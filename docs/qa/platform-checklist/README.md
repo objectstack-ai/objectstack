@@ -142,7 +142,9 @@ copy its shape rather than inventing a second one.
   "app": "showcase",
   "requires": ["…"],                     // item-specific needs stay here
   "provisioning": {
-    "use": "qa-scratch-authz",           // must match a key in the AREA's fixtures block
+    "use": "qa-scratch-authz",           // a key in THIS area's fixtures block — or
+                                         // "<area>:<recipe>" for one another area owns
+                                         // (see "the qualified `use`" below)
     "why": "which of THIS item's clauses the recipe unblocks, and what they'd score without it"
   },
   "knownGaps": ["CLOSED by the qa-scratch-authz recipe (#7670): … ; fall back to <pin> only if …"]
@@ -165,27 +167,46 @@ Why this shape:
   *CLOSED-by-recipe*, naming any pinned fallback and asking the run to record **which**
   of the two its verdict rests on. Deleting the gap loses the reason the recipe exists.
 
-The validator **resolves `provisioning.use` against its own area's `fixtures` keys**: a
-`use` naming a key that area does not define fails `check:platform-checklist`, naming the
-item, the key that resolved to nothing, and the recipes the area does offer. This is
-option C on #7716's open question — deferred at #7720 while the recipe shape lived in a
-single area, landed at #10593 on its own stated condition, once the shape had spread to
-three areas and six references.
+#### Referencing a recipe another area owns — the qualified `use`
 
-Two things the resolve deliberately does **not** do:
+A recipe is proved by one area and sometimes needed by a second. `use` therefore has
+**two spellings**, and the validator resolves both:
 
-- **It does not flag a recipe no item references.** Cross-area reuse has no spelling yet
-  (below), so a recipe whose only consumer lives in another area is referenced from that
-  item's `knownGaps` prose — invisible to the check. Redding the unreferenced direction
-  would answer the cross-area question by accident, in the direction of "recipes are
-  area-local", and that is a convention decision rather than a mechanical one.
-- **It does not reach across areas.** Resolution is area-scoped because the mechanism is:
-  `use` names a key in the item's *own* file. A `use` pointing at another area's recipe
-  key is therefore a dangling pointer and fails — there is no qualified spelling
-  (`search:qa-contributor-bound-member` or similar) and no shared recipe file. A
-  cross-area consumer still cites the recipe **by name in `knownGaps`** and does not fork
-  a second copy; `records-forms.crud-roundtrip` clause 7 is the worked instance. Giving
-  that pointer a spelling the tooling can see is the open half of #10593.
+```jsonc
+"use": "qa-scratch-authz"                    // a recipe of THIS item's own area
+"use": "search:qa-contributor-bound-member"  // "<area>:<recipe>" — one another area owns
+```
+
+The area half is the **filename stem** (`search` → `areas/search.json`). Prefer the bare
+key when the recipe is your area's; reach for the qualifier when it is not — and **never
+fork a second copy** of a recipe into your area, which is the drift this spelling exists
+to prevent. `records-forms.crud-roundtrip` clause 7 is the worked instance: it needs
+`qa-contributor-bound-member`, which `areas/search.json` owns.
+
+This is option A on #10593's second gap, ruled by the maintainer on 2026-08-22 over a
+shared `areas/_fixtures.json` (which would move a recipe away from the area that proved
+it, and make a hot shared file out of one the area sharding deliberately keeps cold) and
+over "recipes stay area-local, duplicate with a back-reference" (which accepts the drift).
+Every reference already written keeps working: the qualifier is an addition, not a
+migration.
+
+The validator **resolves `provisioning.use` to a real recipe** — its own area's key, or
+the named area's — and a reference that resolves to nothing fails `check:platform-checklist`,
+naming the item and distinguishing the three ways it can fail: the named area does not
+exist, the area exists but does not define that recipe, or the reference is malformed
+(`a:b:c`, `search:`, a padded half). A bare key that some *other* area defines is told
+the exact qualified spelling to write. This is option C on #7716's open question,
+deferred at #7720 while the recipe shape lived in a single area and landed at #10593
+once it had spread to three areas and six references.
+
+One thing the resolve deliberately does **not** do:
+
+- **It does not flag a recipe no item references.** It was left out while cross-area
+  reuse had no spelling, because redding it would have answered that question by
+  accident in the direction of "recipes are area-local". With the qualified spelling
+  ruled, that reason has expired and an unreferenced recipe is unambiguously dead text —
+  but turning the direction on is its own change with its own blast radius, tracked at
+  #11506 rather than folded in here.
 
 ⚠️ Remember the cadence: this gate is **not** CI-wired (above), so it catches a typo'd
 `use` at the next manual run, not on the PR that introduced it. Copy the key, don't retype it.

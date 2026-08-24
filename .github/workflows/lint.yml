@@ -885,6 +885,35 @@ jobs:
       - name: Docs redirect destinations resolve, and no chains
         run: pnpm check:docs-redirects
 
+      # #10751 react-page `useAdapter()` contracts, swept over the app-showcase
+      # page modules AND the react-page samples in content/docs. Both traps are
+      # DROP-SHAPED — an unprefixed `top:` is discarded by the adapter and the
+      # read runs unbounded, and `.records` off a `QueryResult` is `undefined`
+      # forever — so nothing throws, nothing warns, and the page renders a
+      # plausible number either way.
+      #
+      # This job rather than the example app's own test suite, decided by
+      # measurement rather than preference: the guard that came before this
+      # (#10288) lived in `examples/app-showcase/test/` and swept that app's page
+      # registry, so the docs samples were invisible to it and the SAME wrong
+      # read survived a third time in `content/docs/ui/react-pages.mdx`. Giving
+      # that test the docs corpus needs a `check:cross-package-test-inputs`
+      # declaration plus turbo input hashing, and both spellings are wrong here:
+      # `content/docs/**` puts the example app's whole suite on 22 of the last
+      # 132 commits (against 3 that touch the app itself), which is the cost that
+      # gate's own roster refuses in those words, and the per-page narrowing it
+      # prefers instead rebuilds this defect — a list someone must remember to
+      # extend the day a react sample lands on a second page. A gate in this job
+      # has no radius to maintain: it runs on every PR over the whole tree.
+      #
+      # Its --self-test is where the detectors are observed FIRING. The live
+      # corpus is green (that is the point), so a passing run over real data
+      # cannot tell a working scanner from one that finds nothing — and the
+      # census control, which fails when either half of the population comes
+      # back empty, is what stops a vacuous green from reading as coverage.
+      - name: React pages honour the useAdapter() query and result contracts
+        run: pnpm check:react-page-adapter-contract
+
       # #9632 published-README links: a README in a package's `files` array with
       # `private` unset is rendered on npm and on GitHub as well as here, and
       # NOTHING read its links. Measured before the gate was written: the lychee
@@ -1212,6 +1241,39 @@ jobs:
       - name: Runner-env posture guard
         run: pnpm check:runner-env-posture
 
+      # #11341, the harness half of the same class the guard above closes in
+      # product source. `check:runner-env-posture` keeps `src/` from READING a
+      # runner variable; this one keeps `packages/cli/test/**` from HANDING the
+      # whole runner environment to a child. A child built from
+      # `{ ...process.env }` inherits the vitest worker's `TEST=true` and the
+      # `VITEST*` family, which is how better-auth's origin/CSRF validation got
+      # switched off inside a spawned `os serve` (#11267) and how the settings
+      # crypto provider took its never-refuses posture (#11352). Neither showed
+      # up as a red test: the failure mode is a security assertion that cannot
+      # go red for the reason it exists, which reads as coverage.
+      # `childEnv()` in `test/helpers/serve-process.ts` is the choke point and
+      # was already a CONVENTION; this is what makes it an invariant.
+      # PRECISION over reach, deliberately: only files that actually import a
+      # process-creating API are scanned, and reading ONE variable off the
+      # environment (`process.env.HOME`) is never flagged — a gate that flagged
+      # every `...process.env` in the package would be carved out into
+      # uselessness. Measured when it landed: 82 sources, 28 spawners, and zero
+      # bulk copies outside a spawner file, so the filter costs no recall.
+      # The 18 leaks that predate the gate are baselined shrink-only in
+      # scripts/cli-test-child-env.baseline.json, each awaiting a card per
+      # neighbourhood; the ratchet refuses new members outright. The two sites
+      # that copy the environment ON PURPOSE — the choke point, and #11267's pin
+      # leg that proves the leak does something — are DELIBERATE entries pinned
+      # in BOTH directions, so "cleaning up" the evidence fails here.
+      # Runs its own --self-test first, and that leg is not decoration: this
+      # gate computes its own population, so a scan that stopped matching would
+      # print a confident green over a tree it never read (#4690's family). Its
+      # positive control runs OUT OF PROCESS through the real entry point,
+      # because "exits non-zero" is the claim and no process can observe its own
+      # exit status. Static AST over 82 sources; under a second, no build.
+      - name: CLI test child-env guard
+        run: pnpm check:cli-test-child-env
+
       # #4093 follow-up. Discovery tells a consumer an absent capability is
       # absent AND what to install. The first half has been carefully honest
       # since #2462/#4000; the second was invented from the slot name, so ten
@@ -1381,6 +1443,25 @@ jobs:
       # checker-side ledger. Runs its own --self-test first.
       - name: Init-service declaration guard
         run: pnpm check:init-service-contract
+
+      # Settings bind-window guard (#11045). The same argument as the gate above,
+      # one lifecycle phase later. SettingsServicePlugin registers the service in
+      # init() but binds the DATA ENGINE from a kernel:ready hook it registers in
+      # start(); in between, the service answers reads from the empty in-memory
+      # fallback and the manifest defaults with source: 'default' while a real
+      # sys_setting row sits unread — indistinguishable, at every level, from "no
+      # row exists" (#10250). Both sides of that ordering constraint are invisible
+      # to a walk rooted at init(), so check:init-service-contract is green either
+      # way. This one walks each plugin's start()-registered kernel:ready handlers
+      # transitively — through local const bindings, which is where the live
+      # plugin-auth case (depth 3) sits — and requires the settings plugin in
+      # dependencies / optionalDependencies. Reads in init()/start() bodies get a
+      # different verdict on purpose: no ordering edge can move those out of the
+      # window, so the message says move the read, not declare an edge. Runs its
+      # own --self-test first; that self-test is written so a depth-0-only walker
+      # fails it, which is the failure mode #10250's census actually had.
+      - name: Settings bind-window guard
+        run: pnpm check:settings-bind-window
 
       # Durability-degradation log-level guard (#4632). #4460 raised ONE
       # best-effort degradation from warn to error — the durable suspended-run
@@ -2329,6 +2410,48 @@ jobs:
       # broken has no verdict worth printing.
       - name: Every committed pnpm --filter names a real package
         run: pnpm check:pnpm-filter-targets
+
+      # The sibling of the gate above, and the OTHER half of the family its
+      # comment names (#10166). There the `--filter` selector matched nothing;
+      # here the filter matched, the script ran, and the ARGUMENTS were lost.
+      #
+      # ⛔ Hand a vitest-backed script its arguments after a bare separator and
+      # the WHOLE package suite runs. pnpm forwards the separator verbatim into
+      # the child argv (npm and turbo both strip it — pnpm is the odd one out),
+      # and vitest's cac parser then discards EVERYTHING after it, options and
+      # positionals alike, in silence. The file pattern and `--maxWorkers` die
+      # together, so the concurrency discipline is inert in the same breath.
+      # Measured on the card: 415 files / 11045 tests / 358s under the shared
+      # verify lock, where the intended run was one file in 655ms — green, exit
+      # 0, reading exactly like the narrow run that was asked for.
+      #
+      # ⚠️ The broken spelling is written out in the GATE'S header, not here.
+      # The first draft of this comment spelled it, and the gate red on this
+      # file at its own wiring commit — which is the objection a corpus gate was
+      # rejected on once before ("it would fire on the counter-example the
+      # corrected instruction MUST contain"). That objection is real; the answer
+      # is `COUNTER_EXAMPLE_FILES` in the gate, and the reason this file is not
+      # in it is that a whole workflow is too coarse a thing to exempt — a
+      # broken spelling here would EXECUTE.
+      #
+      # ⚠️ The violating population is EMPTY today (#11425 landed the corrected
+      # spelling), so this step's job is to keep it empty — and the gate says so
+      # in its own verdict line rather than printing a bare "0 violations". It
+      # reports how many separators it JUDGED, not just how many it failed: 5 on
+      # the tree it landed against, four of which a naive bare-`--` selector
+      # would have RED (this workflow's own turbo dogfood shard, and the three
+      # documented `pnpm dev -- --fresh` spellings in AGENTS.md). Its rule is
+      # vitest-BOUND, and the vitest-backed script names are derived from the
+      # workspace rather than typed here.
+      #
+      # Reads text under `.claude/**`, `skills/**`, `scripts/**`,
+      # `.github/workflows/**` and every tracked AGENTS.md / CLAUDE.md, plus the
+      # workspace manifests for the derivation. No build, no network,
+      # sub-second. The `check:` key runs `--self-test` first: it drives this
+      # same sweep RED over a temp tree on disk, which is what carries
+      # non-vacuity while the real population is zero.
+      - name: No committed command forwards args to vitest through a bare --
+        run: pnpm check:agent-test-spelling
 
   # Lane 1 of 4 behind the required `TypeScript Type Check` context. The
   # aggregator job at the bottom of this file explains the split, holds the

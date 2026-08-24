@@ -209,15 +209,6 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
           }
         }
       },
-      set_user_role: {
-        label: "Establecer rol de plataforma",
-        successMessage: "Rol actualizado",
-        params: {
-          role: {
-            label: "Rol de plataforma"
-          }
-        }
-      },
       impersonate_user: {
         label: "Suplantar usuario",
         confirmText: "¿Iniciar una sesión de suplantación para este usuario? Úsela solo para casos legítimos de soporte; las acciones se registrarán.",
@@ -625,6 +616,10 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       }
     },
     _actions: {
+      invite_user: {
+        label: "Invitar usuario",
+        successMessage: "Invitación enviada"
+      },
       add_member: {
         label: "Añadir miembro",
         successMessage: "Miembro añadido"

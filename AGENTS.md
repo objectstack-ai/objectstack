@@ -127,7 +127,7 @@ pays its first load at module top; `pnpm check:test-source-alias` gates it.
 
 `--fresh`: ephemeral tempdir (auto-deleted on exit) + `--seed-admin` (POSTs sign-up, prints creds — default `admin@objectos.ai` / `admin123`, override via `--admin-email`/`--admin-password`). The seeded admin is auto-promoted to **platform admin** (the system seed identity `usr_system` is skipped), so Setup/Studio are reachable on first login.
 
-Rules: never run two backends on port 3000; for backend tasks pick a random port and tear it down; **never kill a server you didn't start** (other agents/the user may be using it — see Multi-agent discipline §8); always use a `pnpm dev`/`dev:crm`/`dev:showcase` script (flags after `--` are forwarded), not raw `pnpm --filter`.
+Rules: never run two backends on port 3000; for backend tasks pick a random port and tear it down; **never kill a server you didn't start** (other agents/the user may be using it — see Multi-agent discipline §8); always use a `pnpm dev`/`dev:crm`/`dev:showcase` script, not raw `pnpm --filter` — but note what pnpm actually does with `--`: it forwards the **separator itself** into the child's argv, so this spelling only works where the receiving CLI tolerates a leading `--`. ⛔ Do not carry it over to test commands — vitest silently discards everything after a bare `--` (measured; see `.claude/agents/os-dev.md` → Toolchain traps).
 
 ```bash
 pnpm dev:crm -- --fresh -p 38421   # start; debug via curl

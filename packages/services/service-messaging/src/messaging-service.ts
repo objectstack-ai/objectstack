@@ -366,6 +366,21 @@ export class MessagingService {
      * the inbox does not mean the badge is zero. A `type` filter does — the
      * count answers the query that was asked, as it always has.
      *
+     * **This is the REST door's method** — `INotificationService.listInbox?`,
+     * called by `runtime/src/domains/notifications.ts`, which binds `userId`
+     * to `context.executionContext.userId` after answering 401 for a request
+     * that has none. The target user is a declared parameter here *because*
+     * that door has already authenticated it.
+     *
+     * An IN-PROCESS caller has no such door in front of it, and for that
+     * caller the parameter is simply a free string — the "any plugin can read
+     * any user's inbox" shape (#11452), the read-side sibling of the one
+     * {@link markReadAsCaller} closed for writes. Plugins use
+     * {@link listInboxAsCaller}, which derives the recipient from the
+     * caller's execution context and has no target-user parameter to get
+     * wrong. This signature stays as it is: it is the published
+     * `INotificationService` contract, and the REST door needs exactly it.
+     *
      * Returns the REST contract shape: `{ notifications, unreadCount }`.
      */
     async listInbox(
@@ -413,6 +428,39 @@ export class MessagingService {
 
         const notifications = opts.read === undefined ? all : all.filter((n) => n.read === opts.read);
         return { notifications, unreadCount };
+    }
+
+    /**
+     * List **the calling user's own inbox** — the plugin-facing counterpart to
+     * {@link listInbox}, on the same authenticated-caller axis as
+     * {@link markReadAsCaller} / {@link markAllReadAsCaller} (#11452; the
+     * write door is #10753).
+     *
+     * Takes no target user at all: the recipient is derived from the caller's
+     * execution context, so "read someone else's inbox" has no spelling on
+     * this surface — it is unrepresentable rather than merely discouraged.
+     * See `inbox-caller.ts` for the full rationale, including why
+     * `attributedUserId` / `actor` / `isSystem` are refused rather than
+     * accepted as fallbacks.
+     *
+     * Refuses (`InboxCallerError`, 401 `UNAUTHENTICATED`) when the context
+     * names no authenticated user. **The refusal is evaluated FIRST**, before
+     * {@link listInbox}'s no-data-engine / no-user short-circuit: that answers
+     * a well-formed empty `{ notifications: [], unreadCount: 0 }` envelope,
+     * and letting an unauthenticated call reach it would hand back an "empty
+     * inbox" that reads as an answer for a read that was never authorized —
+     * the read-side analog of the silent success the write door replaced.
+     *
+     * @param caller The caller's execution context. The recipient is read
+     *               from its `userId` and from nothing else.
+     * @param opts   Same window/filter options as {@link listInbox}, forwarded
+     *               unchanged.
+     */
+    async listInboxAsCaller(
+        caller: InboxCaller | undefined,
+        opts: { read?: boolean; type?: string; limit?: number } = {},
+    ): Promise<{ notifications: InboxNotificationView[]; unreadCount: number }> {
+        return this.listInbox(resolveInboxRecipient(caller, 'listInboxAsCaller', 'listInbox(userId, opts)'), opts);
     }
 
     /**
@@ -701,6 +749,28 @@ export class MessagingService {
         // flight) can win the (notification_id, user_id, channel) unique index
         // between our read and write. Treat that collision as "someone else
         // created it" and flip the now-present row to `read` instead of failing.
+        // [#11303] The organization this receipt belongs to, THREADED from the
+        // notification the receipt is ABOUT.
+        //
+        // Maintainer ruling, 2026-08-24, verbatim: 「11303
+        // sys_inbox_message/sys_notification/sys_email 应该写 organization_id。」
+        //
+        // The inbox channel's `delivered` receipt already stamps the
+        // organization it was handed at fan-out. This is the OTHER
+        // `sys_notification_receipt` producer — the `read` receipt, inserted
+        // when a user reads a notification whose delivered-receipt never landed
+        // — and it named no organization at all, so it wrote a NULL however
+        // well the emit path upstream was threaded. One table, two producers.
+        //
+        // The subject record's own organization is the platform's standing
+        // answer for a platform row (#8287), and here it is also the only
+        // honest one: `markRead(userId, ids)` carries no tenant of its own, and
+        // ⛔ inventing one — the reader's active organization, their first
+        // membership — would let a receipt claim an organization its own
+        // notification does not have. A null is visibly missing; a wrong value
+        // is silently authoritative.
+        const organizationId = await this.notificationOrganization(data, notificationId);
+
         try {
             await data.insert(RECEIPT_OBJECT, {
                 notification_id: notificationId,
@@ -709,12 +779,45 @@ export class MessagingService {
                 channel: 'inbox',
                 state: 'read',
                 at,
+                organization_id: organizationId,
                 created_at: at,
             });
             return 1;
         } catch (err) {
             if (isUniqueViolationError(err) && (await flipToRead())) return 1;
             throw err;
+        }
+    }
+
+    /**
+     * [#11303] The organization of the `sys_notification` a receipt is about,
+     * or `null`.
+     *
+     * Best-effort in one direction only: a read that fails or finds nothing
+     * yields `null`, which is the same value the row carried before this
+     * existed — so a degraded read can never turn into a WRONG organization,
+     * only into the missing one it already was. That asymmetry is the point:
+     * the failure mode this closes is silence, and the failure mode it must not
+     * open is confident invention.
+     */
+    private async notificationOrganization(
+        data: IDataEngine,
+        notificationId: string,
+    ): Promise<string | null> {
+        try {
+            const row = await data.findOne(NOTIFICATION_EVENT_OBJECT, {
+                where: { id: notificationId },
+                fields: ['id', 'organization_id'],
+            });
+            const org = (row as Record<string, unknown> | undefined)?.organization_id;
+            return org != null && String(org) !== '' ? String(org) : null;
+        } catch (err) {
+            this.ctx.logger.warn(
+                `[messaging] could not read the organization of notification '${notificationId}' ` +
+                `(${(err as Error).message}); its read receipt is written with organization_id = NULL ` +
+                `rather than a guessed organization`,
+            );
+            return null;
         }
     }
 

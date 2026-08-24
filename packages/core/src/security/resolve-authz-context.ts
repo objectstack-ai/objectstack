@@ -647,7 +647,23 @@ function coerceCurrency(value: unknown): string | undefined {
 
 export interface ResolveLocalizationInput {
   ql: any;
-  /** Settings service exposing `get(namespace, key, { tenantId, userId })`. */
+  /**
+   * Settings service occupant. Two methods are consumed, in this order:
+   *
+   *  - `getMany(namespace, keys, { tenantId, userId })` — PREFERRED since
+   *    #10826, and what this resolver calls for all three localization keys in
+   *    ONE grouped read.
+   *  - `get(namespace, key, { tenantId, userId })` — the per-key fallback,
+   *    taken only when the occupant does not expose `getMany` (three parallel
+   *    reads; see the feature-detect below).
+   *
+   * `getMany` is OPTIONAL for an occupant: the branch is feature-detected, so
+   * a service that predates it still resolves — at three reads instead of one.
+   * Typed `any` deliberately (the occupant's shape varies by host); the
+   * declaration above is the contract this resolver actually relies on, and it
+   * is prose precisely because nothing type-checks it — `getService` is a cast
+   * and `rest-server.ts` widens the provider's return to a bare promise.
+   */
   settings?: any;
   tenantId?: string;
   userId?: string;
@@ -757,6 +773,19 @@ async function resolveLocalizationContextUncached(
       // A thrown `getMany` lands in the same place a thrown `get` did —
       // `failed = true` and the direct `$in` fallback below, which reads the
       // exact same three keys.
+      //
+      // [#11222 item 4] ONE non-equivalence, inherent to batching and recorded
+      // here because it is this CALLER's degradation, not the service's:
+      // `getMany` validates every requested key up front and throws for the
+      // WHOLE call, so a host that registered a PARTIAL `localization`
+      // manifest (missing any of the three keys) loses all three at once,
+      // where the per-key path would still have resolved the declared ones.
+      // The `$in` fallback below then answers from tenant-scoped rows only —
+      // it has no `global` scope layer and no `OS_LOCALIZATION_*` env
+      // override. Degradation, never a wrong answer, and unreachable against
+      // the in-repo `localizationSettingsManifest`, which declares all three.
+      // The all-or-nothing rule itself is `SettingsService.getMany`'s own
+      // contract and is documented there, not here.
       let tzRes: any; let localeRes: any; let currencyRes: any;
       if (typeof settings.getMany === 'function') {
         try {

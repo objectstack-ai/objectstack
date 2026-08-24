@@ -12,6 +12,7 @@ import {
   type CurrencyValue,
 } from './field.zod';
 import { ObjectSchema } from './object.zod';
+import { MULTI_CAPABLE_TYPES, isMultiValueField } from './field-value.zod';
 
 describe('FieldType', () => {
   it('should accept valid field types', () => {
@@ -1395,6 +1396,92 @@ describe('ADR-0113 — required is a write contract; storage.notNull is the colu
   });
   it('storage is strict — unknown storage keys reject', () => {
     expect(() => FieldSchema.parse({ type: 'text', storage: { collation: 'C' } })).toThrow();
+  });
+});
+
+describe('FieldSchema — authored `radio` + `multiple: true` is REFUSED (#11437, maintainer ruling 2026-08-22 on objectui#4015, Option C)', () => {
+  // Option C rejects the contradiction at the entrance: the data layer
+  // honoured the flag while the widget rendered a single-value radio group —
+  // declared multi, rendered single, zero diagnostics. The other half of the
+  // same ruling is that the field-value.zod.ts sets stay UNTOUCHED (at-rest
+  // data keeps its read path); the last pin below trips a future "cleanup".
+
+  it('REJECTS radio + multiple: true, naming the field and the illegal pair on the `multiple` path', () => {
+    const r = FieldSchema.safeParse({ name: 'severity', type: 'radio', multiple: true });
+    expect(r.success).toBe(false);
+    if (!r.success) {
+      const issue = r.error.issues.find((i) => i.path.join('.') === 'multiple');
+      expect(issue).toBeDefined();
+      expect(issue!.message).toMatch(/"severity"/);
+      expect(issue!.message).toMatch(/'radio'/);
+      expect(issue!.message).toMatch(/multiple: true/);
+    }
+  });
+
+  it('the rejection carries the prescription — all three correctly-named multi-choice types', () => {
+    const r = FieldSchema.safeParse({ name: 'labels', type: 'radio', multiple: true });
+    expect(r.success).toBe(false);
+    if (!r.success) {
+      const message = r.error.issues.map((i) => i.message).join('\n');
+      expect(message).toMatch(/`checkboxes`/);
+      expect(message).toMatch(/`multiselect`/);
+      expect(message).toMatch(/`tags`/);
+    }
+  });
+
+  it('fires through ObjectSchema too — the publish path an object document crosses', () => {
+    const r = ObjectSchema.safeParse({
+      name: 'crm_lead',
+      label: 'Lead',
+      fields: {
+        severity: { type: 'radio', multiple: true, options: [{ label: 'Low', value: 'low' }, { label: 'High', value: 'high' }] },
+      },
+    });
+    expect(r.success).toBe(false);
+    if (!r.success) {
+      const messages = r.error.issues.map((i) => i.message).join('\n');
+      expect(messages).toMatch(/`checkboxes`/);
+    }
+  });
+
+  it('radio WITHOUT `multiple` stays accepted — and the key materializes its usual `false`', () => {
+    const f = FieldSchema.parse({ name: 'severity', type: 'radio', options: [{ label: 'Low', value: 'low' }, { label: 'High', value: 'high' }] });
+    expect(f.multiple).toBe(false);
+  });
+
+  it('radio + authored `multiple: false` stays accepted — the refusal reads only the authored `true`', () => {
+    const f = FieldSchema.parse({ name: 'severity', type: 'radio', multiple: false });
+    expect(f.multiple).toBe(false);
+  });
+
+  it('parse(parse(x)) is stable — the materialized `multiple: false` re-parses cleanly (#9689 class)', () => {
+    const once = FieldSchema.parse({ name: 'severity', label: 'Severity', type: 'radio', options: [{ label: 'Low', value: 'low' }, { label: 'High', value: 'high' }] });
+    const twice = FieldSchema.parse(once);
+    expect(twice).toEqual(once);
+  });
+
+  it('the prescribed multi-choice types all still parse — with and without the redundant flag', () => {
+    for (const type of ['checkboxes', 'multiselect', 'tags']) {
+      expect(() => FieldSchema.parse({ name: 'labels', type, options: [{ label: 'Alpha', value: 'alpha' }, { label: 'Beta', value: 'beta' }] })).not.toThrow();
+      // Inherently-multi types tolerated a redundant `multiple: true` before
+      // this refusal and still do — the refusal is radio-scoped.
+      expect(() => FieldSchema.parse({ name: 'labels', type, options: [{ label: 'Alpha', value: 'alpha' }, { label: 'Beta', value: 'beta' }], multiple: true })).not.toThrow();
+    }
+  });
+
+  it('`select` + multiple: true — the multi-capable sibling on the same parse branch — stays accepted', () => {
+    const f = FieldSchema.parse({ name: 'labels', type: 'select', options: [{ label: 'Alpha', value: 'alpha' }, { label: 'Beta', value: 'beta' }], multiple: true });
+    expect(f.multiple).toBe(true);
+  });
+
+  it('UNTOUCHED-HALF PIN — `radio` stays in MULTI_CAPABLE_TYPES and isMultiValueField still promotes it', () => {
+    // The ruling's other half: at-rest data written under the old contract
+    // keeps its read path. A "cleanup" that drops `radio` from the set is
+    // Option B (spec-set narrowing + stored-shape migration), explicitly NOT
+    // taken — this pin makes that cleanup trip a test instead of landing
+    // silently.
+    expect(MULTI_CAPABLE_TYPES.has('radio')).toBe(true);
+    expect(isMultiValueField({ type: 'radio', multiple: true })).toBe(true);
   });
 });
 describe('FieldSchema — `placeholder` is a DECLARED key (#9019, ruled Option C on objectui#4676)', () => {

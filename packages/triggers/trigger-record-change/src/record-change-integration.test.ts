@@ -23,13 +23,22 @@
  * that only ever held keys somebody set.
  */
 
-import { describe, it, expect, afterEach, vi } from 'vitest';
+import { describe, it, expect, afterEach, afterAll, vi } from 'vitest';
 import { ObjectKernel } from '@objectstack/core';
 import { ObjectQLPlugin } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { AutomationServicePlugin, type AutomationEngine } from '@objectstack/service-automation';
 import type { IDataEngine, IObjectQLEngine } from '@objectstack/spec/contracts';
 import { RecordChangeTriggerPlugin } from './plugin.js';
+// [#11081] `@objectstack/runtime`'s shared expected-noise capture. This import
+// escapes the package on PURPOSE, so it is DECLARED rather than left for CI to
+// discover: `CROSS_PACKAGE_TEST_INPUTS` in
+// `scripts/check-cross-package-test-inputs.mjs` names the one file, and
+// `@objectstack/trigger-record-change#test` in `turbo.json` hashes the same
+// path so the cache moves with it. The radius is that ONE file rather than
+// `packages/runtime/src/**` (which is what `plugin-auth` and `dogfood`
+// declare) because the helper imports nothing — it is the whole read.
+import { captureExpectedReadRefusals } from '../../../runtime/src/expected-read-refusal-noise.js';
 
 /**
  * `check:slot-lookup` (#4251) — a NEW `kernel.getService(...)` site must carry
@@ -54,6 +63,58 @@ type TestObjectQLEngine = IObjectQLEngine & {
 };
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * [#11081] The tables this file deliberately never provisions — and therefore
+ * the ONLY read refusals whose log frames may be withheld here.
+ *
+ * Every `it` below boots a kernel with no datasource, attaches sqlite late, and
+ * registers exactly its own test object. The authz resolver
+ * (`core/src/security/resolve-authz-context.ts`) and
+ * `ObjectQL.probeInstallOrganizations` then probe these six on every write.
+ * Both probes are fail-soft by construction, so the reads are EXPECTED — but
+ * the driver and the engine each log the fault on the way out.
+ *
+ * ⛔ This list is MEASURED, not copied from the probers' source: a run of this
+ * file at `logger: { level: 'info' }` emitted 84 `refused a read on '<t>'`
+ * driver lines and 84 matching `ERROR Find operation failed` engine frames,
+ * split sys_user 15 / sys_member 15 / sys_user_position 15 /
+ * sys_user_permission_set 15 / sys_position 15 / sys_organization 9. A read
+ * this file stops provoking therefore shows up as a CHANGED SET (red
+ * `silentChannels()`), not as a silence.
+ *
+ * ## Why a capture instead of the blanket `silent` this replaces
+ *
+ * `logger: { level: 'silent' }` stays — it is the key `ObjectKernelConfig`
+ * actually reads and it is what keeps this file's ~830 INFO and ~46 WARN
+ * frames out of the shared shard log. What it CANNOT do is distinguish the 84
+ * expected refusals above from an 85th that means something. The capture can:
+ * it withholds only a line naming one of these tables AND carrying that same
+ * table's `no such table` reason, forwards every other driver fault to the
+ * real console, and COUNTS what it withheld so `afterAll` can assert the
+ * expected reads still happen. A capture nobody asserts is a mute.
+ */
+const EXPECTED_ABSENT_PROBE_TABLES = [
+  'sys_user',
+  'sys_member',
+  'sys_user_position',
+  'sys_user_permission_set',
+  'sys_position',
+  'sys_organization',
+] as const;
+
+/** [#11081] Shared by every kernel this file boots; asserted once in `afterAll`. */
+const noise = captureExpectedReadRefusals([...EXPECTED_ABSENT_PROBE_TABLES]);
+
+/**
+ * [#11081] The PIN half. ⛔ Repairing a failure here means re-deriving the list
+ * above or finding out why a probe stopped firing — NEVER deleting the channel:
+ * a runtime read that silently stopped happening is exactly the finding this
+ * assertion exists to make loud.
+ */
+afterAll(() => {
+  expect(noise.silentChannels()).toEqual([]);
+});
 
 /**
  * The real backend: better-sqlite3 `:memory:` through `@objectstack/driver-sql`,
@@ -89,8 +150,17 @@ afterEach(async () => {
  */
 async function attachSqlite(objectql: any): Promise<any> {
   const driver = makeSqliteDriver();
+  // [#11081] Before `connect()` — i.e. before the driver runs any statement, the
+  // discipline `captureExpectedReadRefusals` documents. `logger` is a protected
+  // field with a `console` default, so the sink also RESTORES a loud channel:
+  // an unexpected driver fault reaches the real console from here even though
+  // the kernel logger is `silent`.
+  noise.captureDriver(driver);
   await driver.connect();
   objectql.registerDriver(driver, true);
+  // The engine exists only after `kernel.bootstrap()`, which every caller has
+  // already run; the probed reads all happen later, per write.
+  noise.captureEngine(objectql);
   openDrivers.push(driver);
   return driver;
 }

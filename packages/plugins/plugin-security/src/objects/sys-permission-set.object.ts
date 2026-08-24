@@ -69,6 +69,29 @@ export const SysPermissionSet = ObjectSchema.create({
       refreshAfter: true,
     },
     {
+      // [field report — rc→GA declared≠enforced surfacing] The sanctioned,
+      // audited counterpart to the field remediation's raw
+      // `DELETE FROM sys_metadata WHERE type='permission' AND name='…'` — see
+      // `permission-set-overlay-discard.ts`. Refuses (403) on any set that is
+      // not currently package-declared, so it can never destroy a genuinely
+      // environment-authored set's work.
+      name: 'discard_permission_set_overlay',
+      label: 'Discard Overlay',
+      icon: 'refresh-ccw',
+      variant: 'danger',
+      mode: 'custom',
+      locations: ['list_item', 'record_header'],
+      type: 'api',
+      method: 'POST',
+      target: '/api/v1/security/permission-sets/{id}/discard-overlay',
+      confirmText:
+        'Discard the environment overlay shadowing this package-declared set and resync it to the shipped ' +
+        'artifact? This only removes the customization overlay — it never touches an environment-authored set.',
+      successMessage: 'Overlay discarded — the set is resynced to the shipped artifact',
+      refreshAfter: true,
+      visible: "has(record.drift_status) && record.drift_status == 'overlay_shadow'",
+    },
+    {
       name: 'clone_permission_set',
       label: 'Clone',
       icon: 'copy',
@@ -122,8 +145,30 @@ export const SysPermissionSet = ObjectSchema.create({
       data: { provider: 'object', object: 'sys_permission_set' },
       // [ADR-0094] Surface provenance + the customized flag so admins can tell
       // a packaged set (and whether they've overlaid it) from an env set.
-      columns: ['label', 'name', 'managed_by', 'customized', 'active', 'updated_at'],
+      // [field report — rc→GA declared≠enforced surfacing] `drift_status`
+      // alongside them: `customized` alone stays `0` on a row whose
+      // `managed_by` is itself wrong (the provenance-skip + overlay-shadow
+      // confound), so it is not a substitute for this column.
+      columns: ['label', 'name', 'managed_by', 'customized', 'drift_status', 'active', 'updated_at'],
       sort: [{ field: 'label', order: 'asc' }],
+      pagination: { pageSize: 50 },
+    },
+    // [field report — rc→GA declared≠enforced surfacing] The LOUD surface:
+    // every package-declared set whose enforced grants differ from the
+    // shipped artifact, naming the set AND the cause (`drift_status`),
+    // updated every boot by `runPermissionSetDriftDiagnostics`. An in-sync
+    // set is never in this view — `drift_status` is written `null`, not
+    // `'in_sync'` (see `permission-set-drift.ts`), so this filter is a data
+    // fact, not merely a display choice: noise here is what would make the
+    // next real drift easy to ignore.
+    drifted: {
+      type: 'grid',
+      name: 'drifted',
+      label: 'Needs Attention',
+      data: { provider: 'object', object: 'sys_permission_set' },
+      columns: ['label', 'name', 'managed_by', 'drift_status', 'drift_detail', 'updated_at'],
+      filter: [{ field: 'drift_status', operator: 'is_not_null' }],
+      sort: [{ field: 'updated_at', order: 'desc' }],
       pagination: { pageSize: 50 },
     },
   },
@@ -267,6 +312,45 @@ export const SysPermissionSet = ObjectSchema.create({
       description:
         'This packaged permission set has an environment customization overlay (ADR-0094). ' +
         'Reset it (delete through the data door) to return to the shipped baseline.',
+      group: 'Provenance',
+    }),
+
+    // [field report — rc→GA declared≠enforced surfacing] Set when this
+    // package-declared set's ENFORCED grants differ from the shipped
+    // artifact — `runPermissionSetDriftDiagnostics` (permission-set-drift.ts)
+    // recomputes it every boot. Absent (null) means enforced == declared, OR
+    // this set is not currently package-declared — an in-sync set is never
+    // given a value here, on purpose (a badge that fires on every packaged
+    // set is noise, and noise is how the next real one gets ignored).
+    // ⚠️ NOT a substitute for, and not derived from, `customized`: that flag
+    // is forced `false` on a row whose `managed_by` is itself wrong (the
+    // provenance-skip + overlay-shadow confound measured on the field-
+    // reported environment), which is exactly the case this field still
+    // needs to catch.
+    drift_status: Field.select({
+      label: 'Declaration Drift',
+      required: false,
+      readonly: true,
+      description:
+        "Cause of a declared≠enforced mismatch for this package-declared set. 'overlay_shadow' = a Studio-" +
+        "authored environment overlay is shadowing the packaged declaration — resync it with the Discard " +
+        "Overlay action. 'provenance_skip' = this row predates package provenance tracking, so boot sync " +
+        "treats it as environment-authored and never reconciles it with the package (no automated fix — file " +
+        "an issue / see the ops runbook for the manual adoption recipe). Absent = enforced grants match the " +
+        "shipped artifact, or this set is not currently package-declared.",
+      options: [
+        { value: 'overlay_shadow', label: 'Overlay shadow' },
+        { value: 'provenance_skip', label: 'Provenance skip' },
+        { value: 'other', label: 'Drift (other)' },
+      ],
+      group: 'Provenance',
+    }),
+
+    drift_detail: Field.textarea({
+      label: 'Drift Detail',
+      required: false,
+      readonly: true,
+      description: 'Human-readable detail for `drift_status` — names the grant-count mismatch and its cause.',
       group: 'Provenance',
     }),
 

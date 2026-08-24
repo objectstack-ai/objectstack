@@ -39,6 +39,17 @@
  * keeps writing, the row keeps landing, every assertion below stays green) and
  * red THERE. Breaking a writer is red here and green there. Neither file alone
  * covers this object.
+ *
+ * ## 2026-08-24 — what the ruling on #11507 changed about this file
+ *
+ * Nothing about the measurements; everything about what they MEAN. #8203 wrote
+ * §3 as "a defect, characterized", with the instruction to delete those cases
+ * once enforcement landed. The maintainer ruled (direction 4) that this column
+ * is an OPEN, author-extensible vocabulary: the declared options are the
+ * platform's BUILT-IN set, ADR-0052 §5b.2 stays a sanctioned write path, and an
+ * author-contributed value landing verbatim is the contract. So §3 is no longer
+ * a characterized defect — it is the only end-to-end measurement of the ruled
+ * behavior, and it stays. See the §3 header for what a red there now means.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -233,8 +244,11 @@ describe('[#8203] sys_activity.type — the writers emit declared values', () =>
       expect(
         DECLARED_TYPES,
         `audit-writers.ts wrote sys_activity.type '${t}', which the object does not `
-          + 'declare. Nothing rejects it — the field is readonly, so `validateRecord` '
-          + 'skips it — so the row lands and the contract denies it (#8203).',
+          + 'declare as a built-in. Nothing rejects it — the field is readonly, so '
+          + '`validateRecord` skips it — so the row lands unannounced. The vocabulary is '
+          + 'open to AUTHORS (#11507); the platform writing outside its own built-in set '
+          + 'is still a finding, because that set is what the platform promises to write, '
+          + 'label and offer as a filter. Declare the value, or stop writing it (#8203).',
       ).toContain(t);
     }
   });
@@ -297,19 +311,34 @@ describe('[#8203] CONTROL — a writable select rejects the undeclared value', (
 });
 
 // ---------------------------------------------------------------------------
-// 3. The finding — the identical write is ACCEPTED when the field is readonly
+// 3. The ruled contract — an author-contributed value is stored verbatim
 // ---------------------------------------------------------------------------
 
-describe('[#8203] the declared vocabulary is unenforceable while the field is readonly', () => {
+describe('[#8203/#11507] an author-contributed type is accepted — the open-vocabulary contract', () => {
   /**
-   * ⚠️ These two cases assert a DEFECT, characterized. They are the card's
-   * observation made mechanical, and they are written to go red the day it is
-   * fixed — which is the correct signal, not a false alarm.
+   * ⚠️ These two cases used to be labelled "a DEFECT, characterized", with the
+   * instruction: go red when enforcement lands, then delete them. That
+   * instruction is RETIRED, and deleting them now would delete the only
+   * end-to-end measurement of a ruled contract.
    *
-   * If one fails with "expected 'not_a_declared_type' … received a rejection",
-   * enforcement has landed (the engine-wide direction #8203 names, in
-   * `record-validator.ts`). That is the fix: delete these two cases, keep §1
-   * and the census file, and close #8203.
+   * Maintainer ruling, 2026-08-24, #11507 (direction 4): `sys_activity.type` is
+   * an OPEN, author-extensible vocabulary. The declared options are the
+   * platform's built-in set; ADR-0052 §5b.2 `activityMilestones[].type` stays a
+   * sanctioned write path; an author-contributed value landing verbatim is what
+   * the platform means, not a hole in it. Directions 2 and 3 were considered and
+   * NOT ruled.
+   *
+   * So a red here no longer reads "the fix landed". It reads: something has
+   * started REJECTING an author-contributed value — which is direction 3, a
+   * shipped authoring surface turned into a rejection path. Do not adapt these
+   * cases to it and do not weaken them; re-open #11507, because that is a
+   * maintainer call and not a test-fixing exercise.
+   *
+   * The mechanism is unchanged and still worth knowing: every field on this
+   * object is `readonly`, and `validateRecord` skips readonly fields on both
+   * branches, so the option check never runs. §2 is the control proving the
+   * validator runs at all — which is what makes the acceptance below a
+   * measurement rather than a test that forgot to assert.
    */
   it('a direct write of an undeclared type into sys_activity is accepted verbatim', async () => {
     const { engine, storeFor } = await boot();
@@ -321,18 +350,22 @@ describe('[#8203] the declared vocabulary is unenforceable while the field is re
     expect(DECLARED_TYPES).not.toContain(UNDECLARED);
     expect(
       activityTypes(storeFor),
-      'sys_activity.type no longer accepts an undeclared option. If this is because '
-        + 'readonly-field option enforcement landed, that is the fix #8203 describes — '
-        + 'retire this case and its neighbour and close the card.',
+      'sys_activity.type no longer accepts an undeclared option. Per the 2026-08-24 '
+        + 'ruling on #11507 this column is an OPEN vocabulary: a value outside the '
+        + 'built-in set is legitimate and is stored verbatim, so a rejection here is a '
+        + 'CONTRACT CHANGE (direction 3, considered and not ruled), not a fix. Re-open '
+        + '#11507 instead of adapting this case.',
     ).toEqual([UNDECLARED]);
   });
 
   /**
-   * The same hole reached through a REAL, shipped authoring surface rather than
+   * The same path reached through a REAL, shipped authoring surface rather than
    * a hand-made insert: `activityMilestones[].type` is `z.string().optional()`
-   * in the spec, so any metadata author can name any string, and it lands in a
-   * column whose enum denies it. This is the authoring-time version of the
-   * defect and the one an AI-written metadata app would hit first.
+   * in the spec, so any metadata author can name any string and it lands. This
+   * is the authoring-time face of the open vocabulary, and the one an AI-written
+   * metadata app meets first — which is exactly why the declaration now says so
+   * in its own `description` (#11507), instead of showing that author a list
+   * that reads closed.
    */
   it('a milestone declaring an undeclared type writes it — the authoring-surface hole', async () => {
     const { engine, storeFor } = await boot();
@@ -342,10 +375,11 @@ describe('[#8203] the declared vocabulary is unenforceable while the field is re
     expect(DECLARED_TYPES).not.toContain('escalated_to_legal');
     expect(
       activityTypes(storeFor),
-      'a milestone-declared `type` outside the sys_activity.type enum no longer reaches '
-        + 'the row. If option enforcement (or a spec-level constraint on '
-        + '`activityMilestones[].type`) landed, that is the fix #8203 describes — retire '
-        + 'this case and close the card.',
+      'a milestone-declared `type` outside the built-in sys_activity.type set no longer '
+        + 'reaches the row. ADR-0052 §5b.2 is a SANCTIONED author write path and the '
+        + '2026-08-24 ruling on #11507 kept it one, so option enforcement here — or a '
+        + 'spec-level constraint on `activityMilestones[].type` — breaks shipped author '
+        + 'metadata by design. Re-open #11507 before changing this.',
     ).toEqual(['created', 'escalated_to_legal']);
   });
 });

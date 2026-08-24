@@ -272,12 +272,26 @@ Building the string by hand with `+` would also work, but CEL throws on
 
 ### Predicate (visibility, read-only, conditional required)
 
+A conditional-rule predicate binds whatever its **layer** binds, and `visibleWhen`
+is one key spelled on layers that do not share a scope — object field, per-option,
+form-view field, page component, flow screen. So write the enclosing structure:
+the `fields:` **map** below is what says *object field*, the layer on which a
+predicate binds `record` (plus `previous`, and `parent` on a master-detail line
+item) and nothing else. A bare `{ name, type, visibleWhen }` fragment names no
+layer, so neither a reader nor `os build` can tell which scope it is written
+against.
+
 ```ts
-{
-  name: 'rating',
-  type: 'select',
-  visibleWhen: P`record.status == 'qualified'`,
-}
+ObjectSchema.create({
+  name: 'opportunity',
+  fields: {
+    // Raw (non-factory) spelling — the map key is the field name.
+    rating: {
+      type: 'select',
+      visibleWhen: P`record.status == 'qualified'`,
+    },
+  },
+})
 
 Field.text({
   visibleWhen: P`record.type == 'business'`,

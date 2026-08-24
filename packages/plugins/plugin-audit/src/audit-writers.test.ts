@@ -1650,7 +1650,7 @@ describe('audit writers — the writer reads the session key the engine emits (#
     expect(created.find((c) => c.object === 'sys_audit_log')?.row.organization_id).toBe('org-A');
   });
 
-  it('⛔ does not resolve the v11-removed `tenantId` alias', async () => {
+  it('⛔ does not resolve the v16-removed `tenantId` alias', async () => {
     const { engine, fire, created } = makeEngine(AUDITED);
     installAuditWriters(engine as any, 'test.audit');
 

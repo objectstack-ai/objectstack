@@ -5,37 +5,61 @@
  * 
  * ObjectStack Protocol & Specification
  * 
- * This package does NOT export types at the root level to prevent naming conflicts.
- * Please use namespaced imports or subpath imports.
- * 
+ * This package does NOT export type namespaces at the root level, to prevent
+ * naming conflicts — `import { Data, UI, System } from '@objectstack/spec'`
+ * names nothing the root exports. The root DOES export a curated set of
+ * authoring `defineX` factory functions (`defineStack`, `defineView`,
+ * `defineApp`, `defineFlow`, `defineAgent`, `defineTool`, `defineSkill`, …)
+ * for direct top-level use. Every domain's TYPES, and its `*Schema` values,
+ * are reached through that domain's own subpath instead
+ * (`@objectstack/spec/data`, `@objectstack/spec/identity`, …).
+ *
  * ## Import Styles
- * 
- * ### Style 1: Namespace Imports from Root
+ *
+ * ### Style 1: Root-Level Factory Imports
+ * <!-- os:check -->
  * ```typescript
- * import { Data, UI, System, Auth, AI, API } from '@objectstack/spec';
- * 
- * const field: Data.Field = { name: 'task_name', type: 'text' };
- * const user: Auth.User = { id: 'u1', email: 'user@example.com' };
+ * import { defineSkill } from '@objectstack/spec';
+ *
+ * const skill = defineSkill({
+ *   name: 'case_management',
+ *   label: 'Case Management',
+ *   description: 'Handles support case lifecycle',
+ *   instructions: 'Use these tools to create, update, and resolve support cases.',
+ *   tools: ['create_case', 'update_case', 'resolve_case'],
+ * });
  * ```
- * 
+ *
  * ### Style 2: Namespace Imports via Subpath
+ * <!-- os:check -->
  * ```typescript
  * import * as Data from '@objectstack/spec/data';
  * import * as UI from '@objectstack/spec/ui';
  * import * as System from '@objectstack/spec/system';
- * import * as Auth from '@objectstack/spec/auth';
- * 
+ * import * as Identity from '@objectstack/spec/identity';
+ *
  * const field: Data.Field = { name: 'task_name', type: 'text' };
- * const user: Auth.User = { id: 'u1', email: 'user@example.com' };
+ * const user: Identity.User = {
+ *   id: 'u1',
+ *   email: 'user@example.com',
+ *   createdAt: '2026-01-01T00:00:00.000Z',
+ *   updatedAt: '2026-01-01T00:00:00.000Z',
+ * };
  * ```
- * 
+ *
  * ### Style 3: Direct Subpath Imports
+ * <!-- os:check -->
  * ```typescript
  * import { Field, FieldType } from '@objectstack/spec/data';
- * import { User, Session } from '@objectstack/spec/auth';
+ * import { User } from '@objectstack/spec/identity';
  *
  * const field: Field = { name: 'task_name', type: 'text' };
- * const user: User = { id: 'u1', email: 'user@example.com' };
+ * const user: User = {
+ *   id: 'u1',
+ *   email: 'user@example.com',
+ *   createdAt: '2026-01-01T00:00:00.000Z',
+ *   updatedAt: '2026-01-01T00:00:00.000Z',
+ * };
  * ```
  *
  * ## Standing principle for export surfaces (#10096, maintainer ruling 2026-08-20)
@@ -175,12 +199,17 @@ export {
   PLATFORM_CAPABILITY_TOKENS,
   isKnownPlatformCapability,
   PLATFORM_CAPABILITY_PROVIDERS,
+  // The `plugins[]`-wired out-of-repo runtimes the token-keyed map structurally
+  // cannot describe (no `requires` token to key a row by) — provenance only,
+  // never resolution (#10921, #11263).
+  PLATFORM_PLUGIN_WIRED_RUNTIMES,
   // The foundational slate every server-side runtime mounts (cloud#925, #3786) —
   // one declaration for `objectstack serve` and cloud's per-tenant runtime alike.
   PLATFORM_ALWAYS_ON_CAPABILITIES,
   classifyRequiredCapability,
   type CapabilityEdition,
   type PlatformCapabilityProvider,
+  type PlatformPluginWiredRuntime,
   type CapabilityProviderStatus,
   type CapabilityClassification,
 } from './kernel/platform-capabilities';

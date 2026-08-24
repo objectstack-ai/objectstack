@@ -27,7 +27,7 @@ import { promisify } from 'node:util';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { runServe, randomPort, CLI, TSX } from './helpers/serve-process.js';
+import { childEnv, runServe, randomPort, CLI, TSX } from './helpers/serve-process.js';
 
 const execFileP = promisify(execFile);
 
@@ -81,7 +81,7 @@ beforeAll(async () => {
   await execFileP(TSX, [CLI, 'compile'], {
     cwd: dir,
     maxBuffer: 16 * 1024 * 1024,
-    env: { ...process.env, NO_COLOR: '1' },
+    env: childEnv({ NO_COLOR: '1' }),
   });
 }, 240_000);
 

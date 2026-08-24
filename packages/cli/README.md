@@ -66,12 +66,13 @@ catalog without a word. `os g agent` now says so and points at skills — the
 third-party extension primitive — which are authored as `src/skills/<name>.skill.ts`
 with `defineSkill`, and which `os g skill <name>` scaffolds for you.
 
-`skill` is the one type written as `NAME.skill.ts` rather than the harness's usual
-`NAME.ts`: the metadata type registry declares that type's file convention as
-`*.skill.ts` / `*.skill.yml`, and a discoverable-metadata file matching no pattern
-type-checks, validates and publishes with nothing reporting that it was skipped.
-Aligning the other six generators with the registry's `NAME.TYPE.ts` convention is
-a separate decision and is deliberately not made here.
+Every type is written as `NAME.TYPE.ts` — `customer.object.ts`, `customer.view.ts`,
+`lead_qualification.skill.ts` — and the infix comes from the metadata type registry,
+which declares each type's file convention (`*.object.ts`, `*.skill.ts`, …). The
+metadata loader discovers files by globbing exactly those patterns, so a scaffold
+matching none of them type-checks, validates and publishes with nothing reporting
+that it was skipped. Files generated before this convention landed are not renamed
+and keep loading through their barrel `index.ts`.
 
 ### Cloud — publish & install
 

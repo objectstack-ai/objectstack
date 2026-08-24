@@ -2,7 +2,6 @@
 
 import { describe, it, expect } from 'vitest';
 
-import * as pages from '../src/ui/pages/index.js';
 import { RenewalsPipelinePage } from '../src/ui/pages/index.js';
 
 /**
@@ -205,124 +204,21 @@ describe('renewals-pipeline hand-rolled rollup — the adapter contract, execute
 });
 
 // ---------------------------------------------------------------------------
-// The same two contracts, swept across every react page this app ships
+// The static sweep of the same two contracts MOVED OUT of this file (#10751)
 // ---------------------------------------------------------------------------
-
-const DECLARED_QUERY_PARAM_PREFIX = '$';
-
-/** Top-level keys of an object-literal source slice. */
-function topLevelKeys(objSrc: string): string[] {
-  const keys: string[] = [];
-  let depth = 0;
-  let i = 0;
-  let expectKey = true;
-  while (i < objSrc.length) {
-    const c = objSrc[i];
-    if (c === '{' || c === '[' || c === '(') { depth++; i++; continue; }
-    if (c === '}' || c === ']' || c === ')') { depth--; i++; continue; }
-    if (depth === 1) {
-      if (c === ',') { expectKey = true; i++; continue; }
-      if (c === ':') { expectKey = false; i++; continue; }
-      if (expectKey) {
-        const m = /^(['"]?)([A-Za-z_$][\w$]*)\1\s*:/.exec(objSrc.slice(i));
-        if (m) { keys.push(m[2]); i += m[0].length; expectKey = false; continue; }
-      }
-    }
-    i++;
-  }
-  return keys;
-}
-
-interface QueryFinding { key: string; snippet: string }
-
-/** Every unprefixed key handed to an `adapter.find`/`findOne` in one source. */
-function unprefixedQueryKeys(source: string): QueryFinding[] {
-  const found: QueryFinding[] = [];
-  const call = /\b(?:adapter|dataSource)\s*\.\s*(?:find|findOne)\s*\(/g;
-  let m: RegExpExecArray | null;
-  while ((m = call.exec(source))) {
-    // Walk to the params object literal, staying inside this call's parens.
-    let i = m.index + m[0].length;
-    let depth = 1;
-    let objStart = -1;
-    while (i < source.length && depth > 0) {
-      const c = source[i];
-      if (c === '(') depth++;
-      else if (c === ')') { depth--; if (depth === 0) break; }
-      else if (c === '{' && depth === 1) { objStart = i; break; }
-      i++;
-    }
-    if (objStart < 0) continue;
-    let braces = 0;
-    let objEnd = -1;
-    for (let j = objStart; j < source.length; j++) {
-      if (source[j] === '{') braces++;
-      else if (source[j] === '}') { braces--; if (braces === 0) { objEnd = j; break; } }
-    }
-    if (objEnd < 0) continue;
-    const obj = source.slice(objStart, objEnd + 1);
-    for (const k of topLevelKeys(obj)) {
-      if (!k.startsWith(DECLARED_QUERY_PARAM_PREFIX)) {
-        found.push({ key: k, snippet: obj.replace(/\s+/g, ' ').slice(0, 100) });
-      }
-    }
-  }
-  return found;
-}
-
-/**
- * A `.records` read with no `.data` beside it, off a find() result.
- *
- * Comment lines are skipped: a page that explains the trap in prose (and
- * `crm-workbench` does, right above the call it once got wrong) is documenting
- * the contract, not violating it. The read itself is what this looks for.
- */
-function recordsOnlyReads(source: string): string[] {
-  const out: string[] = [];
-  for (const line of source.split('\n')) {
-    const trimmed = line.trim();
-    if (trimmed.startsWith('//') || trimmed.startsWith('*') || trimmed.startsWith('/*')) continue;
-    if (!trimmed.includes('.records')) continue;
-    if (trimmed.includes('.data')) continue;
-    out.push(trimmed);
-  }
-  return out;
-}
-
-const REACT_PAGES = Object.values(pages as Record<string, unknown>)
-  .filter((p): p is { name: string; kind?: string; source?: string } =>
-    !!p && typeof p === 'object' && (p as { kind?: string }).kind === 'react')
-  .filter((p) => typeof p.source === 'string');
-
-describe('every kind:"react" page in this app honours the useAdapter contracts', () => {
-  it('found the react pages to sweep (census control)', () => {
-    // A sweep over an empty list is vacuously green — this is what stops that.
-    expect(REACT_PAGES.length).toBeGreaterThanOrEqual(2);
-    expect(REACT_PAGES.map((p) => p.name)).toContain('showcase_renewals_pipeline');
-  });
-
-  it('the scanners fire on a known-bad source (positive control)', () => {
-    const bad = `
-      const a = await adapter.find('showcase_project', { $filter: ['account', '=', sel], top: 500 });
-      const b = await adapter.find('showcase_invoice', { limit: 200 });
-      // a comment mentioning .records must NOT count as a read
-      const rows = (a && a.records) || [];
-    `;
-    expect(unprefixedQueryKeys(bad).map((f) => f.key)).toEqual(['top', 'limit']);
-    expect(recordsOnlyReads(bad)).toEqual(['const rows = (a && a.records) || [];']);
-  });
-
-  it.each(REACT_PAGES.map((p) => [p.name, p.source as string] as const))(
-    '%s passes only $-prefixed query options',
-    (_name, source) => {
-      expect(unprefixedQueryKeys(source)).toEqual([]);
-    },
-  );
-
-  it.each(REACT_PAGES.map((p) => [p.name, p.source as string] as const))(
-    '%s reads rows off QueryResult.data',
-    (_name, source) => {
-      expect(recordsOnlyReads(source)).toEqual([]);
-    },
-  );
-});
+//
+// `recordsOnlyReads()` and `unprefixedQueryKeys()` now live in
+// `scripts/check-react-page-adapter-contract.mjs` (`pnpm check:react-page-adapter-contract`),
+// which sweeps this app's page modules AND the react-page samples in
+// `content/docs` — the copy a customer starts from, and the population gap
+// that let the same `.records` read survive a third time after the two fixes
+// this file's harness was written for.
+//
+// They moved rather than being copied. Two definitions of the same detector
+// double the places a future fix has to land, which IS the defect (#10751):
+// one wrong read, repaired three separate times. The scanners' positive
+// control moved with them, into that gate's `--self-test`.
+//
+// What stays here is the half a text scan cannot do: the block above EXECUTES
+// the real rollup effect against a contract-faithful adapter double, so it
+// judges the numbers a page produces rather than the shape of its source.

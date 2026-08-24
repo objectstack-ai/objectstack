@@ -41,8 +41,20 @@
  * #8617 reaped its pre-fix organization-less rows. This catalog does not, and
  * the difference is deliberate rather than an omission:
  *
- * - a fresh walled deployment never mints an organization-less catalog row once
- *   these seeders run per organization, so there is nothing to migrate;
+ * - a fresh walled deployment never mints an organization-less catalog row
+ *   FROM THESE FOUR SEEDERS once they run per organization, so there is nothing
+ *   of theirs to migrate. It does NOT follow that a fresh walled deployment
+ *   holds none, and this file used to claim it did (#11532).
+ *   `bootstrapPlatformAdmin` is a FIFTH seeder, outside the four converted
+ *   here, and it writes one organization-less `sys_permission_set` row per
+ *   `defaultPermissionSets` entry on EVERY boot — before any organization
+ *   exists (measured on a fresh walled rig: 8 rows, 1.3 s ahead of the first
+ *   `sys_organization`). That is the RULED outcome rather than a leak: the
+ *   2026-08-20 maintainer ruling on #10103 keeps that platform bucket
+ *   "unreaped and loudly warned about under walled posture", and PLATFORM_ADMIN
+ *   is derived from an unscoped grant pointing at its `admin_full_access` row
+ *   BY ROW ID, so a reap would silently demote every platform admin. The guard
+ *   below therefore has to tell the two classes apart;
  * - a `single`-posture deployment is where organization-less rows are the
  *   CORRECT shape, and the carve-out below leaves it byte-for-byte unchanged;
  * - the rows a reap would delete are grant TARGETS — `sys_user_position`,
@@ -52,7 +64,7 @@
  *   because it never touched a junction table; here the junctions ARE the
  *   grants.
  *
- * So the pass says so instead. {@link warnPreFixOrganizationLessRows} names the
+ * So the pass says so instead. {@link warnOrganizationLessRows} names the
  * rows and names the remedy, and — this is the load-bearing half — the pass
  * still CREATES the organization's own copy. The failure shape it exists to
  * prevent is the silent no-op: a tenant-threaded pass sees the pre-fix
@@ -180,37 +192,99 @@ export function resolveOwnOrganizationRow(
 }
 
 /**
- * The loud guard that stands in place of a reap.
+ * The machine-readable half of the guard below: WHY this organization-less row
+ * is visible to a per-organization pass. The two answers take opposite
+ * remedies, so the classification is a field rather than something a reader has
+ * to infer from prose (#11532).
+ */
+export type OrganizationLessRowOrigin = 'platform-bucket' | 'pre-fix-residue';
+
+/**
+ * The loud guard that stands in place of a reap — and the ONE place that tells
+ * the platform bucket apart from a genuine pre-fix leftover.
  *
  * Called once per pass with everything the pass found, so an operator gets ONE
- * actionable line naming the affected rows rather than a warning per name. The
- * remedy is named because "invalid state" with no next step is not a diagnosis:
- * either re-initialize the deployment (correct while it is pre-launch, which is
- * the premise this whole repair was ruled on), or adopt each row by hand by
- * stamping it with the organization that should own it.
+ * actionable line per class rather than a warning per name.
  *
- * The pass that emits this has ALREADY created the organization's own copies —
- * the warning describes leftovers, never a refusal to seed.
+ * ## The two classes, and why conflating them was a defect (#11532)
+ *
+ * - **`pre-fix-residue`** — a row from before the per-organization conversion.
+ *   Nothing regenerates it, so the ruled remedy holds: re-initialize the
+ *   deployment (correct while it is pre-launch, which is the premise this whole
+ *   repair was ruled on), or adopt each row by hand.
+ *
+ * - **`platform-bucket`** — a name `bootstrapPlatformAdmin` still seeds
+ *   organization-less on EVERY boot (`platformBucketNames`). Calling one of
+ *   these "pre-fix" tells an operator they are carrying legacy state they never
+ *   had: on the measured fresh walled rig they were minted 1.3 s before the
+ *   first organization existed, by the very code that then warned about them.
+ *   And the pre-fix remedy does not terminate here — re-initializing recreates
+ *   exactly these rows on the next boot, so the only branch that ends is hand
+ *   adoption, which is also the branch an operator is least likely to pick and
+ *   which hands a platform-wide bucket to one tenant.
+ *
+ * Membership is decided by NAME, not by `managed_by`, because the question the
+ * remedy turns on is "will a re-initialized deployment have this row again?" —
+ * and for these names it will, whatever provenance the current row carries (a
+ * pre-#8692 install stores `'admin'` on the very same names).
+ *
+ * The pass that emits either warning has ALREADY created the organization's own
+ * copies — both describe rows beside that catalog, never a refusal to seed.
  */
-export function warnPreFixOrganizationLessRows(
+export function warnOrganizationLessRows(
   logger: SeedLogger | undefined,
   object: string,
   names: string[],
   organizationId: string,
+  platformBucketNames?: Iterable<string>,
 ): void {
   if (names.length === 0) return;
-  logger?.warn?.(
-    `[security] pre-fix organization-less ${object} rows are still present for names this ` +
-      `organization seeds — under a walled posture a row that belongs to no organization is ` +
-      `invalid state, not a platform-wide default. This organization's own rows WERE created, so ` +
-      `its catalog is complete; the leftovers below are readable through the driver's ` +
-      `compatibility arm and belong to nobody. Remedy: re-initialize the deployment, or adopt each ` +
-      `row by hand by stamping it with the organization that should own it. They are NOT deleted ` +
-      `automatically — grants (sys_user_position, sys_position_permission_set, ` +
-      `sys_user_permission_set) point at these row ids, so reaping them would revoke standing ` +
-      `access with no signal at the moment of loss.`,
-    { object, organization: organizationId, names: [...names].sort(), count: names.length },
-  );
+  const bucketNames = new Set(platformBucketNames ?? []);
+  const bucket = names.filter((n) => bucketNames.has(n));
+  const residue = names.filter((n) => !bucketNames.has(n));
+
+  if (bucket.length > 0) {
+    logger?.warn?.(
+      `[security] organization-less ${object} rows for the PLATFORM BUCKET are visible to this ` +
+        `organization's pass. They are not leftovers from an older release: bootstrapPlatformAdmin ` +
+        `seeds these names without an organization on every boot, including the one that just ran, ` +
+        `and the ruling of 2026-08-20 keeps it that way (unreaped, reported, outside the ` +
+        `per-organization conversion) because the platform-admin grant points at the ` +
+        `admin_full_access row by id. This organization's own copies WERE created, so its catalog ` +
+        `is complete and no action is required. Re-initializing the deployment does NOT clear ` +
+        `them — the next boot mints them again. Adopting one by hand (stamping it with an ` +
+        `organization) does remove it from this list, but hands a platform-wide row to a single ` +
+        `tenant, so do that only if that is what you mean.`,
+      {
+        object,
+        organization: organizationId,
+        origin: 'platform-bucket' satisfies OrganizationLessRowOrigin,
+        names: [...bucket].sort(),
+        count: bucket.length,
+      },
+    );
+  }
+
+  if (residue.length > 0) {
+    logger?.warn?.(
+      `[security] pre-fix organization-less ${object} rows are still present for names this ` +
+        `organization seeds — under a walled posture a row that belongs to no organization is ` +
+        `invalid state, not a platform-wide default. This organization's own rows WERE created, so ` +
+        `its catalog is complete; the leftovers below are readable through the driver's ` +
+        `compatibility arm and belong to nobody. Remedy: re-initialize the deployment, or adopt each ` +
+        `row by hand by stamping it with the organization that should own it. They are NOT deleted ` +
+        `automatically — grants (sys_user_position, sys_position_permission_set, ` +
+        `sys_user_permission_set) point at these row ids, so reaping them would revoke standing ` +
+        `access with no signal at the moment of loss.`,
+      {
+        object,
+        organization: organizationId,
+        origin: 'pre-fix-residue' satisfies OrganizationLessRowOrigin,
+        names: [...residue].sort(),
+        count: residue.length,
+      },
+    );
+  }
 }
 
 /**

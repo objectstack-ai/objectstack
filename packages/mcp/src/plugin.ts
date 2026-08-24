@@ -37,8 +37,10 @@ import { CONNECT_AGENT_UI_BUNDLE } from './connect-ui.js';
  * than merely moved. Re-run per read, so revocation of a key takes effect on
  * the next call of a live stdio session (ADR-0101 D1).
  *
- * @param localization Resolved ONCE by `start()` and threaded in — see the
- * hoist there for why this function must not resolve it itself.
+ * @param localization Resolved ONCE for the life of the transport and threaded
+ * in — see the hoist in `start()` for why this function must not resolve it
+ * itself, and [#11580] for why that resolution happens at `kernel:bootstrapped`
+ * rather than in the `start()` body.
  */
 async function resolveStdioExecutionContext(
   ql: { find: (object: string, opts: unknown) => Promise<unknown> },
@@ -296,21 +298,58 @@ export class MCPServerPlugin implements Plugin {
       // service falls back to the direct `sys_setting` read and then to the
       // built-ins (`UTC` / `en-US`), i.e. exactly the values this face used to
       // get by carrying nothing.
-      let settingsService: unknown;
-      try {
-        settingsService = ctx.getService('settings');
-      } catch {
-        settingsService = undefined;
-      }
-      const localization: EntryLocalization = await resolveLocalizationContext({
-        ql: scopedQl,
-        settings: settingsService,
-        tenantId: initial.tenantId,
-        userId: initial.userId,
+      //
+      // [#11580] Resolved from a `kernel:bootstrapped` hook, NOT in this
+      // `start()` body. `SettingsServicePlugin` registers the settings service
+      // in `init()` but binds its DATA ENGINE from a hook IT registers in its
+      // own `start()` (`settings-service-plugin.ts`, `kernel:ready`). Every
+      // plugin's `start()` body runs strictly before the first `kernel:ready`
+      // handler, so a read taken here is inside that bind window under EVERY
+      // composition order — being ordered after the settings plugin does not
+      // help, and an `optionalDependencies` edge (the #10250 shape) would not
+      // move it. In the window `getMany('localization', …)` is answered by the
+      // empty in-memory fallback plus the manifest defaults with
+      // `source: 'default'`; it does NOT throw, so the direct `sys_setting`
+      // fallback inside `resolveLocalizationContext` never runs either. The
+      // wrong answer (`UTC` / `en-US`) is indistinguishable from a right one,
+      // and the hoist above then holds it for the life of the process: a
+      // long-lived stdio server served every call with the manifest defaults
+      // on a workspace whose persisted `localization` rows said otherwise, and
+      // never self-corrected.
+      //
+      // `kernel:bootstrapped` is the earliest phase strictly after that bind
+      // (`kernel:ready` → `kernel:bootstrapped` → `kernel:listening`) and the
+      // one `SettingsService.reportPreBindRead` names as the remedy. The memo
+      // is what keeps #7279's property across both entry points: whoever gets
+      // there first pays for the single resolution, everyone else awaits it.
+      // The lazy entry is not decoration — it is why this cannot deadlock a
+      // host that never fires the boot hooks (a bare kernel, a test harness):
+      // such a host resolves at first use instead, which is still later than
+      // `start()` and still once for the life of the transport.
+      let localizationOnce: Promise<EntryLocalization> | undefined;
+      const resolveLocalizationOnce = (): Promise<EntryLocalization> => {
+        localizationOnce ??= (async () => {
+          let settingsService: unknown;
+          try {
+            settingsService = ctx.getService('settings');
+          } catch {
+            settingsService = undefined;
+          }
+          return resolveLocalizationContext({
+            ql: scopedQl,
+            settings: settingsService,
+            tenantId: initial.tenantId,
+            userId: initial.userId,
+          });
+        })();
+        return localizationOnce;
+      };
+      ctx.hook('kernel:bootstrapped', async () => {
+        await resolveLocalizationOnce();
       });
       // Re-resolve per call so a revoked/expired key stops working on the next read.
       const resolvePrincipal = async (): Promise<ExecutionContext> => {
-        const ec = await resolveStdioExecutionContext(scopedQl, apiKey, localization);
+        const ec = await resolveStdioExecutionContext(scopedQl, apiKey, await resolveLocalizationOnce());
         if (!ec) throw new Error('MCP stdio identity is no longer valid (key revoked or expired)');
         return ec;
       };

@@ -36,7 +36,7 @@
  * this file reads back all land in a real table.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, afterAll } from 'vitest';
 import { ObjectKernel } from '@objectstack/core';
 import { ObjectQLPlugin } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
@@ -46,8 +46,68 @@ import { ApprovalService } from './approval-service.js';
 import { SysApprovalRequest } from './sys-approval-request.object.js';
 import { SysApprovalAction } from './sys-approval-action.object.js';
 import { SysApprovalApprover } from './sys-approval-approver.object.js';
+// [#11081] `@objectstack/runtime`'s shared expected-noise capture. This import
+// escapes the package on PURPOSE, so it is DECLARED rather than left for CI to
+// discover: `CROSS_PACKAGE_TEST_INPUTS` in
+// `scripts/check-cross-package-test-inputs.mjs` names the one file, and
+// `@objectstack/plugin-approvals#test` in `turbo.json` hashes the same path so
+// the cache moves with it. The radius is that ONE file rather than
+// `packages/runtime/src/**` (what `plugin-auth` and `dogfood` declare) because
+// the helper imports nothing — it is the whole read.
+import { captureExpectedReadRefusals } from '../../../runtime/src/expected-read-refusal-noise.js';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * [#11081] The tables this fixture deliberately never provisions — and so the
+ * ONLY read refusals whose log frames may be withheld here.
+ *
+ * `beforeEach` boots a kernel with no datasource and attaches sqlite late, then
+ * syncs exactly four objects. Every approval decision below therefore probes
+ * the six authz tables `resolveUserAuthzGrants` reads plus
+ * `sys_approval_delegation`, which `ApprovalService.lookupActiveDelegation`
+ * reads best-effort on each decision. All are fail-soft, so the reads are
+ * EXPECTED — but the driver and the engine each log the fault on the way out.
+ *
+ * ⛔ MEASURED, not copied from the probers' source: a run of this file at
+ * `logger: { level: 'info' }` emitted 25 `refused a read on '<t>'` driver lines
+ * and 25 matching `ERROR Find operation failed` engine frames — sys_user 5 /
+ * sys_member 4 / sys_position 4 / sys_user_position 4 /
+ * sys_user_permission_set 4 / sys_organization 2 / sys_approval_delegation 2.
+ *
+ * ## Why a capture instead of the blanket `silent` this replaces
+ *
+ * `logger: { level: 'silent' }` stays — it is the key `ObjectKernelConfig`
+ * actually reads, and it is what keeps this file's ~186 INFO and ~12 WARN
+ * frames out of the shared shard log. What it cannot do is tell the 25 expected
+ * refusals apart from a 26th that means something. The capture withholds only a
+ * line naming one of these tables AND carrying that same table's `no such
+ * table` reason, forwards every other driver fault to the real console, and
+ * COUNTS what it withheld so `afterAll` can assert the expected reads still
+ * happen. A capture nobody asserts is a mute.
+ */
+const EXPECTED_ABSENT_PROBE_TABLES = [
+  'sys_user',
+  'sys_member',
+  'sys_user_position',
+  'sys_user_permission_set',
+  'sys_position',
+  'sys_organization',
+  'sys_approval_delegation',
+] as const;
+
+/** [#11081] Shared by both kernels this file boots; asserted once in `afterAll`. */
+const noise = captureExpectedReadRefusals([...EXPECTED_ABSENT_PROBE_TABLES]);
+
+/**
+ * [#11081] The PIN half. ⛔ Repairing a failure here means re-deriving the list
+ * above or finding out why a probe stopped firing — NEVER deleting the channel.
+ * In particular a silent `sys_approval_delegation` means the out-of-office
+ * delegation lookup stopped running on a decision, which is a finding.
+ */
+afterAll(() => {
+  expect(noise.silentChannels()).toEqual([]);
+});
 
 const SUBMITTER = { userId: 'submitter', positions: [], permissions: [] } as any;
 const APPROVER = { userId: 'approver', positions: [], permissions: [] } as any;
@@ -137,8 +197,13 @@ describe('an approval decision cascades as the deciding user (#3783)', () => {
     // The engine's own `init()` ran during bootstrap, before this driver
     // existed, so the connect the engine would have done is done here.
     const driver = makeSqliteDriver();
+    // [#11081] Before `connect()` — i.e. before the driver runs any statement.
+    // The sink also RESTORES a loud channel: an unexpected driver fault reaches
+    // the real console from here even though the kernel logger is `silent`.
+    noise.captureDriver(driver);
     await driver.connect();
     objectql.registerDriver(driver, true);
+    noise.captureEngine(objectql);
     for (const def of [opportunity, SysApprovalRequest, SysApprovalAction, SysApprovalApprover]) {
       objectql.registry.registerObject(def as any, 'approvals-test', 'approvals-test');
     }

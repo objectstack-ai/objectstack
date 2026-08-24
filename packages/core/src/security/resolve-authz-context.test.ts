@@ -13,17 +13,44 @@ import type { AuthzPosture } from '@objectstack/spec/security';
  * sys_user_position / sys_position_permission_set / platform_admin / ai_seat).
  */
 
-// Minimal in-memory ObjectQL: find(object, { where }) with `===` + `$in` match.
+// Minimal in-memory ObjectQL: find(object, { where, limit }) with `===` + `$in`
+// match, and the caller's `limit` ENFORCED.
+//
+// [#10978] The bound is not decoration. A double that matches `where` and hands
+// back every row it matched cannot tell a read bounded at 200 from the same read
+// bounded at 1000, or from one carrying no bound at all — so raising a limit,
+// lowering it, or folding two reads that carry different ones is green BY
+// CONSTRUCTION, and the production symptom is a silently truncated result set
+// rather than an error. On this file's path that truncation is an authorization
+// input: `resolveUserAuthzGrants` reads `sys_member` twice, `{user_id}` at 200
+// and `{organization_id}` at 1000, and the obvious "same object, fold them"
+// cleanup silently caps the fellow-org peer list (`org_user_ids`, an RLS input)
+// at 200 for any organization with more members.
+//
+// PRESENCE, not truthiness — `limit: 0` means "return no records" and `0` is
+// falsy, so `opts.limit ? …` would answer a request for NOTHING with the WHOLE
+// table. That is a measured door in this repo, not a hypothetical: see the
+// `query.limit !== undefined` comment in `driver-memory`'s `memory-driver.ts`.
+// Bounding AFTER the filter matches the real read path (filter → sort → offset →
+// limit); these doubles implement no ordering, and no read on this path asks for
+// one.
+function bounded<T>(rows: T[], opts: any): T[] {
+  return typeof opts?.limit === 'number' ? rows.slice(0, opts.limit) : rows;
+}
+
 function makeQl(tables: Record<string, any[]>) {
   return {
     async find(object: string, opts: any) {
       const rows = tables[object] ?? [];
       const where = opts?.where ?? {};
-      return rows.filter((r) =>
-        Object.entries(where).every(([k, v]) => { if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`); 
-          if (v && typeof v === 'object' && '$in' in (v as any)) return (v as any).$in.includes(r[k]);
-          return r[k] === v;
-        }),
+      return bounded(
+        rows.filter((r) =>
+          Object.entries(where).every(([k, v]) => { if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
+            if (v && typeof v === 'object' && '$in' in (v as any)) return (v as any).$in.includes(r[k]);
+            return r[k] === v;
+          }),
+        ),
+        opts,
       );
     },
   };
@@ -123,11 +150,14 @@ function makeCountingQl(tables: Record<string, any[]>) {
       counts[object] = (counts[object] ?? 0) + 1;
       const rows = tables[object] ?? [];
       const where = opts?.where ?? {};
-      return rows.filter((r) =>
-        Object.entries(where).every(([k, v]) => { if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`); 
-          if (v && typeof v === 'object' && '$in' in (v as any)) return (v as any).$in.includes(r[k]);
-          return r[k] === v;
-        }),
+      return bounded(
+        rows.filter((r) =>
+          Object.entries(where).every(([k, v]) => { if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
+            if (v && typeof v === 'object' && '$in' in (v as any)) return (v as any).$in.includes(r[k]);
+            return r[k] === v;
+          }),
+        ),
+        opts,
       );
     },
   };
@@ -224,6 +254,123 @@ describe('resolveLocalizationContext — batched fallback read (#2409)', () => {
     const loc = await resolveLocalizationContext({ ql, settings, tenantId: 'o1' });
     expect(loc.timezone).toBe('Europe/Paris');
     expect(ql.counts.sys_setting).toBe(1); // the batched $in fallback ran once
+  });
+
+  // ── [#11222 items 2 + 3] LEGS, and the resolution context ────────────────
+  //
+  // The pins above count CALLS (`getMany.calls`, `gets === 3`). #10826's whole
+  // calibration is that the three reads it collapsed already ran in ONE leg —
+  // "a query-count fix, not a latency fix" (cloud#1539). Nothing pinned that.
+  // A future edit turning the per-key fallback's `Promise.all` into a
+  // sequential `for` loop takes legs 1 -> 3 while every call-count assertion
+  // above stays green; legs are the latency multiplier, so that regression is
+  // exactly the one the existing pins cannot see.
+  //
+  // And the `getMany` double above is declared with TWO parameters, so it is
+  // structurally unable to observe the third argument: drop `sctx` from the
+  // production call and all three pins stay green. The rig's double takes it.
+
+  /**
+   * A settings-service double that MEASURES what the resolver asks for.
+   *
+   *  - `queries` — every row load. `loadRows` stands in for the real service's
+   *    namespace row load, so one call is one `sys_setting` query.
+   *  - `legs` — every row load that STARTS while nothing else is in flight,
+   *    i.e. the number of sequential round-trip WAVES. Three loads issued
+   *    inside one `Promise.all` all increment `inFlight` synchronously before
+   *    any of them resumes past its first `await`, so they count as ONE leg;
+   *    three awaited in sequence count as three. That is the leg definition
+   *    cloud#1539 used, and it is what makes "3 queries, 1 leg" measurable
+   *    rather than asserted.
+   *
+   * `batched: false` reproduces the pre-#10826 occupant (only `get`), which is
+   * also the shape the resolver still falls back to for a host-provided
+   * settings service that predates `getMany`.
+   */
+  function makeSettingsRig(
+    values: Record<string, unknown>,
+    { batched }: { batched: boolean },
+  ) {
+    const stats = { queries: 0, legs: 0 };
+    const calls: Array<{ method: string; args: any[] }> = [];
+    let inFlight = 0;
+    const loadRows = async () => {
+      stats.queries += 1;
+      if (inFlight === 0) stats.legs += 1; // nothing else in flight -> a new wave
+      inFlight += 1;
+      try {
+        await Promise.resolve();
+        return values;
+      } finally {
+        inFlight -= 1;
+      }
+    };
+    const pick = (loaded: Record<string, unknown>, key: string) =>
+      key in loaded
+        ? { value: loaded[key], source: 'tenant' }
+        : { value: undefined, source: 'default' };
+    const rig: any = {
+      stats,
+      calls,
+      async get(namespace: string, key: string, ctx: any) {
+        calls.push({ method: 'get', args: [namespace, key, ctx] });
+        return pick(await loadRows(), key);
+      },
+    };
+    if (batched) {
+      // NOTE the THIRD parameter — this is item 3's fix, not a detail: the
+      // double must accept `ctx` to be able to assert it was forwarded.
+      rig.getMany = async (namespace: string, keys: readonly string[], ctx: any) => {
+        calls.push({ method: 'getMany', args: [namespace, [...keys], ctx] });
+        const loaded = await loadRows();
+        const out: Record<string, unknown> = {};
+        for (const key of keys) out[key] = pick(loaded, key);
+        return out;
+      };
+    }
+    return rig;
+  }
+
+  const VALUES = { timezone: 'Asia/Tokyo', locale: 'ja-JP', currency: 'JPY' };
+  const EXPECTED = { timezone: 'Asia/Tokyo', locale: 'ja-JP', currency: 'JPY' };
+
+  it('a per-key occupant issues three namespace reads in ONE leg (the pre-#10826 cost)', async () => {
+    const settings = makeSettingsRig(VALUES, { batched: false });
+    const ql = makeCountingQl({ sys_setting: [] });
+    const loc = await resolveLocalizationContext({ ql, settings, tenantId: 'o1', userId: 'u1' });
+    expect(loc).toEqual(EXPECTED);
+    expect(settings.stats).toEqual({ queries: 3, legs: 1 });
+    // The settings path answered, so the direct `sys_setting` fallback is not
+    // reached — the three reads above are the whole cost.
+    expect(ql.counts.sys_setting ?? 0).toBe(0);
+  });
+
+  it('the batched occupant issues ONE namespace read, in the same ONE leg', async () => {
+    const settings = makeSettingsRig(VALUES, { batched: true });
+    const ql = makeCountingQl({ sys_setting: [] });
+    const loc = await resolveLocalizationContext({ ql, settings, tenantId: 'o1', userId: 'u1' });
+    expect(loc).toEqual(EXPECTED);
+    // queries 3 -> 1, legs 1 -> 1. #10826 was correctly scheduled as a
+    // query-count fix; the `legs` half is what a sequential-loop regression
+    // would move, and it is now pinned in both directions.
+    expect(settings.stats).toEqual({ queries: 1, legs: 1 });
+    expect(ql.counts.sys_setting ?? 0).toBe(0);
+  });
+
+  it('asks for all three keys of the one namespace in a single call, with the resolution context', async () => {
+    const settings = makeSettingsRig(VALUES, { batched: true });
+    await resolveLocalizationContext({
+      ql: makeCountingQl({ sys_setting: [] }),
+      settings,
+      tenantId: 'o1',
+      userId: 'u1',
+    });
+    expect(settings.calls).toEqual([
+      {
+        method: 'getMany',
+        args: ['localization', ['timezone', 'locale', 'currency'], { tenantId: 'o1', userId: 'u1' }],
+      },
+    ]);
   });
 });
 
@@ -1137,5 +1284,60 @@ describe('[#8613] the `active` flag on the grant catalogues (ADR-0049)', () => {
     const grants = await resolveUserAuthzGrants(makeQl(withActive(false)), 'u1');
     expect(grants.permissions).not.toContain('contributor_ps');
     expect(grants.positions).not.toContain('contributor');
+  });
+});
+
+/**
+ * [#10978] The instrument's own contract.
+ *
+ * Every assertion in this file stands on `makeQl`, and a double that drops
+ * `opts.limit` cannot fail a limit regression: raising a bound, lowering it, or
+ * folding two reads that carry different ones all produce identical rows. These
+ * cases pin the bound itself, so the blindness cannot come back unnoticed —
+ * without them the `slice` is unverified and deleting it fails nothing.
+ *
+ * The measured population when this landed: 49 limit-blind query-honouring
+ * doubles across 43 files, all 49 reached at runtime and 44 handed a real bound
+ * (values 1 … 10000). Teaching all 49 to honour it broke 0 of 1062 tests — the
+ * class was unobservable, not wrong.
+ */
+describe('the in-memory ObjectQL double honours `limit` (#10978)', () => {
+  const rows = (n: number, org: string) =>
+    Array.from({ length: n }, (_, i) => ({ user_id: `u${i}`, organization_id: org, role: 'member' }));
+
+  it('bounds a matched read at the caller\'s limit', async () => {
+    const ql = makeQl({ sys_member: rows(205, 'o1') });
+    expect(await ql.find('sys_member', { where: { organization_id: 'o1' }, limit: 200 })).toHaveLength(200);
+    expect(await ql.find('sys_member', { where: { organization_id: 'o1' } })).toHaveLength(205);
+  });
+
+  it('tells two bounds apart on the same read — the fold this card exists for', async () => {
+    // `resolveUserAuthzGrants` reads sys_member twice: `{user_id}` at 200 and
+    // `{organization_id}` at 1000. Folding them into one read would cap the
+    // fellow-org peer list (`org_user_ids`, an RLS input) at 200. Under a
+    // limit-blind double both bounds return 1005 rows and the fold is invisible.
+    const ql = makeQl({ sys_member: rows(1005, 'o1') });
+    const atOrgBound = await ql.find('sys_member', { where: { organization_id: 'o1' }, limit: 1000 });
+    const atUserBound = await ql.find('sys_member', { where: { organization_id: 'o1' }, limit: 200 });
+    expect(atOrgBound).toHaveLength(1000);
+    expect(atUserBound).toHaveLength(200);
+    expect(atOrgBound.length).not.toBe(atUserBound.length);
+  });
+
+  it('reads the bound by PRESENCE, not truthiness — `limit: 0` returns nothing', async () => {
+    // `0` is falsy, so `opts.limit ? …` answers a request for NOTHING with the
+    // WHOLE table. Measured door in this repo: `driver-memory` carries the same
+    // fix as `query.limit !== undefined`.
+    const ql = makeQl({ sys_member: rows(3, 'o1') });
+    expect(await ql.find('sys_member', { where: { organization_id: 'o1' }, limit: 0 })).toHaveLength(0);
+  });
+
+  it('applies the bound AFTER the filter, never before it', async () => {
+    // Bounding first would return rows the `where` excludes — a double that is
+    // silently WRONG rather than merely unbounded.
+    const ql = makeQl({ sys_member: [...rows(5, 'other'), ...rows(5, 'o1')] });
+    const found = await ql.find('sys_member', { where: { organization_id: 'o1' }, limit: 3 });
+    expect(found).toHaveLength(3);
+    expect(found.every((r: any) => r.organization_id === 'o1')).toBe(true);
   });
 });

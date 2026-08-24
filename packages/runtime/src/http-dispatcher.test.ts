@@ -72,13 +72,17 @@ const PKG_ADMIN = () => ({ request: {}, executionContext: { userId: 'u_pkg_admin
 /**
  * [#10145] The same move for the `/automation` DEFINITION writes — `POST /`,
  * `PUT /:name` and `DELETE /:name` now demand `manage_metadata`, the authoring
- * capability the metadata plane these flows live on already required. The three
- * cases using this caller are about ROUTING — which automation-service method a
+ * capability the metadata plane these flows live on already required. The cases
+ * using this caller are about ROUTING — which automation-service method a
  * path reaches and with which arguments — and were written when an ordinary
  * session could register a flow, which is precisely the premise the gate
  * destroys. Only the caller changes; the gate itself is pinned in
- * `domains/automation-write-capability-gate.test.ts`, and every EXECUTION route
- * on the domain (trigger / toggle / resume) keeps `AUTHED_CALLER`, deliberately.
+ * `domains/automation-write-capability-gate.test.ts`.
+ *
+ * [#10243] `POST /:name/toggle` uses this caller too, since the 2026-08-23
+ * ruling put enablement in the same write set. The EXECUTION routes on the
+ * domain (trigger / resume) keep `AUTHED_CALLER`, deliberately — that half of
+ * the line did not move.
  */
 const FLOW_AUTHOR = () => ({ request: {}, executionContext: { userId: 'u_flow_author', systemPermissions: ['manage_metadata'] } }) as any;
 
@@ -144,7 +148,22 @@ describe('HttpDispatcher', () => {
                 // ever stops being stated, `saveMetaItem`'s 422 silently goes
                 // back to restating prose the envelope already carries — an
                 // exact-match assertion is what makes that visible.
-                writeFace: 'meta-envelope',
+                //
+                // [#11095] The exact-match did its job: this value CHANGED, and
+                // it changed HERE first, deliberately, rather than quietly
+                // starting to pass somewhere. `'meta-envelope'` asserted "I am
+                // one of the doors that carry `issues[]` structurally", which is
+                // still true of this one — but the same field also answers the
+                // 409's question, "which remedy exists on this door", and there
+                // the answer diverged: both REST `PUT`s read `?force` off a
+                // query string (the compound-name twin as of this card), while
+                // this branch is reached with a path, a method and a body and
+                // has no query string at all. So it names itself. The 422
+                // behaviour is unmoved — `specValidationFindings` lists the two
+                // faces on ONE `case` — and what moved is the destructive 409's
+                // remedy clause, pinned in
+                // `domains/meta-save-destructive-remedy.test.ts`.
+                writeFace: 'meta-dispatch',
             });
             expect(result.response?.body).toEqual({
                 success: true,
@@ -169,7 +188,17 @@ describe('HttpDispatcher', () => {
                 item: body,
                 // [#10888] The compound-name door states the same face — it is
                 // the same handler and the same envelope.
-                writeFace: 'meta-envelope',
+                //
+                // ⚠️ [#11095] "The compound-name door" here means the
+                // DISPATCHER's own compound arity (`/lead/views/all_leads`),
+                // which is the same `if (method === 'PUT')` branch as the case
+                // above — not `@objectstack/rest`'s `PUT /meta/:type/:a/:b`,
+                // which is a different file, a different transport, and the one
+                // that GAINED `?force` under this card. Two unrelated things
+                // called "the compound-name door" one paragraph apart is exactly
+                // how a later reader talks themselves into threading `force`
+                // here too, so: this arity has no query string either.
+                writeFace: 'meta-dispatch',
             });
         });
 
@@ -367,7 +396,11 @@ describe('HttpDispatcher', () => {
         });
 
         it('should toggle a flow via POST /:name/toggle', async () => {
-            const result = await dispatcher.handleAutomation('flow_a/toggle', 'POST', { enabled: false }, AUTHED_CALLER());
+            // [#10243] `FLOW_AUTHOR`, not `AUTHED_CALLER`: toggle joined the
+            // `manage_metadata` write set by ruling. This case is about ROUTING
+            // — which service method the path reaches, with which arguments —
+            // so only the caller changes.
+            const result = await dispatcher.handleAutomation('flow_a/toggle', 'POST', { enabled: false }, FLOW_AUTHOR());
             expect(result.handled).toBe(true);
             expect(mockAutomationService.toggleFlow).toHaveBeenCalledWith('flow_a', false);
         });

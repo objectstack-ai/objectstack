@@ -186,3 +186,86 @@ describe('[#7616] resolvePermissionSetsForContext is reachable through the servi
     expect(sets).toEqual([]);
   });
 });
+
+/**
+ * [#11121 residue] An ORGANIZATION-LESS `sys_permission_set` row still grants.
+ *
+ * #11121 made this loader tenant-scoped so two organizations holding a row for
+ * the same name stop answering each other's requests. Its comment promised the
+ * other half — "an organization-less leftover only where it does not [have its
+ * own]" — and the code read `.own` alone, which by
+ * `resolveOwnOrganizationRow`'s documented contract is NEVER a residue once an
+ * organization is supplied. That helper is written for SEEDERS, where refusing
+ * to see a residue as "already seeded" is the entire point; enforcement wants
+ * the opposite reading.
+ *
+ * The consequence was a silent revocation on upgrade: every walled deployment
+ * carrying pre-#11121 rows (or any row authored without a tenant — the admin
+ * UI, a hand-run seed) kept its `system_permissions` and `tab_permissions`,
+ * because that read is unscoped and by id, while its `object_permissions` and
+ * `admin_scope` stopped applying. One row, two enforcement planes, opposite
+ * verdicts, no signal at the moment of loss.
+ */
+const RESIDUE_ROW = {
+  name: 'legacy_auditor',
+  label: 'Legacy Auditor',
+  organization_id: null,
+  object_permissions: JSON.stringify({ deal: { allowRead: true, allowDelete: true } }),
+  field_permissions: JSON.stringify({}),
+  system_permissions: JSON.stringify([]),
+  tab_permissions: JSON.stringify({}),
+};
+
+/** The SAME name, stamped with the caller's organization — this one must win. */
+const OWN_ROW = {
+  name: 'legacy_auditor',
+  label: 'Legacy Auditor (this organization)',
+  organization_id: 'org_a',
+  object_permissions: JSON.stringify({ deal: { allowRead: true, allowDelete: false } }),
+  field_permissions: JSON.stringify({}),
+  system_permissions: JSON.stringify([]),
+  tab_permissions: JSON.stringify({}),
+};
+
+describe('[#11121] the per-organization loader does not silently revoke organization-less grants', () => {
+  it('resolves an organization-LESS row for a caller who has an organization', async () => {
+    const svc = await locateSecurityService([RESIDUE_ROW]);
+
+    const sets = await svc.resolvePermissionSetsForContext?.({
+      userId: 'u1',
+      organizationId: 'org_a',
+      permissions: ['legacy_auditor'],
+    } as any);
+
+    const found = (sets ?? []).find((s) => s.name === 'legacy_auditor');
+    expect(found, 'the grant vanished for a caller in an organization — this is the silent revocation').toBeTruthy();
+    // Whole, not merely present: the columns that went missing are the point.
+    expect((found as any)?.objects?.deal?.allowDelete).toBe(true);
+  });
+
+  it('still prefers THIS organization\'s own row when both exist — the cross-tenant bleed stays closed', async () => {
+    const svc = await locateSecurityService([RESIDUE_ROW, OWN_ROW]);
+
+    const sets = await svc.resolvePermissionSetsForContext?.({
+      userId: 'u1',
+      organizationId: 'org_a',
+      permissions: ['legacy_auditor'],
+    } as any);
+
+    const found = (sets ?? []).find((s) => s.name === 'legacy_auditor');
+    expect(found?.label).toBe('Legacy Auditor (this organization)');
+    // The residue's broader grant must NOT leak in behind the own row.
+    expect((found as any)?.objects?.deal?.allowDelete).toBe(false);
+  });
+
+  it('resolves the same row for a caller with NO organization (single posture, unchanged)', async () => {
+    const svc = await locateSecurityService([RESIDUE_ROW]);
+
+    const sets = await svc.resolvePermissionSetsForContext?.({
+      userId: 'u1',
+      permissions: ['legacy_auditor'],
+    } as any);
+
+    expect((sets ?? []).some((s) => s.name === 'legacy_auditor')).toBe(true);
+  });
+});

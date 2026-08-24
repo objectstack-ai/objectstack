@@ -1267,6 +1267,110 @@
           "ref": "claude/new-session-0pv25p"
         }
       ]
+    },
+    {
+      "id": "platform-core.manifest-install-contract",
+      "title": "The package manifest is enforced at the install boundary: an incompatible `engines` range is refused before the registry write, the namespace gate holds ownership, and a namespace-less runtime package has one derived",
+      "since": "v15",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": [
+        "seeded admin (admin@objectos.ai / admin123)"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a runtime that accepts package install over HTTP — os dev's dispatcher install route, POST /api/v1/packages → protocol.installPackage (the same door api-backend.package-rest-lifecycle drives for its 201/409/PATCH contract; this item drives the manifest GATES that run BEFORE the row is written)",
+          "the RUNNING runtime's protocol major, read from the server rather than assumed — every engines range below is derived from it as RT. A literal '^11' rots the moment the major turns, and a rotted range makes the compatible and incompatible legs swap places silently",
+          "scratch package ids only (qa_manifest_probe_*, com.example.leave, com.example.holiday) so no shipped package is mutated"
+        ],
+        "knownGaps": [
+          "the DURABLE half of the handshake is NOT scored here: ADR-0087 also refuses an incompatible `sys_packages` row during boot-time rehydration, with boot CONTINUING (v15 release notes). Staging it needs an already-stored incompatible row — DB-level access, or a runtime whose major moved under a previously-installed package. Record blocked(fixture) if attempted. The install-path refusal this item does score is the same assertProtocolCompat call one boundary earlier, so a green here says nothing about the rehydration arm",
+          "OS_METADATA_COLLISION=warn downgrades the namespace refusal to a console warning (registry.ts installPackage) — the policy is read by the registry, not per request, so that leg needs a SECOND server booted with the env set, never a mid-run toggle. Score it only if that boot is cheap, and record which arm the run exercised",
+          "the install's durable leg is best-effort BY DESIGN (protocol.installPackage warns and continues when the `package` service cannot persist to sys_packages), so a probe that installs and does not survive a restart is that documented non-fatal path, not a failure of any clause here",
+          "NamespaceConflictError is a plain Error subclass with no `code` field (registry.ts:1080) — unlike the protocol refusal, its HTTP status/code mapping is decided by whatever handler catches it, not pinned by the class. The run RECORDS the status and code it observes rather than asserting a pre-agreed one; see `negative` for the direction that is a finding"
+        ]
+      },
+      "steps": [
+        "boot showcase isolated; sign in as admin. Read the runtime's protocol version from the running server (the boot banner / GET /api/v1/meta), take its leading major as RT, and derive every range below from RT — never from a literal",
+        "BASELINE: POST /api/v1/packages with { manifest: { id: 'qa_manifest_probe_a', name: 'Manifest Probe A', version: '1.0.0', scope: 'custom', type: 'app', namespace: 'qa_mfp', engines: { protocol: '^RT' } } }; capture status + body and GET it back — this is the compatible control every refusal below is judged against",
+        "INCOMPATIBLE: POST id 'qa_manifest_probe_old' with engines: { protocol: '^(RT-1)' }; capture the refusal IN FULL (status, code, message, rangeSource, targetMajor, migrateCommand). Then GET /api/v1/packages/qa_manifest_probe_old and GET /api/v1/packages and confirm NO row exists for that id",
+        "PRECEDENCE, both directions: POST 'qa_manifest_probe_prec_ok' with engines: { protocol: '^RT', platform: '^(RT-1)' } → expect install (protocol is consulted first, so the incompatible platform range is never reached); POST 'qa_manifest_probe_prec_no' with engines: { protocol: '^(RT-1)', platform: '^RT' } → expect refusal whose diagnostic names `engines.protocol` as the range source",
+        "LEGACY leg: POST 'qa_manifest_probe_legacy' with NO `engines` and engine: { objectstack: '^(RT-1)' } → expect refusal whose diagnostic names `engine.objectstack` as the source; repeat with '^RT' → expect install. This proves the third precedence rung is wired, not merely typed",
+        "GRANDFATHERED: POST 'qa_manifest_probe_norange' with no `engines` and no `engine` at all → expect install, plus the server's `[protocol] package '…' declares no engines.protocol range` warning in the log",
+        "UNPARSED: POST 'qa_manifest_probe_wsrange' with engines: { protocol: 'workspace:*' } → expect install, plus the `declares an unrecognized engines.protocol range` warning. This is the direction that would break every workspace-linked package if it inverted",
+        "NAMESPACE OWNERSHIP, three legs: (a) POST 'qa_manifest_probe_b' declaring namespace 'qa_mfp' — the one probe A already owns → expect refusal naming the namespace, the current owner and the incoming id; (b) re-POST probe A's OWN manifest unchanged (same id, same namespace) → expect NO conflict (reinstall/HMR is a normal path); (c) POST 'qa_manifest_probe_shared' declaring a shareable platform namespace (base / system / sys) → expect NO conflict (shareable namespaces are exempt)",
+        "NAMESPACE DERIVATION: POST id 'com.example.leave' with NO namespace declared → GET it back and read manifest.namespace; then POST 'com.example.holiday' WITH an explicit namespace 'timeoff' → GET it back and confirm the declared value survived untouched",
+        "teardown: DELETE every scratch package created above, or simply discard the isolated file DB — the cheaper path an isolated boot makes free. ⚠️ Several legs here are NOT re-runnable in place (step 8b depends on probe A still being installed, and 8a stops being a conflict once probe A is gone), so a re-run starts from a clean DB rather than from the tail of the previous one"
+      ],
+      "acceptance": [
+        {
+          "clause": "an incompatible declared range is REFUSED, and refused BEFORE anything is written: POST /api/v1/packages carrying an `engines.protocol` range that excludes the runtime's major answers a refusal, and the follow-up GET /api/v1/packages/:id and GET /api/v1/packages show no row for that id — assertProtocolCompat runs ahead of registry.installPackage, so a rejected package leaves no half-installed remains",
+          "oracle": "api",
+          "verify": "capture the refusal, then the two post-refusal reads. ⛔ The refusal alone does not score this clause: a gate that throws AFTER the registry write looks identical from the response, and the two reads are the only thing that separates them",
+          "evidence": "the refusal body, plus the GET /packages/:id and GET /packages reads taken after it"
+        },
+        {
+          "clause": "the refusal is a STRUCTURED diagnostic, not a bare failure: it carries code OS_PROTOCOL_INCOMPATIBLE, the declared `requiredRange`, the `rangeSource` it was read from, the runtime version it was judged against, and a `migrateCommand` of the form `objectstack migrate meta --from <targetMajor>` — an author refused at the boundary is told which key to fix and which command resolves it",
+          "oracle": "api",
+          "verify": "read the named fields off the captured refusal body; the migrateCommand's --from must be the major of the DECLARED range, not the runtime's",
+          "evidence": "the refusal body with every named field shown"
+        },
+        {
+          "clause": "the declared range is resolved PROTOCOL-FIRST, and all three rungs are wired: `engines.protocol` is consulted before `engines.platform`, which is consulted before the legacy `engine.objectstack`. A manifest whose `engines.protocol` admits this runtime installs even when its `engines.platform` does not; the mirrored manifest is refused with `rangeSource: engines.protocol`; and a manifest carrying only the legacy `engine.objectstack` is judged on it in both directions",
+          "oracle": "api",
+          "verify": "the four probes of steps 4-5 — precedence-ok installs, precedence-no is refused naming engines.protocol, legacy-incompatible is refused naming engine.objectstack, legacy-compatible installs. ⚠️ A precedence that reads the LAST declared key instead of the first passes the two single-key probes and fails only the mixed pair, which is why the mixed pair is the load-bearing one",
+          "evidence": "the four responses, with the rangeSource of each refusal"
+        },
+        {
+          "clause": "the two non-determinations ADMIT rather than refuse: a manifest declaring NO range installs (grandfathered), and a manifest whose range shape the parser does not recognize (`workspace:*`) installs too — each leaving a `[protocol]` warning naming the package. An unparsed range never becomes a false rejection, and grandfathering is warn-only",
+          "oracle": "api",
+          "verify": "both POSTs succeed and both packages read back; then find each warning in the server log. ⛔ A silent success is only half the clause — the warnings are what keep grandfathering visible instead of invisible, and `os lint`'s protocol/missing-engines-range nudge (covered by cli.plugin-manifest-build-contract) is the ratchet that closes it",
+          "evidence": "the two install responses and the two log lines"
+        },
+        {
+          "clause": "the install-time namespace gate holds OWNERSHIP on all three legs: a second package declaring a namespace another installed package already owns is refused, and the refusal names the namespace, the current owner and the incoming id; the SAME package re-declaring its own namespace is NOT a conflict; and a shareable platform namespace (base / system / sys) is exempt. One leg does not prove the gate — an over-strict gate breaks reinstall, an under-strict one lets a package silently take another's object-name prefix",
+          "oracle": "api",
+          "verify": "the three probes of step 8; the conflict message must name all three identities (the ADR-0048 refusal text at registry.ts:1086-1095), not merely say 'conflict'",
+          "evidence": "the three responses, with the conflict message quoted in full"
+        },
+        {
+          "clause": "a runtime-created package that declares NO namespace has one DERIVED from its id (`com.example.leave` → `leave`) and reads back carrying it, while an explicitly declared namespace is left untouched — the protocol's namespace-prefix rule is enforceable for Studio-authored packages, which never take the compile-time `defineStack` path that would have enforced it",
+          "oracle": "api",
+          "verify": "GET both packages back and read manifest.namespace off each. ⛔ Read the DERIVED value from the stored package, never from the POST echo — the derivation is set on the manifest object shared by the in-memory registry and the sys_packages row, and only a read-back proves both agree",
+          "evidence": "the two GET bodies with manifest.namespace shown"
+        }
+      ],
+      "negative": [
+        "an incompatible package that installs — any 2xx, or a row present after the refusal — is the FAIL this item exists for: it means the mismatch will surface later as a deep schema/renderer crash instead of at the boundary that could name it",
+        "a compatible package REFUSED is the mirror fail and the more expensive one: no-range and unparsed-range must admit, so a false rejection here blocks every package that predates the range convention or is workspace-linked",
+        "a namespace conflict surfacing as a 5xx is the platform reporting its own fault for a manifest the caller authored — record it as a finding rather than scoring the clause on status alone; NamespaceConflictError carries no `code` (registry.ts:1080), so nothing pins its mapping today",
+        "a refusal whose message says only that something conflicted, without the namespace / current owner / incoming id, fails the ownership clause even when the refusal itself is correct — the ADR-0048 text exists so the author knows which of the two packages to rename",
+        "a derived namespace present in the POST echo but absent from the read-back (or vice versa) is a disagreement between the in-memory registry and sys_packages, not a pass"
+      ],
+      "traps": [
+        "dispatcher-vs-hono-route",
+        "destructive-in-place",
+        "eventual-consistency"
+      ],
+      "source": [
+        "packages/metadata-core/src/protocol-handshake.ts — resolveDeclaredRange :80-88 (protocol → platform → legacy engine.objectstack); rangeAdmitsMajor :106 (null = unrecognized, admit-with-warning); checkProtocolCompat :216-262 (the OS_PROTOCOL_INCOMPATIBLE diagnostic and its migrateCommand); assertProtocolCompat :276-301 (the four arms: ok silent, no-range warn, unparsed-range warn, incompatible throw)",
+        "packages/metadata-protocol/src/protocol.ts :19744-19756 — namespace derivation for namespace-less runtime packages, then assertProtocolCompat(manifest) BEFORE registry.installPackage",
+        "packages/objectql/src/registry.ts :3466-3490 — the ADR-0048 install-time namespace gate (shareable exemption, same-package exclusion, OS_METADATA_COLLISION=warn downgrade); NamespaceConflictError :1080-1100",
+        "ADR-0087 (metadata protocol upgrade contract) D1 · ADR-0048 (cross-package metadata collision) · ADR-0025 §3.10 #3 (protocol-first precedence)",
+        "content/docs/releases/v15.mdx :514-523 — 'ADR-0087 completed (#2972)': the handshake on boot-time durable rehydration and on code-defined AppPlugin loads, plus the objectstack lint nudge",
+        "sibling items: api-backend.package-rest-lifecycle (the same install door, judged on its 201/409/PATCH contract rather than on the manifest gates) · cli.plugin-manifest-build-contract (the same manifest at the packaging boundary) · platform-core.package-lifecycle-enable-disable (what happens to a package after it installs)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-08-24",
+          "change": "new — authored to classify the `manifest` capability for the coverage ratchet, which had flagged it UNCLASSIFIED since its liveness ledger landed. Grounding decided the shape: the manifest is an authored, enforced surface (namespace ownership refuses at install, an incompatible engines range refuses before the registry write, a namespace-less runtime package has one derived), not an internal ledger, so it earns items rather than a waiver. This item takes the INSTALL boundary; cli.plugin-manifest-build-contract takes the packaging boundary; api-backend.package-rest-lifecycle already covered the install door's 201/409/PATCH contract and is mapped alongside them. Every range in the steps is derived from the running runtime's major rather than written literally, so the compatible and incompatible legs cannot swap places when the major turns",
+          "ref": "#11421"
+        }
+      ]
     }
   ]
 }

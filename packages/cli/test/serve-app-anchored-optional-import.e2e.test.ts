@@ -35,7 +35,10 @@
  *
  * The spawn is written out here rather than taken from `test/helpers/
  * serve-process.ts` on purpose: that helper always runs the child WITH `cwd` set
- * to the app, which is the one shape this file must not use.
+ * to the app, which is the one shape this file must not use. Only its
+ * `childEnv()` choke point is borrowed (#11267) — what the child INHERITS is
+ * orthogonal to which directory it is started in, and this file boots the real
+ * stack, better-auth included, which reads `TEST` directly.
  *
  * ── The anti-vacuity floor ───────────────────────────────────────────────
  *
@@ -54,6 +57,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { childEnv } from './helpers/serve-process.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -156,8 +160,7 @@ function runServeFrom(
     const port = String(40000 + Math.floor(Math.random() * 20000));
     const child = spawn(TSX, [CLI, 'serve', configArg, '--port', port], {
       cwd,
-      env: {
-        ...process.env,
+      env: childEnv({
         NO_COLOR: '1',
         OS_DATABASE_URL: ':memory:',
         OS_LOG_LEVEL: '',
@@ -165,7 +168,7 @@ function runServeFrom(
         // The trigger: without a non-memory driver the cluster block is skipped
         // entirely and this file would measure nothing.
         OS_CLUSTER_DRIVER: 'redis',
-      },
+      }),
     });
 
     let stdout = '';

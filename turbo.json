@@ -154,6 +154,33 @@
         "$TURBO_ROOT$/packages/types/src/node-isolation.test.ts"
       ]
     },
+    "@objectstack/trigger-record-change#test": {
+      "dependsOn": ["^build"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "!dist/**",
+        "!coverage/**",
+        "!.turbo/**",
+        "$TURBO_ROOT$/packages/runtime/src/expected-read-refusal-noise.ts",
+        "$TURBO_ROOT$/scripts/check-cross-package-test-inputs.mjs",
+        "$TURBO_ROOT$/scripts/slot-lookup-baseline.json",
+        "$TURBO_ROOT$/packages/core/src/kernel.ts"
+      ],
+      "outputs": []
+    },
+    "@objectstack/plugin-approvals#test": {
+      "dependsOn": ["^build"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "!dist/**",
+        "!coverage/**",
+        "!.turbo/**",
+        "$TURBO_ROOT$/packages/runtime/src/expected-read-refusal-noise.ts",
+        "$TURBO_ROOT$/scripts/check-cross-package-test-inputs.mjs",
+        "$TURBO_ROOT$/packages/plugins/plugin-sharing/src/team-graph.ts"
+      ],
+      "outputs": []
+    },
     "@objectstack/plugin-security#test": {
       "dependsOn": ["^build"],
       "outputs": [],

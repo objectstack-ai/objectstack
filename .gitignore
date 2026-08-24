@@ -67,6 +67,7 @@ packages/spec/bundle-size-report.json
 # is wiped when written, so surfaces sharing a resolution dir need their own).
 packages/spec/.examples-build/
 packages/spec/.examples-build-src/
+packages/client-react/.examples-build/
 
 # Generated SBOM (rebuilt during release)
 sbom.json

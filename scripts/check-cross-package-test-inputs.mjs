@@ -617,6 +617,56 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
     // high-privilege table, and cross-checks spec's own delegatable pin.
     globs: ['packages/spec/src/security/**', 'packages/spec/src/identity/**'],
   },
+  '@objectstack/trigger-record-change': {
+    // [#11081] src/record-change-integration.test.ts imports
+    // `@objectstack/runtime`'s shared expected-noise capture so its 84 expected
+    // authz/organization read refusals are WITHHELD-AND-ASSERTED rather than
+    // blanket-muted by `logger: { level: 'silent' }`.
+    //
+    // ONE file, not `packages/runtime/src/**` (which is the radius
+    // `plugin-auth` and `dogfood` carry): the helper has no imports of its own,
+    // so that single path IS the whole escaping read. The narrow radius keeps
+    // this package's suite off every runtime diff while still moving the
+    // `#test` hash when the predicate it depends on changes.
+    //
+    // The three below are NAMED in this package's prose rather than read by it
+    // — `slot-lookup-baseline.json` and `kernel.ts` by comments that predate
+    // this entry, `check-cross-package-test-inputs.mjs` by the import comment
+    // added with it. Same shape as `check-nul-bytes.mjs` on the
+    // `@objectstack/cli` entry above, and settled the same way: the literal
+    // collector takes quoted paths without parsing, so a mention forces a
+    // declaration, and declaring the file is cheaper than rewording prose to
+    // dodge the scanner. (They were invisible until now only because a package
+    // with NO escaping test is never rostered at all.)
+    globs: [
+      'packages/runtime/src/expected-read-refusal-noise.ts',
+      'scripts/check-cross-package-test-inputs.mjs',
+      'scripts/slot-lookup-baseline.json',
+      'packages/core/src/kernel.ts',
+    ],
+  },
+  '@objectstack/plugin-approvals': {
+    // [#11081] src/status-mirror-cascade.integration.test.ts imports the same
+    // capture for its 25 expected refusals (the six authz tables plus
+    // `sys_approval_delegation`). Same one-file radius, same reason — plus this
+    // gate's own path, named in that file's import comment (see the note on the
+    // sibling entry above for why a mention is declared rather than reworded).
+    //
+    // [#11286] src/manager-org-screen-parity.contract.test.ts imports
+    // `managerIsProvablyOutsideOrg` from plugin-sharing's `team-graph.ts` BY
+    // RELATIVE SOURCE PATH — the only way in, since that screen is deliberately
+    // not exported from plugin-sharing's index and the package publishes no
+    // subpath. The test pins the two independent screens over
+    // `sys_user.manager_id` to the same verdicts, so the sharing screen is a
+    // real input to it: without this glob a change THERE would never re-run the
+    // pin HERE, which is the exact blind spot this gate exists for. One file,
+    // not `plugin-sharing/src/**` — nothing else in that package is read.
+    globs: [
+      'packages/runtime/src/expected-read-refusal-noise.ts',
+      'scripts/check-cross-package-test-inputs.mjs',
+      'packages/plugins/plugin-sharing/src/team-graph.ts',
+    ],
+  },
   '@objectstack/dogfood': {
     // test/*-conformance.test.ts read a fixed roster of probe files across
     // runtime, rest, plugins and services by repo-relative path. Narrow to the

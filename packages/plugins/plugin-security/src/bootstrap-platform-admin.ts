@@ -18,6 +18,13 @@
  *         env-declared `OS_PLATFORM_OWNER_EMAIL` — never the first
  *         registrant, and never anyone at all while that var is undeclared
  *         (fail-closed; the boot-refusal half lives in plugin-auth `init()`).
+ *         [#11343] The match must additionally be VERIFIED (`email_verified`):
+ *         an unverified account holding the owner's email string is refused
+ *         like any stranger, because with verification off by default the
+ *         string alone proves nothing about who registered it. The verifying
+ *         write is a sys_user UPDATE, so `shouldReplayBootstrapFor` (below)
+ *         gives the replay middleware an update trigger — without it the
+ *         genuine owner would verify and never be elevated at all.
  *
  * The "create a Default Organization for the freshly-promoted admin"
  * behavior moved to `@objectstack/organizations` (see
@@ -126,6 +133,61 @@ function genId(prefix: string): string {
   const rand = Math.random().toString(36).slice(2, 10);
   const ts = Date.now().toString(36);
   return `${prefix}_${ts}${rand}`;
+}
+
+/**
+ * [#11343] Verified-email predicate for the walled elevation match — a
+ * fail-closed ALLOW-LIST over the representations a driver may hand back for
+ * the `sys_user.email_verified` boolean column (JS `true`, SQLite `1`, and
+ * their stringified forms). Everything else — `false`/`0`, `null`, an ABSENT
+ * field on an imported/legacy row, or any representation not listed — reads
+ * as UNVERIFIED. Absent-means-unverified is deliberate: treating a missing
+ * column as verified would re-open the exact hole this predicate closes for
+ * every row that predates the column.
+ */
+function isEmailVerified(u: any): boolean {
+  const v = u?.email_verified;
+  return v === true || v === 1 || v === '1' || v === 'true';
+}
+
+/**
+ * [#11343] Which `sys_user` writes can change the answer of the elevation
+ * query in {@link bootstrapPlatformAdmin} — the trigger predicate for the
+ * bootstrap-replay middleware in `security-plugin.ts`. Exported so the
+ * middleware and its pins consume the SAME predicate instead of re-deriving
+ * it (the `resolveEngineUpdateDispatch` pattern).
+ *
+ *  - `create` / `insert`: a new account may be the declared owner (walled) or
+ *    the first human user (`single`) — the original re-run trigger, unchanged.
+ *  - `update` whose payload touches `email_verified` or `email`: email
+ *    verification is an UPDATE (better-auth flips `emailVerified` when the
+ *    link is clicked, and change-email writes `{ email, emailVerified: true }`
+ *    — both reach the engine snake_cased via the adapter mapping). A re-run
+ *    bound to insert alone would refuse the unverified owner at sign-up and
+ *    then never look again, so the genuine owner would NEVER be elevated —
+ *    trading the wrong-person-elevated defect for a nobody-can-administer
+ *    one. These two columns are exactly the `sys_user` columns the walled
+ *    owner-match reads.
+ *  - any other operation, or an update touching neither column: cannot change
+ *    the elevation answer — no re-run. The bootstrap is idempotent but not
+ *    free; it must not run on every profile edit.
+ */
+export function shouldReplayBootstrapFor(opCtx: {
+  object?: string;
+  operation?: string;
+  data?: unknown;
+}): boolean {
+  if (opCtx?.object !== 'sys_user') return false;
+  const op = opCtx?.operation;
+  if (op === 'create' || op === 'insert') return true;
+  if (op === 'update') {
+    const data = opCtx?.data;
+    if (!data || typeof data !== 'object') return false;
+    return ['email_verified', 'email'].some((column) =>
+      Object.prototype.hasOwnProperty.call(data, column),
+    );
+  }
+  return false;
 }
 
 /**
@@ -243,6 +305,23 @@ export async function bootstrapPlatformAdmin(
   }
 
   const seededCount = Object.keys(seeded).length;
+  // [#11532] Under a walled posture these rows are organization-less BY RULING
+  // (#10103, 2026-08-20) and unreadable through the wall, and the catalog pass
+  // that runs next reports them once per organization. Saying so HERE is what
+  // stops the operator's first sight of them being a warning that calls the
+  // platform's own output legacy state: the fresh walled rig logged
+  // `seeded: 8` with nothing to indicate the rows carried no organization at
+  // all. Not a behaviour change — the seeding above is byte-identical.
+  if (seededCount > 0 && postureEnforcesWall(resolveTenancyPosture())) {
+    logger?.info?.(
+      '[security] platform default permission sets seeded WITHOUT an organization (the platform ' +
+        'bucket) — ruled 2026-08-20 and unchanged: the platform-admin grant points at the ' +
+        'admin_full_access row by id. Under a walled posture they are unreadable through the ' +
+        'tenant wall; each organization gets its own copies from the per-organization catalog ' +
+        'pass, so no principal is missing a set.',
+      { seeded: seededCount, names: Object.keys(seeded).sort() },
+    );
+  }
   // Attached to every return below so `os meta resync` can report the reconcile
   // outcome even when admin promotion short-circuits (the common dev case: a DB
   // that already has an admin returns `already_have_admin`).
@@ -358,7 +437,36 @@ export async function bootstrapPlatformAdmin(
         ...resyncCounts,
       };
     }
-    target = oldestOf(owners);
+    // [#11343] The email STRING alone is not identity: with self-registration
+    // reachable and email verification off by default, anyone who knows the
+    // declared owner's address and registers before the owner would match here
+    // and be elevated. Elevation therefore requires the match to be VERIFIED —
+    // an account row whose `email_verified` better-auth has confirmed (the
+    // verification link, or a trusted SSO provider at insert). An owner-email
+    // account that is not verified is refused exactly like a stranger, loudly,
+    // and never falls back — same fail-closed direction as the undeclared-owner
+    // refusal above. The refusal is transient for the genuine owner: the
+    // verifying write is a sys_user UPDATE, and the bootstrap-replay middleware
+    // (security-plugin.ts, via `shouldReplayBootstrapFor`) re-runs this
+    // function on exactly that update.
+    const verifiedOwners = owners.filter(isEmailVerified);
+    if (verifiedOwners.length === 0) {
+      logger?.warn?.(
+        `[security] walled posture — an account matching the declared owner email ` +
+          `(${PLATFORM_OWNER_EMAIL_ENV}) exists but its email is NOT VERIFIED; ` +
+          `REFUSING platform-admin elevation until the owner account verifies its address. ` +
+          `Unverified accounts are never promoted, whoever registered them. If this ` +
+          `deployment has no verification path, wire an email transport (or sign the ` +
+          `owner in through a trusted SSO provider) — elevation will not fall back.`,
+      );
+      return {
+        seeded: seededCount,
+        adminPromoted: false,
+        reason: 'walled_owner_not_verified',
+        ...resyncCounts,
+      };
+    }
+    target = oldestOf(verifiedOwners);
   } else {
     const allUsers = await tryFind(ql, 'sys_user', {}, 50);
     const humanUsers = allUsers.filter(isHumanUser);

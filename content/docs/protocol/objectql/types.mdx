@@ -189,7 +189,8 @@ parser, the value is **not** lowercased, and no DNS/MX lookup is performed. Stri
 rules belong in a validation rule or custom validator.
 
 **Database mapping:**
-- SQL driver: `VARCHAR(255)`
+- SQL driver: `VARCHAR(maxLength)`, or `VARCHAR(255)` when the field declares no
+  `maxLength`
 - MongoDB: `String`
 
 **Use cases:**
@@ -230,8 +231,9 @@ phone:
   label: Phone Number
 ```
 
-**Storage format:** the string as entered — a `VARCHAR(255)` column. The engine
-does **not** normalize to E.164 and does **not** reformat for display.
+**Storage format:** the string as entered — a `VARCHAR(maxLength)` column, or
+`VARCHAR(255)` when the field declares no `maxLength`. The engine does **not**
+normalize to E.164 and does **not** reformat for display.
 
 **Validation:** a shape check only — at least 5 characters drawn from digits and
 `+ ( ) - . ` and whitespace (`invalid_phone` otherwise). There is no country-code
@@ -372,6 +374,14 @@ depends on a timezone, it is a `datetime`, not a `date`.
 - SQL driver: `DATE` on PostgreSQL/MySQL, `TEXT` on SQLite — holding
   `YYYY-MM-DD` on every dialect
 - MongoDB: no DDL (schemaless); the driver stores the value it is given
+
+**The day you read back does not depend on the app process's timezone.** The SQL
+driver pins each dialect so a stored `DATE` arrives as the calendar-day string
+itself, never as an instant it would then have to re-derive a day from:
+PostgreSQL connections parse `date` (and `date[]`) as text, and MySQL
+connections are pinned to UTC in both directions. So an app container running
+`TZ=Asia/Shanghai` and one running `TZ=UTC` read the same row as the same day —
+running the process at UTC is not a prerequisite for correct dates.
 
 **Use cases:**
 - Birthdays, anniversaries
@@ -1123,7 +1133,7 @@ The column each type gets from the SQL driver, per dialect:
 | ObjectQL Type | PostgreSQL | MySQL | SQLite |
 |---------------|------------|-------|--------|
 | `text` / `textarea` / `html` | `TEXT` \* | `TEXT` \* | `TEXT` \* |
-| `email` / `url` / `phone` | `VARCHAR(255)` | `VARCHAR(255)` | `VARCHAR(255)` |
+| `email` / `url` / `phone` / `password` | `VARCHAR(maxLength)` † | `VARCHAR(maxLength)` † | `VARCHAR(maxLength)` † |
 | `number` / `currency` / `percent` | `REAL` | `FLOAT` | `REAL` |
 | `date` | `DATE` | `DATE` | `TEXT` (`YYYY-MM-DD`) |
 | `datetime` | `TIMESTAMPTZ` | `DATETIME(3)` | `TEXT` (canonical `…Z`) |
@@ -1144,6 +1154,20 @@ the object's `indexes[]`). A column no index touches stays `TEXT` whatever it
 declares, and so does a keyed column whose bound exceeds 768 characters — see
 the `text` type above for why, and for what the driver does when a keyed column
 cannot be bounded.
+
+† The string family takes the field's declared `maxLength` verbatim, in both
+directions — a declared 1024 is a `VARCHAR(1024)` and a declared 20 is a
+`VARCHAR(20)`. A field that declares no `maxLength` keeps `VARCHAR(255)`, and so
+does one whose declaration is not a positive integer. Above 16383 characters
+(MySQL's utf8mb4 `VARCHAR` ceiling) the column is `TEXT` instead of being
+clamped, since a clamp would refuse writes the declaration permits; the bound is
+still enforced at write time by the record validator's `max_length` check.
+
+Note the neighbouring rows that deliberately do **not** follow this rule:
+`select` / `radio` store an option's machine name, `lookup` / `master_detail` /
+`tree` store the referenced record's id, and `autonumber` stores a
+runtime-issued number — in none of those is the stored string the value the
+field's `maxLength` describes, so all of them keep `VARCHAR(255)`.
 
 Any field flagged `multiple: true` becomes a `JSON` column regardless of its
 type. Relationship columns are plain id strings with no database `FOREIGN KEY`

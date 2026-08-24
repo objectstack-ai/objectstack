@@ -72,6 +72,11 @@ import {
 } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';
+// [#10503] The URL spelling contract itself — the map storage folds through,
+// and the fold the transport was missing. Imported so the sweep below is
+// quantified over the CONTRACT rather than over a hand-copied specimen list
+// (Prime Directive #8): a future spelling limb arrives inside the quantifier.
+import { META_URL_TO_SINGULAR, canonicalMetaUrlType } from '@objectstack/spec/shared';
 import { HttpDispatcher } from './http-dispatcher.js';
 import type { HttpDispatcherResult } from './http-dispatcher.js';
 
@@ -203,10 +208,22 @@ function makeEngine() {
  * ORGANIZATION — the population the whole defect keys off, and the one the
  * pre-existing runtime dispatcher tests never produced.
  */
-function makeDispatcher(protocol: unknown, engine: any, activeOrganizationId: string | undefined) {
+function makeDispatcher(
+    protocol: unknown,
+    engine: any,
+    activeOrganizationId: string | undefined,
+    // [#10503] The `metadata` CORE-SERVICE slot, absent by default. The
+    // `/published` route consults the protocol's layered overlay first and
+    // only then falls back to THIS slot — the code/package store. Registering
+    // it unconditionally would change which branch every #7018 case above
+    // takes, so it is opt-in and every case that does not ask for it sees the
+    // dispatcher exactly as before.
+    metadataService?: unknown,
+) {
     const services: Record<string, unknown> = {
         protocol,
         objectql: { registry: engine.registry },
+        ...(metadataService ? { metadata: metadataService } : {}),
         auth: {
             api: {
                 getSession: async () => (
@@ -242,12 +259,16 @@ const ctx = (): any => ({
     executionContext: { userId: 'usr_1', systemPermissions: ['manage_metadata'] },
 });
 
-function makeStack(activeOrganizationId: string | undefined) {
+function makeStack(activeOrganizationId: string | undefined, metadataService?: unknown) {
     const engine = makeEngine();
     // `environmentId` set: an environment kernel, the topology ADR-0005's
     // overlay gate actually runs on.
     const protocol: any = new ObjectStackProtocolImplementation(engine, () => new Map(), 'env_1');
-    return { engine, protocol, dispatcher: makeDispatcher(protocol, engine, activeOrganizationId) };
+    return {
+        engine,
+        protocol,
+        dispatcher: makeDispatcher(protocol, engine, activeOrganizationId, metadataService),
+    };
 }
 
 const metaRow = (engine: any, type: string, name: string) =>
@@ -469,5 +490,290 @@ describe('#7018 — the registry decides whether a metadata write carries the se
             .map((c) => String(c[0]))
             .filter((line: string) => line.includes('visibility flip'));
         expect(flipComplaints).toEqual([]);
+    });
+});
+
+/**
+ * #10503 — the dispatcher `/metadata` transport decided ORGANIZATION SCOPE
+ * from the RAW path segment. The #10340 defect, one transport over.
+ *
+ * ── What was broken ───────────────────────────────────────────────────────
+ *
+ * Two maps that must agree did not. `protocol.saveMetaItem` folds the segment
+ * through `canonicalizeMetaRequestType` → `META_URL_TO_SINGULAR`, the COMPLETE
+ * spelling map, for STORAGE. The dispatcher handed the same string RAW to
+ * `organizationIdForMetaWrite`, whose `declaresOrgOverride` tolerates only the
+ * MANIFEST-collection spellings — incomplete by design. For the two URL-only
+ * spellings of `allowOrgOverride: true` types the two answers diverged:
+ *
+ *   PUT /metadata/translation/:name     → org-scoped row      (correct)
+ *   PUT /metadata/translations/:name    → env-wide row        (the defect)
+ *   PUT /metadata/email_template/:name  → org-scoped row      (correct)
+ *   PUT /metadata/email_templates/:name → env-wide row        (the defect)
+ *
+ * One item, two partitions, addressed by spelling. `translations` has no
+ * manifest key at all; `email_template`'s manifest key is the camelCase
+ * `emailTemplates`, so the snake_case plural the registry derivation adds is
+ * URL-only too. Both fold to an `allowOrgOverride: true` type in storage.
+ *
+ * The `/published` branch is the smaller second site of the same class: after
+ * the layered overlay consult misses, the fallback reads the code/package
+ * store, which is keyed by CANONICAL type. Handed the raw segment it answered
+ * 404 under a recognised plural and 200 under the singular twin.
+ *
+ * The correction is the one #10340 landed for REST and the one
+ * `packages/spec/src/meta-spelling/metadata-url-spelling.ts` mandates: fold
+ * the segment through `canonicalMetaUrlType` AT THE BOUNDARY, before the scope
+ * decision. ⛔ NOT by widening `declaresOrgOverride` — a predicate below the
+ * boundary consuming the URL spelling contract is the repair that module's
+ * header forbids, and `meta-write-org-scope.ts`'s `ORG_OVERRIDABLE_TYPES`
+ * header pins the limit.
+ *
+ * ── What these assertions are, and at which level ─────────────────────────
+ *
+ * The two measured members are pinned END TO END on the STORED ROW —
+ * `sys_metadata.organization_id`, through the real dispatcher, the real
+ * protocol and the real repository — because the defect IS which partition
+ * the row lands in, and a 200 is not the assertion. The class-closing sweep
+ * over every spelling in the contract is necessarily argument-level (a
+ * schema-valid body per metadata type is not obtainable, and a 422 would pass
+ * for the wrong reason); the stored-row link the argument stands for is what
+ * the two specimens above it — and every #7018 case in this file — pin.
+ *
+ * Mirrors `packages/rest/src/rest-server-meta-org-scope-url-spelling.test.ts`,
+ * the REST-side suite, case for case where the two transports have the same
+ * doors.
+ *
+ * ── Reverse verification, direction predicted BEFORE running ──────────────
+ *
+ * Ordinary red, with deliberately green controls. Reverting the fold in
+ * `src/domains/meta.ts` must turn the plural cases RED and leave every
+ * singular-twin control and the `object`/`objects` over-folding guard GREEN —
+ * the latter is why they are here: a "fix" that org-scoped everything would
+ * pass the red cases and fail there, re-minting the #6190 phantom rows.
+ * Measured result recorded in the PR body.
+ */
+describe('#10503 the dispatcher /metadata transport decides org scope on the FOLDED type', () => {
+    beforeEach(() => {
+        vi.spyOn(console, 'warn').mockImplementation(() => {});
+        vi.spyOn(console, 'error').mockImplementation(() => {});
+    });
+
+    // The two measured members of the disagreement set: URL-only spellings of
+    // `allowOrgOverride: true` types, invisible to the manifest map. Each
+    // carries a schema-VALID body — a minimal one 422s before the scoping
+    // decision is ever reached, which would pass these tests for the wrong
+    // reason (the lesson the specimens above this block were built on).
+    const MEMBERS = [
+        {
+            plural: 'translations',
+            singular: 'translation',
+            item: {
+                name: 'zh-CN',
+                label: 'Chinese (Simplified)',
+                locale: 'zh-CN',
+                messages: { greeting: '你好' },
+            },
+        },
+        {
+            plural: 'email_templates',
+            singular: 'email_template',
+            item: {
+                name: 'welcome',
+                label: 'Welcome',
+                subject: 'Welcome aboard',
+                bodyHtml: '<p>Welcome aboard</p>',
+            },
+        },
+    ] as const;
+
+    for (const { plural, singular, item } of MEMBERS) {
+        it(`PUT /metadata/${plural}/:name lands ORG-SCOPED, where its ${singular} twin lands`, async () => {
+            // THE assertion, and it is the stored row rather than the status:
+            // before the fold this write persisted with `organization_id
+            // NULL` while the author's own org-scoped read looked elsewhere —
+            // receipted 200, served by nothing.
+            const viaPlural = makeStack(ACTIVE_ORG);
+            const resPlural = responseOf(
+                await viaPlural.dispatcher.handleMetadata(`/${plural}/${item.name}`, ctx(), 'PUT', item),
+            );
+            expect(resPlural.status).toBe(200);
+            const pluralRow = metaRow(viaPlural.engine, singular, item.name);
+            expect(pluralRow).toBeDefined();
+            expect(pluralRow!.organization_id).toBe(ACTIVE_ORG);
+
+            // The live control, in the same file and the same direction: the
+            // singular twin's scoping is what the plural must equal, and it
+            // must not have moved.
+            const viaSingular = makeStack(ACTIVE_ORG);
+            const resSingular = responseOf(
+                await viaSingular.dispatcher.handleMetadata(`/${singular}/${item.name}`, ctx(), 'PUT', item),
+            );
+            expect(resSingular.status).toBe(200);
+            const singularRow = metaRow(viaSingular.engine, singular, item.name);
+            expect(singularRow!.organization_id).toBe(ACTIVE_ORG);
+            expect(pluralRow!.organization_id).toBe(singularRow!.organization_id);
+        });
+
+        it(`both spellings of ${singular} address ONE partition, not two`, async () => {
+            // The defect stated as the thing an operator would actually see.
+            // Storage already folded both spellings to `${singular}`, so the
+            // rows differed ONLY in `organization_id` — a second, env-wide row
+            // shadowed by the org-scoped one the author's own reads resolve.
+            const { engine, dispatcher } = makeStack(ACTIVE_ORG);
+
+            expect(responseOf(
+                await dispatcher.handleMetadata(`/${plural}/${item.name}`, ctx(), 'PUT', item),
+            ).status).toBe(200);
+            expect(responseOf(
+                await dispatcher.handleMetadata(`/${singular}/${item.name}`, ctx(), 'PUT', item),
+            ).status).toBe(200);
+
+            const rows = engine.metaRows().filter(
+                (r: any) => r.type === singular && r.name === item.name && r.state === 'active',
+            );
+            expect(rows).toHaveLength(1);
+            expect(rows[0].organization_id).toBe(ACTIVE_ORG);
+        });
+
+        it(`CONTROL — with NO active org, /${plural} still lands env-wide`, async () => {
+            // The fold changes WHICH type is judged, never invents an
+            // organization: no active org in, no org out, for every spelling.
+            const { engine, dispatcher } = makeStack(undefined);
+
+            expect(responseOf(
+                await dispatcher.handleMetadata(`/${plural}/${item.name}`, ctx(), 'PUT', item),
+            ).status).toBe(200);
+            expect(metaRow(engine, singular, item.name)!.organization_id).toBeNull();
+        });
+    }
+
+    // ── the over-folding guard ────────────────────────────────────────────
+
+    it('⛔ a NON-overridable type stays env-wide under its plural spelling too', async () => {
+        // The fold must change which type is judged, never the judgement.
+        // `object` is `allowOrgOverride: false`, and an org-scoped write of it
+        // is exactly the phantom row #6190 stopped minting — a row cold boot
+        // walks past, after which every record 404s. The singular is pinned by
+        // the #7018 case above; this is the spelling the fold newly reaches.
+        const { engine, dispatcher } = makeStack(ACTIVE_ORG);
+        const OBJECT = {
+            name: 'ticket',
+            label: 'Ticket',
+            sharingModel: 'private',
+            fields: { subject: { type: 'text', label: 'Subject' } },
+        };
+
+        const res = responseOf(await dispatcher.handleMetadata(`/objects/${OBJECT.name}`, ctx(), 'PUT', OBJECT));
+
+        expect(res.status).toBe(200);
+        expect(metaRow(engine, 'object', OBJECT.name)!.organization_id).toBeNull();
+    });
+
+    // ── the class, not the two specimens ──────────────────────────────────
+
+    it('decides scope for EVERY spelling in the URL contract exactly as for its folded type', async () => {
+        // The class-closing sweep. For every key of `META_URL_TO_SINGULAR` the
+        // transport's decision must equal the predicate's decision on the
+        // FOLDED type — the property the two maps' disagreement broke. A future
+        // spelling limb (a new registry type's derived plural, a new camelCase
+        // form) arrives inside this quantifier with nothing to update by hand.
+        //
+        // Argument-level, deliberately and for a stated reason: a
+        // schema-valid body for each of ~40 metadata types is not obtainable,
+        // and an invalid one 422s before the scope decision — the sweep would
+        // then be green over a decision never made. `saveMetaItem` is
+        // therefore replaced with a recorder, and the argument→partition link
+        // it stands for is pinned end-to-end by the two specimens above.
+        for (const [spelling, folded] of Object.entries(META_URL_TO_SINGULAR)) {
+            const { protocol, dispatcher } = makeStack(ACTIVE_ORG);
+            const saveMetaItem = vi.fn().mockResolvedValue({ success: true, version: 'v1', seq: 1 });
+            protocol.saveMetaItem = saveMetaItem;
+
+            await dispatcher.handleMetadata(`/${spelling}/specimen`, ctx(), 'PUT', { name: 'specimen' });
+
+            expect(
+                saveMetaItem.mock.calls[0][0].organizationId,
+                `PUT /metadata/${spelling} scope disagreed with its fold '${folded}'`,
+            ).toBe(organizationIdForMetaWrite(folded, ACTIVE_ORG));
+        }
+    });
+
+    it('hands the protocol the RAW segment as the request type — the protocol owns its own fold', async () => {
+        // Only the scope ARGUMENT is folded. The request `type` stays the raw
+        // segment exactly as before, because the protocol boundary folds it
+        // itself (`canonicalizeMetaRequestType`) and two pre-folds would hide a
+        // drift between them from the protocol's own tests. Byte-identical to
+        // the REST suite's pin of the same decision.
+        const { protocol, dispatcher } = makeStack(ACTIVE_ORG);
+        const saveMetaItem = vi.fn().mockResolvedValue({ success: true, version: 'v1', seq: 1 });
+        protocol.saveMetaItem = saveMetaItem;
+
+        await dispatcher.handleMetadata('/translations/zh-CN', ctx(), 'PUT', { name: 'zh-CN' });
+
+        const request = saveMetaItem.mock.calls[0][0];
+        expect(request.type).toBe('translations');
+        expect(request.organizationId).toBe(ACTIVE_ORG);
+    });
+
+    // ── the smaller second site: GET /metadata/:type/:name/published ──────
+
+    describe('the /published code-store fallback — 404-by-spelling ends', () => {
+        /**
+         * A code/package published store, which is keyed by CANONICAL type —
+         * the thing the raw segment could not address. It answers a body for
+         * the canonical key only and records every key it was asked for, so
+         * the assertions can read BOTH what came back and what was asked.
+         */
+        function publishedStore(canonicalType: string, name: string) {
+            const asked: Array<[string, string]> = [];
+            return {
+                asked,
+                service: {
+                    getPublished: async (type: string, itemName: string) => {
+                        asked.push([type, itemName]);
+                        return type === canonicalType && itemName === name
+                            ? { name: itemName, published: true }
+                            : undefined;
+                    },
+                },
+            };
+        }
+
+        for (const { plural, singular, item } of MEMBERS) {
+            it(`/${plural}/:name/published answers what /${singular}/:name/published answers`, async () => {
+                const viaPlural = publishedStore(singular, item.name);
+                const pluralRes = responseOf(await makeStack(ACTIVE_ORG, viaPlural.service)
+                    .dispatcher.handleMetadata(`/${plural}/${item.name}/published`, ctx(), 'GET'));
+
+                const viaSingular = publishedStore(singular, item.name);
+                const singularRes = responseOf(await makeStack(ACTIVE_ORG, viaSingular.service)
+                    .dispatcher.handleMetadata(`/${singular}/${item.name}/published`, ctx(), 'GET'));
+
+                // Same status and same body — before the fold the plural was a
+                // 404 for an item that IS published, the singular a 200.
+                expect(pluralRes.status).toBe(200);
+                expect(pluralRes.status).toBe(singularRes.status);
+                expect(pluralRes.body.data).toEqual(singularRes.body.data);
+                // And the key the store was asked for is the canonical one
+                // under both spellings — the reason the two now agree.
+                expect(viaPlural.asked).toEqual([[singular, item.name]]);
+                expect(viaPlural.asked).toEqual(viaSingular.asked);
+            });
+        }
+
+        it('⛔ folds the SPELLING only — an unmapped segment reaches the store verbatim', async () => {
+            // `canonicalMetaUrlType` returns its input unchanged for anything
+            // the contract does not map, which is what keeps a plugin-
+            // registered kind addressable. The fold is a lookup, never a
+            // guesser, and this pins that the boundary did not grow one.
+            expect(canonicalMetaUrlType('webhook')).toBe('webhook');
+            const store = publishedStore('webhook', 'stripe');
+            const res = responseOf(await makeStack(ACTIVE_ORG, store.service)
+                .dispatcher.handleMetadata('/webhook/stripe/published', ctx(), 'GET'));
+
+            expect(res.status).toBe(200);
+            expect(store.asked).toEqual([['webhook', 'stripe']]);
+        });
     });
 });

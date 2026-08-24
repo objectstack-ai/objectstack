@@ -28,6 +28,7 @@ import {
   printError,
   printStep,
   printWarning,
+  printAuthoringAdvisories,
   createTimer,
   formatZodErrors,
   collectMetadataStats,
@@ -214,11 +215,11 @@ export default class Compile extends Command {
 
       if (ruleAdvisories.length > 0 && !flags.json) {
         console.log('');
-        for (const f of ruleAdvisories.slice(0, 50)) {
-          printWarning(`${f.where}: ${f.message}`);
-          if (f.hint) console.log(chalk.dim(`    ${f.hint}`));
-          console.log(chalk.dim(`    rule: ${f.rule}  at ${f.path}`));
-        }
+        // #11529 — rendered by ONE printer, which also names the remainder when
+        // the list is cut. The loop used to sit inline here and stop dead at 50
+        // with no notice, so a truncated report read exactly like a complete
+        // one. See `printAuthoringAdvisories` for the measurement.
+        printAuthoringAdvisories(ruleAdvisories);
       }
       if (ruleErrors.length > 0) {
         // Every failing rule reports at once — see the note in `validate.ts`.

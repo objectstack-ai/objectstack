@@ -372,6 +372,13 @@ const DISPOSITIONS: Record<string, Disposition> = {
   'POST /api/v1/security/suggested-bindings/:id/confirm': { kind: 'no-record-echo', why: 'Binding receipt.' },
   'POST /api/v1/security/suggested-bindings/:id/dismiss': { kind: 'no-record-echo', why: 'Dismissal receipt.' },
   'POST /api/v1/security/explain': { kind: 'no-record-echo', why: 'Permission explanation verdict.' },
+  // Discard-overlay receipt: `healedObjectGrantCount` / `overlaysDiscarded`
+  // plus the resynced `sys_permission_set` row for the caller's convenience.
+  // Same shape as confirm/dismiss above — the row travels through
+  // `permission-set-overlay-discard.ts`'s own `tryFind` (a `ql.find` READ,
+  // already engine-stripped), never a raw insert/update return, so there is
+  // no unstripped write mouth here to begin with.
+  'POST /api/v1/security/permission-sets/:id/discard-overlay': { kind: 'no-record-echo', why: 'Overlay-discard receipt; the row rides a post-write read (ql.find), not a raw write-mouth echo.' },
 
   // Import: per-row RECEIPTS (row number, action, id, warnings/errors) plus
   // counts — measured, the written row is never spread into a result.

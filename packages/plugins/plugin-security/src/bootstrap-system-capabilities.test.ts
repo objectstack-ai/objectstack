@@ -2,6 +2,7 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { bootstrapSystemCapabilities, KNOWN_CAPABILITIES } from './bootstrap-system-capabilities.js';
+import { buildExistingByName } from './seed-name-lookup.js';
 
 /**
  * Minimal in-memory ql for sys_capability seeding.
@@ -29,6 +30,12 @@ import { bootstrapSystemCapabilities, KNOWN_CAPABILITIES } from './bootstrap-sys
  *     `value == condition`; MongoDB matches null-or-missing. Strict `===`, which
  *     this double used, matches NONE of them and would have made
  *     `organization_id: null` unsatisfiable here while working in production.
+ *  4. **`$in` membership**, because the real engine has it (`security-plugin.ts`
+ *     already reads `sys_permission_set` with `{ name: { $in: names } }`) and
+ *     the curated half's batched existence read (#11451) uses it. A double that
+ *     refused it would be pinning the double's limits, not the seeder's
+ *     behaviour. Every OTHER value-level operator is still REFUSED rather than
+ *     read as a column comparison.
  *  3. **`insert` enforces the declared unique key**, `(COALESCE(organization_id,
  *     '__global__'), name)` — measured rejecting a second platform-bucket row
  *     for a name, and admitting an organization's row for that same name.
@@ -47,7 +54,17 @@ function makeQl() {
       const where = q?.where ?? {};
       const matched = rows.filter((r) =>
         // (2) `null` is IS NULL, not `=== null`.
-        Object.entries(where).every(([k, v]) => { if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`); return (v === null ? r[k] == null : r[k] === v); }),
+        Object.entries(where).every(([k, v]) => {
+          if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
+          // (4) `$in` is modelled; anything else object-shaped is refused.
+          if (v !== null && typeof v === 'object' && !Array.isArray(v)) {
+            const list = (v as { $in?: unknown }).$in;
+            if (!Array.isArray(list)) throw new Error(`fake driver: unsupported operator ${Object.keys(v as object).join(',')}`);
+            return list.includes(r[k]);
+          }
+          // (2) `null` is IS NULL, not `=== null`.
+          return v === null ? r[k] == null : r[k] === v;
+        }),
       );
       if (q?.limit === undefined) return matched;
       // (1) The #4363 tie-breaker. BINARY collation, as SQLite compares ids.
@@ -933,5 +950,114 @@ describe('[#8751] a platform-STAMPED row inside an organization is not the platf
       label: 'Showcase Export Data', description: `Capability ${NAME}.`,
     });
     expect(warn).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * [#11451] WHY THE #8470 PREDICATE TRAVELS INSIDE THE BATCHED READ.
+ *
+ * The filing offered "two batched reads, the curated half post-filtering on
+ * `managed_by`/`organization_id` in memory" as the cheap option. It is not
+ * cheap; it is wrong, and this is the measurement rather than the argument.
+ *
+ * Both harms are visible on the SAME fixture, and both are properties of the
+ * shipped drivers that this double models deliberately (see `makeQl`'s header):
+ * `limit` orders by `id` ascending (#4363's pagination tie-breaker), and the
+ * unscoped batched page is capped at one row per requested name.
+ */
+describe('#11451 — the batched curated read must carry its predicate, not filter afterwards', () => {
+  const CURATED_NAMES = KNOWN_CAPABILITIES.map((c) => c.name);
+  const CURATED_LOOKUP = { managed_by: 'platform', organization_id: null };
+  /** The name two organizations also hold — ADR-0066 D1 "admins EXTEND". */
+  const SHARED = CURATED_NAMES[0];
+
+  /** Every curated name in the platform bucket, plus two organizations' rows. */
+  function fixture() {
+    const ql = makeQl();
+    // Organization ids sort BEFORE the platform's, so they win the tie-breaker.
+    ql.rows.push(
+      { id: 'aaa_org_jia', organization_id: 'org_jia', name: SHARED, label: 'Jia copy', description: 'jia', scope: 'org', managed_by: 'admin', active: true },
+      { id: 'aab_org_yi', organization_id: 'org_yi', name: SHARED, label: 'Yi copy', description: 'yi', scope: 'org', managed_by: 'admin', active: true },
+    );
+    KNOWN_CAPABILITIES.forEach((c, i) => ql.rows.push({
+      id: `cap_${i}`, name: c.name, label: c.label, description: c.description,
+      scope: c.scope, managed_by: 'platform', organization_id: null, active: true,
+    }));
+    return ql;
+  }
+
+  it('POSITIVE CONTROL: with the predicate, every curated name resolves to the PLATFORM row', async () => {
+    const ql = fixture();
+    const index = await buildExistingByName(ql, 'sys_capability', CURATED_NAMES, undefined, undefined, CURATED_LOOKUP);
+    for (const name of CURATED_NAMES) {
+      const found = await index.get(name);
+      expect(found.status).toBe('present');
+      expect((found as { row: any }).row.managed_by).toBe('platform');
+      expect((found as { row: any }).row.organization_id).toBeNull();
+    }
+    // The predicate makes the result a provable singleton per name, so the page
+    // cap is exactly right and nothing falls off the end.
+    const shared = await index.get(SHARED);
+    expect((shared as { row: any }).row.id).toBe('cap_0');
+  });
+
+  it('WITHOUT the predicate the same read returns an ORGANIZATION\'s row for the shared name', async () => {
+    const ql = fixture();
+    const index = await buildExistingByName(ql, 'sys_capability', CURATED_NAMES);
+    const found = await index.get(SHARED);
+    expect(found.status).toBe('present');
+    // …and it is NOT the platform's row. Reconciling this one is #8470 exactly:
+    // an organization's authored copy overwritten with the platform's, every
+    // boot, while the platform's own row is never the one addressed.
+    expect((found as { row: any }).row.id).toBe('aaa_org_jia');
+    expect((found as { row: any }).row.managed_by).toBe('admin');
+  });
+
+  it('WITHOUT the predicate the page also TRUNCATES, and a truncated page reads as "absent"', async () => {
+    const ql = fixture();
+    // 10 rows carry the 8 requested names; the unscoped page is capped at 8, so
+    // the two highest-id rows fall off — and their names are platform rows that
+    // demonstrably exist.
+    const index = await buildExistingByName(ql, 'sys_capability', CURATED_NAMES);
+    const missing: string[] = [];
+    for (const name of CURATED_NAMES) {
+      if ((await index.get(name)).status === 'absent') missing.push(name);
+    }
+    expect(missing).toEqual([CURATED_NAMES[6], CURATED_NAMES[7]]);
+    // Their rows are right there. "Absent" would send the curated half to its
+    // insert branch, where the unique key refuses the write and the seeder
+    // reports a `blockedCurated` collision — every boot, on a healthy install.
+    for (const name of missing) {
+      expect(ql.rows.some((r) => r.name === name && r.managed_by === 'platform')).toBe(true);
+    }
+
+    // …and the predicated read over the same fixture loses nobody.
+    const scoped = await buildExistingByName(ql, 'sys_capability', CURATED_NAMES, undefined, undefined, CURATED_LOOKUP);
+    for (const name of CURATED_NAMES) expect((await scoped.get(name)).status).toBe('present');
+  });
+
+  it('the seeder itself is unharmed by the fixture that breaks the unpredicated read', async () => {
+    const ql = fixture();
+    const warn = vi.fn();
+    const out = await bootstrapSystemCapabilities(ql, [], { logger: { warn } });
+    expect(out.seeded).toBe(0);
+    expect(out.blockedCurated).toBe(0);
+    expect(out.unchanged).toBe(KNOWN_CAPABILITIES.length);   // nothing differed…
+    expect(out.updated).toBe(0);                              // …so nothing was written
+    expect(warn).not.toHaveBeenCalled();
+    // The organizations' rows are untouched.
+    expect(ql.rows.find((r) => r.id === 'aaa_org_jia')).toMatchObject({ label: 'Jia copy' });
+  });
+
+  it('an unreadable database leaves every curated definition ALONE, and says so once', async () => {
+    const ql = Object.assign(fixture(), {
+      async find() { throw new Error('fake driver: read unavailable'); },
+    });
+    const warn = vi.fn();
+    const out = await bootstrapSystemCapabilities(ql, [], { logger: { warn } });
+    expect(out.unreadable).toBe(KNOWN_CAPABILITIES.length);
+    expect(out.seeded).toBe(0);
+    expect(out.blockedCurated).toBe(0);   // ⛔ never a collision that nobody saw
+    expect(warn.mock.calls.map((c) => c[0]).some((m) => String(m).includes('could not be read'))).toBe(true);
   });
 });

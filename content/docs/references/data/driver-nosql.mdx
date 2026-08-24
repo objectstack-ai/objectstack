@@ -150,7 +150,7 @@ const result = AggregationPipelineSchema.parse(data);
 | **name** | `string` | ✅ | Index name |
 | **type** | `Enum<'single' \| 'compound' \| 'unique' \| 'text' \| 'geospatial' \| 'hashed' \| 'ttl' \| 'sparse'>` | ✅ | Index type |
 | **fields** | `{ field: string; order?: Enum<'asc' \| 'desc' \| 'text' \| '2dsphere'> }[]` | ✅ | Fields to index |
-| **unique** | `boolean` | optional (default: `false`) | Enforce uniqueness |
+| **unique** | `boolean` | optional (default: `false`) | Enforce uniqueness over exactly the listed `fields`. Boolean on purpose — no ADR-0120 scope vocabulary here: this is the raw driver-descriptor layer, below tenancy. The 'organization'/'global' boundary is stated on the authorable surfaces (FieldSchema.unique, IndexSchema.unique) and resolved into physical key columns before a descriptor like this is built, so an organization key part, when there is one, is already a listed field (#11215) |
 | **sparse** | `boolean` | optional (default: `false`) | Sparse index |
 | **expireAfterSeconds** | `integer` | optional | TTL in seconds |
 | **partialFilterExpression** | `Record<string, any>` | optional | Partial index filter |

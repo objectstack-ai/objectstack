@@ -96,6 +96,18 @@ export const TaskMapPage = definePage({
   label: 'Work Map',
   interfaceConfig: {
     source: 'showcase_task',
+    // `InterfacePageConfigSchema` is a CLOSED shape with no `map` (or
+    // `kanban`/`calendar`/…) key of its own — an author cannot declare a
+    // marker-title binding directly here (confirmed: `map: {...}` on this
+    // object is rejected as an unrecognized key). The one schema-legal
+    // channel for a per-visualization field binding on an interface page is
+    // `sourceView`, which `InterfaceListPage`'s `resolveSourceView` resolves
+    // against the source object's OWN named view — and `showcase_task`
+    // already declares exactly this binding on its `map` listView
+    // (task.view.ts, `listViews.map.map: { titleField: 'title',
+    // locationField: 'location' }`, from #9340). Referencing it here is a
+    // pure forward, not a duplicate declaration.
+    sourceView: 'map',
     columns: [...cols, 'location'],
     appearance: { showDescription: true, allowedVisualizations: ['map'] },
     userActions: { sort: false, search: true, filter: false, rowHeight: false, addRecordForm: false },

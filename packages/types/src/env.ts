@@ -359,6 +359,33 @@ export function resolveOrgLimit(): number | undefined {
 }
 
 /**
+ * Maximum number of MEMBERS a single organization may hold, from
+ * `OS_ORG_MEMBERSHIP_LIMIT`. A different question from {@link resolveOrgLimit},
+ * which caps how many organizations one user may create.
+ *
+ * Unset → `undefined`, which the auth plugin forwards as "no cap". That default
+ * is a product decision, not an omission: seat entitlements are metered on AI
+ * seats, and plain membership is not a billed axis, so nothing about the
+ * platform wants a member ceiling.
+ *
+ * It has to be stated explicitly because better-auth's organization plugin
+ * substitutes a vendor default of **100** for an absent `membershipLimit`
+ * (`count >= (membershipLimit || 100)`), which reaches the operator as
+ * `Organization membership limit reached` — a refusal nobody in this codebase
+ * ever chose, on an axis the product does not limit.
+ *
+ * A deployment that DOES want a ceiling (a pilot, a trial tenant) sets a
+ * positive integer here. Non-positive or unparsable values read as unset rather
+ * than as zero: a typo must not be the thing that locks an organization.
+ */
+export function resolveOrgMembershipLimit(): number | undefined {
+  const raw = readEnvWithDeprecation('OS_ORG_MEMBERSHIP_LIMIT', [], { silent: true });
+  if (raw == null || String(raw).trim() === '') return undefined;
+  const n = Number.parseInt(String(raw), 10);
+  return Number.isFinite(n) && n > 0 ? n : undefined;
+}
+
+/**
  * SINGLE decision point for "is pinyin search recall on?" (#2486).
  *
  * Pinyin search is a deployment/locale-level capability, not field metadata:

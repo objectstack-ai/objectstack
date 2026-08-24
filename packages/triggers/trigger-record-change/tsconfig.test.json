@@ -48,10 +48,23 @@
 //     relative imports, and the whole layer compiles at 0 under the inherited
 //     settings. Matching the program the ledger's 0 was measured over is the
 //     point -- a different `module` would be a different measurement.
-//   - `rootDir` IS UNTOUCHED, also unlike those siblings. It stays `./src`
-//     because every test file is already under it: the re-measure reported
-//     TS6059 x0, so there is no misconfiguration diagnostic to neutralise and
-//     widening would only loosen which files may enter the program.
+//   - `rootDir` IS WIDENED to `../../..` (= `packages/`), which this file's
+//     first version deliberately did NOT do. That version's reason was a
+//     measurement -- "every test file is already under `./src`, the re-measure
+//     reported TS6059 x0" -- and [#11081] moved the measurement rather than the
+//     rule: `src/record-change-integration.test.ts` now imports
+//     `packages/runtime/src/expected-read-refusal-noise.ts` (the shared
+//     expected-noise capture, declared in
+//     `scripts/check-cross-package-test-inputs.mjs`), so the program contains a
+//     file outside `./src` and `tsc` reports TS6059 x1 against it. `rootDir` is
+//     enforced over every program file even under `--noEmit`, so the widening
+//     is the same consequence-of-an-import that `packages/plugins/
+//     plugin-approvals` records for #10101 and `packages/rest` for #9960 --
+//     `../../..` is the directory that genuinely contains every program file.
+//     ⛔ It buys nothing else: EMIT is unaffected (this config asserts `noEmit`
+//     and the tsup build reads `tsconfig.json`, whose entry is `src/index.ts`
+//     alone), `include` still names `src/**/*` so no new file may ENTER the
+//     program on its own, and STRICTNESS below is untouched.
 //   - STRICTNESS IS UNTOUCHED. `strict`, `noUnusedLocals`, `noUnusedParameters`,
 //     `noImplicitReturns` and the rest are inherited from the root config.
 //     Nothing here may loosen a type rule; if a test does not compile, that is
@@ -67,7 +80,8 @@
 {
   "extends": "./tsconfig.json",
   "compilerOptions": {
-    "noEmit": true
+    "noEmit": true,
+    "rootDir": "../../.."
   },
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist"]

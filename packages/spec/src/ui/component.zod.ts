@@ -134,7 +134,7 @@ import { FeedItemType, FeedFilterMode } from '../data/feed.zod';
 // next divergence sweep: enumerate by the RENDERER'S read pattern, not by the
 // key list a previous ruling happened to quote. Retiring the flat family
 // wholesale in favour of `dataSource` is the standing alternative, deferred to
-// v18 as #6590 — not rejected.
+// v18 as #11509 — not rejected.
 //
 // ── #5068: THE GATE IS WIRED — read the flip precisely ─────────────────────
 //
@@ -662,8 +662,31 @@ export const PageTabsProps = strictObject({
      * whole tab — header *and* panel — is omitted from the strip. This is the
      * item-level complement to a child component's own `visibleWhen`, which
      * hides only the panel content and would leave an empty tab header behind.
-     * Binds the same environment as page-component `visibleWhen`: `record` +
-     * `current_user`, plus page state as `page.<var>` (re-evaluated live).
+     *
+     * **Contract-bound roots**: `record`, `current_user` (ADR-0068 aliases
+     * `user` / `ctx.user` — one object, three spellings; see the reasoning on
+     * `PageComponentSchema.visibleWhen`), plus page state as `page.<var>`
+     * (re-evaluated live).
+     *
+     * ⚠️ **This surface is NOT the same environment as page-component
+     * `visibleWhen`, despite sharing the key name.** It is rendered by its own
+     * evaluator, and that evaluator differs on two points — both renderer
+     * behaviour, NOT contract-guaranteed:
+     *
+     *   * **`data` is the record ROW here**, where the component-node evaluator
+     *     binds it to the data-source ADAPTER. Same key, two meanings.
+     *   * **The row's bare fields are spread flat**, so `status` resolves as
+     *     well as `record.status`. The ambient scope is spread AFTER the row,
+     *     so an ambient root (`app`, `features`, `user`, …) wins over a record
+     *     field of the same name.
+     *
+     * Like the component-node surface it also mounts the ambient `app` /
+     * `features` / `os.user` roots, which no ADR rules for a UI predicate
+     * (ADR-0068's Non-goals: "only the user object is in scope here").
+     *
+     * Measured at the `.objectui-sha` pin `190fbd01d061`:
+     * `components/src/renderers/layout/containers.tsx:450-457`.
+     *
      * Canonical `*When` name per ADR-0089 — this key is new, so the deprecated
      * `visibility` / `visibleOn` aliases are NOT ACCEPTED on tab items: unlike
      * the view/page surfaces that fold them into `visibleWhen` via
@@ -673,7 +696,7 @@ export const PageTabsProps = strictObject({
      * being pointed AT `visibleWhen` is not the same as being accepted).
      */
     visibleWhen: ExpressionInputSchema.optional().describe(
-      'Visibility predicate (CEL) — the whole tab (header + panel) is omitted when FALSE; the renderer falls back to the first visible tab when the active one is hidden. Binds `record`, `current_user`, `page.<var>`. ADR-0089 canonical name — `visible`/`showWhen`/`visibility`/`visibleOn` are all rejected here (not folded in), each with a pointer at this key.',
+      'Visibility predicate (CEL) — the whole tab (header + panel) is omitted when FALSE; the renderer falls back to the first visible tab when the active one is hidden. Contract-bound roots: `record`, `current_user` (ADR-0068 aliases `user` / `ctx.user`), `page.<var>`. ⚠️ NOT the same environment as page-component `visibleWhen`: this surface\'s own evaluator binds `data` to the record ROW (not the data-source adapter) and also spreads the row\'s bare fields — renderer behaviour, NOT contract-guaranteed. ADR-0089 canonical name — `visible`/`showWhen`/`visibility`/`visibleOn` are all rejected here (not folded in), each with a pointer at this key.',
     ),
     /**
      * Stable URL token for this tab — the value `?tab=` carries and the
@@ -843,7 +866,32 @@ export const RecordDetailsProps = strictObject({
     columns: z.number().int().min(1).max(4).optional().describe('Field-grid columns for this section (1-4). Omitted → the renderer derives the width.'),
     /** Field names shown in this section, in order. */
     fields: z.array(z.string()).describe('Field names rendered in this section, in order'),
-  })).optional().describe('Field groups rendered as the detail body, in order. Object form: `{ name?, label?, columns?, fields }`.'),
+    /**
+     * The three presentation keys the renderer has honoured all along,
+     * declared at last (#11289, maintainer ruling 2026-08-23 — direction 1:
+     * declare, defaults matching current renderer behavior; the renderer is
+     * unchanged). `RecordDetailsRenderer` spreads every authored section
+     * through to `DetailSection`, which reads all three — while this shape
+     * rejected them, so `objectstack validate` warned that an authored key
+     * "did nothing". For `hideEmpty` that warning hid the one key that decides
+     * whether a section EXISTS: the renderer forces `hideEmpty ?? true`, and
+     * an all-empty section then returns `null` outright — no heading, no
+     * skeleton — with no declarable way to ask for the skeleton back.
+     *
+     * All three are optional with NO schema default, for the `maxVisible`
+     * reason (see `inlineEdit` below): the fallbacks are the RENDERER'S, and
+     * a schema default would turn "the author said nothing" into "the author
+     * asked for the default". Defaults in the describe() texts are MEASURED
+     * at the `.objectui-sha` pin (objectui `plugin-detail/src/renderers/
+     * record-details.tsx` + `DetailSection.tsx`), not transcribed from a TS
+     * interface.
+     */
+    hideEmpty: z.boolean().optional().describe('Hide this section\'s empty fields (renderer default: on — and a section whose fields are ALL empty then renders nothing at all: no heading, no skeleton). Set `false` to render empty rows, keeping the section\'s label skeleton on an all-empty record (e.g. a brand-new one).'),
+    /** Collapsible card. Initial state is expanded; the toggle is the heading. */
+    collapsible: z.boolean().optional().describe('Render this section as a collapsible card — the heading becomes a chevron toggle, initially expanded (renderer default: off).'),
+    /** Card chrome; the renderer derives it from the presence of a title. */
+    showBorder: z.boolean().optional().describe('Draw this section\'s card chrome (renderer default: derived — on for a titled section, off for an untitled one). Set `false` for a borderless titled section, or `true` for a bordered untitled one.'),
+  })).optional().describe('Field groups rendered as the detail body, in order. Object form: `{ name?, label?, columns?, fields, hideEmpty?, collapsible?, showBorder? }`.'),
   fields: z.array(z.string()).optional().describe('Explicit field list to display (optional, overrides highlightFields)'),
   /**
    * Field names to omit from the body, applied to both `fields` and every
@@ -1893,7 +1941,7 @@ export const ElementFormPropsSchema = lazySchema(() => strictObject({
  * shorthands are contract. Direction B — retiring the whole flat family and
  * making `dataSource` the single data-binding door — was NOT dropped: it is a
  * cross-element decision (`element:form` / `element:filter` carried the same
- * flat `object` when it was recorded), tracked as #6590 for v18, and A does
+ * flat `object` when it was recorded), tracked as #11509 for v18, and A does
  * not block it. Both of those elements have since retired WHOLE at element
  * grain (#9220 / #9249, ADR-0049 — no renderer for either ever shipped), so
  * this element is the flat family's last carrier; when B lands these two

@@ -25,6 +25,17 @@ export interface MessagingServiceSurface {
         dedupKey?: string;
         source?: { object: string; id: string };
         actorId?: string;
+        /**
+         * [#11303] The organization the notification belongs to — the field the
+         * whole downstream chain stamps from. `MessagingService.writeEvent`
+         * puts it on `sys_notification`, the inbox channel puts it on
+         * `sys_inbox_message` and on the `delivered` receipt, and the outbox
+         * carries it onto the `sys_notification_delivery` row. It was missing
+         * from this structural mirror, so the node could not have passed it
+         * even if it had tried: four tables landed 100% org-less on every
+         * flow-produced notification.
+         */
+        organizationId?: string;
         channels?: string[];
     }): Promise<{
         notificationId: string;
@@ -312,6 +323,46 @@ export function registerNotifyNode(engine: AutomationEngine, ctx: PluginContext)
                 };
             }
 
+            // [#11303] The organization this notification belongs to, THREADED
+            // from the run's own acting context — never fabricated.
+            //
+            // Maintainer ruling, 2026-08-24, verbatim: 「11303
+            // sys_inbox_message/sys_notification/sys_email 应该写
+            // organization_id。」 — a gap, not a design choice, and the
+            // PRODUCERS are the fix site. Everything below `emit()` was already
+            // threaded; this node was the origin that never supplied a value.
+            //
+            // `AutomationContext.tenantId` is the acting run's organization —
+            // the same source `audit-writers.ts` hands its own `collab.mention`
+            // emit, so the two notification producers agree about whose
+            // organization a notification carries.
+            //
+            // ⛔ There is deliberately NO fallback limb here — not "the current
+            // organization", not the first organization on the install, not the
+            // recipient's first membership. A wrong `organization_id` is worse
+            // than a null: a null is visibly missing, while a wrong value is
+            // silently authoritative to every report, export and cleanup script
+            // that filters by organization. When the run carries no
+            // organization, the notification carries none and says so (below).
+            const organizationId = toStr(context.tenantId);
+            if (!organizationId) {
+                // Fail-LOUD, not fail-guess — and deliberately not fail-CLOSED.
+                // Refusing here would break the two deployments that legitimately
+                // have no organization to thread: a `single`-posture install, and
+                // every stack before its first organization exists. So the
+                // org-less write stays permitted and becomes a VISIBLE event
+                // instead of a silent one.
+                ctx.logger.warn(
+                    `[notify] no organization in scope for topic '${topic ?? 'notify'}' — the ` +
+                    `sys_notification / sys_inbox_message / sys_notification_receipt / ` +
+                    `sys_notification_delivery rows for this emit will carry organization_id = NULL ` +
+                    `and will be invisible to any report or cleanup that filters by organization. ` +
+                    `On a multi-organization install this means the triggering context lost its ` +
+                    `tenant: give the flow's trigger an acting organization (AutomationContext.tenantId). ` +
+                    `On a single-organization install this is expected and can be ignored.`,
+                );
+            }
+
             try {
                 // ADR-0030 single ingress: hand the messaging service a topic +
                 // audience + payload; it writes the L2 event and materializes
@@ -338,6 +389,11 @@ export function registerNotifyNode(engine: AutomationEngine, ctx: PluginContext)
                     severity,
                     source,
                     actorId,
+                    // [#11303] Absent (not null) when the run has no
+                    // organization: `EmitInput.organizationId` is optional, and
+                    // the chain below normalizes a missing value to NULL exactly
+                    // once, in `writeEvent`.
+                    ...(organizationId ? { organizationId } : {}),
                     channels: channels.length ? channels : undefined,
                 });
                 const delivered = Number(result.delivered) || 0;

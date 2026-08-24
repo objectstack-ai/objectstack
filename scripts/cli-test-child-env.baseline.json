@@ -1,0 +1,30 @@
+{
+  "$comment": [
+    "Latent bare-`process.env` child environments under `packages/cli/test/**` (#11341),",
+    "enforced by scripts/check-cli-test-child-env.mjs. Keys are repo-relative paths;",
+    "values are the number of BULK process.env references that file's spawner code holds.",
+    "",
+    "COUNTS, not a bare path list, for the #4251 reason the slot-lookup ratchet paid for:",
+    "a path list silences the WHOLE file, so a NEW leak added to a listed file rides the",
+    "existing entry in total silence. Counts fail that move.",
+    "",
+    "⛔ SHRINK-ONLY, in both dimensions. The key set only ever loses files -- adding one is",
+    "not a sanctioned move, it is a mute button -- and a count that FALLS must be lowered in",
+    "the same PR. A ceiling left above reality silently licenses that many new leaks.",
+    "",
+    "BURNED DOWN TO ZERO -- the ledger below is empty and stays that way. The burn-down",
+    "ran on https://github.com/objectstack-ai/objectstack/issues/11596 and closed with it.",
+    "An empty ratchet is the strongest one this file can hold: every bulk copy in the",
+    "population is now either repaired or a DELIBERATE entry in the gate. ⛔ A new key here",
+    "is not a baseline, it is a carve-out -- the gate's failure text says so and means it.",
+    "",
+    "The repair is `childEnv()` from packages/cli/test/helpers/serve-process.ts, which copies",
+    "the environment minus the vitest worker family (TEST, VITEST, VITEST_*) and then applies",
+    "the overrides you pass. Burning this list down is one card per neighbourhood; it is NOT",
+    "the job of the PR that lands the gate, and two of the files it baselined were held by",
+    "another card in flight when it did.",
+    "",
+    "Sites that copy the whole environment ON PURPOSE do not belong here. They are DELIBERATE",
+    "entries in the gate itself, carrying their reason, and they are pinned in both directions."
+  ]
+}
