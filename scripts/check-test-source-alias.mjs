@@ -80,6 +80,33 @@
 // file extension. Either anchor the pattern (`/^@objectstack\/core$/`, the
 // array form) or list the subpath entry ahead of the bare one.
 //
+// ── A SECOND resolution hazard, which this gate does NOT cover (#11412) ────
+//
+// This gate is about WHICH ARTIFACT a test resolves — source or `dist/`. There
+// is a separate axis it says nothing about: WHICH BASE a bare specifier is
+// resolved FROM, and under vitest that question is erased rather than answered
+// wrongly.
+//
+// Every workspace package here is a pnpm link whose realpath is the package
+// directory, so it contains no `/node_modules/` segment and vitest's default
+// `server.deps.external` (`[/\/node_modules\//]`) INLINES it — `dist/` included.
+// Vite then rewrites the `import()` written inside that package to resolve from
+// the vitest root instead of from the module physically containing the call,
+// which is the opposite of what Node ESM does. So in-process, the caller's base
+// and the callee's base are the same base, every assertion about which one is in
+// use is green either way — AND SO IS THE ANTI-VACUITY CONTROL BESIDE IT. That
+// is why the hazard needs recording rather than testing in place: the ritual
+// that would normally catch it returns the wrong answer.
+//
+// A pin that must measure a resolution BASE therefore spawns a real Node child.
+// ⚠️ Spawning escapes Vite but NOT `NODE_PATH`: a vitest worker carries pnpm's
+// hoisted store in it, `childEnv()` forwards it, and CJS `createRequire()`
+// honours it while ESM `import()` ignores it. A spawned pin whose claim routes
+// through CJS must strip it (`childEnv({ NODE_PATH: undefined })`).
+//
+// The mechanism, both halves, and the controls that prove each one can fail live
+// in `packages/cli/test/vitest-resolution-base-collapse.e2e.test.ts`.
+//
 // ── Where the walk goes, and why it leaves the package (#8351) ──────────────
 //
 // **Aliasing a workspace dep to source imports that dep's ENTIRE import surface
