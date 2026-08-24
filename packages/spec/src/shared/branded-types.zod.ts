@@ -11,8 +11,9 @@ import { SnakeCaseIdentifierSchema, SystemIdentifierSchema } from './identifiers
  * where a FieldName is expected, even though both are strings at runtime.
  *
  * @example
+ * <!-- os:check -->
  * ```ts
- * import { ObjectNameSchema, FieldNameSchema } from '@objectstack/spec';
+ * import { ObjectNameSchema, FieldNameSchema } from '@objectstack/spec/shared';
  *
  * const objName = ObjectNameSchema.parse('project_task');   // ObjectName
  * const fieldName = FieldNameSchema.parse('task_name');     // FieldName
