@@ -1212,6 +1212,39 @@ jobs:
       - name: Runner-env posture guard
         run: pnpm check:runner-env-posture
 
+      # #11341, the harness half of the same class the guard above closes in
+      # product source. `check:runner-env-posture` keeps `src/` from READING a
+      # runner variable; this one keeps `packages/cli/test/**` from HANDING the
+      # whole runner environment to a child. A child built from
+      # `{ ...process.env }` inherits the vitest worker's `TEST=true` and the
+      # `VITEST*` family, which is how better-auth's origin/CSRF validation got
+      # switched off inside a spawned `os serve` (#11267) and how the settings
+      # crypto provider took its never-refuses posture (#11352). Neither showed
+      # up as a red test: the failure mode is a security assertion that cannot
+      # go red for the reason it exists, which reads as coverage.
+      # `childEnv()` in `test/helpers/serve-process.ts` is the choke point and
+      # was already a CONVENTION; this is what makes it an invariant.
+      # PRECISION over reach, deliberately: only files that actually import a
+      # process-creating API are scanned, and reading ONE variable off the
+      # environment (`process.env.HOME`) is never flagged — a gate that flagged
+      # every `...process.env` in the package would be carved out into
+      # uselessness. Measured when it landed: 82 sources, 28 spawners, and zero
+      # bulk copies outside a spawner file, so the filter costs no recall.
+      # The 18 leaks that predate the gate are baselined shrink-only in
+      # scripts/cli-test-child-env.baseline.json, each awaiting a card per
+      # neighbourhood; the ratchet refuses new members outright. The two sites
+      # that copy the environment ON PURPOSE — the choke point, and #11267's pin
+      # leg that proves the leak does something — are DELIBERATE entries pinned
+      # in BOTH directions, so "cleaning up" the evidence fails here.
+      # Runs its own --self-test first, and that leg is not decoration: this
+      # gate computes its own population, so a scan that stopped matching would
+      # print a confident green over a tree it never read (#4690's family). Its
+      # positive control runs OUT OF PROCESS through the real entry point,
+      # because "exits non-zero" is the claim and no process can observe its own
+      # exit status. Static AST over 82 sources; under a second, no build.
+      - name: CLI test child-env guard
+        run: pnpm check:cli-test-child-env
+
       # #4093 follow-up. Discovery tells a consumer an absent capability is
       # absent AND what to install. The first half has been carefully honest
       # since #2462/#4000; the second was invented from the slot name, so ten
