@@ -78,6 +78,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
+import { childEnv } from './helpers/serve-process.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -184,7 +185,7 @@ beforeAll(async () => {
 
   const { stdout } = await execFileAsync(TSX, [probeFile, SERVE_TS, appRoot], {
     cwd: neutralCwd,
-    env: { ...process.env, NO_COLOR: '1' },
+    env: childEnv({ NO_COLOR: '1' }),
     maxBuffer: 16 * 1024 * 1024,
   });
   const payload = stdout.slice(stdout.indexOf(SENTINEL) + SENTINEL.length);

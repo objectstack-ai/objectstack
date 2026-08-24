@@ -873,12 +873,30 @@ export function selfTest() {
     // preceded this gate. A gate has no worklist, so they are members of the
     // population rather than extra scope -- pinned here because "the derivation
     // covers them" is exactly the kind of claim that rots silently.
+    //
+    // ⚠️ Pinned as membership of the SCANNED population -- walked, and classified
+    // as a spawner, so `bulkEnvReferences` really runs over them. It is NOT
+    // pinned as membership of `findings`, which is what the first revision of
+    // these two cases asserted. That spelling reads identically on the day it is
+    // written and means the opposite: it holds only while the two files still
+    // LEAK, so it turned red the moment #11596's burn-down repaired them --
+    // an anti-shrink pin sitting on a shrink-only ratchet, and one that reports
+    // "the derivation lost this file" when the file is merely clean. A repaired
+    // source is still derived and still scanned; that is the claim #11441
+    // measured, and it is the one that has to survive the repair.
+    const scanned = walkSources(join(REPO_ROOT, POPULATION_ROOT))
+      .filter((abs) => {
+        const text = readFileSync(abs, 'utf8');
+        return /child_process|worker_threads/.test(text)
+          && isSpawnerSource(parseSourceFile(abs, text, scriptKindFor(abs)));
+      })
+      .map((abs) => relative(REPO_ROOT, abs).split(sep).join('/'));
     for (const named of [
       'packages/cli/test/serve-app-anchored-optional-import.e2e.test.ts',
       'packages/cli/test/serve-host-fallback-base.e2e.test.ts',
     ]) {
       t(`the enumerated population contains ${named.split('/').pop()}`,
-        live.refusal === null && live.findings.some((f) => f.file === named));
+        live.refusal === null && scanned.includes(named));
     }
   } finally {
     rmSync(dir, { recursive: true, force: true });
