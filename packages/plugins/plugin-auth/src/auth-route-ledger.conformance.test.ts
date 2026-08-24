@@ -215,6 +215,8 @@ describe('auth route ledger hygiene', () => {
     expect(own).toEqual([
       'GET /api/v1/auth/bootstrap-status',
       'GET /api/v1/auth/config',
+      'GET /api/v1/auth/organization/get-join-link',
+      'GET /api/v1/auth/organization/get-join-link-info',
       'POST /api/v1/auth/admin/import-users',
       'POST /api/v1/auth/admin/oauth2/toggle-disabled',
       'POST /api/v1/auth/admin/sso/register',
@@ -222,7 +224,11 @@ describe('auth route ledger hygiene', () => {
       'POST /api/v1/auth/admin/sso/request-domain-verification',
       'POST /api/v1/auth/admin/sso/verify-domain',
       'POST /api/v1/auth/admin/unlock-user',
+      'POST /api/v1/auth/organization/accept-join-link',
       'POST /api/v1/auth/organization/add-member',
+      'POST /api/v1/auth/organization/create-join-link',
+      'POST /api/v1/auth/organization/revoke-join-link',
+      'POST /api/v1/auth/organization/rotate-join-link',
       'POST /api/v1/auth/set-initial-password',
       'POST /api/v1/auth/sys-oauth-application/register',
     ]);

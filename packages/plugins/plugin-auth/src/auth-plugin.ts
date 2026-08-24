@@ -2171,6 +2171,115 @@ export class AuthPlugin implements Plugin {
     });
 
     // ────────────────────────────────────────────────────────────────────
+    // #11587 (epic #11586) — the universal org JOIN LINK, V1. Six routes over
+    // `organization-join-link.ts` (module header carries the full design):
+    // create/rotate/revoke/get are org-owner/admin (judged by the vendor's own
+    // invite-member permission family INSIDE the handler — these are org-level
+    // gates, not the ADR-0068 platform-admin gate the /admin/* mounts run);
+    // get-join-link-info is public and rate-limited; accept-join-link needs a
+    // session with a VERIFIED email and writes membership through the
+    // server-only `auth.api.addMember` (the #9941 endpoint), role pinned to
+    // `member`. All six ledgered `server-only` in auth-route-ledger.ts.
+    {
+      // ONE lazily-built counter store for the two rate-limited public routes
+      // (#2780 machinery; per-instance so the degraded in-process fallback
+      // keeps its memory across requests). Same lazy `cache` resolution as
+      // init()'s — registered async, so probe per consume, never at mount.
+      const resolveJoinLinkCache = async (): Promise<CounterStore | undefined> => {
+        let cache: any;
+        try {
+          cache = await (ctx as { getServiceAsync?: (n: string) => Promise<unknown> })
+            .getServiceAsync?.('cache');
+        } catch {
+          return undefined;
+        }
+        if (cache && typeof cache.get === 'function' && typeof cache.set === 'function') return cache;
+        return undefined;
+      };
+      let joinLinkCounters: Promise<() => Promise<CounterStore>> | undefined;
+      const getJoinLinkCounterStore = async (): Promise<CounterStore> => {
+        if (!joinLinkCounters) {
+          joinLinkCounters = import('./rate-limit-storage.js').then(({ createLazyCounterStore }) =>
+            createLazyCounterStore({
+              resolveCache: resolveJoinLinkCache,
+              logger: ctx.logger,
+              subject: 'join-link token probe budget (#11587)',
+              degradedImpact:
+                'The probe budget is still enforced, but PER NODE: an N-node deployment admits up to ' +
+                'N× the configured probes against join-link tokens (bearer credentials)',
+            }),
+          );
+        }
+        return (await joinLinkCounters)();
+      };
+      const joinLinkDeps = () => ({
+        getAuthApi: () => this.authManager!.getApi() as any,
+        getDataEngine: () => this.authManager!.getDataEngine(),
+        getCounterStore: getJoinLinkCounterStore,
+      });
+      // [#4586] The mutating handlers drive server-side writes that never pass
+      // through `AuthManager.handleRequest`, so the attribution seam is opened
+      // here — `sys_join_link` rows are credited to the admin who minted them,
+      // and the `sys_member` row accept creates to the user who joined. The
+      // handler still resolves (and gates) the session itself; this read is
+      // attribution-only, never authorization.
+      const attributedTo = async (c: any, run: () => Promise<{ status: number; body: unknown }>) => {
+        let userId: string | undefined;
+        try {
+          const authApi: any = await this.authManager!.getApi();
+          const session = await authApi.getSession({ headers: c.req.raw.headers });
+          const id = session?.user?.id;
+          if (id) userId = String(id);
+        } catch {
+          /* anonymous — the handler answers the 401 */
+        }
+        return userId ? runAttributedToUser(userId, run) : run();
+      };
+      const mountJoinLink = (
+        method: 'get' | 'post',
+        path: string,
+        handler: (deps: any, request: Request) => Promise<{ status: number; body: unknown }>,
+        attributed: boolean,
+      ) => {
+        rawApp[method](`${basePath}${path}`, async (c: any) => {
+          try {
+            const run = () => handler(joinLinkDeps(), c.req.raw);
+            const { status, body } = attributed ? await attributedTo(c, run) : await run();
+            return c.json(body, status as any);
+          } catch (error) {
+            const err = error instanceof Error ? error : new Error(String(error));
+            ctx.logger.error(`[AuthPlugin] organization${path.replace('/organization', '')} failed`, err);
+            return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: err.message } }, 500);
+          }
+        });
+      };
+      mountJoinLink('post', '/organization/create-join-link', async (deps, req) => {
+        const { runCreateJoinLink } = await import('./organization-join-link.js');
+        return runCreateJoinLink(deps, req);
+      }, true);
+      mountJoinLink('post', '/organization/rotate-join-link', async (deps, req) => {
+        const { runRotateJoinLink } = await import('./organization-join-link.js');
+        return runRotateJoinLink(deps, req);
+      }, true);
+      mountJoinLink('post', '/organization/revoke-join-link', async (deps, req) => {
+        const { runRevokeJoinLink } = await import('./organization-join-link.js');
+        return runRevokeJoinLink(deps, req);
+      }, true);
+      mountJoinLink('get', '/organization/get-join-link', async (deps, req) => {
+        const { runGetJoinLink } = await import('./organization-join-link.js');
+        return runGetJoinLink(deps, req);
+      }, false);
+      mountJoinLink('get', '/organization/get-join-link-info', async (deps, req) => {
+        const { runGetJoinLinkInfo } = await import('./organization-join-link.js');
+        return runGetJoinLinkInfo(deps, req);
+      }, false);
+      mountJoinLink('post', '/organization/accept-join-link', async (deps, req) => {
+        const { runAcceptJoinLink } = await import('./organization-join-link.js');
+        return runAcceptJoinLink(deps, req);
+      }, true);
+    }
+
+    // ────────────────────────────────────────────────────────────────────
     // ADR-0069 P3 — register a SAML 2.0 IdP. Mirrors the OIDC bridge above:
     // the metadata `register_saml_provider` action posts FLAT fields; the shared
     // helper reshapes them into better-auth's nested `samlConfig` (deriving the
