@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import type { IDataEngine, WriteObservabilityOptions } from './data-engine';
 import type { IDataDriver } from './data-driver';
+import type { IntrospectedSchema } from './schema-diff-service';
 import {
   EngineUpdateOptionsSchema,
   DataEngineInsertOptionsSchema,
@@ -352,5 +353,71 @@ describe('Data Engine Contract', () => {
     // The `findStream` case that stood here was removed with the contract method
     // in 17.0.0 (#4484) — it built an IDataDriver whose only job was to satisfy a
     // required method no production code ever called.
+  });
+
+  // ===========================================================================
+  // introspectDatasource — typed on the contract, not re-declared by consumers
+  // (#11493, extending the #11123 ruling to the engine-registration seam)
+  // ===========================================================================
+  //
+  // Reverse-verified against the pre-#11493 contract (measured 2026-08-24):
+  // with the member undeclared, an engine answering a non-spec shape compiled
+  // green, and the one in-tree consumer (service-datasource's plugin) carried
+  // a private structural `DataEngineLike` to recover the spec return type.
+  // Every directive below is resolved by tsc; reverting the member makes it
+  // unused, and an unused directive is itself an error.
+
+  describe('introspectDatasource (#11493)', () => {
+    type EngineIntrospection = Awaited<ReturnType<NonNullable<IDataEngine['introspectDatasource']>>>;
+
+    const minimalEngine: IDataEngine = {
+      find: async () => [],
+      findOne: async () => null,
+      insert: async (_obj, data) => data,
+      update: async (_obj, data) => data,
+      delete: async () => ({ deleted: 0 }),
+      count: async () => 0,
+      aggregate: async () => [],
+    };
+
+    it('is optional — an engine without a named-driver registry stays conformant', () => {
+      // `minimalEngine` satisfies `IDataEngine` at its declaration with no
+      // registry members at all — same posture as `getDriverByName?` ([#4251]).
+      expect(minimalEngine.introspectDatasource).toBeUndefined();
+    });
+
+    it('declares exactly the spec introspection shape', () => {
+      // Mutual extends: a revert to `Promise<unknown>` — the shape that forced
+      // the consumer-side re-declaration — resolves `Exact` to `never`.
+      type Exact = EngineIntrospection extends IntrospectedSchema
+        ? (IntrospectedSchema extends EngineIntrospection ? 'exact' : never)
+        : never;
+      const exact: Exact = 'exact';
+      expect(exact).toBe('exact');
+    });
+
+    it('accepts an engine that answers the spec shape', () => {
+      const introspecting: IDataEngine = {
+        ...minimalEngine,
+        introspectDatasource: async (_datasource) => ({
+          dialect: 'postgres',
+          introspectedAt: '2026-08-24T00:00:00.000Z',
+          tables: {},
+        }),
+      };
+      expect(typeof introspecting.introspectDatasource).toBe('function');
+    });
+
+    it('refuses an engine that answers a non-spec shape at the member', () => {
+      // The pre-#11493 posture: `{ tables }` alone, no envelope — absorbed at
+      // runtime by the consumer-side shim, invisible to every compiler.
+      const bareTables = { tables: {} };
+      const misShapen: IDataEngine = {
+        ...minimalEngine,
+        // @ts-expect-error - the untyped pre-#11493 result no longer satisfies the declared member
+        introspectDatasource: async (_datasource: string) => bareTables,
+      };
+      expect(misShapen).toBeTruthy();
+    });
   });
 });
