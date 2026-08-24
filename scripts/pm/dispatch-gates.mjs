@@ -161,7 +161,7 @@ import {
   symlinkSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, dirname, relative, resolve } from 'node:path';
+import { basename, join, dirname, relative, resolve } from 'node:path';
 import process from 'node:process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
@@ -432,8 +432,113 @@ export function extractTriggerPaths(workflowText) {
 }
 
 /**
+ * A `run:` step that invokes a repo script with `--self-test`. The flag is the
+ * SCRIPT'S OWN declaration that this invocation verifies the script rather than
+ * doing its work, which is what makes the step a gate.
+ *
+ * Between the script path and the flag only FLAG-SHAPED tokens are allowed, and
+ * that is the whole over-match guard. A command text is one whole `run:` body,
+ * so a permissive `[^\n]*` would let `--self-test` on the SECOND command in a
+ * two-command body attach itself to the first script named in the body — the
+ * `node scripts/pm/git-history.mjs --self-test` line sits three lines below a
+ * `node scripts/…` line in this very tree. Every shell separator that could
+ * join two commands (`&&`, `||`, `;`, `|`, a newline) and every bare word or
+ * quoted value fails the token pattern, so the match cannot cross one. Live
+ * specimen for the value case: `run-with-stall-guard.mjs --log "$RUNNER_TEMP/…"
+ * --stall-minutes 10 -- pnpm …` stops at the quoted `--log` value, and the bare
+ * `--` argument separator fails it too (the pattern requires an alphanumeric
+ * after the dashes) — so a wrapper never absorbs the flag of the command it
+ * wraps, while the wrapped `node scripts/x.mjs --self-test` still matches on
+ * its own, which is correct: the inner script is the gate.
+ */
+const SELF_TEST_INVOCATION =
+  /node[ \t]+(scripts\/[\w./-]+\.mjs)(?:[ \t]+-{1,2}[A-Za-z0-9][\w-]*)*[ \t]+--self-test\b/g;
+
+/**
  * Pull every `check:*` invocation out of a workflow file's `run:` steps,
  * with the pnpm --filter package (if any) and the workflow's file name.
+ *
+ * ## Why a third matcher: a gate that follows no naming convention (#11404)
+ *
+ * The two matchers above key discovery on a NAME. A step qualifies only if it
+ * runs a `check:*` npm script, or a script whose basename carries `check-`. A
+ * real gate that reds the required lane and follows neither convention is not
+ * a family with an unspellable population — the state #11199 and #11190 are
+ * about, where the gate at least appears under `--residue` in the `silent` or
+ * `undetermined` bucket. It is absent from the universe those buckets
+ * partition, so no local derivation can name it at all.
+ *
+ * Measured on PR #11397: `node scripts/pm/bare-root-worklist.mjs --self-test`
+ * shipped a red on `Lint & Repo Gates` for a diff whose seven derived families
+ * were all run and all green. `grep -c bare-root-worklist` over a full
+ * `--residue` run returned 6 lines, and all six were the dev's own CHANGED PATH
+ * echoed back. The file was visible to the derivation only as an INPUT.
+ *
+ * ## What `--self-test` buys that a widening does not
+ *
+ * The refused direction is any `scripts/**` script in a `run:` step. Measured
+ * over the 26 workflow files on this tree it admits 12 distinct scripts, and
+ * the three it adds beyond this matcher are all non-gate tooling:
+ * `release-github-releases.mjs` (the release run), `run-with-stall-guard.mjs`
+ * (a test wrapper, 7 invocations), and `affected-docs.mjs` (a docs-drift
+ * query). Those are the fabricated leads `hintCovers`' docblock prices the
+ * bare-top-level-word admission at +139084 pairs for refusing.
+ *
+ * `--self-test` is not a heuristic over those names, it is the same scripts'
+ * own declaration. The discriminating specimen is in the tree twice:
+ * `scripts/partition-test-shards.mjs` and `scripts/pr-labels.mjs` are each
+ * invoked BOTH ways — `--self-test` in `lint.yml`, and doing their actual work
+ * in `ci.yml` / `pr-automation.yml`. The flag separates the gate invocation
+ * from the work invocation of one script, which no filename rule can.
+ *
+ * ## Why a `check-` basename is skipped here rather than re-keyed
+ *
+ * 21 of the 30 self-test-shaped invocations on this tree already have a
+ * `check-` basename and are therefore already families under their BARE path
+ * key. Admitting them again under a `… --self-test` key would SPLIT each into
+ * two families and move its matches to the new key — a re-attribution reported
+ * as a gain, which is the error this repo keeps catching. Skipping them makes
+ * zero re-attribution a property of the code rather than a number that happened
+ * to come out right (measured: 0 of the 52774 existing pairs changed key).
+ *
+ * ## The price, measured the way #11512 priced import-following
+ *
+ * Over 6465 tracked files, before -> after:
+ *
+ *   check families discovered      140 -> 149     (+9, ZERO lost)
+ *   watch-hint (gate, file) pairs  52774 -> 52880 (+106, ZERO lost)
+ *   existing matches re-attributed 0 — no pre-existing (file, family, hint)
+ *                                  claim changed, and no existing family's
+ *                                  pair count moved by one
+ *
+ * The +106 is 0.08% of the refused widening's price. Six of the nine new
+ * families contribute no pairs at all; the three that do declare the
+ * population themselves — `release-rehearsal-clone.mjs` +75 (the `.changeset`
+ * tree its self-test clones), `pm/ci-failure.mjs` +30 (`.github`),
+ * `pr-labels.mjs` +1 (`.github/labeler.yml`).
+ *
+ * Six of the nine — `invoked-as.mjs`, `js-comment-mask.mjs`, `ts-parse.mjs`,
+ * `partition-test-shards.mjs`, `git-history.mjs`, `pr-labels.mjs` — also become
+ * GATE FILES, which `discoverFamilies` excludes from import-following. That is
+ * the one direction of this change that could SUBTRACT, so it is measured
+ * rather than argued: of the six, only `pr-labels.mjs` declares a hint at all,
+ * and no gate imports it, so zero families lose an inherited hint. Asserted in
+ * the self-test, because a subtraction here is silent — a lead that stops
+ * appearing looks exactly like a lead that was never earned.
+ *
+ * ## What is NOT closed here, and why it is not folded in
+ *
+ * `bare-root-worklist --self-test` is a whole-corpus gate over every gate
+ * source, and it now enters the universe with ZERO hints — reached by identity
+ * (a card editing it) and, for any other card, printed in the residue as a
+ * family whose population is not path-expressible. That is the state #11199 is
+ * about, one level down from this card, and it is progress with a name: before
+ * this change the gate was in no bucket at all, so `--residue` could not report
+ * it as anything. Giving it a population is #11199's ground and is refused here
+ * on top of that: this tool's own self-test asserts, mechanically, that it
+ * declares no population of its own ("it reads gate sources, never a repo
+ * subtree"), so a hint added for this card's convenience would fail the very
+ * gate the card is about.
  */
 export function extractCheckInvocations(workflowText, workflowFile) {
   const out = [];
@@ -442,7 +547,24 @@ export function extractCheckInvocations(workflowText, workflowFile) {
       out.push({ check: m[2], filter: m[1] ?? null, workflow: workflowFile });
     }
     for (const m of cmd.matchAll(/node\s+(scripts\/[\w./-]*check-[\w.-]+\.mjs)/g)) {
-      out.push({ check: m[1], filter: null, workflow: workflowFile, direct: true });
+      out.push({ check: m[1], script: m[1], filter: null, workflow: workflowFile, direct: true });
+    }
+    for (const m of cmd.matchAll(SELF_TEST_INVOCATION)) {
+      const script = m[1];
+      // Already admitted above, under its bare path key. See the docblock.
+      if (basename(script).includes('check-')) continue;
+      out.push({
+        // The flag is part of the KEY because it is part of the runnable
+        // command: `node scripts/pm/bare-root-worklist.mjs` on its own prints
+        // a worklist and exits 0. A dev pasting the key without it runs
+        // nothing, and reads that as the gate passing.
+        check: `${script} --self-test`,
+        script,
+        filter: null,
+        workflow: workflowFile,
+        direct: true,
+        selfTest: true,
+      });
     }
   }
   return out;
@@ -3103,7 +3225,13 @@ export function discoverFamilies() {
       .filter((t) => t.paths.length > 0);
   }
   for (const entry of byCheck.values()) {
-    let files = entry.direct ? [entry.check] : resolveCheckToFiles(entry.check, rootScripts);
+    // A direct entry carries its script path in `script` rather than reusing
+    // `check`, because a self-test key carries the flag too (`… --self-test`)
+    // and a flag is not a path: `existsSync` would refuse it, and the family
+    // would resolve to no files and therefore to no hints — a family that
+    // exists and can never match anything, which reads exactly like a gate
+    // with an unspellable population.
+    let files = entry.direct ? [entry.script] : resolveCheckToFiles(entry.check, rootScripts);
     if (entry.filter) {
       // package-scoped check: resolve through that package's manifest when findable
       const pkgDirGuess = entry.filter.replace(/^@objectstack\//, '');
@@ -3146,6 +3274,32 @@ export function discoverFamilies() {
       const source = readFileSync(abs, 'utf8');
       entry.hints.push(...extractWatchHints(source));
       entry.noPopulationReason ??= declaredNoPathPopulation(source);
+      // A `--self-test` family follows NO import, and that is a measurement
+      // rather than a preference (#11404). The invocation runs the script's
+      // SELF-TEST; a module the script imports carries the population of the
+      // script's WORK, which this invocation does not perform — so an inherited
+      // hint here describes a read that cannot happen.
+      //
+      // The live specimen is the reason the narrowing shipped with the matcher
+      // rather than after it. `scripts/pm/bare-root-worklist.mjs` statically
+      // imports `./dispatch-gates.mjs`, whose module-body literals are join
+      // bases (`packages/plugins`, `packages/drivers`, `packages/services`) and
+      // a tier glob (`packages/spec/src/**`) — not a population anything reads.
+      // Inheriting them handed that one gate 2553 (gate, file) pairs, 96% of
+      // this change's entire price, every one of them a lead the gate would
+      // never justify. That exact fabrication is already a decided verdict:
+      // `check-dispatch-gates.mjs` exists as a separate file, spawning the tool
+      // instead of importing it, for no other reason (#8162, and its header
+      // measures the same literals reaching the same trees). It arrives here by
+      // a new route, and it is refused the same way.
+      //
+      // Cost of the refusal on this tree: zero. Of the nine self-test families,
+      // only bare-root-worklist inherits anything at all — the other eight
+      // import `invoked-as.mjs` (no literals) or a module that is itself a gate
+      // file and already excluded. A future self-test that really does read a
+      // population declared elsewhere can spell it here, which is the direction
+      // this file errs in everywhere: a missing lead, never a fabricated one.
+      if (entry.selfTest) continue;
       for (const mod of firstPartyImportTargets(f, source)) {
         if (gateFiles.has(mod) || entry.imports.includes(mod)) continue;
         entry.imports.push(mod);
@@ -3746,6 +3900,145 @@ function selfTest() {
   t('a gate named only in a YAML comment between steps is not discovered', !blockNames.includes('check:invented-by-prose'));
   t('a gate named only in a shell comment inside a body is not discovered', !blockNames.includes('scripts/check-mentioned-only.mjs'));
   t('a real command in the same body as a comment is still discovered', blockNames.includes('check:really-invoked'));
+
+  // ── The self-test invocation matcher (#11404) ─────────────────────────────
+  //
+  // A gate whose script follows neither naming convention was not a family at
+  // all — absent from the matched list, the convention list, the unreachable
+  // list and all three residue buckets, because it never entered the universe
+  // those partition. The specimen is the one that shipped the red on PR #11397
+  // over a diff whose seven derived families were all green.
+  const selfTestWf = [
+    'jobs:',
+    '  gates:',
+    '    steps:',
+    '      - name: Bare-root worklist self-test',
+    '        run: node scripts/pm/bare-root-worklist.mjs --self-test',
+    '      - name: Release tooling, not a gate',
+    '        run: node scripts/release-github-releases.mjs',
+    '      - name: A wrapper whose WRAPPED command carries the flag',
+    '        run: node scripts/run-with-stall-guard.mjs --log "/tmp/x.log" --stall-minutes 10 -- pnpm test',
+    '      - name: Two commands, one body, only the second is a self-test',
+    '        run: |',
+    '          node scripts/docs-audit/affected-docs.mjs --json base > affected.json',
+    '          node scripts/pm/git-history.mjs --self-test',
+  ].join('\n');
+  const stInvs = extractCheckInvocations(selfTestWf, 'lint.yml');
+  const stNames = stInvs.map((i) => i.check);
+  t(
+    'the gate that shipped the red on PR #11397 is discovered, flag included',
+    stNames.includes('scripts/pm/bare-root-worklist.mjs --self-test'),
+  );
+  t(
+    '…as a DIRECT family resolving to the script file, not to the flagged key',
+    stInvs.find((i) => i.check === 'scripts/pm/bare-root-worklist.mjs --self-test')?.script
+      === 'scripts/pm/bare-root-worklist.mjs',
+  );
+  t(
+    '…and it prints as a command a dev can paste, flag included — the bare path exits 0 without testing anything',
+    runnableInvocation(stInvs.find((i) => i.check === 'scripts/pm/bare-root-worklist.mjs --self-test'))
+      === 'node scripts/pm/bare-root-worklist.mjs --self-test',
+  );
+  // The refusal, which is the half that keeps this from being the widening
+  // `hintCovers` prices at +139084 pairs: a `scripts/**` script in a `run:`
+  // step is NOT a gate unless it says so.
+  t(
+    'a scripts/ script invoked WITHOUT the flag is not a family',
+    !stNames.some((n) => String(n).includes('release-github-releases')),
+  );
+  // The over-match guard, both live shapes. A command text is one whole `run:`
+  // body, so the flag must not travel backwards across a separator or a value.
+  t(
+    'a wrapper does not absorb the flag of the command it wraps — the `--` separator and the quoted --log value both stop the match',
+    !stNames.some((n) => String(n).includes('run-with-stall-guard')),
+  );
+  t(
+    'the FIRST command in a two-command body does not take the SECOND command\'s flag',
+    !stNames.some((n) => String(n).includes('affected-docs')),
+  );
+  t(
+    '…while the second command, which really carries it, is discovered',
+    stNames.includes('scripts/pm/git-history.mjs --self-test'),
+  );
+  // The no-re-attribution property, held by construction rather than measured
+  // and hoped for: a `check-` basename is already a family under its BARE path
+  // key, and admitting it again under a flagged key would SPLIT it in two.
+  const dualWf = [
+    'jobs:',
+    '  j:',
+    '    steps:',
+    '      - run: node scripts/check-adr-0087-registration.mjs --self-test',
+  ].join('\n');
+  const dualNames = extractCheckInvocations(dualWf, 'x.yml').map((i) => i.check);
+  t(
+    'a check- script invoked with the flag stays ONE family under its bare path key',
+    dualNames.length === 1 && dualNames[0] === 'scripts/check-adr-0087-registration.mjs',
+  );
+
+  // The live halves. Fixtures cannot prove the tree changed; these read it.
+  const liveSelfTestFamilies = [...discoverFamilies().byCheck].filter(([, e]) => e.selfTest);
+  t(
+    `the live tree really has self-test families (${liveSelfTestFamilies.length}), so the cases above judge something`,
+    liveSelfTestFamilies.length > 0,
+  );
+  t(
+    'the PR #11397 gate is one of them, on the real workflows',
+    liveSelfTestFamilies.some(([c]) => c === 'scripts/pm/bare-root-worklist.mjs --self-test'),
+  );
+  t(
+    '…and it resolves to a file that EXISTS, which is what a flagged key would have broken',
+    liveSelfTestFamilies
+      .filter(([c]) => c === 'scripts/pm/bare-root-worklist.mjs --self-test')
+      .every(([, e]) => (e.files ?? []).length === 1 && existsSync(join(ROOT, e.files[0]))),
+  );
+  // The import narrowing, proven NON-VACUOUS: the module this gate imports
+  // really does declare literals, and they really would have reached the tree.
+  // Without that half the case below is satisfied by a module with nothing in
+  // it, which is the shape a green-over-nothing pin takes.
+  const bareRootEntry = liveSelfTestFamilies.find(([c]) => c === 'scripts/pm/bare-root-worklist.mjs --self-test')?.[1];
+  const importedByBareRoot = firstPartyImportTargets(
+    'scripts/pm/bare-root-worklist.mjs',
+    readFileSync(join(ROOT, 'scripts/pm/bare-root-worklist.mjs'), 'utf8'),
+  );
+  const wouldHaveInherited = importedByBareRoot.flatMap((m) =>
+    extractWatchHints(readFileSync(join(ROOT, m), 'utf8')),
+  );
+  t(
+    `the refused inheritance is real — the modules this gate imports declare ${wouldHaveInherited.length} literal(s)`,
+    wouldHaveInherited.length > 0,
+  );
+  t(
+    'a self-test family inherits NONE of them — those literals are join bases and tier globs, the fabrication #8162 already refused by spawning',
+    (bareRootEntry?.hints ?? []).length === 0 && (bareRootEntry?.hintOrigin?.size ?? 0) === 0,
+  );
+
+  // The direction that could SUBTRACT, and the reason it is asserted rather
+  // than argued: admitting these nine makes six previously-followable modules
+  // GATE FILES, and `discoverFamilies` refuses to follow a gate file. Any
+  // family that used to inherit a hint from one of them would silently stop —
+  // and a lead that stops appearing is indistinguishable from a lead that was
+  // never earned, so nothing in the output would say so. Measured here: the
+  // only newly-promoted module that declares a literal at all is pr-labels.mjs
+  // (`.github/labeler.yml`), and no family imports it.
+  const promoted = liveSelfTestFamilies.flatMap(([, e]) => e.files ?? []);
+  const subtracted = [];
+  for (const [check, entry] of discoverFamilies().byCheck) {
+    if (entry.selfTest) continue;
+    for (const f of entry.files ?? []) {
+      if (!existsSync(join(ROOT, f))) continue;
+      const src = readFileSync(join(ROOT, f), 'utf8');
+      for (const mod of firstPartyImportTargets(f, src)) {
+        if (!promoted.includes(mod)) continue;
+        const lost = extractWatchHints(readFileSync(join(ROOT, mod), 'utf8'));
+        if (lost.length > 0) subtracted.push(`${check} <- ${mod} (${lost.join(', ')})`);
+      }
+    }
+  }
+  t(
+    `promoting ${promoted.length} module(s) to gate files subtracts no inherited hint from any other family`
+      + `${subtracted.length ? ` — LOST: ${subtracted.join(' · ')}` : ''}`,
+    subtracted.length === 0,
+  );
 
   // `runCommandTexts` on its own: one entry per step, in file order.
   const texts = runCommandTexts(blockWf);
@@ -5103,6 +5396,16 @@ function selfTest() {
   // a CI failure, not a lead nobody could see. Fixture cases pin the shape;
   // the live case at the end pins it against the real tree, the same pairing
   // the census guard above uses.
+  //
+  // #11404 RE-BASED THE FIXTURE, and the reason is the card itself. This
+  // section's original invisible-step fixture was verbatim the shape #9187
+  // measured — `node scripts/some-mapper.mjs --self-test` — and the third
+  // matcher in extractCheckInvocations now DISCOVERS that shape, so the
+  // fixture stopped being an example of the thing it illustrates. The
+  // invisible step here is now a `node scripts/…` command that is neither a
+  // `check-` basename nor a self-test, which is what genuinely has no family
+  // today; the retired shape is pinned as discovered two cases below, so the
+  // pair records the move rather than losing it.
   const noFamilyWf = [
     'name: X',
     'on:',
@@ -5112,20 +5415,31 @@ function selfTest() {
     'jobs:',
     '  j:',
     '    steps:',
-    '      - name: Self-test the mapper',
-    '        run: node scripts/some-mapper.mjs --self-test',
+    '      - name: Run the mapper',
+    '        run: node scripts/some-mapper.mjs --emit',
   ].join('\n');
   t(
     'a paths-filtered workflow discovering no check family is a coverage gap',
     checkFamilyCoverageGaps([{ file: 'x.yml', text: noFamilyWf }]).includes('x.yml'),
   );
   const familyWf = noFamilyWf.replace(
-    'node scripts/some-mapper.mjs --self-test',
+    'node scripts/some-mapper.mjs --emit',
     'pnpm check:some-mapper',
   );
   t(
     'a paths-filtered workflow that DOES discover a family is not a gap',
     checkFamilyCoverageGaps([{ file: 'x.yml', text: familyWf }]).length === 0,
+  );
+  // The retired fixture, kept as the pin for what #11404 changed: the exact
+  // step #9187 recorded as undiscoverable is a family now, so the same
+  // workflow is no longer a coverage gap.
+  const selfTestFamilyWf = noFamilyWf.replace(
+    'node scripts/some-mapper.mjs --emit',
+    'node scripts/some-mapper.mjs --self-test',
+  );
+  t(
+    "the step #9187 measured as invisible is discovered now, so its workflow is no longer a gap",
+    checkFamilyCoverageGaps([{ file: 'x.yml', text: selfTestFamilyWf }]).length === 0,
   );
   const unfilteredNoFamilyWf = [
     'name: X',
@@ -5134,8 +5448,8 @@ function selfTest() {
     'jobs:',
     '  j:',
     '    steps:',
-    '      - name: Self-test the mapper',
-    '        run: node scripts/some-mapper.mjs --self-test',
+    '      - name: Run the mapper',
+    '        run: node scripts/some-mapper.mjs --emit',
   ].join('\n');
   t(
     'an UNFILTERED workflow with no family is not a gap — it runs on every PR regardless, the residue bucket already accounts for it',
@@ -5314,7 +5628,12 @@ function selfTest() {
         direct.push(mod);
       }
     }
-    const expected = new Set([...own, ...direct.flatMap(liveModuleHints)]);
+    // A `--self-test` family follows no import (#11404), so its expectation is
+    // its own hints and nothing else. Reconstructed from the same `selfTest`
+    // flag `discoverFamilies` reads, never from a list here.
+    const expected = new Set(
+      entry.selfTest ? own : [...own, ...direct.flatMap(liveModuleHints)],
+    );
     const actual = new Set(entry.hints ?? []);
     if (expected.size !== actual.size || [...actual].some((h) => !expected.has(h))) offReconstruction.push(check);
     // The depth bound, family by family: a module reached only through another
