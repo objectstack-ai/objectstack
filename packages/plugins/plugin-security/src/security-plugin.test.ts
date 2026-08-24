@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect, vi } from 'vitest';
+import { assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import { SecurityPlugin } from './security-plugin.js';
 import { PermissionEvaluator, crudBucketForOperation } from './permission-evaluator.js';
 import { FieldMasker } from './field-masker.js';
@@ -120,7 +121,13 @@ describe('SecurityPlugin', () => {
       find: vi.fn(async () => []),
       findOne: vi.fn(async () => null),
       insert: vi.fn(async (_o: string, d: any) => ({ id: d?.id ?? 'x' })),
-      update: vi.fn(async () => true),
+      // Opens with the PRODUCER's own dispatch predicate, never a hand-mirrored
+      // guard (check:engine-double-contract) — same shape as the makeQl double
+      // in bootstrap-platform-admin-walled-owner.test.ts.
+      update: vi.fn(async (_o: string, d: any, o?: any) => {
+        assertEngineUpdateDispatch(d, o);
+        return true;
+      }),
       getSchema: () => undefined,
     };
     const metadata = { get: async () => null, list: async () => [] };
