@@ -985,6 +985,37 @@ jobs:
       - name: Docs redirect destinations resolve, and no chains
         run: pnpm check:docs-redirects
 
+      # #11050 route spellings taught in prose: every /api/v1 wire-path
+      # literal in the published corpora (content/docs/** minus releases/,
+      # plus skills/**) is judged against the route ledgers, and a literal
+      # that matches a ledger row's SHAPE while differing from its SPELLING
+      # is a finding — the drift class #9180 step ② exposed (two sites kept
+      # teaching the retired plural, and the sweep that found them found a
+      # third spelling, `/metadata/objects/...`, that a grep for the plural
+      # cannot see). #10178's pin covers two named files for one route; this
+      # is the corpus-wide detector. The script header carries the design and
+      # its measured false-positive boundaries.
+      #
+      # ── ADVISORY, by the #11050 triage ruling (measurement-first) ──
+      # The population was enumerated before this step was wired: 585
+      # literals across 442 files on 2026-08-24, zero findings. The flag
+      # stays until the maintainer strengthens the gate — flipping is
+      # deleting `--advisory` below, nothing else. Advisory covers FINDINGS
+      # only: the self-test, a dead root, an evaporated corpus or ledger and
+      # the literal-count floors are hard failures in every mode, so this
+      # step still blocks when the scan itself cannot see (#4690 / #4932).
+      # A step in this required job rather than a new job: an unenrolled
+      # job's check-run is advisory with no signal anywhere (#5617), while a
+      # failing step here is read by everyone — and enforcement later needs
+      # only the flag flip, not a Settings change.
+      # Invoked as `node` rather than a `pnpm check:*` alias, same as the
+      # frontmatter step above: the alias is a line in root package.json,
+      # inside the @changesets/cli v3 fence (#9465) while that lane runs.
+      - name: Route spellings taught in prose match the ledgers (advisory)
+        run: |
+          node scripts/check-doc-route-spelling.mjs --self-test
+          node scripts/check-doc-route-spelling.mjs --advisory
+
       # #10751 react-page `useAdapter()` contracts, swept over the app-showcase
       # page modules AND the react-page samples in content/docs. Both traps are
       # DROP-SHAPED — an unprefixed `top:` is discarded by the adapter and the
