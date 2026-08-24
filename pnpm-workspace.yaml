@@ -85,9 +85,16 @@ onlyBuiltDependencies:
 #     Stable 1.7.0/1.7.1 have now shipped, and measured against the published
 #     1.7.1 tarball they ship the rc.2 REWRITE, not the rc.1 shape: no
 #     `scimProvider` model and no generate-token endpoint (0 occurrences in
-#     `dist/index.mjs`), replaced by code-defined connections plus six new
-#     models (scimUser, scimGroup, scimGroupMember, scimSubject,
-#     scimConnectionBinding, scimIdentityTombstone — all six present). So
+#     `dist/index.mjs`), replaced by seven new models (scimUser, scimGroup,
+#     scimGroupMember, scimSubject, scimConnectionBinding,
+#     scimIdentityTombstone, scimProjectionGrant — all seven present).
+#     Connections may be code-defined, but that is only one of three shapes
+#     the plugin accepts: with `managedConnections` configured it also
+#     persists a DB-backed connection catalog of three MORE models
+#     (scimManagedConnection, scimManagedCredential,
+#     scimManagedConnectionEvent) — ten in total. Re-measured 2026-08-24
+#     against 1.7.1 (still `latest`) by constructing the plugin and reading
+#     `plugin.schema`. So
 #     moving this pin is still the ADR-0071 feature migration tracked by #3653
 #     (new platform objects, retiring `sys_scim_provider`, a new way for a
 #     tenant to register a connection) — NOT the version bump #3002 did for the
