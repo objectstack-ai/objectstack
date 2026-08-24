@@ -2411,6 +2411,48 @@ jobs:
       - name: Every committed pnpm --filter names a real package
         run: pnpm check:pnpm-filter-targets
 
+      # The sibling of the gate above, and the OTHER half of the family its
+      # comment names (#10166). There the `--filter` selector matched nothing;
+      # here the filter matched, the script ran, and the ARGUMENTS were lost.
+      #
+      # ⛔ Hand a vitest-backed script its arguments after a bare separator and
+      # the WHOLE package suite runs. pnpm forwards the separator verbatim into
+      # the child argv (npm and turbo both strip it — pnpm is the odd one out),
+      # and vitest's cac parser then discards EVERYTHING after it, options and
+      # positionals alike, in silence. The file pattern and `--maxWorkers` die
+      # together, so the concurrency discipline is inert in the same breath.
+      # Measured on the card: 415 files / 11045 tests / 358s under the shared
+      # verify lock, where the intended run was one file in 655ms — green, exit
+      # 0, reading exactly like the narrow run that was asked for.
+      #
+      # ⚠️ The broken spelling is written out in the GATE'S header, not here.
+      # The first draft of this comment spelled it, and the gate red on this
+      # file at its own wiring commit — which is the objection a corpus gate was
+      # rejected on once before ("it would fire on the counter-example the
+      # corrected instruction MUST contain"). That objection is real; the answer
+      # is `COUNTER_EXAMPLE_FILES` in the gate, and the reason this file is not
+      # in it is that a whole workflow is too coarse a thing to exempt — a
+      # broken spelling here would EXECUTE.
+      #
+      # ⚠️ The violating population is EMPTY today (#11425 landed the corrected
+      # spelling), so this step's job is to keep it empty — and the gate says so
+      # in its own verdict line rather than printing a bare "0 violations". It
+      # reports how many separators it JUDGED, not just how many it failed: 5 on
+      # the tree it landed against, four of which a naive bare-`--` selector
+      # would have RED (this workflow's own turbo dogfood shard, and the three
+      # documented `pnpm dev -- --fresh` spellings in AGENTS.md). Its rule is
+      # vitest-BOUND, and the vitest-backed script names are derived from the
+      # workspace rather than typed here.
+      #
+      # Reads text under `.claude/**`, `skills/**`, `scripts/**`,
+      # `.github/workflows/**` and every tracked AGENTS.md / CLAUDE.md, plus the
+      # workspace manifests for the derivation. No build, no network,
+      # sub-second. The `check:` key runs `--self-test` first: it drives this
+      # same sweep RED over a temp tree on disk, which is what carries
+      # non-vacuity while the real population is zero.
+      - name: No committed command forwards args to vitest through a bare --
+        run: pnpm check:agent-test-spelling
+
   # Lane 1 of 4 behind the required `TypeScript Type Check` context. The
   # aggregator job at the bottom of this file explains the split, holds the
   # contract, and is the thing the merge queue actually requires — read it
