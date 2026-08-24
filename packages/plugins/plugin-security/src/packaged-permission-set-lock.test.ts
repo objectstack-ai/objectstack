@@ -613,8 +613,17 @@ const richSet = (over: Record<string, any> = {}) => ({
   ...over,
 });
 
-/** The row the package door materializes for {@link richSet}. */
-const richRow = (over: Record<string, any> = {}) => ({
+/**
+ * The row the package door materializes for {@link richSet}.
+ *
+ * The return annotation is load-bearing, not decoration: without it tsc infers
+ * the object-literal type and DROPS the index signature that
+ * `permissionSetRowFields()` spreads in, so reading `.admin_scope` off the
+ * result — which the exclusion control below does directly, rather than through
+ * the `any[]` of `ql.permRows` — is a TS2339. It costs no precision: every
+ * facet column arrives through that spread already typed `any`.
+ */
+const richRow = (over: Record<string, any> = {}): Record<string, any> => ({
   id: 'ps_rich',
   name: 'ops_console',
   managed_by: 'package',
