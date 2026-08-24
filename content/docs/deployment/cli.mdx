@@ -1090,24 +1090,29 @@ os g object task --dry-run  # Preview without writing
 
 | Type | Default Directory | Written as | Description |
 |------|------------------|------------|-------------|
-| `object` | `src/objects/` | `NAME.ts` | Business data object with fields |
-| `view` | `src/views/` | `NAME.ts` | List or form view definition |
-| `action` | `src/actions/` | `NAME.ts` | Button or batch action |
-| `flow` | `src/flows/` | `NAME.ts` | Automation flow |
-| `dashboard` | `src/dashboards/` | `NAME.ts` | Analytics dashboard |
-| `app` | `src/apps/` | `NAME.ts` | Application navigation |
+| `object` | `src/objects/` | `NAME.object.ts` | Business data object with fields |
+| `view` | `src/views/` | `NAME.view.ts` | List or form view definition |
+| `action` | `src/actions/` | `NAME.action.ts` | Button or batch action |
+| `flow` | `src/flows/` | `NAME.flow.ts` | Automation flow |
+| `dashboard` | `src/dashboards/` | `NAME.dashboard.ts` | Analytics dashboard |
+| `app` | `src/apps/` | `NAME.app.ts` | Application navigation |
 | `skill` | `src/skills/` | `NAME.skill.ts` | AI skill — the ADR-0063 extension primitive |
 
-<Callout type="info" title="Why `skill` alone gets a filename suffix">
-`skill` is the one type whose scaffold is written as `NAME.skill.ts` rather
-than `NAME.ts`. The metadata type registry declares that type's file
-convention as `*.skill.ts` / `*.skill.yml`, and `skill` is discoverable
-metadata — a file matching neither pattern still type-checks, still validates
-and still publishes, with nothing anywhere reporting that it was skipped.
+<Callout type="info" title="Why generated files carry a type infix">
+Every scaffold is written as `NAME.TYPE.ts`, and the infix is read from the
+metadata type registry rather than chosen by the CLI: each type declares its
+own file convention there (`*.object.ts`, `*.view.ts`, `*.skill.ts`, …), and
+the metadata loader discovers files by globbing exactly those patterns.
 
-The other six generators keep `NAME.ts`. Aligning the whole scaffolder with
-the registry's `NAME.TYPE.ts` convention — the shape the example apps already
-author in — would change every generator's output and is a separate decision.
+A file matching none of them still type-checks, still passes `os validate` and
+still publishes — and is then never loaded, with nothing at any step reporting
+that it was skipped. This is also the shape the example apps already author in
+(`account.object.ts`, `lead.view.ts`).
+
+**Files you generated earlier are unaffected.** Nothing is renamed, and a
+`NAME.ts` file that your app imports through its barrel `index.ts` keeps
+loading exactly as it did. If you want it discovered by the loader's own glob
+as well, rename it to match its type's pattern.
 </Callout>
 
 <Callout type="warn" title="`os g agent` is retired">

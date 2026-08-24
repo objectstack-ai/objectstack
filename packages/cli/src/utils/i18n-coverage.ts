@@ -56,6 +56,7 @@ export interface CoverageIssue {
     | 'dashboard'
     | 'widget'
     | 'page'
+    | 'flow'
     | 'metadataForm';
   /** Human-readable explanation. */
   message: string;
@@ -205,6 +206,14 @@ const COVERAGE_SOURCE: Record<ExpectedEntry['source'], CoverageIssue['source']> 
   dashboard: 'dashboard',
   widget: 'widget',
   page: 'page',
+  // Screen-flow copy (`flows.<f>.label`, `flows.<f>.screens.<n>.title`, and
+  // the per-field `label` / `placeholder`) — the author's own wizard text, so
+  // it keeps its own bucket and reports as `i18n/missing-flow` rather than
+  // folding away with `--include-platform`. Until this bucket existed the
+  // family could not report a screen-flow gap at all: HotCRM measured
+  // `0 i18n/missing-*` while six screen dialogs rendered English in all four
+  // locales (#11485).
+  flow: 'flow',
   metadataType: 'metadataForm',
   metadataFormSection: 'metadataForm',
   metadataFormField: 'metadataForm',
@@ -223,13 +232,14 @@ const SOURCE_NOUN: Record<CoverageIssue['source'], string> = {
   dashboard: 'Dashboard',
   widget: 'Widget',
   page: 'Page',
+  flow: 'Flow',
   metadataForm: 'Metadata form',
 };
 
 /** Subject line for the "missing translation" message. */
 function describeEntry(entry: ExpectedEntry, source: CoverageIssue['source']): string {
   const noun = SOURCE_NOUN[source];
-  const owner = entry.objectName ?? entry.appName ?? entry.metadataType;
+  const owner = entry.objectName ?? entry.appName ?? entry.metadataType ?? entry.flowName;
   // Everything past the owning collection and its name reads as the attribute
   // path: `objects.account.fields.name.label` → `fields.name.label`.
   const attribute = entry.path.slice(2).join('.');
