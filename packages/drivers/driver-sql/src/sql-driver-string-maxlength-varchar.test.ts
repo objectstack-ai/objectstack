@@ -175,8 +175,16 @@ for (const cell of [MYSQL_CELL, PG_CELL]) {
         // Pre-fix this was REFUSED — `ER_DATA_TOO_LONG` on MySQL, `22001` on
         // Postgres — for a value the declaration plainly permits.
         await driver.create(T, { id: 'r1', wide_url: 'u'.repeat(300) });
-        const rows: any[] = await driver.find(T, { filters: [['id', '=', 'r1']] } as any);
-        expect(String(rows[0]?.wide_url ?? '').length).toBe(300);
+
+        // Read the length back from the SERVER rather than through the
+        // driver's deserializer: what is being asserted is that the column
+        // really holds 300 characters, and `char_length` is the database's own
+        // answer to that on both dialects.
+        const res: any = await driver.execute(
+          `select char_length(wide_url) as n from ${T} where id = 'r1'`,
+        );
+        const rows: any[] = Array.isArray(res) && Array.isArray(res[0]) ? res[0] : (res?.rows ?? res);
+        expect(Number(rows[0]?.n ?? rows[0]?.N)).toBe(300);
       });
 
       it('reports no varchar drift against a table it just created', async () => {
