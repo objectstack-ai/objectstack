@@ -166,17 +166,32 @@
  * real consumer would, rather than relying on a same-package self-import
  * trick that may or may not resolve.
  *
- * ── Fence-awareness in the orphan scan ────────────────────────────────────
- * The orphan-marker guard (`extractFromFile`) is fence-aware: a marker
- * spelling shown as example text INSIDE some other fenced block (e.g. a
- * ```md illustration showing what `<!-- os:check -->` looks like) is not
- * adjacent, at top level, to a real fence, so it claims nothing and must not
- * be reported as a misplaced marker either — otherwise this gate's own
- * convention could never be documented in the roots it governs. `fenceSpans()`
- * tracks every top-level fence of ANY language (lifted from the #10533
- * fence-awareness shape in `scripts/check-role-word.mjs`); a marker at true
- * top level that is merely not adjacent to its fence is unaffected and still
- * fails loudly.
+ * ── Fence-awareness, in BOTH of extractFromFile's loops ───────────────────
+ * `fenceOwners()` tracks every top-level fence of ANY language (lifted from
+ * the #10533 fence-awareness shape in `scripts/check-role-word.mjs`), and both
+ * loops read it, because this gate's own convention has to be documentable in
+ * the very roots it governs:
+ *
+ *   - ORPHAN scan (#10791): a marker spelling shown as example text INSIDE
+ *     some other fenced block (e.g. a ```md illustration showing what
+ *     `<!-- os:check -->` looks like) is not adjacent, at top level, to a real
+ *     fence, so it claims nothing and must not be reported as a misplaced
+ *     marker either. A marker at true top level that is merely not adjacent to
+ *     its fence is unaffected and still fails loudly.
+ *   - EXTRACTION (#11355): the same reasoning one step further in. #10791
+ *     deliberately left extraction alone (its card scoped the fix to the
+ *     orphan-scan defect), so a bare ` ```ts ` / ` ```tsx ` /
+ *     ` ```typescript ` fence-open line was still recognised wherever it
+ *     appeared, with no notion of sitting inside a wrapping fence. A marker
+ *     ALONE nested in an illustration was therefore handled correctly, while a
+ *     FULLY worked one — marker and real ts fence, both written as example
+ *     text inside the wrapper — was extracted and handed to `tsc` as a genuine
+ *     example, to compile by luck or to fail the whole gate against
+ *     documentation prose. No such occurrence existed in the corpus when this
+ *     was found (extraction counts are identical either side of the fix), so
+ *     the self-test's nested-illustration fixture is where the defect is
+ *     measurable at all: nested, the worked illustration extracts nothing;
+ *     un-nested, the identical payload extracts every block.
  *
  * Usage:
  *   tsx scripts/check-skill-examples.ts            # extract + type-check (CI)
@@ -461,20 +476,46 @@ const JSDOC_GUTTER_RE = /^\s*\*\s?/;
 const ANY_FENCE_OPEN_RE = /^ {0,3}(`{3,})([^`]*)$/;
 
 /**
- * Every line index that lies INSIDE some top-level fenced block — of ANY
- * language, spanning both its opening and closing fence line. This gate's own
- * `os:check` convention has to be documentable in the very roots it governs
- * (e.g. a ```` ```md ```` illustration showing the marker's exact spelling),
- * and a marker shown as example text inside such a fence claims nothing — it
- * is not adjacent to a real fence the author intends to check, so it must not
- * be flagged as a misplaced (orphan) marker either. The closing run length
- * must match or exceed the opener's (a `````` fence wrapping a ```ts example
- * closes on ITS OWN fence, not the inner one), and an unclosed fence runs to
- * the end of the document (CommonMark), so it consumes the rest of the file
- * rather than leaving the tail ambiguous.
+ * Which TOP-LEVEL fenced block owns each line — of ANY language, spanning both
+ * its opening and closing fence line. The value is the index of the line that
+ * OPENED the block, or `-1` for a line at true top level. A line that opens a
+ * top-level fence owns itself, which makes the array answer both questions this
+ * file asks of it, one per loop in `extractFromFile()`:
+ *
+ *   - `owners[i] >= 0` — "line i is inside some fence". The ORPHAN scan's
+ *     question (#10791): this gate's own `os:check` convention has to be
+ *     documentable in the very roots it governs (e.g. a ```` ```md ````
+ *     illustration showing the marker's exact spelling), and a marker shown as
+ *     example text inside such a fence claims nothing — it is not adjacent to a
+ *     real fence the author intends to check, so it must not be flagged as a
+ *     misplaced (orphan) marker either.
+ *   - `owners[i] === i` — "line i opens a fence AT TOP LEVEL". The EXTRACTION
+ *     loop's question (#11355): a ` ```ts ` fence-open line written as example
+ *     text inside a wrapping fence is part of an illustration, not a block this
+ *     gate should hand to `tsc`. Extraction was NOT fence-aware until #11355 —
+ *     it matched a bare ts/tsx/typescript fence-open line wherever it appeared,
+ *     so a FULLY worked nested illustration (the marker AND a real ts fence,
+ *     both nested) would have been extracted and compiled as if it were a real
+ *     example, failing the gate with a diagnostic pointing at documentation
+ *     prose. (No occurrence existed in the corpus; the self-test is where the
+ *     defect is measurable.)
+ *
+ * The two readings share ONE walk on purpose: two independent notions of "am I
+ * in a fence" in one file is how the halves drifted apart in the first place.
+ *
+ * `FENCE_OPEN_RE` is a strict subset of `ANY_FENCE_OPEN_RE` — three backticks
+ * plus an info string containing no backtick — so every line the extraction
+ * loop recognises is one this walk also opens a span on. A genuine top-level ts
+ * fence therefore always owns itself, and the `owners[i] === i` guard can never
+ * suppress one.
+ *
+ * The closing run length must match or exceed the opener's (a `````` fence
+ * wrapping a ```ts example closes on ITS OWN fence, not the inner one), and an
+ * unclosed fence runs to the end of the document (CommonMark), so it consumes
+ * the rest of the file rather than leaving the tail ambiguous.
  */
-function fenceSpans(lines: string[]): boolean[] {
-  const inFence = new Array<boolean>(lines.length).fill(false);
+function fenceOwners(lines: string[]): number[] {
+  const owners = new Array<number>(lines.length).fill(-1);
   for (let i = 0; i < lines.length; i++) {
     const open = ANY_FENCE_OPEN_RE.exec(lines[i]);
     if (!open) continue;
@@ -482,10 +523,10 @@ function fenceSpans(lines: string[]): boolean[] {
     const closeFence = new RegExp(`^ {0,3}\`{${run},}[ \\t]*$`);
     let end = i + 1;
     while (end < lines.length && !closeFence.test(lines[end])) end++;
-    for (let s = i; s < Math.min(end + 1, lines.length); s++) inFence[s] = true;
+    for (let s = i; s < Math.min(end + 1, lines.length); s++) owners[s] = i;
     i = end;
   }
-  return inFence;
+  return owners;
 }
 
 /**
@@ -508,18 +549,24 @@ function logicalLines(rawLines: string[], root: SourceRoot): string[] {
  * fence is exactly the MARKER (ignoring surrounding whitespace) — after
  * gutter-stripping, for a `commentPrefixed` root.
  *
+ * BOTH halves are fence-aware, via one `fenceOwners()` walk. A ts fence-open
+ * line that is itself example text inside a wrapping fence opens nothing (a
+ * fully worked nested illustration — marker AND real ts fence — would
+ * otherwise be extracted and compiled as if it were a real example, #11355),
+ * and a marker shown inside such a fence claims nothing (#10791) and so is no
+ * orphan either. The two exclusions are the same fact read twice: the block is
+ * not, at top level, a real fence the author intends this gate to check.
+ *
  * Also reports `orphans`: top-level MARKER lines that are NOT directly above
  * a ts fence. A misplaced marker (a blank line slipped in between, or it
  * precedes a bash / json block) silently checks nothing — exactly the
  * failure mode this gate exists to prevent — so the caller treats an orphan
- * as an error, not a no-op. A marker occurrence INSIDE some other fenced
- * block (`fenceSpans()`) is example text illustrating the convention, not a
- * claim, and is excluded from this scan for the same reason it is excluded
- * from extraction above: it is not adjacent, at top level, to a real fence.
+ * as an error, not a no-op.
  */
 function extractFromFile(source: string, root: SourceRoot): { examples: Example[]; orphans: number[] } {
   const rawLines = fs.readFileSync(source, 'utf-8').split('\n');
   const lines = logicalLines(rawLines, root);
+  const owners = fenceOwners(lines);
   const examples: Example[] = [];
   const claimed = new Set<number>(); // MARKER line indices that opened a real block
   let n = 0;
@@ -527,6 +574,11 @@ function extractFromFile(source: string, root: SourceRoot): { examples: Example[
   for (let i = 0; i < lines.length; i++) {
     const open = lines[i].match(FENCE_OPEN_RE);
     if (!open) continue;
+    // Top level only (#11355). A ts fence-open line INSIDE some other fence is
+    // part of an illustration of this very convention, not a block to compile —
+    // see `fenceOwners()`. A genuine top-level ts fence owns itself, so this
+    // guard cannot suppress one.
+    if (owners[i] !== i) continue;
     const marked = i > 0 && lines[i - 1].trim() === root.marker;
     // Find the matching close fence regardless of marking, so `i` advances past
     // this block and we never treat its body as top-level markdown.
@@ -546,13 +598,12 @@ function extractFromFile(source: string, root: SourceRoot): { examples: Example[
     i = close; // skip to the close fence
   }
 
-  const inFence = fenceSpans(lines);
   const orphans: number[] = [];
   for (let i = 0; i < lines.length; i++) {
     // Top level only. A marker shown INSIDE some other fenced block (e.g. a
     // ```md illustration of this very convention) is example text, not a
-    // claim — see `fenceSpans()`.
-    if (inFence[i]) continue;
+    // claim — see `fenceOwners()`.
+    if (owners[i] >= 0) continue;
     // Any marker spelling counts as an orphan claim — a wrong-format marker
     // checks nothing, which is precisely what this guard exists to catch.
     if (ALL_MARKERS.includes(lines[i].trim()) && !claimed.has(i)) orphans.push(i + 1); // 1-based
@@ -1169,6 +1220,171 @@ function selfTest(): never {
         "silenced real orphan would weaken the gate's hard-error posture",
     );
 
+    // ── Fence-awareness in EXTRACTION (#11355). The fixture above pins the
+    //    ORPHAN half — a bare marker nested in an illustration. This one is
+    //    the other half, and the one #10791 deliberately left open: a FULLY
+    //    worked illustration, marker AND a real ```ts fence, all of it example
+    //    text inside a wrapping fence. Before #11355 the extraction loop had no
+    //    notion of being inside another fence, so it read the nested fence-open
+    //    as a genuine block, extracted the payload and handed it to `tsc` —
+    //    failing the gate against documentation prose (or, worse, compiling by
+    //    luck and reporting coverage of a block nobody claimed).
+    //
+    //    The payload is deliberately uncompilable, so a regression is not just
+    //    a count that drifts: the poisoned text reaching an `Example.code` is
+    //    itself the assertion, and downstream it would reach `tsc`.
+    //
+    //    Both payloads sit AFTER an inner ``` close but before the wrapper's
+    //    own ````` close, so a length-blind closer (one that ended the wrapper
+    //    on the inner fence) surfaces here as a second extracted block rather
+    //    than as silence.
+    const POISON_A = `const poison: number = 'not a number';`;
+    const POISON_B = `const alsoPoison: number = 'not a number either';`;
+    const REAL_CLAIM = 'const real: number = 1;';
+
+    const nestedWorked = path.join(dir, 'nested-worked.md');
+    fs.writeFileSync(
+      nestedWorked,
+      [
+        '# Worked nested illustration', // 1
+        '', // 2
+        'Showing an author how to mark a block — marker and fence alike are', // 3
+        'example text here, not a claim:', // 4
+        '', // 5
+        '`````md', // 6  ← wrapping fence, five backticks
+        '<!-- os:check -->', // 7  ← illustrated marker
+        '```ts', // 8  ← illustrated REAL ts fence-open
+        POISON_A, // 9
+        '```', // 10
+        '', // 11
+        '<!-- os:check -->', // 12
+        '```ts', // 13
+        POISON_B, // 14
+        '```', // 15
+        '`````', // 16 ← the wrapper's own close
+        '', // 17
+        'And the one real claim, at top level:', // 18
+        '', // 19
+        '<!-- os:check -->', // 20
+        '```ts', // 21
+        REAL_CLAIM, // 22
+        '```', // 23
+        '',
+      ].join('\n'),
+      'utf8',
+    );
+    const nested = extractFromFile(nestedWorked, skillsRoot);
+    check(
+      nested.examples.length === 1,
+      `nested-illustration fixture: extracted ${nested.examples.length} block(s), expected 1 — a worked illustration ` +
+        'nested inside a wrapping fence is example text; extracting it hands documentation prose to `tsc`',
+    );
+    check(
+      nested.examples.every((e) => !e.code.includes('poison') && !e.code.includes('Poison')),
+      `nested-illustration fixture: an illustrated payload reached an extracted block — ` +
+        `${JSON.stringify(nested.examples.map((e) => e.code))}`,
+    );
+    check(
+      nested.orphans.length === 0,
+      `nested-illustration fixture: reported ${nested.orphans.length} orphan marker(s), expected 0 — the illustrated ` +
+        'markers are inside the wrapper, and skipping their fences must not turn them into orphans instead',
+    );
+    if (nested.examples.length === 1) {
+      const ex = nested.examples[0];
+      check(
+        ex.code === REAL_CLAIM,
+        `nested-illustration fixture: extracted ${JSON.stringify(ex.code)}, expected ${JSON.stringify(REAL_CLAIM)}`,
+      );
+      check(
+        ex.bodyStartLine === 22,
+        `nested-illustration fixture: bodyStartLine ${ex.bodyStartLine}, expected 22 — skipping a wrapper must not ` +
+          'shift the line a diagnostic is reported against',
+      );
+    }
+
+    // The CONTROL, and the load-bearing half of this pair: the identical three
+    // claims with the wrapper's two lines removed. Without it, a guard that
+    // simply stopped extracting anything would pass the assertions above — the
+    // #10533 (B3) shape, where the green has to be shown to come from the
+    // nesting rather than from the payload or the marking.
+    const unnestedWorked = path.join(dir, 'unnested-worked.md');
+    fs.writeFileSync(
+      unnestedWorked,
+      [
+        '<!-- os:check -->', // 1
+        '```ts', // 2
+        POISON_A, // 3
+        '```', // 4
+        '', // 5
+        '<!-- os:check -->', // 6
+        '```ts', // 7
+        POISON_B, // 8
+        '```', // 9
+        '', // 10
+        '<!-- os:check -->', // 11
+        '```ts', // 12
+        REAL_CLAIM, // 13
+        '```', // 14
+        '',
+      ].join('\n'),
+      'utf8',
+    );
+    const unnested = extractFromFile(unnestedWorked, skillsRoot);
+    check(
+      unnested.examples.length === 3,
+      `un-nested control: extracted ${unnested.examples.length} block(s), expected 3 — the SAME payloads, minus the ` +
+        'wrapping fence, must all extract, or the nested case above proves nothing about nesting',
+    );
+    check(
+      JSON.stringify(unnested.examples.map((e) => e.bodyStartLine)) === JSON.stringify([3, 8, 13]),
+      `un-nested control: body start lines ${JSON.stringify(unnested.examples.map((e) => e.bodyStartLine))}, expected [3,8,13]`,
+    );
+    check(
+      unnested.orphans.length === 0,
+      `un-nested control: reported ${unnested.orphans.length} orphan marker(s), expected 0`,
+    );
+
+    // The same nesting inside a `commentPrefixed` root. The guard reads the
+    // GUTTER-STRIPPED lines (`logicalLines()`), and nothing else here would
+    // catch it being computed over the raw ones instead: a raw-line walk never
+    // recognises ` * `````md ` as a fence, so every nested fence below reads as
+    // top level again and the defect returns on precisely the roots whose prose
+    // lives in docblocks.
+    const nestedDoc = path.join(dir, 'nested-doc.ts');
+    fs.writeFileSync(
+      nestedDoc,
+      [
+        '/**', // 1
+        ' * How to mark an example, illustrated:', // 2
+        ' *', // 3
+        ' * `````md', // 4
+        ' * <!-- os:check -->', // 5
+        ' * ```ts', // 6
+        ` * ${POISON_A}`, // 7
+        ' * ```', // 8
+        ' * `````', // 9
+        ' *', // 10
+        ' * @example', // 11
+        ' * <!-- os:check -->', // 12
+        ' * ```ts', // 13
+        ` * ${REAL_CLAIM}`, // 14
+        ' * ```', // 15
+        ' */', // 16
+        'export const Documented = 1;', // 17
+      ].join('\n'),
+      'utf8',
+    );
+    const nestedGutter = extractFromFile(nestedDoc, specSrcRoot);
+    check(
+      nestedGutter.examples.length === 1 && nestedGutter.examples[0].code === REAL_CLAIM,
+      `gutter-wrapped nested fixture: extracted ${JSON.stringify(nestedGutter.examples.map((e) => e.code))}, expected ` +
+        `only ${JSON.stringify([REAL_CLAIM])} — fence ownership must be judged on gutter-stripped lines`,
+    );
+    check(
+      nestedGutter.orphans.length === 0,
+      `gutter-wrapped nested fixture: reported ${nestedGutter.orphans.length} orphan marker(s), expected 0`,
+    );
+
     // ── Build-dir distinctness (#10924). The REAL surfaces are asserted on
     //    every run by `assertDistinctBuildDirs()`; these two fixtures pin the
     //    predicate underneath it in both directions, because a guard that can
@@ -1307,7 +1523,9 @@ function selfTest(): never {
       '    JSDoc-gutter-wrapped ```tsx block (client SDK surface) extracts, strips and maps lines\n' +
       '    identically, and a misplaced gutter-wrapped marker is still caught as an orphan; a marker\n' +
       '    shown as example text inside another fenced block is not an orphan, while a genuine\n' +
-      '    top-level misplaced marker still is; a gutter-wrapped ```ts block (spec-source\n' +
+      '    top-level misplaced marker still is; a FULLY worked nested illustration (marker AND a\n' +
+      '    real ```ts fence, wrapper-nested, gutter-wrapped or not) extracts NOTHING while the\n' +
+      '    identical payloads un-nested all extract; a gutter-wrapped ```ts block (spec-source\n' +
       '    surface) extracts with the right build extension, body and line mapping, its\n' +
       '    `.test.ts` sibling is skipped, two surfaces sharing one build dir are caught, a\n' +
       '    surface whose build dir is not covered by .gitignore is caught too, and a non-git\n' +
