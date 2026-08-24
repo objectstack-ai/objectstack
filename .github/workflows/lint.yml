@@ -1836,6 +1836,46 @@ jobs:
       - name: Additive label-write self-test
         run: node scripts/pr-labels.mjs --self-test
 
+      # The other half of that contract (#10778, split out of #10703). The step
+      # above proves ONE script never emits a whole-set write; this one proves
+      # nothing in the repo does. #10703 removed the two whole-set
+      # `PUT /issues/{n}/labels` writes, but it could not make the verb
+      # UNAVAILABLE -- a newly added third-party labeler, or a second workflow
+      # calling the endpoint directly, reopens the same defect, and until this
+      # gate the only guard was a prose paragraph in pr-automation.yml's header.
+      #
+      # A whole-set PUT destroys any label that lands between its read and its
+      # write. Its second-order cost is the expensive one: while the verb is
+      # reachable, "the label is absent" stops meaning anything, because absence
+      # has two causes (cleared deliberately, or erased) and read-back is the
+      # only detection there is.
+      #
+      # Three assertions, all from the card: no PUT against the labels endpoint
+      # in ANY spelling (`curl -X PUT`, `gh api --method PUT`, `issues.setLabels`,
+      # `octokit.request('PUT /repos/...')`, a `method: 'PUT'` fetch); no `uses:`
+      # of an action measured to write the whole set; and an allowlist entry
+      # REQUIRES a stated reason -- the gate refuses rather than passes on an
+      # entry without one.
+      #
+      # Invoked as `node` rather than through a `pnpm check:*` alias, same as the
+      # other `node scripts/...` steps in this lane: that alias is a line in root
+      # package.json, inside the @changesets/cli v3 fence (#9465).
+      #
+      # Its --self-test runs first and is not ceremony. The gate is GREEN OVER AN
+      # EMPTY EXECUTABLE POPULATION -- every mention of the verb on this tree is
+      # in the comments that document the ban -- so a passing run over real data
+      # cannot by itself distinguish a working matcher from one that matches
+      # nothing. Two things answer that: the verdict line prints the judged
+      # population (files, raw mentions, comment-cleared, executable, `uses:`
+      # pins) so a zero is a measurement rather than a silence, and the gate
+      # REFUSES if the declared live probes in PROSE_PROBES stop matching. The
+      # self-test drives the real sweep red over fixture trees on disk.
+      # Static text only, no build, so it belongs in this pre-build group.
+      - name: No whole-set label PUT anywhere in the repo (#10778) + its self-test
+        run: |
+          node scripts/check-whole-set-label-write.mjs --self-test
+          node scripts/check-whole-set-label-write.mjs
+
       # Cross-repo closer outcome contract (#9595, and #9575 before it).
       # `cross-repo-issue-closer.yml` carries ~150 lines of inline
       # github-script, and it is code nobody has ever seen run: over the 1176
