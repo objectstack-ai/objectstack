@@ -315,9 +315,22 @@ export default class Compile extends Command {
         printWarning(`Undeclared authoring keys (${unknownKeyWarnings.length}) — dropped at load (#3786)`);
         // [#11642] The header already states the true total, so before this
         // notice the block printed two numbers that disagreed and explained
-        // neither. The pointer is honest because #11643 put this exact list
+        // neither. The pointer resolves because #11643 put this exact list
         // into the `--json` payload (`warnings`) a few lines below; it would
         // have been a dead end before that landed.
+        //
+        // ⚠️ …and it resolves ON THE SUCCESS EXIT ONLY — the one conditional
+        // pointer of the nine. `warnings` lives in the terminal payload, so a
+        // build that fails at a LATER gate (access matrix 3e, package docs 3f,
+        // the runtime bundle) emits that gate's failure payload instead, and
+        // none of those carries this list: the author is told to re-run with
+        // `--json` and gets a payload without the withheld keys in it. The six
+        // error-path notices have no such gap — their `--json` branch sits in
+        // the same block as the text face. Filed as #11772; closing it means
+        // changing a `--json` payload shape, which is a machine-contract
+        // decision and not this card's. ⛔ Do not read the line above as
+        // unconditional — an unqualified claim that holds in one branch is the
+        // same shape as the silence this whole change is about.
         printBulletList(unknownKeyWarnings, {
           noun: 'undeclared authoring key(s)',
           remedy: JSON_FULL_LIST_REMEDY,
