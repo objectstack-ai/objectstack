@@ -63,7 +63,7 @@
 # for anyone who means it. Widening it to string-match anywhere in the command would block
 # every `grep "git stash"` run against this very file.
 #
-# Self-test (32 cases, no network, no build): .claude/hooks/guard-shared-stash.selftest.sh
+# Self-test (44 cases, no network, no build): .claude/hooks/guard-shared-stash.selftest.sh
 
 set -uo pipefail
 
@@ -89,6 +89,18 @@ fi
 # A separator inside '…' or "…" does NOT split, so writing *about* the ban is never caught
 # by the ban: `grep -n "cd x && git stash pop" AGENTS.md` stays one segment whose first
 # word is grep. (objectstack#4890's lesson — the PR writing a rule must not trip it.)
+#
+# OUTSIDE quotes a backslash escapes the NEXT character, so an escaped `\"` opens no quoted
+# region at all. Without that branch this pass read the `"` as opening a region that never
+# closed, went inert for every separator behind it, collapsed the whole command into one
+# segment whose head word was the harmless one, and let a real `git stash pop` ride through
+# as a mere argument of `echo` (#11738). Measured on this repo's copy before the fix:
+# `echo \" ; git stash pop` was ALLOWED while a bare `git stash pop` was blocked.
+#
+# This is the same repair guard-main-checkout-bash.sh's split_segments() took in #11131,
+# in the same shape; that guard's `word` bookkeeping has no analogue here because this pass
+# has no comment rule to track word starts for. Both characters are kept verbatim — this
+# pass only SPLITS, and check_segment() re-reads the words afterwards.
 segments=()
 split_segments() {
   local s="$1" seg="" q="" ch i n=${#1}
@@ -100,6 +112,10 @@ split_segments() {
       continue
     fi
     case "$ch" in
+      '\')
+        seg+="$ch"
+        if [ $((i + 1)) -lt "$n" ]; then i=$((i + 1)) ; seg+="${s:i:1}" ; fi
+        ;;
       "'" | '"') q="$ch" ; seg+="$ch" ;;
       ';' | '|' | '&' | '(' | ')' | '{' | '}' | $'\n') segments+=("$seg") ; seg="" ;;
       *) seg+="$ch" ;;
