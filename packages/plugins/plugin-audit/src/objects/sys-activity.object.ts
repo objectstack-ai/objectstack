@@ -54,6 +54,50 @@ export const SysActivity = ObjectSchema.create({
       group: 'Event',
     }),
 
+    /**
+     * The activity kind — an OPEN, author-extensible vocabulary whose declared
+     * options are the platform's BUILT-IN set. Maintainer ruling 2026-08-24 on
+     * #11507 (direction 4 of the four that card framed), which the `description`
+     * below carries into the contract; this comment carries the reasoning.
+     *
+     * ## Why the declaration used to lie
+     *
+     * A `select` over a fixed list normally means "anything else is
+     * `invalid_option`". Here it never could:
+     *
+     *  1. Every field on this object is `readonly: true`, and `validateRecord`
+     *     skips readonly fields on BOTH write branches
+     *     (`objectql/src/validation/record-validator.ts`), so the option check
+     *     never runs. An undeclared value is stored silently.
+     *  2. ADR-0052 §5b.2 `activityMilestones[].type` is `z.string().optional()`
+     *     in `object.zod.ts` and is forwarded verbatim by `audit-writers.ts`
+     *     (`if (milestone.type) activityType = milestone.type`) — a shipped,
+     *     documented, author-facing channel into this column.
+     *  3. An app's own server-side action reaches the column directly
+     *     (`ctx.api.object('sys_activity').insert({ type: … })`). No grep of
+     *     THIS repository can see those; both measured sites live in
+     *     objectstack-ai/hotcrm (#11424, read at 5eee1bd).
+     *
+     * So an author — most often an AI writing metadata — who read the option
+     * list learned "another value will be rejected", which was false in three
+     * independent ways. The ruling closes that by moving the declaration, not
+     * the runtime: the options are the built-in set, author-contributed values
+     * are legitimate, and ADR-0052 §5b.2 STAYS a write path (turning it into a
+     * rejection path was direction 3, which was NOT ruled).
+     *
+     * ## What that binds
+     *
+     *  - Do not "fix" this by enforcing the enum on system-owned writes, and do
+     *    not narrow `activityMilestones[].type`. Either is direction 3; re-open
+     *    #11507 first.
+     *  - Keep the built-in set declared and censused — open is not undeclared.
+     *    The writer census lives in `sys-activity-type-vocabulary.test.ts`, and
+     *    it inventories BUILT-IN values only; an author's value belongs to the
+     *    app that writes it, not to this list.
+     *  - Downstream, every CLOSED map over this vocabulary is now the bug: a
+     *    consumer must render an unknown value, not drop the row. (objectui's
+     *    feed-kind map is the known one; its pin is a card in that lane.)
+     */
     type: Field.select(
       [
         'created',
@@ -71,6 +115,13 @@ export const SysActivity = ObjectSchema.create({
       ],
       {
         label: 'Type',
+        description:
+          'Activity kind. The declared options are the platform BUILT-IN set of an open '
+          + 'vocabulary, not a closed enum: metadata authors may contribute their own values '
+          + '(sanctioned channel: `activityMilestones[].type`, ADR-0052 §5b.2), and an '
+          + 'undeclared value is stored verbatim rather than rejected. Consumers must render '
+          + 'an unknown value instead of assuming this list is exhaustive (maintainer ruling '
+          + '2026-08-24, #11507).',
         required: true,
         readonly: true,
         searchable: true,

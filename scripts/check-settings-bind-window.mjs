@@ -143,25 +143,22 @@ const PREFILTER_TOKENS = [...SERVICE_LOOKUP_CALLEES, 'providesServices'];
  * This ledger is shrink-only in both directions: an entry that stops being a
  * problem is an ERROR here (delete it in the PR that fixes it), and a new
  * offender cannot be admitted without editing this file. It exists because
- * #11045 is the GATE card — the two live readers below were found by its
- * step-1 measurement and routed to their owning lanes rather than fixed here,
- * so landing the gate without them means landing it red.
+ * #11045 is the GATE card — the two live readers it carried were found by that
+ * card's step-1 measurement and routed to their owning lanes rather than fixed
+ * here, so landing the gate without them would have meant landing it red.
  *
- * Keyed by plugin id + verdict, because the two entries need DIFFERENT repairs
+ * **It is now EMPTY, and that is the burned-down state, not a disabled gate.**
+ * Both entries were deleted by the PRs that repaired their sites —
+ * `com.objectstack.auth` (#11579, the ordering declaration) and
+ * `com.objectstack.mcp` (#11580, the read moved to `kernel:bootstrapped`). An
+ * empty array suppresses nothing, so every pre-bind read the scan finds from
+ * here on is reported. Re-admitting one is a ratchet weakening and needs the
+ * same scrutiny as raising any other baseline in this repo.
+ *
+ * Keyed by plugin id + verdict, because two entries can need DIFFERENT repairs
  * and a single "known bad" bucket would let one be closed by the other's fix.
  */
-const KNOWN_PRE_BIND_READS = [
-  {
-    plugin: 'com.objectstack.auth',
-    verdict: 'undeclared',
-    issue: '#11579',
-    note:
-      'AuthPlugin reaches getService(\'settings\') at depth 3 from three start()-registered ' +
-      'kernel:ready hooks and calls settings.getNamespace(\'auth\') there. In the `os serve` ' +
-      'composition AuthPlugin is used() before the capability loop registers ' +
-      'SettingsServicePlugin, so its hooks fire first. Repair is the #10250 declaration.',
-  },
-];
+const KNOWN_PRE_BIND_READS = [];
 
 // ── Discovery ────────────────────────────────────────────────────────────────
 

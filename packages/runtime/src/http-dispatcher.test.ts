@@ -72,13 +72,17 @@ const PKG_ADMIN = () => ({ request: {}, executionContext: { userId: 'u_pkg_admin
 /**
  * [#10145] The same move for the `/automation` DEFINITION writes — `POST /`,
  * `PUT /:name` and `DELETE /:name` now demand `manage_metadata`, the authoring
- * capability the metadata plane these flows live on already required. The three
- * cases using this caller are about ROUTING — which automation-service method a
+ * capability the metadata plane these flows live on already required. The cases
+ * using this caller are about ROUTING — which automation-service method a
  * path reaches and with which arguments — and were written when an ordinary
  * session could register a flow, which is precisely the premise the gate
  * destroys. Only the caller changes; the gate itself is pinned in
- * `domains/automation-write-capability-gate.test.ts`, and every EXECUTION route
- * on the domain (trigger / toggle / resume) keeps `AUTHED_CALLER`, deliberately.
+ * `domains/automation-write-capability-gate.test.ts`.
+ *
+ * [#10243] `POST /:name/toggle` uses this caller too, since the 2026-08-23
+ * ruling put enablement in the same write set. The EXECUTION routes on the
+ * domain (trigger / resume) keep `AUTHED_CALLER`, deliberately — that half of
+ * the line did not move.
  */
 const FLOW_AUTHOR = () => ({ request: {}, executionContext: { userId: 'u_flow_author', systemPermissions: ['manage_metadata'] } }) as any;
 
@@ -392,7 +396,11 @@ describe('HttpDispatcher', () => {
         });
 
         it('should toggle a flow via POST /:name/toggle', async () => {
-            const result = await dispatcher.handleAutomation('flow_a/toggle', 'POST', { enabled: false }, AUTHED_CALLER());
+            // [#10243] `FLOW_AUTHOR`, not `AUTHED_CALLER`: toggle joined the
+            // `manage_metadata` write set by ruling. This case is about ROUTING
+            // — which service method the path reaches, with which arguments —
+            // so only the caller changes.
+            const result = await dispatcher.handleAutomation('flow_a/toggle', 'POST', { enabled: false }, FLOW_AUTHOR());
             expect(result.handled).toBe(true);
             expect(mockAutomationService.toggleFlow).toHaveBeenCalledWith('flow_a', false);
         });

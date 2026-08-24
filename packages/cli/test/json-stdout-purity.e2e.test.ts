@@ -62,6 +62,7 @@ import { mkdtempSync, rmSync, writeFileSync, readFileSync, readdirSync, statSync
 import { tmpdir } from 'node:os';
 import { join, resolve, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { childEnv } from './helpers/serve-process.js';
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 const CLI = resolve(HERE, '../bin/run-dev.js');
@@ -144,7 +145,7 @@ function runCli(argv: string[], cwd: string, env: Record<string, string>): Promi
     execFile(
       TSX,
       [CLI, ...argv],
-      { cwd, maxBuffer: 32 * 1024 * 1024, env: { ...process.env, NO_COLOR: '1', ...env } },
+      { cwd, maxBuffer: 32 * 1024 * 1024, env: childEnv({ NO_COLOR: '1', ...env }) },
       (err, stdout, stderr) => {
         resolvePromise({
           code: err ? (typeof (err as { code?: unknown }).code === 'number' ? (err as unknown as { code: number }).code : 1) : 0,

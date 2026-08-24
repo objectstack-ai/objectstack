@@ -25,8 +25,14 @@
 //   - a body throw that declares NO status keeps the verbatim-message 400;
 //   - a body that CRASHES (`isScriptFaultMessage`) stays the sanitised 500 —
 //     even when the crash object carries a stray `status`;
-//   - the envelope still carries NO `code` field (old @objectstack/client
-//     builds prepend `code` to the human-readable message).
+//   - the envelope carries no `code` for a body that DECLARED none.
+//     ⚠️ [#10345] That third bullet used to read "the envelope still carries NO
+//     `code` field (old @objectstack/client builds prepend `code` to the
+//     human-readable message)". Every fixture below declares no code, so what
+//     the section actually pinned was ADR-0112's "invent nothing" half, and it
+//     is green on both sides of #10345. The blanket claim was the defect: a
+//     hook that DID declare a code lost it here. See `error-response.ts` for
+//     why the client-compat rationale is retired.
 //
 // Reverse verification (measured against this branch with ONLY
 // `error-response.ts` reverted to the pre-fix `origin/main` copy — the fix
@@ -77,9 +83,10 @@ describe('[#9967] mapDataError: a sandboxed body that declares a 4xx status keep
     });
 
     it('the body is byte-identical to the undeclared 400 envelope — only the status moves', () => {
-        // The unwrap branch's own contract (deliberately NO `code`, `object`
-        // rides) is unchanged by the fix; compared output-to-output so a field
-        // later added to BOTH envelopes (e.g. #9934's marking) keeps this green.
+        // The unwrap branch's own contract (`object` rides; no `code` is
+        // invented for a producer that declared none) is unchanged by the fix;
+        // compared output-to-output so a field later added to BOTH envelopes
+        // (#9934's marking, #10345's declared `code`) keeps this green.
         const declared = mapDataError(sandboxRefusal({ status: 403 }), 'showcase_task');
         const undeclared = mapDataError(sandboxRefusal(), 'showcase_task');
 

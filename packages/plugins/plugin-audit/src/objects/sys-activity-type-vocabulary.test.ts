@@ -23,6 +23,30 @@ import { SysActivity } from './index.js';
  * shows both halves, against a control that proves the measurement can fail.
  * This file is the DECLARATIVE half: the writer census, written as literals.
  *
+ * ## 2026-08-24 — the #11507 ruling, and what this census now inventories
+ *
+ * The paragraph above described the state of the code; the maintainer then
+ * ruled what it MEANS (direction 4): `sys_activity.type` is an OPEN,
+ * author-extensible vocabulary, the declared options are the platform's
+ * BUILT-IN set, and ADR-0052 §5b.2 stays a sanctioned author write path. The
+ * declaration now says so in its own `description`
+ * (`sys-activity.object.ts`), pinned by `./sys-activity-type-open-vocabulary.test.ts`.
+ *
+ * Two consequences for THIS file, and no others — every assertion below is
+ * unchanged:
+ *
+ *  - The census inventories the BUILT-IN set. A value an app contributes
+ *    through the milestone door or its own action does not belong here just
+ *    because it exists; it belongs to the app that writes it. Declaring one
+ *    (as #11424 did for `scheduled`) is a deliberate choice to take it into the
+ *    platform's set — the platform then owns its label, its i18n leaves and its
+ *    filter — never an obligation created by the mere fact that someone wrote
+ *    it.
+ *  - "An undeclared value is written silently" is no longer a defect to be
+ *    fixed by enforcement. It is the ruled contract. What this file still
+ *    guards is the OTHER direction: that the built-in set stays honest about
+ *    the platform's own writers.
+ *
  * The two halves are not redundant, and the asymmetry is the reason both
  * exist. Narrowing the enum away from a live writer changes NO behavior — the
  * writer keeps writing, the row keeps landing, every behavioral assertion stays

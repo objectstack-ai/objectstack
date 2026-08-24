@@ -174,6 +174,22 @@ opens with the very quote the recognizer reads. Both moves were priced on a tree
 no instance of the shape, and `259 of 259` / `221 of 221` / 176 unreachable came out
 byte-identical across each.
 
+**And the key itself is anchored** — since #11542, in one place rather than eight. Eight
+scans ask *"is a `route:` / `client:` declaration written here?"*; `declLead` has spelled the
+colon and the run after it once since #11494, but the **key** stayed each call site's own
+argument and only one of the eight anchored it with `\b`. So `subroute: 'GET /api/v1/gone'`
+was a declaration to **seven** of them and not to the eighth, and it minted a phantom
+**row** — silent for the same reason as the two above, `rows` and the first term of
+`routesDeclared` moving together. Not all seven behaviours it moved are counting: the row
+window is delimited by that same lead, so a `subroute:` written between a real `route:` and
+its `client:` **closed the real row's window** and handed the binding to the phantom, which
+then joined the unreachable population — a wrong binding no count comparison can see. Priced
+on a tree carrying no instance: **zero** leads across the seven ledgers that the unanchored
+spelling reads and the anchored one does not, and `269 of 269` / `222 of 222` / 45 reachable /
+177 unreachable came out byte-identical **row for row** across the change. `$route:` is still
+read as a declaration — `\b` fails only against a *word* character — but all eight agree on it
+now, and `--self-test` pins that residue (#11630) where the next card will find it.
+
 A skipped type member is reported **nowhere**, and that is the intended answer rather than
 a new silence: it is a correct declaration of a *type*, not a table row — the same rule
 under which the `route: string;` member of all seven entry interfaces has always produced

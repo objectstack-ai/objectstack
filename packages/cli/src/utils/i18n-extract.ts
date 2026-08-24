@@ -51,6 +51,10 @@
  *   pages.<page>.label / .description
  *   pages.<page>.title / .subtitle   (from the page's `page:header` component)
  *   pages.<page>.components.<id>.<key>  (per-component copy, #6080)
+ *   flows.<flow>.label
+ *   flows.<flow>.screens.<node_id>.title                       (#7646 / #11287)
+ *   flows.<flow>.screens.<node_id>.fields.<field>.label
+ *   flows.<flow>.screens.<node_id>.fields.<field>.placeholder
  *   metadataForms.<type>.label / .description
  *   metadataForms.<type>.sections.<section>.label / .description
  *   metadataForms.<type>.fields.<dotPath>.label / .helpText / .placeholder
@@ -65,7 +69,12 @@
  */
 
 import type { TranslationBundle, TranslationData } from '@objectstack/spec/system';
-import { METADATA_FORM_REGISTRY, PAGE_COMPONENT_COPY_KEYS } from '@objectstack/spec/system';
+import {
+  METADATA_FORM_REGISTRY,
+  PAGE_COMPONENT_COPY_KEYS,
+  FLOW_SCREEN_COPY_KEYS,
+  FLOW_SCREEN_FIELD_COPY_KEYS,
+} from '@objectstack/spec/system';
 import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';
 import { deriveFieldGroupLayout } from '@objectstack/spec/data';
 import { expandViewContainer } from '@objectstack/spec/ui';
@@ -110,6 +119,7 @@ export interface ExpectedEntry {
     | 'dashboard'
     | 'widget'
     | 'page'
+    | 'flow'
     | 'metadataType'
     | 'metadataFormSection'
     | 'metadataFormField';
@@ -119,6 +129,8 @@ export interface ExpectedEntry {
   appName?: string;
   /** Metadata type name when applicable (for `--filter` matching). */
   metadataType?: string;
+  /** Flow name when applicable (for `--filter` matching). */
+  flowName?: string;
 }
 
 export type FillStrategy = 'empty' | 'default' | 'todo';
@@ -249,7 +261,7 @@ function pushViewEmptyState(out: ExpectedEntry[], viewPath: string[], view: any,
   }
 }
 
-type EntryScope = Pick<ExpectedEntry, 'objectName' | 'appName' | 'metadataType'>;
+type EntryScope = Pick<ExpectedEntry, 'objectName' | 'appName' | 'metadataType' | 'flowName'>;
 
 /** Narrow to a usable source string; an empty string is not authored text. */
 function inlineText(value: unknown): string | undefined {
@@ -873,6 +885,9 @@ export function collectExpectedEntries(config: any): ExpectedEntry[] {
     }
   }
 
+  // ── Screen flows (`flows.<flow>.screens.<node>.…`, #7646 / #11287) ─
+  walkScreenFlows(config, out);
+
   // ── Object sections (fieldGroups + authored form/page sections) ───
   // Deliberately a pass of its own: the two authoring surfaces live in
   // `objects`, `views` and `pages`, and one section may be declared by more
@@ -891,6 +906,105 @@ export function collectExpectedEntries(config: any): ExpectedEntry[] {
   walkMetadataForms(out);
 
   return out;
+}
+
+// ─── Screen flows (`flows.<flow>.screens.<node_id>.…`) ─────────────────
+
+/**
+ * The one flow-node type whose copy the bundle addresses. Spelled once here
+ * rather than at each guard; the resolver's own constant is module-private,
+ * and `translateScreenNode` filters on exactly this value.
+ */
+const SCREEN_NODE_TYPE = 'screen';
+
+/**
+ * Emit the screen-flow copy surface (#7646, resolver landed in #11287).
+ *
+ * **The hole this closes.** A `type: 'screen'` flow is a wizard the user
+ * reads — a heading and a list of labelled inputs — and this walker had no
+ * pass for it, so `os lint` could not report a screen-flow copy gap and
+ * `os i18n extract` never scaffolded the keys. HotCRM measured
+ * `0 i18n/missing-*` on a tree whose six screen dialogs rendered English in
+ * all four locales: the gate was green because the surface was invisible to
+ * it, not because the app was translated.
+ *
+ * **The key face is IMPORTED, never restated.** {@link FLOW_SCREEN_COPY_KEYS}
+ * and {@link FLOW_SCREEN_FIELD_COPY_KEYS} are exported by
+ * `@objectstack/spec/system` precisely so this scaffolder and the resolver
+ * that reads the bundle cannot drift — a local copy, however correct on the
+ * day it is written, is the drift the export exists to make impossible. The
+ * schema↔list agreement is pinned spec-side in `translation.test.ts`.
+ *
+ * Addressing (`translation.zod.ts`, `flows`): flow by `Flow.name`, screen by
+ * `FlowNode.id` (the client's `ScreenSpec.nodeId`), field by
+ * `ScreenFieldConfig.name` — every level an identifier some consumer already
+ * holds at render time.
+ *
+ * Two seeding rules worth stating, both measured against what the reader sees
+ * rather than against which key the author happened to fill in:
+ *
+ * - **A screen's `title` falls back to the node `label`.** The executor builds
+ *   the wire title as `config.title ?? node.label` (`ScreenSpec.title`), and
+ *   `translateFlow` overlays the bundle onto `config.title` for that reason —
+ *   one key covers whichever of the two the runner draws. So the seed, and the
+ *   `inline` the coverage gate judges, is that same pair: a screen with only a
+ *   canvas label still shows English text a translator owes a translation for.
+ * - **A field's `label` falls back to its `name`.** `ScreenFieldConfig.label`
+ *   is optional and forwarded as-is (`ScreenFieldSpec.label`), so the runner
+ *   renders the field name when the author wrote no label. That is a derived
+ *   fallback nobody authored — {@link pushDerived}, so the skeleton stays
+ *   usable while the gate demands no translation of a string that does not
+ *   exist.
+ *
+ * A screen node whose `waitForInput` is `false` is deliberately NOT skipped:
+ * `translateFlow` overlays every screen node, and a walker that skipped one
+ * would re-open the extractable-but-ungated gap in miniature.
+ */
+function walkScreenFlows(config: any, out: ExpectedEntry[]): void {
+  const flows: any[] = Array.isArray(config?.flows) ? config.flows : [];
+  for (const flow of flows) {
+    const flowName = typeof flow?.name === 'string' && flow.name.length > 0 ? flow.name : undefined;
+    if (!flowName) continue;
+    const scope: EntryScope = { flowName };
+
+    // `flows.<flow>.label` — `lookupFlowLabel`'s key. `Flow.label` is required
+    // by the schema, so this is authored text in practice; `pushOptional`
+    // keeps a label-less flow from seeding an empty string anyway.
+    pushOptional(out, ['flows', flowName, 'label'], flow.label, 'flow', scope);
+
+    const nodes: any[] = Array.isArray(flow.nodes) ? flow.nodes : [];
+    for (const node of nodes) {
+      if (!node || typeof node !== 'object' || node.type !== SCREEN_NODE_TYPE) continue;
+      const nodeId = typeof node.id === 'string' && node.id.length > 0 ? node.id : undefined;
+      // No id, no key: `translateScreenNode` cannot address the node either.
+      if (!nodeId) continue;
+      const cfg = node.config && typeof node.config === 'object' ? node.config : {};
+      const screenRoot = ['flows', flowName, 'screens', nodeId];
+
+      for (const key of FLOW_SCREEN_COPY_KEYS) {
+        const authored = key === 'title'
+          ? (inlineText(cfg[key]) ?? inlineText(node.label))
+          : inlineText(cfg[key]);
+        pushOptional(out, [...screenRoot, key], authored, 'flow', scope);
+      }
+
+      const fields: any[] = Array.isArray(cfg.fields) ? cfg.fields : [];
+      for (const field of fields) {
+        const fieldName = typeof field?.name === 'string' && field.name.length > 0 ? field.name : undefined;
+        // An item with an empty name is dropped by the runner too.
+        if (!fieldName) continue;
+        const fieldRoot = [...screenRoot, 'fields', fieldName];
+        for (const key of FLOW_SCREEN_FIELD_COPY_KEYS) {
+          const authored = inlineText(field[key]);
+          if (key === 'label') {
+            pushDerived(out, [...fieldRoot, key], authored ?? fieldName, authored, 'flow', scope);
+          } else {
+            pushOptional(out, [...fieldRoot, key], authored, 'flow', scope);
+          }
+        }
+      }
+    }
+  }
 }
 
 /**
@@ -1006,6 +1120,7 @@ function passesFilter(entry: ExpectedEntry, filter?: RegExp): boolean {
   if (entry.objectName && filter.test(entry.objectName)) return true;
   if (entry.appName && filter.test(entry.appName)) return true;
   if (entry.metadataType && filter.test(entry.metadataType)) return true;
+  if (entry.flowName && filter.test(entry.flowName)) return true;
   // Allow matching against the joined path so users can target e.g. ^dashboards\.system_
   return filter.test(entry.path.join('.'));
 }

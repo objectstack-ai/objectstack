@@ -91,12 +91,33 @@ const thrownWithStatus = (status: number, code?: unknown) =>
     Object.assign(new Error('boom'), { status, ...(code !== undefined ? { code } : {}) });
 const thrownWithStatusCode = (statusCode: number, code?: unknown) =>
     Object.assign(new Error('boom'), { statusCode, ...(code !== undefined ? { code } : {}) });
+/**
+ * [#10345] `runtime/src/sandbox/quickjs-runner.ts`'s `SandboxError`: the debug
+ * wrapper on `.message`, the business text on `.innerMessage`. Reaches the
+ * unwrap door, which sits above the passthrough.
+ */
+const sandboxThrownWithStatus = (status: number, code?: unknown) => {
+    const err: any = Object.assign(new Error("hook 'g' threw: Error: boom"), {
+        status, ...(code !== undefined ? { code } : {}),
+    });
+    err.name = 'SandboxError';
+    err.innerMessage = 'boom';
+    return err;
+};
 
 /**
- * The four flat arms a thrown error can leave through, each reached by the
+ * The flat arms a thrown error can leave through, each reached by the
  * spelling/band combination named beside it. Enumerated rather than tested one
  * at a time because the defect this card measured was FOUR verbatim
  * passthroughs, and a fix that reached three of them would read as done.
+ *
+ * [#10345] A FIFTH arm joined the list. The sandbox unwrap door emitted no
+ * `code` at all, so #9232 had nothing to narrow there and left it out — and
+ * "no code, ever" is exactly the shape a vocabulary sweep cannot see. It now
+ * carries the producer's declared code like its four siblings, so it is
+ * enumerated here rather than pinned only in its own file: the rule this
+ * table states is "every flat arm", and an arm that is not in the table is an
+ * arm the next narrowing will miss again.
  */
 const ARMS = [
     {
@@ -124,6 +145,17 @@ const ARMS = [
             return { status: r.status, body: r.body };
         },
         status: 503,
+    },
+    {
+        // [#10345] The sandbox unwrap — reached by `.innerMessage` plus a
+        // declared client-band status, and the ONLY arm whose body text is the
+        // unwrapped business message rather than `error.message`.
+        name: 'mapDataError sandbox unwrap 4xx (`.innerMessage`)',
+        answer: (code: unknown) => {
+            const r = mapDataError(sandboxThrownWithStatus(409, code));
+            return { status: r.status, body: r.body };
+        },
+        status: 409,
     },
 ] as const;
 
