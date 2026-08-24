@@ -330,7 +330,9 @@ interface Surface {
    *  wipes it on entry, so the second surface would delete the first's blocks.
    *  Sequential execution hides that today, but `--keep` would silently retain
    *  only the last surface's dir. Defaults to `.examples-build`; every value
-   *  needs a `.gitignore` entry. `assertDistinctBuildDirs()` enforces it. */
+   *  needs a `.gitignore` entry — `assertDistinctBuildDirs()` enforces that no
+   *  two surfaces collide, `assertGitignoredBuildDirs()` enforces that the
+   *  entry actually exists (#11440). */
   buildDirName?: string;
   /** package.json dirs whose `exports` become explicit `paths` entries —
    *  what lets a block `import` its own surface's package by name. */
@@ -1204,6 +1206,61 @@ function selfTest(): never {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 
+  // ── Gitignore coverage (#11440). `assertGitignoredBuildDirs()` runs against
+  //    the REAL repo on every invocation (pinned below, over the true
+  //    SURFACES/REPO_ROOT); this fixture pins the predicate underneath it —
+  //    `isGitIgnored` / `findUnignoredBuildDir` — against a throwaway git repo,
+  //    in both directions. Same "a guard that can only ever return null is
+  //    indistinguishable from a correct config" reasoning as the build-dir-
+  //    distinctness fixture just above: without the negative case, a detector
+  //    that always reports "ignored" would pass every run silently.
+  const gitDir = fs.mkdtempSync(path.join(os.tmpdir(), 'skill-examples-gitignore-selftest-'));
+  try {
+    // Local copy: the build-dir-distinctness fixture's `surfaceStub` above is
+    // scoped to its own `try` block and does not reach here.
+    const surfaceStub = (name: string, resolutionDir: string, buildDirName?: string): Surface => ({
+      name,
+      roots: [],
+      resolutionDir,
+      buildDirName,
+      selfPackages: [],
+    });
+    spawnSync('git', ['init', '-q'], { cwd: gitDir });
+    fs.writeFileSync(path.join(gitDir, '.gitignore'), '.examples-build/\n', 'utf8');
+    const ignoredSurface = surfaceStub('ignored-surface', gitDir); // default build dir: .examples-build
+    const unignoredSurface = surfaceStub('unignored-surface', gitDir, '.examples-build-uncovered');
+
+    check(
+      isGitIgnored(buildDirOf(ignoredSurface), gitDir),
+      'gitignore fixture: a build dir covered by .gitignore was reported as NOT ignored',
+    );
+    check(
+      !isGitIgnored(buildDirOf(unignoredSurface), gitDir),
+      'gitignore fixture: a build dir with NO .gitignore coverage was reported as ignored',
+    );
+    check(
+      findUnignoredBuildDir([ignoredSurface], gitDir) === null,
+      'gitignore fixture: a fully-covered surface list was reported as having an unignored dir',
+    );
+    const gap = findUnignoredBuildDir([ignoredSurface, unignoredSurface], gitDir);
+    check(
+      gap !== null && gap.name === 'unignored-surface',
+      `gitignore fixture: the unignored surface was NOT flagged (got ${JSON.stringify(gap)}) — this is the ` +
+        'exact defect #11440 describes: the gap is invisible on a clean run and only a dedicated assert catches it',
+    );
+
+    // The real-repo check `assertGitignoredBuildDirs()` runs unconditionally in
+    // `main()`: reverse-verified by running this self-test against origin/main
+    // BEFORE the `.gitignore` fix landed, where it failed naming exactly
+    // "client SDK (@objectstack/client-react, @objectstack/client)".
+    check(
+      findUnignoredBuildDir(SURFACES) === null,
+      'gitignore fixture: a REAL surface build dir is not covered by .gitignore — see assertGitignoredBuildDirs()',
+    );
+  } finally {
+    fs.rmSync(gitDir, { recursive: true, force: true });
+  }
+
   if (failures.length > 0) {
     for (const f of failures) console.error(`✗ self-test: ${f}`);
     console.error(`\ncheck-skill-examples --self-test: ${failures.length} failure(s).\n`);
@@ -1217,7 +1274,8 @@ function selfTest(): never {
       '    shown as example text inside another fenced block is not an orphan, while a genuine\n' +
       '    top-level misplaced marker still is; a gutter-wrapped ```ts block (spec-source\n' +
       '    surface) extracts with the right build extension, body and line mapping, its\n' +
-      '    `.test.ts` sibling is skipped, and two surfaces sharing one build dir are caught.',
+      '    `.test.ts` sibling is skipped, two surfaces sharing one build dir are caught, and a\n' +
+      '    surface whose build dir is not covered by .gitignore is caught too.',
   );
   process.exit(0);
 }
@@ -1261,6 +1319,60 @@ function assertDistinctBuildDirs(): void {
   }
 }
 
+/**
+ * True when `dir` (an absolute path) is covered by `.gitignore`, judged from `cwd`.
+ *
+ * Every real build dir uses a directory-only `.gitignore` pattern (a trailing
+ * `/`), and git only matches those against a path it can see IS a directory —
+ * either because the path exists on disk, or because the query itself carries
+ * a trailing separator. A build dir is normally absent (this gate deletes it
+ * on exit — that is the whole trap #11440 describes), so querying the bare
+ * path reads every real surface as "not ignored" even when `.gitignore` is
+ * correct: measured against all three surfaces in this file before adding the
+ * trailing separator below. `git check-ignore -q` exits 0 when ignored, 1
+ * when not — never throw on the "not ignored" case, it is the expected
+ * negative result `findUnignoredBuildDir` below is built to see.
+ */
+function isGitIgnored(dir: string, cwd: string = REPO_ROOT): boolean {
+  const res = spawnSync('git', ['check-ignore', '-q', `${dir}${path.sep}`], { cwd, encoding: 'utf-8' });
+  return res.status === 0;
+}
+
+/**
+ * The first surface whose build dir `.gitignore` does not cover, or null.
+ *
+ * `assertDistinctBuildDirs` above stops two surfaces from wiping each other;
+ * nothing stopped a THIRD kind of mistake — a surface whose build dir nobody
+ * ever added to `.gitignore` at all. #10969 added the client SDK surface (its
+ * `resolutionDir` is `packages/client-react`, not `packages/spec`, because it
+ * needs react's real types) and its `.examples-build/` sat unignored for two
+ * cards before anyone noticed: invisible on every clean run (this gate
+ * deletes the dir on exit), and only surfaced by `--keep` or a run killed
+ * mid-flight, at which point `git add -A` — routine in this repo — commits
+ * the extracted blocks into whatever PR is open. This walks `SURFACES` so a
+ * fourth surface gets the same check for free, the same reasoning
+ * `assertDistinctBuildDirs` already applies one class over.
+ */
+function findUnignoredBuildDir(surfaces: Surface[], cwd: string = REPO_ROOT): { dir: string; name: string } | null {
+  for (const surface of surfaces) {
+    const dir = buildDirOf(surface);
+    if (!isGitIgnored(dir, cwd)) return { dir, name: surface.name };
+  }
+  return null;
+}
+
+function assertGitignoredBuildDirs(): void {
+  const gap = findUnignoredBuildDir(SURFACES);
+  if (gap) {
+    fail(
+      `Surface "${gap.name}"'s build dir ${rel(gap.dir)} is not covered by .gitignore.\n\n` +
+        `  This gate deletes the dir on a clean run, so the gap is invisible until \`--keep\`\n` +
+        `  or an interrupted run leaves it behind — at which point a routine \`git add -A\`\n` +
+        `  commits the extracted blocks into someone's PR. Add \`${rel(gap.dir)}/\` to .gitignore.`,
+    );
+  }
+}
+
 /** A package.json's own `name` field — used to look its self-entry up in the
  *  `paths` map `surfacePaths()` derived from it. */
 function pkgName(pkgDir: string): string {
@@ -1271,6 +1383,7 @@ function main() {
   if (SELF_TEST) selfTest();
 
   assertDistinctBuildDirs();
+  assertGitignoredBuildDirs();
 
   console.log(`🧪 Type-checking prose TypeScript examples (${SURFACES.map((s) => s.name).join(' · ')})...\n`);
 
