@@ -32,6 +32,16 @@ function makeQl(declared: any[] = []) {
     object === 'sys_permission_set' ? permRows : object === 'sys_metadata' ? metaRows : null;
   const matches = (r: any, where: any) =>
     Object.entries(where ?? {}).every(([k, v]) => {
+      // REFUSE the combinators this double does not implement rather than
+      // reading `$and`/`$or` as a column name (check:where-matcher /
+      // #8494) -- neither code path under test here (drift detection reads
+      // sys_permission_set/sys_metadata by id/name/type/state, batched by
+      // `$in` via `buildExistingByName`) ever issues one; a matcher that
+      // silently treated a combinator as a field name would let a future
+      // combinator query pass this suite while answering the wrong rows.
+      if (k.startsWith('$')) {
+        throw new Error(`fake driver: unsupported combinator ${k}`);
+      }
       if (v && typeof v === 'object' && !Array.isArray(v)) {
         const inList = (v as any).$in;
         if (Array.isArray(inList)) return inList.includes(r[k]);

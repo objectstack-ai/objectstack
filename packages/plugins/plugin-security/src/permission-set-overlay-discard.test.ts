@@ -31,7 +31,18 @@ function makeQl(declared: any[] = []) {
   const tableFor = (object: string) =>
     object === 'sys_permission_set' ? permRows : object === 'sys_metadata' ? metaRows : null;
   const matches = (r: any, where: any) =>
-    Object.entries(where ?? {}).every(([k, v]) => r[k] === v);
+    Object.entries(where ?? {}).every(([k, v]) => {
+      // REFUSE the combinators this double does not implement rather than
+      // reading `$and`/`$or` as a column name (check:where-matcher /
+      // #8494) -- discardPermissionSetOverlay's ql.find/update/delete calls
+      // (by id, or by type+name+state) never issue one; a matcher that
+      // silently treated a combinator as a field name would let a future
+      // combinator query pass this suite while answering the wrong rows.
+      if (k.startsWith('$')) {
+        throw new Error(`fake driver: unsupported combinator ${k}`);
+      }
+      return r[k] === v;
+    });
   return {
     permRows,
     metaRows,
