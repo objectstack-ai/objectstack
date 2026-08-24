@@ -3,6 +3,7 @@ import {
   PLATFORM_CAPABILITY_TOKENS,
   isKnownPlatformCapability,
   PLATFORM_CAPABILITY_PROVIDERS,
+  PLATFORM_PLUGIN_WIRED_RUNTIMES,
   PLATFORM_ALWAYS_ON_CAPABILITIES,
   classifyRequiredCapability,
 } from './platform-capabilities';
@@ -66,6 +67,53 @@ describe('PLATFORM_CAPABILITY_PROVIDERS', () => {
       if (p.package !== null) expect(p.package.startsWith('@')).toBe(true);
       // A packageless provider only makes sense for a cloud-runtime tier.
       if (p.package === null) expect(p.edition).toBe('cloud');
+    }
+  });
+});
+
+// #11263 — the companion roster for `plugins[]`-wired out-of-repo runtimes,
+// which the token-keyed provider map structurally cannot describe (no
+// `requires` token to key a row by). Shape invariants live here; the
+// cross-registry drift pins (edition agreement with the token-keyed map, the
+// serve-resolver exclusions) live in the CLI's
+// `serve-capability-vocabulary.test.ts` beside the map's own 1:1 pins.
+describe('PLATFORM_PLUGIN_WIRED_RUNTIMES (#11263)', () => {
+  it('is frozen and non-empty', () => {
+    expect(Object.isFrozen(PLATFORM_PLUGIN_WIRED_RUNTIMES)).toBe(true);
+    expect(Object.keys(PLATFORM_PLUGIN_WIRED_RUNTIMES).length).toBeGreaterThan(0);
+  });
+
+  it('every key is an @objectstack/ npm package name — the key IS the package', () => {
+    for (const pkg of Object.keys(PLATFORM_PLUGIN_WIRED_RUNTIMES)) {
+      expect(pkg).toMatch(/^@objectstack\/[a-z0-9-]+$/);
+    }
+  });
+
+  it('every row carries a non-empty provenance note — recording it is the roster’s whole job', () => {
+    for (const [pkg, row] of Object.entries(PLATFORM_PLUGIN_WIRED_RUNTIMES)) {
+      expect(row.note.trim().length, `empty note for '${pkg}'`).toBeGreaterThan(0);
+      // The type already excludes 'open'; assert the runtime value too so a
+      // cast or a JS caller cannot smuggle one in.
+      expect(['enterprise', 'cloud'], `bad edition for '${pkg}'`).toContain(row.edition);
+    }
+  });
+
+  it('keys are DISJOINT from the capability vocabulary — package names, never tokens', () => {
+    // The single-list rule's load-bearing half: this roster must never grow a
+    // second way to spell a `requires` token. A key that is also a vocabulary
+    // token would be exactly the divergent second description the provider
+    // map's header warns against.
+    for (const pkg of Object.keys(PLATFORM_PLUGIN_WIRED_RUNTIMES)) {
+      expect(PLATFORM_CAPABILITY_TOKENS).not.toContain(pkg);
+    }
+  });
+
+  it('no roster package is an open-edition provider package — plugins[]-wired means not requires-resolved as open', () => {
+    const openPackages = Object.values(PLATFORM_CAPABILITY_PROVIDERS)
+      .filter((p) => p.edition === 'open')
+      .map((p) => p.package);
+    for (const pkg of Object.keys(PLATFORM_PLUGIN_WIRED_RUNTIMES)) {
+      expect(openPackages).not.toContain(pkg);
     }
   });
 });

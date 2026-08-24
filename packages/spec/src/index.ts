@@ -199,12 +199,17 @@ export {
   PLATFORM_CAPABILITY_TOKENS,
   isKnownPlatformCapability,
   PLATFORM_CAPABILITY_PROVIDERS,
+  // The `plugins[]`-wired out-of-repo runtimes the token-keyed map structurally
+  // cannot describe (no `requires` token to key a row by) — provenance only,
+  // never resolution (#10921, #11263).
+  PLATFORM_PLUGIN_WIRED_RUNTIMES,
   // The foundational slate every server-side runtime mounts (cloud#925, #3786) —
   // one declaration for `objectstack serve` and cloud's per-tenant runtime alike.
   PLATFORM_ALWAYS_ON_CAPABILITIES,
   classifyRequiredCapability,
   type CapabilityEdition,
   type PlatformCapabilityProvider,
+  type PlatformPluginWiredRuntime,
   type CapabilityProviderStatus,
   type CapabilityClassification,
 } from './kernel/platform-capabilities';
