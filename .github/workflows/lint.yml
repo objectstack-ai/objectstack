@@ -1101,6 +1101,23 @@ jobs:
       - name: Quick-reference section counts match their tables
         run: pnpm check:quick-reference-counts
 
+      # #11752: the "Overlay whitelist (shared-DB tenancy invariant)" table in
+      # metadata-lifecycle.mdx is a hand-kept copy of DEFAULT_METADATA_TYPE_REGISTRY
+      # sitting directly under the sentence that calls the registry the single
+      # machine-readable source. It drifted on FOUR types (flow/permission/position
+      # said ✅ against a registry that says ❌ after the #6283/#6483 rollbacks;
+      # `translation` is ✅ in the registry and had no row at all) and was caught by
+      # a human fact-checking a promo video (#11664), not by CI. The gate compares
+      # both directions — a table→registry check alone passes a table missing a
+      # whole row, which is exactly how `translation` survived — and reads the
+      # registry by AST: the same-line regex sees 26 of the 27 entries, because
+      # `datasource` opens its brace on its own line.
+      # It lives in this job with the other docs guards: the edit that breaks it is
+      # a docs edit, so a packages/** paths filter would blind it to its own
+      # failure mode.
+      - name: Overlay whitelist table matches the metadata type registry
+        run: pnpm check:overlay-whitelist-table
+
       # #9604: the runtime-services chapter's pages are enumerated in three
       # hand-written places (meta.json "pages", the chapter list in
       # runtime-services/index.mdx, the services.* table in kernel/index.mdx) and
