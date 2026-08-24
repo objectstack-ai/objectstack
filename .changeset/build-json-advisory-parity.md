@@ -53,7 +53,7 @@ defined", and two manifest ones) from `collectMetadataStats`; `os compile`
 calls that same helper but computes none of them, in any face. That makes it a
 missing computation rather than a dropped list, and whether a command that
 writes an artifact should raise them is a judgment rather than a mechanical
-port. It is reported on #11727 and pinned as the only remaining residue between
+port. It is split out as #11896 and pinned as the only remaining residue between
 the two payloads, so the question stays visible and a fifth genuinely dropped
 list cannot hide in the gap.
 

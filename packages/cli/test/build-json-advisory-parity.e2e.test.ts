@@ -54,7 +54,8 @@
  * the inputs are present and identical and only the computation is absent,
  * which makes "should a command that writes an artifact advise 'No apps or
  * plugins defined'?" a judgment rather than a mechanical port. #11727 fixes the
- * two genuinely dropped lists and reports this one.
+ * two genuinely dropped lists and splits this one out as #11896, which is
+ * where the judgment is made and which outlives #11727 closing.
  *
  * The last pin below makes that report executable: the build/validate residue
  * must be structural advisories and nothing else. A future port of them turns
@@ -332,7 +333,7 @@ describe('#11727 — `os build --json` carries the capability-provider and packa
     }
   }, 180_000);
 
-  it('the ONLY residue between the two payloads is the structural advisory set — reported on #11727, not ported', async () => {
+  it('the ONLY residue between the two payloads is the structural advisory set — deferred to #11896, not ported', async () => {
     // The executable half of this card's third finding. `os validate` derives
     // four structural advisories from `collectMetadataStats`; `os compile`
     // calls that same helper but computes none of them, in any face — a MISSING

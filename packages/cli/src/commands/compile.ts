@@ -581,7 +581,9 @@ export default class Compile extends Command {
           // in any face). That makes it a MISSING COMPUTATION rather than a
           // dropped list — and whether a command that writes an artifact should
           // advise "No apps or plugins defined" is a judgment, not a mechanical
-          // port. Measured and reported on #11727 rather than decided here.
+          // port. Measured on #11727 (this change) and split out as #11896,
+          // which is where that judgment is made — deliberately NOT this card,
+          // which #11727 closes.
           warnings: [...ruleAdvisories, ...docWarnings, ...unknownKeyWarnings, ...capProviderWarnings],
           // [#10678] Body-extraction failures that made a callable fall back to
           // the legacy .mjs bundle. A SEPARATE key on purpose, and the reason is
