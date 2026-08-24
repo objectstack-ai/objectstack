@@ -130,6 +130,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
           shared: "已共享",
           assigned: "已分配",
           completed: "已完成",
+          scheduled: "已安排",
           login: "登录",
           logout: "登出",
           system: "系统"

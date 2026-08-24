@@ -14,7 +14,7 @@ import { SysActivity } from './index.js';
  * insert and the update branch (`objectql/src/validation/record-validator.ts`),
  * so the `invalid_option` check that enforces a `select` field's declared
  * options never runs for one. Every `sys_activity` field is `readonly: true`,
- * which makes its eleven-value `type` enum **documentation, not a contract**:
+ * which makes its declared `type` enum **documentation, not a contract**:
  * an undeclared value is written silently, and narrowing the enum away from a
  * value a writer still emits is equally silent.
  *
@@ -53,9 +53,9 @@ import { SysActivity } from './index.js';
  *
  * Recorded because it changes what "no writer" licenses. objectui's
  * `packages/plugin-detail/src/renderers/recordActivityFeed.ts` maps
- * `sys_activity.type` onto a feed item type, and its key set is set-equal to
- * this enum today — the seven writerless values included. Six carry a
- * deliberate rendering decision (`assigned` / `shared` map to `field_change`,
+ * `sys_activity.type` onto a feed item type, and its key set was set-equal to
+ * this enum at the #8203 census — the seven writerless values included. Six
+ * carry a deliberate rendering decision (`assigned` / `shared` map to `field_change`,
  * `system` to `system`; `commented` / `mentioned` / `login` / `logout` are
  * dropped as not-record-activity). So a writer census answers "may this value
  * be retired?" only in part: a second consumer sits across a repo boundary,
@@ -64,7 +64,10 @@ import { SysActivity } from './index.js';
  * That mirror is unguarded in both directions — objectui pins its key set
  * against a hardcoded literal rather than against this declaration, so an
  * addition here does not reach it. Filed as #8852; deliberately NOT asserted
- * here, since this package cannot import objectui.
+ * here, since this package cannot import objectui. Per objectstack-ai/objectui#5840
+ * that map has since been widened past the declaration to cover values a shipped
+ * producer measurably writes, so the two key sets are no longer set-equal —
+ * recorded from that card, not measured here, for the same reason.
  */
 
 /**
@@ -83,7 +86,20 @@ const TYPES_WITH_WRITERS: ReadonlyArray<readonly [type: string, writer: string]>
     'author-declared `activityMilestones[].type` (ADR-0052 §5b.2), applied by '
       + 'audit-writers.ts `if (milestone.type) activityType = milestone.type`. Shipped '
       + 'declaration: examples/app-showcase/src/data/objects/task.object.ts — '
-      + "{ field: 'status', value: 'done', type: 'completed' }.",
+      + "{ field: 'status', value: 'done', type: 'completed' }. ALSO written directly "
+      + 'by an app action, through the door the `scheduled` row describes: '
+      + "objectstack-ai/hotcrm src/actions/contact.actions.ts inserts type: 'completed' "
+      + 'on the send_email body.',
+  ],
+  [
+    'scheduled',
+    'objectstack-ai/hotcrm src/actions/global.actions.ts — the `schedule_meeting` '
+      + "action body runs `ctx.api.object('sys_activity').insert({ type: EVENT_STATUS "
+      + "=== 'held' ? 'completed' : 'scheduled', … })`, and SCHEDULE_MEETING_SPEC "
+      + "declares `eventStatus: 'planned'`, so this action always takes the "
+      + '`scheduled` branch. Registered on crm_lead / crm_contact / crm_account / '
+      + 'crm_opportunity / crm_case via activityActionFor(). Read at hotcrm 5eee1bd '
+      + 'on 2026-08-24 (#11424).',
   ],
 ];
 
@@ -99,6 +115,15 @@ const TYPES_WITH_WRITERS: ReadonlyArray<readonly [type: string, writer: string]>
  * missed — so the technique demonstrably finds writers when they exist. Beyond
  * that single site the only other way into this column is an author-declared
  * milestone `type`, which is why `completed` is in the list above.
+ *
+ * ⚠️ That sweep is IN-REPO, and in-repo is not the whole population. An app's
+ * server-side action reaches this column directly —
+ * `ctx.api.object('sys_activity').insert({ type: … })` — and no grep of this
+ * repository can see it. Both hotcrm entries in the list above were found by
+ * reading that repository, not by any instrument here (#11424, 2026-08-24).
+ * What that door means for the vocabulary is the open question on that card;
+ * it is recorded here only so the next census knows the sweep has a second
+ * half, and where it is.
  */
 const TYPES_WITHOUT_WRITER_AT_CENSUS: ReadonlyArray<readonly [type: string, searched: string]> = [
   ['commented', 'no writer: sys_comment hooks write comment rows, never a sys_activity row'],

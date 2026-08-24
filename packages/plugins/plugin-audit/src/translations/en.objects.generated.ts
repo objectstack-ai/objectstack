@@ -130,6 +130,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
           shared: "shared",
           assigned: "assigned",
           completed: "completed",
+          scheduled: "scheduled",
           login: "login",
           logout: "logout",
           system: "system"

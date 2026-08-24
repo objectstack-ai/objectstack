@@ -64,6 +64,7 @@ export const SysActivity = ObjectSchema.create({
         'shared',
         'assigned',
         'completed',
+        'scheduled',
         'login',
         'logout',
         'system',
