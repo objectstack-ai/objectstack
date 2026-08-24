@@ -233,7 +233,7 @@
         }
       ],
       "negative": [
-        "a gated file downloadable anonymously (silent success) is a FAIL — UI absence of a download button is a client courtesy; the route is the authority (ADR-0057 D10)",
+        "a gated file downloadable anonymously (silent success) is a FAIL — UI absence of a download button is a client courtesy; the route is the authority (ADR-0124 D1)",
         "a deny that surfaces in the panel as 'Download failed (403)' instead of the mapped copy means the error-envelope dialect broke (#3689 note in the panel) — file it against objectui, not storage"
       ],
       "traps": ["wrong-persona", "dispatcher-vs-hono-route", "stale-console-bundle"],

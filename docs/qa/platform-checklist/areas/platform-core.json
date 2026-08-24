@@ -518,7 +518,7 @@
           "evidence": "three screenshots"
         },
         {
-          "clause": "the app-level gate is server-side, not a client courtesy: a forged member GET /api/v1/meta/app?id=setup is denied/empty at the server, not merely hidden in the launcher (ADR-0057 D10 both-sides)",
+          "clause": "the app-level gate is server-side, not a client courtesy: a forged member GET /api/v1/meta/app?id=setup is denied/empty at the server, not merely hidden in the launcher (ADR-0124 D1 both-sides)",
           "oracle": "api",
           "verify": "the forged request's status/body proves server-side denial",
           "evidence": "the forged response"
