@@ -8,6 +8,10 @@ import {
   EmailAndPasswordConfigSchema,
   EmailVerificationConfigSchema,
   AdvancedAuthConfigSchema,
+  AudienceConfigSchema,
+  AUDIENCE_POSTURES,
+  isAudiencePosture,
+  audiencePermitsSelfRegistration,
 } from './auth-config.zod';
 
 describe('AuthProviderConfigSchema', () => {
@@ -412,5 +416,95 @@ describe('AuthConfigSchema – new passthrough fields', () => {
     expect(config.emailAndPassword?.requireEmailVerification).toBe(true);
     expect(config.emailVerification?.sendOnSignUp).toBe(true);
     expect(config.advanced?.crossSubDomainCookies?.enabled).toBe(true);
+  });
+});
+
+describe('AudienceConfigSchema (#11739)', () => {
+  it('defaults an undeclared posture to invite_only (the ruled safe default)', () => {
+    const parsed = AudienceConfigSchema.parse({});
+    expect(parsed.posture).toBe('invite_only');
+  });
+
+  it('exposes the closed vocabulary as a runtime value list with a type guard', () => {
+    expect(AUDIENCE_POSTURES).toEqual(['invite_only', 'email_domain', 'open']);
+    for (const p of AUDIENCE_POSTURES) expect(isAudiencePosture(p)).toBe(true);
+    // Off-vocabulary values — including the fail-open shapes the
+    // MembershipPolicy precedent exists for — are NOT postures.
+    for (const bad of ['inviteOnly', 'invite-only', 'OPEN', 'domain', '', null, undefined, 0, {}]) {
+      expect(isAudiencePosture(bad)).toBe(false);
+    }
+  });
+
+  it('classifies which postures permit self-registration', () => {
+    expect(audiencePermitsSelfRegistration('invite_only')).toBe(false);
+    expect(audiencePermitsSelfRegistration('email_domain')).toBe(true);
+    expect(audiencePermitsSelfRegistration('open')).toBe(true);
+  });
+
+  it('refuses an off-vocabulary posture loudly (never coerces)', () => {
+    for (const bad of ['inviteOnly', 'invite-only', 'Open', 'anything']) {
+      expect(() => AudienceConfigSchema.parse({ posture: bad })).toThrow();
+    }
+  });
+
+  it('email_domain requires a non-empty domain list (completeness predicate)', () => {
+    expect(() => AudienceConfigSchema.parse({ posture: 'email_domain', selfRegistrationPermissionSet: 'portal_user' })).toThrow(/allowedEmailDomains/);
+    expect(() => AudienceConfigSchema.parse({
+      posture: 'email_domain', allowedEmailDomains: [], selfRegistrationPermissionSet: 'portal_user',
+    })).toThrow(/non-empty/);
+    const ok = AudienceConfigSchema.parse({
+      posture: 'email_domain', allowedEmailDomains: ['acme.com'], selfRegistrationPermissionSet: 'portal_user',
+    });
+    expect(ok.allowedEmailDomains).toEqual(['acme.com']);
+  });
+
+  it('refuses a domain list under a posture that never reads it (declared-but-inert, ADR-0078)', () => {
+    expect(() => AudienceConfigSchema.parse({
+      posture: 'invite_only', allowedEmailDomains: ['acme.com'],
+    })).toThrow(/inert/);
+    expect(() => AudienceConfigSchema.parse({
+      posture: 'open', allowedEmailDomains: ['acme.com'], selfRegistrationPermissionSet: 'portal_user',
+    })).toThrow(/inert/);
+  });
+
+  it('validates domain entry shape and refuses duplicates', () => {
+    for (const bad of ['@acme.com', 'https://acme.com', 'acme', '.acme.com', 'acme.com.', 'a cme.com', '*.acme.com', '']) {
+      expect(() => AudienceConfigSchema.parse({
+        posture: 'email_domain', allowedEmailDomains: [bad], selfRegistrationPermissionSet: 'portal_user',
+      })).toThrow();
+    }
+    expect(() => AudienceConfigSchema.parse({
+      posture: 'email_domain', allowedEmailDomains: ['acme.com', 'ACME.com'], selfRegistrationPermissionSet: 'portal_user',
+    })).toThrow(/duplicate/);
+  });
+
+  it('a self-registration-permitting posture requires the permission set declaration', () => {
+    expect(() => AudienceConfigSchema.parse({ posture: 'open' })).toThrow(/selfRegistrationPermissionSet/);
+    expect(() => AudienceConfigSchema.parse({
+      posture: 'email_domain', allowedEmailDomains: ['acme.com'],
+    })).toThrow(/selfRegistrationPermissionSet/);
+    // Declaring member_default EXPLICITLY is fine — what is retired is the fallback.
+    const ok = AudienceConfigSchema.parse({ posture: 'open', selfRegistrationPermissionSet: 'member_default' });
+    expect(ok.selfRegistrationPermissionSet).toBe('member_default');
+  });
+
+  it('refuses admin_full_access as the self-registration permission set', () => {
+    expect(() => AudienceConfigSchema.parse({
+      posture: 'open', selfRegistrationPermissionSet: 'admin_full_access',
+    })).toThrow(/admin_full_access/);
+  });
+
+  it('refuses a permission set declared under invite_only (inert there)', () => {
+    expect(() => AudienceConfigSchema.parse({
+      posture: 'invite_only', selfRegistrationPermissionSet: 'portal_user',
+    })).toThrow(/inert/);
+  });
+
+  it('rides AuthConfigSchema as the authorable `audience` key', () => {
+    const parsed = AuthConfigSchema.parse({
+      audience: { posture: 'email_domain', allowedEmailDomains: ['acme.com'], selfRegistrationPermissionSet: 'portal_user' },
+    });
+    expect((parsed.audience as { posture?: string } | undefined)?.posture).toBe('email_domain');
+    expect(() => AuthConfigSchema.parse({ audience: { posture: 'bogus' } })).toThrow();
   });
 });

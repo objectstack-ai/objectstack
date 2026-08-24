@@ -1,6 +1,6 @@
 ---
 title: Protocol Reference
-description: Every schema published by @objectstack/spec — 1586 schemas across 14 protocol modules
+description: Every schema published by @objectstack/spec — 1587 schemas across 14 protocol modules
 ---
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
@@ -31,9 +31,9 @@ counts are sums of the rows they head. Regenerate with
 | [Security Protocol](/docs/references/security) | 5 | 27 | Permission sets, row-level security, sharing rules, tenancy posture. |
 | [Shared Protocol](/docs/references/shared) | 8 | 31 | Primitives used across every protocol — identifiers, HTTP, expressions, error maps, enums. |
 | [Studio Protocol](/docs/references/studio) | 3 | 35 | Studio designer metadata — the authoring surfaces for the protocols above. |
-| [System Protocol](/docs/references/system) | 36 | 287 | The runtime environment — logging, jobs, cache, metrics, notifications, i18n and compliance. |
+| [System Protocol](/docs/references/system) | 36 | 288 | The runtime environment — logging, jobs, cache, metrics, notifications, i18n and compliance. |
 | [UI Protocol](/docs/references/ui) | 16 | 156 | Apps, pages, views, dashboards, reports, actions and themes — the ObjectUI layer. |
-| **Total** | **199** | **1586** | 14 protocol modules |
+| **Total** | **199** | **1587** | 14 protocol modules |
 
 ---
 
@@ -318,14 +318,14 @@ Studio designer metadata — the authoring surfaces for the protocols above.
 
 ## System Protocol
 
-**Source:** `packages/spec/src/system/` · **Import:** `@objectstack/spec/system` · **36 pages, 287 schemas**
+**Source:** `packages/spec/src/system/` · **Import:** `@objectstack/spec/system` · **36 pages, 288 schemas**
 
 The runtime environment — logging, jobs, cache, metrics, notifications, i18n and compliance.
 
 | File | Schemas |
 | :--- | :--- |
 | [`app-install.zod.ts`](/docs/references/system/app-install) | `AppCompatibilityCheck`, `AppInstallRequest`, `AppInstallResult`, `AppManifest` |
-| [`auth-config.zod.ts`](/docs/references/system/auth-config) | `AdvancedAuthConfig`, `AuthConfig`, `AuthPluginConfig`, `AuthProviderConfig`, `EmailAndPasswordConfig`, `EmailVerificationConfig`, `MutualTLSConfig`, `OidcProviderConfig`, `OidcProvidersConfig`, `SocialProviderConfig` |
+| [`auth-config.zod.ts`](/docs/references/system/auth-config) | `AdvancedAuthConfig`, `AudienceConfig`, `AuthConfig`, `AuthPluginConfig`, `AuthProviderConfig`, `EmailAndPasswordConfig`, `EmailVerificationConfig`, `MutualTLSConfig`, `OidcProviderConfig`, `OidcProvidersConfig`, `SocialProviderConfig` |
 | [`book.zod.ts`](/docs/references/system/book) | `Book`, `BookAudience`, `BookGroup`, `BookInclude`, `BookNode` |
 | [`cache.zod.ts`](/docs/references/system/cache) | `CacheAvalanchePrevention`, `CacheConfig`, `CacheConsistency`, `CacheInvalidation`, `CacheStrategy`, `CacheTier`, `CacheWarmup`, `DistributedCacheConfig` |
 | [`change-management.zod.ts`](/docs/references/system/change-management) | `ChangeImpact`, `ChangePriority`, `ChangeRequest`, `ChangeStatus`, `ChangeType`, `RollbackPlan` |
