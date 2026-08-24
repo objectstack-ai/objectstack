@@ -662,8 +662,31 @@ export const PageTabsProps = strictObject({
      * whole tab — header *and* panel — is omitted from the strip. This is the
      * item-level complement to a child component's own `visibleWhen`, which
      * hides only the panel content and would leave an empty tab header behind.
-     * Binds the same environment as page-component `visibleWhen`: `record` +
-     * `current_user`, plus page state as `page.<var>` (re-evaluated live).
+     *
+     * **Contract-bound roots**: `record`, `current_user` (ADR-0068 aliases
+     * `user` / `ctx.user` — one object, three spellings; see the reasoning on
+     * `PageComponentSchema.visibleWhen`), plus page state as `page.<var>`
+     * (re-evaluated live).
+     *
+     * ⚠️ **This surface is NOT the same environment as page-component
+     * `visibleWhen`, despite sharing the key name.** It is rendered by its own
+     * evaluator, and that evaluator differs on two points — both renderer
+     * behaviour, NOT contract-guaranteed:
+     *
+     *   * **`data` is the record ROW here**, where the component-node evaluator
+     *     binds it to the data-source ADAPTER. Same key, two meanings.
+     *   * **The row's bare fields are spread flat**, so `status` resolves as
+     *     well as `record.status`. The ambient scope is spread AFTER the row,
+     *     so an ambient root (`app`, `features`, `user`, …) wins over a record
+     *     field of the same name.
+     *
+     * Like the component-node surface it also mounts the ambient `app` /
+     * `features` / `os.user` roots, which no ADR rules for a UI predicate
+     * (ADR-0068's Non-goals: "only the user object is in scope here").
+     *
+     * Measured at the `.objectui-sha` pin `190fbd01d061`:
+     * `components/src/renderers/layout/containers.tsx:450-457`.
+     *
      * Canonical `*When` name per ADR-0089 — this key is new, so the deprecated
      * `visibility` / `visibleOn` aliases are NOT ACCEPTED on tab items: unlike
      * the view/page surfaces that fold them into `visibleWhen` via
@@ -673,7 +696,7 @@ export const PageTabsProps = strictObject({
      * being pointed AT `visibleWhen` is not the same as being accepted).
      */
     visibleWhen: ExpressionInputSchema.optional().describe(
-      'Visibility predicate (CEL) — the whole tab (header + panel) is omitted when FALSE; the renderer falls back to the first visible tab when the active one is hidden. Binds `record`, `current_user`, `page.<var>`. ADR-0089 canonical name — `visible`/`showWhen`/`visibility`/`visibleOn` are all rejected here (not folded in), each with a pointer at this key.',
+      'Visibility predicate (CEL) — the whole tab (header + panel) is omitted when FALSE; the renderer falls back to the first visible tab when the active one is hidden. Contract-bound roots: `record`, `current_user` (ADR-0068 aliases `user` / `ctx.user`), `page.<var>`. ⚠️ NOT the same environment as page-component `visibleWhen`: this surface\'s own evaluator binds `data` to the record ROW (not the data-source adapter) and also spreads the row\'s bare fields — renderer behaviour, NOT contract-guaranteed. ADR-0089 canonical name — `visible`/`showWhen`/`visibility`/`visibleOn` are all rejected here (not folded in), each with a pointer at this key.',
     ),
     /**
      * Stable URL token for this tab — the value `?tab=` carries and the
