@@ -520,12 +520,16 @@ const FAILURE_PROPAGATION_SITES = new Map([
 //   - the `try` block performs a READ (a driver/engine `find`/`findOne`/`count`,
 //     or a same-file wrapper over one — see `MAX_READ_WRAPPER_DEPTH`);
 //   - the `catch` contains NO log call at any level, helpers followed;
-//   - some path out of the `catch` `return`s an INVENTED ANSWER, which is two
+//   - some path out of the `catch` DELIVERS an INVENTED ANSWER, which is three
 //     criteria judged independently against the same paths:
 //       (a) EMPTY/ZERO for that method (`[]`, `false`, `null`, `undefined`,
-//           `{}`, `''`, `0`, `1`) — see `inventedEmptyValue`; or
+//           `{}`, `''`, `0`, `1`) `return`ed — see `inventedEmptyValue`; or
 //       (b) IDENTITY PASS-THROUGH (#6451) — one of the enclosing function's own
-//           PARAMETERS, handed straight back — see `identityPassThrough`;
+//           PARAMETERS, handed straight back — see `identityPassThrough`; or
+//       (c) ANSWER BY ASSIGNMENT (#9165, from #9261) — an (a)-shaped value
+//           WRITTEN into a variable the function declared before the `try`, so
+//           the code after the `try` reads the invention as the answer — see
+//           `assignedInventedAnswer`;
 //   - and that path was NOT reached by discriminating the error's TYPE.
 //
 // The last clause is the exemption, and it is the shape #4825 and #5108 left
@@ -740,6 +744,107 @@ const FAILURE_PROPAGATION_SITES = new Map([
 // of an inferred one. That is a design question with a maintainer in it, not a
 // criterion extension, and it is deliberately left un-taken here.
 //
+// ## THE ANSWER-BY-ASSIGNMENT criterion (#9165, from #9261)
+//
+// ⛔ This is NOT the #8845 criterion above, and the distinction is the whole
+// reason it is affordable. #8845's proposal was a FALL-THROUGH criterion: a
+// catch that writes NOTHING, letting an accumulator declared above the `try`
+// stand in for the answer. It needs the checker to decide WHICH variable is the
+// answer — which is why it measured 15 sites with 7 already correct, and why
+// the obvious exemption for those ("the catch WROTE something") is unsound: it
+// clears `publishPackageDrafts`, whose catch pushes a FABRICATED entry. That
+// criterion is still declined, still unbuilt, and its census above is unchanged.
+//
+// This one asks a strictly narrower question, on the same three preconditions
+// (a read in the `try`, no log at all, no type discrimination):
+//
+//   > Did the catch WRITE an invented empty answer into a variable the function
+//   > declared BEFORE the `try`?
+//
+// Nothing is inferred about which variable is "the answer" — the catch NAMES
+// it — and the value is judged by `inventedEmptyValue`, the SAME table that
+// governs `return`. `catch { return []; }` and `catch { ids = []; }` are one
+// invention delivered a statement apart, and today only the first is judged, so
+// the second is a spelling escape from the rule. Admitting it is the same act
+// as admitting `undefined` / `{}` / `''` to the value table for the same
+// measured reason: it costs nothing today and closes a rename-your-way-out hole.
+//
+// ## The instance (#9261, `probeInstallOrganizations`)
+//
+//     let ids: readonly string[] = [];
+//     try { const rows = await this.find(ORGANIZATION_OBJECT, …); ids = …; }
+//     catch { ids = []; }                  // ← invented, silent, undiscriminated
+//     this.organizationProbeMemo = ids;    // ← and MEMOISED past the outage
+//     return ids;
+//
+// `resolveSystemWriteOrganization` maps that answer: 0 organizations means "no
+// organization yet" and a system insert proceeds UNSTAMPED, 2 means refuse. So a
+// connection loss forked the per-organization counters on a `single` install and
+// skipped the mandated refusal on a multi-organization one — fail-open on a
+// refusal guard, the #8895 shape — and the memo pinned it past the outage.
+// #9261 was found by the #8901 census re-run, not by this gate, and its own
+// filing names the reason: *"this catch returns nothing and lets the accumulator
+// above the try answer"*. Repaired by PR #9817, whose landed shape is the
+// passing fixture below.
+//
+// ## Measured before it was added — 收窄先行, the #6451 discipline again
+//
+// Census over the three scan roots at `origin/main` @ 945ffbea8 (2026-08-24),
+// 66 read seams, narrowing one criterion at a time:
+//
+//   | narrowing                                             | sites |
+//   |-------------------------------------------------------|------:|
+//   | catches containing ANY plain `x = …` assignment        |     3 |
+//   | …whose assigned value is an invented EMPTY one         |     1 |
+//   | …written to a name declared before the `try`           |     1 |
+//   | …silent AND undiscriminated → FIRST-RUN RED SET       |     0 |
+//
+// The one site the criterion DISCOVERS is #9261's own seam, and it passes: PR
+// #9817 gave it `if (!isMissingTableError(error)) throw error;` and the existing
+// type-discrimination exemption reads that correctly. The criterion finds
+// exactly the seam it was written for and grades it green because it IS green.
+// Zero first-run reds, zero baseline entries, no new vocabulary, no new declared
+// name — the same answer #6451 measured and the same reason it was affordable.
+//
+// ⚠️ A zero red set is only a fact if the selector is known to select. Two
+// things keep this one falsifiable rather than silently broken: the green
+// verdict line COUNTS the seams this criterion discovered (so a run that reports
+// none is visibly different from today's), and the fixtures below pin #9261 in
+// BOTH directions — pre-#9817 red, post-#9817 green with the discriminated label
+// asserted, so deleting the criterion reddens the self-test rather than passing
+// vacuously.
+//
+// The other two assignments in the census are the falsification control, and
+// this criterion has to decline both — it does: `counted = pageOffset +
+// records.length` (`findData`) is a COMPUTED value, not an invented empty one,
+// and `storeUnavailable = true` (`loadMetaFromDb`) is a flag the catch RAISES so
+// the caller is told, the opposite of an invention.
+//
+// ## Why an IDENTIFIER declared before the `try`, and not any assignment
+//
+// Both halves are load-bearing, and neither is a spelling heuristic:
+//
+//   - **Declared before the `try`.** `catch { const rows = []; }` invents
+//     nothing that outlives the catch. A variable the function ALREADY HAD is
+//     one the code after the `try` goes on to use — that is what makes the write
+//     an answer rather than a local. Matching is by NAME, the same conservative
+//     direction `identityPassThrough` takes and for the same reason: a
+//     scope-accurate resolver is a type-checker.
+//   - **An identifier, not a property.** `this.memo = []` is deliberately out of
+//     scope: a property write is as often a cache reset as an answer, and
+//     telling those apart needs the enclosing object's semantics. Measured: no
+//     seam in scope answers a failed read that way, so the narrowing costs
+//     nothing today and keeps the criterion syntactic.
+//
+// Deliberately NOT judged, and unchanged from #8845: `push`, `++`, `+=`. Those
+// are the accumulator shapes whose census produced the 7 already-correct sites,
+// and `publishPackageDrafts` is the standing proof that no cheap rule tells a
+// fabricated push from a reported one. This criterion does not touch them, and
+// it does not close #8845 — it closes ONE spelling of it.
+//
+// The escape is the same one every other criterion here offers, and it is the
+// correct fix rather than a way out: say something, or ask the error's type.
+//
 // ## Honest limitations, stated up front rather than discovered later
 //
 //   1. **An empty answer wrapped in an ENVELOPE is not matched.** The rule reads
@@ -781,15 +886,21 @@ const FAILURE_PROPAGATION_SITES = new Map([
 //      `durability-read-invention.baseline.json` as `reviewed-legitimate`, next
 //      to `referenceExists` — an entry that says a human read it, not a rule
 //      that guesses.
-//   5. **A `catch` that returns NOTHING is not judged at all** — it falls
-//      through and lets an accumulator declared above the `try` answer for a
+//   5. **A `catch` that answers by FALLING THROUGH is not judged** — it writes
+//      nothing and lets an accumulator declared above the `try` answer for a
 //      read that never happened (#8845). The fall-off-the-end exit IS modelled;
-//      both invention criteria decline it because there is no expression to
-//      classify, the same exclusion stated for a bare `return;`. Measured and
-//      deliberately not closed — see "Measured and DELIBERATELY NOT added"
-//      above for the census, the three narrowings that were tried, and why the
-//      real answer is a declared propagation vocabulary rather than a looser
-//      invention criterion.
+//      the value criteria decline it because there is no expression to classify,
+//      the same exclusion stated for a bare `return;`. Measured and deliberately
+//      not closed — see "Measured and DELIBERATELY NOT added" above for the
+//      census, the three narrowings that were tried, and why the real answer is
+//      a declared propagation vocabulary rather than a looser invention
+//      criterion.
+//
+//      ⚠️ NARROWED since, not closed (#9165): a catch that WRITES an invented
+//      empty value into a pre-`try` variable IS judged now — see "THE
+//      ANSWER-BY-ASSIGNMENT criterion". What remains unjudged is the catch that
+//      writes nothing at all, and the `push` / `++` accumulation shapes #8845
+//      measured, which are unchanged.
 
 /**
  * Where the read-seam rule looks. Narrowed on purpose — see above.
@@ -1681,6 +1792,75 @@ function identityPassThrough(expr, paramNames) {
     return paramNames.has(e.text) ? e.text : undefined;
 }
 
+/**
+ * The variable names the enclosing function declared BEFORE this `try` (#9165).
+ *
+ * These are the names an answer can be written INTO: the code after the `try`
+ * already refers to them, so a `catch` that assigns one has answered for the
+ * read whether or not it also `return`s. A name the catch declares itself is
+ * not in the set — it invents nothing that outlives the catch.
+ *
+ * Scope is the enclosing function's body (the source file, for a seam at module
+ * level), and matching is by NAME rather than by binding: a nested-function
+ * local that happens to share a name would be read as a pre-`try` declaration.
+ * That is the conservative direction this file takes everywhere and the same
+ * trade `identityPassThrough` documents — the alternative is a type-checker,
+ * and the escape from a wrong read is one log or one type discrimination.
+ */
+function preTryDeclaredNames(tryNode, sf) {
+    let scope = sf;
+    for (let n = tryNode.parent; n; n = n.parent) {
+        if (
+            ts.isFunctionDeclaration(n) ||
+            ts.isMethodDeclaration(n) ||
+            ts.isArrowFunction(n) ||
+            ts.isFunctionExpression(n) ||
+            ts.isConstructorDeclaration(n) ||
+            ts.isGetAccessorDeclaration(n) ||
+            ts.isSetAccessorDeclaration(n)
+        ) {
+            scope = n.body ?? sf;
+            break;
+        }
+    }
+    const names = new Set();
+    const start = tryNode.getStart(sf);
+    walkAll(scope, (child) => {
+        if (ts.isVariableDeclaration(child) && ts.isIdentifier(child.name) && child.getEnd() <= start) {
+            names.add(child.name.text);
+        }
+    });
+    return names;
+}
+
+/**
+ * Is this expression the catch WRITING an invented empty answer into a variable
+ * the function declared before the `try`? (#9165, from #9261.)
+ *
+ * The third invention criterion, judged on the same paths and against the same
+ * two exemptions as the other two. It reuses `inventedEmptyValue` unchanged —
+ * the criterion is about HOW the invention is delivered, never about which
+ * values count as invented, so the two must not drift apart.
+ *
+ * Only a plain `=` to a bare identifier. `this.memo = []` is deliberately not
+ * matched (a property write is as often a cache reset as an answer), and
+ * `push` / `++` / `+=` are the #8845 accumulator shapes this criterion does not
+ * touch — see the header section for both measurements.
+ *
+ * @returns `{ name, value }`, or `undefined` if this is not an assigned
+ *          invention.
+ */
+function assignedInventedAnswer(expr, preTryNames) {
+    if (!expr || preTryNames.size === 0) return undefined;
+    if (!ts.isBinaryExpression(expr)) return undefined;
+    if (expr.operatorToken.kind !== ts.SyntaxKind.EqualsToken) return undefined;
+    if (!ts.isIdentifier(expr.left)) return undefined;
+    if (!preTryNames.has(expr.left.text)) return undefined;
+    const value = inventedEmptyValue(expr.right);
+    if (value === undefined) return undefined;
+    return { name: expr.left.text, value };
+}
+
 /** Strip `await` / parentheses / `as T` so the underlying call is visible. */
 function unwrapExpression(expr) {
     let e = expr;
@@ -1763,8 +1943,22 @@ function discriminatorTest(test, discriminators) {
  *
  * @param exits Accumulator: one entry per normal completion, `{ benign, expr }`.
  *              `expr` is `undefined` for a fall-off-the-end exit.
+ *
+ * An assignment is not an exit — control carries on — so ANSWER-BY-ASSIGNMENT
+ * (#9165) rides on its own optional accumulator, `ctx.assignedAnswers`, and is
+ * recorded with the `benign` state in force AT THE ASSIGNMENT. That state is
+ * what the exemption is judged on, exactly as for a `return`.
  */
 function walkBenignPaths(block, benignIn, ctx, exits) {
+    // #9165. Off unless the caller asked for it, so guard bodies followed by
+    // `establishesBenign` cannot contribute an answer to the seam that called
+    // them — a rethrowing guard's internals are not this seam's invention.
+    const recordAssignedAnswer = (expr, node, benign) => {
+        if (!ctx.assignedAnswers || !ctx.preTryNames) return;
+        const a = assignedInventedAnswer(expr, ctx.preTryNames);
+        if (a) ctx.assignedAnswers.push({ benign, node, ...a });
+    };
+
     const analyzeList = (statements, benign) => {
         for (const stmt of statements) {
             const r = analyzeStmt(stmt, benign);
@@ -1782,6 +1976,7 @@ function walkBenignPaths(block, benignIn, ctx, exits) {
         }
         if (ts.isBlock(stmt)) return analyzeList(stmt.statements, benign);
         if (ts.isExpressionStatement(stmt)) {
+            recordAssignedAnswer(stmt.expression, stmt, benign);
             if (!benign && establishesBenign(stmt.expression, ctx)) {
                 return { benign: true, terminates: false };
             }
@@ -1809,6 +2004,10 @@ function walkBenignPaths(block, benignIn, ctx, exits) {
         // every `return` inside as an exit at the CURRENT state.
         walkSameTick(stmt, (child) => {
             if (ts.isReturnStatement(child)) exits.push({ benign, expr: child.expression, node: child });
+            // Same treatment an unmodelled `return` gets: recorded at the
+            // CURRENT state rather than skipped, so a loop or a `switch` in the
+            // catch is judged rather than excused (#9165).
+            if (ts.isExpressionStatement(child)) recordAssignedAnswer(child.expression, child, benign);
         });
         return { benign, terminates: false };
     };
@@ -1860,6 +2059,9 @@ function establishesBenign(expr, ctx) {
             usedDiscriminators: consulted,
             guardSeen: new Set([...seen, name]),
             guardDepth: depth + 1,
+            // #9165: a guard's own assignments are the GUARD's business, never
+            // an invention by the seam that delegates to it.
+            assignedAnswers: undefined,
         },
         exits,
     );
@@ -1958,12 +2160,15 @@ function analyzeReadSeams(sf, relPath, findings, seams, options = {}) {
             lineOf,
         );
 
-        // 2. On which paths does it invent an answer? TWO criteria over the
-        //    same exits — an EMPTY/ZERO value, or the function's own input
-        //    handed back (#6451). Independent: a seam may trip either or both,
-        //    and the report names which, because the fixes read differently.
+        // 2. On which paths does it invent an answer? THREE criteria over the
+        //    same catch — an EMPTY/ZERO value returned, the function's own input
+        //    handed back (#6451), or an empty value WRITTEN into a pre-`try`
+        //    variable (#9165). Independent: a seam may trip any or all, and the
+        //    report names which, because the fixes read differently.
         const exits = [];
-        walkBenignPaths(catchBlock, false, ctx, exits);
+        const assignedAnswers = [];
+        const preTryNames = preTryDeclaredNames(node, sf);
+        walkBenignPaths(catchBlock, false, { ...ctx, assignedAnswers, preTryNames }, exits);
         const paramNames = enclosingFunctionParameters(node);
         const invented = [];
         for (const e of exits) {
@@ -1975,11 +2180,19 @@ function analyzeReadSeams(sf, relPath, findings, seams, options = {}) {
             const param = identityPassThrough(e.expr, paramNames);
             if (param !== undefined) invented.push({ ...e, kind: 'identity', value: param });
         }
+        for (const a of assignedAnswers) {
+            invented.push({ benign: a.benign, node: a.node, kind: 'assignment', value: `${a.name} = ${a.value}` });
+        }
         const unguarded = invented.filter((e) => !e.benign);
 
         const label = (e) =>
-            `${e.kind === 'identity' ? `pass-through \`${e.value}\`` : e.value}@${lineOf(e.node)}` +
-            (e.benign ? ' (type-discriminated)' : '');
+            `${
+                e.kind === 'identity'
+                    ? `pass-through \`${e.value}\``
+                    : e.kind === 'assignment'
+                      ? `assigns ${e.value}`
+                      : e.value
+            }@${lineOf(e.node)}` + (e.benign ? ' (type-discriminated)' : '');
 
         const seam = {
             file: relPath,
@@ -2529,14 +2742,17 @@ function runReadSeamRule({ list = false } = {}) {
         );
         for (const v of violations) {
             const passThrough = v.unguarded.filter((u) => u.kind === 'identity');
+            const assigned = v.unguarded.filter((u) => u.kind === 'assignment');
             console.error(`  ${v.file}:${v.catchLine}  (in ${v.fn ?? '<anonymous>'}())`);
             console.error(`    guards  : ${v.callee}() at line ${v.calleeLine} — ${DRIVER_READ_CALLEES.get(v.callee) ?? 'a storage read'}`);
             console.error(
-                `    found   : catch logs nothing at all and returns ${v.unguarded
+                `    found   : catch logs nothing at all and ${v.unguarded
                     .map((u) =>
                         u.kind === 'identity'
-                            ? `its own parameter \`${u.value}\` unchanged at line ${u.line}`
-                            : `\`${u.value}\` at line ${u.line}`,
+                            ? `returns its own parameter \`${u.value}\` unchanged at line ${u.line}`
+                            : u.kind === 'assignment'
+                              ? `writes \`${u.value}\` at line ${u.line} into a variable declared before the \`try\`, which answers for the read below it`
+                              : `returns \`${u.value}\` at line ${u.line}`,
                     )
                     .join(', ')}`,
             );
@@ -2567,6 +2783,16 @@ function runReadSeamRule({ list = false } = {}) {
                     '              A pass-through that must stay fail-open on BOTH branches keeps returning the input\n' +
                     '              and adds ONE log naming the consequence, which is what #6116 did — the rule asks\n' +
                     '              that the failure be distinguishable, never that the value change.',
+                );
+            }
+            if (assigned.length > 0) {
+                console.error(
+                    '              For an ASSIGNED answer (#9165, from #9261) the variable is what the code after the\n' +
+                    '              `try` reads, so the write IS the answer — moving it below the catch changes nothing.\n' +
+                    '              PR #9817 is the worked fix: `catch (error) { if (!isMissingTableError(error)) throw\n' +
+                    '              error; ids = []; }` — the invention now happens ONLY on the branch where it is true.\n' +
+                    '              ⚠️ If the value is MEMOISED (as #9261 memoised it), the outage outlives itself: an\n' +
+                    '              undiscriminated failure must not be cached as an emptiness.',
                 );
             }
             console.error(readInventionBaselineOffer());
@@ -2602,10 +2828,16 @@ function runReadSeamRule({ list = false } = {}) {
             (s) => s.invents.length > 0 && s.invents.every((i) => i.includes('type-discriminated')),
         ).length;
         const passThrough = seams.filter((s) => s.invents.some((i) => i.startsWith('pass-through'))).length;
+        // #9165. A criterion whose discoveries are invisible on a GREEN run is
+        // indistinguishable from a selector that stopped selecting — which is
+        // the failure mode this whole card is about. So the answer-by-assignment
+        // population is printed on every clean run, not only when it fails.
+        const assigned = seams.filter((s) => s.invents.some((i) => i.startsWith('assigns '))).length;
         console.log(
-            `✓ read-seam invention (#5186 + #6451, ${READ_SEAM_SCAN_ROOTS.length} package roots, vocabulary ${[...DRIVER_READ_CALLEES.keys()].join('/')}): ${seams.length} read seam(s), none invents an unreported answer` +
+            `✓ read-seam invention (#5186 + #6451 + #9165, ${READ_SEAM_SCAN_ROOTS.length} package roots, vocabulary ${[...DRIVER_READ_CALLEES.keys()].join('/')}): ${seams.length} read seam(s), none invents an unreported answer` +
                 (discriminated > 0 ? ` (${discriminated} answer on a type-discriminated benign branch)` : '') +
                 (passThrough > 0 ? ` (${passThrough} pass an input through, reported)` : '') +
+                (assigned > 0 ? ` (${assigned} answer by writing a pre-\`try\` variable, reported or discriminated)` : '') +
                 (allowed.size > 0 ? ` (${allowed.size} baselined)` : '') +
                 '.',
         );
@@ -4460,6 +4692,108 @@ function selfTestReadSeams() {
             expectViolation: true,
             expectCount: 1,
             expectInvents: ['pass-through \`record\`'],
+        },
+        // ── ANSWER BY ASSIGNMENT (#9165, from #9261): both directions ───────
+        {
+            // #9261 verbatim, as it read BEFORE PR #9817. The catch returns
+            // nothing, so criteria (a) and (b) both decline it — and yet the
+            // function's answer is `[]`, written one statement above the
+            // `return`. This is the fixture that fails if criterion (c) is
+            // deleted, and it is the whole reason (c) exists.
+            name: 'flags: #9261 pre-fix — catch WRITES `[]` into a variable declared before the try',
+            code: `
+                class E {
+                    private async probeInstallOrganizations(): Promise< readonly string[] > {
+                        let ids: readonly string[] = [];
+                        try {
+                            const rows = await this.driver.find('sys_organization', { limit: 2 });
+                            ids = rows.map((r: any) => String(r.id));
+                        } catch { ids = []; }
+                        this.organizationProbeMemo = ids;
+                        return ids;
+                    }
+                }`,
+            expectViolation: true,
+            expectCount: 1,
+            expectInvents: ['assigns ids = []'],
+        },
+        {
+            // #9261 as PR #9817 LANDED it — the shape this rule asks for, so it
+            // must pass. `expectInvents` pins the DISCRIMINATED label rather
+            // than an empty set: without it this case would still pass with
+            // criterion (c) deleted, having tested nothing (#6451's lesson).
+            name: 'passes: #9261 post-fix — the same assignment, reached only through isMissingTableError',
+            code: `
+                class E {
+                    private async probeInstallOrganizations(): Promise< readonly string[] > {
+                        let ids: readonly string[] = [];
+                        try {
+                            const rows = await this.driver.find('sys_organization', { limit: 2 });
+                            ids = rows.map((r: any) => String(r.id));
+                        } catch (error) {
+                            if (!isMissingTableError(error)) throw error;
+                            ids = [];
+                        }
+                        this.organizationProbeMemo = ids;
+                        return ids;
+                    }
+                }`,
+            expectViolation: false,
+            expectInvents: ['assigns ids = [] (type-discriminated)'],
+            expectDiscriminatorsUsed: ['isMissingTableError'],
+        },
+        {
+            // The narrowing that keeps (c) off #8845's cohort. A name the CATCH
+            // declares invents nothing that outlives it, so it is not an answer
+            // — and this case goes red the moment `preTryDeclaredNames` stops
+            // discriminating and starts matching every identifier.
+            name: 'passes: a name the CATCH itself declares is not an answer',
+            code: `
+                class E {
+                    private async load(objectName: string) {
+                        try { return await this.driver.find(objectName, {}); }
+                        catch { const rows: any[] = []; return this.wrap(rows); }
+                    }
+                }`,
+            expectViolation: false,
+            expectInvents: [],
+        },
+        {
+            // The falsification control, taken from the live census: the other
+            // two assignments in the three scan roots are a COMPUTED value and
+            // a RAISED FLAG, and (c) has to decline both. A flag the caller
+            // reads is the opposite of an invention.
+            name: 'passes: the catch assigns a computed value / raises a flag, not an invented empty one',
+            code: `
+                class E {
+                    private async findData(objectName: string, pageOffset: number, records: any[]) {
+                        let counted = 0;
+                        let storeUnavailable = false;
+                        try { counted = await this.driver.count(objectName, {}); }
+                        catch { counted = pageOffset + records.length; storeUnavailable = true; }
+                        return { counted, storeUnavailable };
+                    }
+                }`,
+            expectViolation: false,
+            expectInvents: [],
+        },
+        {
+            // `push` / `++` accumulation is #8845's shape and stays UNJUDGED —
+            // pinned here so a later widening of (c) has to move this fixture
+            // deliberately rather than by accident. `publishPackageDrafts` is
+            // why: no cheap rule tells a fabricated push from a reported one.
+            name: 'passes: #8845 accumulation (`push`) is deliberately still not judged',
+            code: `
+                class E {
+                    private async collect(objectName: string) {
+                        const histRows: any[] = [];
+                        try { histRows.push(...(await this.driver.find(objectName, {}))); }
+                        catch { /* history table unavailable - fall through */ }
+                        return histRows;
+                    }
+                }`,
+            expectViolation: false,
+            expectInvents: [],
         },
         {
             // The measured majority (8 of 10 bare-identifier returns in scope):
