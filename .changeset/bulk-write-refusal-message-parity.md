@@ -47,12 +47,23 @@ been reading it uniformly in the first place. Keying on the prefix would mean
 substring-matching prose that is localised and deliberately reworded over time,
 which is the practice the ADR-0112 `code` vocabulary exists to remove.
 
-**Not covered, measured and reported rather than quietly widened:**
-`POST /api/v1/analytics/dataset/query` builds its own `{ code, message }`
-envelope inline in `rest-server.ts` and reads `error.message` directly; it
-shares no branch with the above and still serves the wrapper. The record-share
-routes (`…/:id/shares`) are a third branch again — `respondSharingError` matches
-on `error.message` and the fallback interpolates it into a `500`. Both live in a
-file held by another open PR this round and are filed separately.
-`POST …/import` and `GET …/export` exit through `handleRouteError` like the
-bulk routes and are repaired by the same change.
+`POST /api/v1/analytics/dataset/query` — the seventh row — needed its own
+repair: it builds a `{ code, message }` envelope inline and touches neither
+door. It now imports the same `sandboxBusinessMessage` rather than re-deriving
+the unwrap, so the analytics face and the `/data` face cannot answer one refusal
+two ways. Both of its client emissions are covered (the declared-4xx envelope
+and the `500 ANALYTICS_QUERY_FAILED` fallback); `logError` still receives the
+whole error and `looksLikeInternalErrorLeak` still reads the raw text, so the
+operator's copy and the leak heuristic are untouched.
+
+`POST …/import` and `GET …/export` exit through `handleRouteError` like the bulk
+routes, so they are repaired by the same change — measured rather than assumed.
+
+**Measured and deliberately NOT repaired here**, each recorded so it is not
+rediscovered as new: the record-share routes (`…/:id/shares`, list/grant/revoke)
+are a third branch again — `respondSharingError` classifies by
+`message.startsWith(CODE)` and its fallback interpolates `error.message` into a
+hand-built `500`, ignoring a declared `status`/`code` entirely. And on the
+analytics route an *undeclared* hook refusal answers `500` where `/data` answers
+`400`; only the sentence was corrected, the status disagreement is a separate
+defect. Both are filed as their own issues.

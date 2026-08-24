@@ -79,8 +79,19 @@
 //   §7 predicted GREEN both sides  measured green — as predicted. It pins a
 //      divergence this card does NOT repair; see its own comment.
 //
-// Total 12 of 23 red pre-fix. Prediction: 11 of 23 — off by the one case above.
-// Measured: `Tests  12 failed | 11 passed (23)`.
+//   §8 predicted RED 2 / GREEN 2  measured 2 red — as predicted. Added after
+//      the file hold on `rest-server.ts` lifted mid-task; its legs were re-run
+//      against the merged base rather than carried across it.
+//
+// Total 14 of 27 red pre-fix, measured `Tests  14 failed | 13 passed (27)`.
+// Predictions: 11 of 23 for §1–§7 (off by the one mis-shelved case above) and
+// 2 of 4 for §8 (exact).
+//
+// The §1–§7 legs reverted `error-response.ts` alone; the final leg reverted
+// BOTH it and `rest-server.ts` to the merged `origin/main`. Mutation proven on
+// disk each time by grepping the injected AND the removed text in both files
+// (injected 1/1 → 0/0, removed 0/0 → 1/2), and the restore re-verified by
+// re-reading both files from the repository root rather than trusting the trap.
 // ---------------------------------------------------------------------------
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
