@@ -2,9 +2,10 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * check-doc-frontmatter (#10493) -- every page under `content/docs/` carries a
- * leading `---` block the DOCS BUILD'S OWN parser can read, and types the two
- * keys `pageSchema` types.
+ * check-doc-frontmatter (#10493, #10754) -- every page under EVERY content root
+ * `apps/docs/source.config.ts` hands to `defineDocs` carries a leading `---`
+ * block the DOCS BUILD'S OWN parser can read, and types the keys that root's
+ * OWN schema types.
  *
  *   node scripts/check-doc-frontmatter.mjs              # judge the checked-in corpus
  *   node scripts/check-doc-frontmatter.mjs --list       # every page and what it declares
@@ -97,6 +98,71 @@
  * throwing), so it too fails only on `title` -- which is why an absent block is
  * reported here by name instead of as a missing key.
  *
+ * ## Two roots, and why the floor is PER ROOT (#10754)
+ *
+ * `apps/docs/source.config.ts` calls `defineDocs` TWICE. The second call points
+ * fumadocs at `content/blog` with `blogSchema`, so `next build` parses those
+ * pages with the same extractor and the same `yaml`, and an unquoted
+ * `description` holding a colon there is the identical defect -- reaching the
+ * identical 30-minute `next build` before anything says so. The first version of
+ * this gate walked `content/docs` alone, so the second root was owned by nothing
+ * below `Build Docs`.
+ *
+ * `ROOTS` below is that list, and each entry carries its OWN floor. That is the
+ * whole difficulty of the second root, and it is one line of arithmetic:
+ *
+ *   a UNION count of 403 + 3 is satisfied by 403 + 0.
+ *
+ * An empty `content/blog` would hide behind the docs root's count, the gate
+ * would print a cheerful total, and CI would report coverage the run does not
+ * have -- STRICTLY WORSE than not walking the blog at all, because the first
+ * state is visible and the second is not. So the floor lives inside
+ * `judgeRoot`, which never sees another root, and `judgeAll` collects refusals
+ * instead of summing pages. A populated root cannot satisfy an empty root's
+ * floor because it is never offered the chance to.
+ *
+ * `scripts/check-doc-authoring.mjs` reached the same conclusion from the other
+ * side and states it in one sentence worth copying: "A total floor is held up by
+ * whichever root still has files while another empties". Same invariant, same
+ * house shape -- refusal names the root.
+ *
+ * The floor is 1, deliberately, and it is NOT a ratchet against a recorded
+ * high-water mark: `content/blog` holds 3 pages today and a legitimate deletion
+ * must not become an argument with a number. It answers exactly one question --
+ * "was this root read at all" -- per root.
+ *
+ * ## The blog root's contract, and the one key it deliberately does not assert
+ *
+ * `blogSchema` is `pageSchema.extend({ author, date, tags })`, so the blog root
+ * inherits both keys above and adds three. Asserting only the inherited pair
+ * would leave three of five typed keys unowned on a root this gate claims to
+ * cover -- a smaller copy of the coverage-it-does-not-have failure the per-root
+ * floor exists to prevent. So each ROOT declares its own key contract, and two
+ * of the three extras are asserted:
+ *
+ *   author: z.string().optional()           -> a string WHEN PRESENT
+ *   tags:   z.array(z.string()).optional()  -> an array of strings WHEN PRESENT
+ *   date:   z.coerce.string().optional()    -> NOT ASSERTED
+ *
+ * `date` is not an omission. Measured against the zod the docs app resolves
+ * (zod@4.4.3), `z.coerce.string()` accepts every value YAML can produce:
+ *
+ *   42 -> "42"     true -> "true"     null -> "null"
+ *   {a: 1} -> "[object Object]"       ["x"] -> "x"       a Date -> its toString
+ *
+ * There is no value a frontmatter `date` can hold that the build rejects, so any
+ * assertion about it would be a rule invented here rather than the build's --
+ * the same line this gate already draws by not requiring `description` to be
+ * present. The self-test pins `date` as declared-and-deliberately-unasserted, so
+ * a fourth key landing in `blogSchema` fails the battery instead of arriving
+ * silently unowned.
+ *
+ * `tags` is not decoration either: the natural way to get it wrong is ordinary
+ * prose, exactly like the colon.
+ *
+ *   tags: [ai, architecture]   -> an array of strings, clean
+ *   tags: ai, architecture     -> one STRING, and a red `Build Docs`
+ *
  * ## It reads the build's own reader, not an imitation of one
  *
  * `fumadocs-core/dist/content/md/frontmatter.js` is eleven lines:
@@ -118,13 +184,21 @@
  * #7484 is the precedent the card names: a documentation invariant CI reported
  * `[200] OK` on until someone wrote a script for it. The failure mode that
  * reproduces it here is a gate that walks NOTHING and prints OK, so every state
- * in which the corpus was not actually read is exit 1 naming what could not be
- * read, never a quiet pass (#4690):
+ * in which A ROOT was not actually read is exit 1 naming THAT ROOT, never a
+ * quiet pass (#4690):
  *
- *   - the docs root does not resolve;
- *   - the walk resolves to ZERO pages (an empty tree, or one holding no `.mdx`);
+ *   - the root does not resolve;
+ *   - the walk resolves to fewer than that root's own floor -- an empty tree, or
+ *     one holding no `.mdx`;
  *   - any entry cannot be read -- a dangling symlink, a directory where a page
- *     should be, a permission error.
+ *     should be, a permission error;
+ *   - `ROOTS` itself is empty, which is every root evaporating at once.
+ *
+ * Each of those is judged with one root in hand and no knowledge of the others,
+ * and a refusal on one root does not suppress the verdict on another: a run over
+ * a clean `content/docs` and an emptied `content/blog` prints the docs verdict,
+ * prints the blog REFUSAL, and exits 1. Reading that output is how you tell this
+ * gate from the union it must not be.
  *
  * Every `.mdx`-named entry is a read candidate and `readFileSync` is the sole
  * authority on whether it can be read; nothing is skipped on the strength of a
@@ -140,6 +214,20 @@
  * lane (#9465) while it runs. The self-test asserts that wiring against the
  * workflow text -- a gate that exists and is not scheduled is the same dormant
  * shape from the other side.
+ *
+ * Adding the second root needed NO workflow edit: the step already invokes this
+ * script, and `ROOTS` is read from here. `lint.yml` is the repo's busiest file
+ * and a second step would have been a third concurrent edit of it.
+ *
+ * ## The list is pinned to `source.config.ts`, so a THIRD root cannot arrive unowned
+ *
+ * This card exists because a root was added to `source.config.ts` and nothing
+ * downstream noticed. Fixing the instance without closing the class would leave
+ * the next `defineDocs` call in exactly the same position, so the self-test
+ * parses `apps/docs/source.config.ts` and asserts SET EQUALITY between the
+ * `dir:` of every `defineDocs` call there and the `dir` of every entry here --
+ * plus a count cross-check, so a call spelled in a way the parser cannot see
+ * fails the battery instead of reading as zero extra roots.
  */
 
 import { readFileSync, readdirSync } from 'node:fs';
@@ -155,11 +243,137 @@ import { isEntrypoint } from './invoked-as.mjs';
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 const REPO_ROOT = resolve(HERE, '..');
 
-/** The corpus. `apps/docs/source.config.ts` points fumadocs at exactly this. */
-export const DOCS_DIR = join(REPO_ROOT, 'content/docs');
+// ---------------------------------------------------------------------------
+// The key contracts -- one per schema `source.config.ts` hands to `defineDocs`
+// ---------------------------------------------------------------------------
 
-/** The generated half, reported separately so the verdict says what it read. */
-export const GENERATED_PREFIX = 'references/';
+/** A key the schema types as a string. */
+const AS_STRING = {
+  typeKind: 'not-a-string',
+  expected: 'a string',
+  is: (v) => typeof v === 'string',
+};
+
+/** A key the schema types as `z.array(z.string())`. */
+const AS_STRING_ARRAY = {
+  typeKind: 'not-an-array-of-strings',
+  expected: 'an array of strings',
+  is: (v) => Array.isArray(v) && v.every((x) => typeof x === 'string'),
+};
+
+/**
+ * `fumadocs-core/source/schema`'s `pageSchema` -- the schema `defineDocs` gets
+ * for `content/docs`, and the base `blogSchema` extends.
+ *
+ *   title:       z.string()             // REQUIRED
+ *   description: z.string().optional()  // optional, but typed WHEN PRESENT
+ *
+ * `icon`, `full` and `_openapi` are likewise `pageSchema`'s and likewise not
+ * asserted, and unknown keys pass because `pageSchema` is not `.strict()`.
+ */
+export const PAGE_KEYS = [
+  {
+    key: 'title',
+    required: true,
+    ...AS_STRING,
+    detailMissing: '`pageSchema` declares `title: z.string()`, so a page without one fails the site build.',
+    detailType:
+      '`pageSchema` declares `title: z.string()`. YAML types an unquoted scalar by its shape, ' +
+      'so quote it to keep it a string.',
+  },
+  {
+    // Presence is deliberately NOT asserted: the build does not require it, and
+    // a rule the build does not have is one invented here.
+    key: 'description',
+    required: false,
+    ...AS_STRING,
+    detailType:
+      '`pageSchema` declares `description: z.string().optional()`. A `word: word` inside an unquoted ' +
+      'description that YAML can read as a nested mapping yields an object here rather than throwing -- ' +
+      'the shape one character away from the parse failure this gate was written for. Quote the scalar.',
+  },
+];
+
+/**
+ * `blogSchema` = `pageSchema.extend({ author, date, tags })`. Two of the three
+ * extras are typed in a way a frontmatter value can violate; see the header for
+ * the measurement that puts `date` in `BLOG_KEYS_UNASSERTED` instead.
+ */
+export const BLOG_KEYS = [
+  ...PAGE_KEYS,
+  {
+    key: 'author',
+    required: false,
+    ...AS_STRING,
+    detailType:
+      '`blogSchema` declares `author: z.string().optional()`. YAML types an unquoted scalar by its ' +
+      'shape, so quote it to keep it a string.',
+  },
+  {
+    key: 'tags',
+    required: false,
+    ...AS_STRING_ARRAY,
+    detailType:
+      '`blogSchema` declares `tags: z.array(z.string()).optional()`. `tags: a, b` is ONE unquoted ' +
+      'scalar to YAML, not two items -- write the flow sequence `tags: [a, b]` or a block sequence.',
+  },
+];
+
+/**
+ * Keys a root's schema declares that this gate deliberately does NOT assert,
+ * with the reason. Pinned by the self-test against `source.config.ts`, so the
+ * list is a decision on the record rather than a gap.
+ */
+export const BLOG_KEYS_UNASSERTED = [
+  {
+    key: 'date',
+    why:
+      '`z.coerce.string().optional()` stringifies its input before validating, so every value YAML ' +
+      'can produce is accepted (42, true, null, a mapping, a sequence -- measured against zod@4.4.3). ' +
+      'There is no frontmatter `date` the build rejects, so any assertion here would be ours, not the build\'s.',
+  },
+];
+
+// ---------------------------------------------------------------------------
+// The roots -- each with its OWN floor
+// ---------------------------------------------------------------------------
+
+/**
+ * Every content root `apps/docs/source.config.ts` hands to `defineDocs`.
+ *
+ * `minPages` is per root ON PURPOSE and the header argues why at length: a union
+ * count of 403 + 3 is satisfied by 403 + 0, so an emptied `content/blog` would
+ * be covered by the docs root and CI would report coverage the run does not
+ * have. `judgeRoot` is handed one entry and can see no other, which is what
+ * makes that structurally impossible rather than merely intended.
+ *
+ * The self-test pins this list against `source.config.ts` -- a third
+ * `defineDocs` call cannot arrive unowned.
+ */
+export const ROOTS = [
+  {
+    name: 'docs',
+    dir: join(REPO_ROOT, 'content/docs'),
+    configExport: 'docs',
+    schemaName: 'pageSchema',
+    keys: PAGE_KEYS,
+    unasserted: [],
+    /** The generated half, reported separately so the verdict says what it read. */
+    generatedPrefix: 'references/',
+    minPages: 1,
+  },
+  {
+    name: 'blog',
+    dir: join(REPO_ROOT, 'content/blog'),
+    configExport: 'blog',
+    schemaName: 'blogSchema',
+    keys: BLOG_KEYS,
+    unasserted: BLOG_KEYS_UNASSERTED,
+    /** No generated half: nothing writes into `content/blog`. */
+    generatedPrefix: null,
+    minPages: 1,
+  },
+];
 
 /**
  * `fumadocs-core/dist/content/md/frontmatter.js`, verbatim. Anchored at byte 0
@@ -258,7 +472,12 @@ export function fileLineOfKey(body, key) {
 }
 
 /**
- * Judge one page's SOURCE TEXT. Returns `{ violations, data }`.
+ * Judge one page's SOURCE TEXT against `keys`. Returns `{ violations, data }`.
+ *
+ * `keys` is the contract of the ROOT the page came from -- `PAGE_KEYS` for
+ * `content/docs`, `BLOG_KEYS` for `content/blog`. Everything above the key loop
+ * is the extraction, which is the build's own and therefore the same for every
+ * root; only the key contract differs.
  *
  * Exported so the self-test drives the real judge over fixture sources rather
  * than over whatever this tree happens to contain today -- a battery that can
@@ -269,7 +488,7 @@ export function fileLineOfKey(body, key) {
  * body-relative ones, and `formatViolation` says so rather than silently
  * presenting two numbering schemes as one.
  */
-export function judgeSource(source) {
+export function judgeSource(source, keys = PAGE_KEYS) {
   const match = FRONTMATTER_RE.exec(source);
 
   if (!match) {
@@ -329,44 +548,48 @@ export function judgeSource(source) {
 
   const violations = [];
 
-  // `pageSchema.title: z.string()` -- required, and typed.
-  if (!('title' in data)) {
-    violations.push({
-      kind: 'title-missing',
-      line: 1,
-      col: 1,
-      what: 'no `title` in frontmatter',
-      detail: '`pageSchema` declares `title: z.string()`, so a page without one fails the site build.',
-    });
-  } else if (typeof data.title !== 'string') {
-    violations.push({
-      kind: 'title-not-a-string',
-      line: fileLineOfKey(body, 'title') ?? FRONTMATTER_BODY_FIRST_LINE,
-      col: 1,
-      what: `\`title\` parses to ${describe(data.title)}, not a string`,
-      detail:
-        '`pageSchema` declares `title: z.string()`. YAML types an unquoted scalar by its shape, ' +
-        'so quote it to keep it a string.',
-    });
-  }
-
-  // `pageSchema.description: z.string().optional()` -- typed WHEN PRESENT.
-  // Presence is deliberately NOT asserted: the build does not require it, and a
-  // rule the build does not have is one invented here.
-  if ('description' in data && typeof data.description !== 'string') {
-    violations.push({
-      kind: 'description-not-a-string',
-      line: fileLineOfKey(body, 'description') ?? FRONTMATTER_BODY_FIRST_LINE,
-      col: 1,
-      what: `\`description\` parses to ${describe(data.description)}, not a string`,
-      detail:
-        '`pageSchema` declares `description: z.string().optional()`. A `word: word` inside an unquoted ' +
-        'description that YAML can read as a nested mapping yields an object here rather than throwing -- ' +
-        'the shape one character away from the parse failure this gate was written for. Quote the scalar.',
-    });
+  for (const spec of keys) {
+    if (!(spec.key in data)) {
+      // An optional key that is absent is not a finding: the schema marks it
+      // optional, and requiring it would be a rule invented here.
+      if (spec.required) {
+        violations.push({
+          kind: `${spec.key}-missing`,
+          line: 1,
+          col: 1,
+          what: `no \`${spec.key}\` in frontmatter`,
+          detail: spec.detailMissing,
+        });
+      }
+      continue;
+    }
+    const value = data[spec.key];
+    if (!spec.is(value)) {
+      violations.push({
+        kind: `${spec.key}-${spec.typeKind}`,
+        line: fileLineOfKey(body, spec.key) ?? FRONTMATTER_BODY_FIRST_LINE,
+        col: 1,
+        what: `\`${spec.key}\` parses to ${describeAgainst(spec, value)}, not ${spec.expected}`,
+        detail: spec.detailType,
+      });
+    }
   }
 
   return { data, violations };
+}
+
+/**
+ * What a value IS, said against what the key EXPECTED.
+ *
+ * For an array-of-strings key an array is not enough information -- `tags: [1]`
+ * and `tags: [a]` are both "an array" -- so the offending item is named.
+ */
+function describeAgainst(spec, v) {
+  if (spec.typeKind === AS_STRING_ARRAY.typeKind && Array.isArray(v)) {
+    const i = v.findIndex((x) => typeof x !== 'string');
+    if (i !== -1) return `an array whose item ${i + 1} is ${describe(v[i])}`;
+  }
+  return describe(v);
 }
 
 /** What a value IS, for a message that has to be actionable. */
@@ -379,15 +602,22 @@ function describe(v) {
 }
 
 /**
- * Walk `docsDir` and judge every page. Throws `Unread` -- never returns a
- * verdict -- for any state in which the corpus was not actually read.
+ * Walk ONE root and judge every page in it. Throws `Unread` -- never returns a
+ * verdict -- for any state in which THAT ROOT was not actually read.
+ *
+ * This function is handed one root and is given no way to see another. That is
+ * the mechanism behind the per-root floor rather than a convention about it: it
+ * cannot let a populated root satisfy an empty root's floor because it is never
+ * offered the other root's count. `judgeAll` keeps it that way by collecting
+ * refusals instead of summing pages.
  */
-export function judgeTree(docsDir = DOCS_DIR) {
-  const pages = collectPages(docsDir);
+export function judgeRoot(root) {
+  const pages = collectPages(root.dir);
 
-  if (pages.length === 0) {
+  if (pages.length < root.minPages) {
     throw new Unread(
-      `walked ${rel(docsDir)} and found ZERO .mdx pages, so nothing was verified -- refusing to report a pass. ` +
+      `the \`${root.name}\` root: walked ${rel(root.dir)} and found ${pages.length} .mdx page(s), below its own ` +
+        `floor of ${root.minPages} -- so this root was not verified and no other root's count can stand in for it. ` +
         'A gate that walks nothing and prints OK is the defect this one was written to close (#7484 / #4690).',
     );
   }
@@ -395,11 +625,12 @@ export function judgeTree(docsDir = DOCS_DIR) {
   const findings = [];
   let generated = 0;
   let handwritten = 0;
-  let withDescription = 0;
+  /** How many pages declare each key -- the verdict says what it actually read. */
+  const declared = new Map(root.keys.map((k) => [k.key, 0]));
 
   for (const page of pages) {
     const r = rel(page);
-    if (relative(docsDir, page).startsWith(GENERATED_PREFIX)) generated++;
+    if (root.generatedPrefix && relative(root.dir, page).startsWith(root.generatedPrefix)) generated++;
     else handwritten++;
 
     let source;
@@ -407,16 +638,56 @@ export function judgeTree(docsDir = DOCS_DIR) {
       source = readFileSync(page, 'utf8');
     } catch (err) {
       throw new Unread(
-        `cannot read ${r}: ${err.code ?? err.message} -- refusing to report a pass over a corpus one page short.`,
+        `the \`${root.name}\` root: cannot read ${r}: ${err.code ?? err.message} -- refusing to report a pass ` +
+          'over a corpus one page short.',
       );
     }
 
-    const { data, violations } = judgeSource(source);
-    if (data && typeof data === 'object' && 'description' in data) withDescription++;
+    const { data, violations } = judgeSource(source, root.keys);
+    if (data && typeof data === 'object') {
+      for (const spec of root.keys) if (spec.key in data) declared.set(spec.key, declared.get(spec.key) + 1);
+    }
     for (const v of violations) findings.push({ ...v, file: r });
   }
 
-  return { pages: pages.length, generated, handwritten, withDescription, findings };
+  return { pages: pages.length, generated, handwritten, declared, findings };
+}
+
+/**
+ * Judge every declared root, INDEPENDENTLY. Returns `{ reports, refusals }`.
+ *
+ * Nothing here adds two roots' page counts together, and a refusal on one root
+ * does not stop the others from being judged: a run over a clean `content/docs`
+ * and an emptied `content/blog` yields one report and one refusal, which is the
+ * output that distinguishes this from the union it must not be.
+ *
+ * An empty `ROOTS` is itself a refusal -- every root evaporating at once is the
+ * same "not measured, reported as measured" shape one level up.
+ */
+export function judgeAll(roots = ROOTS) {
+  const reports = [];
+  const refusals = [];
+
+  if (!Array.isArray(roots) || roots.length === 0) {
+    refusals.push({
+      root: null,
+      message:
+        'no content roots are declared, so nothing was verified -- refusing to report a pass. `ROOTS` must ' +
+        'mirror every `defineDocs` call in apps/docs/source.config.ts.',
+    });
+    return { reports, refusals };
+  }
+
+  for (const root of roots) {
+    try {
+      reports.push({ root, ...judgeRoot(root) });
+    } catch (err) {
+      if (!(err instanceof Unread)) throw err;
+      refusals.push({ root, message: err.message });
+    }
+  }
+
+  return { reports, refusals };
 }
 
 /** One violation, as the terminal should show it. */
@@ -432,33 +703,65 @@ export function formatViolation(v) {
   return lines.join('\n');
 }
 
-/** The live run. */
-export function main(docsDir = DOCS_DIR) {
-  const list = process.argv.includes('--list');
+/** One root's verdict line -- what it read, per key, in that root's own terms. */
+function formatRootVerdict(report) {
+  const { root } = report;
+  const split = root.generatedPrefix
+    ? ` — ${report.handwritten} hand-written + ${report.generated} generated under ${root.generatedPrefix}`
+    : '';
+  const keys = root.keys.map((spec) =>
+    spec.required
+      ? `\`${spec.key}\` present and ${spec.expected} on all ${report.pages}`
+      : `\`${spec.key}\` ${spec.expected} on the ${report.declared.get(spec.key)} that declare one`,
+  );
+  const unasserted = root.unasserted.length
+    ? ` Not asserted: ${root.unasserted.map((u) => `\`${u.key}\``).join(', ')} — see the header.`
+    : '';
+  return (
+    `✓ ${rel(root.dir)} (${root.schemaName}, floor ${root.minPages}): ${report.pages} page(s) parse with ` +
+    `yaml@${parserVersion()}, the parser the docs build resolves${split}. ${keys.join('; ')} ` +
+    `(presence of an optional key is not required — the schema marks it optional).${unasserted}`
+  );
+}
 
-  let report;
-  try {
-    report = judgeTree(docsDir);
-  } catch (err) {
-    if (!(err instanceof Unread)) throw err;
-    console.error(`✗ check-doc-frontmatter: ${err.message}`);
-    return 1;
-  }
+/** The live run. */
+export function main(roots = ROOTS) {
+  const list = process.argv.includes('--list');
+  const { reports, refusals } = judgeAll(roots);
 
   if (list) {
-    for (const page of collectPages(docsDir)) {
-      const { data, violations } = judgeSource(readFileSync(page, 'utf8'));
-      const title = data && typeof data.title === 'string' ? JSON.stringify(data.title) : '(none)';
-      const desc = data && typeof data.description === 'string' ? 'description' : '—';
-      console.log(`${violations.length ? '✗' : '·'} ${rel(page)}  title=${title}  ${desc}`);
+    for (const { root } of reports) {
+      console.log(`# ${rel(root.dir)}`);
+      for (const page of collectPages(root.dir)) {
+        const { data, violations } = judgeSource(readFileSync(page, 'utf8'), root.keys);
+        const title = data && typeof data.title === 'string' ? JSON.stringify(data.title) : '(none)';
+        const desc = data && typeof data.description === 'string' ? 'description' : '—';
+        console.log(`${violations.length ? '✗' : '·'} ${rel(page)}  title=${title}  ${desc}`);
+      }
     }
   }
 
-  if (report.findings.length > 0) {
+  // Refusals first, and never netted against another root's verdict. A root
+  // that WAS read still prints its verdict below, so the output shows exactly
+  // which roots were covered and which were not -- the whole point of #10754.
+  if (refusals.length > 0) {
+    for (const r of refusals) console.error(`✗ check-doc-frontmatter: ${r.message}`);
+    for (const report of reports) console.error(formatRootVerdict(report));
     console.error(
-      `✗ check-doc-frontmatter: ${report.findings.length} problem(s) across ${report.pages} page(s) under ${rel(docsDir)}\n`,
+      `\n${refusals.length} of ${roots.length} declared root(s) could not be verified. Each root carries its own ` +
+        "floor precisely so a populated root cannot report coverage on an empty one's behalf.",
     );
-    for (const v of report.findings) console.error(`${formatViolation(v)}\n`);
+    return 1;
+  }
+
+  const findings = reports.flatMap((r) => r.findings.map((v) => ({ ...v, root: r.root })));
+  if (findings.length > 0) {
+    const scanned = reports.reduce((n, r) => n + r.pages, 0);
+    console.error(
+      `✗ check-doc-frontmatter: ${findings.length} problem(s) across ${scanned} page(s) in ` +
+        `${reports.map((r) => rel(r.root.dir)).join(' + ')}\n`,
+    );
+    for (const v of findings) console.error(`${formatViolation(v)}\n`);
     console.error(
       'Frontmatter is parsed by the site build with the same parser used here, so each of these is a red ' +
         '`Build Docs` — a full `next build` — reporting it 30 minutes later.',
@@ -466,11 +769,10 @@ export function main(docsDir = DOCS_DIR) {
     return 1;
   }
 
+  for (const report of reports) console.log(formatRootVerdict(report));
   console.log(
-    `✓ check-doc-frontmatter: ${report.pages} page(s) under ${rel(docsDir)} parse with yaml@${parserVersion()}, ` +
-      `the parser the docs build resolves — ${report.handwritten} hand-written + ${report.generated} generated under ` +
-      `${GENERATED_PREFIX}. \`title\` present and a string on all ${report.pages}; \`description\` a string on all ` +
-      `${report.withDescription} that declare one (presence not required — \`pageSchema\` marks it optional).`,
+    `✓ check-doc-frontmatter: ${reports.length} content root(s) verified, each against its own floor — ` +
+      `${reports.map((r) => `${rel(r.root.dir)} ${r.pages}`).join(', ')}.`,
   );
   return 0;
 }
@@ -492,11 +794,24 @@ export function main(docsDir = DOCS_DIR) {
  * an empty directory would pass against a gate that reports OK on everything,
  * which is the one outcome this battery exists to exclude.
  *
+ * The TREE half also carries this gate's central assertion (#10754): two real
+ * roots, one of them emptied, judged together. The refusal must name the empty
+ * root while the populated one still returns its own clean verdict -- and the
+ * populated one is deliberately given TWELVE pages, so the run is observed
+ * refusing while the global count is comfortably positive. That is the single
+ * observation a naive two-root union cannot reproduce, and both declaration
+ * orders are checked so the result cannot come from a fold's accumulator.
+ *
  * A third leg cross-checks the extraction against the docs build's OWN
  * extractor, resolved from `apps/docs`. It is what keeps the copied regex from
  * drifting into a private idea of where a page's frontmatter starts. If that
  * module cannot be resolved the leg FAILS -- it does not skip; a leg that
  * silently opts out is the same dormant shape one level up.
+ *
+ * A fourth leg pins `ROOTS` and the blog key contract against
+ * `apps/docs/source.config.ts` itself. The gap this gate closes was created by
+ * adding a `defineDocs` call, so a third one -- or a fourth `blogSchema` key --
+ * must fail this battery rather than arrive unowned.
  */
 export async function selfTest() {
   const failures = [];
@@ -612,9 +927,21 @@ export async function selfTest() {
   const { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } = await import('node:fs');
   const { tmpdir } = await import('node:os');
   const tmp = mkdtempSync(join(tmpdir(), 'doc-frontmatter-'));
+  /** A root descriptor over a temp dir -- the real shape `ROOTS` holds. */
+  const rootAt = (dir, over = {}) => ({
+    name: 'tmp',
+    dir,
+    configExport: 'tmp',
+    schemaName: 'pageSchema',
+    keys: PAGE_KEYS,
+    unasserted: [],
+    generatedPrefix: 'references/',
+    minPages: 1,
+    ...over,
+  });
   const refuses = (dir, why) => {
     try {
-      judgeTree(dir);
+      judgeRoot(rootAt(dir));
       return null;
     } catch (err) {
       return err instanceof Unread ? err.message : `threw ${err?.name}: ${err?.message} (${why})`;
@@ -629,8 +956,8 @@ export async function selfTest() {
     mkdirSync(empty);
     const msg2 = refuses(empty);
     assert(
-      msg2?.includes('ZERO .mdx pages') && msg2.includes('refusing to report a pass'),
-      `an empty tree ⇒ REFUSAL, never an empty allow-list -- got ${msg2}`,
+      msg2?.includes('found 0 .mdx page(s), below its own floor of 1') && msg2.includes("no other root's count"),
+      `an empty tree ⇒ REFUSAL naming its OWN floor, never an empty allow-list -- got ${msg2}`,
     );
 
     // The sneakier zero: the tree is populated, just not with pages.
@@ -639,7 +966,7 @@ export async function selfTest() {
     writeFileSync(join(noPages, 'meta.json'), '{}\n');
     writeFileSync(join(noPages, 'guides', 'notes.md'), '# not an mdx page\n');
     const msg3 = refuses(noPages);
-    assert(msg3?.includes('ZERO .mdx pages'), `a tree with no .mdx ⇒ REFUSAL -- got ${msg3}`);
+    assert(msg3?.includes('below its own floor'), `a tree with no .mdx ⇒ REFUSAL -- got ${msg3}`);
 
     // An entry named like a page that cannot be read. Both shapes reach
     // `readFileSync` because nothing is dropped on a dirent type.
@@ -668,21 +995,86 @@ export async function selfTest() {
     writeFileSync(join(good, 'index.mdx'), page('title: Home\ndescription: D'));
     writeFileSync(join(good, 'guide.mdx'), page('title: Guide'));
     writeFileSync(join(good, 'references', 'objects', 'gen.mdx'), page('title: Gen\ndescription: D'));
-    const verdict = judgeTree(good);
+    const verdict = judgeRoot(rootAt(good));
     assert(verdict.findings.length === 0, `a readable clean tree ⇒ a verdict, not a refusal -- got ${JSON.stringify(verdict.findings)}`);
     assert(verdict.pages === 3 && verdict.handwritten === 2 && verdict.generated === 1,
-      `the verdict counts hand-written and generated separately -- got ${JSON.stringify(verdict)}`);
-    assert(verdict.withDescription === 2, `the verdict counts pages declaring a description -- got ${verdict.withDescription}`);
+      `the verdict counts hand-written and generated separately -- got ${verdict.pages}/${verdict.handwritten}/${verdict.generated}`);
+    assert(verdict.declared.get('description') === 2, `the verdict counts pages declaring a description -- got ${verdict.declared.get('description')}`);
+    // A root with no generated half counts every page as hand-written rather
+    // than reporting a `references/` split it does not have.
+    const noSplit = judgeRoot(rootAt(good, { generatedPrefix: null }));
+    assert(noSplit.handwritten === 3 && noSplit.generated === 0,
+      `a root with no generated prefix reports no split -- got ${noSplit.handwritten}/${noSplit.generated}`);
 
     // A bad page in a readable tree is a VIOLATION carrying its file, not a refusal.
     writeFileSync(join(good, 'bad.mdx'), THE_DEFECT);
-    const red = judgeTree(good);
+    const red = judgeRoot(rootAt(good));
     assert(
       red.findings.length === 1 && red.findings[0].file.endsWith('bad.mdx') && red.findings[0].kind === 'frontmatter-parse',
       `a bad page in a readable tree is a violation naming the file -- got ${JSON.stringify(red.findings)}`,
     );
-    assert(quietly(() => main(good)) === 1, 'main() exits non-zero on a violation');
-    assert(quietly(() => main(join(tmp, 'empty'))) === 1, 'main() exits non-zero on a refusal rather than throwing');
+    assert(quietly(() => main([rootAt(good)])) === 1, 'main() exits non-zero on a violation');
+    assert(
+      quietly(() => main([rootAt(join(tmp, 'empty'))])) === 1,
+      'main() exits non-zero on a refusal rather than throwing',
+    );
+
+    // ── (6b) THE per-root floor: an empty root refuses ON ITS OWN ─────────
+    // #10754's whole acceptance bar, and it is one line of arithmetic: a union
+    // count of 403 + 3 is satisfied by 403 + 0. So it is asserted as
+    // arithmetic rather than as intent -- the surviving root is deliberately
+    // LARGE, and the assertion below records that the run refused while the
+    // global count was 12. A union gate is green in exactly that state.
+    const rootA = join(tmp, 'root-a'); // stands in for content/docs
+    const rootB = join(tmp, 'root-b'); // stands in for content/blog
+    mkdirSync(rootA);
+    mkdirSync(rootB);
+    for (let i = 0; i < 12; i++) writeFileSync(join(rootA, `p${i}.mdx`), page('title: A\ndescription: B'));
+    writeFileSync(join(rootB, 'post.mdx'), page('title: P\ndescription: D'));
+    const pair = () => [rootAt(rootA, { name: 'a' }), rootAt(rootB, { name: 'b' })];
+
+    const both = judgeAll(pair());
+    assert(
+      both.refusals.length === 0 && both.reports.length === 2 && both.reports.every((r) => r.findings.length === 0),
+      `two populated roots ⇒ two verdicts and no refusal -- got ${both.reports.length}/${both.refusals.length}`,
+    );
+    assert(quietly(() => main(pair())) === 0, 'main() exits 0 when every root meets its own floor');
+
+    // Empty ONE root. The other keeps 12 pages, which is the union's blind spot.
+    rmSync(join(rootB, 'post.mdx'));
+    const emptied = judgeAll(pair());
+    assert(emptied.refusals.length === 1, `emptying one root ⇒ exactly one refusal -- got ${emptied.refusals.length}`);
+    assert(
+      emptied.refusals[0].root?.name === 'b' && emptied.refusals[0].message.includes('root-b'),
+      `the refusal NAMES the root that was not read -- got ${emptied.refusals[0]?.message}`,
+    );
+    assert(
+      emptied.reports.length === 1 && emptied.reports[0].root.name === 'a' && emptied.reports[0].findings.length === 0,
+      'the OTHER root still returns its own clean verdict -- a refusal is per root, not a whole-run abort',
+    );
+    // The negative control that separates this from the naive union: at the
+    // moment of that refusal, 12 pages HAD been read across the declared roots.
+    assert(
+      emptied.reports[0].pages === 12,
+      `the refusal stands while the global count is 12 -- got ${emptied.reports[0].pages}`,
+    );
+    assert(quietly(() => main(pair())) === 1, 'main() exits 1 on the empty root though 12 pages were read');
+
+    // ...and with the roles swapped, so the verdict cannot depend on the order
+    // roots are declared in (a fold that carried a running total would).
+    const swapped = judgeAll([rootAt(rootB, { name: 'b' }), rootAt(rootA, { name: 'a' })]);
+    assert(
+      swapped.refusals.length === 1 && swapped.refusals[0].root?.name === 'b' && swapped.reports.length === 1,
+      'the empty root refuses whichever position it is declared in',
+    );
+
+    // Every root evaporating at once is a refusal too, not a vacuous pass.
+    const none = judgeAll([]);
+    assert(
+      none.refusals.length === 1 && none.reports.length === 0 && none.refusals[0].message.includes('no content roots'),
+      `an empty ROOTS list ⇒ REFUSAL -- got ${JSON.stringify(none.refusals)}`,
+    );
+    assert(quietly(() => main([])) === 1, 'main() refuses when no roots are declared at all');
 
     // ── (7) the extraction agrees with the docs build's OWN extractor ──────
     const { createRequire: cr } = await import('node:module');
@@ -732,6 +1124,91 @@ export async function selfTest() {
     rmSync(tmp, { recursive: true, force: true });
   }
 
+  // ── (9) the blog root's OWN keys, each observed firing ──────────────────
+  const bkinds = (s) => judgeSource(s, BLOG_KEYS).violations.map((v) => v.kind);
+  const bonly = (s) => {
+    const v = judgeSource(s, BLOG_KEYS).violations;
+    return v.length === 1 ? v[0] : null;
+  };
+
+  assert(
+    bkinds(
+      page('title: A\ndescription: B\nauthor: ObjectStack Team\ndate: 2026-07-17\ntags: [ai, architecture]'),
+    ).length === 0,
+    "a real content/blog frontmatter shape is clean under the blog root's contract",
+  );
+  const badAuthor = bonly(page('title: A\nauthor: 42'));
+  assert(badAuthor?.kind === 'author-not-a-string', `an unquoted numeric author is caught -- got ${badAuthor?.kind}`);
+
+  // The way `tags` is actually got wrong: prose. YAML reads it as ONE scalar.
+  const badTags = bonly(page('title: A\ntags: ai, architecture'));
+  assert(
+    badTags?.kind === 'tags-not-an-array-of-strings',
+    `tags written as prose is one string, and is caught -- got ${badTags?.kind}`,
+  );
+  assert(badTags?.what.includes('a string'), `the message says what it IS -- got ${badTags?.what}`);
+  const badItem = bonly(page('title: A\ntags: [ai, 42]'));
+  assert(
+    badItem?.kind === 'tags-not-an-array-of-strings' && badItem.what.includes('item 2 is a number'),
+    `a non-string ITEM is named by position, not reported as "an array" -- got ${badItem?.what}`,
+  );
+
+  // `date` is declared-and-deliberately-unasserted: `z.coerce.string()` accepts
+  // every one of these, so asserting any of them would be a rule invented here.
+  for (const d of ['date: 2026-07-17', 'date: 42', 'date: true', 'date:', 'date:\n  y: 1']) {
+    assert(bkinds(page(`title: A\n${d}`)).length === 0, `\`date\` is not asserted -- ${JSON.stringify(d)}`);
+  }
+
+  // The widening must not leak the blog's keys onto the docs root.
+  assert(
+    judgeSource(page('title: A\ntags: ai, architecture'), PAGE_KEYS).violations.length === 0,
+    'the blog keys stay on the blog root -- PAGE_KEYS is what `content/docs` is still judged against',
+  );
+
+  // ── (10) ROOTS is pinned to `apps/docs/source.config.ts` ────────────────
+  // This card exists because a root was added there and nothing noticed. The
+  // parity below is what stops a THIRD one arriving unowned.
+  let config = null;
+  try {
+    config = readFileSync(join(REPO_ROOT, 'apps/docs/source.config.ts'), 'utf8');
+  } catch (err) {
+    failures.push(`cannot read apps/docs/source.config.ts to verify ROOTS: ${err.code ?? err.message}`);
+  }
+  if (config !== null) {
+    const dirs = [...config.matchAll(/dir:\s*path\.resolve\(\s*process\.cwd\(\)\s*,\s*'([^']+)'\s*\)/g)].map((m) =>
+      m[1].replace(/^\.\.\/\.\.\//, ''),
+    );
+    const calls = (config.match(/defineDocs\(/g) ?? []).length;
+    // A source scan sees only the spellings it knows, and an unseen call would
+    // read as "no extra root" -- silently. So the count is the positive control.
+    assert(
+      calls > 0 && calls === dirs.length,
+      `every defineDocs call's dir is readable here -- ${calls} call(s), ${dirs.length} dir(s) parsed`,
+    );
+    const declaredDirs = JSON.stringify(ROOTS.map((r) => rel(r.dir)).sort());
+    assert(
+      JSON.stringify(dirs.slice().sort()) === declaredDirs,
+      `ROOTS mirrors every defineDocs root -- config ${JSON.stringify(dirs.slice().sort())} vs ROOTS ${declaredDirs}`,
+    );
+    assert(/schema:\s*pageSchema/.test(config), 'the docs root is still handed `pageSchema` unextended');
+
+    const ext = /const blogSchema = pageSchema\.extend\(\{([\s\S]*?)\}\);/.exec(config);
+    assert(ext !== null, 'blogSchema is still `pageSchema.extend({ ... })`, which is what BLOG_KEYS mirrors');
+    if (ext) {
+      const extKeys = [...new Set([...ext[1].matchAll(/^\s+(\w+):/gm)].map((m) => m[1]))].sort();
+      const blogRoot = ROOTS.find((r) => r.name === 'blog');
+      const accounted = [
+        ...blogRoot.keys.filter((k) => !PAGE_KEYS.includes(k)).map((k) => k.key),
+        ...blogRoot.unasserted.map((u) => u.key),
+      ].sort();
+      assert(
+        JSON.stringify(extKeys) === JSON.stringify(accounted),
+        `every blogSchema extension key is asserted or explicitly unasserted -- config ${JSON.stringify(extKeys)} ` +
+          `vs accounted ${JSON.stringify(accounted)}`,
+      );
+    }
+  }
+
   // ── (8) WIRING: the gate and its self-test really run in CI ──────────────
   // A gate that exists and is not scheduled is the same dormant shape from the
   // other side. Asserted against the workflow text, not remembered.
@@ -756,9 +1233,13 @@ export async function selfTest() {
     `✓ check-doc-frontmatter --self-test: ${checked} assertions — the card's own description observed failing with ` +
       `the parser's message and the FILE line, every other violation kind observed firing, five REFUSALS over real ` +
       `directories (absent root, empty tree, a tree holding no pages, a dangling symlink, a directory wearing a ` +
-      `page's name) each proved against a readable tree that still returns a verdict, main() returning 1 rather ` +
+      `page's name) each proved against a readable tree that still returns a verdict, the PER-ROOT floor observed ` +
+      `refusing an emptied root in both declaration orders while a sibling root's 12 pages stayed green (the one ` +
+      `observation a naive union cannot reproduce) and an empty ROOTS refusing too, the blog root's \`author\` and ` +
+      `\`tags\` observed firing with \`date\` pinned as deliberately unasserted, main() returning 1 rather ` +
       `than throwing on both a violation and a refusal, extraction cross-checked against the docs build's own ` +
-      `extractor, and the CI wiring read out of lint.yml.`,
+      `extractor, ROOTS pinned against every defineDocs call in source.config.ts, and the CI wiring read out of ` +
+      `lint.yml.`,
   );
   return 0;
 }
