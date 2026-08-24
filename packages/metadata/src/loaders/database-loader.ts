@@ -273,7 +273,14 @@ export class DatabaseLoader implements MetadataLoader {
 
   private async _update(table: string, id: string, data: Record<string, unknown>): Promise<Record<string, unknown>> {
     if (this.engine) {
-      return this.engine.update(table, { id, ...data });
+      // [#11231] The resolved id AFTER the spread, so it WINS — the same
+      // convention as `rest-server.ts`'s batch arm and `protocol.updateData`
+      // (#6479). No `where` is passed, so the payload is the only id the
+      // engine sees and its conflicting-id refusal (`UPDATE_ID_MISMATCH`) has
+      // nothing to compare against: a `data.id` spread over the id parameter
+      // would retarget the write to a row no caller resolved. The separate
+      // `id` parameter is the row address — do not let a payload outrank it.
+      return this.engine.update(table, { ...data, id });
     }
     return this.driver!.update(table, id, data);
   }
