@@ -1152,25 +1152,57 @@ const PHANTOM_PIN_DEBT = {};
 // runs on every typecheck. It type-checks clean, so it graduated with zero debt
 // recorded anywhere -- and RECONCILED forced the entry out, as this header said
 // it would.
+//
+// AND THE EIGHT `*/scripts` ENTRIES (#11351), which is why this ledger is down
+// to one line. All eight were the SAME file -- `scripts/i18n-extract.config.ts`
+// -- and all eight notes recorded a TS2883 count (1 for platform-objects, 3 for
+// the other seven) that #10868 had already driven to zero by annotating the
+// nine configs' `default` export. #10868 did not graduate them, because a
+// directory in no tsc program does not graduate by itself; it only made the
+// repair this header names possible. Each package now carries a
+// `tsconfig.scripts.json` named in its `typecheck` script, and every one of the
+// eight measures 0 errors under it.
+//
+// TWO THINGS WORTH KEEPING from doing it, because both would otherwise be
+// rediscovered the hard way:
+//
+//   `rootDir` IS NOT UNIFORM across the eight, and copying one of these files
+//   to the next package is therefore wrong. Five inherit `rootDir: "src"` and
+//   must widen it to `"."`; three (plugin-approvals, plugin-audit,
+//   plugin-security) already widen it to `"../.."` in `tsconfig.json` to carry
+//   a `paths` redirect of a sibling package to SOURCE, so the inherited value
+//   already contains `scripts/` and overriding it to `"."` would re-narrow the
+//   root below the redirected source. Measured both ways: the `"."` variant is
+//   0 for all eight today, the inherited variant is 0 for those three and
+//   1 x TS6059 for the other five.
+//
+//   `packages/spec/tsconfig.scripts.json` IS NOT THE SHAPE TO COPY, even though
+//   this header cites it as the precedent for the IDEA. Its
+//   `allowImportingTsExtensions`, `module: esnext`,
+//   `moduleResolution: bundler`, DOM `lib` and `exclude` are argued in its own
+//   header as things that package needs; none of the eight needs any of them,
+//   because these configs already spell their relative imports with `.js`.
+//   The shape these eight copy is the minimal one -- `packages/objectql`
+//   (#10756) and `packages/plugins/plugin-auth` (#10869).
+//
+// THE NINTH CONFIG IS NOT HERE, deliberately.
+// `packages/services/service-storage/scripts/i18n-extract.config.ts` is the
+// ninth instance #10868 annotated, and that package appears in no line of this
+// ledger for a reason SOURCES_COVERED makes structural: the invariant only asks
+// its question of a package that DECLARES a `typecheck` script, and
+// service-storage declares none. It is covered instead by
+// DEBT['@objectstack/service-storage'], which records 51 errors -- so giving it
+// a `typecheck` script is not a one-line graduation, it is a 51-error
+// burn-down, and wiring one that ran ONLY `tsconfig.scripts.json` would be
+// worse than leaving it: COVERED would start passing on a script that never
+// reads `src`, and RECONCILED would then force out a 51-error DEBT entry whose
+// errors are all still there. It graduates with that entry, not before it.
 const UNCHECKED_SOURCE_DEBT = {
   'packages/cli/test': 'One non-test module, `test/helpers/serve-process.ts`, the spawn harness the '
     + '`os serve` e2e tests share. It measures 0 errors on its own, and it is not separate debt: it '
     + 'sits inside the hidden test tree already measured by TEST_DEBT[\'@objectstack/cli\'] (56 of '
     + 'that package\'s 110 test files are outside `include`). Repairing it means repairing that '
     + 'layer, so this entry graduates with the TEST_DEBT one rather than before it.',
-  'packages/platform-objects/scripts': '`i18n-extract.config.ts`, 1 x TS2883: the inferred type of '
-    + 'its `default` export names a hash-suffixed internal chunk of `@objectstack/spec`\'s dist '
-    + '(`state-machine.zod-<hash>`), so it is non-portable by construction. One of 8 identical '
-    + 'instances, tracked as one class in #10868.',
-  'packages/plugins/plugin-approvals/scripts': '`i18n-extract.config.ts`, 3 x TS2883 '
-    + '(`FormFieldInput`, `NavigationItemInput`, `StateNodeConfig` through @objectstack/spec dist '
-    + 'chunks). See #10868.',
-  'packages/plugins/plugin-audit/scripts': '`i18n-extract.config.ts`, 3 x TS2883. See #10868.',
-  'packages/plugins/plugin-security/scripts': '`i18n-extract.config.ts`, 3 x TS2883. See #10868.',
-  'packages/plugins/plugin-sharing/scripts': '`i18n-extract.config.ts`, 3 x TS2883. See #10868.',
-  'packages/plugins/plugin-webhooks/scripts': '`i18n-extract.config.ts`, 3 x TS2883. See #10868.',
-  'packages/services/service-messaging/scripts': '`i18n-extract.config.ts`, 3 x TS2883. See #10868.',
-  'packages/services/service-realtime/scripts': '`i18n-extract.config.ts`, 3 x TS2883. See #10868.',
 };
 
 /**
