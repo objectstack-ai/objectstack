@@ -651,9 +651,20 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
     // `sys_approval_delegation`). Same one-file radius, same reason — plus this
     // gate's own path, named in that file's import comment (see the note on the
     // sibling entry above for why a mention is declared rather than reworded).
+    //
+    // [#11286] src/manager-org-screen-parity.contract.test.ts imports
+    // `managerIsProvablyOutsideOrg` from plugin-sharing's `team-graph.ts` BY
+    // RELATIVE SOURCE PATH — the only way in, since that screen is deliberately
+    // not exported from plugin-sharing's index and the package publishes no
+    // subpath. The test pins the two independent screens over
+    // `sys_user.manager_id` to the same verdicts, so the sharing screen is a
+    // real input to it: without this glob a change THERE would never re-run the
+    // pin HERE, which is the exact blind spot this gate exists for. One file,
+    // not `plugin-sharing/src/**` — nothing else in that package is read.
     globs: [
       'packages/runtime/src/expected-read-refusal-noise.ts',
       'scripts/check-cross-package-test-inputs.mjs',
+      'packages/plugins/plugin-sharing/src/team-graph.ts',
     ],
   },
   '@objectstack/dogfood': {

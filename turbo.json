@@ -176,7 +176,8 @@
         "!coverage/**",
         "!.turbo/**",
         "$TURBO_ROOT$/packages/runtime/src/expected-read-refusal-noise.ts",
-        "$TURBO_ROOT$/scripts/check-cross-package-test-inputs.mjs"
+        "$TURBO_ROOT$/scripts/check-cross-package-test-inputs.mjs",
+        "$TURBO_ROOT$/packages/plugins/plugin-sharing/src/team-graph.ts"
       ],
       "outputs": []
     },
