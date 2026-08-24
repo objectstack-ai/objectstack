@@ -11,6 +11,7 @@ import {
   resolveSandboxTimeoutMs,
   isMcpServerEnabled,
   resolveMcpStdioAutoStart,
+  resolveOrgMembershipLimit,
   stampSearchPinyinEnabled,
 } from './env.js';
 
@@ -374,5 +375,36 @@ describe('resolveSandboxTimeoutMs (#3259)', () => {
     process.env[HOOK] = '111';
     process.env[ACTION] = '222';
     expect(resolveSandboxTimeoutMs('wallCeiling', 30_000)).toBe(60_000);
+  });
+});
+
+describe('resolveOrgMembershipLimit', () => {
+  const VAR = 'OS_ORG_MEMBERSHIP_LIMIT';
+  const orig = process.env[VAR];
+  afterEach(() => {
+    if (orig === undefined) delete process.env[VAR];
+    else process.env[VAR] = orig;
+  });
+
+  it('returns undefined when unset — no per-org member cap on self-host', () => {
+    delete process.env[VAR];
+    expect(resolveOrgMembershipLimit()).toBeUndefined();
+  });
+
+  it('returns the configured positive integer', () => {
+    process.env[VAR] = '500';
+    expect(resolveOrgMembershipLimit()).toBe(500);
+  });
+
+  it('treats empty / non-numeric / non-positive values as unset', () => {
+    for (const bad of ['', '   ', 'abc', '0', '-3', 'NaN']) {
+      process.env[VAR] = bad;
+      expect(resolveOrgMembershipLimit(), `value=${JSON.stringify(bad)}`).toBeUndefined();
+    }
+  });
+
+  it('tolerates a leading integer with trailing junk (parseInt semantics, as resolveOrgLimit)', () => {
+    process.env[VAR] = '250 members';
+    expect(resolveOrgMembershipLimit()).toBe(250);
   });
 });

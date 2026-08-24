@@ -439,6 +439,45 @@ describe('AuthManager', () => {
       expect(orgPlugin._opts.schema.session.fields.activeOrganizationId).toBe('active_organization_id');
     });
 
+    // better-auth treats an ABSENT `membershipLimit` as a hard 100-member cap
+    // per organization (`membershipLimit || 100`, 1.7.1 crud-members.mjs), so
+    // real deployments 403'd ORGANIZATION_MEMBERSHIP_LIMIT_REACHED on the
+    // 101st member with no knob to turn. The option must therefore ALWAYS be
+    // passed — env-configurable via OS_ORG_MEMBERSHIP_LIMIT, effectively
+    // unlimited when unset — and in FUNCTION form, because the vendor adapter
+    // reuses a numeric membershipLimit as the default list-members query limit.
+    it('always passes membershipLimit as a function: OS_ORG_MEMBERSHIP_LIMIT when set, effectively unlimited otherwise', async () => {
+      let capturedConfig: any;
+      (betterAuth as any).mockImplementation((config: any) => {
+        capturedConfig = config;
+        return { handler: vi.fn(), api: {} };
+      });
+
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const manager = new AuthManager({
+        secret: 'test-secret-at-least-32-chars-long',
+        baseUrl: 'http://localhost:3000',
+        plugins: { organization: true },
+      });
+      await manager.getAuthInstance();
+      warnSpy.mockRestore();
+
+      const orgPlugin = capturedConfig.plugins.find((p: any) => p.id === 'organization');
+      const limit = orgPlugin._opts.membershipLimit;
+      expect(typeof limit).toBe('function');
+
+      const prev = process.env.OS_ORG_MEMBERSHIP_LIMIT;
+      try {
+        delete process.env.OS_ORG_MEMBERSHIP_LIMIT;
+        expect(limit()).toBe(Number.MAX_SAFE_INTEGER);
+        process.env.OS_ORG_MEMBERSHIP_LIMIT = '500';
+        expect(limit()).toBe(500);
+      } finally {
+        if (prev === undefined) delete process.env.OS_ORG_MEMBERSHIP_LIMIT;
+        else process.env.OS_ORG_MEMBERSHIP_LIMIT = prev;
+      }
+    });
+
     // @better-auth/scim mounts the SCIM 2.0 Service Provider so an external IdP
     // can auto-provision/deprovision this env's users (ADR-0071). It is opt-in
     // via OS_SCIM_ENABLED and FORCES the admin plugin on (active:false → ban

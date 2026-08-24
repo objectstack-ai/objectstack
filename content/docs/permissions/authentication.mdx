@@ -879,7 +879,7 @@ Refusals, with both halves of the ADR-0112 envelope:
 | `400` | `USER_NOT_FOUND` | No account with that `userId`. |
 | `400` | `USER_IS_ALREADY_A_MEMBER_OF_THIS_ORGANIZATION` | The account already holds a membership in that organization. |
 | `400` | `NO_ACTIVE_ORGANIZATION` | `organizationId` was omitted and the calling admin has no active organization to fall back to. |
-| `403` | `ORGANIZATION_MEMBERSHIP_LIMIT_REACHED` | The organization is at its membership limit (better-auth's `membershipLimit`, default 100). |
+| `403` | `ORGANIZATION_MEMBERSHIP_LIMIT_REACHED` | The organization is at its membership limit (`OS_ORG_MEMBERSHIP_LIMIT`; unset means no limit). The platform always passes an explicit limit to better-auth, so the vendor's own 100-member fallback never applies. |
 
 The last five are the vendor's own verdicts, forwarded verbatim rather than
 re-adjudicated.

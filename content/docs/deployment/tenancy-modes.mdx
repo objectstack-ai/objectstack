@@ -299,6 +299,7 @@ the enterprise runtime.
 | `OS_MULTI_ORG_ENABLED` | `false` | Superseded by `OS_TENANCY_POSTURE` and still honoured **only** when it is unset: any value other than a case-insensitive `false` selects `isolated`. |
 | `OS_ALLOW_DEGRADED_TENANCY` | `false` | Boot even when a walled posture is requested but the runtime is absent (degraded). Accepts `1` / `true` / `on` / `yes`. Does not cover a runtime that refused to mount. |
 | `OS_ORG_LIMIT` | unset (unlimited) | Cap on organizations a single user may **own**; organizations they were merely invited into never count against it. Only meaningful under a walled posture, since org creation is refused otherwise. |
+| `OS_ORG_MEMBERSHIP_LIMIT` | unset (unlimited) | Cap on **members per organization**, enforced by better-auth on `add-member` and invitation acceptance (403 `ORGANIZATION_MEMBERSHIP_LIMIT_REACHED` once reached). The platform always passes an explicit limit, so better-auth's own 100-member fallback never applies. |
 | `OS_AUTH_MEMBERSHIP_POLICY` | `auto` | Env override for the `auth.membership_policy` setting — `auto` or `invite-only`. |
 | `OS_SKIP_MEMBERSHIP_BACKFILL` | unset | Set to `1` to skip the boot-time membership backfill. |
 

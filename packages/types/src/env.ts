@@ -359,6 +359,30 @@ export function resolveOrgLimit(): number | undefined {
 }
 
 /**
+ * Maximum number of MEMBERS a single organization may hold, from
+ * `OS_ORG_MEMBERSHIP_LIMIT`. The auth plugin forwards this as better-auth's
+ * `membershipLimit`, which gates `addMember` and invitation acceptance with a
+ * 403 `ORGANIZATION_MEMBERSHIP_LIMIT_REACHED` once the org's member count
+ * reaches the cap.
+ *
+ * Returns `undefined` when unset or non-positive → NO limit, preserving
+ * self-host behaviour like {@link resolveOrgLimit}. This is deliberately NOT
+ * the vendor's default: better-auth falls back to a 100-member cap when the
+ * option is absent (`membershipLimit || 100`, measured on 1.7.1
+ * `routes/crud-members.mjs`), and that arbitrary ceiling blocked real
+ * deployments — a hospital org's 101st staff member simply could not be added,
+ * with no knob to turn. The auth plugin therefore always passes an explicit
+ * limit (this value, or effectively-unlimited when unset) so the vendor
+ * fallback never applies. Metered SaaS postures that want a cap set the env.
+ */
+export function resolveOrgMembershipLimit(): number | undefined {
+  const raw = readEnvWithDeprecation('OS_ORG_MEMBERSHIP_LIMIT', [], { silent: true });
+  if (raw == null || String(raw).trim() === '') return undefined;
+  const n = Number.parseInt(String(raw), 10);
+  return Number.isFinite(n) && n > 0 ? n : undefined;
+}
+
+/**
  * SINGLE decision point for "is pinyin search recall on?" (#2486).
  *
  * Pinyin search is a deployment/locale-level capability, not field metadata:

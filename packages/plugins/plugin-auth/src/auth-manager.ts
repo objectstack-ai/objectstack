@@ -12,7 +12,7 @@ import type {
 } from '@objectstack/spec/system';
 import type { IDataEngine } from '@objectstack/core';
 import type { IEmailService, ISmsService } from '@objectstack/spec/contracts';
-import { readEnvWithDeprecation, resolveTenancyPosture, resolveOrgLimit, isMcpServerEnabled } from '@objectstack/types';
+import { readEnvWithDeprecation, resolveTenancyPosture, resolveOrgLimit, resolveOrgMembershipLimit, isMcpServerEnabled } from '@objectstack/types';
 import {
   mapMembershipRole,
   BUILTIN_IDENTITY_PLATFORM_ADMIN,
@@ -2390,6 +2390,20 @@ export class AuthManager {
             return false;
           }
         },
+        // Cap how many MEMBERS one org can hold (OS_ORG_MEMBERSHIP_LIMIT).
+        // Unset → unlimited (self-host default, same posture as OS_ORG_LIMIT
+        // above). ALWAYS passed, because better-auth's fallback for an absent
+        // `membershipLimit` is a hard 100-member cap (`membershipLimit || 100`,
+        // 1.7.1 `routes/crud-members.mjs`) — which 403'd every add-member and
+        // invitation-accept on real orgs past 100 staff, with no knob to turn.
+        //
+        // Function form on purpose, even though the value is static: the
+        // vendor's adapter reuses a NUMERIC `membershipLimit` as the default
+        // QUERY limit for member listings (`adapter.mjs`:
+        // `typeof options?.membershipLimit === "number" ? options.membershipLimit : 100`),
+        // so a numeric MAX_SAFE_INTEGER here would leak into list-members
+        // pagination. A function only ever feeds the cap check.
+        membershipLimit: () => resolveOrgMembershipLimit() ?? Number.MAX_SAFE_INTEGER,
         ...(customOrgRoles ? { roles: customOrgRoles } : {}),
         // ── Slug-change guard ─────────────────────────────────────
         // An org's slug is baked into every env hostname at creation
