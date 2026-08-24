@@ -574,7 +574,11 @@ describe('cascadeDeleteRelations — [#9689] authored set_null on master_detail 
         const { driver } = makeStubDriver();
         engine.registerDriver(driver, true);
         await engine.init();
-        for (const o of objects) engine.registry.registerObject(o as any);
+        // Two-arg spelling (packageId is the signature's required 2nd arg —
+        // the house pattern of batch-row-authoring-feedback.test.ts): the
+        // 1-arg call this helper first shipped with added a TS2554 to the
+        // frozen TEST_DEBT ledger (354 -> 355), and the ratchet only shrinks.
+        for (const o of objects) engine.registry.registerObject(o as any, 'com.objectstack.test.9689');
         return engine;
     }
 
