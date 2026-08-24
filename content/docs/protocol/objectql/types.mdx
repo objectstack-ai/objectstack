@@ -698,9 +698,13 @@ const opportunities = await engine.find('opportunity', {
 > been emptied.
 >
 > On `master_detail` the same reading applies from the other side: `restrict`
-> is the only value that deviates from `cascade`, so an explicit
-> `deleteBehavior: set_null` on a master-detail reference is *not* honored —
-> the child is cascaded away.
+> is the only value that deviates from `cascade`. An explicit
+> `deleteBehavior: set_null` on a master-detail reference is a **parse-time
+> rejection** (#9689) — a detail row cannot outlive its master, so the spec
+> refuses the declaration instead of silently cascading the children it asked
+> to keep. Metadata that bypasses the parse (a raw registration, or a row
+> stored before the tightening) still resolves to `cascade`, now with a loud
+> engine log at the coercion site.
 >
 > The refusal carries **two** messages, for two audiences. `error` is written for
 > the person who clicked delete: it is rendered in the caller's locale from the
