@@ -1415,6 +1415,102 @@
       "history": [
         { "revision": 1, "date": "2026-08-20", "change": "new — scoped scan-functionality sweep (扫描功能), authored VERIFY-FIRST as the brief required since the hunter had lower confidence here. Source confirmed the three-severity split and errors-only gating; two sketch claims were corrected against lint.ts before authoring: (1) the --json shape is lint's own {passed,total,errors,warnings,suggestions,issues,duration} (:543-553), not the os validate #3782 parity shape — the parity lint actually owes is the #4409 shared-registry agreement with os build (:407-436), encoded as its own clause; (2) the exit contract is 0/1 on both paths (process.exit(1) at :634, CliExitCode slot at :553), not build's human-path oclif-2 split. The i18n platform fold (:47-66) with its hiddenPlatform disclosure is covered as the third load-bearing surface", "ref": "claude/new-session-0pv25p" }
       ]
+    },
+    {
+      "id": "cli.plugin-manifest-build-contract",
+      "title": "os plugin build enforces the manifest at the packaging boundary: an invalid manifest is refused with located errors, `packaging` forks the artifact, and the compiled manifest the artifact carries is readable back",
+      "since": "v15",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "cli",
+      "personas": [
+        "plugin author (local shell, scratch plugin directory)"
+      ],
+      "fixtures": {
+        "app": "scaffold",
+        "requires": [
+          "a scratch plugin directory OUTSIDE the repo tree holding objectstack.plugin.json (the filename os plugin build reads — NOT objectstack.config.ts), an entry at src/index.ts, and a package.json declaring at least one real runtime dependency that the entry actually imports. ⛔ Without a genuinely imported dependency the two `packaging` modes produce the same bundle and the fork clause is unscoreable — an equal-artifacts observation would then be a fixture defect reported as a product fail",
+          "esbuild resolvable from that directory — os plugin build refuses with its own named error when it is not, which is a fixture failure rather than a clause verdict",
+          "a second scratch directory for the refusal probes, so a bad manifest never overwrites the good one"
+        ],
+        "knownGaps": [
+          "os plugin publish CANNOT complete locally: after extracting the artifact manifest it requires a cloud token and posts to <server>/api/v1/cloud/packages. Only its PRE-NETWORK legs are scoreable here — artifact discovery in cwd, manifest extraction, the id/version refusal, and the unsigned-artifact notice. Record blocked(environment) for anything past the auth step; the cloud control plane is not part of this checklist's fixture set",
+          "the SERVER-side mirror of the identity refusal — POST /api/v1/packages/publish answering 400 PACKAGE_MANIFEST_INVALID when id or version is missing (packages/rest/src/package-routes.ts:532) — is deliberately not scored here: it needs a deployment composing the `package` service, and one without it answers 404 with the 'composes no `package` service' message, which is not a failure of anything. Score it from the api lane if a marketplace-capable deployment is available",
+          "the artifact is a gzipped ustar with mtime pinned to 0 and entries emitted in sorted path order, so identical inputs produce byte-identical archives — that is what makes the two packaging builds comparable, and it is also why a stale artifact from an earlier run is indistinguishable from a fresh one by name alone. Build each mode into its own --out path"
+        ]
+      },
+      "steps": [
+        "in the scratch plugin dir, run `os plugin build` on the GOOD manifest (id, version, name, an imported dependency in package.json, no `packaging` key) → capture the full output: the Loaded line, Artifact, Plugin, Files, Integrity entries, Size, sha256. Keep the artifact at its own --out path",
+        "re-run with `packaging: \"manifest-deps\"` in objectstack.plugin.json, into a DIFFERENT --out path → capture the same output block",
+        "compare the two artifacts: extract each (gunzip + tar) and diff the FILE LISTS and the bundled entry. Expect package.json (and pnpm-lock.yaml when present) inside the manifest-deps artifact and absent from the bundled one, and expect the declared dependency's import to survive as an external import in the manifest-deps dist/index.mjs while its code is inlined in the bundled one",
+        "read the compiled manifest out of each artifact (the objectstack.plugin.json entry inside the archive) and compare it to the authored one: expect the authored keys plus `main` and an `integrity` map",
+        "run `os plugin publish` against the good artifact with no token → capture the output up to and including the auth refusal; then run it against an artifact whose compiled manifest lacks a version → capture that refusal",
+        "REFUSAL probes, each in the second scratch dir, each followed by a check that NO artifact file was written: (a) objectstack.plugin.json that is not valid JSON; (b) a manifest missing `id`; (c) a manifest whose `version` is not semver; (d) a manifest with `id: \"\"` — which z.string() admits, so it reaches the explicit post-parse guard; (e) a manifest with no `main` and no src/index.* entry candidate",
+        "run `os lint` on a scaffold config whose manifest declares NO engines range → capture the finding (rule, severity, path, fix); then run it on a bare metadata fragment that declares no manifest at all → confirm the rule does NOT fire there",
+        "teardown: delete both scratch directories. ⚠️ Do not re-run the packaging comparison over the artifacts of a previous run — each mode writes its own --out path and a leftover file from an earlier run reads exactly like a fresh one"
+      ],
+      "acceptance": [
+        {
+          "clause": "an invalid manifest is REFUSED at build with LOCATED errors and no artifact: an unparseable objectstack.plugin.json is refused by name ('Cannot read objectstack.plugin.json in <cwd>'), and a manifest that parses as JSON but fails ManifestSchema is refused with the per-key Zod errors printed — each exits nonzero and leaves no .osplugin behind",
+          "oracle": "log",
+          "verify": "run probes 6a-6c and read stdout plus the exit code; then list the directory and confirm no artifact was written. ⛔ Score the exit code and the absence of the file together — a refusal that prints and still writes an artifact is the shape that ships a broken plugin",
+          "evidence": "each refusal's full output with its exit code, plus the directory listing taken after it"
+        },
+        {
+          "clause": "identity is guarded in BOTH shapes, and the second guard is not redundant: `id` and `version` are required by the schema (an absent one fails safeParse with a located error, a non-semver version fails its regex), while `id: \"\"` satisfies z.string() and is caught only by the explicit post-parse refusal naming both keys — that guard is the one thing between an empty id and a nameless artifact",
+          "oracle": "log",
+          "verify": "probes 6b, 6c and 6d, read as three DIFFERENT refusals — 6b/6c located Zod errors, 6d the worded 'must declare both \"id\" and \"version\"' line. Collapsing them into one 'it refuses' observation cannot tell a working post-parse guard from a removed one",
+          "evidence": "the three refusals side by side, each with its exit code"
+        },
+        {
+          "clause": "`packaging` FORKS the artifact rather than annotating it: the same source tree built as `bundled` (the default) and as `manifest-deps` produces two DIFFERENT artifacts — manifest-deps keeps every package.json dependency external in the bundle and packs package.json (plus pnpm-lock.yaml when present) into the archive; bundled inlines the dependency's code and packs neither",
+          "oracle": "build",
+          "verify": "diff the extracted file lists and the entry bundles of the two artifacts. Both differences must hold: the file-list difference alone could come from any archive change, and the external-import difference alone could come from an esbuild default",
+          "evidence": "the two file lists and the two entry-bundle excerpts showing the dependency inlined in one and imported in the other"
+        },
+        {
+          "clause": "the artifact carries a COMPILED manifest — the authored manifest plus `main: \"dist/index.mjs\"` and an `integrity` map of archive-relative path → sha256 SRI digest, with the manifest itself and SIGNATURE excluded from the map — and os plugin publish reads that manifest back out of the artifact BEFORE any network call, refusing 'Artifact manifest is missing id or version.' when it cannot",
+          "oracle": "build",
+          "verify": "read the objectstack.plugin.json entry out of each archive and diff it against the authored file; then run publish against a good artifact (expect it to reach the auth refusal, proving the manifest was read) and against one whose manifest lacks a version (expect the artifact-manifest refusal, before any auth). ⚠️ The publish leg is scored on WHICH refusal arrives, not on success",
+          "evidence": "the compiled manifest of each artifact, and the two publish outputs distinguished by their refusal"
+        },
+        {
+          "clause": "os lint closes the grandfathering loop and is SCOPED while doing it: a config whose manifest declares no compatibility range gets rule protocol/missing-engines-range at severity warning, on path manifest.engines.protocol, carrying an `engines: { protocol: '^<major>' }` fix — and a config declaring no manifest at all is NOT flagged, because a bare metadata fragment has no package identity to hang a range on",
+          "oracle": "log",
+          "verify": "the two runs of step 7, read as a pair. ⛔ The negative half is the load-bearing one: an unscoped rule fires on every metadata fragment in a project and the warning becomes noise nobody reads, which is indistinguishable from the rule working",
+          "evidence": "the finding (rule, severity, path, fix) from the first run and the absence of it in the second"
+        }
+      ],
+      "negative": [
+        "an artifact written from a manifest that failed the schema, or from one missing id/version, is the FAIL this item exists for — the refusal is worthless if the build still produces something publishable",
+        "the two packaging modes producing byte-identical artifacts is a FAIL of the fork clause — but check the fixture first: without a dependency the entry genuinely imports there is nothing to externalize, and that is a fixture defect, not a product one",
+        "⛔ the `integrity` map's PRESENCE is not evidence of an integrity CHECK. os plugin build computes it and writes it into the compiled manifest, and nothing re-verifies it at unpack — #11331 is open on exactly that. Scoring the printed 'Integrity entries' count as a working integrity guarantee is the false-compliance shape the enforce-or-remove ledger exists for, and this item asserts only that the map is PRODUCED",
+        "⛔ likewise the plugin trust tier: build and publish both print `runtime: <value|unset>`, and nothing in this repo dispatches on it — #11330 is open. A run that reads that printed line as isolation has scored a log line, not a capability",
+        "a lint warning that fires on a manifest-less metadata fragment is a FAIL of the scoping half even though the rule itself works"
+      ],
+      "traps": [
+        "stale-dist",
+        "destructive-in-place"
+      ],
+      "source": [
+        "packages/cli/src/commands/plugin/build.ts — manifest read + named refusal :101-107; ManifestSchema.safeParse + formatZodErrors :111-117; the explicit id/version guard :120-125; packaging default and the Loaded line :127-128; entry resolution :131-142; the manifest-deps externalization :155-166; the manifest-deps package.json / pnpm-lock.yaml packing :202-207; computeIntegrity + the compiled manifest :209-213; the artifact write and its printed block :219-230",
+        "packages/cli/src/utils/osplugin.ts — MANIFEST_FILENAME = 'objectstack.plugin.json' :71; OSPLUGIN_EXT :73; computeIntegrity :61-69 (manifest and SIGNATURE excluded, keys sorted); the ustar writer with mtime pinned to 0 :100-135; readOspluginManifest :163-167",
+        "packages/cli/src/commands/plugin/publish.ts — artifact discovery :67-77; readOspluginManifest before any network call :82-89; the id/version refusal :90-94; the unsigned-artifact notice :103-105; the auth refusal :107-116",
+        "packages/spec/src/kernel/manifest.zod.ts — ManifestSchema id :140 and version :202 (both required, version regex-pinned); PluginPackagingSchema :95-97 ('bundled' | 'manifest-deps', ADR-0025 §3.3); PluginRuntimeSchema :85-86 (the trust tier, ADR-0025 §3.6)",
+        "packages/cli/src/commands/lint.ts :375-400 — the protocol/missing-engines-range rule, its manifest scoping and its fix string",
+        "packages/rest/src/package-routes.ts :525-536 — the server mirror (400 PACKAGE_MANIFEST_INVALID), recorded in knownGaps rather than scored here",
+        "content/docs/releases/v15.mdx :514-523 (the release that dated objectstack lint's protocol/missing-engines-range) · ADR-0025 §3.3 / §3.6",
+        "sibling items: platform-core.manifest-install-contract (the same manifest at the install boundary) · cli.build-own-contract and cli.lint-severity-exit-contract (the os build / os lint exit-code contracts this item leans on but does not re-prove)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-08-24",
+          "change": "new — the packaging half of classifying the `manifest` capability for the coverage ratchet, which had flagged it UNCLASSIFIED since its liveness ledger landed. Authored VERIFY-FIRST against source, and two plausible sketch claims were corrected before they became clauses: (1) `id`/`version` are REQUIRED by ManifestSchema (:140, :202), so the explicit post-parse guard in build.ts is the empty-string arm rather than the only identity check — the clause now asserts both shapes as different refusals; (2) the manifest os plugin build reads is objectstack.plugin.json, not the objectstack.config.ts the manifest liveness ledger names first. `since` is v15 as a FLOOR, not a discovery: the protocol/missing-engines-range rule this item's last clause covers is dated to v15 by the release notes, and os plugin build already predates the earliest release in the CLI changelog reachable from this checkout. The two open enforce-or-remove findings on this surface (#11330 runtime tier printed-not-enforced, #11331 integrity computed-not-verified) are recorded in `negative` so a run cannot score either as working machinery",
+          "ref": "#11421"
+        }
+      ]
     }
   ]
 }
