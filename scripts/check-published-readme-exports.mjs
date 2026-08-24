@@ -294,7 +294,6 @@ import { isEntrypoint } from './invoked-as.mjs';
 import { createProgramChecked } from './ts-parse.mjs';
 import {
   WORKSPACE_FILE,
-  readWorkspaceGlobs,
   selfTest as workspaceEnumeratorSelfTest,
   workspacePackageDirs,
 } from './workspace-enumerator.mjs';

@@ -414,7 +414,6 @@ import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, w
 import { tmpdir } from 'node:os';
 import { join, posix, resolve } from 'node:path';
 import {
-  WORKSPACE_FILE,
   selfTest as workspaceEnumeratorSelfTest,
   workspacePackageDirs,
 } from './workspace-enumerator.mjs';

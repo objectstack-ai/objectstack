@@ -57,7 +57,6 @@
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join, posix, resolve } from 'node:path';
 import {
-  WORKSPACE_FILE,
   readWorkspaceGlobs,
   selfTest as workspaceEnumeratorSelfTest,
   workspacePackageDirs,
