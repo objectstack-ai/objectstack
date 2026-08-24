@@ -81,9 +81,12 @@
  * object literals, and a YAML `sections:` block is a different syntax that the
  * matcher would misread rather than judge. YAML fences carrying `sections:` are
  * COUNTED and PRINTED in the verdict as a declared out-of-scope population, so
- * the boundary is a measurement rather than a silence. (Today: a real
- * population, filed separately -- widening this gate to YAML is a different
- * parser, not a bigger regex.)
+ * the boundary is a measurement rather than a silence. Today that gap holds a
+ * REAL population -- 21 nameless section mappings across 16 YAML fences under
+ * `content/docs/protocol/objectui/**`, measured with the `yaml` parser and
+ * filed as #11887. Widening this gate to cover them is a different parser, not
+ * a bigger regex, and it has to decide what an unparseable teaching fragment
+ * means before it can have a verdict.
  *
  * ## ⛔ A zero here must be a MEASUREMENT, not a silence
  *
