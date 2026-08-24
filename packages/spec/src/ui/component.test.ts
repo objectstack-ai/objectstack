@@ -581,6 +581,70 @@ describe('RecordDetailsProps', () => {
     ).toThrow();
   });
 
+  // #11289 — the three section keys the renderer honoured and this shape
+  // rejected (maintainer ruling 2026-08-23, direction 1: declare; renderer
+  // unchanged). `hideEmpty: false` is the load-bearing one: it is the only
+  // spelling that keeps a section's label skeleton on an all-empty record,
+  // and before this declaration `objectstack validate` warned it "did
+  // nothing".
+  it('preserves the section presentation keys verbatim (#11289)', () => {
+    const result = RecordDetailsProps.parse({
+      sections: [{
+        label: 'Description',
+        fields: ['description', 'next_step'],
+        hideEmpty: false,
+        collapsible: true,
+        showBorder: false,
+      }],
+    });
+    expect(result.sections?.[0].hideEmpty).toBe(false);
+    expect(result.sections?.[0].collapsible).toBe(true);
+    expect(result.sections?.[0].showBorder).toBe(false);
+  });
+
+  it('does not materialize the section presentation keys on a clean parse', () => {
+    // Optional with NO schema default (the `maxVisible` principle): `true` /
+    // off / title-derived are the RENDERER'S fallbacks, and a schema default
+    // would turn "the author said nothing" into "the author asked for the
+    // default" — a different fact.
+    const section = RecordDetailsProps.parse({
+      sections: [{ label: 'Overview', fields: ['name'] }],
+    }).sections?.[0] as Record<string, unknown>;
+    expect('hideEmpty' in section).toBe(false);
+    expect('collapsible' in section).toBe(false);
+    expect('showBorder' in section).toBe(false);
+  });
+
+  it('rejects non-boolean values for the section presentation keys', () => {
+    for (const key of ['hideEmpty', 'collapsible', 'showBorder'] as const) {
+      const r = RecordDetailsProps.safeParse({
+        sections: [{ label: 'A', fields: ['a'], [key]: 'yes' }],
+      });
+      expect(r.success).toBe(false);
+      expect(r.success === false && r.error.issues[0].code).toBe('invalid_type');
+      expect(r.success === false && r.error.issues[0].path).toEqual(['sections', 0, key]);
+    }
+  });
+
+  it('still rejects unknown section keys, and the new keys are suggestion candidates', () => {
+    // Strictness survives the widening, and the declared keys entered the
+    // "did you mean" candidate list — the proof the declaration reached the
+    // same error map the strict shape reads.
+    const r = RecordDetailsProps.safeParse({
+      sections: [{ label: 'A', fields: ['a'], showBorders: true }],
+    });
+    expect(r.success).toBe(false);
+    const message = r.success === false
+      ? r.error.issues.map((i) => i.message).join('\n')
+      : '';
+    expect(message).toContain('`showBorders`');
+    // The arrow form specifically — a bare `toContain('showBorder')` is
+    // satisfied by the echoed offending key (`showBorders` contains it), which
+    // is exactly what reverse verification against the pre-declaration schema
+    // measured: that spelling stayed green with no declaration at all.
+    expect(message).toContain('`showBorders` → `showBorder`');
+  });
+
   it('preserves hideFields verbatim (sys-user.page.ts:106)', () => {
     // Undeclared until #5611, so a non-strict `z.object` dropped it on the
     // floor: the platform page's hidden-field list survived only because
