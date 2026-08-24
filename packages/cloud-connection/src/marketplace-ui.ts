@@ -17,6 +17,8 @@
  * stages (Installed Apps first).
  */
 
+import type { Page } from '@objectstack/spec/ui';
+
 /** "Browse Marketplace" — owned by the browse capability (the proxy). */
 export const MARKETPLACE_BROWSE_UI_BUNDLE = {
     id: 'com.objectstack.cloud-connection.marketplace-browse-ui',
@@ -40,8 +42,14 @@ export const MARKETPLACE_BROWSE_UI_BUNDLE = {
 
 /** "Installed Apps" — owned by the local-install capability (ADR-0009 P2a:
  *  the page itself is now metadata; the console provides only the
- *  `marketplace:installed-list` widget). */
-export const MarketplaceInstalledPage = {
+ *  `marketplace:installed-list` widget).
+ *
+ *  Declared `: Page` (#11480) — this is a raw-literal page served through the
+ *  bundle below, and `export const X: Page =` is the export shape the
+ *  canonical-envelope gate's population scan discovers pages by. Un-annotated
+ *  it shipped invisibly to that scan (measured while wiring this package's
+ *  `canonical-expression-envelopes.test.ts`). */
+export const MarketplaceInstalledPage: Page = {
     name: 'marketplace_installed',
     label: 'Installed Apps',
     type: 'app' as const,
