@@ -1,0 +1,7 @@
+---
+'@objectstack/spec': minor
+---
+
+`CurrencyConfigSchema` no longer materializes the `precision` default onto a configuration the schema itself would refuse as authored (#11423). A bare `currencyConfig: { currencyMode: 'fixed', defaultCurrency: 'JPY' }` used to parse to `precision: 2` — and the #7918 rule rejects an authored `precision: 2` against JPY's 0 fraction digits, with the materialized and authored spellings indistinguishable by design — so parse output rejected itself on the mainline `ObjectSchema.create()` → `defineStack` re-parse: `parse(parse(x))` threw for an input `parse(x)` accepts.
+
+Mechanism (the #9689 idempotent-materialization ruling, applied to its recorded currency twin): one conditional in the `.overwrite()` — when `currencyMode` is `fixed`, no `precision` was authored, and the currency's ISO 4217 / CLDR fraction digits contradict the default `2` (the JPY/KRW/KWD class), the parsed output OMITS `precision` instead of baking a value the schema refuses. Renderers already derive display width from the currency when the key is absent (objectui#4361), so absent is the honest spelling. Every other combination keeps byte-identical output: an authored `precision` is untouched, a bare fixed 2-fraction-digit config (USD/EUR/CNY…) still materializes `precision: 2` at its shape position, and `dynamic` mode and non-CLDR codes (crypto/custom, fail-open) keep materializing — none of those can be refused. The #7918 rejection of an authored contradictory `precision` is unchanged, message and path included.
