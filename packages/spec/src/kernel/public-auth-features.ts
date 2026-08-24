@@ -116,6 +116,12 @@ export const PUBLIC_AUTH_FEATURES = {
       'sys_invitation.actions.invite_user',
       'sys_invitation.actions.cancel_invitation',
       'sys_invitation.actions.resend_invitation',
+      // [#11587] Universal org join link (epic #11586) — the third way a
+      // teammate arrives: a shareable link, no email typed. Same capability
+      // gate as the invite entries above (org CAPABILITY, not multi-org).
+      'sys_join_link.actions.create_join_link',
+      'sys_join_link.actions.rotate_join_link',
+      'sys_join_link.actions.revoke_join_link',
       'sys_team.actions.create_team',
       'sys_team.actions.update_team',
       'sys_team.actions.remove_team',

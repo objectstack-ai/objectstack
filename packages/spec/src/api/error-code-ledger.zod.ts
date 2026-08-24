@@ -348,6 +348,15 @@ export const ERROR_CODE_LEDGER = {
     'INVALID_REQUEST',
     'INVITE_SMS_FAILED',
     'IP_NOT_ALLOWED',
+    // [#11587] Universal org join link — the four live-validity refusals the
+    // epic (#11586) requires to be DISTINCT, plus the one-active-link-per-org
+    // create refusal. Consumed verbatim by the objectui /join/:token landing
+    // page (objectui#5961).
+    'JOIN_LINK_EXHAUSTED',        // max_uses consumed; ask the admin to rotate
+    'JOIN_LINK_EXISTS',           // an active join link already exists for this organization (create refuses; rotate replaces)
+    'JOIN_LINK_EXPIRED',          // past expires_at
+    'JOIN_LINK_INVALID',          // unknown token — deliberately reveals nothing about any organization
+    'JOIN_LINK_REVOKED',          // revoked or rotated away
     'LAST_LOCAL_CREDENTIAL',      // refusing to remove the user's only local credential
     'NO_IDENTITY',                // import row has neither email nor phone
     'NO_PENDING_VERIFICATION',    // pass-through from better-auth
