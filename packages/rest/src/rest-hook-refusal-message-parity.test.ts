@@ -512,6 +512,28 @@ describe('[#11588] the crash-with-a-declared-4xx divergence this card does NOT c
 // refusal (where `/data` answers 400) is a separate defect and is NOT touched.
 //
 // Predicted before running: §8a RED, §8b RED, §8c GREEN, §8d GREEN.
+//
+// ── [#11684] …and that "separate defect" is now closed, so §8b is INVERTED ──
+//
+// The sentence above ("neither arm's STATUS moves") was #11588's fence, not a
+// verdict: it recorded that one hook body, one `throw`, produced `400` on
+// `/data` and `500` here, and left the disagreement standing. #11684 asked
+// which door was right; the answer was already in the repo rather than open,
+// and §8b's own comment now carries the evidence. A new arm ①b sits between ①
+// and ③ and asks `classifiedRefusalAnswer` — the `/data` door's own
+// classification — so:
+//   ①  unchanged — a declared 4xx + `code`; #5352's both-halves rule intact
+//   ①b a sandboxed body's business `throw`, and the `statusCode` spelling
+//   ③  unchanged — a declared 5xx, a CRASHED body, anything unclassified
+//
+// §8b is INVERTED rather than deleted: it recorded a measured defect, and a
+// pin that records one is the only evidence the defect existed. §8e is added
+// beside it — the door-to-door status pin the card's measurement table was,
+// written as an assertion instead of a paragraph.
+//
+// Predicted before running the #11684 leg, against `4ceae8ab0`:
+//   §8a GREEN (① untouched) · §8b RED · §8c GREEN (③ untouched)
+//   §8d GREEN (① untouched) · §8e RED
 // ---------------------------------------------------------------------------
 
 const ANALYTICS_PATH = '/api/v1/analytics/dataset/query';
@@ -560,16 +582,62 @@ describe('[#11588] the analytics dataset face answers in the hook\'s words too',
         expect(JSON.stringify(res.body)).not.toMatch(WRAPPER_RE);
     }, 60_000);
 
-    it('§8b an UNDECLARED refusal reaches the 500 arm unwrapped — the status is NOT moved', async () => {
-        // The sub-case the card's repro did not exercise. `/data` answers 400
-        // with this sentence and analytics answers 500 with it; that status
-        // disagreement is a separate defect and is deliberately left standing —
-        // asserted here so the next reader sees it was measured, not missed.
+    it('§8b [#11684 — INVERTED] an UNDECLARED refusal answers 400, the same as `/data`', async () => {
+        // ── This pin used to assert the 500. It is inverted, not deleted ────
+        //
+        // What it asserted, verbatim from #11588: "an UNDECLARED refusal
+        // reaches the 500 arm unwrapped — the status is NOT moved", with the
+        // comment "that status disagreement is a separate defect and is
+        // deliberately left standing". The defect was real and this pin is the
+        // evidence it was measured rather than missed; deleting it would
+        // destroy that record, so the assertion is turned around and the
+        // reasoning kept.
+        //
+        // ── WHICH READING WON, AND WHY ──────────────────────────────────────
+        //
+        // #11684 named two candidate readings and asked which one the repo had
+        // already committed to. It had committed to the `/data` door's, and
+        // the two readings turn out not to compete — they govern different
+        // questions:
+        //
+        //  - **ADR-0112's "the producer names the condition"** is a rule about
+        //    the `code`, not the status. Read D1–D9 and its five amendments:
+        //    every one of them rules on the code vocabulary, its closure, and
+        //    the `declaredCode` demote channel. The phrase this reading is
+        //    built on is not in the ADR at all — it is `error-response.ts`'s
+        //    own prose, and there it applies to a DECLARED 5xx that carries no
+        //    code ("a half-declaration is honoured for the half that was
+        //    declared and nothing is invented for the half that was not"). It
+        //    is not contradicted here: this arm invents no code either.
+        //
+        //  - **The `/data` door's reading** is the one that rules the STATUS,
+        //    and it is not a preference — it is a structural branch with two
+        //    end-to-end pins behind it. `classifyDataError`'s sandbox unwrap
+        //    door answers `declaredHttpStatus(error) ?? 400` with the verbatim
+        //    `.innerMessage` for a body that REPORTED, and the sanitised 500
+        //    for a body that CRASHED (`isScriptFaultMessage`, #7543). The
+        //    reporting half is pinned end to end by
+        //    `hook-error-format.dogfood.test.ts` ("DELETE blocked by a
+        //    sandboxed hook returns ONLY the business message", 400) and in
+        //    process by §3 above.
+        //
+        // So "an undeclared throw is unclassified" was never the repo's rule
+        // for THIS class. A sandboxed body that reports has classified itself
+        // structurally — the sandbox boundary is what makes `.innerMessage`
+        // exist at all — and only a body that CRASHES is unclassified. That
+        // one still answers 500 here, in §8c's neighbour arm and in §2 of
+        // `rest-share-refusal-classification.test.ts`. No live pin was found
+        // on the other side of the question, so the fork clause did not fire.
+        //
+        // No code, deliberately: the producer declared none and nothing is
+        // invented for it, which is `thrownCodeFields`' answer on `/data` and
+        // ADR-0112's rule. `ANALYTICS_QUERY_FAILED` is ③'s code and ③ is not
+        // where this refusal belongs any more.
         const res = await analyticsRefusal(sandboxRefusal('month-end close is in progress'));
 
-        expect(res.statusCode).toBe(500);
-        expect(res.body.code).toBe('ANALYTICS_QUERY_FAILED');
-        expect(res.body.error).toBe('month-end close is in progress');
+        expect(res.statusCode).toBe(400);
+        expect(res.body.message).toBe('month-end close is in progress');
+        expect(res.body.code).toBeUndefined();
         expect(JSON.stringify(res.body)).not.toMatch(WRAPPER_RE);
     }, 60_000);
 
@@ -594,5 +662,36 @@ describe('[#11588] the analytics dataset face answers in the hook\'s words too',
 
         expect(res.statusCode).toBe(409);
         expect(res.body.message).toBe(text);
+    }, 60_000);
+
+    it('§8e [#11684] the two faces answer one hook `throw` with ONE status', async () => {
+        // The card's measurement table, as an assertion. Both handlers are the
+        // REAL ones, driven in process — the analytics face through its
+        // service provider, the `/data` face through `createData` — because a
+        // hand-rolled stand-in would only reproduce whichever assumption wrote
+        // it. Neither status is named: the claim is that they AGREE, so a
+        // future move on either side reddens here even if someone also updates
+        // the literal in §8b.
+        const cases: Array<[string, any]> = [
+            ['undeclared refusal', sandboxRefusal('month-end close is in progress')],
+            ['declared 409 + code', sandboxRefusal('locked', { code: 'RECORD_LOCKED', status: 409 })],
+            ['`statusCode` spelling', sandboxRefusal('locked', { code: 'RECORD_LOCKED', statusCode: 409 })],
+            ['declared 5xx', sandboxRefusal('boom', { code: 'SERVICE_UNAVAILABLE', status: 503 })],
+            ['a CRASHED body (#7543)', sandboxRefusal('TypeError: x is not a function')],
+        ];
+
+        for (const [label, error] of cases) {
+            const analytics = await analyticsRefusal(error);
+            const rest = setup({ createData: vi.fn().mockRejectedValue(error) });
+            const data = await call(rest, 'POST', DATA_COLLECTION, {
+                params: { object: 'crm_account' }, body: { name: 'x' },
+            });
+
+            expect(
+                analytics.statusCode,
+                `${label}: analytics ${analytics.statusCode} ${JSON.stringify(analytics.body)} `
+                + `vs /data ${data.statusCode} ${JSON.stringify(data.body)}`,
+            ).toBe(data.statusCode);
+        }
     }, 60_000);
 });
