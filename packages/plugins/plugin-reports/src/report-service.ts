@@ -118,10 +118,28 @@ function escapeCsvCell(v: unknown): string {
   return s;
 }
 
+/**
+ * Column set for an export, in first-seen order.
+ *
+ * [#11774] EVERY row, never a sample. The projection these columns drive is
+ * applied to ALL rows, so inferring them from a prefix made any key whose
+ * first occurrence fell past the boundary vanish from the header *and* from
+ * every row that carried it — silently, in a well-formed export of uniform
+ * arity with nothing marking a column as inferred rather than declared. The
+ * prefix was also not a random sample: it is the query's first page in its
+ * `orderBy`, so for a report sorted by status or date it correlates with
+ * exactly the sparse column it drops.
+ *
+ * Cost is one `Object.keys` pass per row, and is bounded twice over: the row
+ * array is already capped by `Math.min(query.limit, maxRows)` before it gets
+ * here, and both renderers already walk the same array once per row per
+ * column. Inference is therefore a fraction of the render it feeds, not a new
+ * order of magnitude on the export path.
+ */
 function pickFields(rows: any[], explicit?: string[]): string[] {
   if (explicit && explicit.length > 0) return explicit;
   const seen = new Set<string>();
-  for (const r of rows.slice(0, 50)) {
+  for (const r of rows) {
     if (r && typeof r === 'object') for (const k of Object.keys(r)) seen.add(k);
   }
   return Array.from(seen);
