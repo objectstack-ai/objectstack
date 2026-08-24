@@ -1348,20 +1348,67 @@ function typeDeclRegions(code) {
  * short-circuits near the top of this file, before any `const` down here has initialized,
  * and a TDZ error there takes the whole self-test down instead of failing one check.
  *
- * ⛔ THE KEY PART STAYS EACH CALL SITE'S OWN, and that is a deliberate boundary, not an
- * oversight. `declarationsIn` anchors with `\b` and the other seven do not, so
- * `subroute: 'GET /x'` is a declaration to seven of them and not to the eighth — the SAME
- * family of divergence one spelling further out, and it mints a silent phantom ROW. Unifying
- * it MOVES the measured population (`rows`, `routesDeclared`, the 177 UNREACHABLE), which
- * is the separate decision with a before/after standard attached, so it is filed as #11542
- * rather than folded in here.
+ * THE KEY IS ANCHORED HERE TOO, AND ONLY HERE (#11542). It used to be each call site's own
+ * argument: `declarationsIn` wrote `\b(route|client)` and the other seven wrote the key bare,
+ * so `subroute: 'GET /api/v1/gone'` was a declaration to SEVEN of the eight scans and not to
+ * the eighth — the same family of divergence one spelling further out, and it minted a silent
+ * phantom ROW. Silent for the reason #10683 and #10793 were: the partial-read verdict is keyed
+ * on the gap between `rows` and `routesDeclared` and BOTH terms read the unanchored spelling,
+ * so both moved together and no verdict fired. `outsideCode` could not see it either, because
+ * the lead genuinely IS in code position, and `declarationsIn` — the one scan that got it
+ * right — sat on the side of the ledger where being right shows up only as a SHORTFALL, which
+ * is precisely what that arithmetic hides. Measured on `cd932772`, one file declaring ONE
+ * `route:`:
  *
- * @param {string} keys  the key part exactly as the call site writes it — `\b(route|client)`,
- *   `route`, `(?:route|client)`. The capture groups and the word boundary are the call
- *   site's question; what may follow the colon is this function's.
+ *     export const L = [
+ *       { subroute: 'GET /api/v1/gone', family: 'metadata', disposition: 'sdk' },
+ *       { route: 'GET /api/v1/meta', family: 'metadata', disposition: 'sdk', client: 'meta.getTypes' },
+ *     ];
+ *   ⇒ rows 2 · routesDeclared 2 · clientsDeclared 1 · declined 0 · outsideCode 0 · brokenScan 0
+ *
+ * The phantom carries a path nobody mounts. In THAT fixture it carries no `client:` either,
+ * so it merely inflated `rows` and the denominator together and stopped there. Where the
+ * stray key sits BETWEEN a real `route:` and its `client:` it did worse, and this is the half
+ * a count comparison cannot see at all: the row WINDOW is delimited by the same lead, so the
+ * phantom CLOSED the real row's window, took its binding, and joined the UNREACHABLE
+ * population as a client-bound row on a path no registrar mounts — while the real row lost
+ * the binding it plainly declares. Same shape #10636 measured for the quote spellings,
+ * arriving through the key; `--self-test` pins that one on its own fixture.
+ *
+ * `\b` IS THE ANSWER ON THE MERITS, and it is the spelling the one scan that got it right
+ * already used: `subroute` is not `route`. The other direction — un-anchoring
+ * `declarationsIn` so that the eight agree — buys agreement at the price of being
+ * agreed-and-wrong, and no key exists that it would be meant to catch.
+ *
+ * ⛔ THIS MOVED THE MEASURED POPULATION, which the header of `--bridge-coverage` attaches a
+ * before/after standard to: anchoring REMOVES rows, it does not add them. Priced on the tree
+ * where the move is provably free — across all seven live ledgers there are ZERO leads that
+ * the unanchored spelling reads and the anchored one does not (every match of
+ * `(route|client)\s*:\s*` over RAW text is also a match of `\b(route|client)\s*:\s*` at the
+ * same index; 0 divergent leads), and `269 of 269` / `222 of 222` / 45 reachable /
+ * 177 UNREACHABLE / 0 prose-quoted leads / `brokenScan` 0 are byte-identical across the
+ * change. That is the same "provably free tree" argument #10683 and #10793 each made
+ * explicitly for their own population moves, and it is made explicitly here for the same
+ * reason: the alternative is moving a reported number quietly.
+ *
+ * ⛔ THE RESIDUE THIS DOES NOT CLOSE, named rather than left to be discovered. `\b` fails only
+ * against a preceding WORD character, so `$route:` — a legal JS identifier — is still read as
+ * a declaration. It is no longer a DIVERGENCE (all eight now agree on it), which is what this
+ * card was about, but it is still a phantom, and tightening to `(?<![\w$])` would move
+ * `declarationsIn` as well — the one scan this card's before/after was priced to leave
+ * byte-identical — so it is a SECOND population move with its own before/after to price.
+ * Filed as #11630 rather than folded in, for the reason this card was filed rather than
+ * folded into #11494, and pinned in `--self-test` so that card MOVES a pin rather than
+ * finding none.
+ *
+ * @param {string} keys  the key alternation ONLY — `(route|client)`, `route`,
+ *   `(?:route|client)`. The capture groups are the call site's question; the ANCHOR, the
+ *   colon and the run between the colon and the value are this function's. ⛔ A call site must
+ *   NOT restate the `\b`: a second copy is a second spelling, which is the entire defect this
+ *   closes, and `--self-test` pins that no argument carries one.
  */
 function declLead(keys) {
-  return String.raw`${keys}\s*:\s*`;
+  return String.raw`\b${keys}\s*:\s*`;
 }
 
 /**
@@ -1392,7 +1439,9 @@ function declarationsIn(text) {
   const code = codeOnly(text);
   const skip = typeDeclRegions(code);
   const out = [];
-  const re = new RegExp(declLead(String.raw`\b(route|client)`), 'g');
+  // The `\b` this used to carry is now `declLead`'s (#11542) — it was the LAST spelling the
+  // eight scans decided for themselves, and this was the one scan that decided it correctly.
+  const re = new RegExp(declLead('(route|client)'), 'g');
   let m;
   while ((m = re.exec(code)) !== null) {
     if (skip.some(([a, b]) => m.index >= a && m.index <= b)) continue;
@@ -2747,25 +2796,143 @@ function selfTest() {
     'declared', '1 row / 1 route / 0 declined',
     `${wrappedTypeMember.rows.length} row / ${wrappedTypeMember.routesDeclared} route / ${wrappedTypeMember.declined.length} declined`);
 
-  // ⛔ THE BOUNDARY THIS CARD DELIBERATELY DID NOT CROSS. `declLead` unifies what may sit
-  // BETWEEN the colon and the value; the KEY part is still each call site's own argument, and
-  // `declarationsIn` anchors it with `\b` while the other seven do not. So `subroute:` is a
-  // declaration to seven of the eight scans and mints a silent phantom ROW — the same family
-  // of divergence one spelling further out. That is #11542, kept out because unifying the key
-  // MOVES the measured population, which the header of `--bridge-coverage` attaches a
-  // before/after standard to. Pinned so the card that closes #11542 MOVES this pin rather
-  // than finding none.
+  // ⛔ THE KEY IS ANCHORED IN ONE PLACE NOW (#11542) — this is the pin the boundary comment
+  // used to hold, MOVED rather than deleted. `declLead` unified the run between the colon and
+  // the value (#11494) and left the KEY as each call site's own argument, so `declarationsIn`
+  // anchored with `\b` and the other seven did not: `subroute: 'GET /api/v1/gone'` was a
+  // declaration to SEVEN of the eight scans and not to the eighth. It was SILENT for the
+  // reason #10683 and #10793 were — the partial-read verdict is keyed on the gap between
+  // `rows` and `routesDeclared` and BOTH terms read the unanchored spelling, so both moved
+  // together and no verdict fired, while `outsideCode` could not see it either because the
+  // lead genuinely IS in code position.
+  //
+  // MEASURED ON THIS EXACT FIXTURE with the key unanchored:
+  //   ⇒ rows 2 · routesDeclared 2 · clientsDeclared 1 · declined 0 · outsideCode 0 ·
+  //     brokenScan 0   — a file declaring ONE `route:` produced TWO rows, exit 0.
+  //
+  // This one fixture moves the ROW RECOGNIZER (`routeRe`) and the FIRST TERM of the
+  // denominator; the seven scans are pinned one at a time below, because "all eight read the
+  // same spelling now" is a claim about seven behaviours and a fix that anchors one more scan
+  // and leaves six is this defect with a smaller denominator.
   const unanchoredKey = parseLedgerSource([
     'export const L = [',
     "  { subroute: 'GET /api/v1/gone', family: 'metadata', disposition: 'sdk' },",
     "  { route: 'GET /api/v1/meta', family: 'metadata', disposition: 'sdk', client: 'meta.getTypes' },",
     '];',
   ].join('\n'));
-  check('parseLedgerSource', 'a `subroute:` still mints a phantom row — #11542, deliberately unmoved',
-    'row count', 2, unanchoredKey.rows.length);
-  check('parseLedgerSource', 'and it is still SILENT — both terms of the denominator move together',
+  check('parseLedgerSource', 'a `subroute:` mints NO row — the ROW RECOGNIZER anchors the key (#11542)',
+    'row count', 1, unanchoredKey.rows.length);
+  check('parseLedgerSource', 'and the row that survives is the REAL one, carrying its binding',
+    'row', 'GET /api/v1/meta → meta.getTypes',
+    `${unanchoredKey.rows[0]?.route} → ${unanchoredKey.rows[0]?.client}`);
+  check('parseLedgerSource', 'and the DENOMINATOR drops it too, so no phantom gap opens', 'declared',
+    '1 route / 1 client / 0 declined',
+    `${unanchoredKey.routesDeclared} route / ${unanchoredKey.clientsDeclared} client / ${unanchoredKey.declined.length} declined`);
+  check('bridgeCoverageFrom', 'and the anchored read carries no verdict on an accurate ledger',
+    'brokenScan', 0,
+    bridgeCoverageFrom([{ file: 'm-route-ledger.ts', ...unanchoredKey }], ['/api/v1/meta']).brokenScan.length);
+
+  // (3) THE WINDOW DELIMITER (`nextRouteRe`) — the worst of the seven, and the reason this is
+  // not merely a counting error. A `subroute:` written BETWEEN a real `route:` and its
+  // `client:` used to CLOSE the real row's window, so the real row lost its binding and the
+  // PHANTOM took it: a WRONG binding, on a path nobody mounts, which then joined the
+  // UNREACHABLE population. A count comparison is blind to it by construction — the same
+  // shape #10636 measured for the quote spellings, arriving through the key.
+  const keyWindow = parseLedgerSource([
+    'export const L = [',
+    "  { route: 'GET /api/v1/meta', family: 'metadata',",
+    "    subroute: 'GET /api/v1/gone',",
+    "    disposition: 'sdk', client: 'meta.getTypes' },",
+    '];',
+  ].join('\n'));
+  check('parseLedgerSource', 'a `subroute:` does not CLOSE the real row window (#11542)', 'rows',
+    '1 row · GET /api/v1/meta → meta.getTypes',
+    `${keyWindow.rows.length} row · ${keyWindow.rows.map((r) => `${r.route} → ${r.client}`).join(' | ')}`);
+
+  // (4) THE IN-WINDOW `client:` MATCH (`windowClientRe`). `window.match()` takes the FIRST
+  // hit, so a `myclient:` written ahead of the real `client:` became the row's binding, and
+  // the real one — spelled exactly the way this recognizer reads — fell through to #10636's
+  // unclaimed sweep and was NAMED as a value no row read, on a ledger that binds it correctly.
+  const keyClient = parseLedgerSource([
+    'export const L = [',
+    "  { route: 'GET /api/v1/meta', family: 'metadata', disposition: 'sdk',",
+    "    myclient: 'wrong.binding', client: 'meta.getTypes' },",
+    '];',
+  ].join('\n'));
+  check('parseLedgerSource', 'a `myclient:` does not become the row BINDING (#11542)', 'binding',
+    'meta.getTypes', keyClient.rows[0]?.client);
+  check('parseLedgerSource', 'and the real `client:` is bound, not swept up as unclaimed', 'declared',
+    '1 client / 0 declined',
+    `${keyClient.clientsDeclared} client / ${keyClient.declined.length} declined`);
+
+  // (5) THE DECLINED SWEEP (`declinedIn`), which is the LOUD direction: a double-quoted
+  // `subroute:` was billed as a `route:` value the parse FAILED to read, so it entered the
+  // denominator, was NAMED with its line, and fired a PARTIAL-read verdict with exit 1 on a
+  // wholly accurate ledger. A false red costs the same trust a false green does.
+  const keyDeclined = parseLedgerSource([
+    'export const L = [',
+    '  { subroute: "GET /api/v1/gone", family: \'metadata\', disposition: \'sdk\' },',
+    "  { route: 'GET /api/v1/meta', family: 'metadata', disposition: 'sdk', client: 'meta.getTypes' },",
+    '];',
+  ].join('\n'));
+  check('parseLedgerSource', 'a double-quoted `subroute:` is not billed as a DECLINED row (#11542)',
+    'declared', '1 row / 1 route / 0 declined',
+    `${keyDeclined.rows.length} row / ${keyDeclined.routesDeclared} route / ${keyDeclined.declined.length} declined`);
+  check('bridgeCoverageFrom', 'so no PARTIAL-read verdict fires on an accurate ledger', 'brokenScan',
+    0, bridgeCoverageFrom([{ file: 'n-route-ledger.ts', ...keyDeclined }], ['/api/v1/meta']).brokenScan.length);
+
+  // (6) THE RAW SWEEP behind `outsideCode`. A `subroute:` in a COMMENT was reported to the
+  // reader as a lead sitting where the mask says code is not — a finding printed on every
+  // `--bridge-coverage` run, naming something that is not a lead at all.
+  const keyProse = parseLedgerSource([
+    "// The retired row read subroute: 'GET /api/v1/gone' before #1234.",
+    'export const L = [',
+    "  { route: 'GET /api/v1/meta', family: 'metadata', disposition: 'sdk', client: 'meta.getTypes' },",
+    '];',
+  ].join('\n'));
+  check('parseLedgerSource', 'a `subroute:` in PROSE is not reported as a prose-quoted lead (#11542)',
+    'outsideCode', 0, keyProse.outsideCode.length);
+  // (7) …and `codeLeads`, the other half of that pair, which has no behaviour of its own:
+  // it is the filter the sweep above is taken against, so the two must anchor TOGETHER. Were
+  // only `codeLeads` anchored, a `subroute:` in CODE position would fall OUT of the filter and
+  // be reported as prose — the card's own fixture, pinned here explicitly so the pair cannot
+  // drift apart while every other fixture stays green.
+  check('parseLedgerSource', 'and a `subroute:` in CODE position is not reported as one either',
+    'outsideCode', 0, unanchoredKey.outsideCode.length);
+
+  // (8) …AND THE EIGHTH SCAN'S ANSWER IS UNCHANGED, which is the whole point: it is the one
+  // that was already right. A `subroute:` whose value is not a string literal at all was never
+  // billed as an unreadable declaration — before the anchor moved or after.
+  const keyUnreadable = parseLedgerSource([
+    'export const L = [',
+    "  { subroute: ROUTES.gone, family: 'metadata', disposition: 'sdk' },",
+    "  { route: 'GET /api/v1/meta', family: 'metadata', disposition: 'sdk', client: 'meta.getTypes' },",
+    '];',
+  ].join('\n'));
+  check('parseLedgerSource', 'a non-literal `subroute:` is billed to nothing — the anchored scan always agreed',
+    'declared', '1 row / 1 route / 0 declined',
+    `${keyUnreadable.rows.length} row / ${keyUnreadable.routesDeclared} route / ${keyUnreadable.declined.length} declined`);
+
+  // ⛔ THE BOUNDARY THIS CARD DOES NOT CROSS. `\b` fails only against a preceding WORD
+  // character, so `$route:` — a legal JS identifier — is still read as a declaration. It is no
+  // longer a DIVERGENCE, which is what this card was about: all eight scans agree on it now,
+  // and they agree by reading the spelling `declarationsIn` already had. It is still a phantom
+  // row, and closing it means tightening to `(?<![\w$])`, which moves `declarationsIn` as well
+  // — a SECOND population move, with its own before/after to price against the header of
+  // `--bridge-coverage`. Filed as #11630 rather than folded in, for the reason this card was
+  // filed rather than folded into #11494, and pinned so that card MOVES this pin rather than
+  // finding none.
+  const dollarKey = parseLedgerSource([
+    'export const L = [',
+    "  { $route: 'GET /api/v1/gone', family: 'metadata', disposition: 'sdk' },",
+    "  { route: 'GET /api/v1/meta', family: 'metadata', disposition: 'sdk', client: 'meta.getTypes' },",
+    '];',
+  ].join('\n'));
+  check('parseLedgerSource', 'a `$route:` still mints a phantom row — #11630, deliberately unmoved',
+    'row count', 2, dollarKey.rows.length);
+  check('parseLedgerSource', 'and it is still SILENT — all eight scans agree on it, so both terms move together',
     'declared', '2 route / 0 declined',
-    `${unanchoredKey.routesDeclared} route / ${unanchoredKey.declined.length} declined`);
+    `${dollarKey.routesDeclared} route / ${dollarKey.declined.length} declined`);
 
   // ⛔ REPORTED, NEVER A VERDICT. A comment explaining a retired row by quoting its old path
   // is legitimate prose; reddening CI over it is the false red the #9747 family declines.
@@ -3401,9 +3568,24 @@ function selfTest() {
   // copy is the same hole re-opening, and only a source pin can see it: every behavioural
   // fixture above would keep passing while the new scan drifted on its own.
   check('declLead', 'the run between a `route:`/`client:` colon and its value is spelled ONCE', 'affected-docs.mjs',
-    1, (ownSource.match(/String\.raw`\$\{keys\}\\s\*:\\s\*`/g) || []).length);
+    1, (ownSource.match(/String\.raw`\\b\$\{keys\}\\s\*:\\s\*`/g) || []).length);
   check('declLead', 'and all eight lead scans are built from it, none inline', 'affected-docs.mjs',
     8, (ownSource.match(/new RegExp\(declLead\(/g) || []).length);
+  // …AND THE KEY ANCHOR IS SPELLED ONCE TOO (#11542), which is the same pin one field over.
+  // It was the LAST part of the lead each call site decided for itself: `declarationsIn`
+  // passed `\b(route|client)` and the other seven passed the key bare, so seven agreeing and
+  // one differing looked exactly like eight agreeing — and the one that differed was the one
+  // that was right. A call site that restates the `\b` is that hole re-opening from the other
+  // side, and only a source pin can see it: every behavioural fixture above stays green while
+  // the argument drifts.
+  check('declLead', 'and the KEY anchor is spelled once too — no call site restates it', 'affected-docs.mjs',
+    0, (ownSource.match(/declLead\([^\n]*?\\b/g) || []).length);
+  // BEHAVIOURAL, not merely textual: the three key spellings the eight call sites pass all
+  // come back anchored, from the one place that spells the anchor. This is what "all eight
+  // read the same anchored spelling" means when checked rather than asserted.
+  check('declLead', 'every key spelling a call site passes comes back ANCHORED', 'declLead',
+    String.raw`\b(route|client)\s*:\s* | \broute\s*:\s* | \b(?:route|client)\s*:\s*`,
+    ['(route|client)', 'route', '(?:route|client)'].map((k) => declLead(k)).join(' | '));
 
 
   if (failed) {
