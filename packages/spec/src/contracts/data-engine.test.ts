@@ -367,23 +367,24 @@ describe('Data Engine Contract', () => {
   // Every directive below is resolved by tsc; reverting the member makes it
   // unused, and an unused directive is itself an error.
 
+  // Deliberately NO new engine double in this block: every pin below reads the
+  // MEMBER type off the contract instead of standing up another `IDataEngine`
+  // literal (this file's doubles are counted by `check:engine-double-contract`
+  // against a shrink-only baseline, and a pin block is not a reason to grow
+  // it). The value-level optionality evidence already exists above: every
+  // pre-existing minimal `IDataEngine` literal in this file omits
+  // `introspectDatasource` and compiles.
   describe('introspectDatasource (#11493)', () => {
-    type EngineIntrospection = Awaited<ReturnType<NonNullable<IDataEngine['introspectDatasource']>>>;
-
-    const minimalEngine: IDataEngine = {
-      find: async () => [],
-      findOne: async () => null,
-      insert: async (_obj, data) => data,
-      update: async (_obj, data) => data,
-      delete: async () => ({ deleted: 0 }),
-      count: async () => 0,
-      aggregate: async () => [],
-    };
+    type Member = IDataEngine['introspectDatasource'];
+    type EngineIntrospection = Awaited<ReturnType<NonNullable<Member>>>;
 
     it('is optional — an engine without a named-driver registry stays conformant', () => {
-      // `minimalEngine` satisfies `IDataEngine` at its declaration with no
-      // registry members at all — same posture as `getDriverByName?` ([#4251]).
-      expect(minimalEngine.introspectDatasource).toBeUndefined();
+      // Same posture as `getDriverByName?` ([#4251]): the member's type admits
+      // `undefined`, so the minimal literals above satisfy the contract without
+      // it. A revert to a REQUIRED member resolves `Optional` to `never`.
+      type Optional = undefined extends Member ? 'optional' : never;
+      const optional: Optional = 'optional';
+      expect(optional).toBe('optional');
     });
 
     it('declares exactly the spec introspection shape', () => {
@@ -396,27 +397,21 @@ describe('Data Engine Contract', () => {
       expect(exact).toBe('exact');
     });
 
-    it('accepts an engine that answers the spec shape', () => {
-      const introspecting: IDataEngine = {
-        ...minimalEngine,
-        introspectDatasource: async (_datasource) => ({
-          dialect: 'postgres',
-          introspectedAt: '2026-08-24T00:00:00.000Z',
-          tables: {},
-        }),
-      };
-      expect(typeof introspecting.introspectDatasource).toBe('function');
+    it('accepts an implementation that answers the spec shape', () => {
+      const introspect: NonNullable<Member> = async (_datasource: string) => ({
+        dialect: 'postgres',
+        introspectedAt: '2026-08-24T00:00:00.000Z',
+        tables: {},
+      });
+      expect(typeof introspect).toBe('function');
     });
 
-    it('refuses an engine that answers a non-spec shape at the member', () => {
+    it('refuses an implementation that answers a non-spec shape', () => {
       // The pre-#11493 posture: `{ tables }` alone, no envelope — absorbed at
       // runtime by the consumer-side shim, invisible to every compiler.
       const bareTables = { tables: {} };
-      const misShapen: IDataEngine = {
-        ...minimalEngine,
-        // @ts-expect-error - the untyped pre-#11493 result no longer satisfies the declared member
-        introspectDatasource: async (_datasource: string) => bareTables,
-      };
+      // @ts-expect-error - the untyped pre-#11493 result no longer satisfies the declared member
+      const misShapen: NonNullable<Member> = async (_datasource: string) => bareTables;
       expect(misShapen).toBeTruthy();
     });
   });
