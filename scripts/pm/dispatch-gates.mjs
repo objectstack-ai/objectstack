@@ -493,9 +493,8 @@ const SELF_TEST_INVOCATION =
  *
  * ## Why a `check-` basename is skipped here rather than re-keyed
  *
- * 21 of the 30 self-test-shaped invocations on this tree already have a
- * `check-` basename and are therefore already families under their BARE path
- * key. Admitting them again under a `… --self-test` key would SPLIT each into
+ * 21 of the 30 scripts invoked this way on this tree already have a `check-`
+ * basename and are therefore already families under their BARE path key. Admitting them again under a `… --self-test` key would SPLIT each into
  * two families and move its matches to the new key — a re-attribution reported
  * as a gain, which is the error this repo keeps catching. Skipping them makes
  * zero re-attribution a property of the code rather than a number that happened
@@ -517,14 +516,18 @@ const SELF_TEST_INVOCATION =
  * tree its self-test clones), `pm/ci-failure.mjs` +30 (`.github`),
  * `pr-labels.mjs` +1 (`.github/labeler.yml`).
  *
- * Six of the nine — `invoked-as.mjs`, `js-comment-mask.mjs`, `ts-parse.mjs`,
- * `partition-test-shards.mjs`, `git-history.mjs`, `pr-labels.mjs` — also become
- * GATE FILES, which `discoverFamilies` excludes from import-following. That is
- * the one direction of this change that could SUBTRACT, so it is measured
- * rather than argued: of the six, only `pr-labels.mjs` declares a hint at all,
- * and no gate imports it, so zero families lose an inherited hint. Asserted in
- * the self-test, because a subtraction here is silent — a lead that stops
- * appearing looks exactly like a lead that was never earned.
+ * All nine also become GATE FILES, which `discoverFamilies` excludes from
+ * import-following. That is the one direction of this change that could
+ * SUBTRACT, so it is measured rather than argued. Four of the nine were being
+ * followed on the base tree, over 111 import edges — `invoked-as.mjs` by 77
+ * families, `ts-parse.mjs` by 18, `js-comment-mask.mjs` by 14,
+ * `pm/git-history.mjs` by 2 — and all four declare ZERO path literals, so the
+ * edges carried nothing to lose. The three that do declare literals
+ * (`release-rehearsal-clone.mjs` 7, `pm/ci-failure.mjs` 2, `pr-labels.mjs` 1)
+ * are followed by no family at all. Net subtraction: zero hints, zero pairs.
+ * Asserted in the self-test rather than left as this paragraph, because a
+ * subtraction here is silent — a lead that stops appearing looks exactly like
+ * a lead that was never earned.
  *
  * ## What is NOT closed here, and why it is not folded in
  *
