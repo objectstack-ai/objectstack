@@ -42,8 +42,10 @@ export default defineConfig({
     // `@objectstack/core/logger` and resolve it to `core/src/index.ts/logger`
     // (ENOTDIR). Same reasoning, and same shape, as `service-knowledge`'s
     // config.
-    // `@objectstack/driver-memory` joins it for the same reason (#11427): the
-    // hydration/download agreement pin drives a REAL engine over a real driver,
+    // `@objectstack/driver-sql` joins it for the same reason (#11427): the
+    // hydration/download agreement pin drives a REAL engine over a real driver
+    // — sqlite `:memory:`, the project's ruled test backend (#5499 froze
+    // investment in the in-memory driver, #5704 migrated the test backends) —
     // and a driver read from `dist/` would make that pin a verdict about build
     // state rather than about the source beside it.
     //
@@ -58,7 +60,7 @@ export default defineConfig({
     // replacement is a FILE swallows the package's subpaths.
     alias: [
       { find: /^@objectstack\/core$/, replacement: path.resolve(__dirname, '../../core/src/index.ts') },
-      { find: /^@objectstack\/driver-memory$/, replacement: path.resolve(__dirname, '../../drivers/driver-memory/src/index.ts') },
+      { find: /^@objectstack\/driver-sql$/, replacement: path.resolve(__dirname, '../../drivers/driver-sql/src/index.ts') },
     ],
   },
 });

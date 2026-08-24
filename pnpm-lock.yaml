@@ -2595,9 +2595,9 @@ importers:
         specifier: workspace:*
         version: link:../../types
     devDependencies:
-      '@objectstack/driver-memory':
+      '@objectstack/driver-sql':
         specifier: workspace:*
-        version: link:../../drivers/driver-memory
+        version: link:../../drivers/driver-sql
       '@objectstack/objectql':
         specifier: workspace:*
         version: link:../../objectql

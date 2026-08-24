@@ -54,9 +54,13 @@
  *
  * The download verdict and the hydration verdict must come from the SAME rows
  * or the pair proves nothing, so both surfaces are driven off one real
- * `ObjectQL` engine over `@objectstack/driver-memory` — a real driver that
- * really filters, including the `$in` the batched holder check issues. No
- * engine double is involved, so no write-verb dispatch contract applies.
+ * `ObjectQL` engine over sqlite `:memory:` — the project's ruled test backend
+ * (#5499 froze investment in the in-memory driver; #5704 migrated the test
+ * backends), and a real driver that really filters, including the `$in` the
+ * batched holder check issues. Nothing here turns on a driver's distinct
+ * semantics: what the fixture needs is shared state across two read surfaces,
+ * which sqlite carries identically. No engine double is involved, so no
+ * write-verb dispatch contract applies.
  *
  * The seam is reached by DUCK TYPING, exactly as `StorageServicePlugin` wires
  * it. That is deliberate: it lets this file state the divergence as a
@@ -70,7 +74,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import type { IHttpResponse, RouteHandler } from '@objectstack/spec/contracts';
 import { ObjectQL } from '@objectstack/objectql';
-import { InMemoryDriver } from '@objectstack/driver-memory';
+import { SqlDriver } from '@objectstack/driver-sql';
 import { LocalStorageAdapter } from './local-storage-adapter.js';
 import { StorageMetadataStore } from './metadata-store.js';
 import { registerStorageRoutes } from './storage-routes.js';
@@ -153,7 +157,11 @@ describe('#11427 — file-field hydration and the download path agree about one 
     adapter = new LocalStorageAdapter({ rootDir, signingSecret: 'test-secret' });
 
     engine = new ObjectQL({ logger: silentLogger() } as any);
-    engine.registerDriver(new InMemoryDriver() as any, true);
+    engine.registerDriver(new SqlDriver({
+      client: 'better-sqlite3',
+      connection: { filename: ':memory:' },
+      useNullAsDefault: true,
+    }) as any, true);
     await engine.init();
 
     engine.registry.registerObject({
@@ -175,6 +183,8 @@ describe('#11427 — file-field hydration and the download path agree about one 
       name: 'contract',
       fields: { title: { type: 'text' }, signed_pdf: { type: 'file' } },
     } as any, 'test-11427');
+    // Real DDL for all three tables before the first row is written.
+    await engine.syncSchemas();
 
     // ── The shared fixture: four sys_file rows in the residual state ──────
     const files = [
@@ -212,6 +222,8 @@ describe('#11427 — file-field hydration and the download path agree about one 
   });
 
   afterEach(async () => {
+    // Closes the `:memory:` database with the engine that owns it.
+    try { await engine?.destroy(); } catch { /* already torn down */ }
     if (rootDir) await fs.rm(rootDir, { recursive: true, force: true });
   });
 
