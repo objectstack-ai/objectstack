@@ -2945,9 +2945,20 @@ export class SecurityPlugin implements Plugin {
         ctx.logger.warn('[security] declared-position seeding failed', { error: (e as Error).message, organization: organizationId });
       }
     };
+    // [#11532] The names `bootstrapPlatformAdmin` seeds organization-less on
+    // every boot. The per-organization pass sees those rows through the driver's
+    // compatibility arm and used to report them as PRE-FIX leftovers with a
+    // remedy ("re-initialize the deployment") that mints them again — on a fresh
+    // walled deployment the whole line was false and its first branch was a
+    // loop. Handed over from here because this is where the one array lives:
+    // the same `bootstrapPermissionSets` goes to the platform bootstrap above
+    // and onto the manifest as `permissions`, so the two can never disagree.
+    const platformBucketNames = this.bootstrapPermissionSets
+      .map((p) => p.name)
+      .filter((n): n is string => typeof n === 'string' && n !== '');
     const seedCatalogPermissions = async (organizationId?: string): Promise<void> => {
       try {
-        await bootstrapDeclaredPermissions(ql, this.metadata, { logger: ctx.logger, organizationId });
+        await bootstrapDeclaredPermissions(ql, this.metadata, { logger: ctx.logger, organizationId, platformBucketNames });
       } catch (e) {
         ctx.logger.warn('[security] declared-permission seeding failed', { error: (e as Error).message, organization: organizationId });
       }

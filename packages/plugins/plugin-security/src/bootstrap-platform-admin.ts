@@ -305,6 +305,23 @@ export async function bootstrapPlatformAdmin(
   }
 
   const seededCount = Object.keys(seeded).length;
+  // [#11532] Under a walled posture these rows are organization-less BY RULING
+  // (#10103, 2026-08-20) and unreadable through the wall, and the catalog pass
+  // that runs next reports them once per organization. Saying so HERE is what
+  // stops the operator's first sight of them being a warning that calls the
+  // platform's own output legacy state: the fresh walled rig logged
+  // `seeded: 8` with nothing to indicate the rows carried no organization at
+  // all. Not a behaviour change — the seeding above is byte-identical.
+  if (seededCount > 0 && postureEnforcesWall(resolveTenancyPosture())) {
+    logger?.info?.(
+      '[security] platform default permission sets seeded WITHOUT an organization (the platform ' +
+        'bucket) — ruled 2026-08-20 and unchanged: the platform-admin grant points at the ' +
+        'admin_full_access row by id. Under a walled posture they are unreadable through the ' +
+        'tenant wall; each organization gets its own copies from the per-organization catalog ' +
+        'pass, so no principal is missing a set.',
+      { seeded: seededCount, names: Object.keys(seeded).sort() },
+    );
+  }
   // Attached to every return below so `os meta resync` can report the reconcile
   // outcome even when admin promotion short-circuits (the common dev case: a DB
   // that already has an admin returns `already_have_admin`).

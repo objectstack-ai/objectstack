@@ -239,6 +239,40 @@ export class AuthPlugin implements Plugin {
    * required` comment with the machine-checked form of the same claim.
    */
   requiresServices = ['data', 'manifest'];
+  /**
+   * `com.objectstack.service.settings` — order-if-present (ADR-0116, #10250).
+   *
+   * `start()` registers `kernel:ready` hooks that reach
+   * {@link ensureAuthSettingsBound} → {@link bindAuthSettings}, which resolves
+   * the `settings` service and reads `getNamespace('auth')`.
+   * `SettingsServicePlugin` binds its data engine from ITS `kernel:ready`
+   * hook, registered in ITS `start()`, so the plugin that starts first
+   * registers the earlier hook and the earlier hook runs first. Start order is
+   * the topological order over these declarations (`resolvePluginOrder`, used
+   * for BOTH phases in `ObjectKernel.bootstrap`), so declaring the edge is
+   * what puts the bind ahead of the read.
+   *
+   * Without it the order was WRONG on the shipped composition, not merely
+   * incidental: `os serve` does `kernel.use(new AuthPlugin(...))` before the
+   * capability loop registers `SettingsServicePlugin`, and `resolvePluginOrder`
+   * preserves insertion order for plugins with no edge between them — so auth
+   * started first and its reads landed in the pre-bind window, where
+   * `SettingsService`'s empty in-memory fallback answers with the manifest
+   * DEFAULTS and `source: 'default'` while the workspace's saved `sys_setting`
+   * rows sit unread. Everything `applySettings()` derives was therefore
+   * computed from defaults at boot — the ADR-0093 membership policy the D6
+   * backfill runs under, and the `google_*` social-provider config — and
+   * `settings.subscribe('auth', …)` only re-applies on a LATER change, so a
+   * workspace that configured auth in Setup and never touched it again kept
+   * booting with the wrong values.
+   *
+   * SOFT, not hard: a kernel with no settings service must still boot auth —
+   * `bindAuthSettings` returns early when the service is absent and the
+   * deployment's env / options config stands. ADR-0049 — declared is enforced:
+   * `auth-settings-ordering.pin.test.ts` resolves a hostile registry that uses
+   * auth BEFORE settings and proves the DECLARATION is what moves the order.
+   */
+  optionalDependencies = ['com.objectstack.service.settings'];
 
 
   private options: AuthPluginOptions;

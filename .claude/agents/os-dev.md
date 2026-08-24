@@ -75,8 +75,8 @@ JSON,所以终报消息就是 JSON 本身,别无其它。
    收尾打印本次持锁时长,过长自己喊出来。只包**命令本身**,不包你的阅读与判断;结论读它
    印的 VERDICT 行,不读裸 `$?`。排队是常态,不是挂死。
 2. **压住堆**:重命令前缀 `NODE_OPTIONS=--max-old-space-size=4096`(要抬需给理由)。
-3. **定向,不扫全**:只 build/test 受影响的包(`pnpm --filter <pkg> …`),vitest
-   `--maxWorkers=2`,turbo `--concurrency=2`。
+3. **定向,不扫全**:只 build/test 受影响的包 —— `pnpm --filter <pkg> exec vitest run --maxWorkers=2 <file>`,turbo `--concurrency=2`。
+   ⛔ 参数永不经裸 `--` 转交:`--` 之后的一切被 vitest 静默丢弃,文件模式与 `--maxWorkers` 一并失效,整包跑完、退出码 0、读起来像一次通过。
 4. **清理是任务的一步**:PR 开出后,
    `rm -rf <path>/node_modules && git worktree remove <path>` —— **不加 force**。⛔ 永不
    上来就 `--force`:node_modules 已删的情况下,拒绝移除说明里面有东西没提交 —— 你自己

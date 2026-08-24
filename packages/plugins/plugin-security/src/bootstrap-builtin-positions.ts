@@ -39,7 +39,7 @@ import {
   resolveOwnOrganizationRow,
   rowMatchesDeclaration,
   seedCtx,
-  warnPreFixOrganizationLessRows,
+  warnOrganizationLessRows,
 } from './per-organization-catalog.js';
 
 /**
@@ -130,7 +130,9 @@ export async function bootstrapBuiltinRoles(
     }
   }
   if (organizationId) {
-    warnPreFixOrganizationLessRows(options.logger, 'sys_position', residue, organizationId);
+    // See the sibling in `bootstrap-declared-positions.ts`: no organization-less
+    // writer survives for `sys_position`, so no platform bucket is declared.
+    warnOrganizationLessRows(options.logger, 'sys_position', residue, organizationId);
   }
   if (seeded + updated > 0) {
     options.logger?.info?.('[security] built-in identity names + audience anchors seeded into sys_position', {

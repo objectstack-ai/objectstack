@@ -152,16 +152,6 @@ const PREFILTER_TOKENS = [...SERVICE_LOOKUP_CALLEES, 'providesServices'];
  */
 const KNOWN_PRE_BIND_READS = [
   {
-    plugin: 'com.objectstack.auth',
-    verdict: 'undeclared',
-    issue: '#11579',
-    note:
-      'AuthPlugin reaches getService(\'settings\') at depth 3 from three start()-registered ' +
-      'kernel:ready hooks and calls settings.getNamespace(\'auth\') there. In the `os serve` ' +
-      'composition AuthPlugin is used() before the capability loop registers ' +
-      'SettingsServicePlugin, so its hooks fire first. Repair is the #10250 declaration.',
-  },
-  {
     plugin: 'com.objectstack.mcp',
     verdict: 'unfixable-by-declaration',
     issue: '#11580',

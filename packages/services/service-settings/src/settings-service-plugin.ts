@@ -466,7 +466,14 @@ export function wrapEngineAsSettingsEngine(engine: IDataEngine): SettingsEngine 
       };
       const id = (where as any)?.id;
       if (id !== undefined && id !== null) {
-        return eng.update(objectName, { id, ...data }, driverOpts);
+        // [#11231] The operation's id AFTER the spread, so it WINS — the same
+        // convention as `rest-server.ts`'s batch arm and `protocol.updateData`
+        // (#6479). This branch passes no `where` to the engine, so the payload
+        // is the only id the engine sees and its conflicting-id refusal
+        // (`UPDATE_ID_MISMATCH`) has nothing to compare against: a
+        // caller-supplied `data.id` spread over the resolved id would retarget
+        // the write silently. Do not flip this back to `{ id, ...data }`.
+        return eng.update(objectName, { ...data, id }, driverOpts);
       }
       return eng.update(objectName, data, {
         where,
