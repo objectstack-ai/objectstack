@@ -40,7 +40,7 @@ from `node_modules` — there is no local copy in the skill bundle.
 - `node_modules/@objectstack/spec/src/ui/action-params.zod.ts` — The action DISPATCH contract: what the platform validates on the way in, and
 - `node_modules/@objectstack/spec/src/ui/bulk-action.zod.ts` — Bulk Action Schemas
 - `node_modules/@objectstack/spec/src/ui/i18n.zod.ts` — Display-label and ARIA-label primitives shared by every `ui/` shape.
-- `node_modules/@objectstack/spec/src/ui/responsive.zod.ts` — Style Map Schema (ADR-0065)
+- `node_modules/@objectstack/spec/src/ui/responsive.zod.ts` — Breakpoint Name Enum
 - `node_modules/@objectstack/spec/src/ui/sharing.zod.ts` — Sharing & Embedding Protocol
 
 ## How to read these
