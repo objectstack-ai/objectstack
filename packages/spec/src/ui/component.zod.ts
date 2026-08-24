@@ -134,7 +134,7 @@ import { FeedItemType, FeedFilterMode } from '../data/feed.zod';
 // next divergence sweep: enumerate by the RENDERER'S read pattern, not by the
 // key list a previous ruling happened to quote. Retiring the flat family
 // wholesale in favour of `dataSource` is the standing alternative, deferred to
-// v18 as #6590 — not rejected.
+// v18 as #11509 — not rejected.
 //
 // ── #5068: THE GATE IS WIRED — read the flip precisely ─────────────────────
 //
@@ -1916,7 +1916,7 @@ export const ElementFormPropsSchema = lazySchema(() => strictObject({
  * shorthands are contract. Direction B — retiring the whole flat family and
  * making `dataSource` the single data-binding door — was NOT dropped: it is a
  * cross-element decision (`element:form` / `element:filter` carried the same
- * flat `object` when it was recorded), tracked as #6590 for v18, and A does
+ * flat `object` when it was recorded), tracked as #11509 for v18, and A does
  * not block it. Both of those elements have since retired WHOLE at element
  * grain (#9220 / #9249, ADR-0049 — no renderer for either ever shipped), so
  * this element is the flat family's last carrier; when B lands these two
