@@ -525,7 +525,12 @@ const DATASET = {
 const SELECTION = { dimensions: ['stage'], measures: ['revenue'] };
 
 async function analyticsRefusal(error: any) {
-    const rest = setup();
+    // `any` deliberately, matching `routeOf`/`call` above: the route's `handler`
+    // is typed against the server's full `IHttpRequest`, and a hand-built
+    // request literal is not assignable to it. Keeping the seam untyped here is
+    // what the sibling helpers already do; typing it would mean constructing a
+    // whole request just to satisfy the parameter.
+    const rest: any = setup();
     (rest as any).analyticsServiceProvider = async () => ({
         queryDataset: vi.fn().mockRejectedValue(error),
     });
