@@ -293,11 +293,15 @@ import { requireDefaultExport } from './import-prerequisite.mjs';
 const ts = await requireDefaultExport('typescript', () => import('typescript'), import.meta.url);
 import { isEntrypoint } from './invoked-as.mjs';
 import { createProgramChecked } from './ts-parse.mjs';
+import {
+  WORKSPACE_FILE,
+  selfTest as workspaceEnumeratorSelfTest,
+  workspacePackageDirs,
+} from './workspace-enumerator.mjs';
 
 // Anchored to the script, not to cwd: the verdict must not depend on where the
 // guard was invoked from.
 const ROOT = resolve(import.meta.dirname, '..');
-const WORKSPACE_FILE = 'pnpm-workspace.yaml';
 const SELF = 'scripts/check-published-readme-exports.mjs';
 const BASELINE_REL = 'scripts/published-readme-exports.baseline.json';
 
@@ -921,46 +925,21 @@ export function resolveTypesEntry(manifest, subpath) {
 // Workspace + type surface
 // ---------------------------------------------------------------------------
 
-/** The `packages:` globs from pnpm-workspace.yaml. */
-function workspaceGlobs() {
-  const lines = readFileSync(join(ROOT, WORKSPACE_FILE), 'utf8').split(/\r?\n/);
-  const start = lines.findIndex((l) => /^packages\s*:\s*$/.test(l));
-  if (start === -1) throw new Error(`${WORKSPACE_FILE}: no top-level \`packages:\` block`);
-  const globs = [];
-  for (let i = start + 1; i < lines.length; i++) {
-    const line = lines[i].replace(/#.*$/, '').trimEnd();
-    if (!line.trim()) continue;
-    const m = line.match(/^\s+-\s+['"]?([^'"\s]+)['"]?\s*$/);
-    if (m) {
-      globs.push(m[1]);
-      continue;
-    }
-    if (/^\S/.test(line)) break;
-  }
-  if (globs.length === 0) throw new Error(`${WORKSPACE_FILE}: \`packages:\` block is empty`);
-  return globs;
-}
-
-/** Workspace member directories, relative to the repo root. */
-function workspaceDirs() {
-  const dirs = [];
-  for (const glob of workspaceGlobs()) {
-    const star = glob.endsWith('/*');
-    const base = star ? glob.slice(0, -2) : glob;
-    if (base.includes('*')) {
-      throw new Error(
-        `${WORKSPACE_FILE}: pattern "${glob}" is richer than <dir> or <dir>/*; extend ${SELF}`,
-      );
-    }
-    const abs = join(ROOT, base);
-    if (!existsSync(abs)) continue;
-    const candidates = star ? readdirSync(abs).map((e) => posix.join(base, e)) : [base];
-    for (const c of candidates) {
-      if (existsSync(join(ROOT, c, 'package.json'))) dirs.push(c);
-    }
-  }
-  return dirs.sort();
-}
+/**
+ * Workspace member directories, relative to the repo root.
+ *
+ * From `scripts/workspace-enumerator.mjs` (#11510) rather than a private parse.
+ *
+ * ⚠️ Importing it does NOT weaken the refusal declared at the top of this file.
+ * That refusal is about a path POPULATION, and the enumerator deliberately
+ * declares none: measured with dispatch-gates' own `extractWatchHints`, the
+ * module contributes zero watch hints to zero families (positive control on the
+ * same run: check-published-files.mjs contributes 14 hints / 7254 pairs). Had
+ * the enumerator spelled the workspace globs as literals, this gate would have
+ * inherited them and gone from 2 matched files to 5397 — precisely the
+ * fabricated population the docblock above measured and refused.
+ */
+const workspaceDirs = () => workspacePackageDirs(ROOT);
 
 /** Package-relative POSIX paths of every non-build file in a package. */
 function walk(absDir, prefix = '', out = []) {
@@ -3468,6 +3447,10 @@ function selfTest() {
         'file it finds (91.3%), which is why the declaration is honest THERE and not here.',
     );
   }
+
+  // The shared workspace enumerator is a plain module with no CI invocation of
+  // its own (#11510); every gate that consolidated onto it folds in its checks.
+  failures.push(...workspaceEnumeratorSelfTest({ root: ROOT }));
 
   if (failures.length > 0) {
     console.error(`✗ check:published-readme-exports --self-test — ${failures.length} failure(s)\n`);

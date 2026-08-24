@@ -311,6 +311,11 @@ import { readFileSync, readdirSync, statSync, existsSync, mkdirSync, writeFileSy
 import { stripComments, scanSource, blank } from './js-comment-mask.mjs';
 import { join, resolve, relative, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import {
+  isExclusionGlob,
+  readWorkspaceGlobs,
+  selfTest as workspaceEnumeratorSelfTest,
+} from './workspace-enumerator.mjs';
 import { tmpdir } from 'node:os';
 import process from 'node:process';
 
@@ -2725,6 +2730,44 @@ function selfTest() {
         `workspace parent ${glob} carries no path separator, so scripts/pm/dispatch-gates.mjs refuses it as too generic and every package under it drops out of the derived gate list`,
       );
     }
+
+    // ── the declaration must still BE the workspace (#11510) ──────────────
+    //
+    // WORKSPACE_PARENT_GLOBS is a hand-written copy of the `packages:` block,
+    // and the case above only checks each entry's SHAPE. Nothing checked that
+    // the entries were still the right ones. Two gates carried byte-identical
+    // 11-entry copies of this array with the same blind spot in both, which is
+    // exactly what a hand-maintained mirror does: a workspace root added to
+    // pnpm-workspace.yaml leaves both walking the old set, both green, and no
+    // dispatch brief naming either gate for the new root.
+    //
+    // The array is NOT replaced by the live parse. It is this gate's declared
+    // population, the only thing that tells scripts/pm/dispatch-gates.mjs which
+    // cards belong here, and a runtime parse spells no literal at all — the
+    // #11190 measurement that made consolidation safe in the first place. So
+    // the declaration stays and the live parse becomes its CHECK, in both
+    // directions, the shape check-published-files.mjs already uses.
+    const declaredParents = WORKSPACE_PARENT_GLOBS.map((g) => g.replace(/\/\*+$/, ''));
+    const liveParents = readWorkspaceGlobs(REPO_ROOT)
+      .filter((g) => !isExclusionGlob(g))
+      .map((g) => g.replace(/\/\*+$/, ''));
+    for (const parent of liveParents) {
+      expect(
+        declaredParents.includes(parent),
+        `pnpm-workspace.yaml declares the workspace root ${parent}, which WORKSPACE_PARENT_GLOBS does not — this gate walks it but no card is dispatched here for it`,
+      );
+    }
+    for (const parent of declaredParents) {
+      expect(
+        liveParents.includes(parent),
+        `WORKSPACE_PARENT_GLOBS declares ${parent}, which pnpm-workspace.yaml does not — a declaration that can drift from the workspace is worse than none, it replaces a silent gate with a lying one`,
+      );
+    }
+
+    // The shared enumerator is a plain module with no CI invocation of its own
+    // (#11510 — being a gate is exactly what it must not be); every script that
+    // consolidated onto it folds in its checks.
+    for (const failure of workspaceEnumeratorSelfTest({ root: REPO_ROOT })) expect(false, failure);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

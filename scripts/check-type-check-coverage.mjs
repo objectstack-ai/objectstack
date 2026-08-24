@@ -413,12 +413,15 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, posix, resolve } from 'node:path';
+import {
+  selfTest as workspaceEnumeratorSelfTest,
+  workspacePackageDirs,
+} from './workspace-enumerator.mjs';
 
 // Anchored to the script, not to cwd: the verdict must not depend on where the
 // guard was invoked from.
 const ROOT = resolve(import.meta.dirname, '..');
 const SELF = 'scripts/check-type-check-coverage.mjs';
-const WORKSPACE_FILE = 'pnpm-workspace.yaml';
 const TRACKING_ISSUE = 'https://github.com/objectstack-ai/objectstack/issues/4311';
 // An `exclude` pattern that names tests (`**/*.test.ts`, `**/*.spec.tsx`, ...)
 // and the files such a pattern hides. Kept deliberately broad: the question is
@@ -1267,30 +1270,6 @@ const GENERATED_INCLUDE_ROOTS = {
 };
 
 /**
- * The `packages:` globs from pnpm-workspace.yaml. Blank lines and comments are
- * skipped rather than treated as the end of the list: stopping early would
- * drop members from the scan and report a clean run over a partial workspace.
- */
-function workspaceGlobs() {
-  const lines = readFileSync(join(ROOT, WORKSPACE_FILE), 'utf8').split(/\r?\n/);
-  const start = lines.findIndex((l) => /^packages\s*:\s*$/.test(l));
-  if (start === -1) throw new Error(`${WORKSPACE_FILE}: no top-level \`packages:\` block`);
-  const globs = [];
-  for (let i = start + 1; i < lines.length; i++) {
-    const line = lines[i].replace(/#.*$/, '').trimEnd();
-    if (!line.trim()) continue;
-    const m = line.match(/^\s+-\s+['"]?([^'"\s]+)['"]?\s*$/);
-    if (m) {
-      globs.push(m[1]);
-      continue;
-    }
-    if (/^\S/.test(line)) break; // the next top-level key ends the block
-  }
-  if (globs.length === 0) throw new Error(`${WORKSPACE_FILE}: \`packages:\` block is empty`);
-  return globs;
-}
-
-/**
  * One `tsconfig*.json` of a package, read with a tolerant parse -- these configs
  * carry `//` comments, and a parse failure must not silently read as "excludes
  * nothing" (that would turn TESTS_COVERED into a gate that passes on
@@ -1710,23 +1689,12 @@ function testCoverage(dir, scripts) {
 
 /** Every workspace member as { name, dir, scripts, hasTsconfig, hidesTests, testFiles }. */
 function workspacePackages() {
-  const dirs = [];
-  for (const glob of workspaceGlobs()) {
-    // Every pattern in this repo is `<dir>` or `<dir>/*`. Anything richer
-    // would silently resolve to nothing, so reject it rather than under-report.
-    const star = glob.endsWith('/*');
-    const base = star ? glob.slice(0, -2) : glob;
-    if (base.includes('*')) {
-      throw new Error(`${WORKSPACE_FILE}: pattern "${glob}" is richer than <dir> or <dir>/*; extend ${SELF}`);
-    }
-    const abs = join(ROOT, base);
-    if (!existsSync(abs)) continue;
-    const candidates = star ? readdirSync(abs).map((e) => posix.join(base, e)) : [base];
-    for (const c of candidates) {
-      if (existsSync(join(ROOT, c, 'package.json'))) dirs.push(c);
-    }
-  }
-  const packages = dirs.sort().map((dir) => {
+  // Membership comes from scripts/workspace-enumerator.mjs (#11510) — this repo's
+  // one parse of the workspace file, and one of nine private copies before it.
+  // It refuses a glob richer than `<dir>` or `<dir>/*` rather than expanding it
+  // to nothing, which is the posture this function already took.
+  const dirs = workspacePackageDirs(ROOT);
+  const packages = dirs.map((dir) => {
     const manifest = JSON.parse(readFileSync(join(ROOT, dir, 'package.json'), 'utf8'));
     return {
       name: manifest.name ?? dir,
@@ -4920,6 +4888,10 @@ function selfTest() {
       failures.push(`lowerLedgerEntries round-trip — ${c.label}: expected ${c.expect}, got ${JSON.stringify(got)}`);
     }
   }
+
+  // The shared workspace enumerator is a plain module with no CI invocation of
+  // its own (#11510); every gate that consolidated onto it folds in its checks.
+  failures.push(...workspaceEnumeratorSelfTest({ root: ROOT }));
 
   if (failures.length) {
     console.error(`✗ check:type-check-coverage --self-test — ${failures.length} failure(s)\n`);

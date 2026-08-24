@@ -237,6 +237,11 @@ import { existsSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, 
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'url';
+import {
+  WorkspaceEnumerationError,
+  selfTest as workspaceEnumeratorSelfTest,
+  workspaceMemberDirs,
+} from './workspace-enumerator.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -265,48 +270,27 @@ class CoverageError extends Error {}
 
 /**
  * Workspace member directories, from pnpm-workspace.yaml — the workspace's own
- * declaration of what it contains. Only `<dir>/*` and literal paths are
- * understood; anything else throws instead of silently covering less.
+ * declaration of what it contains.
+ *
+ * The parse and the glob expansion come from
+ * `scripts/workspace-enumerator.mjs` (#11510), this repo's one reading of that
+ * file. Its refusals are the ones this gate already made — a pattern richer
+ * than `<dir>` or `<dir>/*` throws rather than quietly covering fewer packages,
+ * which is what would make this gate pass vacuously — and they are re-thrown as
+ * `CoverageError` so this file's own failure vocabulary is unchanged.
+ *
+ * Importing it does not give this gate a path population: the enumerator
+ * declares none, deliberately, so the reasoning in this file's header (CI runs
+ * `--self-test` only, so a workspace-wide declaration here would name this gate
+ * for every packages/ card in the tree) still holds exactly as written.
  */
 function workspaceDirs(root) {
-  const file = path.join(root, 'pnpm-workspace.yaml');
-  if (!existsSync(file)) throw new CoverageError(`${rel(root, file)} is missing — cannot enumerate workspace packages.`);
-
-  const lines = readFileSync(file, 'utf-8').split('\n');
-  const start = lines.findIndex((l) => /^packages:\s*$/.test(l));
-  if (start === -1) throw new CoverageError(`pnpm-workspace.yaml has no 'packages:' list — cannot enumerate workspace packages.`);
-
-  const patterns = [];
-  for (const line of lines.slice(start + 1)) {
-    const item = /^\s+-\s+(.+?)\s*$/.exec(line);
-    if (!item) {
-      if (/^\S/.test(line)) break; // next top-level key ends the list
-      continue; // blank line or comment inside the list
-    }
-    patterns.push(item[1].replace(/^['"]|['"]$/g, ''));
+  try {
+    return workspaceMemberDirs(root).map((dir) => path.join(root, dir));
+  } catch (err) {
+    if (err instanceof WorkspaceEnumerationError) throw new CoverageError(err.message);
+    throw err;
   }
-
-  const dirs = [];
-  for (const pattern of patterns) {
-    if (pattern.startsWith('!')) continue; // exclusion: nothing to enumerate
-    if (pattern.includes('**') || pattern.slice(0, -2).includes('*')) {
-      throw new CoverageError(
-        `pnpm-workspace.yaml pattern '${pattern}' is not a shape this gate can expand.\n` +
-          `  Teach scripts/check-dev-prereqs.mjs the new pattern shape — silently covering fewer\n` +
-          `  packages would make this gate pass vacuously.`,
-      );
-    }
-    if (!pattern.endsWith('/*')) {
-      dirs.push(path.join(root, pattern));
-      continue;
-    }
-    const parent = path.join(root, pattern.slice(0, -2));
-    if (!existsSync(parent)) continue;
-    for (const entry of readdirSync(parent, { withFileTypes: true })) {
-      if (entry.isDirectory() && entry.name !== 'node_modules') dirs.push(path.join(parent, entry.name));
-    }
-  }
-  return dirs;
 }
 
 /** The entry point Node resolves for `import '<pkg>'`: exports["."], else main. */
@@ -827,13 +811,18 @@ function selfTest() {
     rmSync(tmp, { recursive: true, force: true });
   }
 
+  // The shared workspace enumerator is a plain module with no CI invocation of
+  // its own (#11510 — being a gate is exactly what it must not be); every gate
+  // that consolidated onto it folds in its checks.
+  failures.push(...workspaceEnumeratorSelfTest({ root: ROOT }));
+
   if (failures.length > 0) {
     console.error(`\n✗ check:dev-prereqs --self-test — ${failures.length} failure(s)\n`);
     for (const f of failures) console.error(`    ${f}`);
     console.error('');
     return 1;
   }
-  console.log('✓ check:dev-prereqs --self-test — every verdict reachable, exclusions and freshness coverage pinned (16 cases).');
+  console.log('✓ check:dev-prereqs --self-test — every verdict reachable, exclusions and freshness coverage pinned (16 cases), plus the shared workspace enumerator.');
   return 0;
 }
 

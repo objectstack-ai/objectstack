@@ -203,9 +203,11 @@ means the list is incomplete **by a known amount**, and an empty `docs` beside i
 never be read as "no page documents this change". The superseded coarse set is still
 computed and emitted as `packageMentionDocs`, labelled — an audit that deliberately wants
 the wide net can still ask for it, and keeping it visible is how a reader tells a *narrow*
-list from a *blind* one. The PR comment renders all of this in a collapsed section, because
-the failure #9192 records was never the tool lying — it was the tool never signalling its
-own limits at the point of use.
+list from a *blind* one. The PR comment renders all of this in a collapsed section — and,
+since #11357, renders the anchorless count in the **headline** as well, because a limit a
+reader has to expand a fold to find is one a reader does not find. The failure #9192
+records was never the tool lying; it was the tool never signalling its own limits at the
+point of use.
 
 ### Measured, before and after
 
@@ -422,6 +424,36 @@ count, and the `sdk` bridge's reach over the client-bound ledger rows (#9572). T
 the point-of-use half of #9192 — every one of the three derived-list failures in that
 shift was caught only because a dev widened the probe past what the tool offered, never
 because the tool signalled its own limits where it was read.
+
+### The headline says what the run did not cover (#11357)
+
+A README carries no `@docs-rule` block, exports no symbol, mounts no route and declares
+no SDK method, so a README-only diff derives **nothing** — and the comment answered it
+with *"this run has no opinion about the docs"*, which a reviewer reads as *"nothing to
+check"*. The file it could not anchor **was** named, honestly, in the collapsed section
+above; GitHub renders that section shut. Two real README defects landed inside that gap
+on one day: #11180 (`packages/cli/README.md` advertising `os studio`, a command the CLI
+does not ship) and #11262 (`packages/console/README.md` asserting a `@object-ui/console`
+fallback the code no longer performs). Neither was detectable by this check on any run.
+
+So whenever `anchorlessChanges` is non-empty the headline itself now names the count and
+the files, says those pages are **not covered by this run**, and **withholds the ✅** —
+a green tick is the clean-bill glyph and a partial look is not a clean bill. Anchor
+derivation is untouched: with nothing unanchored, every headline is byte-identical to
+what it was, and no run's verdict moves either way (this check never fails a build).
+
+⚠️ This is #9282's **option 4**, not its option 3. Falling back to the coarse
+package-mention set for an anchorless file was measured 0-for-3 on recall on its own
+specimen (see [§1](#1-affected-docsmjs--change--docs-mapping-the-linchpin)), and would
+regrow the ~106–112-row lists #6893 / #7009 measured and readers learned to skip.
+Reporting the gap costs nothing and hides nothing; buying coverage with noise does both.
+
+`check-drift-comment.mjs` pins it **in both directions** — a fixture diff touching only a
+README must produce the not-covered wording, and one touching an anchorable source file
+must not. It runs the workflow's own inline `github-script` block against real
+`affected-docs.mjs` output from throwaway git repos, because a source grep passes just as
+happily on text that never renders and on text that renders unconditionally, and neither
+is a report. Zero dependencies, like the mapper: this job never runs `pnpm install`.
 
 ### The comment forks release-owned pages into a read-only section (#6893)
 

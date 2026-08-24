@@ -784,6 +784,106 @@ jobs:
       - name: PM ci-failure self-test
         run: node scripts/pm/ci-failure.mjs --self-test
 
+      # Claude hook guard self-tests (#11514, objectstack half of
+      # objectstack-ai/objectui#5754). `.claude/hooks/` holds the enforcement
+      # behind the two rules whose violation is most expensive in this repo —
+      # worktree-first and the stash ban — and each guard ships a hermetic
+      # matrix asserting its block/allow verdict case by case, with a header
+      # telling you to re-run it after touching the hook. Nothing ran them:
+      # `grep -rn 'selftest' .github/workflows/` returned no match when this
+      # card was filed, so those headers WERE the enforcement. A guard that has
+      # silently stopped guarding is worse than no guard, because everyone keeps
+      # behaving as though it works — the stash ban's own receipt is two
+      # parallel agents losing their in-flight changes to a shared LIFO stack.
+      #
+      # Baseline on `main` before this step existed, measured rather than
+      # assumed: `guard-main-checkout-bash` 121 cases pass, `guard-shared-stash`
+      # 32 cases pass. Both guards were healthy; this wires the alarm, it does
+      # not fix an outage.
+      #
+      # ⭐ DISCOVERED at run time, never listed. A hard-coded list is this
+      # card's own defect one level up: add a hook with a matrix tomorrow and it
+      # silently is not run, and nothing goes red. The glob is the contract, so
+      # a new `.claude/hooks/**/*.selftest.sh` is picked up with no edit here.
+      # `find`, not a flat glob, so a matrix in a subdirectory is not a silent
+      # miss either.
+      #
+      # ...and an EMPTY discovery is RED, not green (#4690). A renamed or moved
+      # directory would otherwise make this step pass by running nothing, which
+      # is the identical green line the whole self-test family above exists to
+      # distrust. The count is printed on success so a SHRINKING set is visible
+      # in the log rather than inferred.
+      #
+      # ⭐ Collected rather than sequenced, for the reason spelled out at the
+      # `Shallow-history guard self-tests` step above (#10814): a `run:` block
+      # is executed as `bash -e`, so a bare loop would abort at the FIRST red
+      # matrix and leave the rest unrun — neither green nor red, and nothing in
+      # the log tells those apart. The matrices are independent by construction
+      # (each builds its own throwaway fixture), so collecting loses nothing.
+      # ⚠️ `check:step-collectors` CANNOT see this block — its population is
+      # `scripts/`|`packages/` paths carrying `--self-test`, and these are
+      # `.claude/hooks/*.selftest.sh` — so the collector shape here is held by
+      # review, not by that gate. Do not "simplify" it into a bare loop.
+      #
+      # ⛔ This step RUNS the matrices; it does not modify any hook. `.claude/**`
+      # is governed surface and this workflow is not — that separation is what
+      # keeps the wiring on the ordinary merge path.
+      #
+      # Home: a STEP of this job rather than a job of its own, deliberately.
+      # `Lint & Repo Gates` is a required status context (pinned by
+      # `check:required-contexts`); a new job would publish a context that is in
+      # no ruleset, so a red guard would be advisory and the merge queue would
+      # not stop for it — #5617 verbatim, which is the exact shape this card
+      # exists to close.
+      #
+      # Hermetic by construction, and measured that way: each matrix builds its
+      # own git repo and linked worktree under $TMPDIR, and both were re-run
+      # from a primary checkout, a detached HEAD and a non-repo cwd with
+      # identical results, so neither this checkout's depth nor its branch is an
+      # input. Needs `jq` and `git` and nothing else — no pnpm, no node, no
+      # build, no network (`jq` is in the runner image and is already relied on
+      # bare by cut-rc.yml and release.yml). ~2 s measured.
+      - name: Claude hook guard self-tests (worktree-first · stash ban)
+        run: |
+          # Tolerate-and-collect (#10814) — see the note above this step. Each
+          # matrix runs unconditionally and prints its own verdict; the step
+          # still FAILS when any of them does, naming every one that failed.
+          # ⛔ Never let the collector swallow the exit code — a green step over
+          # a red self-test looks identical to success.
+          mapfile -t selftests < <(find .claude/hooks -type f -name '*.selftest.sh' | sort)
+          if [ "${#selftests[@]}" -eq 0 ]; then
+            echo "Claude hook guard self-tests — DISCOVERED NOTHING under .claude/hooks/."
+            echo "This step verified nothing, which is a failure and not a pass (#4690):"
+            echo "the matrices were moved, renamed or deleted. Re-point the search above"
+            echo "rather than deleting the step."
+            exit 1
+          fi
+          echo "discovered ${#selftests[@]} hook self-test(s):"
+          printf '  %s\n' "${selftests[@]}"
+          echo ""
+          failed=""
+          run_self_test() {
+            echo "-- $*"
+            if "$@"; then
+              echo "PASS  $*"
+            else
+              echo "FAIL  $*"
+              failed="${failed}  $*"$'\n'
+            fi
+            return 0
+          }
+          for selftest in "${selftests[@]}"; do
+            run_self_test "$selftest"
+          done
+          if [ -n "$failed" ]; then
+            echo ""
+            echo "Claude hook guard self-tests — the following FAILED:"
+            printf "%s" "$failed"
+            exit 1
+          fi
+          echo ""
+          echo "Claude hook guard self-tests — all ${#selftests[@]} ran and passed"
+
       # Docs/skills authoring guard (#2035 / ADR-0059): TS code blocks in
       # Markdown/MDX are not type-checked or ESLinted, so skills/ and
       # content/docs/ can drift back to teaching the bare `: Page = {}` literal
