@@ -68,7 +68,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { promises as fs } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import type { IHttpRequest, IHttpResponse, RouteHandler } from '@objectstack/spec/contracts';
+import type { IHttpResponse, RouteHandler } from '@objectstack/spec/contracts';
 import { ObjectQL } from '@objectstack/objectql';
 import { InMemoryDriver } from '@objectstack/driver-memory';
 import { LocalStorageAdapter } from './local-storage-adapter.js';
@@ -164,17 +164,17 @@ describe('#11427 — file-field hydration and the download path agree about one 
         status: { type: 'text' }, deleted_at: { type: 'datetime' },
         ref_object: { type: 'text' }, ref_id: { type: 'text' }, ref_field: { type: 'text' },
       },
-    } as any);
+    } as any, 'test-11427');
     engine.registry.registerObject({
       name: 'sys_attachment',
       fields: {
         file_id: { type: 'text' }, parent_object: { type: 'text' }, parent_id: { type: 'text' },
       },
-    } as any);
+    } as any, 'test-11427');
     engine.registry.registerObject({
       name: 'contract',
       fields: { title: { type: 'text' }, signed_pdf: { type: 'file' } },
-    } as any);
+    } as any, 'test-11427');
 
     // ── The shared fixture: four sys_file rows in the residual state ──────
     const files = [
@@ -347,7 +347,7 @@ describe('#11427 — findHeldFiles is findFileHolder, batched', () => {
   });
 
   it('asks NOTHING when every row is settled by the ownership columns', async () => {
-    const find = vi.fn(async () => []);
+    const find = vi.fn(async (_object: string, _options: any) => [] as any[]);
     const held = await (lifecycle as any).findHeldFiles({ find } as any, [
       { id: 'f1', ref_object: 'p', ref_id: 'r1' },
       { id: 'f2', ref_object: 'p', ref_id: 'r2' },
@@ -360,7 +360,7 @@ describe('#11427 — findHeldFiles is findFileHolder, batched', () => {
   });
 
   it('asks ONCE for a whole batch, however many files are unsettled', async () => {
-    const find = vi.fn(async () => [{ id: 'att-1', file_id: 'f2' }]);
+    const find = vi.fn(async (_object: string, _options: any) => [{ id: 'att-1', file_id: 'f2' }]);
     const held = await (lifecycle as any).findHeldFiles({ find } as any, [
       { id: 'f1' }, { id: 'f2' }, { id: 'f3' }, { id: 'f4' },
     ]);
