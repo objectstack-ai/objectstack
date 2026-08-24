@@ -53,7 +53,9 @@ function makeDriver() {
         case '$eq': return value === target;
         case '$ne': return value !== target;
         case '$in': return Array.isArray(target) && target.includes(value);
-        default: return true;
+        // REFUSE, never silently match — an unsupported operator answered
+        // `true` reads as a hit for every row (the where-matcher gate's class).
+        default: throw new Error(`fake driver: unsupported operator ${op}`);
       }
     });
   };
@@ -63,6 +65,7 @@ function makeDriver() {
       if (k === '$and') return (v as any[]).every((w) => matches(row, w));
       if (k === '$or') return (v as any[]).some((w) => matches(row, w));
       if (k === '$not') return !matches(row, v);
+      if (k.startsWith('$')) throw new Error(`fake driver: unsupported combinator ${k}`);
       return checkOp(row?.[k], v);
     });
   };
