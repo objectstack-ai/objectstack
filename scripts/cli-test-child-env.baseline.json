@@ -23,21 +23,7 @@
     "Sites that copy the whole environment ON PURPOSE do not belong here. They are DELIBERATE",
     "entries in the gate itself, carrying their reason, and they are pinned in both directions."
   ],
-  "packages/cli/test/cloud-login-json-ndjson.e2e.test.ts": 1,
-  "packages/cli/test/generate-agent-retired.e2e.test.ts": 1,
-  "packages/cli/test/generate-skill.e2e.test.ts": 1,
-  "packages/cli/test/hook-body-build-reach.e2e.test.ts": 1,
-  "packages/cli/test/init-created-files-summary.e2e.test.ts": 1,
-  "packages/cli/test/invocation-loudness.e2e.test.ts": 1,
-  "packages/cli/test/json-stdout-purity.e2e.test.ts": 1,
-  "packages/cli/test/login-json-ndjson.e2e.test.ts": 1,
-  "packages/cli/test/login-json-noninteractive.e2e.test.ts": 1,
-  "packages/cli/test/migrate-exit-code.e2e.test.ts": 1,
-  "packages/cli/test/migrate-meta.e2e.test.ts": 2,
-  "packages/cli/test/qa-empty-glob-exit-code.e2e.test.ts": 1,
   "packages/cli/test/serve-app-anchored-optional-import.e2e.test.ts": 1,
   "packages/cli/test/serve-app-runtime-hooks.e2e.test.ts": 1,
-  "packages/cli/test/serve-host-fallback-base.e2e.test.ts": 1,
-  "packages/cli/test/validate-json-warning-parity.e2e.test.ts": 1,
-  "packages/cli/test/validate-top-level-strict.e2e.test.ts": 1
+  "packages/cli/test/serve-host-fallback-base.e2e.test.ts": 1
 }

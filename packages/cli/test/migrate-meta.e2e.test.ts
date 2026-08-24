@@ -23,6 +23,7 @@ import { dirname, join, resolve } from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { ObjectStackDefinitionSchema } from '@objectstack/spec';
+import { childEnv } from './helpers/serve-process.js';
 
 const execFileP = promisify(execFile);
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
@@ -156,7 +157,7 @@ async function runMeta(args: string[], cwd: string) {
   const { stdout } = await execFileP(TSX, [CLI, 'migrate', 'meta', ...args], {
     cwd,
     maxBuffer: 16 * 1024 * 1024,
-    env: { ...process.env, NO_COLOR: '1' },
+    env: childEnv({ NO_COLOR: '1' }),
   });
   return stdout;
 }
@@ -431,7 +432,7 @@ export default defineStack({
       await execFileP(TSX, [CLI, 'validate'], {
         cwd: rkDir,
         maxBuffer: 16 * 1024 * 1024,
-        env: { ...process.env, NO_COLOR: '1' },
+        env: childEnv({ NO_COLOR: '1' }),
       });
     } catch (e: any) {
       refused = true;

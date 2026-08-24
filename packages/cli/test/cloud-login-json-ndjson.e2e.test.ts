@@ -70,6 +70,7 @@ import { mkdtempSync, rmSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { childEnv } from './helpers/serve-process.js';
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 const CLI = resolve(HERE, '../bin/run-dev.js');
@@ -278,7 +279,7 @@ async function runCloudDeviceLogin(opts: {
       'script',
       // -q quiet, -e propagate the child's exit status, -c the command.
       ['-qec', shell, '/dev/null'],
-      { env: { ...process.env, HOME: home, NO_COLOR: '1' }, maxBuffer: 32 * 1024 * 1024 },
+      { env: childEnv({ HOME: home, NO_COLOR: '1' }), maxBuffer: 32 * 1024 * 1024 },
       (err) => res(err ? Number((err as { code?: unknown }).code ?? 1) : 0),
     );
   });

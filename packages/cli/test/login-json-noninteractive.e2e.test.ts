@@ -56,6 +56,7 @@ import { mkdtempSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { childEnv } from './helpers/serve-process.js';
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 const CLI = resolve(HERE, '../bin/run-dev.js');
@@ -99,7 +100,7 @@ function runLogin(args: string[], answer: Array<{ when: RegExp; send: string }> 
   return new Promise<Run>((done) => {
     const child = spawn(TSX, [CLI, 'login', ...args], {
       stdio: ['pipe', 'pipe', 'pipe'],
-      env: { ...process.env, HOME: home, NO_COLOR: '1' },
+      env: childEnv({ HOME: home, NO_COLOR: '1' }),
     });
 
     let stdout = '';
