@@ -118,6 +118,7 @@
 
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, posix } from 'node:path';
+import { maskComments } from './js-comment-mask.mjs';
 
 /**
  * The workspace manifest's filename.
@@ -418,10 +419,24 @@ export function selfTest({ root = null } = {}) {
   // derivation would have taken.
   try {
     const self = readFileSync(new URL(import.meta.url), 'utf8');
-    const body = self.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^[ \t]*\/\/.*$/gm, '');
+    // maskComments, never a hand-rolled `/\*...\*/` strip. A workspace glob
+    // CONTAINS a comment opener — the `/` and `*` of `packages/*` are exactly
+    // `/*` — so a naive stripper starts a comment at the literal it is looking
+    // for and eats forward to the next `*/`, deleting the evidence. That was
+    // not theoretical: this guard was written that way first and the ablation
+    // that plants `['packages/*', 'apps/*']` here passed it, while the same
+    // planted line really did contribute 5154 pairs per importer. The masker
+    // scans string and comment state properly, and it is the same one
+    // dispatch-gates' own extractor composes with.
+    const body = maskComments(self);
     const offending = [...body.matchAll(/['"`]([^'"`\n]{2,120})['"`]/g)]
       .map((m) => m[1])
       .filter((raw) => /^[\w.@][\w.@/*-]*$/.test(raw))
+      // The same leading-`./` strip extractWatchHints applies before it asks
+      // whether a literal is pathy, so a relative import specifier scores the
+      // way it really scores there (`./js-comment-mask.mjs` -> no separator
+      // left -> not a hint) instead of reading as a population declaration.
+      .map((raw) => raw.replace(/^(?:\.\.?(?:\/|$))+/, ''))
       .filter((raw) => raw.includes('/'))
       .filter((raw) => !raw.startsWith('node:'));
     t(
