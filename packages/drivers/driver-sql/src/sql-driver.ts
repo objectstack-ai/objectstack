@@ -3683,7 +3683,24 @@ function nullSafeNegationOperand(node: Record<string, unknown>): Record<string, 
  * `foreignKeys` / `primaryKeys` — never a second spelling of a spec key.
  */
 export interface IntrospectedColumn extends SpecIntrospectedColumn {
-  /** SQL-introspection extra: the column carries a UNIQUE constraint. */
+  /**
+   * SQL-introspection extra: the column ALONE carries a single-column unique
+   * constraint — it is true iff some unique constraint covers this column and
+   * nothing else.
+   *
+   * Membership of a COMPOSITE constraint is deliberately not represented on
+   * this flag (#11202, maintainer ruling 2026-08-23 option A→B). `UNIQUE
+   * (a, b)` constrains the pair, and a per-column boolean cannot say that;
+   * setting it on both members would assert that each column is unique on its
+   * own, which is a different — and false — claim, and one a consumer acts on
+   * (`introspectedSchemaToObjects` in `@objectstack/objectql` turns this flag
+   * into a drafted field's `unique: true`). A real composite surface is
+   * option B and waits for demand; until it exists, an absent flag on a
+   * composite member means "not single-column unique", never "no constraint".
+   *
+   * All three dialect arms of {@link SqlDriver.introspectUniqueConstraints}
+   * produce it through one predicate — see {@link singleColumnUniqueColumns}.
+   */
   isUnique?: boolean;
   /**
    * SQL-introspection extra: declared maximum length for string types — raw
@@ -14057,12 +14074,39 @@ export class SqlDriver implements IDataDriver {
   }
 
   /**
+   * Columns that ALONE carry a single-column unique constraint (#11202).
+   *
    * ⚠️ A failed read is an ERROR, not a table without unique constraints
    * (#7332 — the ruling {@link introspectIndexes} carries, extended to this
    * sibling by #11161). This used to wrap the whole dialect dispatch in a bare
    * `catch {}` and return `[]`, silently converting a failed read into a
    * positive assertion of absence. See {@link introspectIndexes} for the full
    * rationale; the option shape and default are deliberately identical.
+   *
+   * ## The three arms answer ONE question, and it is the narrow one
+   *
+   * Maintainer ruling 2026-08-23 (option A→B), verbatim and untranslated:
+   * 「10950 不考虑存量，其他接受你的建议」. The answer is **single-column
+   * uniqueness only**: a column appears here iff some unique constraint covers
+   * that column AND NOTHING ELSE. A member of `UNIQUE (a, b)` is deliberately
+   * absent — neither `a` nor `b` is unique on its own, and this method's flat
+   * `string[]` (folded by `introspectSchema` into a per-column `isUnique`) is
+   * structurally unable to say "a and b are unique TOGETHER". Emitting both
+   * made the flag assert something the constraint does not: that each column
+   * alone is unique. Representing composite constraints is option B, which
+   * waits for real demand and is NOT this method.
+   *
+   * The arms used to disagree about this, and the disagreement was invisible
+   * because the loudest arm was dead: SQLite kept single-column unique indexes
+   * only (`info.length === 1`), while the Postgres and MySQL arms returned
+   * every member of every composite constraint — and the Postgres arm's query
+   * was invalid SQL until #11161, so live Postgres had never once reported a
+   * unique constraint through this method. Repairing that query is what made
+   * three dialects start answering three different questions on live systems.
+   *
+   * All three now normalise their rows to {@link UniqueConstraintMember} and
+   * decide through {@link singleColumnUniqueColumns} — one predicate, so a
+   * fourth dialect cannot quietly acquire a fourth meaning.
    */
   protected async introspectUniqueConstraints(
     tableName: string,
@@ -14075,7 +14119,7 @@ export class SqlDriver implements IDataDriver {
       onFailure?: 'throw' | 'partial';
     } = {},
   ): Promise<string[]> {
-    const uniqueColumns: string[] = [];
+    const members: UniqueConstraintMember[] = [];
 
     try {
       if (this.isPostgres) {
@@ -14092,9 +14136,18 @@ export class SqlDriver implements IDataDriver {
         // user can read, so without it the newly-working query would report a
         // same-named table's constraints from a schema the session never
         // reaches.
+        // `constraint_schema` is SELECTed, not just joined on, because it is
+        // half the constraint's IDENTITY here (#11202). `table_schema = ANY
+        // (current_schemas(false))` deliberately spans every schema on the
+        // search path, and Postgres auto-names a unique constraint after the
+        // table and column (`orders_email_key`) — so two same-named tables in
+        // two schemas produce two DIFFERENT constraints carrying the SAME
+        // name. Grouping on the name alone would fuse them into one apparent
+        // two-member constraint and drop a genuinely single-column unique from
+        // the answer.
         const result = await this.knex.raw(
           `
-          SELECT ccu.column_name
+          SELECT tc.constraint_schema, tc.constraint_name, ccu.column_name
           FROM information_schema.table_constraints tc
           JOIN information_schema.constraint_column_usage AS ccu
             ON tc.constraint_schema = ccu.constraint_schema
@@ -14107,12 +14160,19 @@ export class SqlDriver implements IDataDriver {
         );
 
         for (const row of result.rows) {
-          uniqueColumns.push(row.column_name);
+          members.push({
+            constraint: [String(row.constraint_schema), String(row.constraint_name)],
+            column: row.column_name ?? null,
+          });
         }
       } else if (this.isMysql) {
+        // `TABLE_SCHEMA = DATABASE()` and `TABLE_NAME = ?` are both pinned in
+        // the WHERE and merged by the `USING` join, so a constraint name is
+        // already unique within this answer — one identity part suffices,
+        // unlike the Postgres arm above.
         const result = await this.knex.raw(
           `
-          SELECT COLUMN_NAME
+          SELECT CONSTRAINT_NAME, COLUMN_NAME
           FROM information_schema.TABLE_CONSTRAINTS tc
           JOIN information_schema.KEY_COLUMN_USAGE kcu
             USING (CONSTRAINT_NAME, TABLE_SCHEMA, TABLE_NAME)
@@ -14124,7 +14184,10 @@ export class SqlDriver implements IDataDriver {
         );
 
         for (const row of result[0]) {
-          uniqueColumns.push(row.COLUMN_NAME);
+          members.push({
+            constraint: [String(row.CONSTRAINT_NAME)],
+            column: row.COLUMN_NAME ?? null,
+          });
         }
       } else if (this.isSqlite) {
         const safeTableName = tableName.replace(/[^a-zA-Z0-9_]/g, '');
@@ -14133,16 +14196,26 @@ export class SqlDriver implements IDataDriver {
         const tableNames = Array.isArray(tablesResult) ? tablesResult.map((row: any) => row.name) : [];
 
         if (!tableNames.includes(safeTableName)) {
-          return uniqueColumns;
+          return [];
         }
 
         const indexes = await this.knex.raw(`PRAGMA index_list(${safeTableName})`);
 
         for (const idx of indexes) {
           if (idx.unique === 1) {
+            // `PRAGMA index_info` reports one row per index MEMBER, and a
+            // member is not always a column: an expression term
+            // (`CREATE UNIQUE INDEX … ON t (lower(a))`) arrives with
+            // `name: null`. Every member is carried through so it still
+            // COUNTS toward the index's width — dropping the unnamed ones
+            // here would make `(a, lower(b))` look single-column and flag `a`.
+            // The `null` is discarded later, where it can only cost a flag
+            // rather than manufacture one. Previously the row's `name` was
+            // pushed unconditionally, so a one-term expression index put a
+            // literal `null` into a `string[]`.
             const info = await this.knex.raw(`PRAGMA index_info(${idx.name})`);
-            if (info.length === 1) {
-              uniqueColumns.push(info[0].name);
+            for (const entry of info) {
+              members.push({ constraint: [String(idx.name)], column: entry.name ?? null });
             }
           }
         }
@@ -14152,6 +14225,81 @@ export class SqlDriver implements IDataDriver {
       if (opts.onFailure !== 'partial') throw e;
     }
 
-    return uniqueColumns;
+    return singleColumnUniqueColumns(members);
   }
+}
+
+/**
+ * One (constraint, column) membership row, normalised across dialects —
+ * the input to {@link singleColumnUniqueColumns} (#11202).
+ */
+export interface UniqueConstraintMember {
+  /**
+   * What makes this constraint a DISTINCT constraint within one answer, as
+   * its identity parts.
+   *
+   * Spelled as parts rather than a pre-joined string so each arm has to state
+   * what it is relying on: Postgres needs `[schema, name]` because its answer
+   * spans the search path and auto-generated constraint names repeat across
+   * schemas; MySQL and SQLite pin one schema/database in the query itself and
+   * so need only the name. Two constraints whose parts are equal are treated
+   * as one constraint.
+   */
+  constraint: readonly string[];
+  /**
+   * The column this member covers, or `null` for a member that is not a plain
+   * column — a SQLite expression-index term. A `null` still occupies a member
+   * slot; it simply cannot be flagged.
+   */
+  column: string | null;
+}
+
+/**
+ * The one definition of what `introspectUniqueConstraints` reports: the
+ * columns that ALONE carry a unique constraint (#11202).
+ *
+ * A constraint contributes its column iff it has exactly ONE member and that
+ * member is a real column. Members of a composite constraint contribute
+ * nothing — `UNIQUE (a, b)` says the PAIR is unique, and a per-column flag
+ * cannot say that, so claiming it per column is a claim the constraint never
+ * made.
+ *
+ * ## Both defensive choices fail toward NOT flagging, on purpose
+ *
+ * Members are counted as they arrive, without de-duplicating identical rows.
+ * No in-tree arm can produce a duplicate (each query joins one
+ * constraint-listing row to its own column rows), but if one ever did, the
+ * inflated count would merely hide a genuine single-column unique. The
+ * opposite policy — collapsing rows before counting — could merge two real
+ * members and flag a composite one. An under-claimed flag is a missed
+ * optimisation downstream; an over-claimed one is the defect being fixed
+ * here, and it reaches `introspectSchema`'s per-column `isUnique`, the
+ * federated-object draft (ADR-0015) and schema-drift comparison as fact.
+ *
+ * The returned columns are de-duplicated: a column carrying two separate
+ * single-column unique constraints (or, on SQLite, both a `UNIQUE` clause and
+ * a hand-made unique index) is one unique column, named once.
+ */
+export function singleColumnUniqueColumns(members: readonly UniqueConstraintMember[]): string[] {
+  const byConstraint = new Map<string, (string | null)[]>();
+
+  for (const member of members) {
+    // JSON is used as the composite-key encoding because it is injective:
+    // joining the parts with a separator would fuse `['a.b', 'c']` and
+    // `['a', 'b.c']`, and a schema or constraint name really can contain the
+    // separator (Postgres quotes such identifiers rather than rejecting them).
+    const key = JSON.stringify(member.constraint);
+    const existing = byConstraint.get(key);
+    if (existing) existing.push(member.column);
+    else byConstraint.set(key, [member.column]);
+  }
+
+  const uniqueColumns: string[] = [];
+  for (const columns of byConstraint.values()) {
+    if (columns.length !== 1) continue;
+    const only = columns[0];
+    if (only == null) continue;
+    if (!uniqueColumns.includes(only)) uniqueColumns.push(only);
+  }
+  return uniqueColumns;
 }
