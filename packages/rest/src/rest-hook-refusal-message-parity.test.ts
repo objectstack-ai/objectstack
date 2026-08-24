@@ -672,11 +672,12 @@ describe('[#11588] the analytics dataset face answers in the hook\'s words too',
         // it. Neither status is named: the claim is that they AGREE, so a
         // future move on either side reddens here even if someone also updates
         // the literal in §8b.
+        // ⚠️ The CLIENT band only, and that bound is a finding rather than a
+        // convenience — see §8f immediately below, which pins what it excludes.
         const cases: Array<[string, any]> = [
             ['undeclared refusal', sandboxRefusal('month-end close is in progress')],
             ['declared 409 + code', sandboxRefusal('locked', { code: 'RECORD_LOCKED', status: 409 })],
             ['`statusCode` spelling', sandboxRefusal('locked', { code: 'RECORD_LOCKED', statusCode: 409 })],
-            ['declared 5xx', sandboxRefusal('boom', { code: 'SERVICE_UNAVAILABLE', status: 503 })],
             ['a CRASHED body (#7543)', sandboxRefusal('TypeError: x is not a function')],
         ];
 
@@ -693,5 +694,43 @@ describe('[#11588] the analytics dataset face answers in the hook\'s words too',
                 + `vs /data ${data.statusCode} ${JSON.stringify(data.body)}`,
             ).toBe(data.statusCode);
         }
+    }, 60_000);
+
+    it('§8f MEASURED AND NOT REPAIRED — the two faces still disagree in the 5xx band', async () => {
+        // Found by §8e's first draft, which included this case and reddened
+        // WITH the fix in place. Recorded rather than quietly dropped: a bound
+        // on a parity claim that nobody can see is how the next reader
+        // concludes the two faces agree everywhere.
+        //
+        // A producer declaring `503` + a code is answered `503
+        // SERVICE_UNAVAILABLE` on `/data` (the #5582 passthrough: keep the
+        // status, keep the code, drop the prose) and `500
+        // ANALYTICS_QUERY_FAILED` here — 502/503 are `isExpectedDataStatus`
+        // lifecycle outcomes that proxies and retry policies read differently
+        // from a 500, so this is the same class of loss #5582 closed one door
+        // over.
+        //
+        // NOT repaired by #11684, deliberately. ③'s "a declared 5xx keeps
+        // going through the `ANALYTICS_QUERY_FAILED` envelope" is #5352's
+        // ruling, re-argued by #5367 and #5811 and load-bearing for the
+        // read-scope refusals — moving it is a contract call on a shipped
+        // route that neither folded card asked for. `classifiedRefusalAnswer`
+        // hands a declared 5xx straight back for exactly this reason. Filed as
+        // its own card.
+        const error = sandboxRefusal('boom', { code: 'SERVICE_UNAVAILABLE', status: 503 });
+
+        const analytics = await analyticsRefusal(error);
+        const rest = setup({ createData: vi.fn().mockRejectedValue(error) });
+        const data = await call(rest, 'POST', DATA_COLLECTION, {
+            params: { object: 'crm_account' }, body: { name: 'x' },
+        });
+
+        expect(data.statusCode).toBe(503);
+        expect(data.body.code).toBe('SERVICE_UNAVAILABLE');
+        expect(analytics.statusCode).toBe(500);
+        expect(analytics.body.code).toBe('ANALYTICS_QUERY_FAILED');
+        // Both still withhold the prose — that half never disagreed (§8c).
+        expect(analytics.body.error).toBe(INTERNAL_ERROR_MESSAGE);
+        expect(data.body.error).toBe(INTERNAL_ERROR_MESSAGE);
     }, 60_000);
 });
