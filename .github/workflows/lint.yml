@@ -2973,6 +2973,23 @@ jobs:
       - name: Check spec pin citations still name the pin this repo builds against
         run: pnpm --filter @objectstack/spec check:objectui-pin-citations
 
+      # #11344. `packages/spec/llms.txt` is hand-kept, has no generator, and
+      # SHIPS in the published tarball as context for AI consumers — the
+      # audience least able to notice staleness and most likely to turn a claim
+      # into code. When this landed the file advertised eleven symbols that
+      # existed in no entry point (`IUIService` among them, removed in v11), two
+      # packages that did not exist, and a schema table whose heading disagreed
+      # with the sum of its own rows.
+      #
+      # Reads `src/`, the checked-in `api-surface/` shards, the package manifest
+      # and pnpm-workspace.yaml — no build — so it belongs in this pre-build
+      # source-audit group beside its nearest sibling above. Unfiltered on
+      # purpose: the counts are measured against the whole workspace and against
+      # every schema domain, so a PR that adds a package or a schema anywhere
+      # can falsify this file without touching packages/spec/**.
+      - name: Check the shipped llms.txt still describes this package
+        run: pnpm --filter @objectstack/spec check:llms-txt
+
   # Lane 2 of 4 behind the required `TypeScript Type Check` context. The
   # aggregator job at the bottom of this file explains the split, holds the
   # contract, and is the thing the merge queue actually requires — read it
