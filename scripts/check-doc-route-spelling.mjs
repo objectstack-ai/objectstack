@@ -333,11 +333,19 @@ function routeArities(path) {
  * Align prose segments with one row arity.
  *
  * Returns `null` when the arity differs, otherwise the list of positions
- * where a CONCRETE prose segment differs from a LITERAL row segment — the
- * only kind of difference this gate is entitled to judge. A row parameter
- * matches any prose segment (values are not the ledger's vocabulary); a
- * prose placeholder matches any row segment (a doc writing `<verb>` over a
- * literal position is teaching the family, not a spelling).
+ * where the prose differs from a LITERAL row segment. A row parameter
+ * matches any prose segment (values are not the ledger's vocabulary). A
+ * prose placeholder over a row LITERAL is a recorded difference like any
+ * other — it can never be a spelling variant, so it disqualifies the row
+ * from both exact and near-miss. The lenient direction (placeholder matches
+ * literal) was tried and MEASURED wrong in reverse verification: it let the
+ * param-spelled plural `/meta/objects/:name/state/:field` ride an unrelated
+ * same-arity row (`/meta/:type/:section/:name/published`) into an exact
+ * verdict, and steered the third spelling's flag onto that wrong row — a
+ * detector that passes exactly the drift it was built for. Strictness costs
+ * only a few honest `unmatched` entries (`<verb>` family teaching,
+ * brace-set prose); it can create no false flag, because a placeholder/
+ * literal difference never satisfies the variant relation.
  */
 function alignRow(proseSegs, rowSegs) {
   if (proseSegs.length !== rowSegs.length) return null;
@@ -346,7 +354,6 @@ function alignRow(proseSegs, rowSegs) {
     const r = rowSegs[i];
     const p = proseSegs[i];
     if (rowParam(r)) continue;
-    if (prosePlaceholder(p)) continue;
     if (p === r) continue;
     misses.push({ index: i, prose: p, row: r });
   }
@@ -651,6 +658,7 @@ function selfTest() {
     "  { route: 'GET /api/v1/search' },",
     "  { route: 'POST /api/v1/reports/:id/run' },",
     "  { route: 'GET /api/v1/forms/:slug' },",
+    "  { route: 'GET /api/v1/meta/:type/:section/:name/published' },",
     "];",
   ].join('\n');
   const runtimeLedger = [
@@ -677,12 +685,19 @@ function selfTest() {
     'Drivers: /api/v1/datasources/drivers is served outside these ledgers.',
     'Views: /api/v1/ui/view/customer and /api/v1/ui/view/customer/form.',
     'Probes: /api/v1/health. Global actions: POST /api/v1/actions//:action.',
+    'Family teaching: /api/v1/reports/:id/<verb> for every report verb.',
   ].join('\n');
   const driftDoc = [
     'Old plural: /api/v1/meta/objects/lead/state/status still appears here.',
     'Third spelling: /api/v1/metadata/objects/lead/state/status too.',
     'Singular family: POST /api/v1/report/:id/run runs a report.',
     'Scoped drift: /api/v1/environments/env_9/meta/objects/lead/state/status.',
+    // The reverse-verification regression, pinned: spelled WITH its params,
+    // the plural has the same arity as the `:type/:section/:name/published`
+    // decoy above, and the retired lenient placeholder rule let that row
+    // absorb it as exact (and mis-route the metadata flag onto it).
+    'Param spelling: /api/v1/meta/objects/:name/state/:field must flag too.',
+    'Param third: /api/v1/metadata/objects/:name/state/:field as well.',
     `<!-- ${ALLOW_MARKER}: migration guide shows the retired spelling on purpose -->`,
     'Replace /api/v1/meta/objects/lead/state/status with the singular form.',
   ].join('\n');
@@ -728,8 +743,8 @@ function selfTest() {
     const r = runScan(cfg);
 
     // ── Ledger parsing reached the real files ────────────────────────────
-    expect('ledger rows parsed (12 rest + 6 runtime; servedBy and note prose are not rows)',
-      r.ledgerCounts.routes, 18);
+    expect('ledger rows parsed (13 rest + 6 runtime; servedBy and note prose are not rows)',
+      r.ledgerCounts.routes, 19);
     expect('wildcard families parsed', r.ledgerCounts.families, 2);
 
     // ── Walk wiring ──────────────────────────────────────────────────────
@@ -740,7 +755,7 @@ function selfTest() {
       r.flags.some((f) => f.file.includes('node_modules')), false);
 
     // ── The teeth: measured drift class flags, by name ───────────────────
-    expect('flag count', r.flags.length, 4);
+    expect('flag count', r.flags.length, 6);
     const flagged = r.flags.map((f) => f.literal).sort();
     expect('the plural flags', flagged.includes('/api/v1/meta/objects/lead/state/status'), true);
     expect('the third spelling flags (invisible to a plural grep)',
@@ -748,8 +763,13 @@ function selfTest() {
     expect('a singular of a plural route family flags', flagged.includes('/api/v1/report/:id/run'), true);
     expect('the scoped mirror does not hide drift',
       flagged.includes('/api/v1/environments/env_9/meta/objects/lead/state/status'), true);
-    const stateFlags = r.flags.filter((f) => f.literal.endsWith('/state/status'));
-    expect('every state flag names the canonical ledger row',
+    expect('the PARAM-spelled plural flags despite the same-arity published decoy',
+      flagged.includes('/api/v1/meta/objects/:name/state/:field'), true);
+    expect('the PARAM-spelled third spelling flags despite the decoy',
+      flagged.includes('/api/v1/metadata/objects/:name/state/:field'), true);
+    const stateFlags = r.flags.filter((f) => f.literal.includes('/state/'));
+    expect('all five state flags exist', stateFlags.length, 5);
+    expect('every state flag names the canonical ledger row, never the published decoy',
       stateFlags.every((f) => f.route.path === '/api/v1/meta/object/:name/state/:field'), true);
     expect('the flag carries which segments differ',
       stateFlags.some((f) => f.misses.some((m) => m.prose === 'objects' && m.row === 'object')), true);
@@ -770,6 +790,9 @@ function selfTest() {
       r.unmatched.has('/api/v1/ui/view/customer') || r.unmatched.has('/api/v1/ui/view/customer/form'), false);
     expect('the empty-segment route matches (actions//:action)',
       r.unmatched.has('/api/v1/actions//:action'), false);
+    expect('a placeholder over a row LITERAL is unmatched, never exact and never a flag',
+      r.unmatched.has('/api/v1/reports/:id/<verb>')
+        && !r.flags.some((f) => f.literal === '/api/v1/reports/:id/<verb>'), true);
 
     // ── Red/green: dead root (#4916) ─────────────────────────────────────
     renameSync(join(dir, 'skills'), join(dir, 'skills-renamed'));
