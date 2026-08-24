@@ -54,14 +54,24 @@
 // (`@objectstack/spec/api`, `@objectstack/types`) are untouched by the
 // mutation.
 //
-//   §1 predicted RED for the three uncoded rows, GREEN for the two controls.
-//   §2 predicted RED for the sandbox rows, GREEN for the plain twin and 5xx.
-//   §3 predicted GREEN throughout — it pins what must NOT move.
-//   §4 predicted RED for the demote, GREEN for the two non-declarations.
-//   §5 predicted RED for the `statusCode` batch rows, GREEN for the rest.
+//   §1 predicted RED 3 / GREEN 2   measured 3 red — as predicted.
+//   §2 predicted RED 3 / GREEN 1   measured 3 red — as predicted.
+//   §3 predicted GREEN throughout  measured 1 RED. The prediction was WRONG,
+//      recorded rather than rewritten: "an undeclared-status refusal WITH a
+//      code still answers 400" asserts the status AND the code, and pre-fix
+//      only its status half held. Its neighbours in the section really are
+//      direction-insensitive; this one was mis-shelved, and the red is the
+//      correct answer for it.
+//   §4 predicted RED 1 / GREEN 2   measured 2 red — the "registered spelling
+//      arrives verbatim" case reddens too, because pre-fix no code arrives at
+//      all. Predicted as a control; it is not one.
+//   §5 predicted RED 6 / GREEN 5   measured 6 red — as predicted.
 //
-// The measured result is recorded in the PR body rather than here, so a wrong
-// prediction cannot be quietly rewritten to fit.
+// Total 15 of 27 red here (prediction: 13), plus 3 of the 4 cases the fifth
+// `ARMS` entry adds to `rest-thrown-code-vocabulary.test.ts` (prediction: 2 —
+// §1 contributes two assertions per arm, not one). 18 red across both files.
+// The predictions above are left as written, per this repo's rule that a wrong
+// prediction is reported rather than fitted to the measurement.
 // ---------------------------------------------------------------------------
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
