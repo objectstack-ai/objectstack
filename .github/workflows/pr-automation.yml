@@ -423,11 +423,11 @@ jobs:
         with:
           node-version: '22'
 
-      - name: Enable Corepack
+      - name: Setup pnpm
         if: >-
           steps.labels.outputs.skip != 'true'
           && steps.diffbase.outputs.base_error == ''
-        run: corepack enable
+        uses: ./.github/actions/setup-pnpm
 
       - name: Install dependencies
         if: >-

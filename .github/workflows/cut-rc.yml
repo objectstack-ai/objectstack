@@ -339,11 +339,8 @@ jobs:
           # hotcrm@v1.2.0, whose manifest pins engines.node >=22.
           node-version: '22'
 
-      - name: Enable Corepack
-        run: corepack enable
-
-      - name: Verify pnpm version
-        run: pnpm --version
+      - name: Setup pnpm
+        uses: ./.github/actions/setup-pnpm
 
       - name: Get pnpm store directory
         shell: bash
