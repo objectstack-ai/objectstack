@@ -15,6 +15,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { AuthManager } from './auth-manager';
+import { inviteForAudienceGate } from './audience-gate-test-support';
 
 const failures = vi.hoisted(() => ({ oauthProvider: false, bearer: false }));
 
@@ -125,8 +126,13 @@ describe('AuthManager – optional better-auth plugin isolation', () => {
       plugins: { oidcProvider: true },
     });
 
-  const signUp = (manager: AuthManager, email: string) =>
-    manager.handleRequest(
+  const signUp = async (manager: AuthManager, email: string) => {
+    // [#11739] default posture invite_only: fixture users beyond the first
+    // enter through the invitation carve-out (see audience-gate-test-support).
+    // This harness's engine hides its tables, so the seed goes through
+    // engine.insert and MUST be awaited.
+    await inviteForAudienceGate(manager, email);
+    return manager.handleRequest(
       new Request('http://localhost:3000/api/v1/auth/sign-up/email', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -137,6 +143,7 @@ describe('AuthManager – optional better-auth plugin isolation', () => {
         }),
       }),
     );
+  };
 
   beforeEach(() => {
     failures.oauthProvider = false;

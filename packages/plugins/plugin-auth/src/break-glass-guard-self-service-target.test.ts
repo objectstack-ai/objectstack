@@ -36,6 +36,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { AuthManager } from './auth-manager';
 import { createMemoryEngine } from './impersonation-bearer-rotation.test';
 import { LAST_LOCAL_CREDENTIAL_CODE } from './last-local-credential';
+import { inviteForAudienceGate } from './audience-gate-test-support';
 
 const SECRET = 'test-secret-at-least-32-chars-long!!';
 const PASSWORD = 'S3cure!Passw0rd-11074';
@@ -91,6 +92,9 @@ async function seedDeployment() {
     ['owner.11074@example.com', 'Break Glass Owner'],
     ['caller.11074@example.com', 'Ordinary Caller'],
   ]) {
+    // [#11739] default posture invite_only: users beyond the first enter
+    // through the invitation carve-out (see audience-gate-test-support).
+    inviteForAudienceGate(engine, email);
     const res = await post(manager, '/sign-up/email', { email, password: PASSWORD, name });
     expect(res.status, `sign-up ${email}: ${await res.clone().text()}`).toBe(200);
   }
