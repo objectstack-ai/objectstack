@@ -1,8 +1,8 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * Authenticated-caller scoping for the plugin-facing inbox write surface
- * (ADR-0030 Layer 5).
+ * Authenticated-caller scoping for the plugin-facing inbox surface
+ * (ADR-0030 Layer 5) — the write door (#10753) and the read door (#11452).
  *
  * ## The shape this closes
  *
@@ -21,6 +21,11 @@
  * context-lessly on an `engine-owned` object (ADR-0103), so no engine-level
  * permission check sees it either. Unconstrained and undeclared, in both
  * directions.
+ *
+ * The READ side has the same shape (#11452): `listInbox(userId, opts)` keys
+ * its whole read — inbox rows joined with read-state — on the same free
+ * parameter, so an in-process caller could read ANY user's inbox titles,
+ * bodies and read-state. Both doors resolve their recipient here.
  *
  * The verbs here are the plugin-facing door, and the whole design is that they
  * take NO target user. The recipient is DERIVED from the caller's
@@ -66,7 +71,9 @@
  * What this does is make the CORRECT pattern the only one the plugin-facing
  * surface expresses, and make the incorrect one fail loudly at the call site
  * instead of silently succeeding — which is the failure mode measured on the
- * existing path, where an absent caller returns `{ success: true, readCount: 0 }`.
+ * existing path, where an absent caller returns `{ success: true, readCount: 0 }`
+ * (the read path's analog: a well-formed empty
+ * `{ notifications: [], unreadCount: 0 }` inbox).
  */
 
 import type { ExecutionContext } from '@objectstack/spec/kernel';
@@ -83,7 +90,8 @@ import type { ExecutionContext } from '@objectstack/spec/kernel';
 export type InboxCaller = ExecutionContext;
 
 /**
- * The plugin-facing inbox write refusal. Carries the ADR-0112 envelope pair a
+ * The plugin-facing inbox refusal — write and read doors alike. Carries the
+ * ADR-0112 envelope pair a
  * boundary reads — `status` + a registered `code` — so a caller that surfaces
  * it over HTTP answers `401 UNAUTHENTICATED` rather than the `500
  * INTERNAL_ERROR` a bare `Error` demotes to (`resolveThrownHttpError`,
@@ -107,7 +115,7 @@ export class InboxCallerError extends Error {
 }
 
 /**
- * The recipient a plugin-facing inbox write acts on: the caller's
+ * The recipient a plugin-facing inbox call acts on: the caller's
  * authenticated `userId`, or a refusal.
  *
  * Never returns a guess. Never falls back to `attributedUserId` / `actor` /
@@ -116,9 +124,18 @@ export class InboxCallerError extends Error {
  *
  * @param caller The caller's execution context (`undefined` is a refusal).
  * @param verb   The plugin-facing method name, so the refusal names the call.
+ * @param targetUserDoor The contract method a caller that legitimately must
+ *               NAME a target user still has, quoted in the refusal so the
+ *               prescription matches the verb — `listInbox(userId, opts)` for
+ *               the read door. Defaults to the write door's existing text, so
+ *               the #10753 call sites keep their refusal bytes unchanged.
  * @throws {InboxCallerError} when no authenticated user can be resolved.
  */
-export function resolveInboxRecipient(caller: InboxCaller | undefined, verb: string): string {
+export function resolveInboxRecipient(
+    caller: InboxCaller | undefined,
+    verb: string,
+    targetUserDoor = 'markRead(userId, ids)',
+): string {
     const userId = typeof caller?.userId === 'string' ? caller.userId.trim() : '';
     if (userId) return userId;
 
@@ -136,6 +153,6 @@ export function resolveInboxRecipient(caller: InboxCaller | undefined, verb: str
     throw new InboxCallerError(
         `messaging: ${verb} requires an authenticated caller — no 'userId' on the execution context.${detail}. `
         + `This surface acts only on the CALLER'S OWN inbox and takes no target user; `
-        + `a system/background sweep that must name one uses markRead(userId, ids).`,
+        + `a system/background sweep that must name one uses ${targetUserDoor}.`,
     );
 }
