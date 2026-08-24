@@ -124,7 +124,24 @@ export const SysShareLink = ObjectSchema.create({
       required: true,
       maxLength: 100,
       description: 'Primary key of the shared record within object_name',
+      // [#11386] The id half of this object's pointer pair (ADR-0052 §5),
+      // adopting the #11339 carrier. VERIFIED for THIS object separately from
+      // its `sys_record_share` sibling, because the consuming code path is a
+      // different one: `share-link-routes.ts` calls
+      // `engine.find(link.object_name, …)` with `record_id` as the address,
+      // and `share-link-service.ts` resolves a token through a FAIL-CLOSED
+      // existence gate — `if (!(await this.recordStillExists(row.object_name,
+      // row.record_id))) return null`.
+      //
+      // That gate is what makes the declaration worth more here than
+      // anywhere else in this family: a seeded link whose `record_id` stayed a
+      // verbatim natural key was a permanently DEAD token, and dead in the
+      // most misleading way available — the gate deliberately returns the same
+      // `null` as revoked/expired (so the endpoint leaks nothing), so the
+      // failure is silent at seed time and indistinguishable from a
+      // revocation at use time. Declared, the seed is refused loudly instead.
       group: 'Target',
+      referenceVia: 'object_name',
     }),
 
     // ── Access Policy ────────────────────────────────────────────

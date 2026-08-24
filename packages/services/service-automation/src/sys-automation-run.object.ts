@@ -182,6 +182,43 @@ export const SysAutomationRun = ObjectSchema.create({
       group: 'Trigger',
     }),
 
+    // [#11386] DELIBERATELY NOT DECLARED `referenceVia: 'trigger_object'` —
+    // the recorded "stays undeclared" verdict the card's acceptance sketch
+    // asks for, kept at the site so the next survey of this idiom finds the
+    // reasoning instead of re-deriving it (or sweeping it).
+    //
+    // The SHAPE fits: `serialize()` stamps `trigger_object: ctx.object` beside
+    // `trigger_record_id: ctx.record.id`, so this really is the same (object
+    // half, id half) pointer `sys_activity`, `sys_audit_log`,
+    // `sys_approval_request`, `sys_record_share` and `sys_share_link` carry,
+    // and the `{trigger_object, trigger_record_id}` index queries it the same
+    // way. The four objects adopted in #11386 declared on exactly that basis.
+    //
+    // What does NOT fit is the only thing the declaration currently ENFORCES:
+    // seed-time resolution of an AUTHORED pointer. A `sys_automation_run` row
+    // is not content about a record — it is the engine's own run state:
+    //  - a `paused` row IS a live continuation. `SuspendedRunStore` loads
+    //    every `{ status: 'paused' }` row on boot and rehydrates it, so an
+    //    authored one is not sample data, it is a fabricated continuation the
+    //    engine will try to resume against `variables_json` / `steps_json` /
+    //    `context_json` snapshots no real run produced.
+    //  - a terminal row is telemetry under this object's own retention
+    //    contract (`class: 'telemetry'`, 30d sweep scoped to
+    //    completed/failed), so seeded run history deletes itself on the first
+    //    Reaper pass that reaches its age.
+    //  - the row has no natural key to be addressed BY: `nameField: 'id'`,
+    //    the id is the engine's raw `runId`, and the object declares no `name`
+    //    field at all — the seed loader's default externalId does not exist
+    //    here.
+    // Declaring would therefore not make a real corpus resolvable; it would
+    // advertise run rows as authorable seed content — precisely the wrong
+    // signal for a metadata author (human or AI) reading the declaration as
+    // permission.
+    //
+    // To flip this: land a consumer that reads the pair for something other
+    // than seed authoring (the #5180 delete-cascade carrier is the live
+    // candidate — that card needs to know which columns form the pointer),
+    // or a measured case for seeding runs. Not by sweep.
     trigger_record_id: Field.text({
       label: 'Trigger Record',
       required: false,

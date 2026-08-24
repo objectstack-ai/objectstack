@@ -412,3 +412,443 @@ describe('seed pointer-pair resolution (#11339 — referenceVia)', () => {
     expect(logger.error).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * Per-object adoption of the declared pointer pair — #11386.
+ *
+ * #11339 landed the carrier and adopted it on `sys_activity`. This card adopts
+ * it on the remaining system objects that carry the same `(object half, id
+ * half)` idiom, and the card's own discipline is that they are adopted
+ * MEASURED PER OBJECT, not as a sweep: five objects sharing a declaration
+ * SHAPE do not thereby share semantics, and a sweep would declare a pair on an
+ * object whose corpus contradicts it while every test stayed green.
+ *
+ * So each case below drives the loader against ONE adopted object's real field
+ * shape and asserts THAT object's own consuming query — the query that makes
+ * the pair load-bearing there — rather than a generic "the id resolved":
+ *
+ *  - `sys_audit_log`      → the `{object_name, record_id}` index / `record_views`
+ *                           view, i.e. "who touched THIS record"
+ *  - `sys_approval_request` → the pending-request lookup that
+ *                           `lifecycle-hooks.ts` holds the record LOCK with
+ *  - `sys_record_share`   → the grant lookup the sharing middleware enforces on
+ *  - `sys_share_link`     → the fail-closed `recordStillExists` gate a token
+ *                           resolve runs
+ *
+ * The fifth surveyed object, `sys_automation_run`, is deliberately NOT adopted
+ * and therefore has no case here; the verdict and its reasons are recorded at
+ * the declaration site (`sys-automation-run.object.ts`, `trigger_record_id`).
+ *
+ * ## Why every case below seeds its TARGET FIRST
+ *
+ * `sys_activity` heals an out-of-order pointer in pass 2 (the
+ * order-independence case above). None of these four inherits that, and the
+ * reason was measured here rather than assumed — twice over:
+ *
+ *  - MEASURED, and the load-bearing one: all four are engine-owned rows with
+ *    no natural key, so an honest seed dataset for them declares no
+ *    `externalId`. Pass 2 back-fills by looking the row up BY its externalId,
+ *    so it resolves the target and then has nowhere to write it ("Deferred
+ *    reference DROPPED … has an empty externalId"). Pinned by the keyless
+ *    case and its positive control in the `sys_audit_log` block.
+ *  - NOT MEASURED here, and stated as such: on `sys_approval_request`,
+ *    `sys_record_share` and `sys_share_link` the id half is also
+ *    `required: true`, and pass 1 defers a reference by DELETING the column
+ *    from the row (`seed-loader.ts`: "REMOVE the field rather than writing
+ *    null … NOT NULL columns turned this into a loud constraint error"). A
+ *    real engine enforces `required` on seed writes, so the deferred insert
+ *    would fail there too — but this file's engine double does not validate,
+ *    so no case here may claim it either way.
+ *
+ * Both roads end at the ruled family direction (loud, never silently wrong)
+ * and at the same one-line author fix: order the target dataset first. What
+ * they are NOT is order-independence, so no case below claims it.
+ */
+
+/** The four adopted objects, mirroring their real declarations field-for-field
+ *  in the shape this loader reads (type + `referenceVia`). The mirror is kept
+ *  honest by a declaration pin in each owning package, which asserts the REAL
+ *  object still declares the pair this file assumes. */
+const ADOPTER_SCHEMAS: Record<string, any> = {
+  crm_lead: {
+    name: 'crm_lead',
+    fields: { name: { type: 'text', required: true }, status: { type: 'text' } },
+  },
+  sys_audit_log: {
+    name: 'sys_audit_log',
+    fields: {
+      action: { type: 'select' },
+      actor: { type: 'text' },
+      object_name: { type: 'text' },
+      record_id: { type: 'text', referenceVia: 'object_name' },
+    },
+  },
+  sys_approval_request: {
+    name: 'sys_approval_request',
+    fields: {
+      process_name: { type: 'text', required: true },
+      object_name: { type: 'text', required: true },
+      record_id: { type: 'text', required: true, referenceVia: 'object_name' },
+      status: { type: 'select' },
+    },
+  },
+  sys_record_share: {
+    name: 'sys_record_share',
+    fields: {
+      object_name: { type: 'text', required: true },
+      record_id: { type: 'text', required: true, referenceVia: 'object_name' },
+      recipient_type: { type: 'select' },
+      recipient_id: { type: 'text' },
+      access_level: { type: 'select' },
+      source: { type: 'select' },
+    },
+  },
+  sys_share_link: {
+    name: 'sys_share_link',
+    fields: {
+      token: { type: 'text' },
+      object_name: { type: 'text', required: true },
+      record_id: { type: 'text', required: true, referenceVia: 'object_name' },
+      permission: { type: 'select' },
+      audience: { type: 'select' },
+    },
+  },
+};
+
+/** A dataset for an object with no natural key of its own — every adopted
+ *  object here is engine/append-only owned, so `mode: 'insert'` (no
+ *  `externalId`) is how such rows would honestly be authored. */
+function insertSeed(object: string, records: Array<Record<string, unknown>>) {
+  return { object, mode: 'insert', env: ['prod', 'dev', 'test'], records };
+}
+
+describe('pointer-pair adoption per object (#11386)', () => {
+  describe('sys_audit_log — object_name / record_id', () => {
+    it('resolves the ledger pointer so "who touched THIS record" matches on the real id', async () => {
+      const { service, store } = newService(ADOPTER_SCHEMAS);
+
+      const result = await service.load({
+        seeds: [
+          LEAD_SEED,
+          insertSeed('sys_audit_log', [
+            { action: 'update', actor: 'svc:importer', object_name: 'crm_lead', record_id: 'Lisa Thompson' },
+          ]),
+        ] as any,
+        config: CONFIG,
+      });
+
+      expect(result.success).toBe(true);
+      const leadId = store.crm_lead[0].id;
+      // The `{object_name, record_id}` index query — the shape the
+      // `record_views` list view and every "history of this record" drill-down
+      // issue, with the target's REAL id.
+      expect(
+        store.sys_audit_log.filter((r) => r.object_name === 'crm_lead' && r.record_id === leadId),
+      ).toHaveLength(1);
+      expect(store.sys_audit_log.filter((r) => r.record_id === 'Lisa Thompson')).toHaveLength(0);
+    });
+
+    /**
+     * MEASURED, and not what this case was first written to assert.
+     *
+     * The prediction going in was that an out-of-order pointer would heal in
+     * pass 2 here, because `sys_audit_log.record_id` is optional and so defers
+     * cleanly (that is what `sys_activity` does in the order-independence case
+     * above). It does not, and the reason is a property of the DATASET rather
+     * than of the pair: an engine-owned ledger has no natural key, so its seed
+     * dataset declares no `externalId` — and pass 2 back-fills by looking the
+     * row up by its externalId. It resolves the target and then has nowhere to
+     * write it ("Deferred reference DROPPED … has an empty externalId, so no
+     * internal id").
+     *
+     * That is the ruled family direction, not a regression: the load fails
+     * LOUDLY, and the author's fix is one line (order the target dataset
+     * first, or declare an externalId on the ledger dataset — the positive
+     * control below). It is asserted here rather than glossed because it is
+     * the measured difference between adopting the pair on `sys_activity` and
+     * adopting it on the four keyless system objects, and a reader who assumed
+     * order-independence carried over would be wrong.
+     */
+    it('does NOT silently heal an out-of-order pointer on a KEYLESS dataset — pass 2 has nowhere to write back, and says so', async () => {
+      const { service, store } = newService(ADOPTER_SCHEMAS);
+
+      // Ledger dataset BEFORE its target. A pointer pair contributes no static
+      // dependency edge (the target is a per-row fact), so nothing but pass 2
+      // could save this — and pass 2 cannot, on a dataset with no externalId.
+      const result = await service.load({
+        seeds: [
+          insertSeed('sys_audit_log', [
+            { action: 'read', object_name: 'crm_lead', record_id: 'Lisa Thompson' },
+          ]),
+          LEAD_SEED,
+        ] as any,
+        config: CONFIG,
+      });
+
+      expect(result.success).toBe(false);
+      const err = result.errors.find((e: any) => e.field === 'record_id');
+      expect(err).toBeDefined();
+      // The message names the cause (the empty externalId), not just the miss —
+      // the author needs to know ordering/keying is the fix, not the value.
+      expect(String(err!.message)).toMatch(/externalId/);
+      // Never the silent verbatim store this family exists to kill.
+      expect(store.sys_audit_log.filter((r) => r.record_id === 'Lisa Thompson')).toHaveLength(0);
+    });
+
+    it('POSITIVE CONTROL — the same out-of-order load DOES heal once the ledger dataset declares an externalId', async () => {
+      const { service, store } = newService(ADOPTER_SCHEMAS);
+
+      // Same seeds, same order, one difference: the ledger rows are
+      // addressable. This is what isolates the cause above to keylessness
+      // rather than to the pointer pair or to the deferral machinery.
+      const result = await service.load({
+        seeds: [
+          {
+            object: 'sys_audit_log',
+            externalId: 'actor',
+            mode: 'upsert',
+            env: ['prod', 'dev', 'test'],
+            records: [{ action: 'read', actor: 'svc:timeline', object_name: 'crm_lead', record_id: 'Lisa Thompson' }],
+          },
+          LEAD_SEED,
+        ] as any,
+        config: CONFIG,
+      });
+
+      expect(result.success).toBe(true);
+      expect(store.sys_audit_log[0].record_id).toBe(store.crm_lead[0].id);
+    });
+
+    it('keeps an internal-id-shaped pointer verbatim — how a demo row ABOUT A DELETED record stays authorable', async () => {
+      const { service, store } = newService(ADOPTER_SCHEMAS);
+      const goneId = '123e4567-e89b-42d3-a456-426614174000';
+
+      // An `action: 'delete'` row names a record that by definition no longer
+      // exists, so it has no natural key to resolve. The landed escape hatch
+      // is what keeps that row authorable under a declared pair.
+      const result = await service.load({
+        seeds: [
+          insertSeed('sys_audit_log', [
+            { action: 'delete', object_name: 'crm_lead', record_id: goneId },
+          ]),
+        ] as any,
+        config: CONFIG,
+      });
+
+      expect(result.success).toBe(true);
+      expect(store.sys_audit_log[0].record_id).toBe(goneId);
+    });
+  });
+
+  describe('sys_approval_request — object_name / record_id', () => {
+    it('resolves the pointer so the pending-request lock query finds the row', async () => {
+      const { service, store } = newService(ADOPTER_SCHEMAS);
+
+      const result = await service.load({
+        seeds: [
+          LEAD_SEED,
+          insertSeed('sys_approval_request', [
+            {
+              process_name: 'flow:lead_discount_approval',
+              object_name: 'crm_lead',
+              record_id: 'Lisa Thompson',
+              status: 'pending',
+            },
+          ]),
+        ] as any,
+        config: CONFIG,
+      });
+
+      expect(result.success).toBe(true);
+      const leadId = store.crm_lead[0].id;
+      // `lifecycle-hooks.ts` holds the record LOCK with exactly this where —
+      // and `approval-service.ts` finds a record's open request with it. A
+      // verbatim natural key matched neither, so the seeded request locked
+      // nothing while looking pending.
+      expect(
+        store.sys_approval_request.filter(
+          (r) => r.object_name === 'crm_lead' && r.record_id === leadId && r.status === 'pending',
+        ),
+      ).toHaveLength(1);
+    });
+
+    it('REFUSES a request pointing at a record that does not exist', async () => {
+      const { service, store, logger } = newService(ADOPTER_SCHEMAS);
+
+      const result = await service.load({
+        seeds: [
+          LEAD_SEED,
+          insertSeed('sys_approval_request', [
+            {
+              process_name: 'flow:lead_discount_approval',
+              object_name: 'crm_lead',
+              record_id: 'No Such Lead',
+              status: 'pending',
+            },
+          ]),
+        ] as any,
+        config: CONFIG,
+      });
+
+      expect(result.success).toBe(false);
+      expect(
+        result.errors.some((e: any) => e.field === 'record_id' && String(e.message).includes('crm_lead')),
+      ).toBe(true);
+      expect(logger.error).toHaveBeenCalled();
+      expect(store.sys_approval_request.filter((r) => r.record_id === 'No Such Lead')).toHaveLength(0);
+    });
+  });
+
+  describe('sys_record_share — object_name / record_id', () => {
+    it('resolves the grant pointer so the enforcement lookup matches the shared record', async () => {
+      const { service, store } = newService(ADOPTER_SCHEMAS);
+
+      const result = await service.load({
+        seeds: [
+          LEAD_SEED,
+          insertSeed('sys_record_share', [
+            {
+              object_name: 'crm_lead',
+              record_id: 'Lisa Thompson',
+              recipient_type: 'user',
+              recipient_id: 'usr_agent',
+              access_level: 'edit',
+              source: 'manual',
+            },
+          ]),
+        ] as any,
+        config: CONFIG,
+      });
+
+      expect(result.success).toBe(true);
+      const leadId = store.crm_lead[0].id;
+      // The middleware asks "which record ids is this principal granted?" — a
+      // grant whose `record_id` is a natural key answers with a string that is
+      // no record's id, so it widens access to nothing while displaying as a
+      // grant on Setup → Record Shares.
+      expect(
+        store.sys_record_share.filter(
+          (r) => r.object_name === 'crm_lead' && r.record_id === leadId && r.recipient_id === 'usr_agent',
+        ),
+      ).toHaveLength(1);
+    });
+
+    it('REFUSES a grant on a record that does not exist — instead of a row the orphan sweep would delete', async () => {
+      const { service, store, logger } = newService(ADOPTER_SCHEMAS);
+
+      const result = await service.load({
+        seeds: [
+          LEAD_SEED,
+          insertSeed('sys_record_share', [
+            {
+              object_name: 'crm_lead',
+              record_id: 'No Such Lead',
+              recipient_type: 'user',
+              recipient_id: 'usr_agent',
+              access_level: 'read',
+              source: 'manual',
+            },
+          ]),
+        ] as any,
+        config: CONFIG,
+      });
+
+      // `record-orphan-cleanup.ts`: "record gone ⇒ the row cannot describe any
+      // access at all" — the sweep deletes such a row. Refusing at seed time
+      // reports the defect while the author is still looking at it.
+      expect(result.success).toBe(false);
+      expect(result.errors.some((e: any) => e.field === 'record_id')).toBe(true);
+      expect(logger.error).toHaveBeenCalled();
+      expect(store.sys_record_share.filter((r) => r.record_id === 'No Such Lead')).toHaveLength(0);
+    });
+  });
+
+  describe('sys_share_link — object_name / record_id', () => {
+    it('resolves the link pointer so the fail-closed record-existence gate passes', async () => {
+      const { service, store } = newService(ADOPTER_SCHEMAS);
+
+      const result = await service.load({
+        seeds: [
+          LEAD_SEED,
+          insertSeed('sys_share_link', [
+            {
+              token: 'tok_demo_readonly',
+              object_name: 'crm_lead',
+              record_id: 'Lisa Thompson',
+              permission: 'read',
+              audience: 'anyone_with_link',
+            },
+          ]),
+        ] as any,
+        config: CONFIG,
+      });
+
+      expect(result.success).toBe(true);
+      const leadId = store.crm_lead[0].id;
+      const link = store.sys_share_link[0];
+      expect(link.record_id).toBe(leadId);
+      // `share-link-service.ts` resolves a token through
+      // `recordStillExists(object_name, record_id)` and returns null when it
+      // misses — the same null as revoked/expired. This is that probe.
+      expect(store.crm_lead.filter((r) => r.id === link.record_id)).toHaveLength(1);
+    });
+
+    it('REFUSES a link whose target cannot be resolved — a token that would 404 as if revoked', async () => {
+      const { service, store, logger } = newService(ADOPTER_SCHEMAS);
+
+      const result = await service.load({
+        seeds: [
+          LEAD_SEED,
+          insertSeed('sys_share_link', [
+            {
+              token: 'tok_dead_on_arrival',
+              object_name: 'crm_lead',
+              record_id: 'No Such Lead',
+              permission: 'read',
+              audience: 'anyone_with_link',
+            },
+          ]),
+        ] as any,
+        config: CONFIG,
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.errors.some((e: any) => e.field === 'record_id')).toBe(true);
+      expect(logger.error).toHaveBeenCalled();
+      expect(store.sys_share_link.filter((r) => r.record_id === 'No Such Lead')).toHaveLength(0);
+    });
+  });
+
+  it('leaves the UNADOPTED fifth object alone: sys_automation_run stores its trigger pointer verbatim', async () => {
+    const { service, store } = newService({
+      ...ADOPTER_SCHEMAS,
+      // Mirrors the real declaration: the trigger pair carries NO
+      // `referenceVia` — the deliberate verdict recorded on the object.
+      sys_automation_run: {
+        name: 'sys_automation_run',
+        fields: {
+          flow_name: { type: 'text', required: true },
+          status: { type: 'select' },
+          trigger_object: { type: 'text' },
+          trigger_record_id: { type: 'text' },
+        },
+      },
+    });
+
+    const result = await service.load({
+      seeds: [
+        LEAD_SEED,
+        insertSeed('sys_automation_run', [
+          { flow_name: 'lead_scoring', status: 'completed', trigger_object: 'crm_lead', trigger_record_id: 'Lisa Thompson' },
+        ]),
+      ] as any,
+      config: CONFIG,
+    });
+
+    // Undeclared stays undeclared: adopting four objects must not quietly
+    // change the fifth by column spelling. If a later card rules that runs
+    // ARE seedable, this expectation is what it has to come and change.
+    expect(result.success).toBe(true);
+    expect(store.sys_automation_run[0].trigger_record_id).toBe('Lisa Thompson');
+  });
+});
