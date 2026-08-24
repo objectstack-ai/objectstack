@@ -740,6 +740,14 @@ export function selfTest() {
   };
   const quiet = () => {};
 
+  // ⛔ Never index a finding without a fallback. Under ablation the findings
+  // array goes EMPTY, and `findings[0].file` then throws a TypeError — a red
+  // that reads exactly like proof while proving only that the harness crashed.
+  // Measured: the first ablation run of this gate reddened all three legs by
+  // TypeError, and not one of them exercised the assertion it was written for.
+  const NONE = '(no finding — the sweep returned an EMPTY set)';
+  const at = (f) => (f ? `${f.file}:${f.line}` : NONE);
+
   try {
     // ── the happy path: a real tree, real fences, real floors ───────────────
     const clean = tree(baseFixtureFiles());
@@ -758,8 +766,8 @@ export function selfTest() {
     t('a planted nameless section reds', run(planted, quiet), EXIT_VIOLATIONS);
     const plantedSweep = sweep(planted);
     t('...naming exactly one site', plantedSweep.findings.length, 1);
-    t('...at the right file and line', `${plantedSweep.findings[0].file}:${plantedSweep.findings[0].line}`, `${DOCS_ROOT}/extra/a.mdx:8`);
-    t('...carrying its label into the message', plantedSweep.findings[0].label, 'Nameless');
+    t('...at the right file and line', at(plantedSweep.findings[0]), `${DOCS_ROOT}/extra/a.mdx:8`);
+    t('...carrying its label into the message', plantedSweep.findings[0]?.label ?? NONE, 'Nameless');
 
     // ── the spelling that defeated #10709: `sections: [{` on one line ───────
     const inline = tree(
@@ -815,7 +823,7 @@ export function selfTest() {
     const quotedSweep = sweep(quoted);
     t('a quoted `sections` key is still an array', quotedSweep.arrays, cleanSweep.arrays);
     t('a quoted `name` key still satisfies the rule', quotedSweep.findings.length, 1);
-    t('...and it is the unnamed one', quotedSweep.findings[0].label, 'Quoted');
+    t('...and it is the unnamed one', quotedSweep.findings[0]?.label ?? NONE, 'Quoted');
 
     // ── the refusals: each is a broken selector wearing a pass ──────────────
     t('a missing docs root refuses', run(join(tree({}), 'nowhere'), quiet), EXIT_REFUSED);
