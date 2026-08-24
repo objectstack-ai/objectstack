@@ -3925,18 +3925,24 @@ function selfTest() {
   ].join('\n');
   const stInvs = extractCheckInvocations(selfTestWf, 'lint.yml');
   const stNames = stInvs.map((i) => i.check);
+  // Absent rather than thrown: with the matcher ablated these lookups return
+  // nothing, and a self-test that CRASHES instead of naming its failing case
+  // reports "something is broken" where the whole value is "this exact case
+  // went red". Measured — the first ablation run of this change died on a
+  // destructure here and printed no case name at all.
+  const stFind = (name) => stInvs.find((i) => i.check === name) ?? { check: '(not discovered)', direct: true };
   t(
     'the gate that shipped the red on PR #11397 is discovered, flag included',
     stNames.includes('scripts/pm/bare-root-worklist.mjs --self-test'),
   );
   t(
     '…as a DIRECT family resolving to the script file, not to the flagged key',
-    stInvs.find((i) => i.check === 'scripts/pm/bare-root-worklist.mjs --self-test')?.script
+    stFind('scripts/pm/bare-root-worklist.mjs --self-test').script
       === 'scripts/pm/bare-root-worklist.mjs',
   );
   t(
     '…and it prints as a command a dev can paste, flag included — the bare path exits 0 without testing anything',
-    runnableInvocation(stInvs.find((i) => i.check === 'scripts/pm/bare-root-worklist.mjs --self-test'))
+    runnableInvocation(stFind('scripts/pm/bare-root-worklist.mjs --self-test'))
       === 'node scripts/pm/bare-root-worklist.mjs --self-test',
   );
   // The refusal, which is the half that keeps this from being the widening
