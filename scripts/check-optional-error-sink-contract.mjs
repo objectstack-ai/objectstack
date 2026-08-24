@@ -203,17 +203,29 @@
  *
  * ## Wiring
  *
- * ⚠️ NOT wired into `.github/workflows/lint.yml` by the PR that introduced it.
- * #9754's own body forbids more merge-blocking ("⛔ Not a new required context;
- * this argues for a producer-side constraint, not more merge-blocking"), and
- * #9747's family ruling — carried forward by the lane PM when this card was
- * re-graded — was visibility-only. Run it on demand:
+ * ⚠️ This section described the gate as UNWIRED until #11069 found it stale.
+ * It was not wired by the PR that introduced it — #9754's own body forbids more
+ * merge-blocking ("⛔ Not a new required context; this argues for a
+ * producer-side constraint, not more merge-blocking"), and #9747's family
+ * ruling was visibility-only — but it has since been wired, and the paragraph
+ * that said wiring "is a lane-PM decision, recorded on #9754 rather than taken
+ * here" outlived that decision being taken.
+ *
+ * As of today it RUNS ON EVERY PULL REQUEST, from
+ * `.github/workflows/lint.yml` ("Optional-`error` sink contract"), with no
+ * `paths:` filter — deliberately, since a filter on `packages/**` would go
+ * dormant on the PR that edits the baseline. So a red here BLOCKS, and the
+ * exit code on a clean tree is a load-bearing fact rather than a report.
+ *
+ * Run it locally the same way CI does:
  *
  *   pnpm check:optional-error-sink          # --self-test, then the scan
  *   node scripts/check-optional-error-sink-contract.mjs --list   # census only, always exit 0
  *
- * Wiring it into the required `Lint & Repo Gates` job is a lane-PM decision,
- * recorded on #9754 rather than taken here.
+ * ⭐ Note what the drift was: a paragraph stating a fact about the WORLD that
+ * nothing re-checks. It is the same species as the two blind spots below — a
+ * claim nobody re-measures — one level up from the counts, and it is why the
+ * numbers in this header are stated with the tree they were measured on.
  */
 
 import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
