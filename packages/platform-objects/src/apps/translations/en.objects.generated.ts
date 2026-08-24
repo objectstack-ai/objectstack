@@ -625,6 +625,10 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       }
     },
     _actions: {
+      invite_user: {
+        label: "Invite User",
+        successMessage: "Invitation sent"
+      },
       add_member: {
         label: "Add Member",
         successMessage: "Member added"

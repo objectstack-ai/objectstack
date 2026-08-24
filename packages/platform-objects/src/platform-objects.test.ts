@@ -488,6 +488,9 @@ describe('feature-gate lowering matrix (#2874)', () => {
     ['SysOrganization', SysOrganization, 'change_slug', MULTI_ORG],
     ['SysUser', SysUser, 'invite_user', ORG],
     ['SysUser', SysUser, 'create_user', 'features.admin == true'],
+    // [#11544] Third mirror of `invite_user` — the Members tab's own copy of
+    // the email-invite entry. Same gate as the sys_user / sys_invitation rows.
+    ['SysMember', SysMember, 'invite_user', ORG],
     ['SysMember', SysMember, 'add_member', ORG],
     ['SysMember', SysMember, 'update_member_role', ORG],
     ['SysMember', SysMember, 'remove_member', ORG],

@@ -625,6 +625,10 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       }
     },
     _actions: {
+      invite_user: {
+        label: "ユーザーを招待",
+        successMessage: "招待を送信しました"
+      },
       add_member: {
         label: "メンバーを追加",
         successMessage: "メンバーを追加しました"

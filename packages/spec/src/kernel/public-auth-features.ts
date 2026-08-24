@@ -103,6 +103,12 @@ export const PUBLIC_AUTH_FEATURES = {
     semantics: 'default-on',
     gatedInputs: [
       'sys_user.actions.invite_user',
+      // [#11544] Third mirror of the email-invite entry — the org record
+      // page's default Members tab renders sys_member's toolbar, so this is
+      // where an admin looking to invite a teammate actually looks. Listed
+      // ahead of `add_member` to match the object's own declaration order,
+      // which IS the render order.
+      'sys_member.actions.invite_user',
       'sys_member.actions.add_member',
       'sys_member.actions.update_member_role',
       'sys_member.actions.remove_member',

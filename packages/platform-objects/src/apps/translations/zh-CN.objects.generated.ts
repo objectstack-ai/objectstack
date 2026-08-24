@@ -625,6 +625,10 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       }
     },
     _actions: {
+      invite_user: {
+        label: "邀请用户",
+        successMessage: "邀请已发送"
+      },
       add_member: {
         label: "添加成员",
         successMessage: "成员已添加"
