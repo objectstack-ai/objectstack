@@ -260,6 +260,45 @@ jobs:
             if (overbroad.length) limits.push(`**${overbroad.length}** anchor(s) matched too much of the corpus to be a work list: \`${overbroad.join('`, `')}\``);
             if (weak.length) limits.push(`**${weak.length}** name(s) were too generic to anchor anything (single lowercase words)`);
             if (bridge && bridge.measured && bridge.unreachable > 0) limits.push(`the SDK route bridge reached **${bridge.reachable}** of **${bridge.clientRows}** client-bound route-ledger rows — the other **${bridge.unreachable}** have no registrar \`path:\` tail to select them, so pages documenting THEIR client methods cannot appear above, on this or any run: \`node scripts/docs-audit/affected-docs.mjs --bridge-coverage\``);
+            // ── THE RULE-CARRYING PAGE AN EMITTER DIFF CANNOT REACH (#11434) ──────
+            //
+            // Every line above is a REPORT about this run: a count this run produced, a
+            // set this run derived. This one is not — it is a BOUNDARY of the anchor
+            // model, and it is why it is pushed unconditionally.
+            //
+            // The pair it describes: a page states a rule by the rule's INPUTS, and the
+            // code that carries the rule is its EMITTER. They share no identifier, so
+            // precision-first anchoring (#9192) has nothing to join them with, and no
+            // per-run signal can be computed — the absence of a shared token is the whole
+            // defect, and an absence anchors nothing. Reported here rather than detected
+            // because there is nothing to detect on.
+            //
+            // Measured, twice, on the specimen from #11434. On the recorded diff (#11430,
+            // `sql-driver.ts` `createColumn`, re-run through today's mapper): 9 anchors
+            // derived, 7 pages listed, and `content/docs/protocol/objectql/types.mdx` —
+            // the page that diff falsified in four places — listed by none of them. Not
+            // by the coarse fallback either: the page never names the changed package. On
+            // today's tree an emitter-only change to `MAX_KEYABLE_VARCHAR_CHARS` derives
+            // 1 anchor, lists 0 pages, and leaves `anchorlessChanges`, `crossCuttingSymbols`,
+            // `overbroadAnchors` and `weakAnchorsDropped` all EMPTY — so no line above
+            // fires, and the run reads as narrow rather than blind. Positive control on
+            // the same tree and the same page: a change to `FieldSchema`, which that page
+            // does name, lists it via `FieldSchema (symbol)`. The page is reachable; this
+            // pairing is not.
+            //
+            // ⛔ NOT a detector, and must not grow into one here. The routes that would
+            // buy real coverage — a curated code↔page ledger, a per-type anchor
+            // vocabulary, authored enumeration marks — are the open question escalated as
+            // #11817, and deciding the cheap half of it by implementation would pre-empt
+            // that ruling. This says the gap exists; it does not close it.
+            //
+            // ⛔ And it is deliberately NOT the `notCovered` headline's posture. That
+            // sentence is conditional because it reports what THIS diff left unanchored,
+            // and unconditional text there would report nothing (see
+            // `scripts/docs-audit/check-drift-comment.mjs`). This one is true on every
+            // run by construction, exactly like the SDK bridge line above, and stating it
+            // only sometimes would be the lie.
+            limits.push('a page that states a rule by its **inputs** shares no identifier with the **emitter** that implements the rule, so an emitter-only diff cannot list it — not on this run and not on any run. Measured on #11430: `content/docs/protocol/objectql/types.mdx` documents the text-family column mapping by the ObjectQL type names it maps FROM (`text` / `textarea` / `html`) while the diff changed `createColumn`; it went unlisted, and it was the page that diff falsified, in four places. No shared token exists to detect this on, so a rule your change carries has to be re-read by hand in the pages that restate it.');
             // A broken scan is not a coverage number and must not read like one — see
             // `bridgeCoverageFrom`. Rendered outside the collapsed section below, because
             // "the bridge could not read the ledgers" is not a limit of this run, it is a
@@ -277,6 +316,11 @@ jobs:
             // say is "the wide net exists and holds N pages". A short list is the right
             // answer here, but a reader must be able to tell a short list from a blind one
             // without leaving the PR.
+            //
+            // Since #11434 `limits` is never empty — the rule-carrying line above holds on
+            // every run — so this fold now renders on every run too. The guard stays: it is
+            // what keeps the fold from rendering empty if that line is ever moved out, and
+            // an empty "what this run could not see" is the reading it exists to refuse.
             const limitsBlock = (limits.length || coarse.length)
               ? ['', '<details><summary>What this run could not see</summary>', '', ...limits.map(l => `- ${l}`), ...(limits.length ? [''] : []), `Coarse fallback — **${coarse.length}** page(s) merely *mention* a changed package (the pre-#9192 predicate, kept for the deliberately-wide backstop): \`${rederive}\` → \`packageMentionDocs\`.`, '</details>']
               : [];

@@ -450,10 +450,52 @@ to re-verify.
 
 The comment also carries a collapsed **"What this run could not see"** section:
 anchorless files, cross-cutting symbols, over-broad anchors, the coarse package-mention
-count, and the `sdk` bridge's reach over the client-bound ledger rows (#9572). That is
-the point-of-use half of #9192 — every one of the three derived-list failures in that
-shift was caught only because a dev widened the probe past what the tool offered, never
-because the tool signalled its own limits where it was read.
+count, the `sdk` bridge's reach over the client-bound ledger rows (#9572), and the
+rule-carrying pairing no run can reach (#11434, below). That is the point-of-use half of
+#9192 — every one of the three derived-list failures in that shift was caught only because
+a dev widened the probe past what the tool offered, never because the tool signalled its
+own limits where it was read.
+
+### The rule stated by its inputs, the diff touching its emitter (#11434)
+
+Every other entry in that fold is a **report about the run** — a count it produced, a set
+it derived. One is not, and renders on every run:
+
+> a page that states a rule by its **inputs** shares no identifier with the **emitter**
+> that implements the rule, so an emitter-only diff cannot list it — not on this run and
+> not on any run.
+
+A page can document a rule in the rule's own **vocabulary** — the values it maps *from* —
+while the code carrying the rule is named for what it *does*. The two share no token, so
+precision-first anchoring has nothing to join them with. This is not a tuning miss with a
+threshold behind it: the absence of a shared identifier **is** the defect, and an absence
+anchors nothing, so no per-run signal exists to compute. It is reported because it cannot
+be detected — the same posture as the `sdk` bridge line above.
+
+Measured on the specimen (#11434, from PR #11430 / card #11374), re-run through today's
+mapper:
+
+| | |
+|---|---|
+| the diff | `packages/drivers/driver-sql/src/sql-driver.ts` — `createColumn`, the text family's column mapping |
+| derived | 9 anchors (`SqlDriver`, `createColumn`, `keyableTextLength`, …) |
+| listed | 7 pages, every one via a `SqlDriver`-family symbol it merely mentions |
+| **not listed** | `content/docs/protocol/objectql/types.mdx` — **the page that diff falsified, in four places** |
+| coarse fallback | misses it too: the page never mentions the changed package |
+| existing limit lines | all silent — `anchorlessChanges`, `crossCuttingSymbols`, `overbroadAnchors`, `weakAnchorsDropped` all empty |
+
+The last row is the reason this is stated rather than left to the reader: with every limit
+line silent, the run reads as *narrow*, not *blind*. Positive control on the same page and
+the same tree — a change to `FieldSchema`, which the page **does** name, lists it via
+`FieldSchema (symbol)`. The page is reachable; that pairing is not.
+
+⛔ **This states the gap; it does not close it.** Buying real coverage would take a curated
+code↔page ledger, a per-type anchor vocabulary, or authored enumeration marks — the open
+question escalated as **#11817**, whose ruling also owns the population question (how wide
+this class is is deliberately **not measured here**; the sentence's truth does not depend
+on the count). `check-drift-comment.mjs` pins the line byte-exact on **every** fixture
+case, which is the only meaningful pin for a statement whose contract is that it is always
+true — making it conditional, moving it to the headline, or dropping it all go red.
 
 ### The headline says what the run did not cover (#11357)
 

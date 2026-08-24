@@ -31,6 +31,14 @@
  * UNCONDITIONALLY, which is not a report at all. A blind-spot notice that renders on every
  * run says nothing about any run.
  *
+ * ⚠️ That reasoning is about REPORTS, and since #11434 the fold also carries one line that
+ * is not one: a BOUNDARY of the anchor model, true on every run by construction, because
+ * the pair it names (a page stating a rule by its INPUTS, a diff touching the rule's
+ * EMITTER) shares no identifier for any per-run signal to be computed from. Its
+ * unconditionality is the contract, so it is pinned the only way that is meaningful — on
+ * EVERY case, byte-exact, and in the fold rather than the headline. Removing it, making it
+ * conditional, or promoting it to the headline all go red. See `RULE_CARRYING_BLIND_SPOT`.
+ *
  * So both directions are measured end to end, from a git diff:
  *
  *   diff → the real affected-docs.mjs → its real --json → the real comment script → bytes
@@ -202,6 +210,27 @@ const ANCHORS_DERIVED_NONE_NAMED =
 const NARROWED_PHRASE = 'nothing to list';
 
 /**
+ * The #11434 boundary line, byte-exact — the one fold entry that is not a report about the
+ * run, and the only one asserted on every case.
+ *
+ * The class: `content/docs/protocol/objectql/types.mdx` documents the text-family column
+ * mapping by the ObjectQL type names it maps FROM, `sql-driver.ts` carries the mapping in
+ * `createColumn`, and the two share no token — so the advisory listed seven other pages on
+ * #11430 and not the one that diff falsified in four places. Nothing in the anchor model
+ * can join that pair (the routes that could are escalated as #11817), so the run says so
+ * instead of implying coverage by silence.
+ */
+const RULE_CARRYING_BLIND_SPOT =
+  'a page that states a rule by its **inputs** shares no identifier with the **emitter**'
+  + ' that implements the rule, so an emitter-only diff cannot list it — not on this run and'
+  + ' not on any run. Measured on #11430: `content/docs/protocol/objectql/types.mdx`'
+  + ' documents the text-family column mapping by the ObjectQL type names it maps FROM'
+  + ' (`text` / `textarea` / `html`) while the diff changed `createColumn`; it went unlisted,'
+  + ' and it was the page that diff falsified, in four places. No shared token exists to'
+  + ' detect this on, so a rule your change carries has to be re-read by hand in the pages'
+  + ' that restate it.';
+
+/**
  * `want` is the mapper contract each case rides on — asserted before any text is, so a
  * case that silently stopped exercising its branch fails here instead of passing there.
  */
@@ -310,6 +339,15 @@ try {
     if (typeof c.narrowed !== 'boolean') throw new Error(`case ${c.id} does not declare \`narrowed\``);
     check(c.id, `the #11356 narrowed verdict ${c.narrowed ? 'renders here' : 'does NOT render here'}`,
       c.narrowed, headline.includes(NARROWED_PHRASE));
+    // #11434 — the opposite pin to every other one in this file, and deliberately so. A
+    // model boundary that renders only sometimes is false on the runs it skips, so the
+    // assertion is "on every case", which is what fails if someone makes it conditional.
+    // It belongs in the fold: the headline is where a run says what IT did not cover, and
+    // a sentence true of all runs would dilute exactly that (#11357).
+    check(c.id, 'the rule-carrying blind spot is stated in the fold, byte-exact',
+      true, body.includes(`- ${RULE_CARRYING_BLIND_SPOT}`));
+    check(c.id, 'and it stays out of the headline, which reports this run only',
+      false, headline.includes('shares no identifier with the **emitter**'));
     c.expect(headline, body);
   }
 } finally {
