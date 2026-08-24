@@ -3619,12 +3619,39 @@ export class RestServer {
                     logError('[REST] openapi.json endpoint enrichment skipped:', err?.message ?? err);
                 }
 
-                // Surface the runtime version so consumers don't pin to
-                // the spec package's compile-time version.
+                // `info.version` carries the API version identifier this
+                // deployment declares (`api.version`, which `normalizeConfig`
+                // defaults to `'v1'`) — the same value that builds the default
+                // mount (`${basePath}/${version}` -> `/api/v1`), though a
+                // deployment that sets `apiPath` moves the mount without
+                // moving this.
+                //
+                // It is deliberately NOT the runtime version, and the comment
+                // this replaces ("surface the runtime version so consumers
+                // don't pin to the spec package's compile-time version") had it
+                // backwards in both halves. OpenAPI 3.1 defines the field as
+                // "the version of the OpenAPI document (which is distinct from
+                // the OpenAPI Specification version or the API implementation
+                // version)" — the runtime version IS the implementation
+                // version, the one reading the field's own definition rules
+                // out. That fact is not lost: `{basePath}/discovery` and
+                // `/health` both answer with it, derived from
+                // `OS_RUNTIME_VERSION` (#10993/#11235/#11292), so a caller who
+                // wants the serving artifact asks a producer that means it.
+                //
+                // No `|| enriched.info.version` fallback. It was reachable,
+                // not dead: `normalizeConfig` defaults with `??` and the
+                // schema declares a bare `z.string()`, so a configured empty
+                // version reaches here falsy — and firing the fallback
+                // published the spec package's compile-time version, the one
+                // value the old comment claimed this line existed to keep off
+                // the wire. A falsy `api.version` now serves itself, so a
+                // misconfigured deployment reads as misconfigured instead of
+                // silently switching this field to a different kind of fact.
                 if (enriched.info) {
                     enriched.info = {
                         ...enriched.info,
-                        version: this.config.api.version || enriched.info.version,
+                        version: this.config.api.version,
                     };
                 }
 
