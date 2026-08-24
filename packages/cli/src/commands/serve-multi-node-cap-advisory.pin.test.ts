@@ -86,14 +86,27 @@ const MASKED_SERVE_SOURCE = maskComments(SERVE_SOURCE);
  * one literal — but for that reason, not because the alternatives are invisible.
  *
  * The spellings that genuinely produce no flag are the ones the detector cannot
- * resolve at all: a template-literal path, a `findUp` walk from `process.cwd()`,
- * segments arriving out of a variable or an array. Reaching for one of those
- * would leave this read **undeclared**: `@objectstack/cli` would then be absent
+ * resolve at all: a template-literal path, a BARE `process.cwd()` walk, segments
+ * arriving out of a variable or an array. Reaching for one of those would leave
+ * this read **undeclared**: `@objectstack/cli` would then be absent
  * from `turbo ls --affected` for a cluster-only change and its `test` cache
  * would not hash this file, so the pin below would sit green through exactly
  * the drift it exists to catch. The declaration it needs lives in that script's
  * `CROSS_PACKAGE_TEST_INPUTS` and in `turbo.json`'s `@objectstack/cli#test`
  * inputs; removing either turns this file's own gate red.
+ *
+ * ⚠️ BARE is load-bearing. This sentence used to name `a findUp walk from
+ * process.cwd()` without it, and that clause went stale under the file while the
+ * file stayed still. Since #10852 that detector resolves two ANCHOR predicates on
+ * such a walk: one keyed on the scanned package's own manifest `name`, which
+ * resolves to that package's root, and one keyed on a workspace-root marker file
+ * (`pnpm-workspace.yaml` today), which resolves to the repo root. Both are on the
+ * published `RECOGNISED_PATH_SPELLINGS` list printed in its failure text, and
+ * each is pinned by a `--self-test` case — so re-derive from those two sources
+ * rather than from this paragraph, which is prose and can rot again. What still
+ * resolves to nothing is the unadorned `process.cwd()` expression with no
+ * recognised predicate on it, and a `findUp` keyed on any other marker
+ * (`turbo.json`, `.git`); both are pinned unresolved by their own cases.
  */
 const GATE_SOURCE = readFileSync(
   join(REPO_ROOT, 'packages/services/service-cluster/src/multi-node-gate.ts'),

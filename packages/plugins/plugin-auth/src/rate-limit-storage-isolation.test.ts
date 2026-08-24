@@ -58,17 +58,38 @@ import { dirname, join, relative, resolve } from 'node:path';
  *    `__dirname` type-checks under the package's own config and is defined at
  *    runtime by vitest's transform.
  *  - `check:cross-package-test-inputs` detects an escaping read STATICALLY, by
- *    resolving the seed expression. A `findUp` walk from `process.cwd()` is not a
- *    spelling it resolves — `process.cwd()` appears nowhere in that detector — so
- *    the two cross-package directory reads at the bottom of this file yielded no
- *    flag and therefore no declaration, SILENTLY. Measured before this change:
- *    `--list-escapes` named only `managed-extension-fields.test.ts` for
- *    plugin-auth, and `@objectstack/plugin-auth#test`'s turbo input hash
- *    (`1bf3935543ab055b`) did not move when `packages/runtime/src` changed — so a
- *    runtime-only diff that reinstated the package-root import replayed a cached
- *    green over the very scan that catches it (#7802's shape, #10029).
+ *    resolving the seed expression, and `__dirname` is one of the spellings it
+ *    resolves. When this file was reseeded (#10161) a `findUp` walk of
+ *    `process.cwd()` was not one, so the two cross-package directory reads at the
+ *    bottom of this file yielded no flag and therefore no declaration, SILENTLY.
+ *    Measured before that change: `--list-escapes` named only
+ *    `managed-extension-fields.test.ts` for plugin-auth, and
+ *    `@objectstack/plugin-auth#test`'s turbo input hash (`1bf3935543ab055b`) did
+ *    not move when `packages/runtime/src` changed — so a runtime-only diff that
+ *    reinstated the package-root import replayed a cached green over the very
+ *    scan that catches it (#7802's shape, #10029).
  *
- * Deriving the roots any other way puts this file back in that blind spot.
+ *    ⚠️ Read that in the PAST tense — the sentence above used to be written in
+ *    the present, with a second clause ("`process.cwd()` appears nowhere in that
+ *    detector") that was already wrong when it was written. Since #10852 the
+ *    detector DOES resolve a `findUp` walk, for two anchor predicates: one keyed
+ *    on the scanned package's own manifest `name` (which resolves to that
+ *    package's root) and one keyed on a `WORKSPACE_ROOT_MARKERS` file,
+ *    `pnpm-workspace.yaml` today (which resolves to the repo root). It reads
+ *    those predicates as TEXT and executes nothing, which is why the second
+ *    clause never followed from the first: grep `process.cwd` in
+ *    `scripts/check-cross-package-test-inputs.mjs` and every hit is a comment or
+ *    a `--self-test` fixture — the detector names the call it recognises without
+ *    ever making it. What still resolves to nothing is the unadorned
+ *    `process.cwd()` expression, and a `findUp` keyed on any other marker
+ *    (`turbo.json`, `.git`).
+ *
+ * So the constraint on the seed is not a spelling but a LIST: it must be one the
+ * gate publishes in `RECOGNISED_PATH_SPELLINGS` (printed in its failure text,
+ * each entry pinned by a `--self-test` case). `__dirname` is kept here because of
+ * the TS1470 above, not because the alternatives are invisible. Deriving the
+ * roots by a spelling that is NOT on that list puts this file back in the blind
+ * spot the measurement above describes.
  */
 const HERE = __dirname;
 /** …/packages/plugins/plugin-auth/src → the package root, then the repo root. */
