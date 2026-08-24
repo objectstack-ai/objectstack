@@ -3215,8 +3215,32 @@ export class RestServer {
                     const protocol = await this.resolveProtocol(environmentId, req);
                     const discovery = await protocol.getDiscovery();
 
-                    // Override discovery information with actual server configuration
-                    discovery.version = this.config.api.version;
+                    // [#11292] `version` is the PRODUCER's, and is deliberately
+                    // NOT overwritten here. `DiscoverySchema` declares the field
+                    // under "System Identity", grouped with `name` and
+                    // `environment` — the "what server is this" question, settled
+                    // by the #10993 ruling and reaffirmed by #11235/#11242.
+                    //
+                    // This line used to read `discovery.version =
+                    // this.config.api.version`, which is a different fact
+                    // entirely: `normalizeConfig()` defaults it to `'v1'` and the
+                    // SAME value builds the mounted path (`${basePath}/${version}`
+                    // → `/api/v1`), so `GET /api/v1/discovery` answered with the
+                    // path segment the caller had just typed to get there. On the
+                    // one producer most clients actually hit, the identity field
+                    // carried no identity.
+                    //
+                    // It also masked the producer. `getDiscovery()` derives the
+                    // value from `OS_RUNTIME_VERSION` (#11235) — the same stamp
+                    // `/health` and the runtime dispatcher's own `/discovery`
+                    // read (#10993/#11242) — so after #11297 this overwrote a
+                    // value that already AGREED with the other producer, turning
+                    // one answer back into two dialects of one field.
+                    //
+                    // The API-version fact is not lost: every entry in `routes`
+                    // below is prefixed with the mounted base path, which is
+                    // built from `api.version`. It is recoverable from the same
+                    // document, in the field that means it.
 
                     // Substitute the resolved environmentId into the advertised routes so
                     // clients can consume them verbatim (e.g. /api/v1/environments/abc/data).
