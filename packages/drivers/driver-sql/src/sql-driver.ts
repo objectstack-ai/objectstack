@@ -13883,6 +13883,33 @@ export class SqlDriver implements IDataDriver {
           });
         }
       } else if (this.isMysql) {
+        // `KEY_COLUMN_USAGE.ORDINAL_POSITION` IS the key ordinal, and it is
+        // selected by neither the projection nor an order clause — so without
+        // `ORDER BY` the row order of a composite key's columns is whatever the
+        // plan yields. The order is load-bearing for the same reason it is on
+        // the Postgres arm above: #11324 made a composite foreign key ORDERED
+        // SIBLING ROWS in this flat per-column record — `(x, y) references
+        // p (a, b)` is `x -> p.a` then `y -> p.b` — and `IntrospectedForeignKey`
+        // carries no ordinal field for a consumer to recover the position from.
+        //
+        // ⚠️ This clause is NOT a repair of a wrong answer, and the measurement
+        // that says so is the reason to keep it. On MySQL 8.0.46, a key declared
+        // out of column sequence — `foreign key (second_col, first_col)
+        // references ooo_parent (pa, pb)` — came back in KEY order through THIS
+        // predicate with no `ORDER BY` at all: the right answer, unpinned. But
+        // on the same server, in the same session, the sibling
+        // `introspectPrimaryKeys` predicate over the SAME view returned COLUMN
+        // order for an out-of-sequence primary key — `carrier_code` (ordinal 2)
+        // ahead of `shipment_id` (ordinal 1) — reproducing #11101 exactly. So
+        // this view does not preserve the ordinal for free on this server:
+        // WHICH of the two orders you get is decided by the WHERE clause, and
+        // nothing declares that. (Same conclusion as the primary-key arm: the
+        // InnoDB folklore that the view "tends to" return ordinal order does not
+        // hold on an out-of-sequence key.) What the clause removes is a
+        // dependence on a plan choice nobody chose — see the pin in
+        // `sql-driver-11379-introspect-fk-mysql-ordinal-order.test.ts`, which is
+        // deliberately a pin on the emitted SQL rather than on the row order,
+        // because a row-order assertion passes here with or without this line.
         const result = await this.knex.raw(
           `
           SELECT
@@ -13894,6 +13921,7 @@ export class SqlDriver implements IDataDriver {
           WHERE TABLE_SCHEMA = DATABASE()
             AND TABLE_NAME = ?
             AND REFERENCED_TABLE_NAME IS NOT NULL
+          ORDER BY ORDINAL_POSITION
         `,
           [tableName],
         );
