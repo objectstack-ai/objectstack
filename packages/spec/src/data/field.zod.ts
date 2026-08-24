@@ -288,7 +288,7 @@ export const CurrencyConfigSchema = lazySchema(() => strictObject({
   if (contradiction !== undefined) {
     ctx.addIssue({ code: 'custom', path: ['precision'], message: contradiction });
   }
-}).overwrite((config) => ({
+}).overwrite((config) => {
   // #7918 — the relocated `.default(2)`, applied AFTER the check above.
   // `.overwrite()` rather than `.transform()` per the measured #6926 precedent
   // (view.zod.ts `foldFormGroupsIntoSections`): it keeps this schema a
@@ -296,15 +296,44 @@ export const CurrencyConfigSchema = lazySchema(() => strictObject({
   // an empty set), and checks run in attachment order, so the superRefine
   // above always sees the pre-materialized value. Rebuilt in shape order so
   // the output is byte-identical to the `.default(2)` era:
-  // `{precision, currencyMode, defaultCurrency}`, `precision` always a number.
-  // The one accepted cost, same as #6926's: the INFERRED output type still
-  // declares `precision?` even though a parsed config always carries it
-  // (ADR-0122 forbids hand-narrowing `CurrencyConfigParsed`); the runtime
-  // contract is the enforced one.
-  precision: config.precision ?? 2,
-  currencyMode: config.currencyMode,
-  defaultCurrency: config.defaultCurrency,
-})));
+  // `{precision, currencyMode, defaultCurrency}`, `precision` always a number
+  // — except on the guarded combination below. The one accepted cost, same as
+  // #6926's: the INFERRED output type still declares `precision?` even though
+  // a parsed config normally carries it (ADR-0122 forbids hand-narrowing
+  // `CurrencyConfigParsed`); the runtime contract is the enforced one.
+  //
+  // #11423 (maintainer ruling on #9689, 2026-08-24, routed to this twin —
+  // 「The same principle prescribes the fix for the #7918 currency twin
+  // (#11423) — the spec seat should route it under this ruling.」): NEVER
+  // materialize a default the schema itself would refuse as authored. The
+  // superRefine above rejects an AUTHORED `precision: 2` on a fixed
+  // zero-/three-fraction-digit currency (JPY/KRW/KWD class), and the two
+  // spellings are indistinguishable to any later parse BY DESIGN — so baking
+  // `2` onto a bare fixed-JPY config made parse output self-rejecting on
+  // re-parse, and `ObjectSchema.create()` → `defineStack` re-parses on the
+  // MAINLINE app-build path (measured: `parse(parse(x))` threw at
+  // `currencyConfig.precision` for accepted x). A bare fixed config whose
+  // currency contradicts the default 2 therefore parses to output that OMITS
+  // `precision`: renderers already derive display width from the currency
+  // when the key is absent, and built artifacts stop carrying a value the
+  // schema itself refuses. Every other combination keeps byte-identity —
+  // `dynamic` mode and unknown codes (fail-open table) can never be refused,
+  // so they keep materializing. The #9689 master_detail `deleteBehavior`
+  // conditional in `FieldSchema`'s `.overwrite()` below is the worked
+  // precedent; #11423 is its recorded currency twin.
+  if (
+    config.precision === undefined &&
+    config.currencyMode === 'fixed' &&
+    currencyPrecisionContradiction(config.defaultCurrency, 2) !== undefined
+  ) {
+    return config;
+  }
+  return {
+    precision: config.precision ?? 2,
+    currencyMode: config.currencyMode,
+    defaultCurrency: config.defaultCurrency,
+  };
+}));
 
 /**
  * Currency Value Schema
