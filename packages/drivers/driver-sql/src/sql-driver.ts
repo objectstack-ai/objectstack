@@ -3746,9 +3746,48 @@ export interface IntrospectedColumn extends SpecIntrospectedColumn {
  */
 export interface IntrospectedForeignKey {
   columnName: string;
+  /**
+   * The parent's BARE relation name, always — never conditionally qualified
+   * (#11377). When the parent lives outside the session's resolution scope,
+   * the qualification arrives as the separate {@link referencedSchema} key
+   * rather than as a `"schema.table"` spelling here: a key whose spelling
+   * depends on context is exactly the shape a consumer mis-parses.
+   */
   referencedTable: string;
   referencedColumn: string;
   constraintName?: string;
+  /**
+   * The parent table's schema, PRESENT WHEN AND ONLY WHEN the parent lives
+   * outside the session's own resolution scope — i.e. when the bare
+   * {@link referencedTable} name is NOT the name this session would resolve
+   * to that table (#11377). For an in-scope parent the key is ABSENT (never
+   * `undefined`), so an answer that carries it is saying something.
+   *
+   * Until #11324 a cross-schema foreign key contributed zero rows on
+   * Postgres, so this fact was unreachable; repairing that made the
+   * constraint visible under a bare name the session's `search_path` does
+   * not resolve — an answer true of the constraint and unusable as an
+   * address, or worse, one that collides with a same-named table in the
+   * current schema (the #11201 family). A consumer that turns
+   * `referencedTable` into an object reference MUST read this key and refuse
+   * to wire the bare name when it is present
+   * (`convertIntrospectedSchemaToObjects` in `@objectstack/objectql` is the
+   * reference consumer).
+   *
+   * Per dialect arm:
+   * - **Postgres**: the parent's schema, filled when that schema is not in
+   *   `current_schemas(false)` — the same `search_path` scoping every other
+   *   statement in the session resolves bare names against (#11201).
+   * - **MySQL**: filled symmetrically — the parent's database
+   *   (`REFERENCED_TABLE_SCHEMA`) when it differs from the session's default
+   *   database (`DATABASE()`); InnoDB permits cross-database foreign keys,
+   *   and `KEY_COLUMN_USAGE` carries the parent's database on the same row
+   *   the arm already reads.
+   * - **SQLite**: never present — SQLite has no schemas, and a foreign key
+   *   cannot cross an ATTACHed database at all, so the fact this key carries
+   *   cannot exist there.
+   */
+  referencedSchema?: string;
 }
 
 /**
@@ -14514,17 +14553,33 @@ export class SqlDriver implements IDataDriver {
         // (measured), i.e. this rewrite deliberately does NOT adopt the
         // `?::regclass` failure mode `introspectPrimaryKeys` has; the #7332
         // `onFailure` contract below is unchanged by it.
+        // `referenced_schema` (#11377): the PARENT's schema when — and only
+        // when — it is not on the session's `search_path`, NULL otherwise.
+        // The scoping predicate on the CHILD (`ns.nspname = ANY (…)`) is
+        // #11201's and is untouched; this CASE asks the same question about
+        // the parent's namespace, so "in path" here means exactly what bare-
+        // name resolution means to every other statement in the session.
+        // Measured on live PostgreSQL 16.13 (the card's fixture shape): a
+        // parent in `os11377_far` answers `referenced_schema = os11377_far`
+        // with `referenced_table` still the bare name; an in-path parent
+        // answers NULL. The bare spelling of `referenced_table` is
+        // deliberate and unconditional — see `IntrospectedForeignKey`.
         const result = await this.knex.raw(
           `
           SELECT
             att.attname AS column_name,
             parent.relname AS referenced_table,
             patt.attname AS referenced_column,
-            con.conname AS constraint_name
+            con.conname AS constraint_name,
+            CASE
+              WHEN pns.nspname = ANY (current_schemas(false)) THEN NULL
+              ELSE pns.nspname
+            END AS referenced_schema
           FROM pg_constraint con
           JOIN pg_class child ON child.oid = con.conrelid
           JOIN pg_namespace ns ON ns.oid = child.relnamespace
           JOIN pg_class parent ON parent.oid = con.confrelid
+          JOIN pg_namespace pns ON pns.oid = parent.relnamespace
           CROSS JOIN LATERAL unnest(con.conkey, con.confkey)
             WITH ORDINALITY AS k(attnum, fattnum, ord)
           JOIN pg_attribute att
@@ -14547,6 +14602,14 @@ export class SqlDriver implements IDataDriver {
             referencedTable: row.referenced_table,
             referencedColumn: row.referenced_column,
             constraintName: row.constraint_name,
+            // The key is ABSENT for an in-path parent, not `undefined`: an
+            // explicit `referencedSchema: undefined` still spells the key
+            // into `Object.keys`, JSON round-trips differently, and reads as
+            // "someone considered this" — the contract is that presence
+            // itself carries the fact (#11377).
+            ...(row.referenced_schema != null
+              ? { referencedSchema: row.referenced_schema }
+              : {}),
           });
         }
       } else if (this.isMysql) {
@@ -14577,13 +14640,29 @@ export class SqlDriver implements IDataDriver {
         // `sql-driver-11379-introspect-fk-mysql-ordinal-order.test.ts`, which is
         // deliberately a pin on the emitted SQL rather than on the row order,
         // because a row-order assertion passes here with or without this line.
+        // `referenced_schema` (#11377), symmetric with the Postgres arm: the
+        // PARENT's database when it differs from the session's default
+        // database, NULL otherwise. MySQL's resolution scope for a bare name
+        // is `DATABASE()` (there is no search path to be partially on), and
+        // `KEY_COLUMN_USAGE` carries the parent's database as
+        // `REFERENCED_TABLE_SCHEMA` on the same row this arm already reads —
+        // the child-side filter `TABLE_SCHEMA = DATABASE()` never constrained
+        // the referenced side, so a cross-database InnoDB foreign key was
+        // already returned here, under a bare name `DATABASE()` does not
+        // resolve. `<=>` is the null-safe comparison: with no default
+        // database selected, NO bare name resolves, so every parent is
+        // out-of-scope and qualified.
         const result = await this.knex.raw(
           `
           SELECT
             COLUMN_NAME as column_name,
             REFERENCED_TABLE_NAME as referenced_table,
             REFERENCED_COLUMN_NAME as referenced_column,
-            CONSTRAINT_NAME as constraint_name
+            CONSTRAINT_NAME as constraint_name,
+            CASE
+              WHEN REFERENCED_TABLE_SCHEMA <=> DATABASE() THEN NULL
+              ELSE REFERENCED_TABLE_SCHEMA
+            END as referenced_schema
           FROM information_schema.KEY_COLUMN_USAGE
           WHERE TABLE_SCHEMA = DATABASE()
             AND TABLE_NAME = ?
@@ -14599,6 +14678,11 @@ export class SqlDriver implements IDataDriver {
             referencedTable: row.referenced_table,
             referencedColumn: row.referenced_column,
             constraintName: row.constraint_name,
+            // Absent, not `undefined`, for an in-database parent — same
+            // presence-is-the-fact contract as the Postgres arm (#11377).
+            ...(row.referenced_schema != null
+              ? { referencedSchema: row.referenced_schema }
+              : {}),
           });
         }
       } else if (this.isSqlite) {
