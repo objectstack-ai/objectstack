@@ -241,6 +241,14 @@ describe('#11550 — emission identity is not wire identity (#11756 stays open)'
       expect(d.nowDefaultSql('date').toUpperCase(), spelling).toContain('CURRENT_TIMESTAMP');
       // …while still getting the #11389 calendar-day wire hook.
       expect(emit('POSTGRES_WIRE_CLIENTS'), spelling).toContain(spelling);
+      // …and, since #11784, the connect-timeout bound too. Both are properties
+      // of the npm driver doing the connecting (`pg`), which is why neither
+      // waits on #11756: knex's Client_Redshift/Client_CockroachDB extend
+      // Client_PG for the WIRE while overriding the query compiler for
+      // EMISSION. Timeout row present, emission identity still false — the
+      // independence #11784 asserted, pinned rather than argued.
+      expect((SqlDriver as any).DIALECT_CONNECT_TIMEOUT[spelling], spelling)
+        .toEqual({ key: 'connectionTimeoutMillis', urlKey: 'connectionString' });
     }
   });
 
@@ -275,12 +283,21 @@ describe('#11550 — the client-keyed tables now derive from one source', () => 
     }
   });
 
-  it('deriving the table changed no membership', () => {
-    // The refactor half must be a no-op. `redshift`'s ABSENCE is load-bearing —
-    // `withConnectBound`'s comment cites it as the reason its early return may
-    // not skip the session pins.
+  it('membership is the derivation plus its literal extensions, and nothing else', () => {
+    // #11550's refactor half had to be a no-op, and this pinned that. #11784
+    // then added `redshift` — a real membership change, deliberate, and the only
+    // one since. The comment that stood here cited redshift's ABSENCE as
+    // load-bearing documentation for `withConnectBound`'s early-return note;
+    // that example was retired together with the row, and the note now carries
+    // its reasoning directly instead of leaning on this table.
+    //
+    // ⚠️ `cockroachdb` and `redshift` must stay LITERAL extensions of
+    // POSTGRES_EMIT_CLIENTS here. This list now coincides with
+    // POSTGRES_WIRE_CLIENTS, and spelling it as that set instead would grant
+    // both of them SQL-emission identity as a silent refactor side effect —
+    // which is #11756's open decision, not this table's.
     expect(Object.keys(table()).sort()).toEqual(
-      ['cockroachdb', 'mysql', 'mysql2', 'pg', 'postgres', 'postgresql'],
+      ['cockroachdb', 'mysql', 'mysql2', 'pg', 'postgres', 'postgresql', 'redshift'],
     );
   });
 
