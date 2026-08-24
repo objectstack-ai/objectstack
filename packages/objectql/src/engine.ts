@@ -1899,6 +1899,24 @@ export type EngineMiddleware = (
 ) => Promise<void>;
 
 /**
+ * "Which of these tombstoned `sys_file` rows is something still holding?"
+ * (#11427).
+ *
+ * Takes the whole tombstoned set from ONE record read and returns the subset
+ * still held, as a set of stringified ids. Batched rather than per-row on
+ * purpose: hydration runs over many rows per read, so asking per file would be
+ * N queries per read.
+ *
+ * The engine declares this shape but never implements it — "still held" has one
+ * definition (`findFileHolder`, the union of `sys_attachment` join rows and the
+ * `ref_*` ownership columns) and it lives in the storage package. See
+ * `ObjectQL.registerHeldFileResolver`.
+ */
+export type HeldFileResolver = (
+  rows: Array<Record<string, any>>,
+) => Promise<Set<string>>;
+
+/**
  * The stack collections the engine decomposes into individual registry items —
  * ONE list, read by the ONE body both registration seams run
  * (`registerMetadataCollections()`, called from the manifest seam in
@@ -3070,6 +3088,33 @@ export class ObjectQL implements IObjectQLEngine {
         this.actions.delete(key);
       }
     }
+  }
+
+  /**
+   * "Which of these tombstoned `sys_file` rows is something still holding?"
+   * (#11427) — supplied by the storage plugin, never derived here.
+   *
+   * File-field hydration must answer the same question the download path
+   * answers (#10246) or one row gets two answers. That question has exactly one
+   * definition, `findFileHolder`, and it lives in `@objectstack/service-storage`
+   * — a package this one does not and must not depend on. So the engine
+   * declares the seam and the storage plugin fills it, the same handover
+   * `resolveFileHolder` makes to the download routes.
+   *
+   * BATCHED on purpose: hydration runs over many rows per read, so a per-row
+   * holder check would be N queries per read. The resolver takes the whole
+   * tombstoned set and returns the ids still held.
+   */
+  private _heldFileResolver?: HeldFileResolver;
+
+  /**
+   * Wire the batched holder question (#11427). Last registration wins; leaving
+   * it unwired keeps tombstoned files un-hydrated, which is what this engine
+   * did before the seam existed.
+   */
+  registerHeldFileResolver(fn: HeldFileResolver): void {
+    this._heldFileResolver = fn;
+    this.logger.debug('Registered held-file resolver for sys_file hydration');
   }
 
   /**
@@ -8078,8 +8123,52 @@ export class ObjectQL implements IObjectQLEngine {
     }
 
     const fileMap = new Map<string, any>();
+    // [#11427] `committed` is servable and always was. A TOMBSTONE
+    // (`status: 'deleted'` + `deleted_at`) is recoverable state, not a delete:
+    // it is a claim about the future (this row is reapable once the grace
+    // window ends) that the sweep re-checks and often withdraws. #10246 already
+    // stopped the two download endpoints treating it as the last word — they
+    // ask the reap guard's own `findFileHolder` and serve the row for as long
+    // as something still holds it. This pass did not, so one `sys_file` row
+    // answered 200 at `/files/:id` and a bare id here: two read surfaces, two
+    // answers, and consumers render the bare id as "no attachment".
+    //
+    // ⛔ The predicate is NOT re-derived here. "Still held" has ONE definition
+    // (`findFileHolder`, a deliberate union of `sys_attachment` join rows AND
+    // the `ref_*` ownership columns) and it lives in the storage package, which
+    // this one cannot import. A copy narrower by a limb would hide files the
+    // sweep refuses to reap — the same defect one limb over — so the question
+    // arrives through {@link registerHeldFileResolver} instead, the same
+    // handover `resolveFileHolder` makes to the download routes. Unwired (bare
+    // kernel, no storage plugin, tests): tombstones stay hidden, exactly as
+    // before this existed.
+    const tombstoned: any[] = [];
     for (const row of fileRows) {
-      if (row?.id != null && row.status === 'committed') fileMap.set(String(row.id), row);
+      if (row?.id == null) continue;
+      if (row.status === 'committed') fileMap.set(String(row.id), row);
+      else if (row.status === 'deleted') tombstoned.push(row);
+    }
+    // Lazy by construction: a batch with no tombstone — every ordinary read —
+    // costs nothing at all, and the resolver is BATCHED, so the residual case
+    // costs one extra query for the whole read rather than one per row.
+    if (tombstoned.length > 0 && this._heldFileResolver) {
+      try {
+        const held = await this._heldFileResolver(tombstoned);
+        for (const row of tombstoned) {
+          if (held?.has(String(row.id))) fileMap.set(String(row.id), row);
+        }
+      } catch (error) {
+        // Unreadable evidence is not evidence of a holder. Keep the ids
+        // un-hydrated — the answer this pass gave before #11427, and the same
+        // direction the download path fails in (`isServableForDownload`) and
+        // the reap guard fails in (it vetoes rather than reaps when it cannot
+        // tell). Distinct from the #6116 catch above, which covers the
+        // `sys_file` read itself and is untouched.
+        this.logger.warn(
+          'sys_file holder check failed; tombstoned file fields keep their raw ids for this read',
+          { object: objectName, tombstonedIds: tombstoned.length, error: (error as Error)?.message },
+        );
+      }
     }
     if (fileMap.size === 0) return records;
 
