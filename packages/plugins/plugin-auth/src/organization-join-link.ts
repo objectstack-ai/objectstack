@@ -259,13 +259,30 @@ async function refuseUnlessOrgPermitted(
   return refusal(403, 'PERMISSION_DENIED', 'Organization owner or admin role required');
 }
 
-/** `organizationId` from body, else the caller's active organization. */
-function resolveOrganizationId(
+/**
+ * The organization a mutating call operates on: explicit `organizationId`,
+ * else the organization of the `sys_join_link` row named by `joinLinkId`
+ * (what the row actions' `recordIdParam` sends — they are param-less by
+ * #7278, so the row id is the only thing they can carry), else the caller's
+ * active organization.
+ */
+async function resolveOrganizationId(
+  engine: JoinLinkDataEngine,
   body: Record<string, unknown>,
   caller: Caller,
-): string | EndpointResult {
+): Promise<string | EndpointResult> {
   const explicit = readString(body, 'organizationId', 'organization_id');
-  const orgId = explicit ?? caller.activeOrganizationId;
+  if (explicit) return explicit;
+  const rowId = readString(body, 'joinLinkId', 'join_link_id');
+  if (rowId) {
+    const rows = rowsOf(
+      await engine.find(JOIN_LINK_OBJECT, { where: { id: rowId }, limit: 1 }, { context: SYSTEM_CTX }),
+    );
+    const orgId = rows[0]?.organization_id;
+    if (typeof orgId === 'string' && orgId.length > 0) return orgId;
+    return refusal(404, 'RESOURCE_NOT_FOUND', 'No join link with that id');
+  }
+  const orgId = caller.activeOrganizationId;
   if (!orgId) {
     return badRequest('organizationId is required (the session has no active organization)');
   }
@@ -474,7 +491,7 @@ async function gateMutation(
   const engine = engineOf(deps);
   if ('status' in engine) return engine;
   const body = await parseJson(request);
-  const organizationId = resolveOrganizationId(body, caller);
+  const organizationId = await resolveOrganizationId(engine, body, caller);
   if (typeof organizationId !== 'string') return organizationId;
   const denied = await refuseUnlessOrgPermitted(api, request, organizationId, permissions);
   if (denied) return denied;

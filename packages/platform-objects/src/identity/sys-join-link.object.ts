@@ -82,6 +82,9 @@ export const SysJoinLink = ObjectSchema.create({
       successMessage: 'Join link created',
       refreshAfter: true,
     },
+    // Param-LESS on purpose (#7278: `confirmText` beside params = two dialogs
+    // for one decision): the row id rides `recordIdParam`, and the endpoint
+    // resolves the organization scope from that row.
     {
       name: 'rotate_join_link',
       label: 'Rotate Join Link',
@@ -90,12 +93,12 @@ export const SysJoinLink = ObjectSchema.create({
       locations: ['list_item'],
       type: 'api',
       target: '/api/v1/auth/organization/rotate-join-link',
+      recordIdParam: 'joinLinkId',
       requiresFeature: 'organization',
       confirmText:
         'Rotate this organization\'s join link? The current link stops working immediately and a new one is minted.',
       successMessage: 'Join link rotated',
       refreshAfter: true,
-      params: [{ field: 'organization_id', required: false, defaultFromRow: true }],
     },
     {
       name: 'revoke_join_link',
@@ -105,12 +108,12 @@ export const SysJoinLink = ObjectSchema.create({
       locations: ['list_item'],
       type: 'api',
       target: '/api/v1/auth/organization/revoke-join-link',
+      recordIdParam: 'joinLinkId',
       requiresFeature: 'organization',
       confirmText:
         'Revoke this organization\'s join link? Anyone holding the link will no longer be able to join.',
       successMessage: 'Join link revoked',
       refreshAfter: true,
-      params: [{ field: 'organization_id', required: false, defaultFromRow: true }],
     },
   ],
 
