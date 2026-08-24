@@ -267,7 +267,7 @@ import type * as M170 from './ui/component.zod.js';
 import type * as M183 from './api/sortability.zod.js';
 
 // ---------------------------------------------------------------------------
-// 837 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
+// 833 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
 //
 // That number is machine-checked, not hand-kept. The runtime companion at the
 // bottom of this file recomputes the pin count from the source and asserts that
@@ -1337,8 +1337,9 @@ export type Iso694 = Assert<Eq< z.input< typeof M163.ElementDataSourceSchema >, 
 export type Iso695 = Assert<Eq< z.input< typeof M164.JoinedReportBlockSchema >, z.infer< typeof M164.JoinedReportBlockSchema > >>;
 
 // ui/responsive.zod.ts
-export type Iso696 = Assert<Eq< z.input< typeof M165.BreakpointName >, z.infer< typeof M165.BreakpointName > >>;
-export type Iso697 = Assert<Eq< z.input< typeof M165.ResponsiveConfigSchema >, z.infer< typeof M165.ResponsiveConfigSchema > >>;
+// (Iso696 `BreakpointName` / Iso697 `ResponsiveConfigSchema` removed with
+// their schemas — #11027's ADR-0049 retirement of the responsive layout
+// vocabulary. The Iso numbers are positional and stay vacant.)
 export type Iso698 = Assert<Eq< z.input< typeof M165.StyleMapSchema >, z.infer< typeof M165.StyleMapSchema > >>;
 export type Iso699 = Assert<Eq< z.input< typeof M165.ResponsiveStylesSchema >, z.infer< typeof M165.ResponsiveStylesSchema > >>;
 
@@ -1581,8 +1582,8 @@ export type Iso822 = Assert<Eq< z.input< typeof M163.PageComponentType >, z.infe
 export type Iso823 = Assert<Eq< z.input< typeof M164.ReportType >, z.infer< typeof M164.ReportType > >>;
 
 // ui/responsive.zod.ts
-export type Iso824 = Assert<Eq< z.input< typeof M165.BreakpointColumnMapSchema >, z.infer< typeof M165.BreakpointColumnMapSchema > >>;
-export type Iso825 = Assert<Eq< z.input< typeof M165.BreakpointOrderMapSchema >, z.infer< typeof M165.BreakpointOrderMapSchema > >>;
+// (Iso824 `BreakpointColumnMapSchema` / Iso825 `BreakpointOrderMapSchema`
+// removed with their schemas — #11027, see the Iso696/Iso697 note above.)
 
 // ui/view.zod.ts
 export type Iso826 = Assert<Eq< z.input< typeof M167.CalendarConfigSchema >, z.infer< typeof M167.CalendarConfigSchema > >>;
@@ -1667,7 +1668,7 @@ describe('ADR-0122 type-alias convention', () => {
   // this title and the section header above the pin list — are now asserted
   // against the recomputed count below, so neither can go stale without a red
   // test naming it.
-  it('still declares all 837 isomorphic pins', () => {
+  it('still declares all 833 isomorphic pins', () => {
     // The truth of each pin is proved by tsc, not here — an `Assert<Eq<...>>`
     // that stops holding is a compile error with the alias named. What tsc
     // cannot notice is a pin that was DELETED: removing the assertion removes
@@ -1950,9 +1951,15 @@ describe('ADR-0122 type-alias convention', () => {
     // coincide and ADR-0122 gives it a pin rather than an `XParsed`. Its id is
     // `Iso856`, the next free one — the ids are claims about pins, not
     // positions.
+    //
+    // 837 -> 833 is #11027's ADR-0049 retirement of the responsive layout
+    // vocabulary (`BreakpointName`, `ResponsiveConfigSchema`,
+    // `BreakpointColumnMapSchema`, `BreakpointOrderMapSchema` — Iso696/697/
+    // 824/825): the four schemas no longer exist, so there is nothing left to
+    // exempt. -4 retired, +0 of my own; the Iso numbers stay vacant.
     const self = readFileSync(fileURLToPath(import.meta.url), 'utf8');
     const pins = self.match(/^export type Iso\d+ = Assert</gm) ?? [];
-    expect(pins).toHaveLength(837);
+    expect(pins).toHaveLength(833);
 
     // The count is stated in PROSE twice as well — this case's title and the
     // section header above the pin list — and until #6605 nothing read either

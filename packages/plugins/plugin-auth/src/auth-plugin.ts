@@ -1589,6 +1589,41 @@ export class AuthPlugin implements Plugin {
       // (auth-manager.ts) lets this through on an empty DB even when sign-up
       // is otherwise disabled.
       await api.signUpEmail({ body: { email, password, name } });
+      // [#11343] Stamp the seeded admin's address VERIFIED. This account is
+      // provisioned by the deployment's own boot command with operator-known
+      // credentials — it is not an unknown self-registrant, which is the class
+      // the verified-elevation invariant exists to refuse. Under walled
+      // postures elevation now requires the declared owner's email match to be
+      // VERIFIED, and in a dev/harness walled boot the declared owner is this
+      // very account (the verify harness exports it as
+      // OS_PLATFORM_OWNER_EMAIL) — without the stamp a walled dev boot would
+      // seed an admin that can never be elevated, since no real mailbox exists
+      // for the verification link. Same trust shape as a trusted-SSO insert
+      // (`emailVerified: true` at creation). Dev-only by the NODE_ENV gate
+      // above; real sign-ups never pass through here. `isSystem` exempts the
+      // statically-readonly `email_verified` column, the same doorway the
+      // better-auth adapter's own verification write uses.
+      try {
+        const seededRows = await ql.find(
+          SystemObjectName.USER,
+          { where: { email }, limit: 1 },
+          { context: { isSystem: true } },
+        );
+        const seededId = (Array.isArray(seededRows) ? seededRows[0] : undefined)?.id;
+        if (seededId) {
+          await ql.update(
+            SystemObjectName.USER,
+            { id: seededId, email_verified: true },
+            { context: { isSystem: true } },
+          );
+        } else {
+          ctx.logger.warn('[auth] dev admin seeded but no row resolved for the email_verified stamp');
+        }
+      } catch (stampErr: any) {
+        // Fail-open on the stamp, fail-closed on elevation: an unstamped admin
+        // stays unverified and walled elevation refuses it loudly.
+        ctx.logger.warn(`[auth] dev admin email_verified stamp failed: ${stampErr?.message ?? stampErr}`);
+      }
       ctx.logger.info(`🔑 Dev admin seeded: ${email} / ${password}`);
       // Surface the credentials in the `serve` startup banner. The
       // ctx.logger line above is swallowed by serve's boot-quiet window

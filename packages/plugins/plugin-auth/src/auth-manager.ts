@@ -11,6 +11,11 @@ import type {
   OidcProvidersConfig,
 } from '@objectstack/spec/system';
 import type { IDataEngine } from '@objectstack/core';
+// [#10348] The ONE id-shaped platform-admin predicate (ADR-0068 D2).
+// `auth-manager` used to re-derive that standing itself, in two spellings
+// that had drifted from the declared authority and from each other; both
+// now ask the authority. Nothing in this file reads the grant tables.
+import { hasPlatformAdminStanding } from '@objectstack/core';
 import type { IEmailService, ISmsService } from '@objectstack/spec/contracts';
 import {
   readEnvWithDeprecation,
@@ -3030,7 +3035,7 @@ export class AuthManager {
     // `roles: string[]` array (ADR-0068 D1/D2): the stored `user.role` scalar
     // split on commas, PLUS the active membership mapped to canonical
     // `org_owner`/`org_admin`/`org_member`, PLUS `platform_admin` when the user
-    // holds the admin_full_access permission set. `user.isPlatformAdmin` is a
+    // resolves as a platform admin (ADR-0068 D2). `user.isPlatformAdmin` is a
     // derived alias of `'platform_admin' in positions`.
     //
     // IMPORTANT: `user.role` is NOT overwritten anymore — consumers must gate
@@ -3043,9 +3048,10 @@ export class AuthManager {
     // Better-auth's `sys_user` table doesn't carry a `role` column. We derive
     // it from two sources:
     //
-    //   1. **Platform admin** — a `sys_user_permission_set` row that points at
-    //      the `admin_full_access` permission set with `organization_id = null`
-    //      (seeded by `bootstrapPlatformAdmin`).
+    //   1. **Platform admin** — the ADR-0068 D2 standing, resolved through
+    //      `core/security/resolve-authz-context.ts` (the single authority for
+    //      authorization derivation) and never re-read here. See
+    //      `isPlatformAdminUserId` below.
     //   2. **Organization admin** — a `sys_member` row in the user's *active*
     //      organization (`session.activeOrganizationId`) with role `owner` or
     //      `admin`. Org owners/admins are entitled to manage org-scoped
@@ -3060,29 +3066,6 @@ export class AuthManager {
       const { customSession } = await import('better-auth/plugins/custom-session');
       plugins.push(customSession(async ({ user, session }) => {
         if (!user?.id) return { user, session };
-
-        const isPlatformAdmin = async (): Promise<boolean> => {
-          try {
-            const links = await dataEngine.find('sys_user_permission_set', {
-              where: { user_id: user.id },
-              limit: 50,
-            });
-            const platformLinks = (Array.isArray(links) ? links : []).filter(
-              (l: any) => !l.organization_id,
-            );
-            if (platformLinks.length === 0) return false;
-            const sets = await dataEngine.find('sys_permission_set', { limit: 50 });
-            const adminSet = (Array.isArray(sets) ? sets : []).find(
-              (r: any) => r.name === 'admin_full_access',
-            );
-            if (!adminSet) return false;
-            return platformLinks.some(
-              (l: any) => l.permission_set_id === adminSet.id,
-            );
-          } catch {
-            return false;
-          }
-        };
 
         // ADR-0068 D2 — surface CANONICAL org_* role names (not a boolean flag):
         // a membership owner/admin/member maps to org_owner/org_admin/org_member.
@@ -3112,7 +3095,10 @@ export class AuthManager {
         // positions[] (identity names + position names), with NO singular
         // overwrite. isPlatformAdmin is a DERIVED alias of
         // `'platform_admin' in positions`, retained for back-compat clients.
-        const platformAdmin = await isPlatformAdmin();
+        // [#10348] Asked through the ONE authority, exactly as `/sso/register`
+        // and `/admin/impersonate-user` ask it — so the session payload can no
+        // longer disagree with the gates about who a platform admin is.
+        const platformAdmin = await this.isPlatformAdminUserId(user.id);
         const orgRoles = await activeOrgRoles();
         const storedRole = typeof (user as any).role === 'string' ? (user as any).role : '';
         const positions = Array.from(new Set([
@@ -4503,48 +4489,51 @@ export class AuthManager {
   }
 
   /**
-   * ADR-0068 D2, asked on its own: is `userId` a PLATFORM admin — a
-   * `sys_user_permission_set` row pointing at the `admin_full_access`
-   * permission set with `organization_id = null` (seeded by
-   * `bootstrapPlatformAdmin`)?
+   * ADR-0068 D2, asked on its own: is `userId` a PLATFORM admin?
    *
-   * Deliberately does NOT admit organization owners/admins. Platform-admin
-   * routes must not be reachable by whoever happens to own an org (ADR-0068).
-   * [#10009] This replaced an `isOrgOrPlatformAdmin` predicate that admitted
-   * both; once `/sso/register` stopped asking the org question, that wider
-   * predicate had no caller left and was removed rather than parked.
+   * ⭐ [#10348] This is NOT a judge. It is this manager's engine binding over
+   * `hasPlatformAdminStanding` — the one place in the tree that turns a user id
+   * into that boolean, in `core/security/resolve-authz-context.ts`, whose header
+   * states that every entry point must resolve authorization through it and
+   * never re-read `sys_*_permission_set` itself. This file used to do exactly
+   * what that forbids, twice: here, and again inside the `customSession`
+   * callback. Both copies are gone; both callers land here, and this method
+   * performs no derivation of its own. Adding one back is the regression.
    *
-   * ⛔ The legacy `user.role === 'admin'` scalar is NOT consulted here. This
-   * asks the permission-set question only — the channel ADR-0068 D2 keeps.
+   * The three call sites are `/sso/register`'s ADR-0024 before-hook, the
+   * `/admin/impersonate-user` oracle (both the caller and the protected-target
+   * question), and the `customSession` payload — which is why the payload can
+   * no longer report a different answer from the gates.
    *
-   * Reads through `withSystemReadContext` so the lookups are not themselves
-   * RLS-scoped to the acting — possibly non-privileged — user, and fails CLOSED
-   * (returns false) on any lookup error: this backs a security gate, and an
-   * unverifiable actor must never pass.
+   * [#10949] What the copies had drifted away from, and what the authority
+   * applies: the ADR-0091 validity window on the grant, the ADR-0049 `active`
+   * flag on the catalogue row, and a lookup of `admin_full_access` BY ID rather
+   * than by name over a page of the catalogue. The first two mean an expired or
+   * deactivated grant no longer authorizes anything; the third means an
+   * environment with more permission sets than that page held can no longer
+   * demote every platform admin at once.
+   *
+   * Deliberately does NOT admit organization owners/admins — the authority
+   * derives the `PLATFORM_ADMIN` rung from the UNSCOPED capability grant alone,
+   * so an org owner/admin (and a TENANT_ADMIN-posture principal) is refused.
+   * [#10009] That boundary was established when `/sso/register` stopped asking
+   * the org question; it is pinned, at both gates, in
+   * `platform-admin-standing.consolidation.test.ts`.
+   *
+   * ⛔ The legacy `user.role === 'admin'` scalar is NOT consulted. ⛔ Nor is any
+   * caller-supplied seed: the predicate takes `(engine, userId)` and reads the
+   * stored rows, so nothing about a request can supply part of its own verdict.
+   *
+   * The authority reads with system identity, so the lookups are not themselves
+   * RLS-scoped to the acting — possibly non-privileged — user. Fails CLOSED
+   * (returns false) on an empty id, a missing engine, or any lookup error: this
+   * backs security gates, and an unverifiable actor must never pass.
    */
   private async isPlatformAdminUserId(userId: string): Promise<boolean> {
     if (!userId) return false;
     const engine = this.getDataEngine();
     if (!engine) return false;
-    try {
-      const sys = withSystemReadContext(engine);
-      const links = await sys.find('sys_user_permission_set', {
-        where: { user_id: userId },
-        limit: 50,
-      });
-      const platformLinks = (Array.isArray(links) ? links : []).filter(
-        (l: any) => !l.organization_id,
-      );
-      if (platformLinks.length === 0) return false;
-      const sets = await sys.find('sys_permission_set', { limit: 50 });
-      const adminSet = (Array.isArray(sets) ? sets : []).find(
-        (r: any) => r.name === 'admin_full_access',
-      );
-      if (!adminSet) return false;
-      return platformLinks.some((l: any) => l.permission_set_id === adminSet.id);
-    } catch {
-      return false;
-    }
+    return hasPlatformAdminStanding(engine, userId);
   }
 
   /**

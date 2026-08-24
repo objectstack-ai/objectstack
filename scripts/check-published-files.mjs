@@ -56,11 +56,15 @@
 
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join, posix, resolve } from 'node:path';
+import {
+  readWorkspaceGlobs,
+  selfTest as workspaceEnumeratorSelfTest,
+  workspacePackageDirs,
+} from './workspace-enumerator.mjs';
 
 // Anchored to the script, not to cwd: the verdict must not depend on where the
 // guard was invoked from.
 const ROOT = resolve(import.meta.dirname, '..');
-const WORKSPACE_FILE = 'pnpm-workspace.yaml';
 const SELF = 'scripts/check-published-files.mjs';
 
 // Entries every package may declare without justifying itself: the build
@@ -256,52 +260,23 @@ const ROOT_DIR_WATCH_HINTS = [
 ];
 
 /**
- * The `packages:` globs from pnpm-workspace.yaml. Blank lines and comments are
- * skipped rather than treated as the end of the list: stopping early would drop
- * members from the scan and report a clean run over a partial workspace, which
- * is the one failure mode a guard must not have.
+ * The `packages:` globs and the member directories they enumerate.
+ *
+ * Both come from `scripts/workspace-enumerator.mjs` (#11510), which is where
+ * this repo's one parse of that file lives. This gate used to carry a private
+ * copy; so did eight other scripts, and measured against each other they
+ * agreed on the repo's real file while disagreeing on nine adversarial inputs.
+ *
+ * The enumerator is a plain module and declares NO path population of its own,
+ * deliberately — `ROOT_DIR_WATCH_HINTS` above stays this gate's own claim about
+ * this gate's own surface, and the self-test still reconciles it against the
+ * live parse in both directions. See the enumerator's header for the +41725
+ * (gate, file) pair measurement that decided the split.
  */
-function workspaceGlobs() {
-  const lines = readFileSync(join(ROOT, WORKSPACE_FILE), 'utf8').split(/\r?\n/);
-  const start = lines.findIndex((l) => /^packages\s*:\s*$/.test(l));
-  if (start === -1) throw new Error(`${WORKSPACE_FILE}: no top-level \`packages:\` block`);
-  const globs = [];
-  for (let i = start + 1; i < lines.length; i++) {
-    const line = lines[i].replace(/#.*$/, '').trimEnd();
-    if (!line.trim()) continue;
-    const m = line.match(/^\s+-\s+['"]?([^'"\s]+)['"]?\s*$/);
-    if (m) {
-      globs.push(m[1]);
-      continue;
-    }
-    if (/^\S/.test(line)) break; // the next top-level key ends the block
-  }
-  if (globs.length === 0) throw new Error(`${WORKSPACE_FILE}: \`packages:\` block is empty`);
-  return globs;
-}
+const workspaceGlobs = () => readWorkspaceGlobs(ROOT);
 
 /** Workspace member directories, relative to the repo root. */
-function workspaceDirs() {
-  const dirs = [];
-  for (const glob of workspaceGlobs()) {
-    // Every pattern in this repo is `<dir>` or `<dir>/*`. Anything richer would
-    // silently resolve to nothing, so reject it rather than under-report.
-    const star = glob.endsWith('/*');
-    const base = star ? glob.slice(0, -2) : glob;
-    if (base.includes('*')) {
-      throw new Error(
-        `${WORKSPACE_FILE}: pattern "${glob}" is richer than <dir> or <dir>/*; extend ${SELF}`,
-      );
-    }
-    const abs = join(ROOT, base);
-    if (!existsSync(abs)) continue;
-    const candidates = star ? readdirSync(abs).map((e) => posix.join(base, e)) : [base];
-    for (const c of candidates) {
-      if (existsSync(join(ROOT, c, 'package.json'))) dirs.push(c);
-    }
-  }
-  return dirs.sort();
-}
+const workspaceDirs = () => workspacePackageDirs(ROOT);
 
 /** Package-relative POSIX paths of every file that is not build output. */
 function walk(absDir, prefix = '', out = []) {
@@ -429,6 +404,13 @@ function selfTest() {
     if (!ok) failures.push(`ROOT_DIR_WATCH_HINTS: ${name}`);
   }
 
+  // The shared enumerator is a plain module, so no workflow invokes it and it
+  // has no self-test of its own to schedule (#11510 — being a gate is exactly
+  // what it must not be). Its coverage is that every gate which consolidated
+  // onto it folds these in, this one included.
+  const enumeratorFailures = workspaceEnumeratorSelfTest({ root: ROOT });
+  failures.push(...enumeratorFailures);
+
   if (failures.length > 0) {
     console.error(`✗ check:published-files --self-test — ${failures.length} failure(s)\n`);
     for (const f of failures) console.error(`  ${f}`);
@@ -436,8 +418,9 @@ function selfTest() {
   }
   console.log(
     `✓ check:published-files --self-test — ${cases.length} pattern case(s), ` +
-      `${forbidden.length} classification case(s) and ${declarationCases.length} ` +
-      `population-declaration case(s) over ${liveGlobs.length} live workspace glob(s).`,
+      `${forbidden.length} classification case(s), ${declarationCases.length} ` +
+      `population-declaration case(s) and the shared workspace enumerator's own ` +
+      `assertions, over ${liveGlobs.length} live workspace glob(s).`,
   );
 }
 

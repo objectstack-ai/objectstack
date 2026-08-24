@@ -866,7 +866,32 @@ export const RecordDetailsProps = strictObject({
     columns: z.number().int().min(1).max(4).optional().describe('Field-grid columns for this section (1-4). Omitted → the renderer derives the width.'),
     /** Field names shown in this section, in order. */
     fields: z.array(z.string()).describe('Field names rendered in this section, in order'),
-  })).optional().describe('Field groups rendered as the detail body, in order. Object form: `{ name?, label?, columns?, fields }`.'),
+    /**
+     * The three presentation keys the renderer has honoured all along,
+     * declared at last (#11289, maintainer ruling 2026-08-23 — direction 1:
+     * declare, defaults matching current renderer behavior; the renderer is
+     * unchanged). `RecordDetailsRenderer` spreads every authored section
+     * through to `DetailSection`, which reads all three — while this shape
+     * rejected them, so `objectstack validate` warned that an authored key
+     * "did nothing". For `hideEmpty` that warning hid the one key that decides
+     * whether a section EXISTS: the renderer forces `hideEmpty ?? true`, and
+     * an all-empty section then returns `null` outright — no heading, no
+     * skeleton — with no declarable way to ask for the skeleton back.
+     *
+     * All three are optional with NO schema default, for the `maxVisible`
+     * reason (see `inlineEdit` below): the fallbacks are the RENDERER'S, and
+     * a schema default would turn "the author said nothing" into "the author
+     * asked for the default". Defaults in the describe() texts are MEASURED
+     * at the `.objectui-sha` pin (objectui `plugin-detail/src/renderers/
+     * record-details.tsx` + `DetailSection.tsx`), not transcribed from a TS
+     * interface.
+     */
+    hideEmpty: z.boolean().optional().describe('Hide this section\'s empty fields (renderer default: on — and a section whose fields are ALL empty then renders nothing at all: no heading, no skeleton). Set `false` to render empty rows, keeping the section\'s label skeleton on an all-empty record (e.g. a brand-new one).'),
+    /** Collapsible card. Initial state is expanded; the toggle is the heading. */
+    collapsible: z.boolean().optional().describe('Render this section as a collapsible card — the heading becomes a chevron toggle, initially expanded (renderer default: off).'),
+    /** Card chrome; the renderer derives it from the presence of a title. */
+    showBorder: z.boolean().optional().describe('Draw this section\'s card chrome (renderer default: derived — on for a titled section, off for an untitled one). Set `false` for a borderless titled section, or `true` for a bordered untitled one.'),
+  })).optional().describe('Field groups rendered as the detail body, in order. Object form: `{ name?, label?, columns?, fields, hideEmpty?, collapsible?, showBorder? }`.'),
   fields: z.array(z.string()).optional().describe('Explicit field list to display (optional, overrides highlightFields)'),
   /**
    * Field names to omit from the body, applied to both `fields` and every

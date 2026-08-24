@@ -42,25 +42,25 @@
 ## API 配额
 
 - **配额按账户计,不跨席共享;按查询复杂度计费,不按调用次数**:各席位跑在**不同 GitHub 账户**下,「所有 agent 共用一个身份」只在**席位内部**成立(一个席位派出的每个 dev 都以该席身份发言 —— 这正是认领必须在评论里写 session ID 的理由)⇒ ⛔ 不据限流报文里的 user ID 推「池子跨席共用、优化自己没用」(实测推翻),本席额度**完全由本席做法决定**,优化有效且是唯一有效手段;计费按复杂度/节点数 ⇒ 优化方向是**每次少拿**,不是少调用。实测(`/rate_limit` 前后差量,该端点自身不计费):上限 5000/时;单个 dev 子代理 ~15 分钟烧 ~5658 点;一次 `list_issues`(34 张卡、perPage=100)= 107 点;耗尽时刻 GraphQL used 10461(超上限一倍)而 REST core used 7 ⇒ **最大消耗方是派出去的 dev 子代理,PM 巡检相比之下是噪声**(2026-08-22 实测)。
-- GraphQL 配额(5000/时)极易打满,**MCP list/search 家族整个走 GraphQL 池** ——
-  反复撞上的限流墙就是它;「读与评论走 REST(core 15000/时,独立计)」预设会话真有
-  REST 通道:MCP 读工具无 REST 替身,直连 REST 受会话级授权门(会话起点快照,403
-  `GitHub access is not enabled for this session`)与出口代理(只放 repo-scoped
-  路径,`/search/*` 被拒、`/rate_limit` 例外)钳制 —— **纯 MCP 会话撞上枯竭池 =
-  重置前没有任何 list 通道**,降级读法 = 下文 git 先行与 WebFetch 两行;只有无
-  REST 对应物的写才花 GraphQL,`issue_write` 连查找半边都吃 —— 配额红时认领类动作排队,评论(REST 池)先行把结论发出去。
+- **perPage 按预期 population 取,⛔ 不按习惯取 100**:上条计费规则(点数 ≈ 请求节点数/100)使 perPage 成为唯一杠杆 —— 那次 107 点的读数里 34 张卡付的是 100 张的钱,一次只要 3 条的 perPage=100 读法多付约 33 倍点数;只要 `totalCount` 的健康指标取 perPage=1,只要最近 N 张就取 N(2026-08-23)。
+- **批量写 ~1 秒一发**:小时池之外还有**分钟级二级限流** —— GraphQL 端点 2,000 点/分、并发 ≤100,官方指引是**变更类请求之间停 ~1 秒**(mutation 在二级计算里按 5× 计)。双载体清标、批量重分诊这类把写挤在同一秒的扫动,会在小时池仍绿时撞上分钟墙(官方文档 2026-08-23 复核)。
+- **默认读序 git → REST → MCP/GraphQL**(2026-08-23 策略翻转:REST 通道是**默认**读路径,⛔ 不再是「降级退路」)。list/查重/卡与 PR 读/标签回读**默认走容器 curl 的 REST 通道** —— App installation token,core 15,000/时,与 GraphQL 池**独立计**(实测同一天本席 GraphQL 池两次耗尽时 REST core 余 14,938);GraphQL 池(5000/时)只留给**没有 REST 对应物**的那几件:draft 翻转、auto-merge/入队挂载、语义 `/search/*`、Projects field_values、`issue transfer`。逐操作通道归属(每条实调 ✓ 带日期)、写侧配方与队列路由三读法见 `references/rest-channel.md`,⛔ 不在本表复述。
+- **MCP list/search 家族整个走 GraphQL 稀缺池**,且服务器端无条件抓 Projects field_values —— 反复撞上的限流墙就是它;`issue_write` 连查找半边都吃。边界:直连 REST 受会话级授权门钳制(会话起点快照,403 `GitHub access is not enabled for this session`),**该门关着的纯 MCP 会话撞上枯竭池 = 重置前只剩 git 先行与 WebFetch 两行**;配额红时认领类动作排队,评论(REST 桶)先行把结论发出去。
+- **`gh` CLI 的动词按传输分两桶,池枯竭时只死一半**(2026-08-24 同一分钟实测:GraphQL remaining 0 / REST core remaining 4987):porcelain 读家族全走 GraphQL —— `gh issue view` / `gh pr list` / `gh pr checks` 当场回 `API rate limit already exceeded`(`GH_DEBUG=api` 回显 `POST /graphql`);同一批事实改走 `gh api` 的 REST 路径全部照常返回(`repos/{o}/{r}/issues/{n}` 读正文、`.../issues/{n}/labels` 读标签、`.../commits/{sha}/check-runs` 读门禁结论、`.../pulls` 列 PR)⇒ **配额红的一小时里,认领/打标/评论/读门禁这条复核链整条跑得完**,⛔ 不据一次 porcelain 限流就宣布「GitHub 通道断了」而停轮。写侧同一分法:`gh pr create` 也走 GraphQL(同分钟被拒),而开 PR 有 REST 端点 —— `gh api -X POST repos/{o}/{r}/pulls -F draft=true` 同分钟成功 ⇒ 池子为 0 时 draft PR 照开得出,交付不必等重置。边界:本条取自装有 `gh` 的本机席位;容器里没有 `gh`(见「读数陷阱」),那边的分流按 MCP 通道另判。
+- **红窗调度:等重置的只有上面那几件 GraphQL-only 的**(逐件判据与官方文档核对日期住 `references/rest-channel.md`,⛔ 不在本表复述)⇒ `until remaining > 阈值` 的守候只给它们,⛔ 其余一切不为配额空等。走合并队列的仓落地必经 auto-merge ⇒ 红窗里**无退路**;直合仓有(合并本身有 REST 端点)。
+- **`issue transfer` 因配额或权限拿不到 ⇒ 当轮改走多仓协调条款已载明的「在目的仓重建」配方**(出处头 + 裸 `#N` 改全名 + 关源单为 moved):该配方纯 REST、配额免疫,⛔ 不为一次转移空等重置,更不因此把跨仓卡搁成半状态。
 - **两个「瘦身参数」都不省池**:`fields` 省载荷不省池 —— MCP list/search 服务器端无条件抓 Project field_values,池枯竭时**最小字段请求同样全体失败**(报错串 `failed to fetch issue field values: API rate limit already exceeded`);
   ⛔ **`minimal_output: true` 不裁 `list_issues` 的 `body`**(2026-08-22 实测:返回字段仍含 `body`,首条 3258 字符、整体 122,685 字符仍超单次工具输出上限被落盘)—— 工具描述的反向暗示是假的,**永不当省额度手段写进任何 skill**;只要 number/labels/title 时也没有任何参数能关掉 body:要么接受整表 107 点,要么换更窄接口(`search_issues` 点数未实测)。⚠️ 前后体积对比不作证据(两次调用相隔数小时、population 已变),站得住的是直接观察 `body` 在。
 - **git 先行**:本地检出 / `git log` / `ls-remote` 不花配额,断粮期分支存在性检查照常可用,PR 文件读取同走 git(REST PR files 端点实测可瞬态 404);
   **零成本等价物四条**(API 两次挂掉期间实测全程可用):合并队列 `git ls-remote origin 'refs/heads/gh-readonly-queue/*'`;是否落地 `git log --format='%H %s' -40 origin/main` 按 PR 号 grep;squash 验证 `git rev-list --parents -n1`(父提交数);分支存在性 `git ls-remote origin 'refs/heads/*<key>*'`。
-  开轮先读配额(`curl` 带 Bearer `$GH_TOKEN` 打 `/rate_limit`,该端点免费;容器内**没有** `gh`,见「读数陷阱」),graphql remaining < 1000 ⇒ 本轮降级为 git 先行 + 只做必要写;
+  开轮先读配额(`curl` 带 Bearer `$GH_TOKEN` 打 `/rate_limit`,该端点免费;容器内**没有** `gh`,见「读数陷阱」),graphql remaining < 1000 ⇒ 本轮读全部按默认读序走 git + REST(独立桶,不受影响),GraphQL 只花在没有 REST 对应物的那几件写上;
   **派 dev 之前同样先读一次**:额度不足先等重置再派 —— 中途撞限流的 dev **完不成强制查重**,只能把发现交回 PM 代为归档;限流窗口里「必须查重才能归档」的动作等待,⛔ 不盲目开卡。
   打满时:待执行写**排成有序清单挂进巡逻词**(不靠记忆),恢复窗口按序连清;重试对齐整点(REST core 整点重置)优于指数退避,⛔ 绝不忙轮询;
   search 与 core 独立计,一侧打满另一侧可作退路;REST core 共享身份下同样会打满;文档载明、未实测:条件请求答 `304` 不计 core 池(仅当直连 REST 获准才相关)。
 - **公开仓降级读法:WebFetch github.com 网页零 API 配额**(带 label 过滤的 issue
   列表、issue 全文含评论、PR 页含 checks,实测撑得起整轮盘点);边界:~15 分钟缓存、列表行不含 assignee、内容是渲染层。
 - **查重先 `search_issues`**(2026-08-18 23:3xZ 实测:单次调用按 issue body 内文本命中且 `total_count` 精确 ——「search API 对本会话不可用/回错误对象」的继承说法实测为**假**;继承说法不是读数,复述必须带实测日期):body 文本匹配是 repo-scoped `list` 做不到的(全量抓取再 grep 才等价),`list` + 对照组降为回退。
-- **`search_issues` 可整会话静默归零 —— 控制词一并归零**(2026-08-23 实测:某会话对**每个**查询回 `total_count: 0`,含已知必中的控制词;同时刻另一会话同工具正常 ⇒ 故障是**会话级**,不是工具/平台级)。诊断:结果可疑时先跑一个带 `repo:` 限定、已知必中的控制词;回 0 ⇒ 本会话 search 已坏,**立刻换通道,⛔ 不重试**(重试只烧配额)。正确退路 = **REST 列表端点** `GET /repos/{o}/{r}/issues?state=open&labels=a,b&per_page=100&page=N`(走 core 桶、结果**完整**;`GET /search/issues` **不是**退路 —— 出口代理按设计只放 repo-scoped 路径);⛔ **不要用 MCP `list_issues` 手扫**:它走 GraphQL 稀缺桶,且分页手扫极易半途而废(实测 226 张 open 只扫了 100 张)—— **不完整枚举比零结果更危险,它读作「搜过了,没有」**。⛔ 已推翻的候选机理,别再追:「查询串里带 GitHub 限定符(`repo:`/`is:open`)把语义 search 打成零」—— 两次实测反证:带 `repo:` 的控制词回 `total_count: 5`;另一席同工具两腿对照,`repo:… is:open …` 回 1(精确命中)而裸词回 13(语义扩散),限定符在那儿**收窄**结果而非破坏。归零机理仍未定(候选:scope 过滤层静默清空 / search 桶 403 被 MCP 层吞成空结果),要定它必须在复现会话里抓原始响应。
+- **`search_issues` 可整会话静默归零 —— 控制词一并归零**(2026-08-23 实测:某会话对**每个**查询回 `total_count: 0`,含已知必中的控制词;同时刻另一会话同工具正常 ⇒ 故障是**会话级**,不是工具/平台级)。诊断:结果可疑时先跑一个带 `repo:` 限定、已知必中的控制词;回 0 ⇒ 本会话 search 已坏,**立刻换通道,⛔ 不重试**(重试只烧配额)。换到的就是默认读序那一档 = **REST 列表端点** `GET /repos/{o}/{r}/issues?state=open&labels=a,b&per_page=N`(走 core 桶、结果**完整**,perPage 按上面的右尺寸规则取;`GET /search/issues` **不是**退路 —— 出口代理按设计只放 repo-scoped 路径);⛔ **不要用 MCP `list_issues` 手扫**:它走 GraphQL 稀缺桶,且分页手扫极易半途而废(实测 226 张 open 只扫了 100 张)—— **不完整枚举比零结果更危险,它读作「搜过了,没有」**。⛔ 已推翻的候选机理,别再追:「查询串里带 GitHub 限定符(`repo:`/`is:open`)把语义 search 打成零」—— 两次实测反证:带 `repo:` 的控制词回 `total_count: 5`;另一席同工具两腿对照,`repo:… is:open …` 回 1(精确命中)而裸词回 13(语义扩散),限定符在那儿**收窄**结果而非破坏。归零机理仍未定(候选:scope 过滤层静默清空 / search 桶 403 被 MCP 层吞成空结果),要定它必须在复现会话里抓原始响应。
 - **`search_issues` 不可靠地返回分钟级新卡**:同轮发现的东西查重,搜索之外必须按创建时间列近期 issue(`list_issues` + `orderBy: CREATED_AT`)—— 实测一张 ~7 分钟大的同实例卡被关键词与语义搜索双双漏掉,靠按日期列表才逮到;边界:两次观察、索引延迟未实测,断言只到「search 可能漏掉分钟级 issue」,更硬的窗口要另测(2026-08-20 实测)。
 - **会话中途轮换凭据把 GitHub MCP 服务器杀到不可恢复**:此后一切 `mcp__github__*`
   回 `Streamable HTTP error: invalid session`(含几分钟前还好的工具),只有新会话
@@ -73,10 +73,7 @@
   —— 同一动作内重读现值合并再写(隔轮旧读数 = 无效快照,按其回写静默剥别的标签);真追加走 REST `POST /issues/{n}/labels`;写后照标签纪律回读。
 - **`list_issues` 永不返回 assignees**(`fields` 枚举无此成员,不传也没有)—— 已
   认领卡与空闲卡响应逐字节相同,清单只是**候选名单**:每条认领前必须过完整 `issue_read`(它才返回 `assignees`),⛔ 不把清单当候选集直接认领。
-- **MCP `issue_read` 的 body 实体转义是纯读侧伪影**(撇号/引号/尖括号成数字实体;
-  comments 原样),存储体是明文,**先解码实体再写回**往返实测安全(无双重转义)——
-  腐蚀 body 的恰是把转义读数原样回写;⚠️ 但读侧**并非一律可逆** —— 行内反引号里的尖括号片段被 MCP 读路径**整个丢弃**(不是转义,无从解码回来),判据与处置见「读数陷阱」判截断行;写侧剥除(HTML 注释、tag
-  形状片段 —— 细则见「读数陷阱」写侧行)是**真实存储损耗**,⛔ 两类不并成一条「API 会改 body」,写后回读因此必做;实体归属(MCP 还是 GitHub API)与 `&amp;` 类未实测。
+- **MCP `issue_read` 的 body 实体转义是纯读侧伪影**(撇号/引号/尖括号成数字实体;comments 原样),存储体是明文,**先解码实体再写回**往返实测安全(无双重转义)—— 腐蚀 body 的恰是把转义读数原样回写;⚠️ 但读侧**并非一律可逆** —— 行内反引号里的尖括号片段被 MCP 读路径**整个丢弃**(不是转义,无从解码回来),判据与处置见「读数陷阱」判截断行;写侧剥除(HTML 注释、tag 形状片段 —— 细则见「读数陷阱」写侧行)是**真实存储损耗**,⛔ 两类不并成一条「API 会改 body」,写后回读因此必做;实体归属(MCP 还是 GitHub API)与 `&amp;` 类未实测。
 - **`Blocked-by:` 行归 BODY(单通道反向索引)**:追加按上条「解码后写回」执行;历
   史上寄放在评论里的行按同程序**增量**回填(⛔ 不搞批量突击 —— 限流压力);解锁扫
   描只 grep body,⛔ 不加常设评论读;旧「连评论一起扫(`in:comments`)」提示作废,扫描走直读(`list_issues` + `issue_read` 读 body)。

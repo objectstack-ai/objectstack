@@ -238,6 +238,147 @@ function passthroughStderrLines(text) {
 }
 
 // ---------------------------------------------------------------------------
+// The POPULATION: what this gate is going to grade, and the two ways that
+// question can fail before a single bundle is compared (#11647).
+// ---------------------------------------------------------------------------
+
+/**
+ * The directory the population is walked from. Repo-relative ON PURPOSE — it is
+ * the spelling every message here is written in, exactly as `CLI` and the
+ * documented `--out=` are, and `atRepoRoot` is the one seam that turns it into a
+ * path on disk. The same division cli-build-prerequisite.mjs states for its own
+ * vocabulary (#11394), and check-i18n-coverage.mjs for its `at()` (#10907).
+ */
+const PACKAGES_DIR = 'packages';
+
+/**
+ * The repo root as a cwd for the child extractor. Taken from the SHARED seam
+ * rather than derived again from `import.meta.url`: this file already imports
+ * `atRepoRoot`, and a second derivation two lines from the first is the
+ * duplication #11394 removed when it exported this one.
+ */
+const REPO_ROOT = atRepoRoot('.');
+
+/**
+ * A population problem is never fixed by building the CLI, so it must not
+ * inherit `reportPrerequisiteNotMet`'s default `fix`. Prescribing a rebuild for
+ * a missing `packages/` is the confident-wrong-diagnosis shape #5862 removed.
+ */
+const POPULATION_FIX = `check out this repository — this gate reads ${PACKAGES_DIR}/ from its own location, not from the cwd`;
+
+/**
+ * Every extract config in the repo, repo-relative and sorted — from ANY cwd.
+ *
+ * `findExtractConfigs`'s first parameter is its ABSOLUTE walk root; its own
+ * docstring says so ("Every extract config under `absDir`"), and the module's
+ * other consumer — scripts/pm/dispatch-gates.mjs — has always passed one
+ * (`findExtractConfigs(join(ROOT, 'packages'), 'packages')`). This gate passed
+ * the repo-relative vocabulary word for BOTH parameters, so the walk landed on
+ * `<cwd>/packages`: at the repo root that is the right directory by
+ * coincidence, and from anywhere else `readdirSync` threw an uncaught
+ * `ENOENT … scandir 'packages'` with a `node:fs` stack (#11647).
+ *
+ * The anchor goes HERE and not in the shared module: the module's contract is
+ * already correct and already honoured by its other caller, so moving the
+ * anchor into it would silently re-root a second consumer's population — the
+ * defect this gate family keeps paying for, in reverse.
+ *
+ * Note the direction, because it is not #10907's: that stack is LOUD. The cost
+ * was a wrong first diagnosis (a reader sent to node's filesystem module), not
+ * a false pass. What makes it worth fixing anyway is that it bypassed every
+ * worded channel this gate owns — #5217, #7681 and `reportPrerequisiteNotMet`
+ * exist precisely so an environment fact never reaches the reader as a content
+ * verdict, and an uncaught throw reaches them as neither.
+ */
+function discoverExtractConfigs() {
+  return findExtractConfigs(atRepoRoot(PACKAGES_DIR), PACKAGES_DIR)
+    .map((c) => c.rel)
+    .sort();
+}
+
+/**
+ * The detail for a walk that threw. Pure, so `--self-test` can pin the one
+ * property that matters: it says the checkout is broken, NOT that the reader
+ * stood in the wrong place — post-#11647 the cwd cannot cause this.
+ */
+function unreadablePopulationDetail(err) {
+  const message = String(err?.message ?? err);
+  return [
+    `Walking for extract configs failed before any bundle was compared:`,
+    ``,
+    `  ${message.length > 160 ? `${message.slice(0, 160)}…` : message}`,
+    ``,
+    `This gate resolves \`${PACKAGES_DIR}/\` against its OWN location rather than the cwd, so`,
+    `this is not a "run it from the repo root" problem — the directory is missing or`,
+    `unreadable in the checkout this script lives in:`,
+    ``,
+    `  ${atRepoRoot(PACKAGES_DIR)}`,
+  ];
+}
+
+/**
+ * Why the population is unusable, or `null`. Pure over an already-walked list,
+ * so `--self-test` drives both directions — the shape every other classifier in
+ * this file has.
+ *
+ * TWO causes, and only ONE of them is a prerequisite. Keeping them apart is the
+ * whole of this function:
+ *
+ *   - an EMPTY POPULATION is an environment fact, and refusing it is #4690's
+ *     rule: a scan that found nothing must never render as a pass. #10907 had
+ *     to re-learn that one file over, where an unanchored walk came back empty
+ *     and the gate printed `OK (0 config(s))` and exited 0. This gate has
+ *     always exited 1 here, so anchoring the walk did not introduce the guard —
+ *     but anchoring it WITHOUT this check would have converted #11647's loud
+ *     crash into exactly that silent green, which is strictly worse than the
+ *     bug being fixed.
+ *
+ *     No legitimate tree of this repo has zero: `lint.yml` runs this gate
+ *     because packages here ship translation bundles, and a checkout with none
+ *     is not one this gate can grade. So the condition is the plain `=== 0`,
+ *     and it is stated here rather than assumed.
+ *
+ *   - a FILTER that matched nothing is a typo in an argument the developer just
+ *     typed. It is not an environment fact: it must not borrow the "nothing was
+ *     checked" apparatus, must not prescribe a rebuild, and must not describe a
+ *     repository that is fine as broken. Before #11647 both causes shared one
+ *     sentence, so `--filter=platform_objects` for `platform-objects` read as a
+ *     repo with no i18n configs at all.
+ */
+function populationVerdict(population, activeFilter) {
+  if (population.length === 0) {
+    return {
+      prerequisite: true,
+      headline: `this gate has no population — no extract config exists under \`${PACKAGES_DIR}/\``,
+      detail: [
+        `The walk reached \`${PACKAGES_DIR}/\` and came back empty, so there is nothing to compare.`,
+        `Every package that ships a translation bundle documents its extract in`,
+        `\`${PACKAGES_DIR}/<pkg>/scripts/i18n-extract.config.ts\`, and CI runs this gate because some do.`,
+        ``,
+        `Walked: ${atRepoRoot(PACKAGES_DIR)}`,
+        ``,
+        `Reported as a prerequisite rather than as a pass on purpose (#4690): an empty`,
+        `scan rendered as OK is a gate that has stopped grading without saying so.`,
+      ],
+    };
+  }
+  if (activeFilter && !population.some((c) => c.includes(activeFilter))) {
+    return {
+      prerequisite: false,
+      headline: `--filter=${activeFilter} matched none of the ${population.length} extract config(s)`,
+      detail: [
+        `The repository is fine and the population was found — this is the filter, not`,
+        `the tree. \`--filter\` is a plain substring test against these repo-relative`,
+        `paths, and none of them contain that text:`,
+        ``,
+        ...population.map((c) => `  ${c}`),
+      ],
+    };
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------------
 // Self-test — the proof that each classifier can go red, and that the two
 // verdicts do not contaminate each other.
 // ---------------------------------------------------------------------------
@@ -592,14 +733,128 @@ function selfTest() {
   ).join('\n');
   expect('#7681 long evidence is truncated', longSentence.includes(`${'S'.repeat(160)}…`), 'a 400-char sentence must not be pasted whole');
 
+  // -------------------------------------------------------------------------
+  // Fifth classifier (#11647): the POPULATION — is there anything to grade, and
+  // did the walk for it land on this repo or on the caller's cwd?
+  //
+  // These are the only assertions here that can fail over a CORRECT tree in a
+  // WRONG place, which is exactly why they are worth their cost: every other
+  // classifier in this file is proven red against a recorded string, but "did
+  // this gate look at anything at all?" can only be proven by looking.
+  // -------------------------------------------------------------------------
+
+  const popCwdBefore = process.cwd();
+  let offRootPopulation;
+  let bareWalkOffRoot;
+  try {
+    process.chdir(tmpdir());
+    offRootPopulation = discoverExtractConfigs();
+    // POSITIVE CONTROL for the assertion below. Without it, "the anchored walk
+    // works off-root" is compatible with a cwd that happened to contain a
+    // `packages/` — and on a tree where the bare spelling ALSO resolved, the
+    // anchoring assertion would be proving nothing. This records what the
+    // pre-#11647 line 748 did from here: throw.
+    try {
+      findExtractConfigs(PACKAGES_DIR, PACKAGES_DIR);
+      bareWalkOffRoot = 'resolved';
+    } catch (err) {
+      bareWalkOffRoot = err.code ?? 'threw';
+    }
+  } finally {
+    process.chdir(popCwdBefore);
+  }
+  const onRootPopulation = discoverExtractConfigs();
+
+  expect(
+    '#11647 the population is CWD-independent',
+    offRootPopulation.length > 0,
+    `the walk from ${tmpdir()} found ${offRootPopulation.length} config(s) — the population is still ` +
+      "resolved CWD-relatively, which is the defect: off-root the gate cannot start at all",
+  );
+  expect(
+    '#11647 …and finds exactly the population the root does',
+    offRootPopulation.join('\n') === onRootPopulation.join('\n'),
+    `off-root found ${offRootPopulation.length} config(s), on-root ${onRootPopulation.length} — ` +
+      'anchoring must not change WHAT is scanned',
+  );
+  expect(
+    '#11647 …spelled repo-relative, as every message and the child argv are',
+    offRootPopulation.every((c) => !c.startsWith('/') && !c.includes(REPO_ROOT)),
+    `absolute paths would leak into the rerun command and the extractor argv; got ${JSON.stringify(offRootPopulation.slice(0, 2))}`,
+  );
+  expect(
+    '#11647 …and the bare spelling demonstrably would not have',
+    bareWalkOffRoot === 'ENOENT',
+    `the pre-fix spelling did not fail from ${tmpdir()} (got ${bareWalkOffRoot}), so the assertions above ` +
+      'prove nothing about anchoring',
+  );
+
+  // #4690, carried over from #10907: an empty population is a REFUSAL. Anchoring
+  // a scan without this trades a loud crash for a silent green.
+  const emptyVerdict = populationVerdict([], '');
+  expect('#4690 an empty population is refused', !!emptyVerdict && emptyVerdict.prerequisite === true, `got ${JSON.stringify(emptyVerdict)}`);
+  expect(
+    '#4690 …through the WORDED channel, not as a pass',
+    !!emptyVerdict && /no population|came back empty/.test(`${emptyVerdict.headline}\n${emptyVerdict.detail.join('\n')}`),
+    'the refusal has to say in words that nothing was gradeable',
+  );
+  expect(
+    '#4690 …and does not prescribe the CLI build, which would change nothing',
+    POPULATION_FIX !== CLI_BUILD_FIX,
+    'a population problem is not fixed by rebuilding the CLI',
+  );
+
+  // The other cause, and the reason `=== 0` alone is not the whole condition: a
+  // filter that matched nothing is a typo, not an environment fact.
+  const filterVerdict = populationVerdict(onRootPopulation, 'no-such-package');
+  expect('#11647 an unmatched --filter is refused', !!filterVerdict, 'a filter matching nothing must not render as OK (0 package(s))');
+  expect(
+    '#11647 …but NOT as a prerequisite',
+    !!filterVerdict && filterVerdict.prerequisite === false,
+    'a typo in an argument the developer just typed is not an environment fact, and must not print "nothing was checked"',
+  );
+  expect(
+    '#11647 …and the two population verdicts do not contaminate each other',
+    !!emptyVerdict &&
+      !!filterVerdict &&
+      !emptyVerdict.headline.includes('--filter') &&
+      !filterVerdict.detail.join('\n').includes('came back empty') &&
+      filterVerdict.detail.join('\n').includes('The repository is fine'),
+    'each cause must name itself: a broken checkout and a mistyped filter send the reader to different places',
+  );
+  expect(
+    '#11647 a healthy population yields no verdict at all',
+    populationVerdict(onRootPopulation, '') === null && populationVerdict(onRootPopulation, 'platform-objects') === null,
+    'the classifier must be silent over the tree CI actually runs on',
+  );
+
+  // The walk-threw path: it must blame the CHECKOUT, never the caller's cwd —
+  // post-#11647 the cwd cannot cause it, so a message that says "run from the
+  // repo root" would send the reader somewhere that changes nothing.
+  const unreadable = unreadablePopulationDetail(Object.assign(new Error("ENOENT: no such file or directory, scandir 'packages'"), { code: 'ENOENT' })).join('\n');
+  expect('#11647 the unreadable-walk detail carries the evidence', unreadable.includes("scandir 'packages'"), `a conclusion with no reading under it is not auditable; got ${JSON.stringify(unreadable)}`);
+  expect(
+    '#11647 …names the tree it actually walked',
+    unreadable.includes(atRepoRoot(PACKAGES_DIR)),
+    'the reader has to be told WHICH packages/ was missing, not merely that one was',
+  );
+  expect(
+    '#11647 …and does not blame the cwd',
+    /not a "run it from the repo root" problem/.test(unreadable),
+    'after the anchor the cwd cannot cause this, and a wrong remedy costs the reader the diagnosis again',
+  );
+  const longWalkError = unreadablePopulationDetail(new Error('E'.repeat(400))).join('\n');
+  expect('#11647 long walk errors are truncated', longWalkError.includes(`${'E'.repeat(160)}…`), 'a 400-char message must not be pasted whole');
+
   if (failures.length) {
     console.error(`✗ check:i18n --self-test — ${failures.length} failure(s)\n`);
     for (const f of failures) console.error(`  ${f}`);
     process.exit(1);
   }
   console.log(
-    '✓ check:i18n --self-test — bundle-drift, undeclared-authoring-key, missing-CLI-build and ' +
-      'stale-workspace-dist classifiers all go red, and stay distinct.',
+    '✓ check:i18n --self-test — bundle-drift, undeclared-authoring-key, missing-CLI-build, ' +
+      'stale-workspace-dist and empty-population classifiers all go red, and stay distinct; ' +
+      'the population walk is CWD-independent.',
   );
 }
 
@@ -745,14 +1000,31 @@ function checkCliBuildPrerequisite() {
 
 checkCliBuildPrerequisite();
 
-const configs = findExtractConfigs('packages', 'packages')
-  .map((c) => c.rel)
-  .sort()
-  .filter((c) => !filter || c.includes(filter));
-if (configs.length === 0) {
-  console.error(`check-i18n-bundles: no extract configs matched${filter ? ` --filter=${filter}` : ''}`);
+let population;
+try {
+  population = discoverExtractConfigs();
+} catch (err) {
+  // Before #11647 this threw straight out of the module and printed a `node:fs`
+  // stack. It is a worded verdict now, through the same channel the other two
+  // prerequisites already use.
+  reportPrerequisiteNotMet(`this gate's population could not be enumerated`, unreadablePopulationDetail(err), {
+    fix: POPULATION_FIX,
+  });
+}
+
+const populationProblem = populationVerdict(population, filter);
+if (populationProblem?.prerequisite) {
+  reportPrerequisiteNotMet(populationProblem.headline, populationProblem.detail, { fix: POPULATION_FIX });
+}
+if (populationProblem) {
+  // NOT a prerequisite: the repo is fine and the population was found, so this
+  // must not borrow the "nothing was checked" apparatus or prescribe a rebuild.
+  console.error(`\ncheck-i18n-bundles: ${populationProblem.headline}\n`);
+  for (const line of populationProblem.detail) console.error(line ? `  ${line}` : '');
   process.exit(1);
 }
+
+const configs = population.filter((c) => !filter || c.includes(filter));
 
 const drifted = [];
 const broken = [];
@@ -760,14 +1032,19 @@ const broken = [];
 const undeclared = [];
 for (const [index, config] of configs.entries()) {
   const pkg = config.replace(/^packages\//, '').replace(/\/scripts\/i18n-extract\.config\.ts$/, '');
-  const flags = flagsFromDocstring(config);
+  // `config` is repo-relative VOCABULARY — it is what every message below and the
+  // rerun command print, and what the child is handed as argv. The READ of it
+  // goes through the one seam (#11647).
+  const flags = flagsFromDocstring(atRepoRoot(config));
   const out = flags.find((f) => f.startsWith('--out='));
   if (!out) {
     broken.push(`${pkg}: its docstring documents no --out=<dir>, so the gate cannot tell where the bundles live`);
     continue;
   }
   const outDir = out.slice('--out='.length);
-  if (!existsSync(outDir)) {
+  // Same seam: `--out=` is documented repo-relative (`--out=packages/<pkg>/src/...`),
+  // so asking the filesystem about it unanchored asks about the cwd (#11647).
+  if (!existsSync(atRepoRoot(outDir))) {
     broken.push(`${pkg}: documented --out directory does not exist: ${outDir}`);
     continue;
   }
@@ -782,6 +1059,13 @@ for (const [index, config] of configs.entries()) {
   const run = spawnSync(process.execPath, args, {
     encoding: 'utf8',
     maxBuffer: 64 * 1024 * 1024,
+    // `CLI`, `config` and the documented `--out=` are ALL repo-relative, so the
+    // child's cwd is what resolves them — anchoring it is what makes an off-root
+    // run extract the real bundles instead of failing nine times with an
+    // environment fact dressed as `N bundle problem(s)` (#11647). The same line,
+    // for the same reason, that check-i18n-coverage.mjs carries over its own
+    // spawn (#10907).
+    cwd: REPO_ROOT,
   });
   if (run.error) {
     broken.push(`${pkg}: could not run the extractor — ${run.error.message}`);

@@ -20,9 +20,10 @@ import { SnakeCaseIdentifierSchema } from '../shared/identifiers.zod';
 // tombstone below.
 import { I18nLabelSchema } from './i18n.zod';
 // `ResponsiveConfigSchema` is no longer imported here: `widgets[].responsive`
-// was retired (#4876). The shape itself is NOT removed — it stays live on
-// `page.components[].responsive` (`page.zod.ts`), whose renderer really does
-// read it (objectui `useResponsiveConfig`). See the tombstone below.
+// was retired (#4876). At the time the shape survived on
+// `page.components[].responsive`; #11027 then measured THAT carrier dead too
+// (zero callers of either objectui implementation) and retired the key and the
+// shape whole. See the tombstone below.
 
 /**
  * Color variant for dashboard widgets (e.g., KPI cards).
@@ -585,21 +586,28 @@ export const DashboardWidgetSchema = lazySchema(() => strictObject({
   // `responsive` REMOVED (#4876): authorable and inert, exactly like the
   // same-named `view.responsive` retired four days earlier (#3896 close-out).
   // No objectui code read `widget.responsive` — DashboardRenderer /
-  // DashboardEditor / plugin-designer mention it only in comments, and the one
-  // real per-breakpoint consumer (`useResponsiveConfig`) is fed by
-  // `page.components[].responsive`, not by a widget. It escaped the #3896 sweep
-  // through a liveness-ledger drill gap, not on evidence: `dashboard.json`
-  // declares no `children` on `widgets`, so no widget-level key has ever been
-  // classified (#4956). The shared `ResponsiveConfigSchema` survives untouched
-  // via `page.zod.ts` — only this embed goes.
+  // DashboardEditor / plugin-designer mention it only in comments. It escaped
+  // the #3896 sweep through a liveness-ledger drill gap, not on evidence:
+  // `dashboard.json` declared no `children` on `widgets`, so no widget-level
+  // key had ever been classified (#4956).
+  //
+  // CORRECTED (#11027): this tombstone used to redirect authors to
+  // `page.components[].responsive` as the live home of the shared
+  // `ResponsiveConfig` shape, on the belief that objectui `useResponsiveConfig`
+  // read it. Measured 2026-08 across both repos, that hook (and the second
+  // implementation, `ResponsiveProtocol`) had ZERO callers — the prescribed
+  // destination applied no breakpoint behaviour either. The page key and the
+  // shape are retired too (`page.zod.ts` tombstone, ADR-0049 D2); the live
+  // per-breakpoint channel is `responsiveStyles` (ADR-0065).
   responsive: retiredKey(
     '`dashboard.widgets[].responsive` was removed in @objectstack/spec 17.0.0 (#4876, ADR-0049 D2) — ' +
     'no renderer ever read it, so per-widget breakpoint overrides were never applied: the value ' +
     'parsed, validated, and then did nothing. The dashboard grid reflows by its own layout rules ' +
     '(`columns` + `gap` on the dashboard, the `layout` box on each widget). Delete the key. ' +
-    'The shared `ResponsiveConfig` shape is NOT gone — it stays live on `page.components[].responsive`, ' +
-    'which objectui `useResponsiveConfig` really does read; move the layout there if you need ' +
-    'breakpoint behaviour today. ' +
+    'This message used to point at `page.components[].responsive` as the live home of the shared ' +
+    '`ResponsiveConfig` shape; that key was measured equally unread and removed with the shape ' +
+    'in #11027. For breakpoint behaviour that IS applied, use `responsiveStyles` on a page ' +
+    'component (ADR-0065) — per-breakpoint CSS maps compiled to id-scoped CSS at render. ' +
     'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
   ),
 

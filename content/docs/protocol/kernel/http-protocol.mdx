@@ -43,7 +43,7 @@ Host: api.acme.com
 **Response:**
 ```json
 {
-  "version": "v1",
+  "version": "<the serving artifact's version>",
   "name": "ObjectStack API",
   "apiName": "ObjectStack API",
   "environment": "development",
@@ -78,9 +78,14 @@ Host: api.acme.com
 
 Three things about this body are worth stating explicitly:
 
-- **`version` is the configured API version, not a product version.** The handler
-  overwrites the protocol's value with `api.version` — the same string that forms the
-  path segment (`"v1"`). It is never a semantic version like `2.1.0`.
+- **`version` is the serving artifact's version, not the configured API version.** The
+  handler serves the protocol builder's own value — the `OS_RUNTIME_VERSION` stamp when a
+  deployment injects one, otherwise the resolved `@objectstack/metadata-protocol` version
+  — so a semantic version is the normal answer. It used to be overwritten with
+  `api.version` (the same `"v1"` string that forms the path segment); #11292 removed that
+  override, because the identity field then answered with the path segment the caller had
+  just typed to get there. The API version has not left this document: every `routes`
+  entry below is prefixed with the mounted base path, which is built from `api.version`.
 - **`name` is canonical; `apiName` is a deprecated alias with the same value.** Both are
   emitted today so clients pinned to the old spelling keep working; `apiName` is removed
   in **protocol 18** (#4828). Read `name`.
@@ -126,7 +131,7 @@ Host: api.acme.com
   "success": true,
   "data": {
     "name": "ObjectOS",
-    "version": "1.0.0",
+    "version": "<the serving artifact's version>",
     "environment": "production",
     "routes": {
       "data": "/api/v1/data",
@@ -160,10 +165,13 @@ Host: api.acme.com
 }
 ```
 
-`name` and `version` are the dispatcher's own build identity, not your app's name — they
-are fixed strings, so do not display them as the deployment's title. `locale` is derived
-from the registered i18n service (`getDefaultLocale()` / `getLocales()`); with no i18n
-service it degrades to `{ "default": "en", "supported": ["en"], "timezone": "UTC" }`.
+`name` and `version` are the dispatcher's own build identity, not your app's name — do
+not display them as the deployment's title. `name` is a fixed string; `version` is the
+serving artifact's version — the `OS_RUNTIME_VERSION` stamp when a deployment injects one,
+otherwise the resolved `@objectstack/runtime` version (#10993), never a hardcoded literal.
+`locale` is derived from the registered i18n service (`getDefaultLocale()` /
+`getLocales()`); with no i18n service it degrades to
+`{ "default": "en", "supported": ["en"], "timezone": "UTC" }`.
 
 `environment` is **derived from** `NODE_ENV`, not the raw value — the field is an enum
 (`production` / `sandbox` / `development`), so out-of-enum spellings are mapped rather

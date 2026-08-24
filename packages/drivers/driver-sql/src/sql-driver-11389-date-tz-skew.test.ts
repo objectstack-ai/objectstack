@@ -211,18 +211,38 @@ describe('#11389 — a Postgres `date` never becomes a JS Date', () => {
   });
 
   it('is not gated on the connect-timeout table — the two lists are not the same list', async () => {
-    // `redshift` speaks the pg wire protocol but has no connect-timeout knob,
-    // so it is absent from DIALECT_CONNECT_TIMEOUT. Measured while fixing
-    // #11389: with the session pins reached only through that table's early
-    // return, redshift silently opted out of a fix it needs. This asserts the
-    // two concerns really are independent — no timeout injected, pin applied.
+    // ⚠️ This case used to read `redshift`'s ABSENCE from DIALECT_CONNECT_TIMEOUT
+    // as its demonstration: pin applied, no timeout injected, therefore the two
+    // concerns are independent. #11784 gave redshift the row it was missing, so
+    // that vehicle is gone. The timeout assertion is INVERTED here rather than
+    // deleted, because the fact this case exists to pin is #11389's — a pg-wire
+    // client reaches the calendar-day parser hook — and that is unchanged.
     const rec = recordingPgConnection();
     const driver = make({ client: 'redshift', connection: 'postgres://u:p@host:5439/d' });
-    // knex parses a URL connection into its own object either way, so the
-    // readable signal is that no timeout key was injected into it.
-    expect((driver as any).knex.client.config.connection.connectionTimeoutMillis).toBeUndefined();
+    expect((driver as any).knex.client.config.connection.connectionTimeoutMillis).toBe(10_000);
     await runAfterCreate(driver, rec.connection);
     expect([...rec.registered.keys()].sort((a, b) => a - b)).toEqual([OID_DATE, OID_DATE_ARRAY]);
+  });
+
+  it('tripwire: a session-pinned client with no connect-timeout row re-arms the early return', () => {
+    // The hazard `withConnectBound`'s note describes needs a client that needs a
+    // session pin but has no timeout row. #11784 removed the last one, so there
+    // is nothing to observe — which is exactly why this is a TRIPWIRE and not an
+    // assertion about behaviour. It goes red the moment someone adds such a
+    // client, and points them at the note before they "simplify" the
+    // fall-through into an early return that would silently opt it out.
+    const timeoutTable = Object.keys((SqlDriver as any).DIALECT_CONNECT_TIMEOUT);
+    const sessionPinned = [
+      ...((SqlDriver as any).POSTGRES_WIRE_CLIENTS as ReadonlySet<string>), // #11389 calendar-day pin
+      ...((SqlDriver as any).MYSQL_EMIT_CLIENTS as ReadonlySet<string>),    // #3942 UTC session pin
+    ];
+    expect(
+      sessionPinned.filter((c) => !timeoutTable.includes(c)),
+      'A client that needs a session pin now has no DIALECT_CONNECT_TIMEOUT row. That is ' +
+      'ALLOWED — but it re-arms the hazard documented inside withConnectBound: the session ' +
+      'pins must stay reachable when `dialect` is falsy. Confirm the fall-through is intact, ' +
+      'then update this expectation and refresh that note with the live example you just made.',
+    ).toEqual([]);
   });
 
   it('chains a host-supplied afterCreate rather than replacing it', async () => {

@@ -68,6 +68,7 @@ import type {
     GetMetaItemRequest,
     GetMetaItemCachedRequest,
     GetMetaItemLayeredRequest,
+    PublishMetaItemRequest,
 } from '@objectstack/spec/api';
 // [#8073] The closed ADR-0112 error vocabulary, so the explain family's single
 // refusal emitter types its `code` parameter as the vocabulary rather than as
@@ -192,6 +193,7 @@ import { logError, logWarn } from './log.js';
 // surface `./rest-server.js` has always offered is byte-identical.
 import {
     mapDataError,
+    sandboxBusinessMessage,
     sendThrownError,
     sendDeclaredFault,
     sendFieldVisibilityFault,
@@ -3619,12 +3621,50 @@ export class RestServer {
                     logError('[REST] openapi.json endpoint enrichment skipped:', err?.message ?? err);
                 }
 
-                // Surface the runtime version so consumers don't pin to
-                // the spec package's compile-time version.
+                // `info.version` carries the API version identifier this
+                // deployment declares (`api.version`, which `normalizeConfig`
+                // defaults to `'v1'`) — the same value that builds the default
+                // mount (`${basePath}/${version}` -> `/api/v1`), though a
+                // deployment that sets `apiPath` moves the mount without
+                // moving this.
+                //
+                // It is deliberately NOT the runtime version, and the comment
+                // this replaces ("surface the runtime version so consumers
+                // don't pin to the spec package's compile-time version") had it
+                // backwards in both halves. OpenAPI 3.1 defines the field as
+                // "the version of the OpenAPI document (which is distinct from
+                // the OpenAPI Specification version or the API implementation
+                // version)" — the runtime version IS the implementation
+                // version, the one reading the field's own definition rules
+                // out. That fact is not lost: `{basePath}/discovery` and
+                // `/health` both answer with it, derived from
+                // `OS_RUNTIME_VERSION` (#10993/#11235/#11292), so a caller who
+                // wants the serving artifact asks a producer that means it.
+                //
+                // No `|| enriched.info.version` fallback. It was reachable,
+                // not dead — and NOT because the contract allows an empty
+                // version. `RestApiConfigSchema` declares
+                // `version: z.string().regex(/^[a-zA-Z0-9_\-\.]+$/)`, which
+                // refuses `''`. Nothing ever runs it: this config arrives
+                // through casts on both hops (`config.api as any` in
+                // `rest-api-plugin.ts`, then `as Partial<RestApiConfig>` in
+                // `normalizeConfig` below), the plugin declares no
+                // `configSchema` for the kernel's validator to parse, and the
+                // repo's only `RestApiConfigSchema.parse` parses `{}` in a QA
+                // helper. So the regex never executes on a deployment path,
+                // `??` is the only guard left, and `''` walks past it —
+                // whereupon the fallback published the spec package's
+                // compile-time version, the one value the old comment claimed
+                // this line existed to keep off the wire. A falsy
+                // `api.version` now serves itself, so a misconfigured
+                // deployment reads as misconfigured instead of silently
+                // switching this field to a different kind of fact. The
+                // unenforced regex is a defect in its own right, filed
+                // separately rather than fixed here.
                 if (enriched.info) {
                     enriched.info = {
                         ...enriched.info,
-                        version: this.config.api.version || enriched.info.version,
+                        version: this.config.api.version,
                     };
                 }
 
@@ -5937,7 +5977,7 @@ export class RestServer {
                         return;
                     }
                     const p = await this.resolveProtocol(environmentId, req);
-                    if (!(p as any).publishMetaItem) {
+                    if (!p.publishMetaItem) {
                         res.status(501).json({
                             error: 'Publish operation not supported by protocol implementation',
                         });
@@ -6021,34 +6061,38 @@ export class RestServer {
                         // org-scope comment for the measurement.
                         canonicalMetaUrlType(req.params.type), ctx?.tenantId,
                     );
-                    // [#10350] The cast stays, and what it is load-bearing
-                    // FOR is worth stating so this is not re-filed as a missing
-                    // contract. It is NOT hiding the request shape: measured by
-                    // deleting it and running `pnpm --filter @objectstack/rest
-                    // typecheck`, the compiler answers
+                    // [#11145] The `(p as any)` cast this call carried came off
+                    // when `MetadataProtocol` declared `publishMetaItem` (#11006,
+                    // maintainer ruling 2026-08-22, option B). What the cast was
+                    // load-bearing FOR is recorded because it is counter-intuitive
+                    // and was measured, not assumed: deleting it while the member
+                    // was undeclared answered
                     //   `TS2339: Property 'publishMetaItem' does not exist on
                     //    type 'RestProtocol'`
-                    // — not a TS2353 about an unknown key. `publishMetaItem` is
-                    // an ADR-0076 D9 SERVER-ONLY extension: `RestProtocol` is
-                    // `DataProtocol & MetadataProtocol`, and `MetadataProtocol`
-                    // (`packages/spec`) declares no such member — only
-                    // `PublishMetaItemResponseSchema` (#7294) exists there, with
-                    // no request schema and no interface entry. So the cast is
-                    // feature detection, exactly like the `auditMetaItem` twin
-                    // a few hundred lines up, and the same measurement holds
-                    // AFTER #10350 declared `packageId` on the implementation's
-                    // request type: that type lives in
-                    // `@objectstack/metadata-protocol`, which `packages/rest`
-                    // deliberately does not depend on.
+                    // — NOT a `TS2353` about an unknown key. The cast was feature
+                    // detection for an ADR-0076 D9 server-only extension, so only
+                    // declaring the member could retire it; widening the
+                    // implementation's own request type in
+                    // `@objectstack/metadata-protocol` (which this package
+                    // deliberately does not depend on) never could, and #10350
+                    // measured exactly that.
                     //
-                    // Removing it therefore needs `MetadataProtocol` to declare
-                    // the member (plus a `PublishMetaItemRequest` to hang the
-                    // #9741 `TransportScopedMetaRequest` typing off) — a
-                    // `packages/spec` contract decision, promoting an undeclared
-                    // optional extension into a declared one, which is the same
-                    // call the 501 refusal above declines to pre-empt. Filed
-                    // rather than taken here.
-                    const result = await (p as any).publishMetaItem({
+                    // What replaces it is the point of the exercise, not a
+                    // side effect: the literal below is compiled against the spec
+                    // contract through the #9741 `TransportScopedMetaRequest`
+                    // wrapper, so an undeclared key here is a COMPILE ERROR
+                    // (`TS2353`, measured) instead of a payload member no contract
+                    // has ever seen. `environmentId` is the transport-level
+                    // routing key that wrapper layers on — ⛔ never a protocol
+                    // key; a key that belongs on the request belongs in the spec
+                    // schema.
+                    //
+                    // The 501 feature-detection guard above STAYS. The member is
+                    // declared OPTIONAL (ADR-0076 D9 promotion is additive to a
+                    // shipped contract, and a kernel may not implement the
+                    // promotion door at all), and that same guard is what narrows
+                    // it to callable here.
+                    const publishRequest: TransportScopedMetaRequest<PublishMetaItemRequest> = {
                         type: req.params.type,
                         name: req.params.name,
                         organizationId,
@@ -6056,7 +6100,8 @@ export class RestServer {
                         ...(actor ? { actor } : {}),
                         ...(message ? { message } : {}),
                         ...(packageId ? { packageId } : {}),
-                    });
+                    };
+                    const result = await p.publishMetaItem(publishRequest);
                     res.json(result);
                 } catch (error: any) {
                     handleRouteError(res, error);
@@ -9040,6 +9085,29 @@ export class RestServer {
                     res.json(result);
                 } catch (error: any) {
                     const msg = String(error?.message ?? error ?? '');
+                    // [#11588] The text addressed to the CALLER, which for a
+                    // sandboxed hook refusal is the business message rather than
+                    // the `hook '<name>' threw: Error: …` QuickJS debug wrapper
+                    // sitting on `.message`. This route builds its envelope by
+                    // hand and shares no branch with `classifyDataError`'s
+                    // unwrap door or with `resolveErrorResponse`'s passthrough,
+                    // so it shipped the wrapper on every hook refusal while the
+                    // single-row `/data` routes served the author's sentence —
+                    // one refusal, two wordings, decided by which face caught it.
+                    // {@link sandboxBusinessMessage} is imported rather than
+                    // re-derived precisely so a third answer cannot appear here.
+                    //
+                    // Deliberately scoped to what the CLIENT reads. `logError`
+                    // below still receives the whole error, wrapper and all —
+                    // that is the half the wrapper was written for. And
+                    // `looksLikeInternalErrorLeak` below still reads the RAW
+                    // `msg`: feeding it the unwrapped text could only make it
+                    // withhold LESS, and a leak predicate must never be handed a
+                    // narrower input than the one it was calibrated on.
+                    //
+                    // Neither arm's STATUS moves. ① keeps answering the declared
+                    // 4xx and ③ keeps answering 500; only the sentence changes.
+                    const clientMsg = sandboxBusinessMessage(error) ?? msg;
                     // ── [#5352] ① The ADR-0112 envelope, read FIRST ──────────
                     // A thrown error that already carries `code` + a 4xx
                     // `status` has ANSWERED the classification question. This
@@ -9071,7 +9139,7 @@ export class RestServer {
                     const envelopeStatus = typeof error?.status === 'number' ? error.status : undefined;
                     const envelopeCode = typeof error?.code === 'string' && error.code.length > 0 ? error.code : undefined;
                     if (envelopeStatus !== undefined && envelopeStatus >= 400 && envelopeStatus < 500 && envelopeCode) {
-                        return res.status(envelopeStatus).json({ code: envelopeCode, message: msg.slice(0, 1000) });
+                        return res.status(envelopeStatus).json({ code: envelopeCode, message: clientMsg.slice(0, 1000) });
                     }
                     // ── ② … is GONE. The message-sniffing list is retired ────
                     // [#5367] `/analytics/dataset/query` used to classify six
@@ -9159,7 +9227,7 @@ export class RestServer {
                     logError('[REST] Analytics dataset query error:', error);
                     const outward = declaresServerFault(error) || looksLikeInternalErrorLeak(msg)
                         ? INTERNAL_ERROR_MESSAGE
-                        : msg.slice(0, 500);
+                        : clientMsg.slice(0, 500);
                     res.status(500).json({ code: 'ANALYTICS_QUERY_FAILED', error: outward });
                 }
             },

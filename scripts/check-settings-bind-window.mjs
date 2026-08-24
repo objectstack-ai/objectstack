@@ -107,7 +107,8 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import ts from 'typescript';
+import { requireDefaultExport } from './import-prerequisite.mjs';
+const ts = await requireDefaultExport('typescript', () => import('typescript'), import.meta.url);
 import { parseSourceFile } from './ts-parse.mjs';
 
 const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..');
@@ -143,25 +144,22 @@ const PREFILTER_TOKENS = [...SERVICE_LOOKUP_CALLEES, 'providesServices'];
  * This ledger is shrink-only in both directions: an entry that stops being a
  * problem is an ERROR here (delete it in the PR that fixes it), and a new
  * offender cannot be admitted without editing this file. It exists because
- * #11045 is the GATE card — the two live readers below were found by its
- * step-1 measurement and routed to their owning lanes rather than fixed here,
- * so landing the gate without them means landing it red.
+ * #11045 is the GATE card — the two live readers it carried were found by that
+ * card's step-1 measurement and routed to their owning lanes rather than fixed
+ * here, so landing the gate without them would have meant landing it red.
  *
- * Keyed by plugin id + verdict, because the two entries need DIFFERENT repairs
+ * **It is now EMPTY, and that is the burned-down state, not a disabled gate.**
+ * Both entries were deleted by the PRs that repaired their sites —
+ * `com.objectstack.auth` (#11579, the ordering declaration) and
+ * `com.objectstack.mcp` (#11580, the read moved to `kernel:bootstrapped`). An
+ * empty array suppresses nothing, so every pre-bind read the scan finds from
+ * here on is reported. Re-admitting one is a ratchet weakening and needs the
+ * same scrutiny as raising any other baseline in this repo.
+ *
+ * Keyed by plugin id + verdict, because two entries can need DIFFERENT repairs
  * and a single "known bad" bucket would let one be closed by the other's fix.
  */
-const KNOWN_PRE_BIND_READS = [
-  {
-    plugin: 'com.objectstack.mcp',
-    verdict: 'unfixable-by-declaration',
-    issue: '#11580',
-    note:
-      'MCPServerPlugin.start() resolves settings on the stdio auto-start path and immediately ' +
-      'awaits resolveLocalizationContext with it, once for the life of the transport (#7279). ' +
-      'A start()-body read is inside the window under EVERY composition order, so no ' +
-      'declaration repairs it — the read has to move or become lazy.',
-  },
-];
+const KNOWN_PRE_BIND_READS = [];
 
 // ── Discovery ────────────────────────────────────────────────────────────────
 

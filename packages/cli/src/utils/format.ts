@@ -1005,6 +1005,66 @@ export interface AuthoringAdvisory {
 }
 
 /**
+ * The pointer a truncation notice offers when — and ONLY when — the command's
+ * own `--json` payload really does carry the list that was cut.
+ *
+ * Spelled once because the honesty of the sentence is per-SITE, not per-word.
+ * `--json` publishes a different payload at every exit in every command, and
+ * a notice pointing at one that omits its list is worse than a silent cut: it
+ * sends the author down a path that returns the same truncated view. So each
+ * call site below passes this only after its payload has been read, and the
+ * sites whose list `--json` cannot carry — `os init` declares no `--json`
+ * flag at all — pass `null` and state the remainder with no pointer.
+ */
+export const JSON_FULL_LIST_REMEDY = 're-run with --json for the full list';
+
+/**
+ * How many entries a diagnostic list renders in full before it switches to
+ * the withheld-count line — the value every 50-capped render in the CLI's
+ * `build` / `validate` / `init` diagnostics has always used.
+ */
+export const DIAGNOSTIC_PRINT_LIMIT = 50;
+
+/**
+ * Say that a rendered list was cut, and by exactly how much.
+ *
+ * ONE implementation of that sentence, deliberately. #11529 closed the
+ * silence at the author-time advisory list; #11642 re-derived the population
+ * from the DEFECT — a truncating render with no remainder line — and found
+ * nine more across `compile` / `validate` / `init`. Nine copies of the
+ * wording would be nine chances for them to drift apart, and the one thing a
+ * reader must be able to trust is that a report which says nothing about a
+ * remainder has none.
+ *
+ * The defect is the SILENCE, not the cap. Truncated output carrying no notice
+ * is indistinguishable from complete output, so an author who reads it and
+ * sees no further problems has read a list that stopped early. Hence the pair
+ * this function encodes: over the cap the exact remainder is named, at or
+ * under it NOTHING is printed — the absence is what makes the presence
+ * informative, so both halves are pinned.
+ *
+ * `remedy` is a path to the complete output. It is optional, and it is the
+ * caller's job to have verified it: see {@link JSON_FULL_LIST_REMEDY}.
+ */
+export function printTruncationNotice(options: {
+  /** How many entries the list had. */
+  total: number;
+  /** How many of them the caller actually rendered. */
+  shown: number;
+  /** What the entries are, already plural — e.g. `author-time warning(s)`. */
+  noun: string;
+  /** A complete-output path that WORKS for this list, or `null` for none. */
+  remedy?: string | null;
+}): void {
+  const withheld = options.total - options.shown;
+  if (withheld <= 0) return;
+  printWarning(
+    `… and ${withheld} more ${options.noun} not shown (${options.shown} of ${options.total})` +
+      (options.remedy ? ` — ${options.remedy}` : ''),
+  );
+}
+
+/**
  * How many advisories `printAuthoringAdvisories` renders in full before it
  * switches to the withheld-count line. The cap itself is not the defect it
  * guards against — see below — so it keeps the value it has always had.
@@ -1042,6 +1102,7 @@ export const AUTHORING_ADVISORY_PRINT_LIMIT = 50;
 export function printAuthoringAdvisories(
   advisories: readonly AuthoringAdvisory[],
   limit: number = AUTHORING_ADVISORY_PRINT_LIMIT,
+  remedy: string | null = JSON_FULL_LIST_REMEDY,
 ): void {
   if (advisories.length === 0) return;
 
@@ -1051,11 +1112,114 @@ export function printAuthoringAdvisories(
     console.log(chalk.dim(`    rule: ${f.rule}  at ${f.path}`));
   }
 
-  const shown = Math.min(advisories.length, limit);
-  const withheld = advisories.length - shown;
-  if (withheld > 0) {
-    printWarning(
-      `… and ${withheld} more author-time warning(s) not shown (${shown} of ${advisories.length}) — re-run with --json for the full list`,
-    );
+  // [#11642] The notice sentence now lives in ONE place. Rendering here is
+  // byte-for-byte what #11529 shipped — `printTruncationNotice` reproduces
+  // the same wording from the same three numbers — and the third parameter
+  // exists because `os init` renders this same advisory list with no `--json`
+  // face to point at.
+  printTruncationNotice({
+    total: advisories.length,
+    shown: Math.min(advisories.length, limit),
+    noun: 'author-time warning(s)',
+    remedy,
+  });
+}
+
+/**
+ * Errors and advisories are the SAME registry shape — `AuthoringFinding` in
+ * `@objectstack/lint`, split only by `severity` — so both printers take one
+ * type. The `AuthoringAdvisory` name predates the error printer below; new
+ * call sites should read this alias.
+ */
+export type AuthoringRuleFinding = AuthoringAdvisory;
+
+/**
+ * Print the GATING author-time rule failures, and name the remainder when the
+ * list was cut.
+ *
+ * Three commands rendered this identical three-line block inline, each behind
+ * its own `.slice(0, 50)` and none of them saying so (#11642): `os build`,
+ * `os validate` and `os init`'s scaffold self-test. The comment
+ * `validate.ts` carries over its own block is the reason the silence matters
+ * here and not only on the advisory path — "the command used to exit at the
+ * first failing gate, so an author with three unrelated problems fixed them
+ * in three round trips and could not see how deep the hole went". A capped
+ * list with no notice restores a smaller version of exactly that: past the
+ * cap each round of fixes reveals a new batch that reads as fresh breakage.
+ *
+ * The `hint` line is conditional, which is how `printAuthoringAdvisories` and
+ * `init` already rendered it; `compile`/`validate` printed it unconditionally.
+ * `AuthoringFinding.hint` is a required non-empty string in every rule the
+ * registry ships (checked: no rule emits an empty one), so the two forms
+ * differ on no finding this CLI can actually produce.
+ */
+export function printAuthoringRuleErrors(
+  errors: readonly AuthoringRuleFinding[],
+  options: { limit?: number; remedy?: string | null } = {},
+): void {
+  const limit = options.limit ?? DIAGNOSTIC_PRINT_LIMIT;
+  for (const f of errors.slice(0, limit)) {
+    console.log(`  • ${f.where}: ${f.message}`);
+    if (f.hint) console.log(chalk.dim(`      ${f.hint}`));
+    console.log(chalk.dim(`      rule: ${f.rule}  at ${f.path}`));
   }
+  printTruncationNotice({
+    total: errors.length,
+    shown: Math.min(errors.length, limit),
+    noun: 'author-time rule failure(s)',
+    remedy: options.remedy,
+  });
+}
+
+/** One package-doc lint issue, in the shape `collectAndLintDocs` reports. */
+export interface DocIssueRow {
+  path: string;
+  message: string;
+  rule: string;
+}
+
+/**
+ * Print package-doc (ADR-0046) errors, and name the remainder when the list
+ * was cut. Shared by `os build` and `os validate`, which ran byte-identical
+ * capped loops (#11642).
+ */
+export function printDocIssueErrors(
+  issues: readonly DocIssueRow[],
+  options: { limit?: number; remedy?: string | null } = {},
+): void {
+  const limit = options.limit ?? DIAGNOSTIC_PRINT_LIMIT;
+  for (const i of issues.slice(0, limit)) {
+    console.log(`  • ${i.path}: ${i.message}`);
+    console.log(chalk.dim(`      rule: ${i.rule}`));
+  }
+  printTruncationNotice({
+    total: issues.length,
+    shown: Math.min(issues.length, limit),
+    noun: 'package-doc error(s)',
+    remedy: options.remedy,
+  });
+}
+
+/**
+ * Print an already-formatted list as `  • <line>` bullets, and name the
+ * remainder when the list was cut.
+ *
+ * For the diagnostics whose entries are strings by the time they reach the
+ * printer: the undeclared-authoring-key findings, the access-matrix drift
+ * lines, and `--strict-body`'s refusal list (#11642). `noun` is required
+ * rather than defaulted — a notice that names the wrong thing is the same
+ * class of unhelpful as one that names nothing.
+ */
+export function printBulletList(
+  lines: readonly string[],
+  options: { noun: string; limit?: number; remedy?: string | null },
+): void {
+  const limit = options.limit ?? DIAGNOSTIC_PRINT_LIMIT;
+  for (const line of lines.slice(0, limit)) console.log(`  • ${line}`);
+  printTruncationNotice({
+    total: lines.length,
+    shown: Math.min(lines.length, limit),
+    noun: options.noun,
+    remedy: options.remedy,
+  });
 }

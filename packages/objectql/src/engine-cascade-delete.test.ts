@@ -29,9 +29,13 @@
  * `multiple: true` case (see below) and a `master_detail` declaring an explicit
  * `set_null`, which is silently resolved to `cascade`.
  *
- * Whether the spec should reject `set_null` on a `master_detail` at publish
- * time rather than dropping it at delete time is still an open question,
- * carded separately — not decided by this suite.
+ * [#9689] That question is now answered (maintainer ruling 2026-08-19):
+ * `FieldSchema` REJECTS an authored `set_null` on a `master_detail` at parse
+ * time, and this engine logs loudly when the combination still reaches the
+ * coercion site (raw registrations — like this suite's — and metadata stored
+ * before the tightening; the engine registers raw objects and never
+ * re-parses, so the spec-layer rejection alone measurably does not change
+ * anything here). The COERCION itself is unchanged and stays pinned below.
  *
  * ## [#9688] The multi-value refusal now judges EMPTINESS, per row
  *
@@ -54,7 +58,7 @@
  * An authored `deleteBehavior: 'restrict'` is untouched by any of it.
  */
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { ObjectQL } from './engine.js';
 
 const acct = {
@@ -468,9 +472,13 @@ describe('cascadeDeleteRelations — required FK escalates set_null → restrict
 
     it('[#9625] a master_detail declaring an explicit deleteBehavior:set_null still cascades', async () => {
         // The neighbouring resolution with the same blind spot: `restrict` is
-        // the only value that deviates, so `set_null` is accepted by
-        // `FieldSchema` on this type and then dropped here. Pinned so the
-        // silent coercion is a documented fact rather than an absence.
+        // the only value that deviates, so every other value is dropped here.
+        // Pinned so the coercion is a documented fact rather than an absence.
+        // [#9689] `FieldSchema` now rejects this combination at parse time,
+        // but THIS registration is raw (the engine never re-parses), so the
+        // combination still reaches the engine and the coercion still applies
+        // — this pin stays TRUE by ruling; the delete-time change is the loud
+        // log, pinned in its own describe below.
         const a = await engine.insert('acct', { name: 'Acme' });
         const l = await engine.insert('line', { parent: a.id });
 
@@ -513,5 +521,115 @@ describe('cascadeDeleteRelations — required FK escalates set_null → restrict
         expect(cascadeClear?.marker, 'cascade FK clear carries the marker').toBe(true);
         // And the cascade actually nulled the FK.
         expect((await engine.findOne('note', { where: { id: n.id } }) as any).account).toBeNull();
+    });
+});
+
+// [#9689] (maintainer ruling 2026-08-19, Q3 = B): the coercion above stays,
+// and it now LOGS. `FieldSchema` rejects an authored `set_null` on a
+// `master_detail` at parse time, so a value that still reaches the engine came
+// in around the parse seam (raw registration / pre-tightening stored row) —
+// the population parse-time rejection measurably cannot catch. The log fires
+// on exactly the authored combination: not on a bare master_detail, not on an
+// authored cascade, and not on restrict (which never coerces).
+describe('cascadeDeleteRelations — [#9689] authored set_null on master_detail logs loudly at the coercion site', () => {
+    // A bare master_detail — the overwhelmingly common spelling; the engine
+    // resolves it to cascade identically, and it must NOT log.
+    const stanzaBare = {
+        name: 'stanza',
+        label: 'Stanza',
+        fields: {
+            id: { name: 'id', type: 'text' as const, primaryKey: true },
+            parent: { name: 'parent', type: 'master_detail' as const, reference: 'acct' },
+        },
+    };
+    // An authored cascade — same resolved behavior, deliberate; must NOT log.
+    const verseCascade = {
+        name: 'verse',
+        label: 'Verse',
+        fields: {
+            id: { name: 'id', type: 'text' as const, primaryKey: true },
+            parent: {
+                name: 'parent', type: 'master_detail' as const, reference: 'acct',
+                deleteBehavior: 'cascade',
+            },
+        },
+    };
+
+    function makeSpyLogger(withError = true) {
+        const spy = {
+            info: vi.fn(), warn: vi.fn(), debug: vi.fn(),
+            ...(withError ? { error: vi.fn() } : {}),
+        };
+        return spy as Record<'info' | 'warn' | 'debug' | 'error', ReturnType<typeof vi.fn>>;
+    }
+
+    // NOTE the registration set is per test: the log fires at the COERCION
+    // SITE — whenever the parent delete computes the child field's behavior —
+    // not only when that child holds rows. A misdeclared child object in the
+    // registry therefore logs on every parent delete (deliberate: the
+    // declaration is wrong whether or not rows exist today), so the negative
+    // control below must not register `line` at all.
+    async function makeEngine(logger: Record<string, unknown>, objects: unknown[]) {
+        const engine = new ObjectQL({ logger });
+        const { driver } = makeStubDriver();
+        engine.registerDriver(driver, true);
+        await engine.init();
+        // Two-arg spelling (packageId is the signature's required 2nd arg —
+        // the house pattern of batch-row-authoring-feedback.test.ts): the
+        // 1-arg call this helper first shipped with added a TS2554 to the
+        // frozen TEST_DEBT ledger (354 -> 355), and the ratchet only shrinks.
+        for (const o of objects) engine.registry.registerObject(o as any, 'com.objectstack.test.9689');
+        return engine;
+    }
+
+    it('logs via logger.error when the parent delete coerces an authored set_null to cascade', async () => {
+        const logger = makeSpyLogger();
+        const engine = await makeEngine(logger, [acct, lineExplicitSetNull, stanzaBare, verseCascade]);
+        const a = await engine.insert('acct', { name: 'Acme' });
+        const l = await engine.insert('line', { parent: a.id });
+
+        await engine.delete('acct', { where: { id: a.id } } as any);
+        // The pinned behavior is unchanged: the child cascaded away.
+        expect(await engine.findOne('line', { where: { id: l.id } })).toBeNull();
+
+        const hits = logger.error.mock.calls.filter((c) => String(c[0]).includes("deleteBehavior: 'set_null'"));
+        expect(hits).toHaveLength(1);
+        const msg = String(hits[0][0]);
+        // Attribution: which declaration, on which relation, and the outcome.
+        expect(msg).toContain('line.parent');
+        expect(msg).toContain('master_detail');
+        expect(msg).toContain('NOT honored');
+        expect(msg).toContain('CASCADES');
+        // Actionability: both legal re-declarations are named.
+        expect(msg).toContain("'restrict'");
+        expect(msg).toContain("'cascade'");
+        expect(logger.warn).not.toHaveBeenCalled();
+    });
+
+    it('falls back to logger.warn when the sink has no error method (#9750 sanctioned shape — never an optional call)', async () => {
+        const logger = makeSpyLogger(false);
+        const engine = await makeEngine(logger, [acct, lineExplicitSetNull]);
+        const a = await engine.insert('acct', { name: 'Acme' });
+        await engine.insert('line', { parent: a.id });
+
+        await engine.delete('acct', { where: { id: a.id } } as any);
+        expect(logger.warn.mock.calls.some((c) => String(c[0]).includes("deleteBehavior: 'set_null'"))).toBe(true);
+    });
+
+    it('does NOT log for a bare master_detail or an authored cascade (same resolved behavior, no divergence)', async () => {
+        const logger = makeSpyLogger();
+        const engine = await makeEngine(logger, [acct, stanzaBare, verseCascade]);
+        const a = await engine.insert('acct', { name: 'Acme' });
+        const s = await engine.insert('stanza', { parent: a.id });
+        const v = await engine.insert('verse', { parent: a.id });
+
+        await engine.delete('acct', { where: { id: a.id } } as any);
+        // Both cascaded (resolved behavior identical to the logging case) …
+        expect(await engine.findOne('stanza', { where: { id: s.id } })).toBeNull();
+        expect(await engine.findOne('verse', { where: { id: v.id } })).toBeNull();
+        // … and neither logged: the divergence between declared and delivered
+        // exists only for the authored set_null.
+        const all = [...logger.error.mock.calls, ...logger.warn.mock.calls].map((c) => String(c[0]));
+        expect(all.filter((m) => m.includes("deleteBehavior: 'set_null'"))).toHaveLength(0);
     });
 });

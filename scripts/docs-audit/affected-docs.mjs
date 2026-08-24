@@ -1391,24 +1391,84 @@ function typeDeclRegions(code) {
  * explicitly for their own population moves, and it is made explicitly here for the same
  * reason: the alternative is moving a reported number quietly.
  *
- * ⛔ THE RESIDUE THIS DOES NOT CLOSE, named rather than left to be discovered. `\b` fails only
- * against a preceding WORD character, so `$route:` — a legal JS identifier — is still read as
- * a declaration. It is no longer a DIVERGENCE (all eight now agree on it), which is what this
- * card was about, but it is still a phantom, and tightening to `(?<![\w$])` would move
- * `declarationsIn` as well — the one scan this card's before/after was priced to leave
- * byte-identical — so it is a SECOND population move with its own before/after to price.
- * Filed as #11630 rather than folded in, for the reason this card was filed rather than
- * folded into #11494, and pinned in `--self-test` so that card MOVES a pin rather than
- * finding none.
+ * ⛔ THE ANCHOR IS A LOOKBEHIND, NOT `\b` (#11630) — and the SET is the load-bearing half.
+ * `\b` fails only against a preceding WORD character (`[A-Za-z0-9_]`), so `$route:` — a legal
+ * JS identifier — was read as a declaration by all eight scans. They agreed, and they agreed
+ * by being wrong together, which is the shape #11542's own card rejected on sight when
+ * "make `declarationsIn` match the other seven" was proposed as the other direction.
+ *
+ * The set is `[\w$.]` — `symbolRe`'s, NOT `dottedRe`'s. Three lookbehind idioms already live
+ * in this file and they exclude THREE DIFFERENT classes, so copying the nearest one is how a
+ * fix comes out right about the mechanism and wrong about the class:
+ *   • `symbolRe`      `(?<![\w$.])`   a BARE token — not a longer identifier, not a member
+ *   • `dottedRe`      `(?<![\w$])`    a DOTTED token, which must tolerate its own dots
+ *   • `rulePatternFor`/`commandPatternFor` `(?<![\w$.-])`  a doc-side PROSE span, where `-`
+ *     glues tokens in English
+ * ⛔ AND THAT TABLE IS WHY THIS IS NOW AN ALLOWLIST (#11717). Every idiom above names a class
+ * it EXCLUDES, so every one of them has a residue — and this key's residue was worked through
+ * one card at a time: #11494 the colon run, #11542 the word boundary (`subroute:`), #11630 `$`
+ * and `.` (`$route:`, `cond ? obj.route : x`), #11711 queued for Unicode because `\w` is
+ * ASCII-only. Each card was small, provably free and honestly priced, and each named the next
+ * residue as a pin for the next card to flip. That is a good discipline for an open-ended
+ * defect and the wrong one for a BOUNDED defect: over code points 0..0x2FFF the `\b` anchor
+ * admitted 12225 characters and `(?<![\w$.])` admitted 12223, so the whole family was arguing
+ * about a handful at the edge of a set of twelve thousand.
+ *
+ * SO THE ANCHOR IS INVERTED rather than shrunk a fifth time. It no longer enumerates what may
+ * not PRECEDE the key; it names the positions where an object-literal property key may BEGIN —
+ * start of input, whitespace, `{`, `,` — and rejects everything else. Spelled as a negative
+ * lookbehind over the COMPLEMENT of that allowlist, `(?<![^\s{,])`, which also gives
+ * start-of-input for free rather than as a second alternative. The set is bounded at three
+ * characters where a blocklist is not bounded at all, and it closes `$`, `.`, `-`, Unicode and
+ * every future escapee of that shape in ONE move instead of one per card.
+ *
+ * ⛔ AND IT NEEDS NO `u` FLAG, which is the concrete cost the blocklist route was carrying:
+ * closing the Unicode residue as a class meant `\p{L}` under `u`, which changes the escape
+ * semantics of every source these leads are COMPOSED with at the eight call sites. An
+ * allowlist of ASCII positions needs none, so #11711 is subsumed at no cost at all.
+ *
+ * ⛔ THE RESIDUE THIS LEAVES — and it is the end of what ANY left-anchor can reach, so it is a
+ * BOUNDARY rather than the next link in the chain. A key in EXPRESSION position preceded by
+ * whitespace, `cond ? route : 'GET /api/v1/x'`, is byte-for-byte what a property key looks
+ * like, so the allowlist admits it — correctly, by its own rule. #11630 named this same class
+ * as the one no lookbehind can reach, and that is exactly why it left `-` admitted: `a-route`
+ * really is the whole token `route`. The allowlist closes every spelling of the class that
+ * WEARS a character (`$route`, `.route`, `-route`, `éroute`) and leaves the plainest one.
+ * Closing THAT needs the colon's enclosing expression, not its left neighbour — a parser
+ * question, not an anchor question, and a different card if a puller ever appears. Pinned in
+ * `--self-test` as deliberately unmoved.
+ *
+ * ⛔ THIS IS THE THIRD POPULATION MOVE, and like #11630's it moves BOTH the ledger rows and
+ * `declarationsIn`. Priced with its own before/after against the header of `--bridge-coverage`,
+ * at ROW IDENTITY rather than counter equality, and re-derived against THIS base rather than
+ * inherited from #11630: `--bridge-coverage --json` carries all 177 `unreachableRows` by
+ * `{file, route, client}` and still hashes `d04a5cedfb613370e5b46ac4725db1d941e5dc88`, and the
+ * `declarationsIn` population is byte-identical across the change. Counters agreeing is
+ * consistent with two rows swapping places; row identity is not. Provably free for the direct
+ * reason: across the seven live ledgers all 499 `route:`/`client:` leads are preceded by a
+ * SPACE — 0 by `$`, 0 by `.`, 0 by `-`, 0 by `{`, 0 by `,`, 0 by anything outside the
+ * allowlist at all (positive control: the same scan reports every one of those classes the
+ * moment a fixture carries them, so the zeros are readings and not a blind scan).
+ *
+ * ⛔ AND IT CAN ONLY EVER REMOVE, swept rather than argued — against the anchor it actually
+ * replaces, not against the one two cards ago. Over code points 0..0x2FFF `(?<![\w$.])` admits
+ * 12223 and this allowlist admits 25, and the allowlist admits 0 that `(?<![\w$.])` does not.
+ * Both numbers and the zero are pinned in `--self-test`.
+ *
+ * WHY THERE IS NO RIGHT-HAND ANCHOR, since every idiom above carries one: the `\s*:` that
+ * follows IS the right anchor, exactly. `routes:` cannot match — after `route` the `\s*` takes
+ * nothing and the `:` meets `s` — while `route :` legitimately does. A trailing class would be
+ * a second spelling of a constraint the colon already makes exact.
  *
  * @param {string} keys  the key alternation ONLY — `(route|client)`, `route`,
  *   `(?:route|client)`. The capture groups are the call site's question; the ANCHOR, the
  *   colon and the run between the colon and the value are this function's. ⛔ A call site must
- *   NOT restate the `\b`: a second copy is a second spelling, which is the entire defect this
- *   closes, and `--self-test` pins that no argument carries one.
+ *   NOT restate the anchor — neither the old `\b` nor a lookbehind of its own: a second copy
+ *   is a second spelling, which is the entire defect this closes, and `--self-test` pins that
+ *   no argument carries either form.
  */
 function declLead(keys) {
-  return String.raw`\b${keys}\s*:\s*`;
+  return String.raw`(?<![^\s{,])${keys}\s*:\s*`;
 }
 
 /**
@@ -1441,6 +1501,10 @@ function declarationsIn(text) {
   const out = [];
   // The `\b` this used to carry is now `declLead`'s (#11542) — it was the LAST spelling the
   // eight scans decided for themselves, and this was the one scan that decided it correctly.
+  // #11630 then widened that one anchor past `\b` to `(?<![\w$.])`, which moves THIS scan as
+  // well: a `$route:` or a `cond ? obj.route : x` no longer reaches `unreadableIn` (line
+  // 1478) to be billed as a declaration the recognizer could not read. #11542's before/after
+  // was priced to leave this scan byte-identical; #11630's is priced INCLUDING it.
   const re = new RegExp(declLead('(route|client)'), 'g');
   let m;
   while ((m = re.exec(code)) !== null) {
@@ -2913,26 +2977,193 @@ function selfTest() {
     'declared', '1 row / 1 route / 0 declined',
     `${keyUnreadable.rows.length} row / ${keyUnreadable.routesDeclared} route / ${keyUnreadable.declined.length} declined`);
 
-  // ⛔ THE BOUNDARY THIS CARD DOES NOT CROSS. `\b` fails only against a preceding WORD
-  // character, so `$route:` — a legal JS identifier — is still read as a declaration. It is no
-  // longer a DIVERGENCE, which is what this card was about: all eight scans agree on it now,
-  // and they agree by reading the spelling `declarationsIn` already had. It is still a phantom
-  // row, and closing it means tightening to `(?<![\w$])`, which moves `declarationsIn` as well
-  // — a SECOND population move, with its own before/after to price against the header of
-  // `--bridge-coverage`. Filed as #11630 rather than folded in, for the reason this card was
-  // filed rather than folded into #11494, and pinned so that card MOVES this pin rather than
-  // finding none.
+  // ⛔ THE BOUNDARY #11542 LEFT — CROSSED HERE (#11630). The two pins this block used to hold
+  // read "`$route:` still mints a phantom row — deliberately unmoved" and "and it is still
+  // SILENT"; they are MOVED, not deleted, which is the same treatment #11542 gave the pin
+  // #11584 left it. `\b` fails only against a preceding WORD character, so `$route:` — a legal
+  // JS identifier — was a declaration to all eight scans. They agreed, and they agreed by
+  // being wrong together: exactly the "agreed-and-wrong" end state #11542's card rejected on
+  // sight when it was proposed as the OTHER direction for the key.
+  //
+  // The anchor is now `(?<![\w$.])` — `symbolRe`'s set, NOT `dottedRe`'s. See `declLead`'s
+  // docblock for why the set is the load-bearing half and why `-` is deliberately outside it.
+  //
+  // MEASURED ON THIS EXACT FIXTURE with the anchor back at `\b`:
+  //   ⇒ rows 2 · routesDeclared 2 · clientsDeclared 1 · declined 0 · outsideCode 0 ·
+  //     brokenScan 0   — a file declaring ONE `route:` produced TWO rows, exit 0.
+  //
+  // ⛔ AND THIS ONE MOVES `declarationsIn` TOO — the eighth scan, the one #11542's
+  // before/after was priced to leave byte-identical. Its own fixture is (D6) below.
   const dollarKey = parseLedgerSource([
     'export const L = [',
     "  { $route: 'GET /api/v1/gone', family: 'metadata', disposition: 'sdk' },",
     "  { route: 'GET /api/v1/meta', family: 'metadata', disposition: 'sdk', client: 'meta.getTypes' },",
     '];',
   ].join('\n'));
-  check('parseLedgerSource', 'a `$route:` still mints a phantom row — #11630, deliberately unmoved',
-    'row count', 2, dollarKey.rows.length);
+  check('parseLedgerSource', 'a `$route:` mints NO row — the anchor excludes identifier CONTINUATION (#11630)',
+    'row count', 1, dollarKey.rows.length);
+  check('parseLedgerSource', 'and the row that survives is the REAL one, carrying its binding',
+    'row', 'GET /api/v1/meta → meta.getTypes',
+    `${dollarKey.rows[0]?.route} → ${dollarKey.rows[0]?.client}`);
+  check('parseLedgerSource', 'and the DENOMINATOR drops it too, so no phantom gap opens', 'declared',
+    '1 route / 1 client / 0 declined',
+    `${dollarKey.routesDeclared} route / ${dollarKey.clientsDeclared} client / ${dollarKey.declined.length} declined`);
+  check('bridgeCoverageFrom', 'and the widened read carries no verdict on an accurate ledger',
+    'brokenScan', 0,
+    bridgeCoverageFrom([{ file: 'p-route-ledger.ts', ...dollarKey }], ['/api/v1/meta']).brokenScan.length);
+  // …and in CODE position it is not reported as PROSE either — the `codeLeads`/`outsideCode`
+  // pair must anchor TOGETHER, the same way #11542 pinned it for the word-prefixed class.
+  check('parseLedgerSource', 'and a `$route:` in CODE position is not reported as a prose-quoted lead',
+    'outsideCode', 0, dollarKey.outsideCode.length);
+
+  // (D2) THE WINDOW DELIMITER (`nextRouteRe`) — the worst of the eight for the same reason it
+  // was for #11542: a `$route:` between a real `route:` and its `client:` CLOSED the real
+  // row's window, handing the binding to the phantom on a path no registrar mounts.
+  const dollarWindow = parseLedgerSource([
+    'export const L = [',
+    "  { route: 'GET /api/v1/meta', family: 'metadata',",
+    "    $route: 'GET /api/v1/gone',",
+    "    disposition: 'sdk', client: 'meta.getTypes' },",
+    '];',
+  ].join('\n'));
+  check('parseLedgerSource', 'a `$route:` does not CLOSE the real row window (#11630)', 'rows',
+    '1 row · GET /api/v1/meta → meta.getTypes',
+    `${dollarWindow.rows.length} row · ${dollarWindow.rows.map((r) => `${r.route} → ${r.client}`).join(' | ')}`);
+
+  // (D3) THE IN-WINDOW `client:` MATCH (`windowClientRe`). `window.match()` takes the FIRST
+  // hit, so a `$client:` ahead of the real `client:` BECAME the binding, and the real one fell
+  // through to #10636's unclaimed sweep and was named as a value no row read.
+  const dollarClient = parseLedgerSource([
+    'export const L = [',
+    "  { route: 'GET /api/v1/meta', family: 'metadata', disposition: 'sdk',",
+    "    $client: 'wrong.binding', client: 'meta.getTypes' },",
+    '];',
+  ].join('\n'));
+  check('parseLedgerSource', 'a `$client:` does not become the row BINDING (#11630)', 'binding',
+    'meta.getTypes', dollarClient.rows[0]?.client);
+  check('parseLedgerSource', 'and the real `client:` is bound, not swept up as unclaimed', 'declared',
+    '1 client / 0 declined',
+    `${dollarClient.clientsDeclared} client / ${dollarClient.declined.length} declined`);
+
+  // (D4) THE DECLINED SWEEP (`declinedIn`), the LOUD direction: a double-quoted `$route:` was
+  // billed as a `route:` value the parse FAILED to read — entering the denominator, named with
+  // its line, and firing a PARTIAL-read verdict with exit 1 on a wholly accurate ledger.
+  const dollarDeclined = parseLedgerSource([
+    'export const L = [',
+    '  { $route: "GET /api/v1/gone", family: \'metadata\', disposition: \'sdk\' },',
+    "  { route: 'GET /api/v1/meta', family: 'metadata', disposition: 'sdk', client: 'meta.getTypes' },",
+    '];',
+  ].join('\n'));
+  check('parseLedgerSource', 'a double-quoted `$route:` is not billed as a DECLINED row (#11630)',
+    'declared', '1 row / 1 route / 0 declined',
+    `${dollarDeclined.rows.length} row / ${dollarDeclined.routesDeclared} route / ${dollarDeclined.declined.length} declined`);
+  check('bridgeCoverageFrom', 'so no PARTIAL-read verdict fires on an accurate ledger', 'brokenScan',
+    0, bridgeCoverageFrom([{ file: 'q-route-ledger.ts', ...dollarDeclined }], ['/api/v1/meta']).brokenScan.length);
+
+  // (D5) THE RAW SWEEP behind `outsideCode` — a `$route:` in a COMMENT was printed to the
+  // reader on every `--bridge-coverage` run as a lead sitting where the mask says code is not.
+  const dollarProse = parseLedgerSource([
+    "// The retired row read $route: 'GET /api/v1/gone' before #1234.",
+    'export const L = [',
+    "  { route: 'GET /api/v1/meta', family: 'metadata', disposition: 'sdk', client: 'meta.getTypes' },",
+    '];',
+  ].join('\n'));
+  check('parseLedgerSource', 'a `$route:` in PROSE is not reported as a prose-quoted lead (#11630)',
+    'outsideCode', 0, dollarProse.outsideCode.length);
+
+  // (D6) ⛔ THE EIGHTH SCAN — `declarationsIn`, via `unreadableIn`. THIS is what makes #11630 a
+  // SECOND population move rather than a re-run of #11542's: #11542 left this scan
+  // byte-identical on purpose and priced its before/after that way. A `$route:` whose value is
+  // not a string literal at all was billed here as a declaration the recognizer could not
+  // read — `1 row / 2 route / 1 declined` with a PARTIAL-read verdict, on an accurate ledger.
+  // Compare `--self-test`'s `subroute:` twin above, which reads `1 row / 1 route / 0 declined`
+  // on BOTH trees because the anchored scan always agreed about the word-prefixed class.
+  const dollarUnreadable = parseLedgerSource([
+    'export const L = [',
+    "  { $route: ROUTES.gone, family: 'metadata', disposition: 'sdk' },",
+    "  { route: 'GET /api/v1/meta', family: 'metadata', disposition: 'sdk', client: 'meta.getTypes' },",
+    '];',
+  ].join('\n'));
+  check('parseLedgerSource', 'a non-literal `$route:` is billed to nothing — the EIGHTH scan moved too (#11630)',
+    'declared', '1 row / 1 route / 0 declined',
+    `${dollarUnreadable.rows.length} row / ${dollarUnreadable.routesDeclared} route / ${dollarUnreadable.declined.length} declined`);
+  check('bridgeCoverageFrom', 'and `declarationsIn` moving fires no PARTIAL-read verdict either',
+    'brokenScan', 0,
+    bridgeCoverageFrom([{ file: 'r-route-ledger.ts', ...dollarUnreadable }], ['/api/v1/meta']).brokenScan.length);
+
+  // (D7) ⛔ THE SECOND CLASS THE CHARACTER CLASS CLOSES, found by MEASUREMENT rather than
+  // assumed from the card, which named only `$`. A `.` before the key makes the token a MEMBER
+  // ACCESS, and the colon then belongs to a TERNARY and never to a key — `cond ? obj.route :
+  // 'GET /api/v1/gone'` minted a phantom row on a path nobody declares. This is why the set is
+  // `symbolRe`'s `[\w$.]` and not `dottedRe`'s `[\w$]`: `declLead`'s key is a BARE token.
+  const dottedKey = parseLedgerSource([
+    'export const L = [',
+    "  { route: 'GET /api/v1/meta', family: 'metadata', disposition: 'sdk', client: 'meta.getTypes' },",
+    '];',
+    "const fallback = cond ? defaults.route : 'GET /api/v1/gone';",
+  ].join('\n'));
+  check('parseLedgerSource', 'a member-access `.route :` in a TERNARY mints NO row (#11630)',
+    'row count', 1, dottedKey.rows.length);
+  check('parseLedgerSource', 'and the real row keeps its binding across it', 'row',
+    'GET /api/v1/meta → meta.getTypes',
+    `${dottedKey.rows[0]?.route} → ${dottedKey.rows[0]?.client}`);
+  check('parseLedgerSource', 'and it leaves the denominator alone as well', 'declared',
+    '1 route / 1 client / 0 declined',
+    `${dottedKey.routesDeclared} route / ${dottedKey.clientsDeclared} client / ${dottedKey.declined.length} declined`);
+
+  // ⛔ BOTH OF #11630'S BOUNDARY PINS ARE FLIPPED HERE (#11717), not deleted — the allowlist
+  // crosses both, and a green reached by removing an assertion is the one thing this gate
+  // cannot afford.
+  //
+  // (a) `-`. #11630 left it admitted on the reasoning that `a-route` is two tokens, so that
+  // `route` IS the whole token and is a non-declaration for a DIFFERENT reason (expression
+  // position) — a reason it shares with the bare `cond ? route : x` no lookbehind can reach.
+  // The allowlist moves it, and for a reason that reads the same fact the other way round:
+  // whole token or not, `-` is not a place an object-literal KEY may begin. What #11630 called
+  // the shared class is now pinned directly, in its plainest spelling, at the end of this
+  // block — so the class is pinned rather than approximated by one of its spellings.
+  const minusKey = parseLedgerSource([
+    'export const L = [',
+    "  { route: 'GET /api/v1/meta', family: 'metadata', disposition: 'sdk', client: 'meta.getTypes' },",
+    '];',
+    "const n = cond ? a-route : 'GET /api/v1/gone';",
+  ].join('\n'));
+  check('parseLedgerSource', 'a `-`-prefixed lead mints NO row — the pin #11630 left is FLIPPED by the allowlist (#11717)',
+    'row count', 1, minusKey.rows.length);
+  // (b) UNICODE, which is #11711's whole card, subsumed. `\w` is ASCII-only, so `éroute:` was
+  // admitted by the lookbehind exactly as it was by `\b`. As a BLOCKLIST closing it meant a
+  // `\p{L}` class under the `u` flag, which changes escape semantics for every source these
+  // leads are COMPOSED with at the eight call sites — the concrete cost that kept it open. An
+  // allowlist of ASCII positions needs no flag, so it closes for free. 0 occurrences across
+  // the seven live ledgers either way.
+  const unicodeKey = parseLedgerSource([
+    'export const L = [',
+    "  { éroute: 'GET /api/v1/gone', family: 'metadata', disposition: 'sdk' },",
+    "  { route: 'GET /api/v1/meta', family: 'metadata', disposition: 'sdk', client: 'meta.getTypes' },",
+    '];',
+  ].join('\n'));
+  check('parseLedgerSource', 'a UNICODE-prefixed lead mints NO row — #11711 subsumed, and with NO `u` flag (#11717)',
+    'row count', 1, unicodeKey.rows.length);
+
+  // ⛔ (c) THE RESIDUE THIS LEAVES, and it is the END of what any left-anchor can reach — a
+  // boundary, not the next link in the chain. A key in EXPRESSION position preceded by
+  // WHITESPACE is byte-for-byte what a property key looks like, so the allowlist admits it,
+  // correctly by its own rule. This is the class #11630 named as unreachable by any
+  // lookbehind and used to justify leaving `-` open; the allowlist closes every spelling of it
+  // that WEARS a character and leaves this one. Closing it needs the colon's enclosing
+  // EXPRESSION, not its left neighbour — a parser question. Pinned deliberately unmoved so a
+  // card that ever takes it MOVES a pin rather than finding none.
+  const bareExprKey = parseLedgerSource([
+    'export const L = [',
+    "  { route: 'GET /api/v1/meta', family: 'metadata', disposition: 'sdk', client: 'meta.getTypes' },",
+    '];',
+    "const n = cond ? route : 'GET /api/v1/gone';",
+  ].join('\n'));
+  check('parseLedgerSource', 'a bare `? route :` in EXPRESSION position still mints a phantom — deliberately unmoved',
+    'row count', 2, bareExprKey.rows.length);
   check('parseLedgerSource', 'and it is still SILENT — all eight scans agree on it, so both terms move together',
-    'declared', '2 route / 0 declined',
-    `${dollarKey.routesDeclared} route / ${dollarKey.declined.length} declined`);
+    'declared', '2 route / 1 client / 0 declined',
+    `${bareExprKey.routesDeclared} route / ${bareExprKey.clientsDeclared} client / ${bareExprKey.declined.length} declined`);
 
   // ⛔ REPORTED, NEVER A VERDICT. A comment explaining a retired row by quoting its old path
   // is legitimate prose; reddening CI over it is the false red the #9747 family declines.
@@ -3568,24 +3799,93 @@ function selfTest() {
   // copy is the same hole re-opening, and only a source pin can see it: every behavioural
   // fixture above would keep passing while the new scan drifted on its own.
   check('declLead', 'the run between a `route:`/`client:` colon and its value is spelled ONCE', 'affected-docs.mjs',
-    1, (ownSource.match(/String\.raw`\\b\$\{keys\}\\s\*:\\s\*`/g) || []).length);
+    1, (ownSource.match(/String\.raw`\(\?<!\[\^\\s\{,\]\)\$\{keys\}\\s\*:\\s\*`/g) || []).length);
   check('declLead', 'and all eight lead scans are built from it, none inline', 'affected-docs.mjs',
     8, (ownSource.match(/new RegExp\(declLead\(/g) || []).length);
   // …AND THE KEY ANCHOR IS SPELLED ONCE TOO (#11542), which is the same pin one field over.
   // It was the LAST part of the lead each call site decided for itself: `declarationsIn`
   // passed `\b(route|client)` and the other seven passed the key bare, so seven agreeing and
   // one differing looked exactly like eight agreeing — and the one that differed was the one
-  // that was right. A call site that restates the `\b` is that hole re-opening from the other
-  // side, and only a source pin can see it: every behavioural fixture above stays green while
-  // the argument drifts.
+  // that was right. A call site that restates the anchor is that hole re-opening from the
+  // other side, and only a source pin can see it: every behavioural fixture above stays green
+  // while the argument drifts. #11630 widened the anchor past `\b` to a LOOKBEHIND, so the pin
+  // now rejects BOTH spellings — a call site that restated the old `\b` and one that grew a
+  // lookbehind of its own are the same defect, and pinning only the form we just moved away
+  // from would leave the pin watching a door nobody uses any more.
   check('declLead', 'and the KEY anchor is spelled once too — no call site restates it', 'affected-docs.mjs',
-    0, (ownSource.match(/declLead\([^\n]*?\\b/g) || []).length);
-  // BEHAVIOURAL, not merely textual: the three key spellings the eight call sites pass all
-  // come back anchored, from the one place that spells the anchor. This is what "all eight
-  // read the same anchored spelling" means when checked rather than asserted.
+    0, (ownSource.match(/declLead\([^\n]*?(?:\\b|\(\?<!)/g) || []).length);
+  // BEHAVIOURAL, not merely textual: every key spelling the eight call sites pass comes back
+  // anchored, from the one place that spells the anchor. This is what "all eight read the same
+  // anchored spelling" means when checked rather than asserted.
+  //
+  // The spellings are READ FROM THE SOURCE, never restated here (#11737). A hand-kept list
+  // carried three of the FOUR the call sites actually pass — `client`, the one `windowClientRe`
+  // passes, was missing — so a pin labelled "every key spelling" checked three quarters of
+  // them, and nothing else could see the gap: this pin compares STRINGS, so `(route|client)`
+  // never exercises `client`, and the three pins above count call sites and spellings by TEXT
+  // without ever calling the function. A corrected list re-rots the same way the moment a
+  // ninth call site arrives, which is why it is derived rather than corrected.
+  //
+  // Measured rather than argued: a `client`-only TIGHTENING of the allowlist — `(?<![^\s{,])`
+  // narrowed to `(?<![^\s])` for that one key — leaves all of `--self-test` green against the
+  // hand-kept list and fails HERE against the derived one. No fixture defends the `{` and `,`
+  // members, and none can: the sweep below measured 0 leads preceded by either across all
+  // seven live ledgers, so they are exactly the part of the allowlist that only a string pin
+  // can hold. Widening drifts are caught either way (the #11542/#11630 `myclient:`/`$client:`
+  // fixtures see those), so tightening is the whole of what this pin adds — and it is the
+  // direction a `simplification` takes.
+  //
+  // ⛔ Only the INPUT population is derived; the EXPECTED stays a literal. Deriving both ends
+  // is what would make the comparison vacuous, for the reason the sweep below spells out.
+  const passedKeys = [...ownSource.matchAll(/new RegExp\(declLead\((['"])([^'"]*)\1\)/g)].map((m) => m[2]);
+  check('declLead', 'and all eight pass their key as a LITERAL — a computed one drops out of the list below unseen', 'affected-docs.mjs',
+    8, passedKeys.length);
   check('declLead', 'every key spelling a call site passes comes back ANCHORED', 'declLead',
-    String.raw`\b(route|client)\s*:\s* | \broute\s*:\s* | \b(?:route|client)\s*:\s*`,
-    ['(route|client)', 'route', '(?:route|client)'].map((k) => declLead(k)).join(' | '));
+    String.raw`(?<![^\s{,])(?:route|client)\s*:\s* | (?<![^\s{,])(route|client)\s*:\s* | (?<![^\s{,])client\s*:\s* | (?<![^\s{,])route\s*:\s*`,
+    [...new Set(passedKeys)].sort().map((k) => declLead(k)).join(' | '));
+  // …and BEHAVIOURALLY the allowlist is a strict TIGHTENING of BOTH anchors it has replaced,
+  // which is the invariant the population pricing rests on. Swept rather than argued, and
+  // swept against the anchor it ACTUALLY replaces (#11710's lookbehind) as well as against the
+  // `\b` two cards back: a sweep that only ever compares with the oldest spelling stops being
+  // evidence the moment two cards land in a row.
+  {
+    const bAnchor = new RegExp(String.raw`\b(route|client)\s*:\s*`);
+    // The lookbehind this card replaces, spelled here as a LITERAL rather than taken from
+    // `declLead` — it is the BEFORE state, so reading it from the function under test would
+    // make the comparison vacuous the moment the function changes.
+    const prevAnchor = new RegExp(String.raw`(?<![\w$.])(route|client)\s*:\s*`);
+    // Built through a NAMED intermediate on purpose: the pin above counts the eight
+    // production lead SCANS by the way each one compiles `declLead` directly, and this probe
+    // is a behavioural check rather than a ninth scan. Inflating that count to 9 would blunt
+    // the pin that exists to catch a real ninth. Same convention the key-spelling check below
+    // already uses (`.map((k) => declLead(k))`). ⛔ That pin reads this file as TEXT, so even
+    // naming the compiled spelling in a comment here would count — it is described, not
+    // quoted, for the same reason.
+    const leadSource = declLead('(route|client)');
+    const lead = new RegExp(leadSource);
+    let admitsMoreThanB = 0;
+    let admitsMoreThanPrev = 0;
+    let admitsB = 0;
+    let admitsPrev = 0;
+    let admitsLead = 0;
+    for (let c = 0; c < 0x3000; c++) {
+      const s = String.fromCodePoint(c) + "route: 'x'";
+      const b = bAnchor.test(s);
+      const q = prevAnchor.test(s);
+      const l = lead.test(s);
+      if (b) admitsB++;
+      if (q) admitsPrev++;
+      if (l) admitsLead++;
+      if (l && !b) admitsMoreThanB++;
+      if (l && !q) admitsMoreThanPrev++;
+    }
+    check('declLead', 'the anchor only ever REMOVES — it admits nothing `\\b` did not', 'code points 0..0x2FFF',
+      0, admitsMoreThanB);
+    check('declLead', 'and nothing the LOOKBEHIND it replaces did not — the invariant against the real before-state',
+      'code points 0..0x2FFF', 0, admitsMoreThanPrev);
+    check('declLead', 'and the allowlist is the far smaller set, by the margin the sweep measures',
+      'code points 0..0x2FFF', '12225 / 12223 / 25', `${admitsB} / ${admitsPrev} / ${admitsLead}`);
+  }
 
 
   if (failed) {

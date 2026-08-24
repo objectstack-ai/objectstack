@@ -142,8 +142,8 @@
         },
         "responsive": {
           "status": "dead",
-          "verifiedAt": "2026-08-03",
-          "note": "The key this drill exists for. Nothing in either repo ever read `widget.responsive` — DashboardRenderer / DashboardEditor / plugin-designer name it only in comments, and objectui's one real per-breakpoint consumer (useResponsiveConfig) is fed by `page.components[].responsive`. Its literal namesake `view.list.responsive` was judged dead and removed in the 2026-07-30 #3896 sweep precisely because `view` IS drilled through `children`; this one was never asked, and survived on that silence alone. Retired 2026-08-03 via #4876 / PR #4995 (retiredKey tombstone + the protocol-17 `dashboard-widget-responsive-removed` conversion). The row stays because the tombstone keeps the key in the walked shape — the rls.priority precedent — and no authorWarn is needed: authoring it is now a tsc error and a parse error."
+          "verifiedAt": "2026-08-24",
+          "note": "The key this drill exists for. Nothing in either repo ever read `widget.responsive` — DashboardRenderer / DashboardEditor / plugin-designer name it only in comments. Its literal namesake `view.list.responsive` was judged dead and removed in the 2026-07-30 #3896 sweep precisely because `view` IS drilled through `children`; this one was never asked, and survived on that silence alone. Retired 2026-08-03 via #4876 / PR #4995 (retiredKey tombstone + the protocol-17 `dashboard-widget-responsive-removed` conversion). CORRECTED 2026-08-24 (#11027): this note used to call `useResponsiveConfig` the 'one real per-breakpoint consumer', fed by `page.components[].responsive` — measured false: that hook (and `ResponsiveProtocol`, the second implementation) had zero callers, so the page key was retired too (protocol-18 `page-component-responsive-removed`) and the tombstone here no longer prescribes it. The row stays because the tombstone keeps the key in the walked shape — the rls.priority precedent — and no authorWarn is needed: authoring it is now a tsc error and a parse error."
         },
         "aria": {
           "status": "dead",

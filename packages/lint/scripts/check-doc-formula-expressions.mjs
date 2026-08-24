@@ -151,18 +151,19 @@ import { readdirSync, readFileSync, existsSync } from 'node:fs';
 import { join, relative, resolve, sep, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import ts from 'typescript';
-import {
+import { requireDefaultExport, requireDependency } from '../../../scripts/import-prerequisite.mjs';
+const ts = await requireDefaultExport('typescript', () => import('typescript'), import.meta.url);
+const {
   validateExpression,
   isSupportedRlsExpression,
   sqlPredicateToCel,
   isPushdownableCel,
-} from '@objectstack/formula';
+} = await requireDependency('@objectstack/formula', () => import('@objectstack/formula'), import.meta.url);
 // The field-level `*When` root verdict AND its message, imported from the one
 // place that owns them (#11407). Same discipline as `validateExpression` above:
 // this gate is the SECOND consumer of that rule, and a second consumer that
 // re-derives the rule owns a dialect of it instead. See surface 3 below.
-import { fieldRuleRootIssue, FIELD_RULE_BOUND_ROOTS } from '@objectstack/lint';
+const { fieldRuleRootIssue, FIELD_RULE_BOUND_ROOTS } = await requireDependency('@objectstack/lint', () => import('@objectstack/lint'), import.meta.url);
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, '../../..');
@@ -855,6 +856,30 @@ export function judgeFieldRule(slot, source) {
 /**
  * The skip report, as a pure function so "it is printed" is pinnable. Returns
  * the empty string only when there is genuinely nothing skipped.
+ *
+ * ## Why the trailer says what a skip is NOT (#11673)
+ *
+ * Each entry's reason names the structure the PARSER could not read a layer
+ * off. That is the only thing this gate is entitled to say: the layer a
+ * fragment DOCUMENTS is not derivable from the tree, and a skip entry that
+ * confidently named one would be believed — the precise failure #11407 was
+ * built to refuse. So the list quotes its difficulty and concludes nothing.
+ *
+ * The cost of that silence is measured, not hypothetical. Three independent
+ * passes over #11651 (the report, the PM triage, the dispatch) read this list
+ * as a WORKLIST and partitioned seven skips 4 re-authorable / 3 permanent;
+ * judging the sites first gave 1 / 6. One of the "re-authorable" four was
+ * `layout-dsl.mdx:863`, whose predicate is byte-identical to `pages.mdx:165` —
+ * a skip the same ruling protected BY NAME as a false red on correct docs. The
+ * two instructions contradicted each other and the contradiction was invisible.
+ *
+ * The failure was a framing error, not an information deficit, and that is why
+ * the fix is a trailer sentence rather than per-entry context: #11651's own
+ * report QUOTED the layer comments above `:821` and `:824` (`// e.g. on a
+ * PageComponent`, `// e.g. on a FormSection / FormField`) and filed both under
+ * "re-authorable" anyway. Per-entry context would have reprinted what that
+ * author already had in hand and had already published. What was missing was
+ * the instruction not to read the list as a worklist.
  */
 export function renderFieldRuleSkips(skips) {
   if (skips.length === 0) return '';
@@ -867,6 +892,16 @@ export function renderFieldRuleSkips(skips) {
       '  and judging one layer\'s text by another\'s rule produces a red that is WRONG. The list is\n' +
       '  printed so the skips stay visible: a gate that skips in silence is the false-green this\n' +
       '  surface exists to prevent, one level up.',
+  );
+  lines.push(
+    '\n  A skip is NOT a to-do item. Every reason above answers "why could this scan not read a\n' +
+      '  layer here?" — it never answers "what layer does this fragment document?". Those are\n' +
+      '  different questions, and only the second one decides whether a site could be re-authored,\n' +
+      '  so read the layer off the DOCUMENT before re-authoring anything listed here. Triaging this\n' +
+      '  list FROM the list has already gone wrong once: three independent passes partitioned it\n' +
+      '  4 re-authorable / 3 permanent, where judging the sites first gave 1 / 6 — and one site in\n' +
+      '  the "re-authorable" half held a predicate that is correct exactly where it is (#11651,\n' +
+      '  #11673).',
   );
   return lines.join('\n');
 }
@@ -1628,6 +1663,35 @@ const FIELD_RULE_REPORT_SELF_TEST_CASES = [
   {
     name: 'REPORT — an empty skip list renders nothing (no phantom section on a corpus with no skips)',
     holds: () => renderFieldRuleSkips([]) === '',
+  },
+  {
+    // The trailer is the whole of #11673's fix, and it is a string nobody else
+    // reads — deleting it breaks no other assertion in this file and no gate
+    // anywhere goes red. Pin the two load-bearing halves: that a skip is not a
+    // to-do item, and that its layer comes from the document.
+    name: 'REPORT — the trailer says a skip is NOT a to-do item and that the layer comes from the document',
+    holds: () => {
+      const out = renderFieldRuleSkips([
+        { where: 'content/docs/x.mdx:12', slot: 'visibleWhen', reason: 'because reasons' },
+      ]);
+      return out.includes('A skip is NOT a to-do item')
+        && /read the layer off the DOCUMENT before re-authoring/.test(out);
+    },
+  },
+  {
+    // And that it never becomes a CLAIM. The trailer may describe the list's
+    // status; the moment it names a layer for a site it did not derive, it has
+    // done the one thing #11407 exists to refuse. This is the guard on the fix
+    // itself, not on the gate.
+    name: 'REPORT — no rendered skip entry names a layer the gate did not derive',
+    holds: () => {
+      const out = renderFieldRuleSkips([
+        { where: 'content/docs/x.mdx:12', slot: 'visibleWhen', reason: 'because reasons' },
+      ]);
+      // The reason text and the trailer may DISCUSS layers in the abstract; what
+      // must never appear is a verdict sentence binding this site to one.
+      return !/\bthis (?:site|fragment|example) (?:is|documents|describes) (?:a|an|the)\b/i.test(out);
+    },
   },
   {
     name: 'REPORT — the GREEN summary path still PRINTS the skip list, not merely its count',

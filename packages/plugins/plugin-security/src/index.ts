@@ -116,3 +116,29 @@ export type {
   PermissionSetOverlayDiscardDeps,
   PermissionSetOverlayDiscardResult,
 } from './permission-set-overlay-discard.js';
+// [maintainer ruling 2026-08-24 — 「同意 第一步(创业阶段,Salesforce 式)」]
+// Lock the base, clone to customize: the write-door provenance rule and its
+// refusals, plus the DETECTION READING for overlays that already exist.
+// ⛔ The reading reaps nothing — disposition of existing forks is a follow-up
+// reading for the maintainer.
+export {
+  ENV_PROJECTION_MARKER,
+  classifyPackagedPermissionSet,
+  assertPermissionSetNotPackageDeclared,
+  PackagedPermissionSetLockedError,
+  PackagedPermissionSetProvenanceUnknownError,
+} from './packaged-permission-set-lock.js';
+export type {
+  PackagedSetVerdict,
+  LayeredProbe,
+} from './packaged-permission-set-lock.js';
+export {
+  OVERLAY_PAGE_LIMIT,
+  detectPackagedPermissionSetOverlays,
+  reportPackagedPermissionSetOverlays,
+} from './packaged-permission-set-overlay-detection.js';
+export type {
+  PackagedPermissionSetOverlayFinding,
+  PackagedPermissionSetOverlayReading,
+  OverlayDetectionOptions,
+} from './packaged-permission-set-overlay-detection.js';

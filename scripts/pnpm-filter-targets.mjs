@@ -87,6 +87,13 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { isEntrypoint } from './invoked-as.mjs';
+import {
+  WORKSPACE_FILE,
+  WorkspaceEnumerationError,
+  parseWorkspaceGlobs,
+  selfTest as workspaceEnumeratorSelfTest,
+  workspacePackageDirs,
+} from './workspace-enumerator.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -153,102 +160,67 @@ export function findWorkspaceRoot(startDir) {
 /**
  * The `packages:` globs of a pnpm-workspace.yaml.
  *
- * Hand-read rather than parsed with the `yaml` dependency, because the caller
- * that matters most (`os-verify-lock.sh --preflight`) must work in a tree whose
- * `node_modules` is absent or half-installed -- the exact situation in which a
- * verification command is most likely to be wrong. The shape is a flat list of
- * scalars; anything else is not this file.
+ * Delegates to `scripts/workspace-enumerator.mjs` (#11510), this repo's one
+ * parse of that block. Kept as an export because this module's `--self-test`
+ * pins it and `os-verify-lock.sh --preflight` reaches the workspace through
+ * here; the enumerator has no dependencies either, which is the property that
+ * matters on the preflight path (it runs in trees whose `node_modules` is
+ * absent or half-installed).
  *
  * @param {string} text
  * @returns {string[]}
  */
 export function workspacePatterns(text) {
-  const out = [];
-  let inPackages = false;
-  for (const raw of String(text).split('\n')) {
-    const line = raw.replace(/\s+$/, '');
-    if (/^packages:\s*$/.test(line)) {
-      inPackages = true;
-      continue;
-    }
-    if (!inPackages) continue;
-    const item = /^\s+-\s+(.*)$/.exec(line);
-    if (item) {
-      const value = item[1].trim().replace(/^['"]|['"]$/g, '');
-      if (value) out.push(value);
-      continue;
-    }
-    if (line.trim() === '' || /^\s*#/.test(line)) continue;
-    break; // a new top-level key ends the list
-  }
-  return out;
+  return parseWorkspaceGlobs(text);
 }
 
 /**
- * Expand one workspace glob to directories. Only `*` segments are expanded --
- * the shape this repo's workspace file uses (`packages/*`, `packages/qa/*`).
+ * Every package name this workspace declares.
  *
- * @param {string} root
- * @param {string} pattern
- * @returns {string[]} absolute directories
- */
-export function expandPattern(root, pattern) {
-  let dirs = [root];
-  for (const segment of pattern.split('/')) {
-    if (!segment || segment === '.') continue;
-    const next = [];
-    for (const dir of dirs) {
-      if (segment.includes('*')) {
-        let entries;
-        try {
-          entries = readdirSync(dir, { withFileTypes: true });
-        } catch {
-          continue;
-        }
-        const re = new RegExp(`^${segment.split('*').map((s) => s.replace(/[.+?^${}()|[\]\\]/g, '\\$&')).join('[^/]*')}$`);
-        for (const entry of entries) {
-          if (!entry.isDirectory() || entry.name === 'node_modules') continue;
-          if (re.test(entry.name)) next.push(join(dir, entry.name));
-        }
-      } else {
-        const candidate = join(dir, segment);
-        try {
-          if (statSync(candidate).isDirectory()) next.push(candidate);
-        } catch {
-          /* not there */
-        }
-      }
-    }
-    dirs = next;
-  }
-  return dirs;
-}
-
-/**
- * Every package name this workspace declares, plus the root manifest's own.
+ * Membership comes from `scripts/workspace-enumerator.mjs` (#11510), this
+ * repo's one parse and expansion of the `packages:` block.
+ *
+ * ## Why an unreadable workspace is ALLOWED here and refused everywhere else
+ *
+ * The enumerator refuses a workspace file it cannot read an answer out of —
+ * an absent `packages:` key, an empty one, a glob shape it does not expand —
+ * because for the gates that enumerate the workspace a silent empty list is a
+ * clean run over nothing.
+ *
+ * This caller is the exception, and deliberately: `os-verify-lock.sh
+ * --preflight` runs it ahead of EVERY verification command, and its job is to
+ * judge whether a `--filter` selector names a real package. "I could not read
+ * the workspace" is not a finding about the selector — turning it into a
+ * refusal would block verification across the repo on a malformed file this
+ * module does not own. So an unreadable workspace lands in the same bucket as
+ * an absent one, which is the bucket this function already had, and the
+ * callers' `names.length === 0` guard turns it into `allow`. Made explicit
+ * here rather than left to a parser that happened to return `[]`.
  *
  * @param {string} root workspace root
  * @returns {{ names: string[], dirs: string[] }}
  */
 export function listWorkspacePackages(root) {
-  const wsFile = join(root, 'pnpm-workspace.yaml');
-  if (!existsSync(wsFile)) return { names: [], dirs: [] };
+  if (!existsSync(join(root, WORKSPACE_FILE))) return { names: [], dirs: [] };
+  let memberDirs;
+  try {
+    memberDirs = workspacePackageDirs(root);
+  } catch (err) {
+    if (err instanceof WorkspaceEnumerationError) return { names: [], dirs: [] };
+    throw err;
+  }
   const names = [];
   const dirs = [];
-  for (const pattern of workspacePatterns(readFileSync(wsFile, 'utf8'))) {
-    if (pattern.startsWith('!')) continue;
-    for (const dir of expandPattern(root, pattern)) {
-      const manifest = join(dir, 'package.json');
-      if (!existsSync(manifest)) continue;
-      try {
-        const parsed = JSON.parse(readFileSync(manifest, 'utf8'));
-        if (typeof parsed.name === 'string' && parsed.name) {
-          names.push(parsed.name);
-          dirs.push(dir);
-        }
-      } catch {
-        /* an unparseable manifest is not this module's finding */
+  for (const rel of memberDirs) {
+    const dir = join(root, rel);
+    try {
+      const parsed = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8'));
+      if (typeof parsed.name === 'string' && parsed.name) {
+        names.push(parsed.name);
+        dirs.push(dir);
       }
+    } catch {
+      /* an unparseable manifest is not this module's finding */
     }
   }
   return { names: [...new Set(names)].sort(), dirs };
@@ -699,6 +671,10 @@ export async function selfTest() {
   ok(`the workspace file yields its globs (found ${patterns.length})`, patterns.length >= 5);
   ok('and stops at the next top-level key, not at the end of the file', !patterns.some((p) => p.includes(':')));
   ok('and holds the nested ones', patterns.includes('packages/adapters/*') || patterns.includes('packages/drivers/*'));
+
+  // The shared workspace enumerator is a plain module with no CI invocation of
+  // its own (#11510); every script that consolidated onto it folds in its checks.
+  failures.push(...workspaceEnumeratorSelfTest({ root: root ?? HERE }));
 
   if (failures.length === 0) {
     console.log(

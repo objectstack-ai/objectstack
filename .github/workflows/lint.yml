@@ -56,8 +56,8 @@ jobs:
         with:
           node-version: '22'
 
-      - name: Enable Corepack
-        run: corepack enable
+      - name: Setup pnpm
+        uses: ./.github/actions/setup-pnpm
 
       - name: Get pnpm store directory
         shell: bash
@@ -784,6 +784,106 @@ jobs:
       - name: PM ci-failure self-test
         run: node scripts/pm/ci-failure.mjs --self-test
 
+      # Claude hook guard self-tests (#11514, objectstack half of
+      # objectstack-ai/objectui#5754). `.claude/hooks/` holds the enforcement
+      # behind the two rules whose violation is most expensive in this repo —
+      # worktree-first and the stash ban — and each guard ships a hermetic
+      # matrix asserting its block/allow verdict case by case, with a header
+      # telling you to re-run it after touching the hook. Nothing ran them:
+      # `grep -rn 'selftest' .github/workflows/` returned no match when this
+      # card was filed, so those headers WERE the enforcement. A guard that has
+      # silently stopped guarding is worse than no guard, because everyone keeps
+      # behaving as though it works — the stash ban's own receipt is two
+      # parallel agents losing their in-flight changes to a shared LIFO stack.
+      #
+      # Baseline on `main` before this step existed, measured rather than
+      # assumed: `guard-main-checkout-bash` 121 cases pass, `guard-shared-stash`
+      # 32 cases pass. Both guards were healthy; this wires the alarm, it does
+      # not fix an outage.
+      #
+      # ⭐ DISCOVERED at run time, never listed. A hard-coded list is this
+      # card's own defect one level up: add a hook with a matrix tomorrow and it
+      # silently is not run, and nothing goes red. The glob is the contract, so
+      # a new `.claude/hooks/**/*.selftest.sh` is picked up with no edit here.
+      # `find`, not a flat glob, so a matrix in a subdirectory is not a silent
+      # miss either.
+      #
+      # ...and an EMPTY discovery is RED, not green (#4690). A renamed or moved
+      # directory would otherwise make this step pass by running nothing, which
+      # is the identical green line the whole self-test family above exists to
+      # distrust. The count is printed on success so a SHRINKING set is visible
+      # in the log rather than inferred.
+      #
+      # ⭐ Collected rather than sequenced, for the reason spelled out at the
+      # `Shallow-history guard self-tests` step above (#10814): a `run:` block
+      # is executed as `bash -e`, so a bare loop would abort at the FIRST red
+      # matrix and leave the rest unrun — neither green nor red, and nothing in
+      # the log tells those apart. The matrices are independent by construction
+      # (each builds its own throwaway fixture), so collecting loses nothing.
+      # ⚠️ `check:step-collectors` CANNOT see this block — its population is
+      # `scripts/`|`packages/` paths carrying `--self-test`, and these are
+      # `.claude/hooks/*.selftest.sh` — so the collector shape here is held by
+      # review, not by that gate. Do not "simplify" it into a bare loop.
+      #
+      # ⛔ This step RUNS the matrices; it does not modify any hook. `.claude/**`
+      # is governed surface and this workflow is not — that separation is what
+      # keeps the wiring on the ordinary merge path.
+      #
+      # Home: a STEP of this job rather than a job of its own, deliberately.
+      # `Lint & Repo Gates` is a required status context (pinned by
+      # `check:required-contexts`); a new job would publish a context that is in
+      # no ruleset, so a red guard would be advisory and the merge queue would
+      # not stop for it — #5617 verbatim, which is the exact shape this card
+      # exists to close.
+      #
+      # Hermetic by construction, and measured that way: each matrix builds its
+      # own git repo and linked worktree under $TMPDIR, and both were re-run
+      # from a primary checkout, a detached HEAD and a non-repo cwd with
+      # identical results, so neither this checkout's depth nor its branch is an
+      # input. Needs `jq` and `git` and nothing else — no pnpm, no node, no
+      # build, no network (`jq` is in the runner image and is already relied on
+      # bare by cut-rc.yml and release.yml). ~2 s measured.
+      - name: Claude hook guard self-tests (worktree-first · stash ban)
+        run: |
+          # Tolerate-and-collect (#10814) — see the note above this step. Each
+          # matrix runs unconditionally and prints its own verdict; the step
+          # still FAILS when any of them does, naming every one that failed.
+          # ⛔ Never let the collector swallow the exit code — a green step over
+          # a red self-test looks identical to success.
+          mapfile -t selftests < <(find .claude/hooks -type f -name '*.selftest.sh' | sort)
+          if [ "${#selftests[@]}" -eq 0 ]; then
+            echo "Claude hook guard self-tests — DISCOVERED NOTHING under .claude/hooks/."
+            echo "This step verified nothing, which is a failure and not a pass (#4690):"
+            echo "the matrices were moved, renamed or deleted. Re-point the search above"
+            echo "rather than deleting the step."
+            exit 1
+          fi
+          echo "discovered ${#selftests[@]} hook self-test(s):"
+          printf '  %s\n' "${selftests[@]}"
+          echo ""
+          failed=""
+          run_self_test() {
+            echo "-- $*"
+            if "$@"; then
+              echo "PASS  $*"
+            else
+              echo "FAIL  $*"
+              failed="${failed}  $*"$'\n'
+            fi
+            return 0
+          }
+          for selftest in "${selftests[@]}"; do
+            run_self_test "$selftest"
+          done
+          if [ -n "$failed" ]; then
+            echo ""
+            echo "Claude hook guard self-tests — the following FAILED:"
+            printf "%s" "$failed"
+            exit 1
+          fi
+          echo ""
+          echo "Claude hook guard self-tests — all ${#selftests[@]} ran and passed"
+
       # Docs/skills authoring guard (#2035 / ADR-0059): TS code blocks in
       # Markdown/MDX are not type-checked or ESLinted, so skills/ and
       # content/docs/ can drift back to teaching the bare `: Page = {}` literal
@@ -1100,6 +1200,23 @@ jobs:
       # its own failure mode.
       - name: Quick-reference section counts match their tables
         run: pnpm check:quick-reference-counts
+
+      # #11752: the "Overlay whitelist (shared-DB tenancy invariant)" table in
+      # metadata-lifecycle.mdx is a hand-kept copy of DEFAULT_METADATA_TYPE_REGISTRY
+      # sitting directly under the sentence that calls the registry the single
+      # machine-readable source. It drifted on FOUR types (flow/permission/position
+      # said ✅ against a registry that says ❌ after the #6283/#6483 rollbacks;
+      # `translation` is ✅ in the registry and had no row at all) and was caught by
+      # a human fact-checking a promo video (#11664), not by CI. The gate compares
+      # both directions — a table→registry check alone passes a table missing a
+      # whole row, which is exactly how `translation` survived — and reads the
+      # registry by AST: the same-line regex sees 26 of the 27 entries, because
+      # `datasource` opens its brace on its own line.
+      # It lives in this job with the other docs guards: the edit that breaks it is
+      # a docs edit, so a packages/** paths filter would blind it to its own
+      # failure mode.
+      - name: Overlay whitelist table matches the metadata type registry
+        run: pnpm check:overlay-whitelist-table
 
       # #9604: the runtime-services chapter's pages are enumerated in three
       # hand-written places (meta.json "pages", the chapter list in
@@ -1653,6 +1770,30 @@ jobs:
       # truth, and this holds every workflow to it.
       - name: Node-version drift guard
         run: pnpm check:node-version
+
+      # pnpm-acquisition census. Sibling of the guard above, and here for the
+      # failure the guard above cannot have: a census that reaches ZERO while
+      # the thing it measures is still there. The `corepack enable` sites are
+      # moving onto .github/actions/setup-pnpm, and when that finishes a grep
+      # for `corepack enable` returns 0 — a true answer about Corepack that
+      # reads as a complete answer about pnpm acquisition. It is not one:
+      # showcase-smoke.yml acquires pnpm through `pnpm/action-setup`, which
+      # contains no Corepack string and is invisible to that key. A metric that
+      # hits zero while its subject survives is worse than no metric, because it
+      # retires the attention.
+      #
+      # So this gate is keyed on the NEED, not the mechanism: the population is
+      # every job that RUNS pnpm. A mechanism nobody has taught it cannot become
+      # a silent zero — it surfaces as a job running pnpm with no recognised
+      # acquisition, which fails loudly. It prints the full census on SUCCESS
+      # (every mechanism keeps a row, including the ones at 0), so the answer to
+      # "how does CI get pnpm" is one job log rather than a grep nobody thinks
+      # to re-derive. It also pins the ordering that killed two jobs in this
+      # repo with "Unable to locate executable file: pnpm": a setup-node asking
+      # for the pnpm store cache shells out to pnpm, so pnpm must be acquired
+      # strictly earlier. Runs its own --self-test first.
+      - name: pnpm-acquisition census
+        run: pnpm check:pnpm-acquisition
 
       # Workflow status-function guard (#5343, from #4900 and #4928). GitHub
       # wraps any `if:` that names no status function in an IMPLICIT success().
@@ -2411,6 +2552,48 @@ jobs:
       - name: Every committed pnpm --filter names a real package
         run: pnpm check:pnpm-filter-targets
 
+      # The sibling of the gate above, and the OTHER half of the family its
+      # comment names (#10166). There the `--filter` selector matched nothing;
+      # here the filter matched, the script ran, and the ARGUMENTS were lost.
+      #
+      # ⛔ Hand a vitest-backed script its arguments after a bare separator and
+      # the WHOLE package suite runs. pnpm forwards the separator verbatim into
+      # the child argv (npm and turbo both strip it — pnpm is the odd one out),
+      # and vitest's cac parser then discards EVERYTHING after it, options and
+      # positionals alike, in silence. The file pattern and `--maxWorkers` die
+      # together, so the concurrency discipline is inert in the same breath.
+      # Measured on the card: 415 files / 11045 tests / 358s under the shared
+      # verify lock, where the intended run was one file in 655ms — green, exit
+      # 0, reading exactly like the narrow run that was asked for.
+      #
+      # ⚠️ The broken spelling is written out in the GATE'S header, not here.
+      # The first draft of this comment spelled it, and the gate red on this
+      # file at its own wiring commit — which is the objection a corpus gate was
+      # rejected on once before ("it would fire on the counter-example the
+      # corrected instruction MUST contain"). That objection is real; the answer
+      # is `COUNTER_EXAMPLE_FILES` in the gate, and the reason this file is not
+      # in it is that a whole workflow is too coarse a thing to exempt — a
+      # broken spelling here would EXECUTE.
+      #
+      # ⚠️ The violating population is EMPTY today (#11425 landed the corrected
+      # spelling), so this step's job is to keep it empty — and the gate says so
+      # in its own verdict line rather than printing a bare "0 violations". It
+      # reports how many separators it JUDGED, not just how many it failed: 5 on
+      # the tree it landed against, four of which a naive bare-`--` selector
+      # would have RED (this workflow's own turbo dogfood shard, and the three
+      # documented `pnpm dev -- --fresh` spellings in AGENTS.md). Its rule is
+      # vitest-BOUND, and the vitest-backed script names are derived from the
+      # workspace rather than typed here.
+      #
+      # Reads text under `.claude/**`, `skills/**`, `scripts/**`,
+      # `.github/workflows/**` and every tracked AGENTS.md / CLAUDE.md, plus the
+      # workspace manifests for the derivation. No build, no network,
+      # sub-second. The `check:` key runs `--self-test` first: it drives this
+      # same sweep RED over a temp tree on disk, which is what carries
+      # non-vacuity while the real population is zero.
+      - name: No committed command forwards args to vitest through a bare --
+        run: pnpm check:agent-test-spelling
+
   # Lane 1 of 4 behind the required `TypeScript Type Check` context. The
   # aggregator job at the bottom of this file explains the split, holds the
   # contract, and is the thing the merge queue actually requires — read it
@@ -2454,11 +2637,8 @@ jobs:
         with:
           node-version: '22'
 
-      - name: Enable Corepack
-        run: corepack enable
-
-      - name: Verify pnpm version
-        run: pnpm --version
+      - name: Setup pnpm
+        uses: ./.github/actions/setup-pnpm
 
       - name: Get pnpm store directory
         shell: bash
@@ -2973,6 +3153,23 @@ jobs:
       - name: Check spec pin citations still name the pin this repo builds against
         run: pnpm --filter @objectstack/spec check:objectui-pin-citations
 
+      # #11344. `packages/spec/llms.txt` is hand-kept, has no generator, and
+      # SHIPS in the published tarball as context for AI consumers — the
+      # audience least able to notice staleness and most likely to turn a claim
+      # into code. When this landed the file advertised eleven symbols that
+      # existed in no entry point (`IUIService` among them, removed in v11), two
+      # packages that did not exist, and a schema table whose heading disagreed
+      # with the sum of its own rows.
+      #
+      # Reads `src/`, the checked-in `api-surface/` shards, the package manifest
+      # and pnpm-workspace.yaml — no build — so it belongs in this pre-build
+      # source-audit group beside its nearest sibling above. Unfiltered on
+      # purpose: the counts are measured against the whole workspace and against
+      # every schema domain, so a PR that adds a package or a schema anywhere
+      # can falsify this file without touching packages/spec/**.
+      - name: Check the shipped llms.txt still describes this package
+        run: pnpm --filter @objectstack/spec check:llms-txt
+
   # Lane 2 of 4 behind the required `TypeScript Type Check` context. The
   # aggregator job at the bottom of this file explains the split, holds the
   # contract, and is the thing the merge queue actually requires — read it
@@ -3013,11 +3210,8 @@ jobs:
         with:
           node-version: '22'
 
-      - name: Enable Corepack
-        run: corepack enable
-
-      - name: Verify pnpm version
-        run: pnpm --version
+      - name: Setup pnpm
+        uses: ./.github/actions/setup-pnpm
 
       - name: Get pnpm store directory
         shell: bash
@@ -3190,11 +3384,8 @@ jobs:
         with:
           node-version: '22'
 
-      - name: Enable Corepack
-        run: corepack enable
-
-      - name: Verify pnpm version
-        run: pnpm --version
+      - name: Setup pnpm
+        uses: ./.github/actions/setup-pnpm
 
       - name: Get pnpm store directory
         shell: bash
@@ -3384,11 +3575,8 @@ jobs:
         with:
           node-version: '22'
 
-      - name: Enable Corepack
-        run: corepack enable
-
-      - name: Verify pnpm version
-        run: pnpm --version
+      - name: Setup pnpm
+        uses: ./.github/actions/setup-pnpm
 
       - name: Get pnpm store directory
         shell: bash

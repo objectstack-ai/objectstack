@@ -80,6 +80,33 @@
 // file extension. Either anchor the pattern (`/^@objectstack\/core$/`, the
 // array form) or list the subpath entry ahead of the bare one.
 //
+// ── A SECOND resolution hazard, which this gate does NOT cover (#11412) ────
+//
+// This gate is about WHICH ARTIFACT a test resolves — source or `dist/`. There
+// is a separate axis it says nothing about: WHICH BASE a bare specifier is
+// resolved FROM, and under vitest that question is erased rather than answered
+// wrongly.
+//
+// Every workspace package here is a pnpm link whose realpath is the package
+// directory, so it contains no `/node_modules/` segment and vitest's default
+// `server.deps.external` (`[/\/node_modules\//]`) INLINES it — `dist/` included.
+// Vite then rewrites the `import()` written inside that package to resolve from
+// the vitest root instead of from the module physically containing the call,
+// which is the opposite of what Node ESM does. So in-process, the caller's base
+// and the callee's base are the same base, every assertion about which one is in
+// use is green either way — AND SO IS THE ANTI-VACUITY CONTROL BESIDE IT. That
+// is why the hazard needs recording rather than testing in place: the ritual
+// that would normally catch it returns the wrong answer.
+//
+// A pin that must measure a resolution BASE therefore spawns a real Node child.
+// ⚠️ Spawning escapes Vite but NOT `NODE_PATH`: a vitest worker carries pnpm's
+// hoisted store in it, `childEnv()` forwards it, and CJS `createRequire()`
+// honours it while ESM `import()` ignores it. A spawned pin whose claim routes
+// through CJS must strip it (`childEnv({ NODE_PATH: undefined })`).
+//
+// The mechanism, both halves, and the controls that prove each one can fail live
+// in `packages/cli/test/vitest-resolution-base-collapse.e2e.test.ts`.
+//
 // ── Where the walk goes, and why it leaves the package (#8351) ──────────────
 //
 // **Aliasing a workspace dep to source imports that dep's ENTIRE import surface
@@ -284,6 +311,11 @@ import { readFileSync, readdirSync, statSync, existsSync, mkdirSync, writeFileSy
 import { stripComments, scanSource, blank } from './js-comment-mask.mjs';
 import { join, resolve, relative, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import {
+  isExclusionGlob,
+  readWorkspaceGlobs,
+  selfTest as workspaceEnumeratorSelfTest,
+} from './workspace-enumerator.mjs';
 import { tmpdir } from 'node:os';
 import process from 'node:process';
 
@@ -2698,6 +2730,44 @@ function selfTest() {
         `workspace parent ${glob} carries no path separator, so scripts/pm/dispatch-gates.mjs refuses it as too generic and every package under it drops out of the derived gate list`,
       );
     }
+
+    // ── the declaration must still BE the workspace (#11510) ──────────────
+    //
+    // WORKSPACE_PARENT_GLOBS is a hand-written copy of the `packages:` block,
+    // and the case above only checks each entry's SHAPE. Nothing checked that
+    // the entries were still the right ones. Two gates carried byte-identical
+    // 11-entry copies of this array with the same blind spot in both, which is
+    // exactly what a hand-maintained mirror does: a workspace root added to
+    // pnpm-workspace.yaml leaves both walking the old set, both green, and no
+    // dispatch brief naming either gate for the new root.
+    //
+    // The array is NOT replaced by the live parse. It is this gate's declared
+    // population, the only thing that tells scripts/pm/dispatch-gates.mjs which
+    // cards belong here, and a runtime parse spells no literal at all — the
+    // #11190 measurement that made consolidation safe in the first place. So
+    // the declaration stays and the live parse becomes its CHECK, in both
+    // directions, the shape check-published-files.mjs already uses.
+    const declaredParents = WORKSPACE_PARENT_GLOBS.map((g) => g.replace(/\/\*+$/, ''));
+    const liveParents = readWorkspaceGlobs(REPO_ROOT)
+      .filter((g) => !isExclusionGlob(g))
+      .map((g) => g.replace(/\/\*+$/, ''));
+    for (const parent of liveParents) {
+      expect(
+        declaredParents.includes(parent),
+        `pnpm-workspace.yaml declares the workspace root ${parent}, which WORKSPACE_PARENT_GLOBS does not — this gate walks it but no card is dispatched here for it`,
+      );
+    }
+    for (const parent of declaredParents) {
+      expect(
+        liveParents.includes(parent),
+        `WORKSPACE_PARENT_GLOBS declares ${parent}, which pnpm-workspace.yaml does not — a declaration that can drift from the workspace is worse than none, it replaces a silent gate with a lying one`,
+      );
+    }
+
+    // The shared enumerator is a plain module with no CI invocation of its own
+    // (#11510 — being a gate is exactly what it must not be); every script that
+    // consolidated onto it folds in its checks.
+    for (const failure of workspaceEnumeratorSelfTest({ root: REPO_ROOT })) expect(false, failure);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

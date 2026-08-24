@@ -208,11 +208,25 @@ to the authorable-surface rows.
   docs should say plainly the platform performs no upload-time content inspection; the new
   `attachments-storage.field-accept-maxsize-server-enforced` item records the same boundary
   on the QA side.
-- **Dead remediation prescription in a live command** — `doctor.ts:2149` prints "Run
-  `objectstack codemod v2-to-v3` to auto-fix"; no `codemod` command exists (the real path
-  is `os migrate meta`), and `content/docs/protocol/backward-compatibility.mdx:134` admits
-  it. Fix the string; the new `cli.doctor-deprecation-scan` item carries the expected-fail
-  probe until then.
+- **Dead remediation prescription in a live command — FIXED in #10882 (closing #10680),
+  2026-08-21.** `doctor.ts` used to print "Run `objectstack codemod v2-to-v3` to auto-fix";
+  no `codemod` command has ever been registered. At head the print site
+  (`doctor.ts:2283-2288`) prescribes **no** command — it says no automated codemod ships
+  with the CLI and routes the operator to the `→ replacement` already computed per finding,
+  and `packages/cli/src/commands/doctor-deprecation-hint-commands.test.ts` pins the class so
+  a future phantom prescription fails there rather than shipping. **A repoint at
+  `os migrate meta` was considered and REFUSED**: its subject is an authored stack config,
+  its header declines the AST rewrite as "unsafe and lossy", both its writes are `--out`
+  JSON snapshots, and three of the eight `DEPRECATED_PATTERNS` are not metadata at all —
+  reasoning at `doctor.ts:2258-2282`, refusal pinned at that test's `:199`. An earlier
+  wording of this row prescribed that repoint; it is retracted, and it is what seeded the
+  same suggestion in #10680 for #10882 to argue down — do not re-derive it.
+  `content/docs/protocol/backward-compatibility.mdx:134` still records the codemod as "not
+  yet available", but at head that is **consistent** with the tool rather than the
+  contradiction this row cited it for: correct as written, deliberately not edited (#11420,
+  and again here). The interim probe this row pointed at
+  (`cli.doctor-deprecation-scan`'s expected-fail clause) is refreshed to a positive
+  assertion in #11638.
 - **`metadata-service.mdx:188`** presents `eager` bootstrap as "Scans filesystem … at
   boot (default)"; no shipped boot path scans (`watch` defaults false, `os dev` disables it
   explicitly). Stop advertising the scan as default behavior.

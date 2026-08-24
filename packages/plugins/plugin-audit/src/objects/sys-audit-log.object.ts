@@ -232,6 +232,27 @@ export const SysAuditLog = ObjectSchema.create({
       readonly: true,
       searchable: true,
       description: 'ID of the affected record',
+      // [#11386] The id half of this object's ActivityPointer pair (ADR-0052
+      // §5), adopting the #11339 carrier. VERIFIED for THIS object rather than
+      // assumed from the shape: every writer of the pair stamps an object
+      // MACHINE NAME beside a real record id of that object —
+      // `audit-writers.ts` (`object_name: ctx.object`, `record_id: recordId`),
+      // `read-audit.ts` (`event.objectName` / `event.recordId`),
+      // `auth-event-audit.ts` (the session object + `event.sessionId`) and
+      // plugin-auth's admin user endpoints (`'sys_user'` + the affected user
+      // id). The pair is also the object's own query key: the
+      // `{object_name, record_id}` index and the `record_views` list view
+      // answer "who touched THIS record", which only matches on the target's
+      // real id.
+      //
+      // Consequence of declaring, accepted deliberately: a seeded ledger row
+      // whose pointer names a record that cannot be resolved is now refused
+      // loudly instead of stored verbatim — the verbatim row was one that
+      // matched no pair query and rendered on no drill-down. A demo row ABOUT
+      // A DELETED RECORD (an `action: 'delete'` row, whose target must NOT
+      // exist) stays authorable through the landed escape hatch: an
+      // internal-id-shaped value passes through untouched.
+      referenceVia: 'object_name',
       group: 'Target',
     }),
 

@@ -52,6 +52,39 @@
  *     (locale → `TranslationData`). Its keys are simply not visited here: an
  *     unrecognised top-level namespace is skipped, never reported.
  *
+ * ── Flows: what the three levels resolve against ─────────────────────────
+ *
+ * `flows.<name>.screens.<node_id>.fields.<field_name>` (#7646 / #11287) is
+ * three exact-match identifiers deep, and all three have an enumerable
+ * universe, so the leg mirrors `dashboards` → `widgets` one level further:
+ *
+ *   | level  | key                       | declared by                        |
+ *   |--------|---------------------------|------------------------------------|
+ *   | flow   | `Flow.name`               | `flow.zod.ts` (required machine name) |
+ *   | screen | `FlowNode.id`             | `flow.zod.ts`, `type: 'screen'` nodes |
+ *   | field  | `ScreenFieldConfig.name`  | `builtin-node-config.zod.ts` (`config.fields[]`) |
+ *
+ * Two shape facts the collector must respect, both measured rather than
+ * assumed — either one, read the obvious way, turns this leg into a
+ * false-positive generator:
+ *
+ *  1. **Screen nodes NEST.** `FlowNode.config` carries ADR-0031 regions
+ *     (`loop.config.body`, `parallel.config.branches[].nodes`,
+ *     `try_catch.config.try`/`.catch`), each holding a full node array. A
+ *     screen in one is a real screen — the runner pauses on it and the client
+ *     holds its `nodeId` — so the universe is collected with `walkFlowNodes`,
+ *     not off the flat `flow.nodes`.
+ *  2. **`ScreenConfigSchema` has two mutually exclusive shapes.** A FLAT
+ *     screen declares `config.fields[]`; an OBJECT-FORM screen
+ *     (`config.objectName`) renders that object's whole create/edit form and
+ *     declares no `fields` at all. Its input labels resolve through
+ *     `objects.<objectName>.fields.*`, so a field key on one is an orphan —
+ *     reported with that redirect rather than a bare "not declared".
+ *
+ * `flows.<name>.label` and `.screens.<id>.title` are leaf copy on a node that
+ * resolved, so they need no check of their own — the schema closes the leaf
+ * vocabulary (`.strict()`), which is a shape concern, not a reference.
+ *
  * ── Cross-package objects ────────────────────────────────────────────────
  *
  * A stack legitimately translates objects it does not define — `sys_user`'s
@@ -67,9 +100,21 @@
 
 import { expandViewContainer } from '@objectstack/spec';
 import { hasPlatformObjectPrefix, isPlatformProvidedObjectName } from '@objectstack/spec/system';
+import { walkFlowNodes } from './flow-walk.js';
 import { walkPageComponents } from './page-walk.js';
 import { SYSTEM_FIELDS } from './system-fields.js';
 import { viewObjectName } from './view-walk.js';
+
+/**
+ * The `FlowNode.type` a `flows.<name>.screens.*` key addresses.
+ *
+ * A local const, the same way `i18n-resolver.ts` keeps its own `SCREEN_NODE_TYPE`
+ * beside the resolver that reads it: `'screen'` is a member of the open
+ * `FlowNodeAction` seed set (ADR-0018 removed the enum gate on `FlowNode.type`),
+ * and neither that enum nor `FLOW_BUILTIN_NODE_TYPES` exposes "the screen one"
+ * by name to import.
+ */
+const SCREEN_NODE_TYPE = 'screen';
 
 export const TRANSLATION_TARGET_UNKNOWN = 'translation-target-unknown';
 export const TRANSLATION_OPTION_KEY_UNKNOWN = 'translation-option-key-unknown';
@@ -187,11 +232,38 @@ interface ObjectFacts {
   sections: Set<string>;
 }
 
+/** Everything a `flows.<name>.screens.<node_id>` key may legally name. */
+interface ScreenFacts {
+  /** `config.fields[].name` — the flat screen's declared inputs. */
+  fields: Set<string>;
+  /**
+   * `config.objectName` when this is an OBJECT-FORM screen. Its inputs are the
+   * object's own create/edit form, not `config.fields`, so a field key here is
+   * an orphan that belongs under `objects.<objectName>.fields.*` — the same
+   * "say where it belongs" redirect a misfiled `globalActions` key gets.
+   */
+  objectName?: string;
+}
+
+/** Everything a `flows.<name>.…` key may legally name under one flow. */
+interface FlowFacts {
+  /** Screen node id → that screen's facts. Keyed by `FlowNode.id`. */
+  screens: Map<string, ScreenFacts>;
+  /**
+   * Every NON-screen node id → its `type`. The `screens` group addresses screen
+   * nodes only, so a key naming a real `decision` node is still an orphan — but
+   * one whose diagnosis is "wrong node type", not "no such node".
+   */
+  otherNodes: Map<string, string>;
+}
+
 interface Universe {
   objects: Map<string, ObjectFacts>;
   /** App name → every navigation item id declared by that app. */
   apps: Map<string, Set<string>>;
   dashboards: Map<string, { widgets: Set<string>; actions: Set<string> }>;
+  /** Flow name (`Flow.name`) → its screen nodes and their declared fields. */
+  flows: Map<string, FlowFacts>;
   /** Object-less actions — the ones `globalActions.*` may name. */
   globalActions: Map<string, AnyRec>;
   /** Action name → owning object, so a misfiled `globalActions` key can say where it belongs. */
@@ -565,7 +637,42 @@ function buildUniverse(stack: AnyRec): Universe {
     dashboards.set(dashName, { widgets, actions });
   }
 
-  return { objects, apps, dashboards, globalActions, actionOwners };
+  // ── Flows: screen node ids + the field names each screen declares ──
+  //
+  // Nodes are collected through `walkFlowNodes`, NOT `flow.nodes` directly: a
+  // screen inside an ADR-0031 region (`loop.config.body`,
+  // `parallel.config.branches[].nodes`, `try_catch.config.try`/`.catch`) is a
+  // real screen the runner pauses on and hands the client a `ScreenSpec.nodeId`
+  // for, so its translation key resolves. Reading the flat array would leave
+  // every nested screen out of the universe and report each of its keys as an
+  // orphan — a warning-severity false positive, which is exactly the
+  // over-stating ADR-0072 D1 forbids.
+  const flows = new Map<string, FlowFacts>();
+  for (const flow of asArray(stack.flows)) {
+    const flowName = strName(flow.name);
+    if (!flowName) continue;
+    const screens = new Map<string, ScreenFacts>();
+    const otherNodes = new Map<string, string>();
+    for (const { node } of walkFlowNodes(flow, '')) {
+      const nodeId = strName(node.id);
+      if (!nodeId) continue;
+      const nodeType = strName(node.type);
+      if (nodeType !== SCREEN_NODE_TYPE) {
+        if (nodeType && !otherNodes.has(nodeId)) otherNodes.set(nodeId, nodeType);
+        continue;
+      }
+      const config = isRec(node.config) ? node.config : undefined;
+      const fields = new Set<string>();
+      for (const field of asArray(config?.fields)) {
+        const name = strName(field.name);
+        if (name) fields.add(name);
+      }
+      screens.set(nodeId, { fields, objectName: strName(config?.objectName) });
+    }
+    flows.set(flowName, { screens, otherNodes });
+  }
+
+  return { objects, apps, dashboards, flows, globalActions, actionOwners };
 }
 
 /** Quote a locale for the config path — BCP-47 tags carry `-`. */
@@ -825,6 +932,73 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
             `Header-action translations are keyed by the action's \`actionUrl\`, not its label.` +
               (dash.actions.size > 0 ? ` Declared header actions: ${listNames(dash.actions)}.` : ''),
           );
+        }
+      }
+
+      // ── flows.<name>[.screens.<node_id>[.fields.<field_name>]] ────────
+      for (const [flowName, rawFlow] of Object.entries(asRecord(rawData.flows))) {
+        const flowPath = `${base}.flows.${flowName}`;
+        const flow = universe.flows.get(flowName);
+        if (!flow) {
+          orphan(
+            `${inLocale} · flow "${flowName}"`,
+            flowPath,
+            `Translations are keyed to flow "${flowName}", which this stack does not define. ` +
+              `The wizard renders its source-locale label and headings.` +
+              suggest(flowName, universe.flows.keys()),
+            `Match the key to a flow's \`name\` (the machine name, not its label), or drop it.` +
+              (universe.flows.size > 0 ? ` Defined flows: ${listNames(universe.flows.keys())}.` : ''),
+          );
+          continue;
+        }
+        if (!isRec(rawFlow)) continue;
+        for (const [nodeId, rawScreen] of Object.entries(asRecord(rawFlow.screens))) {
+          const screenPath = `${flowPath}.screens.${nodeId}`;
+          const screen = flow.screens.get(nodeId);
+          if (!screen) {
+            const otherType = flow.otherNodes.get(nodeId);
+            orphan(
+              `${inLocale} · flow "${flowName}" · screen "${nodeId}"`,
+              screenPath,
+              otherType
+                ? `Translations are keyed to screen "${nodeId}", which flow "${flowName}" ` +
+                  `declares as a \`${otherType}\` node, not a \`screen\`. Only screen nodes ` +
+                  `render a heading and fields for a user to read, so nothing resolves these keys.`
+                : `Translations are keyed to screen "${nodeId}", which flow "${flowName}" ` +
+                  `declares no screen node for. The wizard step keeps its source-locale heading.` +
+                  suggest(nodeId, flow.screens.keys()),
+              `Screen translations are keyed by the node's \`id\` (the client's ` +
+                `\`ScreenSpec.nodeId\`), not its \`label\`.` +
+                (flow.screens.size > 0
+                  ? ` Declared screen node ids: ${listNames(flow.screens.keys())}.`
+                  : ` Flow "${flowName}" declares no \`type: 'screen'\` node at all.`),
+            );
+            continue;
+          }
+          if (!isRec(rawScreen)) continue;
+          for (const fieldName of Object.keys(asRecord(rawScreen.fields))) {
+            if (screen.fields.has(fieldName)) continue;
+            const objectForm = screen.fields.size === 0 ? screen.objectName : undefined;
+            orphan(
+              `${inLocale} · flow "${flowName}" · screen "${nodeId}" · field "${fieldName}"`,
+              `${screenPath}.fields.${fieldName}`,
+              objectForm
+                ? `Translations are keyed to screen field "${fieldName}", but screen "${nodeId}" ` +
+                  `is an OBJECT-FORM screen (\`config.objectName: "${objectForm}"\`) — it renders ` +
+                  `that object's own create/edit form, so its input labels come from ` +
+                  `\`objects.${objectForm}.fields.*\` and nothing reads a field key here.`
+                : `Translations are keyed to screen field "${fieldName}", which screen "${nodeId}" ` +
+                  `of flow "${flowName}" does not declare. The input keeps its source-locale ` +
+                  `label while every neighbouring field on the same screen resolves.` +
+                  suggest(fieldName, screen.fields),
+              objectForm
+                ? `Move this copy under \`objects.${objectForm}.fields.${fieldName}\`, or drop it.`
+                : `Match the key to a \`config.fields[].name\` on that screen, or drop it.` +
+                  (screen.fields.size > 0
+                    ? ` Declared screen field names: ${listNames(screen.fields)}.`
+                    : ` Screen "${nodeId}" declares no \`config.fields\` at all.`),
+            );
+          }
         }
       }
     }

@@ -1,0 +1,6 @@
+---
+'@objectstack/spec': minor
+'@objectstack/lint': minor
+---
+
+React-tier vocabulary converges on the metadata-tier spelling, deprecate-first (#11284, maintainer ruling 2026-08-23). `<ListView>`'s canonical bindings are now the spec ListView schema's own props: `data={{ provider: 'object', object: '…' }}` for the object binding (objectui#2890 A6) and `type` for the visualization kind. `objectName` and `viewType` remain published and accepted as deprecated aliases for the whole deprecation window — nothing is removed in this release — with the deprecation visible at authoring time: `[DEPRECATED → …]` markers in the generated react-blocks contract, and a new `react-prop-deprecated` lint warning (never an error) on every use of a deprecated spelling. The lint accepts either spelling as satisfying `<ListView>`'s required binding and resolves field-name props (`columns`, `searchableFields`, filter positions, …) against the object bound by whichever spelling is present, canonical winning when both are. `<ObjectForm>` / `<ObjectChart>` `objectName` are unchanged: the form's spec counterpart is explicitly not 1:1 (objectui#2890 Scope B), and the chart has no metadata-tier object binding to converge on (charts bind through a dashboard `dataset` there — see chart.zod.ts guidance). Removal of the deprecated aliases is a later card after the deprecation window.

@@ -178,7 +178,6 @@ export const leadFeed: ApiEndpoint = {
   method: 'GET',
   summary: 'Lead feed',
   type: 'object_operation',
-  target: 'acme_lead',
   objectParams: { object: 'acme_lead', operation: 'find' },
   // `authRequired` omitted → defaults to `true`. Omission is SAFE.
   cacheTtl: 30,                          // seconds; GET-only; success answers only

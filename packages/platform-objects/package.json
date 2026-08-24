@@ -65,7 +65,7 @@
   "scripts": {
     "build": "tsup",
     "test": "vitest run --passWithNoTests",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.scripts.json"
   },
   "dependencies": {
     "@objectstack/metadata-core": "workspace:*",

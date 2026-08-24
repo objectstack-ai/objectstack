@@ -92,6 +92,26 @@ export const SysPermissionSet = ObjectSchema.create({
       visible: "has(record.drift_status) && record.drift_status == 'overlay_shadow'",
     },
     {
+      // [#11703] ⭐ THIS PARAMS LIST *IS* THE PAYLOAD. Every definition facet a
+      // clone should carry has to be named below: the action POSTs its param
+      // VALUES to the generic data door, so a column that is not a param is
+      // simply absent from the body — `permissionSetBodyFromRow()` then reads
+      // it through `parseMaybeJson(undefined, …)` and fills the EMPTY default
+      // (`[]` / `{}`). An omission here is therefore not a missing input, it is
+      // a silent grant loss: the clone is created, the success toast fires, and
+      // the difference is discoverable only by diffing the two records.
+      //
+      // That was live until #11703 — three of the six facets
+      // (`system_permissions`, `row_level_security`, `tab_permissions`) were
+      // never listed, so cloning a set carrying system permissions or RLS
+      // produced a clone with none of them. Fail-closed, and therefore quiet.
+      // It became urgent the moment the save door started REFUSING in-place
+      // edits of package-declared sets and naming THIS action as the remedy
+      // (`packaged-permission-set-lock.ts`, maintainer ruling 2026-08-24).
+      //
+      // `packaged-permission-set-lock.test.ts` pin 6 READS this list rather
+      // than restating it, so adding a facet column to the object surfaces
+      // here rather than silently shipping a clone that drops it.
       name: 'clone_permission_set',
       label: 'Clone',
       icon: 'copy',
@@ -102,6 +122,16 @@ export const SysPermissionSet = ObjectSchema.create({
       method: 'POST',
       target: '/api/v1/data/sys_permission_set',
       bodyExtra: { active: true },
+      // The explanatory line under the clone dialog's title. Its second
+      // sentence is the RULED exclusion (2026-08-24): `admin_scope` — an
+      // ADR-0090 D12 delegated-admin authority — is deliberately NOT copied,
+      // because putting one on a brand-new set on the admin's behalf is a
+      // privilege decision, not a field copy. It is stated HERE, where the
+      // admin is standing when the clone happens, because an UNEXPLAINED
+      // omission is the same silent drop #11703 reports, merely ruled.
+      description:
+        'Copies this set\'s permissions into a new organization-owned set you can edit. '
+        + 'Delegated-admin scope is not copied — grant it deliberately on the new set if it needs one.',
       successMessage: 'Permission set cloned',
       refreshAfter: true,
       params: [
@@ -113,6 +143,14 @@ export const SysPermissionSet = ObjectSchema.create({
         { field: 'description', defaultFromRow: true },
         { field: 'object_permissions', defaultFromRow: true },
         { field: 'field_permissions', defaultFromRow: true },
+        // [#11703] The three facets the clone silently dropped. Same
+        // JSON-string shape as the two above: `permissionSetRowFields()`
+        // writes all five with `JSON.stringify`, and the data door parses all
+        // five back — the accept surface did not move, only what is SENT.
+        { field: 'system_permissions', defaultFromRow: true },
+        { field: 'row_level_security', defaultFromRow: true },
+        { field: 'tab_permissions', defaultFromRow: true },
+        // ⛔ `admin_scope` is deliberately absent — see `description` above.
       ],
     },
   ],

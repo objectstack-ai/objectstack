@@ -51,11 +51,29 @@ interface DefaultEnvironmentSurface {
  * [#4251 B4] Named surface rather than a ledger entry, following the B2
  * decision for this slot: `service-settings` is OPTIONAL, so the REST layer
  * must not acquire a runtime dependency on it, and its `SettingsService`
- * declares no `implements` — there is no contract to name. The one method the
- * platform consumes is `get`, through `resolveLocalizationContext`'s 4-tier
- * timezone/locale/currency cascade; its return type is the PUBLIC
+ * declares no `implements` — there is no contract to name. Both methods below
+ * are consumed through `resolveLocalizationContext`'s 4-tier
+ * timezone/locale/currency cascade; their return types are the PUBLIC
  * `ResolvedSettingValue` from `@objectstack/spec/system`, so only the context
  * argument is described structurally (`SettingsContext` is service-local).
+ *
+ * ## What an occupant must implement
+ *
+ * `get` is REQUIRED; `getMany` is OPTIONAL and worth implementing. Since
+ * #10826 the resolver feature-detects `getMany` and, when present, reads all
+ * three localization keys in ONE grouped call; an occupant without it takes
+ * the three-parallel-`get` path and still answers correctly — the cost is
+ * three namespace reads instead of one, not a wrong result. That is why
+ * `getMany` is declared optional rather than required: making it required
+ * would over-state the contract, and omitting it (as this interface did until
+ * #11222) under-states what the platform actually calls.
+ *
+ * ⚠️ Neither member is type-checked at the call site. `ctx.getService` is a
+ * cast, `rest-server.ts` widens this provider's return to a bare promise, and
+ * `resolveLocalizationContext` receives `settings?: any` — so this interface
+ * is documentation for host authors, not enforcement. `check:slot-lookup`
+ * (#4251) only bans erasing the lookup to `any`; it never checks the named
+ * type is COMPLETE, which is how the missing `getMany` stayed invisible.
  */
 interface SettingsReadSurface {
     get<T = unknown>(
@@ -63,6 +81,15 @@ interface SettingsReadSurface {
         key: string,
         ctx?: { tenantId?: string; userId?: string },
     ): Promise<ResolvedSettingValue<T>>;
+    /**
+     * Resolve several keys of ONE namespace in a single grouped read.
+     * Optional — feature-detected by `resolveLocalizationContext`.
+     */
+    getMany?<T = unknown>(
+        namespace: string,
+        keys: readonly string[],
+        ctx?: { tenantId?: string; userId?: string },
+    ): Promise<Record<string, ResolvedSettingValue<T>>>;
 }
 
 export interface RestApiPluginConfig {

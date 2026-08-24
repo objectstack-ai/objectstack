@@ -3683,7 +3683,24 @@ function nullSafeNegationOperand(node: Record<string, unknown>): Record<string, 
  * `foreignKeys` / `primaryKeys` — never a second spelling of a spec key.
  */
 export interface IntrospectedColumn extends SpecIntrospectedColumn {
-  /** SQL-introspection extra: the column carries a UNIQUE constraint. */
+  /**
+   * SQL-introspection extra: the column ALONE carries a single-column unique
+   * constraint — it is true iff some unique constraint covers this column and
+   * nothing else.
+   *
+   * Membership of a COMPOSITE constraint is deliberately not represented on
+   * this flag (#11202, maintainer ruling 2026-08-23 option A→B). `UNIQUE
+   * (a, b)` constrains the pair, and a per-column boolean cannot say that;
+   * setting it on both members would assert that each column is unique on its
+   * own, which is a different — and false — claim, and one a consumer acts on
+   * (`introspectedSchemaToObjects` in `@objectstack/objectql` turns this flag
+   * into a drafted field's `unique: true`). A real composite surface is
+   * option B and waits for demand; until it exists, an absent flag on a
+   * composite member means "not single-column unique", never "no constraint".
+   *
+   * All three dialect arms of {@link SqlDriver.introspectUniqueConstraints}
+   * produce it through one predicate — see {@link singleColumnUniqueColumns}.
+   */
   isUnique?: boolean;
   /**
    * SQL-introspection extra: declared maximum length for string types — raw
@@ -3924,6 +3941,20 @@ export type SqlDriverConfig = Knex.Config & {
  * Implements the IDataDriver contract via Knex.js for optimal SQL
  * generation against PostgreSQL, MySQL, SQLite and other SQL databases.
  */
+/**
+ * One column's contribution to MySQL's per-ROW budget over DECLARED widths
+ * (#11565).
+ *
+ * `chars` is the `varchar(n)` width {@link SqlDriver.createColumn} emits for
+ * the field; `bytes` is what the server charges for it — the payload
+ * (`chars x bytesPerChar`) plus varchar's own length prefix.
+ */
+interface RowWidthContribution {
+  name: string;
+  chars: number;
+  bytes: number;
+}
+
 export class SqlDriver implements IDataDriver {
   // IDataDriver metadata
   public readonly name: string = 'com.objectstack.driver.sql';
@@ -4175,22 +4206,109 @@ export class SqlDriver implements IDataDriver {
     else this.logger.warn(msg, meta);
   }
 
-  /** Whether the underlying database is a SQLite variant (sqlite3 or better-sqlite3). */
+  /**
+   * The knex `client` spellings that mean "emit THIS dialect's SQL", one set
+   * per dialect family. The single source the three identity getters below and
+   * every client-keyed table further down read — {@link DIALECT_CONNECT_TIMEOUT},
+   * {@link POSTGRES_WIRE_CLIENTS} and {@link withUtcSession} used to carry a
+   * hand-written copy each, and the copies had already drifted apart (#11550).
+   *
+   * ## Why a set and not a pair of literals
+   *
+   * {@link SqlDriverConfig} is `Knex.Config & {…}`, so the DECLARED surface is
+   * every client name knex accepts, while the enforced one used to be two
+   * literals per family. knex's own table (`knex/lib/constants.js`, knex 3.3.0
+   * — the version this repo pins) registers aliases:
+   *
+   * ```js
+   * CLIENT_ALIASES = { pg: 'postgres', postgresql: 'postgres', sqlite: 'sqlite3' }
+   * ```
+   *
+   * So `postgres` is knex's CANONICAL name for the dialect of which `pg` and
+   * `postgresql` are merely the registered aliases, and `sqlite` is an alias of
+   * the canonical `sqlite3`. Measured on the pinned knex: `pg`, `postgres` and
+   * `postgresql` each construct a client with `dialect === 'postgresql'` and
+   * `driverName === 'pg'` — one dialect, three spellings.
+   *
+   * Matching two literals therefore made `client: 'postgres'` — knex's PRIMARY
+   * name for the dialect — answer `isPostgres === false`, silently dropping
+   * every Postgres branch in this file on a config knex considers valid.
+   * Nothing failed. The sharpest case is {@link nowColumnDefault}: the
+   * fall-through emits a bare `CURRENT_TIMESTAMP` default on a `DATE` column,
+   * i.e. the calendar day in the SERVER's timezone — the exact defect
+   * ("measured: a UTC-12 server records YESTERDAY") that method's Postgres
+   * branch exists to remove.
+   *
+   * ## What is deliberately NOT in here
+   *
+   * `redshift` and `cockroachdb` speak the pg WIRE protocol and are in
+   * {@link POSTGRES_WIRE_CLIENTS} for that reason — but they are separate knex
+   * dialects (`redshift` compiles its own DDL; `cockroachdb` ships its own
+   * driver), and whether this driver should claim to emit correct DDL for them
+   * is a SUPPORT-SCOPE question rather than a spelling one. `mariadb` is the
+   * same shape against the MySQL family. They stay out until that is decided
+   * — see #11756. Wire recognition and the connect-timeout table EXTEND these
+   * sets; nothing derives these sets from a union of the others, because that
+   * would answer #11756 as a side effect of a refactor.
+   *
+   * `better-sqlite3` is a member rather than an extension because it is not a
+   * scope question: this driver's own default SQLite client is `better-sqlite3`
+   * and every SQLite branch in this file was written against it.
+   */
+  private static readonly POSTGRES_EMIT_CLIENTS: ReadonlySet<string> = new Set([
+    'postgres', 'pg', 'postgresql',
+  ]);
+  /** SQLite spellings that mean "emit SQLite SQL". See {@link POSTGRES_EMIT_CLIENTS}. */
+  private static readonly SQLITE_EMIT_CLIENTS: ReadonlySet<string> = new Set([
+    'sqlite3', 'sqlite', 'better-sqlite3',
+  ]);
+  /** MySQL spellings that mean "emit MySQL SQL". See {@link POSTGRES_EMIT_CLIENTS}. */
+  private static readonly MYSQL_EMIT_CLIENTS: ReadonlySet<string> = new Set([
+    'mysql', 'mysql2',
+  ]);
+
+  /**
+   * The configured client as a STRING, or `''`.
+   *
+   * `Knex.Config['client']` also admits a Client CONSTRUCTOR (knex's documented
+   * bring-your-own-dialect hatch). Such a value names no spelling in any table
+   * here, and `''` is how it says so — the same answer the literal comparisons
+   * this replaces gave, without stringifying a class to get there.
+   */
+  private static clientSpelling(config: unknown): string {
+    const c = (config as { client?: unknown } | null | undefined)?.client;
+    return typeof c === 'string' ? c : '';
+  }
+
+  /**
+   * Whether the underlying database is a SQLite variant.
+   *
+   * Every knex spelling of the family: `sqlite3` (knex's canon), its registered
+   * alias `sqlite`, and `better-sqlite3`. See {@link SQLITE_EMIT_CLIENTS}.
+   */
   protected get isSqlite(): boolean {
-    const c = (this.config as any).client;
-    return c === 'sqlite3' || c === 'better-sqlite3';
+    return SqlDriver.SQLITE_EMIT_CLIENTS.has(SqlDriver.clientSpelling(this.config));
   }
 
-  /** Whether the underlying database is PostgreSQL. */
+  /**
+   * Whether the underlying database is PostgreSQL.
+   *
+   * Every knex spelling of the family: `postgres` (knex's canon) and its
+   * registered aliases `pg` / `postgresql`. `redshift` and `cockroachdb` are
+   * deliberately NOT here — see {@link POSTGRES_EMIT_CLIENTS} and #11756.
+   */
   protected get isPostgres(): boolean {
-    const c = (this.config as any).client;
-    return c === 'pg' || c === 'postgresql';
+    return SqlDriver.POSTGRES_EMIT_CLIENTS.has(SqlDriver.clientSpelling(this.config));
   }
 
-  /** Whether the underlying database is MySQL. */
+  /**
+   * Whether the underlying database is MySQL.
+   *
+   * Both knex spellings of the family; `mariadb` is a separate knex dialect and
+   * is deliberately NOT here. See {@link POSTGRES_EMIT_CLIENTS} and #11756.
+   */
   protected get isMysql(): boolean {
-    const c = (this.config as any).client;
-    return c === 'mysql' || c === 'mysql2';
+    return SqlDriver.MYSQL_EMIT_CLIENTS.has(SqlDriver.clientSpelling(this.config));
   }
 
   /**
@@ -4456,14 +4574,40 @@ export class SqlDriver implements IDataDriver {
    * SQLite (`better-sqlite3` / `sqlite3`) is deliberately absent — it opens a
    * file, so there is no handshake to time out and nothing to inject.
    */
-  private static readonly DIALECT_CONNECT_TIMEOUT: Record<string, { key: string; urlKey: string }> = {
-    pg: { key: 'connectionTimeoutMillis', urlKey: 'connectionString' },
-    postgres: { key: 'connectionTimeoutMillis', urlKey: 'connectionString' },
-    postgresql: { key: 'connectionTimeoutMillis', urlKey: 'connectionString' },
-    cockroachdb: { key: 'connectionTimeoutMillis', urlKey: 'connectionString' },
-    mysql: { key: 'connectTimeout', urlKey: 'uri' },
-    mysql2: { key: 'connectTimeout', urlKey: 'uri' },
-  };
+  private static readonly DIALECT_CONNECT_TIMEOUT: Record<string, { key: string; urlKey: string }> =
+    Object.fromEntries<{ key: string; urlKey: string }>([
+      // Every spelling that means Postgres SQL, EXTENDED by `cockroachdb` and
+      // `redshift`: separate knex dialects, but ones that reach the server
+      // through the same `pg` driver and therefore take the same knob. Knex's
+      // `Client_Redshift` literally `extends Client_PG`, so the settings object
+      // it hands to `pg.Client` honours `connectionTimeoutMillis` exactly as
+      // `pg` does. Deriving the pg arm from {@link POSTGRES_EMIT_CLIENTS} is
+      // what keeps this table from drifting away from the getters again
+      // (#11550) — widening recognition now widens this with it.
+      //
+      // `redshift`'s row arrived with #11784. It had the knob and would have
+      // obeyed it, but carried no entry, so its connection attempt fell through
+      // to the strictly looser 15s `pool.createTimeoutMillis` backstop while
+      // the docblock above called 10s "the effective bound". Nothing errored
+      // and nothing was logged — the bound was simply 50% looser, for one
+      // client name.
+      //
+      // ⚠️ This arm and {@link POSTGRES_WIRE_CLIENTS} now happen to hold the
+      // same five names. That is a fact about today's membership, NOT an
+      // invariant, and must not be refactored into one: the two answer
+      // different questions (how do I spell the connect timeout vs. which npm
+      // package parses the wire), and unioning them would hand `redshift` and
+      // `cockroachdb` SQL-emission identity as a silent side effect — the open
+      // decision #11756, and #11550's subject, not this table's to make.
+      ...[...SqlDriver.POSTGRES_EMIT_CLIENTS, 'cockroachdb', 'redshift'].map(
+        (c): [string, { key: string; urlKey: string }] =>
+          [c, { key: 'connectionTimeoutMillis', urlKey: 'connectionString' }],
+      ),
+      ...[...SqlDriver.MYSQL_EMIT_CLIENTS].map(
+        (c): [string, { key: string; urlKey: string }] =>
+          [c, { key: 'connectTimeout', urlKey: 'uri' }],
+      ),
+    ]);
 
   private static withConnectBound(knexConfig: Record<string, any>): Record<string, any> {
     const pool = knexConfig.pool as Record<string, any> | undefined;
@@ -4478,10 +4622,24 @@ export class SqlDriver implements IDataDriver {
     // `!dialect` — sqlite, or a client with no connect-timeout knob — means
     // there is no TIMEOUT to inject. It deliberately does not skip the session
     // pins below: those answer a different question (what does a value MEAN on
-    // this connection), and the two lists are not the same list. Measured while
-    // fixing #11389: `redshift` speaks the pg wire protocol, and therefore
-    // needs the calendar-day pin, but carries no entry here — so a `return`
-    // placed at this point silently opted it out of a fix it needs.
+    // this connection), and the two lists are not the same list.
+    //
+    // ⚠️ The worked example that used to stand here was RETIRED by #11784,
+    // which gave `redshift` the connect-timeout row it was missing. Until then
+    // `redshift` was in {@link POSTGRES_WIRE_CLIENTS} (so it needed #11389's
+    // calendar-day pin) yet absent from {@link DIALECT_CONNECT_TIMEOUT} — so a
+    // `return` placed at this point silently opted it out of a fix it needed.
+    // That was measured, not hypothetical, which is why the example is recorded
+    // here rather than dropped.
+    //
+    // The hazard outlives the example. Every client needing a session pin
+    // happens to have a timeout row TODAY; that is current membership, not a
+    // property either table promises. The next pg-wire client added without a
+    // connect-timeout knob restores the exact bug — and it would fail the way
+    // this one did, in silence, with every test green. So: no `return` here,
+    // and the two tables stay separate. The tripwire that goes red the moment
+    // those memberships diverge again lives in
+    // `sql-driver-11389-date-tz-skew.test.ts`.
     const dialect = SqlDriver.DIALECT_CONNECT_TIMEOUT[String(knexConfig.client ?? '')];
     if (dialect) {
       const conn = knexConfig.connection;
@@ -4528,8 +4686,9 @@ export class SqlDriver implements IDataDriver {
    * knex extension point the host may already be using.
    */
   private static withUtcSession(knexConfig: Record<string, any>): Record<string, any> {
-    const client = String(knexConfig.client ?? '');
-    if (client !== 'mysql' && client !== 'mysql2') return knexConfig;
+    // The MySQL identity question again, asked from a static: the same set
+    // `isMysql` reads, not a fourth hand-written copy of it (#11550).
+    if (!SqlDriver.MYSQL_EMIT_CLIENTS.has(SqlDriver.clientSpelling(knexConfig))) return knexConfig;
 
     const out: Record<string, any> = { ...knexConfig };
     const conn = out.connection;
@@ -4558,14 +4717,20 @@ export class SqlDriver implements IDataDriver {
    * knex client names that route to the `pg` npm driver, and therefore reach
    * {@link withPostgresCalendarDayAsText}. Wider than {@link isPostgres} on
    * purpose: that getter answers "which dialect's SQL do I emit", while this
-   * answers "which npm package parses the wire format" — `postgres` (knex's
-   * own alias), `cockroachdb` and `redshift` all speak the pg wire protocol
-   * with the same type OIDs. The hook is additionally guarded on the
-   * connection really exposing `setTypeParser`, so a client name that turns
-   * out not to be a `pg.Client` degrades to a no-op instead of throwing.
+   * answers "which npm package parses the wire format": `cockroachdb` and
+   * `redshift` speak the pg wire protocol with the same type OIDs without
+   * being the same DIALECT. The hook is additionally guarded on the connection
+   * really exposing `setTypeParser`, so a client name that turns out not to be
+   * a `pg.Client` degrades to a no-op instead of throwing.
+   *
+   * Built by EXTENDING {@link POSTGRES_EMIT_CLIENTS}, never by unioning tables
+   * into it: the reverse direction would grant `cockroachdb` and `redshift`
+   * SQL-emission identity as a silent side effect of a refactor, which is the
+   * open decision #11756 and not this file's to make (#11550).
    */
   private static readonly POSTGRES_WIRE_CLIENTS: ReadonlySet<string> = new Set([
-    'pg', 'postgres', 'postgresql', 'cockroachdb', 'redshift',
+    ...SqlDriver.POSTGRES_EMIT_CLIENTS,
+    'cockroachdb', 'redshift',
   ]);
 
   /** Postgres OID of `date` — a bare calendar day, no time and no zone. */
@@ -7790,15 +7955,17 @@ export class SqlDriver implements IDataDriver {
     // #8926 lesson applied in advance — a predicate arm that matches a WORDING
     // is an arm that silently fails to fire on the dialect nobody measured.
     //
-    // ⛔ Deliberately NOT the {@link isUnresolvableColumnError} arm that
-    // {@link SqlDriver.count} runs first. That refusal's words are "Filter on
-    // 'x' names a column that object 'o' has no column for", and THIS door
-    // names columns in three clauses — the WHERE, the `groupBy` fields and the
-    // aggregation `field`. A blanket arm would tell the author of
-    // `avg('nosuchcol')` that their FILTER was wrong, which is the
-    // unsupportable claim the #8931 ruling refuses to make. Answering it
-    // truthfully needs a classifier this card did not measure, so the gap is
-    // filed rather than guessed at.
+    // [#11541] The unresolvable-column arm that {@link SqlDriver.count} runs
+    // first is here too now — but ⛔ NOT as the blanket arm #11455 refused to
+    // add. That refusal's words are "Filter on 'x' names a column that object
+    // 'o' has no column for", and THIS door names columns in three clauses —
+    // the WHERE, the `groupBy` fields and the aggregation `field`s. A blanket
+    // arm would tell the author of `avg('nosuchcol')` that their FILTER was
+    // wrong, which is the unsupportable claim the #8931 ruling refuses to
+    // make. So the dialect-named column is attributed to the clause the
+    // CALLER'S OWN QUERY names it in — see
+    // {@link SqlDriver.aggregateBackendFault}, which holds the three arms and
+    // the reason the no-name case keeps this terminal unchanged.
     //
     // Only the EXECUTION is guarded. Every refusal this method composes —
     // {@link refuseAggregateFunction}, {@link refuseDistinctAggregateWithoutField},
@@ -7809,10 +7976,169 @@ export class SqlDriver implements IDataDriver {
     try {
       rows = await builder;
     } catch (error) {
-      // [#8931] The terminal catch-all — see {@link SqlDriver.backendStatementFault}.
-      throw this.backendStatementFault(object, error);
+      // [#8931, #11541] Attribute what the caller's own query supports, then
+      // fall to the terminal catch-all — see
+      // {@link SqlDriver.aggregateBackendFault}.
+      throw this.aggregateBackendFault(object, query, error);
     }
     return this.presentReadColumns(rows, presentedOutput);
+  }
+
+  /**
+   * [#11541] Which envelope a dialect error leaving {@link SqlDriver.aggregate}
+   * deserves — the #8790 unresolvable-column refusal, at last, on the third
+   * read door, without the unsupportable attribution #8931 forbids.
+   *
+   * # The condition, and why it could not ride `count()`'s arm verbatim
+   *
+   * `find()` and `count()` answer an unresolvable WHERE column with
+   * `INVALID_FILTER` / 400 naming the column (#8790, maintainer ruling
+   * 2026-08-15: one unresolvable WHERE column, one answer, on both read
+   * halves). `aggregate()` is the third read door and never received that arm,
+   * so the same predicate answered `DATABASE_ERROR` / 500 one door over — the
+   * exact split #8790 closed. But this door names columns in THREE clauses
+   * (`where`, `groupBy`, each aggregation's `field`), and the WHERE refusal's
+   * words assert the FILTER was at fault. Telling the author of
+   * `avg('nosuchcol')` that their filter was wrong is an attribution the
+   * signal cannot support — the #8931 ruling (2026-08-17 「同意 C」, restated
+   * by #11455 when it deliberately left this arm out).
+   *
+   * # The three arms — attribution comes from the CALLER'S OWN QUERY
+   *
+   * The dialect names the column; it does not name the clause. The clause is
+   * read off the query AST this driver just compiled — the same `groupBy` /
+   * `aggregations` reads the statement builder performed — so every claim the
+   * refusal makes is a fact about the caller's own request, never a guess
+   * from the backend's prose:
+   *
+   * 1. the name is a `groupBy` field or an aggregation `field` ⇒ a refusal
+   *    naming THAT clause ({@link SqlDriver.unresolvableAggregateColumnRefusal},
+   *    `INVALID_FIELD` / 400);
+   * 2. the name is in neither ⇒ the statement's only remaining column sources
+   *    are the WHERE this method compiled from `query.where` and the
+   *    tenant-scope predicate — both filters — so #8790's existing
+   *    {@link SqlDriver.unresolvableFilterColumnRefusal} applies verbatim;
+   * 3. {@link unresolvableColumnNameOf} answers `null` ⇒ the wording parsed by
+   *    nothing. Without a name there is no AST lookup, so NO attribution is
+   *    supportable — the #11455 terminal envelope stands unchanged. ⛔ Reading
+   *    `null` as license for the WHERE arm would attribute a clause on no
+   *    evidence, which is arm 2's own justification inverted.
+   *
+   * ⚠️ Arm 1 is judged by EXACT name equality against the same AST reads the
+   * builder performed. A suffix match ("`title.x` ends in `.x`") would
+   * attribute a dotted WHERE key to an aggregation over `x` — a false verdict
+   * about a clause that may be perfectly fine — and inspecting the key for a
+   * `.` is #8371's axis besides. When one column is named by BOTH the where
+   * and a groupBy/aggregation, arm 1 wins and its claim is still true: the
+   * caller's groupBy/aggregation really does name a column the table lacks.
+   *
+   * # No new dialect recognizer
+   *
+   * Both predicates this method consults ({@link isUnresolvableColumnError},
+   * {@link unresolvableColumnNameOf}) are #8790's, shared with `find()` and
+   * `count()`, untouched. MySQL's wording even names the clause position
+   * (`in 'field list'` / `'where clause'`), and it is deliberately NOT read:
+   * a per-dialect clause parser is the split-recognizer shape the #8926
+   * ruling refused, and the other two dialects could never feed it.
+   *
+   * Returns the error rather than throwing it, the shape every sibling on
+   * this path uses, so the call site spells its own `throw`.
+   */
+  protected aggregateBackendFault(object: string, query: DriverQuery, error: unknown): Error {
+    if (isUnresolvableColumnError(error)) {
+      const column = unresolvableColumnNameOf(error);
+      if (column !== null) {
+        // The same reads the statement builder performed a few lines up —
+        // string entries and structured `{ field }` entries for groupBy, the
+        // optional `field` for each aggregation. `alias` is deliberately not
+        // consulted: the backend resolves columns, and an alias is an OUTPUT
+        // name, never a column reference the statement could trip on.
+        const inGroupBy = (query.groupBy ?? []).some(
+          (g) => (typeof g === 'string' ? g : g && typeof g === 'object' ? g.field : undefined) === column,
+        );
+        const inAggregations = (query.aggregations ?? []).some(
+          (a) => a && typeof a === 'object' && a.field === column,
+        );
+        if (inGroupBy || inAggregations) {
+          return this.unresolvableAggregateColumnRefusal(object, column, { inGroupBy, inAggregations }, error);
+        }
+        return this.unresolvableFilterColumnRefusal(object, error);
+      }
+      // Arm 3: recognised class, no parsed name — fall through to the terminal.
+    }
+    // [#8931] The terminal catch-all — see {@link SqlDriver.backendStatementFault}.
+    return this.backendStatementFault(object, error);
+  }
+
+  /**
+   * [#11541] Compose the refusal for a `groupBy` / aggregation column the
+   * backend could not resolve, writing the dialect's own message to the
+   * SERVER LOG on the way — the same statement-to-log, name-to-caller split
+   * {@link SqlDriver.unresolvableFilterColumnRefusal} performs for the WHERE
+   * (#7929: the dialect text inlines the statement's bound literals on two of
+   * the three dialects, so it may not travel to the caller).
+   *
+   * # `INVALID_FIELD` / 400 — the ingress door's own answer, not a new choice
+   *
+   * The protocol ingress already refuses THIS condition one layer up:
+   * `assertGroupByFieldsExist` and `assertAggregationFieldsExist`
+   * (`@objectstack/metadata-protocol`, #4254) answer a grouping or
+   * aggregation target the object does not have with `400 INVALID_FIELD`
+   * naming the field and the object — reserving `INVALID_QUERY` for entries
+   * the spec cannot READ (shape violations), which this is not. One condition
+   * refused at two layers must not carry two codes — the exact rule
+   * {@link unresolvableFilterColumnError} applied when it took the ingress
+   * door's `INVALID_FILTER` for the WHERE axis. The driver's half of the
+   * condition is the registry-backstop case: a field the metadata DECLARES
+   * (so ingress passed it) whose column the table lacks, which is why the
+   * message adds the one thing only the driver knows — run schema sync.
+   *
+   * ⛔ Not `INVALID_QUERY`: #5907's aggregate-door precedent
+   * (`undeclaredAggregateFunctionError`) is about a FUNCTION name outside the
+   * spec enum — a query no backend could run. A missing column is not a
+   * malformed query; the identical query answers rows the moment schema sync
+   * runs. ⛔ And no code is minted: `INVALID_FIELD` is a standard-catalog
+   * member (ADR-0112), already the write path's answer for an unknown column
+   * at the REST boundary.
+   *
+   * `field` / `object` ride the error the way the ingress door's refusals
+   * carry them, so `@objectstack/rest`'s `INVALID_FIELD` branch serves the
+   * same enriched envelope whichever layer refused. Both are the caller's own
+   * vocabulary — the column name equals a field their query spells, the
+   * object name is the one they passed — so neither discloses anything the
+   * caller did not write.
+   */
+  protected unresolvableAggregateColumnRefusal(
+    object: string,
+    column: string,
+    namedBy: { inGroupBy: boolean; inAggregations: boolean },
+    error: unknown,
+  ): Error {
+    const detail = (error as { message?: unknown } | null | undefined)?.message;
+    this.logger.warn(
+      `[sql-driver] INVALID_FIELD — a groupBy/aggregation column could not be resolved on ` +
+        `'${object}' ('${column}'). The dialect message below is kept server-side because it ` +
+        `inlines the statement bound literals (#7929, #11541): ` +
+        `${typeof detail === 'string' ? detail : String(error)}`,
+    );
+    const clause =
+      namedBy.inGroupBy && namedBy.inAggregations
+        ? `The groupBy and an aggregation of this query both name '${column}', a column`
+        : namedBy.inGroupBy
+          ? `The groupBy of this query names '${column}', a column`
+          : `An aggregation of this query names '${column}', a column`;
+    const err = new Error(
+      `${clause} that object '${object}' has no column for, so the aggregate never ran. ` +
+        'Grouping and aggregation run over columns that exist; over a missing one they could ' +
+        'only answer blanks, so the query was refused instead of answered with an invented ' +
+        "result. Check the name against the object's fields; if the field was declared " +
+        'recently, run schema sync so the column exists before aggregating on it.',
+    ) as Error & { code?: string; status?: number; field?: string; object?: string };
+    err.code = StandardErrorCode.enum.INVALID_FIELD;
+    err.status = 400;
+    err.field = column;
+    err.object = object;
+    return err;
   }
 
   // ===================================
@@ -8675,17 +9001,26 @@ export class SqlDriver implements IDataDriver {
       });
 
       if (!exists) {
-        await this.knex.schema.createTable(tableName, (table) => {
-          table.string('id').primary();
-          this.createAuditTimestampColumn(table, 'created_at');
-          this.createAuditTimestampColumn(table, 'updated_at');
-          if (obj.fields) {
-            for (const [name, field] of Object.entries(obj.fields)) {
-              if (builtinColumns.has(name)) continue;
-              this.createColumn(table, name, field, keyedColumns.get(name));
+        try {
+          await this.knex.schema.createTable(tableName, (table) => {
+            table.string('id').primary();
+            this.createAuditTimestampColumn(table, 'created_at');
+            this.createAuditTimestampColumn(table, 'updated_at');
+            if (obj.fields) {
+              for (const [name, field] of Object.entries(obj.fields)) {
+                if (builtinColumns.has(name)) continue;
+                this.createColumn(table, name, field, keyedColumns.get(name));
+              }
             }
-          }
-        });
+          });
+        } catch (e: any) {
+          // #11565: MySQL charges every bounded column's DECLARED width against
+          // a per-ROW budget, and refuses the CREATE naming no column and no
+          // declaration — about a table its author described entirely in
+          // metadata. Re-throw the SAME failure carrying the field-level fix;
+          // anything that is not that refusal is re-thrown untouched.
+          await this.rethrowWithRowSizeExplanation(tableName, obj.fields, keyedColumns, null, e);
+        }
         this.tablesWithTimestamps.add(tableName);
       } else {
         const columnInfo = await this.knex(tableName).columnInfo();
@@ -8695,15 +9030,26 @@ export class SqlDriver implements IDataDriver {
           this.tablesWithTimestamps.add(tableName);
         }
 
-        await this.knex.schema.alterTable(tableName, (table) => {
-          if (obj.fields) {
-            for (const [name, field] of Object.entries(obj.fields)) {
-              if (!existingColumns.includes(name)) {
-                this.createColumn(table, name, field, keyedColumns.get(name));
+        // #11565: the row budget is a property of the WHOLE row, so adding one
+        // ordinary column to a wide table is refused by the width of columns
+        // nobody is touching — with the same column-less server error. Named
+        // here so the ADD COLUMN path is not the one that keeps it.
+        const addedColumns = Object.keys(obj.fields ?? {}).filter(
+          (name) => !builtinColumns.has(name) && !existingColumns.includes(name),
+        );
+        try {
+          await this.knex.schema.alterTable(tableName, (table) => {
+            if (obj.fields) {
+              for (const [name, field] of Object.entries(obj.fields)) {
+                if (!existingColumns.includes(name)) {
+                  this.createColumn(table, name, field, keyedColumns.get(name));
+                }
               }
             }
-          }
-        });
+          });
+        } catch (e: any) {
+          await this.rethrowWithRowSizeExplanation(tableName, obj.fields, keyedColumns, addedColumns, e);
+        }
       }
 
       // Materialize the table's index set: field-level `unique` (tenancy-aware
@@ -12948,6 +13294,334 @@ export class SqlDriver implements IDataDriver {
     );
   }
 
+  /**
+   * MySQL's per-ROW budget over the DECLARED byte widths of a table's columns
+   * (#11565) — the number its own refusal quotes and the only part of that
+   * refusal an operator can act on.
+   *
+   * Independent of the per-column `varchar` ceiling {@link MAX_VARCHAR_CHARS}
+   * bounds: every declaration can be individually legal and the table still be
+   * un-creatable. Measured on live MySQL 8.0.46 (utf8mb4 / InnoDB / DYNAMIC),
+   * through this driver rather than in raw SQL, so the built-in `id`,
+   * `created_at` and `updated_at` columns are inside the numbers:
+   *
+   * ```
+   * 15 fields @ maxLength 1024  CREATE ok      63 fields @ maxLength 255  CREATE ok
+   * 16 fields @ maxLength 1024  ER_TOO_BIG_ROWSIZE   64 fields @ maxLength 255  ER_TOO_BIG_ROWSIZE
+   * ```
+   *
+   * Postgres has no equivalent — it TOASTs — so nothing here is dialect-neutral
+   * behaviour that happens to be measured on MySQL. It is MySQL-only, and it is
+   * selected as MySQL-only **by the error code**, never by a dialect getter.
+   */
+  protected static readonly MYSQL_ROW_BYTE_BUDGET = 65535;
+
+  /**
+   * utf8mb4's bytes-per-character, used ONLY when the server cannot be asked
+   * (see {@link schemaBytesPerChar}). The real multiplier is a property of the
+   * schema, not of the metadata: measured on 8.0.46, `64 x varchar(1024)` is
+   * refused on a utf8mb4 database and CREATES on a latin1 one. That asymmetry
+   * is the whole reason this arithmetic is only ever run to EXPLAIN a refusal
+   * the server has already issued — see {@link explainRowSizeOverflow}.
+   */
+  protected static readonly ASSUMED_BYTES_PER_CHAR = 4;
+
+  /**
+   * What MySQL charges for one `varchar(chars)` column: the payload plus
+   * varchar's own length prefix, which is 1 byte while the payload fits in 255
+   * and 2 bytes after.
+   *
+   * Bracketed by measurement rather than read off a doc page — the boundary is
+   * visible in the column counts a table can hold. On utf8mb4 a `varchar(63)`
+   * payload is 252 bytes and 32 such columns fit InnoDB's 8126-byte page limit
+   * (32 x 253 = 8096; at 254 bytes each they would not), so 252 takes ONE
+   * prefix byte; a `varchar(64)` payload of 256 bytes takes two. A payload of
+   * exactly 255 is the documented last one-byte width and is the one point
+   * neither limit can discriminate — a column that narrow is never stored
+   * off-page, so the page limit binds long before 256 vs 257 bytes could show.
+   * Off by one byte there would move a number in a message, never a verdict.
+   */
+  protected static varcharPackLength(chars: number, bytesPerChar: number): number {
+    const payload = chars * bytesPerChar;
+    return payload + (payload < 256 ? 1 : 2);
+  }
+
+  /**
+   * The `varchar(n)` width {@link SqlDriver.createColumn} emits for a field, or
+   * `null` when the column it emits is not a varchar at all (#11565).
+   *
+   * A READ-ONLY mirror of that switch, not a second decision: the two families
+   * that size a column from metadata delegate to the very helpers
+   * `createColumn` calls ({@link declaredVarcharLength},
+   * {@link keyableTextLength}), and the remaining branches are grouped by what
+   * `createColumn` does with them, not restated per type.
+   *
+   * ⚠️ The branch that matters most for the row budget is the one that declares
+   * nothing: `lookup` / `user` / `auto_number` and the catch-all all spell
+   * `table.string(name)`, which is knex's `varchar(255)` — 1022 bytes on
+   * utf8mb4. An object with sixty lookups therefore reaches the budget having
+   * declared no `maxLength` anywhere, and a diagnostic that only looked at
+   * declared bounds would name nothing at all on the most reachable shape.
+   *
+   * The agreement between this mirror and `createColumn` is PINNED rather than
+   * asserted in prose: `sql-driver-11565-row-byte-budget.test.ts` builds one
+   * field of every `FieldType` the spec declares, creates the table, and
+   * compares this answer against `columnInfo()` column by column. A type added
+   * to the spec enters that pin automatically.
+   */
+  protected varcharColumnChars(field: any, keyed?: { unique: boolean }): number | null {
+    // `multiple` is decided before the type switch in `createColumn` — a JSON
+    // column, whatever the element type would have been.
+    if (field?.multiple) return null;
+    const type = field?.type || 'string';
+    switch (type) {
+      case 'string':
+      case 'email':
+      case 'url':
+      case 'phone':
+      case 'password':
+        return this.declaredVarcharLength(field);
+      case 'text':
+      case 'textarea':
+      case 'html':
+      case 'markdown':
+        return keyed ? this.keyableTextLength(field) : null;
+      // Virtual — `createColumn` returns without emitting anything.
+      case 'formula':
+        return null;
+      // The non-string primitives: INTEGER / REAL / BOOLEAN / DATE / DATETIME /
+      // TIME columns. None of them is sized from metadata and none is a varchar.
+      case 'integer':
+      case 'int':
+      case 'float':
+      case 'number':
+      case 'currency':
+      case 'percent':
+      case 'rating':
+      case 'slider':
+      case 'progress':
+      case 'summary':
+      case 'boolean':
+      case 'toggle':
+      case 'date':
+      case 'datetime':
+      case 'time':
+        return null;
+      default:
+        // `createColumn`'s catch-all, spelled the same way so the two cannot
+        // disagree about which types are JSON: everything else is
+        // `table.string(name)` at knex's default width.
+        return JSON_COLUMN_TYPES.has(type) ? null : SqlDriver.DEFAULT_STRING_VARCHAR_CHARS;
+    }
+  }
+
+  /**
+   * Every varchar column this object's fields produce, widest first, with what
+   * each costs against the row budget at a given bytes-per-character (#11565).
+   *
+   * The built-in `id` / `created_at` / `updated_at` columns are excluded for the
+   * same reason `initObjects` skips them when iterating `obj.fields`: they are
+   * not authored, so naming them in a diagnostic addressed to the author points
+   * at something no declaration can change. They are NOT free — `id` alone is a
+   * `varchar(255)` — which is why the message says the sum sits on top of them
+   * rather than claiming to be the server's own total.
+   */
+  protected rowWidthProfile(
+    fields: Record<string, any> | undefined,
+    keyedColumns: ReadonlyMap<string, { unique: boolean }>,
+    bytesPerChar: number,
+  ): { columns: RowWidthContribution[]; totalBytes: number } {
+    const builtin = new Set<string>(['id', ...AUDIT_TIMESTAMP_COLUMNS]);
+    const columns: RowWidthContribution[] = [];
+    for (const [name, field] of Object.entries(fields ?? {})) {
+      if (builtin.has(name)) continue;
+      const chars = this.varcharColumnChars(field, keyedColumns.get(name));
+      if (chars === null) continue;
+      columns.push({ name, chars, bytes: SqlDriver.varcharPackLength(chars, bytesPerChar) });
+    }
+    columns.sort((a, b) => b.bytes - a.bytes || a.name.localeCompare(b.name));
+    return { columns, totalBytes: columns.reduce((sum, c) => sum + c.bytes, 0) };
+  }
+
+  /**
+   * The bytes-per-character the tables this driver creates actually get, read
+   * from the server.
+   *
+   * Knex emits no `CHARACTER SET` clause, so a created table takes the
+   * DATABASE's default charset — verified on 8.0.46: a table created with no
+   * clause in a `CHARACTER SET latin1` database comes back
+   * `TABLE_COLLATION = latin1_swedish_ci`. So `@@character_set_database` is the
+   * right question, and `information_schema.CHARACTER_SETS.MAXLEN` answers the
+   * multiplier for it (utf8mb4 → 4, utf8mb3 → 3, latin1/ascii → 1).
+   *
+   * One round-trip, and only ever on a path that is already throwing — the same
+   * trade {@link explainUnkeyableTextColumn} makes with its `columnInfo()` read.
+   * `null` when the read fails: a diagnostic must not turn into a second
+   * failure, and the advice holds with the assumed multiplier.
+   */
+  protected async schemaBytesPerChar(): Promise<{ bytesPerChar: number; charset: string } | null> {
+    try {
+      const res: any = await this.knex.raw(
+        'select cs.CHARACTER_SET_NAME as charset, cs.MAXLEN as maxlen ' +
+          'from information_schema.CHARACTER_SETS cs ' +
+          'where cs.CHARACTER_SET_NAME = @@character_set_database',
+      );
+      const row = (Array.isArray(res) ? res[0]?.[0] : (res?.rows?.[0] ?? res?.[0])) ?? null;
+      const maxlen = Number(row?.maxlen ?? row?.MAXLEN);
+      const charset = String(row?.charset ?? row?.CHARSET ?? '');
+      if (!Number.isInteger(maxlen) || maxlen <= 0 || !charset) return null;
+      return { bytesPerChar: maxlen, charset };
+    } catch {
+      // Introspection is a nicety here; the advice below holds without it.
+      return null;
+    }
+  }
+
+  /**
+   * Turn MySQL's `ER_TOO_BIG_ROWSIZE` into a message that names the columns
+   * whose declared widths spent the row budget (#11565).
+   *
+   * ## Why a post-hoc translator and NOT a pre-flight
+   *
+   * The card that raised this preferred a pre-flight — sum the declared widths
+   * before issuing DDL and refuse — on the grounds that a translator "only
+   * knows the table failed". That premise does not survive contact with the
+   * call site: this runs inside `initObjects`' own loop, where `obj.fields` and
+   * the resolved `keyedColumns` are in scope, so it names EVERY contributing
+   * field exactly as a pre-flight would. The advantage claimed for the
+   * pre-flight is not an advantage it has here.
+   *
+   * What the two shapes do not share is their failure direction, and the
+   * asymmetry is the whole argument:
+   *
+   *  - A pre-flight has to REPRODUCE the server's arithmetic. Wrong in the lax
+   *    direction it is merely useless — the server still refuses, with today's
+   *    bad message. Wrong in the STRICT direction it refuses an object MySQL
+   *    would have accepted, which is a contract change: the same metadata now
+   *    means two different things depending on the driver's own model.
+   *  - A translator cannot over-refuse BY CONSTRUCTION. It speaks only after
+   *    the server has already refused, so no arithmetic error it makes can
+   *    change which objects are accepted — the worst case is a less precise
+   *    sentence attached to a refusal that was going to happen anyway.
+   *
+   * And the arithmetic is genuinely hard to hold, all four parts measured on
+   * 8.0.46 while choosing this shape:
+   *
+   *  1. **The charset multiplier is the schema's, not the metadata's.**
+   *     `64 x varchar(1024)` is refused on utf8mb4 and CREATES on latin1.
+   *     A pre-flight hard-coding 4 bytes/char over-refuses by 4x on a latin1
+   *     deployment.
+   *  2. **The length prefix moves** at a 255-byte payload boundary (see
+   *     {@link varcharPackLength}).
+   *  3. **The null bitmap counts.** `163 x varchar(100)` is refused when the
+   *     columns are nullable and CREATES when they are `NOT NULL` — same
+   *     declared widths, different verdict.
+   *  4. **There is a SECOND, independent limit.** InnoDB's per-page limit
+   *     (`Row size too large (> 8126)` on a 16K page) fires far below 65535
+   *     for many NARROW columns, because a column whose maximum is under ~256
+   *     bytes is never pushed off-page: measured, `varchar(63)` tops out at 32
+   *     columns and `varchar(64)` at 196. Through this driver, an object of 40
+   *     ordinary `maxLength: 63` fields is refused — a shape a 65535-byte
+   *     pre-flight would have waved through, leaving the author with the
+   *     unactionable server error the card was filed about.
+   *
+   * A pre-flight would also need a dialect predicate to know it is on MySQL.
+   * This needs none: `ER_TOO_BIG_ROWSIZE` is a MySQL code, so the diagnostic is
+   * MySQL-scoped by construction and costs nothing on every other dialect and
+   * on the success path.
+   *
+   * @param addedColumns the columns an `ALTER TABLE` was adding, or `null` for
+   *   a `CREATE TABLE`. The budget is the whole ROW either way — a column added
+   *   years later is refused by the width of columns nobody is touching — so
+   *   the offender list is the same and only the opening clause differs.
+   */
+  protected async explainRowSizeOverflow(
+    tableName: string,
+    fields: Record<string, any> | undefined,
+    keyedColumns: ReadonlyMap<string, { unique: boolean }>,
+    addedColumns: string[] | null,
+    cause: unknown,
+  ): Promise<string | null> {
+    if ((cause as { code?: string } | undefined)?.code !== 'ER_TOO_BIG_ROWSIZE') return null;
+
+    const server = await this.schemaBytesPerChar();
+    const bytesPerChar = server?.bytesPerChar ?? SqlDriver.ASSUMED_BYTES_PER_CHAR;
+    const charsetNote = server
+      ? `${bytesPerChar} bytes/character (${server.charset}, this schema's charset)`
+      : `${bytesPerChar} bytes/character (utf8mb4 assumed — the server's charset could not be read)`;
+    const { columns, totalBytes } = this.rowWidthProfile(fields, keyedColumns, bytesPerChar);
+
+    // Two DIFFERENT limits answer with this one code, and they quote different
+    // numbers. Reading the server's own text keeps the message from asserting
+    // the 65535 one over a refusal that was really InnoDB's page limit.
+    const serverText = String((cause as { sqlMessage?: string; message?: string }).sqlMessage ?? '');
+    const pageLimit = /row size too large \(>\s*(\d+)\)/i.exec(serverText)?.[1] ?? null;
+    const limitClause = pageLimit
+      ? `InnoDB's per-PAGE limit of ${pageLimit} bytes — which many NARROW bounded columns reach far below the ` +
+        `${SqlDriver.MYSQL_ROW_BYTE_BUDGET}-byte one, because a column narrower than about 256 bytes is never ` +
+        `stored off-page (measured on 8.0.46: 40 fields at \`maxLength: 63\` are refused)`
+      : `the server's ${SqlDriver.MYSQL_ROW_BYTE_BUDGET}-byte budget for one ROW`;
+
+    const SHOWN = 8;
+    const listed = columns
+      .slice(0, SHOWN)
+      .map((c) => `"${c.name}" varchar(${c.chars}) = ${c.bytes} bytes`)
+      .join(', ');
+    const rest = columns.length > SHOWN ? `, and ${columns.length - SHOWN} more` : '';
+    const inventory =
+      columns.length === 0
+        ? `This object produces no varchar column at all, so the width is in the built-in columns or in a ` +
+          `type this diagnostic does not size — report it, because that is not a shape it was measured on.`
+        : `Its ${columns.length} varchar column(s) take ${totalBytes} bytes at ${charsetNote}, on top of the ` +
+          `built-in \`id\` (a varchar(${SqlDriver.DEFAULT_STRING_VARCHAR_CHARS})), \`created_at\` and ` +
+          `\`updated_at\` columns. Widest first: ${listed}${rest}.`;
+
+    const opening =
+      addedColumns && addedColumns.length > 0
+        ? `[sql-driver] cannot add column(s) ${addedColumns.map((c) => `"${c}"`).join(', ')} to "${tableName}"`
+        : `[sql-driver] cannot create table "${tableName}"`;
+
+    return (
+      `${opening} — MySQL refuses the whole row: every bounded column's DECLARED width is charged against ` +
+      `${limitClause}, whether or not a row ever holds that much. ${inventory} ` +
+      `Fix it on the declarations: lower \`maxLength\` on the widest field(s), or drop the bound from a ` +
+      `text-family field no index keys on so it is emitted as TEXT — an off-page TEXT column costs this ` +
+      `budget a small pointer rather than its full declared width. Note that a field declaring NO ` +
+      `\`maxLength\` still takes varchar(${SqlDriver.DEFAULT_STRING_VARCHAR_CHARS}) ` +
+      `(${SqlDriver.varcharPackLength(SqlDriver.DEFAULT_STRING_VARCHAR_CHARS, bytesPerChar)} bytes here), and ` +
+      `so do \`lookup\`, \`user\`, \`auto_number\` and the option types — an object can reach this limit ` +
+      `without declaring a bound anywhere. The server's own error names no column, which is the whole reason ` +
+      `this one does (#11565).`
+    );
+  }
+
+  /**
+   * Re-throw a schema-mutation failure carrying {@link explainRowSizeOverflow}'s
+   * explanation, or the original untouched when it is not a row-size refusal.
+   *
+   * The SAME failure, re-worded — the boot still fails, loudly, and no object is
+   * registered that MySQL declined to build. `sqlMessage` rather than `message`
+   * for the quoted server text: knex prefixes `message` with the entire DDL
+   * statement, which for the object that trips this is thousands of characters
+   * of `varchar(...)` and buries the one sentence the server actually said.
+   */
+  private async rethrowWithRowSizeExplanation(
+    tableName: string,
+    fields: Record<string, any> | undefined,
+    keyedColumns: ReadonlyMap<string, { unique: boolean }>,
+    addedColumns: string[] | null,
+    e: any,
+  ): Promise<never> {
+    const overflow = await this.explainRowSizeOverflow(tableName, fields, keyedColumns, addedColumns, e);
+    if (!overflow) throw e;
+    const said = String(e?.sqlMessage ?? e?.message ?? e);
+    (this.logger.error ?? this.logger.warn)(overflow, said);
+    throw Object.assign(new Error(`${overflow} (server said: ${said})`), {
+      code: (e as { code?: string }).code,
+      cause: e,
+    });
+  }
+
   protected createColumn(
     table: Knex.CreateTableBuilder,
     name: string,
@@ -13866,6 +14540,33 @@ export class SqlDriver implements IDataDriver {
           });
         }
       } else if (this.isMysql) {
+        // `KEY_COLUMN_USAGE.ORDINAL_POSITION` IS the key ordinal, and it is
+        // selected by neither the projection nor an order clause — so without
+        // `ORDER BY` the row order of a composite key's columns is whatever the
+        // plan yields. The order is load-bearing for the same reason it is on
+        // the Postgres arm above: #11324 made a composite foreign key ORDERED
+        // SIBLING ROWS in this flat per-column record — `(x, y) references
+        // p (a, b)` is `x -> p.a` then `y -> p.b` — and `IntrospectedForeignKey`
+        // carries no ordinal field for a consumer to recover the position from.
+        //
+        // ⚠️ This clause is NOT a repair of a wrong answer, and the measurement
+        // that says so is the reason to keep it. On MySQL 8.0.46, a key declared
+        // out of column sequence — `foreign key (second_col, first_col)
+        // references ooo_parent (pa, pb)` — came back in KEY order through THIS
+        // predicate with no `ORDER BY` at all: the right answer, unpinned. But
+        // on the same server, in the same session, the sibling
+        // `introspectPrimaryKeys` predicate over the SAME view returned COLUMN
+        // order for an out-of-sequence primary key — `carrier_code` (ordinal 2)
+        // ahead of `shipment_id` (ordinal 1) — reproducing #11101 exactly. So
+        // this view does not preserve the ordinal for free on this server:
+        // WHICH of the two orders you get is decided by the WHERE clause, and
+        // nothing declares that. (Same conclusion as the primary-key arm: the
+        // InnoDB folklore that the view "tends to" return ordinal order does not
+        // hold on an out-of-sequence key.) What the clause removes is a
+        // dependence on a plan choice nobody chose — see the pin in
+        // `sql-driver-11379-introspect-fk-mysql-ordinal-order.test.ts`, which is
+        // deliberately a pin on the emitted SQL rather than on the row order,
+        // because a row-order assertion passes here with or without this line.
         const result = await this.knex.raw(
           `
           SELECT
@@ -13877,6 +14578,7 @@ export class SqlDriver implements IDataDriver {
           WHERE TABLE_SCHEMA = DATABASE()
             AND TABLE_NAME = ?
             AND REFERENCED_TABLE_NAME IS NOT NULL
+          ORDER BY ORDINAL_POSITION
         `,
           [tableName],
         );
@@ -14057,12 +14759,39 @@ export class SqlDriver implements IDataDriver {
   }
 
   /**
+   * Columns that ALONE carry a single-column unique constraint (#11202).
+   *
    * ⚠️ A failed read is an ERROR, not a table without unique constraints
    * (#7332 — the ruling {@link introspectIndexes} carries, extended to this
    * sibling by #11161). This used to wrap the whole dialect dispatch in a bare
    * `catch {}` and return `[]`, silently converting a failed read into a
    * positive assertion of absence. See {@link introspectIndexes} for the full
    * rationale; the option shape and default are deliberately identical.
+   *
+   * ## The three arms answer ONE question, and it is the narrow one
+   *
+   * Maintainer ruling 2026-08-23 (option A→B), verbatim and untranslated:
+   * 「10950 不考虑存量，其他接受你的建议」. The answer is **single-column
+   * uniqueness only**: a column appears here iff some unique constraint covers
+   * that column AND NOTHING ELSE. A member of `UNIQUE (a, b)` is deliberately
+   * absent — neither `a` nor `b` is unique on its own, and this method's flat
+   * `string[]` (folded by `introspectSchema` into a per-column `isUnique`) is
+   * structurally unable to say "a and b are unique TOGETHER". Emitting both
+   * made the flag assert something the constraint does not: that each column
+   * alone is unique. Representing composite constraints is option B, which
+   * waits for real demand and is NOT this method.
+   *
+   * The arms used to disagree about this, and the disagreement was invisible
+   * because the loudest arm was dead: SQLite kept single-column unique indexes
+   * only (`info.length === 1`), while the Postgres and MySQL arms returned
+   * every member of every composite constraint — and the Postgres arm's query
+   * was invalid SQL until #11161, so live Postgres had never once reported a
+   * unique constraint through this method. Repairing that query is what made
+   * three dialects start answering three different questions on live systems.
+   *
+   * All three now normalise their rows to {@link UniqueConstraintMember} and
+   * decide through {@link singleColumnUniqueColumns} — one predicate, so a
+   * fourth dialect cannot quietly acquire a fourth meaning.
    */
   protected async introspectUniqueConstraints(
     tableName: string,
@@ -14075,7 +14804,7 @@ export class SqlDriver implements IDataDriver {
       onFailure?: 'throw' | 'partial';
     } = {},
   ): Promise<string[]> {
-    const uniqueColumns: string[] = [];
+    const members: UniqueConstraintMember[] = [];
 
     try {
       if (this.isPostgres) {
@@ -14092,9 +14821,18 @@ export class SqlDriver implements IDataDriver {
         // user can read, so without it the newly-working query would report a
         // same-named table's constraints from a schema the session never
         // reaches.
+        // `constraint_schema` is SELECTed, not just joined on, because it is
+        // half the constraint's IDENTITY here (#11202). `table_schema = ANY
+        // (current_schemas(false))` deliberately spans every schema on the
+        // search path, and Postgres auto-names a unique constraint after the
+        // table and column (`orders_email_key`) — so two same-named tables in
+        // two schemas produce two DIFFERENT constraints carrying the SAME
+        // name. Grouping on the name alone would fuse them into one apparent
+        // two-member constraint and drop a genuinely single-column unique from
+        // the answer.
         const result = await this.knex.raw(
           `
-          SELECT ccu.column_name
+          SELECT tc.constraint_schema, tc.constraint_name, ccu.column_name
           FROM information_schema.table_constraints tc
           JOIN information_schema.constraint_column_usage AS ccu
             ON tc.constraint_schema = ccu.constraint_schema
@@ -14107,12 +14845,19 @@ export class SqlDriver implements IDataDriver {
         );
 
         for (const row of result.rows) {
-          uniqueColumns.push(row.column_name);
+          members.push({
+            constraint: [String(row.constraint_schema), String(row.constraint_name)],
+            column: row.column_name ?? null,
+          });
         }
       } else if (this.isMysql) {
+        // `TABLE_SCHEMA = DATABASE()` and `TABLE_NAME = ?` are both pinned in
+        // the WHERE and merged by the `USING` join, so a constraint name is
+        // already unique within this answer — one identity part suffices,
+        // unlike the Postgres arm above.
         const result = await this.knex.raw(
           `
-          SELECT COLUMN_NAME
+          SELECT CONSTRAINT_NAME, COLUMN_NAME
           FROM information_schema.TABLE_CONSTRAINTS tc
           JOIN information_schema.KEY_COLUMN_USAGE kcu
             USING (CONSTRAINT_NAME, TABLE_SCHEMA, TABLE_NAME)
@@ -14124,7 +14869,10 @@ export class SqlDriver implements IDataDriver {
         );
 
         for (const row of result[0]) {
-          uniqueColumns.push(row.COLUMN_NAME);
+          members.push({
+            constraint: [String(row.CONSTRAINT_NAME)],
+            column: row.COLUMN_NAME ?? null,
+          });
         }
       } else if (this.isSqlite) {
         const safeTableName = tableName.replace(/[^a-zA-Z0-9_]/g, '');
@@ -14133,16 +14881,26 @@ export class SqlDriver implements IDataDriver {
         const tableNames = Array.isArray(tablesResult) ? tablesResult.map((row: any) => row.name) : [];
 
         if (!tableNames.includes(safeTableName)) {
-          return uniqueColumns;
+          return [];
         }
 
         const indexes = await this.knex.raw(`PRAGMA index_list(${safeTableName})`);
 
         for (const idx of indexes) {
           if (idx.unique === 1) {
+            // `PRAGMA index_info` reports one row per index MEMBER, and a
+            // member is not always a column: an expression term
+            // (`CREATE UNIQUE INDEX … ON t (lower(a))`) arrives with
+            // `name: null`. Every member is carried through so it still
+            // COUNTS toward the index's width — dropping the unnamed ones
+            // here would make `(a, lower(b))` look single-column and flag `a`.
+            // The `null` is discarded later, where it can only cost a flag
+            // rather than manufacture one. Previously the row's `name` was
+            // pushed unconditionally, so a one-term expression index put a
+            // literal `null` into a `string[]`.
             const info = await this.knex.raw(`PRAGMA index_info(${idx.name})`);
-            if (info.length === 1) {
-              uniqueColumns.push(info[0].name);
+            for (const entry of info) {
+              members.push({ constraint: [String(idx.name)], column: entry.name ?? null });
             }
           }
         }
@@ -14152,6 +14910,81 @@ export class SqlDriver implements IDataDriver {
       if (opts.onFailure !== 'partial') throw e;
     }
 
-    return uniqueColumns;
+    return singleColumnUniqueColumns(members);
   }
+}
+
+/**
+ * One (constraint, column) membership row, normalised across dialects —
+ * the input to {@link singleColumnUniqueColumns} (#11202).
+ */
+export interface UniqueConstraintMember {
+  /**
+   * What makes this constraint a DISTINCT constraint within one answer, as
+   * its identity parts.
+   *
+   * Spelled as parts rather than a pre-joined string so each arm has to state
+   * what it is relying on: Postgres needs `[schema, name]` because its answer
+   * spans the search path and auto-generated constraint names repeat across
+   * schemas; MySQL and SQLite pin one schema/database in the query itself and
+   * so need only the name. Two constraints whose parts are equal are treated
+   * as one constraint.
+   */
+  constraint: readonly string[];
+  /**
+   * The column this member covers, or `null` for a member that is not a plain
+   * column — a SQLite expression-index term. A `null` still occupies a member
+   * slot; it simply cannot be flagged.
+   */
+  column: string | null;
+}
+
+/**
+ * The one definition of what `introspectUniqueConstraints` reports: the
+ * columns that ALONE carry a unique constraint (#11202).
+ *
+ * A constraint contributes its column iff it has exactly ONE member and that
+ * member is a real column. Members of a composite constraint contribute
+ * nothing — `UNIQUE (a, b)` says the PAIR is unique, and a per-column flag
+ * cannot say that, so claiming it per column is a claim the constraint never
+ * made.
+ *
+ * ## Both defensive choices fail toward NOT flagging, on purpose
+ *
+ * Members are counted as they arrive, without de-duplicating identical rows.
+ * No in-tree arm can produce a duplicate (each query joins one
+ * constraint-listing row to its own column rows), but if one ever did, the
+ * inflated count would merely hide a genuine single-column unique. The
+ * opposite policy — collapsing rows before counting — could merge two real
+ * members and flag a composite one. An under-claimed flag is a missed
+ * optimisation downstream; an over-claimed one is the defect being fixed
+ * here, and it reaches `introspectSchema`'s per-column `isUnique`, the
+ * federated-object draft (ADR-0015) and schema-drift comparison as fact.
+ *
+ * The returned columns are de-duplicated: a column carrying two separate
+ * single-column unique constraints (or, on SQLite, both a `UNIQUE` clause and
+ * a hand-made unique index) is one unique column, named once.
+ */
+export function singleColumnUniqueColumns(members: readonly UniqueConstraintMember[]): string[] {
+  const byConstraint = new Map<string, (string | null)[]>();
+
+  for (const member of members) {
+    // JSON is used as the composite-key encoding because it is injective:
+    // joining the parts with a separator would fuse `['a.b', 'c']` and
+    // `['a', 'b.c']`, and a schema or constraint name really can contain the
+    // separator (Postgres quotes such identifiers rather than rejecting them).
+    const key = JSON.stringify(member.constraint);
+    const existing = byConstraint.get(key);
+    if (existing) existing.push(member.column);
+    else byConstraint.set(key, [member.column]);
+  }
+
+  const uniqueColumns: string[] = [];
+  for (const columns of byConstraint.values()) {
+    if (columns.length !== 1) continue;
+    const only = columns[0];
+    if (only == null) continue;
+    if (!uniqueColumns.includes(only)) uniqueColumns.push(only);
+  }
+  return uniqueColumns;
 }

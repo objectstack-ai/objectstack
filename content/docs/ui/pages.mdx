@@ -188,7 +188,7 @@ The `type` field is a union of the standard `PageComponentType` enum and any cus
 - **AI:** `ai:chat_window`, `ai:suggestion`
 - **Elements:** `element:text`, `element:number`, `element:image`, `element:divider`, `element:button`, `element:record_picker`, `element:text_input` (`element:filter` and `element:form` were retired in v17.x — no renderer ever shipped for either. List surfaces own their filtering via a view's `userFilters` quick-filter bar or the list toolbar's filter builder; for forms use the object-bound `object-form` block, which is rendered and designer-publishable)
 
-Components may also carry `dataSource` (per-element object binding for multi-object pages), `responsive`, and `aria` configuration. Custom string types are also accepted for project-specific widgets.
+Components may also carry `dataSource` (per-element object binding for multi-object pages), `responsiveStyles` (per-breakpoint scoped CSS, ADR-0065), and `aria` configuration. Custom string types are also accepted for project-specific widgets. (The former `responsive` layout block was retired in v17.x — no renderer ever applied it; see the upgrade guide.)
 
 ## Variables
 

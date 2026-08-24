@@ -255,6 +255,123 @@ describe('resolveLocalizationContext — batched fallback read (#2409)', () => {
     expect(loc.timezone).toBe('Europe/Paris');
     expect(ql.counts.sys_setting).toBe(1); // the batched $in fallback ran once
   });
+
+  // ── [#11222 items 2 + 3] LEGS, and the resolution context ────────────────
+  //
+  // The pins above count CALLS (`getMany.calls`, `gets === 3`). #10826's whole
+  // calibration is that the three reads it collapsed already ran in ONE leg —
+  // "a query-count fix, not a latency fix" (cloud#1539). Nothing pinned that.
+  // A future edit turning the per-key fallback's `Promise.all` into a
+  // sequential `for` loop takes legs 1 -> 3 while every call-count assertion
+  // above stays green; legs are the latency multiplier, so that regression is
+  // exactly the one the existing pins cannot see.
+  //
+  // And the `getMany` double above is declared with TWO parameters, so it is
+  // structurally unable to observe the third argument: drop `sctx` from the
+  // production call and all three pins stay green. The rig's double takes it.
+
+  /**
+   * A settings-service double that MEASURES what the resolver asks for.
+   *
+   *  - `queries` — every row load. `loadRows` stands in for the real service's
+   *    namespace row load, so one call is one `sys_setting` query.
+   *  - `legs` — every row load that STARTS while nothing else is in flight,
+   *    i.e. the number of sequential round-trip WAVES. Three loads issued
+   *    inside one `Promise.all` all increment `inFlight` synchronously before
+   *    any of them resumes past its first `await`, so they count as ONE leg;
+   *    three awaited in sequence count as three. That is the leg definition
+   *    cloud#1539 used, and it is what makes "3 queries, 1 leg" measurable
+   *    rather than asserted.
+   *
+   * `batched: false` reproduces the pre-#10826 occupant (only `get`), which is
+   * also the shape the resolver still falls back to for a host-provided
+   * settings service that predates `getMany`.
+   */
+  function makeSettingsRig(
+    values: Record<string, unknown>,
+    { batched }: { batched: boolean },
+  ) {
+    const stats = { queries: 0, legs: 0 };
+    const calls: Array<{ method: string; args: any[] }> = [];
+    let inFlight = 0;
+    const loadRows = async () => {
+      stats.queries += 1;
+      if (inFlight === 0) stats.legs += 1; // nothing else in flight -> a new wave
+      inFlight += 1;
+      try {
+        await Promise.resolve();
+        return values;
+      } finally {
+        inFlight -= 1;
+      }
+    };
+    const pick = (loaded: Record<string, unknown>, key: string) =>
+      key in loaded
+        ? { value: loaded[key], source: 'tenant' }
+        : { value: undefined, source: 'default' };
+    const rig: any = {
+      stats,
+      calls,
+      async get(namespace: string, key: string, ctx: any) {
+        calls.push({ method: 'get', args: [namespace, key, ctx] });
+        return pick(await loadRows(), key);
+      },
+    };
+    if (batched) {
+      // NOTE the THIRD parameter — this is item 3's fix, not a detail: the
+      // double must accept `ctx` to be able to assert it was forwarded.
+      rig.getMany = async (namespace: string, keys: readonly string[], ctx: any) => {
+        calls.push({ method: 'getMany', args: [namespace, [...keys], ctx] });
+        const loaded = await loadRows();
+        const out: Record<string, unknown> = {};
+        for (const key of keys) out[key] = pick(loaded, key);
+        return out;
+      };
+    }
+    return rig;
+  }
+
+  const VALUES = { timezone: 'Asia/Tokyo', locale: 'ja-JP', currency: 'JPY' };
+  const EXPECTED = { timezone: 'Asia/Tokyo', locale: 'ja-JP', currency: 'JPY' };
+
+  it('a per-key occupant issues three namespace reads in ONE leg (the pre-#10826 cost)', async () => {
+    const settings = makeSettingsRig(VALUES, { batched: false });
+    const ql = makeCountingQl({ sys_setting: [] });
+    const loc = await resolveLocalizationContext({ ql, settings, tenantId: 'o1', userId: 'u1' });
+    expect(loc).toEqual(EXPECTED);
+    expect(settings.stats).toEqual({ queries: 3, legs: 1 });
+    // The settings path answered, so the direct `sys_setting` fallback is not
+    // reached — the three reads above are the whole cost.
+    expect(ql.counts.sys_setting ?? 0).toBe(0);
+  });
+
+  it('the batched occupant issues ONE namespace read, in the same ONE leg', async () => {
+    const settings = makeSettingsRig(VALUES, { batched: true });
+    const ql = makeCountingQl({ sys_setting: [] });
+    const loc = await resolveLocalizationContext({ ql, settings, tenantId: 'o1', userId: 'u1' });
+    expect(loc).toEqual(EXPECTED);
+    // queries 3 -> 1, legs 1 -> 1. #10826 was correctly scheduled as a
+    // query-count fix; the `legs` half is what a sequential-loop regression
+    // would move, and it is now pinned in both directions.
+    expect(settings.stats).toEqual({ queries: 1, legs: 1 });
+    expect(ql.counts.sys_setting ?? 0).toBe(0);
+  });
+
+  it('asks for all three keys of the one namespace in a single call, with the resolution context', async () => {
+    const settings = makeSettingsRig(VALUES, { batched: true });
+    await resolveLocalizationContext({
+      ql: makeCountingQl({ sys_setting: [] }),
+      settings,
+      tenantId: 'o1',
+      userId: 'u1',
+    });
+    expect(settings.calls).toEqual([
+      {
+        method: 'getMany',
+        args: ['localization', ['timezone', 'locale', 'currency'], { tenantId: 'o1', userId: 'u1' }],
+      },
+    ]);
+  });
 });
 
 // #10221: a fresh environment's `sys_setting` table doesn't exist yet, so

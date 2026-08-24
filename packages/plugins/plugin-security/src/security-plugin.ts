@@ -36,6 +36,7 @@ import {
   reconcilePermissionSetProjection,
 } from './permission-set-projection.js';
 import { runPermissionSetDriftDiagnostics } from './permission-set-drift.js';
+import { reportPackagedPermissionSetOverlays } from './packaged-permission-set-overlay-detection.js';
 import { discardPermissionSetOverlay, type PermissionSetOverlayDiscardDeps } from './permission-set-overlay-discard.js';
 import { registerObjectPostureGate } from './object-posture-gate.js';
 import {
@@ -100,7 +101,7 @@ import {
   MaskedValueWriteError,
 } from './errors.js';
 import { assertEngineOwnedWriteAllowed, type EngineOwnedSchemaLike } from './system-write-guard.js';
-import { bootstrapPlatformAdmin } from './bootstrap-platform-admin.js';
+import { bootstrapPlatformAdmin, shouldReplayBootstrapFor } from './bootstrap-platform-admin.js';
 import {
   backfillOrgAdminGrants,
   extractMemberPairs,
@@ -3203,6 +3204,28 @@ export class SecurityPlugin implements Plugin {
           } catch (e) {
             ctx.logger.warn('[security] permission-set drift diagnostics failed', { error: (e as Error).message });
           }
+          // [maintainer ruling 2026-08-24 — 「同意 第一步(创业阶段,Salesforce
+          // 式)」, item 3] The DETECTION READING for sets that were already
+          // silently forked before the save door was locked: count + NAMES,
+          // reported loudly. ⛔ Reaps nothing, merges nothing, migrates
+          // nothing — disposition of an existing fork is a follow-up reading
+          // for the maintainer, and the per-set remedy is the explicit,
+          // audited "Discard Overlay" action a human invokes.
+          //
+          // Distinct from the drift diagnostic above and deliberately run
+          // beside it: drift reports a set whose grants ALREADY differ from
+          // the artifact, so an overlay that currently happens to match is
+          // invisible to it — while that fork is entirely real and freezes
+          // the set the moment the package ships its next version.
+          //
+          // Own try/catch, same discipline as its neighbours: a failure here
+          // must never take down boot, and must never read as "the drift
+          // diagnostics also failed".
+          try {
+            await reportPackagedPermissionSetOverlays(ql, { logger: ctx.logger });
+          } catch (e) {
+            ctx.logger.warn('[security] packaged permission-set overlay detection failed', { error: (e as Error).message });
+          }
         } catch (e) {
           ctx.logger.warn('[security] permission publish-materializer registration failed', { error: (e as Error).message });
         }
@@ -3309,11 +3332,23 @@ export class SecurityPlugin implements Plugin {
       void runBootstrap();
     }
 
-    // Re-run bootstrap after a sys_user insert so the FIRST user that
-    // signs up after boot is auto-promoted to platform admin (and, in
-    // multi-tenant mode, bound to the seeded default organization)
-    // without requiring a server restart. The function itself is
-    // idempotent and bails out as soon as any platform admin exists.
+    // Re-run bootstrap after a sys_user write that can change the elevation
+    // answer, so the platform admin is promoted without a server restart:
+    //
+    //  - INSERT: the user that signs up after boot may be the promotion
+    //    target (and, in multi-tenant mode, gets bound to the seeded default
+    //    organization).
+    //  - UPDATE touching `email_verified` / `email` (#11343): under walled
+    //    postures elevation requires the declared owner's email to be
+    //    VERIFIED, and the verifying write is an update (better-auth flips
+    //    `emailVerified` when the link is clicked; change-email rewrites
+    //    both columns). Insert-only replay would refuse the owner at sign-up
+    //    and then never look again — the genuine owner would never be
+    //    elevated at all.
+    //
+    // The trigger set is `shouldReplayBootstrapFor` — the SAME predicate its
+    // pins consume — and the function itself is idempotent, bailing out as
+    // soon as any platform admin exists.
     //
     // We deliberately do NOT auto-create a "personal workspace" for
     // every subsequent self-service signup. In a B2B / invitation-
@@ -3324,10 +3359,7 @@ export class SecurityPlugin implements Plugin {
     // this case.
     ql.registerMiddleware(async (opCtx: any, next: () => Promise<void>) => {
       await next();
-      if (
-        opCtx?.object === 'sys_user' &&
-        (opCtx?.operation === 'create' || opCtx?.operation === 'insert')
-      ) {
+      if (shouldReplayBootstrapFor(opCtx)) {
         if (bootstrapRanOnce) {
           await runBootstrap();
         }

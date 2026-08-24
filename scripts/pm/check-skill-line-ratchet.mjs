@@ -113,7 +113,21 @@ export const CEILINGS = new Map([
   // 134 → 133: whole-text restructuring round, PR-2 (maintainer ruling
   // 2026-08-23) — the three write-side sanitizer rows consolidated to one
   // author rule + one measured-behaviour row per surface (body / comment).
-  ['.claude/skills/pm-dispatch/references/platform-readings.md', 133],
+  // 133 → 130 (LOWERED, no ruling needed — shrinking is always legitimate):
+  // the REST-default read-order flip (maintainer ruling 2026-08-23, 「1+2+3」)
+  // consolidated the three channel-partition rows into two, and the per-
+  // operation channel mapping moved out to references/rest-channel.md below.
+  // The two right-sized-reads rows the same ruling ordered were paid from that
+  // saving in place, and three lines came back. Headroom 0 again.
+  ['.claude/skills/pm-dispatch/references/platform-readings.md', 130],
+  // Per-operation REST/GraphQL/git channel mapping — which fleet operation has
+  // a REST twin (each row executed in a real session, provenance date carried
+  // per row), the handful that are GraphQL-only, and the queue-routing
+  // readings. The policy lives in platform-readings.md's quota section; this
+  // file is the lookup table it points at, so the policy flip did not have to
+  // grow the hot file. Set at landed line count (headroom 0, same convention
+  // as the entries above).
+  ['.claude/skills/pm-dispatch/references/rest-channel.md', 46],
   ['.claude/skills/pm-dispatch/references/review-checklist.md', 82],
   ['.claude/skills/pm-dispatch/references/landing-operations.md', 82],
   // Release-aftercare duties — what a lane PM still owes AFTER a tagged release

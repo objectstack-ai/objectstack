@@ -24,10 +24,7 @@
 #      BODY — still exist (quoted-exact-name git grep against origin/main).
 #
 # This script performs steps 1–3 and prints step 4 (the regen chain varies by
-# what the branch touches; running it blind would hide a red). Sister trap for
-# step 4: `gen:schema`'s cleanup wipes `gen:openapi`'s output, which shows up as
-# bogus 5xx assertions in the rest package — rerun
-# `pnpm --filter @objectstack/spec gen:openapi` to restore.
+# what the branch touches; running it blind would hide a red).
 #
 # ## Step 3 and the pre-commit hook agree (#8047)
 #
@@ -102,8 +99,7 @@ cat <<'EOF'
 → step 4 (yours, in this order — the script stops here on purpose):
    1. build the spec build closure, then regenerate the WHOLE chain
       (e.g. pnpm --filter @objectstack/spec build && the gen:* scripts your
-      surface touches; gen:schema's cleanup wipes gen:openapi's output — rerun
-      pnpm --filter @objectstack/spec gen:openapi after it);
+      surface touches);
    2. run the generated-artifact gates until fully green;
    3. assert every sibling PR's entries AND the previous PR's implementation
       body still exist: quoted-exact-name `git grep "<symbol>" origin/main -- <path>`

@@ -98,7 +98,8 @@
 import { execFileSync } from 'node:child_process';
 import { readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { parseDocument } from 'yaml';
+import { requireDependency } from './import-prerequisite.mjs';
+const { parseDocument } = await requireDependency('yaml', () => import('yaml'), import.meta.url);
 import { isEntrypoint } from './invoked-as.mjs';
 
 const SELF = 'scripts/check-closing-keyword-parity.mjs';

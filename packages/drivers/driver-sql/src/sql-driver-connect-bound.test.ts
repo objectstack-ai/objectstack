@@ -126,6 +126,55 @@ describe('SqlDriver — connection-attempt bound (framework#3769)', () => {
       expect((d as any).knex.client.config.connection).toEqual({ filename: ':memory:' });
     });
 
+    // #11784 — `redshift` reaches the server through the `pg` driver (knex's
+    // `Client_Redshift extends Client_PG`), so it HAS `connectionTimeoutMillis`
+    // and obeys it; it just carried no DIALECT_CONNECT_TIMEOUT row, so nothing
+    // was injected and the attempt fell through to the strictly looser 15s pool
+    // backstop. Nothing errored and nothing was logged — the before-state is
+    // silence, so "it works" is not evidence and the INJECTED CONFIG is pinned.
+    //
+    // The two controls are load-bearing. `pg` already had a row, so a broken
+    // injection path fails them together instead of looking redshift-specific;
+    // `better-sqlite3` legitimately has none (a file open has no handshake), so
+    // an injector that stopped reading the table and timed everything would be
+    // caught rather than read as a pass.
+    it('bounds a redshift connect attempt at the dialect timeout, not the pool backstop (#11784)', () => {
+      const injected = (client: string, connection: any) =>
+        (make({ client, connection, useNullAsDefault: true }) as any).knex.client.config.connection;
+
+      // subject — URL form moves into the pg URL slot with the timeout alongside
+      expect(injected('redshift', 'postgres://u:p@host:5439/d')).toEqual({
+        connectionString: 'postgres://u:p@host:5439/d',
+        connectionTimeoutMillis: 10_000,
+      });
+      // subject — object form gains the key and disturbs nothing else
+      expect(injected('redshift', { host: 'wh.eu-west-1.redshift.amazonaws.com', port: 5439, database: 'dev' }))
+        .toEqual({
+          host: 'wh.eu-west-1.redshift.amazonaws.com', port: 5439, database: 'dev',
+          connectionTimeoutMillis: 10_000,
+        });
+
+      // positive control — a client that already had a row
+      expect(injected('pg', { host: 'db', database: 'app' }).connectionTimeoutMillis).toBe(10_000);
+      // negative control — a dialect that legitimately has no such knob
+      expect(injected('better-sqlite3', { filename: ':memory:' }).connectionTimeoutMillis).toBeUndefined();
+
+      // The two bounds must not be equal (knex wins a tie and the accurate
+      // message is never seen). Redshift now takes the strict 10s dialect bound
+      // with the 15s pool value still strictly looser behind it — which is the
+      // whole of what #11784 restores.
+      const d = make({ client: 'redshift', connection: 'postgres://u:p@host:5439/d' });
+      expect((d as any).knex.client.config.pool.createTimeoutMillis).toBe(15_000);
+    });
+
+    it("leaves a redshift host's own explicit connect timeout alone (#11784)", () => {
+      const d = make({
+        client: 'redshift',
+        connection: { host: 'wh.redshift.amazonaws.com', connectionTimeoutMillis: 60_000 },
+      });
+      expect((d as any).knex.client.config.connection.connectionTimeoutMillis).toBe(60_000);
+    });
+
     it('leaves a function-valued connection alone — the host builds each one itself', () => {
       const provider = () => ({ host: 'x' });
       const d = make({ client: 'pg', connection: provider });
