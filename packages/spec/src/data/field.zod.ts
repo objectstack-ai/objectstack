@@ -1678,15 +1678,30 @@ export const FieldSchema = lazySchema(() => {
     // introspection with an empty set), and checks run in attachment order, so
     // the superRefine above always sees the pre-materialized value. The key is
     // re-inserted at its SHAPE position (Zod emits parse output in shape
-    // order), so output is byte-identical to the `.default('set_null')` era —
-    // on every field type, `master_detail` included: a bare `master_detail`
-    // still parses to `deleteBehavior: 'set_null'`, which the engine resolves
-    // to `cascade` exactly as before. The one accepted cost, same as the
-    // currency precedent's: the INFERRED output type now declares
-    // `deleteBehavior?` even though a parsed field always carries it
-    // (ADR-0122 forbids hand-narrowing the inferred type); the runtime
-    // contract is the enforced one.
+    // order), so output is byte-identical to the `.default('set_null')` era on
+    // every field type EXCEPT `master_detail` — see the ruling below. The one
+    // accepted cost, same as the currency precedent's: the INFERRED output
+    // type now declares `deleteBehavior?` even though a parsed non-
+    // `master_detail` field always carries it (ADR-0122 forbids hand-narrowing
+    // the inferred type); the runtime contract is the enforced one.
     if (field.deleteBehavior !== undefined) return field;
+    // #9689 (maintainer ruling 2026-08-24, idempotent materialization —
+    // 「四维分析一致的，接手你的建议。」): NEVER materialize a default the
+    // schema itself would refuse as authored. The superRefine above rejects an
+    // AUTHORED `set_null` on a `master_detail`, and the two spellings are
+    // indistinguishable to any later parse BY DESIGN — so baking `set_null`
+    // onto a bare `master_detail` made parse output self-rejecting on
+    // re-parse, and `ObjectSchema.create()` → `defineStack` re-parses on the
+    // MAINLINE app-build path (measured: 4 bare `master_detail` fields red the
+    // showcase build; `parse(parse(x))` threw for accepted x). A bare
+    // `master_detail` therefore parses to output that OMITS `deleteBehavior`:
+    // the engine treats absent exactly as it treated the baked `set_null`
+    // (both resolve to `cascade` — measured in the #9689 exhaustion matrix,
+    // pinned in `engine-cascade-delete.test.ts`), and built artifacts stop
+    // carrying a value the schema itself refuses. Every other type keeps
+    // byte-identity, and the #7918 currency `precision` twin of this landmine
+    // is #11423 — same principle, its own card.
+    if (field.type === 'master_detail') return field;
     const withDefault: Record<string, unknown> = { ...field, deleteBehavior: 'set_null' };
     const out: Record<string, unknown> = {};
     for (const key of shapeOrder) {

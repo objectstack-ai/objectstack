@@ -487,9 +487,13 @@ describe('FieldSchema', () => {
     // `engine-cascade-delete.test.ts`), the opposite of what the declaration
     // asks for. The default relocated off the property (`.optional()` +
     // `.meta({default})` + `.overwrite()`, the #7918 Option A shape) so this
-    // check can tell authored from defaulted; everything else about
-    // `deleteBehavior` must stay byte-identical, which is what the rest of
-    // this block pins.
+    // check can tell authored from defaulted. Second ruling (2026-08-24,
+    // idempotent materialization): the `.overwrite()` never materializes a
+    // default the schema itself would refuse as authored — a bare
+    // `master_detail` parses to output that OMITS `deleteBehavior`, so
+    // `parse(parse(x))` holds on the mainline `create()` → `defineStack`
+    // path; every OTHER type keeps byte-identity with the `.default()` era,
+    // which is what the rest of this block pins.
     describe('[#9689] deleteBehavior: set_null on master_detail is a parse-time rejection', () => {
       const md = (extra: Record<string, unknown> = {}) => ({
         name: 'parent_id',
@@ -515,18 +519,42 @@ describe('FieldSchema', () => {
         expect(issue?.message).toContain("'cascade'");
       });
 
-      it('still parses a BARE master_detail, and still materializes the set_null default', () => {
+      it('still parses a BARE master_detail — and no longer materializes set_null (2026-08-24 ruling: idempotent materialization)', () => {
+        // The schema refuses an AUTHORED `set_null` on this type, and the
+        // materialized spelling is indistinguishable from the authored one BY
+        // DESIGN — so baking it made parse output self-rejecting on re-parse
+        // (measured: 4 bare `master_detail` fields red the showcase build via
+        // `create()` → `defineStack`). Absent is what the output must say; the
+        // engine treats absent and `set_null` identically on this type (both
+        // cascade — `engine-cascade-delete.test.ts`).
         const result = FieldSchema.parse(md());
-        expect(result.deleteBehavior).toBe('set_null');
+        expect(result.deleteBehavior).toBeUndefined();
+        expect('deleteBehavior' in result).toBe(false);
       });
 
-      it('materializes the default at its SHAPE position, not appended at the tail (byte-identity with the .default() era)', () => {
+      it('parse is IDEMPOTENT on a bare master_detail — the mainline create() → defineStack chain re-parses parse output', () => {
+        // This is the exact chain that carried the pre-ruling defect: parse #1
+        // baked `set_null`, parse #2 rejected it. Both layers pinned green.
+        const once = FieldSchema.parse(md());
+        expect(FieldSchema.safeParse(once).success).toBe(true);
+        const obj = ObjectSchema.create({
+          name: 'child_thing',
+          label: 'Child Thing',
+          fields: { parent: { label: 'Parent', type: 'master_detail', reference: 'parent_thing' } },
+        });
+        expect(ObjectSchema.safeParse(obj).success).toBe(true);
+      });
+
+      it('materializes the default at its SHAPE position on every other type, not appended at the tail (byte-identity with the .default() era)', () => {
         // Serialized parse output is what built app artifacts ship (#4447), so
-        // key ORDER is part of the byte-identity contract. `deleteBehavior`
-        // sits between `reference` and `hidden` in the shape; a naive
+        // key ORDER is part of the byte-identity contract for the types that
+        // still materialize the default. `deleteBehavior` sits between
+        // `reference` and `hidden` in the shape; a naive
         // `{ ...field, deleteBehavior }` re-materialization would emit it last.
-        const json = JSON.stringify(FieldSchema.parse(md()));
-        expect(json).toContain('"reference":"parent_object","deleteBehavior":"set_null","hidden":false');
+        const json = JSON.stringify(FieldSchema.parse({
+          name: 'account_id', label: 'Account', type: 'lookup', reference: 'account',
+        }));
+        expect(json).toContain('"reference":"account","deleteBehavior":"set_null","hidden":false');
       });
 
       it('leaves an authored cascade and restrict on master_detail untouched', () => {
