@@ -134,9 +134,12 @@
  * that many new leaks.
  *
  * ⛔ The baseline is closed to new entries -- see the failure text. Its repair
- * is one card per neighbourhood, and the reason those repairs are not in the
- * PR that landed this gate is that two of the baselined files were held by
- * another card in flight at the time.
+ * is one card per neighbourhood, tracked on #11596, and the reason those
+ * repairs are not in the PR that landed this gate is that two of the baselined
+ * files were held by another card in flight at the time.
+ *
+ * The sibling gap this gate does NOT cover -- a spawn passing no `env` option
+ * at all, which inherits the whole environment in a purer form -- is #11595.
  *
  * ## Why every unreadable state is a REFUSAL, not a quiet pass
  *

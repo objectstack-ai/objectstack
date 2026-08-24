@@ -12,6 +12,8 @@
     "not a sanctioned move, it is a mute button -- and a count that FALLS must be lowered in",
     "the same PR. A ceiling left above reality silently licenses that many new leaks.",
     "",
+    "Burn-down is tracked on https://github.com/objectstack-ai/objectstack/issues/11596.",
+    "",
     "The repair is `childEnv()` from packages/cli/test/helpers/serve-process.ts, which copies",
     "the environment minus the vitest worker family (TEST, VITEST, VITEST_*) and then applies",
     "the overrides you pass. Burning this list down is one card per neighbourhood; it is NOT",
