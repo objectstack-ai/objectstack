@@ -1150,15 +1150,15 @@
       "title": "os datasource list-tables/introspect/validate: the federation door answers, the generated draft is cwd-jailed and compiles, and schema drift maps to ✗ diffs with exit 1",
       "since": "v16",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P2",
       "surface": "cli",
-      "personas": ["operator (local shell)", "integration author (adopting a remote table)"],
+      "personas": ["operator (local shell) whose token HOLDS manage_platform_settings — all three commands address federation READ routes, which require it since #9901/#10255", "integration author (adopting a remote table), same capability"],
       "fixtures": {
         "app": "showcase",
         "requires": [
           "a booted showcase (`pnpm dev -- --fresh -p <port>`) — it ships the external datasource fixture: examples/app-showcase/src/system/datasources/showcase-external.datasource.ts (name 'showcase_external', sqlite file .objectstack/data/showcase_external.db) seeded by external-fixture.ts",
-          "an admin session token minted via POST /api/v1/auth/sign-in/email (the external-datasource routes sit behind the auth guard — external-datasource-routes-auth-guard.test.ts); pass it as --token / OS_TOKEN, with --url / OS_CLOUD_URL pointing at the boot port",
+          "an admin session token minted via POST /api/v1/auth/sign-in/email for a user HOLDING manage_platform_settings — authentication alone is NOT enough since #9901/#10255: every route these three commands address is a federation READ (list-tables → GET /external/tables, introspect → POST /external/tables/:remote/draft, validate → POST /external/validate), and each opens with refuseFederationRequest, which answers 401 UNAUTHENTICATED with no identity and then 403 PERMISSION_DENIED naming FEDERATION_READ_CAPABILITY = manage_platform_settings (external-datasource-routes.ts:157, :287-324; pinned in external-datasource-routes-auth-guard.test.ts). Pass it as --token / OS_TOKEN, with --url / OS_CLOUD_URL pointing at the boot port",
           "a scratch objects/ dir in the invocation cwd for the --out draft, and a scratch config to wire the draft into for the compile clause"
         ],
         "knownGaps": [
@@ -1217,7 +1217,8 @@
         "an --out escape that lands a server-authored file outside the project tree is the security FAIL the jail exists for — the refusal must be proven, not assumed from the code",
         "validate exiting 0 while an error-severity diff printed breaks every CI wrapper watching for schema drift",
         "a draft that does not compile through os build makes the adoption workflow a dead end — the whole point of codegen",
-        "route-spelling trap: the CLI addresses /external/tables (federation, packages/rest); probing the admin /remote-tables spelling and reading its 404 as 'the CLI's route is gone' conflates two mounts — the API-door coverage of the admin twin belongs to the integration-system area, not here"
+        "route-spelling trap: the CLI addresses /external/tables (federation, packages/rest); probing the admin /remote-tables spelling and reading its 404 as 'the CLI's route is gone' conflates two mounts — the API-door coverage of the admin twin belongs to the integration-system area, not here",
+        "wrong-persona shape, NOT a finding: all three commands failing alike with the server's 403 PERMISSION_DENIED naming manage_platform_settings means the token authenticated but is unentitled — re-mint it for a caller holding that capability and re-run before filing anything. Filing it as a CLI or route regression would be a report against the #9901/#10255 gate working as ruled"
       ],
       "traps": ["dispatcher-vs-hono-route", "seed-data-thin", "wrong-persona"],
       "source": [
@@ -1228,7 +1229,8 @@
         "sibling item cli.flag-command-error-ux (owned only the topic's --help until now)"
       ],
       "history": [
-        { "revision": 1, "date": "2026-08-20", "change": "new — scoped scan-functionality sweep (扫描功能): the datasource topic's three subcommands had only a --help variant, no functional coverage. Re-verified against source during authoring: the hunter brief asked whether an --out escape refusal exists — it DOES (introspect.ts:65-74, absolute + traversal both refused before any write), so the jail is asserted positively with both escape probes rather than worded observe-and-flag. The /external/tables-vs-/remote-tables mount split is recorded as a runner trap with the admin twin explicitly routed to the integration-system area", "ref": "claude/new-session-0pv25p" }
+        { "revision": 1, "date": "2026-08-20", "change": "new — scoped scan-functionality sweep (扫描功能): the datasource topic's three subcommands had only a --help variant, no functional coverage. Re-verified against source during authoring: the hunter brief asked whether an --out escape refusal exists — it DOES (introspect.ts:65-74, absolute + traversal both refused before any write), so the jail is asserted positively with both escape probes rather than worded observe-and-flag. The /external/tables-vs-/remote-tables mount split is recorded as a runner trap with the admin twin explicitly routed to the integration-system area", "ref": "claude/new-session-0pv25p" },
+        { "revision": 2, "date": "2026-08-24", "change": "spell the CAPABILITY persona out. Read in the same pass as #11138 and confirmed rather than assumed: this item was authored 2026-08-20 against the pre-#9901 federation door, so its fixture asked only for \"an admin session token\" behind \"the auth guard\" — the #9686 AUTHENTICATION floor. At head all three commands address federation READ routes (list-tables GET /external/tables, introspect POST /external/tables/:remote/draft, validate POST /external/validate), each gated on FEDERATION_READ_CAPABILITY = manage_platform_settings by #9901/#10255, so a merely-authenticated token 403s every clause in the item. The capability is now named in both personas and in the token fixture, and the resulting all-403 run is recorded as a negative (the wrong-persona trap this item already declares) so a runner re-mints instead of filing the landed gate as a CLI regression", "ref": "#11138" }
       ]
     },
     {

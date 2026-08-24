@@ -1153,11 +1153,11 @@
       "title": "External-datasource schema introspection happy path: remote-tables lists live tables with columnCount (?schema= honoured since #7955), object-draft renders a reviewable *.object.ts, both route spellings answer as one operation behind the platform auth floor",
       "since": "v16",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "api",
       "personas": [
-        "admin — authenticated AND holding manage_platform_settings (the admin spelling's capability gate, #9391/#9593)",
+        "admin — authenticated AND holding manage_platform_settings (BOTH spellings' capability gate since #9901/#10255: admin #9391/#9593, federation FEDERATION_READ_CAPABILITY)",
         "a second authenticated persona holding NO capability, plus an anonymous probe (for the auth-floor clause)"
       ],
       "fixtures": {
@@ -1178,8 +1178,8 @@
         "GET /api/v1/datasources/showcase_external/external/tables (the twin spelling) — compare the set against step 2",
         "POST /api/v1/datasources/showcase_external/object-draft with body { \"table\": \"customers\" }, and the twin POST /api/v1/datasources/showcase_external/external/tables/customers/draft with body {} — record both drafts",
         "write draft.source to a scratch file and typecheck it (it imports only a type from @objectstack/spec/data) — the compilable-*.object.ts check",
-        "run the pinned suites: packages/rest/src/remote-tables-twin.equivalence.test.ts (the #7955 request-shape cases + the #9686/#9593 admission cases)",
-        "replay remote-tables + object-draft with NO credential (expect 401 on BOTH spellings), then as the no-capability session (expect 403 on the ADMIN spelling only — the federation spelling serves, the pinned #9593 divergence)"
+        "run the pinned suites: packages/rest/src/remote-tables-twin.equivalence.test.ts (the #7955 request-shape cases + the #9686/#9593/#9901 admission cases, incl. the two that pin the twins refusing an UNENTITLED caller identically)",
+        "replay remote-tables + object-draft with NO credential (expect 401 UNAUTHENTICATED on BOTH spellings), then as the no-capability session (expect 403 PERMISSION_DENIED naming manage_platform_settings on BOTH spellings — #9901/#10255 CLOSED the #9593 divergence, so a 200 to that session on the federation spelling is now a FAIL, not the documented behaviour)"
       ],
       "acceptance": [
         {
@@ -1207,9 +1207,9 @@
           "evidence": "the test run output + the paired live reads"
         },
         {
-          "clause": "the auth floor holds, with its documented asymmetry: an anonymous caller is refused 401 UNAUTHENTICATED on BOTH spellings (admin: requireDatasourceAdmin/#9391; federation: refuseAnonymous/#9686 — fail-closed, before any service lookup so an anonymous probe cannot learn what is wired); an authenticated caller WITHOUT manage_platform_settings is refused 403 PERMISSION_DENIED naming the capability on the ADMIN spelling only, while the federation spelling serves — a DELIBERATE, pinned divergence (#9593), not a hole to file",
+          "clause": "the auth floor holds and BOTH spellings answer it IDENTICALLY — the #9593 asymmetry this item recorded through rev 1 is CLOSED, so a federation 200 to an unentitled caller is a FAIL, not the documented behaviour: an anonymous caller is refused 401 UNAUTHENTICATED on BOTH spellings (admin: requireDatasourceAdmin/#9391; federation: refuseFederationRequest's shouldDenyAnonymous arm/#9686 — fail-closed, before any service lookup so an anonymous probe cannot learn what is wired), and an authenticated caller WITHOUT manage_platform_settings is refused 403 PERMISSION_DENIED naming the capability on BOTH spellings, keyed on that capability rather than on holding merely some grant. Federation READS (tables, draft) took FEDERATION_READ_CAPABILITY = manage_platform_settings in #9901 — maintainer ruling 2026-08-20, verbatim: 「其他接受你的建议。」— and validate joined them in #10255 (verbatim: 「同意你的意见。」); the family's WRITES (import, refresh-catalog — outside this item's probes) sit on FEDERATION_WRITE_CAPABILITY = manage_metadata above the same 401 floor",
           "oracle": "api",
-          "verify": "the four probes of step 8 against admin-routes.ts:361-420 (401 then capability 403) and external-datasource-routes.ts refuseAnonymous (401 only, capability check deliberately absent per its #9593 note); the divergence case is pinned in the twin test's 'WHO may ask' describe",
+          "verify": "the four probes of step 8 against admin-routes.ts:361-420 (401 floor then manage_platform_settings 403) and external-datasource-routes.ts:287-324 refuseFederationRequest (the same two decisions out of ONE resolveExecutionContext call — anonymous first, then FEDERATION_READ_CAPABILITY); the agreement is pinned in the twin test's 'listRemoteTables twins agree on WHO may ask (#9686, #9593, #9901)' describe, whose two unentitled cases compare the two spellings' status AND code to each other rather than to a literal",
           "evidence": "the 401/403/200 responses"
         }
       ],
@@ -1229,7 +1229,7 @@
       },
       "source": [
         "packages/services/service-datasource/src/admin-routes.ts:517-560 (remote-tables + the #7955 coercion comment), :611-623 (object-draft), :361-420 + :261 (requireDatasourceAdmin — 401 floor then manage_platform_settings 403, #9391/#9593)",
-        "packages/rest/src/external-datasource-routes.ts:26-28, :215-260 (the twin family GET /external/tables + POST .../draft; anonymous-deny floor #9686; capability gate deliberately absent — the file's own #9593 note)",
+        "packages/rest/src/external-datasource-routes.ts:409-448 (the twin family GET /external/tables + POST .../draft), :287-324 (refuseFederationRequest — the #9686 anonymous-deny floor, then the #9901/#10255 capability gate, both decided from one resolveExecutionContext call with anonymous first), :157 (FEDERATION_READ_CAPABILITY = manage_platform_settings, what the two twin routes require) + :172 (FEDERATION_WRITE_CAPABILITY = manage_metadata, the family's write half)",
         "packages/services/service-datasource/src/external-datasource-service.ts:137 (listRemoteTables schema filter + allowedSchemas), :183 (generateObjectDraft), :445-481 (renderObjectSource; :465 the generated header)",
         "packages/drivers/driver-sql/src/sql-driver.ts:9661 (introspectSchema; SQLite branch reads sqlite_master → bare unqualified table names)",
         "examples/app-showcase/src/system/datasources/ (showcase-external.datasource.ts + external-fixture.ts)",
@@ -1241,6 +1241,12 @@
           "date": "2026-08-20",
           "change": "new item from the scoped scan-functionality (扫描功能) coverage sweep: the introspection HAPPY PATH was uncovered — datasource-admin-lifecycle proves only the unwired-503 arm (and since serve.ts:2966 wires federation unconditionally, that arm is unit-pin territory on a stock boot). Covers remote-tables + object-draft on the shipped SQLite fixture, the #7955 ?schema= fix (asserted as fixed, live-limited on SQLite — see knownGaps), twin-spelling equivalence, and the #9391/#9686/#9593 auth floor incl. its pinned divergence",
           "ref": "claude/new-session-0pv25p"
+        },
+        {
+          "revision": 2,
+          "date": "2026-08-24",
+          "change": "correct the auth-floor texts: the #9593 federation/admin asymmetry this item was authored against (2026-08-20, at 79ebb37) had already been CLOSED by #9901 (reads + writes, 9a1ed7a09) and #10255 (validate, 6ce58a735), so four texts asserted a posture head no longer has — and they INVERT rather than go quiet: a runner would have scored the correct federation 403 as a deviation, with \"a DELIBERATE, pinned divergence (#9593), not a hole to file\" pre-empting the escape hatch. Rewritten to the twin-agreement posture: step 8, this clause, its verify (which read \"capability check deliberately absent\"), and the external-datasource-routes.ts source entry whose :26-28/:215-260 anchors were stale; also persona 1 and step 7, which attributed the capability to the admin spelling alone. Re-verified at 0320a52d, not inherited: all five federation routes open with refuseFederationRequest (reads manage_platform_settings, writes manage_metadata) above the #9686 401 floor, and remote-tables-twin.equivalence.test.ts now compares the two spellings on an unentitled caller instead of pinning a divergence",
+          "ref": "#11138"
         }
       ]
     },
