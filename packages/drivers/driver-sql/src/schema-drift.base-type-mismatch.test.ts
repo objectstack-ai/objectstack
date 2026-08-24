@@ -217,7 +217,7 @@ function declareBaseTypeDriftSuite(cell: DialectCell): void {
 
       // 3. the write that corrupts (or, on SQLite, does not)
       await driver.create(TABLE, { name: 'multi', tags: ['x', 'y'] });
-      const rows = await driver.find(TABLE, { filters: [] } as any);
+      const rows = await driver.find(TABLE, {});
       readBack = rows.find((r: any) => r.name === 'multi')!.tags;
     });
 
@@ -305,7 +305,7 @@ function declareBaseTypeDriftSuite(cell: DialectCell): void {
       // state: the corrupted array is an array again, a legacy single value has
       // become a one-element array, and NULL/'' stay empty rather than becoming
       // `[null]` (which `json_build_array(NULL)` would have produced).
-      const rows = await driver.find(TABLE, { filters: [] } as any);
+      const rows = await driver.find(TABLE, {});
       const byName = new Map(rows.map((r: any) => [r.name, r.tags]));
       expect(byName.get('multi')).toEqual(['x', 'y']);
       expect(byName.get('legacy')).toEqual(['a']);
