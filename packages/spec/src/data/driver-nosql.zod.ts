@@ -398,9 +398,31 @@ export const NoSQLIndexSchema = lazySchema(() => z.object({
   })).describe('Fields to index'),
   
   /**
-   * Unique constraint
+   * Unique constraint — a bare boolean, DELIBERATELY not the ADR-0120 scope
+   * vocabulary (`UniqueScopeSchema`'s `boolean | 'global' | 'organization'`,
+   * carried by `FieldSchema.unique` and `IndexSchema.unique`).
+   *
+   * This file is the raw NoSQL driver-configuration descriptor layer, not an
+   * organization-aware authoring surface. Measured for #11215: nothing in the
+   * repo parses `NoSQLIndexSchema` or materializes indexes from it (a leaf
+   * schema — no runtime, kernel, or driver import), and the one NoSQL driver
+   * that does create indexes (driver-mongodb's `syncCollectionSchema`)
+   * consumes the object-level `indexes[]` surface — `IndexSchema`, which
+   * already carries the scope vocabulary — and is explicitly single-tenant
+   * (#3724), injecting no organization key part. The business boundary of a
+   * unique constraint ('organization' vs 'global') is stated on those
+   * authorable surfaces and resolved into physical key columns ABOVE this
+   * layer; by the time a descriptor like this one reaches a NoSQL engine, the
+   * organization key part — when there is one — is already a listed entry in
+   * `fields`. A scope word here would have no consumer to honor it, which is
+   * exactly the declarable-but-inert vocabulary ADR-0078 forbids. So the
+   * asymmetry with the other two `unique` surfaces is deliberate, not drift.
+   * If a NoSQL driver ever grows row-level tenancy and starts materializing
+   * THIS shape against organization-scoped collections, adopt
+   * `UniqueScopeSchema` here (import it — never fork the union) in the same
+   * change.
    */
-  unique: z.boolean().default(false).describe('Enforce uniqueness'),
+  unique: z.boolean().default(false).describe("Enforce uniqueness over exactly the listed `fields`. Boolean on purpose — no ADR-0120 scope vocabulary here: this is the raw driver-descriptor layer, below tenancy. The 'organization'/'global' boundary is stated on the authorable surfaces (FieldSchema.unique, IndexSchema.unique) and resolved into physical key columns before a descriptor like this is built, so an organization key part, when there is one, is already a listed field (#11215)"),
   
   /**
    * Sparse index (only index documents with the field)
