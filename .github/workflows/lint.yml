@@ -1014,6 +1014,52 @@ jobs:
       - name: React pages honour the useAdapter() query and result contracts
         run: pnpm check:react-page-adapter-contract
 
+      # #10830 form-section `name` in docs examples: the docs pages that TEACH
+      # the i18n-anchor convention were the one surface where nothing enforced
+      # it. `packages/lint`'s `translation-section-name-missing` walks app
+      # METADATA — `collectionEntries`, `walkPageComponents`, `viewContainerSites`
+      # — and never sees an `.mdx` fence, and its severity is `'warning'` besides.
+      # `{/* os:check */}` fences ARE type-checked against the live spec by
+      # `packages/spec/scripts/check-skill-examples.ts`, but `name` is
+      # `.optional()` in the schema — deliberately, and it STAYS (#10709) — so a
+      # nameless section type-checks CLEAN. `content/docs/ui/forms.mdx`'s first
+      # block carried an `os:check` marker over a nameless section for months.
+      #
+      # A gate rather than a fourth sweep, decided by the card's own history:
+      # the same population was hand-counted three times and produced three
+      # numbers — #10579 "3 of 5 over four ui/ pages" (single-line scan), #10709
+      # "7 of 15 across 5 pages" (multi-line, but required `{` to start a fresh
+      # line, so it missed `sections: [{`), PR #10827 "8 of 16 across 5 pages".
+      # Each pass corrected its predecessor's matcher and introduced a subtler
+      # version of the same error.
+      #
+      # This gate's landing census found the error all three SHARED and none
+      # noticed: all three scoped to `content/docs/ui/**`, and six more nameless
+      # literals were sitting in TS fences under `content/docs/concepts/` and
+      # `content/docs/protocol/objectui/`. The real population is 22 literals
+      # across 8 pages, not 16 across 5 — a hand-derived SCOPE is defeated the
+      # same way a hand-derived matcher is, and that is the argument for a
+      # mechanical one. `CENSUS_ANCHORS` pins one of those out-of-`ui/` pages, so
+      # re-narrowing the scope REFUSES instead of reporting a clean corpus.
+      #
+      # Invoked as `node` rather than through a `pnpm check:*` alias, same as the
+      # doc-frontmatter and aggregator-roster steps: that alias belongs in root
+      # package.json, declared territory of the @changesets/cli v3 migration lane
+      # (#9465) while it runs. Dependency-free filesystem read, sub-second over
+      # the whole corpus.
+      #
+      # Its --self-test runs FIRST and is where the rule is observed FAILING:
+      # this PR swept the live corpus, so a passing run over real data cannot
+      # distinguish a working matcher from one that matches nothing. The verdict
+      # line prints the POPULATION it judged, and `run()` REFUSES — never exits 0
+      # — when the corpus falls below its floors or a census anchor stops
+      # contributing. A silent zero here would be this gate committing the exact
+      # defect it exists to catch.
+      - name: Docs form-section examples carry a `name`
+        run: |
+          node scripts/check-docs-section-name.mjs --self-test
+          node scripts/check-docs-section-name.mjs
+
       # #9632 published-README links: a README in a package's `files` array with
       # `private` unset is rendered on npm and on GitHub as well as here, and
       # NOTHING read its links. Measured before the gate was written: the lychee

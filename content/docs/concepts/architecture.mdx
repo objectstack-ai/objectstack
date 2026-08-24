@@ -263,10 +263,12 @@ export const CustomerView = defineView({
     data: { provider: 'object', object: 'customer' },
     sections: [
       {
+        name: 'company_information',
         label: 'Company Information',
         fields: ['name', 'industry', 'annual_revenue'],
       },
       {
+        name: 'contact',
         label: 'Contact',
         fields: ['primary_contact'],
       },
