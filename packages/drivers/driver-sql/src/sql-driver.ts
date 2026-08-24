@@ -3698,6 +3698,16 @@ export interface IntrospectedColumn extends SpecIntrospectedColumn {
    * option B and waits for demand; until it exists, an absent flag on a
    * composite member means "not single-column unique", never "no constraint".
    *
+   * A PRIMARY KEY is NOT a unique constraint to this flag (#11654), on any
+   * dialect and for any key type. `isUnique` means a *declared* single-column
+   * UNIQUE constraint; key membership has a lossless face of its own
+   * ({@link IntrospectedTable.primaryKeys} and `primaryKey` below), so
+   * excluding keys keeps the two flags non-overlapping and drops no fact. Note
+   * this is a statement about what KIND of constraint the flag reports, never
+   * a claim that a key column admits duplicates. A key column that separately
+   * carries its own single-column unique constraint is still flagged — the
+   * constraint is what is being reported, not the column.
+   *
    * All three dialect arms of {@link SqlDriver.introspectUniqueConstraints}
    * produce it through one predicate — see {@link singleColumnUniqueColumns}.
    */
@@ -14762,6 +14772,23 @@ export class SqlDriver implements IDataDriver {
    * All three now normalise their rows to {@link UniqueConstraintMember} and
    * decide through {@link singleColumnUniqueColumns} — one predicate, so a
    * fourth dialect cannot quietly acquire a fourth meaning.
+   *
+   * ## A PRIMARY KEY is not one of them (#11654)
+   *
+   * The residual cell of the same family, and the same convention applied one
+   * step over: a column appears here iff a *declared UNIQUE constraint* covers
+   * it alone. Postgres and MySQL got this for free — `CONSTRAINT_TYPE =
+   * 'UNIQUE'` never matches a primary key. SQLite did not: it keys on
+   * `PRAGMA index_list`, which reports the unique auto-index SQLite
+   * materialises for a non-INTEGER key, so a `varchar` key was flagged while
+   * an `INTEGER PRIMARY KEY` — a rowid alias with no auto-index at all — was
+   * not. Three dialects, four answers, from the declared type of a key.
+   *
+   * The SQLite arm now skips `origin: 'pk'` rows. Unlike the composite case
+   * above the excluded flag was not FALSE, only inconsistent — a key column
+   * really is unique — which is why the exclusion has to be paid for by the
+   * face that keeps the fact: `introspectPrimaryKeys` reports it through
+   * `primaryKeys` and `IntrospectedColumn.primaryKey`, both unmoved by this.
    */
   protected async introspectUniqueConstraints(
     tableName: string,
@@ -14857,7 +14884,31 @@ export class SqlDriver implements IDataDriver {
         const indexes = await this.knex.raw(`PRAGMA index_list(${safeTableName})`);
 
         for (const idx of indexes) {
-          if (idx.unique === 1) {
+          // `origin: 'pk'` is the auto-index SQLite materialises for a
+          // non-INTEGER PRIMARY KEY — not a declared UNIQUE constraint, and so
+          // not what this method reports (#11654). Skipping it is what makes
+          // SQLite agree with the other two arms, whose
+          // `CONSTRAINT_TYPE = 'UNIQUE'` filter never sees a primary key at
+          // all, AND what makes SQLite agree with ITSELF: an `INTEGER PRIMARY
+          // KEY` is a rowid alias for which SQLite creates no auto-index, so
+          // `index_list` is empty and the key was never flagged — the same
+          // logical schema answering differently by the declared type of its
+          // key alone. Nothing is lost by the exclusion: primary-key
+          // membership is reported losslessly by `introspectPrimaryKeys`,
+          // through `IntrospectedTable.primaryKeys` and
+          // `IntrospectedColumn.primaryKey`.
+          //
+          // The test is on the INDEX's origin, never on whether the COLUMN is
+          // in the key: a key column that separately carries its own unique
+          // index (`origin: 'c'`) really does have a declared single-column
+          // unique constraint and stays flagged.
+          //
+          // `origin` has been reported by this pragma since SQLite 3.8.9, so
+          // an absent value is not a case that arises here; were it ever
+          // absent this reads as the pre-#11654 behaviour rather than
+          // silently dropping real constraints, and the pin on
+          // `index_list`'s own origin values turns red.
+          if (idx.unique === 1 && idx.origin !== 'pk') {
             // `PRAGMA index_info` reports one row per index MEMBER, and a
             // member is not always a column: an expression term
             // (`CREATE UNIQUE INDEX … ON t (lower(a))`) arrives with
