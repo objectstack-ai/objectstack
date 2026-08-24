@@ -645,6 +645,94 @@ describe('RecordDetailsProps', () => {
     expect(message).toContain('`showBorders` → `showBorder`');
   });
 
+  // #11661 — three more section keys in exactly the pre-#11289 position
+  // (honoured by the renderer, refused by this shape), declared under the
+  // inherited ruling. Measured at the `.objectui-sha` pin (`190fbd01`):
+  // `defaultCollapsed` at `DetailSection.tsx:139`
+  // (`useState(section.defaultCollapsed ?? false)`), `icon` at
+  // `DetailSection.tsx:516/546`, `description` at `DetailSection.tsx:520/557`.
+  it('preserves the #11661 section keys verbatim', () => {
+    const result = RecordDetailsProps.parse({
+      sections: [{
+        label: 'Company',
+        fields: ['industry', 'website'],
+        collapsible: true,
+        defaultCollapsed: true,
+        icon: 'building-2',
+        description: 'Firmographics and reach',
+      }],
+    });
+    expect(result.sections?.[0].defaultCollapsed).toBe(true);
+    expect(result.sections?.[0].icon).toBe('building-2');
+    expect(result.sections?.[0].description).toBe('Firmographics and reach');
+  });
+
+  it('does not materialize the #11661 keys on a clean parse', () => {
+    // Same `maxVisible` principle as the #11289 trio: expanded / no icon / no
+    // sub-heading are the RENDERER'S fallbacks; a schema default would turn
+    // "the author said nothing" into "the author asked for the default".
+    const section = RecordDetailsProps.parse({
+      sections: [{ label: 'Overview', fields: ['name'] }],
+    }).sections?.[0] as Record<string, unknown>;
+    expect('defaultCollapsed' in section).toBe(false);
+    expect('icon' in section).toBe(false);
+    expect('description' in section).toBe(false);
+  });
+
+  it('rejects wrongly-typed values for the #11661 keys', () => {
+    for (const [key, value] of [
+      ['defaultCollapsed', 'yes'],
+      ['icon', 7],
+      ['description', ['two', 'lines']],
+    ] as const) {
+      const r = RecordDetailsProps.safeParse({
+        sections: [{ label: 'A', fields: ['a'], [key]: value }],
+      });
+      expect(r.success).toBe(false);
+      expect(r.success === false && r.error.issues[0].code).toBe('invalid_type');
+      expect(r.success === false && r.error.issues[0].path).toEqual(['sections', 0, key]);
+    }
+  });
+
+  it('still refuses unknown section keys after the #11661 widening', () => {
+    // The strict face survives, and the new keys entered the "did you mean"
+    // candidate list — the declaration reached the same error map the strict
+    // shape reads.
+    const r = RecordDetailsProps.safeParse({
+      sections: [{ label: 'A', fields: ['a'], defaultCollapse: true }],
+    });
+    expect(r.success).toBe(false);
+    const message = r.success === false
+      ? r.error.issues.map((i) => i.message).join('\n')
+      : '';
+    expect(message).toContain('`defaultCollapse` → `defaultCollapsed`');
+  });
+
+  it('still refuses the two keys #11661 deliberately withholds (`title`, `headerColor`)', () => {
+    // Both are honoured by the renderer at the pin, and both stay OUT of the
+    // accept set on purpose: `title` is a second spelling of the heading slot
+    // `label` declares (the `page:card` `body`-vs-`children` shape, which
+    // #5775 converged rather than declared) and is held for a maintainer
+    // ruling; `headerColor` reaches the DOM only as `bg-${...}`, a
+    // template-literal Tailwind class that generates no CSS under the v4
+    // source scan — dead-in-practice, so declaring it would advertise a
+    // capability the renderer does not deliver. A later batch declaring
+    // either must flip this pin consciously.
+    for (const [key, value] of [
+      ['title', 'Company'],
+      ['headerColor', 'muted'],
+    ] as const) {
+      const r = RecordDetailsProps.safeParse({
+        sections: [{ label: 'A', fields: ['a'], [key]: value }],
+      });
+      expect(r.success).toBe(false);
+      const message = r.success === false
+        ? r.error.issues.map((i) => i.message).join('\n')
+        : '';
+      expect(message).toContain(`\`${key}\``);
+    }
+  });
+
   it('preserves hideFields verbatim (sys-user.page.ts:106)', () => {
     // Undeclared until #5611, so a non-strict `z.object` dropped it on the
     // floor: the platform page's hidden-field list survived only because
