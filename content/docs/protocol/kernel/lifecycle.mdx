@@ -741,9 +741,15 @@ this shape over HTTP — it is an in-process model, not a wire body.
 `checks` is an **array**, and a check's `status` is `"passed" | "failed" |
 "warning"` — the six-value `"healthy" | "degraded" | "unhealthy" | "failed" |
 "recovering" | "unknown"` vocabulary belongs to the report's own top-level
-`status`, never to an entry inside `checks`. Each entry is named after the
-plugin's configured `checkMethod`, or `"plugin-loaded"` when a plugin configures
-none. `metrics.uptime` is in **milliseconds** (`Date.now() - startTime`), unlike
+`status`, never to an entry inside `checks`. An entry's `name` is one of three:
+
+| Entry `name` | Pushed when |
+| :--- | :--- |
+| the plugin's configured `checkMethod` | the custom check ran and returned — `"passed"`, or `"failed"` for the two failing shapes above |
+| `"plugin-loaded"` | no `checkMethod` is configured, **or** the configured name does not resolve to a function on the plugin |
+| `"health-check"` | the check **threw** — a `timeout` overrun included, since the race surfaces it as a rejection. A fixed name, neither the method's nor the default's, and always `status: "failed"` |
+
+`metrics.uptime` is in **milliseconds** (`Date.now() - startTime`), unlike
 the seconds-valued `uptime` of `GET /health` above, and the report carries no
 `version` field — it identifies its plugin by the key it is stored under. The
 optional `message` is set only when a check fails; the schema's remaining
