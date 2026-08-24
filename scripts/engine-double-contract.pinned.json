@@ -1532,6 +1532,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/plugins/plugin-security/src/walled-platform-bucket-diagnostic.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/plugins/plugin-sharing/src/authored-row-write-deferral.test.ts",
       "verb": "delete",
       "pinned": 1

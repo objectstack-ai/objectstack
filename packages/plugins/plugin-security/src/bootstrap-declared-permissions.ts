@@ -59,10 +59,11 @@ import {
   type ExistingByNameIndex,
   type ExistingLookupResult,
 } from './seed-name-lookup.js';
+import { defaultPermissionSets } from './objects/default-permission-sets.js';
 import {
   resolveOwnOrganizationRow,
   seedCtx,
-  warnPreFixOrganizationLessRows,
+  warnOrganizationLessRows,
 } from './per-organization-catalog.js';
 
 export type { PermissionSeedOutcome } from './permission-set-projection.js';
@@ -106,6 +107,26 @@ interface SeedOptions {
    * one place an organization-less catalog row is the correct shape.
    */
   organizationId?: string;
+  /**
+   * [#11532] Names that `bootstrapPlatformAdmin` still seeds organization-less
+   * on every boot — the PLATFORM BUCKET. Supplied by the caller because the
+   * caller is the one holding that array (`security-plugin.ts` hands the same
+   * `bootstrapPermissionSets` to the platform bootstrap and to the manifest),
+   * so the list is exact rather than inferred from a row's provenance.
+   *
+   * An organization-less row for one of these names is NOT a pre-fix leftover
+   * and the pre-fix remedy is a loop for it: re-initializing the deployment
+   * mints it again on the next boot. See {@link warnOrganizationLessRows}.
+   *
+   * Omitted falls back to the SHIPPED `defaultPermissionSets` — which is what
+   * `bootstrapPlatformAdmin` seeds unless the host passed
+   * `SecurityPluginOptions.defaultPermissionSets`. So the classification is
+   * right for every shipped composition even if this option is never threaded,
+   * and the option exists for the one case the fallback cannot know about: a
+   * host that overrode the array. Pass `[]` to state that this caller's
+   * deployment has no organization-less writer at all.
+   */
+  platformBucketNames?: readonly string[];
 }
 
 /**
@@ -263,6 +284,15 @@ export async function upsertPackagePermissionSet(
   return out;
 }
 
+/**
+ * [#11532] The names the SHIPPED `bootstrapPlatformAdmin` seeds
+ * organization-less on every boot. Computed once from the same declaration the
+ * platform bootstrap iterates, so the two cannot drift within a release.
+ */
+const SHIPPED_PLATFORM_BUCKET_NAMES: readonly string[] = defaultPermissionSets
+  .map((ps) => ps.name)
+  .filter((n): n is string => typeof n === 'string' && n !== '');
+
 export async function bootstrapDeclaredPermissions(
   ql: any,
   metadataService: any,
@@ -311,7 +341,13 @@ export async function bootstrapDeclaredPermissions(
   }
 
   if (organizationId) {
-    warnPreFixOrganizationLessRows(options.logger, 'sys_permission_set', residue, organizationId);
+    warnOrganizationLessRows(
+      options.logger,
+      'sys_permission_set',
+      residue,
+      organizationId,
+      options.platformBucketNames ?? SHIPPED_PLATFORM_BUCKET_NAMES,
+    );
   }
   if (out.unreadable > 0) {
     // Said once, with the count: these sets were neither seeded nor reconciled
