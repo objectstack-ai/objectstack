@@ -2394,7 +2394,8 @@ describe('AuthManager', () => {
         inviter: { user: { email: 'admin@example.com' } },
       });
       expect(emailService.sendTemplate).toHaveBeenCalledTimes(1);
-      expect(emailService.sendTemplate.mock.calls[0][0].organizationId).toBe('org_apex');
+      const invitationInput = (emailService.sendTemplate.mock.calls as unknown as Array<[Record<string, unknown>]>)[0]?.[0];
+      expect(invitationInput?.organizationId).toBe('org_apex');
     });
 
     it('sendResetPassword carries NO organizationId and is not refused — auth mail is genuinely org-less (#11741)', async () => {
@@ -2402,7 +2403,8 @@ describe('AuthManager', () => {
       const sendResetPassword = capturedConfig.emailAndPassword.sendResetPassword;
       await sendResetPassword({ user: { id: 'u1', email: 'real@example.com' }, url: 'http://x/reset', token: 't' });
       expect(emailService.sendTemplate).toHaveBeenCalledTimes(1);
-      expect(emailService.sendTemplate.mock.calls[0][0]).not.toHaveProperty('organizationId');
+      const resetInput = (emailService.sendTemplate.mock.calls as unknown as Array<[Record<string, unknown>]>)[0]?.[0];
+      expect(resetInput).not.toHaveProperty('organizationId');
     });
 
     it('sendInvitationEmail honours a custom uiBasePath (Console mounted elsewhere)', async () => {
