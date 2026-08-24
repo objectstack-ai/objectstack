@@ -609,13 +609,16 @@ ObjectStack includes **built-in health monitoring** to validate system state.
 
 ```
 GET /health
-  → 200 with { status, version, uptime } if the process is alive (liveness)
+  → 200 { success: true, data: { status: "ok", timestamp, version, uptime } }
+        if the process is alive (liveness)
   → never fails on a dependency — see below
 
 GET /ready
-  → 200 if the kernel is running AND every data driver answers (readiness)
+  → 200 { success: true, data: { status: "ready", state } } when the kernel is
+        running AND every data driver answers (readiness)
   → 503 while still booting or shutting down
-  → 503 with { state, drivers: [...] } when a data driver stops answering
+  → 503 carrying { state, drivers: [...] } in error.details when a data driver
+        stops answering
 ```
 
 The two probes answer deliberately different questions (#3756). `/health`
@@ -629,15 +632,75 @@ kernel with no data engine, or a probe that itself errors, still reads as ready
 rather than black-holing a working deployment.
 
 <Callout type="info">
-`GET /health` returns a compact liveness body (`status`, `version`, `uptime`) and
-`GET /ready` returns readiness. The richer per-subsystem report and the
-plugin-declared custom checks below describe the internal health-monitor model
+`GET /health` returns a compact liveness body (`status`, `timestamp`, `version`,
+`uptime`) and `GET /ready` returns readiness. The richer per-subsystem report
+and the plugin-declared custom checks below describe the internal health-monitor model
 (`PluginHealthMonitor`), which covers **plugins, not driver connections** — they
 are **not yet** exposed as a dedicated HTTP endpoint or as a declarative plugin
 field.
 </Callout>
 
 ### Health Status Response
+
+```json
+{
+  "success": true,
+  "data": {
+    "status": "ok",
+    "timestamp": "2024-01-15T11:00:00.000Z",
+    "version": "<the serving artifact's version>",
+    "uptime": 3600
+  }
+}
+```
+
+`status` is the fixed string `"ok"`: the probe reports that the process is
+executing code and has nothing else to report. `version` is the serving
+artifact's version — the `OS_RUNTIME_VERSION` stamp when a deployment injects
+one, otherwise the resolved `@objectstack/runtime` version (#10993) — never a
+hardcoded literal. `uptime` is process uptime in seconds, and is omitted
+entirely outside Node-like runtimes, where there is no `process` to read it
+from. There is no `checks` key: per-subsystem results belong to the internal
+health-monitor model below, not to this body.
+
+### Custom Health Checks
+
+Plugins can register custom health checks:
+
+```typescript
+// Plugin registers a custom health check (internal health-monitor model)
+export default {
+  name: '@vendor/salesforce',
+
+  healthChecks: {
+    salesforce_connection: async ({ context }) => {
+      try {
+        // Test Salesforce API
+        const response = await salesforce.query('SELECT Id FROM Account LIMIT 1');
+        
+        return {
+          status: 'healthy',
+          latency_ms: response.duration,
+          records_synced_last_hour: await getSyncCount(),
+        };
+      } catch (error) {
+        return {
+          status: 'unhealthy',
+          error: error.message,
+        };
+      }
+    },
+  },
+};
+```
+
+The richer per-subsystem view the callout above refers to is sketched below. It
+is **illustrative only**: no endpoint serves this shape, and it is not the
+monitor's own serialized type either — `PluginHealthReport`
+(`@objectstack/spec/kernel`) is per-plugin, carries `checks` as an array of
+`{ name, status: "passed" | "failed" | "warning" }`, and reports `uptime` under
+`metrics`. Read the sketch as a picture of what per-subsystem health reporting
+would carry, not as a contract.
 
 ```json
 {
@@ -673,37 +736,6 @@ field.
     }
   }
 }
-```
-
-### Custom Health Checks
-
-Plugins can register custom health checks:
-
-```typescript
-// Plugin registers a custom health check (internal health-monitor model)
-export default {
-  name: '@vendor/salesforce',
-
-  healthChecks: {
-    salesforce_connection: async ({ context }) => {
-      try {
-        // Test Salesforce API
-        const response = await salesforce.query('SELECT Id FROM Account LIMIT 1');
-        
-        return {
-          status: 'healthy',
-          latency_ms: response.duration,
-          records_synced_last_hour: await getSyncCount(),
-        };
-      } catch (error) {
-        return {
-          status: 'unhealthy',
-          error: error.message,
-        };
-      }
-    },
-  },
-};
 ```
 
 ## Shutdown Sequence
