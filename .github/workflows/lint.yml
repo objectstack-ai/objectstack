@@ -1382,6 +1382,25 @@ jobs:
       - name: Init-service declaration guard
         run: pnpm check:init-service-contract
 
+      # Settings bind-window guard (#11045). The same argument as the gate above,
+      # one lifecycle phase later. SettingsServicePlugin registers the service in
+      # init() but binds the DATA ENGINE from a kernel:ready hook it registers in
+      # start(); in between, the service answers reads from the empty in-memory
+      # fallback and the manifest defaults with source: 'default' while a real
+      # sys_setting row sits unread — indistinguishable, at every level, from "no
+      # row exists" (#10250). Both sides of that ordering constraint are invisible
+      # to a walk rooted at init(), so check:init-service-contract is green either
+      # way. This one walks each plugin's start()-registered kernel:ready handlers
+      # transitively — through local const bindings, which is where the live
+      # plugin-auth case (depth 3) sits — and requires the settings plugin in
+      # dependencies / optionalDependencies. Reads in init()/start() bodies get a
+      # different verdict on purpose: no ordering edge can move those out of the
+      # window, so the message says move the read, not declare an edge. Runs its
+      # own --self-test first; that self-test is written so a depth-0-only walker
+      # fails it, which is the failure mode #10250's census actually had.
+      - name: Settings bind-window guard
+        run: pnpm check:settings-bind-window
+
       # Durability-degradation log-level guard (#4632). #4460 raised ONE
       # best-effort degradation from warn to error — the durable suspended-run
       # store writing to a table that never existed (#4420), which looked healthy
