@@ -4192,22 +4192,109 @@ export class SqlDriver implements IDataDriver {
     else this.logger.warn(msg, meta);
   }
 
-  /** Whether the underlying database is a SQLite variant (sqlite3 or better-sqlite3). */
+  /**
+   * The knex `client` spellings that mean "emit THIS dialect's SQL", one set
+   * per dialect family. The single source the three identity getters below and
+   * every client-keyed table further down read — {@link DIALECT_CONNECT_TIMEOUT},
+   * {@link POSTGRES_WIRE_CLIENTS} and {@link withUtcSession} used to carry a
+   * hand-written copy each, and the copies had already drifted apart (#11550).
+   *
+   * ## Why a set and not a pair of literals
+   *
+   * {@link SqlDriverConfig} is `Knex.Config & {…}`, so the DECLARED surface is
+   * every client name knex accepts, while the enforced one used to be two
+   * literals per family. knex's own table (`knex/lib/constants.js`, knex 3.3.0
+   * — the version this repo pins) registers aliases:
+   *
+   * ```js
+   * CLIENT_ALIASES = { pg: 'postgres', postgresql: 'postgres', sqlite: 'sqlite3' }
+   * ```
+   *
+   * So `postgres` is knex's CANONICAL name for the dialect of which `pg` and
+   * `postgresql` are merely the registered aliases, and `sqlite` is an alias of
+   * the canonical `sqlite3`. Measured on the pinned knex: `pg`, `postgres` and
+   * `postgresql` each construct a client with `dialect === 'postgresql'` and
+   * `driverName === 'pg'` — one dialect, three spellings.
+   *
+   * Matching two literals therefore made `client: 'postgres'` — knex's PRIMARY
+   * name for the dialect — answer `isPostgres === false`, silently dropping
+   * every Postgres branch in this file on a config knex considers valid.
+   * Nothing failed. The sharpest case is {@link nowColumnDefault}: the
+   * fall-through emits a bare `CURRENT_TIMESTAMP` default on a `DATE` column,
+   * i.e. the calendar day in the SERVER's timezone — the exact defect
+   * ("measured: a UTC-12 server records YESTERDAY") that method's Postgres
+   * branch exists to remove.
+   *
+   * ## What is deliberately NOT in here
+   *
+   * `redshift` and `cockroachdb` speak the pg WIRE protocol and are in
+   * {@link POSTGRES_WIRE_CLIENTS} for that reason — but they are separate knex
+   * dialects (`redshift` compiles its own DDL; `cockroachdb` ships its own
+   * driver), and whether this driver should claim to emit correct DDL for them
+   * is a SUPPORT-SCOPE question rather than a spelling one. `mariadb` is the
+   * same shape against the MySQL family. They stay out until that is decided
+   * — see #11756. Wire recognition and the connect-timeout table EXTEND these
+   * sets; nothing derives these sets from a union of the others, because that
+   * would answer #11756 as a side effect of a refactor.
+   *
+   * `better-sqlite3` is a member rather than an extension because it is not a
+   * scope question: this driver's own default SQLite client is `better-sqlite3`
+   * and every SQLite branch in this file was written against it.
+   */
+  private static readonly POSTGRES_EMIT_CLIENTS: ReadonlySet<string> = new Set([
+    'postgres', 'pg', 'postgresql',
+  ]);
+  /** SQLite spellings that mean "emit SQLite SQL". See {@link POSTGRES_EMIT_CLIENTS}. */
+  private static readonly SQLITE_EMIT_CLIENTS: ReadonlySet<string> = new Set([
+    'sqlite3', 'sqlite', 'better-sqlite3',
+  ]);
+  /** MySQL spellings that mean "emit MySQL SQL". See {@link POSTGRES_EMIT_CLIENTS}. */
+  private static readonly MYSQL_EMIT_CLIENTS: ReadonlySet<string> = new Set([
+    'mysql', 'mysql2',
+  ]);
+
+  /**
+   * The configured client as a STRING, or `''`.
+   *
+   * `Knex.Config['client']` also admits a Client CONSTRUCTOR (knex's documented
+   * bring-your-own-dialect hatch). Such a value names no spelling in any table
+   * here, and `''` is how it says so — the same answer the literal comparisons
+   * this replaces gave, without stringifying a class to get there.
+   */
+  private static clientSpelling(config: unknown): string {
+    const c = (config as { client?: unknown } | null | undefined)?.client;
+    return typeof c === 'string' ? c : '';
+  }
+
+  /**
+   * Whether the underlying database is a SQLite variant.
+   *
+   * Every knex spelling of the family: `sqlite3` (knex's canon), its registered
+   * alias `sqlite`, and `better-sqlite3`. See {@link SQLITE_EMIT_CLIENTS}.
+   */
   protected get isSqlite(): boolean {
-    const c = (this.config as any).client;
-    return c === 'sqlite3' || c === 'better-sqlite3';
+    return SqlDriver.SQLITE_EMIT_CLIENTS.has(SqlDriver.clientSpelling(this.config));
   }
 
-  /** Whether the underlying database is PostgreSQL. */
+  /**
+   * Whether the underlying database is PostgreSQL.
+   *
+   * Every knex spelling of the family: `postgres` (knex's canon) and its
+   * registered aliases `pg` / `postgresql`. `redshift` and `cockroachdb` are
+   * deliberately NOT here — see {@link POSTGRES_EMIT_CLIENTS} and #11756.
+   */
   protected get isPostgres(): boolean {
-    const c = (this.config as any).client;
-    return c === 'pg' || c === 'postgresql';
+    return SqlDriver.POSTGRES_EMIT_CLIENTS.has(SqlDriver.clientSpelling(this.config));
   }
 
-  /** Whether the underlying database is MySQL. */
+  /**
+   * Whether the underlying database is MySQL.
+   *
+   * Both knex spellings of the family; `mariadb` is a separate knex dialect and
+   * is deliberately NOT here. See {@link POSTGRES_EMIT_CLIENTS} and #11756.
+   */
   protected get isMysql(): boolean {
-    const c = (this.config as any).client;
-    return c === 'mysql' || c === 'mysql2';
+    return SqlDriver.MYSQL_EMIT_CLIENTS.has(SqlDriver.clientSpelling(this.config));
   }
 
   /**
@@ -4473,14 +4560,24 @@ export class SqlDriver implements IDataDriver {
    * SQLite (`better-sqlite3` / `sqlite3`) is deliberately absent — it opens a
    * file, so there is no handshake to time out and nothing to inject.
    */
-  private static readonly DIALECT_CONNECT_TIMEOUT: Record<string, { key: string; urlKey: string }> = {
-    pg: { key: 'connectionTimeoutMillis', urlKey: 'connectionString' },
-    postgres: { key: 'connectionTimeoutMillis', urlKey: 'connectionString' },
-    postgresql: { key: 'connectionTimeoutMillis', urlKey: 'connectionString' },
-    cockroachdb: { key: 'connectionTimeoutMillis', urlKey: 'connectionString' },
-    mysql: { key: 'connectTimeout', urlKey: 'uri' },
-    mysql2: { key: 'connectTimeout', urlKey: 'uri' },
-  };
+  private static readonly DIALECT_CONNECT_TIMEOUT: Record<string, { key: string; urlKey: string }> =
+    Object.fromEntries<{ key: string; urlKey: string }>([
+      // Every spelling that means Postgres SQL, EXTENDED by `cockroachdb`:
+      // a separate knex dialect, but one that reaches the server through the
+      // same `pg` driver and therefore takes the same knob. Deriving the pg
+      // arm from {@link POSTGRES_EMIT_CLIENTS} is what keeps this table from
+      // drifting away from the getters again (#11550) — widening recognition
+      // now widens this with it. `redshift` still carries no entry; see the
+      // note in {@link withConnectBound} for why that absence is load-bearing.
+      ...[...SqlDriver.POSTGRES_EMIT_CLIENTS, 'cockroachdb'].map(
+        (c): [string, { key: string; urlKey: string }] =>
+          [c, { key: 'connectionTimeoutMillis', urlKey: 'connectionString' }],
+      ),
+      ...[...SqlDriver.MYSQL_EMIT_CLIENTS].map(
+        (c): [string, { key: string; urlKey: string }] =>
+          [c, { key: 'connectTimeout', urlKey: 'uri' }],
+      ),
+    ]);
 
   private static withConnectBound(knexConfig: Record<string, any>): Record<string, any> {
     const pool = knexConfig.pool as Record<string, any> | undefined;
@@ -4545,8 +4642,9 @@ export class SqlDriver implements IDataDriver {
    * knex extension point the host may already be using.
    */
   private static withUtcSession(knexConfig: Record<string, any>): Record<string, any> {
-    const client = String(knexConfig.client ?? '');
-    if (client !== 'mysql' && client !== 'mysql2') return knexConfig;
+    // The MySQL identity question again, asked from a static: the same set
+    // `isMysql` reads, not a fourth hand-written copy of it (#11550).
+    if (!SqlDriver.MYSQL_EMIT_CLIENTS.has(SqlDriver.clientSpelling(knexConfig))) return knexConfig;
 
     const out: Record<string, any> = { ...knexConfig };
     const conn = out.connection;
@@ -4575,14 +4673,20 @@ export class SqlDriver implements IDataDriver {
    * knex client names that route to the `pg` npm driver, and therefore reach
    * {@link withPostgresCalendarDayAsText}. Wider than {@link isPostgres} on
    * purpose: that getter answers "which dialect's SQL do I emit", while this
-   * answers "which npm package parses the wire format" — `postgres` (knex's
-   * own alias), `cockroachdb` and `redshift` all speak the pg wire protocol
-   * with the same type OIDs. The hook is additionally guarded on the
-   * connection really exposing `setTypeParser`, so a client name that turns
-   * out not to be a `pg.Client` degrades to a no-op instead of throwing.
+   * answers "which npm package parses the wire format": `cockroachdb` and
+   * `redshift` speak the pg wire protocol with the same type OIDs without
+   * being the same DIALECT. The hook is additionally guarded on the connection
+   * really exposing `setTypeParser`, so a client name that turns out not to be
+   * a `pg.Client` degrades to a no-op instead of throwing.
+   *
+   * Built by EXTENDING {@link POSTGRES_EMIT_CLIENTS}, never by unioning tables
+   * into it: the reverse direction would grant `cockroachdb` and `redshift`
+   * SQL-emission identity as a silent side effect of a refactor, which is the
+   * open decision #11756 and not this file's to make (#11550).
    */
   private static readonly POSTGRES_WIRE_CLIENTS: ReadonlySet<string> = new Set([
-    'pg', 'postgres', 'postgresql', 'cockroachdb', 'redshift',
+    ...SqlDriver.POSTGRES_EMIT_CLIENTS,
+    'cockroachdb', 'redshift',
   ]);
 
   /** Postgres OID of `date` — a bare calendar day, no time and no zone. */
