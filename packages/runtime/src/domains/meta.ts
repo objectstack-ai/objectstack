@@ -11,7 +11,9 @@
 import {
     shouldDenyAnonymous, ANONYMOUS_DENY_STATUS, ANONYMOUS_DENY_CODE, ANONYMOUS_DENY_MESSAGE,
 } from '@objectstack/core';
-import { pluralToSingular } from '@objectstack/spec/shared';
+// [#10503] `canonicalMetaUrlType` is the FOLD this transport was missing.
+// See the two call sites below for what each one was deciding raw.
+import { canonicalMetaUrlType, pluralToSingular } from '@objectstack/spec/shared';
 import { CoreServiceName } from '@objectstack/spec/system';
 // [ADR-0106 / #3682] Metadata-plane FLS — the SAME projection the REST `/meta`
 // exits run. Two dispatchers, one normalizer (`@objectstack/metadata-core`),
@@ -302,7 +304,14 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
 
         const metadataService = await deps.getService(_context, CoreServiceName.enum.metadata);
         if (metadataService && typeof (metadataService as any).getPublished === 'function') {
-            const data = await (metadataService as any).getPublished(type, name);
+            // [#10503] FOLDED — the smaller second site of the same class,
+            // dispatcher edition (the REST twin folds at the same point). The
+            // layered consult above folds internally at the protocol boundary;
+            // this fallback reads the code/package registry, which stores
+            // CANONICAL types. Handed the raw segment it answered 404 under a
+            // recognised plural and 200 under the singular twin — of the same
+            // code-published item.
+            const data = await (metadataService as any).getPublished(canonicalMetaUrlType(type), name);
             if (data === undefined) return { handled: true, response: deps.error('Not found', 404) };
             return { handled: true, response: deps.success(data) };
         }
@@ -310,7 +319,8 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
         const metaSvc = await deps.resolveService(_context, 'metadata', _context.environmentId);
         if (metaSvc && typeof (metaSvc as any).getPublished === 'function') {
             try {
-                const fallbackData = await (metaSvc as any).getPublished(type, name);
+                // [#10503] Same fold — this slot reads the same canonical store.
+                const fallbackData = await (metaSvc as any).getPublished(canonicalMetaUrlType(type), name);
                 if (fallbackData !== undefined) return { handled: true, response: deps.success(fallbackData) };
             } catch { /* fall through */ }
         }
@@ -413,7 +423,36 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
                     // `isOverlayAllowed` — and, since #8805, why it lives there:
                     // the REST `/meta` write doors run the same one.
                     const activeOrganizationId = await deps.resolveActiveOrganizationId(_context);
-                    const organizationId = organizationIdForMetaWrite(type, activeOrganizationId);
+                    //
+                    // [#10503] The segment is FOLDED before the scope decision
+                    // — the correction #10340 landed for the REST `/meta`
+                    // doors, arriving on the second transport. This branch read
+                    // the RAW `parts[0]`, while `protocol.saveMetaItem` below
+                    // folds the same string through `canonicalizeMetaRequestType`
+                    // for storage. Two maps that must agree did not: storage
+                    // folds through `META_URL_TO_SINGULAR` (every spelling),
+                    // while `declaresOrgOverride` tolerates only the MANIFEST
+                    // collection spellings. For the two URL-only spellings of
+                    // `allowOrgOverride: true` types — `translations` and
+                    // `email_templates` — an org-active caller's write therefore
+                    // landed ENV-WIDE where the singular twin landed org-scoped:
+                    // one item, two partitions, addressed by spelling.
+                    //
+                    // ⛔ NOT repaired by widening `declaresOrgOverride`'s set —
+                    // a predicate below the boundary consuming the URL spelling
+                    // contract is what `metadata-url-spelling.ts`'s own header
+                    // forbids ("folding happens at the boundary and only
+                    // there"), and `meta-write-org-scope.ts`'s
+                    // `ORG_OVERRIDABLE_TYPES` header pins that limit.
+                    //
+                    // Only the scope ARGUMENT is folded. The request `type`
+                    // stays the raw segment, exactly as the REST doors leave
+                    // it: the protocol boundary folds it itself, and two
+                    // pre-folds would hide a drift between them from the
+                    // protocol's own tests.
+                    const organizationId = organizationIdForMetaWrite(
+                        canonicalMetaUrlType(type), activeOrganizationId,
+                    );
                     // [#10888] Server-stated face: this branch answers through
                     // `deps.errorFromThrown`, which carries the refusal's
                     // `issues[]` in `details` (see the `details.issues` pin in
