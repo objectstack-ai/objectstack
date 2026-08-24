@@ -219,6 +219,22 @@ const TRIAGE = new Map([
       + 'for #10907 gave the literal a population-constant name, so this row records a population '
       + 'that was previously unnameable rather than one the fix introduced',
   }],
+  ['check:i18n PACKAGES_DIR packages', {
+    verdict: 'REFUSE-UNSPELLABLE',
+    why: 'files named i18n-extract.config.ts beneath a scripts segment — 9 of 5093 (0.18%), tying '
+      + 'its check:i18n-coverage sibling above for the narrowest row on this list. The two gates '
+      + 'select the same nine configs by the same filename-and-segment test, so they are refused '
+      + 'alike: a subtree hint would name this gate for 5093 files to reach 9. Nothing narrower is '
+      + 'spellable, measured rather than assumed — every glob spelling of the real population '
+      + 'collapses to a malformed double-separator prefix that hintCovers matches against NOTHING, '
+      + 'so a narrow declaration would not be a precise hint but a live hint covering zero files. '
+      + 'The miss is also smaller than the row: this gate already reaches the cards that can '
+      + 'actually move a bundle through the convention triggers (a package that owns an extract '
+      + 'config, and a metadata form module), both verified live, and a wholesale root declaration '
+      + 'would drown that precision rather than add to it. The root reached the sweep only once the '
+      + 'fix for #11647 gave the literal a population-constant name, so this row records a '
+      + 'population that was previously unnameable rather than one the fix introduced',
+  }],
   ['scripts/check-skills-token-ratchet.mjs SKILLS_DIR skills', {
     verdict: 'REFUSE-UNSPELLABLE',
     why: 'one named file per child directory, 11 of 50 (22%). It already reaches its own cards '
