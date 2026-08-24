@@ -312,6 +312,14 @@ const PATH_ARG_READS = ['readFileSync', 'readdirSync', 'statSync', 'lstatSync', 
  * a source scan: a spelling that is not on this list yields no flag, so a read
  * written that way goes undeclared silently. Anything added here needs a
  * `--self-test` case in the same edit, or the next refactor drops it unnoticed.
+ *
+ * The AGENTS.md copy is held BYTE-IDENTICAL to this array by
+ * `scripts/check-published-list-mirrors.mjs` (#10855), comments included: twice the
+ * stale line over there was the stated REASON FOR A PROHIBITION (#10163, #10854), so
+ * a containment check would have missed exactly the drift that cost the most. Editing
+ * this array therefore means editing that block in the SAME PR -- and AGENTS.md is
+ * governed, human-merge-only, so that gate can only ever go RED. It prints the block
+ * to paste.
  */
 export const RECOGNISED_PATH_SPELLINGS = [
   "const HERE = dirname(fileURLToPath(import.meta.url));   // seed (ESM)",
