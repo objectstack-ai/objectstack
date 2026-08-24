@@ -63,8 +63,10 @@
  * A SINK is: an interface, a type alias to a type literal, or an inline type
  * literal, all of whose members are function-typed and named from
  * {error, warn, info, debug, log, fatal, trace, verbose, silly}, and which
- * declares `error`. Measured over `packages/**` immediately BEFORE the two
- * repairs that landed with this file (`SweepLogger`, `ProjectionLogger`):
+ * declares `error`. "Function-typed" means a method signature, a function type,
+ * or bare `Function` (#11069 — see `isFunctionTyped`). Measured over
+ * `packages/**` immediately BEFORE the two repairs that landed with this file
+ * (`SweepLogger`, `ProjectionLogger`):
  *
  *   | population                                                | count |
  *   |-----------------------------------------------------------|------:|
@@ -109,6 +111,53 @@
  * That number is printed as `impure` on every run — a narrowing whose cost is
  * only argued is a narrowing nobody re-measures.
  *
+ * ### Narrowing 3: a member type this SYNTACTIC matcher cannot resolve
+ *
+ * Added by #11069 as the reject side of reading bare `Function` as a channel.
+ * `isFunctionTyped` reads syntax; there is no type checker here, deliberately
+ * (a detector with no program to build cannot fail to build one in CI). So
+ * `warn?: Logger['warn']` and `error?: SomeAliasedCallable` are opaque to it.
+ * Rather than let such a shape vanish — the exact defect #11069 was filed over —
+ * a shape whose members are ALL channel names but which carries one of those
+ * types is counted as `unreadable` and listed under `--list`.
+ *
+ * Its measured cost today is ZERO missed reds: of the three, two are
+ * `import-coerce.ts`'s `{ error: FieldCoerceError }` result envelopes with
+ * `error` REQUIRED (nothing to guarantee), and one is `suspended-run-store.ts`'s
+ * `MinimalLogger` = `{ warn?: Logger['warn']; debug?: Logger['debug'] }`, which
+ * declares no `error` at all. Keyword types (`string`, `unknown`, `boolean`) are
+ * deliberately NOT counted here: those are result fields, unambiguously not
+ * callable, and sweeping them in would drown the number that matters.
+ *
+ * ### The two blind spots #11069 measured, and what closed them
+ *
+ * Both were narrowings NOT in the list above — neither argued nor counted, which
+ * is what made them blind spots rather than trade-offs:
+ *
+ *   1. A sink spelled with bare `Function` set `fn = false`, which BOTH hid its
+ *      `error` from the population lookup AND made the shape impure — so it
+ *      landed in no bucket at all. Three live `plugin-sharing` sinks were
+ *      invisible that way, every one of them red. Closed by reading `Function`
+ *      as a channel: population 38 → 41, red 2 → 5. The three are recorded in
+ *      the shrink-only ledger rather than flipped — their options types are
+ *      PUBLICLY EXPORTED, so tightening `warn` is #10556's contract call.
+ *   2. The file prefilter matched on `error` alone. Sound for the enforced
+ *      population, unsound for the `noErrorMember` census line, which counts
+ *      sinks declaring NO `error` and so counts exactly the files with no reason
+ *      to spell the token. Closed by deriving the prefilter from the whole
+ *      vocabulary (see `CHANNEL_PREFILTER`): the tally moved 57 → 95 on an
+ *      UNCHANGED tree, so 40% of it had never been counted, and membership had
+ *      come to depend on whether the file mentioned `error` for unrelated
+ *      reasons.
+ *
+ * The two fixes are independent and additive — 57 + 38 (prefilter) + 1 (the
+ * bare-`Function` sink in `record-orphan-cleanup.ts`) = 96, the tally today.
+ *
+ * ⭐ Both blind spots shared one signature worth recognising again: a number
+ * this file PRINTS was bounded by a filter applied for a different number's
+ * sake. When adding a bucket, check what the prefilter is sound FOR — not that
+ * it is sound.
+ *
  * ### Scope: `packages/**` only
  *
  * These are the contracts plugins and services PUBLISH. `examples/**` holds one
@@ -129,6 +178,14 @@
  *     and the file can only get shorter.
  *   - **Never a place to add new work.** A new red sink is a violation, not a
  *     ledger row. The ledger's own header carries the same sentence.
+ *
+ * One edge that sentence does NOT cover, spelled out because #11069 hit it: a
+ * sink this checker previously could not SEE is not new work. Widening the
+ * population necessarily surfaces shapes that were already red, and if
+ * recording those were forbidden, the cheapest way to keep the gate green would
+ * be to leave the blind spot in place. What the ⛔ forbids is appending a
+ * newly WRITTEN violation. Rows added for a population widening say so, name
+ * the widening, and stay shrink-only like every other row.
  *
  * ## Verdicts
  *
@@ -188,6 +245,45 @@ const LOG_CHANNELS = new Set([
 /** The one channel that may carry a degraded durability report. See the header. */
 const FALLBACK_CHANNEL = 'warn';
 
+/**
+ * The file prefilter, DERIVED from `LOG_CHANNELS` rather than written out.
+ *
+ * ## What it must be sound for, and what the previous one was sound for
+ *
+ * The prefilter decides which files are parsed at all, so it silently bounds
+ * EVERY number this gate prints. Its previous spelling was `/\berror\s*\??\s*
+ * [:(]/` — sound for the enforced population, because a sink declaring `error`
+ * necessarily spells the token, and UNSOUND for the `noErrorMember` census
+ * line, which counts sinks declaring NO `error` and therefore counts exactly
+ * the files that have no reason to contain it. A file whose only sink is a pure
+ * `{ info?, warn? }` was skipped before the parser saw it, and membership in
+ * that tally came to depend on unrelated text elsewhere in the file (#11069).
+ *
+ * ## Why deriving it from the vocabulary makes it sound for ALL of them
+ *
+ * Every shape this gate records in ANY bucket — `sinks`, `impure`,
+ * `castNarrowed`, `unreadable`, `noErrorMember` — has at least one member whose
+ * name is in `LOG_CHANNELS` and whose name is an IDENTIFIER (`readShape` sends
+ * anything else down the `<non-property>` path, and `noErrorMember` further
+ * requires `read.length > 0`). A member of that kind is spelled `name:`,
+ * `name?:`, `name(` or `name?(` — all four covered below. So a file this
+ * prefilter skips cannot contribute to any bucket, and the tally is a COUNT
+ * again rather than a lower bound of unknown slack.
+ *
+ * Verified by MEASUREMENT, not only by the argument above — the argument is the
+ * kind of thing this card exists to distrust. Removing the prefilter entirely
+ * and parsing all 1914 files produces a BYTE-IDENTICAL 146-line `--list`
+ * census, so nothing is lost; and the prefilter still skips 1337 of those 1914
+ * files (69.9%), costing 2.8s against 3.7s unfiltered. The old error-only
+ * prefilter parsed 460 files (24.0%); this one parses 577 (30.1%).
+ *
+ * ⭐ DERIVED, so it cannot drift: adding a channel to `LOG_CHANNELS` widens this
+ * automatically. A hand-written second copy of the vocabulary is how the
+ * previous narrowing outlived the reason for it. The self-test pins every
+ * channel in all four spellings.
+ */
+const CHANNEL_PREFILTER = new RegExp(`\\b(?:${[...LOG_CHANNELS].join('|')})\\s*\\??\\s*[:(]`);
+
 // ── AST helpers ─────────────────────────────────────────────────────────────
 
 function collectSourceFiles(dir, out = []) {
@@ -221,6 +317,20 @@ function collectSourceFiles(dir, out = []) {
 }
 
 /**
+ * The catch-all callable spelling: bare `Function`.
+ *
+ * `Function` is a TYPE REFERENCE, not a `FunctionTypeNode`, so the structural
+ * matcher below has to name it explicitly. Everything else the "catch-all
+ * callable" phrase covers — `(...args: any[]) => any`, `(...args: any[]) =>
+ * unknown` — already IS a `FunctionTypeNode` and needs no special case.
+ *
+ * Measured over `packages/**` when this limb was added: `Function` is the ONLY
+ * catch-all spelling live in the tree (14 members across 4 files, all in
+ * `plugin-sharing`). No `CallableFunction`, no `Object`-typed channel.
+ */
+const CATCH_ALL_CALLABLE = 'Function';
+
+/**
  * Is this member's type a function?
  *
  * A method signature (`error?(m: string): void`) counts, and so does a property
@@ -229,6 +339,16 @@ function collectSourceFiles(dir, out = []) {
  * filed over — use the METHOD form: a matcher that only knew the property form
  * reported a clean tree while missing the sharpest instance in it. Measured,
  * while drawing this population.
+ *
+ * ⭐ Bare `Function` counts too (#11069). It is a WORSE contract than a real
+ * signature, not a better one — it documents nothing and catches no arity
+ * mistake — so a rule about what a sink guarantees must read it as a channel.
+ * Before this limb existed, `error?: Function` set `fn = false`, which made the
+ * whole shape impure AND hid the `error` member from the population lookup, so
+ * such a sink landed in NO bucket at all: not the population, not `impure`, not
+ * `noErrorMember`. Three live `plugin-sharing` sinks were invisible that way,
+ * every one of them red. Being invisible is the defect; the shapes themselves
+ * are unchanged by this PR and are recorded in the shrink-only ledger.
  */
 function isFunctionTyped(member) {
     if (ts.isMethodSignature(member)) return true;
@@ -238,6 +358,40 @@ function isFunctionTyped(member) {
         if (ts.isFunctionTypeNode(t)) return true;
         if (ts.isParenthesizedTypeNode(t)) return seen(t.type);
         if (ts.isUnionTypeNode(t)) return t.types.some(seen);
+        if (ts.isTypeReferenceNode(t) && ts.isIdentifier(t.typeName)) {
+            return t.typeName.text === CATCH_ALL_CALLABLE;
+        }
+        return false;
+    };
+    return seen(member.type);
+}
+
+/**
+ * Is this member's type a NAMED type this syntactic matcher cannot resolve?
+ *
+ * The reject side of the limb above, and the reason it is counted rather than
+ * argued. `isFunctionTyped` reads syntax, not types: it can see `(m: string) =>
+ * void` and it can see `Function`, but `warn?: Logger['warn']` — an indexed
+ * access — and `error?: SomeAliasedCallable` are opaque to it. Whether those
+ * are channels is a question only a type CHECKER answers, and this gate
+ * deliberately has none (a detector with no program to build cannot fail to
+ * build one in CI).
+ *
+ * So the residual blind spot is real, and per this file's own standing rule —
+ * "a narrowing whose cost is only argued is a narrowing nobody re-measures" —
+ * it gets a printed number instead of a paragraph. Keyword types (`string`,
+ * `unknown`, `boolean`) are NOT counted: those are result fields, unambiguously
+ * not callable, and sweeping them in would drown the signal that matters.
+ */
+function isUnresolvedNamedType(member) {
+    if (!ts.isPropertySignature(member)) return false;
+    const seen = (t) => {
+        if (!t) return false;
+        if (ts.isParenthesizedTypeNode(t)) return seen(t.type);
+        if (ts.isUnionTypeNode(t)) return t.types.some(seen);
+        if (ts.isTypeReferenceNode(t)) return true;
+        if (ts.isIndexedAccessTypeNode(t)) return true;
+        if (ts.isTypeQueryNode(t)) return true;
         return false;
     };
     return seen(member.type);
@@ -298,20 +452,29 @@ function anonymousSinkName(node, sf) {
 function readShape(members) {
     const named = [];
     let pure = true;
+    // Does this shape LOOK like a sink whose members are all channels, with the
+    // only obstacle being a member type the matcher cannot resolve? Tracked
+    // separately from `pure` because the two answer different questions:
+    // `pure` is "this rule may judge it", this is "this rule cannot TELL".
+    let allChannelNames = members.length > 0;
+    let unresolved = 0;
     for (const m of members) {
         if ((ts.isPropertySignature(m) || ts.isMethodSignature(m)) && m.name && ts.isIdentifier(m.name)) {
             const name = m.name.text;
             const fn = isFunctionTyped(m);
             named.push({ name, optional: !!m.questionToken, fn });
+            if (!LOG_CHANNELS.has(name)) allChannelNames = false;
             if (!LOG_CHANNELS.has(name) || !fn) pure = false;
+            if (!fn && isUnresolvedNamedType(m)) unresolved++;
         } else {
             // An index signature, a call signature, a computed key: a shape that
             // can carry arbitrary members is not a contract this rule reads.
             pure = false;
+            allChannelNames = false;
             named.push({ name: '<non-property>', optional: false, fn: false });
         }
     }
-    return { pure, members: named };
+    return { pure, members: named, unreadable: allChannelNames && unresolved > 0 };
 }
 
 /** `info? warn? error?` — the whole declared surface, for the report. */
@@ -345,7 +508,22 @@ function analyzeSourceFile(sf, relPath, census) {
     const lineOf = (node) => sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1;
 
     const consider = (node, members, name, kind) => {
-        const { pure, members: read } = readShape(members);
+        const { pure, members: read, unreadable } = readShape(members);
+        if (unreadable) {
+            // The residual blind spot, counted rather than argued: every member
+            // is named from the log vocabulary, and at least one carries a type
+            // this SYNTACTIC matcher cannot resolve to a callable
+            // (`warn?: Logger['warn']`). Recorded BEFORE the population lookup
+            // because that lookup asks `m.fn`, which is precisely the question
+            // that has no syntactic answer here.
+            const errorMember = read.find((m) => m.name === 'error');
+            census.unreadable.push({
+                file: relPath, line: lineOf(node), name: name ?? anonymousSinkName(node, sf),
+                errorOptional: !!errorMember?.optional, declaresError: !!errorMember,
+                members: describeMembers(read),
+            });
+            return;
+        }
         const error = read.find((m) => m.name === 'error' && m.fn);
         if (!error) {
             // Not in the population at all. A `{ info?, warn? }` sink declares no
@@ -398,7 +576,7 @@ function analyzeSourceFile(sf, relPath, census) {
 }
 
 function emptyCensus() {
-    return { sinks: [], impure: [], castNarrowed: [], noErrorMember: [] };
+    return { sinks: [], impure: [], castNarrowed: [], noErrorMember: [], unreadable: [] };
 }
 
 // ── The ledger ──────────────────────────────────────────────────────────────
@@ -461,8 +639,17 @@ function printCensus(census) {
             `${census.impure.length} skipped as not-a-pure-sink ` +
             `(${census.impure.filter((c) => c.errorOptional).length} of them with an optional \`error\` — that ` +
             'number is what the purity narrowing costs in coverage); ' +
+            `${census.unreadable.length} skipped as UNREADABLE — every member is a channel name but a member type ` +
+            `is a named type this syntactic matcher cannot resolve to a callable ` +
+            `(${census.unreadable.filter((c) => c.errorOptional).length} of them with an optional \`error\` — that ` +
+            'is what having no type checker costs in coverage); ' +
             `${census.noErrorMember.length} pure sink(s) declare no \`error\` at all and are out of the population.`,
     );
+    // ⭐ The tally above is a COUNT, not a lower bound: the file prefilter is
+    // derived from the whole channel vocabulary, so a sink declaring no `error`
+    // is parsed and counted like any other (#11069). It read as a count before
+    // that fix too, while silently omitting every such sink whose file happened
+    // not to mention `error` elsewhere.
 }
 
 function printSinkList(census) {
@@ -478,6 +665,20 @@ function printSinkList(census) {
                 `  (error ${c.errorOptional ? 'OPTIONAL' : 'required'})`,
         );
     }
+    for (const c of census.unreadable) {
+        console.log(
+            `  ${'skipped: unreadable'.padEnd(19)} ${c.file}:${c.line}  ${c.name}  { ${c.members} }` +
+                `  (error ${c.declaresError ? (c.errorOptional ? 'OPTIONAL' : 'required') : 'not declared'})`,
+        );
+    }
+    // The `noErrorMember` tally is listed, not only totalled (#11069). It is the
+    // one census line whose members are otherwise unnameable — every other
+    // bucket prints its shapes — and an unlistable count is exactly what let a
+    // 40% undercount sit in this output unnoticed. `--list` now shows which
+    // sinks it is, so the number can be audited instead of believed.
+    for (const c of census.noErrorMember) {
+        console.log(`  ${'out: no `error`'.padEnd(19)} ${c.file}:${c.line}`);
+    }
 }
 
 // ── Entry point ─────────────────────────────────────────────────────────────
@@ -487,10 +688,12 @@ function run({ list = false } = {}) {
     for (const root of SCAN_ROOTS) {
         for (const file of collectSourceFiles(join(ROOT, root))) {
             const text = readFileSync(file, 'utf8');
-            // Cheap prefilter. `error?(` is the METHOD spelling — leaving it out of
-            // this regex is exactly how the first draft of this population read a
-            // clean tree while missing both audit sinks.
-            if (!/\berror\s*\??\s*[:(]/.test(text)) continue;
+            // Cheap prefilter, sound for every bucket because it is derived from
+            // the whole channel vocabulary rather than from `error` alone — see
+            // CHANNEL_PREFILTER. `name?(` is the METHOD spelling; leaving it out
+            // is exactly how the first draft of this population read a clean tree
+            // while missing both audit sinks.
+            if (!CHANNEL_PREFILTER.test(text)) continue;
             // `parseSourceFile` rather than the raw call: ts.createSourceFile never
             // throws, so a `.ts` file with a syntax error would be walked as a
             // recovered partial tree, contribute nothing to the census, and be
@@ -661,6 +864,63 @@ function selfTest() {
             expectImpure: 1,
             expectImpureOptionalError: 1,
         },
+        {
+            // ⭐ #11069 limb 1, the RED direction. Before this limb, bare
+            // `Function` set `fn = false`, which hid the `error` member from the
+            // population lookup AND made the shape impure — so the whole sink
+            // landed in no bucket at all. Three live `plugin-sharing` shapes were
+            // invisible exactly this way. `expectImpure: 0` is half the pin: it
+            // says the shape is JUDGED, not merely re-routed into a skip bucket.
+            name: 'limb: a sink spelled with bare `Function` is in the population, and RED',
+            code: 'interface L { info?: Function; warn?: Function; error?: Function; debug?: Function }',
+            expectVerdicts: ['optional-fallback'],
+            expectImpure: 0,
+            expectNoError: 0,
+        },
+        {
+            name: 'limb: bare `Function` beside a REQUIRED `warn` is clean — the limb widens, it does not redden',
+            code: 'interface L { warn: Function; error?: Function }',
+            expectVerdicts: ['fallback-guaranteed'],
+        },
+        {
+            // The other half of limb 1: a bare-`Function` sink with no `error` is
+            // out of the population, and now COUNTED there instead of vanishing.
+            // `record-orphan-cleanup.ts`'s `MinimalLogger` is this shape.
+            name: 'limb: a bare-`Function` sink declaring no `error` joins the census tally',
+            code: 'interface L { info?: Function; warn?: Function }',
+            expectVerdicts: [],
+            expectNoError: 1,
+        },
+        {
+            // ⭐ #11069 limb 1's REJECT side, pinned as a positive number. An
+            // indexed access is a callable only a type CHECKER can confirm, and
+            // this gate has none. `suspended-run-store.ts`'s `MinimalLogger` is
+            // this shape. Counted, never silently dropped.
+            name: 'reject side: a member typed by an INDEXED ACCESS is unreadable, and COUNTED',
+            code: "interface L { warn?: Logger['warn']; debug?: Logger['debug'] }",
+            expectVerdicts: [],
+            expectUnreadable: 1,
+            expectImpure: 0,
+            expectNoError: 0,
+        },
+        {
+            name: 'reject side: a member typed by an unresolvable ALIAS is unreadable, and COUNTED',
+            code: 'interface L { warn?: AnyCallable; error?: AnyCallable }',
+            expectVerdicts: [],
+            expectUnreadable: 1,
+            expectUnreadableOptionalError: 1,
+        },
+        {
+            // The boundary that keeps the reject side meaningful. A KEYWORD type
+            // is unambiguously not callable, so `{ error?: string; warn?: string }`
+            // stays out of every bucket rather than inflating `unreadable`. The
+            // `Result` case above pins the same tree from the other side.
+            name: 'reject side does NOT swallow keyword types — a `string` `error` is a result field, not unreadable',
+            code: 'interface Result { error?: string; warn?: string; }',
+            expectVerdicts: [],
+            expectUnreadable: 0,
+            expectImpure: 0,
+        },
     ];
 
     let failures = 0;
@@ -692,9 +952,54 @@ function selfTest() {
         if (census.noErrorMember.length !== (c.expectNoError ?? 0)) {
             problems.push(`no-error-member ${census.noErrorMember.length} != ${c.expectNoError ?? 0}`);
         }
+        if (census.unreadable.length !== (c.expectUnreadable ?? 0)) {
+            problems.push(`unreadable ${census.unreadable.length} != ${c.expectUnreadable ?? 0}`);
+        }
+        if (
+            c.expectUnreadableOptionalError !== undefined &&
+            census.unreadable.filter((x) => x.errorOptional).length !== c.expectUnreadableOptionalError
+        ) {
+            problems.push('unreadable-with-optional-error count mismatch');
+        }
         if (problems.length > 0) {
             failures++;
             console.error(`  ✗ ${c.name}\n      ${problems.join('\n      ')}`);
+        }
+    }
+
+    // ⭐ The file PREFILTER, pinned separately because the cases above call
+    // `analyzeSourceFile` directly and so never reach it — which is exactly how
+    // an unsound prefilter survived a self-test that pinned both narrowings as
+    // counts (#11069). Every channel, in all four spellings a member of that
+    // name can take, must reach the parser.
+    for (const channel of LOG_CHANNELS) {
+        const spellings = [
+            `interface L { ${channel}: (m: string) => void }`, // property
+            `interface L { ${channel}?: (m: string) => void }`, // optional property
+            `interface L { ${channel}(m: string): void }`, // method
+            `interface L { ${channel}?(m: string): void }`, // optional method
+        ];
+        for (const code of spellings) {
+            if (!CHANNEL_PREFILTER.test(code)) {
+                failures++;
+                console.error(`  ✗ prefilter skips a file declaring \`${channel}\`: ${code}`);
+            }
+        }
+    }
+    // The reject side of the prefilter, so "always true" is distinguishable from
+    // "correctly derived". A module with no channel member is skipped, and that
+    // is what keeps the scan cheap.
+    if (CHANNEL_PREFILTER.test('export const answer: number = 42;')) {
+        failures++;
+        console.error('  ✗ prefilter matches a file with no log-channel member — it is not filtering at all');
+    }
+    // The derivation itself: a channel added to the vocabulary must widen the
+    // prefilter automatically. A hand-written second copy of the vocabulary is
+    // how the previous narrowing outlived its own reason.
+    for (const channel of LOG_CHANNELS) {
+        if (!CHANNEL_PREFILTER.source.includes(channel)) {
+            failures++;
+            console.error(`  ✗ prefilter is not derived from LOG_CHANNELS — \`${channel}\` is missing from it`);
         }
     }
 
@@ -721,7 +1026,8 @@ function selfTest() {
     }
     console.log(
         `✓ optional-error-sink-contract self-test: ${cases.length} case(s), both directions, ` +
-            'both narrowings pinned as counts.',
+            `all three narrowings pinned as counts, prefilter pinned over ${LOG_CHANNELS.size} channel(s) ` +
+            '× 4 spellings plus its reject side.',
     );
     return 0;
 }
