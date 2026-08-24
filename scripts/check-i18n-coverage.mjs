@@ -885,6 +885,67 @@ function selfTest() {
     `absolute paths would silently re-key every baseline entry; got ${JSON.stringify(offRoot.slice(0, 2))}`,
   );
 
+  // The SHARED probe's own anchoring (#11394). #10907 anchored this FILE; the
+  // module it asks "is the CLI built?" kept reading `packages/cli/package.json`
+  // CWD-relatively, so from any other cwd the probe ENOENTed and deferred — and
+  // every off-root run was preceded by a line about a workspace that was fine.
+  // Pinned here rather than in the shared module because the module has no
+  // self-test of its own: both of its consumers pin its classifiers, and this is
+  // the one property of it that a recorded string cannot prove.
+  const probeCwdBefore = process.cwd();
+  let offRootProbe;
+  try {
+    process.chdir(tmpdir());
+    offRootProbe = resolveCliCommandFile(LINT_COMMAND_ID);
+  } finally {
+    process.chdir(probeCwdBefore);
+  }
+  const onRootProbe = resolveCliCommandFile(LINT_COMMAND_ID);
+  expect(
+    '#11394 the shared CLI probe answers a path, not a deferral',
+    !!onRootProbe.file && !onRootProbe.unknown,
+    `over this repo the probe must derive the command file; got ${JSON.stringify(onRootProbe)}`,
+  );
+  expect(
+    '#11394 …and answers the same from any cwd',
+    JSON.stringify(offRootProbe) === JSON.stringify(onRootProbe),
+    `off-root the probe said ${JSON.stringify(offRootProbe)}, on-root ${JSON.stringify(onRootProbe)} — ` +
+      'the read behind it is CWD-relative again',
+  );
+  expect(
+    '#11394 …spelled repo-relative, as every message and rerun command is',
+    typeof onRootProbe.file === 'string' && !onRootProbe.file.startsWith('/') && !onRootProbe.file.includes(REPO_ROOT),
+    `anchoring the READ must not leak into the vocabulary; got ${JSON.stringify(onRootProbe)}`,
+  );
+  // …and the consumer side of the same seam: this gate asks the FILESYSTEM about
+  // that repo-relative answer, and `at()` is what makes the question land on the
+  // repo rather than the cwd. Unanchored it would report "the workspace CLI is not
+  // built" from a foreign cwd over a built one — which is why the probe resolving
+  // and this check being anchored are one change, not two.
+  //
+  // Proven with a read that is true on ANY tree rather than by comparing
+  // `existsSync` on the command file: `--self-test` runs with no build, where that
+  // file is absent from both cwds and the comparison would agree over nothing.
+  let anchoredReadOffRoot;
+  let bareReadOffRoot;
+  try {
+    process.chdir(tmpdir());
+    anchoredReadOffRoot = existsSync(at('scripts/check-i18n-coverage.mjs'));
+    bareReadOffRoot = existsSync('scripts/check-i18n-coverage.mjs');
+  } finally {
+    process.chdir(probeCwdBefore);
+  }
+  expect(
+    '#11394 an anchored read lands on the repo from a foreign cwd',
+    anchoredReadOffRoot,
+    `at() did not reach this repo from ${tmpdir()} — REPO_ROOT is ${REPO_ROOT}`,
+  );
+  expect(
+    '#11394 …and the bare spelling demonstrably would not have',
+    !bareReadOffRoot,
+    'the bare spelling resolved off-root too, so this assertion proves nothing about anchoring',
+  );
+
   // Anti-#4690 on the population itself. Red on nothing is the assertion that
   // matters — this is the one verdict whose failure mode is a green line.
   expect('#10907 an empty population is refused', !!emptyPopulationVerdict([]), 'zero configs must never be a pass');

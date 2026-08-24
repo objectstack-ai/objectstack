@@ -87,7 +87,9 @@
 // prerequisite failure naming the package whose dist is stale — never a count.
 import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import {
+  atRepoRoot,
   CLI,
   CLI_BUILD_FIX,
   looksLikeMissingCliCommand,
@@ -379,6 +381,55 @@ function selfTest() {
   expect('#5217 derives the command file', derived.file === 'packages/cli/dist/commands/i18n/extract.js', `got ${JSON.stringify(derived)}`);
   const undeclaredTarget = oclifCommandFileFor({ oclif: {} }, ['i18n', 'extract']);
   expect('#5217 unreadable shape defers, loudly', !!undeclaredTarget.unknown && !undeclaredTarget.file, `an unreadable oclif block must yield a reason, not a guessed path; got ${JSON.stringify(undeclaredTarget)}`);
+
+  // …and the probe that puts the REAL package.json through it is anchored to the
+  // module's own location, not the cwd (#11394). Before that fix this gate could
+  // not pre-check from anywhere but the repo root — it printed `build prerequisite
+  // not pre-checked` and deferred. Both halves of the seam are pinned, because
+  // fixing only the first would have been WORSE than the defect: a resolving probe
+  // over a CWD-relative existence check reports "the workspace CLI is not built"
+  // about a CLI that is built.
+  const probeCwdBefore = process.cwd();
+  const onRootProbe = resolveCliCommandFile(EXTRACT_COMMAND_ID);
+  let offRootProbe;
+  let anchoredReadOffRoot;
+  let bareReadOffRoot;
+  try {
+    process.chdir(tmpdir());
+    offRootProbe = resolveCliCommandFile(EXTRACT_COMMAND_ID);
+    anchoredReadOffRoot = existsSync(atRepoRoot('scripts/check-i18n-bundles.mjs'));
+    bareReadOffRoot = existsSync('scripts/check-i18n-bundles.mjs');
+  } finally {
+    process.chdir(probeCwdBefore);
+  }
+  expect(
+    '#11394 the shared CLI probe answers a path, not a deferral',
+    !!onRootProbe.file && !onRootProbe.unknown,
+    `over this repo the probe must derive the command file; got ${JSON.stringify(onRootProbe)}`,
+  );
+  expect(
+    '#11394 …and answers the same from any cwd',
+    JSON.stringify(offRootProbe) === JSON.stringify(onRootProbe),
+    `off-root the probe said ${JSON.stringify(offRootProbe)}, on-root ${JSON.stringify(onRootProbe)}`,
+  );
+  expect(
+    '#11394 …spelled repo-relative, as `CLI` and every message here are',
+    typeof onRootProbe.file === 'string' && !onRootProbe.file.startsWith('/'),
+    `anchoring the READ must not leak into the vocabulary; got ${JSON.stringify(onRootProbe)}`,
+  );
+  // The consumer side of the same seam, proven with a read that is true on ANY
+  // tree: `--self-test` runs with no build, so comparing `existsSync` on the
+  // command file itself would agree over nothing from both cwds.
+  expect(
+    '#11394 an anchored read lands on the repo from a foreign cwd',
+    anchoredReadOffRoot,
+    'atRepoRoot() did not reach this repo from ' + tmpdir(),
+  );
+  expect(
+    '#11394 …and the bare spelling demonstrably would not have',
+    !bareReadOffRoot,
+    'the bare spelling resolved off-root too, so this assertion proves nothing about anchoring',
+  );
 
   // -------------------------------------------------------------------------
   // Fourth classifier (#7681): the OTHER prerequisite — a workspace package this
@@ -673,7 +724,16 @@ function checkCliBuildPrerequisite() {
     console.error(`check-i18n-bundles: ${resolved.unknown} — build prerequisite not pre-checked`);
     return;
   }
-  if (existsSync(resolved.file)) return;
+  // `resolved.file` is repo-relative (`packages/cli/dist/commands/i18n/extract.js`),
+  // so the EXISTENCE check on it needs the same anchor the read behind it got
+  // (#11394). Unanchored, an off-root run that got this far would report "the
+  // workspace CLI is not built" about a CLI that IS built — the #5862 defect (a
+  // confident diagnosis pointing somewhere innocent) rebuilt one layer down, and
+  // the exact sentence `check-i18n-coverage.mjs` already carries over its own copy
+  // of this line. Before #11394 the probe could not get here from a foreign cwd at
+  // all, so anchoring the read without anchoring this would have traded a harmless
+  // deferral for a false hard failure.
+  if (existsSync(atRepoRoot(resolved.file))) return;
   reportPrerequisiteNotMet('the workspace CLI is not built', [
     `This gate runs the BUILT CLI. ${CLI} is only a source stub that hands`,
     `off to oclif, which resolves \`os ${EXTRACT_COMMAND_ID.join(' ')}\` from the compiled`,
