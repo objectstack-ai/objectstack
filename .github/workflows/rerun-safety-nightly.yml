@@ -83,10 +83,14 @@ jobs:
       # #4314) bounds a frozen-output hang at 15 min instead of letting a
       # nightly nobody watches sit until the 120-min timeout; on a stall it
       # exits 75 and its banner in the log names the last output line.
+      # --log-order=stream is mandatory under the guard (see the Test Core
+      # comment in ci.yml): grouped log order flushes a task's output only when
+      # the task ends, so a solo tail task longer than the budget reads as
+      # frozen while healthy. The guard refuses a turbo run without it.
       - name: Test suite — pass 1
         run: |
           node scripts/run-with-stall-guard.mjs --log "$RUNNER_TEMP/rerun-pass1.log" --stall-minutes 15 -- \
-            pnpm turbo run test --concurrency=4 --force
+            pnpm turbo run test --concurrency=4 --force --log-order=stream
 
       # Informational only. A stray `.objectstack/` is how the #4065 class shows
       # up on disk, so printing what pass 1 left behind turns a pass-2 failure
@@ -110,7 +114,7 @@ jobs:
         run: |
           status=0
           node scripts/run-with-stall-guard.mjs --log "$RUNNER_TEMP/rerun-pass2.log" --stall-minutes 15 -- \
-            pnpm turbo run test --concurrency=4 --force || status=$?
+            pnpm turbo run test --concurrency=4 --force --log-order=stream || status=$?
           if [ "$status" -eq 0 ]; then
             exit 0
           elif [ "$status" -eq 75 ]; then

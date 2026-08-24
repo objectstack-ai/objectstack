@@ -26,6 +26,22 @@
 // child's real exit status is propagated by construction, so there is no pipe
 // to guard. Do not reintroduce `| tee`.
 //
+// ## The instrument's one precondition: the wrapped command must STREAM
+//
+// The guard measures output FLUSHES, so it is only a liveness instrument when
+// the wrapped pipeline flushes while work is running. Turbo's default log
+// order in CI is GROUPED — a task's output is buffered and flushed only when
+// the task ENDS — which turns "one task still running" into "zero bytes", and
+// a shard whose tail is a single task longer than --stall-minutes into a
+// guaranteed kill of a HEALTHY suite (measured twice in one day: exit 75 with
+// `Test Files 173 passed (173)` arriving in the very flush the kill forced,
+// stamped ~40ms after it). That red reproduces on rerun, so it reads as "not
+// a flake, therefore the diff" — the exact false trail #4250's triage line
+// warns against. So the precondition is ENFORCED, not documented: a wrapped
+// command that invokes turbo without `--log-order=stream` is refused at
+// startup (exit 1, before anything runs). pnpm's recursive runner streams
+// with per-package prefixes (measured), so non-turbo callers are untouched.
+//
 // ## Stall forensics (before the kill)
 //
 // A declared stall triages itself instead of leaving a mystery for a human:
@@ -126,6 +142,36 @@ for (let i = 0; i < argv.length; i++) {
 if (!logPath || command.length === 0 || !Number.isFinite(stallMinutes) || stallMinutes <= 0) {
   console.error(
     'run-with-stall-guard: usage: run-with-stall-guard.mjs --log <file> [--stall-minutes N] -- <command...>',
+  );
+  process.exit(1);
+}
+
+// The precondition check from the header: a turbo invocation under this guard
+// must pin `--log-order=stream`, or the guard's instrument (output flushes)
+// measures buffering artifacts instead of liveness and kills healthy suites by
+// construction. Deliberately NOT exported — importing this file would execute
+// it (it is an entrypoint, not a library); the self-test pins both directions
+// through real subprocess invocations instead.
+function turboLogOrderViolation(argv) {
+  const runsTurbo = argv.some(
+    (tok) => !tok.startsWith('-') && (tok === 'turbo' || tok.endsWith('/turbo')),
+  );
+  if (!runsTurbo) return false;
+  const streams = argv.some(
+    (tok, i) =>
+      tok === '--log-order=stream' || (tok === '--log-order' && argv[i + 1] === 'stream'),
+  );
+  return !streams;
+}
+
+if (turboLogOrderViolation(command)) {
+  console.error(
+    'run-with-stall-guard: REFUSING to wrap a turbo invocation without --log-order=stream.\n' +
+      "  This guard measures output flushes. Turbo's default log order in CI is grouped —\n" +
+      '  a task flushes only when it ENDS — so a task running longer than --stall-minutes\n' +
+      '  emits zero bytes and is killed as a stall while perfectly healthy (a deterministic\n' +
+      '  red on an innocent diff; it happened, twice in one day, with every test passing).\n' +
+      '  Add --log-order=stream to the turbo command so the guard observes real liveness.',
   );
   process.exit(1);
 }
@@ -523,6 +569,58 @@ async function selfTest() {
       ], {}, { marker: dir });
       check('steady output past the stall window is not a stall',
         code === 0 && !out.includes('STALL'), `exit ${code}`);
+    }
+
+    // -- 3b. The turbo log-order precondition, both directions. --
+    //    Grouped log order flushes a task's output only when the task ends, so
+    //    a guard-wrapped turbo without --log-order=stream kills a healthy solo
+    //    tail task BY CONSTRUCTION (the 2026-08-24 healthy-kill pair: exit 75
+    //    with 173/173 files passing in the flush the kill forced). The wrap is
+    //    refused before anything spawns. Refusal shapes use a bare `turbo`
+    //    that never runs; accepted turbo-shapes use a nonexistent path so the
+    //    verdict is "failed to start", never a real turbo against this repo.
+    {
+      const refused = await runGuard(
+        ['--log', join(dir, 'lo1.log'), ...WINDOW, '--', 'turbo', 'run', 'test'],
+        {}, { marker: dir },
+      );
+      check('a guard-wrapped turbo without --log-order=stream is refused',
+        refused.code === 1 && refused.out.includes('REFUSING'), `exit ${refused.code}`);
+      check('the refusal happens before anything runs (no stall verdict, no spawn)',
+        !refused.out.includes('STALL') && !refused.out.includes('failed to start'));
+
+      const viaPnpm = await runGuard(
+        ['--log', join(dir, 'lo2.log'), ...WINDOW, '--',
+          'pnpm', 'turbo', 'run', 'test', '--concurrency=4', '--log-order=grouped'],
+        {}, { marker: dir },
+      );
+      check('an explicit --log-order=grouped is refused too',
+        viaPnpm.code === 1 && viaPnpm.out.includes('REFUSING'), `exit ${viaPnpm.code}`);
+
+      const streamed = await runGuard(
+        ['--log', join(dir, 'lo3.log'), ...WINDOW, '--',
+          '/nonexistent/turbo', 'run', 'test', '--log-order=stream'],
+        {}, { marker: dir },
+      );
+      check('--log-order=stream lifts the refusal (reaches spawn)',
+        !streamed.out.includes('REFUSING') && streamed.out.includes('failed to start'),
+        streamed.out.trim().split('\n')[0]);
+
+      const spaced = await runGuard(
+        ['--log', join(dir, 'lo4.log'), ...WINDOW, '--',
+          '/nonexistent/turbo', 'run', 'test', '--log-order', 'stream'],
+        {}, { marker: dir },
+      );
+      check('the split `--log-order stream` spelling is accepted as well',
+        !spaced.out.includes('REFUSING') && spaced.out.includes('failed to start'));
+
+      const flagValue = await runGuard(
+        ['--log', join(dir, 'lo5.log'), ...WINDOW, '--',
+          'sh', '-c', 'echo turbo-adjacent ok', 'sh', '--tag=turbo'],
+        {}, { marker: dir },
+      );
+      check('`turbo` inside a flag value does not trip the refusal',
+        flagValue.code === 0 && !flagValue.out.includes('REFUSING'), `exit ${flagValue.code}`);
     }
 
     // -- 4. Idle hang: event loop alive, nothing will ever settle. --
