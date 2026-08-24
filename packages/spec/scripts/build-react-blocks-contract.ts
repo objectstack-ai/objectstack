@@ -55,7 +55,15 @@ const clip = (s: unknown, n = 160): string => {
   return t.length > n ? t.slice(0, n - 1) + '…' : t;
 };
 
-interface Prop { name: string; type: string; kind: string; required: boolean; description: string }
+interface Prop {
+  name: string;
+  type: string;
+  kind: string;
+  required: boolean;
+  description: string;
+  /** #11284 deprecate-first: canonical replacement + authoring note, passed through from the overlay. */
+  deprecated?: { replacedBy: string; note: string };
+}
 
 function dataProps(schema: any, allow?: string[]): Prop[] {
   let js: any;
@@ -94,7 +102,16 @@ function dataProps(schema: any, allow?: string[]): Prop[] {
 }
 
 function mergeProps(dataPs: Prop[], overlay: ReactInteractionProp[]): Prop[] {
-  const out: Prop[] = overlay.map((o) => ({ name: o.name, type: o.type, kind: o.kind, required: !!o.required, description: o.description }));
+  const out: Prop[] = overlay.map((o) => ({
+    name: o.name,
+    type: o.type,
+    kind: o.kind,
+    required: !!o.required,
+    description: o.description,
+    // #11284 deprecate-first: machine consumers see the canonical replacement;
+    // the human-facing "[DEPRECATED → …]" marker rides the description text.
+    ...(o.deprecated ? { deprecated: o.deprecated } : {}),
+  }));
   const seen = new Set(out.map((p) => p.name));
   for (const d of dataPs) if (!seen.has(d.name)) out.push(d);
   return out;

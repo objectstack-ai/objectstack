@@ -122,13 +122,29 @@ const asArray = (v: unknown): AnyRec[] => (Array.isArray(v) ? (v as AnyRec[]) : 
 interface BlockSpec {
   requiredBindings: string[];
   knownProps: Set<string>;
+  /**
+   * [#11284] Deprecated overlay spellings, read from the contract rather than
+   * restated: prop name → its canonical replacement + the authoring note the
+   * warning quotes. A `required` prop that is deprecated is a required
+   * BINDING, not a required spelling — the canonical `replacedBy` prop
+   * satisfies it (see the missing-required check below).
+   */
+  deprecated: Map<string, { replacedBy: string; note: string }>;
 }
 const BLOCKS: Map<string, BlockSpec> = new Map(
-  (REACT_BLOCKS as Array<{ tag: string; interactions: Array<{ name: string; required?: boolean }> }>).map((b) => [
+  (
+    REACT_BLOCKS as Array<{
+      tag: string;
+      interactions: Array<{ name: string; required?: boolean; deprecated?: { replacedBy: string; note: string } }>;
+    }>
+  ).map((b) => [
     b.tag,
     {
       requiredBindings: b.interactions.filter((i) => i.required).map((i) => i.name),
       knownProps: new Set(b.interactions.map((i) => i.name)),
+      deprecated: new Map(
+        b.interactions.filter((i) => i.deprecated).map((i) => [i.name, i.deprecated!]),
+      ),
     },
   ]),
 );
@@ -279,6 +295,15 @@ function filterAttrValue(tsc: typeof ts, sf: ts.SourceFile, attr: ts.JsxAttribut
  * says the true thing: these checks did not get to run.
  */
 export const REACT_PAGE_SOURCE_UNPARSEABLE = 'react-page-source-unparseable';
+
+/**
+ * [#11284] A prop written in a deprecated react-tier spelling (maintainer
+ * ruling 2026-08-23: the react tier converges on the metadata-tier
+ * vocabulary, deprecate-first). Warning, never error: the old spelling keeps
+ * working for the whole deprecation window — this is the loud half of
+ * "alias + loud deprecation", same shape as `approval-approver-type-deprecated`.
+ */
+export const REACT_PROP_DEPRECATED = 'react-prop-deprecated';
 
 export const REACT_CHART_FIELD_UNKNOWN = 'react-chart-field-unknown';
 export const REACT_CHART_FIELD_UNPROVISIONED = 'react-chart-field-unprovisioned';
@@ -844,6 +869,30 @@ function reactFieldRefs(
  * (`page-field-unknown`): the same question, asked of the same component, with
  * the same fix.
  */
+/**
+ * The object a block is bound to, canonical spelling first.
+ *
+ * [#11284] ListView's canonical binding is the metadata-tier data source —
+ * `data={{ provider: 'object', object }}` — with `objectName` the deprecated
+ * alias for the deprecation window. Canonical wins when both are present,
+ * mirroring the one-directional fold objectui's `normalizeListViewSchema`
+ * applies at the component boundary. A non-static `data` (a variable, a
+ * spread-borne value) is `NOT_STATIC` here and falls back to `objectName` —
+ * unresolvable is not wrong (ADR-0072 D1). ListView only: on `<ObjectChart>`
+ * the `data` prop is a static ROW ARRAY, and `<ObjectForm>`'s object binding
+ * is not converged by this step.
+ */
+function boundObjectName(tag: string, values: ReadonlyMap<string, unknown>): string | undefined {
+  if (tag === 'ListView') {
+    const data = values.get('data');
+    if (isRec(data) && data.provider === 'object') {
+      const obj = strOf(data.object);
+      if (obj) return obj;
+    }
+  }
+  return strOf(values.get('objectName'));
+}
+
 function checkBlockFieldProps(
   tag: string,
   values: ReadonlyMap<string, unknown>,
@@ -855,7 +904,7 @@ function checkBlockFieldProps(
   // one, so it must hand over the same index rather than answer differently.
   unprovisionedAnchors?: ReadonlyMap<string, ReadonlySet<string>>,
 ): ReactPropFinding[] {
-  const objectName = strOf(values.get('objectName'));
+  const objectName = boundObjectName(tag, values);
   const out: PageFieldFinding[] = [];
 
   const spec = REACT_FIELD_SPECS[tag];
@@ -1078,18 +1127,37 @@ export function validateReactPageProps(stack: AnyRec): ReactPropFinding[] {
           }
           if (!hasSpread) {
             for (const req of block.requiredBindings) {
-              if (!used.has(req)) {
-                findings.push({
-                  severity: 'error',
-                  rule: 'react-prop-missing-required',
-                  where, path,
-                  message: `<${tag}> is missing the required prop "${req}".`,
-                  hint: `Pass ${req}={…}. See the react-tier component contract.`,
-                });
-              }
+              if (used.has(req)) continue;
+              // [#11284] A required prop that is DEPRECATED requires the
+              // binding, not the spelling: the canonical replacement satisfies
+              // it, so the new vocabulary is accepted without the old one.
+              const dep = block.deprecated.get(req);
+              if (dep && used.has(dep.replacedBy)) continue;
+              findings.push({
+                severity: 'error',
+                rule: 'react-prop-missing-required',
+                where, path,
+                message: dep
+                  ? `<${tag}> is missing its "${req}" binding — pass ${dep.replacedBy}={…} (canonical) or ${req}={…} (deprecated).`
+                  : `<${tag}> is missing the required prop "${req}".`,
+                hint: dep ? dep.note : `Pass ${req}={…}. See the react-tier component contract.`,
+              });
             }
           }
           for (const u of used) {
+            // [#11284] Deprecate-first: the old spelling keeps working, and
+            // every use says so — the contract's note names the canonical
+            // metadata-tier spelling to write instead.
+            const dep = block.deprecated.get(u);
+            if (dep) {
+              findings.push({
+                severity: 'warning',
+                rule: REACT_PROP_DEPRECATED,
+                where, path,
+                message: `<${tag}> prop "${u}" is the deprecated spelling of the metadata-tier "${dep.replacedBy}" and is removed after the deprecation window (#11284).`,
+                hint: dep.note,
+              });
+            }
             const near = nearestKnown(u, block.knownProps);
             if (near) {
               findings.push({
@@ -1119,7 +1187,9 @@ export function validateReactPageProps(stack: AnyRec): ReactPropFinding[] {
             findings.push(
               ...checkSearchableFieldList(
                 values.get('searchableFields'),
-                strOf(values.get('objectName')),
+                // [#11284] canonical `data={{ provider: 'object', object }}`
+                // first, deprecated `objectName` as the window fallback.
+                boundObjectName(tag, values),
                 searchTargets,
                 where,
                 `${path} › searchableFields`,

@@ -9,6 +9,7 @@ import {
   REACT_CHART_DRILLDOWN_INVALID,
   REACT_BLOCK_NEEDS_RECORD_CONTEXT,
   REACT_PAGE_SOURCE_UNPARSEABLE,
+  REACT_PROP_DEPRECATED,
   type ReactPropFinding as PropFinding,
 } from './validate-react-page-props.js';
 // [#10653] The syntax gate whose cover the deleted `catch` comment credited,
@@ -59,8 +60,106 @@ describe('validateReactPageProps (ADR-0081 Phase 2)', () => {
   });
 
   it('does NOT false-flag a valid non-contract prop (no near match)', () => {
-    const f = validateReactPageProps(page('function Page(){ return <ListView objectName="a" striped={true} />; }'));
+    const f = validateReactPageProps(page(`function Page(){ return <ListView data={{ provider: 'object', object: 'a' }} striped={true} />; }`));
     expect(f).toEqual([]);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// #11284 — the react tier converges on the metadata-tier vocabulary,
+// deprecate-first (maintainer ruling 2026-08-23). During the window BOTH
+// spellings bind; the deprecated one warns on every use, and the canonical
+// one satisfies the binding requirement the alias used to carry alone.
+// ─────────────────────────────────────────────────────────────────────────
+
+describe('validateReactPageProps — deprecate-first vocabulary window (#11284)', () => {
+  it('accepts the canonical metadata-tier spelling with no findings', () => {
+    const f = validateReactPageProps(
+      page(`function Page(){ return <ListView data={{ provider: 'object', object: 'a' }} type="kanban" />; }`),
+    );
+    expect(f).toEqual([]);
+  });
+
+  it('accepts the deprecated objectName, with a warning naming the canonical prop', () => {
+    const f = validateReactPageProps(page('function Page(){ return <ListView objectName="a" />; }'));
+    expect(f).toHaveLength(1);
+    expect(f[0].severity).toBe('warning');
+    expect(f[0].rule).toBe(REACT_PROP_DEPRECATED);
+    expect(f[0].message).toContain('"objectName"');
+    expect(f[0].message).toContain('"data"');
+    expect(f[0].hint).toContain("data={{ provider: 'object', object: '…' }}");
+  });
+
+  it('warns on viewType, pointing at the metadata-tier `type`', () => {
+    const f = validateReactPageProps(
+      page(`function Page(){ return <ListView data={{ provider: 'object', object: 'a' }} viewType="kanban" />; }`),
+    );
+    expect(f).toHaveLength(1);
+    expect(f[0].rule).toBe(REACT_PROP_DEPRECATED);
+    expect(f[0].severity).toBe('warning');
+    expect(f[0].message).toContain('"viewType"');
+    expect(f[0].message).toContain('"type"');
+  });
+
+  it('still errors when NEITHER spelling binds, naming canonical first', () => {
+    const f = validateReactPageProps(page(`function Page(){ return <ListView columns={['a']} />; }`));
+    expect(f.some((x) => x.rule === 'react-prop-missing-required')).toBe(true);
+    const miss = f.find((x) => x.rule === 'react-prop-missing-required')!;
+    expect(miss.message).toContain('data={…} (canonical)');
+    expect(miss.message).toContain('objectName={…} (deprecated)');
+  });
+
+  it('resolves field props against the object bound via canonical `data`', () => {
+    // The same stale-entry finding the deprecated spelling produces — the
+    // binding moved, the resolution must move with it.
+    const f = validateReactPageProps({
+      objects: [{ name: 'crm_account', fields: { name: { type: 'text' } } }],
+      pages: [{
+        name: 'p', kind: 'react',
+        source: `function Page(){ return <ListView data={{ provider: 'object', object: 'crm_account' }} columns={['revenue']} />; }`,
+      }],
+    });
+    const unknown = f.filter((x) => x.rule === PAGE_FIELD_UNKNOWN);
+    expect(unknown).toHaveLength(1);
+    expect(unknown[0].message).toContain('crm_account');
+  });
+
+  it('canonical wins when both spellings are present (the objectui fold direction), and the alias still warns', () => {
+    const f = validateReactPageProps({
+      objects: [
+        { name: 'real_obj', fields: { name: { type: 'text' } } },
+        { name: 'stale_obj', fields: { other: { type: 'text' } } },
+      ],
+      pages: [{
+        name: 'p', kind: 'react',
+        source: `function Page(){ return <ListView data={{ provider: 'object', object: 'real_obj' }} objectName="stale_obj" columns={['name']} />; }`,
+      }],
+    });
+    // `name` resolves on real_obj (canonical) and NOT on stale_obj — no
+    // field finding means the canonical binding won.
+    expect(f.filter((x) => x.rule === PAGE_FIELD_UNKNOWN)).toEqual([]);
+    expect(f.filter((x) => x.rule === REACT_PROP_DEPRECATED)).toHaveLength(1);
+  });
+
+  it('a deprecated prop behind a spread still warns — the spelling is literally written', () => {
+    const f = validateReactPageProps(
+      page('function Page(){ const p = {}; return <ListView {...p} objectName="a" />; }'),
+    );
+    expect(f.filter((x) => x.rule === REACT_PROP_DEPRECATED)).toHaveLength(1);
+  });
+
+  it('a value-provider data source also satisfies the binding (static rows need no object)', () => {
+    const f = validateReactPageProps(
+      page(`function Page(){ return <ListView data={{ provider: 'value', items: [] }} columns={['a']} />; }`),
+    );
+    expect(f.filter((x) => x.rule === 'react-prop-missing-required')).toEqual([]);
+  });
+
+  it('ObjectForm and ObjectChart objectName stay undeprecated — not converged by this step', () => {
+    const f = validateReactPageProps(
+      page(`function Page(){ return <><ObjectForm objectName="a" /><ObjectChart objectName="a" aggregate={{ function: 'count', groupBy: 'x' }} /></>; }`),
+    );
+    expect(f.filter((x) => x.rule === REACT_PROP_DEPRECATED)).toEqual([]);
   });
 });
 
@@ -292,14 +391,14 @@ const list = (attrs: string) => `function Page(){ return <ListView ${attrs} />; 
 describe('validateReactPageProps — <ListView> searchableFields (#4329)', () => {
   it('passes a declaration whose every entry resolves', () => {
     const f = validateReactPageProps(
-      listPage(list(`objectName="crm_account" searchableFields={['name', 'billing_email']}`)),
+      listPage(list(`data={{ provider: 'object', object: 'crm_account' }} searchableFields={['name', 'billing_email']}`)),
     );
     expect(f).toEqual([]);
   });
 
   it('flags a stale entry, gating, under the metadata rule id', () => {
     const f = validateReactPageProps(
-      listPage(list(`objectName="crm_account" searchableFields={['name', 'email']}`)),
+      listPage(list(`data={{ provider: 'object', object: 'crm_account' }} searchableFields={['name', 'email']}`)),
     );
 
     expect(f).toHaveLength(1);
@@ -317,14 +416,14 @@ describe('validateReactPageProps — <ListView> searchableFields (#4329)', () =>
 
   it('suggests the real field when the stale name is close to one', () => {
     const f = validateReactPageProps(
-      listPage(list(`objectName="crm_account" searchableFields={['biling_email']}`)),
+      listPage(list(`data={{ provider: 'object', object: 'crm_account' }} searchableFields={['biling_email']}`)),
     );
     expect(f[0].message).toContain('Did you mean "billing_email"?');
   });
 
   it('accepts registry-injected system columns absent from authored fields', () => {
     const f = validateReactPageProps(
-      listPage(list(`objectName="crm_account" searchableFields={['name', 'created_at']}`)),
+      listPage(list(`data={{ provider: 'object', object: 'crm_account' }} searchableFields={['name', 'created_at']}`)),
     );
     expect(f).toEqual([]);
   });
@@ -335,7 +434,7 @@ describe('validateReactPageProps — <ListView> searchableFields (#4329)', () =>
     // whole toolbar search, for every role. Same judgment as the metadata
     // list-view surface, by the shared core.
     const f = validateReactPageProps(
-      listPage(list(`objectName="crm_account" searchableFields={['name', 'owner_id']}`)),
+      listPage(list(`data={{ provider: 'object', object: 'crm_account' }} searchableFields={['name', 'owner_id']}`)),
     );
     expect(f).toHaveLength(1);
     expect(f[0].rule).toBe(SEARCHABLE_FIELD_UNSEARCHABLE);
@@ -359,7 +458,7 @@ describe('validateReactPageProps — <ListView> searchableFields (#4329)', () =>
       fields: { name: { type: 'text' } },
     };
     const f = validateReactPageProps(
-      listPage(list(`objectName="ext_account" searchableFields={['name', 'owner_id']}`), [external]),
+      listPage(list(`data={{ provider: 'object', object: 'ext_account' }} searchableFields={['name', 'owner_id']}`), [external]),
     );
 
     expect(f).toHaveLength(1);
@@ -372,7 +471,7 @@ describe('validateReactPageProps — <ListView> searchableFields (#4329)', () =>
 
   it('flags a dotted path — search cannot resolve the traversal', () => {
     const f = validateReactPageProps(
-      listPage(list(`objectName="crm_account" searchableFields={['owner_id.name']}`)),
+      listPage(list(`data={{ provider: 'object', object: 'crm_account' }} searchableFields={['owner_id.name']}`)),
     );
     expect(f).toHaveLength(1);
     expect(f[0].hint).toContain("scans this object's own columns");
@@ -380,14 +479,14 @@ describe('validateReactPageProps — <ListView> searchableFields (#4329)', () =>
 
   it('skips an object this stack does not define', () => {
     const f = validateReactPageProps(
-      listPage(list(`objectName="pkg_contract" searchableFields={['no_such_field']}`)),
+      listPage(list(`data={{ provider: 'object', object: 'pkg_contract' }} searchableFields={['no_such_field']}`)),
     );
     expect(f).toEqual([]);
   });
 
   it('skips an object with no authored field map (external / introspected)', () => {
     const f = validateReactPageProps(
-      listPage(list(`objectName="external_invoice" searchableFields={['doc_no']}`), [
+      listPage(list(`data={{ provider: 'object', object: 'external_invoice' }} searchableFields={['doc_no']}`), [
         { name: 'external_invoice', external: { datasource: 'erp' } },
       ]),
     );
@@ -397,7 +496,7 @@ describe('validateReactPageProps — <ListView> searchableFields (#4329)', () =>
   it('skips a value built from a variable (not knowable at build time)', () => {
     const f = validateReactPageProps(
       listPage(
-        'function Page(){ const sf = ["nope"]; return <ListView objectName="crm_account" searchableFields={sf} />; }',
+        `function Page(){ const sf = ["nope"]; return <ListView data={{ provider: 'object', object: 'crm_account' }} searchableFields={sf} />; }`,
       ),
     );
     expect(f).toEqual([]);
@@ -406,7 +505,7 @@ describe('validateReactPageProps — <ListView> searchableFields (#4329)', () =>
   it('skips everything behind a spread (props may come from it)', () => {
     const f = validateReactPageProps(
       listPage(
-        'function Page(){ const p = {}; return <ListView objectName="crm_account" {...p} searchableFields={["nope"]} />; }',
+        `function Page(){ const p = {}; return <ListView data={{ provider: 'object', object: 'crm_account' }} {...p} searchableFields={["nope"]} />; }`,
       ),
     );
     expect(f).toEqual([]);
@@ -443,7 +542,7 @@ describe('validateReactPageProps — <ListView> field props (#4340)', () => {
       propsPage(
         jsx(
           'ListView',
-          `objectName="crm_account" columns={['name']} fields={['billing_email']} ` +
+          `data={{ provider: 'object', object: 'crm_account' }} columns={['name']} fields={['billing_email']} ` +
             `sort={[{ field: 'name', order: 'asc' }]} grouping={{ fields: [{ field: 'name' }] }} ` +
             `userFilters={{ element: 'dropdown', fields: [{ field: 'billing_email' }] }}`,
         ),
@@ -454,7 +553,7 @@ describe('validateReactPageProps — <ListView> field props (#4340)', () => {
 
   it('flags a stale `columns` entry, advisory, under the metadata rule id', () => {
     const f = unknownFields(
-      validateReactPageProps(propsPage(jsx('ListView', `objectName="crm_account" columns={['name', 'revenue']}`))),
+      validateReactPageProps(propsPage(jsx('ListView', `data={{ provider: 'object', object: 'crm_account' }} columns={['name', 'revenue']}`))),
     );
     expect(f).toHaveLength(1);
     expect(f[0].severity).toBe('warning');
@@ -466,7 +565,7 @@ describe('validateReactPageProps — <ListView> field props (#4340)', () => {
 
   it('flags the React overlay `fields` prop too — either spelling names columns', () => {
     const f = unknownFields(
-      validateReactPageProps(propsPage(jsx('ListView', `objectName="crm_account" fields={['nope']}`))),
+      validateReactPageProps(propsPage(jsx('ListView', `data={{ provider: 'object', object: 'crm_account' }} fields={['nope']}`))),
     );
     expect(f).toHaveLength(1);
     expect(f[0].path).toBe('pages[0].source › fields[0]');
@@ -475,7 +574,7 @@ describe('validateReactPageProps — <ListView> field props (#4340)', () => {
   it('reads a `{field}` column record, not just a bare name', () => {
     const f = unknownFields(
       validateReactPageProps(
-        propsPage(jsx('ListView', `objectName="crm_account" columns={[{ field: 'nope', width: 120 }]}`)),
+        propsPage(jsx('ListView', `data={{ provider: 'object', object: 'crm_account' }} columns={[{ field: 'nope', width: 120 }]}`)),
       ),
     );
     expect(f).toHaveLength(1);
@@ -484,11 +583,11 @@ describe('validateReactPageProps — <ListView> field props (#4340)', () => {
 
   it('reads the LEGACY bare-string sort by its head, not the whole string', () => {
     const ok = unknownFields(
-      validateReactPageProps(propsPage(jsx('ListView', `objectName="crm_account" sort="name desc"`))),
+      validateReactPageProps(propsPage(jsx('ListView', `data={{ provider: 'object', object: 'crm_account' }} sort="name desc"`))),
     );
     expect(ok).toEqual([]);
     const bad = unknownFields(
-      validateReactPageProps(propsPage(jsx('ListView', `objectName="crm_account" sort="revenue desc"`))),
+      validateReactPageProps(propsPage(jsx('ListView', `data={{ provider: 'object', object: 'crm_account' }} sort="revenue desc"`))),
     );
     expect(bad).toHaveLength(1);
     expect(bad[0].message).toContain('"revenue"');
@@ -501,7 +600,7 @@ describe('validateReactPageProps — <ListView> field props (#4340)', () => {
         propsPage(
           jsx(
             'ListView',
-            `objectName="crm_account" userFilters={{ fields: [{ field: 'nope' }] }} grouping={{ fields: [{ field: 'also_nope' }] }}`,
+            `data={{ provider: 'object', object: 'crm_account' }} userFilters={{ fields: [{ field: 'nope' }] }} grouping={{ fields: [{ field: 'also_nope' }] }}`,
           ),
         ),
       ),
@@ -514,7 +613,7 @@ describe('validateReactPageProps — <ListView> field props (#4340)', () => {
 
   it('covers the legacy `filterableFields` shorthand', () => {
     const f = unknownFields(
-      validateReactPageProps(propsPage(jsx('ListView', `objectName="crm_account" filterableFields={['nope']}`))),
+      validateReactPageProps(propsPage(jsx('ListView', `data={{ provider: 'object', object: 'crm_account' }} filterableFields={['nope']}`))),
     );
     expect(f).toHaveLength(1);
   });
@@ -527,7 +626,7 @@ describe('validateReactPageProps — filter POSITIONS gate (#4340)', () => {
     const f = unknownFields(
       validateReactPageProps(
         propsPage(
-          'function Page(){ const stage = "x"; return <ListView objectName="crm_account" filters={["nope", "=", stage]} />; }',
+          `function Page(){ const stage = "x"; return <ListView data={{ provider: 'object', object: 'crm_account' }} filters={["nope", "=", stage]} />; }`,
         ),
       ),
     );
@@ -537,7 +636,7 @@ describe('validateReactPageProps — filter POSITIONS gate (#4340)', () => {
 
   it('gates: a filter miss returns an empty list, not a skipped column', () => {
     const f = unknownFields(
-      validateReactPageProps(propsPage(jsx('ListView', `objectName="crm_account" filters={['nope', '=', 'x']}`))),
+      validateReactPageProps(propsPage(jsx('ListView', `data={{ provider: 'object', object: 'crm_account' }} filters={['nope', '=', 'x']}`))),
     );
     expect(f).toHaveLength(1);
     expect(f[0].severity).toBe('error');
@@ -546,7 +645,7 @@ describe('validateReactPageProps — filter POSITIONS gate (#4340)', () => {
 
   it('passes a field position that resolves', () => {
     const f = validateReactPageProps(
-      propsPage(jsx('ListView', `objectName="crm_account" filters={['billing_email', '=', 'a@b.c']}`)),
+      propsPage(jsx('ListView', `data={{ provider: 'object', object: 'crm_account' }} filters={['billing_email', '=', 'a@b.c']}`)),
     );
     expect(f).toEqual([]);
   });
@@ -555,7 +654,7 @@ describe('validateReactPageProps — filter POSITIONS gate (#4340)', () => {
     const f = unknownFields(
       validateReactPageProps(
         propsPage(
-          jsx('ListView', `objectName="crm_account" filters={['and', ['name', '=', 'x'], ['nope', '>', 1]]}`),
+          jsx('ListView', `data={{ provider: 'object', object: 'crm_account' }} filters={['and', ['name', '=', 'x'], ['nope', '>', 1]]}`),
         ),
       ),
     );
@@ -564,7 +663,7 @@ describe('validateReactPageProps — filter POSITIONS gate (#4340)', () => {
 
     const flat = unknownFields(
       validateReactPageProps(
-        propsPage(jsx('ListView', `objectName="crm_account" filters={[['nope', '=', 1]]}`)),
+        propsPage(jsx('ListView', `data={{ provider: 'object', object: 'crm_account' }} filters={[['nope', '=', 1]]}`)),
       ),
     );
     expect(flat).toHaveLength(1);
@@ -572,14 +671,14 @@ describe('validateReactPageProps — filter POSITIONS gate (#4340)', () => {
 
   it('says nothing when the field POSITION itself is not static', () => {
     const f = validateReactPageProps(
-      propsPage('function Page(){ const c = "x"; return <ListView objectName="crm_account" filters={[c, "=", 1]} />; }'),
+      propsPage(`function Page(){ const c = "x"; return <ListView data={{ provider: 'object', object: 'crm_account' }} filters={[c, "=", 1]} />; }`),
     );
     expect(f).toEqual([]);
   });
 
   it('says nothing when position 1 is not a known operator (not a filter node)', () => {
     const f = validateReactPageProps(
-      propsPage(jsx('ListView', `objectName="crm_account" filters={['nope', 'wat', 1]}`)),
+      propsPage(jsx('ListView', `data={{ provider: 'object', object: 'crm_account' }} filters={['nope', 'wat', 1]}`)),
     );
     expect(f).toEqual([]);
   });
@@ -748,21 +847,21 @@ describe('validateReactPageProps — <Block> escape hatch (#4340)', () => {
 describe('validateReactPageProps — field-prop false-positive guards (#4340)', () => {
   it('skips an object this stack does not define', () => {
     const f = validateReactPageProps(
-      propsPage(jsx('ListView', `objectName="pkg_thing" columns={['nope']} filters={['nope', '=', 1]}`)),
+      propsPage(jsx('ListView', `data={{ provider: 'object', object: 'pkg_thing' }} columns={['nope']} filters={['nope', '=', 1]}`)),
     );
     expect(f).toEqual([]);
   });
 
-  it('skips a block with no static objectName', () => {
+  it('skips a block with no static binding (canonical `data` built from a variable)', () => {
     const f = validateReactPageProps(
-      propsPage('function Page(){ const o = "crm_account"; return <ListView objectName={o} columns={["nope"]} />; }'),
+      propsPage(`function Page(){ const o = "crm_account"; return <ListView data={{ provider: 'object', object: o }} columns={["nope"]} />; }`),
     );
     expect(f).toEqual([]);
   });
 
   it('skips a non-static value', () => {
     const f = validateReactPageProps(
-      propsPage('function Page(){ const c = ["nope"]; return <ListView objectName="crm_account" columns={c} />; }'),
+      propsPage(`function Page(){ const c = ["nope"]; return <ListView data={{ provider: 'object', object: 'crm_account' }} columns={c} />; }`),
     );
     expect(f).toEqual([]);
   });
@@ -770,7 +869,7 @@ describe('validateReactPageProps — field-prop false-positive guards (#4340)', 
   it('skips everything behind a spread', () => {
     const f = validateReactPageProps(
       propsPage(
-        'function Page(){ const p = {}; return <ListView objectName="crm_account" {...p} columns={["nope"]} filters={["nope","=",1]} />; }',
+        `function Page(){ const p = {}; return <ListView data={{ provider: 'object', object: 'crm_account' }} {...p} columns={["nope"]} filters={["nope","=",1]} />; }`,
       ),
     );
     expect(f).toEqual([]);
@@ -779,7 +878,7 @@ describe('validateReactPageProps — field-prop false-positive guards (#4340)', 
   it('accepts registry-injected system columns and relationship paths', () => {
     const f = validateReactPageProps(
       propsPage(
-        jsx('ListView', `objectName="crm_account" columns={['created_at', 'owner_id', 'owner_id.name']} filters={['created_at', '>', 1]}`),
+        jsx('ListView', `data={{ provider: 'object', object: 'crm_account' }} columns={['created_at', 'owner_id', 'owner_id.name']} filters={['created_at', '>', 1]}`),
       ),
     );
     expect(f).toEqual([]);
@@ -1244,7 +1343,7 @@ describe('validateReactPageProps — unprovisioned injected anchors (#8340)', ()
 
   it('is silent on a declared field in the same filter position', () => {
     const f = validateReactPageProps(
-      extPage(`function Page(){ return <ListView objectName="ext_customer" filters={['tier', '=', 'gold']} />; }`),
+      extPage(`function Page(){ return <ListView data={{ provider: 'object', object: 'ext_customer' }} filters={['tier', '=', 'gold']} />; }`),
     );
     expect(f).toEqual([]);
   });
