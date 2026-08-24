@@ -560,6 +560,32 @@
  *       pushed one commit and then died (its branch moved after the claim), for
  *       the same reason — that is precisely the card the protocol protects.
  *
+ * ## H28 — the STALE BODY LINE that shadowed the live blocker
+ *
+ *   H28 an open `pm:blocked` card whose BODY names a `Blocked-by:` target that
+ *       has CLOSED while a COMMENT names one that is still OPEN. The body is
+ *       the canonical home for the line, so this is the re-park written half:
+ *       a seat found the body's upstream closed, carded the real prerequisite,
+ *       wrote the NEW blocker into a comment — and left the spent one in the
+ *       body. Measured: one card sat in exactly this shape while its real
+ *       blocker was open and `pm:dispatched`, and it was RELEASED to `pm:queue`
+ *       on the strength of the stale line.
+ *       ⚠️ The mechanism half is the gate that used to sit in front of the
+ *       liveness read. `needsBlockedByComments` skips a card whose body already
+ *       carries a line — correct for H4, which only asks whether the line
+ *       EXISTS — but H19/H26 borrowed that gathering and so resolved ONLY the
+ *       stale body target, found it closed, and published "the block has
+ *       outlived its blocker": a FALSE unlock candidate, on three consecutive
+ *       sweeps. The liveness read is therefore UNGATED now
+ *       (`needsBlockerLivenessComments`), and H4's cheap question stays cheap.
+ *       Ungating alone would only turn the false candidate into a PARTIAL one,
+ *       so this row is its pair: it names the stale body line as the thing to
+ *       fix and asks for the live blocker to be MIGRATED to the body, enforcing
+ *       the canonical-home doctrine at the moment the wrong shape is written
+ *       rather than trusting a seat to remember it mid-re-park.
+ *       FREE: the same resolutions H19 and H26 already hold, asked a third
+ *       question — which CHANNEL each target arrived in.
+ *
  * ## The close mechanism, measured (#8293)
  *
  * A half-delivered card (#8131) was closed `completed` two seconds after its
@@ -2924,16 +2950,21 @@ export function blockerTargetKey(ref, ownerRepo = OWNER_REPO) {
  * open listing by construction) — a permanent no-op that costs a row of noise
  * in every explanation of what H19 read.
  *
- * ## The comment channel's stated boundary
+ * ## The comment channel is UNGATED here (#11747)
  *
- * `commentBodies` is whatever the sweep's gated fallback read, and that gate
- * (`needsBlockedByComments`) skips a card whose BODY already carries a line.
- * So a card with a body line AND a second, different blocker parked in a
- * comment has its comment-borne target invisible to H19 — a bound inherited
- * from the gate, not a decision taken here. `undefined` (unconsulted) and
- * `null` (consulted, unreadable) both contribute nothing; the `null` case is
- * a card H4 is already firing on with a sentence that says the thread could
- * not be read, which is the louder and more accurate place for it.
+ * `commentBodies` is what `needsBlockerLivenessComments` gathered, and that
+ * gate is the label alone — it does NOT skip a card whose body already carries
+ * a line, which is where `needsBlockedByComments` (H4's gate, correctly) stops.
+ * The bound this note used to record was a real defect: a card with a body line
+ * AND a second, different blocker parked in a comment had its comment-borne
+ * target invisible here, so a RE-PARK — body line spent, new blocker in a
+ * comment — resolved only the closed target and published a false unlock
+ * candidate. Both channels now, unconditionally, for every `pm:blocked` card.
+ *
+ * `undefined` (unconsulted) and `null` (consulted, unreadable) still contribute
+ * nothing; the `null` case is a card H4 is already firing on with a sentence
+ * that says the thread could not be read, which is the louder and more accurate
+ * place for it.
  *
  * @param {object} issue
  * @param {string[]|null|undefined} commentBodies
@@ -2972,6 +3003,36 @@ export function blockerTargetsFor(issue, commentBodies, ownerRepo = OWNER_REPO) 
  */
 export function needsBlockerLiveness(issue) {
   return labelNames(issue ?? {}).includes('pm:blocked');
+}
+
+/**
+ * Which cards buy a comment fetch FOR THE LIVENESS READ — deliberately NOT
+ * `needsBlockedByComments`, and the difference is the defect this gate exists
+ * to end (#11747).
+ *
+ * That gate skips any card whose BODY already carries a `Blocked-by:` line,
+ * which is exactly right for the question IT serves: H4 asks whether the author
+ * left the machine anything at all, and a body line answers that without the
+ * network. H19 and H26 ask a different question — is what the line names still
+ * RUNNING — and for that question a body line is not an answer, it is one
+ * channel's worth of targets. Borrowing H4's gate made the liveness read resolve
+ * ONLY the body target on precisely the cards where the body is most likely to
+ * be spent: a RE-PARK. A seat that finds the body's upstream closed, cards the
+ * real prerequisite and writes the new blocker into a comment leaves a card
+ * whose body names a closed issue and whose comment names an open one — and the
+ * gated read saw only the closed one, published "the block has outlived its
+ * blocker", and a card was released into an open blocker on the strength of it.
+ *
+ * So the liveness read is ungated: every `pm:blocked` card contributes both
+ * channels, always. The cost is the gate's own complement — one comment fetch
+ * per blocked card that HAS a body line (15 of 33 in the 2026-08-24 census),
+ * bounded by an inventory the sweep already pages and paid once per sweep off
+ * the SHARED comment cache, so a card H2/H4/H17 already fetched costs nothing.
+ * ⛔ H4's gate is deliberately left alone: making the cheap question expensive
+ * would buy nothing — a body line really does discharge the duty H4 audits.
+ */
+export function needsBlockerLivenessComments(issue) {
+  return needsBlockerLiveness(issue);
 }
 
 /**
@@ -4360,6 +4421,135 @@ export function h27DeadClaimNoProgress(issue, claim, refStates, delivery, nowMs 
 }
 
 // ---------------------------------------------------------------------------
+// H28 — the STALE BODY LINE that shadowed the live blocker (#11747).
+//
+// The body is the canonical home for `Blocked-by:`; a comment is a legal second
+// channel, deliberately, because rewriting a body through the MCP escaping
+// hazard is the riskier write. Those two facts are consistent right up to the
+// moment a card is RE-PARKED, and then they collide: the seat that finds the
+// body's upstream closed cards the real prerequisite, writes the NEW blocker
+// into a comment — the cheap, safe write — and leaves the SPENT one in the
+// body. The card is now stating two blockers, one of them a fact about the
+// past, and the machinery cannot tell which is current from the line alone.
+//
+// ## Why ungating the liveness read is necessary and NOT sufficient
+//
+// Before `needsBlockerLivenessComments`, the liveness read borrowed H4's gate
+// and so read only the body on exactly these cards: it resolved the closed
+// target, found nothing else, and published "every target it names is closed:
+// nothing this card declared a wait on is still running" — a false unlock
+// candidate, three sweeps running, acted on once. Ungating fixes the falsehood:
+// the same card now resolves both targets and H19 reports 1 of 2 closed, a
+// PARTIAL discharge that says the card may still be legitimately blocked.
+//
+// But PARTIAL is where H19's duty ends. It reports the block, not the WRITE
+// that produced the ambiguity, and it says nothing about which channel is
+// carrying the live blocker — so the stale body line survives, and the next
+// re-park writes the same shape again. This row is the pair: it names the body
+// line as spent, names the live blocker sitting in a comment, and asks for the
+// migration. That is what makes the canonical-home doctrine enforced rather
+// than merely written down — the failure this whole card measured is a doctrine
+// that existed in prose and was not complied with, and prose is what failed.
+//
+// ## The exact shape, and what it deliberately does NOT fire on
+//
+// Fires only on the CONJUNCTION: a body-named target that is CLOSED **and** a
+// comment-named target, absent from the body, that is OPEN. Each half alone is
+// a different, healthy-or-already-reported state:
+//
+//   - body closed, no live comment target -> H19's ordinary expired block. The
+//     line is spent and so is the wait; there is nothing to migrate.
+//   - body open + comment open -> two live blockers stated in two channels.
+//     Untidy, not wrong, and no row: both are current, and demanding a body
+//     rewrite for tidiness would push seats at the very write the comment
+//     channel exists to avoid.
+//   - a target named in BOTH channels -> not a migration candidate at all; the
+//     body already carries it. Only a comment-ONLY live target can be missing
+//     from the canonical home.
+//   - an UNRESOLVED target on either side is silent here. H19 already fires the
+//     unjudged sentence on that card (#4690), and a migration instruction built
+//     on a target this sweep could not read would be a guess.
+//
+// ## Quota
+//
+// Free. H19 and H26 already hold these resolutions; this row asks the same rows
+// a third question — which CHANNEL each target arrived in — which the sweep can
+// answer from bodies it has already read.
+//
+// Report-only. The remedy is a body rewrite by the owning seat; ⛔ never a
+// label or a body written from this script.
+// ---------------------------------------------------------------------------
+
+/**
+ * The canonical keys a card names in ONE channel — the split H28 needs and the
+ * only thing it adds to what H19 already computed.
+ *
+ * Deliberately built from the same `blockedByTargets` + `blockerTargetKey` pair
+ * the union uses, rather than a second parser: a channel split that recognised
+ * a different set of spellings than the union would report migrations for
+ * targets the union never resolved.
+ *
+ * @returns {Set<string>} canonical `owner/repo#N` keys.
+ */
+export function blockerChannelKeys(text, issue, ownerRepo = OWNER_REPO) {
+  const keys = new Set();
+  for (const ref of blockedByTargets(text)) {
+    const target = blockerTargetKey(ref, ownerRepo);
+    if (!Number.isFinite(target.number)) continue;
+    if (target.local && target.number === issue?.number) continue;
+    keys.add(target.key);
+  }
+  return keys;
+}
+
+/**
+ * H28 — null when the body's line is not shadowing a live comment-borne
+ * blocker, else the finding sentence.
+ *
+ * @param {object} issue — an OPEN issue.
+ * @param {{ key: string, number: number, local: boolean,
+ *   state: 'open'|'closed'|'unresolved', closedAt?: string|null }[]} resolutions
+ * @param {string[]|null|undefined} commentBodies — as gathered for the liveness
+ *   read. `undefined`/`null` contribute no comment channel, so no row.
+ */
+export function h28StaleBodyBlockerLine(issue, resolutions, commentBodies, ownerRepo = OWNER_REPO) {
+  if (!needsBlockerLiveness(issue)) return null;
+  const rows = resolutions ?? [];
+  if (rows.length === 0) return null;
+
+  const bodyKeys = blockerChannelKeys(issue?.body, issue, ownerRepo);
+  const commentKeys = new Set();
+  for (const body of commentBodies ?? []) {
+    for (const key of blockerChannelKeys(body, issue, ownerRepo)) commentKeys.add(key);
+  }
+  if (bodyKeys.size === 0 || commentKeys.size === 0) return null;
+
+  const spent = rows.filter((r) => r.state === 'closed' && bodyKeys.has(r.key));
+  const live = rows.filter(
+    (r) => r.state === 'open' && commentKeys.has(r.key) && !bodyKeys.has(r.key),
+  );
+  if (spent.length === 0 || live.length === 0) return null;
+
+  return (
+    `\`pm:blocked\` whose BODY names ${spent.length} CLOSED \`Blocked-by:\` target(s) ` +
+    `(${namedTargets(spent)}) while a COMMENT names ${live.length} that ${live.length === 1 ? 'is' : 'are'} ` +
+    `still OPEN (${namedTargets(live)}) and appear(s) nowhere in the body — so the body line is ` +
+    'STALE: it states a wait that is over, and the wait that is actually running is parked in the ' +
+    'channel the body is supposed to be the canonical home for. This is the written half of a ' +
+    'RE-PARK: a seat found the body\'s upstream closed, carded the real prerequisite, and wrote ' +
+    'the new blocker into a comment (the cheaper, safer write) without spending the body line. ' +
+    '⚠️ Read what that costs before the migration: until the liveness read was ungated this card ' +
+    'resolved ONLY the closed body target and was published as a card whose every blocker had ' +
+    'closed — a FALSE unlock candidate, and one such card was released to `pm:queue` while its ' +
+    'real blocker was open and dispatched. The row now fires alongside H19\'s PARTIAL discharge ' +
+    'rather than instead of it: H19 says the block is half-expired, this says WHICH half is ' +
+    'documentation. Remedy: rewrite the body line to name the live blocker (the comment stays as ' +
+    'history), so the next reader — human or sweep — finds the current wait in the canonical ' +
+    'home. ⛔ Report-only: never a body or a label written from this script.'
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Report rendering — pure over (findings, counts), so `--self-test` pins both
 // media offline. The live sweep below picks a renderer and prints it; nothing
 // about WHAT is swept or WHICH predicates fire depends on the format.
@@ -5679,6 +5869,17 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
     if (needsBlockedByComments(issue)) await gatherBlockedByComments(issue);
     const unblockedByNothing = h4BlockedNoBlockedBy(issue, fallbackFor(issue));
     if (unblockedByNothing) findings.push([issue, 'H4', unblockedByNothing]);
+    // …and the LIVENESS read's own gathering, UNGATED (#11747). H19/H26/H28 ask
+    // whether what the line names is still RUNNING, and for that a body line is
+    // one channel's targets rather than an answer — so a card whose body line is
+    // spent and whose live blocker sits in a comment must contribute both. It
+    // rides the same cache as the H4 fetch above (a card gathered there is a
+    // no-op here), so the union of the two gates still costs at most one request
+    // per card; the delta is the gate's complement — the blocked cards that DO
+    // carry a body line. Gathered here rather than in the H19 loop below on
+    // purpose: the total-shortfall rethrow reads these stats, so every fetch this
+    // sweep makes must be counted before that check runs.
+    if (needsBlockerLivenessComments(issue)) await gatherBlockedByComments(issue);
     // H9 — judged across BOTH channels since #10403, on the same gated-fetch
     // trade as H4: a hold whose body already carries a fireable line is
     // answered without the network; a body-clean one buys (at most) the one
@@ -6081,6 +6282,12 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
     // different reads.
     const indefinite = h26BlockOnIndefiniteTarget(issue, resolutions);
     if (indefinite) findings.push([issue, 'H26', indefinite]);
+    // H28 — the same resolutions, asked a THIRD question: which CHANNEL each
+    // target arrived in. H19 reports that the block is half-expired; this
+    // reports that the expired half is the one sitting in the canonical home,
+    // which is the write to fix. Both fire on one card, deliberately.
+    const staleBody = h28StaleBodyBlockerLine(issue, resolutions, fallbackFor(issue));
+    if (staleBody) findings.push([issue, 'H28', staleBody]);
   }
   // Distinct targets, which is the unit the cache and the request count are
   // in — and the word is in the summary sentence so the number cannot be read
@@ -8923,6 +9130,98 @@ function selfTest() {
   // Both rows can fire on ONE card — different halves of one wait.
   const expiredAndIndefinite = [{ ...tgt(900, ['pm:queue']), state: 'closed' }, tgt(987, ['pm:on-hold'])];
   t('H26 + H19: a partially expired, partially indefinite block fires both', Boolean(h19BlockOutlivedBlocker(waiting(), expiredAndIndefinite)) && Boolean(h26BlockOnIndefiniteTarget(waiting(), expiredAndIndefinite)), true);
+
+  // -- The UNGATED liveness read + H28: the stale body line (#11747) ----------
+  //
+  // The fixture is the measured card's RECORDED BYTE SHAPE, not a sketch: body
+  // `Blocked-by: #9255` (closed 2026-08-19) plus the re-park's comment, which
+  // states the new blocker in the backticked-key spelling the census recorded
+  // (`Blocked-by:` #11501, open and dispatched). Both legs of the reverse
+  // verification run over these same bytes.
+  const REPARK_BODY = 'Blocked-by: #9255\n\nSome further prose about the card.';
+  const REPARK_COMMENT =
+    'PM re-park 2026-08-24: #9255 discharged, but the real prerequisite is carded.\n' +
+    '`Blocked-by:` #11501';
+  const reparked = { ...issue(['pm:blocked'], [], REPARK_BODY), number: 9592, state: 'open' };
+  const reparkKeys = (comments) =>
+    blockerTargetsFor(reparked, comments, 'objectstack-ai/objectstack').map((t2) => t2.key).join(' ');
+
+  // The GATE — the whole defect in two lines. H4's gate skips this card because
+  // its body carries a line; the liveness gate must NOT, or the live blocker is
+  // invisible to the only item that asks whether the wait is still running.
+  t('H28 gate: H4\'s gate skips a blocked card that HAS a body line', needsBlockedByComments(reparked), false);
+  t('H28 gate: …while the liveness gate reads it anyway', needsBlockerLivenessComments(reparked), true);
+  t('H28 gate: the liveness gate is the label alone, body-clean or not', needsBlockerLivenessComments(blockedCard(1, 'no line here')), true);
+  t('H28 gate: a card without the label buys no liveness fetch', needsBlockerLivenessComments(blockedCard(1, 'Blocked-by: #2', ['pm:queue'])), false);
+  t('H28 gate: a pm:blocking card is out of scope here too', needsBlockerLivenessComments(blockedCard(1, '', ['pm:blocking'])), false);
+  t('H28 gate: a missing issue does not crash', needsBlockerLivenessComments(undefined), false);
+
+  // REVERSE VERIFICATION, both legs, over the recorded bytes.
+  // OLD behaviour = what the gate produced: the comment channel never reached
+  // the liveness read, so the card resolved ONE target and it was closed.
+  const asSwept = reparkKeys(undefined);
+  t('H28 repro (OLD, gated): only the stale body target is resolved', asSwept, 'objectstack-ai/objectstack#9255');
+  const falseCandidate = h19BlockOutlivedBlocker(reparked, [target(9255, 'closed', { closedAt: '2026-08-19T11:28:26Z' })]);
+  t('H28 repro (OLD, gated): H19 publishes 1 of 1 CLOSED', falseCandidate.includes('1 of 1 `Blocked-by:` target(s)'), true);
+  t('H28 repro (OLD, gated): …as a FULL discharge — the false unlock candidate', falseCandidate.includes('Every target it names is closed'), true);
+  t('H28 repro (OLD, gated): …and never says PARTIAL', falseCandidate.includes('PARTIAL'), false);
+  // NEW behaviour = ungated: both channels, so the live blocker is resolved too.
+  const ungated = [target(9255, 'closed', { closedAt: '2026-08-19T11:28:26Z' }), target(11501, 'open')];
+  t('H28 repro (NEW, ungated): both channels are unioned', reparkKeys([REPARK_COMMENT]), 'objectstack-ai/objectstack#9255 objectstack-ai/objectstack#11501');
+  const partialNow = h19BlockOutlivedBlocker(reparked, ungated);
+  t('H28 repro (NEW, ungated): H19 reads 1 of 2', partialNow.includes('1 of 2 `Blocked-by:` target(s)'), true);
+  t('H28 repro (NEW, ungated): …and calls it a PARTIAL discharge', partialNow.includes('PARTIAL'), true);
+  t('H28 repro (NEW, ungated): …naming the live blocker as still open', partialNow.includes('`#11501`'), true);
+  t('H28 repro (NEW, ungated): …and no longer claims every target closed', partialNow.includes('Every target it names is closed'), false);
+
+  // The PAIRED row — what ungating alone does not say.
+  const stale9592 = h28StaleBodyBlockerLine(reparked, ungated, [REPARK_COMMENT], 'objectstack-ai/objectstack');
+  t('H28: the re-park shape fires', typeof stale9592, 'string');
+  t('H28: …naming the spent BODY target', stale9592.includes('`#9255` (closed 2026-08-19T11:28:26Z)'), true);
+  t('H28: …and the live COMMENT target', stale9592.includes('`#11501`'), true);
+  t('H28: …calling the body line STALE', stale9592.includes('the body line is ') && stale9592.includes('STALE'), true);
+  t('H28: …and asking for the migration to the canonical home', stale9592.includes('rewrite the body line to name the live blocker'), true);
+  t('H28: …naming the re-park as the write that produced it', stale9592.includes('RE-PARK'), true);
+  t('H28: …and recording the false unlock candidate the gate used to publish', stale9592.includes('FALSE unlock candidate'), true);
+  t('H28: report-only, never a body written from this script', stale9592.includes('never a body or a label written from this script'), true);
+  // H19 and H28 fire TOGETHER on this card — different halves of one wait.
+  t('H28 + H19: both rows fire on the re-parked card', Boolean(partialNow) && Boolean(stale9592), true);
+
+  // NEGATIVES — each half of the conjunction alone is a different state.
+  t('H28: a closed body target with NO live comment target is H19\'s row alone', h28StaleBodyBlockerLine(reparked, [target(9255, 'closed')], ['no line in this comment'], 'objectstack-ai/objectstack'), null);
+  t('H28: …and H19 does fire on it', typeof h19BlockOutlivedBlocker(reparked, [target(9255, 'closed')]), 'string');
+  t('H28: an OPEN body target beside an open comment target -> no row', h28StaleBodyBlockerLine(reparked, [target(9255, 'open'), target(11501, 'open')], [REPARK_COMMENT], 'objectstack-ai/objectstack'), null);
+  // A target named in BOTH channels is already in the canonical home: there is
+  // nothing to migrate, so the closed-body half alone must not fire.
+  const bothChannels = { ...issue(['pm:blocked'], [], 'Blocked-by: #9255'), number: 9592 };
+  t('H28: a target stated in both channels is not a migration candidate', h28StaleBodyBlockerLine(bothChannels, [target(9255, 'closed'), target(11501, 'open')], ['Blocked-by: #9255'], 'objectstack-ai/objectstack'), null);
+  // Unresolved targets are H19's unjudged sentence, never a migration order.
+  t('H28: an UNRESOLVED comment target is silent (a migration built on a guess)', h28StaleBodyBlockerLine(reparked, [target(9255, 'closed'), { ...target(11501, 'unresolved'), detail: 'HTTP 404' }], [REPARK_COMMENT], 'objectstack-ai/objectstack'), null);
+  t('H28: an UNRESOLVED body target is silent too', h28StaleBodyBlockerLine(reparked, [{ ...target(9255, 'unresolved'), detail: 'HTTP 404' }, target(11501, 'open')], [REPARK_COMMENT], 'objectstack-ai/objectstack'), null);
+  // The channel inputs the sweep can hand it, and the label gate.
+  t('H28: an unconsulted comment thread -> no row', h28StaleBodyBlockerLine(reparked, ungated, undefined, 'objectstack-ai/objectstack'), null);
+  t('H28: an unreadable comment thread -> no row (H4 owns that sentence)', h28StaleBodyBlockerLine(reparked, ungated, null, 'objectstack-ai/objectstack'), null);
+  t('H28: a body with no line at all -> no row (the comment IS the only home)', h28StaleBodyBlockerLine({ ...reparked, body: 'no line here' }, [target(11501, 'open')], [REPARK_COMMENT], 'objectstack-ai/objectstack'), null);
+  t('H28: no resolutions -> no row', h28StaleBodyBlockerLine(reparked, [], [REPARK_COMMENT], 'objectstack-ai/objectstack'), null);
+  t('H28: absent resolutions -> no row', h28StaleBodyBlockerLine(reparked, undefined, [REPARK_COMMENT], 'objectstack-ai/objectstack'), null);
+  t('H28: the label gate outranks the shape', h28StaleBodyBlockerLine({ ...reparked, labels: [{ name: 'pm:queue' }] }, ungated, [REPARK_COMMENT], 'objectstack-ai/objectstack'), null);
+  // The channel split reads the SAME spellings the union does — a split that
+  // recognised fewer would report migrations for targets nothing resolved.
+  t('H28 split: the plain body spelling', [...blockerChannelKeys('Blocked-by: #9255', reparked, 'objectstack-ai/objectstack')].join(' '), 'objectstack-ai/objectstack#9255');
+  t('H28 split: the backticked-key comment spelling', [...blockerChannelKeys('`Blocked-by:` #11501', reparked, 'objectstack-ai/objectstack')].join(' '), 'objectstack-ai/objectstack#11501');
+  t('H28 split: a cross-repo ref keeps its full key', [...blockerChannelKeys('Blocked-by: objectui#4356', reparked, 'objectstack-ai/objectstack')].join(' '), 'objectstack-ai/objectui#4356');
+  t('H28 split: a self-reference is dropped, as in the union', [...blockerChannelKeys('Blocked-by: #9592', reparked, 'objectstack-ai/objectstack')].join(' '), '');
+  t('H28 split: a mid-sentence prose mention is NOT a directive', [...blockerChannelKeys('the stated **Blocked-by: #9255** is discharged', reparked, 'objectstack-ai/objectstack')].join(' '), '');
+  t('H28 split: no text at all is an empty set', blockerChannelKeys(undefined, reparked, 'objectstack-ai/objectstack').size, 0);
+  // Multiple stale/live targets are counted and capped like every other row.
+  const manyStale = h28StaleBodyBlockerLine(
+    { ...issue(['pm:blocked'], [], 'Blocked-by: #1\nBlocked-by: #2'), number: 9592 },
+    [target(1, 'closed'), target(2, 'closed'), target(11501, 'open')],
+    [REPARK_COMMENT],
+    'objectstack-ai/objectstack',
+  );
+  t('H28: two stale body targets are counted', manyStale.includes('names 2 CLOSED'), true);
+  t('H28: …and the live one is still named', manyStale.includes('`#11501`'), true);
 
   // -- resolveSweepRepo: the parameterisation that makes a verbatim sibling
   // -- install correct rather than a green report about the wrong board (#11217)
