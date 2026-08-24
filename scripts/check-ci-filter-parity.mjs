@@ -120,7 +120,8 @@ import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import process from 'node:process';
 
-import { parse } from 'yaml';
+import { requireDependency } from './import-prerequisite.mjs';
+const { parse } = await requireDependency('yaml', () => import('yaml'), import.meta.url);
 
 import { CROSS_PACKAGE_TEST_INPUTS } from './check-cross-package-test-inputs.mjs';
 import { isEntrypoint } from './invoked-as.mjs';

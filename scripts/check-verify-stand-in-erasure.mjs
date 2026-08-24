@@ -72,10 +72,11 @@
 import { readFileSync, readdirSync, existsSync, statSync } from 'node:fs';
 import { join, dirname, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import ts from 'typescript';
+import { requireDefaultExport, requireDependency } from './import-prerequisite.mjs';
+const ts = await requireDefaultExport('typescript', () => import('typescript'), import.meta.url);
 import { parseSourceFile } from './ts-parse.mjs';
 
-import { VERIFY_STAND_IN_CHECKS } from '../eslint.config.mjs';
+const { VERIFY_STAND_IN_CHECKS } = await requireDependency('../eslint.config.mjs', () => import('../eslint.config.mjs'), import.meta.url);
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const VERIFY_SRC = join(REPO_ROOT, 'packages', 'verify', 'src');

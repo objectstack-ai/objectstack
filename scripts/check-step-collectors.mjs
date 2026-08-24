@@ -97,6 +97,7 @@
  * the over-broad reading of that fence propagates as a constraint nobody has.
  */
 
+import { requireDependency } from './import-prerequisite.mjs';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
@@ -323,7 +324,7 @@ export function bareSequence(commands) {
 // -- Entry points -------------------------------------------------------------
 
 async function loadYamlParser() {
-  const { parse } = await import('yaml');
+  const { parse } = await requireDependency('yaml', () => import('yaml'), import.meta.url);
   return parse;
 }
 

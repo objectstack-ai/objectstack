@@ -90,13 +90,15 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { ESLint } from 'eslint';
+import { requireDependency } from './import-prerequisite.mjs';
+const { ESLint } = await requireDependency('eslint', () => import('eslint'), import.meta.url);
 
-import eslintConfig, {
+const {
+  default: eslintConfig,
   QUERY_OPTIONS_RULE_ID,
   QUERY_OPTIONS_TEST_GLOBS,
   QUERY_OPTIONS_ANY_MESSAGE,
-} from '../eslint.config.mjs';
+} = await requireDependency('../eslint.config.mjs', () => import('../eslint.config.mjs'), import.meta.url);
 import {
   checkGuardAdoption,
   collectFatalMessages,

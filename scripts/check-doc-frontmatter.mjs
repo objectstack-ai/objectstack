@@ -147,7 +147,8 @@ import { createRequire } from 'node:module';
 import { join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { parse, parseDocument } from 'yaml';
+import { requireDependency } from './import-prerequisite.mjs';
+const { parse, parseDocument } = await requireDependency('yaml', () => import('yaml'), import.meta.url);
 
 import { isEntrypoint } from './invoked-as.mjs';
 
