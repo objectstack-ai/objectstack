@@ -17,9 +17,16 @@ import { APPROVAL_STATUSES, APPROVAL_STATUS_LABELS } from '@objectstack/spec/con
  * snapshots the Approval node config (approvers / behaviour) the request was
  * opened with.
  *
- * `payload_json` captures a snapshot of the target record at submission
- * time — used by notifications so they can render before the record is
- * locked or changed.
+ * `payload_json` captures a snapshot of the target record at submission time.
+ * It is retained as **audit evidence of what was actually submitted**, so the
+ * column stays whole AT REST; it is served **redacted per reader** — the
+ * SUBJECT object's field-level read controls are applied at serve time from
+ * the security service's `getReadableFields`, on the approvals-inbox door and
+ * on the generic data door alike (#11039).
+ *
+ * ⛔ Notifications are NOT a consumer of this snapshot, and the audit-evidence
+ * sentence above — not "notifications need it" — is why the column holds a
+ * full row. See the note on the field itself.
  *
  * @namespace sys
  */
@@ -214,6 +221,22 @@ export const SysApprovalRequest = ObjectSchema.create({
       group: 'State',
     }),
 
+    // The module docstring above used to justify this column with "used by
+    // notifications so they can render before the record is locked or
+    // changed". That consumer does not exist, and the claim was cited as the
+    // reason the column holds a FULL row before anyone checked it. Measured
+    // against every `this.notify(...)` call site in `approval-service.ts` —
+    // all 12 of them: each passes `{ title, message, actionUrl }` (two also
+    // `actions`), built from `object_name` / `record_id` and the caller's
+    // comment. None reads this column or the parsed `payload`. The real
+    // readers are the serve path (`rowFromRequest` -> `payload`, redacted per
+    // reader), the decide-time approver re-resolution and the org backfill,
+    // both under SYSTEM_CTX, and the free-text predicate.
+    //
+    // The `description` below is deliberately UNCHANGED: it is accurate, and
+    // it is extracted into the four generated i18n bundles as `help`. The
+    // false sentence lived only in the JSDoc above, which is not extracted —
+    // so this correction moves no translation leaf.
     payload_json: Field.textarea({
       label: 'Snapshot',
       required: false,
