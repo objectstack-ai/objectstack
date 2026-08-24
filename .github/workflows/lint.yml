@@ -3591,6 +3591,24 @@ jobs:
       - name: Check @objectstack/spec public API surface
         run: pnpm --filter @objectstack/spec run check:api-surface
 
+      # [#11350] Consumer-shaped declaration-emit pin against the BUILT root
+      # entry (an un-annotated `export default defineStack(...)` must compile
+      # with `declaration: true` — the TS2883 class). The pin is environment-
+      # gated the way the live-dialect cells are: under Test Core, spec's own
+      # dist is deliberately never built (turbo's `test` depends on `^build`,
+      # dependencies only), so there it declares a named skip. THIS lane builds
+      # the full packages closure above, so here the built dist is guaranteed —
+      # the flag turns "dist absent/stale" from a skip into a failure, which is
+      # what stops the pin from quietly degrading to never-measured if the
+      # build steps above are ever dropped (#4690). Sits with its family:
+      # `check:api-surface` / `check:skill-examples`, the other gates that read
+      # the surface a consumer actually installs. Adds no required context —
+      # a step in an existing lane (#9325).
+      - name: Root-entry type nameability pin (built dist, declaration emit)
+        env:
+          OS_EXPECT_ROOT_NAMEABILITY: '1'
+        run: pnpm --filter @objectstack/spec exec vitest run scripts/root-entry-type-nameability.pin.test.ts
+
       # Same surface, the other axis: api-surface/ records that an export
       # EXISTS, never what it resolves to — so four exported types sat at `any`
       # across a whole major with every gate green (#4171). #4115 tells consumers

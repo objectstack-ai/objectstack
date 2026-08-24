@@ -56,12 +56,36 @@
  *   so it stays red exactly as long as the harness keeps checking the axis
  *   the pin lives on. Asserted red.
  *
- * ## Dist freshness
+ * ## Dist freshness — an environment-gated measurement, the live-dialect-cell
+ * shape
  *
  * The subject under test is `dist/index.d.ts`, not `src/` — the same artifact
- * `check:api-surface` reads, refused on the same staleness rule (#7122/#7181):
+ * `check:api-surface` reads, judged by the same staleness rule (#7122/#7181):
  * a stale dist would let a root re-export removed from `src/index.ts` sit
  * green here until the next rebuild.
+ *
+ * But absence of that artifact is an ENVIRONMENT fact, not a defect: turbo's
+ * `test` task depends on `^build` (dependencies only), so the Test Core lane
+ * deliberately runs spec's own suite with spec's own dist unbuilt — a throw
+ * here reds a whole CI shard for a measurement that lane was never equipped
+ * to make (measured on PR #11716's first round: 420/421 files passed, only
+ * this file failed, at the old beforeAll throw). So the pin follows
+ * `live-dialect-matrix.testkit.ts`'s discipline — REPORTED, never omitted,
+ * with no third outcome:
+ *
+ *   - dist fresh → the two programs run, both modes.
+ *   - dist missing/stale, default → a NAMED SKIP whose title carries the
+ *     refusal reason ("it was not run" stays readable in the output). Never a
+ *     silent pass, never a throw.
+ *   - dist missing/stale under `OS_EXPECT_ROOT_NAMEABILITY=1` → a FAILURE
+ *     quoting the freshness refusal: that flag is set only by a runner that
+ *     declared it builds spec's dts first, so a skip there would be the pin
+ *     quietly degrading to never-measured — the #4690 shape.
+ *
+ * Where it runs for real in CI: the `Type Check · consumer gates` lane
+ * (lint.yml `typecheck-consumers`) sets the flag right after its full
+ * packages-closure builds, beside `check:api-surface` / `check:skill-examples`
+ * — the other consumer-shaped gates that read the built dist.
  */
 
 import { spawnSync } from 'node:child_process';
@@ -157,51 +181,77 @@ function runTsc(program: Program): { code: number; output: string } {
   return { code: res.status ?? 1, output: `${res.stdout ?? ''}${res.stderr ?? ''}` };
 }
 
-beforeAll(() => {
-  const freshness = inspectDistFreshness(PKG_DIR, 'check', RERUN);
-  if (!freshness.fresh) throw new Error(freshness.message);
+/**
+ * Read the environment ONCE, at collection time, exactly as
+ * `live-dialect-matrix.testkit.ts` reads its cell URLs: the branch below is
+ * total — measured when the dist is readable, a named skip or an expected-mode
+ * failure when it is not — so there is no third outcome and no throw that
+ * could red a lane never equipped to measure this.
+ */
+const EXPECT_BUILT_DIST = process.env.OS_EXPECT_ROOT_NAMEABILITY === '1';
+const FRESHNESS = inspectDistFreshness(PKG_DIR, 'check', RERUN);
 
-  sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'os-root-nameability-'));
-  // A real consumer's resolution, physically: a node_modules symlink into the
-  // built package, so tsc walks the package's own `exports` map and lands on
-  // `dist/index.d.ts` — the same realpath a pnpm workspace symlink produces
-  // (the #11350 measurement fired TS2883 through exactly this layout).
-  const scope = path.join(sandbox, 'node_modules', '@objectstack');
-  fs.mkdirSync(scope, { recursive: true });
-  fs.symlinkSync(PKG_DIR, path.join(scope, 'spec'), 'dir');
-
-  writeProgram(CONSUMER);
-  writeProgram(CANARY);
-});
-
-afterAll(() => {
-  if (sandbox) fs.rmSync(sandbox, { recursive: true, force: true });
-});
-
-describe('root-entry type nameability (#11350)', () => {
-  it('an un-annotated `export default defineStack(...)` declaration-emits clean against the built root entry', () => {
-    const { code, output } = runTsc(CONSUMER);
-    expect(
-      code,
-      `expected 0 diagnostics; a TS2883 naming a dist chunk means a type the root entry's ` +
-        `public declarations mention structurally is no longer nameable from the root entry ` +
-        `(re-export it from src/index.ts — see #11350). tsc said:\n${output}`,
-    ).toBe(0);
-    expect(output).not.toMatch(/error TS\d+/);
+if (!FRESHNESS.fresh) {
+  describe('root-entry type nameability (#11350)', () => {
+    it.skipIf(!EXPECT_BUILT_DIST)(
+      `spec's dist declarations are ${FRESHNESS.state} — this pin reads the BUILT root entry; ` +
+        `build @objectstack/spec first, then: ${RERUN} (skipped by default; ` +
+        `OS_EXPECT_ROOT_NAMEABILITY=1 turns this into a failure)`,
+      () => {
+        expect.fail(
+          `OS_EXPECT_ROOT_NAMEABILITY=1 while spec's dist declarations are ${FRESHNESS.state}: ` +
+            `this runner declared it builds spec's dts before the suite, so this pin must not ` +
+            `be skipped (a skip here would be the pin quietly degrading to never-measured, #4690).\n` +
+            FRESHNESS.message,
+        );
+      },
+    );
   });
+} else {
+  describe('root-entry type nameability (#11350)', () => {
+    beforeAll(() => {
+      sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'os-root-nameability-'));
+      // A real consumer's resolution, physically: a node_modules symlink into
+      // the built package, so tsc walks the package's own `exports` map and
+      // lands on `dist/index.d.ts` — the same realpath a pnpm workspace
+      // symlink produces (the #11350 measurement fired TS2883 through exactly
+      // this layout).
+      const scope = path.join(sandbox, 'node_modules', '@objectstack');
+      fs.mkdirSync(scope, { recursive: true });
+      fs.symlinkSync(PKG_DIR, path.join(scope, 'spec'), 'dir');
 
-  it('canary: the harness profile still checks the declaration-emit axis', () => {
-    const { code, output } = runTsc(CANARY);
-    expect(
-      code,
-      `the canary fixture's declaration-emit error disappeared — if the harness profile ` +
-        `lost \`declaration: true\`, the consumer pin above is green no matter what leaks. ` +
-        `tsc said:\n${output}`,
-    ).not.toBe(0);
-    // Measured: TS4094 ("Property 'x' of exported anonymous class type may
-    // not be private or protected"). Pin the TS4xxx declaration-emit family +
-    // the message's substance rather than the bare number, so a
-    // compiler-version renumbering does not false-red this line.
-    expect(output).toMatch(/error TS4\d{2,3}: .*private/);
+      writeProgram(CONSUMER);
+      writeProgram(CANARY);
+    });
+
+    afterAll(() => {
+      if (sandbox) fs.rmSync(sandbox, { recursive: true, force: true });
+    });
+
+    it('an un-annotated `export default defineStack(...)` declaration-emits clean against the built root entry', () => {
+      const { code, output } = runTsc(CONSUMER);
+      expect(
+        code,
+        `expected 0 diagnostics; a TS2883 naming a dist chunk means a type the root entry's ` +
+          `public declarations mention structurally is no longer nameable from the root entry ` +
+          `(re-export it from src/index.ts — see #11350). tsc said:\n${output}`,
+      ).toBe(0);
+      expect(output).not.toMatch(/error TS\d+/);
+    });
+
+    it('canary: the harness profile still checks the declaration-emit axis', () => {
+      const { code, output } = runTsc(CANARY);
+      expect(
+        code,
+        `the canary fixture's declaration-emit error disappeared — if the harness profile ` +
+          `lost \`declaration: true\`, the consumer pin above is green no matter what leaks. ` +
+          `tsc said:\n${output}`,
+      ).not.toBe(0);
+      // Measured: TS4094 ("Property 'x' of exported anonymous class type may
+      // not be private or protected"). Pin the TS4xxx declaration-emit family +
+      // the message's substance rather than the bare number, so a
+      // compiler-version renumbering does not false-red this line.
+      expect(output).toMatch(/error TS4\d{2,3}: .*private/);
+    });
   });
-});
+}
