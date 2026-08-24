@@ -46,7 +46,29 @@
  * lagged": a published claim can be wrong on arrival, and nothing caught that
  * either.
  *
- * ## Equality, not "every entry appears"
+ * ## What is mirrored: the SPELLINGS, not the failure box's notes
+ *
+ * The constant is the text of a CLI failure box, and it carries two kinds of
+ * line: the spellings themselves (code, each with the comment that annotates
+ * it) and free-standing NOTE PARAGRAPHS set off by blank entries. Only the
+ * first kind is published, by a rule with no judgement in it:
+ *
+ *   an entry is PUBLISHED unless it is blank, or it is a comment line that no
+ *   published entry directly precedes.
+ *
+ * So a comment CONTINUING the spelling above it travels with that spelling,
+ * and a note paragraph standing alone does not. That is not a convenience: the
+ * document on the other side is a GOVERNED instruction surface under two
+ * standing maintainer rulings — a shrink-only line ceiling
+ * (`scripts/pm/check-skill-line-ratchet.mjs`) and "operative text carries
+ * lessons self-contained ... numbers go" (2026-08-12,
+ * `scripts/pm/check-skill-id-lint.mjs`). A verbatim dump of the whole constant
+ * would import the failure box's narrative AND its issue-ID citations into that
+ * surface, breaking the second ruling outright. The projection is what lets one
+ * mechanism serve both: the doc publishes what an author must be able to read
+ * there, and the failure box keeps the commentary that belongs beside a red.
+ *
+ * ## Equality over that projection, not "every entry appears"
  *
  * Containment -- every entry of the constant appears SOMEWHERE in the block --
  * is the cheaper assertion, and it is not enough, in two directions that both
@@ -71,6 +93,13 @@
  * and the repair rides in the same PR as the code change that caused it.
  *
  * ## What it deliberately does NOT assert
+ *
+ * A prohibition written as a free-standing NOTE PARAGRAPH is not published, so
+ * this gate does not hold the document to it. That is the projection's price,
+ * stated rather than discovered: a prohibition that must bind the reader of the
+ * document belongs on a spelling line or in the document's own prose, not in a
+ * note paragraph. The `⛔ NOT a manifest name ...` lines below the anchor seeds
+ * are published today precisely because they sit on the spelling.
  *
  * Only the fenced block is judged. The prose AROUND it is not comparable to
  * anything mechanically, and a gate that implied otherwise would overstate its
@@ -203,6 +232,28 @@ export function validateEntries(value, spec) {
   return { entries: value };
 }
 
+/**
+ * The entries a document is expected to publish, from the whole constant.
+ *
+ * PUBLISHED unless the entry is blank, or it is a comment line that no
+ * published entry directly precedes. A blank entry breaks the chain, which is
+ * what separates a note paragraph from a spelling's own continuation.
+ *
+ * A spelling can never hide from this: a spelling is code, and code is
+ * published wherever it sits.
+ */
+export function publishedEntries(entries) {
+  const out = [];
+  let continues = false;
+  for (const e of entries) {
+    const t = e.trim();
+    if (t === '') { continues = false; continue; }
+    if (!t.startsWith('//')) { out.push(e); continues = true; continue; }
+    if (continues) out.push(e);
+  }
+  return out;
+}
+
 /** Line-for-line disagreements between the constant and the published block. */
 export function judge(entries, blockLines) {
   const want = entries.map(stripEnd);
@@ -254,8 +305,13 @@ async function main() {
     const block = locateBlock(doc.text, spec);
     if (block.refusal) { refusals.push(block.refusal); continue; }
 
-    const problems = judge(loaded.entries, block.lines);
-    if (problems.length) failures.push({ spec, problems, entries: loaded.entries, at: block.at });
+    const expected = publishedEntries(loaded.entries);
+    if (expected.length === 0) {
+      refusals.push(`mirror \`${spec.id}\`: ${spec.module} -> ${spec.constant} projects to NO publishable entries; an empty expectation matches nothing and reads as a pass.`);
+      continue;
+    }
+    const problems = judge(expected, block.lines);
+    if (problems.length) failures.push({ spec, problems, entries: expected, at: block.at });
   }
 
   if (refusals.length) {
@@ -294,7 +350,7 @@ async function main() {
   const rows = MIRRORS.map((m) => `${m.doc} <- ${m.module} -> ${m.constant}`);
   console.log(
     `OK: ${MIRRORS.length} published list mirror(s) match their constants line for line.\n  ${rows.join('\n  ')}\n` +
-      `  (Only the fenced block is judged — the prose around it is not machine-comparable; see this file's header.)`,
+      `  (The spellings are judged; the failure box's own note paragraphs are not published — see this file's header.)`,
   );
 }
 
@@ -359,6 +415,31 @@ async function selfTest() {
   );
   ok('trailing whitespace alone is NOT a difference (the one stated slack)', judge(ENTRIES, [`${ENTRIES[0]}   `, `${ENTRIES[1]}\t`]).length === 0);
 
+  // ── the projection: a spelling keeps its comments, a note paragraph is not published ──
+  const RAW = [
+    'const A = 1;   // seed',
+    '               // continued here',
+    '',
+    '// a NOTE paragraph, set off by a blank, carrying provenance (#1234)',
+    '// and a second line of it',
+    '',
+    'const B = 2;',
+    '  ⛔ NOT the thing next door',
+  ];
+  const proj = publishedEntries(RAW);
+  ok('a spelling is published', proj.includes('const A = 1;   // seed'));
+  ok('a comment CONTINUING a spelling travels with it', proj.includes('               // continued here'));
+  ok('a note paragraph set off by a blank is NOT published — its provenance stays in the failure box', !proj.some((l) => l.includes('#1234')));
+  ok('and neither is the rest of that paragraph', !proj.some((l) => l.includes('second line of it')));
+  ok('a blank entry is never published', !proj.includes(''));
+  ok('a spelling AFTER a note paragraph is still published — a spelling cannot hide in one', proj.includes('const B = 2;'));
+  ok('a ⛔ prohibition sitting on a spelling IS published', proj.includes('  ⛔ NOT the thing next door'));
+  ok('so the projection of those 8 entries is exactly the 4 spelling-bearing lines', proj.length === 4);
+  ok(
+    'and a doc that publishes a note-paragraph line anyway is RED',
+    judge(proj, [...proj, '// a NOTE paragraph, set off by a blank, carrying provenance (#1234)']).some((p) => p.includes('PUBLISHED but not in the constant')),
+  );
+
   // ── every unreadable state REFUSES rather than passing empty ──
   ok('a renamed heading REFUSES', locateBlock(doc(FENCED).replace(SPEC.heading, '### A different heading entirely'), SPEC).refusal?.includes('heading not found'));
   ok('a duplicated heading REFUSES as ambiguous', locateBlock(`${doc(FENCED)}\n${SPEC.heading}\n`, SPEC).refusal?.includes('occurs 2 times'));
@@ -383,6 +464,12 @@ async function selfTest() {
     ok(`live: ${spec.doc} exists`, !live.refusal);
     const loaded = await loadEntries(spec);
     ok(`live: ${spec.module} still exports ${spec.constant} as a non-empty string list`, !loaded.refusal);
+    const pub = loaded.entries ? publishedEntries(loaded.entries) : [];
+    ok(`live: ${spec.constant} projects to a non-empty published list`, pub.length > 0);
+    ok(
+      `live: no line ${spec.doc} must publish carries an issue-ID citation — an instruction surface keeps its lessons self-contained (maintainer ruling 2026-08-12, \`check-skill-id-lint\`)`,
+      !pub.some((l) => /#\d{3,}/.test(l)),
+    );
     const located = live.text ? locateBlock(live.text, spec) : { refusal: 'unreadable' };
     ok(`live: the block still LOCATES in ${spec.doc} (heading + fence, never a line number)`, Array.isArray(located.lines));
   }

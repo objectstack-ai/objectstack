@@ -87,8 +87,7 @@ deliberately: a detector with no dependencies cannot itself fail to resolve in C
 The price of a source scan is that it sees only the spellings it knows, and an
 unrecognised one produces no flag — which means no declaration, **silently**. So the
 recognised list is published rather than left inside the implementation. Seed from
-`import.meta.url`, `__dirname`, or a `findUp` walk, and write the escaping path as
-one of:
+`import.meta.url`, `__dirname` or a `findUp` walk, and write the escaping path as one of:
 
 ```ts
 const HERE = dirname(fileURLToPath(import.meta.url));   // seed (ESM)
@@ -102,13 +101,6 @@ const P = fileURLToPath(new URL('<rel>', import.meta.url));
 const P = new URL('<rel>', import.meta.url);
 readFileSync(resolve(HERE, '<rel>'))    // the same expressions in argument
 readFileSync(new URL('<rel>', import.meta.url))              // position
-
-// Any call above may be BROKEN ACROSS LINES -- a formatter does that to every
-// argument list past the print width, so it is the DEFAULT spelling for a long
-// relative literal, and it is read whole, trailing comma and all (#11093).
-
-// ANCHOR seeds -- a findUp walk, for a CJS-typed package where import.meta
-// is a TS1470. Both compose with every expression above (#10029).
 const PKG = findUp((dir) => JSON.parse(readFileSync(join(dir, 'package.json'))).name
                            === '<the name of THIS package>');   // -> package root
 const REPO = findUp((dir) => existsSync(join(dir, 'pnpm-workspace.yaml')));
@@ -117,18 +109,12 @@ const REPO = findUp((dir) => existsSync(join(dir, 'pnpm-workspace.yaml')));
      be located from here, so the escape is flagged and the path is NOT named
 ```
 
-The gate prints this list in its failure text too, and `--self-test` pins every entry.
-Reaching for a spelling that is not here? **Extend the detector and add a `--self-test`
-case in the same edit** — never route around it. An unseen read is the defect above, not
-a style question, and a newly recognised shape with no pin is the next silent regression.
-
-That block is **byte-identical** to the detector's `RECOGNISED_PATH_SPELLINGS`, and
-`node scripts/check-published-list-mirrors.mjs` holds it that way — line for line,
-comments included, because twice the stale line here was the stated *reason for a
-prohibition* (#10163, #10854), which is how an obsolete rule gets laundered into a
-live one. Extending the detector therefore means editing this block in the **same
-PR**. ⛔ The gate can only ever go RED — this file is governed, human-merge-only, so
-nothing may repair it for you; it prints the exact block to paste (#10855).
+The gate prints this list in its failure text, where the notes that go with the spellings
+live too, and `check-published-list-mirrors` holds the block above equal to it. That gate
+can only ever go RED — this file is governed, so nothing repairs it for you. Reaching for
+a spelling that is not here? **Extend the detector, add a `--self-test` case, and correct
+the block in the same edit** — never route around it. An unseen read is the defect above,
+and a newly recognised shape with no pin is the next silent regression.
 
 Two things it deliberately does not flag: a path that climbs out and lands in
 `node_modules` (an installed dependency is not a repo source input, and no turbo glob can
