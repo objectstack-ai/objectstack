@@ -755,6 +755,51 @@ describe('lintLivenessProperties', () => {
       expect(findings.map((f) => f.where)).toEqual(["translation bundle #2 · locale 'en'"]);
     });
   });
+
+  // ── #11385: the "never throws" contract also covers object/field items and
+  // every flat TYPE_COLLECTIONS entry ─────────────────────────────────────────
+  //
+  // The translation bundle walk above guards its two levels (#11383,
+  // `isRecord(bundle)` / `isRecord(data)`). Three other walks read
+  // `item.name` (or `item.object`) straight off every collection element with
+  // no such guard: the object walk, the field walk nested under it, and the
+  // flat loop that covers every OTHER governed type in TYPE_COLLECTIONS
+  // (flow/action/agent/tool/…). A `null` element — a malformed hand-built or
+  // unparsed stack, which the exported `stack: AnyRec` signature permits —
+  // threw `TypeError: Cannot read properties of null (reading 'name')`
+  // instead of being skipped, breaking the docblock's own "Advisory only —
+  // returns findings, never throws" promise. Each case below pairs the
+  // malformed element with a well-formed one carrying a REAL still-`authorWarn`
+  // ledger row, so the assertion proves two things at once: no throw, and the
+  // walk kept going past the bad element instead of aborting silently.
+  describe('never throws on a malformed collection item (#11385)', () => {
+    it('flat TYPE_COLLECTIONS loop: skips a null item and keeps walking past it', () => {
+      const findings = lintLivenessProperties({
+        // agent.memory is a real, currently-`experimental` ledger row (see
+        // "warns on an experimental prop" above) — a real ledger witness,
+        // not a synthetic one.
+        agents: [null, { name: 'ag1', memory: { kind: 'buffer' } }],
+      });
+      expect(paths(findings).some((m) => m.includes('`memory`'))).toBe(true);
+    });
+
+    it('object walk: skips a null item and keeps walking past it', () => {
+      const findings = lintLivenessProperties({
+        objects: [null, { name: 'widget', externalSharingModel: 'read' }],
+      });
+      expect(paths(findings).some((m) => m.includes('externalSharingModel'))).toBe(true);
+    });
+
+    it('field walk: skips a null item (nested under a well-formed object) and keeps walking past it', () => {
+      const findings = lintLivenessProperties({
+        objects: [{
+          name: 'widget',
+          fields: [null, { name: 'related_orders', type: 'text', relatedListFilter: { field: 'account_id' } }],
+        }],
+      });
+      expect(paths(findings).some((m) => m.includes('relatedListFilter'))).toBe(true);
+    });
+  });
 });
 
 // ── #10262: the array fan-out, tested at the WALKER's own level ──────────────
