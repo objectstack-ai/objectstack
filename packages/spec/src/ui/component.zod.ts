@@ -316,12 +316,13 @@ const COMPONENT_LEVEL_GUIDANCE: readonly KeySetGuidance[] = [
 /**
  * A component that declares no props at all — `app:launcher`, `nav:menu`,
  * `nav:breadcrumb`, `global:search`, `global:notifications`, `user:profile`,
- * `element:divider`.
+ * `element:divider`, and the two plugin console widgets `cloud-connection:panel`
+ * and `marketplace:installed-list` (#11575).
  *
  * A factory rather than one shared `EmptyProps` const, because the surface name
  * is the whole value of the rejection here: an empty shape has no candidate
  * keys, so the edit-distance fallback can say nothing, and "unrecognized key on
- * this component" would leave the author guessing which of the seven it meant.
+ * this component" would leave the author guessing which of the nine it meant.
  * One `strictObject(` call site either way — the ledger counts sites from the
  * AST, and this is one.
  *
@@ -2574,7 +2575,24 @@ export const ComponentPropsMap = {
   'global:search': emptyProps('global:search'),
   'global:notifications': emptyProps('global:notifications'),
   'user:profile': emptyProps('user:profile'),
-  
+
+  // Plugin console widgets — #11575, the #8691/#8744 mechanism two instances
+  // over, on `@objectstack/cloud-connection`'s published Setup pages: both
+  // types are console-registered renderers reachable only through the type
+  // union's open string arm, and with no row here the #5068 gate's dispatch
+  // skipped them as unregistered — any authored key would have ridden through
+  // in silence (nothing authors one today: both shipped pages carry `{}`).
+  // Key sets measured from the renderers' ACTUAL read points at the
+  // `.objectui-sha` pin (app-shell `console/cloud-connection/
+  // CloudConnectionPanel.tsx`, `console/marketplace/InstalledListWidget.tsx`):
+  // both registrations discard the schema node entirely (`() => <Widget />`)
+  // and neither component function takes a prop, so the accepted key set is
+  // EMPTY — strict, refuses every key. The registrations' declared
+  // `inputs: []` happen to agree here, but the row is the measurement, not
+  // the claim (#8691/#8744 record where those diverge).
+  'cloud-connection:panel': emptyProps('cloud-connection:panel'),
+  'marketplace:installed-list': emptyProps('marketplace:installed-list'),
+
   // AI
   'ai:chat_window': AIChatWindowProps,
   'ai:suggestion': strictObject({

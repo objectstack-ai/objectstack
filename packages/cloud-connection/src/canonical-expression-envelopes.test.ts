@@ -20,16 +20,19 @@
  * preconditions, the verdict, and a downgrade control proving the detector
  * reaches these real exports.
  *
- * ## The two exempted component types
+ * ## No standing exemptions (#11575)
  *
- * `cloud-connection:panel` and `marketplace:installed-list` are
- * console-registered widgets with no `ComponentPropsMap` row, so door 3 has
- * no schema to read their `properties` with. The exemption is asserted
- * EXACTLY (a new unmapped type reds), and it is valid only while those
- * components author an EMPTY props bag — nothing authored is nothing to
- * serve bare. The moment either widget grows a real authored prop, the
- * emptiness assert reds and forces the decision: give the type a
- * `ComponentPropsMap` row, or widen the exemption knowingly.
+ * `cloud-connection:panel` and `marketplace:installed-list` were exempted
+ * here between #11480 and #11575: console-registered widgets with no
+ * `ComponentPropsMap` row, so door 3 had no schema to read their
+ * `properties` with. #11575 gave both types their rows (strict, empty —
+ * measured from the renderers' read points at the `.objectui-sha` pin), so
+ * door 3 now reads both bags and the exemption lists are empty. The
+ * machinery stays: the exemption set is still asserted EXACTLY, so any NEW
+ * unmapped type reds and forces the same decision — declare the props
+ * schema in `ComponentPropsMap`, or record the exemption here with the
+ * reason (and then also pin the exempted bags empty, as the pre-#11575
+ * revision of this file did).
  */
 
 import { readFileSync, readdirSync } from 'node:fs';
@@ -40,7 +43,6 @@ import type { Page } from '@objectstack/spec/ui';
 import {
   auditPageExpressionEnvelopes,
   renderBareExpressionFindings,
-  walkPageComponents,
 } from '@objectstack/lint';
 import { CloudConnectionSettingsPage } from './cloud-connection-ui.js';
 import { MarketplaceInstalledPage } from './marketplace-ui.js';
@@ -56,18 +58,19 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 
 /**
  * Every page this package ships, audited by export name — with the unmapped
- * component types each page is EXPECTED to report (the exemptions above).
+ * component types each page is EXPECTED to report (none since #11575; see
+ * the module header).
  */
 const AUDITED_PAGES: { exportName: string; page: Page; exemptUnmappedTypes: string[] }[] = [
   {
     exportName: 'CloudConnectionSettingsPage',
     page: CloudConnectionSettingsPage,
-    exemptUnmappedTypes: ['cloud-connection:panel'],
+    exemptUnmappedTypes: [],
   },
   {
     exportName: 'MarketplaceInstalledPage',
     page: MarketplaceInstalledPage,
-    exemptUnmappedTypes: ['marketplace:installed-list'],
+    exemptUnmappedTypes: [],
   },
 ];
 
@@ -170,25 +173,12 @@ describe('cloud-connection Page exports serve canonical expression envelopes', (
   });
 
   it.each(AUDITS)('$exportName: unmapped component types are EXACTLY the recorded exemptions (door 3 precondition)', ({ audit, exemptUnmappedTypes }) => {
-    // See the module header for why these two types are exempt. Anything else
+    // No exemptions stand since #11575 (see the module header). Anything
     // unmapped is a new door-3 blind spot: declare the props schema in
-    // `ComponentPropsMap`, or record the exemption here with the reason.
+    // `ComponentPropsMap`, or record the exemption here with the reason —
+    // and then also pin the exempted bags empty, as the pre-#11575 revision
+    // of this file did.
     expect(audit.unmappedTypes.map(e => e.type).sort()).toEqual([...exemptUnmappedTypes].sort());
-  });
-
-  it.each(AUDITS)('$exportName: every exempted component authors an EMPTY props bag', ({ page, exemptUnmappedTypes }) => {
-    // The exemption above is only sound while there is nothing authored for
-    // door 3 to miss. A real key landing in one of these bags must force a
-    // decision (props schema row, or a conscious wider exemption) — not ride
-    // through a standing exemption silently.
-    const offenders = walkPageComponents(page as AnyRec, '')
-      .filter(w => typeof w.component.type === 'string' && exemptUnmappedTypes.includes(w.component.type))
-      .filter(w => {
-        const props = w.component.properties;
-        return !!props && typeof props === 'object' && Object.keys(props).length > 0;
-      })
-      .map(w => `${w.path} [${String(w.component.type)}]`);
-    expect(offenders.join('\n')).toBe('');
   });
 
   it.each(AUDITS)('$exportName: every authored `properties` bag parses against its props schema (door 3 precondition)', ({ audit }) => {
