@@ -192,6 +192,7 @@ import { logError, logWarn } from './log.js';
 // surface `./rest-server.js` has always offered is byte-identical.
 import {
     mapDataError,
+    sandboxBusinessMessage,
     sendThrownError,
     sendDeclaredFault,
     sendFieldVisibilityFault,
@@ -9078,6 +9079,29 @@ export class RestServer {
                     res.json(result);
                 } catch (error: any) {
                     const msg = String(error?.message ?? error ?? '');
+                    // [#11588] The text addressed to the CALLER, which for a
+                    // sandboxed hook refusal is the business message rather than
+                    // the `hook '<name>' threw: Error: …` QuickJS debug wrapper
+                    // sitting on `.message`. This route builds its envelope by
+                    // hand and shares no branch with `classifyDataError`'s
+                    // unwrap door or with `resolveErrorResponse`'s passthrough,
+                    // so it shipped the wrapper on every hook refusal while the
+                    // single-row `/data` routes served the author's sentence —
+                    // one refusal, two wordings, decided by which face caught it.
+                    // {@link sandboxBusinessMessage} is imported rather than
+                    // re-derived precisely so a third answer cannot appear here.
+                    //
+                    // Deliberately scoped to what the CLIENT reads. `logError`
+                    // below still receives the whole error, wrapper and all —
+                    // that is the half the wrapper was written for. And
+                    // `looksLikeInternalErrorLeak` below still reads the RAW
+                    // `msg`: feeding it the unwrapped text could only make it
+                    // withhold LESS, and a leak predicate must never be handed a
+                    // narrower input than the one it was calibrated on.
+                    //
+                    // Neither arm's STATUS moves. ① keeps answering the declared
+                    // 4xx and ③ keeps answering 500; only the sentence changes.
+                    const clientMsg = sandboxBusinessMessage(error) ?? msg;
                     // ── [#5352] ① The ADR-0112 envelope, read FIRST ──────────
                     // A thrown error that already carries `code` + a 4xx
                     // `status` has ANSWERED the classification question. This
@@ -9109,7 +9133,7 @@ export class RestServer {
                     const envelopeStatus = typeof error?.status === 'number' ? error.status : undefined;
                     const envelopeCode = typeof error?.code === 'string' && error.code.length > 0 ? error.code : undefined;
                     if (envelopeStatus !== undefined && envelopeStatus >= 400 && envelopeStatus < 500 && envelopeCode) {
-                        return res.status(envelopeStatus).json({ code: envelopeCode, message: msg.slice(0, 1000) });
+                        return res.status(envelopeStatus).json({ code: envelopeCode, message: clientMsg.slice(0, 1000) });
                     }
                     // ── ② … is GONE. The message-sniffing list is retired ────
                     // [#5367] `/analytics/dataset/query` used to classify six
@@ -9197,7 +9221,7 @@ export class RestServer {
                     logError('[REST] Analytics dataset query error:', error);
                     const outward = declaresServerFault(error) || looksLikeInternalErrorLeak(msg)
                         ? INTERNAL_ERROR_MESSAGE
-                        : msg.slice(0, 500);
+                        : clientMsg.slice(0, 500);
                     res.status(500).json({ code: 'ANALYTICS_QUERY_FAILED', error: outward });
                 }
             },

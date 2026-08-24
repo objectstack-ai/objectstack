@@ -260,8 +260,15 @@ function isScriptFaultMessage(message: string): boolean {
  * the caller's message is the remedy on a 4xx (#5423) — the one thing this
  * boundary must not paraphrase. `rest-hook-refusal-message-parity.test.ts` §5
  * is the control that keeps it a read.
+ *
+ * Exported for the SECOND boundary that has to ask the same question:
+ * `/analytics/dataset/query` builds its own `{ code, message }` envelope inline
+ * in `rest-server.ts` and shares no branch with either door here. It reads this
+ * rather than re-deriving the unwrap, so the analytics face and the `/data`
+ * face cannot drift into two answers for one refusal — the door-disagreement
+ * shape #7525/#8016 keeps producing when a boundary open-codes the read.
  */
-function sandboxBusinessMessage(error: any): string | undefined {
+export function sandboxBusinessMessage(error: any): string | undefined {
     if (typeof error?.innerMessage !== 'string' || !error.innerMessage) return undefined;
     if (isScriptFaultMessage(error.innerMessage)) return undefined;
     return error.innerMessage;

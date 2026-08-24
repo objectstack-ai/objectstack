@@ -483,3 +483,100 @@ describe('[#11588] the crash-with-a-declared-4xx divergence this card does NOT c
         expect(viaData.body.error).toBe(INTERNAL_ERROR_MESSAGE);
     });
 });
+
+// ---------------------------------------------------------------------------
+// §8 `/analytics/dataset/query` — the SEVENTH row, and a THIRD branch again
+//
+// This route builds its `{ code, message }` envelope by hand and reads
+// `error.message` directly. It touches neither `classifyDataError`'s unwrap door
+// nor `resolveErrorResponse`'s passthrough, so nothing in §1–§7 reaches it: it
+// needed the same read applied at its own boundary, importing
+// `sandboxBusinessMessage` rather than re-deriving the unwrap.
+//
+// Both of its client emissions are covered, because the card's repro exercised
+// only the first:
+//   ① a declared 4xx + `code` → `{ code, message }`
+//   ③ everything else         → `500 ANALYTICS_QUERY_FAILED`
+// Neither arm's STATUS moves here. ③ answering 500 for an undeclared hook
+// refusal (where `/data` answers 400) is a separate defect and is NOT touched.
+//
+// Predicted before running: §8a RED, §8b RED, §8c GREEN, §8d GREEN.
+// ---------------------------------------------------------------------------
+
+const ANALYTICS_PATH = '/api/v1/analytics/dataset/query';
+const DATASET = {
+    name: 'pipeline',
+    label: 'Pipeline',
+    object: 'crm_opportunity',
+    dimensions: [{ name: 'stage', field: 'stage', type: 'string' }],
+    measures: [{ name: 'revenue', aggregate: 'sum', field: 'amount' }],
+};
+const SELECTION = { dimensions: ['stage'], measures: ['revenue'] };
+
+async function analyticsRefusal(error: any) {
+    const rest = setup();
+    (rest as any).analyticsServiceProvider = async () => ({
+        queryDataset: vi.fn().mockRejectedValue(error),
+    });
+    const res = makeRes();
+    const route = rest.getRoutes().find(
+        (r: any) => r.method === 'POST' && r.path === ANALYTICS_PATH,
+    );
+    if (!route) throw new Error(`${ANALYTICS_PATH} route not registered`);
+    await route.handler(
+        { method: 'POST', params: {}, query: {}, headers: {}, body: { dataset: DATASET, selection: SELECTION } },
+        res,
+    );
+    return res;
+}
+
+describe('[#11588] the analytics dataset face answers in the hook\'s words too', () => {
+    it('§8a a declared 4xx + code reaches the client unwrapped', async () => {
+        const res = await analyticsRefusal(
+            sandboxRefusal('This dataset is locked during month-end close.', {
+                code: 'RECORD_LOCKED', status: 409,
+            }),
+        );
+
+        expect(res.statusCode).toBe(409);
+        expect(res.body.code).toBe('RECORD_LOCKED');
+        expect(res.body.message).toBe('This dataset is locked during month-end close.');
+        expect(JSON.stringify(res.body)).not.toMatch(WRAPPER_RE);
+    }, 60_000);
+
+    it('§8b an UNDECLARED refusal reaches the 500 arm unwrapped — the status is NOT moved', async () => {
+        // The sub-case the card's repro did not exercise. `/data` answers 400
+        // with this sentence and analytics answers 500 with it; that status
+        // disagreement is a separate defect and is deliberately left standing —
+        // asserted here so the next reader sees it was measured, not missed.
+        const res = await analyticsRefusal(sandboxRefusal('month-end close is in progress'));
+
+        expect(res.statusCode).toBe(500);
+        expect(res.body.code).toBe('ANALYTICS_QUERY_FAILED');
+        expect(res.body.error).toBe('month-end close is in progress');
+        expect(JSON.stringify(res.body)).not.toMatch(WRAPPER_RE);
+    }, 60_000);
+
+    it('§8c a declared 5xx still has its prose withheld', async () => {
+        const res = await analyticsRefusal(
+            sandboxRefusal('connect ECONNREFUSED 10.0.0.5:5432', {
+                code: 'SERVICE_UNAVAILABLE', status: 503,
+            }),
+        );
+
+        expect(res.statusCode).toBe(500);
+        expect(res.body.error).toBe(INTERNAL_ERROR_MESSAGE);
+    }, 60_000);
+
+    it('§8d ⭐ POSITIVE CONTROL — a non-sandboxed refusal is still verbatim', async () => {
+        // Same trap as §5: no `.innerMessage`, wrapper-shaped text, must survive
+        // character for character. A pattern-strip at this boundary reddens here.
+        const text = "hook 'guard' threw: Error: locked";
+        const res = await analyticsRefusal(
+            plainRefusal(text, { code: 'RECORD_LOCKED', status: 409 }),
+        );
+
+        expect(res.statusCode).toBe(409);
+        expect(res.body.message).toBe(text);
+    }, 60_000);
+});
