@@ -7634,7 +7634,57 @@ export class SqlDriver implements IDataDriver {
       }
     }
 
-    const rows = await builder;
+    // [#11455] The third read exit joins the other two. `find()` and `count()`
+    // have carried the terminal envelope since #8931; this door executed BARE,
+    // so any dialect error the statement raised left the driver as the
+    // backend's own object — a raw SQLSTATE in `code`, `status` UNDEFINED, and
+    // the compiled statement as the message. Measured on live PostgreSQL 16.13:
+    //
+    //   sum(flag) => THREW code=42883 status=undefined
+    //                msg=select sum("flag") as "n" from "…" -
+    //                    function sum(boolean) does not exist
+    //
+    // A raw `42883` is on no list `@objectstack/rest` reads, so an ordinary
+    // analytics shape — a rate measure over a flag column — was logged as an
+    // UNHANDLED server fault. `mapDataError` then had nothing declared to
+    // forward, which is the #1116/#1117 gap {@link mapAggregateFunc} closed for
+    // the FUNCTION NAME while leaving the STATEMENT half open.
+    //
+    // ⛔ Nothing here decides whether a boolean aggregate should ANSWER (by
+    // casting boolean to int in {@link SQL_AGGREGATE_FUNCTIONS}) or REFUSE —
+    // that contract question is #11152's, and #11249's for `min`/`max`. The
+    // three dialects genuinely disagree today (SQLite and MySQL's `tinyint(1)`
+    // both answer arithmetically, Postgres refuses), which is exactly why the
+    // envelope is the half that can land first: *when* it fails, the failure
+    // carries a catalogued code and a status, either way that card is ruled.
+    //
+    // ⛔ And no boolean-specific recognizer: the envelope comes from the EXIT,
+    // not from matching `42883` or the words `does not exist`. That is the
+    // #8926 lesson applied in advance — a predicate arm that matches a WORDING
+    // is an arm that silently fails to fire on the dialect nobody measured.
+    //
+    // ⛔ Deliberately NOT the {@link isUnresolvableColumnError} arm that
+    // {@link SqlDriver.count} runs first. That refusal's words are "Filter on
+    // 'x' names a column that object 'o' has no column for", and THIS door
+    // names columns in three clauses — the WHERE, the `groupBy` fields and the
+    // aggregation `field`. A blanket arm would tell the author of
+    // `avg('nosuchcol')` that their FILTER was wrong, which is the
+    // unsupportable claim the #8931 ruling refuses to make. Answering it
+    // truthfully needs a classifier this card did not measure, so the gap is
+    // filed rather than guessed at.
+    //
+    // Only the EXECUTION is guarded. Every refusal this method composes —
+    // {@link refuseAggregateFunction}, {@link refuseDistinctAggregateWithoutField},
+    // {@link unsupportedAggregationFilterError}, {@link refuseDateBucketedGroupBy}
+    // — is raised while the statement is BUILT, upstream of this line, so the
+    // catch-all cannot bury a precise refusal under a generic 500.
+    let rows: unknown[];
+    try {
+      rows = await builder;
+    } catch (error) {
+      // [#8931] The terminal catch-all — see {@link SqlDriver.backendStatementFault}.
+      throw this.backendStatementFault(object, error);
+    }
     return this.presentReadColumns(rows, presentedOutput);
   }
 
