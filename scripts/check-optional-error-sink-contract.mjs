@@ -1014,7 +1014,18 @@ function selfTest() {
     // uses the result correctly. That is precisely the half no other assertion
     // here covers — the cases above already pin the semantics — and it is the
     // half a second, hand-written copy of the vocabulary would break.
-    if (!run.toString().includes('CHANNEL_PREFILTER')) {
+    //
+    // ⚠️ COMMENTS ARE STRIPPED FIRST, and that is not tidiness. The first
+    // version of this pin tested `run.toString()` directly and stayed GREEN
+    // under the very ablation it was written for — because the comment above
+    // the call site names `CHANNEL_PREFILTER` in prose, and `toString()`
+    // returns comments verbatim. A pin satisfied by a SENTENCE DESCRIBING the
+    // code is satisfied by deleting the code and keeping the sentence.
+    const runBody = run
+        .toString()
+        .replace(/\/\*[\s\S]*?\*\//g, ' ')
+        .replace(/(^|[^:])\/\/[^\n]*/g, '$1 ');
+    if (!runBody.includes('CHANNEL_PREFILTER.test(')) {
         failures++;
         console.error(
             '  ✗ `run` does not reference CHANNEL_PREFILTER — the scan is filtering files through some other\n' +
