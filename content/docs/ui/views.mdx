@@ -430,7 +430,7 @@ fields: [
 | `colSpan` | `1-4` | Legacy absolute column span — prefer `span` |
 | `widget` | `string` | Custom widget/component name |
 | `dependsOn` | `string` | Parent field for cascading |
-| `visibleWhen` | `string` | Visibility predicate (CEL); runtime forms bind `record` (+ `previous`, `parent`) — **not** `current_user`, which is unbound at field level and would fault the predicate open (was `visibleOn`, ADR-0089) |
+| `visibleWhen` | `string` | Visibility predicate (CEL); runtime form fields bind `record` (+ `previous`, `parent`) and, since objectui#6010, `current_user` — the identity scope page components and per-option predicates already bound (ADR-0089 D1). Two surfaces still evaluate it unbound, where the predicate faults open: the console's standalone form routes `/forms/:name` and `/f/:slug` (objectui#6110), and section-level predicates (objectui#6111). (was `visibleOn`, ADR-0089) |
 
 ## Complete Example
 
