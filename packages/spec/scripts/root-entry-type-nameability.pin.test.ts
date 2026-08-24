@@ -40,7 +40,7 @@
  *   MINIMAL one-file program leaks two MORE names through `/data`
  *   (`BaseValidationRuleShape`, `FilterCondition`) that the fixed root entry
  *   still cannot name — deliberately NOT pinned here; that is #11350's
- *   recorded premise delta, its repair is a separate ruling. For the same
+ *   recorded premise delta, filed as #11709 for its own ruling. For the same
  *   reason the program contains no `@objectstack/spec/ui` or `/automation`
  *   import and no direct `import type { FormFieldInput, … }` — any of those
  *   would mask the very symptom under pin. Direct existence of the three root
