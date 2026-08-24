@@ -41,7 +41,7 @@
     "@types/node": "^26.2.0",
     "@types/sql.js": "^1.4.11",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.11"
   },
   "author": "ObjectStack",
   "repository": {

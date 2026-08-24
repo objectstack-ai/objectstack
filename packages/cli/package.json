@@ -117,11 +117,11 @@
   "devDependencies": {
     "@objectstack/driver-turso": "workspace:*",
     "@oclif/plugin-help": "^6.2.58",
-    "@oclif/plugin-plugins": "^5.4.87",
+    "@oclif/plugin-plugins": "^5.5.1",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^26.2.0",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.11"
   },
   "repository": {
     "type": "git",
