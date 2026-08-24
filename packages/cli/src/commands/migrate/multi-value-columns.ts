@@ -29,65 +29,33 @@ export type CorruptingDialect = 'postgres' | 'mysql';
 export const CORRUPTING_DIALECTS: readonly CorruptingDialect[] = ['postgres', 'mysql'];
 
 /**
- * ── The remedy statement, taken from the engine rather than invented here ───
+ * ── The remedy statement comes FROM THE ENGINE, at the point of use ─────────
  *
- * This is the statement `@objectstack/driver-sql`'s `manualJsonConversionSql`
- * emits inside the `manual_column_type_change` finding (#11720), reproduced
- * character for character. It is NOT re-derived: two of its arms were corrected
- * by running the earlier version against a live server, and a fresh derivation
- * loses both.
+ * `manualJsonConversionSql` is `@objectstack/driver-sql`'s own builder — the
+ * one whose output `manual_column_type_change` prints — re-exported from that
+ * package for this command (#11733) and imported here rather than reproduced.
+ * Two of its arms were corrected by running the earlier version against a live
+ * server (`json_build_array` over `to_json`, which yields a JSON *scalar*; and
+ * the explicit `IS NULL` arm, because `json_build_array(NULL)` is `[null]`), so
+ * a second copy of it in this package could only ever be a copy that goes
+ * stale. There is now exactly one definition, in the package that measured it.
  *
- *   - `json_build_array(col)`, never `to_json(col)`. `to_json` turns a legacy
- *     single value into a JSON **scalar**, so `Array.isArray` reads `false`
- *     under a field the metadata now declares multi-value. `json_build_array`
- *     makes Postgres 16.13 hand back the same value MySQL 8.0.46's `JSON_ARRAY`
- *     does.
- *   - the explicit `IS NULL` arm is load-bearing: `json_build_array(NULL)` is
- *     `[null]`, a one-element array. The arm was added AFTER the version
- *     without it was run on a live Postgres and observed giving every NULL row
- *     a value.
- *
- * ⚠️ The copy is not trusted on its word anywhere in this command. Two guards
- * hold it to the engine's:
- *
- *   1. at RUNTIME — {@link planStaleColumnTargets} refuses to execute a
- *      statement the engine's own finding does not contain verbatim, so the
- *      only statements this command can ever run are ones `driver-sql` printed
- *      for that exact table, column and dialect;
- *   2. at TEST TIME — `multi-value-columns.remedy-fidelity.test.ts` pins this
- *      output against `diffManagedTable()`'s finding for both dialects, so a
- *      correction landing in the engine turns this package red instead of
- *      leaving a stale statement behind a green suite.
- *
- * The copy exists because `manualJsonConversionSql` is not part of
- * `@objectstack/driver-sql`'s public surface (`src/index.ts` re-exports two
- * blocks from `schema-drift.js` and it is in neither) and this card's file
- * surface is read-only over that package. Both guards above become unnecessary
- * the day it is exported — see the PR body.
+ * It arrives through {@link RemedySqlBuilder} rather than a module-level import
+ * for a mechanical reason, not a stylistic one: no CLI production module may
+ * STATICALLY value-import a driver package. oclif `import()`s every command
+ * module on every invocation while building its command table, so one static
+ * driver import makes an unbuilt `driver-sql/dist` print a `MODULE_NOT_FOUND`
+ * block for each of the nine commands sharing that chain, in front of whatever
+ * the operator actually ran, and drops all nine from the table (#5726, pinned
+ * by `schema-migrate.lazy-driver-import.test.ts`). The command therefore
+ * `await import(...)`s the driver at the point of use and hands the builder in,
+ * which also keeps {@link planStaleColumnTargets} synchronous and pure.
  */
-export function multiValueJsonMigrationSql(
+export type RemedySqlBuilder = (
   dialect: CorruptingDialect,
   table: string,
   column: string,
-): string {
-  if (dialect === 'mysql') {
-    // MySQL will not cast text to json implicitly: rows holding a legacy single
-    // value have to become one-element arrays FIRST, or the ALTER fails with
-    // `ER_INVALID_JSON_TEXT` on the first non-JSON row.
-    return (
-      `UPDATE \`${table}\` SET \`${column}\` = JSON_ARRAY(\`${column}\`) ` +
-      `WHERE \`${column}\` IS NOT NULL AND \`${column}\` <> '' AND LEFT(\`${column}\`, 1) <> '['; ` +
-      `UPDATE \`${table}\` SET \`${column}\` = NULL WHERE \`${column}\` = ''; ` +
-      `ALTER TABLE \`${table}\` MODIFY \`${column}\` json;`
-    );
-  }
-  return (
-    `ALTER TABLE "${table}" ALTER COLUMN "${column}" TYPE json USING ` +
-    `(CASE WHEN "${column}" IS NULL THEN NULL WHEN "${column}" = '' THEN NULL ` +
-    `WHEN "${column}" LIKE '[%' THEN "${column}"::json ` +
-    `ELSE json_build_array("${column}") END);`
-  );
-}
+) => string;
 
 /**
  * Split the remedy into the statements a driver seam can take one at a time.
@@ -95,7 +63,7 @@ export function multiValueJsonMigrationSql(
  * The same split #11720's live suite executes the remedy with. It is not a
  * general SQL splitter and does not need to be: neither dialect's form contains
  * a semicolon inside a literal (`''`, `'['`), which is a property of THESE two
- * statements, pinned by `multi-value-columns.remedy-fidelity.test.ts`.
+ * statements, pinned by `multi-value-columns.dialect-probe.test.ts`.
  *
  * The MySQL form is three statements and must be run in order — the two UPDATEs
  * put every row into a shape the `MODIFY … json` will accept.
@@ -143,26 +111,35 @@ export function isStaleMultiValueColumn(entry: ManagedDriftEntry): boolean {
  *
  * ## The dialect is read off the finding, not off the connection
  *
- * There is no client-name table here on purpose. `driver-sql` owns the mapping
- * from a knex client spelling to a dialect (`postgres` / `pg` / `postgresql`
- * are one dialect under three names, and getting that list wrong is a measured
- * defect class — see `POSTGRES_EMIT_CLIENTS`), and a second copy in this
- * package would be a copy that can disagree. So the dialect is decided by which
- * dialect's statement the ENGINE's own finding contains: the two forms are
- * unmistakable (backtick-quoted MySQL versus double-quoted Postgres), and a
- * match is simultaneously the proof that the statement about to run is the one
- * `driver-sql` printed for this exact table and column.
+ * A `ManagedDriftEntry` does not carry a dialect, and there is deliberately no
+ * client-name table here: `driver-sql` owns the mapping from a knex client
+ * spelling to a dialect (`postgres` / `pg` / `postgresql` are one dialect under
+ * three names, and getting that list wrong is a measured defect class — see
+ * `POSTGRES_EMIT_CLIENTS`), so a second copy of it in this package could only
+ * ever disagree with it. The dialect is therefore decided by WHICH dialect's
+ * statement the engine's own finding message contains; the two forms are
+ * unmistakable, backtick-quoted MySQL against double-quoted Postgres.
  *
- * A finding whose message contains NEITHER form is refused, never guessed at
- * and never run — that is a remedy this command no longer recognises, and
- * executing a statement the engine did not print is the one thing it must not
- * do. SQLite lands here too if it ever produced this finding, which it does not
- * (measured: SQLite reads a stale column back as a real array, so there is
- * nothing to migrate and `diffManagedTable` stays silent).
+ * ## What the containment check claims, now that `sql` IS the engine's function
+ *
+ * While this command carried its own copy of the statement, this check was also
+ * the guard that the copy had not gone stale. That job is gone — `sql` is
+ * `manualJsonConversionSql` itself (#11733), so the two sides cannot disagree,
+ * and a test asserting they match would be a test that cannot fail.
+ *
+ * The check stays because the OTHER job it was doing is the one it now does
+ * alone: it reads the dialect, by matching the engine's finding against the
+ * engine's own function. Its failure branch remains reachable and load-bearing.
+ * A finding whose message no longer embeds the remedy — a message the engine
+ * reworded, an entry forwarded without one — yields no dialect, and the command
+ * REFUSES it rather than guess which of two dialects' DDL to run against a
+ * customer's table. SQLite would land there too if it ever produced this
+ * finding, which it does not: it reads a stale column back as a real array, so
+ * `diffManagedTable` stays silent (measured, #11720).
  */
 export function planStaleColumnTargets(
   entries: ManagedDriftEntry[],
-  opts: { tables?: string[] } = {},
+  opts: { sql: RemedySqlBuilder; tables?: string[] },
 ): StaleColumnPlan {
   const wanted = opts.tables && opts.tables.length > 0 ? new Set(opts.tables) : null;
   const targets: StaleColumnTarget[] = [];
@@ -175,7 +152,7 @@ export function planStaleColumnTargets(
 
     const message = typeof entry.message === 'string' ? entry.message : '';
     const dialect = CORRUPTING_DIALECTS.find((d) =>
-      message.includes(multiValueJsonMigrationSql(d, op.table, op.column)),
+      message.includes(opts.sql(d, op.table, op.column)),
     );
 
     if (!dialect) {
@@ -197,7 +174,7 @@ export function planStaleColumnTargets(
       from: op.from,
       to: op.to,
       dialect,
-      statements: splitRemedyStatements(multiValueJsonMigrationSql(dialect, op.table, op.column)),
+      statements: splitRemedyStatements(opts.sql(dialect, op.table, op.column)),
     });
   }
 
@@ -468,8 +445,16 @@ export default class MigrateMultiValueColumns extends Command {
         return;
       }
 
+      // Lazily, at the point of use: a static value import of a driver package
+      // in a command module costs every OTHER command its place in oclif's
+      // table when the driver is not built (#5726).
+      const { manualJsonConversionSql } = await import('@objectstack/driver-sql');
+
       const drift = await stack.driver.detectManagedDrift();
-      const plan = planStaleColumnTargets(drift, flags.table ? { tables: flags.table } : {});
+      const plan = planStaleColumnTargets(drift, {
+        sql: manualJsonConversionSql,
+        ...(flags.table ? { tables: flags.table } : {}),
+      });
 
       let result: StaleColumnRunResult;
       let verified: boolean | null = null;
@@ -522,7 +507,7 @@ export default class MigrateMultiValueColumns extends Command {
         // reports the column has not done what it claims.
         if (result.outcomes.some((o) => o.status === 'migrated')) {
           const after = await stack.driver.detectManagedDrift();
-          const stillStale = planStaleColumnTargets(after).targets;
+          const stillStale = planStaleColumnTargets(after, { sql: manualJsonConversionSql }).targets;
           verified = !result.outcomes.some(
             (o) => o.status === 'migrated' && stillStale.some((t) => t.table === o.table && t.column === o.column),
           );

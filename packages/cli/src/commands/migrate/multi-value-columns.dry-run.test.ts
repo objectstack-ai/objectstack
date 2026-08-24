@@ -30,8 +30,8 @@
  *
  *   - **is the statement right?** — answered where it can be: #11720 EXECUTES
  *     the real remedy against live Postgres 16.13 and MySQL 8.0.46 over four
- *     row states, and `multi-value-columns.remedy-fidelity.test.ts` pins that
- *     this command runs that exact statement.
+ *     row states, and the command runs that very function
+ *     (`manualJsonConversionSql`) rather than a statement of its own.
  *   - **does the executor honour the dry run?** — that is dialect-independent
  *     control flow, and answering it needs a database this suite can actually
  *     open. The statements below are a SQLite-legal stand-in shaped like the
@@ -46,7 +46,7 @@ import { describe, it, expect, beforeEach, afterAll } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { SqlDriver, diffManagedTable, type PhysicalColumn } from '@objectstack/driver-sql';
+import { SqlDriver, diffManagedTable, manualJsonConversionSql, type PhysicalColumn } from '@objectstack/driver-sql';
 import {
   runStaleColumnMigration,
   planStaleColumnTargets,
@@ -210,7 +210,7 @@ describe('os migrate multi-value-columns — the dry run changes nothing (#11733
       columns: stale,
       dialect: 'postgres',
     });
-    const plan = planStaleColumnTargets(entries);
+    const plan = planStaleColumnTargets(entries, { sql: manualJsonConversionSql });
     expect(plan.targets).toHaveLength(1); // the plan is real
 
     const before = await snapshot();
