@@ -616,7 +616,11 @@ export {
 
 export { lintLivenessProperties } from './lint-liveness-properties.js';
 export type { LivenessLintFinding } from './lint-liveness-properties.js';
-export { LIVENESS_DEAD_PROPERTY, LIVENESS_EXPERIMENTAL_PROPERTY } from './lint-liveness-properties.js';
+export {
+  LIVENESS_DEAD_PROPERTY,
+  LIVENESS_EXPERIMENTAL_PROPERTY,
+  LIVENESS_PLANNED_PROPERTY,
+} from './lint-liveness-properties.js';
 
 export { lintAutonumberFormats } from './lint-autonumber-formats.js';
 export type { AutonumberLintFinding } from './lint-autonumber-formats.js';
