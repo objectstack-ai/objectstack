@@ -27,7 +27,7 @@ export {
 } from './validate-widget-bindings.js';
 export type { WidgetBindingFinding, WidgetBindingSeverity } from './validate-widget-bindings.js';
 
-export { validateStackExpressions } from './validate-expressions.js';
+export { validateStackExpressions, fieldRuleRootIssue, FIELD_RULE_BOUND_ROOTS } from './validate-expressions.js';
 export type { ExprIssue } from './validate-expressions.js';
 
 // #4763 — `has(x)` reads as a null guard and is not one. The decision procedure

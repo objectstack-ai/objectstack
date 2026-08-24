@@ -402,6 +402,311 @@ function rulePredicates(rule: AnyRec, path: string): Array<{ label: string; raw:
 }
 
 /**
+ * A FIELD-level conditional rule (`visibleWhen` / `readonlyWhen` /
+ * `requiredWhen`) that reaches for a namespace root the field level does not
+ * bind. The field level binds THREE roots and nothing else — `record`,
+ * `previous`, and `parent` on a master-detail line item — measured at three
+ * independent ends: the server (`rule-validator.ts` binds
+ * `{ record, previous, extra: { parent } }` for `readonlyWhen` and
+ * `{ record, previous, ...parentScope }` for `requiredWhen`), the client
+ * (`evalFieldPredicate` binds `record` + `previous` + a caller `scope` that
+ * is only ever `{ parent }` across objectui's five field-level call sites),
+ * and the authoring surface (objectui's `FIELD_RULE_ROOTS`, whose comment
+ * says "nothing else").
+ *
+ * ## Why this is a rule of its own rather than a missing root
+ *
+ * Until #6290 the same rejection fell out of `@objectstack/formula`'s
+ * `SCOPE_ROOTS` not listing `current_user` — a global baseline, doing a
+ * per-surface job by accident. Two things were wrong with that:
+ *
+ *  1. The rest of the package said the opposite. `introspectScope` hands
+ *     `current_user` to authors as a legal root and `checkRoleCatalog`'s four
+ *     position-membership regexes all lead with it, because ADR-0068 D1 makes
+ *     it THE canonical spelling and `buildScope` really does mount it. One
+ *     package, two accounts of one root.
+ *  2. The diagnostic was the generic bare-field one, so it prescribed
+ *     "Write `record.current_user`" — a shape that binds on NO layer. An
+ *     author who followed it wrote something strictly worse than what they
+ *     started with, and the failure stayed silent.
+ *
+ * So the baseline now declares the root (a reference through it never faults
+ * platform-wide) and the surface that genuinely cannot bind it says so here,
+ * in its own words, with the prescriptions that actually exist.
+ *
+ * ## Why the membership test is an ALLOWLIST (#6713)
+ *
+ * Until #6713 this rule matched a hand-written DENYLIST — one root in #6584,
+ * three after #6585 (`current_user` / `user` / `ctx`). The denylist was never
+ * the truth: the three anchors above pin a three-item ALLOWLIST, and
+ * everything outside it is equally unbound, faults identically, and — this is
+ * the part that made the hole invisible — is equally SILENT. A root in
+ * `SCOPE_ROOTS` resolves in the strict env, so the bare-reference check one
+ * line up never fires on it either. #6713 measured 21 roots living in that
+ * gap (`input`, `output`, `os`, `vars`, `variables`, `automation`, `context`,
+ * `args`, `item`, `env`, `step`, `result`, `trigger`, `event`, `payload`,
+ * `data`, `params`, `config`, `settings`, `features`, `current`), two of them
+ * highly credible author typos rather than theoretical members:
+ *
+ *  - `os.user.id` — ADR-0068 D1's FOURTH user spelling. #6585 took three and
+ *    left this one, so the same semantic error stayed silent under one of the
+ *    four names the platform itself mounts the user object under.
+ *  - `data.status == 'x'` — `data` is the LEGAL root of this very
+ *    `visibleWhen` key on a METADATA form (`view.zod.ts`: "Root: `record` …
+ *    in runtime forms, or `data` in metadata forms"). Two form kinds, one key
+ *    name, different roots — and the repo's own `*.form.ts` files are full of
+ *    the `data` spelling for an author to copy.
+ *
+ * A denylist cannot track `SCOPE_ROOTS`: every root added there is unreported
+ * here until somebody remembers to copy it across (`current_user` itself
+ * arrived in #6290 and needed #6584 to be noticed). The allowlist inverts the
+ * maintenance burden onto the three roots that are pinned by three anchors and
+ * change only when the evaluators do.
+ *
+ * The membership test is `SCOPE_ROOTS` minus the allowlist, taken from
+ * `@objectstack/formula` rather than restated here (#6713 published it for
+ * this consumer) — one list, one definition, no drift. It deliberately is NOT
+ * `firstUndeclaredReference`, the declaredness oracle the sibling visibility
+ * rule uses, and the difference is a measured false positive rather than a
+ * preference: the strict env also declares CEL's TYPE names, so
+ * `type(record.x) == string` reports `string` as a root that "resolves".
+ * Judging by declaredness would reject that legitimate predicate; judging by
+ * `SCOPE_ROOTS` membership does not. Everything the oracle owns and this list
+ * does not — bare field references, comprehension-macro variables — keeps
+ * falling to the bare-reference check, which has the right prescription for
+ * it. The two partitions are disjoint and there is no gap between them.
+ *
+ * ## Why it is an error and not a warning
+ *
+ * Every fault direction available here is silent, and two of the three are
+ * the opposite of what the author declared (see the per-slot table below):
+ * a `visibleWhen` written to HIDE leaves the field visible to everyone, a
+ * `readonlyWhen` written to unlock-under-a-condition locks the field on every
+ * write, and a `requiredWhen` simply never fires. None of the three produces
+ * a runtime error an author can find; the only signal that exists is this one
+ * (#6146).
+ *
+ * Verdict scope is the field level only. Per-option `visibleWhen` is checked
+ * by the loop in the field walk and deliberately NOT passed through here:
+ * options resolve against the host's predicate scope, which binds
+ * `current_user` (ADR-0068 / objectui#2284) — that surface is where such a
+ * predicate belongs, which is why it is also the first prescription below.
+ *
+ * ## The user roots, and why `ctx` is judged whole-root (#6585)
+ *
+ * ADR-0068 D1 makes `user` and `ctx.user` ALIASES of `current_user` — one
+ * `EvalUser` object under every spelling (`buildScope` in
+ * `formula/stdlib.ts` hangs the same reference on `current_user` / `user` /
+ * `ctx.user` / `os.user`). Matching only the canonical spelling meant the
+ * identical semantic error got a diagnostic under `current_user` and total
+ * silence under the aliases — which spelling the author picked decided
+ * whether they got the diagnostic, the exact fork AI authors cannot
+ * self-check. All four roots now share one verdict and one prescription;
+ * the message names the spelling found, nothing else varies. (`os` joined the
+ * set in #6713 — it is the fourth name `buildScope` mounts the same object
+ * under, and the allowlist would have rejected it anyway; what the user tier
+ * decides is only WHICH prescription it gets, and the user one is right for
+ * `os.user`. `os.org` / `os.env` land in the same tier because the option
+ * surface named by the first prescription binds the whole `os` namespace, not
+ * only its `user` member.)
+ *
+ * `ctx` is judged as a WHOLE root, not only in `ctx.user` form, because at
+ * this surface that is simply what is true: `buildScope` creates the `ctx`
+ * root ONLY when the evaluation carries a user (`scope.ctx = { user }`
+ * inside `if (ctx.user !== undefined)`), and no field-level site passes one
+ * — the server binds `record`+`previous`(+`parent`) (`rule-validator.ts`
+ * `readonlyWhenBindings` / the `requiredWhen` block) and the client's
+ * `evalFieldPredicate` binds `record`+`previous`+caller `scope` (only ever
+ * `{ parent }`). So `ctx.locale` faults exactly like `ctx.user.id` here.
+ * `ctx` IS ActionEngine's predicate root elsewhere — the platform's real
+ * `ctx.user` predicates all sit on action `visible` (`sys-user.object.ts`,
+ * `sys-invitation.object.ts`), a surface this helper never reads — and
+ * measured usage of field-level `*When` with ANY user root is zero across
+ * examples/, packages/ and objectui (#6585's sweep).
+ *
+ * The rejected alternative was matching `ctx` only in its `ctx.user` form.
+ * `collectCelRootIdentifiers` reports ROOTS and drops member names by
+ * design, so that reading needs a source-level spelling match — and a
+ * spelling match is precisely the defect this rule exists to remove: it
+ * would re-open the same fork one level down (`ctx["user"].id` silent,
+ * `ctx.user.id` rejected), while leaving a real fail-open fault (`ctx.locale`)
+ * unreported for the sake of a narrower rule NAME.
+ *
+ * ## The message tiers on TWO orthogonal axes
+ *
+ * The causal half tiers by SLOT (#6716); the prescription half tiers by ROOT
+ * (#6713). They are independent — `data` on a `readonlyWhen` needs the
+ * metadata-form prescription AND the locked-field consequence — so one
+ * skeleton carries both rather than a message per combination.
+ *
+ * ### Axis 1 — the consequence, by SLOT (#6716, all three cells measured)
+ *
+ * Until #6713/#6716 all three slots shared ONE sentence: "the predicate
+ * faults and falls back to VISIBLE, leaving the field the test was meant to
+ * hide showing for everyone". That is precise for exactly one of them. The
+ * measurement, at both ends of each slot:
+ *
+ *  - **`visibleWhen` — client-only, fail-OPEN, sentence was correct.** The
+ *    server never evaluates a FIELD-level `visibleWhen` at all:
+ *    `rule-validator.ts`'s `ConditionalFieldDef` has no such member, and
+ *    `hasFieldRules` gates on `requiredWhen || readonlyWhen ||
+ *    fieldHasOptionVisibility` — the `visibleWhen` it does evaluate is the
+ *    per-OPTION one. So the only verdict is the renderer's, and
+ *    `resolveFieldRuleState` passes `fallback: true` for visibility. Field
+ *    visible to everyone, exactly as the old sentence said.
+ *  - **`readonlyWhen` — the two ends fault in OPPOSITE directions, and the
+ *    server wins.** Server: `isReadonlyWhenLocked` matches the fault with
+ *    `unknownVariableOf` and returns `true` — "the declared lock is not
+ *    waived because it could not be evaluated" (#4889's carve-out, whose
+ *    trigger is precisely the unbound-ROOT case, not the undeclared-key one)
+ *    — and `stripReadonlyWhenFields` then DELETES the field from the incoming
+ *    payload and lets the rest of the write through. Client:
+ *    `resolveFieldRuleState` passes `fallback: false`, so the form renders the
+ *    field editable. The standing "server enforces, client is courtesy" rule
+ *    — cited in this repo as ADR-0057 D10, an attribution rather than a
+ *    resolvable anchor (#9628) — resolves the disagreement: the author edits
+ *    the field, the save reports
+ *    success, and the value silently never lands. The old sentence told this
+ *    author the field would be VISIBLE TO EVERYONE — the opposite failure, and
+ *    the opposite troubleshooting direction.
+ *  - **`requiredWhen` — fail-OPEN at both ends, and never about visibility.**
+ *    Server: the `requiredWhen` block logs `unknownVariableOf`'s name and
+ *    `continue`s — #4977 deliberately did not copy #4889's carve-out, so the
+ *    required-check is skipped for that write. Client: `fallback: false`, so
+ *    the form does not mark the field required either. Both ends agree and
+ *    both do nothing: the requirement is never enforced anywhere, and a record
+ *    saves with the field empty. "Falls back to VISIBLE" was not merely
+ *    imprecise here, it named the wrong property of the field.
+ *
+ * `conditionalRequired` also reaches this helper (the field walk still passes
+ * it). It is a `retiredKey` in `FieldSchema` — the strict schema rejects it by
+ * name — so the branch is inert on the parsed compile path, and it gets a
+ * slot-agnostic clause rather than a fabricated fourth measurement.
+ *
+ * ### Axis 2 — the prescription, by ROOT (#6713)
+ *
+ * The pre-#6713 prescriptions are user-oriented (move to the option level,
+ * declare permission-set FLS) because the pre-#6713 denylist held only user
+ * roots. Handed to an author who wrote `data.type == 'select'`, "move it to
+ * the option's `visibleWhen`" answers a question nobody asked. Three tiers:
+ *
+ *  - **user roots** (`current_user` / `user` / `ctx` / `os`) keep the existing
+ *    two user-specific prescriptions plus the `record` rewrite;
+ *  - **`data`** gets the metadata-form-vs-runtime-form explanation, because
+ *    that is what the mistake IS — the same key name, the other form kind's
+ *    root;
+ *  - **everything else** gets the general rewrite, phrased without claiming
+ *    which other surface the author copied it from.
+ */
+/**
+ * The roots a field-level `*When` predicate binds. Everything else in
+ * `SCOPE_ROOTS` is rejected — see the allowlist section above.
+ */
+export const FIELD_RULE_BOUND_ROOTS = ['record', 'previous', 'parent'] as const;
+/**
+ * ADR-0068 D1's four user spellings, in the order the message's tie-break
+ * prefers them (canonical first — the #6585 ordering, with `os` appended so
+ * the pre-existing three keep their exact precedence).
+ */
+const FIELD_RULE_USER_ROOTS = ['current_user', 'user', 'ctx', 'os'] as const;
+/**
+ * The slot-agnostic clause — provably true for any slot, specific to none.
+ * Used where the honest answer is "not measured for this slot", never as a
+ * softening of a cell that WAS measured.
+ */
+const FIELD_RULE_SLOT_CONSEQUENCE_GENERIC =
+  'the predicate faults, and a faulting rule never produces the verdict you declared — each ' +
+  'slot resolves the fault to its own fallback, and none of those fallbacks is yours';
+/** Axis 1 — see "the consequence, by SLOT" above. Every cell is measured. */
+const FIELD_RULE_SLOT_CONSEQUENCE: Record<string, string> = {
+  visibleWhen:
+    'the predicate faults and the renderer falls back to VISIBLE ' +
+    '(`resolveFieldRuleState` evaluates visibility with `fallback: true`, and no server-side ' +
+    'gate evaluates a field-level `visibleWhen` at all), leaving the field the test was meant ' +
+    'to hide showing for everyone (#6146)',
+  readonlyWhen:
+    'the predicate faults — and the two ends fault in OPPOSITE directions. The server treats ' +
+    'the field as LOCKED (`isReadonlyWhenLocked` will not waive a declared lock it could not ' +
+    'evaluate, #4889) and drops your value from the payload, while the form still renders the ' +
+    'field editable (`fallback: false`). The server is the one that decides: ' +
+    'the field looks writable, the save reports success, and the value silently never lands',
+  requiredWhen:
+    'the predicate faults and the requirement is never enforced anywhere — the server logs it ' +
+    'and SKIPS the check (fail-open, #4977 deliberately did not take #4889\'s carve-out) and ' +
+    'the form does not mark the field required either, so a record saves with the field empty',
+  // Listed rather than left to the `??` below, so the map covers every slot
+  // the field walk passes and the default stays unreachable. `FieldSchema`
+  // declares this key only as a `retiredKey`, which rejects it by name, so
+  // there is no fourth runtime to measure — the honest clause is the generic
+  // one, not a fabricated fourth cell (#6716).
+  conditionalRequired: FIELD_RULE_SLOT_CONSEQUENCE_GENERIC,
+};
+
+/**
+ * The decision half of the rule documented above, as ONE exported function so
+ * every surface that judges a field-level `*When` stands on the same verdict
+ * AND the same message (Prime Directive #12). Two consumers today: the
+ * metadata walk in {@link validateStackExpressions} below, and the docs-corpus
+ * gate `scripts/check-doc-formula-expressions.mjs`, which judges the same three
+ * slots where a fenced example's enclosing structure identifies the field layer
+ * (#11407). Before that gate existed this lived as a closure inside the walk —
+ * fine while there was one caller, and exactly how a second caller comes to own
+ * a DIALECT of the rule instead of the rule.
+ *
+ * `null` = nothing to report: the source does not parse (the syntax pass owns
+ * that, and reporting it twice under a worse name is the #4889 mistake), or
+ * every root it reads is one the field level binds.
+ */
+export function fieldRuleRootIssue(
+  slot: string,
+  source: string,
+): { root: string; message: string } | null {
+  const roots = collectCelRootIdentifiers(source);
+  if (!roots.ok) return null;
+  // Filtered through SCOPE_ROOTS, in SCOPE_ROOTS order — so a bare field
+  // reference (owned by the bare-reference check one line up) and a CEL type
+  // name (`type(record.x) == string`) can never land here.
+  const kept = SCOPE_ROOTS.filter(
+    (r) => !(FIELD_RULE_BOUND_ROOTS as readonly string[]).includes(r) && roots.roots.includes(r),
+  );
+  if (kept.length === 0) return null;
+  // One issue per slot even when a predicate reaches for two rejected roots.
+  // User roots win the tie-break (canonical spelling first) so #6585's
+  // message stays stable; anything else falls back to SCOPE_ROOTS order,
+  // which is stable too — never AST walk order.
+  const root = FIELD_RULE_USER_ROOTS.find((r) => kept.includes(r)) ?? kept[0]!;
+  const prescription = (FIELD_RULE_USER_ROOTS as readonly string[]).includes(root)
+    ? `To gate the CHOICES of a select by user, move the predicate to the option's own ` +
+      `\`visibleWhen\` (\`options: [{ …, visibleWhen: … }]\`) — per-option is the one \`*When\` ` +
+      `surface that binds \`current_user\` and its ADR-0068 aliases. To hide the FIELD by role, ` +
+      `declare field-level security on a permission set ` +
+      `(\`fields: { '<object>.<field>': { readable: false } }\`), which the server enforces. ` +
+      `To gate on record state, rewrite the predicate against \`record\`.`
+    : root === 'data'
+      // The `*.form` spelling is deliberately not `*.form.ts`: this is a
+      // STRING literal, and #5017's receiver scan strips comments but not
+      // strings, so `form.ts` inside the message registers `form` as a read
+      // receiver of this rule. Measured — it went red on the first run.
+      ? `\`data\` is the root of a METADATA form (a \`*.form\` module — the metadata row ` +
+        `being edited); ` +
+        `this is an OBJECT field, whose runtime form binds the row as \`record\` — one key name, ` +
+        `two form kinds, two roots. Rewrite \`data.<key>\` as \`record.<field>\`.`
+      : `\`${root}\` is declared platform-wide and bound at OTHER evaluation sites (flow, ` +
+        `automation, screen and action predicates), never at the field level. Rewrite the ` +
+        `predicate against \`record\` (plus \`previous\`, and \`parent\` on a master-detail line ` +
+        `item), or move the decision to a surface that binds \`${root}\`.`;
+  return {
+    root,
+    message:
+      `\`${slot}\` reads \`${root}\`, but a field-level conditional rule binds only ` +
+      `\`record\` (plus \`previous\`, and \`parent\` on a master-detail line item) — ` +
+      `\`${root}\` is unbound here, so ` +
+      `${FIELD_RULE_SLOT_CONSEQUENCE[slot] ?? FIELD_RULE_SLOT_CONSEQUENCE_GENERIC}. ` +
+      prescription,
+  };
+}
+
+/**
  * Validate every predicate in the stack. Returns the list of issues (empty =
  * clean). Caller decides how to surface / whether to fail the build.
  */
@@ -539,293 +844,15 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
   };
 
   /**
-   * A FIELD-level conditional rule (`visibleWhen` / `readonlyWhen` /
-   * `requiredWhen`) that reaches for a namespace root the field level does not
-   * bind. The field level binds THREE roots and nothing else — `record`,
-   * `previous`, and `parent` on a master-detail line item — measured at three
-   * independent ends: the server (`rule-validator.ts` binds
-   * `{ record, previous, extra: { parent } }` for `readonlyWhen` and
-   * `{ record, previous, ...parentScope }` for `requiredWhen`), the client
-   * (`evalFieldPredicate` binds `record` + `previous` + a caller `scope` that
-   * is only ever `{ parent }` across objectui's five field-level call sites),
-   * and the authoring surface (objectui's `FIELD_RULE_ROOTS`, whose comment
-   * says "nothing else").
-   *
-   * ## Why this is a rule of its own rather than a missing root
-   *
-   * Until #6290 the same rejection fell out of `@objectstack/formula`'s
-   * `SCOPE_ROOTS` not listing `current_user` — a global baseline, doing a
-   * per-surface job by accident. Two things were wrong with that:
-   *
-   *  1. The rest of the package said the opposite. `introspectScope` hands
-   *     `current_user` to authors as a legal root and `checkRoleCatalog`'s four
-   *     position-membership regexes all lead with it, because ADR-0068 D1 makes
-   *     it THE canonical spelling and `buildScope` really does mount it. One
-   *     package, two accounts of one root.
-   *  2. The diagnostic was the generic bare-field one, so it prescribed
-   *     "Write `record.current_user`" — a shape that binds on NO layer. An
-   *     author who followed it wrote something strictly worse than what they
-   *     started with, and the failure stayed silent.
-   *
-   * So the baseline now declares the root (a reference through it never faults
-   * platform-wide) and the surface that genuinely cannot bind it says so here,
-   * in its own words, with the prescriptions that actually exist.
-   *
-   * ## Why the membership test is an ALLOWLIST (#6713)
-   *
-   * Until #6713 this rule matched a hand-written DENYLIST — one root in #6584,
-   * three after #6585 (`current_user` / `user` / `ctx`). The denylist was never
-   * the truth: the three anchors above pin a three-item ALLOWLIST, and
-   * everything outside it is equally unbound, faults identically, and — this is
-   * the part that made the hole invisible — is equally SILENT. A root in
-   * `SCOPE_ROOTS` resolves in the strict env, so the bare-reference check one
-   * line up never fires on it either. #6713 measured 21 roots living in that
-   * gap (`input`, `output`, `os`, `vars`, `variables`, `automation`, `context`,
-   * `args`, `item`, `env`, `step`, `result`, `trigger`, `event`, `payload`,
-   * `data`, `params`, `config`, `settings`, `features`, `current`), two of them
-   * highly credible author typos rather than theoretical members:
-   *
-   *  - `os.user.id` — ADR-0068 D1's FOURTH user spelling. #6585 took three and
-   *    left this one, so the same semantic error stayed silent under one of the
-   *    four names the platform itself mounts the user object under.
-   *  - `data.status == 'x'` — `data` is the LEGAL root of this very
-   *    `visibleWhen` key on a METADATA form (`view.zod.ts`: "Root: `record` …
-   *    in runtime forms, or `data` in metadata forms"). Two form kinds, one key
-   *    name, different roots — and the repo's own `*.form.ts` files are full of
-   *    the `data` spelling for an author to copy.
-   *
-   * A denylist cannot track `SCOPE_ROOTS`: every root added there is unreported
-   * here until somebody remembers to copy it across (`current_user` itself
-   * arrived in #6290 and needed #6584 to be noticed). The allowlist inverts the
-   * maintenance burden onto the three roots that are pinned by three anchors and
-   * change only when the evaluators do.
-   *
-   * The membership test is `SCOPE_ROOTS` minus the allowlist, taken from
-   * `@objectstack/formula` rather than restated here (#6713 published it for
-   * this consumer) — one list, one definition, no drift. It deliberately is NOT
-   * `firstUndeclaredReference`, the declaredness oracle the sibling visibility
-   * rule uses, and the difference is a measured false positive rather than a
-   * preference: the strict env also declares CEL's TYPE names, so
-   * `type(record.x) == string` reports `string` as a root that "resolves".
-   * Judging by declaredness would reject that legitimate predicate; judging by
-   * `SCOPE_ROOTS` membership does not. Everything the oracle owns and this list
-   * does not — bare field references, comprehension-macro variables — keeps
-   * falling to the bare-reference check, which has the right prescription for
-   * it. The two partitions are disjoint and there is no gap between them.
-   *
-   * ## Why it is an error and not a warning
-   *
-   * Every fault direction available here is silent, and two of the three are
-   * the opposite of what the author declared (see the per-slot table below):
-   * a `visibleWhen` written to HIDE leaves the field visible to everyone, a
-   * `readonlyWhen` written to unlock-under-a-condition locks the field on every
-   * write, and a `requiredWhen` simply never fires. None of the three produces
-   * a runtime error an author can find; the only signal that exists is this one
-   * (#6146).
-   *
-   * Verdict scope is the field level only. Per-option `visibleWhen` is checked
-   * by the loop in the field walk and deliberately NOT passed through here:
-   * options resolve against the host's predicate scope, which binds
-   * `current_user` (ADR-0068 / objectui#2284) — that surface is where such a
-   * predicate belongs, which is why it is also the first prescription below.
-   *
-   * ## The user roots, and why `ctx` is judged whole-root (#6585)
-   *
-   * ADR-0068 D1 makes `user` and `ctx.user` ALIASES of `current_user` — one
-   * `EvalUser` object under every spelling (`buildScope` in
-   * `formula/stdlib.ts` hangs the same reference on `current_user` / `user` /
-   * `ctx.user` / `os.user`). Matching only the canonical spelling meant the
-   * identical semantic error got a diagnostic under `current_user` and total
-   * silence under the aliases — which spelling the author picked decided
-   * whether they got the diagnostic, the exact fork AI authors cannot
-   * self-check. All four roots now share one verdict and one prescription;
-   * the message names the spelling found, nothing else varies. (`os` joined the
-   * set in #6713 — it is the fourth name `buildScope` mounts the same object
-   * under, and the allowlist would have rejected it anyway; what the user tier
-   * decides is only WHICH prescription it gets, and the user one is right for
-   * `os.user`. `os.org` / `os.env` land in the same tier because the option
-   * surface named by the first prescription binds the whole `os` namespace, not
-   * only its `user` member.)
-   *
-   * `ctx` is judged as a WHOLE root, not only in `ctx.user` form, because at
-   * this surface that is simply what is true: `buildScope` creates the `ctx`
-   * root ONLY when the evaluation carries a user (`scope.ctx = { user }`
-   * inside `if (ctx.user !== undefined)`), and no field-level site passes one
-   * — the server binds `record`+`previous`(+`parent`) (`rule-validator.ts`
-   * `readonlyWhenBindings` / the `requiredWhen` block) and the client's
-   * `evalFieldPredicate` binds `record`+`previous`+caller `scope` (only ever
-   * `{ parent }`). So `ctx.locale` faults exactly like `ctx.user.id` here.
-   * `ctx` IS ActionEngine's predicate root elsewhere — the platform's real
-   * `ctx.user` predicates all sit on action `visible` (`sys-user.object.ts`,
-   * `sys-invitation.object.ts`), a surface this helper never reads — and
-   * measured usage of field-level `*When` with ANY user root is zero across
-   * examples/, packages/ and objectui (#6585's sweep).
-   *
-   * The rejected alternative was matching `ctx` only in its `ctx.user` form.
-   * `collectCelRootIdentifiers` reports ROOTS and drops member names by
-   * design, so that reading needs a source-level spelling match — and a
-   * spelling match is precisely the defect this rule exists to remove: it
-   * would re-open the same fork one level down (`ctx["user"].id` silent,
-   * `ctx.user.id` rejected), while leaving a real fail-open fault (`ctx.locale`)
-   * unreported for the sake of a narrower rule NAME.
-   *
-   * ## The message tiers on TWO orthogonal axes
-   *
-   * The causal half tiers by SLOT (#6716); the prescription half tiers by ROOT
-   * (#6713). They are independent — `data` on a `readonlyWhen` needs the
-   * metadata-form prescription AND the locked-field consequence — so one
-   * skeleton carries both rather than a message per combination.
-   *
-   * ### Axis 1 — the consequence, by SLOT (#6716, all three cells measured)
-   *
-   * Until #6713/#6716 all three slots shared ONE sentence: "the predicate
-   * faults and falls back to VISIBLE, leaving the field the test was meant to
-   * hide showing for everyone". That is precise for exactly one of them. The
-   * measurement, at both ends of each slot:
-   *
-   *  - **`visibleWhen` — client-only, fail-OPEN, sentence was correct.** The
-   *    server never evaluates a FIELD-level `visibleWhen` at all:
-   *    `rule-validator.ts`'s `ConditionalFieldDef` has no such member, and
-   *    `hasFieldRules` gates on `requiredWhen || readonlyWhen ||
-   *    fieldHasOptionVisibility` — the `visibleWhen` it does evaluate is the
-   *    per-OPTION one. So the only verdict is the renderer's, and
-   *    `resolveFieldRuleState` passes `fallback: true` for visibility. Field
-   *    visible to everyone, exactly as the old sentence said.
-   *  - **`readonlyWhen` — the two ends fault in OPPOSITE directions, and the
-   *    server wins.** Server: `isReadonlyWhenLocked` matches the fault with
-   *    `unknownVariableOf` and returns `true` — "the declared lock is not
-   *    waived because it could not be evaluated" (#4889's carve-out, whose
-   *    trigger is precisely the unbound-ROOT case, not the undeclared-key one)
-   *    — and `stripReadonlyWhenFields` then DELETES the field from the incoming
-   *    payload and lets the rest of the write through. Client:
-   *    `resolveFieldRuleState` passes `fallback: false`, so the form renders the
-   *    field editable. The standing "server enforces, client is courtesy" rule
-   *    — cited in this repo as ADR-0057 D10, an attribution rather than a
-   *    resolvable anchor (#9628) — resolves the disagreement: the author edits
-   *    the field, the save reports
-   *    success, and the value silently never lands. The old sentence told this
-   *    author the field would be VISIBLE TO EVERYONE — the opposite failure, and
-   *    the opposite troubleshooting direction.
-   *  - **`requiredWhen` — fail-OPEN at both ends, and never about visibility.**
-   *    Server: the `requiredWhen` block logs `unknownVariableOf`'s name and
-   *    `continue`s — #4977 deliberately did not copy #4889's carve-out, so the
-   *    required-check is skipped for that write. Client: `fallback: false`, so
-   *    the form does not mark the field required either. Both ends agree and
-   *    both do nothing: the requirement is never enforced anywhere, and a record
-   *    saves with the field empty. "Falls back to VISIBLE" was not merely
-   *    imprecise here, it named the wrong property of the field.
-   *
-   * `conditionalRequired` also reaches this helper (the field walk still passes
-   * it). It is a `retiredKey` in `FieldSchema` — the strict schema rejects it by
-   * name — so the branch is inert on the parsed compile path, and it gets a
-   * slot-agnostic clause rather than a fabricated fourth measurement.
-   *
-   * ### Axis 2 — the prescription, by ROOT (#6713)
-   *
-   * The pre-#6713 prescriptions are user-oriented (move to the option level,
-   * declare permission-set FLS) because the pre-#6713 denylist held only user
-   * roots. Handed to an author who wrote `data.type == 'select'`, "move it to
-   * the option's `visibleWhen`" answers a question nobody asked. Three tiers:
-   *
-   *  - **user roots** (`current_user` / `user` / `ctx` / `os`) keep the existing
-   *    two user-specific prescriptions plus the `record` rewrite;
-   *  - **`data`** gets the metadata-form-vs-runtime-form explanation, because
-   *    that is what the mistake IS — the same key name, the other form kind's
-   *    root;
-   *  - **everything else** gets the general rewrite, phrased without claiming
-   *    which other surface the author copied it from.
+   * The metadata-walk half: locate the source, then defer to the shared
+   * {@link fieldRuleRootIssue} for the verdict and the message.
    */
-  /**
-   * The roots a field-level `*When` predicate binds. Everything else in
-   * `SCOPE_ROOTS` is rejected — see the allowlist section above.
-   */
-  const FIELD_RULE_BOUND_ROOTS = ['record', 'previous', 'parent'] as const;
-  /**
-   * ADR-0068 D1's four user spellings, in the order the message's tie-break
-   * prefers them (canonical first — the #6585 ordering, with `os` appended so
-   * the pre-existing three keep their exact precedence).
-   */
-  const FIELD_RULE_USER_ROOTS = ['current_user', 'user', 'ctx', 'os'] as const;
-  /**
-   * The slot-agnostic clause — provably true for any slot, specific to none.
-   * Used where the honest answer is "not measured for this slot", never as a
-   * softening of a cell that WAS measured.
-   */
-  const FIELD_RULE_SLOT_CONSEQUENCE_GENERIC =
-    'the predicate faults, and a faulting rule never produces the verdict you declared — each ' +
-    'slot resolves the fault to its own fallback, and none of those fallbacks is yours';
-  /** Axis 1 — see "the consequence, by SLOT" above. Every cell is measured. */
-  const FIELD_RULE_SLOT_CONSEQUENCE: Record<string, string> = {
-    visibleWhen:
-      'the predicate faults and the renderer falls back to VISIBLE ' +
-      '(`resolveFieldRuleState` evaluates visibility with `fallback: true`, and no server-side ' +
-      'gate evaluates a field-level `visibleWhen` at all), leaving the field the test was meant ' +
-      'to hide showing for everyone (#6146)',
-    readonlyWhen:
-      'the predicate faults — and the two ends fault in OPPOSITE directions. The server treats ' +
-      'the field as LOCKED (`isReadonlyWhenLocked` will not waive a declared lock it could not ' +
-      'evaluate, #4889) and drops your value from the payload, while the form still renders the ' +
-      'field editable (`fallback: false`). The server is the one that decides: ' +
-      'the field looks writable, the save reports success, and the value silently never lands',
-    requiredWhen:
-      'the predicate faults and the requirement is never enforced anywhere — the server logs it ' +
-      'and SKIPS the check (fail-open, #4977 deliberately did not take #4889\'s carve-out) and ' +
-      'the form does not mark the field required either, so a record saves with the field empty',
-    // Listed rather than left to the `??` below, so the map covers every slot
-    // the field walk passes and the default stays unreachable. `FieldSchema`
-    // declares this key only as a `retiredKey`, which rejects it by name, so
-    // there is no fourth runtime to measure — the honest clause is the generic
-    // one, not a fabricated fourth cell (#6716).
-    conditionalRequired: FIELD_RULE_SLOT_CONSEQUENCE_GENERIC,
-  };
   const checkFieldRuleRoot = (where: string, slot: string, raw: unknown): void => {
     const source = celSourceOf(raw);
     if (!source) return;
-    const roots = collectCelRootIdentifiers(source);
-    if (!roots.ok) return;
-    // Filtered through SCOPE_ROOTS, in SCOPE_ROOTS order — so a bare field
-    // reference (owned by the bare-reference check one line up) and a CEL type
-    // name (`type(record.x) == string`) can never land here.
-    const kept = SCOPE_ROOTS.filter(
-      (r) => !(FIELD_RULE_BOUND_ROOTS as readonly string[]).includes(r) && roots.roots.includes(r),
-    );
-    if (kept.length === 0) return;
-    // One issue per slot even when a predicate reaches for two rejected roots.
-    // User roots win the tie-break (canonical spelling first) so #6585's
-    // message stays stable; anything else falls back to SCOPE_ROOTS order,
-    // which is stable too — never AST walk order.
-    const root = FIELD_RULE_USER_ROOTS.find((r) => kept.includes(r)) ?? kept[0]!;
-    const prescription = (FIELD_RULE_USER_ROOTS as readonly string[]).includes(root)
-      ? `To gate the CHOICES of a select by user, move the predicate to the option's own ` +
-        `\`visibleWhen\` (\`options: [{ …, visibleWhen: … }]\`) — per-option is the one \`*When\` ` +
-        `surface that binds \`current_user\` and its ADR-0068 aliases. To hide the FIELD by role, ` +
-        `declare field-level security on a permission set ` +
-        `(\`fields: { '<object>.<field>': { readable: false } }\`), which the server enforces. ` +
-        `To gate on record state, rewrite the predicate against \`record\`.`
-      : root === 'data'
-        // The `*.form` spelling is deliberately not `*.form.ts`: this is a
-        // STRING literal, and #5017's receiver scan strips comments but not
-        // strings, so `form.ts` inside the message registers `form` as a read
-        // receiver of this rule. Measured — it went red on the first run.
-        ? `\`data\` is the root of a METADATA form (a \`*.form\` module — the metadata row ` +
-          `being edited); ` +
-          `this is an OBJECT field, whose runtime form binds the row as \`record\` — one key name, ` +
-          `two form kinds, two roots. Rewrite \`data.<key>\` as \`record.<field>\`.`
-        : `\`${root}\` is declared platform-wide and bound at OTHER evaluation sites (flow, ` +
-          `automation, screen and action predicates), never at the field level. Rewrite the ` +
-          `predicate against \`record\` (plus \`previous\`, and \`parent\` on a master-detail line ` +
-          `item), or move the decision to a surface that binds \`${root}\`.`;
-    issues.push({
-      where,
-      message:
-        `\`${slot}\` reads \`${root}\`, but a field-level conditional rule binds only ` +
-        `\`record\` (plus \`previous\`, and \`parent\` on a master-detail line item) — ` +
-        `\`${root}\` is unbound here, so ` +
-        `${FIELD_RULE_SLOT_CONSEQUENCE[slot] ?? FIELD_RULE_SLOT_CONSEQUENCE_GENERIC}. ` +
-        prescription,
-      source,
-      severity: 'error',
-    });
+    const issue = fieldRuleRootIssue(slot, source);
+    if (!issue) return;
+    issues.push({ where, message: issue.message, source, severity: 'error' });
   };
 
   /**
