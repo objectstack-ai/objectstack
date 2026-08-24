@@ -37,8 +37,9 @@
 //     vocabulary is READ from that table, never copied into this file, and a
 //     table this script cannot parse is a refusal rather than an empty
 //     allow-list (see the trap-vocabulary block below for why that matters).
-//   - every `fixtures.provisioning.use` resolves to a recipe key in its OWN
-//     area's area-level `fixtures` block — an item that reads as provisioned
+//   - every `fixtures.provisioning.use` resolves to a real recipe — either a
+//     key of its own area's area-level `fixtures` block, or `<area>:<recipe>`
+//     naming one another area owns — because an item that reads as provisioned
 //     and is not costs the run the clauses the recipe was meant to unblock,
 //     mid-run and on a live boot (see the provisioning block below).
 //
@@ -224,7 +225,7 @@ function trapProblems(item, vocabulary) {
   return out;
 }
 
-// ── Area-scoped provisioning recipes (`fixtures.provisioning.use`) ──────────
+// ── Provisioning recipes (`fixtures.provisioning.use`) ─────────────────────
 // An area may write ONE provisioning recipe at the area level and have many
 // items opt into it by key (README "Area-level `fixtures` — one named
 // provisioning recipe, many items"). Both halves have to be real: a recipe
@@ -238,19 +239,26 @@ function trapProblems(item, vocabulary) {
 // tracked at #7720), on the stated condition that it be revisited if the shape
 // spread. It has: three area files, six references (#10593).
 //
-// Scope, deliberately narrow in two directions:
+// TWO SPELLINGS, one lookup (maintainer ruling 2026-08-22, #10593 gap 2 —
+// option A, area-qualified references):
 //
-//   1. SAME-AREA resolution only, because that is the mechanism the README
-//      documents. Cross-area reuse has no spelling at all today (the second,
-//      undecided gap on #10593), so a `use` pointing at another area's recipe
-//      key IS a dangling pointer here — and the message says so, instead of
-//      letting a reference that resolves nowhere read as if it worked.
-//   2. The reverse direction — a recipe no item references — is NOT checked,
-//      unlike the bidirectional trap vocabulary above. With cross-area reuse
-//      unspelled, a recipe whose only consumer sits in another area is cited
-//      from that item's `knownGaps` prose; redding it here would settle gap 2
-//      by accident, in the direction of "recipes are area-local", which is a
-//      convention decision and not this check's to make.
+//   "qa-scratch-authz"                      → a recipe of the item's OWN area
+//   "search:qa-contributor-bound-member"    → "<area>:<recipe>", any area
+//
+// The qualified form exists because a recipe is proved by one area and needed
+// by another, and until it existed that pointer could only be prose. Prose is
+// the one form that cannot drift-check: rename the recipe and `search.json`
+// moves while the sentence in `records-forms.json` does not. The unqualified
+// form stays exactly as valid as it was — every reference already written
+// resolves unchanged; the qualifier is an addition, not a migration.
+//
+// Deliberately still NOT checked: the reverse direction, a recipe no item
+// references. It was left out while cross-area reuse was unspelled, because
+// redding it would have settled that convention by accident in the direction
+// of "recipes are area-local". That reason has now expired — with a qualified
+// spelling available, an unreferenced recipe is unambiguously dead text — but
+// turning it on is a separate change with its own blast radius, tracked rather
+// than smuggled in here (#11506).
 //
 // `$`-prefixed keys are annotations, not recipes — every area `fixtures` block
 // opens with a `$comment` stating the block's purpose and replay rule — so
@@ -263,28 +271,91 @@ function areaRecipeKeys(doc) {
   return Object.keys(f).filter((k) => !k.startsWith('$'));
 }
 
-/** Problems with one item's `fixtures.provisioning`, as message strings. Pure; battery-tested below. */
-function provisioningProblems(item, recipeKeys) {
+const USE_SEP = ':';
+
+/**
+ * Split a `use` into the area it addresses and the recipe key it names.
+ * `{ area: null }` is the unqualified spelling (resolve against the item's own
+ * area). `{ malformed }` is a shape that is neither — reported as itself
+ * rather than resolved to nothing, because "no recipe called `search:`" would
+ * send the author hunting for a recipe when the defect is the reference.
+ */
+function parseUse(use) {
+  if (!use.includes(USE_SEP)) return { area: null, recipe: use };
+  const parts = use.split(USE_SEP);
+  if (parts.length > 2) {
+    return { malformed: `it carries ${parts.length - 1} "${USE_SEP}" separators — a qualified reference names exactly one area and one recipe` };
+  }
+  const [area, recipe] = parts;
+  if (!area) return { malformed: `its area half is empty — write "<area>${USE_SEP}<recipe>", or drop the "${USE_SEP}" to name a recipe of this item's own area` };
+  if (!recipe) return { malformed: `its recipe half is empty — write "<area>${USE_SEP}<recipe>"` };
+  if (area !== area.trim() || recipe !== recipe.trim()) {
+    return { malformed: 'it has whitespace around a half — a padded name is a different string to everyone who greps for it' };
+  }
+  return { area, recipe, qualified: true };
+}
+
+/**
+ * Problems with one item's `fixtures.provisioning`, as message strings.
+ *
+ * `ownArea` is the item's area (the filename stem); `recipesByArea` maps every
+ * area to its recipe keys, so a qualified `use` can be resolved against the
+ * area it names. Pure; battery-tested below.
+ */
+function provisioningProblems(item, ownArea, recipesByArea) {
   const out = [];
   const p = item?.fixtures?.provisioning;
   if (p === undefined) return out; // optional field: 6 of 205 items opt into a recipe
   if (typeof p !== 'object' || p === null || Array.isArray(p) || typeof p.use !== 'string' || !p.use.trim()) {
-    out.push('"fixtures.provisioning" must carry a non-empty string "use" naming a recipe in this area\'s area-level "fixtures" block — a provisioning block that opts into nothing reads as provisioned and is not');
+    out.push(`"fixtures.provisioning" must carry a non-empty string "use" naming a recipe — either a key of this area's area-level "fixtures" block, or "<area>${USE_SEP}<recipe>" for one another area owns — a provisioning block that opts into nothing reads as provisioned and is not`);
     return out;
   }
-  const recipes = new Set(recipeKeys);
-  if (recipes.has(p.use)) return out;
-  if (recipes.size === 0) {
+
+  const parsed = parseUse(p.use);
+  if (parsed.malformed) {
     out.push(
-      `"fixtures.provisioning.use" names "${p.use}" but this area file has no area-level "fixtures" block to resolve it against` +
-        ' — write the recipe as a sibling of "area"/"title"/"items" (README "Area-level `fixtures`"), or drop the reference.',
+      `"fixtures.provisioning.use" is ${JSON.stringify(p.use)}, which is not a usable reference: ${parsed.malformed}.` +
+        ` Both spellings are accepted: \`qa-scratch-authz\` (a recipe of this area) or \`search${USE_SEP}qa-contributor-bound-member\` (one another area owns).`,
     );
     return out;
   }
+
+  // Which area's block answers this reference — the named one, or this item's own.
+  const targetArea = parsed.area ?? ownArea;
+  const recipes = new Set(recipesByArea.get(targetArea) ?? []);
+  if (recipes.has(parsed.recipe)) return out;
+
+  if (parsed.qualified && !recipesByArea.has(targetArea)) {
+    const areas = [...recipesByArea.keys()];
+    const withRecipes = areas.filter((a) => (recipesByArea.get(a) ?? []).length > 0);
+    out.push(
+      `"fixtures.provisioning.use" is "${p.use}", whose area half names "${targetArea}" — there is no such area file` +
+        `${didYouMean(targetArea, areas)} — the areas that define recipes today are ${withRecipes.map((a) => `\`${a}\``).join(', ')}.`,
+    );
+    return out;
+  }
+
+  // The recipe key is unknown wherever we were told to look. When some OTHER
+  // area does define it, say so with the exact spelling to write: an author
+  // who copied an unqualified key across areas is one qualifier away from a
+  // working reference, and that is the drift this two-level lookup exists for.
+  const elsewhere = [...recipesByArea].filter(([a, keys]) => a !== targetArea && keys.includes(parsed.recipe)).map(([a]) => a);
+  const hint = elsewhere.length
+    ? ` — ${elsewhere.map((a) => `\`${a}\``).join(', ')} define${elsewhere.length === 1 ? 's' : ''} it: write \`${elsewhere[0]}${USE_SEP}${parsed.recipe}\` to opt into it from here, and do NOT fork a second copy into this area.`
+    : '';
+
+  if (recipes.size === 0) {
+    out.push(
+      `"fixtures.provisioning.use" names "${parsed.recipe}"` +
+        (parsed.qualified ? ` in area "${targetArea}", which has no area-level "fixtures" block to resolve it against` : ' but this area file has no area-level "fixtures" block to resolve it against') +
+        (hint || ' — write the recipe as a sibling of "area"/"title"/"items" (README "Area-level `fixtures`"), or drop the reference.'),
+    );
+    return out;
+  }
+
   out.push(
-    `"fixtures.provisioning.use" names "${p.use}", which is not a recipe in this area's area-level "fixtures" block${didYouMean(p.use, recipes)}` +
-      ` — this area offers ${[...recipes].map((k) => `\`${k}\``).join(', ')}. References are AREA-SCOPED: a recipe another area owns cannot be opted into by key` +
-      ' (cross-area reuse has no spelling yet, #10593) — cite that recipe by name in this item\'s "knownGaps" instead, and do not fork a second copy.',
+    `"fixtures.provisioning.use" names "${parsed.recipe}", which is not a recipe in ${parsed.qualified ? `area "${targetArea}"'s` : "this area's"} area-level "fixtures" block${didYouMean(parsed.recipe, recipes)}` +
+      ` — ${parsed.qualified ? `\`${targetArea}\`` : 'this area'} offers ${[...recipes].map((k) => `\`${k}\``).join(', ')}${hint || '.'}`,
   );
   return out;
 }
@@ -366,6 +437,13 @@ function selfTestTrapVocabulary() {
  * `qa-media-constraints`) and a cross-area `use` each validated clean, exit 0,
  * printing the same OK line as an untouched tree. A check that quietly stopped
  * firing would restore exactly that green. Zero I/O — every subject literal.
+ *
+ * The qualified half (Q…) carries the same burden twice over, because a
+ * two-level lookup has a failure mode the one-level one did not: resolving too
+ * MUCH. A widening bug that let any recipe answer any reference would pass
+ * every "it resolves" assertion, so each of the three failure shapes — real
+ * area / missing key, missing area, malformed reference — is pinned firing,
+ * and pinned saying which of the three it is.
  */
 function selfTestProvisioningUse() {
   const failures = [];
@@ -375,30 +453,85 @@ function selfTestProvisioningUse() {
     if (!ok) failures.push(what);
   };
 
+  // A miniature of the real ledger: the area that owns the recipes under test,
+  // a second area that owns the one every cross-area reference wants, and a
+  // third that defines no recipes at all (the shape 12 of 15 area files have).
   const keys = areaRecipeKeys({ fixtures: { $comment: 'what this block is, and the replay rule', 'qa-scratch-authz': {}, 'qa-media-constraints': {} } });
+  const byArea = new Map([
+    ['attachments-storage', keys],
+    ['search', areaRecipeKeys({ fixtures: { $comment: 'x', 'qa-contributor-bound-member': {} } })],
+    ['records-forms', areaRecipeKeys({ area: 'records-forms', items: [] })],
+  ]);
+  const HERE = 'attachments-storage';
   const item = (use) => ({ fixtures: { app: 'showcase', provisioning: { use, why: 'which clauses it unblocks' } } });
+  const check = (use, from = HERE) => provisioningProblems(item(use), from, byArea);
 
-  t('U1 a `use` naming a recipe of this area passes', provisioningProblems(item('qa-scratch-authz'), keys).length === 0);
-  t('U2 an item whose fixtures carry no provisioning is fine (optional field)', provisioningProblems({ fixtures: { app: 'showcase' } }, keys).length === 0);
-  t('U3 an item with no fixtures block at all is fine', provisioningProblems({}, keys).length === 0);
+  // ── The unqualified spelling — every one of these predates the qualifier and
+  // must behave identically after it (the ruling's "existing spellings stay valid").
+  t('U1 a `use` naming a recipe of this area passes', check('qa-scratch-authz').length === 0);
+  t('U2 an item whose fixtures carry no provisioning is fine (optional field)', provisioningProblems({ fixtures: { app: 'showcase' } }, HERE, byArea).length === 0);
+  t('U3 an item with no fixtures block at all is fine', provisioningProblems({}, HERE, byArea).length === 0);
 
-  const dangling = provisioningProblems(item('qa-recipe-nobody-wrote'), keys);
+  const dangling = check('qa-recipe-nobody-wrote');
   t('U4 a `use` no recipe answers to is flagged', dangling.length === 1 && dangling[0].includes('qa-recipe-nobody-wrote'));
 
-  const typo = provisioningProblems(item('qa-media-constraint'), keys);
+  const typo = check('qa-media-constraint');
   t('U5 a TYPO of a real recipe is flagged — the drift shape review is worst at', typo.length === 1);
   t('U6 the typo message names the recipe that was meant', typo.length === 1 && typo[0].includes('did you mean `qa-media-constraints`'));
   t('U7 the message lists the recipes this area does offer', typo.length === 1 && typo[0].includes('`qa-scratch-authz`'));
 
-  t('U8 a recipe key ANOTHER area owns does not resolve here (references are area-scoped)', provisioningProblems(item('qa-contributor-bound-member'), keys).length === 1);
-  t('U9 `$comment` is an annotation, not a recipe', !keys.includes('$comment') && provisioningProblems(item('$comment'), keys).length === 1);
-  t('U10 a whitespace-padded spelling does not resolve', provisioningProblems(item('qa-scratch-authz '), keys).length === 1);
-  t('U11 a provisioning block with no "use" is flagged', provisioningProblems({ fixtures: { provisioning: { why: 'because' } } }, keys).length === 1);
-  t('U12 a non-string "use" is flagged', provisioningProblems({ fixtures: { provisioning: { use: 42 } } }, keys).length === 1);
+  t('U8 an UNQUALIFIED key another area owns still does not resolve — the qualifier is required, not optional', check('qa-contributor-bound-member').length === 1);
+  t('U9 `$comment` is an annotation, not a recipe', !keys.includes('$comment') && check('$comment').length === 1);
+  t('U10 a whitespace-padded spelling does not resolve', check('qa-scratch-authz ').length === 1);
+  t('U11 a provisioning block with no "use" is flagged', provisioningProblems({ fixtures: { provisioning: { why: 'because' } } }, HERE, byArea).length === 1);
+  t('U12 a non-string "use" is flagged', provisioningProblems({ fixtures: { provisioning: { use: 42 } } }, HERE, byArea).length === 1);
 
-  const noBlock = provisioningProblems(item('qa-scratch-authz'), areaRecipeKeys({ area: 'records-forms', items: [] }));
+  const noBlock = check('qa-scratch-authz', 'records-forms');
   t('U13 an area with NO fixtures block says so, rather than offering an empty list', noBlock.length === 1 && noBlock[0].includes('no area-level "fixtures" block'));
   t('U14 a fixtures block holding only annotations exposes zero recipes', areaRecipeKeys({ fixtures: { $comment: 'x' } }).length === 0);
+
+  // ── The qualified spelling `<area>:<recipe>` (#10593 gap 2, ruled 2026-08-22).
+  // This half is the whole point of the widening, so every limb is observed
+  // both resolving and failing — a two-level lookup that only ever passes has
+  // exactly the same signature as one that resolves everything it is handed.
+  t('Q1 a qualified `use` resolves against the area it names — the ruled spelling, from the area that needs it', check('search:qa-contributor-bound-member', 'records-forms').length === 0);
+  t('Q2 the same reference resolves from ANY area, not just the one worked example', check('search:qa-contributor-bound-member').length === 0);
+  t('Q3 a qualified `use` may name the item\'s OWN area — one lookup, no special case', check('attachments-storage:qa-scratch-authz').length === 0);
+
+  const badKey = check('search:qa-recipe-nobody-wrote', 'records-forms');
+  t('Q4 FAILURE SHAPE 1 — a real area, a key it does not define, is flagged', badKey.length === 1);
+  t('Q5 that message names the area whose block was searched, not the item\'s own', badKey.length === 1 && badKey[0].includes('area "search"'));
+  t('Q6 and lists what that area does offer', badKey.length === 1 && badKey[0].includes('`qa-contributor-bound-member`'));
+
+  const keyTypo = check('search:qa-contributor-bound-membr', 'records-forms');
+  t('Q7 a typo in the RECIPE half gets a did-you-mean from the named area\'s keys', keyTypo.length === 1 && keyTypo[0].includes('did you mean `qa-contributor-bound-member`'));
+
+  const badArea = check('serch:qa-contributor-bound-member', 'records-forms');
+  t('Q8 FAILURE SHAPE 2 — an area half naming no area file is flagged', badArea.length === 1);
+  t('Q9 that message says the AREA is missing, not that the recipe is', badArea.length === 1 && badArea[0].includes('no such area file') && !badArea[0].includes('is not a recipe'));
+  t('Q10 and offers the area that was meant', badArea.length === 1 && badArea[0].includes('did you mean `search`'));
+  t('Q11 it also names the areas that do define recipes', badArea.length === 1 && badArea[0].includes('`attachments-storage`'));
+
+  const emptyArea = check('records-forms:qa-anything', HERE);
+  t('Q12 a qualified `use` into a real area with NO recipe block says so', emptyArea.length === 1 && emptyArea[0].includes('no area-level "fixtures" block'));
+  t('Q13 a qualified `use` cannot reach an annotation key either', check('search:$comment', 'records-forms').length === 1);
+
+  // FAILURE SHAPE 3 — the reference is malformed, and says so rather than
+  // sending the author to hunt for a recipe named `search:` or ``.
+  const malformed = (use) => check(use, 'records-forms');
+  t('Q14 two separators is a malformed reference, not a missing recipe', malformed('a:b:c').length === 1 && malformed('a:b:c')[0].includes('not a usable reference'));
+  t('Q15 an empty area half is malformed', malformed(':qa-contributor-bound-member').length === 1 && malformed(':qa-contributor-bound-member')[0].includes('area half is empty'));
+  t('Q16 an empty recipe half is malformed', malformed('search:').length === 1 && malformed('search:')[0].includes('recipe half is empty'));
+  t('Q17 whitespace around a half is malformed — a padded name is a different string', malformed('search: qa-contributor-bound-member').length === 1 && malformed('search: qa-contributor-bound-member')[0].includes('whitespace'));
+
+  // The upgrade that makes the drift self-correcting: an author who copied an
+  // unqualified key across areas is told the exact spelling that works. Before
+  // the ruling this same message said no cross-area spelling existed.
+  const hinted = check('qa-contributor-bound-member');
+  t('Q18 an unqualified key another area owns is told the qualified spelling to write', hinted.length === 1 && hinted[0].includes('`search:qa-contributor-bound-member`'));
+  t('Q19 and is told not to fork a second copy', hinted.length === 1 && hinted[0].includes('do NOT fork a second copy'));
+  const hintedEmpty = check('qa-contributor-bound-member', 'records-forms');
+  t('Q20 the same hint reaches an area that has no recipe block of its own', hintedEmpty.length === 1 && hintedEmpty[0].includes('`search:qa-contributor-bound-member`'));
 
   return { checked, failures };
 }
@@ -410,7 +543,7 @@ if (process.argv.slice(2).includes('--self-test')) {
   if (failures.length === 0) {
     console.log(
       `✓ check-platform-checklist --self-test: ${trap.checked + prov.checked} assertions — the trap-table extractor reads a good table and REFUSES an empty/renamed/reshaped one;` +
-        ' `fixtures.provisioning.use` resolves against its own area and fires on a dangling one.',
+        ' `fixtures.provisioning.use` resolves both spellings (own-area key and `<area>:<recipe>`) and fires on all three dangling shapes.',
     );
     process.exit(0);
   }
@@ -464,31 +597,38 @@ if (files.length === 0) {
 
 const allIds = new Map(); // id -> file
 const allItems = [];
-let recipeTotal = 0; // area-level provisioning recipes, across all areas
 let recipeRefs = 0; // item references that resolved to one
+let qualifiedRefs = 0; // ...of which named another area explicitly
 
+// Pass 1 — parse every area file. A qualified `use` resolves against ANOTHER
+// area's block, so the recipe universe has to be complete before any item is
+// judged: a single walk would test each item against a half-built map, and
+// whether a cross-area reference resolved would depend on readdir order. That
+// is the kind of green that holds right up until someone renames a file.
+const parsed = [];
 for (const file of files) {
-  let doc;
   try {
-    doc = JSON.parse(readFileSync(join(AREAS_DIR, file), 'utf8'));
+    parsed.push({ file, stem: basename(file, '.json'), doc: JSON.parse(readFileSync(join(AREAS_DIR, file), 'utf8')) });
   } catch (e) {
     err(file, null, `does not parse as JSON: ${e.message}`);
-    continue;
   }
-  const stem = basename(file, '.json');
+}
+
+// Keyed by FILENAME stem, deliberately not by `doc.area`. The two must agree
+// (checked per file below), and the stem is the half a `use` qualifier
+// actually names — `search:…` means `areas/search.json`. Keying by a
+// mismatched `doc.area` would let a qualified reference resolve THROUGH the
+// very inconsistency this gate reports one line down.
+const recipesByArea = new Map(parsed.map(({ stem, doc }) => [stem, areaRecipeKeys(doc)]));
+const recipeTotal = [...recipesByArea.values()].reduce((n, keys) => n + keys.length, 0);
+
+for (const { file, stem, doc } of parsed) {
   if (doc.area !== stem) err(file, null, `"area" is ${JSON.stringify(doc.area)} but the filename says "${stem}"`);
   if (typeof doc.title !== 'string' || !doc.title) err(file, null, 'missing "title"');
   if (!Array.isArray(doc.items) || doc.items.length === 0) {
     err(file, null, '"items" must be a non-empty array');
     continue;
   }
-
-  // Area-scoped: the universe a `provisioning.use` resolves against is THIS
-  // file's recipe keys, so it is read once here rather than in the post-loop
-  // cross-file section where `supersededBy` (whose universe is every id in the
-  // ledger) has to live. Same reporting: `err(file, item.id, …)`.
-  const recipeKeys = areaRecipeKeys(doc);
-  recipeTotal += recipeKeys.length;
 
   for (const item of doc.items) {
     const id = typeof item.id === 'string' ? item.id : '<no id>';
@@ -528,9 +668,12 @@ for (const file of files) {
 
     for (const msg of trapProblems(item, TRAPS)) where(msg);
 
-    const useProblems = provisioningProblems(item, recipeKeys);
+    const useProblems = provisioningProblems(item, stem, recipesByArea);
     for (const msg of useProblems) where(msg);
-    if (item.fixtures?.provisioning !== undefined && useProblems.length === 0) recipeRefs++;
+    if (item.fixtures?.provisioning !== undefined && useProblems.length === 0) {
+      recipeRefs++;
+      if (parseUse(item.fixtures.provisioning.use).qualified) qualifiedRefs++;
+    }
 
     if (item.status === 'retired') {
       if (typeof item.retiredReason !== 'string' || !item.retiredReason) where('retired items must carry "retiredReason"');
@@ -727,6 +870,6 @@ const active = allItems.filter(({ item }) => item.status === 'active').length;
 console.log(
   `check-platform-checklist: OK — ${files.length} areas, ${total} items (${active} active); coverage: ${mappedCount} kinds mapped, ${waivedCount} waived;` +
     ` traps: ${TRAPS.size} documented, ${usedTraps.size} in use;` +
-    ` provisioning: ${recipeTotal} area recipes, ${recipeRefs} item references resolved` +
+    ` provisioning: ${recipeTotal} area recipes, ${recipeRefs} item references resolved (${qualifiedRefs} area-qualified)` +
     ` (self-checks: ${trapControl.checked} trap-vocabulary + ${provisioningControl.checked} provisioning-resolve assertions).`,
 );
