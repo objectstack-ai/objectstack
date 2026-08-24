@@ -1,5 +1,6 @@
 ---
 '@objectstack/plugin-security': patch
+'@objectstack/plugin-auth': patch
 ---
 
 Walled platform-admin elevation now requires the owner-email match to be
@@ -33,3 +34,9 @@ reasonable in #11184) does not gain a verification requirement, and the
 owner-email variable is still never consulted there. Both directions are
 pinned: the unverified holder is refused AND the verified owner is elevated —
 including across the refuse-then-verify-then-re-run sequence.
+
+The seeded dev admin (`maybeSeedDevAdmin`, dev-only) is now provisioned with
+`email_verified` stamped: it is created by the deployment's own boot command
+with operator-known credentials — the same trust shape as a trusted-SSO
+insert, not an unknown self-registrant — so walled dev/harness boots keep a
+promotable declared owner. The generic sign-up path is unchanged.
