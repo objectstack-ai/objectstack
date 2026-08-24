@@ -373,6 +373,14 @@ depends on a timezone, it is a `datetime`, not a `date`.
   `YYYY-MM-DD` on every dialect
 - MongoDB: no DDL (schemaless); the driver stores the value it is given
 
+**The day you read back does not depend on the app process's timezone.** The SQL
+driver pins each dialect so a stored `DATE` arrives as the calendar-day string
+itself, never as an instant it would then have to re-derive a day from:
+PostgreSQL connections parse `date` (and `date[]`) as text, and MySQL
+connections are pinned to UTC in both directions. So an app container running
+`TZ=Asia/Shanghai` and one running `TZ=UTC` read the same row as the same day —
+running the process at UTC is not a prerequisite for correct dates.
+
 **Use cases:**
 - Birthdays, anniversaries
 - Contract dates
