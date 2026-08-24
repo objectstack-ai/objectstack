@@ -120,7 +120,16 @@ function boot(options: { security: 'none' | 'per-principal' }) {
         name,
         item: copy(STORED_SCHEMA),
     }));
-    const getMetaTypes = vi.fn(async () => ({ types: ['object', 'app', 'plugin'] }));
+    /**
+     * The parameter is DECLARED, not incidental: the domain calls this as
+     * `protocol.getMetaTypes({})`, and the case below asserts on the argument it
+     * was handed. A zero-parameter double types `mock.calls` as an array of empty
+     * tuples, so reading `[0][0]` off it is a type error (TS2493) — and typing the
+     * argument away with `as any` would erase the very thing being pinned.
+     */
+    const getMetaTypes = vi.fn(async (_args: Record<string, unknown>) => (
+        { types: ['object', 'app', 'plugin'] }
+    ));
     const protocol = { getMetaItem, getMetaTypes };
 
     /**
