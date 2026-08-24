@@ -885,6 +885,35 @@ jobs:
       - name: Docs redirect destinations resolve, and no chains
         run: pnpm check:docs-redirects
 
+      # #10751 react-page `useAdapter()` contracts, swept over the app-showcase
+      # page modules AND the react-page samples in content/docs. Both traps are
+      # DROP-SHAPED — an unprefixed `top:` is discarded by the adapter and the
+      # read runs unbounded, and `.records` off a `QueryResult` is `undefined`
+      # forever — so nothing throws, nothing warns, and the page renders a
+      # plausible number either way.
+      #
+      # This job rather than the example app's own test suite, decided by
+      # measurement rather than preference: the guard that came before this
+      # (#10288) lived in `examples/app-showcase/test/` and swept that app's page
+      # registry, so the docs samples were invisible to it and the SAME wrong
+      # read survived a third time in `content/docs/ui/react-pages.mdx`. Giving
+      # that test the docs corpus needs a `check:cross-package-test-inputs`
+      # declaration plus turbo input hashing, and both spellings are wrong here:
+      # `content/docs/**` puts the example app's whole suite on 22 of the last
+      # 132 commits (against 3 that touch the app itself), which is the cost that
+      # gate's own roster refuses in those words, and the per-page narrowing it
+      # prefers instead rebuilds this defect — a list someone must remember to
+      # extend the day a react sample lands on a second page. A gate in this job
+      # has no radius to maintain: it runs on every PR over the whole tree.
+      #
+      # Its --self-test is where the detectors are observed FIRING. The live
+      # corpus is green (that is the point), so a passing run over real data
+      # cannot tell a working scanner from one that finds nothing — and the
+      # census control, which fails when either half of the population comes
+      # back empty, is what stops a vacuous green from reading as coverage.
+      - name: React pages honour the useAdapter() query and result contracts
+        run: pnpm check:react-page-adapter-contract
+
       # #9632 published-README links: a README in a package's `files` array with
       # `private` unset is rendered on npm and on GitHub as well as here, and
       # NOTHING read its links. Measured before the gate was written: the lychee
