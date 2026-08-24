@@ -87,7 +87,7 @@ When you call `client.connect()`, the client:
 // connect() resolves with the discovery manifest — capture the return value
 const discovery = await client.connect();
 
-console.log(discovery.version);      // "1.0.0"
+console.log(discovery.version);      // the serving artifact's version
 console.log(discovery.environment);  // "development"
 
 // Check if a service is available before using it
