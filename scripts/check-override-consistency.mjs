@@ -63,46 +63,28 @@
  *    and moves only the replacement target.
  */
 
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import semver from 'semver';
 import { parse as parseYaml } from 'yaml';
+import { workspacePackages } from './workspace-enumerator.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, '..');
 
 /**
- * Minimal pnpm-workspace.yaml block parsers (same approach as
- * scripts/check-changeset-fixed.mjs): this repo's file only uses simple
- * `key: value` scalars and `- item` lists, so a YAML dependency is avoided.
+ * Minimal reader for the `overrides:` block, hand-parsed because this repo's
+ * file only uses simple `key: value` scalars there.
+ *
+ * The `packages:` block is NOT parsed here any more — that one moved to
+ * scripts/workspace-enumerator.mjs (#11510), which nine scripts now share. This
+ * block stayed behind on purpose: it is a different question with exactly one
+ * reader, so consolidating it would create a shared module with one caller.
  */
 function readWorkspaceYamlLines() {
   const text = readFileSync(resolve(repoRoot, 'pnpm-workspace.yaml'), 'utf8');
   return text.split(/\r?\n/);
-}
-
-/** @returns {string[]} */
-function readWorkspacePatterns() {
-  const patterns = [];
-  let inPackages = false;
-  for (const raw of readWorkspaceYamlLines()) {
-    const line = raw.replace(/#.*$/, '').replace(/\s+$/, '');
-    if (!line.trim()) continue;
-    if (/^packages\s*:\s*$/.test(line)) {
-      inPackages = true;
-      continue;
-    }
-    if (inPackages) {
-      const m = /^\s+-\s+["']?([^"'\s]+)["']?\s*$/.exec(line);
-      if (m) {
-        patterns.push(m[1]);
-        continue;
-      }
-      if (/^\S/.test(line)) inPackages = false;
-    }
-  }
-  return patterns;
 }
 
 /**
@@ -140,56 +122,24 @@ function readOverrides() {
   return overrides;
 }
 
-/** @param {string} pattern @returns {string[]} */
-function expandPattern(pattern) {
-  const segments = pattern.split('/');
-  let dirs = [repoRoot];
-  for (const seg of segments) {
-    const next = [];
-    for (const dir of dirs) {
-      if (seg === '*') {
-        let entries;
-        try {
-          entries = readdirSync(dir, { withFileTypes: true });
-        } catch {
-          continue;
-        }
-        for (const entry of entries) {
-          if (entry.isDirectory() && !entry.name.startsWith('.')) {
-            next.push(join(dir, entry.name));
-          }
-        }
-      } else {
-        const candidate = join(dir, seg);
-        try {
-          if (statSync(candidate).isDirectory()) next.push(candidate);
-        } catch {
-          /* missing - skip */
-        }
-      }
-    }
-    dirs = next;
-  }
-  return dirs;
-}
-
-/** @returns {Array<{ dir: string, pkg: any }>} all non-private workspace packages */
+/**
+ * All non-private workspace packages, as `{ dir, pkg }` with an ABSOLUTE dir.
+ *
+ * Membership comes from `scripts/workspace-enumerator.mjs` (#11510) — this
+ * repo's one parse of the `packages:` block, and one of nine private copies
+ * before it. The `overrides:` parser above stays here: it reads a DIFFERENT
+ * block of the same file, and nothing else in the repo reads that one.
+ *
+ * @returns {Array<{ dir: string, pkg: any }>}
+ */
 function listPublishablePackages() {
   const seen = new Set();
   const result = [];
-  for (const pattern of readWorkspacePatterns()) {
-    for (const dir of expandPattern(pattern)) {
-      let pkg;
-      try {
-        pkg = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8'));
-      } catch {
-        continue;
-      }
-      if (!pkg.name || pkg.private === true) continue;
-      if (seen.has(pkg.name)) continue;
-      seen.add(pkg.name);
-      result.push({ dir, pkg });
-    }
+  for (const { dir, manifest } of workspacePackages(repoRoot)) {
+    if (!manifest.name || manifest.private === true) continue;
+    if (seen.has(manifest.name)) continue;
+    seen.add(manifest.name);
+    result.push({ dir: join(repoRoot, dir), pkg: manifest });
   }
   return result;
 }

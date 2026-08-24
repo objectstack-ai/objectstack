@@ -145,60 +145,37 @@ import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import process from 'node:process';
 import { isEntrypoint } from './invoked-as.mjs';
+import { WORKSPACE_FILE, parseWorkspaceGlobs, workspacePackageDirs } from './workspace-enumerator.mjs';
 
 const REPO_ROOT = resolve(fileURLToPath(import.meta.url), '..', '..');
 
 // Read as text, but never let a binary artifact fabricate a match.
 const BINARY_EXT = new Set(['.wasm', '.node', '.png', '.jpg', '.jpeg', '.gif', '.ico', '.woff', '.woff2', '.zip', '.gz', '.br']);
 
-/** Parse the `packages:` globs out of pnpm-workspace.yaml (no YAML dependency). */
-export function parseWorkspaceGlobs(yamlText) {
-  const globs = [];
-  let inPackages = false;
-  for (const rawLine of yamlText.split('\n')) {
-    const line = rawLine.replace(/\s+$/, '');
-    if (/^packages:\s*$/.test(line)) {
-      inPackages = true;
-      continue;
-    }
-    if (inPackages) {
-      const item = line.match(/^\s+-\s+['"]?([^'"\s]+)['"]?\s*$/);
-      if (item) {
-        globs.push(item[1]);
-        continue;
-      }
-      if (line.trim() !== '') break; // next top-level key ends the list
-    }
-  }
-  return globs;
-}
+/**
+ * Parse the `packages:` globs out of pnpm-workspace.yaml (no YAML dependency).
+ *
+ * Re-exported from `scripts/workspace-enumerator.mjs` (#11510) rather than
+ * parsed here. The copy this replaces was the strictest of the nine and the
+ * only one that ended the list at ANY line it could not match, so a whole-line
+ * comment inside the `packages:` block silently truncated the workspace — this
+ * script would then have scanned a subset of the members and reported a clean
+ * preflight over it. Latent on this repo's file today; a comment in that block
+ * is all it needed.
+ */
+export { parseWorkspaceGlobs };
 
 /** name -> repo-relative dir, for every workspace package. */
 function workspacePackages(repoRoot) {
-  const yamlPath = join(repoRoot, 'pnpm-workspace.yaml');
-  let globs;
+  let dirs;
   try {
-    globs = parseWorkspaceGlobs(readFileSync(yamlPath, 'utf8'));
-  } catch {
-    fail(`cannot read ${relative(repoRoot, yamlPath) || 'pnpm-workspace.yaml'} -- refusing to guess the workspace layout.`);
+    dirs = workspacePackageDirs(repoRoot).map((rel) => join(repoRoot, rel));
+  } catch (err) {
+    fail(
+      `cannot enumerate the workspace from ${WORKSPACE_FILE} -- refusing to guess the layout.\n  ${err?.message ?? err}`,
+    );
   }
-  if (globs.length === 0) fail('pnpm-workspace.yaml declares no `packages:` globs -- refusing to scan an empty workspace.');
-
-  const dirs = [];
-  for (const glob of globs) {
-    if (glob.endsWith('/*')) {
-      const parent = join(repoRoot, glob.slice(0, -2));
-      let entries = [];
-      try {
-        entries = readdirSync(parent, { withFileTypes: true });
-      } catch {
-        continue; // a declared-but-absent parent is the workspace's problem, not ours
-      }
-      for (const e of entries) if (e.isDirectory()) dirs.push(join(parent, e.name));
-    } else {
-      dirs.push(join(repoRoot, glob));
-    }
-  }
+  if (dirs.length === 0) fail(`${WORKSPACE_FILE} declares no \`packages:\` globs -- refusing to scan an empty workspace.`);
 
   const byName = new Map();
   for (const dir of dirs) {
