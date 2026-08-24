@@ -13355,6 +13355,10 @@ export class SqlDriver implements IDataDriver {
       case 'textarea':
       case 'html':
       case 'markdown':
+      case 'richtext':
+      case 'code':
+      case 'signature':
+      case 'qrcode':
         return keyed ? this.keyableTextLength(field) : null;
       // Virtual — `createColumn` returns without emitting anything.
       case 'formula':
@@ -13649,7 +13653,28 @@ export class SqlDriver implements IDataDriver {
       case 'text':
       case 'textarea':
       case 'html':
-      case 'markdown': {
+      case 'markdown':
+      // #11794: the four remaining unbounded plain-string types whose STORED
+      // value IS the declared value. `richtext` is the headline member: the
+      // spec groups `markdown` / `html` / `richtext` together as "Rich
+      // Content" (`field.zod.ts`) and two of the three already landed here —
+      // the third fell through to the catch-all's `table.string(name)`, knex's
+      // varchar(255), so an ordinary rich-text body over 255 characters was
+      // refused by both enforcing dialects (MySQL `ER_DATA_TOO_LONG` under
+      // `STRICT_TRANS_TABLES`, Postgres `22001`) while the same body in a
+      // `markdown` field was accepted. `code` / `signature` / `qrcode` join
+      // for the same measured reason, not by analogy: each is a
+      // `STRING_VALUE_TYPES` member storing the author's own value as a plain
+      // string with no declared bound — field-zoo writes a data-URI PNG for
+      // `signature` and the editor's contents for `code`, and neither a data
+      // URI nor a code document fits in 255 characters. `secret` and `color`
+      // stay in the catch-all DELIBERATELY: a secret column holds an opaque
+      // `sys_secret` ref (ADR-0100), a color holds a color code — short by
+      // construction, and (for `secret`) not the declared value at all.
+      case 'richtext':
+      case 'code':
+      case 'signature':
+      case 'qrcode': {
         // #11374: a text-family column that some declared index KEYS ON is
         // emitted as `varchar(maxLength)` rather than TEXT, whenever the field
         // declared a bound this dialect can key on.
@@ -13798,14 +13823,17 @@ export class SqlDriver implements IDataDriver {
         // (#field-zoo). Everything else is a plain string.
         //
         // ⛔ The third branch #11431 leaves alone. This is the CATCH-ALL, and
-        // what lands in it is precisely the set of types whose stored value is
-        // NOT the declared value: `secret` persists an opaque `sys_secret`
-        // ref rather than the credential it was given (ADR-0100), and
-        // `select` / `radio` / `checkboxes` / `code` / `tree` store option
-        // machine names or ids. Sizing any of those from the author's
-        // `maxLength` would size the wrong string. A type that genuinely wants
-        // the bound belongs in the string-family case above, named — never
-        // acquired by falling through to here.
+        // what lands in it is the set of types whose stored value is NOT the
+        // declared value, or is short by construction: `secret` persists an
+        // opaque `sys_secret` ref rather than the credential it was given
+        // (ADR-0100), `select` / `radio` / `checkboxes` / `tree` store option
+        // machine names or ids, and `color` holds a color code. Sizing any of
+        // those from the author's `maxLength` would size the wrong string.
+        // (`code` used to be mis-listed here as option-valued — measured in
+        // field-zoo, it stores the editor's contents verbatim, which is why
+        // #11794 moved it to the text family above.) A type that genuinely
+        // wants the bound belongs in the string-family case above, named —
+        // never acquired by falling through to here.
         col = JSON_COLUMN_TYPES.has(type) ? table.json(name) : table.string(name);
     }
 
