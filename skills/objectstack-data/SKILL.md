@@ -81,7 +81,7 @@ database table and exposes automatic CRUD APIs.
 | `titleFormat` | — | **Retired (ADR-0079)** — a render-only template the server can't return or query. Use `nameField`; for a composite title, designate a `returnType: 'text'` formula field as `nameField` |
 | `enable` | — | Capability flags (trackHistory, searchable, apiEnabled, etc.) |
 | `fieldGroups` | — | Ordered list of logical field groups for forms/detail pages (see [Field Groups](#field-groups-mvp)) |
-| `lifecycle` | `record` semantics (permanent) | Data retention/rotation/archival contract (ADR-0057). **Required for append-only, high-write-rate objects** — a `telemetry`/`transient`/`event`/`audit` class must declare a bounding policy or parsing fails (see [Data Lifecycle & Retention](./rules/lifecycle.md)) |
+| `lifecycle` | `record` semantics (permanent) | Data retention/rotation/archival contract. **Required for append-only, high-write-rate objects** — a `telemetry`/`transient`/`event`/`audit` class must declare a bounding policy or parsing fails (see [Data Lifecycle & Retention](./rules/lifecycle.md)) |
 
 ### Object Capabilities (`enable`)
 
@@ -970,7 +970,7 @@ export const SetupApp = defineApp({
 | Feature | When to Consider |
 |:--------|:-----------------|
 | `tenancy` | Multi-tenant SaaS — `{ enabled: true, tenantField: 'tenant_id' }` row-level isolation (DB-per-tenant is an environment/deployment choice, not object metadata) |
-| `lifecycle` | Append-only / high-write-rate objects — retention / rotation / archival contract (ADR-0057); see [rules/lifecycle.md](./rules/lifecycle.md) |
+| `lifecycle` | Append-only / high-write-rate objects — retention / rotation / archival contract; see [rules/lifecycle.md](./rules/lifecycle.md) |
 | per-field `trackHistory` | Render a field's value changes as human-readable activity-timeline entries (pair with `enable.trackHistory`, ADR-0052 §5b) |
 
 > The former `softDelete` / `versioning` object keys were **removed** from the
