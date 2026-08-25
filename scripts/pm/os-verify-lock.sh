@@ -408,14 +408,36 @@ ticket_state() {
     printf 'dead'
     return 0
   fi
-  pid_alive "$pid" || {
+  if ! pid_alive "$pid" || [[ "$(proc_starttime "$pid" 2> /dev/null || echo x)" != "$start" ]]; then
+    # The process behind this ticket is gone. For an ORDINARY ticket that is
+    # the end of it -- prune. For a SLOT it is a DEMOTION to parked, and this
+    # is the case that matters most in practice rather than an edge one.
+    #
+    # Parking is written by the EXIT trap, and a trap is exactly what the real
+    # killer here does not run. Measured while building this: a foreground
+    # agent turn holding a queued call was killed at its ~10-minute ceiling,
+    # the wait was ~210s in, and the ticket was reaped as an ordinary dead one
+    # -- so the call that most needed its place kept was the one that lost it.
+    # SIGTERM leaves through the trap; SIGKILL, and a harness that kills the
+    # process group, do not. A mechanism that only survives the polite exit
+    # would advertise a guarantee it does not have.
+    #
+    # A slot whose owner died IS a place whose owner walked away, which is
+    # already exactly what parked means -- so the state is READ from the file's
+    # identity rather than requiring the dying process to have written it. It
+    # costs nothing and wedges nothing: parked blocks nobody, and the ageing
+    # bound below is the same one every other parked place is held to.
+    case "${file##*/}" in
+      *-s?*)
+        ((age <= SLOT_MAX_AGE_S)) && {
+          printf 'parked'
+          return 0
+        }
+        ;;
+    esac
     printf 'dead'
     return 0
-  }
-  [[ "$(proc_starttime "$pid" 2> /dev/null || echo x)" == "$start" ]] || {
-    printf 'dead'
-    return 0
-  }
+  fi
   ((age <= TICKET_MAX_AGE_S)) || {
     printf 'dead'
     return 0
@@ -1858,10 +1880,45 @@ mode_self_test() {
   # And the place really is the ORIGINAL one: resuming must not re-stamp
   # arrival, or the caller is quietly sent to the back while being told it
   # resumed.
-  local resumed_stamp
   OS_VERIFY_LOCK_SLOT=probe-slot bash "$SELF" -c true > /dev/null 2>&1
   st_case 'resuming a slot consumes it once acquired' \
     "$(ls "$sq"/*-sprobe-slot 2> /dev/null | wc -l | tr -d ' ')" 0
+
+  # ⭐ THE KILL THIS MECHANISM EXISTS FOR, and the one the EXIT trap cannot
+  # cover. A queued agent turn does not usually end by timing out politely; it
+  # ends when the harness's foreground ceiling kills it, and a SIGKILL (or a
+  # kill delivered to the whole process group) runs no trap at all. Measured
+  # while building this: a real queued call was killed at its ceiling ~210s
+  # into the wait and its ticket was reaped as an ordinary dead one -- the call
+  # that most needed its place kept was precisely the one that lost it.
+  #
+  # So the place must survive a killed owner, and an ORDINARY ticket must still
+  # be reaped exactly as before. Both directions are asserted: a mechanism that
+  # kept every dead ticket would be a queue that never drains.
+  rm -rf "$sq"
+  bash "$SELF" -c 'sleep 8' > /dev/null 2>&1 &
+  local killholder=$!
+  sleep 1.5
+  OS_VERIFY_LOCK_SLOT=kill-slot OS_VERIFY_LOCK_WAIT=30 bash "$SELF" -c true > /dev/null 2>&1 &
+  local killwaiter=$!
+  sleep 2
+  kill -9 "$killwaiter" 2> /dev/null
+  wait "$killwaiter" 2> /dev/null
+  local killed_n=0 kf
+  for kf in "$sq"/*-skill-slot; do
+    [[ -f "$kf" ]] && killed_n=$((killed_n + 1))
+  done
+  st_case 'a slot whose owner was SIGKILLed keeps its place (no trap ran)' "$killed_n" 1
+  st_case 'and the queue scan reads it as parked, not as a waiter' \
+    "$(ticket_state "$(slot_ticket_path kill-slot)")" parked
+  st_case 'and it is not counted as waiting' "$(queue_live | wc -l | tr -d ' ')" 0
+  st_case 'while an ORDINARY killed ticket is still reaped as dead' \
+    "$(printf '999999 12345 %s ordinary\n' "$(now_s)" > "${sq}/00000000000000000011-999999"
+       ticket_state "${sq}/00000000000000000011-999999")" dead
+  kill "$killholder" 2> /dev/null
+  wait "$killholder" 2> /dev/null
+  rm -rf "$sq"
+  mkdir -p "$sq"
 
   # Ageing: a place older than SLOT_MAX_AGE_S is pruned like any dead ticket,
   # so the priority it carries is bounded rather than indefinite.
