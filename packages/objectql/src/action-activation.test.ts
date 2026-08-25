@@ -27,6 +27,11 @@
 //    `metadata:reloaded`, and a re-registered handler must stay switched off.
 
 import { describe, it, expect, vi } from 'vitest';
+// The engine's OWN update-dispatch predicate, so the fake below cannot be
+// looser than ObjectQL.update (`pnpm check:engine-double-contract`). Imported
+// from metadata-core rather than from `@objectstack/objectql`: this test lives
+// INSIDE objectql, and the package re-exporting it is this one.
+import { assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 
 import { ObjectQL } from './engine.js';
 import {
@@ -61,6 +66,14 @@ function makeStoreEngine(rows: any[] = []) {
             return { id: 'row_new', ...data };
         }),
         update: vi.fn(async (object: string, data: any, options?: any) => {
+            // Routed through ObjectQL's OWN dispatch predicate, so this fake
+            // cannot be looser than the engine it stands in for — #4434 shipped
+            // a dead REST route with its suite green off exactly that gap.
+            // `pnpm check:engine-double-contract` is the gate; the predicate
+            // lives in metadata-core, which this package already depends on
+            // (importing objectql's own re-export from inside objectql would be
+            // a self-import). Same pin the flow twin's fake carries.
+            assertEngineUpdateDispatch(data, options);
             calls.push({ op: 'update', object, data, options });
             return data;
         }),

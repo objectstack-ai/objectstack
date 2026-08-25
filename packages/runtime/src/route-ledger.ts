@@ -384,7 +384,18 @@ export const ROUTE_LEDGER: readonly RouteLedgerEntry[] = [
   { route: 'POST /actions//:action', domain: '/actions', disposition: 'sdk', client: 'actions.invokeGlobal',
     note: 'the object-less spelling of the global-action call (#3913) — same handler and same `global` key as the row above, reached without naming an object' },
   { route: 'POST /actions/_activation/:object/:action', domain: '/actions', disposition: 'server-only',
+    servedBy: '/api/v1/actions/:object/:action/:recordId',
     note: '[#12160] ADR-0126 §8 item 2 — enable/disable ONE packaged action, the only non-invocation shape this domain serves. '
+      + '⚠️ `servedBy`, and MEASURED on a real boot (#7526 caught it): no pattern of this spelling is registered. The '
+      + 'dispatcher mounts three `/actions` patterns, and a 3-segment activation path is matched by the LAST of them with '
+      + '`_activation` bound to `:object` — but that mount rebuilds the dispatch path from the matched params '
+      + '(`/actions/${object}/${action}/${recordId}`), so the path `handleActionsRequest` parses is byte-identical to the '
+      + 'one the caller sent and the `_activation` arm still fires. Probed against a booted showcase: the 2-segment shape '
+      + 'answers this door\'s own 400 (`Path must be /actions/_activation/:object/:action`) and a 3-segment undeclared '
+      + 'action answers this door\'s own 404 (`nothing to switch off`), neither of which the invocation path can produce. '
+      + 'A 4-segment path resolves to NOTHING and 404s at the router. Pinned end-to-end through the real mount in '
+      + '`qa/dogfood/test/action-params-contract.dogfood.test.ts`, so if that reconstruction ever stops being faithful the '
+      + 'pin reddens rather than this note going quietly stale. '
       + 'Body `{ enabled?: boolean }`; it writes a `sys_metadata_activation` row and nothing else (⛔ no definition write, ⛔ no clone: '
       + 'the action-clone half is unchartered). Two authority tiers, the same pair `POST /automation/:name/toggle` carries: '
       + '`manage_metadata`, then the ADR-0126 §5 posture rule requiring the platform operator in `group`/`isolated` — one shared '
