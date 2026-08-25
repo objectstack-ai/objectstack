@@ -909,9 +909,11 @@ describe('required-deferral early signal (#11674)', () => {
    * the deferral was taken: pass 1 deleted the column, so only pass 2 can put
    * it back, and its payload is the only `update` carrying that field.
    */
-  function passTwoBackfills(engine: { update: { mock: { calls: unknown[][] } } }, object: string, field: string): number {
-    return engine.update.mock.calls.filter(
-      ([obj, data]) => obj === object && Object.prototype.hasOwnProperty.call((data ?? {}) as object, field),
+  function passTwoBackfills(engine: ReturnType<typeof newService>['engine'], object: string, field: string): number {
+    // Same `as any` reach into the mock the rest of this file uses — the
+    // engine is typed as `IDataEngine`, whose `update` carries no mock.
+    return (engine.update as any).mock.calls.filter(
+      (call: any[]) => call[0] === object && Object.prototype.hasOwnProperty.call(call[1] ?? {}, field),
     ).length;
   }
 
