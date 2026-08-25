@@ -947,15 +947,28 @@ export async function selfTest() {
     },
   });
   assert('a-governed-diff-DOES-reach-the-review-read', reached === 1, `reached=${reached}`);
-  // A throwing reader on a GOVERNED diff becomes a refusal, never a pass.
-  const thrown = await runGuard({
-    event: 'merge_group',
-    rows: [row(1, ['AGENTS.md'])],
-    fetchReviews: () => {
-      throw new Error('HTTP 403');
-    },
-  });
-  assert('a-throwing-review-read-on-a-governed-diff-REFUSES', thrown.exitCode === EXIT_REFUSED_UNREADABLE && /403/.test(renderGuardVerdict(thrown)), renderGuardVerdict(thrown));
+  // A throwing reader on a GOVERNED diff becomes a refusal, never a pass —
+  // and `runGuard` must CONTAIN the throw rather than propagate it, so this
+  // is caught too: an escaping error would otherwise abort every case after
+  // it, and an aborted self-test hides the failures it already collected.
+  let thrown = null;
+  let thrownEscaped = null;
+  try {
+    thrown = await runGuard({
+      event: 'merge_group',
+      rows: [row(1, ['AGENTS.md'])],
+      fetchReviews: () => {
+        throw new Error('HTTP 403');
+      },
+    });
+  } catch (error) {
+    thrownEscaped = String(error?.message ?? error);
+  }
+  assert(
+    'a-throwing-review-read-on-a-governed-diff-REFUSES-and-the-throw-never-escapes',
+    thrownEscaped === null && thrown?.exitCode === EXIT_REFUSED_UNREADABLE && /403/.test(renderGuardVerdict(thrown)),
+    thrownEscaped ? `escaped: ${thrownEscaped}` : renderGuardVerdict(thrown),
+  );
 
   // ── the words a reader acts on (requirement (e)) ──────────────────────────
   const refusalText = renderGuardVerdict(refusedV);
