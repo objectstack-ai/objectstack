@@ -697,12 +697,174 @@ export function checkFamilyCoverageGaps(workflowEntries) {
   return out;
 }
 
-/** Resolve a `check:x` script name to the script files it runs, via a package.json `scripts` map. */
-export function resolveCheckToFiles(checkName, scriptsMap) {
+/**
+ * Resolve a `check:x` script name to the TRACKED PATHS of the script files it
+ * runs, via a `package.json` `scripts` map. `dir` is the directory that
+ * manifest lives in, repo-relative — `''` for the root manifest.
+ *
+ * ## The extensions, and why the list was wrong (#12107)
+ *
+ * The alternation used to read `mjs|cjs|js|sh`. A gate whose npm script names a
+ * `.ts` / `.mts` / `.cts` file matched nothing, so `entry.files` stayed empty
+ * and `discoverFamilies` never opened the source — no watch hints, no
+ * first-party import following, no `declaredNoPathPopulation` read, and no
+ * entry in `gateFiles`. Such a family scores `undetermined` for every card in
+ * the tree, and the output cannot tell that apart from a gate whose author
+ * declined to declare a population: in the first case the declaration was
+ * never READ, in the second there is none to read. Measured on this tree at
+ * the fix: 24 of 167 families resolved to zero files; 23 of them were this
+ * defect, all `tsx`-run TypeScript gates.
+ *
+ * The 24th, `check:app-nav-i18n`, is NOT this defect and is deliberately still
+ * zero-file: its root script is `pnpm --filter @objectstack/cli run
+ * check:app-nav-i18n`, a composite that names a PACKAGE and a SCRIPT NAME
+ * rather than a path. No extension list can reach it — resolving it means
+ * following a `pnpm --filter … run …` hop into another manifest, which is a
+ * different mechanism and a different card. A fix here that reported zero
+ * remaining would have absorbed it by accident.
+ *
+ * ## Why `dir`, and why the climb prefix is part of the match (#12107, point 1)
+ *
+ * A package manifest spells its script relative to ITSELF, and one of the 23
+ * climbs out of its own package: `packages/client`'s alias is
+ * `tsx ../../scripts/check-exported-any-returns.mts …`. The caller used to
+ * prepend the package prefix to whatever came back, which is correct for the
+ * 22 in-package spellings (`packages/spec` + `scripts/build-docs.ts`) and
+ * wrong for the climbing one.
+ *
+ * ⚠️ It is wrong in a way the card that filed this predicted the shape of but
+ * not the mechanism of, and the difference decides the fix. The card expected
+ * `packages/client/../../scripts/…` — a path that resolves on disk but is not
+ * a tracked-path spelling. That is not what happens: the pattern was anchored
+ * on the literal `scripts/`, so the match SILENTLY DROPPED the `../../` and
+ * produced the bare `scripts/check-exported-any-returns.mts`, leaving `join`
+ * nothing to normalise. Prepending the package prefix then yields
+ * `packages/client/scripts/check-exported-any-returns.mts`, which does not
+ * exist. Measured with the extension list widened and this normalisation NOT
+ * yet in place: the family leaves the zero-file set and stops scoring
+ * `undetermined`, while `existsSync` still refuses the file so it reads
+ * **zero hints** — the card's own trigger gate, still silent, now silent
+ * behind a confident phantom identity key instead of an honest bucket. That
+ * is a strictly worse output than the bug being fixed, so the climb prefix is
+ * matched here and normalised through `join` against the manifest's own
+ * directory.
+ *
+ * A spelling that climbs clear of the repo root is dropped rather than
+ * returned: `join` cannot normalise it into a tracked path, and a lead no
+ * `hintCovers` can ever match is the fabricated-lead direction this file
+ * refuses everywhere.
+ *
+ * ## Why the extension needs a right-hand boundary, and why that is part of
+ * ## this widening rather than a tidy-up beside it
+ *
+ * The alternation was never anchored on its right, so an extension that is a
+ * PREFIX of a longer one matched as itself and the rest of the word was
+ * dropped. That was already live before this change — a `scripts/**.json`
+ * argument matched as `…/pins.js` through the `js` branch — but admitting `ts`
+ * adds the common one: `scripts/render.tsx` would match as
+ * `scripts/render.ts`. Both produce the same output, and it is the worst one
+ * this function has: a gate file that does not exist, which `existsSync` then
+ * refuses to open, so the family carries an identity key `coveringKey` prints
+ * as a `gate script` match over a file nothing ever read. That is the same
+ * phantom the package-relative case above produces, reached by a second route,
+ * so it is closed in the same edit and pinned by the same live assertion
+ * ("every gate file the derivation names exists on disk").
+ *
+ * Measured: adding the boundary changes nothing on this tree — no live command
+ * names a `scripts/…` argument whose extension merely starts with one of these
+ * — so it costs zero recall today and closes the class before the first `.tsx`
+ * or `.json` argument arrives.
+ *
+ * ## What it costs, measured in BOTH directions (the deliverable, not the code)
+ *
+ * This is a WIDENING, and this file prices widenings by measurement rather
+ * than by argument — `firstPartyImportTargets`' docblock above is the standard
+ * this section is written to. Over 167 discovered families x 6763 tracked
+ * files, at the commit that lands it:
+ *
+ *   watch-hint (gate, file) pairs   73278 -> 74481   (+1203, and ZERO lost)
+ *   zero-file families              24 -> 1
+ *   families gaining coverage       19
+ *   families losing coverage        0
+ *   gate files naming nothing       0 -> 0
+ *   existing matches re-attributed  4
+ *
+ * The +1203 is concentrated in three families that declare real corpora —
+ * check:skill-examples (+495), check:docs (+440), check:generated (+234) —
+ * with check:template-manifests (+14) and check:react-blocks (+3) next; the
+ * remaining fourteen gain 1 or 2 each, which is the identity match on their
+ * own source and, for most of them, nothing more. That distribution is the
+ * honest shape of the fix: what these families were missing was mostly the
+ * ability to be named AT ALL, not a large population.
+ *
+ * The 4 re-attributions are the one number that differs from the precedent's
+ * (which reports 0), so it is reported rather than rounded: check:liveness,
+ * check:empty-state, check:variant-docs and check:strictness-ledger each
+ * matched their OWN source file already, through the `paths:` filter of
+ * spec-liveness-check.yml, and now match it through identity instead. The via
+ * label changes from `CI trigger in spec-liveness-check.yml` to `gate script`;
+ * no path enters or leaves any family's matched list. That direction is
+ * `coveringKey`'s own declared ordering — identity outranks a trigger because
+ * it is the stronger provenance — so these are re-attributions UP, not the
+ * silent key churn the precedent was guarding against.
+ *
+ * ## The SUBTRACTION direction, which is the half an addition count hides
+ *
+ * Admitting these sources also makes them GATE FILES, and `discoverFamilies`
+ * refuses to follow a module that is itself a gate file. Any family that used
+ * to inherit a hint from one of the 23 would silently stop — and a lead that
+ * stops appearing is indistinguishable from one that was never earned, so
+ * nothing in the output would say so.
+ *
+ *   import-follow edges suppressed  0
+ *   inherited hints lost            0
+ *
+ * Zero, and for a structural reason rather than by luck: `firstPartyImportTargets`
+ * admits only relative specifiers that resolve INSIDE the root `scripts/` dir,
+ * and 22 of the 23 live under `packages/spec/scripts/`, which no first-party
+ * follow can reach. The 23rd, `scripts/check-exported-any-returns.mts`, does
+ * live there and is imported by nothing. The live half of the self-test
+ * asserts this rather than trusting it, because a future TypeScript gate in
+ * the root `scripts/` dir could make it false.
+ *
+ * The mirror question, asked because it is the one that could FABRICATE:
+ * opening 23 files that were never opened also means following their imports
+ * one level, which is how a gate inherits a population it does not read. Also
+ * measured at 0 new edges. The 22 under `packages/spec/scripts/` are out of
+ * reach for the same rule; the root-dir one imports `./check-regen-pending.mjs`
+ * and `./invoked-as.mjs`, and BOTH are already discovered gate files, so the
+ * pre-existing narrowing refuses them. This change therefore adds nothing to
+ * the inheritable-literal surface #11556 records for this module: measured on
+ * this tree, `extractWatchHints` over this file yields the same 9 hints
+ * covering the same 2642 tracked files before and after.
+ *
+ * ## What the fix does NOT buy, stated because the number invites the reading
+ *
+ * `check:exported-any-returns` — the gate this card was filed from — resolves
+ * its source now and still contributes no watch hints, because that source
+ * declares no path literals and carries no `no-path-population` marker. It
+ * scores `undetermined` before and after. The difference is the whole point of
+ * the card and none of it is visible in a pair count: before, the declaration
+ * was never READ; now it has been read and there is nothing there. The first
+ * is a defect in this derivation, the second is a missing declaration on that
+ * gate, and only the second can be acted on by its author.
+ */
+export function resolveCheckToFiles(checkName, scriptsMap, { dir = '' } = {}) {
   const cmd = scriptsMap[checkName];
   if (!cmd) return [];
-  // The conventional script shape names its file twice (`--self-test && run`) — dedupe.
-  return [...new Set([...cmd.matchAll(/(scripts\/[\w./-]+\.(?:mjs|cjs|js|sh))/g)].map((m) => m[1]))];
+  // The conventional script shape names its file twice (`--self-test && run`) —
+  // dedupe, and dedupe on the NORMALISED path so two spellings of one file
+  // (`scripts/x.mts` from the root, `../../scripts/x.mts` from a package)
+  // cannot both be returned.
+  const out = new Set();
+  for (const m of cmd.matchAll(/((?:\.\.\/)*scripts\/[\w./-]+\.(?:mjs|cjs|js|sh|ts|mts|cts))(?![\w-])/g)) {
+    const tracked = join(dir, m[1]);
+    // Climbed clear of the repo root: unnameable as a tracked path, so it is
+    // not a lead at all.
+    if (tracked === '..' || tracked.startsWith('../')) continue;
+    out.add(tracked);
+  }
+  return [...out];
 }
 
 /**
@@ -3246,8 +3408,13 @@ export function discoverFamilies() {
         const p = join(ROOT, base, pkgDirGuess, 'package.json');
         if (existsSync(p)) {
           const pkgScripts = JSON.parse(readFileSync(p, 'utf8')).scripts ?? {};
+          // The manifest's own directory goes IN, and tracked paths come back
+          // out — a package script may climb out of its package
+          // (`tsx ../../scripts/x.mts`), and prefixing the result here instead
+          // was measured to misattribute exactly that spelling to the package
+          // (#12107; resolveCheckToFiles' docblock carries the measurement).
           files = files.concat(
-            resolveCheckToFiles(entry.check, pkgScripts).map((f) => join(base, pkgDirGuess, f)),
+            resolveCheckToFiles(entry.check, pkgScripts, { dir: join(base, pkgDirGuess) }),
           );
         }
       }
@@ -4144,6 +4311,87 @@ function selfTest() {
     subtracted.length === 0,
   );
 
+  // #12107, the live half — three claims about THIS tree, each one a thing the
+  // fix buys that a fixture cannot show.
+  const tsLiveFamilies = [...discoverFamilies().byCheck];
+
+  // 1. No gate file the derivation NAMES is a path that does not exist. This is
+  //    the invariant the package-relative normalisation buys, and it is the one
+  //    that catches the near-miss: widening the extensions WITHOUT normalising
+  //    produced `packages/client/scripts/check-exported-any-returns.mts` — a
+  //    phantom identity key that `coveringKey` would print as a `gate script`
+  //    match while `existsSync` kept the file closed and the family kept
+  //    reading zero hints. Measured on this tree at the fix: 0 phantoms.
+  const phantomGateFiles = tsLiveFamilies.flatMap(([check, e]) =>
+    (e.files ?? []).filter((f) => !existsSync(join(ROOT, f))).map((f) => `${check} -> ${f}`),
+  );
+  t(
+    `every gate file the derivation names exists on disk${phantomGateFiles.length ? ` — PHANTOM: ${phantomGateFiles.join(' · ')}` : ''}`,
+    phantomGateFiles.length === 0,
+  );
+
+  // 2. The TypeScript families really do resolve now, on the live tree rather
+  //    than through a fixture — and the climbing one resolves to the ROOT path.
+  const anyReturns = tsLiveFamilies.find(([c]) => c === 'check:exported-any-returns')?.[1];
+  t(
+    'the live TypeScript gate that climbs out of its package resolves to the tracked root path',
+    (anyReturns?.files ?? []).join() === 'scripts/check-exported-any-returns.mts',
+  );
+  const tsFamilies = tsLiveFamilies.filter(([, e]) =>
+    (e.files ?? []).some((f) => /\.(?:ts|mts|cts)$/.test(f)),
+  );
+  t(`the live tree resolves TypeScript-authored gates at all (${tsFamilies.length} families)`, tsFamilies.length >= 20);
+
+  // 3. What is LEFT zero-file, and why it must stay that way. `resolveCheckToFiles`
+  //    reads PATHS out of a command string; a family whose script names a package
+  //    and a script NAME instead (`pnpm --filter @objectstack/cli run check:…`)
+  //    carries no path for any extension list to match. It is a different
+  //    mechanism and a different card, so the assertion is that every remaining
+  //    zero-file family is one of those composites — never that the count is
+  //    zero, which would mean this fix had absorbed a family it cannot honestly
+  //    resolve.
+  const rootScriptsMap = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')).scripts ?? {};
+  const zeroFile = tsLiveFamilies.filter(([, e]) => (e.files ?? []).length === 0);
+  const unexplained = zeroFile
+    .map(([check]) => [check, rootScriptsMap[check] ?? ''])
+    .filter(([, cmd]) => !/\bpnpm\b[^&|]*?(?:--filter|--recursive|-r)\b[^&|]*?\brun\b/.test(cmd))
+    .map(([check, cmd]) => `${check} (${cmd || 'no root script'})`);
+  t(
+    `every zero-file family left is a pnpm workspace composite, not an unmatched extension${unexplained.length ? ` — UNEXPLAINED: ${unexplained.join(' · ')}` : ''}`,
+    unexplained.length === 0,
+  );
+  t('and there is still at least one, so the assertion above is not vacuous', zeroFile.length > 0);
+
+  // 4. The SUBTRACTION direction, asserted the way the self-test families'
+  //    promotion above asserts its own: admitting these sources makes them GATE
+  //    FILES, and `discoverFamilies` refuses to follow a gate file. A family
+  //    that used to inherit a hint from one of them would silently stop, and a
+  //    lead that stops appearing is indistinguishable from one never earned.
+  //    Measured on this tree: none of the newly admitted sources is imported by
+  //    any gate at all — all 12 modules this tree follows live in the root
+  //    `scripts/` dir, and 22 of the 23 admitted sources live under
+  //    `packages/spec/scripts/`. The 23rd (`scripts/check-exported-any-returns.mts`)
+  //    is imported by nothing.
+  const admittedTs = tsLiveFamilies.flatMap(([, e]) => (e.files ?? []).filter((f) => /\.(?:ts|mts|cts)$/.test(f)));
+  const tsSubtracted = [];
+  for (const [check, entry] of tsLiveFamilies) {
+    if (entry.selfTest) continue;
+    for (const f of entry.files ?? []) {
+      if (/\.(?:ts|mts|cts)$/.test(f)) continue;
+      if (!existsSync(join(ROOT, f))) continue;
+      for (const mod of firstPartyImportTargets(f, readFileSync(join(ROOT, f), 'utf8'))) {
+        if (!admittedTs.includes(mod)) continue;
+        const lost = extractWatchHints(readFileSync(join(ROOT, mod), 'utf8'));
+        if (lost.length > 0) tsSubtracted.push(`${check} <- ${mod} (${lost.join(', ')})`);
+      }
+    }
+  }
+  t(
+    `admitting ${admittedTs.length} TypeScript gate source(s) subtracts no inherited hint from any other family`
+      + `${tsSubtracted.length ? ` — LOST: ${tsSubtracted.join(' · ')}` : ''}`,
+    tsSubtracted.length === 0,
+  );
+
   // `runCommandTexts` on its own: one entry per step, in file order.
   const texts = runCommandTexts(blockWf);
   t('one command text per run step', texts.length === 4);
@@ -4219,6 +4467,47 @@ function selfTest() {
   const scripts = { 'check:foo': 'node scripts/check-foo.mjs --self-test && node scripts/check-foo.mjs' };
   t('resolves script file from package.json', resolveCheckToFiles('check:foo', scripts).join() === 'scripts/check-foo.mjs');
   t('unknown check resolves to nothing', resolveCheckToFiles('check:bar', scripts).length === 0);
+
+  // #12107 — the extension list. Each of the three TypeScript spellings is a
+  // case the OLD alternation (`mjs|cjs|js|sh`) resolved to nothing, which is
+  // why they are pinned separately rather than as one representative: the
+  // defect was an alternation, and an alternation regresses one branch at a
+  // time.
+  const tsScripts = {
+    'check:ts': 'tsx scripts/check-generated.ts',
+    'check:mts': 'tsx scripts/check-variant-docs.mts',
+    'check:cts': 'tsx scripts/check-legacy.cts',
+    'check:mixed': 'node scripts/pre.mjs && tsx scripts/check-generated.ts',
+  };
+  t('resolves a .ts gate script — zero-file under the old alternation', resolveCheckToFiles('check:ts', tsScripts).join() === 'scripts/check-generated.ts');
+  t('resolves a .mts gate script', resolveCheckToFiles('check:mts', tsScripts).join() === 'scripts/check-variant-docs.mts');
+  t('resolves a .cts gate script', resolveCheckToFiles('check:cts', tsScripts).join() === 'scripts/check-legacy.cts');
+  t('a command naming both an .mjs and a .ts file yields both', resolveCheckToFiles('check:mixed', tsScripts).join() === 'scripts/pre.mjs,scripts/check-generated.ts');
+  // The negative half of the alternation: widening it must not admit every
+  // extension. A `.json` argument is data the gate READS, not a file it runs,
+  // and the hint scan is what places those.
+  t('a data file argument is still not a gate script', resolveCheckToFiles('check:x', { 'check:x': 'tsx scripts/check-x.mts scripts/fixtures/pins.json' }, { dir: '' }).join() === 'scripts/check-x.mts');
+  t('nor a .tsx file, the one this widening would newly have mis-matched as .ts', resolveCheckToFiles('check:x', { 'check:x': 'tsx scripts/render.tsx' }).length === 0);
+  t('while the extension it is a prefix of still resolves', resolveCheckToFiles('check:x', { 'check:x': 'tsx scripts/render.ts' }).join() === 'scripts/render.ts');
+
+  // #12107 point 1 — a package manifest spells its script relative to ITSELF,
+  // so the manifest's directory is an input to the resolution, not a prefix
+  // the caller staples on afterwards.
+  const pkgScripts = {
+    'check:in-package': 'tsx scripts/build-docs.ts --check',
+    'check:climbing': 'tsx ../../scripts/check-exported-any-returns.mts --self-test && tsx ../../scripts/check-exported-any-returns.mts --package packages/client',
+    'check:escaping': 'tsx ../../../../scripts/check-elsewhere.mjs',
+  };
+  t('a package-local spelling lands under the package that declares it', resolveCheckToFiles('check:in-package', pkgScripts, { dir: 'packages/spec' }).join() === 'packages/spec/scripts/build-docs.ts');
+  t('a spelling that climbs out of its package normalises to the tracked repo path', resolveCheckToFiles('check:climbing', pkgScripts, { dir: 'packages/client' }).join() === 'scripts/check-exported-any-returns.mts');
+  // The regression this normalisation exists for, stated as the wrong answer
+  // rather than only as the right one: with the extensions widened and the
+  // climb prefix dropped, this resolved to a path that does not exist, and the
+  // family left the honest `undetermined` bucket while still reading no hints.
+  t('and never to the package-prefixed path that does not exist', !resolveCheckToFiles('check:climbing', pkgScripts, { dir: 'packages/client' }).includes('packages/client/scripts/check-exported-any-returns.mts'));
+  t('the twice-named climbing script is ONE file, deduped on the normalised path', resolveCheckToFiles('check:climbing', pkgScripts, { dir: 'packages/client' }).length === 1);
+  t('a spelling that climbs clear of the repo root is dropped, not returned unnameable', resolveCheckToFiles('check:escaping', pkgScripts, { dir: 'packages/client' }).length === 0);
+  t('an absent dir leaves a root-manifest spelling exactly as it was', resolveCheckToFiles('check:foo', scripts).join() === 'scripts/check-foo.mjs');
 
   const src = [
     "const DIR = '.claude/agents';",

@@ -256,6 +256,78 @@ describe('hookBodyRunnerFactory', () => {
       expect(await probeUser({})).toBe('null');
     });
   });
+
+  // [#11552] The per-row dispatch signal and the D2 options projection cross
+  // the sandbox boundary — the unit half; the real-engine composition (flat
+  // proxy from `installFlatInput`, predicate dispatch, write-back) is pinned
+  // in `perrow-dispatch-signal.integration.test.ts`.
+  describe('marshals ctx.dispatch and input.options onto the hook body face (#11552)', () => {
+    const probeSignal = (engineCtx: Record<string, unknown>) => {
+      const fn = hookBodyRunnerFactory(runner, { ql: {}, appId: 'crm' })({
+        name: 'probe_signal',
+        object: 'contact',
+        events: ['beforeUpdate'],
+        body: {
+          language: 'js',
+          source:
+            'return { seen: JSON.stringify({'
+            + ' dispatchType: typeof ctx.dispatch,'
+            + ' mode: ctx.dispatch ? ctx.dispatch.mode : null,'
+            + ' index: ctx.dispatch ? ctx.dispatch.index : null,'
+            + ' scopeType: ctx.dispatch ? typeof ctx.dispatch.scope : null,'
+            + ' optionsType: typeof ctx.input.options,'
+            + ' multi: ctx.input.options ? ctx.input.options.multi : null,'
+            + ' where: ctx.input.options ? ctx.input.options.where : null,'
+            + ' contextType: ctx.input.options ? typeof ctx.input.options.context : null,'
+            + ' inputKeys: Object.keys(ctx.input).sort(),'
+            + ' }) };',
+          capabilities: [],
+        },
+      } as any);
+      const ctx = { input: {} as Record<string, unknown>, ...engineCtx } as any;
+      return fn!(ctx).then(() => JSON.parse(String(ctx.input.seen)));
+    };
+
+    it('copies { mode, index } and deliberately NOT `scope` — a JSON copy cannot keep its shared identity', async () => {
+      const seen = await probeSignal({
+        dispatch: { mode: 'per-row', index: 3, scope: { stash: 1 } },
+      });
+      expect(seen.dispatchType).toBe('object');
+      expect(seen.mode).toBe('per-row');
+      expect(seen.index).toBe(3);
+      expect(seen.scopeType).toBe('undefined');
+    });
+
+    it('leaves ctx.dispatch ABSENT on an unrecognised marker shape — never guessed at', async () => {
+      const seen = await probeSignal({ dispatch: { mode: 'weird', index: 0, scope: {} } });
+      expect(seen.dispatchType).toBe('undefined');
+    });
+
+    it('projects input.options to multi/where — the caller bag\'s other keys do not cross', async () => {
+      // The wrapper shape `installFlatInput` presents: `options` passes through
+      // the get trap while `ownKeys` hides it. A plain object models the get
+      // half; the enumeration half is pinned on the real proxy in the
+      // integration test.
+      const seen = await probeSignal({
+        input: { options: { multi: true, where: { status: 'draft' }, context: { secret: 'S' } } },
+      });
+      expect(seen.optionsType).toBe('object');
+      expect(seen.multi).toBe(true);
+      expect(seen.where).toEqual({ status: 'draft' });
+      expect(seen.contextType).toBe('undefined');
+      // Non-enumerable graft: the snapshot's own enumerable copy (this bare
+      // context has no ownKeys-hiding proxy) is REPLACED by the hidden one, so
+      // even here enumeration stays clean.
+      expect(seen.inputKeys).toEqual([]);
+    });
+
+    it('carries neither key when the engine context has neither — the action-face and legacy shape', async () => {
+      const seen = await probeSignal({ input: { email: 'a@b.co' } });
+      expect(seen.dispatchType).toBe('undefined');
+      expect(seen.optionsType).toBe('undefined');
+      expect(seen.inputKeys).toEqual(['email']);
+    });
+  });
 });
 
 describe('actionBodyRunnerFactory', () => {

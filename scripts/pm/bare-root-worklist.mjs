@@ -303,6 +303,25 @@ const TRIAGE = new Map([
     why: 'one named file per child directory, 11 of 50 (22%). It already reaches its own cards '
       + 'through the artifact roster it names file by file, so the miss is smaller than the row',
   }],
+  ['check:skill-docs SKILLS_DIR skills', {
+    verdict: 'REFUSE-UNSPELLABLE',
+    why: 'one named file per child directory plus the root README — 12 of 50 (24%). '
+      + 'build-skill-docs.ts:221 readdirSync-es the bare root and reconciles the listing against '
+      + 'DISPLAY in both directions (:227-228), so a new or removed objectstack-*/SKILL.md moves '
+      + 'the verdict and no fixed list can name it; but :222 admits a child only if it CARRIES '
+      + 'SKILL.md, so the population is that filename filter, not the root. Recorded to match the '
+      + 'check-skills-token-ratchet row above, which reads the SAME root the same way at the same '
+      + 'scale — one root answered one way',
+  }],
+  ['check:skill-refs SKILLS_DIR skills', {
+    verdict: 'REFUSE-UNSPELLABLE',
+    why: 'a named subdirectory per child, enumerated and pruned wholesale — 12 of 50 (24%), 9 of '
+      + 'them the _index.md it emits. It never reads the bare root: build-skill-references.ts:304 '
+      + 'iterates the authored SKILL_MAP (:43-127), resolves skills/<name>/, and manages '
+      + 'skills/<name>/references/ via manageDir/ownsReferenceEntry (:288-294). The true population '
+      + 'is skills/*/references/**, which collapseHint reduces to skills//references/** — a double '
+      + 'slash no tree can hold (#12246) — so the only spellable claim left is the bare root',
+  }],
   ['check:runner-env-posture SCANNED_ROOTS packages', {
     verdict: 'REFUSE-UNSPELLABLE',
     why: 'non-test source beneath a `src` SEGMENT — 1794 of 5185 (35%). The segment is what makes '
