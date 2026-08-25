@@ -3494,13 +3494,19 @@ export class AuthManager {
    * check. Answers `undefined` to admit, `{ error, errorDescription }` to
    * refuse (the vendor surfaces it as a 403 whose `code` is ours; browser
    * OAuth flows redirect to the error URL carrying the same code).
+   *
+   * [#11767] The vendor's second argument — the endpoint context — is
+   * deliberately UNREAD. Both probes below take their own ctx-independent data
+   * path, because sourcing this gate's I/O from the request context is exactly
+   * what made the bootstrap bypass inert (see {@link isBootstrapCreation}).
+   * The parameter is kept so the signature still reads as the vendor's.
    */
   private async validateAudienceAdmission(
     data: {
       user?: Record<string, unknown>;
       source?: { action?: string; method?: string; oauth?: { providerId?: string } };
     },
-    ctx: any,
+    _ctx?: unknown,
   ): Promise<{ error: string; errorDescription?: string } | undefined> {
     try {
       // link-account / provider sign-in concern an EXISTING user's identity,
