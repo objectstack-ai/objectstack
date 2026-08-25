@@ -15,6 +15,7 @@
     "system/AppManifest:objects = []",
     "system/AppManifest:seedData = []",
     "system/AppManifest:views = []",
+    "system/AudienceConfig:posture = \"invite_only\"",
     "system/AuthConfig:uiBasePath = \"/_console\"",
     "system/AuthPluginConfig:admin = false",
     "system/AuthPluginConfig:deviceAuthorization = false",

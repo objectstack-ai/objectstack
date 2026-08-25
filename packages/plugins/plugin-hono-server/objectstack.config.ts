@@ -230,13 +230,9 @@ const HonoServerPlugin: ObjectStackManifest = {
     extensions: [],
   },
 
-  contributes: {
-    // System Events
-    events: [
-      'kernel:ready',
-      'kernel:listening',
-    ],
-  },
+  // `contributes.events` was retired (#10724, ADR-0049): the declaration drove
+  // nothing — this plugin already subscribes to `kernel:ready` / `kernel:listening`
+  // imperatively in its own code, which is the enforced channel.
 };
 
 export default HonoServerPlugin;

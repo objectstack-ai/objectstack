@@ -4606,7 +4606,8 @@ export class ObjectQL implements IObjectQLEngine {
           for (const kind of manifest.contributes.kinds) {
             this._registry.registerKind(kind);
             // [#10729] Name the kind by its declared `id`. `contributes.kinds`
-            // items are `{ id, globs, description? }` (`manifest.zod.ts`) and
+            // items are `{ id, description? }` (`manifest.zod.ts`; `globs` was
+            // retired unread, #11169) and
             // `registerKind` keys the item on `id` (`registerItem('kind', kind, 'id')`),
             // so `id` is BOTH the only identifying field the schema declares and the
             // exact key the item is stored under — a reader of this line can look the

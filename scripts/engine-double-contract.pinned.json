@@ -1277,6 +1277,16 @@
       "pinned": 1
     },
     {
+      "file": "packages/plugins/plugin-auth/src/audience-posture.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-auth/src/audience-posture.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/plugins/plugin-auth/src/auth-manager.jwt-eddsa-fallback.test.ts",
       "verb": "delete",
       "pinned": 1
