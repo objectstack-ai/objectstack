@@ -8623,10 +8623,70 @@ export class SqlDriver implements IDataDriver {
     return { object: tableName, current, shards: retained, dropped };
   }
 
+  /**
+   * [#12015] Say out loud that a declared field was dropped for colliding with
+   * a builtin column.
+   *
+   * `id`, `created_at` and `updated_at` are emitted by the driver itself, so a
+   * field an author DECLARES under one of those names never reaches
+   * {@link createColumn} — its declared type, length and constraints are
+   * discarded. The driver is right to own its primary key and audit stamps;
+   * the defect was that it disagreed with the author in **silence**. Measured
+   * on live PostgreSQL 16.13: an object declaring `id: { type: 'text' }` boots
+   * green and gets `id varchar(255)` — `table.string('id')`, not TEXT — and
+   * nothing anywhere said the declaration had been thrown away. That is the
+   * declared-≠-enforced hazard this repo treats as first-class, and it bites
+   * hardest on AI-authored metadata, where the mismatch surfaces much later as
+   * data behaving oddly.
+   *
+   * ⛔ This is a diagnostic, NOT a rejection door. Maintainer ruling
+   * 2026-08-25 took the warning and explicitly did **not** take "refuse boot"
+   * (a new rejection door on an existing accept path, whose stock inventory is
+   * unmeasured) nor "make the declaration meaningful" (capability expansion
+   * with no pull — the platform owning its primary key is correct design; the
+   * defect was only the silence). Every object that boots today still boots,
+   * with one more line in the log.
+   *
+   * `phase` is part of the message because all THREE paths that drop such a
+   * declaration carry this warning — create, the ADD COLUMN diff, and the
+   * shard path — and a warning on one path with silence on the others just
+   * moves the trap. Each phase is pinned separately, so a regression to a
+   * silent `continue` on ONE path fails by name.
+   */
+  protected warnBuiltinColumnCollisions(
+    tableName: string,
+    fields: Record<string, any> | undefined,
+    builtinColumns: ReadonlySet<string>,
+    phase: 'create' | 'alter' | 'shard',
+  ): string[] {
+    const collisions = Object.keys(fields ?? {}).filter((name) => builtinColumns.has(name));
+    if (collisions.length === 0) return collisions;
+    const where = {
+      create: `while creating table "${tableName}"`,
+      alter: `while syncing existing table "${tableName}"`,
+      shard: `while syncing shard "${tableName}"`,
+    }[phase];
+    for (const field of collisions) {
+      this.logger.warn(
+        `[sql-driver] ${where}: declared field '${field}' collides with a builtin column the platform ` +
+          `owns (id, created_at, updated_at) — the declaration is NOT applied. Its declared type, ` +
+          `length and constraints are ignored; the platform's own '${field}' column stands. Remove the ` +
+          `declaration, or rename the field if you meant a column of your own.`,
+        { table: tableName, field, phase },
+      );
+    }
+    return collisions;
+  }
+
   /** Create/column-sync one physical shard table (mirrors the managed-table
    * branch of {@link initObjects}, scoped to a shard). */
   protected async ensureShardTable(shardName: string, obj: { fields?: Record<string, any>; tenancy?: any }): Promise<void> {
     const builtinColumns = new Set(['id', 'created_at', 'updated_at']);
+    // [#12015] Both branches below drop a declared field named after a builtin
+    // column — the create branch skips it explicitly, the column-sync branch
+    // finds the column already present — so the shard path warns once here,
+    // ahead of either.
+    this.warnBuiltinColumnCollisions(shardName, obj.fields, builtinColumns, 'shard');
     const exists = await this.knex.schema.hasTable(shardName);
     // #11374: a shard carries the base table's declared indexes (below), so its
     // columns need the same keyable-text decision the managed path makes.
@@ -9090,6 +9150,10 @@ export class SqlDriver implements IDataDriver {
       });
 
       if (!exists) {
+        // [#12015] The `continue` below drops a declared field that collides
+        // with a builtin column. Said BEFORE the DDL runs, so the author hears
+        // it even when the CREATE goes on to fail for an unrelated reason.
+        this.warnBuiltinColumnCollisions(tableName, obj.fields, builtinColumns, 'create');
         try {
           await this.knex.schema.createTable(tableName, (table) => {
             table.string('id').primary();
@@ -9118,6 +9182,13 @@ export class SqlDriver implements IDataDriver {
         if (existingColumns.includes('updated_at')) {
           this.tablesWithTimestamps.add(tableName);
         }
+
+        // [#12015] The ADD COLUMN diff is keyed on "column not already there",
+        // so a declared `id`/`created_at`/`updated_at` is dropped on this path
+        // too — the builtin is already in `existingColumns`, so the diff below
+        // never proposes it and `addedColumns` excludes it by name. Silent on
+        // every boot of an existing table until now.
+        this.warnBuiltinColumnCollisions(tableName, obj.fields, builtinColumns, 'alter');
 
         // #11565: the row budget is a property of the WHOLE row, so adding one
         // ordinary column to a wide table is refused by the width of columns
