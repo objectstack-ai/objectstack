@@ -272,6 +272,10 @@ function boot(opts?: { capabilities?: string[]; seedDrafts?: boolean }) {
 
     return {
         seen,
+        /** Every `POST …/publish` pattern the composed server really registered. */
+        mountedPublishDoors: () => (rest as any).getRoutes()
+            .filter((r: any) => r.method === 'POST' && String(r.path).endsWith('/publish'))
+            .map((r: any) => String(r.path)),
         /**
          * The pair this file turns on, for one name: what the LIVE row carries
          * and what (if anything) is still STAGED beside it. A tuple so §5 can
@@ -304,13 +308,18 @@ const UNTOUCHED = [LIVE_LABEL, DRAFT_LABEL];
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe('[#11932] POST /meta/:type/:section/:name/publish — the compound promotion door', () => {
-    it('⭐ is registered at all', () => {
+    it('⭐ is registered at all — BOTH arities, read off the real mount table', () => {
         const stack = boot();
-        // Pre-fix this threw inside `call()` with "is not registered at all".
+
+        // ⛔ Not `typeof compoundPublish === 'function'` — that is true of the
+        // helper whether or not the route exists, and it passed the ablation.
+        // The claim is about the SERVER's table: both spellings, single-segment
+        // first, and nothing else answering `…/publish`.
+        expect(stack.mountedPublishDoors()).toEqual([SINGLE_PUBLISH, COMPOUND_PUBLISH]);
         // Registration is necessary and NOT sufficient — everything below is
-        // about what it then does. (#7526's lesson: a mounted-but-shadowed or
-        // stubbed route answers a plausible 200.)
-        expect(stack.compoundPublish).toBeTypeOf('function');
+        // about what the door then does, and `meta-route-registration-order`
+        // carries the reachability half. (#7526's lesson: a mounted-but-shadowed
+        // or stubbed route answers a plausible 200.)
     });
 
     it('⭐ makes the staged compound body LIVE — read from the store, not from the status', async () => {
