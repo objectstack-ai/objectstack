@@ -130,6 +130,18 @@
 // in a thirteenth. It also means a double cannot pass vacuously by returning
 // everything: the control catches that before the battery runs.
 //
+// The seat is granted on a POSITIVE reading, never on the absence of a negative
+// one. A double may answer both control probes with rows of its OWN -- constant
+// stubs (`async find(o, q) { return [{ id: 'r1' }]; }`), or schema-signature
+// fixtures that exist only to satisfy a `parse()`. Those rows carry none of the
+// probe's fields, so the control reads nothing from them and obtains no evidence
+// of filtering whatever. Treating "could not read" as "did not fail" seats them,
+// and they then grade BLIND -- debt with NO POSSIBLE REMEDY, because there is no
+// corpus to bound. Measured on this corpus: 19 of 294 seated candidates. They are
+// routed by structure instead, by the same fallthrough every unseated candidate
+// takes: OUT OF SCOPE when the body never filters, UNJUDGED -- declared, never
+// skipped -- when it does but this lift cannot drive it.
+//
 // ## Driving a double whose rows live in a closure
 //
 // Unlike a `matches(row, where)` matcher, a `find` double reads its rows from an
@@ -178,9 +190,12 @@
 //   BOUNDED     every seated double applies the caller's `limit`, or refuses it
 //               loudly -- or its file carries a measured baseline entry.
 //   SHAPED      every double that DOES apply the bound applies it by presence,
-//               after the filter, and before any row-touching stage. There is no
-//               baseline for this: no double in the measured population fails a
-//               shape rule, so grandfathering one would be inventing debt.
+//               after the filter, and before any row-touching stage. The measured
+//               population DOES contain shape breakers (32 of them, nearly all
+//               reading the bound by truthiness), so they are grandfathered like
+//               the blind ones -- but under their OWN `wrong` count, never folded
+//               into `blind`. The two have different remedies, and a folded count
+//               cannot tell a repair from a regression.
 //   JUDGED      every seated double was actually drivable. "Could not run" is a
 //               failure, not a skip (AGENTS.md, "Absence must be loud"), and is
 //               declared per file in the baseline's `unjudged` count.
@@ -580,7 +595,19 @@ export async function judge(candidate) {
         // gate could not drive -- out of scope rather than debt.
         if (!hits || !skips) { notAList = true; continue; }
         if (hits.length === 0 || skips.length === 0) continue;
-        if (allCarry(hits, 'yes') === false || allCarry(skips, 'no') === false) continue;
+        // Seating demands a POSITIVE answer, never merely the absence of a
+        // negative one. `allCarry` answers `null` when NO returned row carried
+        // the probe's field -- the double handed back rows of its own, so the
+        // control obtained no evidence that it filtered on the probe's `where`
+        // at all. Reading `null` as "not disproven" seats a double the control
+        // could not read (measured: 19 of 294, among them constant-returning
+        // stubs like `async find(o, q) { return [{ id: 'r1' }]; }` and schema-
+        // signature fixtures that exist only to satisfy a `parse()`), and then
+        // grades it BLIND -- debt with no possible remedy, since there is no
+        // corpus to bound. Unseated candidates fall through below and are
+        // routed by structure: OUT_OF_SCOPE when the body never filters,
+        // UNJUDGED -- declared, never skipped -- when it does.
+        if (allCarry(hits, 'yes') !== true || allCarry(skips, 'no') !== true) continue;
         if (hits.length === ROW_COUNT || skips.length === ROW_COUNT) continue; // no filtering
         seated = { factory, objectName, unbounded: hit };
         break;
@@ -945,6 +972,43 @@ function makeQl(rows: any[]) {
 }`;
 
 /**
+ * A `find` that answers with rows OF ITS OWN -- constants that carry none of the
+ * probe's fields -- and never consults `where` at all. The control probe reads
+ * nothing from the returned rows, so it obtains NO evidence of filtering; the
+ * seat therefore has to be refused. Graded, it would read as limit-blind debt
+ * with no possible remedy: there is no corpus to bound. This is the commonest
+ * shape in the corpus (`async find(o, q) { return [{ id: 'r1' }]; }`).
+ */
+const FIXTURE_CONSTANT_ROWS = `
+function makeQl(rows: any[]) {
+  return {
+    async find(object: string, opts: any) {
+      void opts;
+      return [{ id: 'r1' }];
+    },
+  };
+}`;
+
+/**
+ * The same refusal, one step harder: the body IS query-shaped -- it names
+ * `where` and it filters -- but the rows it answers with are its own, so the
+ * control probe still reads nothing. Structure alone cannot dismiss this one,
+ * so it must be DECLARED (`UNJUDGED`) rather than dropped or graded. Pinning
+ * both fixtures pins the seating rule in both directions: a control that reads
+ * "not disproven" as "proven" grades both of these BLIND.
+ */
+const FIXTURE_FOREIGN_ROWS = `
+function makeQl(rows: any[]) {
+  return {
+    async find(object: string, opts: any) {
+      const where = opts?.where ?? {};
+      const roster = [{ user_id: 'u1' }, { user_id: 'u2' }];
+      return roster.filter((r: any) => where.user_id == null || r.user_id === where.user_id);
+    },
+  };
+}`;
+
+/**
  * The shared-helper spelling. The gate is deliberately blind to WHICH spelling a
  * double uses -- it asks a question, it never hands out an implementation -- so
  * a repo-shared `bounded()` and a per-file copy grade identically. Pinned so the
@@ -1062,6 +1126,17 @@ async function selfTest() {
   expect('a `find` that never filters cannot pass vacuously',
     noFilter.r?.verdict === 'OUT_OF_SCOPE');
 
+  const constant = await one(FIXTURE_CONSTANT_ROWS);
+  expect('a constant-returning `find` is a structural candidate', constant.n === 1);
+  expect('the control probe refuses a seat it could not read -- constants are OUT OF SCOPE, never BLIND',
+    constant.r?.verdict === 'OUT_OF_SCOPE');
+
+  const foreign = await one(FIXTURE_FOREIGN_ROWS);
+  expect('a query-shaped double answering with rows of its own is not graded BLIND',
+    foreign.r?.verdict !== 'BLIND');
+  expect('it is DECLARED unjudged rather than dropped -- absence must be loud',
+    foreign.r?.verdict === 'UNJUDGED');
+
   const shared = await one(FIXTURE_SHARED_HELPER);
   expect('a double bounded through a SHARED helper is discovered', shared.n === 1);
   expect('a double bounded through a SHARED helper is CONFORMING -- the gate reads behaviour, not spelling',
@@ -1098,7 +1173,8 @@ async function selfTest() {
     'OK  self-test: separates bounding, limit-blind, truthiness, bound-before-filter and\n' +
     '    refusing doubles on synthetic fixtures; all three shape rules are pinned in BOTH\n' +
     '    directions, with the wrap-order proof separated from the two states it cannot\n' +
-    '    prove; the control probe drops a non-query `find` and one that never filters;\n' +
+    '    prove; the control probe drops a non-query `find`, one that never filters, and\n' +
+    '    one answering with rows of its own that it could read no evidence from;\n' +
     '    a SHARED helper and a per-file copy grade identically; rows reached through a\n' +
     '    table map and through a module-scope fixture are both driven; the ledger\n' +
     '    reconciles in both directions.',

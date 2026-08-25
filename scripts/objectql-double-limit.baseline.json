@@ -35,12 +35,23 @@
     "PROVENANCE, and the number this ledger does NOT carry. #11525 was filed against a census",
     "recorded on PR #11521: 49 limit-blind doubles across 43 files and 10 packages, 9 of them",
     "converted there, 40 left. Re-derived behaviourally at the merge base of this gate's own PR,",
-    "the population is MUCH larger -- 186 blind, 32 breaking a shape rule and 50 unjudged, across",
+    "the population is MUCH larger -- 167 blind, 32 breaking a shape rule and 54 unjudged, across",
     "the files below. The two measurements are not the same instrument: the earlier one was",
     "scoped by hand, this one seats every candidate by driving it. Seeding this ledger from 40",
     "would have pinned the ratchet to a number the corpus does not have, and it would have read",
     "as green forever. The nine doubles PR #11521 converted are the positive control on the",
     "re-derivation: all nine grade CONFORMING here, so they are absent below.",
+    "",
+    "WHAT IS NOT IN HERE, and why this count is lower than a first measurement of the same corpus.",
+    "A candidate is seated only on a POSITIVE reading of the control probe -- the rows it answers with",
+    "must actually carry the probe's field. 19 candidates answered BOTH control probes with rows of",
+    "their OWN (constant stubs like `async find(o, q) { return [{ id: 'r1' }]; }`, and schema-signature",
+    "fixtures that exist only to satisfy a `parse()`), so the control read nothing from them and",
+    "obtained no evidence of filtering at all. Seating them anyway graded them limit-blind -- debt with",
+    "no possible remedy, because there is no corpus to bound -- and a ledger carrying unfixable entries",
+    "can never burn down. They are routed by structure instead: 15 dropped OUT OF SCOPE (the body never",
+    "filters), 4 DECLARED unjudged (it does, but this lift cannot drive it). Both are pinned by",
+    "--self-test fixtures, so reading \"not disproven\" as \"proven\" again fails the gate's own test.",
     "",
     "TWO ways to clear an entry, and the cheap one is usually right:",
     "  1. apply the bound AFTER the filter, by PRESENCE --",
@@ -211,9 +222,6 @@
     "packages/metadata-protocol/src/protocol.unrecognised-meta-type.test.ts": {
       "unjudged": 1
     },
-    "packages/metadata-protocol/src/protocol.write-response-internal-fields.tripwire.test.ts": {
-      "blind": 1
-    },
     "packages/metadata-protocol/src/sys-metadata-repository.draft-drain.test.ts": {
       "blind": 1
     },
@@ -361,9 +369,6 @@
     "packages/objectql/src/hook-input-shape-contract.test.ts": {
       "blind": 1
     },
-    "packages/objectql/src/integrity/dangling-reference-audit.federated-phantom-columns.test.ts": {
-      "blind": 1
-    },
     "packages/objectql/src/internal-fields.test.ts": {
       "blind": 1
     },
@@ -387,9 +392,6 @@
     },
     "packages/objectql/src/plugin.authoring-channel.test.ts": {
       "blind": 1
-    },
-    "packages/objectql/src/plugin.integration.test.ts": {
-      "blind": 3
     },
     "packages/objectql/src/protocol-boot-hydration-scoped.test.ts": {
       "blind": 1
@@ -466,9 +468,6 @@
     "packages/objectql/src/sys-metadata-repository.test.ts": {
       "unjudged": 1
     },
-    "packages/objectql/src/system-write-organization.test.ts": {
-      "blind": 1
-    },
     "packages/platform-objects/src/plugin.test.ts": {
       "unjudged": 1
     },
@@ -518,9 +517,6 @@
       "blind": 1
     },
     "packages/plugins/plugin-audit/src/comment-access-hooks.test.ts": {
-      "blind": 1
-    },
-    "packages/plugins/plugin-audit/src/comment-read-visibility.test.ts": {
       "blind": 1
     },
     "packages/plugins/plugin-audit/src/objects/sys-audit-log-record-views-columns.test.ts": {
@@ -596,7 +592,7 @@
       "unjudged": 1
     },
     "packages/plugins/plugin-hono-server/src/server-timing-e2e.test.ts": {
-      "blind": 1
+      "unjudged": 1
     },
     "packages/plugins/plugin-pinyin-search/src/companion-projection.test.ts": {
       "unjudged": 1
@@ -674,7 +670,6 @@
       "blind": 1
     },
     "packages/plugins/plugin-sharing/src/position-graph.test.ts": {
-      "blind": 1,
       "unjudged": 1
     },
     "packages/plugins/plugin-sharing/src/share-link-enforcement-context.test.ts": {
@@ -711,16 +706,16 @@
       "blind": 1
     },
     "packages/rest/src/remote-tables-twin.equivalence.test.ts": {
-      "blind": 1
+      "unjudged": 1
     },
     "packages/rest/src/rest-exec-ctx-principal-kind.test.ts": {
-      "blind": 1
+      "unjudged": 1
     },
     "packages/rest/src/rest-server-meta-read-org-scope.test.ts": {
       "blind": 1
     },
     "packages/rest/src/rest-server-timing.test.ts": {
-      "blind": 1
+      "unjudged": 1
     },
     "packages/rest/src/rest-update-path-id-not-a-dropped-field.test.ts": {
       "blind": 1
@@ -733,12 +728,6 @@
     },
     "packages/runtime/src/action-execution-calldata-batch-retired.test.ts": {
       "unjudged": 1
-    },
-    "packages/runtime/src/action-execution-calldata-query.test.ts": {
-      "blind": 1
-    },
-    "packages/runtime/src/dispatcher-plugin.endpoint-fallback.integration.test.ts": {
-      "blind": 1
     },
     "packages/runtime/src/domains/meta-published-runtime-publish.test.ts": {
       "blind": 1
@@ -773,12 +762,6 @@
     "packages/services/service-automation/src/builtin/crud-bulk-intent.test.ts": {
       "blind": 1
     },
-    "packages/services/service-automation/src/builtin/crud-config-aliases.test.ts": {
-      "blind": 1
-    },
-    "packages/services/service-automation/src/builtin/crud-runas.test.ts": {
-      "blind": 1
-    },
     "packages/services/service-automation/src/builtin/wait-node-degraded-run.test.ts": {
       "wrong": 1
     },
@@ -803,14 +786,8 @@
     "packages/services/service-job/src/job-service-plugin.test.ts": {
       "blind": 1
     },
-    "packages/services/service-messaging/src/messaging-service.test.ts": {
-      "blind": 1
-    },
     "packages/services/service-messaging/src/preference-resolver.test.ts": {
       "unjudged": 1
-    },
-    "packages/services/service-messaging/src/recipient-resolver.test.ts": {
-      "blind": 1
     },
     "packages/services/service-queue/src/db-queue-adapter.test.ts": {
       "wrong": 1
@@ -847,9 +824,6 @@
     },
     "packages/services/service-storage/src/lax-deviation-reclamation-gate.test.ts": {
       "blind": 2
-    },
-    "packages/spec/src/data/driver.test.ts": {
-      "blind": 1
     },
     "packages/triggers/trigger-record-change/src/bulk-write-per-row-context.test.ts": {
       "blind": 1
