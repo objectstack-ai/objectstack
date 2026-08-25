@@ -145,6 +145,14 @@ export { defineSkill } from './ai/skill.zod';
 export type { FormFieldInput } from './ui/view.zod';
 export type { NavigationItemInput } from './ui/app.zod';
 export type { StateNodeConfig } from './automation/state-machine.zod';
+// [#11709] #11350's recorded premise delta, ruled the same way (maintainer
+// decision 2026-08-25, recorded on #11709): the MINIMAL one-file consumer —
+// no `/data` subpath import anywhere in its program — leaks two more
+// structural mentions of `defineStack`'s return type that the three lines
+// above do not cover. Same invariant, same fix shape: re-export from the
+// declaring module (both already public on `/data`).
+export type { BaseValidationRuleShape } from './data/validation.zod';
+export type { FilterCondition } from './data/filter.zod';
 
 // DX factories for the remaining authoring domains (issue #2035) — one type-safe
 // entry per writable domain, mirroring the 19 factories above. `defineX` is a
