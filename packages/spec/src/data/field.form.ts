@@ -36,7 +36,14 @@ export const fieldForm = defineForm({
         { field: 'placeholder', helpText: 'Hint text shown inside the empty input (disappears once a value is entered); use inlineHelpText for always-visible help' },
         // Text field options
         { field: 'minLength', visibleWhen: "data.type == 'text' || data.type == 'textarea' || data.type == 'email'", helpText: 'Minimum character length' },
-        { field: 'maxLength', visibleWhen: "data.type == 'text' || data.type == 'textarea' || data.type == 'email'", helpText: 'Maximum character length' },
+        // #11566 — `maxLength` is shown for exactly the bounded-string types
+        // the schema accepts it on and the write-time validator enforces it
+        // for (BOUNDED_STRING_FIELD_TYPES; maintainer ruling 2026-08-24).
+        // This list used to be a third opinion (3 types here, 9 in
+        // object.form, 10 at the validator); it converged to the validator's.
+        // #11875 added `signature`/`qrcode` to the set (the write seam now
+        // enforces their declared bound); this visibleWhen moves with it.
+        { field: 'maxLength', visibleWhen: "data.type in ['text','textarea','email','url','phone','password','markdown','html','richtext','code','signature','qrcode']", helpText: 'Maximum character length' },
         // Number field options
         { field: 'min', visibleWhen: "data.type == 'number' || data.type == 'currency'", helpText: 'Minimum value' },
         { field: 'max', visibleWhen: "data.type == 'number' || data.type == 'currency'", helpText: 'Maximum value' },
@@ -46,7 +53,32 @@ export const fieldForm = defineForm({
         { field: 'options', type: 'repeater', visibleWhen: "data.type == 'select' || data.type == 'multiselect'", helpText: 'Available options (label/value pairs)' },
         // Reference field options
         { field: 'reference', widget: 'ref:object', visibleWhen: "data.type == 'lookup' || data.type == 'master_detail'", helpText: 'Referenced object name' },
-        { field: 'deleteBehavior', visibleWhen: "data.type == 'lookup' || data.type == 'master_detail'", helpText: 'What happens when referenced record is deleted' },
+        // Two declarations of one key, with disjoint `visibleWhen` (#11410) —
+        // the same split `object.form.ts` carries, and for the same reason:
+        // #9689 made `set_null` on a `master_detail` a parse-time rejection, so
+        // one shared control offered a choice publish refuses.
+        //
+        // This file reached that defect by the OTHER route. It declares no
+        // `options`, which is not a narrower offer but the renderer's DERIVED
+        // source: with no inline list the metadata-admin form falls through to
+        // the JSON Schema `enum` — `['set_null','cascade','restrict']`, which
+        // additionally advertises `default: 'set_null'`. A Zod enum has no
+        // per-type narrowing to give, so `master_detail` can only be served by
+        // an EXPLICIT list; omitting one re-offers the refused value.
+        //
+        // `lookup` keeps deriving from that enum, untouched: all three outcomes
+        // are legal there, and leaving the source alone keeps its labels and
+        // their translation exactly as they are today. The two branches are
+        // mutually exclusive, so no author ever sees both spellings at once.
+        //
+        // `helpText` is identical on both — they share one i18n key
+        // (`metadataForms.field.fields.deleteBehavior`), so divergent text would
+        // collide silently.
+        { field: 'deleteBehavior', visibleWhen: "data.type == 'lookup'", helpText: 'What happens when referenced record is deleted' },
+        { field: 'deleteBehavior', type: 'select', visibleWhen: "data.type == 'master_detail'", helpText: 'What happens when referenced record is deleted', options: [
+          { label: 'Cascade (delete children)', value: 'cascade' },
+          { label: 'Restrict (block the delete)', value: 'restrict' },
+        ] },
       ],
     },
     {

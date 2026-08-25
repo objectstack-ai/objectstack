@@ -252,8 +252,17 @@ export const PUBLIC_AUTH_FEATURE_NAMES = Object.keys(PUBLIC_AUTH_FEATURES) as [
  * this tells the console how to render org context — under `group` the org
  * switcher picks the WRITE target and reads span every organization the member
  * belongs to.
+ *
+ * `audiencePosture` (#11739) reports WHICH of `invite_only` | `email_domain` |
+ * `open` is in force — the declared answer to "who may self-register into this
+ * environment". It gates no spec input: `emailPassword.disableSignUp` remains
+ * the login UI's boolean for hiding the sign-up form (it is NOT forced by the
+ * posture — under `invite_only` the sign-up route still admits a pending
+ * invitee, so hiding the form would dead-end invited users), while this value
+ * lets the login surface render honest messaging ("registration is by
+ * invitation") instead of a form the server will refuse.
  */
-export const PUBLIC_AUTH_CONFIG_NON_FLAG_KEYS = ['termsUrl', 'privacyUrl', 'tenancyPosture'] as const;
+export const PUBLIC_AUTH_CONFIG_NON_FLAG_KEYS = ['termsUrl', 'privacyUrl', 'tenancyPosture', 'audiencePosture'] as const;
 
 /**
  * Capabilities that are RESERVED but deliberately **not advertised** — the

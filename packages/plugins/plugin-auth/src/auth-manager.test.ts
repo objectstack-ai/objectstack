@@ -2379,6 +2379,34 @@ describe('AuthManager', () => {
       expect(data.acceptUrl).toBe('http://localhost:3000/_console/accept-invitation/tok456');
     });
 
+    // #11741 — the invitation producer HOLDS an organization (the invitation
+    // row's own organizationId), so it threads that exact value into
+    // SendTemplateInput for the sys_email.organization_id stamp. Auth mail
+    // that genuinely has no organization (password reset / verification /
+    // magic link) stays unstamped AND un-refused — the over-denial control.
+    it('sendInvitationEmail threads the invitation organizationId into sendTemplate (#11741)', async () => {
+      const { capturedConfig, emailService } = await boot();
+      const orgPlugin = capturedConfig.plugins.find((p: any) => p.id === 'organization');
+      await orgPlugin._opts.sendInvitationEmail({
+        email: 'invitee@example.com',
+        invitation: { id: 'inv42', organizationId: 'org_apex', role: 'member' },
+        organization: { name: 'Apex' },
+        inviter: { user: { email: 'admin@example.com' } },
+      });
+      expect(emailService.sendTemplate).toHaveBeenCalledTimes(1);
+      const invitationInput = (emailService.sendTemplate.mock.calls as unknown as Array<[Record<string, unknown>]>)[0]?.[0];
+      expect(invitationInput?.organizationId).toBe('org_apex');
+    });
+
+    it('sendResetPassword carries NO organizationId and is not refused — auth mail is genuinely org-less (#11741)', async () => {
+      const { capturedConfig, emailService } = await boot();
+      const sendResetPassword = capturedConfig.emailAndPassword.sendResetPassword;
+      await sendResetPassword({ user: { id: 'u1', email: 'real@example.com' }, url: 'http://x/reset', token: 't' });
+      expect(emailService.sendTemplate).toHaveBeenCalledTimes(1);
+      const resetInput = (emailService.sendTemplate.mock.calls as unknown as Array<[Record<string, unknown>]>)[0]?.[0];
+      expect(resetInput).not.toHaveProperty('organizationId');
+    });
+
     it('sendInvitationEmail honours a custom uiBasePath (Console mounted elsewhere)', async () => {
       const { capturedConfig, emailService } = await boot({
         baseUrl: 'https://acme.example.com',
@@ -2474,6 +2502,9 @@ describe('AuthManager', () => {
         // A vanilla deployment (no tenancy service wired, no env override) is
         // `single`, matching `multiOrgEnabled: false`.
         tenancyPosture: 'single',
+        // [#11739] Which audience posture is in force. Undeclared ⇒ the safe
+        // default, `invite_only` — no legacy limbo.
+        audiencePosture: 'invite_only',
         degradedTenancy: false,
         privacyUrl: 'https://objectstack.ai/privacy',
         termsUrl: 'https://objectstack.ai/terms',

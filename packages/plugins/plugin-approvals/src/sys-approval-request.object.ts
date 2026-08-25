@@ -17,9 +17,16 @@ import { APPROVAL_STATUSES, APPROVAL_STATUS_LABELS } from '@objectstack/spec/con
  * snapshots the Approval node config (approvers / behaviour) the request was
  * opened with.
  *
- * `payload_json` captures a snapshot of the target record at submission
- * time — used by notifications so they can render before the record is
- * locked or changed.
+ * `payload_json` captures a snapshot of the target record at submission time.
+ * It is retained as **audit evidence of what was actually submitted**, so the
+ * column stays whole AT REST; it is served **redacted per reader** — the
+ * SUBJECT object's field-level read controls are applied at serve time from
+ * the security service's `getReadableFields`, on the approvals-inbox door and
+ * on the generic data door alike (#11039).
+ *
+ * ⛔ Notifications are NOT a consumer of this snapshot, and the audit-evidence
+ * sentence above — not "notifications need it" — is why the column holds a
+ * full row. See the note on the field itself.
  *
  * @namespace sys
  */
@@ -160,6 +167,19 @@ export const SysApprovalRequest = ObjectSchema.create({
       // `required: true`, so the un-addressable case (id half authored, type
       // half empty) is already unreachable on this object.
       group: 'Target',
+      //
+      // ⚠️ ORDERING CONSTRAINT — this id half is `required: true`, and that
+      // makes it ORDER-DEPENDENT in seeds even though a pointer pair
+      // contributes no static ordering edge (#11674, measured against the real
+      // engine in `packages/objectql/src/engine-seed-required-deferral.test.ts`):
+      // the seed loader defers an unresolvable reference by DELETING the column
+      // from the pass-1 insert, required-validation rejects that row, and pass 2
+      // is then left with no row to back-fill. So the pass-2 healing that makes
+      // an OPTIONAL id half order-independent (`sys_audit_log`) does not reach
+      // this one. ⇒ SEED THE TARGET DATASET FIRST. The failure if you do not is
+      // loud in three places — a write error naming this column, a
+      // dropped-deferral error, and `success: false` — and since #11674 the
+      // loader also WARNS at load time, before the engine rejects the row.
       referenceVia: 'object_name',
     }),
 
@@ -214,6 +234,22 @@ export const SysApprovalRequest = ObjectSchema.create({
       group: 'State',
     }),
 
+    // The module docstring above used to justify this column with "used by
+    // notifications so they can render before the record is locked or
+    // changed". That consumer does not exist, and the claim was cited as the
+    // reason the column holds a FULL row before anyone checked it. Measured
+    // against every `this.notify(...)` call site in `approval-service.ts` —
+    // all 12 of them: each passes `{ title, message, actionUrl }` (two also
+    // `actions`), built from `object_name` / `record_id` and the caller's
+    // comment. None reads this column or the parsed `payload`. The real
+    // readers are the serve path (`rowFromRequest` -> `payload`, redacted per
+    // reader), the decide-time approver re-resolution and the org backfill,
+    // both under SYSTEM_CTX, and the free-text predicate.
+    //
+    // The `description` below is deliberately UNCHANGED: it is accurate, and
+    // it is extracted into the four generated i18n bundles as `help`. The
+    // false sentence lived only in the JSDoc above, which is not extracted —
+    // so this correction moves no translation leaf.
     payload_json: Field.textarea({
       label: 'Snapshot',
       required: false,

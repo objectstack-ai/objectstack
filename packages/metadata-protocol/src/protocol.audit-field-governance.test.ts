@@ -129,6 +129,11 @@ function makeStubEngine() {
  * spelled `false` on two of the four and left ABSENT on the other two, because
  * absent defaults to false as well and the read must not be right only for the
  * spelling that happens to be explicit.
+ *
+ * `deleteBehavior: 'set_null'` on the datetime is the PRE-#9784 materializing
+ * era — newly built artifacts omit the key on non-reference fields, but
+ * artifacts of this shape remain in the installed base and must keep loading;
+ * keep the bytes as they shipped.
  */
 const artifactObject = (name: string) => ({
     name,

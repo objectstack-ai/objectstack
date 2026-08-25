@@ -3698,6 +3698,16 @@ export interface IntrospectedColumn extends SpecIntrospectedColumn {
    * option B and waits for demand; until it exists, an absent flag on a
    * composite member means "not single-column unique", never "no constraint".
    *
+   * A PRIMARY KEY is NOT a unique constraint to this flag (#11654), on any
+   * dialect and for any key type. `isUnique` means a *declared* single-column
+   * UNIQUE constraint; key membership has a lossless face of its own
+   * ({@link IntrospectedTable.primaryKeys} and `primaryKey` below), so
+   * excluding keys keeps the two flags non-overlapping and drops no fact. Note
+   * this is a statement about what KIND of constraint the flag reports, never
+   * a claim that a key column admits duplicates. A key column that separately
+   * carries its own single-column unique constraint is still flagged — the
+   * constraint is what is being reported, not the column.
+   *
    * All three dialect arms of {@link SqlDriver.introspectUniqueConstraints}
    * produce it through one predicate — see {@link singleColumnUniqueColumns}.
    */
@@ -3736,9 +3746,48 @@ export interface IntrospectedColumn extends SpecIntrospectedColumn {
  */
 export interface IntrospectedForeignKey {
   columnName: string;
+  /**
+   * The parent's BARE relation name, always — never conditionally qualified
+   * (#11377). When the parent lives outside the session's resolution scope,
+   * the qualification arrives as the separate {@link referencedSchema} key
+   * rather than as a `"schema.table"` spelling here: a key whose spelling
+   * depends on context is exactly the shape a consumer mis-parses.
+   */
   referencedTable: string;
   referencedColumn: string;
   constraintName?: string;
+  /**
+   * The parent table's schema, PRESENT WHEN AND ONLY WHEN the parent lives
+   * outside the session's own resolution scope — i.e. when the bare
+   * {@link referencedTable} name is NOT the name this session would resolve
+   * to that table (#11377). For an in-scope parent the key is ABSENT (never
+   * `undefined`), so an answer that carries it is saying something.
+   *
+   * Until #11324 a cross-schema foreign key contributed zero rows on
+   * Postgres, so this fact was unreachable; repairing that made the
+   * constraint visible under a bare name the session's `search_path` does
+   * not resolve — an answer true of the constraint and unusable as an
+   * address, or worse, one that collides with a same-named table in the
+   * current schema (the #11201 family). A consumer that turns
+   * `referencedTable` into an object reference MUST read this key and refuse
+   * to wire the bare name when it is present
+   * (`convertIntrospectedSchemaToObjects` in `@objectstack/objectql` is the
+   * reference consumer).
+   *
+   * Per dialect arm:
+   * - **Postgres**: the parent's schema, filled when that schema is not in
+   *   `current_schemas(false)` — the same `search_path` scoping every other
+   *   statement in the session resolves bare names against (#11201).
+   * - **MySQL**: filled symmetrically — the parent's database
+   *   (`REFERENCED_TABLE_SCHEMA`) when it differs from the session's default
+   *   database (`DATABASE()`); InnoDB permits cross-database foreign keys,
+   *   and `KEY_COLUMN_USAGE` carries the parent's database on the same row
+   *   the arm already reads.
+   * - **SQLite**: never present — SQLite has no schemas, and a foreign key
+   *   cannot cross an ATTACHed database at all, so the fact this key carries
+   *   cannot exist there.
+   */
+  referencedSchema?: string;
 }
 
 /**
@@ -4576,14 +4625,30 @@ export class SqlDriver implements IDataDriver {
    */
   private static readonly DIALECT_CONNECT_TIMEOUT: Record<string, { key: string; urlKey: string }> =
     Object.fromEntries<{ key: string; urlKey: string }>([
-      // Every spelling that means Postgres SQL, EXTENDED by `cockroachdb`:
-      // a separate knex dialect, but one that reaches the server through the
-      // same `pg` driver and therefore takes the same knob. Deriving the pg
-      // arm from {@link POSTGRES_EMIT_CLIENTS} is what keeps this table from
-      // drifting away from the getters again (#11550) — widening recognition
-      // now widens this with it. `redshift` still carries no entry; see the
-      // note in {@link withConnectBound} for why that absence is load-bearing.
-      ...[...SqlDriver.POSTGRES_EMIT_CLIENTS, 'cockroachdb'].map(
+      // Every spelling that means Postgres SQL, EXTENDED by `cockroachdb` and
+      // `redshift`: separate knex dialects, but ones that reach the server
+      // through the same `pg` driver and therefore take the same knob. Knex's
+      // `Client_Redshift` literally `extends Client_PG`, so the settings object
+      // it hands to `pg.Client` honours `connectionTimeoutMillis` exactly as
+      // `pg` does. Deriving the pg arm from {@link POSTGRES_EMIT_CLIENTS} is
+      // what keeps this table from drifting away from the getters again
+      // (#11550) — widening recognition now widens this with it.
+      //
+      // `redshift`'s row arrived with #11784. It had the knob and would have
+      // obeyed it, but carried no entry, so its connection attempt fell through
+      // to the strictly looser 15s `pool.createTimeoutMillis` backstop while
+      // the docblock above called 10s "the effective bound". Nothing errored
+      // and nothing was logged — the bound was simply 50% looser, for one
+      // client name.
+      //
+      // ⚠️ This arm and {@link POSTGRES_WIRE_CLIENTS} now happen to hold the
+      // same five names. That is a fact about today's membership, NOT an
+      // invariant, and must not be refactored into one: the two answer
+      // different questions (how do I spell the connect timeout vs. which npm
+      // package parses the wire), and unioning them would hand `redshift` and
+      // `cockroachdb` SQL-emission identity as a silent side effect — the open
+      // decision #11756, and #11550's subject, not this table's to make.
+      ...[...SqlDriver.POSTGRES_EMIT_CLIENTS, 'cockroachdb', 'redshift'].map(
         (c): [string, { key: string; urlKey: string }] =>
           [c, { key: 'connectionTimeoutMillis', urlKey: 'connectionString' }],
       ),
@@ -4606,10 +4671,24 @@ export class SqlDriver implements IDataDriver {
     // `!dialect` — sqlite, or a client with no connect-timeout knob — means
     // there is no TIMEOUT to inject. It deliberately does not skip the session
     // pins below: those answer a different question (what does a value MEAN on
-    // this connection), and the two lists are not the same list. Measured while
-    // fixing #11389: `redshift` speaks the pg wire protocol, and therefore
-    // needs the calendar-day pin, but carries no entry here — so a `return`
-    // placed at this point silently opted it out of a fix it needs.
+    // this connection), and the two lists are not the same list.
+    //
+    // ⚠️ The worked example that used to stand here was RETIRED by #11784,
+    // which gave `redshift` the connect-timeout row it was missing. Until then
+    // `redshift` was in {@link POSTGRES_WIRE_CLIENTS} (so it needed #11389's
+    // calendar-day pin) yet absent from {@link DIALECT_CONNECT_TIMEOUT} — so a
+    // `return` placed at this point silently opted it out of a fix it needed.
+    // That was measured, not hypothetical, which is why the example is recorded
+    // here rather than dropped.
+    //
+    // The hazard outlives the example. Every client needing a session pin
+    // happens to have a timeout row TODAY; that is current membership, not a
+    // property either table promises. The next pg-wire client added without a
+    // connect-timeout knob restores the exact bug — and it would fail the way
+    // this one did, in silence, with every test green. So: no `return` here,
+    // and the two tables stay separate. The tripwire that goes red the moment
+    // those memberships diverge again lives in
+    // `sql-driver-11389-date-tz-skew.test.ts`.
     const dialect = SqlDriver.DIALECT_CONNECT_TIMEOUT[String(knexConfig.client ?? '')];
     if (dialect) {
       const conn = knexConfig.connection;
@@ -7868,7 +7947,31 @@ export class SqlDriver implements IDataDriver {
         // their own mistake instead of a dialect's syntax error wrapped in a
         // 500 (see {@link refuseDistinctAggregateWithoutField}).
         if (lowering.distinct && fieldExpr === '*') refuseDistinctAggregateWithoutField(funcName);
-        const rawFunc = lowering.distinct ? `${lowering.sql}(distinct ??)` : `${lowering.sql}(??)`;
+        // [#11635] A boolean aggregand is CAST for the arithmetic/order
+        // aggregates on Postgres — the one dialect that stores `Field.boolean`
+        // as a real `boolean` column and defines no `sum`/`avg`/`min`/`max`
+        // over it (SQLSTATE `42883`, measured on PG 16.13; SQLite stores 0/1
+        // INTEGER and MySQL `tinyint(1)`, so both compute natively). #11249
+        // ruled the answers (maintainer 2026-08-23): `sum`/`avg` answer
+        // arithmetic over 1/0, and `min`/`max` answer `false`/`true` — a
+        // member of the input domain — so this face must ANSWER; refusing
+        // cannot satisfy the ruled contract. `cast(?? as int)` keeps the
+        // column in a knex identifier binding exactly as the uncast form does.
+        // `count`/`count_distinct` are deliberately NOT cast (both lower to
+        // `count`, defined over boolean everywhere — their answers were
+        // correct before this and must not move). The 1/0 the cast computes
+        // for `min`/`max` is presented back as a JSON boolean below, where the
+        // result column is tracked.
+        const castBooleanAggregand =
+          this.isPostgres &&
+          lowering.sql !== 'count' &&
+          fieldExpr !== '*' &&
+          table !== null &&
+          (this.booleanFields[table]?.includes(fieldExpr) ?? false);
+        const argExpr = castBooleanAggregand ? 'cast(?? as int)' : '??';
+        const rawFunc = lowering.distinct
+          ? `${lowering.sql}(distinct ${argExpr})`
+          : `${lowering.sql}(${argExpr})`;
         if (agg.alias) {
           if (fieldExpr === '*') {
             builder.select(this.knex.raw(`${lowering.sql}(*) as ??`, [agg.alias]));
@@ -7883,7 +7986,23 @@ export class SqlDriver implements IDataDriver {
           // (`max("closed_at")` on SQLite, `max` on Postgres) and is defensive
           // only, so it is deliberately not tracked.
           if ((funcName === 'min' || funcName === 'max') && agg.field) {
-            const kind = this.readPresentationKind(table, agg.field);
+            // [#11249/#11635] A boolean aggregand presents on EVERY dialect,
+            // not only under `readPresentationKind`'s dialect gate. That gate
+            // mirrors `formatOutput`'s ROW reads (SQLite + MySQL since #11782;
+            // SQLite-only when this landed), where the storage-form dialects
+            // hand back a number — but on this door the backend ALSO answers
+            // `min`/`max` as 1/0 on Postgres (the `cast(?? as int)` above,
+            // over a column whose row reads need no presentation), and the
+            // ruled contract is `false` / `true` in JSON: order statistics
+            // return a member of the input domain, and SQL drivers convert at
+            // the driver boundary. The `??` fallback is what carries Postgres.
+            // `presentReadValue('boolean', …)` leaves `null` (no rows / all
+            // NULL) untouched and is idempotent on a value already boolean.
+            const kind =
+              this.readPresentationKind(table, agg.field) ??
+              (table !== null && this.booleanFields[table]?.includes(agg.field)
+                ? ('boolean' as const)
+                : null);
             if (kind) presentedOutput.set(agg.alias, kind);
           }
         } else {
@@ -7912,13 +8031,13 @@ export class SqlDriver implements IDataDriver {
     // forward, which is the #1116/#1117 gap {@link mapAggregateFunc} closed for
     // the FUNCTION NAME while leaving the STATEMENT half open.
     //
-    // ⛔ Nothing here decides whether a boolean aggregate should ANSWER (by
-    // casting boolean to int in {@link SQL_AGGREGATE_FUNCTIONS}) or REFUSE —
-    // that contract question is #11152's, and #11249's for `min`/`max`. The
-    // three dialects genuinely disagree today (SQLite and MySQL's `tinyint(1)`
-    // both answer arithmetically, Postgres refuses), which is exactly why the
-    // envelope is the half that can land first: *when* it fails, the failure
-    // carries a catalogued code and a status, either way that card is ruled.
+    // When #11455 landed, whether a boolean aggregate should ANSWER or REFUSE
+    // was deliberately left to #11152 / #11249 — the envelope was the half
+    // that could land first. #11249 has since RULED (maintainer 2026-08-23):
+    // the face answers, and [#11635] delivered the Postgres cast in the
+    // statement builder above, so a boolean aggregand no longer reaches this
+    // exit at all. The envelope itself is unchanged — it never recognised
+    // `42883`, so removing one of its inputs removes nothing from it.
     //
     // ⛔ And no boolean-specific recognizer: the envelope comes from the EXIT,
     // not from matching `42883` or the words `does not exist`. That is the
@@ -10033,7 +10152,9 @@ export class SqlDriver implements IDataDriver {
    * Apply a set of drift entries to the physical schema. Destructive entries
    * are skipped unless `allowDestructive` is set. Postgres/MySQL alter columns
    * in place; SQLite (which cannot alter constraints in place) rebuilds each
-   * affected table (copy → swap) applying only the requested edits.
+   * affected table (copy → swap) applying only those requested edits it can
+   * express as a rebuild — the rest are reported `skipped` and logged, exactly
+   * as the in-place arm reports an op its dialect cannot perform (#11722).
    *
    * @returns the entries actually applied and those skipped (e.g. destructive
    *   without `allowDestructive`, or unsupported on the dialect).
@@ -10074,8 +10195,29 @@ export class SqlDriver implements IDataDriver {
     for (const [table, ents] of byTable) {
       try {
         if (this.isSqlite) {
-          await this.rebuildSqliteTablePatched(table, ents);
-          applied.push(...ents);
+          // `applied` means "this op happened", not "a rebuild ran" — every
+          // consumer reads it that way (`reconcileAndWarnDrift` logs
+          // "auto-reconciled <op> on <table>", the artifact boot gate prints
+          // "↪ migrated <op>"). The rebuild honours four op types and
+          // IGNORES the rest (#11722), so reporting the whole batch applied
+          // turned an op that never happened into a green log line: the
+          // finding is still there on the next boot, reports as drift again,
+          // and is "migrated" again — a loop with no failing signal anywhere
+          // in it. So only the entries the rebuild actually acted on are
+          // reported applied, and the remainder is skipped and logged in the
+          // SAME words the in-place arm uses for an op its dialect cannot do
+          // ({@link applyDriftOpInPlace}).
+          const honoured = new Set(await this.rebuildSqliteTablePatched(table, ents));
+          for (const d of ents) {
+            if (honoured.has(d)) {
+              applied.push(d);
+              continue;
+            }
+            this.logger.warn(
+              `[schema-drift] ${d.op.type} on ${d.table}.${d.column ?? ''} is unsupported on dialect '${this.dialectName}' — skipped`,
+            );
+            skipped.push(d);
+          }
         } else {
           for (const d of ents) {
             const ok = await this.applyDriftOpInPlace(d.op);
@@ -10282,6 +10424,18 @@ export class SqlDriver implements IDataDriver {
    * copy → drop → rename. varchar widen/narrow are no-ops on SQLite (dynamic
    * typing) and ignored.
    *
+   * @returns the entries this rebuild actually ACTED on. Anything else in
+   *   `ents` was ignored, and the caller must report those as `skipped` rather
+   *   than `applied` (#11722) — on SQLite `applied` otherwise meant only "a
+   *   rebuild ran", while every consumer of it reads "this op happened".
+   *
+   * ⚠️ The rebuild still runs for the WHOLE table even when it honours
+   * nothing: it re-materializes every kept column's default and the full
+   * declared index set from metadata, so it is not a no-op, and skipping it in
+   * that case would change what the reconciler DOES rather than what it
+   * reports. Honesty about the report is this function's contract; deciding
+   * whether a rebuild is worth running is not.
+   *
    * SQLite cannot alter a column's DEFAULT in place, so `drop_column_default`
    * (#4560) is reconciled here too — by re-materializing every column's default
    * from METADATA through {@link applyDeclaredColumnDefault} and simply not
@@ -10296,17 +10450,28 @@ export class SqlDriver implements IDataDriver {
    * by `lookup` fields are not re-added (ObjectStack enforces relationships at
    * the application layer, not via SQLite FK constraints).
    */
-  protected async rebuildSqliteTablePatched(table: string, ents: ManagedDriftEntry[]): Promise<void> {
+  protected async rebuildSqliteTablePatched(table: string, ents: ManagedDriftEntry[]): Promise<ManagedDriftEntry[]> {
     const relax = new Set<string>();
     const tighten = new Set<string>();
     const drop = new Set<string>();
     const dropDefault = new Set<string>();
+    // The entries this rebuild ACTS on, filled by the same pass that fills the
+    // four sets — deliberately not a second list of op types to keep in sync
+    // with the branches below. An entry is honoured if and only if one of those
+    // branches took it, so the returned set cannot drift from the work done.
+    const honoured: ManagedDriftEntry[] = [];
     for (const e of ents) {
       if (e.op.type === 'relax_not_null') relax.add(e.op.column);
       else if (e.op.type === 'tighten_not_null') tighten.add(e.op.column);
       else if (e.op.type === 'drop_column') drop.add(e.op.column);
       else if (e.op.type === 'drop_column_default') dropDefault.add(e.op.column);
-      // widen/narrow varchar: SQLite ignores declared length — nothing to do.
+      // Everything else is IGNORED here and must be reported as such (#11722):
+      // widen/narrow varchar (SQLite ignores declared length — nothing to do),
+      // `manual_column_type_change` (no reconciler arm on ANY dialect, by
+      // decision), and any column op added later, which lands in this branch by
+      // default rather than being silently absorbed into `honoured`.
+      else continue;
+      honoured.push(e);
     }
 
     const physical = await this.introspectColumns(table);
@@ -10378,6 +10543,8 @@ export class SqlDriver implements IDataDriver {
     } catch (e: any) {
       this.logger.warn(`[schema-drift] could not fully recreate indexes for '${table}' after rebuild`, e?.message ?? e);
     }
+
+    return honoured;
   }
 
   /** Map an introspected SQLite column to a knex builder for the rebuilt table. */
@@ -11473,9 +11640,13 @@ export class SqlDriver implements IDataDriver {
    * row, asked one field at a time so the paths that return raw builder output
    * can ask it too. `null` means the stored form already IS the presented form.
    *
-   * The boolean / numeric rules are SQLite-only because `formatOutput` gates
-   * them that way: SQLite is the dialect without a native boolean, and the
-   * numeric repair only exists for legacy TEXT-affinity columns.
+   * The boolean rule runs on SQLite AND MySQL — the two dialects that store a
+   * declared boolean as a number (INTEGER 0/1, `tinyint(1)`) — because
+   * `formatOutput` gates its row reads that way (#11782; SQLite-only before,
+   * which is how a declared boolean answered `1`/`0` on MySQL). Postgres
+   * stores a real `boolean` node-pg parses, so there the stored form already
+   * IS the presented form. The numeric repair stays SQLite-only: it exists
+   * for legacy TEXT-affinity columns, which no other dialect has.
    */
   protected readPresentationKind(
     table: string | null | undefined,
@@ -11484,8 +11655,10 @@ export class SqlDriver implements IDataDriver {
     if (!table) return null;
     const temporal = this.temporalFieldKind(table, field);
     if (temporal) return temporal;
+    if ((this.isSqlite || this.isMysql) && this.booleanFields[table]?.includes(field)) {
+      return 'boolean';
+    }
     if (!this.isSqlite) return null;
-    if (this.booleanFields[table]?.includes(field)) return 'boolean';
     if (this.numericFields[table]?.includes(field)) return 'number';
     return null;
   }
@@ -11496,10 +11669,11 @@ export class SqlDriver implements IDataDriver {
    * (`aggregate`, `distinct` — #3797 for instants, #3849 for scalars).
    *
    * The dialect gating mirrors `formatOutput`: the `Field.datetime` repair and
-   * the boolean / numeric coercions are SQLite-only (it is the one dialect where
-   * storage ≠ presentation), while the `Field.date` → `YYYY-MM-DD` collapse runs
-   * everywhere. {@link readPresentationKind} does the SQLite gating for the
-   * scalar kinds, so by the time one arrives here the dialect is settled.
+   * the numeric coercion are SQLite-only, the boolean coercion runs on SQLite
+   * and MySQL (#11782 — the two dialects whose stored boolean is a number),
+   * and the `Field.date` → `YYYY-MM-DD` collapse runs everywhere.
+   * {@link readPresentationKind} does the dialect gating for the scalar kinds,
+   * so by the time one arrives here the dialect is settled.
    */
   protected presentReadValue(kind: ReadPresentationKind, value: any): any {
     if (value == null) return value;
@@ -13355,6 +13529,12 @@ export class SqlDriver implements IDataDriver {
       case 'textarea':
       case 'html':
       case 'markdown':
+      case 'richtext':
+      case 'code':
+      // #11875 — moved out of the catch-all together with `createColumn`'s
+      // text-family case: the write seam now enforces their declared bound.
+      case 'signature':
+      case 'qrcode':
         return keyed ? this.keyableTextLength(field) : null;
       // Virtual — `createColumn` returns without emitting anything.
       case 'formula':
@@ -13649,7 +13829,52 @@ export class SqlDriver implements IDataDriver {
       case 'text':
       case 'textarea':
       case 'html':
-      case 'markdown': {
+      case 'markdown':
+      // #11794: `richtext` and `code` join the text family, and membership is
+      // decided by a MEASURED test rather than by "this type's values look
+      // long".
+      //
+      // ## What makes an unbounded TEXT column correct for a type
+      //
+      // That the WRITE SEAM enforces the type's declared `maxLength` — the
+      // invariant the rest of this driver already rests on, stated in
+      // `schema-drift.ts` in as many words: "A TEXT column refuses nothing a
+      // `maxLength` allows … the bound is enforced at the write seam." So the
+      // question is not whether a value can be long, it is whether the
+      // declaration still binds once the column stops binding.
+      //
+      // objectql's record-validator applies its `max_length` / `min_length`
+      // branch to exactly the spec's BOUNDED_STRING_FIELD_TYPES — measured,
+      // not read off it: a `maxLength: 64` field of each member refuses a
+      // 100-character value with a field-named ADR-0112 envelope, before any
+      // column is reached. So membership here RESTORES the declared contract
+      // (any string, as `valueSchemaFor` says) instead of widening past it.
+      //
+      // `richtext` is the headline member: the spec groups `markdown` / `html`
+      // / `richtext` together as "Rich Content" (`field.zod.ts`) and two of
+      // the three already landed here — the third fell through to the
+      // catch-all's `table.string(name)`, knex's varchar(255), so an ordinary
+      // rich-text body over 255 characters was refused by both enforcing
+      // dialects while the same body in a `markdown` field on the same table
+      // was accepted. Measured at 1000 characters on live MySQL 8.0.46
+      // (`ER_DATA_TOO_LONG` under `STRICT_TRANS_TABLES`) and Postgres 16
+      // (`22001`). `code` is the same defect on the same evidence — a code
+      // editor's contents, refused identically on both dialects.
+      case 'richtext':
+      case 'code':
+      // #11875 (maintainer ruling 2026-08-25, option 1): `signature` and
+      // `qrcode` join under exactly the invariant above. #11794 measured them
+      // (same live refusal: a 1000-char data-URI landed varchar(255) and was
+      // refused `22001` on PG, `ER_DATA_TOO_LONG` on MySQL) and deliberately
+      // left them in the catch-all, because at that point NOTHING enforced
+      // their declared `maxLength` — an unbounded TEXT would have accepted
+      // values the declaration forbids. That gap is now closed at both seams:
+      // `FieldSchema` admits `maxLength` on them (BOUNDED_STRING_FIELD_TYPES)
+      // and the record-validator's `max_length` branch reads the same set, so
+      // a TEXT column here refuses nothing the declaration allows — the bound
+      // is enforced at the write seam, and the data-URI refusal goes away.
+      case 'signature':
+      case 'qrcode': {
         // #11374: a text-family column that some declared index KEYS ON is
         // emitted as `varchar(maxLength)` rather than TEXT, whenever the field
         // declared a bound this dialect can key on.
@@ -13798,14 +14023,22 @@ export class SqlDriver implements IDataDriver {
         // (#field-zoo). Everything else is a plain string.
         //
         // ⛔ The third branch #11431 leaves alone. This is the CATCH-ALL, and
-        // what lands in it is precisely the set of types whose stored value is
-        // NOT the declared value: `secret` persists an opaque `sys_secret`
-        // ref rather than the credential it was given (ADR-0100), and
-        // `select` / `radio` / `checkboxes` / `code` / `tree` store option
-        // machine names or ids. Sizing any of those from the author's
-        // `maxLength` would size the wrong string. A type that genuinely wants
-        // the bound belongs in the string-family case above, named — never
-        // acquired by falling through to here.
+        // MOST of what lands in it is the set of types whose stored value is
+        // NOT the declared value, or is short by construction: `secret`
+        // persists an opaque `sys_secret` ref rather than the credential it was
+        // given (ADR-0100), `select` / `radio` / `checkboxes` / `tree` store
+        // option machine names or ids, and `color` holds a color code. Sizing
+        // any of those from the author's `maxLength` would size the wrong
+        // string. (`code` used to be mis-listed here among the option-valued
+        // ones — measured in field-zoo it stores the editor's contents
+        // verbatim, which is why #11794 moved it to the text family above.
+        // `signature` / `qrcode` sat here as a measured OPEN DEFECT — their
+        // stored value IS the declared value, routinely a data-URI far past
+        // 255 chars, refused by both enforcing dialects — until #11875 gave
+        // the write seam their bound and moved them to the text family too.)
+        //
+        // A type that genuinely wants the bound belongs in the string-family
+        // case above, named — never acquired by falling through to here.
         col = JSON_COLUMN_TYPES.has(type) ? table.json(name) : table.string(name);
     }
 
@@ -14192,15 +14425,6 @@ export class SqlDriver implements IDataDriver {
         }
       }
 
-      const booleanFields = this.booleanFields[object];
-      if (booleanFields && booleanFields.length > 0) {
-        for (const field of booleanFields) {
-          if (data[field] !== undefined && data[field] !== null) {
-            data[field] = Boolean(data[field]);
-          }
-        }
-      }
-
       // Numeric scalars stored on a legacy TEXT-affinity column come back as
       // strings ('4'); coerce numeric-looking strings back to numbers so the
       // declared type wins regardless of when the column was created. Only
@@ -14243,6 +14467,29 @@ export class SqlDriver implements IDataDriver {
         for (const field of datetimeFields) {
           if (data[field] !== undefined) {
             data[field] = normalizeSqliteDatetimeOutput(data[field]);
+          }
+        }
+      }
+    }
+
+    // [#11782] Present a declared `Field.boolean` as a JSON boolean on the
+    // dialects whose STORAGE form is a number: SQLite (INTEGER 0/1) and MySQL
+    // (`tinyint(1)`, which mysql2 hands back as a JS number). Postgres stores a
+    // real `boolean` and node-pg already parses it, so its stored form IS the
+    // presented form and it deliberately stays outside the gate — the same
+    // per-dialect posture {@link readPresentationKind} takes for the read doors
+    // that return raw builder output (`distinct`; `aggregate` tracks its own
+    // result columns per #11635). Before this, the gate was SQLite-only and a
+    // declared boolean answered `1`/`0` on MySQL's row-read door while
+    // answering `true`/`false` on the other two dialects — and, once #11635
+    // presented `min`/`max` everywhere, `find()` and `aggregate()` gave
+    // OPPOSITE answers for the same column on the same MySQL connection.
+    if (this.isSqlite || this.isMysql) {
+      const booleanFields = this.booleanFields[object];
+      if (booleanFields && booleanFields.length > 0) {
+        for (const field of booleanFields) {
+          if (data[field] !== undefined && data[field] !== null) {
+            data[field] = Boolean(data[field]);
           }
         }
       }
@@ -14474,17 +14721,33 @@ export class SqlDriver implements IDataDriver {
         // (measured), i.e. this rewrite deliberately does NOT adopt the
         // `?::regclass` failure mode `introspectPrimaryKeys` has; the #7332
         // `onFailure` contract below is unchanged by it.
+        // `referenced_schema` (#11377): the PARENT's schema when — and only
+        // when — it is not on the session's `search_path`, NULL otherwise.
+        // The scoping predicate on the CHILD (`ns.nspname = ANY (…)`) is
+        // #11201's and is untouched; this CASE asks the same question about
+        // the parent's namespace, so "in path" here means exactly what bare-
+        // name resolution means to every other statement in the session.
+        // Measured on live PostgreSQL 16.13 (the card's fixture shape): a
+        // parent in `os11377_far` answers `referenced_schema = os11377_far`
+        // with `referenced_table` still the bare name; an in-path parent
+        // answers NULL. The bare spelling of `referenced_table` is
+        // deliberate and unconditional — see `IntrospectedForeignKey`.
         const result = await this.knex.raw(
           `
           SELECT
             att.attname AS column_name,
             parent.relname AS referenced_table,
             patt.attname AS referenced_column,
-            con.conname AS constraint_name
+            con.conname AS constraint_name,
+            CASE
+              WHEN pns.nspname = ANY (current_schemas(false)) THEN NULL
+              ELSE pns.nspname
+            END AS referenced_schema
           FROM pg_constraint con
           JOIN pg_class child ON child.oid = con.conrelid
           JOIN pg_namespace ns ON ns.oid = child.relnamespace
           JOIN pg_class parent ON parent.oid = con.confrelid
+          JOIN pg_namespace pns ON pns.oid = parent.relnamespace
           CROSS JOIN LATERAL unnest(con.conkey, con.confkey)
             WITH ORDINALITY AS k(attnum, fattnum, ord)
           JOIN pg_attribute att
@@ -14507,6 +14770,14 @@ export class SqlDriver implements IDataDriver {
             referencedTable: row.referenced_table,
             referencedColumn: row.referenced_column,
             constraintName: row.constraint_name,
+            // The key is ABSENT for an in-path parent, not `undefined`: an
+            // explicit `referencedSchema: undefined` still spells the key
+            // into `Object.keys`, JSON round-trips differently, and reads as
+            // "someone considered this" — the contract is that presence
+            // itself carries the fact (#11377).
+            ...(row.referenced_schema != null
+              ? { referencedSchema: row.referenced_schema }
+              : {}),
           });
         }
       } else if (this.isMysql) {
@@ -14537,13 +14808,29 @@ export class SqlDriver implements IDataDriver {
         // `sql-driver-11379-introspect-fk-mysql-ordinal-order.test.ts`, which is
         // deliberately a pin on the emitted SQL rather than on the row order,
         // because a row-order assertion passes here with or without this line.
+        // `referenced_schema` (#11377), symmetric with the Postgres arm: the
+        // PARENT's database when it differs from the session's default
+        // database, NULL otherwise. MySQL's resolution scope for a bare name
+        // is `DATABASE()` (there is no search path to be partially on), and
+        // `KEY_COLUMN_USAGE` carries the parent's database as
+        // `REFERENCED_TABLE_SCHEMA` on the same row this arm already reads —
+        // the child-side filter `TABLE_SCHEMA = DATABASE()` never constrained
+        // the referenced side, so a cross-database InnoDB foreign key was
+        // already returned here, under a bare name `DATABASE()` does not
+        // resolve. `<=>` is the null-safe comparison: with no default
+        // database selected, NO bare name resolves, so every parent is
+        // out-of-scope and qualified.
         const result = await this.knex.raw(
           `
           SELECT
             COLUMN_NAME as column_name,
             REFERENCED_TABLE_NAME as referenced_table,
             REFERENCED_COLUMN_NAME as referenced_column,
-            CONSTRAINT_NAME as constraint_name
+            CONSTRAINT_NAME as constraint_name,
+            CASE
+              WHEN REFERENCED_TABLE_SCHEMA <=> DATABASE() THEN NULL
+              ELSE REFERENCED_TABLE_SCHEMA
+            END as referenced_schema
           FROM information_schema.KEY_COLUMN_USAGE
           WHERE TABLE_SCHEMA = DATABASE()
             AND TABLE_NAME = ?
@@ -14559,6 +14846,11 @@ export class SqlDriver implements IDataDriver {
             referencedTable: row.referenced_table,
             referencedColumn: row.referenced_column,
             constraintName: row.constraint_name,
+            // Absent, not `undefined`, for an in-database parent — same
+            // presence-is-the-fact contract as the Postgres arm (#11377).
+            ...(row.referenced_schema != null
+              ? { referencedSchema: row.referenced_schema }
+              : {}),
           });
         }
       } else if (this.isSqlite) {
@@ -14762,6 +15054,23 @@ export class SqlDriver implements IDataDriver {
    * All three now normalise their rows to {@link UniqueConstraintMember} and
    * decide through {@link singleColumnUniqueColumns} — one predicate, so a
    * fourth dialect cannot quietly acquire a fourth meaning.
+   *
+   * ## A PRIMARY KEY is not one of them (#11654)
+   *
+   * The residual cell of the same family, and the same convention applied one
+   * step over: a column appears here iff a *declared UNIQUE constraint* covers
+   * it alone. Postgres and MySQL got this for free — `CONSTRAINT_TYPE =
+   * 'UNIQUE'` never matches a primary key. SQLite did not: it keys on
+   * `PRAGMA index_list`, which reports the unique auto-index SQLite
+   * materialises for a non-INTEGER key, so a `varchar` key was flagged while
+   * an `INTEGER PRIMARY KEY` — a rowid alias with no auto-index at all — was
+   * not. Three dialects, four answers, from the declared type of a key.
+   *
+   * The SQLite arm now skips `origin: 'pk'` rows. Unlike the composite case
+   * above the excluded flag was not FALSE, only inconsistent — a key column
+   * really is unique — which is why the exclusion has to be paid for by the
+   * face that keeps the fact: `introspectPrimaryKeys` reports it through
+   * `primaryKeys` and `IntrospectedColumn.primaryKey`, both unmoved by this.
    */
   protected async introspectUniqueConstraints(
     tableName: string,
@@ -14857,7 +15166,31 @@ export class SqlDriver implements IDataDriver {
         const indexes = await this.knex.raw(`PRAGMA index_list(${safeTableName})`);
 
         for (const idx of indexes) {
-          if (idx.unique === 1) {
+          // `origin: 'pk'` is the auto-index SQLite materialises for a
+          // non-INTEGER PRIMARY KEY — not a declared UNIQUE constraint, and so
+          // not what this method reports (#11654). Skipping it is what makes
+          // SQLite agree with the other two arms, whose
+          // `CONSTRAINT_TYPE = 'UNIQUE'` filter never sees a primary key at
+          // all, AND what makes SQLite agree with ITSELF: an `INTEGER PRIMARY
+          // KEY` is a rowid alias for which SQLite creates no auto-index, so
+          // `index_list` is empty and the key was never flagged — the same
+          // logical schema answering differently by the declared type of its
+          // key alone. Nothing is lost by the exclusion: primary-key
+          // membership is reported losslessly by `introspectPrimaryKeys`,
+          // through `IntrospectedTable.primaryKeys` and
+          // `IntrospectedColumn.primaryKey`.
+          //
+          // The test is on the INDEX's origin, never on whether the COLUMN is
+          // in the key: a key column that separately carries its own unique
+          // index (`origin: 'c'`) really does have a declared single-column
+          // unique constraint and stays flagged.
+          //
+          // `origin` has been reported by this pragma since SQLite 3.8.9, so
+          // an absent value is not a case that arises here; were it ever
+          // absent this reads as the pre-#11654 behaviour rather than
+          // silently dropping real constraints, and the pin on
+          // `index_list`'s own origin values turns red.
+          if (idx.unique === 1 && idx.origin !== 'pk') {
             // `PRAGMA index_info` reports one row per index MEMBER, and a
             // member is not always a column: an expression term
             // (`CREATE UNIQUE INDEX … ON t (lower(a))`) arrives with

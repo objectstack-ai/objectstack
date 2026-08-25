@@ -12,7 +12,8 @@ import type {
 } from './outbox.js';
 import { hashPartition } from './backoff.js';
 import { toEpochMs } from './audit-timestamp.js';
-import { dispatcherAckOptions, dispatcherSweepOptions } from './outbox-dispatcher-scope.js';
+import { dispatcherAckCasOptions, dispatcherSweepOptions } from './outbox-dispatcher-scope.js';
+import { NotificationAckError, notificationAckLostClaimMessage, notificationAckNotClaimedMessage } from './outbox.js';
 
 export const DELIVERY_OBJECT = 'sys_notification_delivery';
 
@@ -212,9 +213,20 @@ export class SqlNotificationOutbox implements INotificationOutbox {
     async ack(id: string, result: AckResult): Promise<void> {
         const current = (await this.engine.findOne(this.objectName, {
             where: { id },
-            fields: ['attempts'],
-        })) as { attempts?: number } | null;
+            fields: ['status', 'attempts'],
+        })) as { status?: DeliveryStatus; attempts?: number } | null;
+        // An id matching no row is not a contract violation: no state to
+        // corrupt, no claim to lose. Declared on the interface, unchanged.
         if (!current) return;
+        // [#11453] Precondition, half one: the loud, deterministic refusal for
+        // a row that is not claimed at all — the ack-as-cancel trap. Refused
+        // BEFORE any write, so a refused ack leaves the row byte-identical.
+        if (current.status !== 'in_flight') {
+            throw new NotificationAckError(
+                notificationAckNotClaimedMessage(id, current.status ?? 'unknown'),
+                'DELIVERY_NOT_ELIGIBLE',
+            );
+        }
 
         const now = Date.now();
         let status: DeliveryStatus;
@@ -235,22 +247,57 @@ export class SqlNotificationOutbox implements INotificationOutbox {
             error = result.error ?? null;
         }
 
+        // [#11453] Precondition, half two: the ATOMIC one. The status test
+        // above is a read, and a read cannot hold a row still — `claim()` is
+        // atomic by contract and this call was never part of that atom, which
+        // is the race the card describes. So the requirement is re-stated IN
+        // the write: the row is transitioned only if it is STILL `in_flight`.
+        // A row reaped by the visibility timeout and re-claimed between the
+        // read and here matches nothing and is left entirely alone.
+        //
+        // `attempts` is incremented HERE and only here, inside that condition,
+        // so the counter can only move for a row that was genuinely claimed —
+        // i.e. for a real dispatch attempt. Previously this write was
+        // unconditional and by-id, so any caller could advance the retry
+        // schedule of a row no dispatcher ever held.
+        const attempts = (current.attempts ?? 0) + 1;
         await this.engine.update(
             this.objectName,
             {
                 status,
-                attempts: (current.attempts ?? 0) + 1,
+                attempts,
                 last_attempted_at: now,
                 claimed_by: null,
                 claimed_at: null,
                 next_attempt_at: nextAttemptAt,
                 error,
             },
-            // Single-record dispatcher write, audited under the `update` op.
-            // Declared a global-sweep site — no request context exists on the
-            // tick that reaches here. Warrant in `outbox-dispatcher-scope.ts`.
-            dispatcherAckOptions(id) as any,
+            // Predicate write (`updateMany`), audited under that op. Declared a
+            // global-sweep site — no request context exists on the tick that
+            // reaches here. Warrant in `outbox-dispatcher-scope.ts`.
+            dispatcherAckCasOptions(id, 'in_flight') as any,
         );
+
+        // Did the conditional write land? `IDataEngine.update` declares its
+        // return as `any`, so the row itself is the only contract-safe answer
+        // — the same read-back `SqlHttpOutbox.redeliver` uses to report its own
+        // compare-and-set miss. Without it a lost claim would write nothing and
+        // still report success, which is the silent-success family this card
+        // exists to close.
+        //
+        // The detector is the pair (status, attempts), not status alone: a
+        // retry ack's post-state IS `pending`, the same status a refused row
+        // already had, so only the recorded attempt tells the two apart.
+        const after = (await this.engine.findOne(this.objectName, {
+            where: { id },
+            fields: ['status', 'attempts'],
+        })) as { status?: DeliveryStatus; attempts?: number } | null;
+        if (!after || after.status !== status || (after.attempts ?? 0) !== attempts) {
+            throw new NotificationAckError(
+                notificationAckLostClaimMessage(id, after?.status ?? 'unknown'),
+                'DELIVERY_NOT_ELIGIBLE',
+            );
+        }
     }
 
     async list(filter?: { status?: DeliveryStatus; notificationId?: string }): Promise<NotificationDeliveryRecord[]> {

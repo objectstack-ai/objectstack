@@ -254,7 +254,7 @@
       "title": "Filtered roll-up summaries recompute only through their own filter",
       "since": "v16",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -263,10 +263,8 @@
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "a parent with several filtered roll-ups in different filter shapes (showcase_expense_report: equality / boolean / operator / unfiltered)"
-        ],
-        "knownGaps": [
-          "the visual filter-editor half needs a summary field in a WRITABLE package — the showcase ships read-only, so Studio editing is not reachable on stock fixtures (#3358)"
+          "a parent with several filtered roll-ups in different filter shapes (showcase_expense_report: equality / boolean / operator / unfiltered)",
+          "the editor-half clause additionally needs a writable target package — obtained at runtime via POST /packages/:id/duplicate (ADR-0070 D4 'duplicate base'), not a stock fixture"
         ]
       },
       "steps": [
@@ -276,7 +274,7 @@
         "PATCH one line's status approved→rejected over /api/v1/data/showcase_expense_line/:id; re-read the parent and recompute again",
         "PATCH a different line's billable true→false; re-read the parent",
         "DELETE one line; re-read the parent — a delete must move every roll-up whose filter matched the deleted row, including the unfiltered total",
-        "(editor half, blocked) on a writable package: edit a summary field's child-row filter in Studio's visual filter editor, save, and re-read the persisted metadata"
+        "on a writable package: POST /packages/com.example.showcase/duplicate {targetPackageId: <scratch id>} (ADR-0070 D4 'duplicate base' — the platform's supported writable-base route) to clone the showcase base, then in Studio's visual filter editor edit the duplicated expense-report's summary field child-row filter, save, and re-read the persisted metadata over the meta API"
       ],
       "acceptance": [
         {
@@ -304,25 +302,23 @@
           "evidence": "before/after value table"
         },
         {
-          "clause": "the child-row filter is settable via the visual editor on a writable package",
+          "clause": "the child-row filter is settable via the visual editor on a writable package obtained through the platform's own duplicate-base route",
           "oracle": "screenshot",
-          "verify": "edit a summary field's filter in Studio on a writable package and confirm the persisted metadata via the meta API",
+          "verify": "POST /packages/com.example.showcase/duplicate to clone the showcase base into a writable target package (ADR-0070 D4), open the duplicated parent's summary field in Studio's visual filter editor, edit its child-row filter, save, and confirm the persisted metadata via the meta API",
           "evidence": "editor screenshot + saved metadata read"
         }
       ],
       "negative": [
         "an untouched-filter roll-up that moves on an edit outside its filter (e.g. rejected_count changing on the billable flip) is a FAIL even if every touched value is right"
       ],
-      "blocked": {
-        "by": "fixture",
-        "ref": "#3358 (editor half needs a writable-package summary field fixture)"
-      },
       "traps": [
         "seed-data-thin"
       ],
       "source": [
         "#3358 §2 (recompute half proven; editor half explicitly left unticked)",
-        "examples/app-showcase/src/data/objects/expense-report.object.ts (the six roll-up shapes and their filters)"
+        "examples/app-showcase/src/data/objects/expense-report.object.ts (the six roll-up shapes and their filters)",
+        "packages/runtime/src/domains/packages.ts (POST /packages/:id/duplicate — ADR-0070 D4 'duplicate base', the writable-target route)",
+        "docs/adr/0070-package-first-authoring.md §D4 ('clone a base into a new writable package')"
       ],
       "history": [
         {
@@ -336,6 +332,12 @@
           "date": "2026-08-07",
           "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants",
           "ref": "claude/platform-test-checklist-ocwugl"
+        },
+        {
+          "revision": 3,
+          "date": "2026-08-25",
+          "change": "retargeted clause 5 (the visual filter-editor half) at the platform's supported runtime path per the maintainer ruling on #9788 (2026-08-19, 「接受你的所有建议」): the stock showcase does NOT boot with a writable package, so the runner instead clones the showcase base via POST /packages/:id/duplicate (ADR-0070 D4 'duplicate base') to get a writable target for the visual editor. Removed the item-level blocked.by:fixture entry and the matching fixtures.knownGaps line — the clause is runnable on every boot now, not fixture-blocked. Oracle stays screenshot: the clause specifically tests the VISUAL editor, corroborated by a meta-API read of the persisted filter",
+          "ref": "#9788"
         }
       ]
     },

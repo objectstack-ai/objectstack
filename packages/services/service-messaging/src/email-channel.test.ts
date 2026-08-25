@@ -277,4 +277,94 @@ describe('email channel', () => {
             expect(email.sent[0]).toEqual({ to: 'ada@example.com', subject: 'Deal closed', text: 'Acme signed' });
         });
     });
+
+    // ── #11741 — organization threading. This channel is the producer the
+    // ruling names as HOLDING an organization (`delivery.notification
+    // .organizationId`, the tenant stamp the outbox snapshots per delivery),
+    // so it threads that value into the email service's input on BOTH of its
+    // arms; plugin-email's writer then stamps `sys_email.organization_id`
+    // verbatim. Identity pins, not counts: each pin asserts the exact value
+    // THIS producer stamped. The over-denial control pins the other half of
+    // the ruling: a delivery genuinely without an organization sends WITHOUT
+    // one — never refused, never given a fabricated stamp.
+    describe('organization threading (#11741)', () => {
+        /** Email service double recording both arms' inputs. */
+        function orgEmail() {
+            const sent: any[] = [];
+            const templated: any[] = [];
+            return {
+                sent,
+                templated,
+                service: {
+                    async send(input: any) { sent.push(input); return { id: 'email_row_1' }; },
+                    async sendTemplate(input: any) { templated.push(input); return { id: 'email_row_9', status: 'sent' }; },
+                },
+            };
+        }
+
+        it('the plain arm threads notification.organizationId into SendEmailInput (identity pin)', async () => {
+            const email = orgEmail();
+            const ch = channel(() => email.service, fakeData({ users: { user_1: 'ada@example.com' } }));
+            const r = await ch.send(silentCtx(), delivery({ organizationId: 'org_apex' }));
+            expect(r.ok).toBe(true);
+            expect(email.sent).toHaveLength(1);
+            // Exact shape: the stamp is the delivery's OWN organization, and
+            // nothing else about the input moved.
+            expect(email.sent[0]).toEqual({
+                to: 'ada@example.com',
+                subject: 'Deal closed',
+                text: 'Acme signed',
+                organizationId: 'org_apex',
+            });
+        });
+
+        it('the template arm threads notification.organizationId into sendTemplate (identity pin)', async () => {
+            const email = orgEmail();
+            const data = fakeData({ users: { user_1: 'ada@example.com' } });
+            const ch = createEmailChannel({
+                getEmail: () => email.service,
+                getData: () => data,
+                store: new NotificationTemplateStore({ getData: () => data }),
+                getDefaultTemplateLocale: () => 'ja-JP',
+            });
+            const r = await ch.send(silentCtx(), delivery({
+                organizationId: 'org_apex',
+                title: 'deal.won',
+                body: '',
+                payload: { template: 'crm.large_deal_won', templateData: { dealName: 'Acme' } },
+            }));
+            expect(r.ok).toBe(true);
+            expect(email.templated).toHaveLength(1);
+            expect(email.templated[0]).toEqual({
+                template: 'crm.large_deal_won',
+                to: 'ada@example.com',
+                data: { dealName: 'Acme' },
+                locale: 'ja-JP',
+                organizationId: 'org_apex',
+            });
+        });
+
+        it('over-denial control: an org-less delivery sends WITHOUT an organization and is not refused (both arms)', async () => {
+            const email = orgEmail();
+            const data = fakeData({ users: { user_1: 'ada@example.com' } });
+            const ch = createEmailChannel({
+                getEmail: () => email.service,
+                getData: () => data,
+                store: new NotificationTemplateStore({ getData: () => data }),
+            });
+            const plain = await ch.send(silentCtx(), delivery());
+            expect(plain.ok).toBe(true);
+            expect(email.sent).toHaveLength(1);
+            expect(email.sent[0]).not.toHaveProperty('organizationId');
+
+            const templated = await ch.send(silentCtx(), delivery({
+                title: 'deal.won',
+                body: '',
+                payload: { template: 'crm.large_deal_won' },
+            }));
+            expect(templated.ok).toBe(true);
+            expect(email.templated).toHaveLength(1);
+            expect(email.templated[0]).not.toHaveProperty('organizationId');
+        });
+    });
 });

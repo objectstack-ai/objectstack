@@ -120,7 +120,8 @@ import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { isMap, isSeq, parseDocument } from 'yaml';
+import { requireDependency } from './import-prerequisite.mjs';
+const { isMap, isSeq, parseDocument } = await requireDependency('yaml', () => import('yaml'), import.meta.url);
 import { isEntrypoint } from './invoked-as.mjs';
 
 const WORKFLOW = '.github/workflows/cross-repo-issue-closer.yml';

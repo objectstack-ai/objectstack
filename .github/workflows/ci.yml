@@ -537,6 +537,17 @@ jobs:
       # a process whose event loop is alive, and a named "no report = blocked
       # loop" verdict for one that is sync-spinning. The next #4250 occurrence
       # identifies its own culprit instead of costing a diagnosis.
+      #
+      # --log-order=stream is MANDATORY under the guard, not a preference. The
+      # guard measures output FLUSHES; turbo's default in CI is grouped log
+      # order, which flushes a task's output only when the task ENDS — so a
+      # shard whose tail is one task longer than --stall-minutes was killed BY
+      # CONSTRUCTION, healthy or not (measured: a healthy cli:test killed at
+      # exit 75 with 173/173 files passing in the flush the kill forced). The
+      # guard now refuses to wrap a turbo run without this flag. Cost is
+      # interleaved logs; the completeness guard below reads the per-line
+      # `<pkg>:test:` prefixes stream order emits (a pinned parseSummaries
+      # branch), so attribution survives.
       - name: Run this shard's tests
         env:
           NODE_OPTIONS: --report-on-signal --report-signal=SIGUSR2 --report-directory=${{ runner.temp }}/stall-reports
@@ -549,7 +560,7 @@ jobs:
           mkdir -p "$RUNNER_TEMP/stall-reports"
           node scripts/run-with-stall-guard.mjs --log "$RUNNER_TEMP/test-core.log" --stall-minutes 10 \
             --report-dir "$RUNNER_TEMP/stall-reports" -- \
-            pnpm turbo run test $FILTERS --concurrency=4 --summarize
+            pnpm turbo run test $FILTERS --concurrency=4 --summarize --log-order=stream
 
       # --summarize above costs nothing at runtime and writes
       # `.turbo/runs/<id>.json`: one per-task record with the execution window
@@ -1121,7 +1132,7 @@ jobs:
           mkdir -p "$RUNNER_TEMP/stall-reports"
           node scripts/run-with-stall-guard.mjs --log "$RUNNER_TEMP/dogfood.log" --stall-minutes 10 \
             --report-dir "$RUNNER_TEMP/stall-reports" -- \
-            pnpm turbo run test --filter=@objectstack/dogfood -- --shard=${{ matrix.shard }}/3
+            pnpm turbo run test --filter=@objectstack/dogfood --log-order=stream -- --shard=${{ matrix.shard }}/3
 
       # Dogfood boots real apps in-process, so a native/OOM abort is likelier
       # here than in the unit suites — and a shard that dies silently looks like

@@ -289,7 +289,8 @@
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join, posix, resolve } from 'node:path';
 import process from 'node:process';
-import ts from 'typescript';
+import { requireDefaultExport } from './import-prerequisite.mjs';
+const ts = await requireDefaultExport('typescript', () => import('typescript'), import.meta.url);
 import { isEntrypoint } from './invoked-as.mjs';
 import { createProgramChecked } from './ts-parse.mjs';
 import {

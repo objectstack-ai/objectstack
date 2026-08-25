@@ -339,6 +339,7 @@ export const ERROR_CODE_LEDGER = {
     'CREATE_FAILED',
     'DOMAIN_VERIFICATION_DISABLED', // domain verification is off on this deployment
     'DOMAIN_VERIFICATION_FAILED', // pass-through from better-auth
+    'EMAIL_DOMAIN_NOT_ALLOWED',   // [#11739] audience posture email_domain: the address's domain is off the allowlist
     'EMAIL_SERVICE_REQUIRED',
     'ENV_ACCESS_DENIED',
     'INVALID_EMAIL',
@@ -358,6 +359,7 @@ export const ERROR_CODE_LEDGER = {
     'OAUTH_REGISTER_FAILED',       // better-auth rejected the client registration
     'PHONE_NOT_ENABLED',
     'SAML_REGISTER_FAILED',
+    'SELF_REGISTRATION_CLOSED',   // [#11739] audience posture invite_only: self-registration is closed (no pending invitation for this address)
     'SSO_REGISTER_FAILED',
     'SSO_REGISTER_FORBIDDEN',
     'USER_ALREADY_EXISTS',        // pass-through from better-auth
@@ -508,7 +510,34 @@ export const ERROR_CODE_LEDGER = {
   ],
   '@objectstack/service-messaging': [
     'DELIVERY_NEVER_SENT',           // [#8069] terminal delivery row with 0 attempts — a PARKED record of a delivery that could never be prepared, not one that failed. Redelivering it would be a FIRST send, and the row carries no HMAC signature because the secret that would have produced one is exactly what went missing, so it would go out unsigned (#7799). Distinct from DELIVERY_NOT_ELIGIBLE: that one says "wrong state, try when it settles"; this one says "never, fix the configuration instead"
-    'DELIVERY_NOT_ELIGIBLE',         // delivery row is in a non-terminal state
+    // "this delivery row's state does not permit the requested operation" —
+    // ONE concept on TWO delivery surfaces of this package, deliberately
+    // sharing one spelling (PR #11858's contract-review PASS ruled option B;
+    // a second near-synonym code was rejected for the vocabulary sprawl
+    // ADR-0112 exists to prevent). Stated per-surface because the two refuse
+    // OPPOSITE halves of the state space — no single status predicate glosses
+    // both, and the older "non-terminal state" wording named only the first:
+    //   - `IHttpOutbox.redeliver` (`HttpRedeliverError`; the operator
+    //     redeliver button) refuses a row that is NOT terminal —
+    //     `redeliver` means send this AGAIN, so it wants `success`/`failed`/
+    //     `dead` (`assertHttpRedeliverable`). Also raised when the producer's
+    //     `RedeliverGuard` refuses, or itself throws (fail-closed on purpose:
+    //     "we could not check" must never read as "allowed"), and when the
+    //     terminal re-check AT THE WRITE misses because a dispatcher tick
+    //     re-claimed the row mid-call — both `SqlHttpOutbox` and
+    //     `MemoryHttpOutbox` report that miss instead of a false success
+    //     (#11009).
+    //   - `INotificationOutbox.ack` (`NotificationAckError`; #11453) refuses a
+    //     row that is not `in_flight` — which covers BOTH an unclaimed
+    //     `pending` row (the ack-as-cancel trap) and an already-terminal one,
+    //     because `ack` records the outcome of a delivery the caller CLAIMED.
+    //     Also raised by `SqlNotificationOutbox` when its compare-and-set
+    //     read-back shows the claim was lost mid-ack (a slow send outrunning
+    //     `claimTtlMs`), so nothing was written.
+    // Distinct from DELIVERY_NEVER_SENT: this one says "wrong state for THIS
+    // operation, try when it settles"; that one says "never, fix the
+    // configuration instead".
+    'DELIVERY_NOT_ELIGIBLE',
   ],
   '@objectstack/trigger-api': [
     'ENQUEUE_FAILED',                // queue accepted the call but publish threw

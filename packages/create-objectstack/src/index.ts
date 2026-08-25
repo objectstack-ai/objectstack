@@ -59,6 +59,7 @@ import chalk from 'chalk';
 import fs from 'node:fs';
 import path from 'node:path';
 import { execSync } from 'node:child_process';
+import { detectPackageManager } from './detect-package-manager.js';
 import { fileURLToPath } from 'node:url';
 
 import { syncObjectStackDeps } from './pkg-utils.js';
@@ -121,15 +122,6 @@ function printSuccess(msg: string) { console.log(chalk.green(`  ✓ ${msg}`)); }
 function printError(msg: string)   { console.log(chalk.red(`  ✗ ${msg}`)); }
 function printStep(msg: string)    { console.log(chalk.yellow(`  → ${msg}`)); }
 function printWarning(msg: string) { console.log(chalk.yellow(`  ⚠ ${msg}`)); }
-
-function detectPackageManager(): string {
-  try {
-    execSync('pnpm --version', { stdio: 'ignore' });
-    return 'pnpm';
-  } catch {
-    return 'npm';
-  }
-}
 
 // ─── Loading: bundled (fs copy) ─────────────────────────────────────
 
@@ -437,7 +429,24 @@ const program = new Command()
     // no install to drive. Previously "Next steps" hardcoded `npm` regardless
     // of which package manager actually ran (#10322) — a newcomer who just
     // watched `pnpm install` run was then told `npm run dev`.
-    const pm = detectPackageManager();
+    //
+    // The probe reports WHY as well as WHAT. `npm` used to mean two different
+    // things that nothing downstream could tell apart: "this machine has no
+    // pnpm" and "the pnpm probe threw". The second is not a choice, it is a
+    // fallback under uncertainty — `pnpm --version` resolves through Corepack
+    // and so can fail on a slow or offline network even though pnpm is
+    // installed — and a run that stays silent about it tells the reader to
+    // type npm without ever admitting it never found out.
+    const detected = detectPackageManager();
+    const pm = detected.pm;
+    if (detected.probe === 'failed') {
+      printWarning(
+        `pnpm is installed but \`pnpm --version\` failed (${detected.detail}); ` +
+          'using npm as a fallback. The commands below name npm because the ' +
+          'probe did not answer, not because this project prefers it.',
+      );
+      console.log('');
+    }
 
     printKV('Environment', projectName);
     printKV('Namespace', namespace);

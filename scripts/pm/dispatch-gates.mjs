@@ -2503,6 +2503,10 @@ export const CHANGE_KIND_GATES = [
         name: 'check:i18n',
         why: "it re-extracts every owning package's translation bundles and fails on drift, so any edit that changes what the extractor emits (an object definition, a label, the config itself) moves it — regenerate with `node scripts/check-i18n-bundles.mjs --write`",
       },
+      {
+        name: 'check:i18n-stale-fill',
+        why: "REVISING an existing source string (a label, description or help text) is the move `check:i18n` cannot see: the extractor's merge fills gaps only, so the regeneration rewrites `en` and LEAVES the previous source text in every translated locale — in sync by key, green gate, superseded draft served forever (#11671). This ratchet fails when a NEW leaf goes stale that way. It needs no build. If your revision stranded a leaf, re-translate it and commit the bundle; regenerating does NOT fix it, because a present-but-stale string is not a gap",
+      },
     ],
   },
   {
@@ -4301,12 +4305,19 @@ function selfTest() {
   // gates rather than fixtures — a fixture cannot show that the tree still has
   // the shape. If one of these gates stops declaring its root, re-point the
   // case at whatever gate then does; deleting one deletes the evidence.
-  const crossPkgHints = extractWatchHints(readFileSync(join(ROOT, 'scripts/check-cross-package-test-inputs.mjs'), 'utf8'));
+  // Re-pointed at the module that DECLARES the table (#11511): it moved out of
+  // check-cross-package-test-inputs.mjs into a plain module precisely so the
+  // follow below could reach it, and this read is of the declaration, not of
+  // the gate. Exactly what the paragraph above asks for -- "if one of these
+  // gates stops declaring its root, re-point the case at whatever gate then
+  // does". Left pointing at the gate it would have gone green over an empty
+  // hint list, which is the vacuous-pass shape these cases exist to refuse.
+  const crossPkgHints = extractWatchHints(readFileSync(join(ROOT, 'scripts/cross-package-test-inputs.mjs'), 'utf8'));
   // NOT `scripts/check-nul-bytes.mjs`: that gate names that file explicitly
   // too, so the case would pass with the declaration still refused — measured,
   // it survived the ablation. Pick a scripts path reachable ONLY through the
   // declared subtree, or the case pins nothing.
-  t('the cross-package gate reaches the root scripts dir it declares', crossPkgHints.some((h) => hintCovers(h, 'scripts/pm/dispatch-gates.mjs')));
+  t('the cross-package declaration table reaches the root scripts dir it declares', crossPkgHints.some((h) => hintCovers(h, 'scripts/pm/dispatch-gates.mjs')));
   t('and the content tree it declares', crossPkgHints.some((h) => hintCovers(h, 'content/docs/getting-started/index.mdx')));
   const governedHints = extractWatchHints(readFileSync(join(ROOT, 'scripts/pm/check-governed-merges.mjs'), 'utf8'));
   t('the governed-merge gate reaches the published skills catalog it declares', governedHints.some((h) => hintCovers(h, 'skills/objectstack-upgrade/SKILL.md')));
@@ -4939,8 +4950,16 @@ function selfTest() {
   // stayed green through it — every prefix-preserving rename is invisible to a
   // substring, which is the one class of rot the STALE branch exists to catch.
   const i18nHit = changeKindLines(['packages/services/service-messaging/src/objects/http-delivery.object.ts'], resolved);
-  t('an owning-package path emits the i18n convention section', i18nHit.length === 2 && i18nHit[0].includes('owns an i18n-extract.config.ts'));
+  // One kind line plus one line per gate in the entry — TWO gates since #11671
+  // added the stale-fill ratchet to the same file surface. The count is pinned
+  // (not `>= 1`) so a gate silently dropped from the entry fails here.
+  t('an owning-package path emits the i18n convention section', i18nHit.length === 3 && i18nHit[0].includes('owns an i18n-extract.config.ts'));
   t('the i18n section names check:i18n exactly, runnably', i18nHit.some((l) => l.includes('- pnpm check:i18n   —')));
+  // #11671: the two gates answer DIFFERENT moves on the same surface — check:i18n
+  // sees a key set change, this one sees a source string REVISED under a stale
+  // translated leaf. The delimiter anchor keeps the check:i18n pin above from
+  // matching this line by prefix, and vice versa.
+  t('the i18n section also names check:i18n-stale-fill, runnably', i18nHit.some((l) => l.includes('- pnpm check:i18n-stale-fill   —')));
   t('a path outside every owning package emits no i18n section', !changeKindLines(['packages/objectql/src/engine.ts'], resolved).some((l) => l.includes('check:i18n')));
 
   // ── The metadata-form edge (#9116) ────────────────────────────────────────

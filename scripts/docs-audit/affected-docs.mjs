@@ -522,15 +522,34 @@ if (args.includes('--self-test')) {
 // a complete read) is broken rather than clean, and no such verdict can fire on a tree
 // where the scan works at all.
 if (args.includes('--bridge-coverage')) {
-  const { registrarFiles, ledgers, registrarByTail } = scanRouteSurface();
-  const coverage = bridgeCoverageFrom(ledgers, registrarByTail.keys());
+  const { registrarFiles, sourceFiles, ledgers, registrarByTail } = scanRouteSurface();
+  // THE CEILING (#11178) — read lazily off the walk this scan already did, so the census
+  // holds one file's source at a time rather than the tree's. Only this mode pays for it:
+  // the advisory path calls `bridgeCoverageFrom` with no ceiling and gets `unmeasured`.
+  const ceiling = maximalTailsFrom((function* () {
+    for (const rel of sourceFiles) {
+      try { yield { file: rel, text: readFileSync(join(repoRoot, rel), 'utf8') }; } catch { /* unreadable file contributes no tail */ }
+    }
+  })());
+  const coverage = bridgeCoverageFrom(ledgers, registrarByTail.keys(), ceiling.keys());
   const selects = selectsFrom(registrarByTail.keys());
+  const causeOf = new Map(coverage.ledgers.map((l) => [l.file, l.cause]));
+  // Through the one definition, per tail, so naming a witness cannot drift from the rule
+  // that decided the row was remediable in the first place (⛔ never restate the suffix test).
+  const witnessesFor = (route) => [...ceiling.keys()].filter((t) => selectsFrom([t])(route)).flatMap((t) => ceiling.get(t));
   if (asJson) {
     process.stdout.write(JSON.stringify({
       ...coverage,
       registrarFiles: registrarFiles.filter((f) => !LEDGER_FILE_RE.test(f)),
       unreachableRows: ledgers.flatMap(({ file, rows }) =>
-        rows.filter((r) => r.client && !selects(r.route)).map((r) => ({ file, route: r.route, client: r.client }))),
+        rows.filter((r) => r.client && !selects(r.route)).map((r) => {
+          const witnesses = witnessesFor(r.route);
+          // The row-level half of the same partition: a row with a witness is remediable
+          // whatever its ledger looks like; a row without one inherits its ledger's verdict,
+          // because "no registration site anywhere on this surface" is a claim only the
+          // whole ledger can support (see `bridgeCoverageFrom`).
+          return { file, route: r.route, client: r.client, cause: witnesses.length ? 'discovery-gap' : causeOf.get(file), witnesses };
+        })),
     }, null, 2) + '\n');
   } else {
     console.log(`sdk route bridge — reach over the declared client-bound surface`);
@@ -553,8 +572,35 @@ if (args.includes('--bridge-coverage')) {
     }
     console.log(`    reachable ................ ${coverage.reachable}`);
     console.log(`    UNREACHABLE .............. ${coverage.unreachable}`);
+    // WHY, beside the number, on every line (#11178). `56 of 56` and `46 of 87` printed in
+    // the same words read as one remediable cause, and they are not: the first surface has
+    // no in-repo registration site at all, so the discovery change the second one wants
+    // moves it by zero rows. That misreading is the reason this split exists — it aimed a
+    // whole card at widening a recognizer that was never the constraint.
+    const CAUSE_NOTE = {
+      'no-in-repo-registrar': () => 'NO in-repo registrar for ANY row — discovery cannot reach this surface',
+      'discovery-gap': (l) => `all ${l.remediable} remediable by discovery`,
+      'undecided': (l) => `${l.remediable} remediable by discovery, ${l.unwitnessed} undecided`,
+      'no-client-surface': () => 'no client-bound rows to reach',
+      'fully-reachable': () => 'every client-bound row is reachable',
+      'unmeasured': () => 'cause not measured on this run',
+    };
     for (const l of coverage.ledgers) {
-      console.log(`      ${String(l.unreachable).padStart(4)} of ${String(l.clientRows).padEnd(4)} unreachable  ${l.file}`);
+      const note = CAUSE_NOTE[l.cause];
+      console.log(`      ${String(l.unreachable).padStart(4)} of ${String(l.clientRows).padEnd(4)} unreachable  ${l.file}`
+        + (note ? `   ← ${note(l)}` : ''));
+    }
+    // A PARTITION of the number above, printed whole for the reason the declared/read
+    // fraction is: remediable + structural + undecided === UNREACHABLE, so a reader can see
+    // it stay whole, and a bucket that starts absorbing another cannot do it quietly.
+    if (coverage.causes.measured) {
+      console.log(`    why — against every \`path:\` any packages/** file declares (${coverage.causes.ceilingTails}-tail ceiling vs the ${coverage.tails} the filename convention yields):`);
+      const n = (v) => String(v).padStart(4);
+      console.log(`        remediable by discovery ..${n(coverage.causes.remediable)}   an in-repo file declares the row's path; the convention did not scan that file`);
+      console.log(`        NO in-repo registrar .....${n(coverage.causes.structural)}   on a ledger where not ONE row is declared in-repo — declared upstream and catch-all-mounted, so no discovery change reaches it`);
+      console.log(`        undecided ................${n(coverage.causes.undecided)}   no in-repo declaration, on a ledger that HAS in-repo registrars — absence and an unreadable spelling are not distinguishable here`);
+    } else {
+      console.log(`    why ........................ ${coverage.causes.reason}`);
     }
     // The 176 rows themselves are one flag away, never printed by default: this mode is
     // a CI gate step (`check-affected-docs.mjs`), and 176 lines of known blind spot in
@@ -1109,6 +1155,55 @@ function parseRegistrarSource(text) {
 }
 
 /**
+ * Every route tail ANY file under `packages/**` could yield, with the filename convention
+ * ignored entirely — the CEILING on what a widened discovery could ever reach (#11178).
+ *
+ * ⛔ THIS IS NOT A SECOND DISCOVERY ROUTE, and nothing downstream of it selects a row.
+ * `REGISTRAR_FILE_RE` is untouched, the bridge still rides on `registrarByTail` alone, and
+ * the published `reachable` figure is computed exactly where it was. This function exists
+ * only so the REPORT can name WHY a row is unreachable, which the report could not do
+ * while it had one number for two causes:
+ *
+ *   - a row the convention missed but SOME in-repo file declares — the recognizer is
+ *     narrower than the repo, and widening discovery would reach it;
+ *   - a row NO in-repo file declares at all — the surface is declared upstream and mounted
+ *     through a catch-all, so no discovery change reaches it at any price.
+ *
+ * Measured on `589758d22`, that is the difference between 14 rows and 163: the auth
+ * ledger's `56 of 56` and the rest ledger's `46 of 87` print identically today and are not
+ * the same finding. That conflation is not hypothetical — it is what aimed #11178 at
+ * discovery, whose own remedy was then measured to move the auth ledger by ZERO rows.
+ *
+ * SUPERSET BY CONSTRUCTION, which is what makes the comparison legitimate: the same
+ * `parseRegistrarSource`, over the same walk's files, minus the convention test. So every
+ * tail discovery yields appears here too, and `reachable` can never exceed this ceiling —
+ * an invariant `bridgeCoverageFrom` turns into a broken-scan verdict rather than trusting.
+ *
+ * The `includes('path')` prefilter is a SOUND superset, not a heuristic: `parseRegistrarSource`
+ * yields a tail only from a line matching `path\s*:` in the MASKED source, and masking
+ * replaces bytes with spaces rather than inserting any, so those four bytes must be present
+ * in the raw text for any tail to exist. Positive control on `589758d22`: masking all 1930
+ * files instead of the 1093 the prefilter keeps produces a byte-identical census — the same
+ * 82 tails and the same 14/163 split — for 1.76s instead of 1.47s.
+ *
+ * @param {Iterable<{file: string, text: string}>} sources  candidate files and their source
+ * @returns {Map<string, string[]>} tail ⟶ the files that declare it, so a "discovery could
+ *   reach this" claim can always NAME the witness rather than asserting one exists.
+ */
+function maximalTailsFrom(sources) {
+  const byTail = new Map();
+  for (const { file, text } of sources) {
+    if (!text.includes('path')) continue;
+    for (const [tail] of parseRegistrarSource(text)) {
+      let owners = byTail.get(tail);
+      if (!owners) byTail.set(tail, (owners = []));
+      owners.push(file);
+    }
+  }
+  return byTail;
+}
+
+/**
  * How much of the DECLARED client-bound route surface the `sdk` bridge can actually
  * reach — pure, so `--self-test` pins it with fixtures and no repo state (#9572).
  *
@@ -1137,13 +1232,32 @@ function parseRegistrarSource(text) {
  *   whole verdict exists to prevent. A caller that omits them throws here instead — and
  *   `outsideCode` (#10683) is read on the same terms, for the same reason.
  * @param {Iterable<string>} tails  every route tail the registrar scan produced
+ * @param {Iterable<string>} [maximalTails]  the CEILING — every tail any `packages/**` file
+ *   could yield with the filename convention ignored (`maximalTailsFrom`). Supplying it is
+ *   what lets each ledger's cause be DERIVED. ⛔ Omitting it is not an empty ceiling: every
+ *   cause reports `unmeasured` and the three counts are `null`, on the same terms as the
+ *   declared counts above — an absent reading must never render as a reading.
  */
-function bridgeCoverageFrom(ledgers, tails) {
+function bridgeCoverageFrom(ledgers, tails, maximalTails) {
   const tailList = [...tails];
   // The same suffix test PHASE 2 bridges with and the same one `--bridge-coverage --json`
   // enumerates with, taken from the single definition beside `LEDGER_FILE_RE` so this
   // cannot drift from either what it measures or the row list it is the count of.
   const selects = selectsFrom(tailList);
+  // WHY a row is unreachable, and `undefined` is not an empty census (#11178). A caller
+  // that measured no ceiling gets `unmeasured` spelled out on every ledger — never a
+  // default into one of the two buckets, which is the whole failure this split exists to
+  // end. Same rule as `measured: false` on the advisory path and `computedOn.dirty`'s null
+  // arm: an ABSENT reading must not render as a reading.
+  const censusMeasured = maximalTails !== undefined;
+  // Materialised ONCE, exactly like `tailList` above and for the same reason: callers pass
+  // a `Map.keys()` iterator, and a second spread of a spent iterator reads as an EMPTY
+  // ceiling — which renders as a clean `0-tail` census rather than as an error.
+  const ceilingList = censusMeasured ? [...maximalTails] : null;
+  // Through `selectsFrom`, never a second copy of the suffix test — the cause counts are a
+  // partition of `unreachable`, so a restatement here lets the split disagree with the
+  // total it is the breakdown of.
+  const reaches = censusMeasured ? selectsFrom(ceilingList) : null;
   const byLedger = [];
   let clientRows = 0;
   let reachable = 0;
@@ -1151,16 +1265,53 @@ function bridgeCoverageFrom(ledgers, tails) {
   let routesDeclaredAll = 0;
   let clientsDeclaredAll = 0;
   let leadsOutsideCode = 0;
+  let remediableRows = 0;
+  let structuralRows = 0;
+  let undecidedRows = 0;
+  let censusBroken = null;
   for (const { file, rows, declined, routesDeclared, clientsDeclared, outsideCode } of ledgers) {
     const bound = rows.filter((r) => r.client);
     const hit = bound.filter((r) => selects(r.route));
+    const miss = bound.filter((r) => !selects(r.route));
     clientRows += bound.length;
     reachable += hit.length;
     rowsParsed += rows.length;
     routesDeclaredAll += routesDeclared;
     clientsDeclaredAll += clientsDeclared;
     leadsOutsideCode += outsideCode.length;
-    byLedger.push({ file, clientRows: bound.length, reachable: hit.length, unreachable: bound.length - hit.length, rowsParsed: rows.length, routesDeclared, clientsDeclared, declined, outsideCode });
+    // THE SPLIT. `witnessed` = some in-repo file declares this exact path and the filename
+    // convention simply did not scan it, so widening discovery reaches the row and the
+    // witness can be NAMED. `unwitnessed` = no in-repo file declares it at all.
+    const witnessed = censusMeasured ? miss.filter((r) => reaches(r.route)) : [];
+    const unwitnessed = censusMeasured ? miss.filter((r) => !reaches(r.route)) : [];
+    // THE CEILING CANNOT BE BELOW THE FLOOR. `maximalTails` is built from the same parser
+    // over a superset of the same files, so a reachable row it cannot reach is a broken
+    // census, not a finding — it cannot fire on a census built the way this one is.
+    if (censusMeasured && !censusBroken) {
+      const below = hit.find((r) => !reaches(r.route));
+      if (below) censusBroken = `${file}: \`${below.route}\` is reachable by the ${tailList.length}-tail discovery scan but not by the ${ceilingList.length}-tail ceiling it is measured against — the ceiling is not the superset it is built to be, so every cause below is unsound`;
+    }
+    let cause;
+    if (!censusMeasured) cause = 'unmeasured';
+    else if (bound.length === 0) cause = 'no-client-surface';
+    else if (miss.length === 0) cause = 'fully-reachable';
+    // STRUCTURAL, and the test is a property of the SURFACE rather than a list of ledger
+    // names: not one client-bound row of this ledger is declared by any file in this repo.
+    // That is the auth surface — better-auth declares those routes inside `node_modules`
+    // and the plugin mounts them with a single catch-all — and it is derived here rather
+    // than asserted, so a ledger that grows an in-repo registrar leaves this bucket by
+    // itself. Measured on `589758d22`: exactly one ledger of the seven.
+    else if (hit.length === 0 && witnessed.length === 0) cause = 'no-in-repo-registrar';
+    else if (unwitnessed.length === 0) cause = 'discovery-gap';
+    // ⛔ NOT defaulted into either bucket. This ledger HAS in-repo registrars, so its
+    // unwitnessed rows are not the auth shape — but nothing here can tell "no registration
+    // site" apart from "a registration site whose path this recognizer cannot read", and
+    // rendering that ignorance as either verdict is exactly the #9747 false green.
+    else cause = 'undecided';
+    if (cause === 'no-in-repo-registrar') structuralRows += unwitnessed.length;
+    else undecidedRows += unwitnessed.length;
+    remediableRows += witnessed.length;
+    byLedger.push({ file, clientRows: bound.length, reachable: hit.length, unreachable: bound.length - hit.length, rowsParsed: rows.length, routesDeclared, clientsDeclared, declined, outsideCode, cause, remediable: censusMeasured ? witnessed.length : null, unwitnessed: censusMeasured ? unwitnessed.length : null });
   }
   // ZERO IS NOT A CLEAN REPO, IT IS A BROKEN SCAN — `check-engine-double-contract`'s
   // invariant, applied to this population (#9747 quotes it as the germ worth
@@ -1175,6 +1326,7 @@ function bridgeCoverageFrom(ledgers, tails) {
   const brokenScan = [];
   if (!ledgers.length) brokenScan.push('no route-ledger file was found at all — the ledger walk selected nothing, so every `sdk` anchor is silently unavailable');
   if (!tailList.length) brokenScan.push('the registrar scan produced no route tail at all — the symbol → route → sdk bridge cannot fire for any change');
+  if (censusBroken) brokenScan.push(censusBroken);
   for (const l of byLedger) {
     if (l.rowsParsed === 0) brokenScan.push(`${l.file} matched the ledger convention but parsed 0 rows — the row recognizer no longer reads this file's shape`);
     // ONE LEVEL DOWN, AND THE LIKELIER SHAPE: a PARTIAL read. The guard above is the
@@ -1208,7 +1360,83 @@ function bridgeCoverageFrom(ledgers, tails) {
   // number here that describes the ledger's PROSE rather than its route surface, and a
   // comment that quotes a retired path is not a broken scan — before #10683 it was a
   // phantom ROW, which is what makes counting it worth doing and gating it wrong.
-  return { measured: true, clientRows, reachable, unreachable: clientRows - reachable, tails: tailList.length, rowsParsed, routesDeclared: routesDeclaredAll, clientsDeclared: clientsDeclaredAll, leadsOutsideCode, ledgers: byLedger, brokenScan };
+  // The cause split is published as a PARTITION of `unreachable` — 14 + 56 + 107 = 177 on
+  // `589758d22` — so a reader (or a ratchet) can see it stay whole. `causesMeasured: false`
+  // is the honest shape for a caller that passed no ceiling, and the three counts are
+  // `null` there rather than `0`: nobody may read "no structural rows" out of "nobody looked".
+  const causes = censusMeasured
+    ? { measured: true, ceilingTails: ceilingList.length, remediable: remediableRows, structural: structuralRows, undecided: undecidedRows }
+    : { measured: false, reason: 'no in-repo ceiling was supplied — why a row is unreachable was not measured on this run', ceilingTails: null, remediable: null, structural: null, undecided: null };
+  return { measured: true, clientRows, reachable, unreachable: clientRows - reachable, tails: tailList.length, rowsParsed, routesDeclared: routesDeclaredAll, clientsDeclared: clientsDeclaredAll, leadsOutsideCode, causes, ledgers: byLedger, brokenScan };
+}
+
+/**
+ * The walk itself, split out of `scanRouteSurface` so `--self-test` can pin the one
+ * decision that broke here — WHICH FILES THE WALK ADMITS — against a fake tree.
+ * `readDir` is injectable for exactly the reason `packageRootOf`'s `hasPackageJson` is:
+ * the pin needs no repo state, and a pin that re-asks the predicate instead of walking
+ * would re-pin the half that was already right.
+ *
+ * ⛔ `isTestFile` IS DEFINED OVER A PATH AND MUST BE GIVEN ONE (#11866). This call site
+ * used to pass `e.name` — a BASENAME — so the `__tests__` / `__mocks__` / `__fixtures__`
+ * arm, which requires a `/`, could never match: only the `*.test.*` / `*.spec.*` arm did
+ * any work here, and the directory exclusion the function documents was not happening.
+ * The self-test did not catch it because it pins `isTestFile` with paths, and the
+ * function was never the broken half — its CALLER was. That is why the pin walks a fake
+ * tree through this function rather than calling the predicate a fourth time.
+ *
+ * A STRICT TIGHTENING, measured rather than assumed: on `d63b01436`, of the 4625 `.ts`
+ * files under `packages/**`, exactly 3 were admitted by the basename test and are
+ * excluded by the path test, and ZERO go the other way — the file arms are anchored
+ * `(^|\/)`, so a basename they match is matched inside a path too. Reordering `rel`
+ * ahead of the test therefore cannot admit anything the old order excluded.
+ *
+ * ⭐ AND THE EXCLUSION IS RIGHT FOR THE CEILING TOO, which is the question this walk's
+ * two consumers make live. `sourceFiles` is the #11178 ceiling population and
+ * `registrarFiles` is the bridge's own discovery — one walk, both. It is tempting to
+ * argue the ceiling wants the WIDEST possible population and so should keep test
+ * directories; it does not, because of what the ceiling's verdict MEANS. A row counted
+ * `remediable by discovery` is a claim that widening the FILENAME CONVENTION would reach
+ * it, and no widening of that convention may legitimately admit a test double — so a
+ * witness under `__tests__/` would move a row into `remediable` against a remedy that
+ * cannot be taken, i.e. exactly the misreading `bridgeCoverageFrom`'s split exists to
+ * end ("it aimed a whole card at widening a recognizer that was never the constraint").
+ * The superset invariant survives either way — both populations come off this one walk,
+ * so they narrow together and `reachable` still cannot exceed the ceiling. And no gate
+ * ratchets these counts: `check-affected-docs.mjs` fails on `brokenScan` alone, so
+ * nothing here moves a shrink-only number down.
+ *
+ * @param {string} root  the tree to walk (`packages/**` under it); paths come back
+ *   relative to it, which is what `isTestFile` and both file regexes are defined over.
+ * @param {(dir: string, opts: {withFileTypes: true}) => Array<{name: string, isFile(): boolean, isDirectory(): boolean}>} [readDir]
+ * @returns {{registrarFiles: string[], sourceFiles: string[]}}
+ */
+function walkSourceFiles(root, readDir = readdirSync) {
+  const registrarFiles = [];
+  // EVERY candidate the convention CHOSE FROM, collected in the same walk (#11178). This
+  // is not a second discovery route and nothing downstream of the bridge reads it: it is
+  // the population `maximalTailsFrom` measures the convention against, so that "the
+  // recognizer missed a registrar" can be told apart from "there is no registrar". Filled
+  // here rather than by a second walk for the reason `scanRouteSurface` exists at all —
+  // two walks of `packages/**` is the drift #4851 billed us for.
+  const sourceFiles = [];
+  const walkSrc = (dir) => {
+    let entries;
+    try { entries = readDir(dir, { withFileTypes: true }); } catch { return; }
+    for (const e of entries) {
+      if (e.name === 'node_modules' || e.name === 'dist' || e.name === '.turbo') continue;
+      const p = join(dir, e.name);
+      if (e.isDirectory()) { walkSrc(p); continue; }
+      if (!e.isFile() || !e.name.endsWith('.ts')) continue;
+      // The PATH, never `e.name` — see above.
+      const rel = relative(root, p);
+      if (isTestFile(rel)) continue;
+      sourceFiles.push(rel);
+      if (LEDGER_FILE_RE.test(rel) || REGISTRAR_FILE_RE.test(rel)) registrarFiles.push(rel);
+    }
+  };
+  walkSrc(join(root, 'packages'));
+  return { registrarFiles, sourceFiles };
 }
 
 /**
@@ -1217,21 +1445,7 @@ function bridgeCoverageFrom(ledgers, tails) {
  * same walk — a second walk here is exactly the drift #4851 billed us for.
  */
 function scanRouteSurface() {
-  const registrarFiles = [];
-  const walkSrc = (dir) => {
-    let entries;
-    try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return; }
-    for (const e of entries) {
-      if (e.name === 'node_modules' || e.name === 'dist' || e.name === '.turbo') continue;
-      const p = join(dir, e.name);
-      if (e.isDirectory()) walkSrc(p);
-      else if (e.isFile() && e.name.endsWith('.ts') && !isTestFile(e.name)) {
-        const rel = relative(repoRoot, p);
-        if (LEDGER_FILE_RE.test(rel) || REGISTRAR_FILE_RE.test(rel)) registrarFiles.push(rel);
-      }
-    }
-  };
-  walkSrc(join(repoRoot, 'packages'));
+  const { registrarFiles, sourceFiles } = walkSourceFiles(repoRoot);
 
   const ledgers = [];
   const ledgerRows = [];
@@ -1252,7 +1466,7 @@ function scanRouteSurface() {
       }
     }
   }
-  return { registrarFiles, ledgers, ledgerRows, registrarByTail };
+  return { registrarFiles, sourceFiles, ledgers, ledgerRows, registrarByTail };
 }
 
 /**
@@ -1928,6 +2142,81 @@ function selfTest() {
     ['packages/foo/src/tests-helper.ts', false, 'tests-helper is not __tests__'],
   ];
   for (const [path, want, label] of testFileCases) check('isTestFile', label, path, want, isTestFile(path));
+
+  // ── the WALK's admission decision, against a fake tree (#11866) ──────────────
+  //
+  // The cases above pin the PREDICATE, and the predicate was never wrong: every one of
+  // them passes a full path, which is what `isTestFile` is defined over. What was wrong
+  // was the CALL SITE — `scanRouteSurface`'s walk handed it `e.name`, a basename, so the
+  // three directory arms could not match. A green predicate beside a broken caller is the
+  // shape these cases could not see, so this block walks `walkSourceFiles` itself.
+  //
+  // ⛔ NON-VACUITY IS THE ENTIRE POINT OF THESE FIXTURES, and it is why none of them is a
+  // real repo path. The live population is ZERO — measured on `d63b01436`, the three files
+  // under a test directory that the old walk admitted match neither `REGISTRAR_FILE_RE`
+  // nor `LEDGER_FILE_RE` and declare no `path:`, so `--bridge-coverage` is byte-identical
+  // across this fix. A pin built from real paths would therefore have passed just as
+  // green with the bug in place and pinned NOTHING. Every fixture below is instead a file
+  // the BASENAME test admits and the PATH test excludes: `x-route.ts` carries no `.test.`
+  // / `.spec.` infix, so under the old call site it was walked, matched
+  // `REGISTRAR_FILE_RE`, and a test double contributed production route tails — the exact
+  // failure this is here to keep out. Verified RED against the pre-fix line: 4 registrar
+  // files and 6 source files, against the 1 and 2 asserted here.
+  const fakeSrcTree = [
+    'packages/foo/src/engine.ts',                        // plain implementation
+    'packages/foo/src/real-route.ts',                    // a genuine registrar — must survive
+    'packages/foo/src/engine.test.ts',                   // already excluded by the file arm
+    'packages/foo/src/__tests__/x-route.ts',             // ⭐ registrar-NAMED test double
+    'packages/foo/src/__tests__/helper.ts',              // ceiling population only
+    'packages/foo/src/__mocks__/fake-server.ts',         // the `-server` alternative
+    'packages/foo/src/__fixtures__/stub-route-ledger.ts',// LEDGER_FILE_RE
+    'packages/foo/node_modules/dep/route.ts',            // pruned directory
+    'packages/foo/dist/route.ts',                        // pruned directory
+    'packages/foo/README.md',                            // not a .ts file
+  ];
+  const fakeRoot = '/repo';
+  const fakeDirs = new Map();
+  for (const rel of fakeSrcTree) {
+    const segs = rel.split('/');
+    for (let i = 0; i < segs.length; i++) {
+      const dir = join(fakeRoot, ...segs.slice(0, i));
+      let kids = fakeDirs.get(dir);
+      if (!kids) fakeDirs.set(dir, (kids = new Map()));
+      kids.set(segs[i], i === segs.length - 1);
+    }
+  }
+  // Throws on an unknown directory exactly as `readdirSync` does, so the walk's own
+  // `try`/`catch` is exercised rather than bypassed by a forgiving fake.
+  const fakeReadDir = (dir) => {
+    const kids = fakeDirs.get(dir);
+    if (!kids) throw new Error(`ENOENT: no such fake directory, ${dir}`);
+    return [...kids].map(([name, isFile]) => ({ name, isFile: () => isFile, isDirectory: () => !isFile }));
+  };
+  const walked = walkSourceFiles(fakeRoot, fakeReadDir);
+  const sorted = (a) => [...a].sort().join(' | ');
+  check('walkSourceFiles', 'a registrar-NAMED file under __tests__/ is NOT a registrar — the walk tests the path',
+    'registrarFiles', 'packages/foo/src/real-route.ts', sorted(walked.registrarFiles));
+  check('walkSourceFiles', 'and the three test directories contribute nothing to the CEILING population either',
+    'sourceFiles', 'packages/foo/src/engine.ts | packages/foo/src/real-route.ts', sorted(walked.sourceFiles));
+  // Per-fixture, so a regression NAMES the arm that came back rather than only the totals.
+  const excludedFixtures = [
+    ['packages/foo/src/__tests__/x-route.ts', 'a __tests__/ file matching REGISTRAR_FILE_RE'],
+    ['packages/foo/src/__mocks__/fake-server.ts', 'a __mocks__/ file matching the `-server` alternative'],
+    ['packages/foo/src/__fixtures__/stub-route-ledger.ts', 'a __fixtures__/ file matching LEDGER_FILE_RE'],
+    ['packages/foo/src/__tests__/helper.ts', 'a __tests__/ helper with no registrar name'],
+  ];
+  for (const [rel, label] of excludedFixtures) {
+    check('walkSourceFiles', `${label} is walked at all`, rel, false, walked.sourceFiles.includes(rel));
+    check('walkSourceFiles', `${label} reaches the registrar list`, rel, false, walked.registrarFiles.includes(rel));
+  }
+  check('walkSourceFiles', 'a genuine registrar still survives the walk', 'packages/foo/src/real-route.ts',
+    true, walked.registrarFiles.includes('packages/foo/src/real-route.ts'));
+  check('walkSourceFiles', 'a .test.ts file is still excluded by the FILE arm', 'packages/foo/src/engine.test.ts',
+    false, walked.sourceFiles.includes('packages/foo/src/engine.test.ts'));
+  check('walkSourceFiles', 'node_modules/ and dist/ are still pruned', 'packages/foo/{node_modules,dist}/route.ts',
+    0, walked.sourceFiles.filter((f) => /(^|\/)(node_modules|dist)\//.test(f)).length);
+  check('walkSourceFiles', 'a non-.ts file is not walked', 'packages/foo/README.md',
+    false, walked.sourceFiles.includes('packages/foo/README.md'));
 
   // Package-root derivation, against a fake tree so the self-test stays hermetic.
   // One package.json per shape the repo has: a direct child package plus a nested
@@ -3754,6 +4043,93 @@ function selfTest() {
   // correct answer and must never be a verdict.
   const serverOnly = bridgeCoverageFrom([covLedger('c-route-ledger.ts', [{ route: 'GET /api/v1/datasources', client: null }])], ['/x/:y']);
   check('bridgeCoverageFrom', 'an all-server-only ledger is accurate, not broken', 'brokenScan', 0, serverOnly.brokenScan.length);
+
+  // --- #11178: WHY a row is unreachable, and the two causes that printed as one --------
+  // `56 of 56` (auth) and `46 of 87` (rest) render identically today and are not the same
+  // finding: the first surface has NO in-repo registration site, so the discovery widening
+  // the second one wants moves it by zero rows — measured, before this split existed.
+  const ceilSrc = [
+    ['r-registers.ts', "app.get({ path: '/api/v1/storage/upload/presigned' }, handler);"],
+    ['r-comments.ts', "// path: '/api/v1/never/registered' — an illustration, not a registration\n"],
+    ['r-silent.ts', 'export const answer = 1;\n'],
+  ];
+  const ceil = maximalTailsFrom(ceilSrc.map(([file, text]) => ({ file, text })));
+  check('maximalTailsFrom', 'a real `path:` reaches the ceiling', 'tails',
+    true, ceil.has('/api/v1/storage/upload/presigned'));
+  check('maximalTailsFrom', 'and NAMES its file, so "discovery could reach this" can point at the witness',
+    'witness', 'r-registers.ts', (ceil.get('/api/v1/storage/upload/presigned') || [])[0]);
+  // The ceiling reads CODE, exactly like the scan it bounds — a ceiling built off prose
+  // would invent remediable rows and empty the structural bucket without moving a byte.
+  check('maximalTailsFrom', 'a `path:` in a COMMENT is not a registration', 'tails',
+    false, ceil.has('/api/v1/never/registered'));
+  check('maximalTailsFrom', 'and a file with no `path` at all contributes nothing', 'tails', 1, ceil.size);
+
+  // The four shapes today's seven ledgers actually take, each derived from the ceiling
+  // rather than from a list of ledger names — a hand-kept list is the defect this card
+  // family keeps hitting, one level up.
+  const causeLedgers = [
+    covLedger('structural-route-ledger.ts', [
+      { route: 'POST /api/v1/auth/sign-in/email', client: 'auth.login' },
+      { route: 'POST /api/v1/auth/sign-out', client: 'auth.logout' },
+    ]),
+    covLedger('gap-route-ledger.ts', [{ route: 'POST /api/v1/storage/upload/presigned', client: 'storage.presign' }]),
+    covLedger('mixed-route-ledger.ts', [
+      { route: 'GET /api/v1/data/import/jobs', client: 'data.listImportJobs' },
+      { route: 'GET /api/v1/meta/:type', client: 'meta.getItems' },
+    ]),
+    covLedger('serveronly-route-ledger.ts', [{ route: 'GET /health', client: null }]),
+  ];
+  const causeCov = bridgeCoverageFrom(causeLedgers, ['/x/:y'],
+    ['/api/v1/storage/upload/presigned', '/api/v1/data/import/jobs']);
+  const causeOf = (f) => causeCov.ledgers.find((l) => l.file === f).cause;
+  const causeCases = [
+    // THE ONE THIS CARD IS ABOUT: not one row of the surface is declared anywhere in-repo.
+    ['a ledger no in-repo file declares ANY row of is structural', 'no-in-repo-registrar', causeOf('structural-route-ledger.ts')],
+    ['a ledger whose every unreachable row has an in-repo witness is a discovery gap', 'discovery-gap', causeOf('gap-route-ledger.ts')],
+    // ⛔ NOT defaulted into either bucket — the #9747 rule this whole split is an
+    // application of: a recognizer narrower than the repo reports "unrecognised".
+    ['a ledger with witnesses for SOME rows is undecided, not quietly structural', 'undecided', causeOf('mixed-route-ledger.ts')],
+    ['a wholly server-only ledger has no client surface to reach, which is not a cause', 'no-client-surface', causeOf('serveronly-route-ledger.ts')],
+    ['the structural verdict counts only the ledger that earned it', 2, causeCov.causes.structural],
+    ['a witnessed row is remediable whichever ledger carries it', 2, causeCov.causes.remediable],
+    ['and the undecided rows are neither', 1, causeCov.causes.undecided],
+    // A PARTITION, pinned as one: a bucket that starts absorbing another keeps every count
+    // above green while this fails.
+    ['remediable + structural + undecided IS the unreachable population', causeCov.unreachable,
+      causeCov.causes.remediable + causeCov.causes.structural + causeCov.causes.undecided],
+    ['a working census carries no broken-scan verdict', 0, causeCov.brokenScan.length],
+  ];
+  for (const [label, want, got] of causeCases) check('bridgeCoverageFrom', label, 'cause', want, got);
+
+  // ⛔ THE FIGURE THIS MAY NOT MOVE. Other cards cite `45 reachable` (#10534, #9572), and
+  // the split explains that number rather than participating in it: same ledgers, same
+  // discovery tails, a ceiling bolted on — the reach is identical or this is a widening.
+  check('bridgeCoverageFrom', 'supplying a ceiling explains the reach without moving it', 'reachable',
+    cov.reachable, bridgeCoverageFrom(covLedgers, ['/:type/:name/audit', '/:type/:name/history'], ['/api/v1/auth/sign-in/email']).reachable);
+
+  // ABSENT IS NOT EMPTY. A caller that measured no ceiling must not read as "no structural
+  // rows" — the same rule the declared counts above are read under.
+  const noCeiling = bridgeCoverageFrom(covLedgers, ['/:type/:name/audit', '/:type/:name/history']);
+  const absentCases = [
+    ['a run with no ceiling says so', false, noCeiling.causes.measured],
+    ['and says it on every ledger rather than picking a bucket', true, noCeiling.ledgers.every((l) => l.cause === 'unmeasured')],
+    ['and the counts are null, not 0 — "nobody looked" is not "none found"', null, noCeiling.causes.structural],
+    ['and the reach it could not explain is still reported whole', 2, noCeiling.unreachable],
+  ];
+  for (const [label, want, got] of absentCases) check('bridgeCoverageFrom', label, 'unmeasured', want, got);
+
+  // THE CEILING CANNOT SIT BELOW THE FLOOR. Built as a superset by construction, so this
+  // cannot fire on a census built the way `maximalTailsFrom` builds one — which is exactly
+  // what makes it a verdict rather than a number, on the `brokenScan` terms above.
+  const sunkCeiling = bridgeCoverageFrom(
+    [covLedger('t-route-ledger.ts', [{ route: 'GET /api/v1/meta/:type/:name/audit', client: 'meta.getAudit' }])],
+    ['/:type/:name/audit'], []);
+  check('bridgeCoverageFrom', 'a ceiling that misses a REACHABLE row is a broken census, not a finding', 'brokenScan',
+    true, sunkCeiling.brokenScan.some((v) => v.includes('ceiling')));
+  check('bridgeCoverageFrom', 'and a ceiling that contains it carries no verdict', 'brokenScan', 0,
+    bridgeCoverageFrom(
+      [covLedger('t-route-ledger.ts', [{ route: 'GET /api/v1/meta/:type/:name/audit', client: 'meta.getAudit' }])],
+      ['/:type/:name/audit'], ['/:type/:name/audit']).brokenScan.length);
 
   // The selection rule itself, pinned once — both the count and the row list read it, so a
   // change here moves them together or fails here.

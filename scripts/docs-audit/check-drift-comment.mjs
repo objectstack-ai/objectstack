@@ -31,9 +31,27 @@
  * UNCONDITIONALLY, which is not a report at all. A blind-spot notice that renders on every
  * run says nothing about any run.
  *
+ * ⚠️ That reasoning is about REPORTS, and since #11434 the fold also carries one line that
+ * is not one: a BOUNDARY of the anchor model, true on every run by construction, because
+ * the pair it names (a page stating a rule by its INPUTS, a diff touching the rule's
+ * EMITTER) shares no identifier for any per-run signal to be computed from. Its
+ * unconditionality is the contract, so it is pinned the only way that is meaningful — on
+ * EVERY case, byte-exact, and in the fold rather than the headline. Removing it, making it
+ * conditional, or promoting it to the headline all go red. See `RULE_CARRYING_BLIND_SPOT`.
+ *
  * So both directions are measured end to end, from a git diff:
  *
  *   diff → the real affected-docs.mjs → its real --json → the real comment script → bytes
+ *
+ * Since #11356 it pins one more verdict the same way: the `anchors-derived-none-named`
+ * state — anchors derived, nothing unanchored, no page naming any of them — used to end
+ * in a ✅. That glyph read as "docs verified" on a change whose own page had just gone
+ * incomplete, because a page is listed only when it ALREADY names a changed token, so a
+ * PR that widens an enumerable vocabulary can never be caught by the relation (the new
+ * members' absence from the page IS the defect). The narrowing does not catch that class;
+ * it stops the run from claiming it did. Both readings are on the record below: the
+ * verdict is pinned byte-exact on that state and pinned ABSENT on all four neighbours,
+ * because a notice that renders everywhere reports nothing.
  *
  * Each case declares the mapper facts it depends on (`anchors` / `anchorless` / `docs`)
  * and those are asserted BEFORE the rendered text is. Without that, a change in how the
@@ -182,6 +200,36 @@ const NAMES_THE_ANCHOR = '# Guide\n\nThe cap is `MAX_WIDGETS`, and it bounds the
 const ADDS_ANCHOR = 'export function renderWidget(x: number) {\n  return x + 1;\n}\n\nexport const MAX_WIDGETS = 5;\n';
 const README_EDITED = '# @objectstack/demo\n\nRun `os demo` to start. Then run `os demo studio` for the UI.\n';
 
+/** The #11356 verdict, byte-exact — rendered by exactly one of the five cases below. */
+const ANCHORS_DERIVED_NONE_NAMED =
+  '**1** anchor(s) derived from **1** changed package(s); no hand-written page names any of them,'
+  + ' so this run has **nothing to list** — **not a clean bill of health**. This check sees only'
+  + ' pages that NAME a derived anchor: one that documents this change in prose, or enumerates it'
+  + ' in an authoring dialect, names none and stays invisible to it on every run.';
+/** The phrase that tells that verdict apart from every neighbouring one. */
+const NARROWED_PHRASE = 'nothing to list';
+
+/**
+ * The #11434 boundary line, byte-exact — the one fold entry that is not a report about the
+ * run, and the only one asserted on every case.
+ *
+ * The class: `content/docs/protocol/objectql/types.mdx` documents the text-family column
+ * mapping by the ObjectQL type names it maps FROM, `sql-driver.ts` carries the mapping in
+ * `createColumn`, and the two share no token — so the advisory listed seven other pages on
+ * #11430 and not the one that diff falsified in four places. Nothing in the anchor model
+ * can join that pair (the routes that could are escalated as #11817), so the run says so
+ * instead of implying coverage by silence.
+ */
+const RULE_CARRYING_BLIND_SPOT =
+  'a page that states a rule by its **inputs** shares no identifier with the **emitter**'
+  + ' that implements the rule, so an emitter-only diff cannot list it — not on this run and'
+  + ' not on any run. Measured on #11430: `content/docs/protocol/objectql/types.mdx`'
+  + ' documents the text-family column mapping by the ObjectQL type names it maps FROM'
+  + ' (`text` / `textarea` / `html`) while the diff changed `createColumn`; it went unlisted,'
+  + ' and it was the page that diff falsified, in four places. No shared token exists to'
+  + ' detect this on, so a rule your change carries has to be re-read by hand in the pages'
+  + ' that restate it.';
+
 /**
  * `want` is the mapper contract each case rides on — asserted before any text is, so a
  * case that silently stopped exercising its branch fails here instead of passing there.
@@ -193,6 +241,7 @@ const CASES = [
     base: { 'content/docs/guide.mdx': NAMES_NOTHING },
     change: { 'packages/demo/README.md': README_EDITED },
     want: { anchors: 0, anchorless: ['packages/demo/README.md'], docs: 0 },
+    narrowed: false,
     expect: (headline, body) => {
       check('readme-only', 'the headline names the blind spot', true, headline.includes('NOT COVERED by this run'));
       check('readme-only', 'the headline names the file that went unanchored', true, headline.includes('packages/demo/README.md'));
@@ -203,15 +252,22 @@ const CASES = [
   },
   {
     id: 'anchored-source',
-    what: 'an anchorable source file, no page naming it — the ✅ arm',
+    what: 'an anchorable source file, no page naming it — the anchors-derived-none-named arm (#11356)',
     base: { 'content/docs/guide.mdx': NAMES_NOTHING },
     change: { 'packages/demo/src/widget.ts': ADDS_ANCHOR },
     want: { anchors: 1, anchorless: [], docs: 0 },
+    narrowed: true,
     expect: (headline) => {
       check('anchored-source', 'the blind-spot sentence does NOT render — it is a report, not boilerplate',
         false, headline.includes('NOT COVERED'));
-      check('anchored-source', 'the headline is the untouched ✅ text', true,
-        headline === '**1** anchor(s) derived from **1** changed package(s); no hand-written page names any of them. ✅');
+      check('anchored-source', 'the headline is the narrowed #11356 verdict, byte-exact', true,
+        headline === ANCHORS_DERIVED_NONE_NAMED);
+      // The point of the narrowing, asserted as its own reading: this state no longer
+      // carries the clean-bill glyph. Byte equality above would catch a ✅ appended to
+      // the end, but not one moved elsewhere in the line.
+      check('anchored-source', 'the clean-bill glyph is withheld', false, headline.includes('✅'));
+      check('anchored-source', 'and the verdict says what it could not see, not just what it found', true,
+        headline.includes('not a clean bill of health'));
     },
   },
   {
@@ -220,6 +276,7 @@ const CASES = [
     base: { 'content/docs/guide.mdx': NAMES_NOTHING },
     change: { 'packages/demo/src/widget.ts': ADDS_ANCHOR, 'packages/demo/README.md': README_EDITED },
     want: { anchors: 1, anchorless: ['packages/demo/README.md'], docs: 0 },
+    narrowed: false,
     expect: (headline) => {
       check('anchored-and-anchorless', 'the derived anchors are still reported', true, headline.startsWith('**1** anchor(s) derived'));
       check('anchored-and-anchorless', 'and the unanchored file is reported beside them', true, headline.includes('NOT COVERED by this run'));
@@ -232,6 +289,7 @@ const CASES = [
     base: { 'content/docs/guide.mdx': NAMES_THE_ANCHOR },
     change: { 'packages/demo/src/widget.ts': ADDS_ANCHOR },
     want: { anchors: 1, anchorless: [], docs: 1 },
+    narrowed: false,
     expect: (headline, body) => {
       check('docs-listed', 'the work-list headline is unchanged', true,
         headline === 'This PR changes **1** package(s): `@objectstack/demo`, touching **1** documentable anchor(s).');
@@ -244,6 +302,7 @@ const CASES = [
     base: { 'content/docs/guide.mdx': NAMES_NOTHING },
     change: { 'content/docs/guide.mdx': `${NAMES_NOTHING}\nOne more line.\n` },
     want: { anchors: 0, anchorless: [], docs: 0 },
+    narrowed: false,
     expect: (headline) => {
       check('no-package-change', 'the original headline is preserved byte-for-byte', true,
         headline === 'Nothing in this diff resolved to a documentable surface (no symbol, route or SDK anchor derived from **0** changed package(s)), so **this run has no opinion** about the docs.');
@@ -275,6 +334,20 @@ try {
     check(c.id, 'the comment keeps its heading', '### 📓 Docs Drift Check', lines[1]);
     const headline = lines[2];
     if (PRINT) console.log(`\n── ${c.id} — ${c.what}\n${headline}\n`);
+    // Non-vacuity for the #11356 verdict, asserted in the LOOP rather than per case, so a
+    // sixth case cannot be added without declaring which side of the line it sits on.
+    if (typeof c.narrowed !== 'boolean') throw new Error(`case ${c.id} does not declare \`narrowed\``);
+    check(c.id, `the #11356 narrowed verdict ${c.narrowed ? 'renders here' : 'does NOT render here'}`,
+      c.narrowed, headline.includes(NARROWED_PHRASE));
+    // #11434 — the opposite pin to every other one in this file, and deliberately so. A
+    // model boundary that renders only sometimes is false on the runs it skips, so the
+    // assertion is "on every case", which is what fails if someone makes it conditional.
+    // It belongs in the fold: the headline is where a run says what IT did not cover, and
+    // a sentence true of all runs would dilute exactly that (#11357).
+    check(c.id, 'the rule-carrying blind spot is stated in the fold, byte-exact',
+      true, body.includes(`- ${RULE_CARRYING_BLIND_SPOT}`));
+    check(c.id, 'and it stays out of the headline, which reports this run only',
+      false, headline.includes('shares no identifier with the **emitter**'));
     c.expect(headline, body);
   }
 } finally {

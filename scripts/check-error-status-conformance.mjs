@@ -112,6 +112,7 @@
 import { readdirSync, readFileSync, writeFileSync, statSync, existsSync } from 'node:fs';
 import { maskComments } from './js-comment-mask.mjs';
 import { join, relative } from 'node:path';
+import { isEntrypoint } from './invoked-as.mjs';
 
 const SCAN_ROOT = 'packages';
 const SKIP_DIRS = new Set(['node_modules', 'dist', '.git', '.turbo', 'coverage', 'build', 'fixtures']);
@@ -1083,7 +1084,6 @@ function selfTest() {
   process.exit(0);
 }
 
-if (process.argv.includes('--self-test')) selfTest();
 
 // ───────────────────────────────────────────────────────────────────────────
 // The real check
@@ -1099,134 +1099,145 @@ function walk(dir, out) {
   }
 }
 
-const update = process.argv.includes('--update');
+function main() {
+  const update = process.argv.includes('--update');
 
-const files = [];
-walk(SCAN_ROOT, files);
-const sources = new Map();
-for (const f of files.sort()) sources.set(relative('.', f).replace(/\\/g, '/'), readFileSync(f, 'utf8'));
+  const files = [];
+  walk(SCAN_ROOT, files);
+  const sources = new Map();
+  for (const f of files.sort()) sources.set(relative('.', f).replace(/\\/g, '/'), readFileSync(f, 'utf8'));
 
-const errorsZod = readFileSync(ERRORS_ZOD, 'utf8');
-const members = parseStandardErrorCodes(errorsZod);
-const index = buildConstantIndex(sources);
-const derived = deriveRuntimeStatuses(sources, index);
-for (const { code, status } of deriveDoorMap(errorsZod)) {
-  if (!derived.emitted.has(code)) derived.emitted.set(code, new Map());
-  const perStatus = derived.emitted.get(code);
-  if (!perStatus.has(status)) perStatus.set(status, []);
-  if (!perStatus.get(status).includes(`${ERRORS_ZOD}: HttpStatusErrorCodeMap`)) {
-    perStatus.get(status).push(`${ERRORS_ZOD}: HttpStatusErrorCodeMap`);
-  }
-}
-
-const doc = parseDocumentedStatuses({
-  handling: readFileSync(DOC_HANDLING, 'utf8'),
-  catalog: readFileSync(DOC_CATALOG, 'utf8'),
-});
-const { vocabulary, docPublishedBeyondStandard } = reconciledVocabulary({ members, ...doc });
-const result = reconcile({ vocabulary, emitted: derived.emitted, ...doc });
-
-const baseline = existsSync(BASELINE_PATH)
-  ? JSON.parse(readFileSync(BASELINE_PATH, 'utf8'))
-  : { unpinned: [] };
-const baselined = new Set(baseline.unpinned ?? []);
-const newlyUnpinned = result.unpinned.filter((c) => !baselined.has(c));
-const nowPinnedFindings = nowPinned({
-  baselined: [...baselined], unpinned: result.unpinned, vocabulary, documented: doc.documented,
-});
-
-if (update) {
-  writeFileSync(
-    BASELINE_PATH,
-    `${JSON.stringify({
-      note:
-        'StandardErrorCode members documented with an HTTP status that NO producer this gate can read '
-        + 'declares a status for — nothing pins the doc claim on either side. Shrink-only: a new entry is a '
-        + 'gate failure, and a row that becomes pinned must be removed. Regenerate with '
-        + '`node scripts/check-error-status-conformance.mjs --update`.',
-      unpinned: result.unpinned,
-    }, null, 2)}\n`,
-  );
-  console.log(`Baseline rewritten: ${result.unpinned.length} unpinned code(s).`);
-  process.exit(0);
-}
-
-// The residual, as a SUBTRACTION from what the pages publish rather than a
-// claim about it: codes the deriver found that are neither a `StandardErrorCode`
-// member nor published with a status by a scanned page. Nothing here is a
-// literal, so registering a ledger code moves no number that has to be edited.
-const unreconciledLedger = [...derived.emitted.keys()].filter((c) => !vocabulary.includes(c)).sort();
-
-// `--report` prints the whole derivation rather than only the disagreements.
-// A finding is only as trustworthy as the evidence behind it, and "which
-// producers did you actually see for this code?" is the first question anyone
-// reading a failure asks.
-if (process.argv.includes('--report')) {
-  for (const code of vocabulary) {
-    const runtime = derived.emitted.get(code);
-    if (!runtime) continue;
-    console.log(`${code}`);
-    for (const [status, where] of [...runtime].sort((a, b) => a[0] - b[0])) {
-      console.log(`    ${status}  ${where.join('\n          ')}`);
+  const errorsZod = readFileSync(ERRORS_ZOD, 'utf8');
+  const members = parseStandardErrorCodes(errorsZod);
+  const index = buildConstantIndex(sources);
+  const derived = deriveRuntimeStatuses(sources, index);
+  for (const { code, status } of deriveDoorMap(errorsZod)) {
+    if (!derived.emitted.has(code)) derived.emitted.set(code, new Map());
+    const perStatus = derived.emitted.get(code);
+    if (!perStatus.has(status)) perStatus.set(status, []);
+    if (!perStatus.get(status).includes(`${ERRORS_ZOD}: HttpStatusErrorCodeMap`)) {
+      perStatus.get(status).push(`${ERRORS_ZOD}: HttpStatusErrorCodeMap`);
     }
   }
-  console.log(`\nderived but NOT reconciled — no scanned page publishes a status for these ${unreconciledLedger.length}:`);
-  for (const c of unreconciledLedger) console.log(`    ${c}`);
-}
 
-console.log('check:error-status-conformance — documented HTTP status ⇄ runtime-emitted status');
-console.log(
-  `  scope: ${vocabulary.length} code(s) reconciled = ${members.length} StandardErrorCode member(s) `
-  + `+ ${docPublishedBeyondStandard.length} ledger code(s) a doc page publishes a status for`
-  + `${docPublishedBeyondStandard.length ? ` (${docPublishedBeyondStandard.join(', ')})` : ''}; `
-  + `${sources.size} source files scanned; ${derived.sites} producer site(s) derived; `
-  + `${unreconciledLedger.length} further ledger code(s) derived but NOT reconciled — no scanned page publishes `
-  + 'a status for them, so there is nothing to reconcile them against.',
-);
-console.log(
-  `  reconciled: ${result.reconciledCodes} code(s) with a derived producer, `
-  + `${result.reconciledPairs} (code, status) pair(s) matched against the docs.`,
-);
-console.log(`  unpinned: ${result.unpinned.length} documented code(s) with no derivable producer (baselined: ${baselined.size}).`);
-const ungraded = ungradedEntries(doc);
-if (ungraded.length) {
+  const doc = parseDocumentedStatuses({
+    handling: readFileSync(DOC_HANDLING, 'utf8'),
+    catalog: readFileSync(DOC_CATALOG, 'utf8'),
+  });
+  const { vocabulary, docPublishedBeyondStandard } = reconciledVocabulary({ members, ...doc });
+  const result = reconcile({ vocabulary, emitted: derived.emitted, ...doc });
+
+  const baseline = existsSync(BASELINE_PATH)
+    ? JSON.parse(readFileSync(BASELINE_PATH, 'utf8'))
+    : { unpinned: [] };
+  const baselined = new Set(baseline.unpinned ?? []);
+  const newlyUnpinned = result.unpinned.filter((c) => !baselined.has(c));
+  const nowPinnedFindings = nowPinned({
+    baselined: [...baselined], unpinned: result.unpinned, vocabulary, documented: doc.documented,
+  });
+
+  if (update) {
+    writeFileSync(
+      BASELINE_PATH,
+      `${JSON.stringify({
+        note:
+          'StandardErrorCode members documented with an HTTP status that NO producer this gate can read '
+          + 'declares a status for — nothing pins the doc claim on either side. Shrink-only: a new entry is a '
+          + 'gate failure, and a row that becomes pinned must be removed. Regenerate with '
+          + '`node scripts/check-error-status-conformance.mjs --update`.',
+        unpinned: result.unpinned,
+      }, null, 2)}\n`,
+    );
+    console.log(`Baseline rewritten: ${result.unpinned.length} unpinned code(s).`);
+    process.exit(0);
+  }
+
+  // The residual, as a SUBTRACTION from what the pages publish rather than a
+  // claim about it: codes the deriver found that are neither a `StandardErrorCode`
+  // member nor published with a status by a scanned page. Nothing here is a
+  // literal, so registering a ledger code moves no number that has to be edited.
+  const unreconciledLedger = [...derived.emitted.keys()].filter((c) => !vocabulary.includes(c)).sort();
+
+  // `--report` prints the whole derivation rather than only the disagreements.
+  // A finding is only as trustworthy as the evidence behind it, and "which
+  // producers did you actually see for this code?" is the first question anyone
+  // reading a failure asks.
+  if (process.argv.includes('--report')) {
+    for (const code of vocabulary) {
+      const runtime = derived.emitted.get(code);
+      if (!runtime) continue;
+      console.log(`${code}`);
+      for (const [status, where] of [...runtime].sort((a, b) => a[0] - b[0])) {
+        console.log(`    ${status}  ${where.join('\n          ')}`);
+      }
+    }
+    console.log(`\nderived but NOT reconciled — no scanned page publishes a status for these ${unreconciledLedger.length}:`);
+    for (const c of unreconciledLedger) console.log(`    ${c}`);
+  }
+
+  console.log('check:error-status-conformance — documented HTTP status ⇄ runtime-emitted status');
   console.log(
-    `  ungraded: ${ungraded.length} doc entr(y|ies) whose heading was read but for which no page publishes a `
-    + 'status in a graded shape (reported, not failed — see `ungradedEntries`) —',
+    `  scope: ${vocabulary.length} code(s) reconciled = ${members.length} StandardErrorCode member(s) `
+    + `+ ${docPublishedBeyondStandard.length} ledger code(s) a doc page publishes a status for`
+    + `${docPublishedBeyondStandard.length ? ` (${docPublishedBeyondStandard.join(', ')})` : ''}; `
+    + `${sources.size} source files scanned; ${derived.sites} producer site(s) derived; `
+    + `${unreconciledLedger.length} further ledger code(s) derived but NOT reconciled — no scanned page publishes `
+    + 'a status for them, so there is nothing to reconcile them against.',
   );
-  for (const e of ungraded) console.log(`      ${e.code}  ${e.where}`);
-}
-if (doc.unreadableHeadings.length) {
-  console.log(`  unreadable: ${doc.unreadableHeadings.length} doc heading(s) naming a code in an unrecognised shape —`);
-  for (const u of doc.unreadableHeadings) console.log(`      ${u.path}:${u.line} ${JSON.stringify(u.text)}`);
-}
-if (derived.unresolved.length) {
-  console.log(`  unresolved: ${derived.unresolved.length} declaration(s) the deriver could not read —`);
-  for (const u of derived.unresolved) console.log(`      ${u}`);
-}
-
-if (result.reconciledPairs === 0) {
-  console.error(
-    '\n✗ the deriver matched ZERO (code, status) pairs. A green run with nothing reconciled is a blind run, '
-    + 'not a clean one — the source anchors this gate reads have moved.\n',
+  console.log(
+    `  reconciled: ${result.reconciledCodes} code(s) with a derived producer, `
+    + `${result.reconciledPairs} (code, status) pair(s) matched against the docs.`,
   );
-  process.exit(1);
+  console.log(`  unpinned: ${result.unpinned.length} documented code(s) with no derivable producer (baselined: ${baselined.size}).`);
+  const ungraded = ungradedEntries(doc);
+  if (ungraded.length) {
+    console.log(
+      `  ungraded: ${ungraded.length} doc entr(y|ies) whose heading was read but for which no page publishes a `
+      + 'status in a graded shape (reported, not failed — see `ungradedEntries`) —',
+    );
+    for (const e of ungraded) console.log(`      ${e.code}  ${e.where}`);
+  }
+  if (doc.unreadableHeadings.length) {
+    console.log(`  unreadable: ${doc.unreadableHeadings.length} doc heading(s) naming a code in an unrecognised shape —`);
+    for (const u of doc.unreadableHeadings) console.log(`      ${u.path}:${u.line} ${JSON.stringify(u.text)}`);
+  }
+  if (derived.unresolved.length) {
+    console.log(`  unresolved: ${derived.unresolved.length} declaration(s) the deriver could not read —`);
+    for (const u of derived.unresolved) console.log(`      ${u}`);
+  }
+
+  if (result.reconciledPairs === 0) {
+    console.error(
+      '\n✗ the deriver matched ZERO (code, status) pairs. A green run with nothing reconciled is a blind run, '
+      + 'not a clean one — the source anchors this gate reads have moved.\n',
+    );
+    process.exit(1);
+  }
+
+  const failures = [];
+  for (const f of result.emittedNotDocumented) failures.push(emittedNotDocumentedMessage(f));
+  for (const f of result.documentedNotReachable) failures.push(documentedNotReachableMessage(f));
+  for (const u of doc.unreadableHeadings) failures.push(unreadableHeadingMessage(u));
+  for (const c of newlyUnpinned) failures.push(newUnpinnedMessage(c));
+  for (const f of nowPinnedFindings) {
+    failures.push(f.reason === 'producer' ? nowPinnedProducerMessage(f.code) : nowPinnedDocRemovedMessage(f.code));
+  }
+
+  if (failures.length) {
+    console.error('');
+    for (const f of failures) console.error(`  ✗ ${f}`);
+    console.error(`\n✗ check:error-status-conformance — ${failures.length} finding(s).\n`);
+    process.exit(1);
+  }
+
+  console.log('\n✓ every derivable runtime status is documented, and every documented status is reachable.');
 }
 
-const failures = [];
-for (const f of result.emittedNotDocumented) failures.push(emittedNotDocumentedMessage(f));
-for (const f of result.documentedNotReachable) failures.push(documentedNotReachableMessage(f));
-for (const u of doc.unreadableHeadings) failures.push(unreadableHeadingMessage(u));
-for (const c of newlyUnpinned) failures.push(newUnpinnedMessage(c));
-for (const f of nowPinnedFindings) {
-  failures.push(f.reason === 'producer' ? nowPinnedProducerMessage(f.code) : nowPinnedDocRemovedMessage(f.code));
+// Guarded: this module exports the whole derivation (parseStandardErrorCodes,
+// deriveRuntimeStatuses, reconcile, and the message builders), and unguarded an
+// import of any of them walked the scan root, read every source file and printed
+// this gate's full report into the importer's stdout before returning a binding.
+if (isEntrypoint(import.meta.url)) {
+  if (process.argv.includes('--self-test')) selfTest();
+  main();
 }
-
-if (failures.length) {
-  console.error('');
-  for (const f of failures) console.error(`  ✗ ${f}`);
-  console.error(`\n✗ check:error-status-conformance — ${failures.length} finding(s).\n`);
-  process.exit(1);
-}
-
-console.log('\n✓ every derivable runtime status is documented, and every documented status is reachable.');

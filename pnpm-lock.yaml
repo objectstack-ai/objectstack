@@ -1967,6 +1967,9 @@ importers:
       '@objectstack/runtime':
         specifier: workspace:*
         version: link:../../runtime
+      '@objectstack/spec':
+        specifier: workspace:*
+        version: link:../../spec
       '@types/node':
         specifier: ^26.2.0
         version: 26.2.0
@@ -2595,6 +2598,9 @@ importers:
         specifier: workspace:*
         version: link:../../types
     devDependencies:
+      '@objectstack/driver-sql':
+        specifier: workspace:*
+        version: link:../../drivers/driver-sql
       '@objectstack/objectql':
         specifier: workspace:*
         version: link:../../objectql

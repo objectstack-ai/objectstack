@@ -107,7 +107,8 @@ import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join, dirname, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
-import ts from 'typescript';
+import { requireDefaultExport } from './import-prerequisite.mjs';
+const ts = await requireDefaultExport('typescript', () => import('typescript'), import.meta.url);
 import { parseSourceFile } from './ts-parse.mjs';
 import { isEntrypoint } from './invoked-as.mjs';
 
@@ -122,6 +123,16 @@ const DEP_FIELDS = ['dependencies', 'devDependencies', 'peerDependencies', 'opti
 
 /** Binding kinds a ledger entry may claim. `string-literal` is context, never gated. */
 const BINDING_KINDS = ['import', 'export-from', 'dynamic-import', 'import-type', 'require', 'mock'];
+
+/**
+ * Ceiling on `ruledConsumers` — the two arms #5704 Q2 and #6664 A ruled permanent.
+ *
+ * A CEILING, deliberately, and not the set's exact size: #5499 froze the driver and
+ * the programme above this gate exists to shrink the ruled set, so a PR that migrates
+ * an arm away lowers this number in the same edit. Raising it is a new maintainer
+ * ruling — the same authority `RULING_ISSUES` names in the self-test.
+ */
+const RULED_CEILING = 2;
 
 /**
  * The disposition vocabulary. Closed on purpose: a free-text axis would let the
@@ -663,8 +674,46 @@ function selfTest() {
       expect(`discovery reaches the ruled consumer ${e.file}`,
         realScan.bindings.some((b) => b.file === e.file && b.kind === e.kind));
     }
-    expect('the ledger rules exactly the consumers #5704/#6664 named',
-      (realLedger.ruledConsumers ?? []).length === 2);
+    // The claim here is about the RULING AUTHORITY, not about the ledger's current
+    // length.
+    //
+    // ⚠️ This was spelled `ruledConsumers.length === 2` — "the ledger rules exactly
+    // the consumers #5704/#6664 named". That reads identically on the day it is
+    // written and means something else: it holds only while both arms are STILL
+    // ledgered, so the gate's own LIVE invariant ("a migrated consumer must lose its
+    // entry in the same PR") cannot be obeyed without turning this self-test red —
+    // and red with a message that reads "the ledger lost an entry it must have" when
+    // the entry was correctly deleted. A pin on the debt rather than on the gate:
+    // the retirement programme #5499/#5704 exists to shrink this set, and an
+    // equality on its size makes it un-burnable by construction.
+    //
+    // What the pin was actually protecting is the OTHER direction: no third consumer
+    // may be waved into `ruled-permanent` — the strongest disposition this census
+    // has — under a marker of its own invention. `validateLedgerShape` already
+    // requires SOME rulingMarker; it does not require the ruling to be one this
+    // programme actually issued. So that is the claim, and it survives the set
+    // shrinking to empty.
+    const RULING_ISSUES = ['#5704', '#6664'];
+    const admittedByARuling = (e) => (e.rulingMarkers ?? []).some((m) => RULING_ISSUES.includes(m));
+    const ruled = realLedger.ruledConsumers ?? [];
+
+    // Carried on a WITNESS PAIR rather than on the live rows alone: `[].every(...)`
+    // is a pass that proves nothing, so the synthetic row keeps the positive half
+    // exercised once the ledger reaches zero, and the negative witness is what gives
+    // the case teeth at that point. (The `ESCAPABLE_LITERAL_LEDGER` cases in
+    // scripts/pm/dispatch-gates.mjs are the worked precedent for the idiom.)
+    const WITNESS_RULED = { file: 'w/itness.test.ts', kind: 'import', axis: 'ruled-permanent', rulingMarkers: ['#6664'] };
+    const WITNESS_UNRULED = { file: 'w/itness.test.ts', kind: 'import', axis: 'ruled-permanent', rulingMarkers: ['#0'] };
+    expect('every ruled consumer is admitted by one of this programme\'s two rulings',
+      [...ruled, WITNESS_RULED].every(admittedByARuling));
+    expect('…and that rule can FAIL: a marker neither ruling issued does not admit a consumer',
+      !admittedByARuling(WITNESS_UNRULED));
+
+    // The anti-GROWTH half, as a ceiling rather than an equality. It may be lowered
+    // by any PR that migrates an arm away; raising it is a new maintainer ruling,
+    // which is the same authority `RULING_ISSUES` names.
+    expect(`the ruled set never grows past what those rulings named (${RULED_CEILING} arm(s); it may shrink to empty)`,
+      ruled.length <= RULED_CEILING);
   }
 
   if (failures.length) {
@@ -678,8 +727,9 @@ function selfTest() {
       + 'entry, a log line, a comment), reads dependency fields but not a manifest\'s own `name`, reports an '
       + 'unledgered arrival AND a stale ledger entry AND a changed binding kind, refuses an unknown axis or an '
       + 'empty `why`, fails when a ruling marker is deleted, fails when a ruled file stops stating the census '
-      + 'count, shows that growing the ruled set invalidates every sentence still carrying the old count, and '
-      + 'proves discovery reaches both ruled consumers in the real tree.',
+      + 'count, shows that growing the ruled set invalidates every sentence still carrying the old count, '
+      + 'proves discovery reaches every ruled consumer in the real tree, and holds the ruled set to the '
+      + 'rulings that admitted it — a claim that survives the set shrinking to empty.',
   );
 }
 

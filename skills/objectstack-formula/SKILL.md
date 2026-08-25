@@ -30,7 +30,7 @@ formula / condition / predicate / dynamic-seed metadata.
 > The previous custom Salesforce-flavor engine was **deleted** in M9.5.
 >
 > **Predicates / formulas are bare CEL — never wrap field references in `{…}`
-> braces.** The #1 authoring mistake (root cause of #1491) is a condition like
+> braces.** The #1 authoring mistake is a condition like
 > `{record.rating} >= 4`: in CEL, `{…}` is a **map literal**, so it is a parse
 > error. Write bare CEL: `record.rating >= 4`. Braces are *only* for `{{ … }}`
 > text templates (see Template surfaces).
@@ -78,7 +78,7 @@ type Expression = {
 | `cron`     | built-in validator     | Recurring schedules                               | `` cron`...` `` | `` cron`0 6 * * MON` ``               |
 | `template` | built-in interpolator  | `{{path}}` text interpolation (notif/prompt/title) | `` tmpl`...` `` | `` tmpl`Hello {{record.first_name}}` ``|
 
-There is **no `js` dialect** — it was retired (#3278). Procedural JavaScript is
+There is **no `js` dialect** — it was retired. Procedural JavaScript is
 the L2 `ScriptBody { language: 'js' }` authoring surface (hook bodies, mapping
 transforms — see objectstack-data), not an expression dialect.
 
@@ -121,7 +121,7 @@ ADR-0068 — spec field docs write predicates like `current_user.positions`.
 `isBlank()` or compare to `null` explicitly.
 
 Every predicate reads a record that is **total over the object's declared
-fields** (#4649), so `has(record.<declared_field>)` is uniformly `true` and
+fields**, so `has(record.<declared_field>)` is uniformly `true` and
 tells you nothing at all. The idiom that reads like a guard is not one:
 
 ```text
@@ -133,7 +133,7 @@ has(record.start_date) && has(record.end_date) && record.end_date < record.start
 record.start_date != null && record.end_date != null && record.end_date < record.start_date
 ```
 
-**This is a publish-time rejection, not advice (#4763).** `os build` /
+**This is a publish-time rejection, not advice.** `os build` /
 `os validate` / `os lint` and the runtime publish gate reject any validation-rule
 or hook predicate that applies an ordering (`< <= > >=`) or arithmetic
 (`+ - * / %`) operator to a **declared nullable** field — no `required: true`,
@@ -211,7 +211,7 @@ If you need a helper that doesn't exist, prefer adding it to the stdlib
 
 > **Only the functions above are callable.** An UNKNOWN function — `PRIOR()`, a
 > legacy `ISBLANK()`, a typo'd `isBlnk()` — **fails `objectstack build`** with a
-> "no matching overload" type error (#1877), rather than silently no-op'ing the
+> "no matching overload" type error, rather than silently no-op'ing the
 > predicate at run time. Use `previous.x` (not `PRIOR()`), `isBlank()` (not `ISBLANK()`).
 
 ---
@@ -296,11 +296,11 @@ P`previous.status != 'escalated' && record.status == 'escalated'`
 ISCHANGED-style logic does not exist as a function; use explicit `previous`
 comparison.
 
-`record` is the record's **state**, not this write's diff (#4770): stored row ⊕
+`record` is the record's **state**, not this write's diff: stored row ⊕
 payload, so `record.status == 'escalated'` is true on *every* update of an
 already-escalated record. Comparing against `previous` is the only way to say
 "just became". Hook `condition`s and validation predicates bind the same two
-roots (#4784) — one scope, one meaning, whichever surface reads it.
+roots — one scope, one meaning, whichever surface reads it.
 
 **Where `previous` is bound, and where it is not:**
 
@@ -308,11 +308,11 @@ roots (#4784) — one scope, one meaning, whichever surface reads it.
 |:---|:---|
 | Update hook `condition` (single-record write), validation rule on update | the stored pre-write row |
 | Insert events (`beforeInsert` / `afterInsert`), validation rule on insert | **unbound** — there is no prior state |
-| **`after*` hook `condition` / record-change flow trigger on a predicate (`multi: true`) write** | **that row's pre-write row** — a bulk write fires after-hooks once PER MATCHED ROW (#5038) |
-| Validation rule on a predicate bulk update | that row's pre-write row — per row since #3106 |
+| **`after*` hook `condition` / record-change flow trigger on a predicate (`multi: true`) write** | **that row's pre-write row** — a bulk write fires after-hooks once PER MATCHED ROW |
+| Validation rule on a predicate bulk update | that row's pre-write row — per row |
 | `before*` hook `condition` on a predicate (`multi: true`) write | **unbound** — a `before*` hook fires ONCE for the whole batch (it may still rewrite the shared payload), so there is no single prior record. `record` is the bare payload here too, so a *declared* field this write does not set is unevaluable as well |
 
-⚠️ **An unevaluable condition ABORTS the operation (#4775).** Referencing
+⚠️ **An unevaluable condition ABORTS the operation.** Referencing
 `previous` where it is unbound — like a typo'd key (`record.stauts`), a retired
 field, or a comparison CEL has no overload for — does **not** degrade to "the
 hook did not fire": it **fails the write**, with an error naming the hook and
@@ -331,7 +331,7 @@ So write insert-event conditions over `record` alone — that mistake used to co
 you a hook that quietly never ran, and now costs you every write the hook is
 attached to.
 
-**A transition condition needs no special handling for bulk writes (#5038).**
+**A transition condition needs no special handling for bulk writes.**
 Write it once, on an `after*` event, and it means the same thing whether the
 write carries an id or a predicate:
 
@@ -400,9 +400,9 @@ When migrating Salesforce-flavor metadata, apply these rules in order:
 
 > ⚠️ `OLD.x` and `ISCHANGED(x)` both land on `previous.x`, which exists only
 > where `previous` is **bound** — see §5. On an insert event, or in a `before*`
-> hook condition on a `multi: true` predicate write, it is not; since #4775 that
+> hook condition on a `multi: true` predicate write, it is not; that
 > does not quietly skip the hook, it **fails the write**. On `after*` events it
-> IS bound, per matched row, on bulk and single-record writes alike (#5038).
+> IS bound, per matched row, on bulk and single-record writes alike.
 
 ---
 
@@ -478,7 +478,7 @@ tmpl`Deal {{ record.name }} — {{ record.amount | currency }} closes {{ record.
 
 There is no JS expression surface: procedural JS is the L2
 `ScriptBody { language: 'js' }` surface (hook bodies), not an expression
-dialect (#3278).
+dialect.
 
 ---
 

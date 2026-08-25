@@ -590,44 +590,63 @@ context.i18n.formatNumber(smallNumber, {
 
 ## Plugin Integration
 
-Plugins register translation bundles in their manifest:
+Translations are **metadata**, declared on the stack — not manifest entries.
+(The former `contributes.translations` manifest key was removed in v17 (#10724,
+ADR-0049): no loader ever read its `{ locale, path }` entries, so a manifest
+that still carries it now fails the parse with the upgrade prescription.)
+
+A package declares a translation bundle and registers it in its stack's
+`translations` collection:
 
 {/* os:check */}
 ```typescript
-// plugin.manifest.ts — a plugin manifest validated by `ManifestSchema`
-// from `@objectstack/spec/kernel` (there is no `definePlugin()` helper).
-// Translation files are registered under `contributes.translations` as
-// { locale, path } entries (see packages/spec/src/kernel/manifest.zod.ts).
-const manifest = {
-  id: 'com.mycompany.crm',
-  name: '@mycompany/crm',
-  version: '1.0.0',
+// src/translations/crm.translation.ts
+import { defineTranslationBundle } from '@objectstack/spec/system';
 
-  contributes: {
-    translations: [
-      { locale: 'en', path: 'i18n/en/account.json' },
-      { locale: 'de', path: 'i18n/de/account.json' },
-    ],
+export const CrmTranslationBundle = defineTranslationBundle({
+  en: {
+    objects: {
+      crm_account: {
+        label: 'Account',
+        pluralLabel: 'Accounts',
+        fields: {
+          name: { label: 'Account Name' },
+        },
+      },
+    },
   },
-};
-
-export default manifest;
+  de: {
+    objects: {
+      crm_account: {
+        label: 'Konto',
+        pluralLabel: 'Konten',
+        fields: {
+          name: { label: 'Kontoname' },
+        },
+      },
+    },
+  },
+});
 ```
 
-### Translation File Registration
+```typescript
+// objectstack.config.ts
+import { defineStack } from '@objectstack/spec';
+import { CrmTranslationBundle } from './src/translations/crm.translation.js';
 
-```
-@mycompany/crm/
-  i18n/
-    en/
-      account.json        → Namespace: crm.account
-      contact.json        → Namespace: crm.contact
-    de/
-      account.json
-      contact.json
+export default defineStack({
+  manifest: {
+    id: 'com.mycompany.crm',
+    version: '1.0.0',
+    type: 'app',
+    name: 'CRM',
+  },
+  translations: [CrmTranslationBundle],
+});
 ```
 
-**Namespace Convention:** `{pluginName}.{filename}`
+The engine registers the collection as `translation` metadata (the governed
+`translation` type), and the i18n pipeline serves it.
 
 ### Using Plugin Translations
 

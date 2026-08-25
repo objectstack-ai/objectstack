@@ -90,13 +90,15 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { ESLint } from 'eslint';
+import { requireDependency } from './import-prerequisite.mjs';
+const { ESLint } = await requireDependency('eslint', () => import('eslint'), import.meta.url);
 
-import eslintConfig, {
+const {
+  default: eslintConfig,
   QUERY_OPTIONS_RULE_ID,
   QUERY_OPTIONS_TEST_GLOBS,
   QUERY_OPTIONS_ANY_MESSAGE,
-} from '../eslint.config.mjs';
+} = await requireDependency('../eslint.config.mjs', () => import('../eslint.config.mjs'), import.meta.url);
 import {
   checkGuardAdoption,
   collectFatalMessages,
@@ -118,13 +120,24 @@ import {
   osThreadStackKb,
   stackRearmPlan,
 } from './eslint-stack-headroom.mjs';
+import { isEntrypoint } from './invoked-as.mjs';
 
 // This gate lints IN-PROCESS, so it does not inherit the `--stack-size` the
 // root `lint` script puts on ESLint's CLI entry, and this repo's deepest file
 // does not parse without it (#10449). Re-exec once, before any linting --
 // including before `--self-test`, whose headroom assertion below is only a fact
 // about the gate if the self-test runs on the same stack the gate does.
-ensureStackHeadroom(fileURLToPath(import.meta.url));
+//
+// Guarded IN PLACE rather than moved into main(): the ordering above is the
+// whole point of the call, and leaving it at its original position in module
+// order is what makes that ordering checkable by reading. `rearmWithStackHeadroom`
+// re-execs and then calls `process.exit(status)`, so on an import path this line
+// replaced the IMPORTER's process with a fresh run of this gate -- the loudest
+// entry in the KNOWN_IMPORT_UNSAFE ledger, and the reason a `main()` extraction
+// alone would not have been enough here.
+if (isEntrypoint(import.meta.url)) {
+  ensureStackHeadroom(fileURLToPath(import.meta.url));
+}
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, '..');
@@ -895,92 +908,100 @@ async function selfTest() {
 // ---------------------------------------------------------------------------
 // main
 
-if (process.argv.includes('--self-test')) {
-  await selfTest();
-  process.exit(0);
-}
+async function main() {
+  if (!eslintConfig.some(carriesRule)) {
+    console.error(
+      `check-query-options-erasure-ratchet: no config block carries \`${QUERY_OPTIONS_RULE_ID}\`.\n` +
+      'The rule was renamed or removed without updating QUERY_OPTIONS_RULE_ID — refusing\n' +
+      'to report "clean" for a rule that is no longer being measured.',
+    );
+    process.exit(2);
+  }
 
-if (!eslintConfig.some(carriesRule)) {
-  console.error(
-    `check-query-options-erasure-ratchet: no config block carries \`${QUERY_OPTIONS_RULE_ID}\`.\n` +
-    'The rule was renamed or removed without updating QUERY_OPTIONS_RULE_ID — refusing\n' +
-    'to report "clean" for a rule that is no longer being measured.',
+  const update = process.argv.includes('--update');
+  const baselineFile = JSON.parse(readFileSync(resolve(repoRoot, BASELINE_PATH), 'utf8'));
+  const baseline = baselineFile.nonTest ?? {};
+  const testCeiling = baselineFile.testSurface?.sites;
+
+  if (typeof testCeiling !== 'number' && !update) {
+    console.error(
+      `check-query-options-erasure-ratchet: ${BASELINE_PATH} has no numeric ` +
+      '`testSurface.sites`. Refusing to report clean with half the surface unmeasured.',
+    );
+    process.exit(2);
+  }
+
+  // Two runs, one per population. The split is done by ESLint against the very
+  // globs the rule uses, so there is no second definition of "is this a test
+  // file" for the two halves to drift apart on.
+  const nonTest = sortKeys(await measure(new Set(Object.keys(baseline))));
+  const everything = sortKeys(await measure(new Set([...Object.keys(baseline), ...QUERY_OPTIONS_TEST_GLOBS])));
+  const testOnly = sortKeys(
+    Object.fromEntries(Object.entries(everything).filter(([file]) => !(file in nonTest))),
   );
-  process.exit(2);
-}
+  const testSites = sum(testOnly);
 
-const update = process.argv.includes('--update');
-const baselineFile = JSON.parse(readFileSync(resolve(repoRoot, BASELINE_PATH), 'utf8'));
-const baseline = baselineFile.nonTest ?? {};
-const testCeiling = baselineFile.testSurface?.sites;
+  if (update) {
+    const next = {
+      ...baselineFile,
+      nonTest,
+      testSurface: { ...(baselineFile.testSurface ?? {}), sites: testSites },
+    };
+    writeFileSync(resolve(repoRoot, BASELINE_PATH), JSON.stringify(next, null, 2) + '\n');
+    console.log(
+      `query-options-erasure baseline updated: ${sum(nonTest)} non-test site(s) in ` +
+      `${Object.keys(nonTest).length} file(s); test surface ${testSites} site(s) in ` +
+      `${Object.keys(testOnly).length} file(s).`,
+    );
+    process.exit(0);
+  }
 
-if (typeof testCeiling !== 'number' && !update) {
-  console.error(
-    `check-query-options-erasure-ratchet: ${BASELINE_PATH} has no numeric ` +
-    '`testSurface.sites`. Refusing to report clean with half the surface unmeasured.',
-  );
-  process.exit(2);
-}
+  const monotonicity = baselineKeysAddedSinceMergeBase(Object.keys(baseline));
+  const errors = diffRatchet({
+    baseline,
+    current: nonTest,
+    testCeiling,
+    testSites,
+    addedBaselineKeys: monotonicity?.added ?? [],
+  });
 
-// Two runs, one per population. The split is done by ESLint against the very
-// globs the rule uses, so there is no second definition of "is this a test
-// file" for the two halves to drift apart on.
-const nonTest = sortKeys(await measure(new Set(Object.keys(baseline))));
-const everything = sortKeys(await measure(new Set([...Object.keys(baseline), ...QUERY_OPTIONS_TEST_GLOBS])));
-const testOnly = sortKeys(
-  Object.fromEntries(Object.entries(everything).filter(([file]) => !(file in nonTest))),
-);
-const testSites = sum(testOnly);
+  if (errors.length > 0) {
+    console.error(`✗ query-options-erasure ratchet (${errors.length} problem(s)):\n`);
+    for (const e of errors) console.error(`  • ${e}`);
+    console.error(
+      `\nUnswept: ${sum(nonTest)} non-test site(s) in ${Object.keys(nonTest).length} file(s), ` +
+      `plus ${testSites} in test code. Sweeping is a separate batch — part of the residual ` +
+      `needs a boundary type WRITTEN (objectql's \`hookContext.input.options\`, the metadata ` +
+      `loader's query bag), not the assertion deleted. See issue #4918.`,
+    );
+    process.exit(1);
+  }
 
-if (update) {
-  const next = {
-    ...baselineFile,
-    nonTest,
-    testSurface: { ...(baselineFile.testSurface ?? {}), sites: testSites },
-  };
-  writeFileSync(resolve(repoRoot, BASELINE_PATH), JSON.stringify(next, null, 2) + '\n');
   console.log(
-    `query-options-erasure baseline updated: ${sum(nonTest)} non-test site(s) in ` +
-    `${Object.keys(nonTest).length} file(s); test surface ${testSites} site(s) in ` +
-    `${Object.keys(testOnly).length} file(s).`,
+    `✓ query-options-erasure ratchet holds: ${sum(nonTest)} unswept non-test site(s) in ` +
+    `${Object.keys(nonTest).length} file(s), none new, and every file measured parsed. ` +
+    `Every other non-test file under packages/ is covered by \`pnpm lint\`.`,
   );
-  process.exit(0);
+  console.log(
+    `  test surface: ${testSites} site(s) in ${Object.keys(testOnly).length} file(s) — at the ` +
+    `ceiling, outside the blocking rule by the #4918 triage (a rejection test must be able ` +
+    `to build off-contract input).`,
+  );
+  console.log(
+    monotonicity
+      ? `  baseline key set verified against ${monotonicity.base}: no files added.`
+      : `  NOT verified: could not read the baseline at the merge base with main (no git, ` +
+        `shallow clone, or the baseline is new here), so "no files added" is unchecked this run.`,
+  );
 }
 
-const monotonicity = baselineKeysAddedSinceMergeBase(Object.keys(baseline));
-const errors = diffRatchet({
-  baseline,
-  current: nonTest,
-  testCeiling,
-  testSites,
-  addedBaselineKeys: monotonicity?.added ?? [],
-});
-
-if (errors.length > 0) {
-  console.error(`✗ query-options-erasure ratchet (${errors.length} problem(s)):\n`);
-  for (const e of errors) console.error(`  • ${e}`);
-  console.error(
-    `\nUnswept: ${sum(nonTest)} non-test site(s) in ${Object.keys(nonTest).length} file(s), ` +
-    `plus ${testSites} in test code. Sweeping is a separate batch — part of the residual ` +
-    `needs a boundary type WRITTEN (objectql's \`hookContext.input.options\`, the metadata ` +
-    `loader's query bag), not the assertion deleted. See issue #4918.`,
-  );
-  process.exit(1);
+// The dispatch, behind the same predicate. This module exports `diffRatchet`,
+// `measure` and the baseline helpers; unguarded, importing one of them ran two
+// full ESLint passes over packages/** inside the importer.
+if (isEntrypoint(import.meta.url)) {
+  if (process.argv.includes('--self-test')) {
+    await selfTest();
+    process.exit(0);
+  }
+  await main();
 }
-
-console.log(
-  `✓ query-options-erasure ratchet holds: ${sum(nonTest)} unswept non-test site(s) in ` +
-  `${Object.keys(nonTest).length} file(s), none new, and every file measured parsed. ` +
-  `Every other non-test file under packages/ is covered by \`pnpm lint\`.`,
-);
-console.log(
-  `  test surface: ${testSites} site(s) in ${Object.keys(testOnly).length} file(s) — at the ` +
-  `ceiling, outside the blocking rule by the #4918 triage (a rejection test must be able ` +
-  `to build off-contract input).`,
-);
-console.log(
-  monotonicity
-    ? `  baseline key set verified against ${monotonicity.base}: no files added.`
-    : `  NOT verified: could not read the baseline at the merge base with main (no git, ` +
-      `shallow clone, or the baseline is new here), so "no files added" is unchecked this run.`,
-);

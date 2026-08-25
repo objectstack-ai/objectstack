@@ -1,0 +1,115 @@
+# The PREVENTION half of the governed-surface regime (#11704). The rule, the
+# event split, the ruled approval predicate and the exit contract all live in
+# `scripts/pm/check-governed-queue-guard.mjs`; that header is authoritative and
+# this file is the invocation. Only the wiring decisions are argued here.
+#
+# Its sibling `check:pm-governed-merges` is the DETECTION half — a report-only
+# post-merge audit. Three incidents (#9550, #10580, the #9319 landing) each
+# ended with a governed diff enqueued or merged with zero reviews and each was
+# caught by ACCIDENT, which is the expected behaviour of a regime whose only
+# pre-merge line of defence is seat discipline. This is the missing refusal.
+name: Governed Surface Guard
+
+on:
+  # BOTH legs are load-bearing, and they mean DIFFERENT things — see the script
+  # header. `merge_group` is the leg that REFUSES: the queue build is the last
+  # thing between a speculative merge and `main`, and it is the path a seat
+  # uses. `pull_request` is an EARLY WARNING that deliberately exits 0, because
+  # a governed PR held as a draft for the maintainer to merge by hand is the
+  # regime's healthy end state, and a check that reddens on the healthy case is
+  # the permanently-red gate the 2026-08-18 ruling retired.
+  pull_request:
+    branches:
+      - main
+    # Naming `types:` REPLACES GitHub's default set rather than extending it,
+    # so all three defaults are restated here (#8304). `ready_for_review` is
+    # the addition and it is the point: flipping a governed draft to ready is
+    # the first move of the exact sequence this guard exists to interrupt, and
+    # it is not in the default set — without it the warning would not re-fire
+    # at the one moment a seat most needs to read it.
+    types: [opened, synchronize, reopened, ready_for_review]
+  merge_group:
+
+# ⛔ NO `paths:` filter, on either leg, and this is not an oversight. A skipped
+# job counts as SUCCESS in branch protection, so a path filter would hand the
+# queue a green "Governed Surface Queue Guard" for a PR the filter mis-scoped —
+# the #4928 shape, on the one check whose entire job is to refuse. The path
+# test belongs INSIDE the script, where "nothing governed" is a verdict that
+# says so and costs zero API calls. (`merge_group` has no paths support at all,
+# so a filter would also make the two legs disagree about what they cover.)
+
+concurrency:
+  group: governed-surface-guard-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+# The default read scopes and nothing beyond them. `pull-requests: read` is
+# what the review list needs; there is no write scope here, and adding one to
+# make this check "fix" anything would be a widening no ruling covers.
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  governed-surface-guard:
+    # ⚠️ THIS LITERAL IS THE CHECK-RUN NAME branch protection would pin, and it
+    # is duplicated in `CHECK_CONTEXT_NAME` in the script — deliberately, and
+    # pinned in both directions: the script's `--self-test` reads THIS FILE and
+    # fails if the two ever disagree. Renaming a job silently detaches a
+    # required context (#6865); this is the cheap half of the two-step that
+    # makes that impossible to do by accident.
+    #
+    # ⛔ Making it a required context is NOT this PR's step. Branch protection
+    # is the maintainer's: it takes a `REQUIRED_CONTEXTS` row in
+    # `scripts/check-required-contexts.mjs` PLUS the entry in Settings →
+    # Rulesets, in one sitting (#6865). Either half alone is an outage — a row
+    # without the setting reads as `direction A — registered here, NOT in the
+    # live required set`, which is #5617's own defect.
+    name: Governed Surface Queue Guard
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          # A governed-surface question answered over a truncated history
+          # answers with SILENCE, and silence reads as compliance (#9902). The
+          # merge group's base sha can predate a shallow fetch's floor, so the
+          # whole history is the only depth that cannot under-report. The
+          # script refuses outright (exit 1) if either sha is missing, rather
+          # than diffing what it happens to have.
+          fetch-depth: 0
+
+      # Pinned to the same major and spelling as every other setup-node in this
+      # repo. `actions/setup-node@v5`+ defaults `package-manager-cache: true`,
+      # which shells out to pnpm and hard-errors in a job like this one that
+      # installs no package manager — see the Part-of Closing-Keyword Guard's
+      # note for the measured failure. No install step and no corepack: the
+      # script is dependency-free and imports only sibling `scripts/**` modules.
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      # The self-test runs FIRST and in its own step, because it is the
+      # precondition for trusting the run after it: this guard's predicates
+      # decide whether a merge lands, so a rotted predicate must redden here
+      # rather than quietly wave a governed diff through. `bash -e` aborting the
+      # step on the first failure is the correct semantics for a
+      # precondition — the collector idiom next door in lint.yml is for
+      # INDEPENDENT self-tests, which these are not.
+      - name: Guard predicate self-test
+        run: node scripts/pm/check-governed-queue-guard.mjs --self-test
+
+      # The live judgment. Everything it reads arrives through `env:` or the
+      # event payload on disk — no `${{ }}` interpolation into the shell line,
+      # so no PR-controlled text ever becomes part of a command.
+      #
+      # GITHUB_TOKEN is the workflow's own default token at the read scopes
+      # declared above; it is what makes the review read possible at all, and
+      # an unreadable review list is a REFUSAL with its own exit code, never a
+      # pass. ⛔ Fail-open is wrong in this file specifically — it exists
+      # because every other layer in this chain failed open.
+      - name: Governed surfaces may not enter the merge queue unreviewed
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/pm/check-governed-queue-guard.mjs

@@ -266,6 +266,21 @@ export default class Compile extends Command {
           : [],
         projectDir: path.dirname(absolutePath),
       });
+      // [#11727] MAPPED HERE, once, and consumed by BOTH faces — the text block
+      //     just below and the `--json` payload at the end of this command. The
+      //     hints used to be rendered inside that print block, i.e. under
+      //     `!flags.json`, so the payload could not reach them: computed, then
+      //     discarded, for the one audience `--json` exists to serve. This is
+      //     the same defect #11643 fixed one list over, and the same fix —
+      //     hoist the formatting to the computation site so one list feeds both
+      //     faces. `os validate --json` already maps to exactly this
+      //     `{ token, message }` record beside its own preflight call, so
+      //     mirroring it is what keeps the two commands from reporting
+      //     different sets. One list cannot drift from itself.
+      const capProviderWarnings = capPreflight.warnings.map((c) => ({
+        token: c.token,
+        message: renderCapabilityMessage(c),
+      }));
       if (capPreflight.errors.length > 0) {
         if (flags.json) {
           await emitJson({
@@ -282,10 +297,10 @@ export default class Compile extends Command {
         }
         this.exit(1);
       }
-      if (capPreflight.warnings.length > 0 && !flags.json) {
+      if (capProviderWarnings.length > 0 && !flags.json) {
         console.log('');
-        for (const c of capPreflight.warnings) {
-          printWarning(renderCapabilityMessage(c));
+        for (const w of capProviderWarnings) {
+          printWarning(w.message);
         }
       }
 
@@ -396,6 +411,18 @@ export default class Compile extends Command {
       if (!flags.json) printStep('Collecting package docs (ADR-0046)...');
       const docsResult = collectAndLintDocs(absolutePath, result.data as Record<string, unknown>);
       const docErrors = docsResult.issues.filter((i) => i.severity === 'error');
+      // [#11727] Consumed by BOTH faces — the text block below and the `--json`
+      //     payload. Only the text block read it before, so the advisories were
+      //     computed and then dropped for `--json`, exactly as the #3366 hints
+      //     above were. Carried into the payload as the ISSUE RECORDS
+      //     themselves, unmapped, because that is what `os validate --json`
+      //     ships (`warnings: [..., ...docWarnings, ...]` over the same
+      //     `collectAndLintDocs` output) — the text face's `path: message`
+      //     rendering is a text-face concern and stays here.
+      //
+      //     `severity === 'warning'` and validate's `severity !== 'error'`
+      //     select the same set: `DocIssue.severity` is `'error' | 'warning'`,
+      //     so there is no third value for the two spellings to disagree about.
       const docWarnings = docsResult.issues.filter((i) => i.severity === 'warning');
       if (docErrors.length > 0) {
         if (flags.json) {
@@ -528,7 +555,36 @@ export default class Compile extends Command {
           // ...unknownKeyWarnings, …]`, likewise a heterogeneous list). The
           // homogeneity this key used to have was not a contract; it was the
           // symptom of the omission.
-          warnings: [...ruleAdvisories, ...unknownKeyWarnings],
+          //
+          // [#11727] …and then, still, two lists short of parity: the #3366
+          // capability-provider hints and the ADR-0046 package-docs advisories
+          // were computed above and dropped under the same `!flags.json` guard
+          // the undeclared-key findings used to sit behind. Same defect, same
+          // audience, fourth instance in these two files. A CI consumer reading
+          // `warnings` off `os build --json` saw `[]` for a stack whose
+          // `requires` names an unknown capability token and whose shipped doc
+          // has unreadable frontmatter — while the same consumer reading
+          // `os validate --json` on that same tree saw both.
+          //
+          // ORDER AND SHAPE MIRROR `os validate --json` rather than being
+          // chosen here: that payload reads `[...ruleAdvisories, ...docWarnings,
+          // ...unknownKeyWarnings, ...capProviderWarnings, ...structuralWarnings]`,
+          // and this is that list minus its last member. Doc advisories ride as
+          // ISSUE RECORDS and capability hints as `{ token, message }` records,
+          // which is what validate ships for each — so a consumer reads one
+          // shape per class from either command rather than learning two.
+          //
+          // `structuralWarnings` is ABSENT ON PURPOSE, and it is not this
+          // omission's fourth sibling: `os validate` computes those four from
+          // `collectMetadataStats`, and `os compile` never computes them at all
+          // (this file has no "No objects defined" / "may not do much" string,
+          // in any face). That makes it a MISSING COMPUTATION rather than a
+          // dropped list — and whether a command that writes an artifact should
+          // advise "No apps or plugins defined" is a judgment, not a mechanical
+          // port. Measured on #11727 (this change) and split out as #11896,
+          // which is where that judgment is made — deliberately NOT this card,
+          // which #11727 closes.
+          warnings: [...ruleAdvisories, ...docWarnings, ...unknownKeyWarnings, ...capProviderWarnings],
           // [#10678] Body-extraction failures that made a callable fall back to
           // the legacy .mjs bundle. A SEPARATE key on purpose, and the reason is
           // parity too — the opposite way round from `unknownKeyWarnings` just

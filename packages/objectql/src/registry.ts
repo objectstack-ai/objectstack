@@ -1132,7 +1132,7 @@ function isTenantAuthored(item: unknown): boolean {
  * Truthy `_packageId`, not the `'sys_metadata'` rehydration sentinel, and not
  * tenant provenance.
  */
-function isCodeArtifactBody(item: unknown): boolean {
+export function isCodeArtifactBody(item: unknown): boolean {
   const it = item as { _packageId?: unknown } | null | undefined;
   if (!it || !it._packageId || it._packageId === 'sys_metadata') return false;
   return !isTenantAuthored(it);
@@ -3745,11 +3745,14 @@ export class SchemaRegistry {
   // Kind Helpers
   // ==========================================
 
-  registerKind(kind: { id: string, globs: string[] }) {
+  // #11169: `globs` left the kind shape — nothing ever read the value here or
+  // downstream (the two type positions below were its only non-schema
+  // occurrences); a kind entry is `{ id, description? }`, keyed on `id`.
+  registerKind(kind: { id: string; description?: string }) {
     this.registerItem('kind', kind, 'id');
   }
-  
-  getAllKinds(): { id: string, globs: string[] }[] {
+
+  getAllKinds(): { id: string; description?: string }[] {
     return this.listItems('kind');
   }
 

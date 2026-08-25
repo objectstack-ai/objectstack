@@ -775,3 +775,57 @@ describe('validateComponentProps — record:alert / record:quick_actions / recor
     expect(findings[0].message).toContain('`dock`');
   });
 });
+
+/**
+ * #11575 — the two `@objectstack/cloud-connection` console widgets, so the
+ * gate's dispatch reaches them.
+ *
+ * The pre-fix state these pin against: `cloud-connection:panel` and
+ * `marketplace:installed-list` had no `ComponentPropsMap` row (they are
+ * open-string-arm types — never in `PageComponentType` — so nothing else
+ * judged them either), and the walker's unregistered-type skip swallowed the
+ * whole props bag: any authored key produced ZERO findings from
+ * validate/build. Their rows are strict and EMPTY — measured from the
+ * renderers' read points at the `.objectui-sha` pin, where both registrations
+ * discard the schema node (`() => <Widget />`) — so EVERY authored key is a
+ * finding. Remove either map row and its loud test here goes back to that
+ * silence.
+ */
+describe('validateComponentProps — cloud-connection:panel / marketplace:installed-list are dispatched (#11575)', () => {
+  it('reports any key authored on `cloud-connection:panel`, naming the zero-prop surface', () => {
+    const findings = validateComponentProps(
+      stackWith([{
+        type: 'cloud-connection:panel',
+        properties: { pollInterval: 5 },
+      }]),
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(COMPONENT_PROPS_UNKNOWN_KEY);
+    expect(findings[0].where).toBe('page "probe_page" · cloud-connection:panel');
+    expect(findings[0].message).toContain('`pollInterval`');
+    expect(findings[0].message).toContain('cloud-connection:panel');
+  });
+
+  it('reports any key authored on `marketplace:installed-list` the same way', () => {
+    const findings = validateComponentProps(
+      stackWith([{
+        type: 'marketplace:installed-list',
+        properties: { filter: 'installed' },
+      }]),
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(COMPONENT_PROPS_UNKNOWN_KEY);
+    expect(findings[0].where).toBe('page "probe_page" · marketplace:installed-list');
+    expect(findings[0].message).toContain('`filter`');
+  });
+
+  it('stays silent on the empty bag both plugin-shipped pages author', () => {
+    const findings = validateComponentProps(
+      stackWith([
+        { type: 'cloud-connection:panel', properties: {} },
+        { type: 'marketplace:installed-list', properties: {} },
+      ]),
+    );
+    expect(findings).toEqual([]);
+  });
+});

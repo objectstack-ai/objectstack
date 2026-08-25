@@ -83,8 +83,42 @@ import type {
   ApprovalActionRow,
   ApprovalStatus,
   ApprovalDecisionResult,
+  // [#8140] The service-contract return types this SDK relays verbatim. Each
+  // one is the DECLARED return of the service method the route calls, and the
+  // route serves it under at most one `{ success, data }` envelope that
+  // `unwrapResponse` strips — so the annotation on the method and the value
+  // the caller receives are one statement, not two.
+  ApprovalRecallResult,
+  ApprovalResubmitResult,
+  ApprovalSendBackResult,
+  AudienceBindingSuggestion,
+  AudienceBindingSuggestionSync,
+  AutomationResult,
+  DelegableScope,
+  ImportObjectResult,
+  ObjectDraft,
+  RecordShare,
+  RemoteTable,
+  ReportRunResult,
+  ReportSchedule,
+  SavedReport,
+  SchemaValidationReport,
+  ScreenSpec,
+  SendEmailResult,
+  ShareLink,
+  SharingRuleEvaluationResult,
+  SharingRuleRow,
 } from '@objectstack/spec/contracts';
-import type { ExecutionStatus } from '@objectstack/spec/automation';
+import type {
+  ActionDescriptor,
+  ExecutionLog,
+  ExecutionStatus,
+  FlowParsed,
+} from '@objectstack/spec/automation';
+import type { ExternalCatalog } from '@objectstack/spec/data';
+import type { InstalledPackage } from '@objectstack/spec/kernel';
+import type { ConnectorDescriptor } from '@objectstack/spec/integration';
+import type { ExplainDecision } from '@objectstack/spec/security';
 import type { InvitationStatus } from '@objectstack/spec/identity';
 import { Logger, createLogger } from '@objectstack/core/logger';
 import { RealtimeAPI } from './realtime-api';
@@ -484,6 +518,123 @@ function normalizeActionResult<T>(payload: any): { success: boolean; data?: T; e
   return { success: true, data: payload as T };
 }
 
+/**
+ * Query-string options for `meta.saveItem` on BOTH clients — the unscoped
+ * `ObjectStackClient.meta` and {@link ScopedProjectClient.meta}.
+ *
+ * ONE exported type deliberately shared by the two declarations, rather than
+ * an inline literal copied into each. The two `saveItem`s are the same method
+ * on two clients reaching one pair of routes; every divergence measured
+ * between them so far has been closed as a defect (#7019 and the cards citing
+ * it), and a bag spelled twice is a divergence waiting to be introduced by
+ * whoever next extends only the copy they happened to open.
+ *
+ * ## Why these three, and why they are the ones that exist
+ *
+ * `PUT /api/v1/meta/:type/:name` reads exactly these three query parameters,
+ * and until this type existed the SDK sent NONE of them — `saveItem` built a
+ * bare path and a body. The sharpest consequence is `force`: `saveMetaItem`'s
+ * Phase 3a-destructive gate refuses with `409 DESTRUCTIVE_CHANGE` and ends the
+ * message `— re-submit with ?force=true to proceed.`, so a first-party SDK
+ * caller was told to set a parameter their client had no way to set. Doing
+ * literally what the refusal said returned the identical refusal, forever; the
+ * only way out was to abandon the SDK for raw `fetch`. That is not a
+ * hypothetical — the platform QA checklist instructs its own authors to issue
+ * these steps "as raw HTTP with the query string appended" for exactly this
+ * reason, and `@object-ui/data-objectstack` carries a hand-rolled
+ * `MetadataClient.save` that composes these same three parameters itself.
+ *
+ * ⛔ The remedy clause is the contract here, not a nicety: it is a
+ * risk-acknowledgement refusal, and `destructiveChangeRemedy` renders it per
+ * write FACE precisely so that no caller is ever prescribed a mechanism their
+ * door does not have. Both REST `PUT` doors state face `'meta-envelope'`,
+ * whose clause names `?force=true` — so the clause is only true of an SDK
+ * caller while this bag exists. Removing it re-breaks the prose, not just the
+ * feature.
+ *
+ * The face is stated by the SERVER and is not derivable from the caller's
+ * identity: an SDK save and a raw `fetch` save arrive at the same door as the
+ * same request. There is therefore no "SDK-flavoured" wording available to
+ * repair this from the message side — the parameter had to become reachable.
+ */
+export interface SaveMetaItemOptions {
+    /**
+     * `?force=true` — acknowledge and proceed past the Phase 3a
+     * destructive-change refusal (`409 DESTRUCTIVE_CHANGE`), whose message
+     * names this parameter as the remedy.
+     *
+     * Only `true` reaches the wire. `false` and `undefined` both OMIT the
+     * parameter rather than sending `?force=false`, which is not merely
+     * tidier: the door refuses a REPEATED `?force` (#6877) because a repeated
+     * value arrives as an array and a non-empty array is truthy — so a
+     * spelled-out opt-OUT could turn the guard ON. Never emitting the
+     * opt-out spelling keeps this client clear of that edge entirely.
+     */
+    force?: boolean;
+    /**
+     * `?package=<id>` — bind the saved row to that software package
+     * (`sys_metadata.package_id`). Omit for an environment-local overlay.
+     * Named `packageId` rather than `package` to match the sibling
+     * `getItem`/`getItems` options on this same object (`package` is also a
+     * reserved word).
+     */
+    packageId?: string;
+    /**
+     * `?mode=draft` — stage the write as a pending draft instead of
+     * publishing it to the active overlay.
+     *
+     * `'publish'` is the explicit spelling of the default and deliberately
+     * sends NOTHING: the door acts on `mode=draft` alone and treats every
+     * other value as publish, so emitting `?mode=publish` would put a value
+     * on the wire that the server ignores. Same shape the first-party
+     * `@object-ui/data-objectstack` `MetadataClient.save` already uses.
+     *
+     * ⚠️ COMPOUND NAMES DO NOT STAGE. `mode` reaches only the single-segment
+     * `PUT /meta/:type/:name`. Its compound-name twin
+     * `PUT /meta/:type/:section/:name` — the door a `name` containing a slash
+     * lands on, e.g. `saveItem('object', 'views/all_leads', item)` — never
+     * reads this parameter, so `{ mode: 'draft' }` there is IGNORED and the
+     * write is PUBLISHED LIVE, answered 200. It is not refused; there is no
+     * signal at the call site. Filed as objectstack#11712 and deliberately not
+     * repaired from this side: threading it is the route's decision, and a
+     * client-side guess would be a second place the two doors disagree.
+     *
+     * ⛔ Do not "fix" this by rejecting compound names here. `force` and
+     * `packageId` DO reach both doors (measured: the compound handler reads
+     * and threads `?force` since objectstack#11095 and `?package` alongside
+     * it), so refusing the whole bag on a compound name would break the two
+     * parameters that work in order to warn about the one that does not.
+     */
+    mode?: 'draft' | 'publish';
+}
+
+/**
+ * Compose the `meta.saveItem` query string — the ONE builder both `saveItem`
+ * declarations call, for the same reason {@link SaveMetaItemOptions} is one
+ * type: the twins must not be able to drift in what they put on the wire.
+ *
+ * Returns `''` (not `'?'`) when nothing is set, so an options-less call is
+ * BYTE-IDENTICAL to what this method sent before the bag existed. That is the
+ * backward-compatibility guarantee, and it is what the pre-existing URL pins
+ * measure.
+ *
+ * `URLSearchParams.set` (never `append`) is load-bearing: the door REFUSES a
+ * repeated `force` / `package` / `mode`, so a builder that could emit a key
+ * twice would turn a caller's option into a 400.
+ */
+function metaSaveQuery(options?: SaveMetaItemOptions): string {
+    if (!options) return '';
+    const params = new URLSearchParams();
+    // Only the opt-IN is spelled on the wire — see `force`'s doc comment.
+    if (options.force) params.set('force', 'true');
+    if (options.packageId) params.set('package', options.packageId);
+    // Only `'draft'` is actionable server-side; `'publish'` is the default
+    // said out loud and sends nothing.
+    if (options.mode === 'draft') params.set('mode', 'draft');
+    const qs = params.toString();
+    return qs ? `?${qs}` : '';
+}
+
 export class ObjectStackClient {
   private baseUrl: string;
   private token?: string;
@@ -700,9 +851,26 @@ export class ObjectStackClient {
      * declaration used to stop at `{ success, message }`, and annotating
      * against that subset would have hidden the OCC carrier (#5545).
      */
-    saveItem: async (type: string, name: string, item: any): Promise<SaveMetaItemResponse> => {
+    saveItem: async (
+        type: string,
+        name: string,
+        item: any,
+        options?: SaveMetaItemOptions,
+    ): Promise<SaveMetaItemResponse> => {
         const route = this.getRoute('metadata');
-        const res = await this.fetch(`${this.baseUrl}${route}/${type}/${name}`, {
+        // Named `query`, not `qs`. Measured on this file: of 37 `const qs =`
+        // bindings, 27 hold a BARE `params.toString()` (the `?` is added at
+        // the interpolation site), 8 hold a string that CARRIES its own `?`,
+        // and 2 hold a `URLSearchParams` object. One name, three meanings —
+        // so a reader cannot tell from `${qs}` whether a `?` is already
+        // there, and picking the wrong one builds `…name??force=true` or
+        // `…nameforce=true`. This value carries its `?`; the distinct name
+        // says so without the reader having to go and look.
+        const query = metaSaveQuery(options);
+        // `type`/`name` stay UNENCODED — a compound name's slash must survive
+        // so the request reaches `PUT /meta/:type/:section/:name` instead of
+        // collapsing onto the 3-segment route (pinned in client.test.ts).
+        const res = await this.fetch(`${this.baseUrl}${route}/${type}/${name}${query}`, {
             method: 'PUT',
             body: JSON.stringify(item)
         });
@@ -1066,7 +1234,7 @@ export class ObjectStackClient {
         replyTo?: any;
         sentBy?: string;
         [k: string]: any;
-    }): Promise<any> => {
+    }): Promise<SendEmailResult> => {
         // [#6714] The base comes from `getRoute('email')`: a connected client
         // follows the server's advertised `routes.email` (the REST discovery
         // endpoint projects it from its recorded route registrations — the
@@ -1079,7 +1247,7 @@ export class ObjectStackClient {
             method: 'POST',
             body: JSON.stringify(message),
         });
-        return this.unwrapResponse<any>(res);
+        return this.unwrapResponse<SendEmailResult>(res);
     },
   };
 
@@ -1100,56 +1268,56 @@ export class ObjectStackClient {
   datasources = {
     external: {
         /** List remote tables on a datasource, optionally by `schema`. */
-        listTables: async (name: string, opts?: { schema?: string }): Promise<any> => {
+        listTables: async (name: string, opts?: { schema?: string }): Promise<{ tables: RemoteTable[] }> => {
             const qs = opts?.schema ? `?schema=${encodeURIComponent(opts.schema)}` : '';
             const route = this.getRoute('datasources');
             const res = await this.fetch(
                 `${this.baseUrl}${route}/${encodeURIComponent(name)}/external/tables${qs}`,
             );
-            return this.unwrapResponse<any>(res);
+            return this.unwrapResponse<{ tables: RemoteTable[] }>(res);
         },
 
         /** Generate an Object draft (structured + `*.object.ts` source) from a remote table. */
-        draft: async (name: string, remoteTable: string, opts?: Record<string, any>): Promise<any> => {
+        draft: async (name: string, remoteTable: string, opts?: Record<string, any>): Promise<{ draft: ObjectDraft }> => {
             const route = this.getRoute('datasources');
             const res = await this.fetch(
                 `${this.baseUrl}${route}/${encodeURIComponent(name)}/external/tables/${encodeURIComponent(remoteTable)}/draft`,
                 { method: 'POST', body: JSON.stringify(opts ?? {}) },
             );
-            return this.unwrapResponse<any>(res);
+            return this.unwrapResponse<{ draft: ObjectDraft }>(res);
         },
 
         /**
          * Import a remote table as a live federated object ("Import as
          * Object"). 400 [external_import_error] when refused.
          */
-        import: async (name: string, remoteTable: string, opts?: Record<string, any>): Promise<any> => {
+        import: async (name: string, remoteTable: string, opts?: Record<string, any>): Promise<{ object: ImportObjectResult }> => {
             const route = this.getRoute('datasources');
             const res = await this.fetch(
                 `${this.baseUrl}${route}/${encodeURIComponent(name)}/external/tables/${encodeURIComponent(remoteTable)}/import`,
                 { method: 'POST', body: JSON.stringify(opts ?? {}) },
             );
-            return this.unwrapResponse<any>(res);
+            return this.unwrapResponse<{ object: ImportObjectResult }>(res);
         },
 
         /** Refresh and return the cached remote-catalog snapshot. */
-        refreshCatalog: async (name: string): Promise<any> => {
+        refreshCatalog: async (name: string): Promise<{ catalog: ExternalCatalog }> => {
             const route = this.getRoute('datasources');
             const res = await this.fetch(
                 `${this.baseUrl}${route}/${encodeURIComponent(name)}/external/refresh-catalog`,
                 { method: 'POST', body: JSON.stringify({}) },
             );
-            return this.unwrapResponse<any>(res);
+            return this.unwrapResponse<{ catalog: ExternalCatalog }>(res);
         },
 
         /** Validate this datasource's federated objects against the remote schema. */
-        validate: async (name: string): Promise<any> => {
+        validate: async (name: string): Promise<SchemaValidationReport> => {
             const route = this.getRoute('datasources');
             const res = await this.fetch(
                 `${this.baseUrl}${route}/${encodeURIComponent(name)}/external/validate`,
                 { method: 'POST', body: JSON.stringify({}) },
             );
-            return this.unwrapResponse<any>(res);
+            return this.unwrapResponse<SchemaValidationReport>(res);
         },
     },
   };
@@ -3114,7 +3282,7 @@ export class ObjectStackClient {
       /**
        * Get a flow definition by name
        */
-      get: async (name: string): Promise<any> => {
+      get: async (name: string): Promise<FlowParsed> => {
           const route = this.getRoute('automation');
           const res = await this.fetch(`${this.baseUrl}${route}/${name}`);
           return this.unwrapResponse(res);
@@ -3122,6 +3290,14 @@ export class ObjectStackClient {
 
       /**
        * Create (register) a new flow
+       *
+       * [#8140] ⛔ `Promise<any>` is DELIBERATE here, and it is a missing
+       * CONTRACT rather than a missing annotation. The route ends
+       * `deps.success(body)` — the request body, echoed — and
+       * `IAutomationService.registerFlow(name, definition: unknown): void`
+       * returns nothing, so no published type describes what comes back.
+       * Naming `Flow` would be a claim about the REQUEST that no validation
+       * backs. Authoring the response contract is `packages/spec`'s call.
        */
       create: async (name: string, definition: any): Promise<any> => {
           const route = this.getRoute('automation');
@@ -3134,6 +3310,10 @@ export class ObjectStackClient {
 
       /**
        * Update an existing flow
+       *
+       * [#8140] ⛔ `Promise<any>` is DELIBERATE — same missing contract as
+       * `create` above: the route ends `deps.success(definition)`, echoing
+       * what was sent.
        */
       update: async (name: string, definition: any): Promise<any> => {
           const route = this.getRoute('automation');
@@ -3165,7 +3345,7 @@ export class ObjectStackClient {
        * ADR-0018: registered action-node descriptors, optionally filtered by
        * `paradigm` / `source` / `category`. Empty registry → `{ actions: [], total: 0 }`.
        */
-      listActions: async (opts?: { paradigm?: string; source?: string; category?: string }): Promise<{ actions: any[]; total: number }> => {
+      listActions: async (opts?: { paradigm?: string; source?: string; category?: string }): Promise<{ actions: ActionDescriptor[]; total: number }> => {
           const route = this.getRoute('automation');
           const params = new URLSearchParams();
           if (opts?.paradigm) params.set('paradigm', opts.paradigm);
@@ -3180,7 +3360,7 @@ export class ObjectStackClient {
        * ADR-0022: registered connector descriptors (populated by connector
        * plugins), optionally filtered by `type`.
        */
-      listConnectors: async (opts?: { type?: string }): Promise<{ connectors: any[]; total: number }> => {
+      listConnectors: async (opts?: { type?: string }): Promise<{ connectors: ConnectorDescriptor[]; total: number }> => {
           const route = this.getRoute('automation');
           const qs = opts?.type ? `?type=${encodeURIComponent(opts.type)}` : '';
           const res = await this.fetch(`${this.baseUrl}${route}/connectors${qs}`);
@@ -3213,7 +3393,7 @@ export class ObjectStackClient {
           /**
            * List execution runs for a flow
            */
-          list: async (flowName: string, options?: { limit?: number; cursor?: string }): Promise<{ runs: any[]; hasMore: boolean }> => {
+          list: async (flowName: string, options?: { limit?: number; cursor?: string }): Promise<{ runs: ExecutionLog[]; hasMore: boolean }> => {
               const route = this.getRoute('automation');
               const params = new URLSearchParams();
               if (options?.limit) params.set('limit', String(options.limit));
@@ -3226,7 +3406,7 @@ export class ObjectStackClient {
           /**
            * Get a single execution run
            */
-          get: async (flowName: string, runId: string): Promise<any> => {
+          get: async (flowName: string, runId: string): Promise<ExecutionLog> => {
               const route = this.getRoute('automation');
               const res = await this.fetch(`${this.baseUrl}${route}/${flowName}/runs/${runId}`);
               return this.unwrapResponse(res);
@@ -3237,9 +3417,28 @@ export class ObjectStackClient {
        * Flat aliases mirroring the ScopedProjectClient.automation surface so
        * Studio (and other consumers) can use the same call shape regardless of
        * whether they hold a scoped or unscoped client.
+       *
+       * [#8140] These six are FIXED-SHAPE platform methods, so their type
+       * parameter is `<T extends X = X>` rather than the `<T = any>` it used
+       * to be. Both halves of that spelling are load-bearing:
+       *
+       *  - the DEFAULT closes the erasure for the ordinary call
+       *    (`await getFlow(n)` was `any`, and is now `FlowParsed`);
+       *  - the CONSTRAINT closes it for the annotated call. A bare
+       *    `<T = FlowParsed>` is only half a fix — TypeScript infers `T` from
+       *    the call's contextual type, so `const x: SomethingElse = await
+       *    getFlow(n)` still compiled and `T` silently became `SomethingElse`.
+       *    Measured on this card's own pin file, which is why the constraint
+       *    is here.
+       *
+       * A caller narrowing to their own known shape keeps working
+       * (`getFlow<FlowParsed & { name: 'onboarding' }>(…)`); one naming an
+       * unrelated type is now refused, which is the point. The
+       * caller-supplied generics on `data.*` and `actions.*` are deliberately
+       * NOT constrained — there the payload really is the caller's.
        */
       /** Alias for `automation.get` — fetch a flow definition by name. */
-      getFlow: async <T = any>(name: string): Promise<T> => {
+      getFlow: async <T extends FlowParsed = FlowParsed>(name: string): Promise<T> => {
           const route = this.getRoute('automation');
           const res = await this.fetch(`${this.baseUrl}${route}/${encodeURIComponent(name)}`);
           return this.unwrapResponse(res) as Promise<T>;
@@ -3256,7 +3455,7 @@ export class ObjectStackClient {
        * both never dispatched, so neither is `FLOW_FAILED`.
        * See `automation.trigger` for the full table — both call the same door.
        */
-      execute: async <T = any>(name: string, ctx?: Record<string, any>): Promise<T> => {
+      execute: async <T extends AutomationResult = AutomationResult>(name: string, ctx?: Record<string, any>): Promise<T> => {
           const route = this.getRoute('automation');
           const res = await this.fetch(`${this.baseUrl}${route}/${encodeURIComponent(name)}/trigger`, {
               method: 'POST',
@@ -3265,7 +3464,7 @@ export class ObjectStackClient {
           return this.unwrapResponse(res) as Promise<T>;
       },
       /** Alias for `automation.runs.list`. */
-      listRuns: async <T = any>(
+      listRuns: async <T extends { runs: ExecutionLog[]; hasMore: boolean } = { runs: ExecutionLog[]; hasMore: boolean }>(
           flowName: string,
           opts?: { limit?: number; cursor?: string; status?: ExecutionStatus },
       ): Promise<T> => {
@@ -3285,7 +3484,7 @@ export class ObjectStackClient {
           return this.unwrapResponse(res) as Promise<T>;
       },
       /** Alias for `automation.runs.get`. */
-      getRun: async <T = any>(flowName: string, runId: string): Promise<T> => {
+      getRun: async <T extends ExecutionLog = ExecutionLog>(flowName: string, runId: string): Promise<T> => {
           const route = this.getRoute('automation');
           const res = await this.fetch(
               `${this.baseUrl}${route}/${encodeURIComponent(flowName)}/runs/${encodeURIComponent(runId)}`,
@@ -3336,7 +3535,7 @@ export class ObjectStackClient {
        * `INVALID_SCREEN_INPUT` (400), `RESUME_IN_PROGRESS` (409),
        * `STORE_UNAVAILABLE` (503).
        */
-      resume: async <T = any>(
+      resume: async <T extends AutomationResult = AutomationResult>(
           flowName: string,
           runId: string,
           signal?: {
@@ -3360,7 +3559,7 @@ export class ObjectStackClient {
        * not launch the run (a reload, a different tab, an inbox) render the
        * pending step before calling {@link resume}.
        */
-      getScreen: async <T = any>(flowName: string, runId: string): Promise<T> => {
+      getScreen: async <T extends { runId: string; screen: ScreenSpec } = { runId: string; screen: ScreenSpec }>(flowName: string, runId: string): Promise<T> => {
           const route = this.getRoute('automation');
           const res = await this.fetch(
               `${this.baseUrl}${route}/${encodeURIComponent(flowName)}/runs/${encodeURIComponent(runId)}/screen`,
@@ -3401,6 +3600,13 @@ export class ObjectStackClient {
        * Invoke a server-registered action on an object.
        * Falls back to the server's object-less ('global') handler when no
        * object-specific handler is registered.
+       *
+       * [#8140] `<T = any>` STAYS. The envelope is already precise
+       * (`{ success, data?, error? }`); `T` is the return value of the
+       * app-author's own handler registered with
+       * `engine.registerAction(objectName, actionName, handler)`, so it is
+       * caller-supplied in exactly the sense `data.get<T>` is — not the
+       * fixed-shape platform erasure this card was about.
        */
       invoke: async <T = any>(
           objectName: string,
@@ -3498,7 +3704,7 @@ export class ObjectStackClient {
               redactFields?: string[];
               label?: string;
           },
-      ): Promise<any> => {
+      ): Promise<ShareLink> => {
           const res = await this.fetch(`${this.baseUrl}/api/v1/share-links`, {
               method: 'POST',
               body: JSON.stringify({ object, recordId, ...(opts ?? {}) }),
@@ -3511,7 +3717,7 @@ export class ObjectStackClient {
           object?: string;
           recordId?: string;
           includeRevoked?: boolean;
-      }): Promise<any[]> => {
+      }): Promise<ShareLink[]> => {
           const params = new URLSearchParams();
           if (opts?.object) params.set('object', opts.object);
           if (opts?.recordId) params.set('recordId', opts.recordId);
@@ -3564,12 +3770,12 @@ export class ObjectStackClient {
           userId?: string;
           recordId?: string;
           recordIds?: string[];
-      }): Promise<any> => {
+      }): Promise<ExplainDecision> => {
           const res = await this.fetch(`${this.baseUrl}/api/v1/security/explain`, {
               method: 'POST',
               body: JSON.stringify(request),
           });
-          return this.unwrapResponse<any>(res);
+          return this.unwrapResponse<ExplainDecision>(res);
       },
 
       /**
@@ -3585,14 +3791,14 @@ export class ObjectStackClient {
        * discloses nothing beyond the caller's own authority; a tenant admin
        * comes back `isTenantAdmin: true` with everything enumerated.
        */
-      describeDelegableScope: async (): Promise<any> => {
+      describeDelegableScope: async (): Promise<DelegableScope> => {
           const res = await this.fetch(`${this.baseUrl}/api/v1/security/my-delegable-scope`);
-          return this.unwrapResponse<any>(res);
+          return this.unwrapResponse<DelegableScope>(res);
       },
 
       suggestedBindings: {
           /** List suggestions, optionally by `status` / `packageId` (reconciles first). */
-          list: async (opts?: { status?: string; packageId?: string }): Promise<any> => {
+          list: async (opts?: { status?: string; packageId?: string }): Promise<{ suggestions: AudienceBindingSuggestion[]; synced: AudienceBindingSuggestionSync }> => {
               const params = new URLSearchParams();
               if (opts?.status) params.set('status', opts.status);
               if (opts?.packageId) params.set('packageId', opts.packageId);
@@ -3604,7 +3810,7 @@ export class ObjectStackClient {
           },
 
           /** Confirm a suggestion — creates the anchor binding. */
-          confirm: async (id: string): Promise<any> => {
+          confirm: async (id: string): Promise<{ suggestion: AudienceBindingSuggestion; bindingCreated: boolean }> => {
               const res = await this.fetch(
                   `${this.baseUrl}/api/v1/security/suggested-bindings/${encodeURIComponent(id)}/confirm`,
                   { method: 'POST' },
@@ -3613,7 +3819,7 @@ export class ObjectStackClient {
           },
 
           /** Dismiss (decline) a suggestion. */
-          dismiss: async (id: string): Promise<any> => {
+          dismiss: async (id: string): Promise<{ suggestion: AudienceBindingSuggestion }> => {
               const res = await this.fetch(
                   `${this.baseUrl}/api/v1/security/suggested-bindings/${encodeURIComponent(id)}/dismiss`,
                   { method: 'POST' },
@@ -3735,69 +3941,69 @@ export class ObjectStackClient {
      * Recall (withdraw) a pending request. Submitter-only — the service
      * enforces access. (#3587 gap closure)
      */
-    recall: async (requestId: string, opts?: { actorId?: string; comment?: string }): Promise<any> => {
+    recall: async (requestId: string, opts?: { actorId?: string; comment?: string }): Promise<ApprovalRecallResult> => {
       const route = this.getRoute('approvals');
       const res = await this.fetch(`${this.baseUrl}${route}/requests/${encodeURIComponent(requestId)}/recall`, {
         method: 'POST',
         body: JSON.stringify({ actorId: opts?.actorId, comment: opts?.comment }),
       });
-      return this.unwrapResponse<any>(res);
+      return this.unwrapResponse<ApprovalRecallResult>(res);
     },
 
     /**
      * ADR-0044 send-back-for-revision: the request finalizes `returned` and
      * the flow run parks at a wait point. Pending-approver-only.
      */
-    revise: async (requestId: string, opts?: { actorId?: string; comment?: string }): Promise<any> => {
+    revise: async (requestId: string, opts?: { actorId?: string; comment?: string }): Promise<ApprovalSendBackResult> => {
       const route = this.getRoute('approvals');
       const res = await this.fetch(`${this.baseUrl}${route}/requests/${encodeURIComponent(requestId)}/revise`, {
         method: 'POST',
         body: JSON.stringify({ actorId: opts?.actorId, comment: opts?.comment }),
       });
-      return this.unwrapResponse<any>(res);
+      return this.unwrapResponse<ApprovalSendBackResult>(res);
     },
 
     /**
      * ADR-0044 resubmit-after-revision: re-enters the approval node.
      * Submitter-only. Returns the flow outcome (`resumed` / `autoRejected`).
      */
-    resubmit: async (requestId: string, opts?: { actorId?: string; comment?: string }): Promise<any> => {
+    resubmit: async (requestId: string, opts?: { actorId?: string; comment?: string }): Promise<ApprovalResubmitResult> => {
       const route = this.getRoute('approvals');
       const res = await this.fetch(`${this.baseUrl}${route}/requests/${encodeURIComponent(requestId)}/resubmit`, {
         method: 'POST',
         body: JSON.stringify({ actorId: opts?.actorId, comment: opts?.comment }),
       });
-      return this.unwrapResponse<any>(res);
+      return this.unwrapResponse<ApprovalResubmitResult>(res);
     },
 
     /** Nudge the pending approver(s); a thread interaction — the flow does not move. */
-    remind: async (requestId: string, opts?: { actorId?: string; comment?: string }): Promise<any> => {
+    remind: async (requestId: string, opts?: { actorId?: string; comment?: string }): Promise<{ request: ApprovalRequestRow; notified: number }> => {
       const route = this.getRoute('approvals');
       const res = await this.fetch(`${this.baseUrl}${route}/requests/${encodeURIComponent(requestId)}/remind`, {
         method: 'POST',
         body: JSON.stringify({ actorId: opts?.actorId, comment: opts?.comment }),
       });
-      return this.unwrapResponse<any>(res);
+      return this.unwrapResponse<{ request: ApprovalRequestRow; notified: number }>(res);
     },
 
     /** Ask the submitter for more information (thread interaction). */
-    requestInfo: async (requestId: string, opts?: { actorId?: string; comment?: string }): Promise<any> => {
+    requestInfo: async (requestId: string, opts?: { actorId?: string; comment?: string }): Promise<{ request: ApprovalRequestRow }> => {
       const route = this.getRoute('approvals');
       const res = await this.fetch(`${this.baseUrl}${route}/requests/${encodeURIComponent(requestId)}/request-info`, {
         method: 'POST',
         body: JSON.stringify({ actorId: opts?.actorId, comment: opts?.comment }),
       });
-      return this.unwrapResponse<any>(res);
+      return this.unwrapResponse<{ request: ApprovalRequestRow }>(res);
     },
 
     /** Append a comment (optionally with attachments) to the request thread. */
-    comment: async (requestId: string, opts: { comment: string; actorId?: string; attachments?: string[] }): Promise<any> => {
+    comment: async (requestId: string, opts: { comment: string; actorId?: string; attachments?: string[] }): Promise<{ request: ApprovalRequestRow }> => {
       const route = this.getRoute('approvals');
       const res = await this.fetch(`${this.baseUrl}${route}/requests/${encodeURIComponent(requestId)}/comment`, {
         method: 'POST',
         body: JSON.stringify({ actorId: opts.actorId, comment: opts.comment, attachments: opts.attachments }),
       });
-      return this.unwrapResponse<any>(res);
+      return this.unwrapResponse<{ request: ApprovalRequestRow }>(res);
     },
 
     /**
@@ -3820,12 +4026,12 @@ export class ObjectStackClient {
    */
   shares = {
     /** List the sharing grants on a record. */
-    list: async (object: string, recordId: string): Promise<any[]> => {
+    list: async (object: string, recordId: string): Promise<RecordShare[]> => {
         const route = this.getRoute('data');
         const res = await this.fetch(
             `${this.baseUrl}${route}/${encodeURIComponent(object)}/${encodeURIComponent(recordId)}/shares`,
         );
-        const body = await this.unwrapResponse<{ data?: any[] } | any[]>(res);
+        const body = await this.unwrapResponse<{ data?: RecordShare[] } | RecordShare[]>(res);
         return Array.isArray(body) ? body : (body?.data ?? []);
     },
 
@@ -3844,13 +4050,13 @@ export class ObjectStackClient {
             sourceId?: string;
             reason?: string;
         },
-    ): Promise<any> => {
+    ): Promise<RecordShare> => {
         const route = this.getRoute('data');
         const res = await this.fetch(
             `${this.baseUrl}${route}/${encodeURIComponent(object)}/${encodeURIComponent(recordId)}/shares`,
             { method: 'POST', body: JSON.stringify(opts) },
         );
-        return this.unwrapResponse<any>(res);
+        return this.unwrapResponse<RecordShare>(res);
     },
 
     /** Revoke a share by its id. */
@@ -3871,13 +4077,13 @@ export class ObjectStackClient {
      */
     rules: {
         /** List sharing rules, optionally by object / active-only. */
-        list: async (opts?: { object?: string; activeOnly?: boolean }): Promise<any[]> => {
+        list: async (opts?: { object?: string; activeOnly?: boolean }): Promise<SharingRuleRow[]> => {
             const params = new URLSearchParams();
             if (opts?.object) params.set('object', opts.object);
             if (opts?.activeOnly !== undefined) params.set('activeOnly', String(opts.activeOnly));
             const qs = params.toString();
             const res = await this.fetch(`${this.baseUrl}/api/v1/sharing/rules${qs ? `?${qs}` : ''}`);
-            const body = await this.unwrapResponse<{ data?: any[] } | any[]>(res);
+            const body = await this.unwrapResponse<{ data?: SharingRuleRow[] } | SharingRuleRow[]>(res);
             return Array.isArray(body) ? body : (body?.data ?? []);
         },
 
@@ -3892,18 +4098,18 @@ export class ObjectStackClient {
             label?: string;
             description?: string;
             active?: boolean;
-        }): Promise<any> => {
+        }): Promise<SharingRuleRow> => {
             const res = await this.fetch(`${this.baseUrl}/api/v1/sharing/rules`, {
                 method: 'POST',
                 body: JSON.stringify(rule),
             });
-            return this.unwrapResponse<any>(res);
+            return this.unwrapResponse<SharingRuleRow>(res);
         },
 
         /** Get a sharing rule by id or name. 404 [RULE_NOT_FOUND] when absent. */
-        get: async (idOrName: string): Promise<any> => {
+        get: async (idOrName: string): Promise<SharingRuleRow> => {
             const res = await this.fetch(`${this.baseUrl}/api/v1/sharing/rules/${encodeURIComponent(idOrName)}`);
-            return this.unwrapResponse<any>(res);
+            return this.unwrapResponse<SharingRuleRow>(res);
         },
 
         /** Delete a sharing rule; its materialised grants cascade. */
@@ -3916,12 +4122,12 @@ export class ObjectStackClient {
         },
 
         /** Re-evaluate a rule against current data and reconcile its grants. */
-        evaluate: async (idOrName: string): Promise<any> => {
+        evaluate: async (idOrName: string): Promise<SharingRuleEvaluationResult> => {
             const res = await this.fetch(`${this.baseUrl}/api/v1/sharing/rules/${encodeURIComponent(idOrName)}/evaluate`, {
                 method: 'POST',
                 body: JSON.stringify({}),
             });
-            return this.unwrapResponse<any>(res);
+            return this.unwrapResponse<SharingRuleEvaluationResult>(res);
         },
     },
   };
@@ -3930,6 +4136,17 @@ export class ObjectStackClient {
    * Global cross-object search (M10.5): one query across every searchable
    * object the caller can read. 501s on kernels without `searchAll`.
    * (#3587 gap closure)
+   *
+   * [#8140] ⛔ `Promise<any>` is DELIBERATE — a missing CONTRACT, not a
+   * missing annotation. The response shape
+   * (`{ query, hits, totalObjects, totalHits, truncated }`) is declared
+   * INLINE on the implementation (`@objectstack/metadata-protocol`'s
+   * `searchAll`), not in `@objectstack/spec`, and `metadata-protocol` is not
+   * a dependency of this package — so there is nothing reachable to bind.
+   * ⚠️ `SearchResult` (`@objectstack/spec/contracts`) is a NEAR-MISS trap: it
+   * types the per-object `ISearchService.search`, whose `hits` carry
+   * `score`/`document`, not this route's `object`/`title`/`snippet`/`record`.
+   * Binding it would typecheck and be false.
    */
   search = async (
       q: string,
@@ -3954,29 +4171,29 @@ export class ObjectStackClient {
    */
   reports = {
     /** List saved reports, optionally filtered by object or owner. */
-    list: async (opts?: { object?: string; ownerId?: string }): Promise<any[]> => {
+    list: async (opts?: { object?: string; ownerId?: string }): Promise<SavedReport[]> => {
         const params = new URLSearchParams();
         if (opts?.object) params.set('object', opts.object);
         if (opts?.ownerId) params.set('ownerId', opts.ownerId);
         const qs = params.toString();
         const res = await this.fetch(`${this.baseUrl}/api/v1/reports${qs ? `?${qs}` : ''}`);
-        const body = await this.unwrapResponse<{ data?: any[] } | any[]>(res);
+        const body = await this.unwrapResponse<{ data?: SavedReport[] } | SavedReport[]>(res);
         return Array.isArray(body) ? body : (body?.data ?? []);
     },
 
     /** Create or update a saved report definition. 400 [VALIDATION_FAILED] on a bad spec. */
-    save: async (report: any): Promise<any> => {
+    save: async (report: any): Promise<SavedReport> => {
         const res = await this.fetch(`${this.baseUrl}/api/v1/reports`, {
             method: 'POST',
             body: JSON.stringify(report ?? {}),
         });
-        return this.unwrapResponse<any>(res);
+        return this.unwrapResponse<SavedReport>(res);
     },
 
     /** Get a saved report by id. 404 [REPORT_NOT_FOUND] when absent. */
-    get: async (id: string): Promise<any> => {
+    get: async (id: string): Promise<SavedReport> => {
         const res = await this.fetch(`${this.baseUrl}/api/v1/reports/${encodeURIComponent(id)}`);
-        return this.unwrapResponse<any>(res);
+        return this.unwrapResponse<SavedReport>(res);
     },
 
     /** Delete a saved report; its schedules cascade. */
@@ -3989,12 +4206,12 @@ export class ObjectStackClient {
     },
 
     /** Execute a saved report and return its rendered output. */
-    run: async (id: string): Promise<any> => {
+    run: async (id: string): Promise<ReportRunResult> => {
         const res = await this.fetch(`${this.baseUrl}/api/v1/reports/${encodeURIComponent(id)}/run`, {
             method: 'POST',
             body: JSON.stringify({}),
         });
-        return this.unwrapResponse<any>(res);
+        return this.unwrapResponse<ReportRunResult>(res);
     },
 
     /**
@@ -4014,18 +4231,18 @@ export class ObjectStackClient {
             ownerId?: string;
             active?: boolean;
         },
-    ): Promise<any> => {
+    ): Promise<ReportSchedule> => {
         const res = await this.fetch(`${this.baseUrl}/api/v1/reports/${encodeURIComponent(id)}/schedule`, {
             method: 'POST',
             body: JSON.stringify(opts),
         });
-        return this.unwrapResponse<any>(res);
+        return this.unwrapResponse<ReportSchedule>(res);
     },
 
     /** List the recurring schedules attached to a report. */
-    listSchedules: async (id: string): Promise<any[]> => {
+    listSchedules: async (id: string): Promise<ReportSchedule[]> => {
         const res = await this.fetch(`${this.baseUrl}/api/v1/reports/${encodeURIComponent(id)}/schedules`);
-        const body = await this.unwrapResponse<{ data?: any[] } | any[]>(res);
+        const body = await this.unwrapResponse<{ data?: ReportSchedule[] } | ReportSchedule[]>(res);
         return Array.isArray(body) ? body : (body?.data ?? []);
     },
 
@@ -4817,6 +5034,13 @@ export class ObjectStackClient {
      * Duplicate a record (gated by the object's `enable.clone` capability).
      * `overrides` are applied on top of the copied values — e.g. a new name
      * or a cleared unique field. (#3587 gap closure)
+     *
+     * [#8140] ⛔ `Promise<any>` is DELIBERATE — a missing CONTRACT. The route
+     * returns `{ object, id, sourceId, record }`, produced inline by
+     * `@objectstack/metadata-protocol`'s `cloneData` and declared nowhere in
+     * `@objectstack/spec`. It is the structural sibling of this file's own
+     * `CreateDataResult<T>` plus `sourceId`, but writing that equivalence
+     * here would mint an undeclared contract in a consumer.
      */
     clone: async (object: string, id: string, overrides?: Record<string, any>): Promise<any> => {
         const route = this.getRoute('data');
@@ -5169,9 +5393,26 @@ export class ScopedProjectClient {
       const res = await this.parent._fetch(this.url(`/meta/${type}/${name}${qs ? `?${qs}` : ''}`));
       return this.parent._unwrap<GetMetaItemResponse>(res);
     },
-    /** Carries the ADR-0008 OCC token in `version` — see the unscoped twin. */
-    saveItem: async (type: string, name: string, item: any): Promise<SaveMetaItemResponse> => {
-      const res = await this.parent._fetch(this.url(`/meta/${type}/${name}`), {
+    /**
+     * Carries the ADR-0008 OCC token in `version` — see the unscoped twin.
+     *
+     * `options` is the SAME {@link SaveMetaItemOptions} bag the unscoped twin
+     * takes, and reaches the SAME handler: the scoped mount is not a second
+     * implementation, it is one `registerForBase` call replayed against
+     * `/environments/:environmentId` (see `RestServer`), so this door reads
+     * `?force` / `?package` / `?mode` byte-identically. A bag on only one of
+     * the two clients would be a fresh divergence of the kind #7019 rules
+     * against, not half a fix.
+     */
+    saveItem: async (
+      type: string,
+      name: string,
+      item: any,
+      options?: SaveMetaItemOptions,
+    ): Promise<SaveMetaItemResponse> => {
+      // `query`, not `qs` — it carries its own `?`; see the unscoped twin.
+      const query = metaSaveQuery(options);
+      const res = await this.parent._fetch(this.url(`/meta/${type}/${name}${query}`), {
         method: 'PUT',
         body: JSON.stringify(item),
       });
@@ -5417,9 +5658,9 @@ export class ScopedProjectClient {
    * package tests.
    */
   packages = {
-    list: async (): Promise<{ packages: any[]; total: number }> => {
+    list: async (): Promise<{ packages: InstalledPackage[]; total: number }> => {
       const res = await this.parent._fetch(this.url('/packages'));
-      return this.parent._unwrap<{ packages: any[]; total: number }>(res);
+      return this.parent._unwrap<{ packages: InstalledPackage[]; total: number }>(res);
     },
     get: async (id: string, version?: string) => {
       const qs = version ? `?version=${encodeURIComponent(version)}` : '';
@@ -5438,7 +5679,7 @@ export class ScopedProjectClient {
    */
   automation = {
     /** Fetch a flow definition by name. */
-    getFlow: async <T = any>(name: string): Promise<T> => {
+    getFlow: async <T extends FlowParsed = FlowParsed>(name: string): Promise<T> => {
       const res = await this.parent._fetch(this.url(`/automation/${encodeURIComponent(name)}`));
       return this.parent._unwrap<T>(res);
     },
@@ -5454,7 +5695,7 @@ export class ScopedProjectClient {
      * `409` `FLOW_DISABLED` and a definition with no `start` node with `422`
      * `FLOW_NO_START_NODE`. See that method for the full table.
      */
-    execute: async <T = any>(name: string, ctx?: Record<string, any>): Promise<T> => {
+    execute: async <T extends AutomationResult = AutomationResult>(name: string, ctx?: Record<string, any>): Promise<T> => {
       const res = await this.parent._fetch(this.url(`/automation/${encodeURIComponent(name)}/trigger`), {
         method: 'POST',
         body: JSON.stringify(ctx ?? {}),
@@ -5462,7 +5703,7 @@ export class ScopedProjectClient {
       return this.parent._unwrap<T>(res);
     },
     /** List recent runs for a flow, optionally narrowed to one status. */
-    listRuns: async <T = any>(
+    listRuns: async <T extends { runs: ExecutionLog[]; hasMore: boolean } = { runs: ExecutionLog[]; hasMore: boolean }>(
       flowName: string,
       opts?: { limit?: number; cursor?: string; status?: ExecutionStatus },
     ): Promise<T> => {
@@ -5478,7 +5719,7 @@ export class ScopedProjectClient {
       return this.parent._unwrap<T>(res);
     },
     /** Fetch a single run (with step log) for a flow. */
-    getRun: async <T = any>(flowName: string, runId: string): Promise<T> => {
+    getRun: async <T extends ExecutionLog = ExecutionLog>(flowName: string, runId: string): Promise<T> => {
       const res = await this.parent._fetch(
         this.url(`/automation/${encodeURIComponent(flowName)}/runs/${encodeURIComponent(runId)}`),
       );
@@ -5494,7 +5735,7 @@ export class ScopedProjectClient {
      * `err.details.errorMessage`) instead of resolving with an inner
      * `{ success: false }` under HTTP 200. See that method for the full shape.
      */
-    resume: async <T = any>(
+    resume: async <T extends AutomationResult = AutomationResult>(
       flowName: string,
       runId: string,
       signal?: {
@@ -5510,7 +5751,7 @@ export class ScopedProjectClient {
       return this.parent._unwrap<T>(res);
     },
     /** Fetch the screen a paused run is waiting on. */
-    getScreen: async <T = any>(flowName: string, runId: string): Promise<T> => {
+    getScreen: async <T extends { runId: string; screen: ScreenSpec } = { runId: string; screen: ScreenSpec }>(flowName: string, runId: string): Promise<T> => {
       const res = await this.parent._fetch(
         this.url(`/automation/${encodeURIComponent(flowName)}/runs/${encodeURIComponent(runId)}/screen`),
       );

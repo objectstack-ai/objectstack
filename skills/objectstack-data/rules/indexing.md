@@ -24,7 +24,7 @@ and it is the whole surface *because* it is all the driver materializes:
 | `unique` | optional | Uniqueness **and its scope** — see ADR-0120 section below |
 | `name` | optional | Custom index name; auto-generated when omitted |
 
-> **Retired at protocol 17 (#5248, #4943): `type` and `partial`.** Both were
+> **Retired at protocol 17: `type` and `partial`.** Both were
 > authorable and neither was ever read by any driver — an authored `type`
 > selected no access method, and an authored `partial` produced a **full**
 > index with the predicate silently discarded. Writing either is now a `tsc`
@@ -144,8 +144,8 @@ indexes: [
 ```typescript
 indexes: [
   { fields: ['status'], type: 'btree', unique: false },  // ❌ `type` retired; `unique: false` redundant
-  { fields: ['description'], type: 'fulltext' },         // ❌ `type` retired (#5248)
-  { fields: ['created_at'], partial: "status = 'active'" },  // ❌ `partial` retired (#5248)
+  { fields: ['description'], type: 'fulltext' },              // ❌ `type` retired
+  { fields: ['created_at'], partial: "status = 'active'" },   // ❌ `partial` retired
 ]
 ```
 
@@ -238,7 +238,7 @@ Place most **selective** (unique) fields first, then range/sort fields last.
 
 Both are real database capabilities. Neither is part of the **declaration**
 surface, and the keys that used to pretend otherwise (`type`, `partial`) were
-retired at protocol 17 (#5248, #4943) precisely because nothing consumed them.
+retired at protocol 17 precisely because nothing consumed them.
 
 **Access method (`btree` / `hash` / `gin` / `gist` / `fulltext`).** The driver
 and dialect decide. Postgres defaults to B-tree, which is the right choice for

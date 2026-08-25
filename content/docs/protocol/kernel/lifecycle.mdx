@@ -665,34 +665,59 @@ health-monitor model below, not to this body.
 
 ### Custom Health Checks
 
-Plugins can register custom health checks:
+A plugin can expose **one** custom health check, and it takes two halves: the
+plugin defines an ordinary method, and whoever runs the monitor names that
+method in the plugin's `PluginHealthCheck` config. There is no `healthChecks`
+field to declare — the monitor resolves the method dynamically off the plugin
+object (`plugin[checkMethod]`), so it is not a member of the `Plugin` interface
+either.
 
 ```typescript
-// Plugin registers a custom health check (internal health-monitor model)
-export default {
+import { PluginHealthMonitor } from '@objectstack/core';
+import { PluginHealthCheckSchema } from '@objectstack/spec/kernel';
+
+// 1. The plugin side — a plain method, invoked with NO arguments.
+export const salesforcePlugin = {
   name: '@vendor/salesforce',
 
-  healthChecks: {
-    salesforce_connection: async ({ context }) => {
-      try {
-        // Test Salesforce API
-        const response = await salesforce.query('SELECT Id FROM Account LIMIT 1');
-        
-        return {
-          status: 'healthy',
-          latency_ms: response.duration,
-          records_synced_last_hour: await getSyncCount(),
-        };
-      } catch (error) {
-        return {
-          status: 'unhealthy',
-          error: error.message,
-        };
-      }
-    },
+  // The name is free; `checkMethod` below is what points at it.
+  async healthCheck() {
+    try {
+      await salesforce.query('SELECT Id FROM Account LIMIT 1');
+      return true;
+    } catch (error) {
+      return { status: 'unhealthy', message: error.message };
+    }
   },
 };
+
+// 2. The host side — the embedding application owns the monitor.
+const monitor = new PluginHealthMonitor(kernel.logger);
+
+// `registerPlugin` takes the PARSED config, so parse it: the schema fills in
+// interval 30000, timeout 5000, failureThreshold 3, successThreshold 1,
+// autoRestart false, maxRestartAttempts 3, restartBackoff 'exponential'.
+monitor.registerPlugin(
+  salesforcePlugin.name,
+  PluginHealthCheckSchema.parse({ checkMethod: 'healthCheck' }),
+);
+
+monitor.startMonitoring(salesforcePlugin.name, salesforcePlugin);
 ```
+
+`startMonitoring` runs one check immediately, then repeats every `interval`
+milliseconds; each run is raced against `timeout`, and the method may be
+synchronous or return a promise.
+
+Only two returned shapes count as a failure: `false`, and an object whose
+`status` is exactly `'unhealthy'` (whose `message`, if any, becomes the
+report's). **Everything else passes** — `true`, `undefined`,
+`{ status: 'healthy' }` and a rich object of metrics alike, so a check has
+nowhere to publish latency or row counts: no key beyond `status` and `message`
+is read. Consecutive returned failures move the plugin to `degraded` first, and
+to `unhealthy` only once `failureThreshold` of them accumulate. A check that
+**throws** — including one that exceeds `timeout` — is the separate `failed`
+status, applied immediately with no threshold.
 
 The monitor keeps one report per plugin rather than one aggregate document. Each
 round of checks builds a `PluginHealthReport` (`@objectstack/spec/kernel`,
@@ -716,9 +741,15 @@ this shape over HTTP — it is an in-process model, not a wire body.
 `checks` is an **array**, and a check's `status` is `"passed" | "failed" |
 "warning"` — the six-value `"healthy" | "degraded" | "unhealthy" | "failed" |
 "recovering" | "unknown"` vocabulary belongs to the report's own top-level
-`status`, never to an entry inside `checks`. Each entry is named after the
-plugin's configured `checkMethod`, or `"plugin-loaded"` when a plugin configures
-none. `metrics.uptime` is in **milliseconds** (`Date.now() - startTime`), unlike
+`status`, never to an entry inside `checks`. An entry's `name` is one of three:
+
+| Entry `name` | Pushed when |
+| :--- | :--- |
+| the plugin's configured `checkMethod` | the custom check ran and returned — `"passed"`, or `"failed"` for the two failing shapes above |
+| `"plugin-loaded"` | no `checkMethod` is configured, **or** the configured name does not resolve to a function on the plugin |
+| `"health-check"` | the check **threw** — a `timeout` overrun included, since the race surfaces it as a rejection. A fixed name, neither the method's nor the default's, and always `status: "failed"` |
+
+`metrics.uptime` is in **milliseconds** (`Date.now() - startTime`), unlike
 the seconds-valued `uptime` of `GET /health` above, and the report carries no
 `version` field — it identifies its plugin by the key it is stored under. The
 optional `message` is set only when a check fails; the schema's remaining

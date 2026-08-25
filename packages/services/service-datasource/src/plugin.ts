@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { Plugin, PluginContext } from '@objectstack/core';
-import type { IntrospectedSchema } from '@objectstack/spec/contracts';
+import type { IDataEngine, IntrospectedSchema } from '@objectstack/spec/contracts';
 import {
   ExternalDatasourceService,
   type ExternalDatasourceServiceConfig,
@@ -10,15 +10,17 @@ import {
   type Logger,
 } from './external-datasource-service.js';
 
-/**
- * Minimal surfaces the plugin needs from the data engine + metadata service.
- * Kept structural so the plugin doesn't hard-depend on concrete classes.
- */
-interface DataEngineLike {
-  /** Resolve a driver by datasource name and introspect its live schema. */
-  introspectDatasource?: (datasource: string) => Promise<IntrospectedSchema>;
-  getDatasourceDriver?: (datasource: string) => { introspectSchema?: () => Promise<IntrospectedSchema> } | undefined;
-}
+// The structural `DataEngineLike` re-declaration that used to live here is
+// DELETED (#11493, part of the fix by the maintainer ruling): the `'data'`
+// service's real contract (`IDataEngine`, `@objectstack/spec/contracts`) now
+// declares `introspectDatasource?` with the spec return type, so this plugin
+// no longer needs a private engine type to recover `IntrospectedSchema` from
+// an untyped `Promise`. Its second member, `getDatasourceDriver?`, matched NO
+// engine in either repository (measured 2026-08-24: zero references outside
+// this file) — the fallback branch below probed it and could never fire. The
+// probe is respelled to the member the contract actually declares
+// (`getDriverByName?`, [#4251]), which makes the degradation reachable for
+// the first time instead of silently dead.
 
 interface MetadataServiceLike {
   get: (type: string, name: string) => Promise<unknown>;
@@ -61,14 +63,14 @@ export class ExternalDatasourceServicePlugin implements Plugin {
   }
 
   async init(ctx: PluginContext): Promise<void> {
-    const engine = safeGetService<DataEngineLike>(ctx, 'data');
+    const engine = safeGetService<IDataEngine>(ctx, 'data');
     const metadata = safeGetService<MetadataServiceLike>(ctx, 'metadata');
 
     const introspect: ExternalDatasourceServiceConfig['introspect'] =
       this.options.introspect ??
       (async (datasource: string) => {
         if (engine?.introspectDatasource) return engine.introspectDatasource(datasource);
-        const driver = engine?.getDatasourceDriver?.(datasource);
+        const driver = engine?.getDriverByName?.(datasource);
         if (driver?.introspectSchema) return driver.introspectSchema();
         throw new Error(
           `Cannot introspect datasource '${datasource}': no driver introspection available.`,

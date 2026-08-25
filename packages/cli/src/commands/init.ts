@@ -419,9 +419,9 @@ export default defineStack({
 });
 `,
     srcFiles: {
-      'src/objects/index.ts': (_name, namespace) => `export { default as ${toCamelCase(namespace)}Item } from './${namespace}_item';
+      'src/objects/index.ts': (_name, namespace) => `export { default as ${toCamelCase(namespace)}Item } from './${namespace}_item.object';
 `,
-      'src/objects/__name___item.ts': (_name, namespace) => `import * as Data from '@objectstack/spec/data';
+      'src/objects/__name___item.object.ts': (_name, namespace) => `import * as Data from '@objectstack/spec/data';
 
 const ${toCamelCase(namespace)}Item: Data.Object = {
   name: '${namespace}_item',
@@ -507,9 +507,9 @@ export default defineStack({
 });
 `,
     srcFiles: {
-      'src/objects/index.ts': (_name, namespace) => `export { default as ${toCamelCase(namespace)}Item } from './${namespace}_item';
+      'src/objects/index.ts': (_name, namespace) => `export { default as ${toCamelCase(namespace)}Item } from './${namespace}_item.object';
 `,
-      'src/objects/__name___item.ts': (_name, namespace) => `import * as Data from '@objectstack/spec/data';
+      'src/objects/__name___item.object.ts': (_name, namespace) => `import * as Data from '@objectstack/spec/data';
 
 const ${toCamelCase(namespace)}Item: Data.Object = {
   name: '${namespace}_item',
@@ -633,7 +633,7 @@ function printCreatedFilesSummary(targetDir: string, wasEmpty: boolean) {
  *
  * File paths use `__name__` as a placeholder for the NAMESPACE (not the npm
  * name) so generated identifiers stay snake_case even when the project name
- * contains hyphens (`my-app` → namespace `my_app` → `src/objects/my_app_item.ts`).
+ * contains hyphens (`my-app` → namespace `my_app` → `src/objects/my_app_item.object.ts`).
  *
  * Exported so the scaffold pin test generates projects through the real
  * emitter instead of a copy of it. A test that re-implemented this loop could

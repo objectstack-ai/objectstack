@@ -104,7 +104,8 @@ import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { LineCounter, isMap, isScalar, isSeq, parseDocument } from 'yaml';
+import { requireDependency } from './import-prerequisite.mjs';
+const { LineCounter, isMap, isScalar, isSeq, parseDocument } = await requireDependency('yaml', () => import('yaml'), import.meta.url);
 import { isEntrypoint } from './invoked-as.mjs';
 
 const WORKFLOW_DIR = '.github/workflows';

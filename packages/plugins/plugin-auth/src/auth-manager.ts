@@ -10,6 +10,16 @@ import type {
   AuthPluginConfig,
   OidcProvidersConfig,
 } from '@objectstack/spec/system';
+import { SystemObjectName, audiencePermitsSelfRegistration } from '@objectstack/spec/system';
+import {
+  assertAudienceConfig,
+  classifyCreationMethod,
+  decideAudienceAdmission,
+  isHumanUserRow,
+  resolveAudience,
+  AUDIENCE_CONFIG_ERROR,
+  type ResolvedAudience,
+} from './audience-posture.js';
 import type { IDataEngine } from '@objectstack/core';
 // [#10348] The ONE id-shaped platform-admin predicate (ADR-0068 D2).
 // `auth-manager` used to re-derive that standing itself, in two spellings
@@ -1008,6 +1018,15 @@ export class AuthManager {
     // history retention follows the cooldown; see otp-send-guard.ts.
     assertOtpCooldownSeconds(config.phoneOtp?.cooldownSeconds);
 
+    // [#11739] Audience posture — ENTRY validation, at boot, for the same
+    // reason as the OTP guard above: an unusable audience declaration must
+    // refuse the boot loudly, not surface as a 403 on the first sign-up.
+    // Off-vocabulary postures, inert declarations (ADR-0078) and the
+    // open-posture-with-verification-off contradiction are all refused here;
+    // `applyConfigPatch` runs the same assertion on the merged result so no
+    // entry path can smuggle an invalid declaration past boot.
+    assertAudienceConfig(config.audience, config.emailAndPassword);
+
     // WebContainer (StackBlitz) compatibility — install a synchronous
     // AsyncLocalStorage polyfill for better-auth's request-state global
     // BEFORE better-auth ever instantiates its own. See the helper for the
@@ -1149,6 +1168,16 @@ export class AuthManager {
         changeEmail: {
           enabled: true,
         },
+
+        // ── [#11739] Audience posture — THE enforcement point ──────────────
+        // better-auth's own admission gate, invoked by internalAdapter
+        // .createUser for EVERY creation path with a method-discriminated
+        // `source` (email-password, oauth, sso-oidc/saml, magic-link,
+        // email-otp, phone-number, anonymous, admin, scim, …), failing CLOSED
+        // by vendor construction. One seam, one owner — see
+        // `audience-posture.ts` for the decision semantics, the pinned
+        // domain-matching rules, and the creation-class table.
+        validateUserInfo: (data: any, ctx: any) => this.validateAudienceAdmission(data, ctx),
       },
       account: {
         ...AUTH_ACCOUNT_CONFIG,
@@ -1210,8 +1239,18 @@ export class AuthManager {
           ...(passwordHasher ? { password: passwordHasher } : {}),
           ...(effectiveDisableSignUp != null
             ? { disableSignUp: effectiveDisableSignUp } : {}),
-          ...(this.config.emailAndPassword?.requireEmailVerification != null
-            ? { requireEmailVerification: this.config.emailAndPassword.requireEmailVerification } : {}),
+          // [#11739] Invariant: a posture that permits self-registration
+          // (email_domain / open) FORCES email verification on — an
+          // unverified allowlisted-domain signup is colleague impersonation
+          // and makes the domain gate decorative. The explicit-false
+          // contradiction was already refused at config entry
+          // (assertAudienceConfig), so this forcing never overrides a value
+          // the entry validation accepted; getPublicConfig() mirrors it so
+          // the advertised flag cannot disagree with the wired one.
+          ...(audiencePermitsSelfRegistration(this.getAudience().posture)
+            ? { requireEmailVerification: true }
+            : (this.config.emailAndPassword?.requireEmailVerification != null
+              ? { requireEmailVerification: this.config.emailAndPassword.requireEmailVerification } : {})),
           ...(this.config.emailAndPassword?.minPasswordLength != null
             ? { minPasswordLength: this.config.emailAndPassword.minPasswordLength } : {}),
           ...(this.config.emailAndPassword?.maxPasswordLength != null
@@ -1655,6 +1694,19 @@ export class AuthManager {
             // the mount is conditional on the admin plugin, and because the
             // guard itself now lives in ONE module both call sites share —
             // `last-local-credential.ts`, whose header records this trap.
+            //
+            // ⚠️ `/admin/remove-user` IS ALSO SHADED NOW (#11477) — and it DOES
+            // still reach this hook, which is the opposite of the line above
+            // and is the point. Its mount only runs `gateAdmin` and then
+            // RE-DISPATCHES the request through `handleRequest`, so it re-enters
+            // better-auth's router and this hook fires exactly as before —
+            // just AFTER authorization instead of before it. That is the whole
+            // fix: an authenticated non-admin is now refused by the mount and
+            // never reaches the lookup below, while an admitted platform admin
+            // reaches the identical lookup and the identical `CONFLICT`.
+            // ⛔ Do not "reconcile" the two notes by deleting this path from
+            // the list — that would silently drop the guard on the one route
+            // that still depends on this hook to run it.
             // ── [#10776] AUTHENTICATE FIRST ────────────────────────────
             // A `hooks.before` runs AHEAD of the endpoint's own
             // `use: [adminMiddleware]`, and that middleware is the only layer
@@ -1720,6 +1772,46 @@ export class AuthManager {
             // fall through to better-auth's own handler
           }
 
+          // ── [#11739] Audience posture on the PASSWORD sign-up route ──
+          // The DECISION is validateAudienceAdmission — the same single owner
+          // the user.validateUserInfo gate calls for every creation path.
+          // This route alone needs the refusal raised HERE, before the
+          // handler: better-auth's sign-up route wraps createUser in an
+          // anti-enumeration shield (dist/api/routes/sign-up.mjs:163,235 —
+          // `shouldReturnGenericDuplicateResponse`, on whenever
+          // requireEmailVerification is on) that converts ANY 403 from the
+          // creation seam into a synthetic 200 "success". Correct for
+          // account-existence oracles; wrong for an audience refusal, which
+          // is deterministic per (posture, domain, invitation) and reveals
+          // nothing about any account — swallowed, it would turn the domain
+          // gate's refusal into a silent black hole (fake success, no
+          // verification mail ever). Measured: with posture `open`/
+          // `email_domain` (verification forced on) the validateUserInfo
+          // refusal came back 200 `{token:null,user:{synthetic}}`. The
+          // validateUserInfo gate stays wired for this route too — the
+          // decision is idempotent, so the second ask cannot disagree.
+          if (ctx?.path === '/sign-up/email') {
+            const refusal = await this.validateAudienceAdmission(
+              {
+                user: {
+                  ...(typeof ctx?.body?.email === 'string'
+                    ? { email: ctx.body.email.toLowerCase() }
+                    : {}),
+                },
+                source: { action: 'create-user', method: 'email-password' },
+              },
+              ctx,
+            );
+            if (refusal) {
+              const { APIError } = await import('better-auth/api');
+              throw new APIError('FORBIDDEN', {
+                code: refusal.error,
+                message: refusal.errorDescription ?? refusal.error,
+              });
+            }
+            // fall through — the vendor still decides everything it owns
+          }
+
           // ── ADR-0069 D2: account lockout (gate) ─────────────────────
           // Reject a sign-in for a locked identity BEFORE better-auth checks
           // the password — a lock must hold even against the correct password.
@@ -1732,15 +1824,16 @@ export class AuthManager {
           if (ctx?.path !== '/sign-up/email') return;
           const ep = ctx?.context?.options?.emailAndPassword;
           if (!ep?.disableSignUp) return;
-          try {
-            const adapter = ctx.context.adapter;
-            const existing = await adapter.findOne({ model: 'user', where: [] });
-            if (!existing) {
-              ctx.context.__osDisableSignUpOrig = ep.disableSignUp;
-              ep.disableSignUp = false;
-            }
-          } catch {
-            // Adapter not ready → keep disableSignUp on.
+          // [#11767] Same population question, same owner. This site used to
+          // ask `ctx.context.adapter.findOne({ model: 'user', where: [] })`,
+          // which the real ObjectQL engine REFUSES (#4419 —
+          // `requireFindOnePredicate`) rather than answers; the surrounding
+          // `catch` read that refusal as "users exist" and the declared
+          // bypass never fired on a real deployment. `isBootstrapCreation`
+          // owns the answerable form — see its doc.
+          if (await this.isBootstrapCreation()) {
+            ctx.context.__osDisableSignUpOrig = ep.disableSignUp;
+            ep.disableSignUp = false;
           }
         }),
         after: createAuthMiddleware(async (ctx: any) => {
@@ -2685,6 +2778,12 @@ export class AuthManager {
               },
               relatedObject: 'sys_invitation',
               relatedId: invitation.id,
+              // #11741 — the invitation HOLDS its organization; thread it so
+              // the sys_email row is stamped. Org-less auth mail (reset /
+              // verification / magic link) deliberately threads nothing.
+              ...(invitation.organizationId
+                ? { organizationId: String(invitation.organizationId) }
+                : {}),
             });
           } catch (err: any) {
             // Do NOT rethrow: the invitation row was already persisted by
@@ -3250,10 +3349,38 @@ export class AuthManager {
       next.socialProviders = patch.socialProviders;
     }
 
+    // [#11739] The audience declaration replaces WHOLE (never a deep merge —
+    // a posture switch changes which sibling keys are even legal, so merging
+    // stale domains under a new posture would manufacture the inert shapes
+    // the entry validation refuses). Validate the MERGED result before it
+    // becomes current: a patch that would leave the audience configuration
+    // unusable — off-vocabulary posture, inert keys, verification
+    // contradiction — is refused loudly here and the standing config keeps
+    // ruling (the settings-boundary posture of #5152: reject, never coerce).
+    if ('audience' in patch) {
+      next.audience = patch.audience;
+    }
+    if ('audience' in patch || 'emailAndPassword' in patch) {
+      assertAudienceConfig(next.audience, next.emailAndPassword);
+    }
+
     this.config = next;
     if (this.auth && !patch.authInstance) {
       this.auth = null;
     }
+  }
+
+  /**
+   * [#11739] The deployment's audience posture **as it stands right now** —
+   * the `getMembershipPolicy()` pattern: the ONE source every consumer reads
+   * (the validateUserInfo admission gate, the better-auth wiring's forced
+   * email verification, and `getPublicConfig()`'s `features.audiencePosture`),
+   * so a config patch reaches all of them without a restart and no captured
+   * constructor option can go stale against the live setting. Undeclared ⇒
+   * `invite_only` (epic #11723 ruling — no legacy/undeclared limbo).
+   */
+  getAudience(): ResolvedAudience {
+    return resolveAudience(this.config.audience);
   }
 
   /**
@@ -3328,6 +3455,441 @@ export class AuthManager {
     }
   }
 
+  // ── [#11739] Audience posture — admission gate + self-registration grant ──
+
+  /**
+   * Self-registration grants staged between the admission gate (which runs
+   * just before the user row is inserted and is the last point that may
+   * REFUSE) and `user.create.after` (the first point the created user id
+   * exists). Keyed by lowercased email — better-auth lowercases the address
+   * on `createUser`, and an in-flight duplicate email cannot create twice
+   * (unique). Entries are pruned by age so an admission whose creation never
+   * completed cannot leak.
+   */
+  private pendingSelfRegistrationGrants = new Map<
+    string,
+    { setName: string; stagedAtMs: number }
+  >();
+
+  private static readonly SELF_REG_GRANT_STAGE_TTL_MS = 10 * 60 * 1000;
+
+  /**
+   * Page size of the bootstrap population probe ({@link isBootstrapCreation}).
+   * Matches the bound the dev-admin seed reads with, so the two ask the same
+   * question of the same window.
+   */
+  private static readonly BOOTSTRAP_USER_PROBE_LIMIT = 50;
+
+  /**
+   * Page size of the pending-invitation probe ({@link hasPendingInvitationFor}).
+   * Unlike the bootstrap probe's limit this is NOT a bound on the answer — the
+   * probe's read is narrowed to one address and its page chain is exhausted —
+   * so the value only trades round trips against page size.
+   */
+  private static readonly PENDING_INVITATION_PROBE_PAGE = 50;
+
+  /**
+   * Termination guarantee for that page chain, not a ceiling on the answer:
+   * reaching it would mean 10k pending invitations addressed to a single
+   * person, and it is reported at error level rather than answered silently.
+   */
+  private static readonly PENDING_INVITATION_PROBE_MAX_PAGES = 200;
+
+  /** `error` when the host logger carries it, else the guaranteed `warn` channel (#9754). */
+  private audienceLogError(message: string, meta?: Record<string, unknown>): void {
+    const logger = this.config.logger as
+      | { error?: (m: string, meta?: any) => void; warn?: (m: string, meta?: any) => void; info?: (m: string, meta?: any) => void }
+      | undefined;
+    (logger?.error ?? logger?.warn)?.(message, meta);
+  }
+
+  /** OAuth providerIds that are OPERATOR-REGISTERED identity authorities (enterprise `oidcProviders`, incl. the cloud platform IdP). */
+  private enterpriseOAuthProviderIds(): ReadonlySet<string> {
+    const ids = new Set<string>();
+    for (const p of this.config.oidcProviders ?? []) {
+      const id = (p as { providerId?: unknown } | undefined)?.providerId;
+      if (typeof id === 'string' && id) ids.add(id);
+    }
+    return ids;
+  }
+
+  /**
+   * The better-auth `user.validateUserInfo` gate — [#11739]'s ONE enforcement
+   * point. Semantics (creation classes, invitation carve-out, pinned domain
+   * matching, fail postures) live in `audience-posture.ts`; this method owns
+   * only the I/O the pure decision needs: the zero-user bootstrap probe, the
+   * pending-invitation lookup, and the declared permission set's completeness
+   * check. Answers `undefined` to admit, `{ error, errorDescription }` to
+   * refuse (the vendor surfaces it as a 403 whose `code` is ours; browser
+   * OAuth flows redirect to the error URL carrying the same code).
+   *
+   * [#11767] The vendor's second argument — the endpoint context — is
+   * deliberately UNREAD. Both probes below take their own ctx-independent data
+   * path, because sourcing this gate's I/O from the request context is exactly
+   * what made the bootstrap bypass inert (see {@link isBootstrapCreation}).
+   * The parameter is kept so the signature still reads as the vendor's.
+   */
+  private async validateAudienceAdmission(
+    data: {
+      user?: Record<string, unknown>;
+      source?: { action?: string; method?: string; oauth?: { providerId?: string } };
+    },
+    _ctx?: unknown,
+  ): Promise<{ error: string; errorDescription?: string } | undefined> {
+    try {
+      // link-account / provider sign-in concern an EXISTING user's identity,
+      // not audience admission — the posture judges only who may COME INTO
+      // EXISTENCE.
+      if (data?.source?.action !== 'create-user') return undefined;
+      const audience = this.getAudience();
+      const creationClass = classifyCreationMethod(data?.source, {
+        enterpriseOAuthProviderIds: this.enterpriseOAuthProviderIds(),
+      });
+      const email = typeof data?.user?.email === 'string' ? (data.user.email as string) : undefined;
+      let isBootstrap = false;
+      let hasPendingInvitation = false;
+      if (creationClass === 'self-serve') {
+        // Only the gated class pays for the probes.
+        isBootstrap = await this.isBootstrapCreation();
+        if (!isBootstrap && email) hasPendingInvitation = await this.hasPendingInvitationFor(email);
+      }
+      const verdict = decideAudienceAdmission({
+        audience,
+        creationClass,
+        email,
+        hasPendingInvitation,
+        isBootstrap,
+      });
+      if (!verdict.admit) {
+        if (verdict.code === AUDIENCE_CONFIG_ERROR) {
+          // Config-unusable refusals are the operator's bug, not policy —
+          // report at error level with the offending value in the line
+          // (#5205: never let "your posture is not a posture" read as
+          // "policy said no").
+          this.audienceLogError(`[audience] refusing self-registration: ${verdict.message}`, {
+            method: data?.source?.method,
+          });
+        } else {
+          this.config.logger?.info?.('[audience] self-registration refused by posture', {
+            code: verdict.code,
+            method: data?.source?.method,
+            posture: audience.posture,
+          });
+        }
+        return { error: verdict.code, errorDescription: verdict.message };
+      }
+      if (verdict.grantPermissionSet) {
+        const setName = audience.selfRegistrationPermissionSet;
+        if (!setName) {
+          // Unreachable past entry validation; keep the fail-closed floor —
+          // admitting without the declared grant would be ADR-0078's
+          // "declared but inert" at runtime.
+          const message =
+            `audience posture '${audience.posture}' permits self-registration but declares no ` +
+            'selfRegistrationPermissionSet — self-registration is refused until the configuration is fixed.';
+          this.audienceLogError(`[audience] ${message}`);
+          return { error: AUDIENCE_CONFIG_ERROR, errorDescription: message };
+        }
+        const resolvable = await this.selfRegistrationSetResolvable(setName);
+        if (!resolvable) {
+          const message =
+            `the declared self-registration permission set '${setName}' cannot be resolved in ` +
+            'sys_permission_set (missing, deactivated, or the permission-set store is unavailable) — ' +
+            'self-registration is refused rather than admitting an ungranted user. ' +
+            'Create/activate the set, or point selfRegistrationPermissionSet at an existing one.';
+          this.audienceLogError(`[audience] ${message}`);
+          return { error: AUDIENCE_CONFIG_ERROR, errorDescription: message };
+        }
+        if (email) this.stageSelfRegistrationGrant(email, setName);
+      }
+      return undefined;
+    } catch (error) {
+      // Fail CLOSED: an admission question this gate cannot answer must not
+      // admit. Operator/provider classes never reach I/O, so they cannot land
+      // here.
+      const message = 'audience admission could not be evaluated — self-registration refused.';
+      this.audienceLogError(`[audience] ${message}`, {
+        error: (error as Error)?.message ?? String(error),
+      });
+      return { error: AUDIENCE_CONFIG_ERROR, errorDescription: message };
+    }
+  }
+
+  /**
+   * Zero HUMAN users exist — the first-run owner wizard / seeded admin
+   * creating the very first account (a fresh install must never lock its
+   * operator out). {@link isHumanUserRow} owns the population predicate and
+   * says why it is humans rather than rows. An unanswerable probe reads as
+   * NOT bootstrap (gate stays on) — fail closed is deliberate here, which is
+   * exactly why the probe must be ANSWERABLE at every seam that asks.
+   *
+   * ## Why this reads the data engine and not `ctx.context.adapter`
+   *
+   * The first spelling of this probe was `adapter.findOne({ model: 'user',
+   * where: [] })`, copied from the `disableSignUp` bypass below. On the real
+   * ObjectQL engine that call does not answer — it THROWS. `where: []` lowers
+   * to an empty filter, and `requireFindOnePredicate` (#4419) refuses a
+   * `findOne` that selects no particular record rather than hand back an
+   * arbitrary row. The `catch` turned that refusal into `false`, so EVERY
+   * bootstrap creation read as "not bootstrap" and the `invite_only` default
+   * refused the operator's own first account — with the in-memory harness
+   * green throughout, because a fake engine has no such guard.
+   *
+   * So the probe is expressed the way it can actually be answered: a bounded
+   * `find` through `withSystemReadContext`, the same ctx-independent data
+   * path {@link hasPendingInvitationFor} uses one frame away. `find` carries
+   * no #4419 predicate requirement — asking for a PAGE is a well-posed
+   * question in a way that asking for an unspecified single row is not.
+   */
+  private async isBootstrapCreation(): Promise<boolean> {
+    const engine = this.config.dataEngine;
+    if (!engine || typeof (engine as any).find !== 'function') return false;
+    try {
+      const reader = withSystemReadContext(engine) as any;
+      const raw = await reader.find(SystemObjectName.USER, {
+        limit: AuthManager.BOOTSTRAP_USER_PROBE_LIMIT,
+      });
+      const rows: any[] = Array.isArray(raw) ? raw : Array.isArray(raw?.records) ? raw.records : [];
+      if (rows.some(isHumanUserRow)) return false;
+      // A page that came back FULL of non-human rows cannot prove there is no
+      // human on the next page — fail closed rather than guess.
+      return rows.length < AuthManager.BOOTSTRAP_USER_PROBE_LIMIT;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * A pending, unexpired `sys_invitation` row exists for this email.
+   *
+   * ## Why the address goes into the QUERY rather than into a memory scan
+   *
+   * The first spelling read `{ status: 'pending' }` with `limit: 200` and
+   * matched the address in JS. That is a CEILING, not a bound: past 200
+   * concurrently-pending invitations in one environment, an invitee outside
+   * the first page was not found, so under the `invite_only` default their
+   * registration was refused with `SELF_REGISTRATION_CLOSED` — the invitation
+   * lane silently failing for the TAIL of a large rollout, with no signal to
+   * the administrator or the invitee. A 500-employee onboarding reaches it.
+   *
+   * The scan existed to make the match case-insensitive, on the stated belief
+   * that invitation addresses are stored as the inviter typed them while
+   * better-auth lowercases the registrant's. Measured on the installed
+   * better-auth 1.7.1, that belief is wrong on BOTH halves — the vendor
+   * normalizes each side before this gate ever sees it:
+   *
+   *  - `organization/invite-member` lowercases `ctx.body.email` and carries
+   *    that value into `createInvitation` (and into the resend path), so the
+   *    stored `sys_invitation.email` is already the normalized form;
+   *  - `internalAdapter.createUser` lowercases `user.email` *before* it calls
+   *    `validateUserInfo`, so the address this gate is asked about is already
+   *    normalized too.
+   *
+   * The vendor's own reads agree: `findPendingInvitation`,
+   * `listUserInvitations` and `findMemberByEmail` all query with
+   * `email.toLowerCase()`. A mixed-case row would therefore be unredeemable
+   * by `accept-invitation` and invisible in the invitee's own inbox — the old
+   * tolerance admitted a registrant to an invitation they could never accept.
+   *
+   * So the address is pushed into the query (`sys_invitation.email` carries a
+   * declared index) and the page chain is EXHAUSTED. That removes the ceiling
+   * without putting a read of the environment's whole pending population on
+   * the self-serve sign-up path: a page here is "pending invitations
+   * addressed to this one person", which the vendor bounds by refusing a
+   * second pending invitation per organization.
+   *
+   * The JS comparison is KEPT and is not dead. `=` folds case on some
+   * collations (MySQL's default) and folds accents with it, so every returned
+   * row is re-checked against the normalized target: a case-only difference
+   * still matches — identical to the old behaviour on such a store — while an
+   * accent-only difference does not, so a folding collation cannot WIDEN what
+   * counts as an invitation. Expiry stays in JS for the reason it was there:
+   * a row with no readable `expires_at` keeps reading as live, which an
+   * `expires_at: { $gt: … }` predicate would silently narrow away.
+   *
+   * Unanswerable ⇒ no carve-out (fail CLOSED): the `catch` returns false, so
+   * the declared posture applies rather than an unverified admission.
+   */
+  private async hasPendingInvitationFor(email: string): Promise<boolean> {
+    const engine = this.config.dataEngine;
+    if (!engine || typeof (engine as any).find !== 'function') return false;
+    const target = email.trim().toLowerCase();
+    if (!target) return false;
+    try {
+      const reader = withSystemReadContext(engine) as any;
+      const nowMs = Date.now();
+      const page = AuthManager.PENDING_INVITATION_PROBE_PAGE;
+      const seenIds = new Set<unknown>();
+      for (let pageIndex = 0; pageIndex < AuthManager.PENDING_INVITATION_PROBE_MAX_PAGES; pageIndex++) {
+        const offset = pageIndex * page;
+        const raw = await reader.find('sys_invitation', {
+          where: { status: 'pending', email: target },
+          limit: page,
+          // Omitted on the first page so the ordinary single-page read sends
+          // exactly the option shape every driver already answers.
+          ...(offset > 0 ? { offset } : {}),
+        });
+        const rows: any[] = Array.isArray(raw) ? raw : Array.isArray(raw?.records) ? raw.records : [];
+        const idsBefore = seenIds.size;
+        for (const row of rows) {
+          if (row?.id != null) seenIds.add(row.id);
+          const rowEmail = typeof row?.email === 'string' ? row.email.trim().toLowerCase() : '';
+          if (rowEmail !== target) continue;
+          const expires = row?.expires_at ?? row?.expiresAt;
+          if (expires != null) {
+            const expMs = new Date(expires as any).getTime();
+            if (Number.isFinite(expMs) && expMs <= nowMs) continue;
+          }
+          return true;
+        }
+        // Exhausted: a short page is the end of the chain. The second arm is
+        // the termination guarantee against a driver that accepts `offset`
+        // and ignores it — a page that carried no row id this loop had not
+        // already read cannot carry a new answer either, and looping forever
+        // on the sign-up path would be worse than the ceiling being removed.
+        if (rows.length < page) return false;
+        if (seenIds.size === idsBefore && rows.some((r) => r?.id != null)) return false;
+      }
+      // Unreachable on any real population (that is 10k pending invitations
+      // addressed to ONE person). Loud rather than silent: the defect this
+      // method closes was a boundary nobody could see from either side.
+      this.audienceLogError(
+        '[audience] pending-invitation probe hit its page ceiling — the carve-out is being refused '
+          + 'without having read every pending invitation for this address.',
+        { pages: AuthManager.PENDING_INVITATION_PROBE_MAX_PAGES, pageSize: page },
+      );
+      return false;
+    } catch {
+      return false;
+    }
+  }
+
+  /** At least one ACTIVE `sys_permission_set` row carries the declared name. */
+  private async selfRegistrationSetResolvable(setName: string): Promise<boolean> {
+    const rows = await this.findPermissionSetRows(setName);
+    return rows.some((r) => r?.active !== false && typeof r?.id === 'string' && r.id);
+  }
+
+  private async findPermissionSetRows(setName: string): Promise<any[]> {
+    const engine = this.config.dataEngine;
+    if (!engine || typeof (engine as any).find !== 'function') return [];
+    try {
+      const reader = withSystemReadContext(engine) as any;
+      const raw = await reader.find('sys_permission_set', { where: { name: setName }, limit: 50 });
+      return Array.isArray(raw) ? raw : Array.isArray(raw?.records) ? raw.records : [];
+    } catch {
+      return [];
+    }
+  }
+
+  private stageSelfRegistrationGrant(email: string, setName: string): void {
+    this.prunePendingSelfRegistrationGrants();
+    this.pendingSelfRegistrationGrants.set(email.trim().toLowerCase(), {
+      setName,
+      stagedAtMs: Date.now(),
+    });
+  }
+
+  private prunePendingSelfRegistrationGrants(): void {
+    const cutoff = Date.now() - AuthManager.SELF_REG_GRANT_STAGE_TTL_MS;
+    for (const [key, value] of this.pendingSelfRegistrationGrants) {
+      if (value.stagedAtMs < cutoff) this.pendingSelfRegistrationGrants.delete(key);
+    }
+  }
+
+  /**
+   * Land the staged self-registration grant for a freshly created user — the
+   * `user.create.after` half of an admitted self-registration. Idempotent
+   * (existing `(user, set)` pair wins), org-scoped to the same target org the
+   * membership reconciler resolves (falls back to an unscoped row only when
+   * no org is resolvable — multi-org self-registration binds no org either).
+   *
+   * A failure here is reported at the DURABILITY level (`error` when the sink
+   * carries it): the system keeps looking normal from the outside while a
+   * grant the configuration claims has not landed — the declared≠enforced
+   * state #11739 exists to close. The consequence and the fix ride the first
+   * line.
+   */
+  private async settleSelfRegistrationGrant(user: any): Promise<void> {
+    let staged: { setName: string; stagedAtMs: number } | undefined;
+    try {
+      const email = typeof user?.email === 'string' ? user.email.trim().toLowerCase() : '';
+      const userId = typeof user?.id === 'string' ? user.id : '';
+      if (!email || !userId) return;
+      this.prunePendingSelfRegistrationGrants();
+      staged = this.pendingSelfRegistrationGrants.get(email);
+      if (!staged) return;
+      this.pendingSelfRegistrationGrants.delete(email);
+      const engine = this.config.dataEngine;
+      if (!engine) {
+        this.reportUngrantedSelfRegistrant(userId, staged.setName, 'no data engine is available');
+        return;
+      }
+      const sys = withSystemReadContext(engine) as any;
+      let organizationId: string | null = null;
+      try {
+        const tenancy = this.config.getTenancy?.();
+        organizationId = tenancy ? await tenancy.defaultOrgId() : null;
+      } catch {
+        organizationId = null;
+      }
+      const rows = (await this.findPermissionSetRows(staged.setName)).filter(
+        (r) => r?.active !== false && typeof r?.id === 'string' && r.id,
+      );
+      const row =
+        (organizationId ? rows.find((r) => r?.organization_id === organizationId) : undefined) ??
+        rows.find((r) => r?.organization_id == null) ??
+        (rows.length === 1 ? rows[0] : undefined);
+      if (!row) {
+        this.reportUngrantedSelfRegistrant(
+          userId,
+          staged.setName,
+          organizationId
+            ? `no active sys_permission_set row named '${staged.setName}' resolves for organization ${organizationId}`
+            : `no active sys_permission_set row named '${staged.setName}' resolves`,
+        );
+        return;
+      }
+      const existingRaw = await sys.find('sys_user_permission_set', {
+        where: { user_id: userId, permission_set_id: row.id },
+        limit: 1,
+      });
+      const existing: any[] = Array.isArray(existingRaw)
+        ? existingRaw
+        : Array.isArray(existingRaw?.records)
+          ? existingRaw.records
+          : [];
+      if (existing.length > 0) return;
+      const id = `ups_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
+      await sys.insert('sys_user_permission_set', {
+        id,
+        user_id: userId,
+        permission_set_id: row.id,
+        ...(organizationId ? { organization_id: organizationId } : {}),
+      });
+      this.config.logger?.info?.('[audience] granted the declared self-registration permission set', {
+        userId,
+        permissionSet: staged.setName,
+        organizationId: organizationId ?? undefined,
+      });
+    } catch (error) {
+      this.reportUngrantedSelfRegistrant(
+        typeof user?.id === 'string' ? user.id : '(unknown)',
+        staged?.setName ?? '(unknown)',
+        (error as Error)?.message ?? String(error),
+      );
+    }
+  }
+
+  private reportUngrantedSelfRegistrant(userId: string, setName: string, cause: string): void {
+    this.audienceLogError(
+      `[audience] a self-registrant was ADMITTED but the declared permission set '${setName}' was NOT granted ` +
+      `(user ${userId}) — the account works and everything looks normal, but it holds only baseline access, ` +
+      `and nothing retries this. Fix: verify the set exists and is active for the target organization, then grant it ` +
+      `manually (sys_user_permission_set) or have the user re-created. Cause: ${cause}`,
+    );
+  }
+
   /**
    * Inject (or replace) the outbound email service used by better-auth
    * callbacks. Safe to call after construction but BEFORE the first
@@ -3344,6 +3906,21 @@ export class AuthManager {
   /** @internal Used by callback closures. */
   private getEmailService(): IEmailService | undefined {
     return this.config.emailService;
+  }
+
+  /**
+   * [#11640] Whether an outbound email transport is wired RIGHT NOW.
+   *
+   * The one public read of the fact every verification link depends on: with
+   * no transport the `sendVerificationEmail` callback has nowhere to send, so
+   * an address can only ever become verified through a federated sign-in. The
+   * boot check in `walled-owner-verification-path.ts` asks this rather than
+   * re-deriving it from config, because the transport can arrive two ways —
+   * host-supplied at construction, or injected on `kernel:ready` once the
+   * kernel `email` service resolves — and only this object sees both.
+   */
+  public hasEmailTransport(): boolean {
+    return !!this.config.emailService;
   }
 
   /**
@@ -4202,10 +4779,23 @@ export class AuthManager {
     // `enabled` stays true (break-glass), but signup is forced off and the UI
     // suppresses the password form via `features.ssoEnforced` below.
     const ssoOnly = this.resolveSsoOnly();
+    // [#11739] The audience posture, resolved once for this response: the
+    // forced-verification mirror below and `features.audiencePosture` must
+    // answer from the same read the enforcement path uses (getAudience —
+    // the getMembershipPolicy pattern). Note `disableSignUp` is deliberately
+    // NOT forced by the posture: under invite_only the sign-up route still
+    // admits a pending invitee, so hiding the form entirely would dead-end
+    // invited users — the posture rides its own key instead.
+    const audience = this.getAudience();
     const emailPassword = {
       enabled: emailPasswordConfig.enabled !== false, // Default to true
       disableSignUp: ssoOnly ? true : (disableSignUpFromEnv ?? emailPasswordConfig.disableSignUp ?? false),
-      requireEmailVerification: emailPasswordConfig.requireEmailVerification ?? false,
+      // Mirrors the wiring in createAuthInstance(): a self-registration-
+      // permitting posture forces verification ON — the advertised flag must
+      // not disagree with the wired one.
+      requireEmailVerification: audiencePermitsSelfRegistration(audience.posture)
+        ? true
+        : (emailPasswordConfig.requireEmailVerification ?? false),
     };
 
     // Extract enabled features
@@ -4273,6 +4863,14 @@ export class AuthManager {
       // `group` the org switcher picks the WRITE target while reads span every
       // organization the member belongs to ("all my organizations" views).
       tenancyPosture,
+      // [#11739] WHICH audience posture is in force (invite_only |
+      // email_domain | open) — a value, not a flag (registered in
+      // PUBLIC_AUTH_CONFIG_NON_FLAG_KEYS beside tenancyPosture). Lets the
+      // login surface render honest messaging instead of a sign-up form the
+      // server will refuse. An off-vocabulary config value reports the safe
+      // coercion (invite_only) here while the enforcement path refuses with
+      // AUTH_CONFIG_ERROR — display never fails open.
+      audiencePosture: audience.posture,
       // ADR-0093 D5 — brand the degraded state everywhere an operator looks.
       // True iff multi-org was requested but tenant isolation is inactive
       // (booted only because OS_ALLOW_DEGRADED_TENANCY=1). The console can
@@ -4973,6 +5571,13 @@ export class AuthManager {
     const hostUserAfter = (host as any)?.user?.create?.after;
     const membershipReconciler = async (user: any) => {
       await this.settleMembership(user?.id);
+      // [#11739] The second half of an admitted SELF-registration: land the
+      // DECLARED permission-set grant staged by the validateUserInfo gate.
+      // Same seam as the membership bind (the one every creation path flows
+      // through), same never-throw posture — but a failure here is reported
+      // at the durability level, because an admitted-but-ungranted
+      // self-registrant is the declared≠enforced state this card closes.
+      await this.settleSelfRegistrationGrant(user);
     };
     const userAfter = hostUserAfter
       ? async (user: any, ctx: any) => {

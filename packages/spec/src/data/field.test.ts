@@ -357,6 +357,93 @@ describe('FieldSchema', () => {
         if (result.success) expect(result.data.currencyConfig?.precision).toBe(10);
       });
     });
+
+    /**
+     * #11566 (maintainer ruling 2026-08-24) — `maxLength` tightens on both
+     * axes. Shape: a character length is a positive integer, so `0` / `-5` /
+     * `12.5` are refused at the producer (`z.number().int().min(1)` — the
+     * #8321 house pattern one field below; `maxLength: 0` measurably sent
+     * schema-drift planning `varchar(0)` DDL, at severity error/destructive,
+     * before #11431 taught the consumer to defend itself). Applicability: the
+     * key was on the BASE schema — authorable on `boolean`/`lookup`/
+     * `autonumber` where nothing bounded is stored — and now converges to the
+     * write-time validator's bounded-string types
+     * (BOUNDED_STRING_FIELD_TYPES; ten at #11566, `signature`/`qrcode`
+     * joined in #11875 when the write seam gained their bound).
+     */
+    describe('malformed or misplaced maxLength declarations are refused at authoring (#11566)', () => {
+      const shapeCases: Array<[value: number, code: string]> = [
+        [0, 'too_small'],     // the issue repro: varchar(0) is not a bound
+        [-5, 'too_small'],
+        [12.5, 'invalid_type'], // non-integer count — the varchar(12.5) repro
+      ];
+      for (const [value, code] of shapeCases) {
+        it(`refuses maxLength: ${value} on a text field with a ${code} issue at [maxLength]`, () => {
+          const result = FieldSchema.safeParse({
+            name: 'title', label: 'Title', type: 'text', maxLength: value,
+          });
+          expect(result.success).toBe(false);
+          if (!result.success) {
+            const issue = result.error.issues.find((i) => i.path[0] === 'maxLength');
+            expect(issue?.code).toBe(code);
+            // Message substance, not just a throw: the refusal names what a
+            // legal value looks like (int / >=1), so an AI author can fix it.
+            expect(issue?.message).toMatch(code === 'invalid_type' ? /expected int/ : />=1/);
+          }
+        });
+      }
+
+      // One representative per family the base-schema placement wrongly
+      // accepted: logic, numeric, temporal, selection, relational,
+      // runtime-owned, derived, structured — plus `secret` and `color`, the
+      // near-misses the #11875 ruling explicitly left OUT of the set (`secret`
+      // stores a ciphertext handle per ADR-0100; `color` is short by
+      // construction).
+      const wrongTypes = [
+        'boolean', 'number', 'date', 'select', 'lookup', 'autonumber',
+        'formula', 'json', 'secret', 'color',
+      ] as const;
+      for (const type of wrongTypes) {
+        it(`refuses maxLength on type: '${type}' with a custom issue at [maxLength]`, () => {
+          const result = FieldSchema.safeParse({
+            name: 'f', label: 'F', type, maxLength: 50,
+          });
+          expect(result.success).toBe(false);
+          if (!result.success) {
+            const issue = result.error.issues.find((i) => i.path[0] === 'maxLength');
+            expect(issue?.code).toBe('custom');
+            // The refusal names the legal set and the offending type, so an
+            // AI author can fix the declaration without leaving the message.
+            expect(issue?.message).toMatch(/bounded string/);
+            expect(issue?.message).toContain(`\`${type}\``);
+          }
+        });
+      }
+
+      it('accepts a positive-integer maxLength on every bounded-string type (the validator\'s twelve)', () => {
+        // Ten at #11566; `signature` / `qrcode` joined in #11875 (maintainer
+        // ruling 2026-08-25, option 1) — the write seam enforces their bound,
+        // so the declaration is no longer inert and the authoring seam admits it.
+        const twelve = [
+          'text', 'textarea', 'email', 'url', 'phone', 'password',
+          'markdown', 'html', 'richtext', 'code', 'signature', 'qrcode',
+        ] as const;
+        for (const type of twelve) {
+          const result = FieldSchema.safeParse({
+            name: 'f', label: 'F', type, maxLength: 255,
+          });
+          expect(result.success).toBe(true);
+          if (result.success) expect(result.data.maxLength).toBe(255);
+        }
+      });
+
+      it('absent maxLength stays absent — no default materializes, on any type', () => {
+        for (const type of ['text', 'boolean', 'lookup'] as const) {
+          const result = FieldSchema.parse({ name: 'f', label: 'F', type }) as Record<string, unknown>;
+          expect('maxLength' in result).toBe(false);
+        }
+      });
+    });
   });
 
   describe('useGrouping — number-field digit-grouping presentation hint (#7768)', () => {
@@ -492,8 +579,10 @@ describe('FieldSchema', () => {
     // default the schema itself would refuse as authored — a bare
     // `master_detail` parses to output that OMITS `deleteBehavior`, so
     // `parse(parse(x))` holds on the mainline `create()` → `defineStack`
-    // path; every OTHER type keeps byte-identity with the `.default()` era,
-    // which is what the rest of this block pins.
+    // path. The reference types that still materialize (`lookup`/`tree`)
+    // keep byte-identity with the `.default()` era — that half is pinned
+    // here; #9784 (the block below) gates materialization off every
+    // NON-reference type.
     describe('[#9689] deleteBehavior: set_null on master_detail is a parse-time rejection', () => {
       const md = (extra: Record<string, unknown> = {}) => ({
         name: 'parent_id',
@@ -571,10 +660,13 @@ describe('FieldSchema', () => {
         expect(FieldSchema.parse({ ...lookup, required: true }).deleteBehavior).toBe('set_null');
       });
 
-      it('keeps non-reference types accepting and defaulting the key (installed-base artifact shape, #4447)', () => {
-        // Verbatim shape from examples/app-showcase/dist/objectstack.json — a
-        // materialized datetime carrying only FieldSchema defaults. Built
-        // artifacts ship this on EVERY field type; it must stay legal.
+      it('keeps non-reference types ACCEPTING the key (installed-base artifact shape, #4447) — materialization moved to the #9784 block below', () => {
+        // Verbatim shape from the pre-#9784 examples/app-showcase/dist/
+        // objectstack.json — a materialized datetime carrying only FieldSchema
+        // defaults. Built artifacts of the materializing era ship this on
+        // EVERY field type; it must STAY legal (accept-set unchanged), and the
+        // authored value must round-trip verbatim, even though a bare
+        // datetime no longer materializes it.
         const showcaseVerbatim = {
           label: 'Created At', type: 'datetime', required: false,
           searchable: false, multiple: false, unique: false,
@@ -582,8 +674,7 @@ describe('FieldSchema', () => {
           readonly: false, sortable: true, externalId: false,
         };
         expect(() => FieldSchema.parse(showcaseVerbatim)).not.toThrow();
-        // And a bare text field still gets the materialized default.
-        expect(FieldSchema.parse({ name: 'title', label: 'Title', type: 'text' }).deleteBehavior).toBe('set_null');
+        expect(FieldSchema.parse(showcaseVerbatim).deleteBehavior).toBe('set_null');
       });
 
       it('keeps FieldSchema.shape enumerable (no pipe degradation from the relocation)', () => {
@@ -592,6 +683,73 @@ describe('FieldSchema', () => {
         // enumerate this shape.
         expect(Object.keys(FieldSchema.shape).length).toBeGreaterThan(50);
         expect(Object.keys(FieldSchema.shape)).toContain('deleteBehavior');
+      });
+    });
+
+    // [#9784] `deleteBehavior` materializes ONLY on reference types. On every
+    // other type the key was inert by construction — the engine's
+    // `cascadeDeleteRelations` reads it exclusively behind a
+    // `master_detail`/`lookup` + `fdef.reference` guard — yet the materialized
+    // default shipped in every built artifact as an apparent explicit
+    // declaration (#4447 mechanism) and read as meaningful to AI authors
+    // (ADR-0033 direction). The accept-set is UNTOUCHED: authored values on
+    // any type round-trip verbatim (the installed-base test above).
+    describe('[#9784] deleteBehavior materializes only on reference types', () => {
+      const bare = (type: string) => ({ name: 'f1', label: 'F1', type });
+
+      it('omits deleteBehavior from bare non-reference fields (text/datetime/number)', () => {
+        for (const type of ['text', 'datetime', 'number']) {
+          const result = FieldSchema.parse(bare(type));
+          expect(result.deleteBehavior, `type=${type}`).toBeUndefined();
+          expect('deleteBehavior' in result, `type=${type}`).toBe(false);
+        }
+      });
+
+      it('omits deleteBehavior from bare `user` fields — outside today\'s cascade guard, same as text', () => {
+        // `user` is stored identically to `lookup` but the engine's cascade
+        // guard admits only `master_detail`/`lookup`, so the key is inert on
+        // `user` exactly as on `text`. It takes the non-reference side of the
+        // line; an authored value still round-trips (below).
+        const result = FieldSchema.parse({ ...bare('user'), reference: 'sys_user' });
+        expect('deleteBehavior' in result).toBe(false);
+      });
+
+      it('still materializes set_null on bare lookup and tree, at shape position (byte-identity)', () => {
+        // Key ORDER is part of the byte-identity contract (#4447):
+        // `deleteBehavior` sits between `reference` and `hidden` in the shape.
+        const lookupJson = JSON.stringify(FieldSchema.parse({
+          name: 'account_id', label: 'Account', type: 'lookup', reference: 'account',
+        }));
+        expect(lookupJson).toContain('"reference":"account","deleteBehavior":"set_null","hidden":false');
+        const treeJson = JSON.stringify(FieldSchema.parse({
+          name: 'parent_id', label: 'Parent', type: 'tree', reference: 'category',
+        }));
+        expect(treeJson).toContain('"reference":"category","deleteBehavior":"set_null","hidden":false');
+      });
+
+      it('keeps an AUTHORED deleteBehavior on non-reference types, verbatim (accept-set unchanged)', () => {
+        expect(FieldSchema.parse({ ...bare('text'), deleteBehavior: 'cascade' }).deleteBehavior).toBe('cascade');
+        expect(FieldSchema.parse({ ...bare('number'), deleteBehavior: 'restrict' }).deleteBehavior).toBe('restrict');
+        expect(FieldSchema.parse({ ...bare('datetime'), deleteBehavior: 'set_null' }).deleteBehavior).toBe('set_null');
+        expect(FieldSchema.parse({ ...bare('user'), deleteBehavior: 'set_null' }).deleteBehavior).toBe('set_null');
+      });
+
+      it('parse(parse(x)) is byte-stable for bare and authored spellings across the type boundary', () => {
+        const cases = [
+          bare('text'),
+          bare('datetime'),
+          bare('number'),
+          { ...bare('user'), reference: 'sys_user' },
+          { name: 'account_id', label: 'Account', type: 'lookup', reference: 'account' },
+          { name: 'parent_id', label: 'Parent', type: 'tree', reference: 'category' },
+          { ...bare('text'), deleteBehavior: 'cascade' },
+          { name: 'account_id', label: 'Account', type: 'lookup', reference: 'account', deleteBehavior: 'restrict' },
+        ];
+        for (const input of cases) {
+          const once = FieldSchema.parse(input);
+          const twice = FieldSchema.parse(once);
+          expect(JSON.stringify(twice), `type=${(input as { type: string }).type}`).toBe(JSON.stringify(once));
+        }
       });
     });
 

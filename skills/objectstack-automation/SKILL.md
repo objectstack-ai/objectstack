@@ -166,7 +166,7 @@ variables: [
 > **Writing a `readonly` field? Set `runAs: 'system'`.** `readonly: true`
 > governs the end-user surface: under the default `runAs: 'user'`, the engine
 > **silently strips** a `readonly` field from an `update_record` payload
-> (#2948) — the step reports success but the value never lands. A flow that
+> — the step reports success but the value never lands. A flow that
 > maintains a `readonly` field (approval stamps, conversion flags, SLA
 > markers, rollups) must run `runAs: 'system'`, the trusted-writer channel.
 > `os validate` / `os build` fail a `runAs:'user'` `update_record` that writes
@@ -254,7 +254,7 @@ dead-end.
   label: 'Case Lifecycle',
   field: 'status',                 // the field that holds the state
   message: 'Invalid status transition.',
-  initialStates: ['new'],          // states a record may be CREATED in (#3165)
+  initialStates: ['new'],          // states a record may be CREATED in
   transitions: {
     new:       ['open'],
     open:      ['escalated', 'resolved'],
@@ -268,7 +268,7 @@ dead-end.
 Notes:
 - **One rule per field.** Parallel lifecycles (e.g. `status` + `payment_status`)
   are N separate `state_machine` rules, one per field.
-- **`initialStates`** (optional, #3165) gates INSERT: a record created with its
+- **`initialStates`** (optional) gates INSERT: a record created with its
   state field outside this list is rejected. `transitions` only governs
   updates, so without it a record can be born mid-flow (e.g. created already
   `resolved`). Omit to keep the legacy no-check-on-insert behavior.
@@ -394,7 +394,7 @@ Three pieces author it:
    is a *service-owned* pause (`resumeAuthority: 'service'`), so only
    `POST /api/v1/approvals/requests/:id/resubmit` can end it. ADR-0044 D3 first
    prescribed an ordinary `wait` here and its **2026-07-28 amendment reversed
-   that** (#3823) — a `wait` is `resumeAuthority: 'any'`, so a raw
+   that** — a `wait` is `resumeAuthority: 'any'`, so a raw
    `POST /api/v1/automation/:name/runs/:runId/resume` walked the back-edge with no
    submitter check and no audit row, and could destroy the run outright. The
    `approval_revise` node takes **no config** — there is no signal to wait on.
@@ -453,7 +453,7 @@ your normal `flows: [...]`.
 A decision is recorded through `ApprovalService.decide()` (or the REST routes
 `POST /api/v1/approvals/requests/:id/approve` | `/reject`). That finalizes the
 `sys_approval_request` and **resumes** the suspended run down the matching
-branch — you never resume the flow by hand, and since #3801 you *cannot*: the
+branch — you never resume the flow by hand, and you *cannot*: the
 `approval` node declares `resumeAuthority: 'service'`, so
 `POST /api/v1/automation/:name/runs/:runId/resume` answers **403** for a run
 parked on one (including via a `subflow` pause) and changes nothing.
@@ -481,11 +481,11 @@ still missing.
 | `team`       | Members of a flat `sys_team` |
 | `department` | A department + all descendant departments |
 | `manager`    | The submitter's manager (`sys_user.manager_id`) |
-| `field`      | User id read from a record field (`value` = field name). Resolved against the record's **live** state at node entry (#3447), so a field written mid-flow routes correctly; a multi-select user field fans out into one approver per user |
+| `field`      | User id read from a record field (`value` = field name). Resolved against the record's **live** state at node entry, so a field written mid-flow routes correctly; a multi-select user field fans out into one approver per user |
 | `queue`      | A data-ownership queue |
 | `expression` | A **CEL expression** resolved at node entry (`value` = the expression) — see **Dynamic approvers** below. Only `current.*` / `trigger.*` / `vars.*` roots are available; the optional `resolveAs: 'user'(default) \| 'department' \| 'position' \| 'team'` re-expands each resolved id through the graph |
 
-### Dynamic approvers (`type: 'expression'`, #3447)
+### Dynamic approvers (`type: 'expression'`)
 
 An `expression` approver computes WHO approves at the moment the node is
 entered. Its CEL source sees exactly **three roots** — nothing else:
@@ -499,7 +499,7 @@ entered. Its CEL source sees exactly **three roots** — nothing else:
 **`record` and bare field names are NOT available and fail the node loudly.**
 Everywhere else on this platform `record` means "the record at event time"
 (flow conditions: the trigger snapshot; hook conditions: the stored record
-overlaid with the write's payload, #4770) — at an
+overlaid with the write's payload) — at an
 approval node that phrase is ambiguous between two different times, so you must
 say which one: `current.x` or `trigger.x`. Do not carry the `record.x` habit
 over from conditions.
@@ -592,8 +592,8 @@ Time-word cheat sheet across surfaces (do not mix them up):
 `previous` / `session` / `ql` (plus `object` / `event`) — a handler reads the
 write payload as `ctx.input`. The bare `record` / `previous` roots are the
 **condition**'s CEL scope, not the handler's context object: `record` is the
-stored row overlaid with this write's payload (#4770) and `previous` is the
-pre-write row (#4784), both made total over the object's declared fields. See
+stored row overlaid with this write's payload and `previous` is the
+pre-write row, both made total over the object's declared fields. See
 `objectstack-formula` §5 for where `previous` is bound and where it is not.
 
 ### Node Config (`ApprovalNodeConfigSchema`)
@@ -605,8 +605,8 @@ pre-write row (#4784), both made total over the object's declared fields. See
 | `minApprovals` | Approvals required — total for `quorum`, per group for `per_group`. Default `1`; clamped at runtime to the resolvable approver count so a misconfiguration can never deadlock |
 | `lockRecord` | Lock the triggering record from edits while pending. Default `true` |
 | `approvalStatusField` | Business-object field to mirror `pending`/`approved`/`rejected`/`recalled` onto (should be readonly) |
-| `onEmptyApprovers` | #3447 — what an EMPTY resolved slate does: `admin_rescue` (default — request opens, only a privileged admin can act via Reassign; never waves through, never kills the run), `fail` (node fails — treat an empty slate as a config bug), `auto_approve` (skip the request, continue down `approve` with `output.autoApproved = true` — opt-in because it silently waves the record through). Declare it explicitly on any node with an `expression` approver (linted) |
-| `decisionOutputs` | #3447 — decision outputs a decision may carry (author declares, approvers fill values). Entries are bare keys (free-text input) **or typed declarations** `{ key, label?, type: 'text'\|'user'\|'department'\|'position'\|'team', multiple? }` — a typed entry renders the matching record picker in the decision dialog (`multiple` collects an id array). Accepted outputs resume the run as `<nodeId>.<key>` variables; undeclared keys reject the decision; `decision`/`requestId` reserved |
+| `onEmptyApprovers` | What an EMPTY resolved slate does: `admin_rescue` (default — request opens, only a privileged admin can act via Reassign; never waves through, never kills the run), `fail` (node fails — treat an empty slate as a config bug), `auto_approve` (skip the request, continue down `approve` with `output.autoApproved = true` — opt-in because it silently waves the record through). Declare it explicitly on any node with an `expression` approver (linted) |
+| `decisionOutputs` | Decision outputs a decision may carry (author declares, approvers fill values). Entries are bare keys (free-text input) **or typed declarations** `{ key, label?, type: 'text'\|'user'\|'department'\|'position'\|'team', multiple? }` — a typed entry renders the matching record picker in the decision dialog (`multiple` collects an id array). Accepted outputs resume the run as `<nodeId>.<key>` variables; undeclared keys reject the decision; `decision`/`requestId` reserved |
 | `escalation` | Optional per-node SLA — `{ enabled, timeoutHours, action: reassign\|auto_approve\|auto_reject\|notify, escalateTo?, notifySubmitter }`. `escalateTo` is a **position machine name** (expanded to its holders via `sys_user_position`, ADR-0090 D3) or a specific user id — never a membership tier. `reassign` without `escalateTo` degrades to notify (linted) |
 | `maxRevisions` | ADR-0044 — max **send-backs-for-revision** per run before auto-reject. Default `3`; `0` disables send-back. Only meaningful when the node has a `revise` out-edge |
 
@@ -623,7 +623,7 @@ These are wired on the **graph**, not in node config:
 - **Send back for revision (ADR-0044)** — distinct from a plain reject: an
   Approval node can emit a third decision **`revise`** on a `revise`-labeled
   out-edge that routes to an **`approval_revise`** rework window (not a plain
-  `wait` — #3823). The submitter edits and resubmits, re-entering the node via an
+  `wait`). The submitter edits and resubmits, re-entering the node via an
   edge `type: 'back'` (a declared back-edge — traversed at run time but excluded
   from DAG cycle validation). `maxRevisions` (node config, default `3`) caps the
   loop before auto-reject.
@@ -879,7 +879,7 @@ them right the first time:
    empty `script` node refuses at execute, and one pointing at an unregistered
    function fails loudly.
 
-   The other dispatch forms were retired in spec 17 (#4343) because none of them
+   The other dispatch forms were retired in spec 17 because none of them
    ran: `config.actionType: 'email' | 'slack'` were logger-backed stubs that
    delivered nothing (with `config.template` / `.recipients` / `.variables`
    feeding a message no channel sent), and inline `config.script` JS was never

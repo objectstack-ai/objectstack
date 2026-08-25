@@ -116,9 +116,10 @@ export const MetadataTypeSchema = lazySchema(() => z.enum([
   'external_catalog', // Cached remote schema snapshot for federated datasources (ADR-0015) — RUNTIME-CREATED by the Sync wizard (ADR-0062/0088); packages never ship one
   'translation', // i18n resources (TranslationSchema)
   // ADR-0088: `router`/`function`/`service` are NOT metadata kinds — they are
-  // code contributions: plugin `contributes.routes` + declarative `apis:`
-  // (router), `defineStack({ functions })` + `contributes.functions`
-  // (function), and the plugin/service registry itself (service).
+  // code contributions: declarative `apis:` (router — `contributes.routes`
+  // parses but serves nothing, #10726), `defineStack({ functions })`
+  // (function — `contributes.functions` was retired unread, #10724), and the
+  // plugin/service registry itself (service).
   //
   // [#5271, part of #5206] `api` is the ONE declarative endpoint ITEM kind, and
   // it is NOT a reversal of the `router` retirement above: `router` was retired

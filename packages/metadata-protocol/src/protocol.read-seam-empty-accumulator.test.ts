@@ -204,6 +204,105 @@ describe('[#8896] searchAll — an object that could not be READ is not an objec
     });
 });
 
+describe('[#11754] searchAll — a registry that cannot ENUMERATE is not a registry with no objects', () => {
+    const acct = objectFixture('acct');
+
+    /**
+     * The seam this pins: `searchAll` used to read the registry as
+     * `(engine as any).registry?.getAllObjects?.() ?? []`. Neither guard could
+     * ever fire on an outage — `SchemaRegistry.getAllObjects()` walks in-memory
+     * Maps and has no throwing path — so what they absorbed was only the
+     * STRUCTURAL omission: a host whose registry does not implement
+     * `getAllObjects` at all. That omission never throws, so pre-fix the whole
+     * sweep was a silent no-op: `{ hits: [], totalObjects: 0, totalHits: 0,
+     * truncated: false }` under a successful response, indistinguishable from
+     * a deployment with genuinely nothing registered (ADR-0110 D3).
+     *
+     * No new code and no new envelope are minted here on purpose — the ruled
+     * disposition (#9284, the engine's own registry sweeps) is to drop both
+     * halves of the swallow and let the omission surface as the read's own
+     * failure, which for a missing method is the runtime's TypeError.
+     */
+
+    it('a registry WITHOUT getAllObjects rejects instead of inventing an empty sweep', async () => {
+        const find = vi.fn(async () => [{ id: 'a1', name: 'Acme' }]);
+        const engine = {
+            // Everything a registry needs EXCEPT enumeration — the structural
+            // omission, not an error class.
+            registry: {
+                getObject: (n: string) => (n === 'acct' ? acct : undefined),
+                getItem: () => undefined,
+                listItems: () => [],
+            },
+            find,
+            findOne: vi.fn(async () => null),
+        };
+        const protocol = new ObjectStackProtocolImplementation(engine as never);
+
+        const caught = await rejection(() => protocol.searchAll({ q: 'Acme' }));
+
+        // The omission surfaces as itself — the runtime's own TypeError naming
+        // the missing member — never a minted code, never an invented answer.
+        expect(caught).toBeInstanceOf(TypeError);
+        expect(caught.message).toContain('getAllObjects');
+        // The sweep never ran: no data read was issued for an enumeration that
+        // did not happen.
+        expect(find).not.toHaveBeenCalled();
+        // Pre-fix this resolved with `{ query: 'Acme', hits: [],
+        // totalObjects: 0, totalHits: 0, truncated: false }` — "nothing
+        // matched", reported for a registry that was never asked.
+    });
+
+    it('an engine with NO registry rejects too (the other dropped `?.`)', async () => {
+        const engine = {
+            find: vi.fn(async () => []),
+            findOne: vi.fn(async () => null),
+        };
+        const protocol = new ObjectStackProtocolImplementation(engine as never);
+
+        const caught = await rejection(() => protocol.searchAll({ q: 'Acme' }));
+
+        expect(caught).toBeInstanceOf(TypeError);
+    });
+
+    it('control: a registry that truthfully answers "no objects" still resolves the empty response', async () => {
+        // The one benign emptiness: the registry ENUMERATED and the answer was
+        // empty. This is the neighbouring shape the fix must not move.
+        const engine = {
+            registry: { ...fixtureRegistry([]), getAllObjects: vi.fn(() => []) },
+            find: vi.fn(async () => []),
+            findOne: vi.fn(async () => null),
+        };
+        const protocol = new ObjectStackProtocolImplementation(engine as never);
+
+        const result = await protocol.searchAll({ q: 'Acme' });
+
+        expect(result).toEqual({ query: 'Acme', hits: [], totalObjects: 0, totalHits: 0, truncated: false });
+        // Proof the emptiness was SAID by the registry, not invented past it.
+        expect(engine.registry.getAllObjects).toHaveBeenCalledTimes(1);
+    });
+
+    it('control: a blank query still short-circuits BEFORE the registry is consulted', async () => {
+        // The early return for an empty `q` sits above the enumeration read.
+        // Pinned so the propagate change cannot drift it: a registry-less host
+        // asked nothing must keep getting the empty-query answer, not a throw.
+        const engine = {
+            registry: {
+                getObject: () => undefined,
+                getItem: () => undefined,
+                listItems: () => [],
+            },
+            find: vi.fn(async () => []),
+            findOne: vi.fn(async () => null),
+        };
+        const protocol = new ObjectStackProtocolImplementation(engine as never);
+
+        const result = await protocol.searchAll({ q: '   ' });
+
+        expect(result).toEqual({ query: '', hits: [], totalObjects: 0, totalHits: 0, truncated: false });
+    });
+});
+
 // ═══════════════════════════════════════════════════════════════════════════
 // findReferencesToMeta
 // ═══════════════════════════════════════════════════════════════════════════

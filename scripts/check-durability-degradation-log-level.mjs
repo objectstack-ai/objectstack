@@ -58,7 +58,7 @@
  * failure is known to mean "the bytes did not land". Adding an entry is a
  * deliberate, reviewable act.
  *
- * Two honest limitations, stated up front rather than discovered later:
+ * Three honest limitations, stated up front rather than discovered later:
  *
  *   1. It cannot FIND a durability seam whose operation is not in the
  *      vocabulary. It guarantees the seams already paid for cannot regress to
@@ -70,6 +70,12 @@
  *      path does end loudly — but it does mean an unrelated nested
  *      `logger.error` would satisfy the gate. Narrowing this would fail the
  *      legitimate recovering catch, which is the worse trade.
+ *   3. A catch that reports through a receiver spelled anything other than
+ *      `logger` / `log` / `console` reads as SILENT to both rules — the
+ *      dangling-reference audit's `port.warn?.(…)` is the live example (#8897).
+ *      This is a DECIDED narrowness, not an undiscovered one: see the decision
+ *      recorded at `LOGGER_RECEIVERS` for what was weighed and why widening it
+ *      was declined.
  *
  * ## Why AST, not regex
  *
@@ -239,7 +245,8 @@
 import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import ts from 'typescript';
+import { requireDefaultExport } from './import-prerequisite.mjs';
+const ts = await requireDefaultExport('typescript', () => import('typescript'), import.meta.url);
 import { parseSourceFile } from './ts-parse.mjs';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
@@ -652,7 +659,9 @@ const FAILURE_PROPAGATION_SITES = new Map([
 // (66 seams to 67) and reported as `no invented answer`, gate green. Surveyed,
 // cleared, harmful — the #6116 shape a third time.
 //
-// SECOND — the census, narrowing one criterion at a time: 66 read seams; 46 have
+// SECOND — the census, narrowing one criterion at a time (⚠️ the 66 is the
+// PRE-#11921 recognizer's count — 2 of it were not read seams; see "RECOGNIZER
+// CORRECTION" below before quoting any figure in this ladder): 66 read seams; 46 have
 // no `return` anywhere in the catch; 41 have a valueless exit; 31 of those are
 // silent; 25 are silent AND undiscriminated; 15 also have an empty accumulator
 // declared above the `try`, written inside it, and read below.
@@ -702,7 +711,9 @@ const FAILURE_PROPAGATION_SITES = new Map([
 // arithmetic standing in for a census — the count is not the argument, and a
 // number nobody can re-run is worth less than a smaller one anchored to a
 // commit. The anchor is checkable: run this gate at 8664a2c and it still
-// answers `66 read seam(s)`; today's main answers 67, a seam the scan roots
+// answers `66 read seam(s)` — with the recognizer of that day; #11921 corrected
+// it to 64 over the same tree, see "RECOGNIZER CORRECTION" — today's main
+// answered 67, a seam the scan roots
 // gained after that commit and NOT from #8895 (which moves nothing — below).
 //
 //   - `cascadeDeleteRelations` — REPAIRED by #8895. Its dependents probe now
@@ -790,7 +801,9 @@ const FAILURE_PROPAGATION_SITES = new Map([
 // ## Measured before it was added — 收窄先行, the #6451 discipline again
 //
 // Census over the three scan roots at `origin/main` @ 945ffbea8 (2026-08-24),
-// 66 read seams, narrowing one criterion at a time:
+// 66 read seams (⚠️ pre-#11921 recognizer; 64 corrected — the ladder BELOW is
+// unaffected, measured, see "RECOGNIZER CORRECTION"), narrowing one criterion at
+// a time:
 //
 //   | narrowing                                             | sites |
 //   |-------------------------------------------------------|------:|
@@ -902,6 +915,58 @@ const FAILURE_PROPAGATION_SITES = new Map([
 //      writes nothing at all, and the `push` / `++` accumulation shapes #8845
 //      measured, which are unchanged.
 
+// ── RECOGNIZER CORRECTION (#11921) — what "66" actually counted ─────────────
+//
+// Every census figure above is quoted against a 66-seam read population. Two of
+// those 66 were never read seams. `isReadCall` matched the callee NAME with no
+// further test, so `Array.prototype.find` on a plain local array counted as a
+// storage read — and, through the wrapper recursion, attributed that "read" to
+// the wrapper's CALLER. The corrected recognizer is `contradictsDriverReadShape`
+// below; this block restates the affected figures rather than leaving them to be
+// silently invalidated.
+//
+// RE-MEASURED, not derived by arithmetic — the corrected recognizer was run over
+// the SAME anchor tree, so the correction is a census and not a subtraction:
+//
+//   | tree                          | old recognizer | corrected |
+//   |-------------------------------|---------------:|----------:|
+//   | `origin/main` @ 8664a2c (#8845 anchor)  |      66 |    64 |
+//   | `origin/main` @ 8619f9513 (#11921)      |      66 |    64 |
+//
+// The old recognizer reproducing 66 at 8664a2c is the calibration: it is the
+// number this header already told the reader to re-run the gate and check, so
+// the instrument is verified against the record before it is trusted.
+//
+// THE TWO NON-MEMBERS, the same two functions on both trees:
+//
+//   - `getMetaItems` (`metadata-protocol/src/protocol.ts`) — its try guards
+//     `mergePackageAwareOverlay`, a PURE helper whose `list.find((c) => …)` runs
+//     on a plain local array. The `try` holds exactly one `await`,
+//     `metadataService.list(request.type)`, and no find/findOne/count of its own.
+//     Catch shape: empty, returnless, silent, undiscriminated — so it was a
+//     member of the 46 / 41 / 31 / 25 rungs, and it carries the shape the 15 rung
+//     tests for (`let items: unknown[] = []` above the `try`, written inside,
+//     read below).
+//   - `resolveDeferredUpdates` (`metadata-protocol/src/seed-loader.ts`) — NOT
+//     found when #11921 was filed, and the worse of the two: its try guards
+//     `writeDeferredReference`, a WRITE. It is in this rule's population at all
+//     only because `allResults.find(r => …)` updates an in-memory stats row. Its
+//     catch reports at `error`, so it left the ladder at the "silent" rung and
+//     sits in the 46 / 41 rungs only.
+//
+// ⛔ The #8845 and #9165 ladder rungs are NOT re-derived here, deliberately.
+// Re-running those narrowings is the census re-run #8901's restart conjunct (b)
+// reserves, and #8901's own ⛔ forbids re-opening the #8845 decision; #11921's
+// filing forbids this fix riding along with any other change. What is restated
+// is the DENOMINATOR every one of those figures is quoted against, plus enough
+// of each departing seam's shape that any rung's owner can place it exactly.
+//
+// Directly measured and unaffected: the #9165 assignment ladder (3 / 1 / 1 / 0)
+// and every parenthetical in the verdict line — 8 type-discriminated, 1
+// pass-through, 1 answer-by-assignment, 1 baselined — are byte-identical before
+// and after. Only the seam count moves, and ⛔ no baseline entry was added: an
+// entry there says a human read the seam, not that a rule guessed wrong.
+
 /**
  * Where the read-seam rule looks. Narrowed on purpose — see above.
  *
@@ -952,8 +1017,55 @@ const DRIVER_READ_CALLEES = new Map([
  * Two hops is what the real chain needs (`_find` → `engine.find`) plus one.
  * Measured on the scan scope: following wrappers grew the SEAM census from 45
  * to 66 and the VIOLATION set not at all — it buys robustness at zero
- * false-positive cost today.
+ * false-positive cost today. (#11921: that 66 included 2 non-reads the wrapper
+ * recursion manufactured from `Array.prototype.find`; corrected, 45 to 64. The
+ * conclusion is unchanged — the VIOLATION set is still untouched.)
  */
+/**
+ * The one thing the READ vocabulary above cannot say by NAME, said by SHAPE.
+ *
+ * `find` is `IDataDriver.find` and it is also `Array.prototype.find`, and a
+ * callee NAME cannot tell them apart. Until #11921 nothing tried: `isReadCall`
+ * matched the name with no further test, so `list.find((c) => c.pkg === id)` on
+ * a plain local array read as a storage read — and, through the wrapper
+ * recursion below, attributed that "read" to the wrapper's CALLER, pulling a
+ * try/catch that guards no storage read at all into the census.
+ *
+ * A receiver ALLOWLIST is the wrong answer here, and measurably so. Measured
+ * over the whole census (`--list`, 90 matched reads across 66 seams): the
+ * genuine driver reads arrive through `this`, `this.engine`, `this.ql`,
+ * `driver`, `engine`, `engineAny`, `ledger` and `port`; the array reads through
+ * `list`, `allResults` and a `.map(...)` chain. Nothing in the SHAPE of a
+ * receiver separates those two lists — only what the name is BOUND to does, and
+ * that is a type-checker. Requiring a `this`-rooted receiver, the closest
+ * syntactic approximation, drops 14 of the 66 seams and 12 of the 14 are real
+ * driver reads (history-cleanup, build-probes, the dangling-reference audit,
+ * `checkGovernance`). That is the UNSAFE direction: a population that shrinks
+ * silently. Declaring the receiver names instead is a second vocabulary with
+ * its own staleness obligation — the failure mode this file's staleness checks
+ * exist for — and it still fails the same way, because the next driver binding
+ * gets a different name and its seam leaves the census without a word.
+ *
+ * What CAN be said is said from the contract already anchored above, not from a
+ * new list of names: every read on `IDataDriver` takes the object NAME first —
+ * `find(objectName, query)`, `findOne(objectName, …)`, `count(objectName,
+ * query?)`. A predicate is never its first argument. `Array.prototype.find`'s
+ * first argument is ALWAYS one. So a call whose first argument is a function
+ * literal is not a call to this contract, however it is spelled.
+ *
+ * Direction of the error, stated up front: this predicate can only DECLINE to
+ * exclude. It fires on a shape the declared contract cannot produce, so it
+ * cannot drop a real driver read; and a spurious match it does not recognise —
+ * `list.find(isTarget)`, a named predicate rather than a literal — stays in the
+ * census, over-counting rather than under-counting. That is the same safe
+ * direction every other narrowing in this file takes.
+ */
+function contradictsDriverReadShape(node) {
+    const first = node.arguments[0];
+    if (!first) return false;
+    return ts.isArrowFunction(first) || ts.isFunctionExpression(first);
+}
+
 const MAX_READ_WRAPPER_DEPTH = 2;
 
 /**
@@ -1083,7 +1195,54 @@ function calleeName(node) {
     return undefined;
 }
 
-/** The receiver names that make a `<recv>.<level>(…)` call a LOG. */
+/**
+ * The receiver names that make a `<recv>.<level>(…)` call a LOG.
+ *
+ * ## DECIDED, 2026-08-25 (#8897, option 1) — narrow on purpose, and recorded
+ *
+ * #8897's `Restart-when:` is *"any PR touches
+ * scripts/check-durability-degradation-log-level.mjs (decide options 1/2/3 in
+ * that change)"*. #11921 touched it, so the three-way is settled here rather
+ * than passed by. The options were: (1) leave it and note the narrowness beside
+ * the other honest limitations; (2) follow a same-file injected-logger
+ * PARAMETER the way this file already follows same-file helper FUNCTIONS;
+ * (3) declare additional receiver names explicitly.
+ *
+ * **Taken: option 1.** The filer's own weak preference, but the reason recorded
+ * here is not the filer's — it is the measurement #11921 ran on the mirror-image
+ * question, which none of the three options had.
+ *
+ * #11921's whole subject is that matching a NAME with no provenance manufactures
+ * false members: `find` is `IDataDriver.find` and also `Array.prototype.find`.
+ * Asking the same question of the receiver side was measured over the full
+ * read-seam census — and receiver PROVENANCE is not syntactically available
+ * either. Requiring a `this`-rooted receiver drops 14 of 66 seams, 12 of them
+ * real driver reads; declaring the receiver names instead only postpones that,
+ * because the next binding gets a name the list does not have.
+ *
+ * Options 2 and 3 are both that instrument, pointed at `loggerLevel`. And the
+ * direction of their error is the UNSAFE one here, which the filer's analysis
+ * did not price: for the read-seam rule `collectLoggedLevels` powers an
+ * EXEMPTION — "the catch said something, so this is the other rule's question".
+ * Widening what counts as a logger widens an exemption, so a seam that invents
+ * an answer is excused because something that is not a logger happens to own a
+ * `.warn`. Option 1 keeps the error in the direction this file takes everywhere
+ * else: a genuinely loud catch may be over-counted as silent, and no invention
+ * is ever excused for a reason nobody declared.
+ *
+ * ⚠️ What option 1 costs, stated rather than hidden: the misclassification is
+ * still real and still latent — the read-seam rule consults the log exemption
+ * only after finding an invented answer, and the live injected-receiver seam
+ * (`packages/objectql/src/integrity/dangling-reference-audit.ts`, receiver
+ * `port`) invents none, so it never reaches a verdict. #8897's SECOND restart
+ * condition is unchanged and is the promote-immediately one: a seam reporting
+ * through an injected receiver going red with a "silent" message. If that fires,
+ * this decision was wrong and the evidence says so out loud.
+ *
+ * ⛔ Not decided here, and deliberately: the CALL-SHAPE half of the same
+ * function's narrowness (#9657, closed) — a different defect in `loggerLevel`,
+ * already answered by #9609 with a named same-file helper.
+ */
 const LOGGER_RECEIVERS = /^(logger|log|console)$/i;
 
 /** Every level name the two vocabularies above know. */
@@ -1879,7 +2038,11 @@ function unwrapExpression(expr) {
 function isReadCall(node, functionBodies, seen = new Set(), depth = 0) {
     const name = calleeName(node);
     if (!name) return false;
-    if (DRIVER_READ_CALLEES.has(name)) return true;
+    if (DRIVER_READ_CALLEES.has(name) && !contradictsDriverReadShape(node)) return true;
+    // A vocabulary NAME whose argument shape contradicts the contract is not
+    // treated as a dead end: it falls through to the wrapper recursion, so a
+    // same-file helper that happens to be called `find` is still followed. The
+    // shape test subtracts a false positive; it must not subtract a real read.
     if (depth >= MAX_READ_WRAPPER_DEPTH || seen.has(name)) return false;
     const body = functionBodies.get(name);
     if (!body) return false;
@@ -4811,6 +4974,115 @@ function selfTestReadSeams() {
                 }`,
             expectViolation: false,
             expectInvents: [],
+        },
+
+        // ── #11921: the callee NAME is not enough — the shape test, both ways ──
+        //
+        // `find` is `IDataDriver.find` and it is also `Array.prototype.find`.
+        // These five pin the line `contradictsDriverReadShape` draws, including
+        // the two places it deliberately does NOT draw it. `expectSeams` is the
+        // load-bearing assertion in the passing cases: `expectViolation: false`
+        // would hold vacuously if the seam were merely graded green, and what
+        // is being asserted here is that it is not in the POPULATION at all.
+        {
+            name: 'passes: #11921 — `Array.prototype.find` on a local array is not a storage read',
+            code: `
+                class L {
+                    async pick(id: string) {
+                        const list = [{ id: 'a' }];
+                        try {
+                            const hit = list.find((c) => c.id === id);
+                            return hit ?? null;
+                        } catch { return null; }
+                    }
+                }`,
+            expectViolation: false,
+            expectSeams: 0,
+        },
+        {
+            // The live instance, reduced: a PURE helper matched on `find`, and
+            // the wrapper recursion then attributed the "read" to its caller —
+            // whose try guards a MetadataService call and no storage read at all.
+            name: 'passes: #11921 — an array `find` inside a same-file helper does not make its CALLER a read seam',
+            code: `
+                function mergeOverlay(base: unknown[], records: any[]) {
+                    const list = base as any[];
+                    const out: unknown[] = [];
+                    // SAME-TICK on purpose: the wrapper recursion does not descend
+                    // into a nested function body, so spelling this as
+                    // \`records.map((r) => list.find(...))\` makes the fixture pass
+                    // for a reason that has nothing to do with the shape test —
+                    // measured, it stayed green under ablation.
+                    for (const r of records) {
+                        const prev = list.find((c) => c.pkg === r.pkg);
+                        out.push(prev ?? r);
+                    }
+                    return out;
+                }
+                class P {
+                    async getMetaItems(type: string) {
+                        let items: unknown[] = [];
+                        try {
+                            const runtime = await this.service.list(type);
+                            items = mergeOverlay(runtime, items);
+                        } catch {
+                            // MetadataService not available
+                        }
+                        return items;
+                    }
+                }`,
+            expectViolation: false,
+            expectSeams: 0,
+        },
+        {
+            // The other direction, and the one that keeps the shape test honest:
+            // it must SUBTRACT a false positive without ever subtracting a read.
+            name: 'flags: #11921 — a vocabulary name taking a callback is still followed as a same-file wrapper',
+            code: `
+                class L {
+                    private async find(pred: (r: any) => boolean) {
+                        const rows = await this.driver.find(this.tableName, { where: {} });
+                        return rows.filter(pred);
+                    }
+                    async loadMany(type: string) {
+                        try { return await this.find((r) => r.type === type); }
+                        catch { return []; }
+                    }
+                }`,
+            expectViolation: true,
+            expectSeams: 1,
+        },
+        {
+            name: 'flags: #11921 — the shape test reads the FIRST argument, so a function in a query option changes nothing',
+            code: `
+                class L {
+                    async loadMany(type: string) {
+                        try { return await this.driver.find(this.tableName, { where: { type }, map: (r: any) => r }); }
+                        catch { return []; }
+                    }
+                }`,
+            expectViolation: true,
+            expectSeams: 1,
+        },
+        {
+            // The documented limitation, pinned rather than described. The test
+            // reads function LITERALS, so a named predicate still counts — the
+            // safe direction (over-count, never under-count), and the next
+            // reader sees where the line is instead of assuming it is elsewhere.
+            name: 'flags (documented limitation): #11921 — an array `find` with a NAMED predicate is still counted',
+            code: `
+                function matches(c: { id: string }) { return c.id === 'a'; }
+                class L {
+                    async pick(id: string) {
+                        const list = [{ id: 'a' }];
+                        try {
+                            const hit = list.find(matches);
+                            return hit ?? null;
+                        } catch { return null; }
+                    }
+                }`,
+            expectViolation: true,
+            expectSeams: 1,
         },
     ];
 

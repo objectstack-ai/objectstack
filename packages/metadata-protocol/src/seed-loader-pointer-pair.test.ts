@@ -439,30 +439,33 @@ describe('seed pointer-pair resolution (#11339 — referenceVia)', () => {
  * and therefore has no case here; the verdict and its reasons are recorded at
  * the declaration site (`sys-automation-run.object.ts`, `trigger_record_id`).
  *
- * ## Why every case below seeds its TARGET FIRST
+ * ## Ordering: what heals, what still requires the target first (#11674)
  *
  * `sys_activity` heals an out-of-order pointer in pass 2 (the
- * order-independence case above). None of these four inherits that, and the
- * reason was measured here rather than assumed — twice over:
+ * order-independence case above). Whether these four inherit that was
+ * measured rather than assumed, and the answer SPLIT — by dataset keyedness
+ * first, then by the `required` flag on the id half:
  *
- *  - MEASURED, and the load-bearing one: all four are engine-owned rows with
- *    no natural key, so an honest seed dataset for them declares no
- *    `externalId`. Pass 2 back-fills by looking the row up BY its externalId,
- *    so it resolves the target and then has nowhere to write it ("Deferred
- *    reference DROPPED … has an empty externalId"). Pinned by the keyless
- *    case and its positive control in the `sys_audit_log` block.
- *  - NOT MEASURED here, and stated as such: on `sys_approval_request`,
- *    `sys_record_share` and `sys_share_link` the id half is also
- *    `required: true`, and pass 1 defers a reference by DELETING the column
- *    from the row (`seed-loader.ts`: "REMOVE the field rather than writing
- *    null … NOT NULL columns turned this into a loud constraint error"). A
- *    real engine enforces `required` on seed writes, so the deferred insert
- *    would fail there too — but this file's engine double does not validate,
- *    so no case here may claim it either way.
- *
- * Both roads end at the ruled family direction (loud, never silently wrong)
- * and at the same one-line author fix: order the target dataset first. What
- * they are NOT is order-independence, so no case below claims it.
+ *  - MEASURED, healed by #11674: all four are engine-owned rows with no
+ *    natural key, so an honest seed dataset for them declares no
+ *    `externalId`. Pass 2 used to back-fill by looking the row up BY its
+ *    externalId, so a keyless deferral resolved the target and then had
+ *    nowhere to write it ("Deferred reference DROPPED … empty externalId").
+ *    Pass 2 now writes back through the internal id captured at insert time,
+ *    so keylessness no longer costs the deferral — pinned by the keyless
+ *    case (healing) and its keyed sibling control in the `sys_audit_log`
+ *    block below.
+ *  - MEASURED against the REAL engine (in `packages/objectql/src/`
+ *    `engine-seed-required-deferral.test.ts` — this file's engine double
+ *    does not validate, so no case HERE may claim it): on
+ *    `sys_approval_request`, `sys_record_share` and `sys_share_link` the id
+ *    half is also `required: true`, and pass 1 defers a reference by
+ *    DELETING the column from the row. The real engine enforces `required`
+ *    on seed inserts (SEED_OPTIONS skips only state_machine), so the
+ *    deferred insert is rejected before pass 2 can help — an independent,
+ *    equally LOUD road that #11674's write-back does NOT clear. For those
+ *    three, order the target dataset first; `sys_audit_log` (optional id
+ *    half) is genuinely order-independent now.
  */
 
 /** The four adopted objects, mirroring their real declarations field-for-field
@@ -549,32 +552,33 @@ describe('pointer-pair adoption per object (#11386)', () => {
     });
 
     /**
-     * MEASURED, and not what this case was first written to assert.
+     * MEASURED — and this case has now flipped TWICE, deliberately both times.
      *
-     * The prediction going in was that an out-of-order pointer would heal in
-     * pass 2 here, because `sys_audit_log.record_id` is optional and so defers
-     * cleanly (that is what `sys_activity` does in the order-independence case
-     * above). It does not, and the reason is a property of the DATASET rather
-     * than of the pair: an engine-owned ledger has no natural key, so its seed
-     * dataset declares no `externalId` — and pass 2 back-fills by looking the
-     * row up by its externalId. It resolves the target and then has nowhere to
-     * write it ("Deferred reference DROPPED … has an empty externalId, so no
-     * internal id").
+     * As first written it asserted the healing this title now claims, on the
+     * prediction that an optional `record_id` defers cleanly the way
+     * `sys_activity`'s does. Measurement said no: pass 2 back-filled by
+     * looking the row up BY its externalId, and a keyless dataset (the honest
+     * authoring for an engine-owned ledger — no natural key) had no such
+     * handle, so the deferral resolved the target and then dropped the link
+     * LOUDLY ("Deferred reference DROPPED … empty externalId"). That
+     * order-dependence is the defect #11674 names: the declared deferral
+     * property ("a pointer pair contributes no static ordering edge, pass 2
+     * heals it") did not hold for exactly the datasets the four adopted
+     * objects ship.
      *
-     * That is the ruled family direction, not a regression: the load fails
-     * LOUDLY, and the author's fix is one line (order the target dataset
-     * first, or declare an externalId on the ledger dataset — the positive
-     * control below). It is asserted here rather than glossed because it is
-     * the measured difference between adopting the pair on `sys_activity` and
-     * adopting it on the four keyless system objects, and a reader who assumed
-     * order-independence carried over would be wrong.
+     * #11674's fix makes pass 2 write back through the internal id captured
+     * at insert time, so the property now holds without requiring a key.
+     * This case pins the healed behaviour; the keyed sibling below pins that
+     * the pre-existing keyed path still heals identically (it was the
+     * positive control that isolated keylessness as the cause while the
+     * failure existed).
      */
-    it('does NOT silently heal an out-of-order pointer on a KEYLESS dataset — pass 2 has nowhere to write back, and says so', async () => {
-      const { service, store } = newService(ADOPTER_SCHEMAS);
+    it('DOES heal an out-of-order pointer on a KEYLESS dataset — pass 2 writes back by the internal id captured at insert (#11674)', async () => {
+      const { service, store, engine } = newService(ADOPTER_SCHEMAS);
 
       // Ledger dataset BEFORE its target. A pointer pair contributes no static
       // dependency edge (the target is a per-row fact), so nothing but pass 2
-      // could save this — and pass 2 cannot, on a dataset with no externalId.
+      // can save this — and pass 2 now can, with no externalId declared.
       const result = await service.load({
         seeds: [
           insertSeed('sys_audit_log', [
@@ -585,22 +589,31 @@ describe('pointer-pair adoption per object (#11386)', () => {
         config: CONFIG,
       });
 
-      expect(result.success).toBe(false);
-      const err = result.errors.find((e: any) => e.field === 'record_id');
-      expect(err).toBeDefined();
-      // The message names the cause (the empty externalId), not just the miss —
-      // the author needs to know ordering/keying is the fix, not the value.
-      expect(String(err!.message)).toMatch(/externalId/);
+      expect(result.success).toBe(true);
+      const leadId = store.crm_lead.find((r) => r.name === 'Lisa Thompson')!.id;
+      // Healed to the REAL id — the `{object_name, record_id}` index query the
+      // ledger exists to answer now matches.
+      expect(store.sys_audit_log[0].record_id).toBe(leadId);
+      // It really went through the pass-2 back-fill write, not luck of order.
+      expect(
+        (engine.update as any).mock.calls.some(([obj]: [string]) => obj === 'sys_audit_log'),
+      ).toBe(true);
+      const ledgerResult = result.results.find((r: any) => r.object === 'sys_audit_log')!;
+      expect(ledgerResult.referencesResolved).toBeGreaterThan(0);
+      expect(ledgerResult.referencesDeferred).toBe(0); // given back by the successful back-fill
       // Never the silent verbatim store this family exists to kill.
       expect(store.sys_audit_log.filter((r) => r.record_id === 'Lisa Thompson')).toHaveLength(0);
     });
 
-    it('POSITIVE CONTROL — the same out-of-order load DOES heal once the ledger dataset declares an externalId', async () => {
+    it('KEYED SIBLING CONTROL — the same out-of-order load heals identically with an externalId declared', async () => {
       const { service, store } = newService(ADOPTER_SCHEMAS);
 
-      // Same seeds, same order, one difference: the ledger rows are
-      // addressable. This is what isolates the cause above to keylessness
-      // rather than to the pointer pair or to the deferral machinery.
+      // Same seeds, same order, one difference: the ledger rows are also
+      // addressable by natural key. While the keyless failure existed this was
+      // the positive control that isolated its cause to keylessness (same
+      // seeds, same order, key declared → healed); it stays pinned so the two
+      // paths — internal-id write-back and the pre-existing keyed lookup —
+      // cannot drift apart again.
       const result = await service.load({
         seeds: [
           {
@@ -851,4 +864,204 @@ describe('pointer-pair adoption per object (#11386)', () => {
     expect(result.success).toBe(true);
     expect(store.sys_automation_run[0].trigger_record_id).toBe('Lisa Thompson');
   });
+});
+
+/**
+ * The load-time EARLY SIGNAL for a deferral on a `required` column — #11674's
+ * B half, ruled by triage on 2026-08-24 as "warn (loud) by default", scoped to
+ * the required subset, and ⛔ NOT allowed to change the accept set.
+ *
+ * The failure it announces was already loud: PR #11830 measured against the
+ * REAL engine (`packages/objectql/src/engine-seed-required-deferral.test.ts`)
+ * that pass 1 defers by DELETING the column, so a `required: true` id half is
+ * rejected at insert and pass-2 write-back can never reach the row. What this
+ * signal changes is WHEN the author learns — the loader now says it before the
+ * write that provokes the rejection, instead of leaving the author to read a
+ * driver-level error after the fact.
+ *
+ * Two failure modes are pinned against, because both look green:
+ *  - a signal that NEVER fires  → the FIRES cases below;
+ *  - a signal that fires on EVERYTHING → the DOES-NOT-FIRE cases, which are
+ *    the ones that give it meaning: an optional id half (`sys_audit_log`,
+ *    genuinely order-independent since #11830), a pointer that resolves in
+ *    pass 1, and the UPDATE arm, where the deleted column is an omitted field
+ *    the write contract never checks.
+ *
+ * The message wording is pinned in ONE case only; the rest match on the
+ * signal's identifying parts (`required`, the field, the target object) so a
+ * reworded line does not fail six tests for one change.
+ */
+describe('required-deferral early signal (#11674)', () => {
+  /** The load-time signal, isolated from every other line the loader logs. */
+  function requiredDeferralWarnings(logger: ReturnType<typeof createLogger>): string[] {
+    return logger.warn.mock.calls
+      .map((call) => String(call[0]))
+      .filter((message) => /is `required: true`, but record #/.test(message));
+  }
+
+  /**
+   * Non-vacuity probe: how many pass-2 back-fill writes landed for `field`.
+   *
+   * ⛔ NOT `referencesDeferred` — a successful back-fill GIVES THAT COUNTER
+   * BACK (the loader decrements it when pass 2 heals the row), so a healed
+   * deferral reads as zero and a case asserting `> 0` on it would be asserting
+   * that healing FAILED. The pass-2 write itself is the durable evidence that
+   * the deferral was taken: pass 1 deleted the column, so only pass 2 can put
+   * it back, and its payload is the only `update` carrying that field.
+   */
+  function passTwoBackfills(engine: ReturnType<typeof newService>['engine'], object: string, field: string): number {
+    // Same `as any` reach into the mock the rest of this file uses — the
+    // engine is typed as `IDataEngine`, whose `update` carries no mock.
+    return (engine.update as any).mock.calls.filter(
+      (call: any[]) => call[0] === object && Object.prototype.hasOwnProperty.call(call[1] ?? {}, field),
+    ).length;
+  }
+
+  it('FIRES when a keyless required id half defers — before the row is written, naming the fix', async () => {
+    const { service, logger, engine, store } = newService(ADOPTER_SCHEMAS);
+
+    const result = await service.load({
+      seeds: [
+        // Approval request BEFORE its target: `record_id` cannot resolve in
+        // pass 1, so the loader defers it by deleting the required column.
+        insertSeed('sys_approval_request', [
+          { process_name: 'flow:discount', object_name: 'crm_lead', record_id: 'Lisa Thompson', status: 'pending' },
+        ]),
+        LEAD_SEED,
+      ] as any,
+      config: CONFIG,
+    });
+
+    // The scenario really deferred — without this the assertion below could
+    // pass against a load that never took the deferral branch at all.
+    const approvalResult = result.results.find((r) => r.object === 'sys_approval_request')!;
+    expect(passTwoBackfills(engine, 'sys_approval_request', 'record_id'), 'no deferral was taken — the signal case is vacuous').toBe(1);
+
+    const warnings = requiredDeferralWarnings(logger);
+    expect(warnings).toHaveLength(1);
+    // The line owes the author three things: WHICH declaration makes this
+    // order-dependent, WHAT the deferral did to the row, and the fix.
+    expect(warnings[0]).toContain('sys_approval_request.record_id is `required: true`');
+    expect(warnings[0]).toContain('REMOVES the column from the pass-1 insert');
+    expect(warnings[0]).toContain('Order the `crm_lead` dataset BEFORE `sys_approval_request`');
+
+    // ⛔ ACCEPT SET UNCHANGED. This engine double does not validate, so the
+    // deferred insert lands and #11830's write-back heals it — exactly as it
+    // did before this signal existed. The warning is a log line and nothing
+    // more: no counter moved, nothing reached `errors`, `success` is untouched.
+    expect(result.success).toBe(true);
+    expect(result.errors).toHaveLength(0);
+    expect(approvalResult.errored).toBe(0);
+    expect(approvalResult.referencesDropped).toBe(0);
+    expect(store.sys_approval_request[0].record_id).toBe(store.crm_lead[0].id);
+  });
+
+  it('DOES NOT FIRE for an OPTIONAL id half deferring the very same way — sys_audit_log stays order-independent', async () => {
+    const { service, logger, store, engine } = newService(ADOPTER_SCHEMAS);
+
+    const result = await service.load({
+      seeds: [
+        insertSeed('sys_audit_log', [
+          { action: 'view', actor: 'admin', object_name: 'crm_lead', record_id: 'Lisa Thompson' },
+        ]),
+        LEAD_SEED,
+      ] as any,
+      config: CONFIG,
+    });
+
+    // Same shape, same order, same deferral — the ONLY difference from the
+    // case above is that this id half is not `required`.
+    expect(passTwoBackfills(engine, 'sys_audit_log', 'record_id'), 'no deferral was taken — the control is vacuous').toBe(1);
+    expect(requiredDeferralWarnings(logger)).toHaveLength(0);
+
+    // …and it heals, which is why warning here would be a false alarm.
+    expect(result.success).toBe(true);
+    const leadId = store.crm_lead.find((r) => r.name === 'Lisa Thompson')!.id;
+    expect(store.sys_audit_log[0].record_id).toBe(leadId);
+  });
+
+  it('DOES NOT FIRE when the target is seeded first — the constraint is the deferral, not the declaration', async () => {
+    const { service, logger } = newService(ADOPTER_SCHEMAS);
+
+    const result = await service.load({
+      seeds: [
+        LEAD_SEED,
+        insertSeed('sys_approval_request', [
+          { process_name: 'flow:discount', object_name: 'crm_lead', record_id: 'Lisa Thompson', status: 'pending' },
+        ]),
+      ] as any,
+      config: CONFIG,
+    });
+
+    // Resolved in pass 1: nothing was deferred, so there is nothing to warn
+    // about. A signal keyed on the `required` DECLARATION rather than on the
+    // deferral would fire here — and then fire on every correctly ordered
+    // seed in the repo.
+    const approvalResult = result.results.find((r) => r.object === 'sys_approval_request')!;
+    expect(approvalResult.referencesDeferred).toBe(0);
+    expect(approvalResult.referencesResolved).toBeGreaterThan(0);
+    expect(requiredDeferralWarnings(logger)).toHaveLength(0);
+    expect(result.success).toBe(true);
+  });
+
+  it('DOES NOT FIRE on the UPDATE arm: an omitted column is not a cleared one, so the replay succeeds today', async () => {
+    const { service, logger, store, engine } = newService(ADOPTER_SCHEMAS);
+    // A row this dataset will MATCH on replay — the dev-server-restart shape.
+    store.sys_approval_request = [
+      { id: 'ar-existing', process_name: 'flow:discount', object_name: 'crm_lead', record_id: 'lead-from-a-previous-run', status: 'pending' },
+    ];
+
+    const result = await service.load({
+      seeds: [
+        {
+          object: 'sys_approval_request',
+          externalId: 'process_name',
+          mode: 'upsert',
+          env: ['prod', 'dev', 'test'],
+          records: [
+            { process_name: 'flow:discount', object_name: 'crm_lead', record_id: 'Lisa Thompson', status: 'approved' },
+          ],
+        },
+        LEAD_SEED,
+      ] as any,
+      config: CONFIG,
+    });
+
+    // The deferral IS taken (the target is not seeded yet) …
+    const approvalResult = result.results.find((r) => r.object === 'sys_approval_request')!;
+    expect(passTwoBackfills(engine, 'sys_approval_request', 'record_id'), 'no deferral was taken — the control is vacuous').toBe(1);
+    expect(approvalResult.updated).toBe(1);
+    // … but it lands on an UPDATE, where the deleted column is simply omitted
+    // and the write contract never checks it. Warning here would announce a
+    // rejection that does not happen — measured on the REAL engine in
+    // `packages/objectql/src/engine-seed-required-deferral.test.ts`.
+    expect(requiredDeferralWarnings(logger)).toHaveLength(0);
+    expect(result.success).toBe(true);
+    const leadId = store.crm_lead.find((r) => r.name === 'Lisa Thompson')!.id;
+    expect(store.sys_approval_request[0].record_id).toBe(leadId);
+  });
+
+  it('says it ONCE per dataset and field, not once per row', async () => {
+    const { service, logger, engine } = newService(ADOPTER_SCHEMAS);
+
+    const result = await service.load({
+      seeds: [
+        insertSeed('sys_approval_request', [
+          { process_name: 'flow:a', object_name: 'crm_lead', record_id: 'Lisa Thompson', status: 'pending' },
+          { process_name: 'flow:b', object_name: 'crm_lead', record_id: 'Lisa Thompson', status: 'pending' },
+          { process_name: 'flow:c', object_name: 'crm_lead', record_id: 'Lisa Thompson', status: 'pending' },
+        ]),
+        LEAD_SEED,
+      ] as any,
+      config: CONFIG,
+    });
+
+    expect(result.success).toBe(true);
+    expect(passTwoBackfills(engine, 'sys_approval_request', 'record_id')).toBe(3);
+    // Three rows, one ordering mistake, one line. The author's fix is the same
+    // single change for all three — repeating it per row is the noise that
+    // trains readers to skim `warn`.
+    expect(requiredDeferralWarnings(logger)).toHaveLength(1);
+  });
+
 });

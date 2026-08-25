@@ -1582,7 +1582,17 @@ describe('[#6428] fail-closed: an unresolvable verdict is DENY, never abstain', 
     logged = [];
     svc = new SharingService({
       engine,
-      logger: { error: (...args: any[]) => { logged.push(args); } },
+      // [#10556 (c)] `warn` is a REQUIRED member of this options type as of the
+      // #9754 repair, so an `{ error }`-only spy no longer satisfies it. Both
+      // channels land in the SAME `logged` array deliberately, and that is
+      // coverage rather than a formality: #9754's whole rule is that a
+      // fail-closed report DEGRADES to `warn` when `error` is absent, so a
+      // double capturing only `error` is one that would not notice the
+      // degradation this test exists to assert on.
+      logger: {
+        error: (...args: any[]) => { logged.push(args); },
+        warn: (...args: any[]) => { logged.push(args); },
+      },
     });
     engine._tables.account = [{ id: 'a1', name: 'Acme', owner_id: 'alice' }];
   });

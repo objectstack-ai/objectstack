@@ -1355,6 +1355,18 @@ const actionObject = () => strictObject({
    * `executeAPI` navigation handling and `${result.*}` interpolation are the
    * downstream objectui half (Blocked-by #9566/#9474; tracked in the liveness
    * ledger at `planned` strength with the amend-on-landing instruction).
+   *
+   * **The doubled channel is refused where the schema can see it** (#11519,
+   * maintainer ruling 2026-08-24): a `type: 'script'` action declaring BOTH
+   * this block AND `opensInNewTab: true` carries two post-success
+   * destinations — `opensInNewTab` is the schema-visible marker of the
+   * handler-returned `{ redirectUrl }` channel — and the refinement below
+   * rejects the pair at authoring time. A handler that returns `redirectUrl`
+   * WITHOUT the marker is runtime-only knowledge; that remainder gets a loud
+   * dispatch-seam diagnostic in `@objectstack/runtime` (`action-execution.ts`,
+   * `doubledPostSuccessNavigationWarning`), under which the interim renderer
+   * precedence (declared `onSuccess` wins, objectui#5933) still decides the
+   * navigation. ⛔ No `precedence` field — refusal, not arbitration, by ruling.
    */
   onSuccess: strictObject({
     surface: "this action's onSuccess block",
@@ -1523,6 +1535,75 @@ export const ActionSchema = lazySchema(() => actionObject().refine((data) => {
     + 'renderer reads a post-success hop today — if that capability is needed, it is a spec '
     + 'proposal, not a silent key.',
   path: ['onSuccess'],
+}).refine((data) => {
+  // #11519 (maintainer ruling 2026-08-24) — refuse the DOUBLED post-success
+  // navigation channel where the schema can see it. Two channels can name a
+  // destination for one `type: 'script'` action: the declared `onSuccess`
+  // block, and the handler-returned `{ redirectUrl }`. The handler's return
+  // value is runtime-only in general (`target` names an opaque registry
+  // entry; `HookBodySchema` declares no return contract) — but
+  // `opensInNewTab: true` IS a schema-visible declaration of the
+  // handler-redirect channel: its whole contract is "pre-open a tab, then
+  // drive it to the handler's returned `redirectUrl`". Declaring it beside
+  // `onSuccess` states two destinations for one success; a renderer can only
+  // perform one, so the other declaration is silently dead — the
+  // declared-≠-enforced shape this file rejects at author time (#4352 /
+  // ADR-0078). The runtime-only remainder (no marker, handler returns
+  // `redirectUrl` anyway) is diagnosed loudly at the dispatch seam instead
+  // (`@objectstack/runtime` `doubledPostSuccessNavigationWarning`).
+  //
+  // Scoped to `type: 'script'` — the ruled sentence. `opensInNewTab: false`
+  // is not the marker (it declares the channel is NOT in use). The corpus was
+  // measured at zero doubled producers (#11519), so nothing legal breaks.
+  if (data.type === 'script' && data.onSuccess && data.opensInNewTab === true) {
+    return false;
+  }
+  return true;
+}, {
+  message:
+    "A `type: 'script'` action declaring BOTH `onSuccess` and `opensInNewTab: true` carries two "
+    + 'post-success destinations for one success: `opensInNewTab` pre-opens a tab for the '
+    + 'HANDLER-RETURNED `{ redirectUrl }`, while `onSuccess.navigate` declares the hop in '
+    + 'metadata. A renderer can perform only one — under the interim precedence (objectui#5933) '
+    + "the declared `onSuccess` wins and the handler's `redirectUrl` is silently ignored — so the "
+    + 'doubled declaration is refused at authoring time (#11519). Keep `onSuccess` and drop '
+    + '`opensInNewTab` (and stop returning `redirectUrl` from the handler), or keep '
+    + '`opensInNewTab` + the handler redirect and drop `onSuccess`. There is no `precedence` '
+    + 'field, by ruling: one destination, declared in one place.',
+  path: ['onSuccess'],
+}).refine((data) => {
+  // #11842 — enforce the documented co-constraint on `newTabUrl`. The field's
+  // own doc has always said "Only valid together with `opensInNewTab`", and
+  // every renderer read point agrees: objectui's pre-opened-tab wrapper
+  // (`consoleServerAction.ts`) reads `newTabUrl` only behind
+  // `action.opensInNewTab && newTabUrl`, and no other path reads the key at
+  // all. So a lone `newTabUrl` parsed clean and did nothing — the
+  // declared-≠-enforced shape this file rejects at author time (#4352 /
+  // ADR-0078), arriving through a documented co-constraint rather than a
+  // missing key.
+  //
+  // `opensInNewTab: false` is refused too, deliberately: unlike the #11519
+  // rule above (where `false` declares the handler-redirect channel out of
+  // use and the pair carries ONE destination), `newTabUrl` has no meaning
+  // OUTSIDE the pre-opened-tab flow — a declared-off channel makes the key
+  // exactly as dead as an undeclared one. The corpus was measured at zero
+  // lone producers (this repo's examples/platform metadata, objectui
+  // fixtures, and the cloud SSO producers all declare the pair), so nothing
+  // legal breaks.
+  if (data.newTabUrl !== undefined && data.opensInNewTab !== true) {
+    return false;
+  }
+  return true;
+}, {
+  message:
+    '`newTabUrl` is the zero-roundtrip target of the pre-opened-tab flow and is only valid '
+    + 'together with `opensInNewTab: true` — the renderer pre-opens the tab synchronously on '
+    + 'click and only THAT flow ever navigates to `newTabUrl`; no render path reads the key '
+    + 'otherwise, so without the flag it would parse clean and never run (ADR-0078). If a '
+    + 'pre-opened tab is intended, add `opensInNewTab: true`; otherwise drop `newTabUrl` '
+    + '(behavior is unchanged — the lone key was never read). For a STATIC url action, new-tab '
+    + 'behavior is `openIn: "new-tab"`, not this pair (#11842).',
+  path: ['newTabUrl'],
 }).transform((data, ctx) => lowerRequiresFeature(data, ctx)));
 
 export type Action = z.input<typeof ActionSchema>;

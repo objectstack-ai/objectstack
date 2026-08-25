@@ -3,8 +3,12 @@
   "entry": "./meta-spelling",
   "exports": [
     "META_URL_TO_SINGULAR (const)",
+    "PLURAL_TO_SINGULAR (const)",
+    "SINGULAR_TO_PLURAL (const)",
     "canonicalMetaUrlType (function)",
     "metaUrlSpellingRefusal (function)",
+    "pluralToSingular (function)",
+    "singularToPlural (function)",
     "unrecognisedMetaTypeRefusal (function)"
   ]
 }

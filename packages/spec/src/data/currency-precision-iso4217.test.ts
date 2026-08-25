@@ -22,6 +22,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { CurrencyConfigSchema, FieldSchema } from './field.zod';
+import { ObjectSchema } from './object.zod';
 import {
   CURRENCY_FRACTION_DIGITS,
   currencyFractionDigits,
@@ -57,15 +58,18 @@ describe('#7918 — currencyConfig-level anchor (pre-default, inside CurrencyCon
   });
 
   it('THE noisy-shape guard: an untouched fixed-JPY config (defaulted precision) parses clean', () => {
-    // The baked default 2 "contradicts" JPY's 0 digits — but it was never
-    // authored, so the rule must not fire. This is the assertion that proves
-    // the pre-default anchoring; with a property-level `.default(2)` it goes
-    // red (measured in this card's reverse verification).
+    // The default 2 "contradicts" JPY's 0 digits — but it was never authored,
+    // so the rule must not fire. This is the assertion that proves the
+    // pre-default anchoring; with a property-level `.default(2)` it goes red
+    // (measured in this card's reverse verification). Since #11423 the default
+    // is also no longer MATERIALIZED on this combination (the schema would
+    // refuse it as authored — see the idempotency block below), so the parsed
+    // output omits `precision` rather than carrying 2.
     const result = CurrencyConfigSchema.safeParse({
       currencyMode: 'fixed', defaultCurrency: 'JPY',
     });
     expect(result.success).toBe(true);
-    expect(result.data!.precision).toBe(2);
+    expect(result.data!.precision).toBeUndefined();
   });
 
   it('dynamic currencyMode is out of reach by design (JPY + 2 + dynamic passes)', () => {
@@ -107,7 +111,11 @@ describe('#7918 — currencyConfig-level anchor (pre-default, inside CurrencyCon
 
   it('agreeing combos parse byte-identically to the `.default(2)` era', () => {
     // Measured on origin/main (37b82ed5b) before this change — same shape
-    // order, same materialized default, byte for byte.
+    // order, same materialized default, byte for byte. The one #11423 flip is
+    // deliberately NOT in this battery: a bare fixed-JPY config now omits
+    // `precision` (the schema would refuse the materialized 2 as authored —
+    // pinned in the idempotency block below); every combination here either
+    // authored its precision or cannot be refused, so byte-identity holds.
     const cases: Array<[Record<string, unknown>, string]> = [
       [{ precision: 2, currencyMode: 'fixed', defaultCurrency: 'USD' },
         '{"precision":2,"currencyMode":"fixed","defaultCurrency":"USD"}'],
@@ -115,8 +123,10 @@ describe('#7918 — currencyConfig-level anchor (pre-default, inside CurrencyCon
         '{"precision":0,"currencyMode":"fixed","defaultCurrency":"JPY"}'],
       [{ precision: 3, currencyMode: 'fixed', defaultCurrency: 'KWD' },
         '{"precision":3,"currencyMode":"fixed","defaultCurrency":"KWD"}'],
+      [{ currencyMode: 'fixed', defaultCurrency: 'USD' },
+        '{"precision":2,"currencyMode":"fixed","defaultCurrency":"USD"}'],
       [{ currencyMode: 'fixed', defaultCurrency: 'JPY' },
-        '{"precision":2,"currencyMode":"fixed","defaultCurrency":"JPY"}'],
+        '{"currencyMode":"fixed","defaultCurrency":"JPY"}'],
       [{}, '{"precision":2,"currencyMode":"dynamic","defaultCurrency":"CNY"}'],
     ];
     for (const [input, expected] of cases) {
@@ -136,6 +146,78 @@ describe('#7918 — currencyConfig-level anchor (pre-default, inside CurrencyCon
       const messages = result.error!.issues.map((i) => i.message).join('\n');
       expect(messages).toContain(alias);
       expect(messages).toContain('precision');
+    }
+  });
+});
+
+// [#11423] (maintainer ruling routed from #9689, 2026-08-24, idempotent
+// materialization): the `.overwrite()` never materializes a default the schema
+// itself would refuse as authored. Baking `precision: 2` onto a bare fixed
+// zero-/three-digit-currency config (JPY/KRW/KWD class) made parse output
+// self-rejecting on re-parse — `parse(parse(x))` threw for accepted x, and the
+// re-parse chain is the mainline authoring path (`ObjectSchema.create()`
+// returns parse output; `objectstack build`'s defineStack parses it again).
+// Same one-conditional shape as the #9689 master_detail guard in field.zod.ts.
+describe('#11423 — the materialized precision default is never one the schema itself refuses', () => {
+  it('a bare fixed-JPY config parses green and OMITS precision — parse(parse(x)) is idempotent', () => {
+    // The card's measured break: parse #1 baked `precision: 2`, parse #2
+    // rejected it at `currencyConfig.precision` ("currency JPY has 0 fraction
+    // digits; `precision: 2` contradicts it"). Absent is the honest spelling.
+    const once = CurrencyConfigSchema.parse({ currencyMode: 'fixed', defaultCurrency: 'JPY' });
+    expect(once.precision).toBeUndefined();
+    expect('precision' in once).toBe(false);
+    const again = CurrencyConfigSchema.safeParse(JSON.parse(JSON.stringify(once)));
+    expect(again.success).toBe(true);
+    expect(JSON.stringify(again.data)).toBe(JSON.stringify(once));
+  });
+
+  it('parse is IDEMPOTENT through the mainline create() → defineStack chain (the chain that carried the defect)', () => {
+    const field = FieldSchema.parse({
+      name: 'amount', label: 'Amount', type: 'currency',
+      currencyConfig: { currencyMode: 'fixed', defaultCurrency: 'JPY' },
+    });
+    expect(FieldSchema.safeParse(JSON.parse(JSON.stringify(field))).success).toBe(true);
+    const obj = ObjectSchema.create({
+      name: 'invoice', label: 'Invoice',
+      fields: { amount: { label: 'Amount', type: 'currency', currencyConfig: { currencyMode: 'fixed', defaultCurrency: 'JPY' } } },
+    });
+    expect(ObjectSchema.safeParse(obj).success).toBe(true);
+  });
+
+  it('an AUTHORED contradictory precision is still rejected with the named message (the guard narrows materialization, not the rule)', () => {
+    const result = CurrencyConfigSchema.safeParse({
+      precision: 2, currencyMode: 'fixed', defaultCurrency: 'JPY',
+    });
+    expect(result.success).toBe(false);
+    const issue = firstIssue(result)!;
+    expect(issue.code).toBe('custom');
+    expect(issue.path).toEqual(['precision']);
+    expect(issue.message).toContain('currency JPY has 0 fraction digits');
+    expect(issue.message).toContain('`precision: 2` contradicts it');
+  });
+
+  it('a bare fixed-USD config still materializes precision 2 byte-identically (the default keeps baking where it is legal — #7918 relocation intact)', () => {
+    expect(JSON.stringify(CurrencyConfigSchema.parse({ currencyMode: 'fixed', defaultCurrency: 'USD' })))
+      .toBe('{"precision":2,"currencyMode":"fixed","defaultCurrency":"USD"}');
+  });
+
+  it('the whole refused class skips materialization — 0-digit (KRW) and 3-digit (KWD) fixed currencies omit precision and re-parse green', () => {
+    for (const code of ['KRW', 'KWD']) {
+      const once = CurrencyConfigSchema.parse({ currencyMode: 'fixed', defaultCurrency: code });
+      expect('precision' in once).toBe(false);
+      expect(CurrencyConfigSchema.safeParse(JSON.parse(JSON.stringify(once))).success).toBe(true);
+    }
+  });
+
+  it('combinations the superRefine cannot refuse keep materializing — dynamic mode and unknown fixed codes', () => {
+    // dynamic + JPY: no single currency to check against, baked 2 re-parses
+    // green (the superRefine only judges `fixed`); unknown fixed code: the
+    // digit table fails OPEN, so 2 is never refused.
+    expect(CurrencyConfigSchema.parse({ defaultCurrency: 'JPY' }).precision).toBe(2);
+    expect(CurrencyConfigSchema.parse({ currencyMode: 'fixed', defaultCurrency: 'BTC' }).precision).toBe(2);
+    for (const input of [{ defaultCurrency: 'JPY' }, { currencyMode: 'fixed', defaultCurrency: 'BTC' }]) {
+      const once = CurrencyConfigSchema.parse(input);
+      expect(CurrencyConfigSchema.safeParse(JSON.parse(JSON.stringify(once))).success).toBe(true);
     }
   });
 });

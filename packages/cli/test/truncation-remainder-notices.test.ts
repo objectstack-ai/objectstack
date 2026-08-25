@@ -411,7 +411,13 @@ describe('[#11642] a pointer is only offered where it resolves', () => {
       ['compile.ts', "error: 'author-time rules failed', issues: ruleErrors"],
       ['compile.ts', "error: 'access matrix drift', changes: drift"],
       ['compile.ts', "error: 'docs validation failed', issues: docErrors"],
-      ['compile.ts', 'warnings: [...ruleAdvisories, ...unknownKeyWarnings],'],
+      // [#11727] Spelling updated, claim unchanged — and the claim got
+      // STRONGER: the success payload still publishes the advisory list this
+      // notice points at, and now publishes more of it. The #3366 capability
+      // hints and the ADR-0046 doc advisories joined the two already here, so
+      // "re-run with `--json` for the full list" resolves for four lists
+      // rather than two.
+      ['compile.ts', 'warnings: [...ruleAdvisories, ...docWarnings, ...unknownKeyWarnings, ...capProviderWarnings],'],
       ['validate.ts', 'errors: ruleErrors,'],
       ['validate.ts', 'errors: docErrors,'],
     ];

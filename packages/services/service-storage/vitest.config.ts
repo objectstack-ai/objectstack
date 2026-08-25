@@ -42,6 +42,25 @@ export default defineConfig({
     // `@objectstack/core/logger` and resolve it to `core/src/index.ts/logger`
     // (ENOTDIR). Same reasoning, and same shape, as `service-knowledge`'s
     // config.
-    alias: [{ find: /^@objectstack\/core$/, replacement: path.resolve(__dirname, '../../core/src/index.ts') }],
+    // `@objectstack/driver-sql` joins it for the same reason (#11427): the
+    // hydration/download agreement pin drives a REAL engine over a real driver
+    // — sqlite `:memory:`, the project's ruled test backend (#5499 froze
+    // investment in the in-memory driver, #5704 migrated the test backends) —
+    // and a driver read from `dist/` would make that pin a verdict about build
+    // state rather than about the source beside it.
+    //
+    // `@objectstack/objectql` is deliberately NOT aliased here — it is a
+    // registered entry in `KNOWN_UNALIASED_TEST_IMPORTS`
+    // (`scripts/check-test-source-alias.mjs`), so this package's tests resolve
+    // the engine through its `exports` to `dist/`. That is load-bearing rather
+    // than incidental: it is what lets an ablation of engine source, rebuilt,
+    // actually change what these tests observe.
+    //
+    // Anchored patterns in array form, per the note above: a bare key whose
+    // replacement is a FILE swallows the package's subpaths.
+    alias: [
+      { find: /^@objectstack\/core$/, replacement: path.resolve(__dirname, '../../core/src/index.ts') },
+      { find: /^@objectstack\/driver-sql$/, replacement: path.resolve(__dirname, '../../drivers/driver-sql/src/index.ts') },
+    ],
   },
 });

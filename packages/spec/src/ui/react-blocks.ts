@@ -275,7 +275,7 @@ export const REACT_BLOCKS: ReactBlockDef[] = [
           replacedBy: 'data',
           note: "Write the metadata-tier data source instead: data={{ provider: 'object', object: '…' }} — the same spelling a metadata list view authors. objectName keeps working during the deprecation window.",
         },
-        description: "[DEPRECATED → `data={{ provider: 'object', object }}`] The object this block binds to (server-connected). Converging on the metadata-tier spelling (#11284); this alias is removed after the deprecation window.",
+        description: "[DEPRECATED → `data={{ provider: 'object', object }}`] The object this block binds to (server-connected). Converging on the metadata-tier spelling; this alias is removed after the deprecation window.",
       },
       {
         name: 'viewType',
@@ -285,7 +285,7 @@ export const REACT_BLOCKS: ReactBlockDef[] = [
           replacedBy: 'type',
           note: 'Write type="kanban" (ListViewSchema\'s own `type`, the metadata-tier view kind) instead. viewType keeps working during the deprecation window.',
         },
-        description: '[DEPRECATED → `type`] Which visualization to render (default grid). Converging on the metadata-tier spelling (#11284): write `type`, the same key a metadata list view authors.',
+        description: '[DEPRECATED → `type`] Which visualization to render (default grid). Converging on the metadata-tier spelling: write `type`, the same key a metadata list view authors.',
       },
       { name: 'filters', type: "FilterArray e.g. ['status','=','active']", kind: 'controlled', description: 'ObjectQL base filter; drive from React state for tabbed/searched lists. ([field, op, value]; ops =, !=, >, <, contains, in; compound: [\"and\", […], […]]).' },
       { name: 'navigation', type: "{ mode: 'page' | 'drawer' | 'modal' | 'split' | 'none' }", kind: 'binding', description: 'What a row click does. Use { mode: \"none\" } when you handle clicks via onRowClick.' },
@@ -344,7 +344,7 @@ export const REACT_BLOCKS: ReactBlockDef[] = [
   {
     tag: 'Block',
     schemaType: '(any)',
-    summary: 'Escape hatch — render any registered component by type. <Block type="object-kanban" objectName="task" /> etc. Not a way back to the record:* family: those need a record page\'s record context and are rejected here too (#4413).',
+    summary: 'Escape hatch — render any registered component by type. <Block type="object-kanban" objectName="task" /> etc. Not a way back to the record:* family: those need a record page\'s record context and are rejected here too.',
     interactions: [
       { name: 'type', type: 'string', kind: 'binding', required: true, description: 'The registered component type to render.' },
     ],

@@ -1606,6 +1606,88 @@ function resolveErrorResponse(error: any, object?: string): { status: number; bo
 }
 
 /**
+ * [#11683 / #11684] The wire answer the `/data` door gives for a refusal the
+ * PRODUCER classified — or `undefined` when it classified nothing and the
+ * catching route's own fault terminal is the honest answer.
+ *
+ * ## Why this exists as an export rather than as a rule each route re-states
+ *
+ * Two route families build their error body by hand and share no branch with
+ * either door in this file: `/analytics/dataset/query` and the three
+ * record-share routes, both in `rest-server.ts`. Both re-derived
+ * classification locally — analytics from an in-line `error.status` +
+ * `error.code` read, the share family from `message.startsWith(CODE)` over
+ * five literal prefixes — and both landed a *different* answer from `/data`
+ * for one refusal. That is the door-disagreement shape #7525/#8016/#11588 keep
+ * producing whenever a boundary open-codes a read this file already owns;
+ * {@link sandboxBusinessMessage} was named for exactly that reason one card
+ * earlier, and this is its status-side counterpart. A route that asks this
+ * cannot drift, because there is nothing left at the route to drift.
+ *
+ * ## The two limbs, and why each is a limb
+ *
+ * A refusal is *classified* when the producer said which condition it is. This
+ * repo has already ruled on two ways of saying so, and this function is their
+ * union — not a third rule:
+ *
+ *  1. **A declared ADR-0112 envelope** — a `status`/`statusCode`
+ *     ({@link declaredHttpStatus}, both spellings, #7525) in the 4xx band
+ *     *and* a non-empty string `code`. **Both halves, deliberately**, which is
+ *     #5352's standing ruling on the analytics arm this sits beside: a 4xx
+ *     with no code would force a hand-built envelope to invent one, and a
+ *     producer shipping half an envelope has a bug that should be found rather
+ *     than papered over here. This function does not reopen that.
+ *  2. **A sandboxed body's business `throw`** — {@link sandboxBusinessMessage}
+ *     reads non-`undefined`, i.e. the QuickJS body REPORTED something rather
+ *     than CRASHED (#7543). A missing `code` is *not* half an envelope here:
+ *     the producer is a metadata-app author writing `throw new Error('…')`,
+ *     and `classifyDataError`'s unwrap door has answered that with `400` plus
+ *     the verbatim sentence since it existed — pinned end to end by
+ *     `hook-error-format.dogfood.test.ts` and by
+ *     `rest-hook-refusal-message-parity.test.ts` §3. Nothing is invented for
+ *     the code that was not declared either: `thrownCodeFields` answers `{}`,
+ *     which is ADR-0112's own rule.
+ *
+ * ## What it deliberately refuses to answer
+ *
+ * A **5xx**, declared or resolved. A server fault is not a refusal addressed
+ * to the caller, so it belongs to the catching route's own terminal — which is
+ * where the analytics `500 ANALYTICS_QUERY_FAILED` envelope and the share
+ * family's `SHARE_*_FAILED` codes keep living, message-withholding
+ * ({@link declaresServerFault}, #5811) and all. Both bands are checked: the
+ * declared one before resolution, so a declared 5xx never reaches
+ * {@link resolveErrorResponse}'s heuristics at all, and the resolved one
+ * after, so an error that looked classified but resolves to
+ * {@link UNCLASSIFIED_FAULT} or {@link DATA_STORE_FAULT} is handed back rather
+ * than dressed up as a refusal.
+ *
+ * ## What it does NOT decide
+ *
+ * The DIALECT. It returns the classification — `{ status, body }`, the same
+ * flat shape {@link handleRouteError} would send — and the caller re-dresses
+ * it in whatever envelope that route publishes. The record-share family
+ * answers the NESTED ADR-0112 D5 envelope (#8111) and must keep doing so; the
+ * analytics face answers its own flat `{ code, message }`. Deciding the wire
+ * POSITION here would have moved one of them, and vocabulary and position are
+ * two separate decisions — ADR-0112's #9232 amendment says so in as many
+ * words.
+ */
+export function classifiedRefusalAnswer(
+    error: any,
+): { status: number; body: Record<string, unknown> } | undefined {
+    const declared = declaredHttpStatus(error);
+    // A declared server fault is not a refusal, whatever else it carries.
+    if (declared !== undefined && declared >= 500) return undefined;
+    const declaresEnvelope =
+        declared !== undefined
+        && typeof error?.code === 'string'
+        && error.code.length > 0;
+    if (!declaresEnvelope && sandboxBusinessMessage(error) === undefined) return undefined;
+    const resolved = resolveErrorResponse(error);
+    return resolved.status < 500 ? resolved : undefined;
+}
+
+/**
  * Whether a mapped data-error status represents an *expected* client/lifecycle
  * outcome (and therefore shouldn't be logged as "[REST] Unhandled error").
  *  - 403 PERMISSION_DENIED is a normal RBAC denial

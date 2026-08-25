@@ -14,7 +14,7 @@ Guide for modeling relationships between objects using `lookup`, `master_detail`
 
 ### Use `lookup` When:
 - Child record can exist independently
-- Parent deletion should not affect child
+- Parent deletion should not affect child (`deleteBehavior: 'set_null'`)
 - No roll-up aggregations needed
 - Relationship is optional
 - **Example:** `task.assigned_to → user` (task can exist without assignment)
@@ -150,19 +150,19 @@ export default ObjectSchema.create({
 
 ## Delete Behaviors
 
-Configure `deleteBehavior` on `master_detail` relationships:
+Configure `deleteBehavior` on `master_detail` — `cascade` or `restrict` **only**;
+an authored `set_null` is refused at publish (it would orphan the detail row).
 
 | Behavior | Effect | Use Case |
 |:---------|:-------|:---------|
 | `cascade` | Delete all child records | Invoice → Line Items |
 | `restrict` | Prevent parent deletion if children exist | Department → Employees |
-| `set_null` | Set child reference to null | Manager → Employees (manager leaves) |
 
 ```typescript
 {
   type: 'master_detail',
   reference: 'parent_object',
-  deleteBehavior: 'cascade',  // or 'restrict' or 'set_null'
+  deleteBehavior: 'cascade',  // or 'restrict' — 'set_null' is refused here
 }
 ```
 
@@ -402,7 +402,7 @@ export default ObjectSchema.create({
 1. **Use lookup by default** — Only use master_detail when lifecycle coupling is required
 2. **Unique constraints on junctions** — Prevent duplicate many-to-many entries
 3. **Meaningful junction names** — Use descriptive names like `project_assignment` not `project_employee`
-4. **deleteBehavior on master_detail** — Always specify cascade/restrict/set_null
+4. **deleteBehavior on master_detail** — Always specify `cascade` or `restrict`
 5. **Required on master_detail** — Child should always require parent
 6. **Roll-ups for aggregation** — Use summary fields on parent for counts/sums
 7. **lookupFilters for scoping** — Limit lookup options to relevant records (`lookupFilters: [{ field, operator: 'eq', value }]`)

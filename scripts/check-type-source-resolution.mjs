@@ -82,7 +82,9 @@
 //
 // ── What this checks ───────────────────────────────────────────────────────
 //
-// For every workspace package with a `tsconfig.json`:
+// For every tsc PROGRAM a workspace package runs — its `tsconfig.json` plus
+// every `tsconfig*.json` its `typecheck` script NAMES (#11490; see
+// `programConfigsFor` for why named and not globbed):
 //
 //   1. Determine the files tsc puts in the program (`files` / `include` /
 //      `exclude`, with TS's defaults), and collect the workspace packages they
@@ -97,7 +99,9 @@
 //      safe: tsc falls back to node resolution, i.e. to `dist`, silently.
 //   4. Anything left resolves through a build artifact, and the package must be
 //      registered in `KNOWN_DIST_RESOLVED_TYPE_IMPORTS` below with EXACTLY that
-//      set. Unregistered ⇒ red.
+//      set — the UNION over the package's programs, since the registry is keyed
+//      by package and an exposure is an exposure whichever program reaches it.
+//      Unregistered ⇒ red.
 //
 // Rules are judged INDIVIDUALLY, never "does a `paths` block exist". Measured
 // on #8021: with the subpath rule kept and only the bare-entry rule deleted,
@@ -149,6 +153,11 @@ import {
   readWorkspaceGlobs,
   selfTest as workspaceEnumeratorSelfTest,
 } from './workspace-enumerator.mjs';
+// The `typecheck`-script -> tsconfig program set, shared with
+// `check-type-check-coverage.mjs` (#11490). Imported rather than re-derived:
+// two copies of that predicate drift, and the symptom of drift is a green gate
+// on either side.
+import { configsNamedByTypecheck, selfTest as typecheckConfigsSelfTest } from './typecheck-configs.mjs';
 import { tmpdir } from 'node:os';
 import process from 'node:process';
 
@@ -169,10 +178,38 @@ const REPO_ROOT = resolve(HERE, '..');
  * header for the two rules `downstream-contract` uses and the `@pkg*` spelling
  * that must never be used). Entries are audited in both directions, so one that
  * is no longer needed fails the gate and names itself for deletion.
+ *
+ * ## The one thing that is NOT a violation of that: a re-baseline (#11490)
+ *
+ * This registry grew when the gate's POPULATION widened from "each package's
+ * `tsconfig.json`" to "every `tsconfig*.json` its `typecheck` script names".
+ * Nothing about the repo changed and no new exposure was admitted — the same
+ * imports were always there, in tsc programs CI has been running on every PR,
+ * and the instrument could not see them. The measured before/after, both from
+ * `--list` on the same checkout:
+ *
+ *   before   77 programs / 77 packages, 51 entries, 221 package-dep pairs
+ *   after    93 programs / 77 packages, 54 entries, 233 package-dep pairs
+ *
+ * so +16 programs, +3 entries (`plugin-webhooks`, `service-messaging`,
+ * `service-realtime`, all reached only through `tsconfig.scripts.json`) and
+ * +12 pairs. The ratchet is shrink-only from the NEW number; the widening is
+ * the only thing that may ever move it up, and a widening states its numbers
+ * here or it is indistinguishable from a ratchet quietly reset.
+ *
+ * ⛔ Do NOT reach for this precedent to admit an exposure your change created.
+ * The test is whether the SET OF PROGRAMS changed, and that is a change to this
+ * file, not to a package.
  */
 const KNOWN_DIST_RESOLVED_TYPE_IMPORTS = {
   '@objectstack/account': ['@objectstack/platform-objects'],
-  '@objectstack/client': ['@objectstack/core', '@objectstack/spec'],
+  // #11490 re-baseline. Everything after `@objectstack/core` here arrives from
+  // `tsconfig.test.json`, a program CI has run on every PR since PR #5546 and
+  // which this gate could not see until its population became per-PROGRAM.
+  '@objectstack/client': [
+    '@objectstack/core', '@objectstack/driver-sqlite-wasm', '@objectstack/objectql',
+    '@objectstack/plugin-hono-server', '@objectstack/runtime', '@objectstack/spec',
+  ],
   '@objectstack/client-react': ['@objectstack/client', '@objectstack/spec'],
   '@objectstack/connector-mcp': ['@objectstack/core', '@objectstack/spec'],
   '@objectstack/connector-openapi': ['@objectstack/core', '@objectstack/spec'],
@@ -254,9 +291,11 @@ const KNOWN_DIST_RESOLVED_TYPE_IMPORTS = {
     '@objectstack/core', '@objectstack/formula', '@objectstack/spec', '@objectstack/types',
   ],
   '@objectstack/plugin-audit': ['@objectstack/core', '@objectstack/objectql', '@objectstack/spec'],
+  // #11490 re-baseline: `@objectstack/plugin-hono-server` arrives from
+  // `tsconfig.examples.json`.
   '@objectstack/plugin-auth': [
-    '@objectstack/core', '@objectstack/platform-objects', '@objectstack/rest', '@objectstack/spec',
-    '@objectstack/types',
+    '@objectstack/core', '@objectstack/platform-objects', '@objectstack/plugin-hono-server',
+    '@objectstack/rest', '@objectstack/spec', '@objectstack/types',
   ],
   '@objectstack/plugin-email': [
     '@objectstack/core', '@objectstack/formula', '@objectstack/objectql', '@objectstack/platform-objects',
@@ -274,6 +313,8 @@ const KNOWN_DIST_RESOLVED_TYPE_IMPORTS = {
     '@objectstack/core', '@objectstack/formula', '@objectstack/metadata-core',
     '@objectstack/platform-objects', '@objectstack/spec',
   ],
+  // #11490 re-baseline: a NEW entry — reached only through `tsconfig.scripts.json`.
+  '@objectstack/plugin-webhooks': ['@objectstack/spec'],
   '@objectstack/plugin-sharing': [
     '@objectstack/core', '@objectstack/formula', '@objectstack/metadata-core', '@objectstack/objectql',
     '@objectstack/platform-objects', '@objectstack/spec', '@objectstack/types',
@@ -290,11 +331,21 @@ const KNOWN_DIST_RESOLVED_TYPE_IMPORTS = {
     '@objectstack/service-cluster', '@objectstack/service-datasource', '@objectstack/spec',
     '@objectstack/types',
   ],
+  // #11490 re-baseline: NEW entries — reached only through `tsconfig.scripts.json`.
+  '@objectstack/service-messaging': ['@objectstack/spec'],
+  '@objectstack/service-realtime': ['@objectstack/spec'],
   '@objectstack/service-sms': ['@objectstack/core', '@objectstack/plugin-auth', '@objectstack/spec'],
   '@objectstack/setup': ['@objectstack/platform-objects', '@objectstack/spec'],
   '@objectstack/studio': ['@objectstack/platform-objects', '@objectstack/spec'],
   '@objectstack/trigger-api': ['@objectstack/core', '@objectstack/spec'],
-  '@objectstack/trigger-record-change': ['@objectstack/core', '@objectstack/spec'],
+  // #11490 re-baseline, and the card's own measurement: these four arrive from
+  // `tsconfig.test.json`. They were REPORTED when the identical 7 test files
+  // were put through the build config and SILENT through the prescribed
+  // sibling — the asymmetry this widening closes.
+  '@objectstack/trigger-record-change': [
+    '@objectstack/core', '@objectstack/driver-sql', '@objectstack/formula', '@objectstack/objectql',
+    '@objectstack/service-automation', '@objectstack/spec',
+  ],
   '@objectstack/trigger-schedule': [
     '@objectstack/core', '@objectstack/service-automation', '@objectstack/spec',
   ],
@@ -763,6 +814,129 @@ function starTraps(paths, workspaceNames) {
 
 // ── the scan ────────────────────────────────────────────────────────────────
 
+/**
+ * Every tsc program a package runs, as config basenames — `tsconfig.json`
+ * first, the rest alphabetical.
+ *
+ * ## Why this is not just `tsconfig.json` (#11490)
+ *
+ * This gate read `join(pkg.dir, 'tsconfig.json')` and nothing else, so every
+ * other tsc program in the package was outside its declared population. That
+ * is not an exotic case here: the repair this repo PRESCRIBES for a hidden
+ * test layer — stated in AGENTS.md and in `check-type-check-coverage.mjs`'s
+ * TESTS_COVERED docs — is precisely a SIBLING `tsconfig.test.json` named in
+ * the `typecheck` script, and CI runs it on every PR.
+ *
+ * Measured on `packages/triggers/trigger-record-change` before this widening,
+ * both spellings of the same 7 test files with the same four dist-resolved
+ * type imports:
+ *
+ *   through the BUILD config    ✗ NEW dist-resolved type import(s): driver-sql,
+ *                                 formula, objectql, service-automation
+ *   through the SIBLING config  exit 0, count unchanged
+ *
+ * So following the house pattern was what made the exposure invisible, and an
+ * author with a genuine choice between the two spellings got a green gate for
+ * picking the one that hides more. Same files, same exposure, two answers — a
+ * gate that is per-package where it needs to be per-PROGRAM.
+ *
+ * ## Why NAMED, not every `tsconfig*.json` on disk
+ *
+ * The criterion is "the `typecheck` script names it", never "the glob matches
+ * it". A config no script invokes is decorative: putting it in the population
+ * would report imports no tsc program ever resolves, and a gate that looks
+ * stronger while measuring something nobody runs is worse than the state it
+ * replaced, because it READS as covered. Measured on this tree at the widening:
+ * 16 configs across 15 packages join the population, and
+ * `packages/cli/tsconfig.build.json` — present on disk, named by no script —
+ * correctly stays out.
+ *
+ * `configsNamedByTypecheck` answers in BASENAMES (see that module's header), so
+ * every name is resolved against this package's own directory and dropped when
+ * no file is there. `tsconfig.json` is always a candidate even when no
+ * `typecheck` script exists at all: this population may only grow here, and a
+ * package whose primary config stopped being read because its manifest lost a
+ * script would be a SILENT narrowing.
+ */
+function programConfigsFor(pkg) {
+  const named = configsNamedByTypecheck(pkg.json?.scripts ?? {});
+  const present = [...new Set(['tsconfig.json', ...named])].filter((file) => existsSync(join(pkg.dir, file)));
+  return present.sort((a, b) => (a === 'tsconfig.json' ? -1 : b === 'tsconfig.json' ? 1 : a.localeCompare(b)));
+}
+
+/**
+ * One tsc program's verdict: which workspace deps its file set imports whose
+ * types resolve through a build artifact, plus the config defects found on the
+ * way. Resolution is per PROGRAM and cannot be hoisted to the package: `paths`,
+ * `baseUrl` and the `extends` chain are properties of the config that was
+ * loaded, and a sibling config that re-declares `compilerOptions` replaces its
+ * parent's `paths` map outright rather than merging into it.
+ */
+function scanProgram(root, pkg, file, names, artifactPackages) {
+  const empty = { file, fileCount: 0, distResolved: [], traps: [], missingTargets: [] };
+
+  let config;
+  try {
+    config = loadTsconfig(join(pkg.dir, file));
+  } catch (error) {
+    if (!(error instanceof UnreadableConfig)) throw error;
+    return { ...empty, unreadable: error.message };
+  }
+
+  const paths = config.compilerOptions.paths ?? {};
+  const baseDir = pathsBaseDir(config);
+  const files = programFiles(pkg.dir, config);
+
+  /** bare workspace name -> the specifiers actually written */
+  const imports = new Map();
+  for (const source of files) {
+    let text;
+    try {
+      text = readFileSync(source, 'utf8');
+    } catch {
+      continue;
+    }
+    for (const spec of extractTypeImports(text)) {
+      if (spec.startsWith('.') || spec.startsWith('/')) continue;
+      const scoped = spec.match(/^(@[^/]+\/[^/]+)(?:\/.*)?$/);
+      const bare = scoped ? scoped[1] : spec.split('/')[0];
+      if (bare === pkg.name || !names.has(bare)) continue;
+      if (!imports.has(bare)) imports.set(bare, new Set());
+      imports.get(bare).add(spec);
+    }
+  }
+
+  const distResolved = [];
+  const missingTargets = [];
+  for (const [dep, specs] of [...imports].sort(([a], [b]) => a.localeCompare(b))) {
+    if (!artifactPackages.has(dep)) continue; // types already point at source
+    let anyDistResolved = false;
+    for (const spec of [...specs].sort()) {
+      const resolved = resolveThroughPaths(spec, paths, baseDir);
+      if (!resolved) {
+        anyDistResolved = true;
+        continue;
+      }
+      if (!existsAsModule(resolved.target)) {
+        missingTargets.push({ spec, key: resolved.key, target: relative(root, resolved.target) });
+        anyDistResolved = true;
+        continue;
+      }
+      if (!pointsAtSource(resolved.target)) anyDistResolved = true;
+    }
+    if (anyDistResolved) distResolved.push(dep);
+  }
+
+  return {
+    file,
+    fileCount: files.length,
+    unreadable: null,
+    distResolved,
+    traps: starTraps(paths, names),
+    missingTargets,
+  };
+}
+
 function scan(root) {
   const workspace = listWorkspacePackages(root);
   const names = new Set(workspace.map((p) => p.name));
@@ -770,94 +944,46 @@ function scan(root) {
 
   const packages = [];
   for (const pkg of workspace) {
-    const configPath = join(pkg.dir, 'tsconfig.json');
-    if (!existsSync(configPath)) continue;
+    const configFiles = programConfigsFor(pkg);
+    if (configFiles.length === 0) continue;
 
-    let config = null;
-    let unreadable = null;
-    try {
-      config = loadTsconfig(configPath);
-    } catch (error) {
-      if (!(error instanceof UnreadableConfig)) throw error;
-      unreadable = error.message;
-    }
+    const programs = configFiles.map((file) => scanProgram(root, pkg, file, names, artifactPackages));
 
-    if (unreadable) {
-      packages.push({
-        name: pkg.name,
-        rel: pkg.rel,
-        fileCount: 0,
-        unreadable,
-        distResolved: [],
-        traps: [],
-        missingTargets: [],
-      });
-      continue;
-    }
-
-    const paths = config.compilerOptions.paths ?? {};
-    const baseDir = pathsBaseDir(config);
-    const files = programFiles(pkg.dir, config);
-
-    /** bare workspace name -> the specifiers actually written */
-    const imports = new Map();
-    for (const file of files) {
-      let text;
-      try {
-        text = readFileSync(file, 'utf8');
-      } catch {
-        continue;
+    // dep -> the config(s) whose program reaches it, so a diagnostic can say
+    // WHICH program to look in. Without it an author reads the build config,
+    // finds no such import, and concludes the gate is wrong.
+    const distResolvedBy = new Map();
+    for (const program of programs) {
+      for (const dep of program.distResolved) {
+        if (!distResolvedBy.has(dep)) distResolvedBy.set(dep, []);
+        distResolvedBy.get(dep).push(program.file);
       }
-      for (const spec of extractTypeImports(text)) {
-        if (spec.startsWith('.') || spec.startsWith('/')) continue;
-        const scoped = spec.match(/^(@[^/]+\/[^/]+)(?:\/.*)?$/);
-        const bare = scoped ? scoped[1] : spec.split('/')[0];
-        if (bare === pkg.name || !names.has(bare)) continue;
-        if (!imports.has(bare)) imports.set(bare, new Set());
-        imports.get(bare).add(spec);
-      }
-    }
-
-    const distResolved = [];
-    const missingTargets = [];
-    for (const [dep, specs] of [...imports].sort(([a], [b]) => a.localeCompare(b))) {
-      if (!artifactPackages.has(dep)) continue; // types already point at source
-      let anyDistResolved = false;
-      for (const spec of [...specs].sort()) {
-        const resolved = resolveThroughPaths(spec, paths, baseDir);
-        if (!resolved) {
-          anyDistResolved = true;
-          continue;
-        }
-        if (!existsAsModule(resolved.target)) {
-          missingTargets.push({ spec, key: resolved.key, target: relative(root, resolved.target) });
-          anyDistResolved = true;
-          continue;
-        }
-        if (!pointsAtSource(resolved.target)) anyDistResolved = true;
-      }
-      if (anyDistResolved) distResolved.push(dep);
     }
 
     packages.push({
       name: pkg.name,
       rel: pkg.rel,
-      fileCount: files.length,
-      unreadable: null,
-      distResolved,
-      traps: starTraps(paths, names),
-      missingTargets,
+      programs,
+      fileCount: programs.reduce((n, program) => n + program.fileCount, 0),
+      unreadable: programs.find((program) => program.unreadable)?.unreadable ?? null,
+      distResolved: [...distResolvedBy.keys()].sort((a, b) => a.localeCompare(b)),
+      distResolvedBy,
     });
   }
 
-  return { packages, artifactPackages, totalPackages: workspace.length };
+  return {
+    packages,
+    artifactPackages,
+    totalPackages: workspace.length,
+    totalPrograms: packages.reduce((n, p) => n + p.programs.length, 0),
+  };
 }
 
 // ── the gate ────────────────────────────────────────────────────────────────
 
 function check(root, registry) {
   const failures = [];
-  const { packages, artifactPackages, totalPackages } = scan(root);
+  const { packages, artifactPackages, totalPackages, totalPrograms } = scan(root);
 
   // Census guard. Every reading below is a scan result, and a scan that has
   // quietly stopped matching reports a spotless repo. Zero is never the good
@@ -867,40 +993,67 @@ function check(root, registry) {
   if (artifactPackages.size === 0)
     failures.push('scanner found NO package whose types resolve to `dist/` — entry detection is broken, not the repo');
   if (packages.length === 0)
-    failures.push('scanner found NO package with a tsconfig.json — config discovery is broken, not the repo');
+    failures.push('scanner found NO package with a tsc program — config discovery is broken, not the repo');
   if (packages.length > 0 && packages.every((p) => p.fileCount === 0 && !p.unreadable))
     failures.push('scanner put NO file in ANY program — include/exclude handling is broken, not the repo');
+  // The census leg the #11490 widening needs. Sibling-config discovery failing
+  // is INVISIBLE without it: this gate reverts to exactly its old per-package
+  // behaviour, every remaining program still scans, and the summary reads like
+  // a clean repo. `configsNamedByTypecheck` returning an empty set for every
+  // package — a regex that stopped matching, a manifest reader that stopped
+  // seeing `scripts` — is that failure, and it is silent by construction.
+  if (packages.length > 0 && packages.every((p) => p.programs.length <= 1))
+    failures.push(
+      'scanner found NO package running more than one tsc program — sibling-config discovery is broken, not\n' +
+        '    the repo. The prescribed `tsconfig.test.json` route is the one this gate exists to be able to see.',
+    );
 
   const measured = new Map(packages.filter((p) => p.distResolved.length > 0).map((p) => [p.name, p.distResolved]));
 
   for (const pkg of packages) {
-    if (pkg.unreadable) {
-      failures.push(
-        `${pkg.rel}: tsconfig.json cannot be read (${pkg.unreadable}).\n` +
-          '    This gate must be able to resolve every `extends` chain and read every `paths` block.',
-      );
-    }
-    for (const trap of pkg.traps) {
-      failures.push(
-        `${pkg.rel}: \`paths\` key \`${trap.key}\` puts its star where a separator belongs, so it swallows ` +
-          `${trap.swallowed.join(', ')}\n` +
-          '    and every subpath of them, folding all of it onto one target. This does NOT crash — the target\n' +
-          '    re-exports most of the surface, so the program type-checks against the WRONG MODULE and stays\n' +
-          `    green. Split it into an exact key and a \`/*\` key:\n` +
-          `      "${trap.swallowed[0]}": ["<relative>/src/index.ts"],\n` +
-          `      "${trap.swallowed[0]}/*": ["<relative>/src/*/index.ts"]`,
-      );
-    }
-    for (const missing of pkg.missingTargets) {
-      failures.push(
-        `${pkg.rel}: \`paths\` key \`${missing.key}\` maps \`${missing.spec}\` to \`${missing.target}\`, which does ` +
-          'not exist.\n' +
-          '    A rule whose target is missing is not a rule: tsc falls back to node resolution — i.e. to `dist` —\n' +
-          '    and reports nothing. Fix the target or delete the rule; a rule that matches nothing is worse than\n' +
-          '    no rule, because it reads as coverage.',
-      );
+    for (const program of pkg.programs) {
+      if (program.unreadable) {
+        failures.push(
+          `${pkg.rel}/${program.file} cannot be read (${program.unreadable}).\n` +
+            '    This gate must be able to resolve every `extends` chain and read every `paths` block.',
+        );
+      }
+      for (const trap of program.traps) {
+        failures.push(
+          `${pkg.rel}/${program.file}: \`paths\` key \`${trap.key}\` puts its star where a separator belongs, so it ` +
+            `swallows ${trap.swallowed.join(', ')}\n` +
+            '    and every subpath of them, folding all of it onto one target. This does NOT crash — the target\n' +
+            '    re-exports most of the surface, so the program type-checks against the WRONG MODULE and stays\n' +
+            `    green. Split it into an exact key and a \`/*\` key:\n` +
+            `      "${trap.swallowed[0]}": ["<relative>/src/index.ts"],\n` +
+            `      "${trap.swallowed[0]}/*": ["<relative>/src/*/index.ts"]`,
+        );
+      }
+      for (const missing of program.missingTargets) {
+        failures.push(
+          `${pkg.rel}/${program.file}: \`paths\` key \`${missing.key}\` maps \`${missing.spec}\` to ` +
+            `\`${missing.target}\`, which does not exist.\n` +
+            '    A rule whose target is missing is not a rule: tsc falls back to node resolution — i.e. to `dist`\n' +
+            '    — and reports nothing. Fix the target or delete the rule; a rule that matches nothing is worse\n' +
+            '    than no rule, because it reads as coverage.',
+        );
+      }
     }
   }
+
+  /**
+   * A dep list annotated with the program that reaches it, when that is not the
+   * build config (#11490). Without it the widening produces a diagnostic an
+   * author cannot act on: they open `tsconfig.json`, find no such import, and
+   * conclude the gate is wrong. Plain names are kept in the copy-paste snippets
+   * below — those are `paths` keys and a parenthetical would be pasted in.
+   */
+  const withProvenance = (pkg, deps) =>
+    deps.map((dep) => {
+      const via = pkg.distResolvedBy.get(dep) ?? [];
+      const siblings = via.filter((file) => file !== 'tsconfig.json');
+      return siblings.length > 0 && !via.includes('tsconfig.json') ? `${dep} (via ${siblings.join(', ')})` : dep;
+    });
 
   for (const [name, deps] of measured) {
     const registered = registry[name];
@@ -909,7 +1062,7 @@ function check(root, registry) {
       failures.push(
         `${pkg.rel} (${name}): its tsc program imports ${deps.length} workspace package(s) whose declarations\n` +
           `    resolve to \`dist/\` with no \`paths\` rule pointing at source:\n` +
-          `    ${deps.join(', ')}\n` +
+          `    ${withProvenance(pkg, deps).join(', ')}\n` +
           '    Every type verdict in this package — including whatever `typecheck` reports — is currently a\n' +
           '    function of build state, and the dangerous case is SILENT (a dist merely BEHIND the source\n' +
           '    type-checks GREEN against old declarations). Add the rules to its tsconfig.json:\n' +
@@ -922,7 +1075,8 @@ function check(root, registry) {
     const gone = registered.filter((d) => !deps.includes(d));
     if (added.length > 0)
       failures.push(
-        `${name}: NEW dist-resolved type import(s) since this entry was measured: ${added.join(', ')}.\n` +
+        `${name}: NEW dist-resolved type import(s) since this entry was measured: ` +
+          `${withProvenance(packages.find((p) => p.name === name), added).join(', ')}.\n` +
           "    Add the `paths` rules to the package's tsconfig.json — widening the registry entry is not the fix.\n" +
           // The REASON for that refusal, in the text the author actually reads (#8576).
           // Mirrors `KNOWN_DIST_RESOLVED_TYPE_IMPORTS`'s own words verbatim rather than
@@ -947,13 +1101,13 @@ function check(root, registry) {
     );
   }
 
-  return { failures, packages, measured };
+  return { failures, packages, measured, programs: totalPrograms };
 }
 
 // ── reporting ───────────────────────────────────────────────────────────────
 
 function printList(root) {
-  const { packages } = scan(root);
+  const { packages, totalPrograms: programs } = scan(root);
   const offenders = packages.filter((p) => p.distResolved.length > 0).sort((a, b) => a.name.localeCompare(b.name));
   console.log('const KNOWN_DIST_RESOLVED_TYPE_IMPORTS = {');
   for (const pkg of offenders) {
@@ -961,7 +1115,7 @@ function printList(root) {
   }
   console.log('};');
   console.error(
-    `\n${offenders.length} of ${packages.length} packages with a tsconfig.json have >=1 workspace type import ` +
+    `\n${offenders.length} of ${packages.length} packages (${programs} tsc program(s)) have >=1 workspace type import ` +
       `resolving through \`dist/\` (${offenders.reduce((n, p) => n + p.distResolved.length, 0)} package-dependency pairs); ` +
       `${packages.length - offenders.length} are clean.`,
   );
@@ -1236,6 +1390,75 @@ function buildFixtureTree() {
     'src/thing.ts': "import { alive } from '@fx/spec';\nexport const t = alive;\n",
   });
 
+  // ── #11490: the population is per PROGRAM, and "named" is the criterion ──
+  //
+  // (17) THE CARD'S SHAPE. The build config excludes the test layer — which
+  // ci.yml requires, so no test file reaches the published artifact — and the
+  // repo's prescribed repair is a SIBLING config named in `typecheck`. The
+  // exposure lives ONLY in that sibling's program. Before the widening this
+  // package was silent.
+  const testLayerFiles = {
+    'src/thing.ts': 'export const thing = 1;\n',
+    'src/thing.test.ts': "import { alive } from '@fx/spec';\nexport const t = alive;\n",
+  };
+  fixture(root, 'packages/sibling-config', {
+    'package.json': JSON.stringify(
+      {
+        name: '@fx/sibling-config',
+        types: 'dist/index.d.ts',
+        exports: { '.': { types: './dist/index.d.ts' } },
+        scripts: { typecheck: 'tsc --noEmit && tsc --noEmit -p tsconfig.test.json' },
+      },
+      null,
+      2,
+    ),
+    'tsconfig.json': JSON.stringify({ include: ['src/**/*'], exclude: ['**/*.test.ts'] }, null, 2),
+    'tsconfig.test.json': JSON.stringify({ extends: './tsconfig.json', include: ['src/**/*'], exclude: [] }, null, 2),
+    ...testLayerFiles,
+  });
+
+  // (18) THE TWIN, and the two-sided acceptance test. The SAME files with the
+  // SAME import, reached through the BUILD config because this one keeps no
+  // exclusion. The card's whole finding was that (17) and (18) are the same
+  // exposure reported in one spelling and silent in the other, so the assertion
+  // is not "both are reported" but that they are reported IDENTICALLY.
+  fixture(root, 'packages/build-config-twin', {
+    'package.json': JSON.stringify(
+      {
+        name: '@fx/build-config-twin',
+        types: 'dist/index.d.ts',
+        exports: { '.': { types: './dist/index.d.ts' } },
+        scripts: { typecheck: 'tsc --noEmit' },
+      },
+      null,
+      2,
+    ),
+    'tsconfig.json': JSON.stringify({ include: ['src/**/*'] }, null, 2),
+    ...testLayerFiles,
+  });
+
+  // (19) THE FALSE-POSITIVE GUARD ON THE WIDENING ITSELF. Byte-identical to
+  // (17) except that NO script names the sibling. A config nothing runs decides
+  // no type verdict, so its imports are not this package's exposure — and a
+  // widening spelled as `tsconfig*.json` on disk would report this package,
+  // producing a gate that looks stronger while measuring a program nobody runs.
+  // That is worse than the state it replaced, because it READS as covered.
+  fixture(root, 'packages/decorative-config', {
+    'package.json': JSON.stringify(
+      {
+        name: '@fx/decorative-config',
+        types: 'dist/index.d.ts',
+        exports: { '.': { types: './dist/index.d.ts' } },
+        scripts: { typecheck: 'tsc --noEmit', 'some:other': 'tsc -p tsconfig.test.json' },
+      },
+      null,
+      2,
+    ),
+    'tsconfig.json': JSON.stringify({ include: ['src/**/*'], exclude: ['**/*.test.ts'] }, null, 2),
+    'tsconfig.test.json': JSON.stringify({ extends: './tsconfig.json', include: ['src/**/*'], exclude: [] }, null, 2),
+    ...testLayerFiles,
+  });
+
   return root;
 }
 
@@ -1299,6 +1522,43 @@ function selfTest() {
     expect(reported(bare, 'packages/unparseable'), 'an unparseable tsconfig was read as resolving nothing');
     expect(has(bare.failures, 'cannot be read'), 'an unparseable tsconfig did not fail as unreadable');
 
+    // ── #11490: the population is per PROGRAM ─────────────────────────────
+    //
+    // The card's own measurement, in fixture form and TWO-SIDED. "The gate
+    // still passes" was explicitly not the test: the same files with the same
+    // import were REPORTED through the build config and SILENT through the
+    // prescribed sibling, so what has to hold is that the two spellings now
+    // report the SAME THING.
+    expect(
+      reported(bare, 'packages/sibling-config'),
+      'an exposure reachable only through the sibling `tsconfig.test.json` this repo PRESCRIBES was not '
+        + 'reported — the gate is per-package again where it must be per-program',
+    );
+    expect(reported(bare, 'packages/build-config-twin'), 'the build-config spelling of the identical files was not reported');
+    expect(
+      JSON.stringify(bare.measured.get('@fx/sibling-config')) ===
+        JSON.stringify(bare.measured.get('@fx/build-config-twin')),
+      'the sibling-config spelling and the build-config spelling of the SAME files with the SAME import did '
+        + `not report identically: ${JSON.stringify(bare.measured.get('@fx/sibling-config'))} vs `
+        + `${JSON.stringify(bare.measured.get('@fx/build-config-twin'))}`,
+    );
+    expect(
+      JSON.stringify(bare.measured.get('@fx/sibling-config')) === JSON.stringify(['@fx/spec']),
+      'the sibling-config exposure was not measured as exactly the dep the test file imports',
+    );
+    // The widening's own false positive: a config on disk that no script runs.
+    expect(
+      !reported(bare, 'packages/decorative-config'),
+      'a `tsconfig*.json` NO script names was put in the population — a gate that looks stronger while '
+        + 'measuring a program nobody runs reads as covered and is worse than the state it replaced',
+    );
+    // The diagnostic must say WHICH program, or the author opens the build
+    // config, finds no such import, and concludes the gate is wrong.
+    expect(
+      has(bare.failures, '(via tsconfig.test.json)'),
+      'the diagnostic did not name the program the exposure was reached through',
+    );
+
     // ── the registry, audited in BOTH directions ──────────────────────────
     const measuredNames = {
       '@fx/violator': ['@fx/spec'],
@@ -1307,6 +1567,9 @@ function selfTest() {
       '@fx/paths-to-dist': ['@fx/spec'],
       '@fx/star-trap': ['@fx/spec'],
       '@fx/missing-target': ['@fx/spec'],
+      // #11490 — both spellings of the same exposure, registered identically.
+      '@fx/sibling-config': ['@fx/spec'],
+      '@fx/build-config-twin': ['@fx/spec'],
     };
     const registered = check(root, measuredNames);
     expect(
@@ -1344,6 +1607,43 @@ function selfTest() {
 
     const wide = check(root, { ...measuredNames, '@fx/violator': ['@fx/spec', '@fx/other', '@fx/gone'] });
     expect(has(wide.failures, 'STALE'), 'a registry entry listing a dep that is no longer dist-resolved did not fail');
+
+    // ── census guard: sibling-config discovery going quiet is INVISIBLE ────
+    //
+    // The zero this leg exists for needs its own positive control: a tree in
+    // which no package runs a second program must trip it, or the guard is a
+    // line nobody has ever seen fire. Same shape as (17) minus the `typecheck`
+    // script that names the sibling — which is also exactly what the whole
+    // widening looks like after a regression.
+    const singleProgram = join(tmpdir(), `os-type-source-resolution-single-${process.pid}`);
+    rmSync(singleProgram, { recursive: true, force: true });
+    mkdirSync(join(singleProgram, 'packages'), { recursive: true });
+    fixture(singleProgram, 'packages/spec', {
+      'package.json': ARTIFACT_MANIFEST('@fx/spec'),
+      'src/index.ts': 'export const alive = 1;\n',
+    });
+    fixture(singleProgram, 'packages/lonely', {
+      'package.json': ARTIFACT_MANIFEST('@fx/lonely'),
+      'tsconfig.json': JSON.stringify({ include: ['src/**/*'] }, null, 2),
+      'src/thing.ts': "import { alive } from '@fx/spec';\nexport const t = alive;\n",
+    });
+    const single = check(singleProgram, { '@fx/lonely': ['@fx/spec'] });
+    expect(
+      has(single.failures, 'sibling-config discovery is broken'),
+      'a tree where no package runs a second tsc program did not trip the census guard — the #11490 widening '
+        + 'can go quiet and the summary still reads like a clean repo',
+    );
+    rmSync(singleProgram, { recursive: true, force: true });
+    // ...and it must NOT fire on the real fixture tree, where (17) runs two.
+    expect(
+      !has(bare.failures, 'sibling-config discovery is broken'),
+      'the multi-program census guard fired on a tree that does have a second program',
+    );
+
+    // The shared `typecheck`-script predicate is a plain module with no CI
+    // invocation of its own; the gates that consolidated onto it fold in its
+    // cases (#11490).
+    for (const failure of typecheckConfigsSelfTest()) expect(false, failure);
 
     // ── census guard: an empty tree is a broken scanner, never a clean repo ─
     const empty = join(tmpdir(), `os-type-source-resolution-empty-${process.pid}`);
@@ -1430,7 +1730,7 @@ if (argv.includes('--self-test')) {
 } else if (argv.includes('--list')) {
   printList(REPO_ROOT);
 } else {
-  const { failures, packages, measured } = check(REPO_ROOT, KNOWN_DIST_RESOLVED_TYPE_IMPORTS);
+  const { failures, packages, measured, programs } = check(REPO_ROOT, KNOWN_DIST_RESOLVED_TYPE_IMPORTS);
   if (failures.length > 0) {
     console.error('check-type-source-resolution FAILED\n');
     for (const failure of failures) console.error(`  ✗ ${failure}\n`);
@@ -1441,7 +1741,8 @@ if (argv.includes('--self-test')) {
     process.exit(1);
   }
   console.log(
-    `check-type-source-resolution OK — ${packages.length} packages with a tsconfig.json scanned; ` +
+    `check-type-source-resolution OK — ${programs} tsc program(s) across ${packages.length} packages scanned ` +
+      `(every \`tsconfig*.json\` each package's \`typecheck\` script names, #11490); ` +
       `${measured.size} registered as still resolving a workspace dep's types through \`dist/\`.`,
   );
 }

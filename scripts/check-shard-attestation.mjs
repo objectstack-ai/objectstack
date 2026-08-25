@@ -94,6 +94,63 @@
  * what makes this robust to the next undocumented lifecycle value instead of
  * needing another word added to a list.
  *
+ * ## Attempt scoping: an earlier attempt's credential is not this one's (#11998)
+ *
+ * Artifacts live on the RUN, not on the attempt, so every attempt after the
+ * first downloads whatever the earlier ones published. Measured on run
+ * 32806633489 (2026-08-25, PR #11987): attempt 1's `filter` job died
+ * environmentally BEFORE any path judgement, THE FILTER CONTRACT (#4928,
+ * fail-open by design) let all 9 shards run, they passed and attested, and the
+ * rollups failed on the dead filter. `rerun_failed_jobs` — the PRESCRIBED
+ * remedy for a pre-judgement death — re-ran filter + the two rollups; filter
+ * then judged the diff honestly (docs-only, zero test legs) and the shards
+ * stayed `skipped`, correctly. The rollups read expected-0 and refused attempt
+ * 1's credentials one at a time:
+ *
+ *     Test Core: unexpected attestation 'test-1-of-6' that no declared leg accounts for.  (×6)
+ *     Dogfood Regression Gate: unexpected attestation 'dogfood-1-of-3' …                  (×4)
+ *
+ * Red again, now for the OPPOSITE reason — and no attempt of that run could
+ * ever converge, because a full `rerun_workflow_run` hits the identical wall.
+ * The only exits were minting a new run or deleting artifacts by hand.
+ *
+ * The credential already CARRIED the attempt (`--emit` has stamped
+ * `run_attempt` from `GITHUB_RUN_ATTEMPT` all along) and `judge()` already
+ * PRINTED it. It simply never COMPARED it, so the run_id equality below was the
+ * entire scope check — one level coarser than the artifact namespace it judges.
+ * The repair is therefore a verdict change: no payload change, and nothing in
+ * ci.yml moves.
+ *
+ * ⭐ The rule is "latest per shard WITHIN ONE RUN", not "only this attempt's",
+ * and that difference is the whole design:
+ *
+ *   - a credential from an earlier attempt of THIS run that no declared leg
+ *     accounts for is DISCARDED, with a log line. It is explained by the
+ *     attempt mechanism rather than by foul play, and discarding it grants no
+ *     pass: the green in the sequence above comes from #4928's expected-0,
+ *     which that credential never entered.
+ *   - a credential from an earlier attempt that a declared leg DOES account for
+ *     still COUNTS. `overwrite: true` on every upload means a leg that re-runs
+ *     REPLACES its own artifact, so the store already holds exactly the latest
+ *     per shard; what survives into a later attempt is the credential of a leg
+ *     that did NOT re-run — and such a leg also keeps its earlier conclusion in
+ *     `needs.<job>.result`. Refusing it would turn the ORDINARY
+ *     `rerun_failed_jobs` case (one flaky shard re-runs alone, the other five
+ *     are attempt-1) permanently red: this same never-converges defect, moved
+ *     one button over onto the commoner case. Pinned in --self-test.
+ *   - everything else keeps its pre-#11998 judgement. The tolerance requires
+ *     the credential to say POSITIVELY that it is from this run and an earlier
+ *     attempt: a foreign credential from the CURRENT attempt is still refused,
+ *     so is one from another run whatever attempt it claims, and an absent or
+ *     unreadable `run_attempt` buys no exemption at all.
+ *
+ * The "…but its inputs may have changed" worry that makes latest-per-shard look
+ * risky in general cannot arise within ONE run: a run is pinned to one commit
+ * and one workflow file, and a re-run replays the same event payload. The only
+ * way the inputs differ is a different RUN — which the run_id veto already
+ * refuses, and which is exactly what a base merge mints (that is how PR #11987
+ * got unblocked, leaving the class behind for this card).
+ *
  * ## How the static guard decides what a job IS (#6589)
  *
  * `scanWorkflow` has to tell an aggregate GATE (`… --verify …`) from an
@@ -118,6 +175,7 @@
  * `--verify`-in-a-comment fixture is the pin.
  */
 
+import { requireDependency } from './import-prerequisite.mjs';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -154,6 +212,25 @@ function rosterFor(job, total) {
   return Array.from({ length: total }, (_, i) => attestationId(job, i + 1, total));
 }
 
+/**
+ * The attempt a credential (or this process) belongs to, as a positive integer
+ * — or `undefined` when it does not say (#11998).
+ *
+ * `undefined` is the FAIL-CLOSED answer, and every tolerance below demands a
+ * readable attempt on BOTH sides before it applies. A credential predating the
+ * field, a blank `GITHUB_RUN_ATTEMPT`, `'latest'`, `0`, `1.5` — none of them
+ * buys an exemption with a value nobody could read. That direction matters:
+ * an unreadable attempt keeps the strict pre-#11998 verdict, so the worst case
+ * of a garbled field is the red this card is about, never a silent green.
+ */
+function parseAttempt(value) {
+  if (value === undefined || value === null) return undefined;
+  const text = String(value).trim();
+  if (text === '') return undefined;
+  const attempt = Number(text);
+  return Number.isInteger(attempt) && attempt > 0 ? attempt : undefined;
+}
+
 // ── The verdict, as a pure function ─────────────────────────────────────────
 
 /**
@@ -168,18 +245,37 @@ function rosterFor(job, total) {
  *   filterResult: string,
  *   present: Map<string, Record<string, unknown>>,
  *   runId: string,
+ *   runAttempt?: string,
  *   downloadOutcome?: string,
  * }} input
  * @returns {{ ok: boolean, log: string[], errors: string[] }}
  */
-export function judge({ gate, legs, filterResult, present, runId, downloadOutcome }) {
+export function judge({ gate, legs, filterResult, present, runId, runAttempt, downloadOutcome }) {
   const log = [];
   const errors = [];
   const allowed = new Set();
   let counted = 0;
+  const thisAttempt = parseAttempt(runAttempt);
+
+  /**
+   * Was this credential published by an EARLIER attempt of THIS run (#11998)?
+   *
+   * Both halves are positive assertions, deliberately: the credential must name
+   * this run's id AND a readable attempt lower than the one now judging. A
+   * missing run_id, a missing attempt, or an unreadable `GITHUB_RUN_ATTEMPT`
+   * here all answer `false`, which is the pre-#11998 judgement.
+   */
+  const carriedOver = (record) => {
+    if (!runId || record?.run_id === undefined || String(record.run_id) !== String(runId)) return false;
+    const attempt = parseAttempt(record?.run_attempt);
+    return attempt !== undefined && thisAttempt !== undefined && attempt < thisAttempt;
+  };
 
   log.push(`${gate}: counting per-shard positive attestations (#6082), not absence of negatives.`);
   log.push(`  filter job result: ${filterResult || '(unreadable)'}`);
+  // Printed so that an unreadable attempt — which silently restores the strict
+  // pre-#11998 scope — is diagnosable instead of invisible.
+  log.push(`  run ${runId || '(unreadable)'}, attempt ${thisAttempt ?? '(unreadable)'}`);
   if (downloadOutcome && downloadOutcome !== 'success') {
     log.push(`  NOTE: the attestation download step itself did not succeed (outcome: ${downloadOutcome}).`);
   }
@@ -235,7 +331,8 @@ export function judge({ gate, legs, filterResult, present, runId, downloadOutcom
     const missing = roster.filter((id) => !present.has(id));
     for (const id of roster) {
       const record = present.get(id);
-      log.push(record ? `    + ${id}  (run ${record.run_id}, attempt ${record.run_attempt})` : `    - ${id}  MISSING`);
+      const carried = record && carriedOver(record) ? '  ← carried over from an earlier attempt of this run (#11998)' : '';
+      log.push(record ? `    + ${id}  (run ${record.run_id}, attempt ${record.run_attempt})${carried}` : `    - ${id}  MISSING`);
     }
     log.push(`    attested ${roster.length - missing.length} / ${roster.length} declared shard(s)`);
 
@@ -256,6 +353,19 @@ export function judge({ gate, legs, filterResult, present, runId, downloadOutcom
   // Foreign or stale credentials: the run must not be judged on someone else's.
   for (const [id, record] of present) {
     if (!allowed.has(id)) {
+      // #11998: an earlier attempt of THIS run is not "someone else" — it is
+      // this same commit, one button press ago. Its credential says nothing
+      // about the attempt now being judged, so it is discarded rather than
+      // treated as foul play. Discarding grants no pass: this branch only ever
+      // ADDED an error, so removing that error cannot manufacture a green that
+      // the roster logic above did not already reach.
+      if (carriedOver(record)) {
+        log.push(
+          `  discarded '${id}': published by attempt ${record.run_attempt} of this run, and this is attempt ${thisAttempt} — ` +
+            `an earlier attempt's credential is not evidence about this one (#11998).`,
+        );
+        continue;
+      }
       errors.push(`${gate}: unexpected attestation '${id}' that no declared leg accounts for.`);
       continue;
     }
@@ -565,7 +675,7 @@ export function invokesScript(runText, flag) {
  * @returns {Promise<{ problems: string[], gates: number, legs: number, attesters: number }>}
  */
 export async function scanWorkflow(root) {
-  const { parse } = await import('yaml');
+  const { parse } = await requireDependency('yaml', () => import('yaml'), import.meta.url);
   const problems = [];
   const file = join(root, '.github', 'workflows', 'ci.yml');
   if (!existsSync(file)) {
@@ -762,6 +872,11 @@ function verify() {
     filterResult: argValue('--filter-result', ''),
     present,
     runId: process.env.GITHUB_RUN_ID ?? '',
+    // Read from the environment for the same reason the run id is (#11998):
+    // `GITHUB_RUN_ATTEMPT` is a default variable in every job, `--emit` already
+    // stamps the credential from it, and taking both ends of the comparison
+    // from the same source means no ci.yml step has to remember to pass it.
+    runAttempt: process.env.GITHUB_RUN_ATTEMPT ?? '',
     downloadOutcome: argValue('--download-outcome', ''),
   });
   for (const line of verdict.log) console.log(line);
@@ -797,8 +912,8 @@ async function selfTest() {
     if (!condition) failures.push(description);
   };
 
-  const attest = (job, shard, total, runId = '99') =>
-    [attestationId(job, shard, total), { attestation: attestationId(job, shard, total), job, shard, total, run_id: runId, run_attempt: '1' }];
+  const attest = (job, shard, total, runId = '99', runAttempt = '1') =>
+    [attestationId(job, shard, total), { attestation: attestationId(job, shard, total), job, shard, total, run_id: runId, run_attempt: runAttempt }];
 
   const testGate = (results, ids, filterResult = 'success') =>
     judge({
@@ -891,6 +1006,114 @@ async function selfTest() {
   const forged = new Map([attest('test', 1, 3), attest('test', 2, 3), attest('test', 3, 3)]);
   forged.get('test-3-of-3').attestation = 'test-1-of-3';
   assert(!judge({ gate: 'Test Core', legs: [{ job: 'test', total: 3, result: 'success' }], filterResult: 'success', present: forged, runId: '99' }).ok, 'a credential that does not describe itself ⇒ red');
+
+  // ── #11998: attempt scoping, in both directions ───────────────────────────
+  //
+  // THE MEASURED SEQUENCE (run 32806633489, attempt 2, 2026-08-25 — the run
+  // this card was filed from), replayed as a fixture because the live instance
+  // was unblocked by a base merge and cannot be re-entered. Attempt 1: the
+  // filter died before any path judgement, THE FILTER CONTRACT (#4928) let all
+  // 9 shards run, they attested. Attempt 2 via `rerun_failed_jobs`: filter
+  // succeeded, judged docs-only, the legs stayed `skipped` — and the gates
+  // refused attempt 1's own credentials one by one. The two error clusters
+  // below are quoted from that run's job logs verbatim.
+  const rerun = (legs, ids, runAttempt = '2', filterResult = 'success') =>
+    judge({ gate: 'Test Core', legs, filterResult, present: new Map(ids), runId: '99', runAttempt });
+  const testLeg = (result) => [{ job: 'test', total: 6, result }];
+  const attempt1Roster = (runAttempt = '1') => [1, 2, 3, 4, 5, 6].map((n) => attest('test', n, 6, '99', runAttempt));
+
+  const measured = rerun(testLeg('skipped'), attempt1Roster());
+  assert(measured.ok, '#11998 measured sequence: attempt-1 credentials + legs the filter skipped on attempt 2 ⇒ green, so the run can converge');
+  assert(
+    measured.log.some((l) => l.includes("discarded 'test-1-of-6'") && l.includes('attempt 2') && l.includes('#11998')),
+    '#11998: a carried-over credential is DISCARDED WITH A LOG LINE naming it and both attempts — never silently dropped',
+  );
+  // The dogfood twin of the same measured sequence: a matrix leg and a single
+  // leg under one context, both skipped, all four credentials carried over.
+  const measuredDogfood = judge({
+    gate: 'Dogfood Regression Gate',
+    legs: [
+      { job: 'dogfood', total: 3, result: 'skipped' },
+      { job: 'dogfood-verify', total: 1, result: 'skipped' },
+    ],
+    filterResult: 'success',
+    present: new Map([attest('dogfood', 1, 3), attest('dogfood', 2, 3), attest('dogfood', 3, 3), attest('dogfood-verify', 1, 1)]),
+    runId: '99',
+    runAttempt: '2',
+  });
+  assert(measuredDogfood.ok, '#11998 measured sequence, dogfood twin: 3 shard + 1 single-leg credentials carried over ⇒ green');
+
+  // ⭐ THE OTHER DIRECTION, which is what stops this from being "the gate off":
+  // the SAME shape with the credentials stamped with the CURRENT attempt is
+  // still refused, with the same words the production log showed.
+  const sameAttemptForeign = rerun(testLeg('skipped'), attempt1Roster('2'));
+  assert(!sameAttemptForeign.ok, '#11998: a credential from the CURRENT attempt that no declared leg accounts for is still refused — the tolerance is attempt-scoped, not blanket');
+  assert(
+    sameAttemptForeign.errors.some((e) => e === "Test Core: unexpected attestation 'test-1-of-6' that no declared leg accounts for."),
+    '#11998: …and it is refused in the exact words run 32806633489 printed, so the fail-closed limb is unchanged',
+  );
+  // Nor may the exemption launder another RUN's credential just because it
+  // claims an earlier attempt: both halves of `carriedOver` are required.
+  const foreignRunEarlierAttempt = rerun(testLeg('skipped'), [attest('test', 1, 6, '1234', '1')]);
+  assert(!foreignRunEarlierAttempt.ok, '#11998: an earlier-attempt credential from ANOTHER run is still refused — the run_id half of the test is load-bearing');
+  const foreignRunInRoster = rerun(testLeg('success'), [...attempt1Roster().slice(0, 5), attest('test', 6, 6, '1234', '1')]);
+  assert(
+    foreignRunInRoster.errors.some((e) => e.includes('belongs to run 1234')),
+    '#11998: …and one that IS on the roster still trips the run_id veto (#6082), attempt notwithstanding',
+  );
+  // The tolerance must not fire on attempt 1, where there is no earlier attempt
+  // for a credential to have come from: the #4928 contradiction pin stands.
+  assert(!rerun(testLeg('skipped'), attempt1Roster(), '1').ok, '#11998: on attempt 1 a credential from a leg reported skipped is still a contradiction ⇒ red');
+
+  // ⭐ THE MIS-FIX THIS PIN EXISTS TO BLOCK: "accept only the CURRENT attempt's"
+  // — whether spelled as an attempt-namespaced artifact or as a verify-side
+  // filter — reads the ordinary `rerun_failed_jobs` case as five missing
+  // credentials. `overwrite: true` on every upload means a re-running leg
+  // REPLACES its own artifact, so what persists is exactly the credential of a
+  // leg that did NOT re-run, and that leg keeps its earlier conclusion in
+  // `needs.test.result`. Refusing it moves this same never-converges defect
+  // onto the commoner case instead of removing it.
+  const partialRerun = rerun(testLeg('success'), [...attempt1Roster().slice(0, 2), attest('test', 3, 6, '99', '2'), ...attempt1Roster().slice(3)]);
+  assert(partialRerun.ok, '#11998: a partial re-run (shard 3 re-ran on attempt 2, five legs carried over) ⇒ green — latest-per-shard within one run');
+  assert(
+    partialRerun.log.some((l) => l.includes('attested 6 / 6 declared shard(s)')),
+    '#11998: …and the carried-over credentials are COUNTED, not merely tolerated — the roster is satisfied 6/6',
+  );
+  assert(
+    partialRerun.log.some((l) => l.includes('test-1-of-6') && l.includes('carried over')),
+    '#11998: …with each carried-over credential marked in the roster listing',
+  );
+  // Counting them can still never override a declared negative (#6082).
+  assert(!rerun(testLeg('failure'), attempt1Roster()).ok, '#11998: a full roster of carried-over credentials never overrides a declared `failure`');
+
+  // FAIL-CLOSED on an unreadable attempt, on BOTH sides of the comparison. An
+  // exemption is never bought with a value nobody could read — so the worst a
+  // garbled attempt can do is restore the strict pre-#11998 verdict.
+  for (const bad of [null, '', '   ', 'latest', '0', '-1', '1.5', 'NaN']) {
+    assert(!rerun(testLeg('skipped'), [attest('test', 1, 6, '99', bad)]).ok, `#11998 fail-closed: a credential whose run_attempt reads ${JSON.stringify(bad)} gets no exemption`);
+  }
+  // The field ABSENT entirely — a credential minted before it was stamped, or
+  // by a fake. Spelled as a literal because `attest()`'s default parameter
+  // would silently turn `undefined` back into '1' (which is how this very
+  // assertion first failed: the fixture, not the verdict, was wrong).
+  assert(
+    !rerun(testLeg('skipped'), [['test-1-of-6', { attestation: 'test-1-of-6', job: 'test', shard: 1, total: 6, run_id: '99' }]]).ok,
+    '#11998 fail-closed: a credential with no run_attempt field at all gets no exemption',
+  );
+  for (const bad of [null, '', 'two']) {
+    assert(!rerun(testLeg('skipped'), attempt1Roster(), bad).ok, `#11998 fail-closed: an unreadable GITHUB_RUN_ATTEMPT (${JSON.stringify(bad)}) restores the strict verdict rather than disabling the gate`);
+  }
+  // …and a caller that passes no `runAttempt` at all — every pre-#11998 call
+  // site, this file's own fixtures above included — keeps the old verdict.
+  assert(
+    !judge({ gate: 'Test Core', legs: testLeg('skipped'), filterResult: 'success', present: new Map(attempt1Roster()), runId: '99' }).ok,
+    '#11998 fail-closed: judge() called without a runAttempt is judged exactly as before',
+  );
+  assert(
+    rerun(testLeg('skipped'), attempt1Roster(), '2').log.some((l) => l.includes('run 99, attempt 2')) &&
+      rerun(testLeg('skipped'), attempt1Roster(), '').log.some((l) => l.includes('attempt (unreadable)')),
+    '#11998: the attempt the gate is judging AS is printed, so an unreadable one is diagnosable instead of invisible',
+  );
 
   // ── missing input is a failure, never a pass (#4690) ──────────────────────
   assert(!judge({ gate: 'Test Core', legs: [], filterResult: 'success', present: new Map(), runId: '99' }).ok, 'a gate with no legs verifies nothing ⇒ red');
@@ -1150,7 +1373,7 @@ async function selfTest() {
     process.exit(1);
   }
   console.log(
-    `✓ check-shard-attestation --self-test: ${checked} assertions (dominance experiment + both #6082 counter-examples + the #4928 guard + the #6589 classifier pins + the #10889 quoting pins).`,
+    `✓ check-shard-attestation --self-test: ${checked} assertions (dominance experiment + both #6082 counter-examples + the #4928 guard + the #6589 classifier pins + the #10889 quoting pins + the #11998 attempt-scoping sequence).`,
   );
 }
 

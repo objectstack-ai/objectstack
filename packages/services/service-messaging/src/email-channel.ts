@@ -30,6 +30,13 @@ export interface EmailSenderSurface {
         subject: string;
         html?: string;
         text?: string;
+        /**
+         * Structural mirror of `SendEmailInput.organizationId` (#11741) —
+         * the tenant stamp for `sys_email.organization_id`, threaded from
+         * `delivery.notification.organizationId` when the delivery holds
+         * one. Optional: an org-less delivery sends without it.
+         */
+        organizationId?: string;
     }): Promise<{ id?: string } | unknown>;
     /**
      * Structural mirror of `IEmailService.sendTemplate` (#9205) — resolves a
@@ -45,6 +52,8 @@ export interface EmailSenderSurface {
         to: string | string[];
         data?: Record<string, unknown>;
         locale?: string;
+        /** Same tenant stamp as on `send` (#11741) — forwarded by the email service into the send it performs. */
+        organizationId?: string;
     }): Promise<{ id?: string; status?: string; error?: string } | unknown>;
     /**
      * Structural mirror of `IEmailService.renderTemplate` (#9225) — resolves a
@@ -190,6 +199,11 @@ export function createEmailChannel(opts: EmailChannelOptions): MessagingChannel 
                         to: address,
                         ...(data !== undefined ? { data } : {}),
                         ...(templateLocale ? { locale: templateLocale } : {}),
+                        // #11741 — this channel HOLDS the organization (the
+                        // tenant stamp the outbox snapshots per delivery), so
+                        // it threads it for the sys_email.organization_id
+                        // stamp. Absent stays absent — never fabricated.
+                        ...(n.organizationId ? { organizationId: n.organizationId } : {}),
                     })) as { id?: unknown; status?: unknown; error?: unknown } | undefined;
                     // `IEmailService.send` reports transport failure as
                     // `status: 'failed'` rather than throwing — surface it.
@@ -222,6 +236,8 @@ export function createEmailChannel(opts: EmailChannelOptions): MessagingChannel 
                     subject: rendered.subject,
                     ...(rendered.html !== undefined ? { html: rendered.html } : {}),
                     ...(rendered.text !== undefined ? { text: rendered.text } : {}),
+                    // #11741 — same threading as the template arm above.
+                    ...(n.organizationId ? { organizationId: n.organizationId } : {}),
                 });
                 const id = result?.id;
                 return { ok: true, externalId: id != null ? String(id) : undefined };

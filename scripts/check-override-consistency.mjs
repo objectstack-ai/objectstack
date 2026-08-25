@@ -66,9 +66,10 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import semver from 'semver';
-import { parse as parseYaml } from 'yaml';
 import { workspacePackages } from './workspace-enumerator.mjs';
+import { requireDefaultExport, requireDependency } from './import-prerequisite.mjs';
+const semver = await requireDefaultExport('semver', () => import('semver'), import.meta.url);
+const { parse: parseYaml } = await requireDependency('yaml', () => import('yaml'), import.meta.url);
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, '..');

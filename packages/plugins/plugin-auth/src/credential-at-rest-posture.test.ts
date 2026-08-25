@@ -142,6 +142,7 @@ import {
   SysOauthConsent,
   SysJwks,
 } from '@objectstack/platform-objects';
+import { inviteForAudienceGate } from './audience-gate-test-support';
 
 const BASE = 'http://localhost:3000';
 const AUTH = `${BASE}/api/v1/auth`;
@@ -251,7 +252,11 @@ function cookiesFrom(response: Response): string {
 async function signUpAdmin(
   send: (request: Request) => Promise<Response>,
   email = 'admin@example.com',
+  engine?: unknown,
 ): Promise<string> {
+  // [#11739] default posture invite_only: fixture users beyond the first
+  // enter through the invitation carve-out (see audience-gate-test-support).
+  if (engine) await inviteForAudienceGate(engine, email);
   const res = await send(
     new Request(`${AUTH}/sign-up/email`, {
       method: 'POST',
@@ -331,7 +336,7 @@ describe('[#8192] sys_scim_provider.scim_token is hashed at rest — via the rep
     const manager = makeManager(engine);
     const send = (request: Request) => manager.handleRequest(request);
 
-    const cookie = await signUpAdmin(send);
+    const cookie = await signUpAdmin(send, undefined, engine);
     const organizationId = await createOrganization(send, cookie, 'probe-org-8192');
     const bearer = await generateScimToken(send, cookie, organizationId);
 
@@ -370,7 +375,7 @@ describe('[#8192] sys_scim_provider.scim_token is hashed at rest — via the rep
     const manager = makeManager(engine);
     const send = (request: Request) => manager.handleRequest(request);
 
-    const cookie = await signUpAdmin(send);
+    const cookie = await signUpAdmin(send, undefined, engine);
     const organizationId = await createOrganization(send, cookie, 'probe-org-8192-auth');
     const bearer = await generateScimToken(send, cookie, organizationId);
 
@@ -471,7 +476,7 @@ describe('[#8192] the control arm — what the SCIM plugin does with NO option',
     });
     const send = (request: Request) => auth.handler(request);
 
-    const cookie = await signUpAdmin(send, 'control@example.com');
+    const cookie = await signUpAdmin(send, 'control@example.com', engine);
     const organizationId = await createOrganization(send, cookie, 'control-org-8192');
     const bearer = await generateScimToken(send, cookie, organizationId);
 

@@ -316,12 +316,13 @@ const COMPONENT_LEVEL_GUIDANCE: readonly KeySetGuidance[] = [
 /**
  * A component that declares no props at all — `app:launcher`, `nav:menu`,
  * `nav:breadcrumb`, `global:search`, `global:notifications`, `user:profile`,
- * `element:divider`.
+ * `element:divider`, and the two plugin console widgets `cloud-connection:panel`
+ * and `marketplace:installed-list` (#11575).
  *
  * A factory rather than one shared `EmptyProps` const, because the surface name
  * is the whole value of the rejection here: an empty shape has no candidate
  * keys, so the edit-distance fallback can say nothing, and "unrecognized key on
- * this component" would leave the author guessing which of the seven it meant.
+ * this component" would leave the author guessing which of the nine it meant.
  * One `strictObject(` call site either way — the ledger counts sites from the
  * AST, and this is one.
  *
@@ -891,7 +892,34 @@ export const RecordDetailsProps = strictObject({
     collapsible: z.boolean().optional().describe('Render this section as a collapsible card — the heading becomes a chevron toggle, initially expanded (renderer default: off).'),
     /** Card chrome; the renderer derives it from the presence of a title. */
     showBorder: z.boolean().optional().describe('Draw this section\'s card chrome (renderer default: derived — on for a titled section, off for an untitled one). Set `false` for a borderless titled section, or `true` for a bordered untitled one.'),
-  })).optional().describe('Field groups rendered as the detail body, in order. Object form: `{ name?, label?, columns?, fields, hideEmpty?, collapsible?, showBorder? }`.'),
+    /**
+     * Three more section keys the renderer has honoured all along (#11661 —
+     * same defect class as #11289, inheriting its 2026-08-23 ruling WITH its
+     * reason: declare what the renderer honours; the renderer is unchanged).
+     * Optional with NO schema default, for the same `maxVisible` reason as the
+     * #11289 trio above; the defaults in the describe() texts are MEASURED at
+     * the `.objectui-sha` pin (`190fbd01`, objectui `plugin-detail/src/
+     * renderers/record-details.tsx` + `plugin-detail/src/DetailSection.tsx`).
+     *
+     * Two keys the same measurement found are deliberately NOT declared here
+     * (#11661 holds their forks):
+     * - `title` — the renderer's `s.title ?? s.label` limb is a second
+     *   spelling of the heading slot `label` already declares (identical
+     *   localization handling, zero producers). Same shape as the `page:card`
+     *   `body`-vs-`children` pair, which #5775 CONVERGED rather than declared
+     *   — one heading slot, not two de-facto contracts (Prime Directive #12).
+     *   Held for the maintainer's declare-vs-converge ruling.
+     * - `headerColor` — the renderer's only read is `bg-${headerColor}`, a
+     *   template-literal Tailwind class: Tailwind v4 scans source text with
+     *   no safelist, so this call site generates NO CSS and an authored value
+     *   works only when some other source file happens to use the same class
+     *   literally. Dead-in-practice at the pin (zero producers); declaring it
+     *   would advertise a capability the renderer does not deliver.
+     */
+    defaultCollapsed: z.boolean().optional().describe('Start a `collapsible: true` section collapsed (renderer default: expanded). Consulted only when `collapsible` is on — a non-collapsible section never reads its collapse state.'),
+    icon: z.string().optional().describe('Heading icon, as a lucide icon name (kebab-case, e.g. `building-2`). A value that is not an ASCII identifier (emoji, CJK text) renders as literal text beside the heading instead. Shown where the section heading renders: a titled section, or any collapsible section.'),
+    description: z.string().optional().describe('Sub-heading text rendered under the section heading (plain string — the renderer applies no translation to it, unlike `label`). Renders on a titled or collapsible section; a collapsible section hides it while collapsed.'),
+  })).optional().describe('Field groups rendered as the detail body, in order. Object form: `{ name?, label?, columns?, fields, hideEmpty?, collapsible?, showBorder?, defaultCollapsed?, icon?, description? }`.'),
   fields: z.array(z.string()).optional().describe('Explicit field list to display (optional, overrides highlightFields)'),
   /**
    * Field names to omit from the body, applied to both `fields` and every
@@ -2474,12 +2502,66 @@ export const ObjectFormPropsSchema = lazySchema(() => strictObject({
 /** Author state (ADR-0122: the bare name is the author state). */
 export type ObjectFormProps = z.input<typeof ObjectFormPropsSchema>;
 
+// `formType` old-vocabulary prescriptions (#11873; the objectui#5939
+// measurement). Declared with `//` on purpose — the `LIST_VIEW_EXPORT_PDF_RETIRED`
+// placement note applies here too: build-docs takes a file's first JSDoc per
+// exported symbol, and these need no doc page. This is an enum-VALUE
+// narrowing, so there is no `retiredKey()` tombstone to hang the prescription
+// on — the enum's own error map carries it, keyed on `issue.input` so only
+// the four sibling-block spellings an author would plausibly carry over from
+// `object-form` get a prescription (the `record:chatter` `position`
+// precedent, #8762). A never-vocabulary string (`'wizzard'`) gets zod's own
+// enum refusal — which is the fix's whole point: under the old `z.string()`
+// it parsed clean, matched no renderer branch, and rendered a silently
+// sectionless parent form. No ADR-0087 conversion is registered here: unlike
+// #8762 (whose old set was the schema's own declared vocabulary and default),
+// these four names were never this block's declared vocabulary — the key was
+// a bare `z.string()` — and the authored-value census on both repos (this
+// repo + objectui#5939's) found zero occurrences to rewrite.
+const MASTER_DETAIL_FORM_TYPE_RETIRED: ReadonlyMap<string, string> = new Map([
+  ['wizard', "'wizard' is not part of `object-master-detail-form` `formType` (#11873 — objectui#5939 "
+    + 'measured the renderer): only the current wizard step\'s fields mount and the block\'s single '
+    + "Save bar acts as the wizard's Next, so parent + details never save through the atomic batch "
+    + "(ADR-0001, the block's whole contract). Write 'simple' (sections render stacked) or 'tabbed'; "
+    + "for a wizard without inline details author an `object-form`, where 'wizard' is honoured."],
+  ['split', "'split' is not part of `object-master-detail-form` `formType` (#11873 — objectui#5939 "
+    + 'measured the renderer): the parent half renders inline but persists via `dataSource.create`, '
+    + "bypassing the atomic parent+details batch (ADR-0001, the block's whole contract). Write "
+    + "'simple' or 'tabbed'; for a split presentation without inline details author an "
+    + "`object-form`, where 'split' is honoured."],
+  ['drawer', "'drawer' is not part of `object-master-detail-form` `formType` (#11873 — objectui#5939 "
+    + 'measured the renderer): the parent half renders in a portal dialog outside the master-detail '
+    + "container, so the block's Save bar has no form to submit. Write 'simple' or 'tabbed'; for a "
+    + "drawer overlay without inline details author an `object-form`, where 'drawer' is honoured."],
+  ['modal', "'modal' is not part of `object-master-detail-form` `formType` (#11873 — objectui#5939 "
+    + 'measured the renderer): the parent half renders in a portal dialog outside the master-detail '
+    + "container (the same portal shape as 'drawer'), so the block's Save bar has no form to "
+    + "submit. Write 'simple' or 'tabbed'; for a modal overlay without inline details author an "
+    + "`object-form`, where 'modal' is honoured."],
+]);
+
 /**
  * `object-master-detail-form` (objectui `plugin-form/src/MasterDetailForm.tsx`
  * @ `eb7f586b`). Parent + child line items entered together (ADR-0001). The
  * child collections come from `details` — the FK and editable-grid columns
  * are auto-derived from the child object's metadata (`deriveMasterDetail.ts`),
  * so `details[].columns` is an override, not a requirement.
+ *
+ * `formType` speaks the MEASURED vocabulary — `simple` / `tabbed` — since
+ * #11873 (the spec half of objectui#5939, which tightened the objectui
+ * registry declaration to the same pair on the same measurement, corroborated
+ * by objectui's own two declarations: `MasterDetailFormSchema.formType?:
+ * 'simple' | 'tabbed'` and the `formType === 'tabbed' ? 'tabbed' : 'simple'`
+ * coercion). The key was a bare `z.string()`, so a value outside the
+ * renderer's vocabulary (`'wizzard'`) parsed clean, matched no branch, and
+ * the parent half fell through to a flat field list — authored sections
+ * silently disappeared with no diagnostic (the objectui#3840 probe read GREEN
+ * through a real crash this way). The four `object-form` spellings that do
+ * name renderer branches (`wizard`/`split`/`drawer`/`modal`) each break the
+ * block's atomic parent+details contract and refuse with a per-value
+ * prescription ({@link MASTER_DETAIL_FORM_TYPE_RETIRED}). objectui#6176
+ * (`tabbed` presentationally honoured but escaping the atomic batch) is a
+ * renderer defect tracked there — it does not change this vocabulary.
  */
 export const ObjectMasterDetailFormPropsSchema = lazySchema(() => strictObject({
   surface: 'this `object-master-detail-form`',
@@ -2490,7 +2572,10 @@ export const ObjectMasterDetailFormPropsSchema = lazySchema(() => strictObject({
     .describe('PARENT object. Optional because the component-level `dataSource` binding can supply the object instead (#7121)'),
   recordId: z.union([z.string(), z.number()]).optional().describe('Parent record to load (edit mode)'),
   mode: z.enum(['create', 'edit']).optional().describe('Form mode'),
-  formType: z.string().optional().describe('Parent form presentation'),
+  formType: z.enum(['simple', 'tabbed'], {
+    error: (issue) =>
+      typeof issue.input === 'string' ? MASTER_DETAIL_FORM_TYPE_RETIRED.get(issue.input) : undefined,
+  }).optional().describe("Parent form presentation — the two variants the renderer honours for the parent half (#11873, objectui#5939)"),
   sections: z.array(z.unknown()).optional().describe('Parent form sections'),
   fields: z.array(z.unknown()).optional().describe('Parent fields shown'),
   details: z.array(z.unknown()).optional()
@@ -2574,7 +2659,24 @@ export const ComponentPropsMap = {
   'global:search': emptyProps('global:search'),
   'global:notifications': emptyProps('global:notifications'),
   'user:profile': emptyProps('user:profile'),
-  
+
+  // Plugin console widgets — #11575, the #8691/#8744 mechanism two instances
+  // over, on `@objectstack/cloud-connection`'s published Setup pages: both
+  // types are console-registered renderers reachable only through the type
+  // union's open string arm, and with no row here the #5068 gate's dispatch
+  // skipped them as unregistered — any authored key would have ridden through
+  // in silence (nothing authors one today: both shipped pages carry `{}`).
+  // Key sets measured from the renderers' ACTUAL read points at the
+  // `.objectui-sha` pin (app-shell `console/cloud-connection/
+  // CloudConnectionPanel.tsx`, `console/marketplace/InstalledListWidget.tsx`):
+  // both registrations discard the schema node entirely (`() => <Widget />`)
+  // and neither component function takes a prop, so the accepted key set is
+  // EMPTY — strict, refuses every key. The registrations' declared
+  // `inputs: []` happen to agree here, but the row is the measurement, not
+  // the claim (#8691/#8744 record where those diverge).
+  'cloud-connection:panel': emptyProps('cloud-connection:panel'),
+  'marketplace:installed-list': emptyProps('marketplace:installed-list'),
+
   // AI
   'ai:chat_window': AIChatWindowProps,
   'ai:suggestion': strictObject({
