@@ -539,33 +539,42 @@ describe('end of the chain: better-auth pipeline over the memory engine (#11739)
     expect((engine.tables.get('sys_user') ?? []).some((u: any) => u.email === 'last.hire@acme.com')).toBe(true);
   });
 
-  it('the probe reads sys_invitation NARROWED by email — the answer never depends on how many invitations exist (#11770)', async () => {
-    const engine = createMemoryEngine();
-    seedExistingUser(engine);
-    const manager = makeManager(engine);
-    for (let i = 0; i < 300; i++) seedPendingInvitation(engine, `colleague${i}@acme.com`);
-    seedPendingInvitation(engine, 'targeted@acme.com');
+  it('the probe reads sys_invitation NARROWED by email — the work never depends on how many invitations exist (#11770)', async () => {
+    const readsForPopulation = async (otherPending: number) => {
+      const engine = createMemoryEngine();
+      seedExistingUser(engine);
+      const manager = makeManager(engine);
+      for (let i = 0; i < otherPending; i++) seedPendingInvitation(engine, `colleague${i}@acme.com`);
+      seedPendingInvitation(engine, 'targeted@acme.com');
 
-    const reads: any[] = [];
-    const find = engine.find.bind(engine);
-    engine.find = async (name: string, q: any = {}) => {
-      if (name === 'sys_invitation') reads.push(q);
-      return find(name, q);
+      const reads: any[] = [];
+      const find = engine.find.bind(engine);
+      engine.find = async (name: string, q: any = {}) => {
+        if (name === 'sys_invitation') reads.push(q);
+        return find(name, q);
+      };
+
+      const admitted = await signUp(manager, 'targeted@acme.com');
+      expect(admitted.status).toBeLessThan(300);
+      return reads;
     };
 
-    const admitted = await signUp(manager, 'targeted@acme.com');
-    expect(admitted.status).toBeLessThan(300);
+    const small = await readsForPopulation(1);
+    const large = await readsForPopulation(400);
 
     // Every read carries BOTH predicates. Without the email predicate the only
-    // way to stay correct is to walk the whole pending population, which is a
-    // read of unbounded size on the self-serve sign-up path.
-    expect(reads.length).toBeGreaterThan(0);
-    for (const q of reads) {
+    // way to stay correct is to walk the whole pending population, which is an
+    // unbounded read on the self-serve sign-up path.
+    expect(small.length).toBeGreaterThan(0);
+    for (const q of [...small, ...large]) {
       expect(q.where?.status).toBe('pending');
       expect(q.where?.email).toBe('targeted@acme.com');
+      expect(q.offset ?? 0).toBe(0); // one page settled it, either way
     }
-    // And one page settled it: 301 pending rows, a single read.
-    expect(reads.length).toBe(1);
+    // 2 pending rows or 401 — identical work. (The read count is >1 because
+    // the email sign-up route pre-checks the very decision the
+    // `validateUserInfo` gate then makes; see `validateAudienceAdmission`.)
+    expect(large.length).toBe(small.length);
   });
 
   it('a case-folding collation may answer with a differently-cased row (matched) but never a different address (#11770)', async () => {
