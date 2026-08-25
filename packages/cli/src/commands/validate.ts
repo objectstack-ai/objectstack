@@ -16,7 +16,7 @@ import { loadConfig } from '../utils/config.js';
 import { runAuthoringRules, splitBySeverity, authoringRulesFor } from '@objectstack/lint';
 import { resolveSduiManifest } from '../utils/sdui-manifest.js';
 import { preflightRequiredCapabilities, renderCapabilityMessage } from '../utils/capability-preflight.js';
-import { collectAndLintDocs } from '../utils/collect-docs.js';
+import { collectAndLintDocs, type DocIssue } from '../utils/collect-docs.js';
 import {
   printHeader,
   printKV,
@@ -57,6 +57,76 @@ export default class Validate extends Command {
       printHeader('Validate');
     }
 
+    // [#12047] THE ADVISORY LISTS THIS RUN HAS COMPUTED SO FAR, hoisted out of
+    // the `try` so that EVERY `emitJson` exit can read them — not the terminal
+    // success payload alone.
+    //
+    // The defect: all five failure exits published strictly less than the run
+    // had already computed. Two carried `ruleAdvisories` and nothing else; the
+    // other three carried no advisory list at all. The text face prints these
+    // blocks ending `— re-run with --json for the full list`, so an author
+    // whose tree failed a LATER gate was told to re-run with `--json` and got
+    // a payload without the withheld entries in it — the "the remedy named is
+    // unreachable" shape of #11643 and #11391.
+    //
+    // The strongest instance is the parse-failure exit. `unknownKeyWarnings`
+    // is computed PRE-parse (see its own note below) precisely so the finding
+    // survives an unrelated schema error — and then that exit dropped it
+    // anyway, defeating the one hoist that existed to prevent exactly this.
+    //
+    // Maintainer ruling 2026-08-25 on #11772, inherited here under the
+    // same-family rule: every failure exit carries the lists the run has
+    // ALREADY COMPUTED, so `warnings` means the same thing on every exit and a
+    // machine consumer has exactly one way to read it. Option 2 — carry them
+    // only where the text face printed them, making the payload's SHAPE depend
+    // on how far the run got — was rejected as the hardest contract to
+    // declare. Option 3 (weaken the pointer) was rejected as making the
+    // product worse.
+    //
+    // ⛔ CARRYING, NOT COMPUTING. Every list stays computed at exactly the step
+    // that owns it; these bindings only make the value visible to the exits
+    // DOWNSTREAM of that step. An exit that runs before a given step therefore
+    // still reports that list empty, and that is the honest reading of "what
+    // the run has already computed". Hoisting a computation earlier so an
+    // early exit looks fuller would be option 2 wearing option 1's clothes,
+    // and it would change what the command costs on its failure paths too.
+    //
+    // ⛔ `structuralWarnings` is the member that is measured, not assumed. It
+    // is computed LAST — below every one of the five failure exits — so it
+    // rides `warningsSoFar()` as an empty list on all of them, and the only
+    // exit that can ever see it non-empty is the success payload. It is a
+    // member of the same class as the other four (a non-blocking advisory
+    // about the stack, gated by `--strict`, already in the success payload's
+    // `warnings`); it differs only in WHEN it becomes available, which is the
+    // same axis `docWarnings` and `capProviderWarnings` already differ on. It
+    // is included here rather than special-cased so the order lives at ONE
+    // site — ⛔ do not "fix" its emptiness by moving its computation up.
+    //
+    // ORDER IS THE SUCCESS PAYLOAD'S, stated ONCE here and read by that
+    // payload too — the "one list cannot drift from itself" idiom this file
+    // has already had to apply three times. The spread used to be written out
+    // at the payload, so a seventh exit could have been added with a different
+    // member order and nothing would have caught it.
+    // Typed off `splitBySeverity` rather than by naming `AuthoringFinding`: the
+    // #4409 import scan (packages/lint/src/authoring-rule-wiring.test.ts) reads
+    // every symbol this file names from `@objectstack/lint` and strips `type `
+    // rather than exempting it, and `splitBySeverity` — which produces this
+    // list — is already ratcheted there. Binding the annotation to the producer
+    // is also the tighter statement: the list cannot disagree with the function
+    // that fills it.
+    let ruleAdvisories: ReturnType<typeof splitBySeverity>['advisories'] = [];
+    let capProviderWarnings: Array<{ token: string; message: string }> = [];
+    let unknownKeyWarnings: string[] = [];
+    let docWarnings: DocIssue[] = [];
+    let structuralWarnings: string[] = [];
+    const warningsSoFar = () => [
+      ...ruleAdvisories,
+      ...docWarnings,
+      ...unknownKeyWarnings,
+      ...capProviderWarnings,
+      ...structuralWarnings,
+    ];
+
     try {
       // 1. Load configuration
       if (!flags.json) printStep('Loading configuration...');
@@ -83,7 +153,7 @@ export default class Validate extends Command {
       // carries the key the author actually wrote. Computed here rather than
       // down in the warnings section so the `--json` path reports it too — the
       // "computed, then discarded" shape this file already had to fix once.
-      const unknownKeyWarnings = [
+      unknownKeyWarnings = [
         ...lintUnknownStackKeys(normalized as Record<string, unknown>, ObjectStackDefinitionSchema),
         ...lintUnknownAuthoringKeys(normalized as Record<string, unknown>, ObjectStackDefinitionSchema),
       ].map(formatUnknownAuthoringKey);
@@ -94,6 +164,11 @@ export default class Validate extends Command {
           await emitJson({
             valid: false,
             errors: (result.error as unknown as ZodError).issues,
+            // [#12047] The list computed at `unknownKeyWarnings` above — six
+            // lines up, and dropped here until now. This is the exit the card
+            // called the strongest instance: the hoist exists so the finding
+            // SURVIVES a schema error, and this payload discarded it anyway.
+            warnings: warningsSoFar(),
             duration: timer.elapsed(),
           });
           this.exit(1);
@@ -123,7 +198,8 @@ export default class Validate extends Command {
         parsed: result.data as Record<string, unknown>,
         sduiManifest: resolveSduiManifest(),
       });
-      const { errors: ruleErrors, advisories: ruleAdvisories } = splitBySeverity(findings);
+      const { errors: ruleErrors, advisories } = splitBySeverity(findings);
+      ruleAdvisories = advisories;
 
       if (ruleErrors.length > 0) {
         // Every failing rule reports at once. The command used to exit at the
@@ -133,7 +209,10 @@ export default class Validate extends Command {
           await emitJson({
             valid: false,
             errors: ruleErrors,
-            warnings: ruleAdvisories,
+            // [#12047] Was `ruleAdvisories` alone. Reading the shared site adds
+            // the pre-parse `unknownKeyWarnings` — computed long before this
+            // gate — and keeps the member ORDER identical to every other exit.
+            warnings: warningsSoFar(),
             duration: timer.elapsed(),
           });
           this.exit(1);
@@ -166,7 +245,7 @@ export default class Validate extends Command {
         projectDir: dirname(absolutePath),
       });
       const capProviderErrors = capProviderPreflight.errors;
-      const capProviderWarnings = capProviderPreflight.warnings.map((c) => ({
+      capProviderWarnings = capProviderPreflight.warnings.map((c) => ({
         token: c.token,
         message: renderCapabilityMessage(c),
       }));
@@ -175,6 +254,10 @@ export default class Validate extends Command {
           await emitJson({
             valid: false,
             errors: capProviderErrors.map((c) => ({ token: c.token, message: renderCapabilityMessage(c) })),
+            // [#12047] The FATAL tokens ride `errors`; the advisory ones ride
+            // `warnings` beside the two lists computed before this gate. The
+            // two classes being separate is the whole point of the split.
+            warnings: warningsSoFar(),
             duration: timer.elapsed(),
           });
           this.exit(1);
@@ -200,13 +283,17 @@ export default class Validate extends Command {
       if (!flags.json) printStep('Checking package docs (ADR-0046)...');
       const docsResult = collectAndLintDocs(absolutePath, result.data as Record<string, unknown>);
       const docErrors = docsResult.issues.filter((i) => i.severity === 'error');
-      const docWarnings = docsResult.issues.filter((i) => i.severity !== 'error');
+      docWarnings = docsResult.issues.filter((i) => i.severity !== 'error');
       if (docErrors.length > 0) {
         if (flags.json) {
           await emitJson({
             valid: false,
             errors: docErrors,
-            warnings: ruleAdvisories,
+            // [#12047] Was `ruleAdvisories` alone, on the very exit that had
+            // the most computed: the doc advisories from this same call, the
+            // capability hints, and the pre-parse key findings were all in
+            // hand and none of them reached the payload.
+            warnings: warningsSoFar(),
             duration: timer.elapsed(),
           });
           this.exit(1);
@@ -235,7 +322,7 @@ export default class Validate extends Command {
       //     conditions were. Computed once and consumed by BOTH faces below, so
       //     the two cannot disagree by construction — the same "a single list
       //     cannot drift from itself" move this file already had to make twice.
-      const structuralWarnings: string[] = [];
+      structuralWarnings = [];
       if (stats.objects === 0) {
         structuralWarnings.push('No objects defined — this stack has no data model');
       }
@@ -312,7 +399,13 @@ export default class Validate extends Command {
             // hand-maintained concatenation of per-gate arrays, and it leaked
             // twice: warnings computed and then dropped from `--json` while the
             // console printed them. A single list cannot drift from itself.
-            warnings: [...ruleAdvisories, ...docWarnings, ...unknownKeyWarnings, ...capProviderWarnings, ...structuralWarnings],
+            // [#12047] The spread that used to be written out here now lives
+            // at `warningsSoFar()` above, which every one of the six exits
+            // reads. Content is unchanged on this payload — what changed is
+            // that a seventh exit cannot be added with a different member
+            // order, and the five failure exits no longer publish less than
+            // this one.
+            warnings: warningsSoFar(),
             conversions: conversionNotices,
             specVersionGap: specGap,
             duration: timer.elapsed(),
@@ -391,6 +484,12 @@ export default class Validate extends Command {
         await emitJson({
           valid: false,
           error: error.message,
+          // [#12047] Whatever the run had reached before the throw. A config
+          // that dies in `loadConfig` reports `[]` here honestly — nothing was
+          // computed yet — while a throw from a later step (a `src/docs` that
+          // is a FILE, say, which makes `readdirSync` raise ENOTDIR) carries
+          // the three lists already in hand.
+          warnings: warningsSoFar(),
           duration: timer.elapsed(),
         });
         this.exit(1);
