@@ -17,7 +17,7 @@ from `node_modules` — there is no local copy in the skill bundle.
 - `node_modules/@objectstack/spec/src/ai/mcp.zod.ts` — Model Context Protocol (MCP) — Reference & Binding Primitives
 - `node_modules/@objectstack/spec/src/ai/model-registry.zod.ts` — AI Model Registry Protocol
 - `node_modules/@objectstack/spec/src/ai/skill.zod.ts` — Skill Trigger Condition Schema
-- `node_modules/@objectstack/spec/src/ai/tool.zod.ts` — Retired `ToolSchema` keys — the rejection carries the upgrade prescription,
+- `node_modules/@objectstack/spec/src/ai/tool.zod.ts` — Exports: ToolSchema
 - `node_modules/@objectstack/spec/src/ai/usage.zod.ts` — AI Usage Primitives
 
 ## Transitive dependencies

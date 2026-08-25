@@ -13,14 +13,14 @@ from `node_modules` — there is no local copy in the skill bundle.
 - `node_modules/@objectstack/spec/src/api/batch.zod.ts` — Batch Operations API
 - `node_modules/@objectstack/spec/src/api/endpoint.zod.ts` — API Mapping Schema
 - `node_modules/@objectstack/spec/src/api/errors.zod.ts` — Standardized Error Codes Protocol
-- `node_modules/@objectstack/spec/src/api/realtime.zod.ts` — Transport Protocol Enum
+- `node_modules/@objectstack/spec/src/api/realtime.zod.ts` — Exports: TransportProtocol, RealtimeEventType, SubscriptionEventSchema, SubscriptionSchema, RealtimePresenceSchema
 - `node_modules/@objectstack/spec/src/api/rest-server.zod.ts` — REST API Server Protocol
 - `node_modules/@objectstack/spec/src/api/versioning.zod.ts` — API Versioning Protocol
 - `node_modules/@objectstack/spec/src/api/websocket.zod.ts` — WebSocket Event Protocol
 
 ## Transitive dependencies
 
-- `node_modules/@objectstack/spec/src/api/contract.zod.ts` — Machine-readable semantic code (ADR-0112): a `StandardErrorCode` member or
+- `node_modules/@objectstack/spec/src/api/contract.zod.ts` — Exports: ApiErrorSchema, BaseResponseSchema, RecordDataSchema, CreateRequestSchema, UpdateRequestSchema
 - `node_modules/@objectstack/spec/src/api/error-code-ledger.zod.ts` — Error-Code Ledger (ADR-0112 D3).
 - `node_modules/@objectstack/spec/src/api/realtime-shared.zod.ts` — Realtime Shared Protocol
 - `node_modules/@objectstack/spec/src/data/data-engine.zod.ts` — Data Engine Protocol

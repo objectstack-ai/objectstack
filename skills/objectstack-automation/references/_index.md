@@ -9,7 +9,7 @@ from `node_modules` — there is no local copy in the skill bundle.
 
 ## Core schemas
 
-- `node_modules/@objectstack/spec/src/automation/approval.zod.ts` — Approval Step Approver Type
+- `node_modules/@objectstack/spec/src/automation/approval.zod.ts` — Exports: ApproverType, DEPRECATED_APPROVER_TYPES, NON_AUTHORABLE_APPROVER_TYPES, ORG_MEMBERSHIP_LEVELS, APPROVER_EXPRESSION_ROOTS
 - `node_modules/@objectstack/spec/src/automation/execution.zod.ts` — Automation Execution Protocol
 - `node_modules/@objectstack/spec/src/automation/flow.zod.ts` — Flow Node Types — **built-in seed set** (ADR-0018).
 - `node_modules/@objectstack/spec/src/automation/node-executor.zod.ts` — Node Executor Plugin Protocol — Wait Node Pause/Resume

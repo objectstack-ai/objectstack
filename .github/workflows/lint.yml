@@ -1604,6 +1604,18 @@ jobs:
       - name: CLI test child-env guard
         run: pnpm check:cli-test-child-env
 
+      # #12016. A CLI command id spelled as a string literal OUTSIDE the CLI
+      # package has nothing tying it to the command file it names: rename the
+      # command, update the CLI and the docs, and the engine's own drift warning
+      # keeps printing a route that no longer exists — a stale hint inside an
+      # otherwise-correct message, which no suite reads as wrong because
+      # driver-sql's pin asserts the message contains the constant and the
+      # constant still matches itself. 274 such literals across 98 files were
+      # measured before the gate was written; the sibling sweep INSIDE
+      # packages/cli is #11465 / #12177, and the two populations do not overlap.
+      - name: CLI command-id literals resolve
+        run: pnpm check:cli-command-ids
+
       # #4093 follow-up. Discovery tells a consumer an absent capability is
       # absent AND what to install. The first half has been carefully honest
       # since #2462/#4000; the second was invented from the slot name, so ten
