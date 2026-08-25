@@ -71,6 +71,15 @@
 //               covered, for a driver that no longer exists, or for a case-set
 //               that no longer exists, is an error. A ledger that can only
 //               accrete rots into a list nobody trusts.
+//   DIALECTED   every conformance suite in a dialect-capable driver SAYS which
+//               dialects it runs on -- see the dialect-axis block below.
+//   MATRIXED    every dialect-scored cell has at least one MATRIX-ROUTED suite
+//               (#12136). DIALECTED asks each FILE to state a stance; a tree can
+//               satisfy it with every suite honestly declaring `sqlite`, and
+//               then ADR-0053 D-A3's `Postgres at minimum` is enforced nowhere.
+//               This is the invariant that makes the census ENFORCE D-A3 rather
+//               than report it, and it is deliberately not buyable from the
+//               dialect ledger -- see the ledger's own note.
 //
 // ## What "covered" means, and what it deliberately does not
 //
@@ -535,11 +544,25 @@ const LEDGER = [];
 // files that make a cell of THIS census covered — the suites whose coverage
 // this script's own headline is asserting.
 //
-// Promoting "every dialect-scored cell has at least one matrix-routed suite"
-// from a printed measurement to an invariant is the follow-up the numbers below
-// size, not something to infer here: today exactly one cell would fail it, and
-// converting that suite is a change to what the SUITE asserts, not to what the
-// census can see.
+// ## MATRIXED: the measurement, promoted (#12136)
+//
+// "Every dialect-scored cell has at least one matrix-routed suite" was printed
+// here as a number (`8 of 9`) before it was enforced. It could not be promoted
+// in the same change that started measuring it, because exactly one cell failed
+// it -- `FILTER_COMPARAND_TYPE`, whose own CASE_SETS entry says the accepted
+// types "compile EVERYWHERE" while it ran on SQLite alone -- and clearing that
+// red meant editing a TEST, which is a change to what the suite asserts rather
+// than to what the census can see. A gate that ships red is worse than one that
+// ships honest, so the promotion waited for the population to reach zero.
+//
+// #12136 converted that suite to the matrix and measured it on live PG 16.13
+// (all eight executed cases answered the case-set's row ids), which took the
+// count to `9 of 9` and made the promotion free. DIALECTED and MATRIXED are two
+// different questions and both are needed: DIALECTED is per FILE and asks for a
+// STATED stance, MATRIXED is per CELL and asks that the stance somewhere on that
+// cell actually be the matrix. A tree where every suite honestly declares
+// `dialectCell('sqlite')` passes DIALECTED completely while enforcing D-A3
+// nowhere; MATRIXED is what closes that.
 //
 // ## Declared, not detected — so it cannot be respelled around
 //
@@ -573,7 +596,7 @@ const DIALECT_CELL_SYMBOLS = ['dialectCell', 'PG_CELL', 'MYSQL_CELL', 'declareDi
 /** The export that identifies a package's dialect-matrix testkit, found on disk. */
 const DIALECT_TESTKIT_EXPORT = 'DIALECT_CELLS';
 
-// ── The dialect ledger ──────────────────────────────────────────────────────
+// ── The dialect ledger ─────────────────────────────────────────
 //
 // One entry per conformance suite that declares no stance. Same discipline as
 // LEDGER above: every entry is MEASURED against `main`, and clearing one means
@@ -581,47 +604,33 @@ const DIALECT_TESTKIT_EXPORT = 'DIALECT_CELLS';
 // in both directions, so a row for a suite that now declares — or that no longer
 // covers a cell — is an error rather than residue.
 //
-// SEEDED, not empty, and the seeding is the first measurement of this axis
-// rather than newly written looseness: these two rows are what the population
-// WAS on the day the axis was added. Both are deliberately left for a follow-up
-// card, because giving either one a stance is a claim about intent this gate's
-// author cannot verify and the maintainer can:
+// EMPTY, and empty is the intended steady state (#12136). It was seeded with two
+// rows on the day the axis was added — the population as it stood, not newly
+// written looseness — and both are now resolved rather than excused:
 //
-//   comparand-type   FILTER_COMPARAND_TYPE_CASES is described in CASE_SETS as
-//                    "the six accepted types compile EVERYWHERE". It is measured
-//                    on one dialect, and it is the only dialect-scored cell with
-//                    no matrix-routed suite at all. Marking it `dialectCell(
-//                    'sqlite')` would write down the opposite of its own
-//                    case-set's claim.
-//   icontains        FILTER_TEXT_CASES is the case-set whose answer is KNOWN to
-//                    diverge by dialect — #6518 made case sensitivity per-dialect
-//                    (`GLOB` on SQLite, `LIKE` on Postgres, `LIKE` over
-//                    `CAST(… AS BINARY)` on MySQL). A sqlite-only suite over it
-//                    is the shape most likely to be accidental, so "deliberate"
-//                    is exactly the word that must not be guessed. The cell
-//                    itself is matrix-covered by
-//                    `sql-driver-text-case-conformance.test.ts`; this is a second
-//                    suite over the same case-set.
+//   comparand-type   CONVERTED to the matrix. Its case-set claims the six
+//                    accepted types "compile everywhere", and that sentence had
+//                    been measured on one dialect; it is now measured on the
+//                    cells `DIALECT_CELLS` offers, live PG 16.13 included.
+//   icontains        MARKED `dialectCell('sqlite')`. Measured BY OPERATOR rather
+//                    than by file before marking: the seven text operators it
+//                    reaches are exactly the seven `FILTER_TEXT_CASES` reaches,
+//                    and `sql-driver-text-case-conformance.test.ts` runs that
+//                    whole table once per cell — so the narrowness costs no
+//                    dialect coverage, and its residue (GLOB's escape class, the
+//                    `lower(…) GLOB lower(…)` construct) is about SQLite BY
+//                    CONSTRUCTION.
+//
+// ⛔ What this ledger can NO LONGER do, now that MATRIXED is enforced. A row
+// here excuses an undeclared FILE. It does not — and must not be expected to —
+// clear MATRIXED, which is about a CELL: a ledgered suite is not a matrix-routed
+// suite, so if the ledgered file is the ONLY suite over its cell, that cell is
+// red whatever this list says. The ledger therefore reaches exactly one shape
+// now: a second suite over a cell some sibling already routes through the
+// matrix. That is a real narrowing of the escape hatch and it is deliberate —
+// the promotion exists so D-A3 is enforced rather than excused.
 
-const DIALECT_LEDGER = [
-  {
-    driver: 'driver-sql',
-    file: 'packages/drivers/driver-sql/src/sql-driver-comparand-type-conformance.test.ts',
-    why: 'Hard-codes the SQLite cell. Its case-set claims the accepted types "compile everywhere", '
-      + 'and this is the only dialect-scored cell with no matrix-routed suite — so whether it should '
-      + 'be marked single-cell or converted to the matrix is a decision, not a marking.',
-    issue: '#12014',
-  },
-  {
-    driver: 'driver-sql',
-    file: 'packages/drivers/driver-sql/src/sql-driver-icontains-and-retired-operators.test.ts',
-    why: 'Hard-codes the SQLite cell over FILTER_TEXT_CASES, whose answer diverges by dialect '
-      + '(#6518: GLOB / LIKE / CAST AS BINARY). The cell is matrix-covered by '
-      + 'sql-driver-text-case-conformance.test.ts, so this is a second suite whose narrowness may '
-      + 'be deliberate — that is the claim that must be made rather than assumed.',
-    issue: '#12014',
-  },
-];
+const DIALECT_LEDGER = [];
 
 
 // ── The ratchet-remedy authority convention (#8435) ─────────────────────────
@@ -740,6 +749,38 @@ function dialectedMessage(driver, relFile, markers, kit) {
   );
 }
 
+
+/**
+ * MATRIXED's text, named and pure for the same reason {@link consumedMessage}
+ * and {@link dialectedMessage} are.
+ *
+ * It deliberately offers NO ledger path. The dialect ledger accounts for a FILE
+ * that cannot state a stance; this error is about a CELL that no suite routes
+ * through the matrix, and a ledger row cannot make one appear. Saying so in the
+ * message is the point — an author who went looking for the escape hatch the
+ * sibling errors offer would otherwise add a row, watch this stay red, and
+ * conclude the gate is broken.
+ *
+ * @param {string} driver
+ * @param {string} marker the case-set whose cell has no matrix-routed suite
+ * @param {{file: string, stance: string}[]} suites the suites covering that cell
+ * @param {{specifier: string, cellIds: string[]}} kit the driver's dialect testkit
+ * @returns {string}
+ */
+function matrixedMessage(driver, marker, suites, kit) {
+  const listed = suites.map((s) => `${s.file.split('/').pop()} (${s.stance})`).join(', ');
+  return (
+    `MATRIXED: ${driver}'s ${marker} cell is covered, but no suite over it runs the dialect `
+    + `matrix — ${suites.length} covering suite(s): ${listed}. ADR-0053 D-A3 declares the matrix `
+    + `as driver x {SQLite, Postgres at minimum}, so a cell whose every suite names one dialect `
+    + `is a cell where "Postgres at minimum" is enforced nowhere. Route one of those suites `
+    + `through ${DIALECT_MATRIX_SYMBOLS[0]} from '${kit.specifier}' — it iterates every cell this `
+    + `driver speaks (${kit.cellIds.join(', ')}) and reports an unprovisioned one by name rather `
+    + `than omitting it. Note this is NOT ledgerable: the dialect ledger excuses a FILE that `
+    + 'cannot state a stance, and this is a CELL with no matrix-routed suite anywhere, which no '
+    + 'ledger row can supply.'
+  );
+}
 
 // ── Discovery ───────────────────────────────────────────────────────────────
 
@@ -1200,6 +1241,27 @@ function dialectAudit(drivers, coveringByDriver, errors, over = {}) {
     }
   }
 
+  // MATRIXED — the per-CELL invariant (#12136), promoted from the measurement
+  // this axis used to only print. Computed HERE rather than in `report()` so
+  // there is ONE derivation: the numbers the report prints and the numbers this
+  // invariant enforces cannot disagree, which is the failure a second copy
+  // would eventually produce silently.
+  const scoredCells = new Set();
+  const matrixCells = new Set();
+  for (const s of scored) {
+    for (const m of s.markers) {
+      scoredCells.add(`${s.driver}::${m}`);
+      if (s.stance === 'matrix') matrixCells.add(`${s.driver}::${m}`);
+    }
+  }
+  for (const cellKey of [...scoredCells].filter((c) => !matrixCells.has(c))) {
+    const [driver, marker] = cellKey.split('::');
+    const suites = scored
+      .filter((s) => s.driver === driver && s.markers.includes(marker))
+      .map((s) => ({ file: s.file, stance: s.stance }));
+    errors.push(matrixedMessage(driver, marker, suites, kits.get(driver)));
+  }
+
   // RECONCILED, the reverse direction — a dialect-ledger row must still point at
   // a conformance suite in a dialect-capable driver.
   for (const entry of ledger) {
@@ -1216,7 +1278,7 @@ function dialectAudit(drivers, coveringByDriver, errors, over = {}) {
     }
   }
 
-  return { scored, singleBackend, kits, notExecutable };
+  return { scored, singleBackend, kits, notExecutable, scoredCells, matrixCells };
 }
 
 function reportDeadRoots(err) {
@@ -1267,14 +1329,10 @@ function report() {
   // Printed BEFORE the error block so a red run still shows the measurement:
   // the number this axis exists to make visible is most wanted on the run where
   // something is wrong.
-  const scoredCells = new Set();
-  const matrixCells = new Set();
-  for (const s of dialect.scored) {
-    for (const m of s.markers) {
-      scoredCells.add(`${s.driver}::${m}`);
-      if (s.stance === 'matrix') matrixCells.add(`${s.driver}::${m}`);
-    }
-  }
+  // Read from `dialectAudit`, never recomputed: MATRIXED enforces these exact
+  // two sets, and a second derivation here could print `9 of 9` beside an error
+  // saying otherwise.
+  const { scoredCells, matrixCells } = dialect;
   const singleBackendCells = rows.filter(
     (r) => r.state === 'covered' && dialect.singleBackend.includes(r.driver),
   ).length;
@@ -1658,6 +1716,10 @@ function selfTest() {
     const declaredFile = join(dsrc('driver-x'), 'b.test.ts');
     writeFileSync(undeclaredFile, "const d = new SqlDriver({ client: 'better-sqlite3' });\n");
     writeFileSync(declaredFile, "import { DIALECT_CELLS } from './kit.testkit.js';\nfor (const c of DIALECT_CELLS) {}\n");
+    // [#12136] A suite that declares HONESTLY and narrowly — the shape MATRIXED
+    // exists for. DIALECTED is satisfied by it; D-A3 is not.
+    const cellFile = join(dsrc('driver-x'), 'd.test.ts');
+    writeFileSync(cellFile, "import { dialectCell } from './kit.testkit.js';\nconst c = dialectCell('sqlite');\n");
     mkdirSync(dsrc('driver-y'), { recursive: true });   // no testkit: single-backend
     writeFileSync(join(tmpDialect, 'driver-y', 'package.json'), '{}\n');
     writeFileSync(join(dsrc('driver-y'), 'c.test.ts'), 'const x = 1;\n');
@@ -1680,11 +1742,18 @@ function selfTest() {
       return { errs, out };
     };
 
-    // RED: an undeclared conformance suite, with an empty ledger.
+    // RED: an undeclared conformance suite, with an empty ledger. Two errors
+    // since #12136, and they are two different findings about one file: it
+    // states no stance (DIALECTED), and its cell has no matrix-routed suite
+    // (MATRIXED). Asserted separately so a regression in either is named.
     const red = drive([[undeclaredFile, ['PAGINATION_CASES']]], []);
-    expect('an undeclared conformance suite is an error', red.errs.length === 1);
-    expect('the error names the suite', /a\.test\.ts/.test(red.errs[0] ?? ''));
-    expect('the error names the dialects it could have declared', /sqlite, pg/.test(red.errs[0] ?? ''));
+    const redDialected = red.errs.find((e) => e.startsWith('DIALECTED:'));
+    const redMatrixed = red.errs.find((e) => e.startsWith('MATRIXED:'));
+    expect('an undeclared conformance suite is an error', red.errs.length === 2);
+    expect('DIALECTED names the suite', /a\.test\.ts/.test(redDialected ?? ''));
+    expect('DIALECTED names the dialects it could have declared', /sqlite, pg/.test(redDialected ?? ''));
+    expect('#12136 — MATRIXED also fires, naming the CELL rather than the file',
+      /PAGINATION_CASES/.test(redMatrixed ?? ''));
 
     // GREEN: the same suite, declared. Same tree, same call — so the red above
     // was caused by the missing stance and nothing else.
@@ -1692,11 +1761,46 @@ function selfTest() {
     expect('declaring a stance clears it', green.errs.length === 0);
     expect('and the stance is recorded as matrix', green.out.scored[0]?.stance === 'matrix');
 
-    // GREEN by ledger — and REPORTED as ledgered rather than as covered-and-fine.
+    // GREEN by ledger, for DIALECTED — and REPORTED as ledgered rather than as
+    // covered-and-fine. Since #12136 the ledger clears DIALECTED and NOTHING
+    // ELSE: this file is the only suite over its cell, so MATRIXED still fires.
+    // That narrowing is the promotion's whole point (a ledger row must not be a
+    // way to buy D-A3 green), so it is pinned here rather than left to be
+    // discovered by someone adding a row and finding it did not work.
     const ledgered = drive([[undeclaredFile, ['PAGINATION_CASES']]],
       [{ driver: 'driver-x', file: 'driver-x/src/a.test.ts', why: 'measured', issue: '#0' }]);
-    expect('a ledger entry accounts for an undeclared suite', ledgered.errs.length === 0);
+    expect('a ledger entry accounts for an undeclared suite (no DIALECTED error)',
+      !ledgered.errs.some((e) => e.startsWith('DIALECTED:')));
     expect('and it is REPORTED as ledgered, never as declared', ledgered.out.scored[0]?.stance === 'ledger');
+    expect('#12136 — but a ledger row does NOT clear MATRIXED: a ledgered suite is not a '
+      + 'matrix-routed one, so its cell is still uncovered on the dialect axis',
+      ledgered.errs.length === 1 && ledgered.errs[0].startsWith('MATRIXED:'));
+    expect('#12136 — and MATRIXED says so, so nobody adds a second row expecting it to work',
+      /NOT ledgerable/.test(ledgered.errs[0] ?? ''));
+
+    // -- MATRIXED, both directions, over the same synthetic tree. --
+    //
+    // The direction that matters: a suite can satisfy DIALECTED completely and
+    // still leave D-A3 enforced nowhere. This is the tree #12136 promotes the
+    // invariant against.
+    const honestlyNarrow = drive([[cellFile, ['PAGINATION_CASES']]], []);
+    expect('#12136 — a named-cell suite states a stance, so DIALECTED is satisfied',
+      !honestlyNarrow.errs.some((e) => e.startsWith('DIALECTED:')));
+    expect('#12136 — and its stance is recorded as cell', honestlyNarrow.out.scored[0]?.stance === 'cell');
+    expect('#12136 — but MATRIXED is RED: the cell has no matrix-routed suite',
+      honestlyNarrow.errs.length === 1 && honestlyNarrow.errs[0].startsWith('MATRIXED:'));
+    expect('#12136 — and the message names the covering suite and its stance',
+      /d\.test\.ts \(cell\)/.test(honestlyNarrow.errs[0] ?? ''));
+
+    // GREEN: the same narrow suite, beside a matrix-routed sibling over the SAME
+    // cell — the arrangement FILTER_TEXT is in on the real tree. MATRIXED is per
+    // CELL, so the sibling satisfies it and the narrow suite is not an error.
+    const narrowWithSibling = drive(
+      [[cellFile, ['PAGINATION_CASES']], [declaredFile, ['PAGINATION_CASES']]], []);
+    expect('#12136 — a matrix-routed sibling over the same cell clears MATRIXED',
+      narrowWithSibling.errs.length === 0);
+    expect('#12136 — and the cell is counted once, as matrix-covered',
+      narrowWithSibling.out.matrixCells.size === 1 && narrowWithSibling.out.scoredCells.size === 1);
 
     // RECONCILED, all three directions.
     const stale = drive([[declaredFile, ['PAGINATION_CASES']]],
@@ -1776,10 +1880,34 @@ function selfTest() {
   expect('driver-sql is discovered as dialect-capable from disk', liveKit !== null);
   expect('and D-A3\'s two minimum dialects are both cells of it ("SQLite, Postgres at minimum")',
     ['sqlite', 'pg'].every((id) => liveKit?.cellIds.includes(id)));
-  expect('every row of the dialect ledger points at a file that exists',
-    DIALECT_LEDGER.every((e) => {
-      try { return statSync(join(ROOT, e.file)).isFile(); } catch { return false; }
-    }));
+  // `[].every()` is TRUE, so with the ledger at its intended empty steady state
+  // this assertion measures nothing — the shape #12136 had to decide about
+  // rather than leave as a green that had quietly stopped checking. Both facts
+  // are asserted, and which one is live is stated in its own label, so a future
+  // row is checked and today's emptiness is not read as a passing file check.
+  if (DIALECT_LEDGER.length === 0) {
+    expect('#12136 — the dialect ledger is EMPTY, which is the steady state the promoted '
+      + 'MATRIXED invariant assumes (a row cannot clear it, so a non-empty ledger means a cell '
+      + 'is being excused that this gate no longer excuses)', true);
+  } else {
+    expect('every row of the dialect ledger points at a file that exists',
+      DIALECT_LEDGER.every((e) => {
+        try { return statSync(join(ROOT, e.file)).isFile(); } catch { return false; }
+      }));
+  }
+  // The real tree must actually satisfy the invariant this script now enforces —
+  // asserted here as well as in `report()`, so `--self-test` cannot pass on a
+  // tree whose census is red.
+  {
+    const errs = [];
+    const live = audit();
+    expect('#12136 — MATRIXED holds on the real tree: every dialect-scored cell has a '
+      + 'matrix-routed suite', live.dialect.scoredCells.size === live.dialect.matrixCells.size);
+    expect('#12136 — and that population is not empty (an axis that scored nothing would '
+      + 'satisfy the invariant vacuously)', live.dialect.scoredCells.size > 0);
+    expect('#12136 — the real tree raises no MATRIXED error',
+      !live.errors.some((e) => e.startsWith('MATRIXED:')) && errs.length === 0);
+  }
 
   if (failures.length) {
     for (const f of failures) console.error(`  x self-test: ${f}`);
@@ -1796,7 +1924,12 @@ function selfTest() {
       + 'regexes survive stripping, a matrix / named-cell / undeclared reading is pinned in all '
       + 'three directions, an undeclared conformance suite is RED and declaring one is GREEN over '
       + 'the same synthetic tree, the dialect ledger reconciles in all three directions, and its '
-      + 'offer is marked maintainer-only too.',
+      + 'offer is marked maintainer-only too. And it holds MATRIXED (#12136), the per-CELL '
+      + 'invariant: a suite that declares HONESTLY and narrowly satisfies DIALECTED while leaving '
+      + 'its cell without a matrix-routed suite, which is RED; a matrix-routed sibling over the '
+      + 'same cell is GREEN; a dialect-ledger row does NOT clear it, and the message says so; and '
+      + 'the invariant is asserted against the real tree over a non-empty population, so it cannot '
+      + 'pass vacuously.',
   );
 }
 

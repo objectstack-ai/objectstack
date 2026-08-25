@@ -23,6 +23,40 @@
  * `CAST(… AS BINARY)` on MySQL. The per-dialect reasoning and the measurements
  * behind each cell live on that function.
  *
+ * ## [#12136] Deliberately the SQLite cell — measured, not assumed
+ *
+ * This suite names `dialectCell('sqlite')`, which declares its narrowness as a
+ * DECISION rather than leaving it spelled the same way an accident would be
+ * (#12014). The claim that declaring it loses no dialect coverage was measured
+ * BY OPERATOR rather than by file, because #6518 makes `FILTER_TEXT_CASES`
+ * answer differently per dialect (`GLOB` on SQLite, `LIKE` on Postgres, `LIKE`
+ * over `CAST(… AS BINARY)` on MySQL) and a wrong call here would hide a real
+ * gap:
+ *
+ *   - Operators reached by THIS suite, read from comment-masked source:
+ *     `$contains`, `$endsWith`, `$icontains`, `$notContains`, `$options`,
+ *     `$regex`, `$startsWith` — plus `$or`.
+ *   - Operators reached by `FILTER_TEXT_CASES`, read from the EXPORTED case
+ *     filters rather than from the file's prose (its head note also mentions
+ *     `$ilike` and `$not`, which no case actually exercises — the reason this
+ *     was measured off the data): exactly the same seven.
+ *
+ * `sql-driver-text-case-conformance.test.ts` runs that whole table once per
+ * cell of `DIALECT_CELLS`, so all seven are already answered on all three
+ * dialects. The one extra, `$or`, is a logical combinator belonging to
+ * `FILTER_LOGIC_CASES`, which `sql-driver-or-filter.test.ts` routes through the
+ * same matrix.
+ *
+ * What is left over — and what makes SQLite the RIGHT cell rather than merely a
+ * tolerable one — is this file's own residue: the `GLOB` metacharacter class
+ * (`*`, `?`, `[`), the `lower(name) GLOB lower(…)` construct, and the assertion
+ * that `$contains` and `$icontains` stop answering identically. `GLOB` is
+ * emitted on the SQLite dialects and nowhere else, so those blocks are about
+ * SQLite BY CONSTRUCTION; running them on Postgres or MySQL would assert a
+ * construct those dialects never compile. The backslash limb is pinned
+ * per-dialect in `sql-driver-like-escape.test.ts`, which routes through the
+ * cells itself.
+ *
  * ## The reverse verification, direction decided BEFORE it was run
  *
  * - **Refusal face** — predicted RED, measured RED. Restoring the deleted
@@ -47,6 +81,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import type { DriverOptions, FilterCondition } from '@objectstack/spec/data';
 import { FILTER_TEXT_CASES, FILTER_TEXT_ROWS } from '@objectstack/spec/data';
 import { SqlDriver } from './sql-driver.js';
+import { dialectCell } from './live-dialect-matrix.testkit.js';
 
 /** The error a refused filter produced — never a bare `toThrow()` (see below). */
 interface WireBearingError extends Error {
@@ -76,11 +111,11 @@ describe('[#5702] SqlDriver — $icontains, and the retired $regex/$options', ()
   let driver: CompilerProbeDriver;
 
   beforeAll(async () => {
-    driver = new CompilerProbeDriver({
-      client: 'better-sqlite3',
-      connection: { filename: ':memory:' },
-      useNullAsDefault: true,
-    });
+    // [#12136] The SQLite cell BY NAME, not a hard-coded client literal. The
+    // value is unchanged — this cell's `config()` is byte-for-byte the literal
+    // that stood here — but a named cell is a STATED stance, which is the whole
+    // distinction #12014 found the repo could not spell.
+    driver = new CompilerProbeDriver(dialectCell('sqlite').config());
     await driver.initObjects([{ name: 'txt', fields: { name: { type: 'string' } } }]);
     for (const row of FILTER_TEXT_ROWS) {
       await driver.create('txt', { ...row }, BYPASS);
