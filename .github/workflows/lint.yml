@@ -354,6 +354,42 @@ jobs:
       - name: scripts/ TypeScript parses go through one module
         run: pnpm check:parse-guard
 
+      # Nobody writes a NEW private comment-stripper (#12307).
+      # `scripts/js-comment-mask.mjs` exists because two private `stripComments`
+      # families drifted apart in opposite directions — one regex-based and
+      # blind to string literals, opening PHANTOM comments that delete real
+      # code; one string-aware but regex-blind, hiding real comments. What the
+      # tree had no instrument for was ADOPTION: `check:comment-mask-corpus`
+      # below verifies the shared mask against a real parser, which is a claim
+      # about the MODULE and says nothing about its callers. So the module
+      # landed, some callers were converted by hand, and the residue was found
+      # by hand three separate times — three cards for one conversion.
+      # This gate is the half that covers the caller nobody has written yet:
+      # a new private stripper reds on the PR that writes it, while the 23
+      # measured pre-existing ones sit in a shrink-only ledger and are NOT
+      # required to move first (a gate that reds on day one is a gate nobody
+      # can land). Converting them is per-row and deliberately not this gate's
+      # call.
+      # ⚠️ NOT a widening of `check:parse-guard` above: that gate governs the
+      # three TypeScript PARSER ENTRY POINTS and its own header refuses a root
+      # broader than `scripts/**` twice. Comment-stripping is a different
+      # subject, and widening that population would still catch no stripper.
+      # Its `--self-test` runs FIRST and is where the detectors are observed
+      # FIRING and, just as importantly, observed STAYING SILENT on an adopter
+      # and on prose — the live corpus is green by construction, so a passing
+      # production run alone cannot tell a working detector from a dead one.
+      # The ledger's stale-row equality is the other half: breaking a detector
+      # reddens the production run (measured: 3 stale rows) instead of going
+      # quietly green, which is what keeps this out of the double-green family
+      # `check:self-test-wired` names.
+      # Invoked as `node` rather than through a `pnpm check:*` alias: see the
+      # GATE INVOCATION IDIOM note at the top of this file.
+      # Scans ~5k files under packages/** + examples/**, no spawns; ~2s.
+      - name: No new private comment-strippers (all route through js-comment-mask)
+        run: |
+          node scripts/check-comment-mask-adoption.mjs --self-test
+          node scripts/check-comment-mask-adoption.mjs
+
       # The bash-3.2 floor, over every shell file the repo ships (#12221).
       # `/usr/bin/env bash` is bash 3.2.57 on macOS -- Apple ships no bash 4+,
       # for licensing reasons -- and THIS RUNNER IS BASH 5, where every construct
