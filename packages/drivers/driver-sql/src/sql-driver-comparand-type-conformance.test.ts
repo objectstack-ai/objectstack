@@ -235,7 +235,13 @@ describe('[#7872] every accepted comparand type binds, on every dialect', () => 
     describe(client.id, () => {
       for (const c of EXECUTED_CASES) {
         it(`${c.name} — binds`, () => {
-          const sql = probe(client.config).compileWhere(parseFilterAST(c.filter()));
+          // `parseFilterAST` is typed `FilterCondition | undefined`. Asserted
+          // rather than `!`-ed: a case that produced NO condition would compile
+          // a bare select, and every assertion below would then be measuring an
+          // empty statement instead of a bound comparand.
+          const condition = parseFilterAST(c.filter());
+          expect(condition, `${c.name} produced no condition to compile`).toBeDefined();
+          const sql = probe(client.config).compileWhere(condition as FilterCondition);
           // A statement, with a `where` in it: `applyFilters` throwing is the
           // failure this block is looking for, and a builder that silently
           // applied NOTHING would render a bare select — which is the quiet
