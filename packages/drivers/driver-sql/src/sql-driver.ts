@@ -10152,7 +10152,9 @@ export class SqlDriver implements IDataDriver {
    * Apply a set of drift entries to the physical schema. Destructive entries
    * are skipped unless `allowDestructive` is set. Postgres/MySQL alter columns
    * in place; SQLite (which cannot alter constraints in place) rebuilds each
-   * affected table (copy → swap) applying only the requested edits.
+   * affected table (copy → swap) applying only those requested edits it can
+   * express as a rebuild — the rest are reported `skipped` and logged, exactly
+   * as the in-place arm reports an op its dialect cannot perform (#11722).
    *
    * @returns the entries actually applied and those skipped (e.g. destructive
    *   without `allowDestructive`, or unsupported on the dialect).
@@ -10193,8 +10195,29 @@ export class SqlDriver implements IDataDriver {
     for (const [table, ents] of byTable) {
       try {
         if (this.isSqlite) {
-          await this.rebuildSqliteTablePatched(table, ents);
-          applied.push(...ents);
+          // `applied` means "this op happened", not "a rebuild ran" — every
+          // consumer reads it that way (`reconcileAndWarnDrift` logs
+          // "auto-reconciled <op> on <table>", the artifact boot gate prints
+          // "↪ migrated <op>"). The rebuild honours four op types and
+          // IGNORES the rest (#11722), so reporting the whole batch applied
+          // turned an op that never happened into a green log line: the
+          // finding is still there on the next boot, reports as drift again,
+          // and is "migrated" again — a loop with no failing signal anywhere
+          // in it. So only the entries the rebuild actually acted on are
+          // reported applied, and the remainder is skipped and logged in the
+          // SAME words the in-place arm uses for an op its dialect cannot do
+          // ({@link applyDriftOpInPlace}).
+          const honoured = new Set(await this.rebuildSqliteTablePatched(table, ents));
+          for (const d of ents) {
+            if (honoured.has(d)) {
+              applied.push(d);
+              continue;
+            }
+            this.logger.warn(
+              `[schema-drift] ${d.op.type} on ${d.table}.${d.column ?? ''} is unsupported on dialect '${this.dialectName}' — skipped`,
+            );
+            skipped.push(d);
+          }
         } else {
           for (const d of ents) {
             const ok = await this.applyDriftOpInPlace(d.op);
@@ -10401,6 +10424,18 @@ export class SqlDriver implements IDataDriver {
    * copy → drop → rename. varchar widen/narrow are no-ops on SQLite (dynamic
    * typing) and ignored.
    *
+   * @returns the entries this rebuild actually ACTED on. Anything else in
+   *   `ents` was ignored, and the caller must report those as `skipped` rather
+   *   than `applied` (#11722) — on SQLite `applied` otherwise meant only "a
+   *   rebuild ran", while every consumer of it reads "this op happened".
+   *
+   * ⚠️ The rebuild still runs for the WHOLE table even when it honours
+   * nothing: it re-materializes every kept column's default and the full
+   * declared index set from metadata, so it is not a no-op, and skipping it in
+   * that case would change what the reconciler DOES rather than what it
+   * reports. Honesty about the report is this function's contract; deciding
+   * whether a rebuild is worth running is not.
+   *
    * SQLite cannot alter a column's DEFAULT in place, so `drop_column_default`
    * (#4560) is reconciled here too — by re-materializing every column's default
    * from METADATA through {@link applyDeclaredColumnDefault} and simply not
@@ -10415,17 +10450,28 @@ export class SqlDriver implements IDataDriver {
    * by `lookup` fields are not re-added (ObjectStack enforces relationships at
    * the application layer, not via SQLite FK constraints).
    */
-  protected async rebuildSqliteTablePatched(table: string, ents: ManagedDriftEntry[]): Promise<void> {
+  protected async rebuildSqliteTablePatched(table: string, ents: ManagedDriftEntry[]): Promise<ManagedDriftEntry[]> {
     const relax = new Set<string>();
     const tighten = new Set<string>();
     const drop = new Set<string>();
     const dropDefault = new Set<string>();
+    // The entries this rebuild ACTS on, filled by the same pass that fills the
+    // four sets — deliberately not a second list of op types to keep in sync
+    // with the branches below. An entry is honoured if and only if one of those
+    // branches took it, so the returned set cannot drift from the work done.
+    const honoured: ManagedDriftEntry[] = [];
     for (const e of ents) {
       if (e.op.type === 'relax_not_null') relax.add(e.op.column);
       else if (e.op.type === 'tighten_not_null') tighten.add(e.op.column);
       else if (e.op.type === 'drop_column') drop.add(e.op.column);
       else if (e.op.type === 'drop_column_default') dropDefault.add(e.op.column);
-      // widen/narrow varchar: SQLite ignores declared length — nothing to do.
+      // Everything else is IGNORED here and must be reported as such (#11722):
+      // widen/narrow varchar (SQLite ignores declared length — nothing to do),
+      // `manual_column_type_change` (no reconciler arm on ANY dialect, by
+      // decision), and any column op added later, which lands in this branch by
+      // default rather than being silently absorbed into `honoured`.
+      else continue;
+      honoured.push(e);
     }
 
     const physical = await this.introspectColumns(table);
@@ -10497,6 +10543,8 @@ export class SqlDriver implements IDataDriver {
     } catch (e: any) {
       this.logger.warn(`[schema-drift] could not fully recreate indexes for '${table}' after rebuild`, e?.message ?? e);
     }
+
+    return honoured;
   }
 
   /** Map an introspected SQLite column to a knex builder for the rebuilt table. */
