@@ -172,7 +172,42 @@ function boot(opts?: { capabilities?: string[]; seedDrafts?: boolean }) {
     };
 
     const engine: any = {
-        async find(table: string, o?: { where?: Record<string, unknown> }) {
+        /**
+         * ⛔ REFUSES the caller's bound rather than approximating it — the `limit`
+         * twin of the combinator refusal in `match` above, and the same reasoning:
+         * a double looser than `ObjectQL` turns a green suite into no suite
+         * (`pnpm check:objectql-double-limit`,
+         * `scripts/check-objectql-double-limit.mjs`, #11525 from #10978).
+         *
+         * A `find` that matches `where` and hands back every matched row cannot
+         * tell a read bounded at 200 from the same read bounded at 1000, or from
+         * one carrying no bound at all. Every limit change on such a read is green
+         * BY CONSTRUCTION, and the production symptom is a silently TRUNCATED
+         * result set rather than an error.
+         *
+         * REFUSAL and not `slice()`, because the bound is UNREACHABLE here, and
+         * that is measured rather than assumed. With this double instrumented at
+         * the seam and the suite run whole (15 cases): 18 `find` calls, every one
+         * of them `sys_metadata_history`, carrying keys `["where","context"]` and
+         * `typeof o.limit === 'undefined'` — zero calls carry a bound. The absence
+         * is a reading and not a silent probe: the same instrument recorded 54
+         * `findOne` calls in the same run as its control. So a `slice()` branch
+         * would be a line no case in this suite executes, and dead code cannot be
+         * relied on to be right on the day it finally runs. A throw states what
+         * this fake actually is — *it does not implement paging* — and turns the
+         * day some case starts handing it a bound into a RED, instead of a quiet
+         * full scan that reads exactly like a passing test.
+         *
+         * By PRESENCE (`!== undefined`), so `limit: 0` — a request for NOTHING —
+         * refuses too instead of falling through as falsy and answering with the
+         * whole table.
+         */
+        async find(table: string, o?: { where?: Record<string, unknown>; limit?: number }) {
+            if (o?.limit !== undefined) {
+                throw new Error(
+                    `fake engine: unsupported bound limit=${String(o.limit)} — this double does not implement paging`,
+                );
+            }
             if (table !== 'sys_metadata') return [];
             return [...rows.values()].filter((r) => match(r, o?.where ?? {}));
         },
