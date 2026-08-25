@@ -57,7 +57,7 @@ import { SqlDriver } from '@objectstack/driver-sql';
 import { MemoryNotificationOutbox } from './memory-outbox.js';
 import { SqlNotificationOutbox } from './sql-outbox.js';
 import { NotificationDelivery } from './objects/notification-delivery.object.js';
-import type { INotificationOutbox, NotificationDeliveryRecord } from './outbox.js';
+import type { ClaimedDeliveryRecord, INotificationOutbox, NotificationDeliveryRecord } from './outbox.js';
 
 /**
  * The refusal identity both backends must produce. `DELIVERY_NOT_ELIGIBLE` is
@@ -133,9 +133,13 @@ describe.each([memoryBackend(), sqlBackend()])('$name — ack() status precondit
         const id = await enqueueOne();
         expect(`${(await readRow(id)).status}:${(await readRow(id)).attempts}`).toBe('pending:0');
 
-        // The card's trap, verbatim: ack-as-cancel on a row no dispatcher holds.
+        // The card's trap, verbatim: ack-as-cancel on a row no dispatcher
+        // holds. [#11859] `ack` now takes the claimed record back, so the
+        // literal spelling of the trap is handing it a `list()` row — which
+        // carries NO claim credential; the cast is the JS caller/miscast this
+        // pin keeps refused at runtime, not just at compile time.
         await expect(
-            outbox.ack(id, { success: false, suppressed: true }),
+            outbox.ack((await readRow(id)) as ClaimedDeliveryRecord, { success: false, suppressed: true }),
         ).rejects.toMatchObject(REFUSAL);
 
         // A refused ack is not a partial one: the row keeps its identity, its
@@ -150,7 +154,7 @@ describe.each([memoryBackend(), sqlBackend()])('$name — ack() status precondit
         const claimed = await outbox.claim(CLAIM);
         expect(claimed.map((r) => r.id)).toEqual([id]);
 
-        await expect(outbox.ack(id, { success: true, durationMs: 5 })).resolves.toBeUndefined();
+        await expect(outbox.ack(claimed[0], { success: true, durationMs: 5 })).resolves.toBeUndefined();
 
         const after = await readRow(id);
         expect(`${after.id}:${after.status}:${after.attempts}`).toBe(`${id}:success:1`);
@@ -158,11 +162,14 @@ describe.each([memoryBackend(), sqlBackend()])('$name — ack() status precondit
 
     it('refuses a SECOND ack on a terminal row, leaving the first outcome intact', async () => {
         const id = await enqueueOne();
-        await outbox.claim(CLAIM);
-        await outbox.ack(id, { success: true });
+        const [rec] = await outbox.claim(CLAIM);
+        await outbox.ack(rec, { success: true });
 
+        // The SAME once-genuine record, handed back a second time: its
+        // credential was real, but the row is terminal now and the first
+        // outcome must stand.
         await expect(
-            outbox.ack(id, { success: false, suppressed: true }),
+            outbox.ack(rec, { success: false, suppressed: true }),
         ).rejects.toMatchObject(REFUSAL);
 
         // `attempts` is the assertion that matters: an unconditional increment
@@ -173,10 +180,10 @@ describe.each([memoryBackend(), sqlBackend()])('$name — ack() status precondit
 
     it('re-arms a retried row, then refuses an ack on the re-armed (pending) row', async () => {
         const id = await enqueueOne();
-        await outbox.claim(CLAIM);
+        const [rec] = await outbox.claim(CLAIM);
 
         // A real failed attempt: the row goes back to `pending` for a later try.
-        await outbox.ack(id, { success: false, error: 'transport blip', nextAttemptAt: 1 });
+        await outbox.ack(rec, { success: false, error: 'transport blip', nextAttemptAt: 1 });
         const retried = await readRow(id);
         expect(`${retried.id}:${retried.status}:${retried.attempts}`).toBe(`${id}:pending:1`);
 
@@ -186,7 +193,7 @@ describe.each([memoryBackend(), sqlBackend()])('$name — ack() status precondit
         // and the refused row's state (`pending`) are the SAME status, so only
         // a real conditional write tells them apart.
         await expect(
-            outbox.ack(id, { success: false, suppressed: true }),
+            outbox.ack(rec, { success: false, suppressed: true }),
         ).rejects.toMatchObject(REFUSAL);
 
         const after = await readRow(id);
@@ -199,9 +206,9 @@ describe.each([memoryBackend(), sqlBackend()])('$name — ack() status precondit
         // state happens to be `suppressed`. The precondition must not confuse
         // that legitimate dispatcher outcome with ack-as-cancel.
         const id = await enqueueOne();
-        await outbox.claim(CLAIM);
+        const [rec] = await outbox.claim(CLAIM);
 
-        await outbox.ack(id, { success: false, suppressed: true, error: 'no such recipient' });
+        await outbox.ack(rec, { success: false, suppressed: true, error: 'no such recipient' });
 
         const after = await readRow(id);
         expect(`${after.id}:${after.status}:${after.attempts}`).toBe(`${id}:suppressed:1`);

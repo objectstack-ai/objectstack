@@ -3,8 +3,6 @@ title: API Overview
 description: How ObjectStack generates its API surface from metadata — discovery, error handling wire formats, protocol types, and a map of the API & SDK docs.
 ---
 
-# API Overview
-
 ObjectStack generates its entire API surface — REST endpoints, realtime protocols, and the client SDK — from your metadata: define an object once and its endpoints exist. This module documents those surfaces and how to consume them.
 
 ObjectStack exposes a fully typed REST API. All endpoints use JSON request/response bodies. The API is **service-driven** — routes are only available when the corresponding plugin is installed. Use the [Discovery endpoint](#discovery) to determine what services are available at runtime.

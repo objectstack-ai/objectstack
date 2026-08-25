@@ -3,8 +3,6 @@ title: Events & Hooks
 description: System-wide event bus for loose coupling between plugins
 ---
 
-# Events & Hooks
-
 ObjectStack has **two distinct hook systems**. They look similar but use different APIs, payloads, ordering, and error semantics — pick the right one for the job:
 
 - **Kernel lifecycle hooks** — `ctx.hook(name, handler)` / `ctx.trigger(name, ...args)` on the `PluginContext`. Used for system bootstrap events and custom plugin-to-plugin events, matched by **exact name**.

@@ -1386,17 +1386,141 @@ export function runnableInvocation({ check, filter, direct }) {
  */
 /**
  * A hint with its globs collapsed and its trailing separators dropped — the
- * form `hintCovers` compares against, extracted so the reachability sweep can
- * describe a dead hint in the SAME terms the comparison judged it by. The
- * transformation is carried verbatim from where it was written inline; a
- * second, separately-maintained copy of it is exactly the drift this file
- * refuses everywhere else.
+ * form `hintCovers` compares against for every hint whose globs are TRAILING,
+ * extracted so the reachability sweep can describe a dead hint in the SAME
+ * terms the comparison judged it by. The transformation is carried verbatim
+ * from where it was written inline; a second, separately-maintained copy of it
+ * is exactly the drift this file refuses everywhere else.
+ *
+ * One strip, not two. The trailing-separator cleanup used to be written
+ * `.replace(/\/+$/, '').replace(/\/$/, '')`, and the second call was
+ * unreachable: `/\/+$/` is greedy and anchored, so after it runs no trailing
+ * separator survives for the second to find. Measured over all 754 distinct
+ * hints in the fleet — and over every probe string the shape admits (`a///`,
+ * `a/`, `a//`, `a/**\/`, `**\/`, `/`) — it changed the answer for zero of them.
+ * Deleted here rather than left as decoration, because a redundant strip reads
+ * as defence against a case the first one misses and there is no such case:
+ * what the anchored strips genuinely cannot touch is a separator left in the
+ * MIDDLE, which is the defect the branch below fixes rather than one more
+ * trailing pass would.
  */
 export function collapseHint(hint) {
-  return hint.replace(/\*\*?/g, '').replace(/\/+$/, '').replace(/\/$/, '');
+  return hint.replace(/\*\*?/g, '').replace(/\/+$/, '');
 }
 
+/**
+ * ## A glob in a NON-FINAL segment is not collapsible, and must not be collapsed
+ *
+ * Collapse-by-deletion is sound for a glob in the LAST segment, which is every
+ * shape the idioms above use: `packages/**` → `packages`, `packages/spec/src/**`
+ * → `packages/spec/src`, `packages/client*` → `packages/client`. Each names a
+ * subtree root the tree really has, and `ROOT_DIR_WATCH_HINTS` depends on
+ * exactly that reduction (`scripts/check-published-files.mjs:215-248` declares
+ * the workspace globs VERBATIM so "the glob collapse reduces each back to the
+ * root it names", justified there at 91.3%).
+ *
+ * A glob in a non-final segment is the one case where deletion does not reduce
+ * — it MANGLES. `skills/*\/references/_index.md` collapses to
+ * `skills//references/_index.md`, a double separator no tree can hold, so the
+ * hint matches nothing BY CONSTRUCTION while looking like an ordinary literal.
+ * `check:skill-refs` was the live specimen: `packages/spec/scripts/
+ * build-skill-references.ts` generates nine `_index.md` files, `git ls-files
+ * 'skills/*\/references/_index.md'` returns those nine, and the derivation
+ * reached zero of them.
+ *
+ * It also produced the worst row this output can print. `unreachableClass`
+ * calls a family "THE LAYOUT MOVED … a real miss, worth triaging" when a dead
+ * hint's `deepest` differs from its collapsed form, and the mangled form makes
+ * that true for a gate whose layout did not move at all — with the three
+ * "reasons" printed beside it drawn from OTHER inert hints, TypeScript
+ * `paths`-mapped module specifiers that were never repo paths. Both halves of
+ * the row were wrong: the classification and its evidence.
+ *
+ * No spelling of `collapseHint` can fix this, which is why the branch is here
+ * rather than there, and the impossibility is structural rather than a matter
+ * of a cleverer string. For a family to be classed "by construction" its dead
+ * hint needs `deepest(P) === P`, i.e. P must be a tracked prefix — but any
+ * tracked prefix P makes the three comparisons below reach every file beneath
+ * it, so the hint goes LIVE and never enters `dead` to be classified at all.
+ * The two requirements are mutually exclusive. Re-checked on this tree against
+ * every candidate P the specimen admits: `skills` is a tracked prefix and
+ * reaches 50 files (live, never classified); `skills/*`,
+ * `skills/*\/references`, `skills/*\/references/_index.md`, `skills/references`
+ * and the mangled `skills//references/_index.md` are none of them tracked
+ * prefixes and all reach 0.
+ *
+ * ## The rule, and why it reuses `triggerCovers`
+ *
+ * When — and ONLY when — a glob sits in a non-final segment, the hint is
+ * matched as the filter pattern it visibly is, through `triggerCovers`. That is
+ * not a second matching language: `triggerCovers` is `triggerPatternRegex` plus
+ * the literal-prefix directory reach, both of which already live in this file
+ * for this exact job, and the docblock above refuses a second one on principle.
+ * It also lines the two directions up with the ones the collapse gives: the
+ * regex answers "does this pattern match the file" (`plain`-equality and
+ * subtree descent), and the literal prefix answers "is the input a DIRECTORY
+ * the pattern reaches into" (reverse containment).
+ *
+ * ## Measured, both directions, on 170 families × 754 distinct hints × 6816
+ * ## tracked files
+ *
+ * Exactly SIX distinct hints in the whole fleet carry a glob in a non-final
+ * segment, so the blast radius is enumerable rather than estimated:
+ *
+ *   packages/**\/*.ts             0 → 4693   check:cross-package-test-inputs (+2)
+ *   packages/**\/*.object.ts      0 →   79   the same three families
+ *   skills/*\/references/_index.md 0 →    9   check:skill-refs
+ *   src/**\/*                     0 →    0   check:type-source-resolution
+ *   spec/src/*\/index.ts          0 →    0   check:type-source-resolution
+ *   src/**\/*.zod.ts              0 →    0   check:published-files
+ *
+ *   watch-hint (gate, file) pairs   72482 → 86807
+ *   families gaining coverage       4 rows / 3 gates, listed above; ZERO losing
+ *   (check, hint) newly live        7; newly inert 0
+ *   unreachable families            12 → 11, and "layout moved" 1 → 0
+ *   `skills/*\/references/_index.md` claims the 9 real files and 0 others
+ *
+ * The narrower rule is deliberate. Matching ALL whole-segment globs this way
+ * was measured and REFUSED: it takes `check:test-source-alias` 7511 → 107,
+ * `check:type-source-resolution` 8682 → 1278 and `check:published-files` 7407 →
+ * 3 (−7404 each), because it stops collapsing the trailing `**` the
+ * `ROOT_DIR_WATCH_HINTS` idiom is built on. That is a regression, not a
+ * correction, and this branch keeps the idiom bit-for-bit: `packages/*` 5228,
+ * `examples/*` 241, `skills/**` 50, `content/**` 442, all unchanged. So is the
+ * DECIDED partial-segment trade — `packages/client*` still refuses
+ * `packages/client-react/src/index.ts` and still covers `packages/client`,
+ * because a partial-segment glob in the LAST segment is not this case.
+ *
+ * ## What the +14325 pairs are, and why they are not a widening
+ *
+ * All of the residual cost is two hints: `packages/**\/*.ts` and
+ * `packages/**\/*.object.ts`, declared in `scripts/cross-package-test-inputs.mjs`
+ * and inherited by three family rows. They reach 0 today ONLY because of this
+ * defect, so the question is not whether to widen a gate but whether a
+ * declaration that finally means what it says is wanted — and it is, checked at
+ * the declaration site rather than assumed: `packages/**\/*.ts` is held by
+ * `packages/core/src/security/operation-private-keys.pin.test.ts`, whose scan
+ * surface is spelled `git ls-files` over "every `.ts`/`.tsx` file under
+ * `packages/`", and `packages/**\/*.object.ts` by the two repo-wide
+ * `*.object.ts` walkers in `packages/spec`. Those tests really do read every
+ * matching file, so every recovered pair is a TRUE lead, not a fabricated one —
+ * which is the provenance criterion the docblock above prices, never volume.
+ *
+ * Its derivation cost was measured rather than feared, because "22 leads is the
+ * same as none" is the failure this file exists to avoid. Reading each tracked
+ * file as a one-file card surface: `check:cross-package-test-inputs` is named by
+ * 3323 cards today and 5561 after — 2238 additional cards, 32.8% of the tree.
+ * It is NOT "nearly every card touching `packages/**`": of the 4693
+ * `packages/**\/*.ts` files, 2455 already name the family through some other
+ * hint and 2238 do not. Mean matched families per card goes 12.05 → 13.51 for a
+ * `packages/**\/*.ts` card and 11.99 → 12.89 fleet-wide — about one extra
+ * lead, against the +139084-pair explosion that took one card from 7 families
+ * to 34 and is the number this file calls unaffordable. So the two hints stay
+ * as declared; narrowing them at their declaration site was considered and is
+ * refused, because the narrowing would be the false statement.
+ */
 export function hintCovers(hint, inputPath) {
+  if (globInNonFinalSegment(hint)) return triggerCovers(hint, inputPath);
   const plain = collapseHint(hint);
   if (plain.length < 2) return false;
   // `hint`, not `plain`: glob collapse destroys the separator this refusal is
@@ -1407,6 +1531,20 @@ export function hintCovers(hint, inputPath) {
     inputPath.startsWith(`${plain}/`) ||
     plain.startsWith(`${inputPath}/`)
   );
+}
+
+/**
+ * Does a glob sit anywhere but this hint's LAST segment? The one question that
+ * decides which of the two rules above judges a hint, kept as its own named
+ * predicate so the branch reads as the case it is rather than as an inline
+ * condition. Segment-wise on purpose: `packages/client*` is a glob in the last
+ * segment and stays with the collapse (the DECIDED trade), while
+ * `packages/**\/*.ts` is not.
+ */
+export function globInNonFinalSegment(hint) {
+  const segments = hint.split('/');
+  for (let i = 0; i < segments.length - 1; i++) if (segments[i].includes('*')) return true;
+  return false;
 }
 
 /**
@@ -2607,6 +2745,32 @@ export function reachesMetadataFormModule(path, modulePaths) {
  *     path each already carries is their own output, and a card editing a
  *     baseline matches through it today without making the gate derivable for
  *     anybody else.
+ *
+ *     ⚠ "A literal naming their POPULATION" is the whole of that criterion,
+ *     and one gate in this kind now fails it while READING as satisfied.
+ *     Measured on this tree (#11199, the day PR #12300 landed): of the 2773
+ *     tracked test files, the hint route names `check:cross-package-test-
+ *     inputs` for 2760 of them — 99.5%, against 0–3.3% for its five siblings
+ *     in this same kind — because #12300 taught `hintCovers` to read a glob in
+ *     a non-final segment and the deep `packages` glob for TypeScript files
+ *     came back to life. (That glob is not spelled here: its own wildcard
+ *     closes a block comment.) The hint
+ *     is neither this gate's population nor even its own literal: it is
+ *     INHERITED from the declaration table the gate imports, where it is ONE
+ *     package's declared turbo `inputs` glob (`@objectstack/core`'s, wide
+ *     because a single pin test there walks the whole repo with `git
+ *     ls-files`). It is a row the gate JUDGES, not a population the gate
+ *     DECLARES — so it narrows the day that package's declaration narrows,
+ *     which is the direction the gate's own repair advice pushes. And even at
+ *     99.5% it reaches no test file outside `packages/**` (10 tracked today,
+ *     all under `examples/**`), none with a `.tsx` suffix (3 today, all in
+ *     client-react), and none under `apps/**` the day one arrives — while
+ *     the KIND reaches every one of them, because the trigger really is "a
+ *     test file's content changed, full stop". Both routes are kept (two
+ *     routes to one gate is redundancy, not a defect); the KIND is the
+ *     load-bearing one. The residue and the inheritance are pinned in the
+ *     self-test, so the next reader re-points a red case instead of
+ *     re-deriving this paragraph.
  *   - i18n entry: when `check-i18n-bundles.mjs` stops discovering its targets
  *     at runtime and names its POPULATION in its own source — a literal each
  *     owning package path starts with — the path half matches and this entry
@@ -4661,6 +4825,48 @@ function selfTest() {
   t('the same glob still covers the package it names', hintCovers('packages/client*', 'packages/client/src/index.ts'));
   t('a segment-boundary glob is untouched by the trade', hintCovers('packages/client/**', 'packages/client/src/index.ts'));
 
+  // ── A glob in a NON-FINAL segment is matched, not collapsed (#12246) ──────
+  //
+  // Collapse-by-deletion mangles this one shape into a double separator no tree
+  // can hold, so the hint matched nothing BY CONSTRUCTION and its family was
+  // then misfiled as "THE LAYOUT MOVED". Both halves are pinned: what the rule
+  // now reaches, and — the larger half — everything it deliberately does NOT
+  // disturb, because the refused alternative (matching ALL whole-segment globs)
+  // breaks the ROOT_DIR_WATCH_HINTS idiom by −7404 pairs on each of three gates.
+  t('the predicate reads the LAST segment, so a trailing glob is not this case', !globInNonFinalSegment('packages/**'));
+  t('nor is a partial-segment glob in the last segment', !globInNonFinalSegment('packages/client*'));
+  t('a glob in a middle segment IS', globInNonFinalSegment('skills/*/references/_index.md'));
+  t('and a `**` in a middle segment IS', globInNonFinalSegment('packages/**/*.ts'));
+  // The live specimen: `packages/spec/scripts/build-skill-references.ts` emits
+  // these nine files and the derivation reached zero of them. If the skills
+  // layout ever changes, re-point this case at whatever mid-segment glob the
+  // fleet then declares rather than deleting it.
+  t('a mid-segment glob reaches the file it names', hintCovers('skills/*/references/_index.md', 'skills/objectstack-formula/references/_index.md'));
+  t('and does NOT claim the rest of the subtree it passes through', !hintCovers('skills/*/references/_index.md', 'skills/objectstack-formula/SKILL.md'));
+  t('a `**` crosses separators, a single `*` does not', hintCovers('packages/**/*.ts', 'packages/spec/src/data/filter.zod.ts'));
+  t('so a single `*` segment matches exactly one segment', !hintCovers('skills/*/references/_index.md', 'skills/a/b/references/_index.md'));
+  t('the extension the glob names is honoured', !hintCovers('packages/**/*.object.ts', 'packages/spec/src/index.ts'));
+  // Reverse containment, the direction a coarse card surface needs: the literal
+  // prefix before the first wildcard still reaches back to a directory surface,
+  // exactly as the collapsed form used to.
+  t('a directory surface above the glob still derives the gate', hintCovers('skills/*/references/_index.md', 'skills'));
+  t('but an unrelated root does not', !hintCovers('skills/*/references/_index.md', 'packages'));
+  // ⛔ The refused alternative, pinned as the loss it would be. Each of these
+  // is a trailing glob and MUST keep going through the collapse.
+  t('a trailing `**` still collapses to the root it names', hintCovers('packages/**', 'packages/spec/src/index.ts'));
+  t('the ROOT_DIR_WATCH_HINTS idiom is untouched', hintCovers('skills/**', 'skills/objectstack-formula/SKILL.md'));
+  t('and so is a trailing single `*`', hintCovers('examples/*', 'examples/app-showcase/src/x.ts'));
+  t('the DECIDED partial-segment trade still refuses the sibling', !hintCovers('packages/client*', 'packages/client-react/src/index.ts'));
+
+  // The trailing-separator strip is ONE call, not two: `/\/+$/` is greedy and
+  // anchored, so nothing survives for a second `/\/$/` to remove. Measured at
+  // zero of 754 hints; pinned on the probes that could tell them apart, so a
+  // future reader does not restore the redundant call as defence-in-depth.
+  t('the greedy trailing strip removes every trailing separator', collapseHint('a///') === 'a');
+  t('including the one a trailing `**` leaves behind', collapseHint('a/**/') === 'a');
+  t('and a hint that is nothing but separators collapses to empty', collapseHint('**/') === '');
+  t('what it cannot touch is a separator left in the MIDDLE', collapseHint('skills/*/references/_index.md') === 'skills//references/_index.md');
+
   // ── A declared SUBTREE is not a bare word (#9626) ─────────────────────────
   //
   // The genericity refusal reads the hint as the author wrote it. Both
@@ -5792,6 +5998,59 @@ function selfTest() {
     'check:cross-package-test-inputs is a live family (#10542 moved it here from a path derivation that could name it at 49.6% precision at best)',
     liveFamilies.has('check:cross-package-test-inputs'),
   );
+
+  // ── The test-file entry's deletion criterion, MEASURED (#11199) ───────────
+  //
+  // The card behind these cases reported that no local derivation ever named
+  // `check:cross-package-test-inputs` for an edited test file. That is closed —
+  // the entry above has been in the table since #10542 — and the reason these
+  // cases exist rather than a seventh entry is what the re-measurement found:
+  // the entry now READS redundant against its own stated deletion criterion,
+  // and it is not. The full measurement is in that criterion's bullet in this
+  // table's docblock; what is pinned here is every load-bearing half of it, so
+  // the claim reddens instead of ageing.
+  //
+  // Both directions matter. The positive case keeps the redundancy honest (the
+  // hint route really does reach an ordinary packages test file — Zone rule:
+  // two routes to one gate is redundancy, never a bug, and neither may be
+  // deleted BECAUSE of the other). The negative cases are the residue: a class
+  // the hint route cannot reach in principle, with live tracked specimens.
+  const XPKG = 'check:cross-package-test-inputs';
+  const xpkgEntry = discoverFamilies().byCheck.get(XPKG);
+  // Live specimens, one per residue reason. If either file is ever deleted or
+  // renamed, re-point the case at another member of its class — and if a class
+  // ever EMPTIES, that is the measurement to redo, not a case to drop.
+  const OUTSIDE_PACKAGES = 'examples/app-crm/test/smoke.test.ts';   // not under packages/**
+  const TSX_TEST = 'packages/client-react/src/realtime-hooks.test.tsx'; // not *.ts
+  const APPS_TEST = 'apps/docs/src/x.test.ts';                      // no tracked member today
+  t('the gate is discovered with hints at all, so these cases are not vacuous', (xpkgEntry?.hints ?? []).length > 0);
+  t('both residue specimens are real tracked files, so the negatives are live rather than a pair of matching strings',
+    existsSync(join(ROOT, OUTSIDE_PACKAGES)) && existsSync(join(ROOT, TSX_TEST)));
+  t('the hint route really does reach an ordinary packages test file — the redundancy #12300 recovered is real',
+    covers(xpkgEntry.hints, 'packages/spec/src/x.test.ts'));
+  t('but no hint of this gate reaches a test file outside packages/**', !covers(xpkgEntry.hints, OUTSIDE_PACKAGES));
+  t('nor a .tsx test file inside it', !covers(xpkgEntry.hints, TSX_TEST));
+  t('nor one under apps/**, the class with no tracked member to lose', !covers(xpkgEntry.hints, APPS_TEST));
+  // The entry itself, anchored on both sides of the rendered name the way the
+  // STALE cases above are: a bare substring test stays green if some other
+  // gate's `why` ever quotes this gate's name.
+  t('the KIND names the gate for every one of them — delete the entry and this reddens',
+    [OUTSIDE_PACKAGES, TSX_TEST, APPS_TEST].every((p) =>
+      changeKindLines([p], (n) => n).some((l) => l.includes(`- ${XPKG}   —`))));
+  // The fragility half: the covering hint is INHERITED from the declaration
+  // table this gate imports (one package's declared turbo `inputs` glob), not
+  // declared by the gate as its own population. `hintOrigin` carries exactly
+  // that provenance, and it is what the output prints as `gate source via …`.
+  const xpkgCovering = xpkgEntry.hints.find((h) => hintCovers(h, 'packages/spec/src/x.test.ts'));
+  t('and that covering hint is inherited from a module the gate imports, not a population the gate declares',
+    Boolean(xpkgEntry.hintOrigin?.get(xpkgCovering)));
+  // The class-level claim, against the real corpus rather than two specimens:
+  // while ANY tracked test file is unreachable by every hint this gate has, the
+  // entry's deletion criterion is unmet. The day this reddens, re-measure the
+  // criterion and either retire the entry with these cases or re-point them.
+  const xpkgResidue = trackedFiles().filter((f) => isTestFilePath(f) && !covers(xpkgEntry.hints, f));
+  t(`the tree still holds test files no hint of this gate reaches (${xpkgResidue.length}), so the entry is not redundant`,
+    xpkgResidue.length > 0);
 
   // ── The check-family coverage guard (#9187) ───────────────────────────────
   //

@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import type { IDataEngine } from '@objectstack/spec/contracts';
 import type {
     AckResult,
+    ClaimedDeliveryRecord,
     ClaimOptions,
     DeliveryStatus,
     EnqueueDeliveryInput,
@@ -13,7 +14,12 @@ import type {
 import { hashPartition } from './backoff.js';
 import { toEpochMs } from './audit-timestamp.js';
 import { dispatcherAckCasOptions, dispatcherSweepOptions } from './outbox-dispatcher-scope.js';
-import { NotificationAckError, notificationAckLostClaimMessage, notificationAckNotClaimedMessage } from './outbox.js';
+import {
+    NotificationAckError,
+    notificationAckLostClaimMessage,
+    notificationAckNoCredentialMessage,
+    notificationAckNotClaimedMessage,
+} from './outbox.js';
 
 export const DELIVERY_OBJECT = 'sys_notification_delivery';
 
@@ -122,7 +128,7 @@ export class SqlNotificationOutbox implements INotificationOutbox {
         }
     }
 
-    async claim(opts: ClaimOptions): Promise<NotificationDeliveryRecord[]> {
+    async claim(opts: ClaimOptions): Promise<ClaimedDeliveryRecord[]> {
         const now = opts.now ?? Date.now();
 
         // 1. Reap stale in_flight rows (visibility-timeout recovery).
@@ -159,14 +165,17 @@ export class SqlNotificationOutbox implements INotificationOutbox {
             dispatcherSweepOptions({ id: { $in: ids }, status: 'pending' }),
         );
 
-        // 4. Read back only the rows we own.
+        // 4. Read back only the rows we own. [#11859] The read-back WHERE just
+        //    proved (claimed_by, claimed_at) — the claim credential — so the
+        //    explicit stamp below narrows to ClaimedDeliveryRecord without a
+        //    cast, and states nothing the query did not already establish.
         const claimed = (await this.engine.find(this.objectName, {
             where: { id: { $in: ids }, claimed_by: opts.nodeId, claimed_at: now, status: 'in_flight' },
         })) as DeliveryRow[];
-        return claimed.map((r) => this.toRecord(r));
+        return claimed.map((r) => ({ ...this.toRecord(r), claimedBy: opts.nodeId, claimedAt: now }));
     }
 
-    async claimDigest(opts: ClaimOptions): Promise<NotificationDeliveryRecord[]> {
+    async claimDigest(opts: ClaimOptions): Promise<ClaimedDeliveryRecord[]> {
         const now = opts.now ?? Date.now();
 
         // 1. Reap stale in_flight (same as claim).
@@ -203,18 +212,30 @@ export class SqlNotificationOutbox implements INotificationOutbox {
             dispatcherSweepOptions({ id: { $in: ids }, status: 'pending' }),
         );
 
-        // 4. Read back the rows we own.
+        // 4. Read back the rows we own — same credential stamp as claim().
         const claimed = (await this.engine.find(this.objectName, {
             where: { id: { $in: ids }, claimed_by: opts.nodeId, claimed_at: now, status: 'in_flight' },
         })) as DeliveryRow[];
-        return claimed.map((r) => this.toRecord(r));
+        return claimed.map((r) => ({ ...this.toRecord(r), claimedBy: opts.nodeId, claimedAt: now }));
     }
 
-    async ack(id: string, result: AckResult): Promise<void> {
+    async ack(claimed: ClaimedDeliveryRecord, result: AckResult): Promise<void> {
+        const id = claimed.id;
+        // [#11859] The runtime half of the ClaimedDeliveryRecord contract, for
+        // JS callers and casts: a record with no claim credential was not
+        // handed out by claim()/claimDigest() and is refused before any IO.
+        if (typeof claimed.claimedBy !== 'string' || typeof claimed.claimedAt !== 'number') {
+            throw new NotificationAckError(notificationAckNoCredentialMessage(id), 'DELIVERY_NOT_ELIGIBLE');
+        }
         const current = (await this.engine.findOne(this.objectName, {
             where: { id },
-            fields: ['status', 'attempts'],
-        })) as { status?: DeliveryStatus; attempts?: number } | null;
+            fields: ['status', 'attempts', 'claimed_by', 'claimed_at'],
+        })) as {
+            status?: DeliveryStatus;
+            attempts?: number;
+            claimed_by?: string | null;
+            claimed_at?: number | null;
+        } | null;
         // An id matching no row is not a contract violation: no state to
         // corrupt, no claim to lose. Declared on the interface, unchanged.
         if (!current) return;
@@ -224,6 +245,18 @@ export class SqlNotificationOutbox implements INotificationOutbox {
         if (current.status !== 'in_flight') {
             throw new NotificationAckError(
                 notificationAckNotClaimedMessage(id, current.status ?? 'unknown'),
+                'DELIVERY_NOT_ELIGIBLE',
+            );
+        }
+        // [#11859] Ownership, read half: the row is claimed, but not by the
+        // claim this record came from — reaped and re-claimed while the send
+        // ran (`status = 'in_flight'` alone matches B's live attempt, which is
+        // exactly the overwrite the card measured). Deterministic refusal
+        // before any write; the SAME test is re-stated in the conditional
+        // write below, which is the half that actually holds under the race.
+        if (current.claimed_by !== claimed.claimedBy || current.claimed_at !== claimed.claimedAt) {
+            throw new NotificationAckError(
+                notificationAckLostClaimMessage(id, current.status ?? 'unknown'),
                 'DELIVERY_NOT_ELIGIBLE',
             );
         }
@@ -247,13 +280,16 @@ export class SqlNotificationOutbox implements INotificationOutbox {
             error = result.error ?? null;
         }
 
-        // [#11453] Precondition, half two: the ATOMIC one. The status test
-        // above is a read, and a read cannot hold a row still — `claim()` is
-        // atomic by contract and this call was never part of that atom, which
-        // is the race the card describes. So the requirement is re-stated IN
-        // the write: the row is transitioned only if it is STILL `in_flight`.
-        // A row reaped by the visibility timeout and re-claimed between the
-        // read and here matches nothing and is left entirely alone.
+        // [#11453] Precondition, half two: the ATOMIC one. The tests above are
+        // reads, and a read cannot hold a row still — `claim()` is atomic by
+        // contract and this call was never part of that atom, which is the
+        // race the card describes. So the requirement is re-stated IN the
+        // write: the row is transitioned only if it is STILL `in_flight` AND
+        // [#11859] still held by THIS claim — the (`claimed_by`, `claimed_at`)
+        // credential round-tripped from the record `claim()` returned. A row
+        // reaped by the visibility timeout and re-claimed between the read and
+        // here matches nothing and is left entirely alone, whoever re-claimed
+        // it — another node, or this node's own later claim.
         //
         // `attempts` is incremented HERE and only here, inside that condition,
         // so the counter can only move for a row that was genuinely claimed —
@@ -275,7 +311,7 @@ export class SqlNotificationOutbox implements INotificationOutbox {
             // Predicate write (`updateMany`), audited under that op. Declared a
             // global-sweep site — no request context exists on the tick that
             // reaches here. Warrant in `outbox-dispatcher-scope.ts`.
-            dispatcherAckCasOptions(id, 'in_flight') as any,
+            dispatcherAckCasOptions(id, 'in_flight', claimed.claimedBy, claimed.claimedAt) as any,
         );
 
         // Did the conditional write land? `IDataEngine.update` declares its

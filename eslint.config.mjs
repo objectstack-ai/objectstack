@@ -887,6 +887,49 @@ const commentSwallowPlugin = {
 };
 
 export default [
+  // ───────────────────────────────────────────────────────────────────────────
+  // GLOBAL ignore. This is the ONLY object in this array with no `files` key,
+  // and that absence is the whole point: a flat-config `ignores` that sits
+  // BESIDE a `files` key is object-scoped — it stops that one object from
+  // applying and does NOT remove the path from the linted population. All
+  // seven objects below carry `files`, so before this object existed the build
+  // output they each list was still enumerated and parsed. ESLint lints
+  // `.js`/`.mjs`/`.cjs` under its built-in defaults even when no object here
+  // matches, so every emitted bundle was parsed to produce a guaranteed-empty
+  // result.
+  //
+  // Measured on this tree (ESLint v10.8.1, Node 22.22.2), 50 files per
+  // extension dropped under `packages/core/dist/`:
+  //
+  //   before   dist/*.js + dist/*.mjs  → LINTED, 0 rules enabled, parser espree
+  //            dist/*.ts + dist/*.d.ts → not linted at all (`--print-config`
+  //                                      returns `undefined`: no object matches,
+  //                                      and ESLint does not lint `.ts` by default)
+  //   after    none of the four present in the population
+  //
+  // So the accept/reject semantics of `**/dist/**` do not move: nothing there
+  // had a rule enabled to lose. The saving is pure enumeration + parse.
+  //
+  // ⚠️ SCOPE IS DELIBERATELY NARROWER THAN THE PER-OBJECT LISTS BELOW. Those
+  // also carry `**/build/**`, `**/.next/**` and `**/.turbo/**`, and promoting
+  // those three here would NOT be semantics-neutral. Three of the objects
+  // below (the `packages/**` and `examples/**` ones) list only
+  // `**/node_modules/**` and `**/dist/**` in their `ignores`, so they still
+  // match TypeScript under the other three directories:
+  //
+  //   packages/core/build/x.ts → LINTED, 3 rules ENABLED
+  //     (slot-lookup/no-any-assignment, no-restricted-syntax,
+  //      query-options/no-any-erasure), parser @typescript-eslint/parser
+  //
+  // No such path exists in this repo today — nothing emits to `build/`, and the
+  // only Next.js app is `apps/docs`, which is outside `packages/**` — so this
+  // is latent rather than live. It is still a real semantic change, and it is
+  // left out of this object pending a maintainer ruling rather than taken
+  // silently under a "changes nothing" banner. See #12304.
+  // ───────────────────────────────────────────────────────────────────────────
+  {
+    ignores: ['**/node_modules/**', '**/dist/**'],
+  },
   {
     files: ['**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs}'],
     ignores: [

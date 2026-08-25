@@ -42,6 +42,7 @@ import { join } from 'node:path';
 import { ObjectQL } from '@objectstack/objectql';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { SqlDriver } from '@objectstack/driver-sql';
+import { provisionRawForeignKey } from './raw-foreign-key-fixture.js';
 import {
   captureExpectedReadRefusals,
   type ExpectedReadRefusalCapture,
@@ -61,7 +62,14 @@ const CHILD = {
     name: 'hs_child',
     fields: {
         name: { type: 'text' },
-        parent: { type: 'lookup', reference_to: 'hs_parent' },
+        // ⚠️ Deliberately NOT declared as a lookup — see
+        // `raw-foreign-key-fixture.ts`. A canonical `reference` would let the
+        // ENGINE see the relationship and apply `deleteBehavior` on delete,
+        // clearing the child BEFORE the parent delete ever reaches the
+        // database — which dissolves the raw driver fault this suite exists to
+        // withhold. The column still carries a real FOREIGN KEY (raw DDL); what
+        // it must not carry is a relationship the engine will resolve for it.
+        parent: { type: 'text' },
     },
 };
 
@@ -109,6 +117,14 @@ describe('[#8570] a batch row carries the status its producer DECLARED — real 
         // `logger` through the prototype chain to this sink.
         noise = captureExpectedReadRefusals([ABSENT_TENANCY_TABLE]);
         noise.captureDriver(real);
+        // [#11567] The FK this suite's raw-fault vehicle depends on is built
+        // with RAW DDL, because the driver no longer emits one: `reference_to`
+        // (a key `FieldSchema` refuses) used to gate `createColumn`'s FK
+        // emission, and that branch is retired. The lookup below is now spelled
+        // the canonical way and contributes NO constraint — see
+        // `raw-foreign-key-fixture.ts` for why the vehicle was kept rather than
+        // dropped along with the key.
+        await provisionRawForeignKey(real, 'hs_parent', 'hs_child', 'parent');
         await real.initObjects([TASK, PARENT, CHILD]);
 
         // Capture the RAW error at the seam and let it propagate untouched, so

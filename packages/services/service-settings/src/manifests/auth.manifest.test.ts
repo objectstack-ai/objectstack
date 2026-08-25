@@ -151,4 +151,74 @@ describe('authSettingsManifest', () => {
     expect(clientSecret.encrypted).toBe(true);
     expect(clientSecret.visible).toBe("${data.google_enabled !== false}");
   });
+
+  // [#11768] Audience posture (#11739, epic #11723) — the console switch
+  // surface for `invite_only | email_domain | open`. The option table IS the
+  // closed vocabulary: `setMany` (and the env-override door, which judges the
+  // same table — #5204/#6580) refuses anything outside it, and the binding in
+  // plugin-auth refuses off-vocabulary again with `isAudiencePosture` before
+  // the value ever reaches `applyConfigPatch`.
+  it('exposes audience_posture as a closed three-value select in its own group (#11768)', () => {
+    const specs = authSettingsManifest.specifiers as any[];
+    const posture = specs.find((s) => s.key === 'audience_posture');
+
+    expect(posture.type).toBe('select');
+    // UI default only — `bindAuthSettings` applies EXPLICIT values alone, so
+    // this default never masks a deployment's boot-config declaration. It
+    // matches the spec's undeclared default (the safe end).
+    expect(posture.default).toBe('invite_only');
+    expect(posture.options.map((o: any) => o.value)).toEqual([
+      'invite_only',
+      'email_domain',
+      'open',
+    ]);
+
+    // The posture judges EVERY self-serve creation path — social-provider
+    // OAuth included — so like `membership_policy` it must not be hidden
+    // behind the email/password provider toggle.
+    expect(posture.visible).toBeUndefined();
+    expect(specs.filter((s) => s.type === 'group').map((s) => s.id)).toContain('audience');
+  });
+
+  it('gates the audience sibling fields on the posture that reads them (#11768)', () => {
+    const specs = authSettingsManifest.specifiers as any[];
+    const domains = specs.find((s) => s.key === 'audience_allowed_email_domains');
+    const permissionSet = specs.find((s) => s.key === 'audience_self_registration_permission_set');
+
+    expect(domains.type).toBe('textarea');
+    expect(domains.visible).toBe("${data.audience_posture === 'email_domain'}");
+
+    expect(permissionSet.type).toBe('text');
+    expect(permissionSet.visible).toBe(
+      "${data.audience_posture === 'email_domain' || data.audience_posture === 'open'}",
+    );
+
+    // Explicit-only application: neither sibling ships a default that could
+    // read as an operator's declaration.
+    expect(domains.default).toBeUndefined();
+    expect(permissionSet.default).toBeUndefined();
+  });
+
+  it('refuses an audience posture outside the option table at the write API (#11768)', async () => {
+    const svc = new SettingsService({ env: {} });
+    svc.registerManifest(authSettingsManifest as any);
+
+    // `invite-only` is the MEMBERSHIP policy spelling — the most plausible
+    // typo for this select. The write path refuses it with the coded envelope
+    // (ADR-0114 field vocabulary on the SETTINGS_VALIDATION error); silently
+    // storing it would hand the binding a value it can only refuse at apply
+    // time, after the console already said "saved".
+    await expect(svc.setMany('auth', { audience_posture: 'invite-only' })).rejects.toMatchObject({
+      code: 'SETTINGS_VALIDATION',
+      fields: [
+        {
+          field: 'audience_posture',
+          code: 'invalid_option',
+          constraint: { allowed: 'invite_only, email_domain, open' },
+        },
+      ],
+    });
+    await expect(svc.setMany('auth', { audience_posture: 'email_domain' })).resolves.toBeDefined();
+    expect((await svc.get('auth', 'audience_posture')).value).toBe('email_domain');
+  });
 });

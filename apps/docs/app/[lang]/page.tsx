@@ -4,6 +4,7 @@ import { ArrowRight, Check } from 'lucide-react';
 import { Bricolage_Grotesque, IBM_Plex_Mono } from 'next/font/google';
 import { HomeLayout } from 'fumadocs-ui/layouts/home';
 import { baseOptions, gitConfig } from '@/lib/layout.shared';
+import { absoluteUrl } from '@/lib/site';
 import { YouTubeEmbed } from '@/components/youtube-embed';
 
 /** The 90-second overview — the same video the README's hero cover links to. */
@@ -21,12 +22,60 @@ const mono = IBM_Plex_Mono({
   variable: '--font-l-mono',
 });
 
+const HOME_TITLE = 'Metadata framework for AI-written apps';
+const HOME_DESCRIPTION =
+  'ObjectStack turns the whole app — data model, UI, workflows, permissions — into typed metadata: a complete CRM in under 150k tokens, one context window.';
+
+/**
+ * The homepage's social card.
+ *
+ * ⚠️ Deliberately NOT the docs card generator. `app/og/docs/[...slug]/route.tsx`
+ * renders from a `source.getPage()` result, and the homepage has no MDX file
+ * behind it — there is no slug to hand it. It reuses the hero cover instead,
+ * which is already shipped and already the video poster on this page, so the
+ * shared card costs no extra bytes and no extra route.
+ *
+ * ⚠️ `apps/docs/app/[lang]/blog/[[...slug]]/page.tsx` spells this same path for
+ * the blog's card. Two spellings rather than one shared constant because
+ * `lib/site.ts` is the origin's home, not the asset manifest's; if a third page
+ * ever needs it, hoist it there. Anything that renames, re-encodes or deletes
+ * `public/hero-cover-dark.png` must update BOTH — an `og:image` that 404s is
+ * worse than none, because crawlers then scrape whatever else the page offers.
+ *
+ * Left site-relative: `metadataBase` in `app/layout.tsx` absolutises it.
+ */
+const HOME_CARD = {
+  url: '/hero-cover-dark.png',
+  width: 2400,
+  height: 1200,
+  alt: 'ObjectStack — the metadata framework for AI-written apps',
+};
+
 export const metadata: Metadata = {
-  title: {
-    absolute: 'ObjectStack — Apps small enough for AI to hold whole.',
+  title: HOME_TITLE,
+  description: HOME_DESCRIPTION,
+  /**
+   * `/` is the one indexable spelling of the homepage: `proxy.ts` rewrites `/` to
+   * this route internally, and the prefixed form `/en` 307s back to `/`. Every
+   * other spelling a crawler reaches it by — query strings, tracking parameters —
+   * points here.
+   */
+  alternates: { canonical: absoluteUrl('/') },
+  openGraph: {
+    type: 'website',
+    title: HOME_TITLE,
+    description: HOME_DESCRIPTION,
+    // Same absolute URL as the canonical link — see the docs route for why the
+    // two must not drift.
+    url: absoluteUrl('/'),
+    images: [HOME_CARD],
   },
-  description:
-    'ObjectStack turns the whole app — data model, UI, workflows, permissions — into typed metadata: a complete CRM in under 150k tokens, one context window. Agents read it whole, reason it whole, refactor it whole. The business logic alone — every object, workflow and permission — is under 100k tokens; the UI adds just 50k more. That metadata is your business ontology — an open, versioned definition you own. Strict TypeScript, Zod, and a validation gate catch the agent\'s mistakes at authoring time, and the runtime derives the database, REST API, UI, and MCP server, enforcing permissions and audit on every call.',
+  twitter: {
+    card: 'summary_large_image',
+    title: HOME_TITLE,
+    description: HOME_DESCRIPTION,
+    images: [HOME_CARD.url],
+  },
 };
 
 const VOCABULARY: { tag: string; title: string; copy: string }[] = [

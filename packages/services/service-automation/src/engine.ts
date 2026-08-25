@@ -22,6 +22,13 @@ import type { Logger } from '@objectstack/spec/contracts';
 import { FlowSchema, FLOW_STRUCTURAL_NODE_TYPES, validateControlFlow, collectFlowGraphs, findRegionEntry, defineActionDescriptor } from '@objectstack/spec/automation';
 import { resolveFlowNodeExpressions } from '@objectstack/spec/automation';
 import { applyConversionsToFlow, type ConversionNotice, type ConversionConflictNotice } from '@objectstack/spec';
+// [ADR-0126 §7.3] "Does a code package ship this flow?" for the subflow guard.
+// Routed through the local precedence module rather than importing
+// `isCodeArtifactBody` from `@objectstack/objectql` directly: that package is a
+// devDependency here, and `describeFlowContender` is already this package's one
+// wrapper over the canonical ADR-0029 D9.6 test — so the guard and the boot
+// pull cannot drift into two answers about what "packaged" means.
+import { describeFlowContender } from './flow-precedence.js';
 import type { FlowRegionParsed } from '@objectstack/spec/automation';
 import type {
     Connector,
@@ -1170,6 +1177,44 @@ export interface FlowDispatchStore {
 }
 
 /**
+ * [ADR-0126 §4] One packaged flow's install-level activation row, as the engine
+ * sees it. The ledger's own columns are `metadata_type` / `name` /
+ * `package_id` / `organization_id` / `active`; `metadata_type` is fixed to
+ * `'flow'` by the store and `organization_id` is never written on this line
+ * (§5), so those two never reach the engine.
+ */
+export interface FlowActivationRow {
+    /** The packaged flow's machine name. */
+    name: string;
+    /** The package that ships the base artifact. */
+    packageId: string;
+    /** Is the packaged flow armed for this installation. */
+    active: boolean;
+}
+
+/**
+ * [ADR-0126 §7.2] The durable off-switch for packaged flows — the mechanism
+ * that REPLACES the process-local `flowEnabled` map #10243 measured leaking
+ * across tenants.
+ *
+ * Backed by `sys_metadata_activation` in production (see
+ * `ObjectStoreFlowActivationStore`), so a disabled packaged flow stays
+ * disabled across a restart — the property the retired in-process map could
+ * not have, and the one that made its "mitigating but not exculpating" cold
+ * boot the only thing limiting the #10243 leak.
+ *
+ * Absence of a row means the packaged default — ACTIVE — so an engine with no
+ * store attached, or a store with no rows, behaves exactly as a stock boot
+ * always has.
+ */
+export interface FlowActivationStore {
+    /** Every install-level flow activation row (`organization_id IS NULL`). */
+    list(): Promise<FlowActivationRow[]>;
+    /** Insert or update the install-level row for one packaged flow. */
+    setActive(row: FlowActivationRow): Promise<void>;
+}
+
+/**
  * TTL for the engine's IN-PROCESS dispatch-claim fallback (#10220). Every
  * dispatch key embeds a calendar day, so a key stops being producible once its
  * sweep day has passed; 48h comfortably outlives any key's claimable lifetime
@@ -1294,7 +1339,54 @@ export class AutomationEngine implements IAutomationService {
      * {@link getFlowRuntimeStates} can show it.
      */
     private flowShadowing = new Map<string, FlowShadowingRecord>();
-    private flowEnabled = new Map<string, boolean>();
+    /**
+     * [ADR-0126 §7.2] Flows the durable ACTIVATION LEDGER currently marks
+     * inactive — the local projection of `sys_metadata_activation`, keyed by
+     * flow name. Membership means "a row says `active: false`"; absence means
+     * the packaged default, ACTIVE (§4).
+     *
+     * ## ⛔ This is NOT the retired `flowEnabled` map under a new name
+     *
+     * That distinction is the whole point of #10243, so it is spelled out
+     * rather than left to a reader's charity. The retired map was the TRUTH:
+     * `toggleFlow` wrote it and nothing else recorded the bit, so the
+     * off-switch was a name-keyed, unscoped, process-local value that one
+     * tenant could set and every other tenant read. Three things are different
+     * here, and each is load-bearing:
+     *
+     *   1. **It is a projection, not a source.** The only writers are
+     *      {@link hydrateFlowActivations} (boot, from the ledger) and
+     *      {@link toggleFlow} (which writes the durable row FIRST and updates
+     *      this only after that write succeeds). There is no path that changes
+     *      this set without the ledger changing, so it cannot drift into being
+     *      an independent off-switch.
+     *   2. **The write door is gated.** Reaching `toggleFlow` from the wire
+     *      goes through the automation domain's activation gate: in `group` /
+     *      `isolated` postures the write requires the platform operator, so
+     *      the tenant-org-admin caller #10243 measured is refused before any
+     *      of this runs (ADR-0126 §5).
+     *   3. **It survives a restart** — because the row does. The retired map's
+     *      cold-boot amnesia was recorded as "mitigating but not exculpating";
+     *      durability is what turns the flip into a recorded administrator
+     *      CHOICE (§6 wall 3) instead of a process accident.
+     *
+     * ## Why a projection at all, rather than reading the ledger per execute()
+     *
+     * Because the ledger has to be consulted at BIND time, not only at run
+     * time: §7.2 requires the install-level row to unbind the trigger, so the
+     * engine must know a flow's activation state at boot — before any
+     * `execute()` — to decide whether to arm its trigger at all. Given that
+     * boot read is required anyway, `execute()` consults its result rather
+     * than issuing a datasource read on every single flow run.
+     */
+    private flowLedgerDisabled = new Set<string>();
+    /**
+     * The durable ledger behind {@link flowLedgerDisabled}. `null` until a host
+     * attaches one via {@link setFlowActivationStore} — an engine with no
+     * ObjectQL has no durable plane to write to, and says so at the moment of
+     * a flip rather than reporting a durability it does not have.
+     */
+    private flowActivationStore: FlowActivationStore | null = null;
     /**
      * Re-entrancy guard for record-triggered flows (complements the intra-run
      * {@link MAX_NODE_REENTRIES} back-edge guard, which cannot see a self-trigger
@@ -2574,17 +2666,22 @@ export class AutomationEngine implements IAutomationService {
         // any legacy flow with no explicit status — stay enabled, so existing flows
         // are unaffected (zero regression). This is how the Studio's on/off switch
         // persists: it flips `status` active↔obsolete, applied on the next publish
-        // rebind. A flip back OUT of a disabled status re-enables even if turned off;
-        // a runtime toggleFlow() override on a still-enabled flow is preserved.
+        // rebind.
+        //
+        // [ADR-0126 §7.2] Recording the STATUS dimension is now all this does.
+        // It used to also fold that dimension into the `flowEnabled` map and
+        // then work to preserve the OTHER dimension living in the same map —
+        // hence the old `wasStatusDisabled || !flowEnabled.has(name)` arm,
+        // whose job was to re-enable on a status flip without clobbering a
+        // runtime toggle. With the activation ledger holding the toggle
+        // dimension separately ({@link flowLedgerDisabled}) the two no longer
+        // share a slot, so there is nothing to reconcile: a status flip moves
+        // the status bit, a ledger flip moves the ledger bit, and
+        // {@link isFlowEnabled} composes them. That the reconciliation
+        // DISAPPEARS rather than moving is the sign the two were always
+        // distinct facts crammed into one map.
         const flowStatus = (parsed as { status?: string }).status;
-        const disabledByStatus = flowStatus === 'obsolete' || flowStatus === 'invalid';
-        const wasStatusDisabled = this.flowStatusDisabled.get(name) === true;
-        this.flowStatusDisabled.set(name, disabledByStatus);
-        if (disabledByStatus) {
-            this.flowEnabled.set(name, false);
-        } else if (wasStatusDisabled || !this.flowEnabled.has(name)) {
-            this.flowEnabled.set(name, true);
-        }
+        this.flowStatusDisabled.set(name, flowStatus === 'obsolete' || flowStatus === 'invalid');
         this.logger.info(`Flow registered: ${name} (version ${parsed.version})`);
 
         // ADR-0018 §M1 node-type check, inline — but ONLY once the vocabulary
@@ -2598,7 +2695,7 @@ export class AutomationEngine implements IAutomationService {
         // registerFlow) IS against a complete vocabulary, so it warns at once.
         // Placed after the enable/disable resolution above so it can honor the
         // same "a flow that cannot run cannot fail" rule as the audit.
-        if (this.nodeTypeVocabularySealed && this.flowEnabled.get(name) !== false) {
+        if (this.nodeTypeVocabularySealed && this.isFlowEnabled(name)) {
             const known = this.knownNodeTypes();
             const unknownTypes = this.unknownNodeTypes(parsed, known);
             if (unknownTypes.length > 0) {
@@ -2607,8 +2704,12 @@ export class AutomationEngine implements IAutomationService {
         }
 
         // Re-bind in case the definition changed its trigger, then (re)activate.
+        // [ADR-0126 §7.2] A ledger-disabled flow is NOT re-armed here, which is
+        // what makes the unbind survive a republish and a restart: the boot
+        // pull re-registers every flow, so a hydrated ledger row has to be
+        // able to keep a trigger unbound through exactly this path.
         this.deactivateFlowTrigger(name);
-        if (this.flowEnabled.get(name) !== false) {
+        if (this.isFlowEnabled(name)) {
             this.activateFlowTrigger(name);
         }
     }
@@ -2616,7 +2717,13 @@ export class AutomationEngine implements IAutomationService {
     unregisterFlow(name: string): void {
         this.deactivateFlowTrigger(name);
         this.flows.delete(name);
-        this.flowEnabled.delete(name);
+        // [ADR-0126 §7.2] `flowLedgerDisabled` is deliberately NOT cleared. It
+        // mirrors a durable row, and unregistering a flow does not delete that
+        // row — so dropping the projection here would silently re-arm a
+        // disabled packaged flow the moment it was re-registered (a hot
+        // reload, a Studio publish, the next boot pull), which is the one
+        // thing the durable switch exists to prevent. The projection is a Set
+        // of names; a genuinely deleted flow leaves one harmless string.
         this.flowStatusDisabled.delete(name);
         this.flowVersionHistory.delete(name);
         this.logger.info(`Flow unregistered: ${name}`);
@@ -2651,7 +2758,7 @@ export class AutomationEngine implements IAutomationService {
             const shadowing = this.flowShadowing.get(name);
             return {
                 name,
-                enabled: this.flowEnabled.get(name) !== false,
+                enabled: this.isFlowEnabled(name),
                 bound: this.boundFlowTriggers.has(name),
                 status: (this.flows.get(name) as { status?: string } | undefined)?.status,
                 triggerType: resolved?.triggerType,
@@ -2675,7 +2782,7 @@ export class AutomationEngine implements IAutomationService {
     getTriggerBindingAudit(): Array<{ flowName: string; triggerType: string; reason: string }> {
         const audit: Array<{ flowName: string; triggerType: string; reason: string }> = [];
         for (const name of this.flows.keys()) {
-            if (this.flowEnabled.get(name) === false) continue;
+            if (!this.isFlowEnabled(name)) continue;
             if (this.boundFlowTriggers.has(name)) continue;
             const resolved = this.resolveTriggerBinding(name);
             if (!resolved) continue; // manual / screen flow — nothing to bind
@@ -2722,11 +2829,208 @@ export class AutomationEngine implements IAutomationService {
         return this.flows.get(name) ?? null;
     }
 
+    /**
+     * Attach the durable activation ledger (ADR-0126 §4). Hosts call this at
+     * start(), after ObjectQL is available; see the automation plugin.
+     */
+    setFlowActivationStore(store: FlowActivationStore): void {
+        this.flowActivationStore = store;
+    }
+
+    /**
+     * [ADR-0126 §7.2] Load the ledger into {@link flowLedgerDisabled}.
+     *
+     * Called once at boot, AFTER the flow pull, because the projection decides
+     * whether a flow's trigger is armed and re-arming happens per
+     * {@link registerFlow}. Returns the names it disarmed so the host can say
+     * so in its bootstrap audit.
+     *
+     * An empty ledger — the stock-boot case — disarms nothing and rebinds
+     * nothing, which is §4's "an empty ledger changes nothing anywhere".
+     */
+    async hydrateFlowActivations(): Promise<string[]> {
+        if (!this.flowActivationStore) return [];
+        const rows = await this.flowActivationStore.list();
+        const disabled: string[] = [];
+        for (const row of rows) {
+            if (row.active) {
+                this.flowLedgerDisabled.delete(row.name);
+                continue;
+            }
+            this.flowLedgerDisabled.add(row.name);
+            // Only a flow this engine actually holds can be unbound; a row for
+            // a flow this deployment does not ship is kept in the projection
+            // (it costs one string, and the flow may be registered later by a
+            // hot reload) but has nothing to disarm now.
+            if (this.flows.has(row.name)) {
+                this.deactivateFlowTrigger(row.name);
+                disabled.push(row.name);
+            }
+        }
+        return disabled;
+    }
+
+    /**
+     * Is this flow allowed to run — the composition of the two INDEPENDENT
+     * disable dimensions.
+     *
+     * `flowStatusDisabled` is the authoring state (`obsolete` / `invalid`),
+     * owned by the definition. `flowLedgerDisabled` is the installation's
+     * activation choice (ADR-0126 §4), owned by `sys_metadata_activation`.
+     * Either one disarms; neither can override the other, because they answer
+     * different questions and an "override" would mean one silently undoing a
+     * decision it does not own.
+     */
+    private isFlowEnabled(name: string): boolean {
+        return this.flowStatusDisabled.get(name) !== true && !this.flowLedgerDisabled.has(name);
+    }
+
+    /**
+     * The `FLOW_DISABLED` refusal MESSAGE, which is where the ledger-vs-status
+     * distinction rides (ADR-0126 §7.2 reuses the CODE deliberately, so the
+     * message is the only channel left).
+     */
+    private describeDisabledFlow(flowName: string): string {
+        if (this.flowLedgerDisabled.has(flowName)) {
+            return (
+                `Flow '${flowName}' is disabled — it is switched off for this installation in the ` +
+                `packaged-metadata activation ledger (sys_metadata_activation, ADR-0126 §7.2). ` +
+                `Re-enable the packaged flow to arm it again, or run a clone of it under a new name.`
+            );
+        }
+        // Unchanged wording for the status dimension: it is what every existing
+        // consumer and test reads, and this leg has no reason to move it.
+        return `Flow '${flowName}' is disabled`;
+    }
+
+    /**
+     * [ADR-0126 §7.3] Packaged flows that invoke `name` as a subflow.
+     *
+     * A DEFINITION SCAN, run at disable time — ⛔ deliberately not an index.
+     * ADR-0126 §9 records that no reference index exists and that building one
+     * is not chartered (#11665 §3.2); the flow map is small, this runs once per
+     * disable, and an index would be a durable structure to keep correct
+     * forever for a check that happens when an administrator clicks a switch.
+     *
+     * Two node types invoke another flow by name, and BOTH count: `subflow`
+     * (config.flowName) and `map`, whose own descriptor calls its per-item
+     * target "the per-item subflow" and reaches it through the same
+     * `engine.execute`. Scanning only `subflow` would let a `map` caller break
+     * exactly the way §7.3 exists to prevent.
+     *
+     * ⛔ The historical `flow` alias for `config.flowName` is NOT read here.
+     * ADR-0087 D2's conversion `flow-node-subflow-flow-alias` canonicalizes it
+     * at load, so only the canonical key reaches a registered definition;
+     * re-reading the alias in this consumer would be a tolerant fallback
+     * papering over a producer that is already correct.
+     *
+     * Only PACKAGED callers are reported: §7.3's rationale is that a VENDOR
+     * flow would break mid-run at its subflow node. A caller the customer
+     * authored is theirs to fix, and refusing on it would make the packaged
+     * artifact hostage to a tenant's own flow.
+     */
+    private packagedSubflowCallers(name: string): string[] {
+        const callers: string[] = [];
+        for (const [callerName, flow] of this.flows) {
+            if (callerName === name) continue;
+            if (describeFlowContender(flow).source !== 'package') continue;
+            const nodes = (flow as { nodes?: unknown }).nodes;
+            if (!Array.isArray(nodes)) continue;
+            const invokes = nodes.some((node) => {
+                const n = node as { type?: unknown; config?: { flowName?: unknown } } | null;
+                if (!n || (n.type !== 'subflow' && n.type !== 'map')) return false;
+                return n.config?.flowName === name;
+            });
+            if (invokes) callers.push(callerName);
+        }
+        return callers;
+    }
+
+    /**
+     * [ADR-0126 §7.2] Flip a flow's activation — THE sanctioned off-switch.
+     *
+     * ## What changed, and why the durable write is inside this method
+     *
+     * This used to set a process-local map and nothing else, which is the
+     * mechanism #10243 measured leaking across tenants. It now writes the
+     * `sys_metadata_activation` row FIRST and updates the in-process
+     * projection only after that write returns. Putting the durable write here
+     * — rather than in the HTTP route that calls it — is deliberate: this is
+     * the service contract's off-switch (`IAutomationService.toggleFlow`), so
+     * a caller that reaches it any other way must get the same durable
+     * semantics. A route-side write would leave every non-HTTP caller on the
+     * retired in-process-only behaviour.
+     *
+     * ## Where the AUTHORITY gate is, and why it is not here
+     *
+     * ADR-0126 §5 gates the write on posture and the platform-operator
+     * capability. That gate lives at the automation domain's toggle route,
+     * because it needs the CALLER — and `toggleFlow(name, enabled)` is a
+     * `packages/spec` contract with no caller channel and no room to grow one
+     * on this line. In-process callers are trusted here exactly as they are at
+     * every other service method; the wire is the untrusted surface, and the
+     * wire goes through the gate.
+     *
+     * @throws when the flow is unknown, when §7.3's subflow guard refuses, or
+     *   when the durable write fails — a reported flip that did not persist is
+     *   the failure mode this whole leg exists to remove.
+     */
     async toggleFlow(name: string, enabled: boolean): Promise<void> {
-        if (!this.flows.has(name)) {
+        const flow = this.flows.get(name);
+        if (!flow) {
             throw new Error(`Flow '${name}' not found`);
         }
-        this.flowEnabled.set(name, enabled);
+
+        // [ADR-0126 §7.3] The subflow cascade guard, on DISABLE only. Enable is
+        // never guarded — arming a flow cannot break a caller.
+        if (!enabled) {
+            const callers = this.packagedSubflowCallers(name);
+            if (callers.length > 0) {
+                const list = callers.map((c) => `'${c}'`).join(', ');
+                throw Object.assign(
+                    new Error(
+                        `Flow '${name}' cannot be disabled while ${callers.length} packaged flow` +
+                        `${callers.length === 1 ? '' : 's'} still call${callers.length === 1 ? 's' : ''} it as a subflow: ${list}. ` +
+                        `Disabling it would break ${callers.length === 1 ? 'that caller' : 'those callers'} mid-run at ` +
+                        `${callers.length === 1 ? 'its' : 'their'} subflow node with a late, inexplicable failure ` +
+                        `(ADR-0126 §7.3). Disable the calling flow${callers.length === 1 ? '' : 's'} first, or leave this one armed.`,
+                    ),
+                    // ADR-0112 envelope: code AND status. `DELETE_RESTRICTED` is
+                    // the standard catalog's "cannot do this due to
+                    // dependencies" member (409) — ⛔ no new ledger entry is
+                    // minted here. Its `DELETE_` prefix fits because this
+                    // repo's own #10243 ruling records that "disabling a
+                    // shipped flow is functionally equivalent to deleting it
+                    // for as long as it stays off".
+                    { code: 'DELETE_RESTRICTED', status: 409, subflowCallers: callers },
+                );
+            }
+        }
+
+        // The durable row FIRST. A store that throws aborts the flip with
+        // nothing changed in process, so the engine never reports an
+        // activation state the ledger does not carry.
+        if (this.flowActivationStore) {
+            await this.flowActivationStore.setActive({
+                name,
+                packageId: String((flow as { _packageId?: unknown })._packageId ?? ''),
+                active: enabled,
+            });
+        } else {
+            // Degrading to in-process is a legitimate mode for a host with no
+            // ObjectQL — degrading to it while REPORTING durability is not
+            // (the posture this package already takes for suspended runs).
+            // Note the #10243 leak is closed by the route's authority gate,
+            // not by durability, so this degraded mode is not that leak.
+            this.logger.warn(
+                `[Automation] flow '${name}' ${enabled ? 'enabled' : 'disabled'} IN PROCESS ONLY — no activation ledger is ` +
+                `attached (sys_metadata_activation), so this flip will NOT survive a restart.`,
+            );
+        }
+
+        if (enabled) this.flowLedgerDisabled.delete(name);
+        else this.flowLedgerDisabled.add(name);
+
         this.logger.info(`Flow '${name}' ${enabled ? 'enabled' : 'disabled'}`);
         // A disabled flow should stop receiving trigger events; a re-enabled one
         // should resume. execute() also guards disabled flows, but unbinding
@@ -3251,8 +3555,14 @@ export class AutomationEngine implements IAutomationService {
             return { success: false, error: `Flow '${flowName}' not found` };
         }
 
-        // Check if flow is disabled
-        if (this.flowEnabled.get(flowName) === false) {
+        // Check if flow is disabled.
+        //
+        // [ADR-0126 §7.2] THE consult point for the activation ledger. This is
+        // the one seam every entry path crosses (#11665 §2.3) — record-change,
+        // schedule, time-relative, api and subflow all arrive here — which is
+        // why the ADR puts the runtime refusal beside this guard instead of
+        // teaching each trigger its own check.
+        if (!this.isFlowEnabled(flowName)) {
             // [#9415] NEVER DISPATCHED, and the producer says which kind — the
             // remaining half of #9378's classification. `status` stays ABSENT
             // here on purpose (see the `status: 'failed'` exit below): its
@@ -3260,7 +3570,18 @@ export class AutomationEngine implements IAutomationService {
             // instead of guessing, so a later edit that stamps `'failed'` on
             // this exit "for consistency" must fail a test. What the exit
             // gained is a `code`, which is the classification's own channel.
-            return { success: false, code: 'FLOW_DISABLED', error: `Flow '${flowName}' is disabled` };
+            //
+            // [ADR-0126 §7.2] The ledger refusal REUSES `FLOW_DISABLED` — ⛔ no
+            // new ADR-0112 ledger entry — so the distinction has to ride the
+            // MESSAGE. It is a real distinction to an operator: a status
+            // disable is an authoring state fixed in Studio, a ledger disable
+            // is an installation choice fixed by re-enabling the packaged
+            // flow, and the two have different remedies.
+            return {
+                success: false,
+                code: 'FLOW_DISABLED',
+                error: this.describeDisabledFlow(flowName),
+            };
         }
 
         // #4792 — a real run is about to start, so if the vocabulary was never
@@ -4989,7 +5310,7 @@ export class AutomationEngine implements IAutomationService {
         const known = this.knownNodeTypes();
         const audit: UnknownNodeTypeAuditEntry[] = [];
         for (const [flowName, flow] of this.flows) {
-            if (this.flowEnabled.get(flowName) === false) continue;
+            if (!this.isFlowEnabled(flowName)) continue;
             const unknownTypes = this.unknownNodeTypes(flow, known);
             if (unknownTypes.length > 0) {
                 audit.push({ flowName, unknownTypes, knownTypes: [...known] });
@@ -6627,7 +6948,7 @@ export class AutomationEngine implements IAutomationService {
         if (!flow) {
             return { success: false, error: `Flow '${flowName}' not found` };
         }
-        if (this.flowEnabled.get(flowName) === false) {
+        if (!this.isFlowEnabled(flowName)) {
             // [#9415] Classified like `execute()`'s own disabled exit, for the
             // same reason #9378 classified this method's failure exit: a
             // selective classification is the one a later reader mistakes for
@@ -6640,7 +6961,10 @@ export class AutomationEngine implements IAutomationService {
             // OUTER guard and would stay green with this line unclassified.
             // Reachability is what a future change would have to establish;
             // the spelling is already right.
-            return { success: false, code: 'FLOW_DISABLED', error: `Flow '${flowName}' is disabled` };
+            //
+            // [ADR-0126 §7.2] Shares `execute()`'s message builder for the same
+            // parity reason: two spellings of one refusal is what #9378 was.
+            return { success: false, code: 'FLOW_DISABLED', error: this.describeDisabledFlow(flowName) };
         }
 
         // [#9704] The SAME environment attempt 1 runs in — seeded through the

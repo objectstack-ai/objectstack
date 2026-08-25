@@ -399,12 +399,50 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       'packages/cli/src/commands/**': ['packages/lint/src/authoring-rule-wiring.test.ts'],
     },
   },
+  '@objectstack/cloud-connection': {
+    // src/canonical-expression-envelopes.test.ts (#12267) imports `maskComments`
+    // from `js-comment-mask.mjs` to decide which text in this package's `src/` is
+    // a comment and which is a `Page` declaration — the same conversion #9367
+    // made for six gates. The coupling is real: that gate's POPULATION is a
+    // function of the module's masking behaviour, so a change to it has to re-run
+    // this package's suite. The `.d.mts` sibling is declared alongside it because
+    // it is what gives `maskComments` its type, so this package's typecheck
+    // verdict is a function of it too — the reason the `@objectstack/cli` entry
+    // above declares the pair rather than the module alone.
+    globs: [
+      'scripts/js-comment-mask.mjs',
+      'scripts/js-comment-mask.d.mts',
+    ],
+  },
   '@objectstack/platform-objects': {
     // src/managed-api-method-affordance-sweep.test.ts (#7934) imports every
     // `*.object.ts` in the monorepo and runs `validateManagedApiMethods` over
     // it — the population `os lint` never walks, because these objects ship as
     // code rather than in an authored stack.
-    globs: ['packages/**/*.object.ts'],
+    //
+    // `js-comment-mask.mjs` and its `.d.mts` sibling are read by
+    // src/pages/canonical-expression-envelopes.test.ts (#12267), which imports
+    // `maskComments` to decide which text in this package's `src/` is a comment
+    // and which is a `Page` declaration. Declared for both reasons the
+    // `@objectstack/cli` entry above records: the import is a real coupling —
+    // that gate's POPULATION is a function of the module's masking behaviour, so
+    // a change to it has to re-run this package's suite — and the `.d.mts` is
+    // what gives `maskComments` its type, so this package's `tsc --noEmit`
+    // verdict is a function of it too.
+    //
+    // `page-envelope-audit.test.ts` and `cloud-connection-ui.ts` are named in
+    // that same file's prose and read by nothing. The literal collector takes
+    // quoted paths without parsing, so a mention forces a declaration; the
+    // `check-nul-bytes.mjs` entry above settles that trade — declaring the file
+    // beats rewording a comment to dodge a scanner, and over-collection can only
+    // widen a radius, never narrow one.
+    globs: [
+      'packages/**/*.object.ts',
+      'scripts/js-comment-mask.mjs',
+      'scripts/js-comment-mask.d.mts',
+      'packages/lint/src/page-envelope-audit.test.ts',
+      'packages/cloud-connection/src/cloud-connection-ui.ts',
+    ],
   },
   '@objectstack/plugin-auth': {
     // src/managed-extension-fields.test.ts walks every `*.object.ts`, and pins

@@ -3,8 +3,6 @@ title: Client-Side Error Handling
 description: Best practices for handling ObjectStack errors in client applications — parsing, display, retry strategies, and React patterns
 ---
 
-# Client-Side Error Handling
-
 This guide covers best practices for handling ObjectStack API errors in client applications — from parsing error responses to displaying validation errors in forms and implementing retry strategies.
 
 <Callout type="info">
@@ -132,7 +130,7 @@ async function parseApiError(response: Response): Promise<ObjectStackError> {
 
 Map field-level errors from the API response directly to form fields:
 
-```typescript
+```tsx
 import { useState } from 'react';
 
 interface FormErrors {
@@ -304,7 +302,7 @@ function sleep(ms: number): Promise<void> {
 
 Catch unexpected errors at the component tree level:
 
-```typescript
+```tsx
 import { Component, type ReactNode } from 'react';
 
 interface ErrorBoundaryState {

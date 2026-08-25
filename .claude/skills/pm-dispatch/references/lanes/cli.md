@@ -20,8 +20,8 @@
   聚合,`in_progress` 不是过;advisory 门禁红进 main 是共享损伤,照样止血立单。
 - **PR 侧绿 ≠ 队列侧绿**;队列分支读法与边界在 platform-readings(条目名
   `main/pr-{number}-{parent sha}`,parent sha 可重建队序;⚠️ ref 在出队后滞留)。
-- `dispatch-gates.mjs` 只报**路径推导**的地板 —— 条款②从卡**内容**判且优先于它;
-  已知盲区:它不点名 `pnpm lint` 族 ⇒ 本车道派发令恒补一句「跑 `pnpm lint`」。
+- `dispatch-gates.mjs` 只报**路径推导**的地板 —— 条款②从卡**内容**判且优先于它;已知盲
+  区:它不点名 `pnpm lint` 族 ⇒ 本车道派发令恒补一句「跑 `pnpm lint`」。
 - ⛔ 永不削弱门禁 —— 棘轮上跳是门禁在报你的改动有缺陷;规则文案里自带的逃生舱只用
   于它描述的那种情形。
 

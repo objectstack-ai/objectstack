@@ -1463,16 +1463,33 @@ describe('AutomationEngine - Execution History', () => {
         });
     });
 
-    describe('unregisterFlow cleans up enabled state', () => {
-        it('should remove enabled state on unregister', async () => {
+    describe('unregisterFlow and activation state', () => {
+        /**
+         * [ADR-0126 §7.2 / #12158] REPLACED, not re-spelled. This case used to
+         * assert the opposite — that unregistering a flow FORGOT it had been
+         * switched off, so re-registering it came back enabled. That was a
+         * faithful pin of the retired `flowEnabled` map: an in-process bit with
+         * no durable home, which is exactly the mechanism #10243 measured
+         * leaking and ADR-0126 §7.2 retires.
+         *
+         * Under the activation ledger the answer inverts, and it is ADR-0126 §6
+         * wall 3 that forces the inversion rather than a preference: the ledger
+         * records the customer's CHOICE, and "no upgrade un-makes a choice".
+         * Unregister-then-register is precisely what a package upgrade, a
+         * Studio publish and the boot pull all do — so a disable that did not
+         * survive this path would be un-made by every upgrade, which is the
+         * wall's stated prohibition.
+         */
+        it('keeps a ledger disable across unregister + re-register (§6 wall 3)', async () => {
             engine.registerFlow('test_flow', simpleFlow);
             await engine.toggleFlow('test_flow', false);
             engine.unregisterFlow('test_flow');
 
-            // Re-register should default to enabled
             engine.registerFlow('test_flow', simpleFlow);
+
             const result = await engine.execute('test_flow');
-            expect(result.success).toBe(true);
+            expect(result.success).toBe(false);
+            expect(result.code).toBe('FLOW_DISABLED');
         });
     });
 });

@@ -47,7 +47,9 @@ function makeEngine(findResults: Array<Array<Record<string, unknown>>> = []) {
     const updates: RecordedUpdate[] = [];
     const inserts: Array<{ object: string; data: Record<string, unknown> }> = [];
     let findCall = 0;
-    const row: Record<string, unknown> = { status: 'in_flight', attempts: 2 };
+    // [#11859] The row carries the claim credential ack()'s ownership check
+    // reads back; the record handed to ack() below round-trips the same pair.
+    const row: Record<string, unknown> = { status: 'in_flight', attempts: 2, claimed_by: 'n1', claimed_at: 111 };
 
     const engine = {
         async insert(object: string, data: Record<string, unknown>) {
@@ -130,7 +132,13 @@ describe('SqlNotificationOutbox — audit columns on UPDATE (#4765)', () => {
         const { engine, updates } = makeEngine();
         const outbox = new SqlNotificationOutbox(engine, { partitionCount: 8 });
 
-        await outbox.ack('d1', { success: false, error: 'boom', nextAttemptAt: 123 });
+        // [#11859] ack() takes the claimed record back; the credential here
+        // matches what the fake row carries, as a real claim's would.
+        await outbox.ack({
+            id: 'd1', notificationId: 'n1', recipientId: 'u1', channel: 'inbox',
+            payload: {}, partitionKey: 0, status: 'in_flight', attempts: 2,
+            claimedBy: 'n1', claimedAt: 111, createdAt: 0, updatedAt: 0,
+        }, { success: false, error: 'boom', nextAttemptAt: 123 });
 
         expectNoPlatformAuditColumns(updates);
         expect(updates[0].data).toMatchObject({

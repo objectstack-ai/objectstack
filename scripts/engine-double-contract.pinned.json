@@ -1472,6 +1472,16 @@
       "pinned": 1
     },
     {
+      "file": "packages/plugins/plugin-security/src/packaged-permission-set-lock-gate.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-security/src/packaged-permission-set-lock-gate.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/plugins/plugin-security/src/packaged-permission-set-lock.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -1883,6 +1893,11 @@
     },
     {
       "file": "packages/services/service-automation/src/builtin/wait-node-degraded-run.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-automation/src/flow-activation-ledger.test.ts",
       "verb": "update",
       "pinned": 1
     },

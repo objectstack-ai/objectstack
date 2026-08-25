@@ -18,8 +18,8 @@ const LEAD_OBJECT: AnyRec = {
     last_name: { name: 'last_name', type: 'text' },
     company: { name: 'company', type: 'text' },
     full_name: { name: 'full_name', type: 'formula' },
-    crm_account: { name: 'crm_account', type: 'lookup', reference_to: 'crm_account' },
-    target_channels: { name: 'target_channels', type: 'lookup', reference_to: 'channel', multiple: true },
+    crm_account: { name: 'crm_account', type: 'lookup', reference: 'crm_account' },
+    target_channels: { name: 'target_channels', type: 'lookup', reference: 'channel', multiple: true },
     payload: { name: 'payload', type: 'json' },
   },
 };

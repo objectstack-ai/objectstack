@@ -315,6 +315,38 @@ jobs:
       - name: scripts/ TypeScript parses go through one module
         run: pnpm check:parse-guard
 
+      # The bash-3.2 floor, over every shell file the repo ships (#12221).
+      # `/usr/bin/env bash` is bash 3.2.57 on macOS -- Apple ships no bash 4+,
+      # for licensing reasons -- and THIS RUNNER IS BASH 5, where every construct
+      # the gate refuses works perfectly. So the class is invisible to a normal
+      # green run in both directions: the defect passes CI, and so does its
+      # repair. It is found by an operator on a Mac, at status 127, at the moment
+      # they most needed the script to work. Two incidents, four sites, both
+      # caught by hand and late; one of them turned the shared verify lock's
+      # bounded wait into an unbounded spin, because an unbound `EPOCHSECONDS`
+      # leaves the deadline EMPTY rather than erroring.
+      # What this step buys that a bash-5 runner cannot otherwise see is a static
+      # verdict: the gate reads the text, so it never needs the construct to be
+      # reachable, only written. Rationale, the construct table with a bash
+      # version per row, and the three exemption rules that tell a file HUNTING
+      # these tokens from a file USING one: the gate script's header. The short
+      # version, for whoever is reading this because the step just went red --
+      # there is deliberately NO filename allowlist, and no waiver comment; a
+      # legitimate mention is already exempt by being a full-line comment, a
+      # guarded `${VAR:-}` read, or a token outside command position.
+      # ⛔ This does not supersede the two file-scoped scans in
+      # `check:objectui-changeset` and the verify lock's own self-test. Those
+      # pair their scan with a SIMULATED 3.2 run (`enable -n mapfile readarray`
+      # via BASH_ENV, plus `unset` of the bash-5 variables), which reaches
+      # runtime-assembled commands a static scan cannot see and proves the real
+      # path COMPLETES without the builtins. Different instruments, one class.
+      # Scans 20 tracked shell files, no spawns in the production run; ~0.1s.
+      # The `--self-test` half spawns a handful of real bash children (the
+      # known-bad fixture tree, and the simulated-3.2 probe that proves the
+      # harness is not vacuous); ~1s.
+      - name: shell scripts hold the bash 3.2 floor
+        run: pnpm check:bash32-floor
+
       # The comment-mask CORPUS sweep (#10640) — the other instrument for the
       # module the two gates above delegate "is this span a comment, or code?"
       # to. `js-comment-mask.mjs --self-test` pins the SHAPES someone wrote
@@ -1071,6 +1103,32 @@ jobs:
       - name: Docs anchors resolve to real headings
         run: pnpm check:doc-anchors
 
+      # #12236 one <h1> per doc page. `DocsTitle` renders the frontmatter `title`
+      # as the page's <h1> unconditionally (apps/docs/app/[lang]/docs/[[...slug]]/
+      # page.tsx), so a body-level `# ` heading compiles to a SECOND one inside
+      # `DocsBody`. Measured on the dev server at /docs/data-modeling/objects
+      # before the sweep: two <h1>, both reading "Object Metadata". 195 of the 403
+      # pages were in that state, 138 of them with the two <h1> identical.
+      #
+      # It lives next to check:doc-anchors because the two share the corpus and
+      # the heading model — this gate imports `stripFrontmatter` and
+      # `flattenHeadingText` from that one rather than re-modelling either, which
+      # is what makes the delete-vs-demote remedy right on the nine pages whose
+      # two headings differ only by inline code markup.
+      #
+      # The gate strips FENCED CODE before looking for a heading, and that is the
+      # load-bearing half: a naive `^# ` scan reports 205 files, ten of which are
+      # shell/YAML comments inside working examples. A fence-blind rule does not
+      # over-report by ten, it instructs the fixer to corrupt ten snippets.
+      #
+      # Two subtrees are excluded, each with a named owner (#12249 generated
+      # reference pages, #12250 release notes) and each self-retiring: the gate
+      # FAILS with DEAD-EXCLUSION when an excluded tree becomes clean, so the
+      # carve-outs cannot outlive their reasons. A run that judges zero pages
+      # fails too (#4690).
+      - name: One `<h1>` per docs page
+        run: pnpm check:docs-single-h1
+
       # #9014 docs redirects: `apps/docs/redirects.mjs` is a 92-entry table of
       # PERMANENT (308) redirects, and before this step nothing in the repo read
       # it — `dispatch-gates.mjs apps/docs/redirects.mjs` named no family over 99
@@ -1110,6 +1168,27 @@ jobs:
       # observed failing.
       - name: Docs redirect destinations resolve, and no chains
         run: pnpm check:docs-redirects
+
+      # The docs site's `app/[lang]/` is a catch-all that matches ANY single
+      # path segment, and `proxy.ts`'s matcher deliberately excludes dotted
+      # paths from locale rewriting — so before the guard landed, `/ads.txt`,
+      # `/security.txt`, `/sitemap_index.xml` and every other dotted
+      # single-segment URL rendered the full homepage under a 200 (measured on
+      # the dev server; the request log shows no `proxy.ts:` timing for those
+      # paths, and a probe printed `lang="ads.txt"`).
+      #
+      # It sits here rather than in a test because nothing else can see the
+      # regression: delete the three-line guard and every page still renders,
+      # every type still checks, every link still resolves. The only symptom is
+      # a 200 where a 404 belongs, on URLs no test requests.
+      #
+      # Runs its own --self-test first (via the pnpm script). Not ceremony: the
+      # live tree is green by construction after the fix, so a passing run over
+      # real data cannot distinguish a working gate from one that approves
+      # everything. The self-test is where every limb is observed failing, and
+      # where the proxy condition is observed flipping the requirement off.
+      - name: Docs locale catch-all rejects non-locale segments
+        run: pnpm check:docs-locale-catch-all
 
       # #11050 route spellings taught in prose: every /api/v1 wire-path
       # literal in the published corpora (content/docs/** minus releases/,
@@ -1170,6 +1249,17 @@ jobs:
       # back empty, is what stops a vacuous green from reading as coverage.
       - name: React pages honour the useAdapter() query and result contracts
         run: pnpm check:react-page-adapter-contract
+
+      # #11576 page discovery vs ground truth: what makes something a SERVED
+      # page is membership in a bundle's `pages:` array (the kernel reads it in
+      # `registerMetadataCollections`), not its type annotation — while the
+      # canonical-envelope gates (#11255, #11480) discover their population by
+      # export shape. #11480 measured that gap on a live page. This gate makes
+      # the approximation exact by construction: every identifier in a `pages:`
+      # array must be declared `export const X: Page =` or via `definePage()`,
+      # so a page can never again be served-but-uncovered.
+      - name: Kernel-reaching pages are declared in a discoverable shape
+        run: pnpm check:page-declaration-shape
 
       # #10830 form-section `name` in docs examples: the docs pages that TEACH
       # the i18n-anchor convention were the one surface where nothing enforced
@@ -1720,9 +1810,11 @@ jobs:
       # it enforced nothing, while reading in `package.json` exactly like the
       # gates that do. That is #10574's defect one file over, and it is the only
       # thing this change repairs; the gate itself is untouched.
-      # Runs its own --self-test FIRST (13 cases, both directions, both
-      # narrowings pinned as counts), then the scan — 36 sink types, 15
-      # baselined shrink-only. AST over packages/**, no spawns; ~3.5 s.
+      # Runs its own --self-test FIRST (both directions, every narrowing pinned
+      # as a count), then the scan. Deliberately carries NO counts: the run
+      # prints its own census — self-test cases, sink-type population, and the
+      # baselined shrink-only total — so a copy here could only ever be a stale
+      # one, and was. AST over packages/**, no spawns; ~3.5 s.
       # No `paths:` filter, for the standard reason: a filter on `packages/**`
       # would go dormant on the PR that edits the baseline.
       - name: Optional-`error` sink contract
