@@ -45,6 +45,7 @@ import {
   renderRootIndex,
   type RootIndexCategory,
 } from './lib/root-index';
+import { rootCategoryDirs } from './lib/root-meta';
 import {
   buildSchemaIndex,
   formatConflicts,
@@ -936,13 +937,12 @@ if (managedCount > 0) {
 }
 
 // 3. Update root meta.json
-// Collect categories that have actual generated content (non-empty zod files)
-const categoryDirs = Object.keys(CATEGORIES)
-  .filter(cat => {
-    const zodFiles = categoryZodFiles.get(cat);
-    return zodFiles && zodFiles.size > 0;
-  })
-  .sort();
+// Which categories reach the sidebar — from `categoryMetaPages`, the same
+// declared list §2.5 reads for its card grid, never a `.zod.ts`-keyed
+// re-derivation. See `lib/root-meta.ts` for the defect this replaces and why
+// the rule lives in an extracted, unit-testable function (#11482, same fix
+// pattern as #11260 one enumeration up).
+const categoryDirs = rootCategoryDirs(Object.keys(CATEGORIES), categoryMetaPages);
 
 // Collect other root files (if any exist, like implementation-status.mdx).
 // Root-level .mdx is hand-written and never generated, so this reads the disk in
