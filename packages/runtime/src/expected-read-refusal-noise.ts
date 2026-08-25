@@ -70,9 +70,15 @@
  *     the kernel built from its `logger` config and handed over by reference
  *     — so it inherits that logger's level. `ObjectLogger.write` returns
  *     early unless `error` is enabled, which it is not whenever the
- *     configured level ranks ABOVE `error` (`fatal`, `silent`). Several
- *     consumers of this capture boot with `logger: { level: 'silent' }`, and
- *     in those an unrecognised ENGINE frame is dropped rather than logged.
+ *     configured level ranks ABOVE `error` (`fatal`, `silent`).
+ *
+ * ⇒ So the engine channel's loudness is the CALLER'S, not this module's, and
+ * it is not uniform across this capture's consumers: the ones that boot
+ * `new ObjectKernel({ logger: { level: 'silent' } })` see an unrecognised
+ * ENGINE frame nowhere at all, while the ones that leave the kernel at its
+ * default (`info`) still see it. ⛔ Do not read the silent-fixture case as the
+ * rule for all of them, and do not read a quiet engine channel in one fixture
+ * as evidence about another.
  *
  * ⇒ Read the guarantee per channel: the DRIVER channel is pinned in both
  * directions (withheld-when-expected, loud-when-not); the ENGINE channel is
