@@ -267,7 +267,7 @@ import type * as M170 from './ui/component.zod.js';
 import type * as M183 from './api/sortability.zod.js';
 
 // ---------------------------------------------------------------------------
-// 838 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
+// 837 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
 //
 // That number is machine-checked, not hand-kept. The runtime companion at the
 // bottom of this file recomputes the pin count from the source and asserts that
@@ -1571,9 +1571,11 @@ export type Iso849 = Assert<Eq< z.input< typeof M170.RecordHistoryProps >, z.inf
 // The object-* block family (#7751) — deliberately default-free in its first,
 // warning-tier step ("the author said nothing" must stay distinguishable from
 // "the author asked for the renderer's fallback"), so input === infer holds.
-// A default added to any of these six goes red here, and the fix is the ADR's:
+// A default added to any of these goes red here, and the fix is the ADR's:
 // declare the XParsed alias and delete the pin line.
-export type Iso839 = Assert<Eq< z.input< typeof M170.ObjectGridPropsSchema >, z.infer< typeof M170.ObjectGridPropsSchema > >>;
+// `ObjectGridPropsSchema` (Iso839) left the family exactly that way on the
+// ui#6207 convergence: its `data` now carries `ViewDataSchema`, whose own
+// input ≠ infer, so `ObjectGridPropsParsed` is declared and the pin deleted.
 export type Iso840 = Assert<Eq< z.input< typeof M170.ObjectMetricPropsSchema >, z.infer< typeof M170.ObjectMetricPropsSchema > >>;
 export type Iso841 = Assert<Eq< z.input< typeof M170.ObjectKanbanPropsSchema >, z.infer< typeof M170.ObjectKanbanPropsSchema > >>;
 export type Iso842 = Assert<Eq< z.input< typeof M170.ObjectCalendarPropsSchema >, z.infer< typeof M170.ObjectCalendarPropsSchema > >>;
@@ -1673,7 +1675,7 @@ describe('ADR-0122 type-alias convention', () => {
   // this title and the section header above the pin list — are now asserted
   // against the recomputed count below, so neither can go stale without a red
   // test naming it.
-  it('still declares all 838 isomorphic pins', () => {
+  it('still declares all 837 isomorphic pins', () => {
     // The truth of each pin is proved by tsc, not here — an `Assert<Eq<...>>`
     // that stops holding is a compile error with the alias named. What tsc
     // cannot notice is a pin that was DELETED: removing the assertion removes
@@ -1974,19 +1976,28 @@ describe('ADR-0122 type-alias convention', () => {
     // ADR-0122 gives each a pin rather than an `XParsed`. Ids `Iso857`/
     // `Iso858`, the next free ones — ids are claims about pins, not positions.
     //
-    // 835 -> 838 is #11924's `CloneDataResponseSchema` /
+    // 835 -> 834 is #12039's ui#6207 convergence: `ObjectGridPropsSchema.data`
+    // now carries `ViewDataSchema`, whose own input ≠ infer (measured — the
+    // Eq probe answers false on ViewDataSchema alone), so `object-grid` left
+    // the default-free object-* family exactly the way that family's comment
+    // prescribes: `ObjectGridPropsParsed` declared, the Iso839 pin deleted.
+    // -1 converted to an `XParsed` pair; the Iso number stays vacant.
+    //
+    // 834 -> 837 is #11924's `CloneDataResponseSchema` /
     // `SearchAllHitSchema` / `SearchAllResponseSchema` — the `data.clone` and
-    // global-search route response contracts, declared as produced.
-    // Isomorphism MEASURED, not assumed: all three trees are plain
-    // `z.object`s of `z.string()` (some `.optional()`), `z.number()`,
-    // `z.boolean()`, `z.record(z.string(), z.unknown())` and one `z.array` of
-    // the hit object — no `.default()`, `.transform()`, `.catch()` or
-    // `.pipe()` anywhere, so the two shapes coincide and ADR-0122 gives each
-    // a pin rather than an `XParsed`. Ids `Iso859`/`Iso860`/`Iso861`, the
-    // next free ones — ids are claims about pins, not positions.
+    // global-search route response contracts, declared as produced. (Authored
+    // as 835 -> 838; restated from the post-merge base after #12039's -1
+    // landed first — the two changes touch disjoint pins.) Isomorphism
+    // MEASURED, not assumed: all three trees are plain `z.object`s of
+    // `z.string()` (some `.optional()`), `z.number()`, `z.boolean()`,
+    // `z.record(z.string(), z.unknown())` and one `z.array` of the hit
+    // object — no `.default()`, `.transform()`, `.catch()` or `.pipe()`
+    // anywhere, so the two shapes coincide and ADR-0122 gives each a pin
+    // rather than an `XParsed`. Ids `Iso859`/`Iso860`/`Iso861`, the next
+    // free ones — ids are claims about pins, not positions.
     const self = readFileSync(fileURLToPath(import.meta.url), 'utf8');
     const pins = self.match(/^export type Iso\d+ = Assert</gm) ?? [];
-    expect(pins).toHaveLength(838);
+    expect(pins).toHaveLength(837);
 
     // The count is stated in PROSE twice as well — this case's title and the
     // section header above the pin list — and until #6605 nothing read either
