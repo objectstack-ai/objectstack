@@ -111,6 +111,7 @@ import { readdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { findExtractConfigs, flagsFromDocstring } from './i18n-bundle-surface.mjs';
+import { isEntrypoint } from './invoked-as.mjs';
 
 /**
  * Every read is anchored to the script's own location, never the cwd (#10907):
@@ -382,12 +383,17 @@ function selfTest() {
   process.exit(failures === 0 ? 0 : 1);
 }
 
-if (process.argv.includes('--self-test')) selfTest();
-
 // ---------------------------------------------------------------------------
 // Run
+//
+// Behind `isEntrypoint` because this module EXPORTS its rules for the sibling
+// gates and self-tests to import: without the guard, importing `findStaleFills`
+// would run the whole gate inside the importer and exit its process — the
+// silent-success direction `scripts/invoked-as.mjs` documents, and what
+// `check:entry-guard` is there to catch.
 // ---------------------------------------------------------------------------
 
+function main() {
 const sets = discoverBundleSets();
 
 // #4690 / #10907: zero is a broken scan, not a repo with nothing to translate.
@@ -438,7 +444,6 @@ if (update) {
   process.exit(0);
 }
 
-for (const set of sets) void set;
 console.log(`check-i18n-stale-fill: scanned ${sets.length} bundle set(s), ${found.length} stale-fill leaf/leaves, ${Object.keys(baseline).length} baselined.`);
 
 if (added.length) {
@@ -476,3 +481,9 @@ if (removed.length) {
 }
 
 console.log(`\ncheck-i18n-stale-fill: OK (${sets.length} bundle set(s) — no new stale fills, ${found.length} baselined).`);
+}
+
+if (isEntrypoint(import.meta.url)) {
+  if (process.argv.includes('--self-test')) selfTest();
+  main();
+}
