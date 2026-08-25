@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { ProtectionSchema } from '../shared/protection.zod';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 import { strictObject, strictObjectError } from '../shared/strict-object';
-import { SnakeCaseIdentifierSchema } from '../shared/identifiers.zod';
+import { SnakeCaseIdentifierSchema, QUALIFIED_ITEM_NAME_PATTERN } from '../shared/identifiers.zod';
 import { ExpressionInputSchema } from '../shared/expression.zod';
 import { normalizeVisibleWhen, VISIBILITY_STRICT_OPTIONS } from '../shared/visibility';
 import { VISIBILITY_ONLY_STRICT_OPTIONS } from '../shared/editability-boundary';
@@ -2882,11 +2882,16 @@ export function defineView(config: z.input<typeof ViewSchema>): ViewParsed {
  * Qualified view-item identity: `<object>.<viewKey>` — dotted snake_case
  * segments, e.g. `crm_lead.pipeline`. Globally unique, and the object can be
  * recovered from the prefix, so the registry key never collides across objects.
+ *
+ * The dot-REQUIRED arity of the platform's one item-name grammar
+ * (`QUALIFIED_ITEM_NAME_PATTERN`, `shared/identifiers.zod.ts` — #12194): same
+ * segment source as `MetadataItemNameSchema`, which the metadata publish door
+ * enforces with the qualifier optional. Grammar changes belong there, not here.
  */
 export const ViewItemNameSchema = z
   .string()
   .regex(
-    /^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$/,
+    QUALIFIED_ITEM_NAME_PATTERN,
     'View item name must be a dotted snake_case qualified name, e.g. "crm_lead.pipeline".',
   )
   .describe('Globally-unique view id, `<object>.<viewKey>`.');
