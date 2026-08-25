@@ -1,3 +1,4 @@
+import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import { blog } from '@/lib/source';
 import { getMDXComponents } from '@/mdx-components';
@@ -181,33 +182,86 @@ export async function generateStaticParams() {
   }));
 }
 
+/**
+ * The blog's social card.
+ *
+ * ⚠️ The card generator at `app/og/docs/[...slug]/route.tsx` is docs-only: it
+ * renders from `source` (the `content/docs` loader) and has no branch for `blog`,
+ * so there is no per-post card to reference and this card is shared by the index
+ * and every post. Giving posts their own generated cards is a separate decision,
+ * not a gap in this wiring — it would mean a second `app/og/**` route.
+ *
+ * ⚠️ Same path as `apps/docs/app/[lang]/page.tsx`'s `HOME_CARD`; that file
+ * carries the note on why it is spelled twice and what must change together.
+ */
+const BLOG_CARD = {
+  url: '/hero-cover-dark.png',
+  width: 2400,
+  height: 1200,
+  alt: 'ObjectStack — the metadata framework for AI-written apps',
+};
+
+const BLOG_INDEX_TITLE = 'Blog';
+const BLOG_INDEX_DESCRIPTION =
+  'Insights, updates, and best practices from the ObjectStack team.';
+
 export async function generateMetadata({
   params,
 }: {
   params: Promise<{ slug?: string[] }>;
-}) {
+}): Promise<Metadata> {
   const { slug } = await params;
-  
+
   // If no slug, return default metadata for blog index
   if (!slug || slug.length === 0) {
+    // The index has no MDX file behind it, so its route is spelled out here — the
+    // same literal `app/sitemap.ts` lists it under.
+    const canonical = absoluteUrl('/blog');
+
     return {
-      title: 'Blog',
-      description: 'Insights, updates, and best practices from the ObjectStack team.',
-      // The index has no MDX file behind it, so its route is spelled out here — the
-      // same literal `app/sitemap.ts` lists it under.
-      alternates: { canonical: absoluteUrl('/blog') },
+      title: BLOG_INDEX_TITLE,
+      description: BLOG_INDEX_DESCRIPTION,
+      alternates: { canonical },
+      openGraph: {
+        type: 'website',
+        title: BLOG_INDEX_TITLE,
+        description: BLOG_INDEX_DESCRIPTION,
+        url: canonical,
+        images: [BLOG_CARD],
+      },
+      twitter: {
+        card: 'summary_large_image',
+        title: BLOG_INDEX_TITLE,
+        description: BLOG_INDEX_DESCRIPTION,
+        images: [BLOG_CARD.url],
+      },
     };
   }
-  
+
   const page = blog.getPage(slug);
 
   if (!page) {
     notFound();
   }
 
+  const canonical = absoluteUrl(page.url);
+
   return {
     title: page.data.title,
     description: page.data.description,
-    alternates: { canonical: absoluteUrl(page.url) },
+    alternates: { canonical },
+    openGraph: {
+      type: 'article',
+      title: page.data.title,
+      description: page.data.description,
+      url: canonical,
+      images: [BLOG_CARD],
+    },
+    twitter: {
+      card: 'summary_large_image',
+      title: page.data.title,
+      description: page.data.description,
+      images: [BLOG_CARD.url],
+    },
   };
 }
