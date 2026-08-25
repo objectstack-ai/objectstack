@@ -1468,6 +1468,36 @@ export const CreateDataResponseSchema = lazySchema(() => z.object({
 }));
 
 /**
+ * Clone Data Response (#11924)
+ *
+ * The WHOLE body of `POST /data/:object/:id/clone` — the route answers BARE
+ * (`res.status(201).json(result)`, no `{ success, data }` envelope) and relays
+ * `@objectstack/metadata-protocol`'s `cloneData` return verbatim, so this
+ * schema names the entire body where the route ledger references it.
+ *
+ * Declared AS PRODUCED (maintainer ruling 2026-08-25 on #11924: the shape is
+ * stable and server-produced): `cloneData` builds exactly
+ * `{ object, id, sourceId, record }` — the structural sibling of
+ * {@link CreateDataResponseSchema} plus `sourceId`. A clone IS a create (the
+ * copy runs the insert path: engine-owned columns re-derived, the #3043
+ * readonly ingress strip applied, internal fields omitted from the response,
+ * #7823) — but unlike `createData` the producer emits no `droppedFields`
+ * member, so none is declared: a key the producer never writes would be a
+ * promise conformance cannot measure.
+ */
+export const CloneDataResponseSchema = lazySchema(() => z.object({
+  object: z.string().describe('The object name.'),
+  id: z.string().describe('The ID of the newly created clone.'),
+  sourceId: z.string().describe('The ID of the record the clone was copied from.'),
+  record: z.record(z.string(), z.unknown()).describe(
+    'The created clone, including server-generated fields. Engine-owned values '
+    + '(injected system/audit columns, autonumbers, computed formula/summary fields) are '
+    + 're-derived by the insert path rather than copied from the source; caller-supplied '
+    + '`overrides` win over copied values.'
+  ),
+}));
+
+/**
  * One field-level finding from a validate-only run — the same
  * `{ field, code, message }` triple the engine's `ValidationError.fields`
  * carries, so a caller reads one vocabulary whether the verdict arrived from a
@@ -1595,6 +1625,82 @@ export const DeleteDataResponseSchema = lazySchema(() => z.object({
   object: z.string().describe('Object name'),
   id: z.string().describe('Deleted record ID'),
   success: z.boolean().describe('Whether deletion succeeded'),
+}));
+
+// ==========================================
+// Global Cross-Object Search
+// ==========================================
+
+/**
+ * One hit of the global cross-object search (#11924).
+ *
+ * ⚠️ NOT the per-object search-service hit. `SearchHit` / `SearchResult`
+ * (`@objectstack/spec/contracts`, `search-service.ts`) contract the pluggable
+ * `ISearchService.search` engine surface, whose hits carry `score` /
+ * `document`. THIS shape is the `GET /api/v1/search` palette answer —
+ * `object` / `id` / `title` / `snippet` / `record` — produced by
+ * `@objectstack/metadata-protocol`'s `searchAll`. Binding the same-named
+ * neighbour would typecheck and be false; the compile-time guard #8140 left in
+ * `packages/client/src/return-type-precision.test.ts` pins the mismatch.
+ */
+export const SearchAllHitSchema = lazySchema(() => z.object({
+  object: z.string().describe('Name of the object the hit belongs to.'),
+  id: z.string().describe('ID of the matched record.'),
+  title: z.string().describe(
+    'Display title for the hit, resolved in order: the object\'s `titleFormat` template → '
+    + 'the declared primary-title pointer (`nameField`, ADR-0079; deprecated alias '
+    + '`displayNameField` still honored) → conventional name fields → first/last name → '
+    + 'the record ID as a string.'
+  ),
+  snippet: z.string().optional().describe(
+    'Excerpt cut around the first matched term in a searchable text column, ellipsized at '
+    + 'both ends when truncated. ABSENT when no source column literally contains a term '
+    + '(e.g. a pinyin companion match, #7643) — absence is a correct answer, not a miss.'
+  ),
+  record: z.record(z.string(), z.unknown()).describe(
+    'The matched record as the engine\'s find path returns it (row-level security applied, '
+    + 'internal fields already stripped). Object-specific — no cross-object field shape is '
+    + 'promised beyond "a record of the named object".'
+  ),
+}));
+
+/**
+ * Global Cross-Object Search Response (#11924)
+ *
+ * The WHOLE body of `GET /api/v1/search` — the route answers BARE
+ * (`res.json(result)`, no `{ success, data }` envelope) and relays
+ * `@objectstack/metadata-protocol`'s `searchAll` return verbatim, so this
+ * schema names the entire body where the route ledger references it.
+ *
+ * Declared AS PRODUCED (maintainer ruling 2026-08-25 on #11924: the shape is
+ * stable and server-produced). One query sweeps every searchable,
+ * API-enabled object the caller can read (ADR-0061 Tier 1: the server
+ * resolves which fields to search from object metadata); an empty/blank `q`
+ * short-circuits to `{ query: '', hits: [], totalObjects: 0, totalHits: 0,
+ * truncated: false }` without scanning.
+ */
+export const SearchAllResponseSchema = lazySchema(() => z.object({
+  query: z.string().describe(
+    'The TRIMMED query text the sweep ran with — empty string when the request carried '
+    + 'none (the no-scan short-circuit).'
+  ),
+  hits: z.array(SearchAllHitSchema).describe(
+    'Matched records across objects, in scan order, capped at the overall `limit` '
+    + '(default 20, max 100) with at most `perObject` (default 5, max 25) per object.'
+  ),
+  totalObjects: z.number().describe(
+    'Number of objects the sweep actually SCANNED (searchable, API-enabled, with a '
+    + 'resolvable search-field set) — not the number of objects with hits. An object '
+    + 'whose table was never provisioned is skipped and not counted (#8896).'
+  ),
+  totalHits: z.number().describe(
+    'Number of hits returned — equals `hits.length`. NOT a deployment-wide total-match '
+    + 'count: matches beyond `limit` / `perObject` are not counted.'
+  ),
+  truncated: z.boolean().describe(
+    'True when the sweep stopped at the overall `limit` — more matches may exist beyond '
+    + 'the returned set.'
+  ),
 }));
 
 // ==========================================
@@ -2468,6 +2574,8 @@ export type GetDataRequest = z.input<typeof GetDataRequestSchema>;
 export type GetDataResponse = z.input<typeof GetDataResponseSchema>;
 export type CreateDataRequest = z.input<typeof CreateDataRequestSchema>;
 export type CreateDataResponse = z.input<typeof CreateDataResponseSchema>;
+/** The `POST /data/:object/:id/clone` body — see {@link CloneDataResponseSchema} (#11924). */
+export type CloneDataResponse = z.input<typeof CloneDataResponseSchema>;
 export type ValidateDataIssue = z.input<typeof ValidateDataIssueSchema>;
 export type ValidateDataRequest = z.input<typeof ValidateDataRequestSchema>;
 export type ValidateDataResponse = z.input<typeof ValidateDataResponseSchema>;
@@ -2475,6 +2583,13 @@ export type UpdateDataRequest = z.input<typeof UpdateDataRequestSchema>;
 export type UpdateDataResponse = z.input<typeof UpdateDataResponseSchema>;
 export type DeleteDataRequest = z.input<typeof DeleteDataRequestSchema>;
 export type DeleteDataResponse = z.input<typeof DeleteDataResponseSchema>;
+/**
+ * The `GET /api/v1/search` body and its hit element (#11924). ⚠️ Distinct from
+ * the per-object `SearchResult` / `SearchHit` in `@objectstack/spec/contracts`
+ * — see {@link SearchAllHitSchema} for the trap.
+ */
+export type SearchAllHit = z.input<typeof SearchAllHitSchema>;
+export type SearchAllResponse = z.input<typeof SearchAllResponseSchema>;
 
 export type BatchDataRequest = z.input<typeof BatchDataRequestSchema>;
 /** Post-parse shape of {@link BatchDataRequest} — defaults applied, transforms run (ADR-0122). */

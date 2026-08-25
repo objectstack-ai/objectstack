@@ -34,8 +34,8 @@
 auto-merge 与队列成员资格)。
 
 **转 ready / 挂 auto-merge 之前先读 `mergeable_state`**:`dirty` ⇒ 先 merge
-`origin/main`(生成物在面上按 A 的固定序)再挂;`unknown` ⇒ 重读一次(惰性计算,
-事实行见平台读数)。**ready + 全绿 ≠ 已入队 —— 队列从不主动拉 PR,入队是显式动
+`origin/main`(生成物在面上按 A 的固定序)再挂;`unknown` ⇒ 重读一次(惰性计算,事实行见平台读
+数)。**ready + 全绿 ≠ 已入队 —— 队列从不主动拉 PR,入队是显式动
 作。**零 `enqueued` 事件按序查:① `mergeable_state` 是否 `dirty`;②
 enable-auto-merge 调用根本没落地(GraphQL、吃配额、回显两向不可靠,按既有陷阱行
 重发一次,以 timeline 事件验证,⛔ 不看 `auto_merge` 字段);③ PR 碰

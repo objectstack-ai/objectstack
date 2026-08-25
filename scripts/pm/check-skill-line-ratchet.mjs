@@ -137,6 +137,29 @@
  * because that one WOULD render as a space. That property is what let the one-off
  * re-wrap prove itself: every file compared byte-identical after whitespace
  * normalization, with its inline code spans identical in sequence.
+ *
+ * ### The junction that leaked (#12081), and why it is invisible in the source
+ *
+ * One junction escaped the paragraph above and had to be measured to be found: a
+ * break directly after an ASCII `,` `;` `:` that follows a HAN character. It is
+ * not a CJK↔Latin junction — both sides are Chinese — but the MARK between them
+ * is a narrow byte, so the segment break is not between two wide characters and
+ * renders as a space. 34 such breaks survived the #11106 re-wrap across 15
+ * ratcheted files. ⚠️ The defect is invisible in the source and visible only in
+ * the render, which is the inverse of the usual reading: a reviewer reads these
+ * files as source, where the break looks like ordinary wrapping, while the space
+ * exists only for the agent that reads the RENDERED text — and that is the whole
+ * population these files are written for.
+ *
+ * ⭐ It is also SELF-CONCEALING under re-wrap, which is why the mechanism is
+ * written down here rather than left to a PR body. Re-flowing such a paragraph
+ * and re-wrapping it FAITHFULLY must PRESERVE the space (it is what the text
+ * renders as), so the space migrates out of the line break and into a literal
+ * `", "` in the source. It then looks like the re-wrap introduced a space. It did
+ * not — it only made an existing render visible. Anyone auditing a re-wrap by eye
+ * will reach the wrong conclusion here. {@link hanAsciiPunctTail} closes the
+ * channel at its source by refusing to OFFER the break, so no future wrap has to
+ * choose between preserving a defect and hiding it.
  */
 
 import { readFileSync } from 'node:fs';
@@ -193,7 +216,10 @@ export const CEILINGS = new Map([
   // Business-perspective decision-analysis writing guide (maintainer ruling
   // 2026-08-20: the four-facet analysis must argue from the business
   // standpoint). Set at landed line count (headroom 0, same convention).
-  ['.claude/skills/pm-dispatch/references/decision-analysis.md', 48],
+  // Lowered 48 → 46 by the #12081 soft-break closure (lowering is always
+  // legitimate): three of this file's measured Han+ASCII-punct breaks merged
+  // back into their paragraphs, and two of the three paid for themselves.
+  ['.claude/skills/pm-dispatch/references/decision-analysis.md', 46],
   // 134 → 133: whole-text restructuring round, PR-2 (maintainer ruling
   // 2026-08-23) — the three write-side sanitizer rows consolidated to one
   // author rule + one measured-behaviour row per surface (body / comment).
@@ -235,6 +261,18 @@ export const CEILINGS = new Map([
   // line count read from this ratchet's own run — headroom 0, same convention as
   // the entries above.
   ['.claude/skills/pm-dispatch/references/true-green.md', 34],
+  // Per-surface compile/typecheck coverage index — which surfaces a repo-wide
+  // typecheck actually reaches, which are compiled only by their own package's
+  // script, and the frozen ones. #12098: after true-green.md above it was the
+  // LAST pm-dispatch references file with no row, found by enumerating the
+  // directory against this map rather than by noticing one file. A references
+  // file is read per seat session like every entry above, so its absence was a
+  // coverage gap, not the header's deliberate omission (that one is the
+  // published `skills/` catalog, and only it). Set at the landed line count read
+  // from this ratchet's own run — headroom 0, same convention. ⚠️ Its seven
+  // over-120B lines are all `table` rows, structurally exempt and NOT
+  // re-wrappable; they are metered instead by MAX_TABLE_ROW_BYTES below.
+  ['.claude/skills/pm-dispatch/references/compile-surfaces.md', 26],
   // Lane job descriptions (maintainer ruling 2026-08-19: per-lane PM job
   // descriptions move from seat-post prose into versioned skill references).
   // Set at landed line counts (headroom 0, same convention as above).
@@ -315,6 +353,88 @@ export const CEILINGS = new Map([
   // growth cheaply. Set at its line count on `origin/main` (headroom 0, same
   // convention as the entries above).
   ['CLAUDE.md', 86],
+]);
+
+/**
+ * Per-file MAX TABLE ROW BYTES — the second ratchet, and the only metered thing
+ * in this file that is not a line count (#11947).
+ *
+ * ## The hole it closes
+ *
+ * The 120-byte line rule above exempts a markdown table row by shape, and that
+ * exemption is correct — a wrapped `|` row is a different table. But it is not
+ * free, and until this map nothing measured what flowed through it. A table row
+ * grows by WIDENING A CELL, which costs zero lines and passes both existing
+ * controls: the line ratchet counts it as one line, and the length rule exempts
+ * it. Measured on the corpus when this landed, the five longest surviving lines
+ * were all table rows, led by `AGENTS.md` at 1,081 bytes.
+ *
+ * The widening is not hypothetical and not broad decay — it is HEAVY-TAIL, which
+ * is what sized this remedy. Per-row byte drift keyed by first cell between two
+ * refs of `origin/main`: of ~100 matched rows, essentially none moved, while the
+ * corpus's two longest lines both reached their length inside two weeks through
+ * exactly this channel (`AGENTS.md` 639 → 1,081 bytes; one `domain:engine` row
+ * 101 → 765, a 7x). A corpus-wide new RULE would be sized for a defect that
+ * lives in two or three rows per file; a shrink-only PIN catches precisely the
+ * measured defect and nothing else.
+ *
+ * ## The ruling
+ *
+ * Maintainer ruling 2026-08-25 (issue #11947, comment 5406811814), verbatim and
+ * untranslated: 「同意」 — accepting option 1, the A-ratchet, over option 2 (a
+ * whole-file byte ceiling on the two table-heavy files, the narrowed form of the
+ * option already declined corpus-wide by #11106) and option 3 (nothing, refuted
+ * by the measurement above). The other five structural exemption classes —
+ * quotation, blockquote, unbreakable, anchored, fence — are untouched and remain
+ * load-bearing and human-audited.
+ *
+ * ## The discipline, which is the ceilings' discipline
+ *
+ * Seeded at each file's OWN widest table row on the day this landed, read from
+ * {@link scanTableRows} rather than measured by hand — no invented constants,
+ * the same idiom as the ceilings above and {@link MAX_LINE_BYTES}. Shrink-only:
+ * lowering is always legitimate and consolidation pays the pin down; raising one
+ * requires a maintainer ruling quoted in the raising PR.
+ *
+ * ⚠️ A pin of 0 is a MEASUREMENT, not a disabled row: that file has no table row
+ * today, so its widest is 0. It is deliberately not an omission — an uncovered
+ * file is the one place a row could widen unmetered again, which is the whole
+ * defect. Every key of {@link CEILINGS} carries a pin and the self-test holds the
+ * two maps in step, because enforcement cannot: a missing pin would simply never
+ * be consulted. Since every pin is seeded at headroom 0, ANY positive headroom
+ * means a row has since been paid down and the pin should follow it — `run`
+ * prints that as a hint rather than a failure.
+ */
+export const MAX_TABLE_ROW_BYTES = new Map([
+  // The five files that carry a table row today, each seeded at its own widest.
+  // The corpus's #1 longest LINE of any shape is the AGENTS.md row below.
+  ['.claude/skills/pm-dispatch/SKILL.md', 765],
+  ['.claude/skills/pm-dispatch/references/dispatch-runbook.md', 0],
+  ['.claude/skills/pm-dispatch/references/state-machine.md', 0],
+  ['.claude/skills/pm-dispatch/references/contract-review.md', 0],
+  ['.claude/skills/pm-dispatch/references/decision-analysis.md', 0],
+  ['.claude/skills/pm-dispatch/references/platform-readings.md', 0],
+  ['.claude/skills/pm-dispatch/references/rest-channel.md', 0],
+  ['.claude/skills/pm-dispatch/references/review-checklist.md', 0],
+  ['.claude/skills/pm-dispatch/references/landing-operations.md', 0],
+  ['.claude/skills/pm-dispatch/references/release-aftercare.md', 0],
+  ['.claude/skills/pm-dispatch/references/seat-post-protocol.md', 0],
+  ['.claude/skills/pm-dispatch/references/true-green.md', 0],
+  ['.claude/skills/pm-dispatch/references/compile-surfaces.md', 352],
+  ['.claude/skills/pm-dispatch/references/lanes/engine.md', 0],
+  ['.claude/skills/pm-dispatch/references/lanes/services.md', 0],
+  ['.claude/skills/pm-dispatch/references/lanes/cli.md', 0],
+  ['.claude/skills/pm-dispatch/references/lanes/devx.md', 0],
+  ['.claude/skills/pm-dispatch/references/lanes/skills.md', 0],
+  ['.claude/skills/pm-dispatch/references/lanes/spec.md', 0],
+  ['.claude/skills/pm-dispatch/references/lanes/hotcrm.md', 0],
+  ['.claude/agents/os-dev.md', 0],
+  ['.claude/skills/checklist-test/SKILL.md', 221],
+  ['.claude/skills/checklist-author/SKILL.md', 0],
+  ['.claude/skills/dogfood-verification/SKILL.md', 0],
+  ['.claude/skills/spec-property-retirement/SKILL.md', 328],
+  ['AGENTS.md', 1081],
+  ['CLAUDE.md', 0],
 ]);
 
 /**
@@ -410,6 +530,19 @@ const WIDE =
 // Kinsoku: never strand a closing mark at a line head, never leave an opener at a line tail.
 const NO_BREAK_BEFORE = '。，、;；:：?？!!)）]】}』」〉》·…%,.;:?!)]}’”';
 const NO_BREAK_AFTER = '(（[【{『「〈《‘“';
+// #12081 — the OTHER no-break-after class, and the reason it is a separate test
+// rather than three more characters in the string above. `,` `;` `:` are legal
+// break points in ASCII prose ("first, second") and must stay legal there. What
+// is never legal is one of them written directly after a HAN character: this
+// corpus spells CJK sentence-internal punctuation in ASCII throughout (measured
+// on `.claude/agents/os-dev.md`: 197 ASCII commas after a Han character, 0
+// fullwidth U+FF0C), so such a mark is a CJK sentence mark that happens to be a
+// narrow byte. A segment break after it is NOT between two wide characters, so
+// the CSS segment-break transformation KEEPS it and it renders as a SPACE —
+// mid-sentence, in prose that has no spaces anywhere else. The successor
+// character is irrelevant to that: the mark itself is narrow, so the break
+// renders as a space whatever follows.
+const HAN = /\p{Script=Han}/u;
 // Sequences markdown reads as the start of a NEW block — a continuation line may never begin with one.
 const BLOCK_START = /^(#{1,6}(\s|$)|[-*+](\s|$)|\d+[.)](\s|$)|>|\||`{3}|~{3}|-{3}|={3})/;
 
@@ -476,10 +609,33 @@ export function atomize(body) {
   return atoms;
 }
 
-function breakLegal(a, b) {
+/**
+ * Does `atoms[i]` end in an ASCII `,` `;` `:` that itself follows a Han
+ * character? Then a break placed AFTER it renders as a space (see the comment
+ * on {@link HAN}) and {@link breakLegal} refuses it.
+ *
+ * The mark can sit either inside the atom (`态,` never happens — a wide char is
+ * its own atom — but `PR,` and `第2章,` do) or be the whole atom, in which case
+ * the Han character is the tail of the PRECEDING atom and only when no space
+ * separates them: `常态, 不是` has the mark after `态`, while `见 , 后` does not.
+ */
+export function hanAsciiPunctTail(atoms, i) {
+  const a = atoms[i];
+  if (!a || !/[,;:]$/.test(a.text)) return false;
+  const inner = a.text.slice(0, -1);
+  if (inner.length > 0) return HAN.test(inner[inner.length - 1]);
+  if (a.sp) return false;         // whitespace before the mark — it follows nothing
+  const prev = atoms[i - 1];
+  return !!prev && HAN.test(prev.text[prev.text.length - 1]);
+}
+
+export function breakLegal(atoms, k) {
+  const a = atoms[k - 1];
+  const b = atoms[k];
   const last = a.text[a.text.length - 1];
   if (NO_BREAK_AFTER.includes(last)) return false;
   if (NO_BREAK_BEFORE.includes(b.text[0])) return false;
+  if (hanAsciiPunctTail(atoms, k - 1)) return false;   // #12081 — renders as a space
   if (b.sp) return true;          // an existing space becomes the newline
   return a.cjk && b.cjk;          // segment break between two wide chars renders as nothing
 }
@@ -518,13 +674,13 @@ export function wrapLine(line, limit = MAX_LINE_BYTES) {
     if (bytes(full) <= limit) { out.push(full); break; }
     let chosen = -1;
     for (let k = from + 1; k < atoms.length; k++) {
-      if (!breakLegal(atoms[k - 1], atoms[k]) || startsBlock(atoms, k)) continue;
+      if (!breakLegal(atoms, k) || startsBlock(atoms, k)) continue;
       if (bytes(renderSeg(atoms, from, k, pfx)) <= limit) chosen = k;
       else break;                 // segment length is monotonic in k
     }
     if (chosen === -1) {          // nothing fits: take the first legal break at all, if any
       for (let k = from + 1; k < atoms.length; k++) {
-        if (breakLegal(atoms[k - 1], atoms[k]) && !startsBlock(atoms, k)) { chosen = k; break; }
+        if (breakLegal(atoms, k) && !startsBlock(atoms, k)) { chosen = k; break; }
       }
     }
     if (chosen === -1) { out.push(full); break; }
@@ -596,6 +752,60 @@ export function scanLineLengths(text) {
   return { offenders, exempt };
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// The max-table-row-bytes pin (#11947). See MAX_TABLE_ROW_BYTES for why.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The widest markdown table row in `text`, in bytes, with its 1-based line
+ * number. Fenced and front-matter regions are not table rows however they are
+ * spelled, so the block state is carried exactly as {@link scanLineLengths}
+ * carries it. A file with no table row measures 0 — that is a MEASUREMENT, not a
+ * sentinel, and it is what seeds the pin of every such file.
+ */
+export function scanTableRows(text) {
+  const lines = text.split('\n');
+  if (text.endsWith('\n')) lines.pop();
+  let state = initialState();
+  let widest = 0;
+  let at = 0;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const before = state;
+    state = advanceState(line, state, i);
+    if (before.fence || isFence(line) || before.frontMatter) continue;
+    if (!isTableRow(line)) continue;
+    const b = bytes(line);
+    if (b > widest) { widest = b; at = i + 1; }
+  }
+  return { widest, line: at };
+}
+
+export function tableRowVerdict(rel, widest, at, pin) {
+  if (pin === undefined) {
+    return {
+      ok: false,
+      msg:
+        `${rel} has no max-table-row-bytes pin — red, not a skip (#4690). Every file in the ` +
+        'ceiling map carries one, seeded at its own widest table row, so an uncovered file is the ' +
+        'one place a row could widen unmetered again.',
+    };
+  }
+  if (widest > pin) {
+    return {
+      ok: false,
+      msg:
+        `${rel} has a ${widest}-byte table row at L${at}; the max-table-row-bytes pin is ${pin}. ` +
+        'A table row is the one shape the 120-byte line rule cannot reach — a wrapped `|` row is a ' +
+        'different table — so its width is metered here instead, and widening a cell costs zero ' +
+        'lines. Move the row\'s detail into prose or a reference file, or consolidate two rows into ' +
+        'one; either pays the pin down. There is no allowlist, and raising a pin requires a ' +
+        'maintainer ruling quoted in the PR.',
+    };
+  }
+  return { ok: true, msg: `${rel}: widest table row is ${widest} bytes (pin ${pin}; headroom ${pin - widest}).` };
+}
+
 export function lengthVerdict(rel, offenders) {
   if (offenders.length === 0) return { ok: true, msg: `${rel}: every line is within ${MAX_LINE_BYTES} bytes (or structurally exempt).` };
   const shown = offenders.slice(0, 5).map((o) => `L${o.line} (${o.bytes}B)`).join(', ');
@@ -627,6 +837,18 @@ function run() {
     if (!lv.ok) {
       failed++;
       console.error(`✗ check-skill-line-ratchet: ${lv.msg}`);
+    }
+    const tr = scanTableRows(text);
+    const tv = tableRowVerdict(rel, tr.widest, tr.line, MAX_TABLE_ROW_BYTES.get(rel));
+    if (!tv.ok) {
+      failed++;
+      console.error(`✗ check-skill-line-ratchet: ${tv.msg}`);
+    } else {
+      const slack = MAX_TABLE_ROW_BYTES.get(rel) - tr.widest;
+      if (slack > 0) {
+        console.log(`ℹ️  ${rel}: max-table-row-bytes headroom is ${slack} — every pin is seeded at 0 headroom, so a row has been paid down; lower the pin to ${tr.widest} (shrink-only ratchets tighten opportunistically).`);
+      }
+      console.log(`✓ check-skill-line-ratchet: ${tv.msg}`);
     }
     const v = verdict(rel, countLines(text), maxLines);
     if (!v.ok) {
@@ -660,6 +882,9 @@ function selfTest() {
     ['the other four skills are covered (#9473)', ['checklist-test', 'checklist-author', 'dogfood-verification', 'spec-property-retirement'].every((n) => CEILINGS.has(`.claude/skills/${n}/SKILL.md`)), true],
     ['root AGENTS.md is covered (#9792)', CEILINGS.has('AGENTS.md'), true],
     ['root CLAUDE.md is covered (#9965)', CEILINGS.has('CLAUDE.md'), true],
+    // #12098: the last uncovered pm-dispatch references file. Found by
+    // enumerating the directory against this map, not by noticing one file.
+    ['references/compile-surfaces.md is covered (#12098)', CEILINGS.has('.claude/skills/pm-dispatch/references/compile-surfaces.md'), true],
     // The dispatch-gates declaration (#9964). Enforcement cannot hold any of
     // these: the declaration is read by another tool entirely, so a wrong or
     // missing entry runs perfectly green here and only shows up as a dev
@@ -752,6 +977,89 @@ function selfTest() {
         ['advanceState does not track quotes inside a fence', advanceState('说:「引文', { fence: true, frontMatter: false, quote: false }, 3).quote, false],
         ['scan: a two-line quote yields quotation exemptions, not offenders', scanLineLengths(`维护者:「${'引'.repeat(60)}\n${'文'.repeat(60)}」\n`).offenders.length, 0],
         ['wrapLine never strands a closing 。 at a line head', wrapped.slice(1).every((l) => !'。,、;:?!)]}'.includes(l.trimStart()[0])), true],
+      ];
+    })(),
+    // ── #12081: no break after an ASCII `,;:` that follows a Han character ───
+    // Every case is a PAIR discriminating on the Han condition alone, because
+    // the failure mode of a blunt fix is silently forbidding the ASCII-prose
+    // comma break too, which no corpus line would ever reveal.
+    ...(() => {
+      const hanComma = atomize('常态,不是许可');           // 常 态 , 不 是 许 可
+      const hanCommaSpaced = atomize('常态, 不是');        // 常 态 , 不(sp) 是
+      const asciiComma = atomize('first, second');       // "first," · "second"
+      const spaced = atomize('常态 , 不是');               // the mark follows a space
+      // The one shape where the OLD wrapper actually took the break: the atom
+      // after the mark carries a space and is too long to append, so the only
+      // segment that fits ends ON the mark.
+      const hanTrap = `${'中文内容'.repeat(9)}, \`${'p/'.repeat(40)}\``;
+      const latinTwin = `${'word '.repeat(18)}end, \`${'p/'.repeat(40)}\``;
+      const wrappedTrap = wrapLine(hanTrap);
+      const wrappedTwin = wrapLine(latinTwin);
+      return [
+        ['an ASCII , after a Han character is a no-break-after mark', hanAsciiPunctTail(hanComma, 2), true],
+        ['...and ; and : are the same mark class', ['常态;不是', '常态:不是'].every((s) => hanAsciiPunctTail(atomize(s), 2)), true],
+        ['...but after a LATIN word it stays an ordinary break point', hanAsciiPunctTail(asciiComma, 0), false],
+        ['...and a mark with a space before it follows nothing', hanAsciiPunctTail(spaced, 2), false],
+        ['...and an atom not ending in one is never the mark', hanAsciiPunctTail(hanComma, 1), false],
+        ['breakLegal refuses the break after a Han+ASCII mark', breakLegal(hanCommaSpaced, 3), false],
+        // Why only ONE shape ever leaked, pinned so the case above cannot pass
+        // for the wrong reason: with no space after the mark there was never a
+        // legal break there anyway (neither side is wide), so the defect could
+        // only enter where the author had written `, ` and the wrapper spent it.
+        ['...a mark with no following space was never a break point to begin with', breakLegal(hanComma, 3), false],
+        ['...still allows the CJK-to-CJK break one atom earlier', breakLegal(hanComma, 1), true],
+        ['...and still allows an ordinary ASCII space break', breakLegal(asciiComma, 1), true],
+        // End to end, on the shape that used to produce the defect.
+        ['wrapLine splits the trap line', wrappedTrap.length > 1, true],
+        ['no wrapped line ends on a Han+ASCII mark — the break is no longer OFFERED', wrappedTrap.every((l) => !/\p{Script=Han}[,;:]$/u.test(l)), true],
+        ['...the line it took instead is still within budget', wrappedTrap.every((l) => Buffer.byteLength(l, 'utf8') <= 120), true],
+        ['...and it moved only whitespace, as every wrap must', wrappedTrap.join('').replace(/\s+/g, ''), hanTrap.replace(/\s+/g, '')],
+        // The RED twin: identical shape, Latin before the mark. If this one also
+        // stopped breaking, the rule would be over-broad and the case above
+        // would pass for the wrong reason.
+        ['the SAME shape with a Latin word before the mark still breaks there', wrappedTwin.some((l) => l.endsWith('end,')), true],
+        ['wrapLine is still idempotent under the new rule', wrappedTrap.flatMap((l) => wrapLine(l)).join('\n'), wrappedTrap.join('\n')],
+      ];
+    })(),
+    // ── #11947: the per-file max-table-row-bytes pin ────────────────────────
+    ...(() => {
+      const row = `| a | ${'中文内容'.repeat(20)} |`;      // 6 + 240 + 2 = 248 bytes
+      const doc = `# t\n\n| a | b |\n|---|---|\n${row}\n`; // the row lands on line 5
+      const fenced = `\`\`\`\n| a | ${'x'.repeat(200)} |\n\`\`\`\n`;
+      const clean = { fence: false, frontMatter: false };
+      const red = tableRowVerdict('f.md', 999, 3, 100);
+      return [
+        // The pairing that IS this card: the length rule exempts the row by
+        // shape, and the pin meters the same row instead. A case asserting only
+        // one half would pass under either control alone.
+        ['a long table row is EXEMPT from the 120-byte line rule', classifyLine(row, clean), 'table'],
+        ['...and the same row is METERED by its file pin', tableRowVerdict('f.md', 248, 5, 247).ok, false],
+        ['at exactly the pin -> green', tableRowVerdict('f.md', 248, 5, 248).ok, true],
+        ['one byte wider -> RED (widening a cell is the measured defect)', tableRowVerdict('f.md', 249, 5, 248).ok, false],
+        ['narrower than the pin -> green', tableRowVerdict('f.md', 100, 5, 248).ok, true],
+        ['a pin of 0 is a measurement — a file with no table row passes it', tableRowVerdict('f.md', 0, 0, 0).ok, true],
+        ['...and the FIRST table row in such a file is RED', tableRowVerdict('f.md', 30, 4, 0).ok, false],
+        ['a missing pin is RED, not a skip (#4690)', tableRowVerdict('f.md', 0, 0, undefined).ok, false],
+        ['...and says so rather than naming a width', tableRowVerdict('f.md', 0, 0, undefined).msg.includes('no max-table-row-bytes pin'), true],
+        ['the RED message names the width', red.msg.includes('999-byte'), true],
+        ['the RED message names the line', red.msg.includes('L3'), true],
+        ['the RED message names the remedy', red.msg.includes('reference file'), true],
+        ['the RED message names consolidation as the way to pay it down', red.msg.includes('consolidate'), true],
+        ['the RED message offers NO allowlist', red.msg.includes('no allowlist'), true],
+        ['the RED message says raising needs a maintainer ruling', red.msg.includes('maintainer ruling'), true],
+        // scanTableRows — the seed instrument. The pins were read from it, so a
+        // wrong scan would have written wrong pins that then ran green forever.
+        ['scanTableRows finds the widest row', scanTableRows(doc).widest, 248],
+        ['...and reports its line number', scanTableRows(doc).line, 5],
+        ['a `|` line inside a FENCE is not a table row', scanTableRows(fenced).widest, 0],
+        ['a `|` line in FRONT MATTER is not a table row', scanTableRows('---\n| a |\n---\n').widest, 0],
+        ['a file with no table row measures 0', scanTableRows('中文内容\n').widest, 0],
+        // The two maps must stay in step; enforcement cannot hold this, because
+        // a file missing from the pin map is simply never consulted.
+        ['every ceilinged file carries a pin', [...CEILINGS.keys()].every((k) => MAX_TABLE_ROW_BYTES.has(k)), true],
+        ['and the pin map names no file the ceiling map does not cover', [...MAX_TABLE_ROW_BYTES.keys()].every((k) => CEILINGS.has(k)), true],
+        ['every pin is a non-negative integer', [...MAX_TABLE_ROW_BYTES.values()].every((n) => Number.isInteger(n) && n >= 0), true],
+        ['the published skills/ catalog is uncovered here too', [...MAX_TABLE_ROW_BYTES.keys()].some((k) => k.startsWith('skills/')), false],
       ];
     })(),
   ].map((c) => (Array.isArray(c[1]) || (c[1] && typeof c[1] === 'object') ? [c[0], JSON.stringify(c[1]), JSON.stringify(c[2])] : c));

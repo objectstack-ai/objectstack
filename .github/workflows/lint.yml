@@ -1171,6 +1171,17 @@ jobs:
       - name: React pages honour the useAdapter() query and result contracts
         run: pnpm check:react-page-adapter-contract
 
+      # #11576 page discovery vs ground truth: what makes something a SERVED
+      # page is membership in a bundle's `pages:` array (the kernel reads it in
+      # `registerMetadataCollections`), not its type annotation — while the
+      # canonical-envelope gates (#11255, #11480) discover their population by
+      # export shape. #11480 measured that gap on a live page. This gate makes
+      # the approximation exact by construction: every identifier in a `pages:`
+      # array must be declared `export const X: Page =` or via `definePage()`,
+      # so a page can never again be served-but-uncovered.
+      - name: Kernel-reaching pages are declared in a discoverable shape
+        run: pnpm check:page-declaration-shape
+
       # #10830 form-section `name` in docs examples: the docs pages that TEACH
       # the i18n-anchor convention were the one surface where nothing enforced
       # it. `packages/lint`'s `translation-section-name-missing` walks app
