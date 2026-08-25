@@ -54,8 +54,11 @@
  *     nobody edited a file is not a ratchet.
  *   - NO DEPENDENCY. The workspace carries no tokenizer today (checked at
  *     landing: no `tiktoken` / `gpt-tokenizer` / `gpt-3-encoder` in any
- *     manifest), and root dependencies are fenced (#9465). Adding one to make a
- *     lint gate's numbers prettier is not a trade this gate needs.
+ *     manifest). Adding one to make a lint gate's numbers prettier is not a
+ *     trade this gate needs. Refused on that merit alone, not by a fence: root
+ *     dependencies as a CLASS are not #9465 territory -- the GATE INVOCATION
+ *     IDIOM note at the top of `.github/workflows/lint.yml` carries that lane's
+ *     verbatim scope, and it is pointed at rather than restated here.
  *   - INDEPENDENTLY REPRODUCIBLE. Anyone can audit a ceiling without running
  *     this script: `ceil($(wc -c < file) / 4)`. A tokenizer's count can only be
  *     checked by re-running the tokenizer.
@@ -166,7 +169,13 @@ export const CEILINGS = new Map([
   // CEILING_BASIS.strippedInternalIds. `(was N)` is the ceiling this replaced.
   ['skills/objectstack-ai/SKILL.md', 6806], //          -18 (was 6824)
   ['skills/objectstack-api/SKILL.md', 6331], //         -11 (was 6342)
-  ['skills/objectstack-automation/SKILL.md', 12511], // -32 (was 12543)
+  // 12511 -> 12643 (#11348): the flow value-expression section documented the
+  // expression surface but not the function vocabulary (round/floor/ceil/abs/
+  // min/max); an unknown function fails at RUNTIME, not at flow-save, so the
+  // published teaching is the only guard. +132 tokens, compressed to minimum.
+  // Maintainer ruling 2026-08-25 (option B1, raise the ceiling), verbatim and
+  // untranslated: 「我看到了,你分析过了,接受你的建议」.
+  ['skills/objectstack-automation/SKILL.md', 12643],
   ['skills/objectstack-data/SKILL.md', 13783], //       -34 (was 13817)
   ['skills/objectstack-formula/SKILL.md', 6002], //     -53 (was 6055)
   ['skills/objectstack-i18n/SKILL.md', 6338], //        -11 (was 6349)

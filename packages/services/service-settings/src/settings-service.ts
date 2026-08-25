@@ -1218,6 +1218,40 @@ export class SettingsService {
    * the env-override branch, the scope→userId mapping, and the cascade are
    * the same code ({@link resolveKeyFromRows} is extracted from `get`, not
    * copied). Nothing is cached; nothing survives the call.
+   *
+   * ## Key validation is UP-FRONT and TOTAL
+   *
+   * That equivalence covers every key that RESOLVES. It does not cover the
+   * refusal, and this is the one respect in which `getMany` is not N `get`
+   * calls — so it is stated here rather than left to be rediscovered from a
+   * test.
+   *
+   * EVERY requested key is checked against the namespace's manifest before a
+   * single env override is read and before any row is loaded. One undeclared
+   * key therefore rejects the WHOLE call — {@link UnknownKeyError}, `code:
+   * 'SETTINGS_UNKNOWN_KEY'` — and the caller receives NOTHING: no partial
+   * `Record`, not even the subset it was entitled to. N per-key {@link get}
+   * calls part ways on exactly this input: each declared key still answers,
+   * and only the undeclared one throws. Same error class, same code; the
+   * blast radius is what differs. (An unregistered NAMESPACE is refused first
+   * and identically to `get`: {@link UnknownNamespaceError}.)
+   *
+   * Validating before the grouped walk rather than inside it is what makes
+   * the refusal independent of key order, of scope grouping, and of which
+   * keys happened to carry an env override — the call either refuses or
+   * answers all of them, never something in between. `setMany` pre-flights
+   * its whole patch the same way.
+   *
+   * What it costs a caller: against a host that registers a PARTIAL manifest,
+   * a batched consumer loses ALL of its keys at once and must degrade for the
+   * whole set — it cannot fall back key by key. `resolveLocalizationContext`
+   * is the first consumer to inherit this and records its own degradation
+   * locally: a partial `localization` manifest drops it to a shorter cascade
+   * (no `global` scope layer, no `OS_LOCALIZATION_*` override) where the
+   * per-key path would still have resolved the declared keys. A caller that
+   * cannot afford the rule should intersect `keys` with the manifest itself,
+   * or read per key. {@link getNamespace} can never trip it — it passes
+   * exactly the registered keys.
    */
   async getMany(
     namespace: string,

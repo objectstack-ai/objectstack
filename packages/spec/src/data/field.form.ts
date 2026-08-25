@@ -35,7 +35,12 @@ export const fieldForm = defineForm({
         { field: 'defaultValue', helpText: 'Default value for new records' },
         { field: 'placeholder', helpText: 'Hint text shown inside the empty input (disappears once a value is entered); use inlineHelpText for always-visible help' },
         // Text field options
-        { field: 'minLength', visibleWhen: "data.type == 'text' || data.type == 'textarea' || data.type == 'email'", helpText: 'Minimum character length' },
+        // #11949 — `minLength` converges on the same bounded-string types as
+        // `maxLength` below (BOUNDED_STRING_FIELD_TYPES; maintainer ruling
+        // 2026-08-25: the #11566 template applies in full). This row used to
+        // show the key for 3 types while the schema accepted it on every
+        // type; it moves with the set, exactly like the row below.
+        { field: 'minLength', visibleWhen: "data.type in ['text','textarea','email','url','phone','password','markdown','html','richtext','code','signature','qrcode']", helpText: 'Minimum character length' },
         // #11566 — `maxLength` is shown for exactly the bounded-string types
         // the schema accepts it on and the write-time validator enforces it
         // for (BOUNDED_STRING_FIELD_TYPES; maintainer ruling 2026-08-24).
