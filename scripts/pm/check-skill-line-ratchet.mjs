@@ -224,6 +224,17 @@ export const CEILINGS = new Map([
   // MERGED-tracking line, so that ceiling stays at 82 — no re-wrap, no cut.
   ['.claude/skills/pm-dispatch/references/release-aftercare.md', 58],
   ['.claude/skills/pm-dispatch/references/seat-post-protocol.md', 105],
+  // Per-repo「真绿」跑法索引 — the canonical test invocation, the gates a CI-log
+  // grep cannot see, and the local preflight, one fact per line per repo. Added
+  // by the protocol-text family PR, which could not carry its own ceiling: that
+  // dispatch declared a closed file surface (SKILL.md + os-dev.md + the new page
+  // + one pointer line) with stop-on-breach, and this script sat outside it. A
+  // pm-dispatch references file is read per seat session like every entry above,
+  // so its absence here was a coverage gap, not the header's deliberate omission
+  // (that one is the published `skills/` catalog, and only it). Set at the landed
+  // line count read from this ratchet's own run — headroom 0, same convention as
+  // the entries above.
+  ['.claude/skills/pm-dispatch/references/true-green.md', 34],
   // Lane job descriptions (maintainer ruling 2026-08-19: per-lane PM job
   // descriptions move from seat-post prose into versioned skill references).
   // Set at landed line counts (headroom 0, same convention as above).
