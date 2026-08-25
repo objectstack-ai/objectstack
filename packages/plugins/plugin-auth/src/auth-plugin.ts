@@ -64,7 +64,7 @@ import {
   isDevAdminSeedArmed,
   warnIfWalledOwnerCannotVerify,
 } from './walled-owner-verification-path.js';
-import { judgePlatformAdmin, type PlatformAdminActor } from './platform-admin-gate.js';
+import { judgePlatformAdmin, isPlatformAdminUser, type PlatformAdminActor } from './platform-admin-gate.js';
 import {
   runAdminBanUser,
   runAdminUnbanUser,
@@ -2248,6 +2248,82 @@ export class AuthPlugin implements Plugin {
         } catch (error) {
           const err = error instanceof Error ? error : new Error(String(error));
           ctx.logger.error('[AuthPlugin] admin/remove-user failed', err);
+          return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: err.message } }, 500);
+        }
+      });
+
+      // ── #11900: /admin/has-permission — a QUERY answered from the ADR-0068
+      // predicate, everything else delegated byte-for-byte ────────────────
+      //
+      // The vendor evaluates this permission QUERY on the legacy
+      // `user.role === 'admin'` scalar ADR-0068 D2 stopped synthesizing, so a
+      // genuine platform admin was told `200 {"success":false}` —
+      // byte-identical to a plain member's answer. Not a refusal like the
+      // #9652 family: a confident WRONG ANSWER on a published
+      // authorization-answer surface. Maintainer ruling 2026-08-25 (option B
+      // per the card body's lettering): shade it, answering from the
+      // ADR-0068 predicate.
+      //
+      // ⚠️ Unlike `remove-user` above, gate-then-delegate CANNOT carry this
+      // fix: delegation preserves the vendor's answer, and here the vendor's
+      // answer to the admitted caller IS the defect. And unlike `ban-user`,
+      // gate-then-reimplement cannot either: `gateAdmin`'s 403 would replace
+      // the plain member's own `200 {"error":null,"success":false}` — the
+      // correct negative ANSWER to a permission question, pinned by the
+      // non-admin dogfood sweep (a `true` there would be the leak, but so
+      // would turning the answer into a refusal). So this mount branches on
+      // the predicate WITHOUT refusing anyone:
+      //
+      //   platform admin + a body the vendor would evaluate
+      //     → answered here, from the vendor's own access-control statements
+      //       with only the identity signal replaced (an ungranted or unknown
+      //       permission still answers `false` — see
+      //       admin-has-permission-endpoint.ts for why unconditional `true`
+      //       would be a new wrong-200);
+      //   everyone and everything else — anonymous (enveloped 401), plain
+      //   member (its own negative), any body the vendor refuses (vendor
+      //   400, vendor ordering)
+      //     → delegated through `handleRequest`, native bytes standing.
+      //
+      // Ledger: `POST /api/v1/auth/admin/has-permission` stays a
+      // `BETTER_AUTH_MOUNTED_SURFACE` row; `check:auth-mount-ledger` accounts
+      // for this mount as "shadowing a vendor-declared path" (the #12029
+      // worked reading — a shadow is accounted for, not a new row).
+      //
+      // Pinned by `admin-has-permission-endpoint.test.ts` (both directions,
+      // full table) and the two dogfood sweeps (admin standing + non-admin
+      // negative).
+      rawApp.post(`${basePath}/admin/has-permission`, async (c: any) => {
+        try {
+          const authApi = await this.authManager!.getApi();
+          const session = await (authApi as any).getSession({ headers: c.req.raw.headers });
+          const user = (session as { user?: { id?: unknown } } | null | undefined)?.user;
+          if (user?.id && isPlatformAdminUser(user)) {
+            const { readEvaluatedPermissionQuery, answerPermissionQueryAsAdmin } = await import(
+              './admin-has-permission-endpoint.js'
+            );
+            // Parse from a CLONE: on the delegate path below the original
+            // request body must reach the vendor undisturbed.
+            let body: unknown;
+            try {
+              body = await c.req.raw.clone().json();
+            } catch {
+              body = undefined; // unreadable → the vendor's own 400, below
+            }
+            const query = readEvaluatedPermissionQuery(body);
+            if (query) {
+              const answer = await answerPermissionQueryAsAdmin(
+                { getAuthContext: () => this.authManager!.getAuthContext() },
+                String(user.id),
+                query,
+              );
+              return c.json(answer, 200);
+            }
+          }
+          return await this.authManager!.handleRequest(c.req.raw);
+        } catch (error) {
+          const err = error instanceof Error ? error : new Error(String(error));
+          ctx.logger.error('[AuthPlugin] admin/has-permission failed', err);
           return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: err.message } }, 500);
         }
       });
