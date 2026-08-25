@@ -20,6 +20,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { SettingsService } from './settings-service.js';
+import { UnknownKeyError } from './settings-service.types.js';
 
 // WHERE-matcher gate: implement exactly the combinators the service emits and
 // THROW on the rest — a bare field-equality read of `$or` would silently match
@@ -116,6 +117,42 @@ describe('[#10826] SettingsService.getMany', () => {
     const { svc } = await makeService();
     await expect(svc.getMany('localization', ['timezone', 'nope'])).rejects.toThrow(/nope/);
     await expect(svc.get('localization', 'nope')).rejects.toThrow(/nope/);
+  });
+
+  // [#11680] The rule the doc comment now states, pinned as a PROPERTY rather
+  // than as "it throws": the refusal is TOTAL (no partial Record), it lands
+  // BEFORE any row load, and it is the one input on which `getMany` and N
+  // per-key `get()` calls part ways. The sibling above asserts only that the
+  // message names the bad key — which stays green whatever the blast radius is.
+  it('one undeclared key rejects the WHOLE call — before any row load, no partial result', async () => {
+    const { svc, engine } = await makeService();
+    engine.find.mockClear();
+
+    const err: unknown = await svc
+      .getMany('localization', ['timezone', 'currency', 'nope'])
+      .then(() => null, (e: unknown) => e);
+
+    // The envelope, not just the throw. This is a service-layer error class:
+    // it carries `code` and no `status` (no HTTP boundary here), so `code` is
+    // the whole machine-readable envelope there is to assert.
+    expect(err).toBeInstanceOf(UnknownKeyError);
+    expect((err as UnknownKeyError).code).toBe('SETTINGS_UNKNOWN_KEY');
+    expect((err as Error).message).toMatch(
+      /Key 'nope' is not declared in manifest 'localization'/,
+    );
+
+    // TOTAL and UP-FRONT: the two DECLARED keys were neither answered nor even
+    // loaded — validation runs ahead of the grouped `loadRows`.
+    expect(engine.find).toHaveBeenCalledTimes(0);
+
+    // ...and here is the non-equivalence: per-key `get()` still answers every
+    // declared key on the same input; only the undeclared one throws. Asserted
+    // on the resolved cascade LAYER, not on the literal — this fixture stores
+    // JSON text in `value` while the service persists values verbatim, so a
+    // literal here would pin the fixture's encoding rather than the rule.
+    expect((await svc.get('localization', 'timezone')).source).toBe('global');
+    expect((await svc.get('localization', 'currency')).source).toBe('tenant');
+    await expect(svc.get('localization', 'nope')).rejects.toBeInstanceOf(UnknownKeyError);
   });
 
   it('getNamespace resolves through the grouped path with unchanged answers', async () => {

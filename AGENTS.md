@@ -219,8 +219,8 @@ localStorage / auth gotchas.
 11. **Worktree-first — never edit on the shared `main` checkout.** This repo is edited by **multiple agents at once**;
     the shared tree has its HEAD switched and reset *under you*, silently clobbering uncommitted work — a feature
     branch on the *shared* checkout is **not** enough (it still gets switched under you). Before your **first file
-    edit**, be in a dedicated worktree on a feature branch:
-    `git worktree add ../objectstack-<task> -b <branch> main && cd ../objectstack-<task> && pnpm install`. Two
+    edit**, be in a dedicated worktree on a feature branch: `git fetch origin main &&
+    git worktree add ../objectstack-<task> -b <branch> origin/main && cd ../objectstack-<task> && pnpm install`. Two
     PreToolUse hooks **enforce** this — `.claude/hooks/guard-main-checkout.sh` blocks `Edit`/`Write`/`NotebookEdit`,
     and `.claude/hooks/guard-main-checkout-bash.sh` blocks the identical write arriving through **Bash** (`>`/`>>`
     redirection, `sed -i`, `perl -i`, `tee`, `cp`, `mv`, `rm`, `touch`) — and both check the **target file's own
@@ -323,15 +323,16 @@ localStorage / auth gotchas.
     readable by every seat — which is why it lives here, not only in a lane-specific skill file. **Release-adjacent
     work stays open to every seat.** The release board, `.objectui-sha` pin bumps, version reconciliation, writing
     changesets, compiling release notes when asked, and *verifying* release state (`npm view`, `git ls-remote --tags`)
-    are ordinary tasks. What is reserved is the **release act itself**: ⛔ running `changeset publish` /
-    `pnpm run release`, ⛔ pushing a version tag, ⛔ cutting a GitHub Release, ⛔ pushing a runtime image, ⛔
+    are ordinary tasks. What is reserved is the **release act itself**: ⛔ running `changeset publish` / `pnpm run
+    release`, ⛔ pushing a version tag, ⛔ cutting a GitHub Release, ⛔ pushing a runtime image, ⛔
     `workflow_dispatch`-ing `release.yml` or any other publish-capable workflow, ⛔ **approving a pending `release`
     environment deployment** (ADR-0125 — since 2026-08-20 that click IS the publish authorisation, and a deployment
     waiting for hours is the system working, not a state you clear), and ⛔ merging — or queueing, or arming
     auto-merge on — the **Version Packages** PR (`chore: version packages`). That PR is bot-authored and standing-open
-    by design: it is regenerated on every push to `main`, so "green, current, and nobody has objected" is its permanent
-    resting state, not a signal that it is due. When you find a publish nobody ordered — a tag or an npm version that
-    simply appeared — ⛔ do not "repair" it with a counter-publish: file it as an incident for the maintainer.
+    by design: it is regenerated six-hourly by `release.yml`'s `version-pr` job — never on a push to `main`; push
+    drives the publish lane — so "green, current, and nobody has objected" is its permanent resting state, not a
+    signal that it is due. When you find a publish nobody ordered — a tag or an npm version that simply appeared —
+    ⛔ do not "repair" it with a counter-publish: file it as an incident for the maintainer.
 
     **The precedent is that the mechanical channel fires with nobody deciding to use it.** The release workflow's
     `on: push` lane once shipped a full release candidate end to end — 69 packages to npm, tags, GitHub Releases,
@@ -354,9 +355,9 @@ localStorage / auth gotchas.
 ## Multi-agent working discipline
 
 This repo is worked on by **multiple agents in parallel**. **Use one git worktree per
-agent/task** (`git worktree add ../objectstack-<task> -b <branch>`; run `pnpm install` in
-the new tree) so file systems are physically isolated — mandatory, not a preference (Prime
-Directive #11), and hook-enforced. Working in the shared `main` checkout is *not* a
+agent/task** (`git fetch origin main && git worktree add ../objectstack-<task> -b <branch>
+origin/main`; run `pnpm install` in the new tree) so file systems are physically isolated —
+mandatory, not a preference (Prime Directive #11), and hook-enforced. Working in the shared `main` checkout is *not* a
 supported fallback: branches get switched and shared files — including ones you just wrote
 — get reset *under you* mid-task (full sessions were silently reverted before enforcement).
 

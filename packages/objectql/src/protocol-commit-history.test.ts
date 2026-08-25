@@ -8,6 +8,8 @@ import { SchemaRegistry } from './registry.js';
 // refuses.
 import { assertEngineDeleteDispatch } from './engine-delete-dispatch.js';
 import { assertEngineUpdateDispatch } from './engine-update-dispatch.js';
+import { assertEngineFindOnePredicate } from './engine-findone-predicate.js';
+import type { EngineFindOneQueryInput } from './engine-findone-predicate.js';
 
 /**
  * ADR-0067 — package-scoped commit history & rollback.
@@ -42,6 +44,12 @@ function makeFakeEngine(seedCommits: any[] = []) {
       return [];
     }),
     findOne: vi.fn(async (table: string, q: any) => {
+        // [#11957] Pinned to ObjectQL.findOne's OWN #4419 predicate: `findOne`
+        // applies limit: 1, so a query naming no record returns an ARBITRARY row
+        // and the engine REFUSES it. A double that answers it anyway is how
+        // #11767 shipped a bootstrap bypass that was inert on every real
+        // deployment while a 641-line unit matrix stayed green.
+        assertEngineFindOnePredicate(table, q);
       if (table === 'sys_metadata_commit') return commits.find((c) => c.id === q.where.id) ?? null;
       return null; // no active sys_metadata rows by default
     }),
@@ -187,7 +195,10 @@ describe('ADR-0067 — publishPackageDrafts records a commit', () => {
     const commits: any[] = [];
     const engine: any = {
       insert: vi.fn(async (t: string, d: any) => { if (t === 'sys_metadata_commit') commits.push(d); }),
-      findOne: vi.fn(async () => null), // no active rows → every draft is a CREATE
+      findOne: vi.fn(async (table: string, query?: EngineFindOneQueryInput) => {
+        assertEngineFindOnePredicate(table, query);
+        return null; // no active rows → every draft is a CREATE
+      }),
       find: vi.fn(async () => []),
     };
     const protocol = new ObjectStackProtocolImplementation(engine as never);
@@ -340,6 +351,7 @@ function makeRealRepoHarness(seedCommits: any[] = [], opts: { controlPlane?: boo
   const engine: any = {
     registry,
     async findOne(table: string, opts: { where: Record<string, unknown> }) {
+        assertEngineFindOnePredicate(table, opts);
       if (table === 'sys_metadata_commit') return commits.find((c) => matchesWhere(c, opts.where)) ?? null;
       if (table === 'sys_metadata_history') return historyRows.find((h) => matchesWhere(h, opts.where)) ?? null;
       if (table !== 'sys_metadata') return null;

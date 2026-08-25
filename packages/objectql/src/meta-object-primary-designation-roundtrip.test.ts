@@ -61,6 +61,7 @@ import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objects
 // against what the platform would derive rather than against a transcription.
 import { provisionPrimary } from '@objectstack/spec/data';
 import { SchemaRegistry } from './registry.js';
+import { assertEngineFindOnePredicate } from './engine-findone-predicate.js';
 
 interface Row {
     id: string;
@@ -120,6 +121,12 @@ function makeHost() {
     const engine: any = {
         registry,
         async findOne(_t: string, o: { where: Record<string, unknown> }) {
+            // [#11957] Pinned to ObjectQL.findOne's OWN #4419 predicate: `findOne`
+            // applies limit: 1, so a query naming no record returns an ARBITRARY row
+            // and the engine REFUSES it. A double that answers it anyway is how
+            // #11767 shipped a bootstrap bypass that was inert on every real
+            // deployment while a 641-line unit matrix stayed green.
+            assertEngineFindOnePredicate(_t, o);
             return findRow(o.where)?.row ?? null;
         },
         async find(_t: string, o: { where: Record<string, unknown> }) {
