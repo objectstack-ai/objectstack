@@ -9,7 +9,9 @@ export const entry: SemanticMigration = {
     + '`BOUNDED_STRING_FIELD_TYPES` (`boolean`, `lookup`, `autonumber`, `formula`, `select`, '
     + '`json`, `secret`, …)',
   replacement: 'a positive-integer `minLength` (>= 1) on a bounded-string field type — `text`, '
-    + '`textarea`, `email`, `url`, `phone`, `password`, `markdown`, `html`, `richtext`, `code` '
+    + '`textarea`, `email`, `url`, `phone`, `password`, `markdown`, `html`, `richtext`, `code`, '
+    + '`signature`, `qrcode` (the twelve-member `BOUNDED_STRING_FIELD_TYPES` set; '
+    + '`signature`/`qrcode` joined in #11875) '
     + '— or no declaration at all ("no minimum" is expressed by OMITTING the key, never by '
     + '`minLength: 0`). Deleting the key is mechanical and behaviour-preserving for a '
     + 'MISPLACED declaration (the write-time validator only ever applied `min_length` inside '

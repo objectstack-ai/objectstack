@@ -122,15 +122,18 @@ export const objectForm = defineForm({
             { field: 'placeholder', type: 'text', helpText: 'Hint text shown inside the empty input; disappears once a value is entered' },
 
             // Text constraints
-            // #11566 — aligned to the ten bounded-string types the schema
-            // accepts `maxLength` on (BOUNDED_STRING_FIELD_TYPES — the
-            // write-time validator's list; maintainer ruling 2026-08-24).
-            // `code` was the one this list was missing.
-            { field: 'maxLength', type: 'number', helpText: 'Max characters', visibleWhen: "data.type in ['text','textarea','email','url','phone','password','markdown','html','richtext','code']" },
-            // #11949 — `minLength` aligned to the same ten (maintainer ruling
-            // 2026-08-25: the #11566 template applies in full). `code` was the
-            // one this row was missing.
-            { field: 'minLength', type: 'number', helpText: 'Min characters', visibleWhen: "data.type in ['text','textarea','email','url','phone','password','markdown','html','richtext','code']" },
+            // #11566 — aligned to the bounded-string types the schema accepts
+            // `maxLength` on (BOUNDED_STRING_FIELD_TYPES — the write-time
+            // validator's list; maintainer ruling 2026-08-24). `code` was the
+            // one this list was missing. #11875 added `signature`/`qrcode`
+            // (the write seam now enforces their declared bound); this
+            // visibleWhen moves with the set.
+            { field: 'maxLength', type: 'number', helpText: 'Max characters', visibleWhen: "data.type in ['text','textarea','email','url','phone','password','markdown','html','richtext','code','signature','qrcode']" },
+            // #11949 — `minLength` aligned to the same set (maintainer ruling
+            // 2026-08-25: the #11566 template applies in full). This row used
+            // to stop at 9 types (`code` was the one it was missing); it moves
+            // with the set, exactly like the row above.
+            { field: 'minLength', type: 'number', helpText: 'Min characters', visibleWhen: "data.type in ['text','textarea','email','url','phone','password','markdown','html','richtext','code','signature','qrcode']" },
 
             // Numeric constraints
             { field: 'min', type: 'number', helpText: 'Minimum value', visibleWhen: "data.type in ['number','currency','percent','rating','slider','progress']" },
