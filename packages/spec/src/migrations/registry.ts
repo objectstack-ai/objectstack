@@ -5195,7 +5195,19 @@ const step18: MigrationStep = {
     'never consulted (zero value reads; the only non-test occurrences were the ' +
     'schema declaration and two type positions). The `kind` bucket itself and its ' +
     '`id` are untouched; file-type discovery stays single-channel on `filePatterns`. ' +
-    'D3 semantic `plugin-manifest-kind-globs-retired`, same no-seam reasoning.',
+    'D3 semantic `plugin-manifest-kind-globs-retired`, same no-seam reasoning. ' +
+    'Finally, it retires `object-grid`\'s `defaultSort` (#11805, ADR-0049 enforce-or-remove; ' +
+    'maintainer ruling 2026-08-25, decision-inbox batch 4 — the producer half of ' +
+    'objectui#5861, under the objectui#4869 「接受所有」 direction): the legacy second ' +
+    'spelling of `sort`, a single `{ field, order }` pair the renderer read only when ' +
+    '`sort` was absent (measured at the `.objectui-sha` pin `190fbd01d`, ' +
+    '`plugin-grid/src/ObjectGrid.tsx:1244-1246` and `:2847`, which wraps it ' +
+    '`[schema.defaultSort]` — the exact array shape `sort` carries). One intent, two ' +
+    'spellings; objectui\'s mirror schema is parity-test-only and parses nothing at ' +
+    'runtime, so only the spec strictObject can refuse the key. The mechanical ' +
+    'conversion carries the pair over — renamed to `sort` and wrapped in the array ' +
+    'shape — when `sort` is absent, and strips it as a pure lossless delete when ' +
+    '`sort` is present (the renderer\'s own precedence made it unread then).',
   conversionIds: [
     'field-malformed-scale-precision-removed',
     'record-chatter-position-vocabulary',
@@ -5208,6 +5220,7 @@ const step18: MigrationStep = {
     'mapping-lookup-params-removed',
     'translation-component-submit-label-removed',
     'page-component-responsive-removed',
+    'object-grid-default-sort-removed',
   ],
   semantic: [
     // One file per entry under `entries/semantic/`, concatenated here sorted by
@@ -7352,6 +7365,29 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // `element-input-target-variable-removed` (a page component IS a stack
     // collection member, unlike the `kernel/Manifest:loading` family).
     'ui/ElementTextInputProps:targetVariable',
+    // #11805 — ADR-0049 enforce-or-remove (maintainer ruling 2026-08-25,
+    // decision-inbox batch 4: 「#11805 退役 defaultSort,不需要major」; the producer
+    // half of objectui#5861, under the objectui#4869 「接受所有」 direction).
+    // `defaultSort` was the legacy second spelling of `object-grid`'s `sort`: a
+    // single `{ field, order }` pair the renderer read only when `sort` was absent
+    // (measured at the `.objectui-sha` pin `190fbd01d`,
+    // `plugin-grid/src/ObjectGrid.tsx:1244-1246` fetch fallback and `:2847`, which
+    // wraps it `[schema.defaultSort]` — the exact array shape `sort` carries). One
+    // intent, two spellings; objectui's mirror schema is parity-test-only and
+    // parses nothing at runtime, so only this repo's strictObject can refuse the
+    // key. Zero authored occurrences in either repo's corpora (the card's
+    // measurement, re-run here at dispatch).
+    //
+    // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
+    // removal ships on the 17.x line (launch-window convention: accept-set
+    // narrowings ride minor releases) and the prescription lives at the major
+    // boundary where `migrate meta` users look (the #8495 / PR #8666 precedent,
+    // as `data/Metric:filters` before it). Tombstoned with `retiredKey()` in
+    // `ObjectGridPropsSchema` (the surface baseline line carries `[RETIRED]`);
+    // sources are rewritten by the D2 conversion `object-grid-default-sort-removed`
+    // (wrap-and-rename to `sort: [pair]` when `sort` is absent; a pure lossless
+    // delete when `sort` is present, since the fallback was never read then).
+    'ui/ObjectGridProps:defaultSort',
     // #11027 — ADR-0049 enforce-or-remove (maintainer ruling 2026-08-22, ruled B:
     // retire + repair the redirect texts in the same change). The LAST carrier of
     // the `ResponsiveConfig` layout block, and the destination the
