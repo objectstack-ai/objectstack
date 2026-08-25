@@ -1071,6 +1071,32 @@ jobs:
       - name: Docs anchors resolve to real headings
         run: pnpm check:doc-anchors
 
+      # #12236 one <h1> per doc page. `DocsTitle` renders the frontmatter `title`
+      # as the page's <h1> unconditionally (apps/docs/app/[lang]/docs/[[...slug]]/
+      # page.tsx), so a body-level `# ` heading compiles to a SECOND one inside
+      # `DocsBody`. Measured on the dev server at /docs/data-modeling/objects
+      # before the sweep: two <h1>, both reading "Object Metadata". 195 of the 403
+      # pages were in that state, 138 of them with the two <h1> identical.
+      #
+      # It lives next to check:doc-anchors because the two share the corpus and
+      # the heading model — this gate imports `stripFrontmatter` and
+      # `flattenHeadingText` from that one rather than re-modelling either, which
+      # is what makes the delete-vs-demote remedy right on the nine pages whose
+      # two headings differ only by inline code markup.
+      #
+      # The gate strips FENCED CODE before looking for a heading, and that is the
+      # load-bearing half: a naive `^# ` scan reports 205 files, ten of which are
+      # shell/YAML comments inside working examples. A fence-blind rule does not
+      # over-report by ten, it instructs the fixer to corrupt ten snippets.
+      #
+      # Two subtrees are excluded, each with a named owner (#12249 generated
+      # reference pages, #12250 release notes) and each self-retiring: the gate
+      # FAILS with DEAD-EXCLUSION when an excluded tree becomes clean, so the
+      # carve-outs cannot outlive their reasons. A run that judges zero pages
+      # fails too (#4690).
+      - name: One `<h1>` per docs page
+        run: pnpm check:docs-single-h1
+
       # #9014 docs redirects: `apps/docs/redirects.mjs` is a 92-entry table of
       # PERMANENT (308) redirects, and before this step nothing in the repo read
       # it — `dispatch-gates.mjs apps/docs/redirects.mjs` named no family over 99
