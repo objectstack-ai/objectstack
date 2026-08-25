@@ -104,8 +104,8 @@
 //   node scripts/check-ratchet-remedy-authority.mjs --self-test  # the detector's own rules
 
 import { readFileSync, readdirSync } from 'node:fs';
-import { join, dirname, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { join, dirname, resolve, relative } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import process from 'node:process';
 import { isEntrypoint } from './invoked-as.mjs';
 
@@ -114,6 +114,90 @@ const REPO_ROOT = resolve(HERE, '..');
 const SCRIPTS_DIR = join(REPO_ROOT, 'scripts');
 const SELF_FILE = 'check-ratchet-remedy-authority.mjs';
 const SELF = `scripts/${SELF_FILE}`;
+
+/**
+ * This sweep's population, written in the spelling `scripts/pm/dispatch-gates.mjs`
+ * compares in. Provenance ONLY: nothing in this gate reads this array — the sweep
+ * reads {@link SCRIPTS_DIR} — and the run behaves exactly as it did without it.
+ *
+ * ## The gap this closes (the #9964 declaration pattern)
+ *
+ * That tool builds every dispatch's gate list by scanning each gate's own source
+ * for the path literals it operates on, and "looks like a path" there means
+ * "carries a separator". This gate's population is ASSEMBLED — `join(REPO_ROOT,
+ * …)` over a bare word — so no separator ever reaches the source, and
+ * `extractWatchHints` returned an EMPTY set for this file. The family therefore
+ * landed in the derivation's `Undetermined (source names no path at all — NOT
+ * known irrelevant)` bucket, 54 families deep, where a dispatch prompt that says
+ * "run every matched family" turns an honest bucket into an unrun one.
+ *
+ * It bites in exactly the wrong place. This gate is REQUIRED (lint.yml, "Type
+ * Check · source gates") and its population is GATE SCRIPTS — so the card most
+ * likely to violate it, one that adds or edits a gate's author-facing remedy, is
+ * precisely the card whose derived list omitted it. Measured, not hypothetical:
+ * a corpus rule added to check-doc-authoring.mjs offered a registry path in its
+ * failure text, derived 14 families, ran all 14 green locally, and met this gate
+ * as red CI after the report was already filed.
+ *
+ * Note the asymmetry that hid it for so long: the family DOES appear once a diff
+ * touches THIS file, through the derivation's gate-script arm. So a card fixing
+ * this gate sees the family for a reason that has nothing to do with the fix, and
+ * every other card does not see it at all.
+ *
+ * ## Why a separator, and never the bare word
+ *
+ * `hintCovers` refuses a bare single-segment literal as too generic BY DESIGN,
+ * and the refusal is measured rather than incidental: teaching the extractor to
+ * accept bare top-level directory words was priced at +139084 fabricated (gate,
+ * file) pairs, because `packages`, `apps` and `examples` are path COMPONENTS in
+ * dozens of gates that never read those roots. A declared path is a different
+ * claim — an author stating what this gate reads.
+ *
+ * ## Why the SINGLE star, and not the subtree spelling
+ *
+ * The copyable idiom is the subtree form `<root>/**` — check-role-word.mjs
+ * (`skills/**`), check-examples-live-imports.mjs (`examples/**`),
+ * check-parse-guard.mjs (`scripts/**`). Every one of those gates WALKS its root
+ * recursively, and their declarations are true because of it.
+ *
+ * This gate does not walk. {@link corpusFiles} is a FLAT `readdirSync` with no
+ * recursion, so the population is the top layer of the scripts root and nothing
+ * below it: 141 files today, against 89 tracked files under nine subdirectories
+ * (pm, qa, codemod, docs-audit, fixtures, migrate, bench, adr-anchors,
+ * analytics-reconcile) that this sweep never opens. The subtree spelling would
+ * therefore be the "declared a root the gate does not read WHOLESALE" error,
+ * which this repo prices ABOVE a missing declaration and has refused before by
+ * name: the bare-root ledger in the pm directory records `check:published-files`
+ * discharged BY CONSTRUCTION rather than by declaration, on the finding that a
+ * subtree declaration for it "would have been false" and would have named the
+ * gate for every scripts edit it does not read.
+ *
+ * The single star states what this sweep really reaches, and it agrees with the
+ * population this file's own header already names, `scripts/*.{mjs,mts}` — a
+ * subtree declaration sitting in a file whose header spells a flat glob would be
+ * a declaration drifting from its own scan, which is worse than none: it
+ * replaces a silent gate with a lying one.
+ *
+ * ## What the star does NOT buy — stated so nobody re-derives it as a defect
+ *
+ * `collapseHint` collapses globs BY DELETION, so this hint and the subtree form
+ * both reduce to the same bare root and match IDENTICALLY, subdirectory files
+ * included. The choice of star therefore changes no verdict the tool reaches; it
+ * changes what this file CLAIMS. The reach that remains past the swept layer is
+ * the extractor's own decided collapse — its docblock argues that trade and
+ * pins both directions of it — and not a claim by this gate. The self-test below
+ * pins that residual as a measured, bounded fact rather than leaving it to be
+ * rediscovered as a surprise.
+ *
+ * ## Provenance, never a lookup key
+ *
+ * The glob form handed to `readdirSync` would name a directory that does not
+ * exist. The self-test derives both directions from {@link SCRIPTS_DIR} and from
+ * {@link corpusFiles} rather than re-spelling the root, and it runs them against
+ * the REAL `hintCovers` — a declaration checked only against a paraphrase of the
+ * extractor is a declaration checked against nothing.
+ */
+const ROOT_DIR_WATCH_HINTS = ['scripts/*'];
 
 /** The compliance token. Byte-identical to every instrumented gate's const. */
 const RATCHET_AUTHORITY_MARKER = '⛔ MAINTAINER-ONLY';
@@ -842,7 +926,7 @@ function main() {
 // approved everything, or a sweep that read nothing, would keep the corpus run
 // green with the convention entirely gone.
 
-function selfTest() {
+async function selfTest() {
   const failures = [];
   const expect = (label, cond) => { if (!cond) failures.push(label); };
 
@@ -1016,6 +1100,95 @@ function selfTest() {
     + 'control is a declaration registry, and its offer-shaped quotes live in comments)',
     results.get(SELF_FILE) !== undefined && results.get(SELF_FILE).verdict === 'excluded');
 
+  // ── (20)-(26) The dispatch-derivation scan surface ────────────────────────
+  //
+  // Enforcement cannot hold ANY of these from inside this file: ROOT_DIR_WATCH_HINTS
+  // is read by another tool entirely, so a wrong, stale or invisible one runs green
+  // here forever and pays itself out as a dev dispatched on a scripts card with this
+  // REQUIRED gate missing from the brief — the exact round trip this declaration
+  // exists to stop. So they are pinned against the REAL extractor, imported here
+  // rather than paraphrased, and every direction is DERIVED from the walked root and
+  // the live corpus rather than re-spelled.
+  //
+  // ⚠️ The module path is assembled from separator-less parts on purpose. A literal
+  // import specifier carrying a separator becomes a watch hint of THIS file — and a
+  // module-relative one collapses to a path the tree does not have, so it would add a
+  // DEAD hint to the very declaration these cases exist to keep honest.
+  const extractor = await import(pathToFileURL(join(HERE, 'pm', 'dispatch-gates.mjs')).href);
+  const { hintCovers, collapseHint, extractWatchHints } = extractor;
+  const walkedRoot = relative(REPO_ROOT, SCRIPTS_DIR);
+  const declaredRoots = ROOT_DIR_WATCH_HINTS.map((h) => collapseHint(h));
+  const corpus = corpusFiles();
+
+  // (20) The load-bearing direction: the extractor must actually SEE this
+  // declaration in this file's source. A constant the scan cannot read is a silent
+  // no-op that looks exactly like a fix, which is the failure this whole block is
+  // insurance against.
+  const ownHints = [...extractWatchHints(readFileSync(join(SCRIPTS_DIR, SELF_FILE), 'utf8'))];
+  expect(`scan surface — the real extractor reads this file's declaration out of this file's own `
+    + `source (it currently sees: ${JSON.stringify(ownHints)})`,
+    ROOT_DIR_WATCH_HINTS.every((h) => ownHints.includes(h)));
+
+  // (21) Positive half: every file the sweep really reads is covered, judged by the
+  // real predicate and derived from the live corpus rather than from a re-spelling.
+  const uncovered = corpus.filter(
+    (f) => !ROOT_DIR_WATCH_HINTS.some((h) => hintCovers(h, [walkedRoot, f].join('/'))),
+  );
+  expect(`scan surface — the declaration covers every file this sweep reads, all ${corpus.length} `
+    + `of them; uncovered: ${uncovered.join(', ') || '(none)'}`,
+    uncovered.length === 0);
+
+  // (22) Negative half, and the one the bare-root ratchet cares about: this file
+  // declares no root it does not walk. A declaration that can drift from the scan is
+  // worse than none — it replaces a silent gate with a lying one.
+  expect(`scan surface — the declaration names no root this gate does not walk `
+    + `(declared: ${JSON.stringify(declaredRoots)}, walked: ${walkedRoot})`,
+    declaredRoots.length > 0 && declaredRoots.every((r) => r === walkedRoot));
+
+  // (23) Why the literal is not simply the walked root: the real predicate REFUSES a
+  // bare single-segment word as too generic, so the separator is load-bearing rather
+  // than decorative. Pinned against the predicate so the reason survives a rewrite.
+  expect('scan surface — the real predicate refuses the bare walked root as too generic, which is '
+    + 'the whole reason the declaration is not spelled as that word',
+    !hintCovers(walkedRoot, [walkedRoot, SELF_FILE].join('/')));
+  expect('scan surface — every declared literal carries the separator that refusal requires',
+    ROOT_DIR_WATCH_HINTS.every((h) => h.includes('/')));
+
+  // (24) The flatness claim the SINGLE star rests on, pinned in BOTH directions so
+  // the depth of the declaration is tied to the depth of the sweep rather than to a
+  // paragraph. Left half: if this sweep ever starts recursing, the corpus grows
+  // separator-carrying entries and this fires — the moment the subtree spelling
+  // becomes the true one and this one stops being it. Right half: while the sweep is
+  // flat, the declaration must not be "upgraded" to the subtree form to look more
+  // like the copyable idiom. Glob collapse makes the two forms behave identically, so
+  // nothing else in this repo can tell them apart — this assertion is the only thing
+  // standing between the flat sweep and a declaration that overstates it by 89 files.
+  const sweepIsFlat = corpus.every((f) => !f.includes('/'));
+  expect('scan surface — the sweep is FLAT; no corpus entry names a subdirectory',
+    sweepIsFlat);
+  expect('scan surface — a flat sweep is declared with the flat glob, never the subtree form: the '
+    + 'two collapse to the same root and match identically, so the subtree form would silently '
+    + 'claim the nine subdirectories this sweep never opens',
+    sweepIsFlat === ROOT_DIR_WATCH_HINTS.every((h) => !h.includes('**')));
+
+  // (25) The residual, measured rather than assumed. Glob collapse is by deletion, so
+  // the declared form reaches subdirectory files this sweep never opens. That reach
+  // belongs to the extractor's decided collapse, not to this declaration; it is
+  // recorded here so it is a known bounded fact instead of tomorrow's discovery.
+  const belowTheLayer = [walkedRoot, 'pm', 'dispatch-gates.mjs'].join('/');
+  expect('scan surface — the residual is the extractor collapse, not a claim of this file: the '
+    + 'declared form still reaches below the swept layer, and the swept corpus does not contain '
+    + 'that file',
+    ROOT_DIR_WATCH_HINTS.some((h) => hintCovers(h, belowTheLayer))
+      && !corpus.includes(belowTheLayer));
+
+  // (26) Provenance, never a lookup key: the declared form must not be mistaken for
+  // the directory the sweep opens. Handing the glob to readdirSync would name a
+  // directory that does not exist.
+  expect('scan surface — the declared form is NOT the walk root itself, so it cannot be read back '
+    + 'as the directory this sweep opens',
+    !ROOT_DIR_WATCH_HINTS.includes(walkedRoot) && !ROOT_DIR_WATCH_HINTS.includes(SCRIPTS_DIR));
+
   if (failures.length > 0) {
     for (const f of failures) console.error(`  x self-test: ${f}`);
     console.error(`\ncheck-ratchet-remedy-authority --self-test: ${failures.length} failure(s).\n`);
@@ -1024,8 +1197,9 @@ function selfTest() {
   console.log(
     'OK  self-test: the lexer holds, messages are bounded, both offer word orders and path-named '
     + 'registries are reached, declaration registries are not, the authority token cannot anchor '
-    + 'itself, refusal is told apart from discouragement, and the sweep still reaches every known '
-    + 'instance.',
+    + 'itself, refusal is told apart from discouragement, the sweep still reaches every known '
+    + 'instance, and the dispatch-derivation scan surface is declared for the layer this sweep '
+    + 'really reads and for no other — judged by the real extractor, not by a paraphrase of it.',
   );
   process.exit(0);
 }
@@ -1035,6 +1209,13 @@ const invokedDirectly = isEntrypoint(import.meta.url);
 
 if (!invokedDirectly) {
   // imported as a module — expose the exports and do nothing else
-} else if (process.argv.includes('--self-test')) selfTest();
-else if (process.argv.includes('--list')) list();
+} else if (process.argv.includes('--self-test')) {
+  // The self-test reads the REAL extractor, which is an ESM import, so it is async.
+  // A rejection must be a RED gate naming itself — never an unhandled rejection whose
+  // exit status depends on the runtime's mood.
+  selfTest().catch((err) => {
+    console.error(`check-ratchet-remedy-authority --self-test: ${err?.stack || err}`);
+    process.exit(1);
+  });
+} else if (process.argv.includes('--list')) list();
 else main();
