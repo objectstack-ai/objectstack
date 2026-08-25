@@ -124,7 +124,56 @@
 //   The per-spawn cost is module-graph EXECUTION, not compilation.
 //
 // So the work is real, the price is fair, and nothing contained in this package
-// removes it without changing what the e2e tests assert. Swapping the spawns to
+// removes it without changing what the e2e tests assert.
+//
+// ## THE `test` BLOCK THAT NOW EXISTS, AND WHY IT IS NOT THE ONE REFUSED ABOVE
+//
+// #11775 added `test.server.deps.external`. Everything above still stands: the
+// block deliberately sets NOTHING that has a default a test file can observe —
+// no `globals`, no `environment`, no `pool`, no `isolate`, no `maxWorkers`. It
+// is not a performance lever (the section above measured those and rejected
+// them), and adding it changed no test's configuration except the resolution of
+// one dependency.
+//
+// WHAT IT DOES. Vitest's default `server.deps.external` is `[/\/node_modules\//]`,
+// evaluated against a module's REALPATH. A pnpm-linked workspace package's
+// realpath is the package directory itself — `packages/types/dist/node.mjs` —
+// which contains no `/node_modules/` segment, so every workspace dependency is
+// INLINED, even one reached through `exports` to `dist/`. Vite then rewrites the
+// `import()` written inside it to `__vite_ssr_dynamic_import__`, which resolves
+// from the vitest root instead of from the module physically containing the
+// call. Node ESM does the opposite: it anchors a bare specifier at the
+// containing module. `@objectstack/types/node`'s `createHostImporter` EXISTS to
+// resolve against a specific base, so under vitest it was measuring a base that
+// had been flattened out from under it (#11412), and the entry below hands that
+// call back to Node.
+//
+// ⚠️ THE PATTERN MUST MATCH THE REALPATH, AND A NAME-SHAPED ONE MATCHES NOTHING
+// — SILENTLY. `/@objectstack[\/]types/` looks like the obvious spelling and is
+// the trap: the realpath carries neither the package name nor `/node_modules/`,
+// so that pattern matches zero modules and the experiment reads as
+// "externalising does not help" rather than as "the pattern was wrong". #11775
+// was first measured wrong for exactly that reason. Anything edited here needs a
+// POSITIVE CONTROL that the pattern matches something — a pattern that matches
+// nothing and a mechanism that does not work are indistinguishable from the
+// outcome alone.
+//
+// ⚠️ IT DOES NOT FIGHT THE `resolve.alias` ENTRIES ABOVE, by construction.
+// `resolve.alias` acts in the RESOLVE phase, so an aliased specifier is already
+// an absolute `…/src/…` path before this predicate is consulted, and a `/dist/`
+// pattern cannot match a `src/` path. That is not a coincidence to be preserved
+// by care: `check:test-source-alias` FAILS any alias whose winning entry does
+// not land under `src/`, so the gate that was assumed to be in tension with this
+// entry is the same gate that keeps the two disjoint. Measured, not argued — see
+// `test/vitest-resolution-base-collapse.e2e.test.ts`.
+//
+// COSTS, so the next person extending this list knows what they buy: an
+// externalised package cannot be `vi.mock`ed and is not instrumented for
+// coverage. Both were checked against this package when the entry landed —
+// `packages/cli` has no `vi.mock` of `@objectstack/types` (its only mock targets
+// are `../utils/optional-package.js`, `node:fs/promises` and
+// `@objectstack/cloud-connection`) — but neither is free, and a package added
+// here later must be re-checked for both. Swapping the spawns to
 // the built entry would halve per-spawn boot and is exactly the source-vs-dist
 // trade `scripts/check-test-source-alias.mjs` exists to refuse — see the note
 // above on why a test that passes GREEN against a stale artifact is the
@@ -167,5 +216,12 @@ export default defineConfig({
         replacement: path.resolve(__dirname, '../plugins/plugin-auth/src/index.ts'),
       },
     ],
+  },
+  test: {
+    server: {
+      deps: {
+        external: [/packages[\/]types[\/]dist/],
+      },
+    },
   },
 });
