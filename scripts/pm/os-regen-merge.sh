@@ -65,7 +65,44 @@ echo "→ fetching origin/main"
 git fetch origin main
 
 # The single authoritative list, read at run time.
-mapfile -t regen_paths < <(grep 'merge=os-regen' .gitattributes | awk '{print $1}')
+#
+# READ LOOP, NOT `mapfile` — THE BASH 3.2 FLOOR. `mapfile`/`readarray` are bash
+# 4 builtins and `/usr/bin/env bash` is bash 3.2.57 on macOS (Apple ships no
+# bash 4+, for licensing reasons). This script is run BY HAND, in an agent's or
+# a maintainer's worktree, and it has no CI path at all — nothing in
+# `.github/workflows/` invokes it — so a bash-4 builtin here does not fail on a
+# fringe host, it fails on the ordinary one, and no CI run can ever say so.
+# Measured with the builtin disabled (`enable -n mapfile readarray` via
+# `BASH_ENV`, which reproduces the macOS symptom byte for byte):
+# `mapfile: command not found`, then `set -e` kills the run at status 127 —
+# AFTER `git fetch origin main` and BEFORE step 1, i.e. with the merge sequence
+# whose ORDER is this script's entire reason for existing not begun. The
+# operator is left to perform steps 1–3 by hand, which is the trap the script
+# was written to remove.
+#
+# Keep this loop bash-3.2-clean: no `mapfile`, no `readarray`, no `declare -A`,
+# no `${x^^}`/`${x,,}`. Two details are load-bearing and neither is obvious:
+#
+#   `regen_paths=()` BEFORE the loop. Under `set -u` a loop that appends
+#   nothing never creates the array at all, so `${#regen_paths[@]}` below
+#   aborts with `unbound variable` — and "grep matched nothing" is precisely
+#   the case the refusal below exists to REPORT. Measured: without the
+#   declaration the empty input dies at `regen_paths: unbound variable`; with
+#   it, `count=0` and the refusal prints.
+#
+#   `if [[ -n … ]]; then …; fi`, not a trailing `[[ -n … ]] && …`. Measured:
+#   with the `&&` form the `while` takes status 1 whenever the LAST line read
+#   fails the test, and under `set -e` that kills the caller the moment such a
+#   loop is the last command of a function — silently correct today, a landmine
+#   for the next refactor. The `if` form returns 0 on the same input. (This is
+#   the form #12142 standardised; its own note attributes the trap to the empty
+#   list, which measures clean — an all-empty read leaves the body unexecuted
+#   and the `while` at status 0.)
+regen_paths=()
+regen_line=''
+while IFS= read -r regen_line; do
+  if [[ -n "$regen_line" ]]; then regen_paths+=("$regen_line"); fi
+done < <(grep 'merge=os-regen' .gitattributes | awk '{print $1}')
 if [ "${#regen_paths[@]}" -eq 0 ]; then
   echo "✗ no merge=os-regen entries found in .gitattributes — refusing to guess" >&2
   exit 1
