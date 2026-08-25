@@ -235,6 +235,24 @@ const TRIAGE = new Map([
       + 'fix for #11647 gave the literal a population-constant name, so this row records a '
       + 'population that was previously unnameable rather than one the fix introduced',
   }],
+  ['check:i18n-stale-fill PACKAGES_DIR packages', {
+    verdict: 'REFUSE-UNSPELLABLE',
+    why: 'the THIRD gate on this list to reach its population through the shared '
+      + 'findExtractConfigs walk, so it is refused with the two above rather than judged apart — '
+      + 'files named i18n-extract.config.ts beneath a scripts segment, 9 of 5185 (0.17%). The walk '
+      + 'IS recursive across the root, which is not the question these verdicts ask: what it '
+      + 'ADMITS is a filename-and-segment test, and that is the unspellable shape. Re-measured '
+      + 'here rather than inherited from the sibling rows — both star spellings of the real '
+      + 'population collapse to the same malformed double-separator prefix, which hintCovers was '
+      + 'checked against a real config path and matched NOTHING, while the only spellings that '
+      + 'cover anything collapse to the bare root. So the choice is a live hint over zero files or '
+      + 'a hint over 5185 files to reach 9. This gate additionally READS the 40 committed bundle '
+      + 'files, but it reaches those through each config docstring and its documented out flag, '
+      + 'never through this walk, so they widen what it opens and not what this constant names. '
+      + 'The miss is smaller than the row for the same reason its siblings record: the cards that '
+      + 'can actually strand a leaf reach this gate through the convention trigger for a package '
+      + 'owning an extract config, which #11671 extended to name this gate alongside check:i18n',
+  }],
   ['scripts/check-skills-token-ratchet.mjs SKILLS_DIR skills', {
     verdict: 'REFUSE-UNSPELLABLE',
     why: 'one named file per child directory, 11 of 50 (22%). It already reaches its own cards '
