@@ -1,6 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
+import { SYS_ACTIVITY_BUILTIN_TYPES } from '@objectstack/spec/data';
 import { SysActivity } from './index.js';
 
 /**
@@ -92,6 +93,21 @@ import { SysActivity } from './index.js';
  * that map has since been widened past the declaration to cover values a shipped
  * producer measurably writes, so the two key sets are no longer set-equal —
  * recorded from that card, not measured here, for the same reason.
+ *
+ * ## 2026-08-25 — #11807: the built-in set is now PUBLISHED, and this census
+ * pins the spec constant transitively
+ *
+ * The built-in set moved to `SYS_ACTIVITY_BUILTIN_TYPES` in
+ * `@objectstack/spec/data` (feed.zod.ts), and the object declaration spreads it
+ * — one source, readable by the UI packages whose hand-copy drifted (#11522's
+ * `scheduled`). Two consequences here:
+ *
+ *  - The literal census below now transitively pins the SPEC constant: editing
+ *    the published set without redoing the census goes red in this file. That
+ *    is the intended cost — a built-in-set edit is a contract change.
+ *  - A new wiring pin asserts the object's declared options ARE the published
+ *    set, so re-inlining a diverging list in the object (the pre-#11807 shape)
+ *    cannot come back silently.
  */
 
 /**
@@ -206,6 +222,26 @@ describe('sys_activity — the `type` vocabulary is pinned to a writer census (#
         + TYPES_WITH_WRITERS.map(([t, w]) => `  ${t} ← ${w}`).join('\n') + '\n'
         + TYPES_WITHOUT_WRITER_AT_CENSUS.map(([t, s]) => `  ${t} — ${s}`).join('\n'),
     ).toEqual(inventoried);
+  });
+
+  /**
+   * [#11807] The single-source wiring pin. The object spreads
+   * `SYS_ACTIVITY_BUILTIN_TYPES` today, which makes this assertion look
+   * tautological — it is not: it goes red the day someone re-inlines a literal
+   * option list in `sys-activity.object.ts` that diverges from the published
+   * set, which is exactly the hand-copy shape whose drift #11807 retired. With
+   * this pin plus the census above, the chain is closed in both directions:
+   * spec constant === object declaration === writer census.
+   */
+  it('declares exactly the published built-in set — object and spec cannot diverge (#11807)', () => {
+    expect(
+      [...typeValues()].sort(),
+      'sys_activity.type\'s declared options no longer equal SYS_ACTIVITY_BUILTIN_TYPES '
+        + '(@objectstack/spec/data, feed.zod.ts). The published constant is the single '
+        + 'source of the built-in set (#11807): declare the options by spreading it, and '
+        + 'change the set only in the spec (with a changeset + a census redo here), never '
+        + 'by re-inlining a list in the object.',
+    ).toEqual([...SYS_ACTIVITY_BUILTIN_TYPES].sort());
   });
 
   /**

@@ -24,7 +24,7 @@ from `node_modules` — there is no local copy in the skill bundle.
 
 - `node_modules/@objectstack/spec/src/api/errors.zod.ts` — Standardized Error Codes Protocol
 - `node_modules/@objectstack/spec/src/data/date-macros.zod.ts` — Date Macro Tokens — the declarative placeholders the UI substitutes
-- `node_modules/@objectstack/spec/src/data/feed.zod.ts` — Activity-timeline UI config enums.
+- `node_modules/@objectstack/spec/src/data/feed.zod.ts` — Activity-timeline UI config enums, and the `sys_activity.type` built-in set.
 - `node_modules/@objectstack/spec/src/data/field-value.zod.ts` — Field runtime VALUE-shape contract (ADR-0104 D1).
 - `node_modules/@objectstack/spec/src/data/field.zod.ts` — Field Type Enum
 - `node_modules/@objectstack/spec/src/data/filter.zod.ts` — Unified Query DSL Specification

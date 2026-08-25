@@ -1,6 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { ObjectSchema, Field } from '@objectstack/spec/data';
+import { ObjectSchema, Field, SYS_ACTIVITY_BUILTIN_TYPES } from '@objectstack/spec/data';
 
 /**
  * sys_activity — Lightweight Activity Stream
@@ -97,22 +97,19 @@ export const SysActivity = ObjectSchema.create({
      *  - Downstream, every CLOSED map over this vocabulary is now the bug: a
      *    consumer must render an unknown value, not drop the row. (objectui's
      *    feed-kind map is the known one; its pin is a card in that lane.)
+     *
+     * ## Where the built-in set lives (#11807)
+     *
+     * The options below spread `SYS_ACTIVITY_BUILTIN_TYPES` from
+     * `@objectstack/spec/data` (`feed.zod.ts`) — the PUBLISHED single source,
+     * readable by UI packages that cannot depend on this plugin. Do not inline
+     * the list again here: hand-copies are how objectui's census drifted the
+     * day #11522 added `scheduled`. Growing or shrinking the set is a spec
+     * change (with a changeset) plus a census redo in
+     * `sys-activity-type-vocabulary.test.ts`, in the same PR.
      */
     type: Field.select(
-      [
-        'created',
-        'updated',
-        'deleted',
-        'commented',
-        'mentioned',
-        'shared',
-        'assigned',
-        'completed',
-        'scheduled',
-        'login',
-        'logout',
-        'system',
-      ],
+      [...SYS_ACTIVITY_BUILTIN_TYPES],
       {
         label: 'Type',
         description:
