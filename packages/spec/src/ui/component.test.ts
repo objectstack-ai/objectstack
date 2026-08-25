@@ -2121,6 +2121,34 @@ describe('#7751 — object-* block props schemas', () => {
     expect(parsed.filter).toEqual([['owner_id', '=', '{current_user_id}']]);
   });
 
+  it("object-grid `data` takes the ViewDataSchema provider object — the ui#6207 convergence (Option A)", () => {
+    // The #5090-pinned authority: static inline rows are `{ provider: 'value',
+    // items }`. Before the 2026-08-25 ruling this exact value was REFUSED by
+    // this entry ("expected array, received object") while being the
+    // pinned-legal form of the authority the objectui declaration is held to.
+    const inline = ComponentPropsMap['object-grid'].safeParse({
+      data: { provider: 'value', items: [] },
+    });
+    expect(inline.success).toBe(true);
+    // A second arm of the union, to prove the whole discriminated authority is
+    // reachable through this entry rather than one hardcoded branch.
+    const bound = ComponentPropsMap['object-grid'].safeParse({
+      data: { provider: 'object', object: 'showcase_task' },
+    });
+    expect(bound.success).toBe(true);
+  });
+
+  it('the bare-array `data` — the deprecated `staticData` shortcut — is REFUSED at the `data` path', () => {
+    // Reverse verification of the convergence: the value this entry used to
+    // accept (`z.array(z.unknown())`) no longer parses. The #4648 carve-out
+    // already refuses to publish the bare-array author; this closes the spec
+    // entry that still advertised it. Migration:
+    // `object-grid-data-view-data-converged`.
+    const r = ComponentPropsMap['object-grid'].safeParse({ data: [{ id: 1 }] });
+    expect(r.success).toBe(false);
+    expect(r.error!.issues.some((i: { path: (string | number)[] }) => i.path[0] === 'data')).toBe(true);
+  });
+
   it('`defaultFilters` stays HONOURED — it is a read legacy fallback, not an inert spelling', () => {
     // ObjectGrid.tsx reads it and lowers it to `$filter` when `filter` is
     // absent (the routed finding on #7751 verified the read point). Only the

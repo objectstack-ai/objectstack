@@ -2,7 +2,7 @@
 
 import { z } from 'zod';
 import { FilterConditionSchema } from '../data/filter.zod';
-import { ViewFilterRuleSchema } from './view.zod';
+import { ViewFilterRuleSchema, ViewDataSchema } from './view.zod';
 import { InlineActionSchema, ActionLocationSchema } from './action.zod';
 import { I18nLabelSchema, AriaPropsSchema } from './i18n.zod';
 import { FeedItemType, FeedFilterMode } from '../data/feed.zod';
@@ -2263,8 +2263,23 @@ export const ObjectGridPropsSchema = lazySchema(() => strictObject({
   showColumnTypeIcons: z.boolean().optional().describe('Show field-type icons in column headers'),
   exportOptions: z.unknown().optional().describe('Export config ({ formats, streaming })'),
   operations: z.unknown().optional().describe('Operation toggles ({ export: false, … })'),
-  data: z.array(z.unknown()).optional().describe('Static inline rows — bypasses the object query'),
-  staticData: z.array(z.unknown()).optional().describe('Alternate spelling of `data` the renderer also reads'),
+  /**
+   * Data source binding — `ViewDataSchema`, the #5090-pinned authority the
+   * objectui registry declares against (`plugin-grid/src/index.tsx:225`
+   * `type: 'object'`, held by `gridDataInputContract.test.ts`). Until the
+   * ui#6207 ruling (2026-08-25, Option A: 「同意」) this entry said
+   * `z.array(z.unknown())` — the bare-array spelling of the deprecated
+   * `staticData` shortcut — so the two spec authorities refused each other's
+   * legal values: this entry accepted `data: [{…}]` and refused
+   * `{ provider: 'value', items: [] }`, while `ViewDataSchema` (what
+   * `ObjectGridSchema.data` resolves to, and what the designer publishes)
+   * ruled the opposite. Static inline rows live at
+   * `{ provider: 'value', items: [...] }`; the migration prescription is the
+   * `object-grid-data-view-data-converged` semantic entry.
+   */
+  data: ViewDataSchema.optional()
+    .describe("Data source binding (ViewDataSchema — discriminated on `provider`: object | api | value | schema). Static inline rows live at `{ provider: 'value', items: [...] }`; the bare-array shortcut is refused — see migration `object-grid-data-view-data-converged`"),
+  staticData: z.array(z.unknown()).optional().describe("Deprecated bare-array static-rows shortcut the renderer still reads. Prefer `data: { provider: 'value', items: [...] }`"),
 }));
 /** Author state (ADR-0122: the bare name is the author state). */
 export type ObjectGridProps = z.input<typeof ObjectGridPropsSchema>;
