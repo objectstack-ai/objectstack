@@ -938,9 +938,9 @@ them right the first time:
     `today()`, `daysFromNow(n)`, `daysAgo(n)`, `daysBetween(a, b)`, `isBlank(v)`,
     `coalesce(a, b)`, `abs/round/min/max`, `upper/lower/contains/matches`, plus CEL
     built-ins (`has`, `size`, `int`, `string`, …) — see **objectstack-formula** for the full table.
-    An UNKNOWN function (`PRIOR()`, a typo'd name) **fails the build**. And never
-    wrap a field reference in `{…}` inside a condition — that's a template brace
-    and fails as CEL: write `record.x`, not `{record.x}`.
+    An UNKNOWN function (`PRIOR()`, a typo'd name) and a `{…}`-wrapped field ref
+    both **fail the build**: a brace is a template, not CEL — write `record.x`,
+    not `{record.x}`.
 
 ---
 
@@ -962,24 +962,27 @@ metadata first; reserve custom code for edge-case integrations.
 
 ## Verify your work
 
-Flow predicates fail **silently at runtime** when malformed: a typo'd field
-name, an unknown function, or a `{…}`-wrapped reference in a condition
-evaluates to `null`/`false`, so the flow "fires" but does nothing — and nothing
-errors at edit time. (Bare field refs like `status == 'open'` DO resolve in
-start/decision/edge conditions — the engine flattens the trigger record's
-fields into scope — but `record.status == 'open'` remains the canonical style.)
-Catch it at author time before reporting a flow done:
+**Conditions and declared bare-CEL slots** (`condition`, a screen's
+`visibleWhen`) are validated at flow **registration** and by the build: a
+syntax error, an unknown function (`PRIOR()`) or a `{…}`-wrapped reference
+**throws**, located and corrective — never silent.
+
+**Node values** take the single-brace `flow-template` dialect (`'{round(x)}'`);
+no validator implements it, so an unknown function there is NOT build-checked —
+it throws `FlowExpressionFunctionError` at **run time**.
+
+The quiet case is a typo'd *field* name: bare refs (`status == 'open'`) DO
+resolve (the engine flattens the record's fields into scope), so a typo is only
+an advisory did-you-mean. `record.status` stays canonical; `os validate` errors
+on unknown `record.<field>`:
 
 ```bash
 os validate     # CEL/predicate validation (record.<field> existence) + schema
 # or: os build  # the same gates, plus emits dist/
 ```
 
-This runs the ADR-0032 expression gate over every flow condition, edge guard,
-validation rule and sharing rule, exiting non-zero with a
-located, corrective message. Remember conditions are **bare CEL**
-(`record.status == 'x'`); only string node fields use `{…}` templates — see
-objectstack-formula. In a scaffolded project this is `npm run validate`.
+It runs the ADR-0032 gate over every condition, edge guard, validation and
+sharing rule, exiting non-zero. In a scaffolded project: `npm run validate`.
 
 ---
 
