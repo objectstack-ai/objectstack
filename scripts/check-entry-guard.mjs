@@ -465,7 +465,6 @@ const KNOWN_IMPORT_UNSAFE = new Set([
   'scripts/check-release-page-status.mjs',
   'scripts/checklist-select.mjs',
   'scripts/objectui-range.mjs',
-  'scripts/pm/check-governed-prose.mjs',
   'scripts/qa/qa-rollup.mjs',
   'scripts/ts-parse.mjs',
 ]);
