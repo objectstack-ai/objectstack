@@ -27,6 +27,7 @@ import type { FlowTrigger, FlowTriggerBinding, FlowActivationRow } from './engin
 import { InMemoryFlowActivationStore, ObjectStoreFlowActivationStore } from './flow-activation-store.js';
 import { registerSubflowNode } from './builtin/subflow-node.js';
 import type { AutomationContext } from '@objectstack/spec/contracts';
+import { assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
@@ -418,7 +419,23 @@ describe('ADR-0126 §4/§5 — the row this line writes', () => {
             find: vi.fn(async (_object: string, options: any) => {
                 const where = options?.where ?? {};
                 return rows.filter((r) =>
-                    Object.entries(where).every(([k, v]) => r[k] === v),
+                    Object.entries(where).every(([k, v]) => {
+                        // This double implements EQUALITY ONLY, and REFUSES
+                        // anything else rather than quietly mismatching it. A
+                        // matcher that read a combinator (`$in`, `$ne`, …) as a
+                        // FIELD NAME would return `[]` and make a broken store
+                        // look green — the silent-wrong class
+                        // `pnpm check:where-matcher` exists to catch. Refusing
+                        // is the conformance shape most discovered matchers
+                        // already take, and the branch belongs HERE, in the
+                        // predicate itself, not in the enclosing `find`.
+                        if (k.startsWith('$') || (v !== null && typeof v === 'object')) {
+                            throw new Error(
+                                `fakeEngine: unsupported WHERE combinator '${k}' — this double implements equality only`,
+                            );
+                        }
+                        return r[k] === v;
+                    }),
                 );
             }),
             insert: vi.fn(async (_object: string, data: any) => {
@@ -426,7 +443,14 @@ describe('ADR-0126 §4/§5 — the row this line writes', () => {
                 rows.push({ id: `row_${rows.length}`, ...data });
                 return data;
             }),
-            update: vi.fn(async (_object: string, data: any) => {
+            update: vi.fn(async (_object: string, data: any, options?: any) => {
+                // Routed through ObjectQL's OWN dispatch predicate, so this
+                // fake cannot be looser than the engine it stands in for
+                // (#4434 shipped a dead REST route with its suite green off
+                // exactly that gap). `pnpm check:engine-double-contract` is
+                // the gate; the predicate lives in metadata-core, which this
+                // package already depends on.
+                assertEngineUpdateDispatch(data, options);
                 updated.push(data);
                 return data;
             }),
