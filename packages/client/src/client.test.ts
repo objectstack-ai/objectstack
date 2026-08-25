@@ -1351,7 +1351,12 @@ describe('ObjectStackClient.automation', () => {
 
         const result = await client.automation.resume('my_flow', 'run_1', { inputs: { account_id: 'a1' } });
         expect(result.status).toBe('paused');
-        expect(result.screen.nodeId).toBe('step2');
+        // [#8140] `resume` now declares `AutomationResult`, on which `screen`
+        // is optional — a run that COMPLETED carries none. Asserting its
+        // presence before reading through it is the consumer-side half of that
+        // narrowing, and is exactly the migration an external caller makes.
+        expect(result.screen).toBeDefined();
+        expect(result.screen?.nodeId).toBe('step2');
     });
 
     // [#8684] BREAKING: a run that resumed and then FAILED used to resolve with
