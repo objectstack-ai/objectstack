@@ -13,7 +13,7 @@
     }
   },
   "scripts": {
-    "build": "tsup src/index.tsx --config ../../tsup.config.ts",
+    "build": "tsup src/index.tsx --config ../../tsup.config.ts && node ../../scripts/check-dts-emitted.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit"

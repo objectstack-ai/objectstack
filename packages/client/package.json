@@ -13,7 +13,7 @@
     }
   },
   "scripts": {
-    "build": "tsup --config ../../tsup.config.ts",
+    "build": "tsup --config ../../tsup.config.ts && node ../../scripts/check-dts-emitted.mjs",
     "test": "vitest run",
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "check:exported-any-returns": "tsx ../../scripts/check-exported-any-returns.mts --self-test && tsx ../../scripts/check-exported-any-returns.mts --package packages/client",

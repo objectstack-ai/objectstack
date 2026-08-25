@@ -580,7 +580,7 @@ async function selfTest() {
   {
     const lint = sources['lint.yml'];
     const self = 'scripts/check-aggregator-roster.mjs';
-    assert(lint.includes(`node ${self}\n`), `wiring: lint.yml invokes ${self} directly (no root package.json alias -- #9465 fence)`);
+    assert(lint.includes(`node ${self}\n`), `wiring: lint.yml invokes ${self} directly (lint.yml's GATE INVOCATION IDIOM note, not a package.json fence)`);
     assert(lint.includes(`node ${self} --self-test`), 'wiring: lint.yml runs the --self-test half too');
   }
 

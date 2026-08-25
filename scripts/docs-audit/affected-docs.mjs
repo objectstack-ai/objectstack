@@ -524,13 +524,10 @@ if (args.includes('--self-test')) {
 if (args.includes('--bridge-coverage')) {
   const { registrarFiles, sourceFiles, ledgers, registrarByTail } = scanRouteSurface();
   // THE CEILING (#11178) — read lazily off the walk this scan already did, so the census
-  // holds one file's source at a time rather than the tree's. Only this mode pays for it:
-  // the advisory path calls `bridgeCoverageFrom` with no ceiling and gets `unmeasured`.
-  const ceiling = maximalTailsFrom((function* () {
-    for (const rel of sourceFiles) {
-      try { yield { file: rel, text: readFileSync(join(repoRoot, rel), 'utf8') }; } catch { /* unreadable file contributes no tail */ }
-    }
-  })());
+  // holds one file's source at a time rather than the tree's. Since #11867 the PHASE 2
+  // advisory run pays for it too, through this same `ceilingTailsFrom` — one derivation,
+  // so the two paths cannot report the same three buckets from two populations.
+  const ceiling = ceilingTailsFrom(sourceFiles);
   const coverage = bridgeCoverageFrom(ledgers, registrarByTail.keys(), ceiling.keys());
   const selects = selectsFrom(registrarByTail.keys());
   const causeOf = new Map(coverage.ledgers.map((l) => [l.file, l.cause]));
@@ -1190,6 +1187,26 @@ function parseRegistrarSource(text) {
  * @returns {Map<string, string[]>} tail ⟶ the files that declare it, so a "discovery could
  *   reach this" claim can always NAME the witness rather than asserting one exists.
  */
+/**
+ * The CEILING, built off a walk's `sourceFiles` — ONE derivation, both callers (#11867).
+ *
+ * ⛔ Never inline this at a call site. `--bridge-coverage` and the PHASE 2 advisory run
+ * both measure causes now, and a census the two paths build differently would report the
+ * same three buckets from two populations — the exact class of defect the cause split was
+ * introduced to end, one level up. Read LAZILY, one file's source at a time, so neither
+ * caller holds the tree in memory.
+ *
+ * @param {Iterable<string>} sourceFiles  repo-relative paths, as `walkSourceFiles` yields them
+ * @returns {Map<string, string[]>} exactly what `maximalTailsFrom` returns
+ */
+function ceilingTailsFrom(sourceFiles) {
+  return maximalTailsFrom((function* () {
+    for (const rel of sourceFiles) {
+      try { yield { file: rel, text: readFileSync(join(repoRoot, rel), 'utf8') }; } catch { /* unreadable file contributes no tail */ }
+    }
+  })());
+}
+
 function maximalTailsFrom(sources) {
   const byTail = new Map();
   for (const { file, text } of sources) {
@@ -4161,6 +4178,48 @@ function selfTest() {
   })();
   check('emit', 'the drift comment RENDERS `bridgeCoverage` — an unrendered key is half-wired (#9433)', 'docs-drift-check.yml',
     true, driftWorkflow === null || /data\.bridgeCoverage/.test(driftWorkflow));
+  // ── `causes` GETS THE SAME TREATMENT, AT BOTH ENDS (#11867) ─────────────────
+  //
+  // #9433's rule is about a KEY, not about this one key, so the sub-object that carries
+  // the three-way cause split is pinned exactly the way `bridgeCoverage` above is — and
+  // this time BOTH halves were separately broken. The advisory path published `causes`
+  // for two cards while omitting the ceiling that populates it, so every ledger read
+  // `unmeasured` and the three counts were `null`; and the workflow had no render branch
+  // at all (measured: zero occurrences of `causes` in that file). Either half alone is
+  // the half-wired state — a ceiling nobody renders is cost paid for no reader, and a
+  // render branch with no ceiling prints `unmeasured` in a nicer shape.
+  check('emit', 'the ADVISORY path measures causes — it passes a ceiling, not just tails', 'affected-docs.mjs',
+    true, /bridgeCoverageFrom\(ledgers, registrarByTail\.keys\(\), ceilingTailsFrom\(sourceFiles\)\.keys\(\)\)/.test(ownSource));
+  // ⚠️ READ THE CODE, NOT THE COMMENT THAT FORBIDS IT. These three pins are about what
+  // the renderer DOES, and the block it lives in names `bridge.ledgers` in prose precisely
+  // to forbid deriving from it — so a raw-text negative pin fails on its own rationale
+  // (measured: it did, first run). Full-line `//` comments are dropped first; trailing
+  // ones are left alone rather than risk eating a `//` inside a string.
+  const driftWorkflowCode = driftWorkflow === null ? null
+    : driftWorkflow.split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
+  check('emit', 'the drift comment RENDERS `causes` — an unrendered key is half-wired (#9433)', 'docs-drift-check.yml',
+    true, driftWorkflowCode === null || /bridge\.causes/.test(driftWorkflowCode));
+  // AND THE BREAKDOWN MAY NOT BE ABLE TO DISAGREE WITH THE HEADLINE. The workflow's own
+  // rule at that spot — "Same names, one derivation" — is what this pins: the renderer
+  // reads the three counts off `bridge.causes` and the total off `bridge.unreachable`,
+  // and refuses to print the split unless they partition. A renderer that recomputed the
+  // parts from `bridge.ledgers` would satisfy the grep above while reintroducing exactly
+  // the drift the partition exists to make visible.
+  check('emit', 'the rendered split is GUARDED by the partition it claims to be', 'docs-drift-check.yml',
+    true, driftWorkflowCode === null || /parts === bridge\.unreachable/.test(driftWorkflowCode));
+  check('emit', 'and the renderer derives no cause count of its own from the ledger list', 'docs-drift-check.yml',
+    true, driftWorkflowCode === null || !/bridge\.ledgers/.test(driftWorkflowCode));
+  // WRITTEN ONCE, pinned at the source (#11494's rule, applied to the census). Two paths
+  // now publish these three buckets; two spellings of the population they are computed
+  // over is how two surfaces start disagreeing about one repo. `ceilingTailsFrom` is the
+  // single builder, and an inline second copy is what this catches — every behavioural
+  // fixture above would stay green while the two arms drifted apart.
+  check('emit', 'the ceiling is built in exactly ONE place', 'affected-docs.mjs',
+    1, (ownSource.match(/return maximalTailsFrom\(\(function\* \(\) \{/g) || []).length);
+  // CALL SITES, which is why the lookbehind: the declaration shares the spelling, and
+  // counting it would let one arm drop its call while the total stayed put.
+  check('emit', 'and both arms that measure causes build it through that one place', 'affected-docs.mjs',
+    2, (ownSource.match(/(?<!function )ceilingTailsFrom\(/g) || []).length);
   // `unreachableRows` is the detail of `unreachable`, and the only way it can contradict
   // that count is by deriving selection a second time. Pinned at the source, because the
   // two agreeing today is what a re-statement costs nothing to break tomorrow.
@@ -4471,8 +4530,29 @@ const crossCuttingSymbols = [];
 // same rule), and a fabricated `0 of 0` here would read as "nothing to reach".
 let bridgeCoverage = { measured: false, reason: 'no bridgeable symbol in this change — the sdk route bridge did not run' };
 if (bridgeSymbols.length) {
-  const { ledgers, ledgerRows, registrarByTail } = scanRouteSurface();
-  bridgeCoverage = bridgeCoverageFrom(ledgers, registrarByTail.keys());
+  const { ledgers, ledgerRows, registrarByTail, sourceFiles } = scanRouteSurface();
+  // WITH THE CEILING (#11867). Until now this call omitted the third argument, so every
+  // ledger's cause came back `unmeasured` and the three counts `null` — honest, but it
+  // meant the PR comment, which is the surface a human actually reads, rendered all 177
+  // unreachable rows as ONE population when the census says there are three. The ceiling
+  // is the ONLY input that turns "unreachable" into WHY, and the reader who needs that
+  // distinction most is the one looking at a PR, not the one running a diff-free gate.
+  //
+  // WHAT IT COSTS, measured on this tree rather than assumed (`f5a7f9c88`, 7 warm runs of
+  // each arm): the ceiling reads the 1950 `packages/**` source files this walk already
+  // enumerated, of which 1106 pass `maximalTailsFrom`'s `path` prefilter, and yields the
+  // same 82 tails `--bridge-coverage` builds. Median advisory run 0.652s → 1.998s, so
+  // +1.35s — the same order as the ~1.4s recorded on `589758d22`, against a CI job
+  // measured in minutes. It is paid ONLY on a run that already carried a bridgeable symbol.
+  //
+  // ⚠️ AND IT IS THE INPUT THAT WOULD REVERSE THIS. The cause split is worth ~1.35s on a
+  // per-PR advisory run and would not be worth ~15s; whoever finds this number has grown
+  // should re-take the decision, not absorb the cost. Re-measure with the two arms above.
+  //
+  // ⛔ Through `ceilingTailsFrom`, never a second inline census: `--bridge-coverage` and
+  // this path now publish the same three buckets, and two spellings of the population they
+  // are computed over is how the two surfaces start disagreeing about one repo.
+  bridgeCoverage = bridgeCoverageFrom(ledgers, registrarByTail.keys(), ceilingTailsFrom(sourceFiles).keys());
 
   // symbol → route, capped: the bridge answers "which routes mention this name", and for
   // a CROSS-CUTTING helper that is every route it is wired into. Measured on the REST
