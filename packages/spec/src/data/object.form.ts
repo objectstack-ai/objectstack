@@ -129,7 +129,11 @@ export const objectForm = defineForm({
             // (the write seam now enforces their declared bound); this
             // visibleWhen moves with the set.
             { field: 'maxLength', type: 'number', helpText: 'Max characters', visibleWhen: "data.type in ['text','textarea','email','url','phone','password','markdown','html','richtext','code','signature','qrcode']" },
-            { field: 'minLength', type: 'number', helpText: 'Min characters', visibleWhen: "data.type in ['text','textarea','email','url','phone','password','markdown','html','richtext']" },
+            // #11949 — `minLength` aligned to the same set (maintainer ruling
+            // 2026-08-25: the #11566 template applies in full). This row used
+            // to stop at 9 types (`code` was the one it was missing); it moves
+            // with the set, exactly like the row above.
+            { field: 'minLength', type: 'number', helpText: 'Min characters', visibleWhen: "data.type in ['text','textarea','email','url','phone','password','markdown','html','richtext','code','signature','qrcode']" },
 
             // Numeric constraints
             { field: 'min', type: 'number', helpText: 'Minimum value', visibleWhen: "data.type in ['number','currency','percent','rating','slider','progress']" },

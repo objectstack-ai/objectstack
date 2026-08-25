@@ -582,7 +582,33 @@ trap 'sdui_on_signal INT' INT
 trap 'sdui_on_signal TERM' TERM
 trap 'sdui_on_signal HUP' HUP
 
-readarray -t DUMP_DEV_ARGV < <(sdui_dev_server_cmd "$DUMP_PORT")
+# READ LOOP, NOT `readarray` — THE BASH 3.2 FLOOR. `readarray`/`mapfile` are
+# bash 4 builtins and `/usr/bin/env bash` is bash 3.2.57 on macOS (Apple ships
+# no bash 4+, for licensing reasons). This is the sharpest site in the repo for
+# that defect: `pnpm sdui:manifest` is the literal `→ NEXT STEP` that
+# `scripts/bump-objectui.sh` prints on its way out, and per the comment at the
+# head of this file the ratchet is an on-demand gate by decision (#5960) — the
+# only routine CI invocation is `cut-rc.yml`'s pre-publish run, a handful of
+# times a month on Linux. So the ONE host this line is normally executed on is
+# the operator's laptop, and on a Mac it aborted there. Measured with the
+# builtin disabled (`enable -n mapfile readarray` via `BASH_ENV`, which
+# reproduces the macOS symptom byte for byte): `readarray: command not found`,
+# status 127 under `set -e` — and it aborts HERE, after the EXIT/INT/TERM traps
+# are armed but before any server is spawned, so the operator is handed a bare
+# builtin error at the exact step the pin bump just told them to run.
+#
+# Keep this loop bash-3.2-clean: no `mapfile`, no `readarray`, no `declare -A`,
+# no `${x^^}`/`${x,,}`. Two details are load-bearing: `DUMP_DEV_ARGV=()` before
+# the loop (under `set -u` a loop that appends nothing never creates the array,
+# and the expansion below would abort with `unbound variable`), and the `if`
+# rather than a trailing `[[ … ]] &&` (with the `&&` form the `while` takes
+# status 1 whenever the last line read fails the test, which under `set -e`
+# kills the caller as soon as such a loop sits last in a function).
+DUMP_DEV_ARGV=()
+dump_argv_line=''
+while IFS= read -r dump_argv_line; do
+  if [[ -n "$dump_argv_line" ]]; then DUMP_DEV_ARGV+=("$dump_argv_line"); fi
+done < <(sdui_dev_server_cmd "$DUMP_PORT")
 sdui_spawn_detached "$DUMP_PID_FILE" "$DUMP_DEV_LOG" "${DUMP_DEV_ARGV[@]}"
 
 # Failing here is a REFUSAL TO GUESS, not an inconvenience: the alternative is

@@ -141,8 +141,15 @@ describe('check:liveness — evidence pointers (#5623)', () => {
     // ✗, not ⚠ — same grading argument as the missing-file case above.
     expect(output).toMatch(/✗ 1 citation\(s\) name a line/);
     expect(output).not.toMatch(/⚠ \d+ citation\(s\) name a line/);
-    // And it must NOT be reported as a missing FILE: two checks, two verdicts.
-    expect(output).not.toContain('query/limit → packages/spec/scripts/liveness/evidence.mts\n');
+    // And it must NOT be reported as a missing FILE: separate checks, separate
+    // verdicts. Asserted against the missing-file HEADING rather than against
+    // the bare `entry → path` line, because that line is not unique to one
+    // check: the key-mention check (#11457) reports the same pair in the same
+    // shape for its own reason — this fixture cites `evidence.mts` for
+    // `query.limit`, and that file genuinely never names `limit`, so it is a
+    // true hit there too. Pinning the heading pins the claim actually being
+    // made; pinning the line pinned which OTHER checks happened to exist.
+    expect(output).not.toContain('cite a file that is missing from THIS repo');
   });
 
   it('bounds EVERY citation in a concatenated entry, not just the first', () => {

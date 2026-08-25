@@ -192,6 +192,19 @@
  *     the self-test's nested-illustration fixture is where the defect is
  *     measurable at all: nested, the worked illustration extracts nothing;
  *     un-nested, the identical payload extracts every block.
+ *   - SHARED CLOSER (#11690): #11355 gave both loops one shared notion of fence
+ *     OPENING (`owners[i] === i`), but the BODY END was still re-derived twice —
+ *     the walk's own indent/run-length-aware closer inside `fenceOwners()`, and
+ *     a second, looser `^```\s*$` (exactly three backticks, column 0) inside
+ *     `extractFromFile`'s extraction loop — and the two disagreed on an
+ *     indented or four-or-more-backtick closing line (closes the walk's span,
+ *     not extraction's) and on a CR-trailing one from a CRLF file (closes
+ *     extraction's, not the walk's, which then reads the fence as unclosed —
+ *     consuming, per CommonMark, every later block and orphan in the file
+ *     too). Latent, no occurrence in the corpus. Fixed the same way as the two
+ *     bullets above: `fenceOwners()` now returns each opener's `closeLine`
+ *     alongside `owners`, and extraction reads it instead of re-deriving one —
+ *     one closer predicate, not two that can drift apart.
  *
  * Usage:
  *   tsx scripts/check-skill-examples.ts            # extract + type-check (CI)
@@ -458,9 +471,19 @@ function buildFileName(source: string, root: SourceRoot, n: number, buildExt: '.
  *  `commentPrefixed` roots today — every #10969 block is a React component —
  *  but is recognised for every root so a marker over a markdown `tsx` fence
  *  (several already exist, unmarked, in skills/docs) is no longer a silent
- *  no-op the day someone marks one. */
+ *  no-op the day someone marks one.
+ *
+ *  There is deliberately no sibling `FENCE_CLOSE_RE` here (#11690 retired it):
+ *  a block's body END is read from `fenceOwners()`'s own `closeLine`, the SAME
+ *  indent/run-length-aware regex that decided this line opens a top-level
+ *  fence in the first place. A second, looser closer (`^```\s*$` — exactly
+ *  three backticks at column 0) used to be re-derived here and disagreed with
+ *  the walk's closer in both directions: an indented (≤3 spaces) or
+ *  four-or-more-backtick closing line closed the walk's span but not this
+ *  one, and a closing line with a trailing CR (a CRLF file) closed this one
+ *  (`\s` matches CR) but not the walk's (`[ \t]` does not) — so extraction's
+ *  body could run past, or short of, the fence the walk actually closed. */
 const FENCE_OPEN_RE = /^```(ts|tsx|typescript)\s*$/;
-const FENCE_CLOSE_RE = /^```\s*$/;
 /** The JSDoc continuation gutter: optional leading whitespace, one `*`, at
  *  most one following space. Strips ` *   const x = 1;` → `  const x = 1;`
  *  (indentation beyond the gutter is real code indentation and is kept). */
@@ -513,9 +536,19 @@ const ANY_FENCE_OPEN_RE = /^ {0,3}(`{3,})([^`]*)$/;
  * wrapping a ```ts example closes on ITS OWN fence, not the inner one), and an
  * unclosed fence runs to the end of the document (CommonMark), so it consumes
  * the rest of the file rather than leaving the tail ambiguous.
+ *
+ * Also returns `closeLine`: for every line that OPENS a top-level fence
+ * (`owners[i] === i`), the index of the line that closed it — or
+ * `lines.length` when the fence ran unclosed to EOF. This is the SAME value
+ * the walk above used internally to decide where the span ends; `extractFromFile`
+ * reads it directly instead of re-deriving a body end with its own, looser
+ * closer regex (#11690) — one closer predicate, shared by both loops, rather
+ * than two that can drift apart on an indented, over-long, or CR-trailing
+ * closing line.
  */
-function fenceOwners(lines: string[]): number[] {
+function fenceOwners(lines: string[]): { owners: number[]; closeLine: number[] } {
   const owners = new Array<number>(lines.length).fill(-1);
+  const closeLine = new Array<number>(lines.length).fill(-1);
   for (let i = 0; i < lines.length; i++) {
     const open = ANY_FENCE_OPEN_RE.exec(lines[i]);
     if (!open) continue;
@@ -524,9 +557,10 @@ function fenceOwners(lines: string[]): number[] {
     let end = i + 1;
     while (end < lines.length && !closeFence.test(lines[end])) end++;
     for (let s = i; s < Math.min(end + 1, lines.length); s++) owners[s] = i;
+    closeLine[i] = end;
     i = end;
   }
-  return owners;
+  return { owners, closeLine };
 }
 
 /**
@@ -566,7 +600,7 @@ function logicalLines(rawLines: string[], root: SourceRoot): string[] {
 function extractFromFile(source: string, root: SourceRoot): { examples: Example[]; orphans: number[] } {
   const rawLines = fs.readFileSync(source, 'utf-8').split('\n');
   const lines = logicalLines(rawLines, root);
-  const owners = fenceOwners(lines);
+  const { owners, closeLine } = fenceOwners(lines);
   const examples: Example[] = [];
   const claimed = new Set<number>(); // MARKER line indices that opened a real block
   let n = 0;
@@ -580,10 +614,9 @@ function extractFromFile(source: string, root: SourceRoot): { examples: Example[
     // guard cannot suppress one.
     if (owners[i] !== i) continue;
     const marked = i > 0 && lines[i - 1].trim() === root.marker;
-    // Find the matching close fence regardless of marking, so `i` advances past
-    // this block and we never treat its body as top-level markdown.
-    let close = i + 1;
-    while (close < lines.length && !FENCE_CLOSE_RE.test(lines[close])) close++;
+    // Body end is the SAME line the walk above closed this fence on (#11690) —
+    // never re-derived with a second, looser regex that could disagree with it.
+    const close = closeLine[i];
     if (marked) {
       claimed.add(i - 1);
       const body = lines.slice(i + 1, close);
@@ -1385,6 +1418,189 @@ function selfTest(): never {
       `gutter-wrapped nested fixture: reported ${nestedGutter.orphans.length} orphan marker(s), expected 0`,
     );
 
+    // ── Shared fence-closer predicate (#11690). #11355 gave both loops one
+    //    shared notion of fence OPENING (`owners[i] === i`), but the body END
+    //    was still re-derived twice: `fenceOwners()`'s own indent/run-length
+    //    -aware closer for the walk, and a second, looser `^```\s*$` (exactly
+    //    three backticks, column 0) inside extraction. The two fixtures below
+    //    each pin one closing-line spelling the walk accepts but the OLD
+    //    extraction regex did not — an indented (≤3-space) closer, and a
+    //    four-or-more-backtick closer — by placing a SECOND real, marked
+    //    block right after the divergent close: under the old two-closer
+    //    code, extraction ran past the real close looking for a bare
+    //    column-0 `` ``` ``, swallowed the second block's marker and fence
+    //    whole into the first block's body, and the second claim never
+    //    extracted as its own block at all (verified against the pre-fix
+    //    code: one merged, poisoned example, not two). Now both loops read
+    //    the SAME `closeLine`, so the two blocks extract independently.
+    const INDENTED_BODY = 'const indented: number = 1;';
+    const AFTER_INDENT_CLAIM = 'const afterIndent: number = 2;';
+    const indentedClose = path.join(dir, 'indented-close.md');
+    fs.writeFileSync(
+      indentedClose,
+      [
+        '<!-- os:check -->', // 1
+        '```ts', // 2
+        INDENTED_BODY, // 3
+        '  ```', // 4  ← closer indented 2 spaces: closes the WALK (≤3-space indent allowed) but not the old column-0-only extraction regex
+        '', // 5
+        '<!-- os:check -->', // 6
+        '```ts', // 7
+        AFTER_INDENT_CLAIM, // 8
+        '```', // 9
+        '',
+      ].join('\n'),
+      'utf8',
+    );
+    const indented = extractFromFile(indentedClose, skillsRoot);
+    check(
+      indented.examples.length === 2,
+      `indented-closer fixture: extracted ${indented.examples.length} block(s), expected 2 — the OLD extraction ` +
+        "regex ran past line 4's indented close to line 9's bare column-0 fence, merging both blocks into one",
+    );
+    if (indented.examples.length === 2) {
+      check(
+        indented.examples[0].code === INDENTED_BODY,
+        `indented-closer fixture: first block body was ${JSON.stringify(indented.examples[0].code)}, expected ` +
+          `${JSON.stringify(INDENTED_BODY)} — extraction must close on the SAME indented line the walk closed on`,
+      );
+      check(
+        indented.examples[1].code === AFTER_INDENT_CLAIM,
+        `indented-closer fixture: second block body was ${JSON.stringify(indented.examples[1].code)}, expected ` +
+          `${JSON.stringify(AFTER_INDENT_CLAIM)} — it must still extract as its own block, not be swallowed into the first`,
+      );
+    }
+    check(
+      indented.orphans.length === 0,
+      `indented-closer fixture: reported ${indented.orphans.length} orphan marker(s), expected 0`,
+    );
+
+    const RUNLEN_BODY = 'const runlen: number = 1;';
+    const AFTER_RUNLEN_CLAIM = 'const afterRunlen: number = 2;';
+    const runlenClose = path.join(dir, 'runlen-close.md');
+    fs.writeFileSync(
+      runlenClose,
+      [
+        '<!-- os:check -->', // 1
+        '```ts', // 2
+        RUNLEN_BODY, // 3
+        '````', // 4  ← 4-backtick closer: satisfies the walk's run-length-aware `{run,}` but not the old exact-3 extraction regex
+        '', // 5
+        '<!-- os:check -->', // 6
+        '```ts', // 7
+        AFTER_RUNLEN_CLAIM, // 8
+        '```', // 9
+        '',
+      ].join('\n'),
+      'utf8',
+    );
+    const runlen = extractFromFile(runlenClose, skillsRoot);
+    check(
+      runlen.examples.length === 2,
+      `run-length-closer fixture: extracted ${runlen.examples.length} block(s), expected 2 — same merge-past-the-` +
+        'real-close failure as the indented case, triggered by an over-long closer instead',
+    );
+    if (runlen.examples.length === 2) {
+      check(
+        runlen.examples[0].code === RUNLEN_BODY,
+        `run-length-closer fixture: first block body was ${JSON.stringify(runlen.examples[0].code)}, expected ` +
+          `${JSON.stringify(RUNLEN_BODY)}`,
+      );
+      check(
+        runlen.examples[1].code === AFTER_RUNLEN_CLAIM,
+        `run-length-closer fixture: second block body was ${JSON.stringify(runlen.examples[1].code)}, expected ` +
+          `${JSON.stringify(AFTER_RUNLEN_CLAIM)}`,
+      );
+    }
+    check(
+      runlen.orphans.length === 0,
+      `run-length-closer fixture: reported ${runlen.orphans.length} orphan marker(s), expected 0`,
+    );
+
+    // A THIRD spelling combining both attributes at once (indent AND an
+    // over-long run together) — the boundary the shared regex's `{0,3}` and
+    // `{run,}` quantifiers must both clear in the same line, not just one at
+    // a time.
+    const COMBO_BODY = 'const combo: number = 1;';
+    const AFTER_COMBO_CLAIM = 'const afterCombo: number = 2;';
+    const comboClose = path.join(dir, 'combo-close.md');
+    fs.writeFileSync(
+      comboClose,
+      [
+        '<!-- os:check -->', // 1
+        '```ts', // 2
+        COMBO_BODY, // 3
+        '   ````', // 4  ← 3-space indent AND 4 backticks together
+        '', // 5
+        '<!-- os:check -->', // 6
+        '```ts', // 7
+        AFTER_COMBO_CLAIM, // 8
+        '```', // 9
+        '',
+      ].join('\n'),
+      'utf8',
+    );
+    const combo = extractFromFile(comboClose, skillsRoot);
+    check(
+      combo.examples.length === 2 &&
+        combo.examples[0].code === COMBO_BODY &&
+        combo.examples[1].code === AFTER_COMBO_CLAIM,
+      `combined indent+run-length fixture: got ${JSON.stringify(combo.examples.map((e) => e.code))}, expected ` +
+        `${JSON.stringify([COMBO_BODY, AFTER_COMBO_CLAIM])}`,
+    );
+    check(
+      combo.orphans.length === 0,
+      `combined indent+run-length fixture: reported ${combo.orphans.length} orphan marker(s), expected 0`,
+    );
+
+    // The FOURTH spelling: a trailing CR (a CRLF-line-ended file) closes the
+    // OLD extraction regex (`\s*` matches CR) but not the walk's (`[ \t]*`
+    // does not) — the reverse direction from the three above. Pre-#11690 this
+    // was the one divergence that looked "clean": extraction's own closer
+    // matched the CR-line and reported a short, plausible one-line body,
+    // while the walk (silently, underneath it) had already decided the fence
+    // never closed at all and swallowed the second marker+fence with NO
+    // extraction and NO orphan report — the exact silent-suppression #11355
+    // introduced this file's docblock warns about. Now that extraction reads
+    // the walk's OWN `closeLine`, its reported body honestly reflects what
+    // the walk believes this span contains — including the buried second
+    // block — rather than quietly disagreeing with it. This is still a
+    // latent gap in CRLF handling (no occurrence in the corpus, per the
+    // issue), but the two loops no longer give two different answers about
+    // where the fence ends.
+    const CR_BODY = 'const crClosed: number = 1;';
+    const AFTER_CR_CLAIM = 'const afterCr: number = 2;';
+    const crClose = path.join(dir, 'cr-close.md');
+    fs.writeFileSync(
+      crClose,
+      ['<!-- os:check -->', '```ts', CR_BODY, '```\r', '', '<!-- os:check -->', '```ts', AFTER_CR_CLAIM, '```', ''].join(
+        '\n',
+      ),
+      'utf8',
+    );
+    const crFixture = extractFromFile(crClose, skillsRoot);
+    const crExpectedBody = [CR_BODY, '```\r', '', '<!-- os:check -->', '```ts', AFTER_CR_CLAIM].join('\n');
+    check(
+      crFixture.examples.length === 1,
+      `CR-closer fixture: extracted ${crFixture.examples.length} block(s), expected 1 — the walk reads the CR-` +
+        'trailing close as non-closing and treats the whole rest of the fixture as one unclosed span, so the second ' +
+        'marked block must NOT extract as its own example',
+    );
+    if (crFixture.examples.length === 1) {
+      check(
+        crFixture.examples[0].code === crExpectedBody,
+        `CR-closer fixture: body was ${JSON.stringify(crFixture.examples[0].code)}, expected ` +
+          `${JSON.stringify(crExpectedBody)} — extraction's reported body must match what the WALK considers this ` +
+          "span's content (including the buried second block), not a shorter body computed by extraction's own " +
+          'independent closer',
+      );
+    }
+    check(
+      crFixture.orphans.length === 0,
+      `CR-closer fixture: reported ${crFixture.orphans.length} orphan marker(s), expected 0 — the second marker is ` +
+        "inside the walk's (still open) span, not an orphan",
+    );
+
     // ── Build-dir distinctness (#10924). The REAL surfaces are asserted on
     //    every run by `assertDistinctBuildDirs()`; these two fixtures pin the
     //    predicate underneath it in both directions, because a guard that can
@@ -1529,7 +1745,10 @@ function selfTest(): never {
       '    surface) extracts with the right build extension, body and line mapping, its\n' +
       '    `.test.ts` sibling is skipped, two surfaces sharing one build dir are caught, a\n' +
       '    surface whose build dir is not covered by .gitignore is caught too, and a non-git\n' +
-      '    cwd reads as indeterminate rather than as a false violation.',
+      '    cwd reads as indeterminate rather than as a false violation; an indented, an over-long,\n' +
+      '    and a combined indent+over-long closing fence all extract identically to the walk\'s own\n' +
+      '    span, and a CR-trailing closer reads as unclosed the SAME way for both loops instead of\n' +
+      '    disagreeing about where the fence ends.',
   );
   process.exit(0);
 }

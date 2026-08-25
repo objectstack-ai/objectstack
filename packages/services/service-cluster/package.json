@@ -19,7 +19,7 @@
     }
   },
   "scripts": {
-    "build": "tsup",
+    "build": "tsup && node ../../../scripts/check-dts-emitted.mjs",
     "test": "vitest run"
   },
   "dependencies": {

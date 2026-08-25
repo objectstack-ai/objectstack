@@ -598,14 +598,15 @@ describe('#7010 corpus — shipped METADATA_FORM_REGISTRY', () => {
       for (const value of Object.values(rec)) rewrite(value);
     };
     rewrite(corrupted.views);
-    // The count tracks the CORPUS, not an issue: 44 today because #11566
-    // (PR #11989) respelled the field form's `maxLength` row from a 3-way
+    // The count tracks the CORPUS, not an issue: 41 today because #11949
+    // respelled the field form's `minLength` row from a 3-way
     // `data.type == '…'` chain to one `data.type in […]` list while aligning
     // it to the ten bounded-string types — 3 fewer `==` literal comparisons,
     // and `in`-list literals are deliberately not this rule's (see the anchor
-    // note above). The pre-#11566 measurement was 47 and stays 47 — history,
-    // not the census.
-    expect(comparisons, 'no shipped predicate carries an `==`/`!=` literal comparison').toBe(44);
+    // note above) — exactly the #11566 (PR #11989) respell of the sibling
+    // `maxLength` row, which took the measurement from 47 to 44. Earlier
+    // measurements stay what they were — history, not the census.
+    expect(comparisons, 'no shipped predicate carries an `==`/`!=` literal comparison').toBe(41);
 
     const rhsFindings = validatePredicatePathRefs(corrupted)
       .filter((f) => f.rule === PREDICATE_RHS_PATH_SHAPED);
