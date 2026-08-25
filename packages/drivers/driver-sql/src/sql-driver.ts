@@ -1474,6 +1474,67 @@ function refuseDateBucketedGroupBy(granularity: string, bucketedHere: string[], 
   throw err;
 }
 
+/**
+ * [#11567] A field reached DDL carrying `reference_to` — a key `FieldSchema`
+ * REFUSES — so this face refuses it too, in the spec's own words.
+ *
+ * ## Why the DDL seam needs a door the schema already has
+ *
+ * `reference` is the only relationship spelling the spec declares;
+ * `reference_to` is a REJECTED ALIAS, not a normalised one. Measured on
+ * `origin/main`:
+ *
+ * ```
+ * FieldSchema.safeParse({ name:'parent', type:'lookup', reference_to:'p' })
+ *   => success:false, issue.code = `unrecognized_keys`
+ *      "Unrecognized key(s) on this field: `reference_to`.
+ *       Did you mean `reference_to` → `reference`?"
+ * ```
+ *
+ * Until #11567 this driver read `reference_to` and ONLY `reference_to`, as the
+ * gate on a `table.foreign(name).references('id')`. So one key had TWO doors
+ * with opposite answers: the authoring door refused it, while the DDL door
+ * silently honoured it and changed the PHYSICAL SCHEMA — and the silent one
+ * was the one that touched the database. It was reachable only by metadata
+ * that went around Zod (`registerObject` deliberately skips it, #3896), which
+ * is why no authored deployment ever had these constraints: measured across
+ * all 44 exported platform objects on live Postgres 16.13 and MySQL 8.0.46,
+ * **zero** FOREIGN KEYs existed. The emission is retired; this is the door
+ * that stays, so the driver stops disagreeing with the spec in silence.
+ *
+ * ## Why refuse rather than ignore
+ *
+ * Ignoring the key would be a THIRD answer to one question. An author who
+ * wrote `reference_to` meant to point the field somewhere; a driver that drops
+ * it on the floor creates a column pointing nowhere and says nothing — the
+ * "dropped silently" shape #4001 closed at the schema, re-opened one layer
+ * down. The refusal is stated at the DDL seam because that is the last place
+ * the mistake is still cheap: before the column exists, not after rows are in
+ * it.
+ *
+ * `VALIDATION_ERROR`/400 rather than a 500 (ADR-0112): the metadata is the
+ * caller's, the condition is decided entirely by what the caller wrote, and
+ * the fix is a one-word rename. A bare `throw new Error` would leave
+ * `code`/`status` undefined and serve an opaque 500 through `mapDataError` for
+ * a named, caller-fixable condition — the trade {@link refuseDateBucketedGroupBy}
+ * records above (#6212).
+ */
+function refuseRejectedReferenceAlias(column: string): never {
+  const err = new Error(
+    `[sql-driver] field '${column}' declares \`reference_to\`, a rejected alias of \`reference\`. ` +
+    `Did you mean \`reference_to\` → \`reference\`? \`reference\` is the only relationship spelling ` +
+    `@objectstack/spec declares, and \`FieldSchema\` refuses this key with that same verdict ` +
+    `(\`unrecognized_keys\`) — so a field still carrying it at DDL time went around the schema ` +
+    `(raw \`registerObject\` skips Zod, #3896). Rename the key. The column is built from ` +
+    `\`reference\`, and referential integrity is enforced by the ENGINE via \`deleteBehavior\` ` +
+    `(the 409 DELETE_RESTRICTED), not by a database FOREIGN KEY: #11567 retired the FK DDL this ` +
+    `key used to gate, which could never fire for a spec-conformant lookup in the first place.`,
+  ) as Error & { code?: string; status?: number };
+  err.code = StandardErrorCode.enum.VALIDATION_ERROR;
+  err.status = 400;
+  throw err;
+}
+
 /*
  * [#8445 → #8567] `isUnbackedConflictTargetError` — "is this the conflict
  * target is not a key failure?" — is imported from `@objectstack/types`
@@ -14196,6 +14257,22 @@ export class SqlDriver implements IDataDriver {
     field: any,
     keyed?: { unique: boolean },
   ) {
+    // [#11567] Stated BEFORE the `multiple` short-circuit and before the type
+    // switch, because the spec's refusal is gated on neither: `FieldSchema`
+    // answers `unrecognized_keys` for `reference_to` on ANY field, whatever its
+    // type, and a multi-value lookup (a JSON column, returning immediately
+    // below) used to carry the key straight past this seam. One key, one
+    // answer, wherever it appears.
+    //
+    // `!== undefined` rather than `'reference_to' in field`: it refuses every
+    // value the key can actually carry — including the `null` and `''` the old
+    // truthy gate ignored — while staying immune to a producer that spreads an
+    // explicit `{ reference_to: undefined }`. Measured: `FieldSchema`'s own
+    // canonical output does NOT carry `reference_to` as an own key, so key
+    // presence would have been correct too; this is the narrower of two
+    // correct predicates.
+    if (field.reference_to !== undefined) refuseRejectedReferenceAlias(name);
+
     if (field.multiple) {
       table.json(name);
       return;
@@ -14408,10 +14485,29 @@ export class SqlDriver implements IDataDriver {
         // is `ERROR 1406 Data too long`. Honouring `maxLength` here would make
         // the column structurally incapable of holding ANY id — a strictly
         // worse defect than the one #11431 fixes.
+        //
+        // [#11567] ⛔ This arm emits NO `FOREIGN KEY`, and that is the ruled
+        // contract rather than an omission. It used to carry
+        // `if (field.reference_to) table.foreign(name)...` — gated on a key
+        // the spec REFUSES (see {@link refuseRejectedReferenceAlias}), so it
+        // could not fire for any spec-conformant lookup and never had: zero FK
+        // constraints existed across all 44 exported platform objects on live
+        // Postgres 16.13 and MySQL 8.0.46. Retiring it is therefore a no-op for
+        // every authored deployment, and it is pinned in the retiring direction
+        // by `sql-driver-11567-lookup-no-foreign-key.test.ts`.
+        //
+        // ⛔ Do NOT "restore" this by re-reading the canonical `reference`.
+        // Measured on a PRISTINE EMPTY database: doing so takes Postgres from
+        // 44/44 objects synced to 18/44 and MySQL from 37/44 to 15/44, with
+        // `relation "sys_user" does not exist` — no data involved. Two
+        // structural causes: `syncSchema` has no topological ordering, so a
+        // child reaches DDL before its parent; and three of the ten FK targets
+        // (`sys_file`, `sys_environment`, `sys_package_version`) are not among
+        // the platform objects at all (ADR-0003 puts them in `service-tenant` /
+        // `service-storage`). Referential integrity is the ENGINE's, via
+        // `deleteBehavior` — which is what `content/docs/protocol/objectql/
+        // types.mdx` has told authors since 2026-07-30.
         col = table.string(name);
-        if (field.reference_to) {
-          table.foreign(name).references('id').inTable(field.reference_to);
-        }
         break;
       case 'summary':
         col = table.float(name);

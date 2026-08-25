@@ -33,7 +33,7 @@ const PROJECT_SCHEMA = {
     labels: { type: 'multiselect', options: ['frontend', 'backend', 'design'] },
     tags: { type: 'tags' },
     channels: { type: 'select', multiple: true, options: ['email', 'sms'] },
-    related_docs: { type: 'lookup', multiple: true, reference_to: 'document' },
+    related_docs: { type: 'lookup', multiple: true, reference: 'document' },
     // Field.user expands to type 'user' at runtime — the showcase
     // team_members field ships exactly this shape (#2552 e2e regression).
     team_members: { type: 'user', multiple: true, reference: 'sys_user' },
