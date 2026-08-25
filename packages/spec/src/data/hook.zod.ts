@@ -405,10 +405,18 @@ export const HookContextSchema = lazySchema(() => z.object({
    *   and the envelope spelling `input.data.<field>` is a **TypeError** — which
    *   ABORTS the caller's write on a hook whose `onError` is `abort` — which is
    *   this schema's DEFAULT, and what shipped showcase body hooks declare
-   *   explicitly. `id`, `options` and `ast` are
+   *   explicitly. `id` and `ast` are
    *   absent for the same reason; on `find` and `delete`, whose envelopes carry
    *   no `data`, the whole snapshot is `{}`. A body that needs the row reads
    *   `ctx.previous` — the pre-image, `id` included, bound on update and delete.
+   *   `input.options` is the one wrapper key grafted BACK onto the body face
+   *   (#11552, closing the D2 declared≠observable drift): a body reads
+   *   `ctx.input.options.multi` / `.where` — the PROJECTION D2 names, not the
+   *   whole caller bag — as a frozen, NON-ENUMERABLE property, so enumeration
+   *   stays flat-only exactly as above and the post-run write-back (which walks
+   *   enumerable keys) can never carry a copy of the bag back to the engine.
+   *   The body face also carries the #6966 dispatch marker — see `dispatch`
+   *   below.
    *   Writes the script makes to `ctx.input` are copied back onto the live proxy
    *   after it returns (`applyMutationsToInput`), so `input.field = value` still
    *   lands in `data` through the same `set` trap.
@@ -579,6 +587,21 @@ export const HookContextSchema = lazySchema(() => z.object({
    * "not a per-row dispatch", which is the back-compatible direction.
    *
    * Reads (`beforeFind`/`afterFind`) carry no marker: a read has no fan-out.
+   *
+   * ## The sandboxed `body` face carries `{ mode, index }` — and not `scope`
+   *
+   * Since #11552 a declarative `body` (L2 sandboxed JS) observes the marker
+   * too, as a FROZEN `ctx.dispatch = { mode, index }` copy — before that the
+   * sandbox marshalling dropped it entirely, so ADR-0058 Addendum II D3's
+   * routes 1 (batch-scoped throw) and 2 (`ctx.api` per row) were not
+   * expressible from a shipped body: the guard `ctx.dispatch?.mode ===
+   * 'per-row'` lowered cleanly and evaluated `false` on every production
+   * dispatch. `scope` is deliberately NOT marshalled: its whole contract is
+   * shared object identity across dispatches, which a JSON copy into an
+   * isolated VM heap cannot keep — a body stashing on the copy would watch it
+   * silently never arrive, the same inert-guard shape this key closes. A body
+   * needing cross-dispatch state does batch-scoped work at `index === 0` or
+   * keeps state in the record itself via `ctx.api`.
    */
   dispatch: z.object({
     mode: z.enum(['record', 'per-row']).describe("'record' = this call is the caller's whole write; 'per-row' = one of N dispatches for one write"),

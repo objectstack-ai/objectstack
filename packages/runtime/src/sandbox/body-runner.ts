@@ -555,6 +555,48 @@ function buildSandboxContext(
   // than left as a second de-facto contract (PD #12).
   const inputSnapshot = unwrapProxyToPlain(engineCtx?.input);
   const previousRaw = engineCtx?.previous;
+
+  // [#11552] The per-row dispatch signal, and the D2 options visibility, both
+  // of which the snapshot above DROPS by construction: `unwrapProxyToPlain`
+  // materialises only what `installFlatInput`'s `ownKeys` enumerates (the
+  // payload fields), and `dispatch` was never marshalled at all. ADR-0058
+  // Addendum II D3 names three routes for row-specific work, and routes 1
+  // (scoped throw) and 2 (`ctx.api` per row) both require the handler to KNOW
+  // it is on the per-row path — a guard written `ctx.dispatch?.mode ===
+  // 'per-row'` in a shipped body lowered cleanly and evaluated `false` on
+  // every dispatch in production (maintainer ruling on #11552: close the
+  // declared≠observable gap; the D3 contract itself is untouched).
+  //
+  // Copy `{ mode, index }` only when the engine marker carries its declared
+  // shape — an unrecognised shape is left ABSENT, never guessed at, so
+  // `ctx.dispatch?.mode` reads "not a per-row dispatch" exactly as the spec's
+  // back-compat rule prescribes. `scope` is deliberately not copied (see
+  // {@link ScriptContext.dispatch}).
+  const dispatchRaw = engineCtx?.dispatch;
+  const dispatch =
+    dispatchRaw &&
+    typeof dispatchRaw === 'object' &&
+    (dispatchRaw.mode === 'record' || dispatchRaw.mode === 'per-row') &&
+    typeof dispatchRaw.index === 'number'
+      ? { mode: dispatchRaw.mode as 'record' | 'per-row', index: dispatchRaw.index as number }
+      : undefined;
+
+  // [#11552] The caller's bag, read THROUGH the flat proxy's get trap (wrapper
+  // keys pass through even though `ownKeys` hides them), projected to the two
+  // members D2 declares `before*`-visible. `{}` when a bag exists but carries
+  // neither — presence mirrors the engine face; absence stays absence.
+  const optionsRaw =
+    engineCtx?.input && typeof engineCtx.input === 'object'
+      ? (engineCtx.input as { options?: unknown }).options
+      : undefined;
+  let inputOptions: ScriptContext['inputOptions'];
+  if (optionsRaw && typeof optionsRaw === 'object') {
+    const bag = optionsRaw as Record<string, unknown>;
+    inputOptions = {};
+    if ('multi' in bag) inputOptions.multi = bag.multi;
+    if ('where' in bag) inputOptions.where = bag.where;
+  }
+
   return {
     input: inputSnapshot ?? {},
     // Preserve `undefined` for `previous` on insert events so hooks can
@@ -587,6 +629,10 @@ function buildSandboxContext(
     // sites; widening the accessor to it is a separate capability call and is
     // deliberately not taken here — the ruling names hook bodies.
     title,
+    // [#11552] Hook face only, both of them: an action is never one of N
+    // dispatches for one write, and its params bag has no caller options.
+    dispatch,
+    inputOptions,
     crypto: globalThis.crypto,
   };
 }
