@@ -5860,7 +5860,9 @@ const step18: MigrationStep = {
         + '`BOUNDED_STRING_FIELD_TYPES` (`boolean`, `lookup`, `autonumber`, `formula`, `select`, '
         + '`json`, `secret`, …)',
       replacement: 'a positive-integer `maxLength` (>= 1) on a bounded-string field type — `text`, '
-        + '`textarea`, `email`, `url`, `phone`, `password`, `markdown`, `html`, `richtext`, `code` '
+        + '`textarea`, `email`, `url`, `phone`, `password`, `markdown`, `html`, `richtext`, `code`, '
+        + 'plus `signature`/`qrcode` since #11875 (the set is `BOUNDED_STRING_FIELD_TYPES`; the '
+        + '#11566 narrowing itself landed on the ten-member set of its day) '
         + '— or no declaration at all. Deleting the key is mechanical and behaviour-preserving '
         + 'for a MISPLACED declaration: the write-time validator only ever applied `max_length` '
         + 'inside its bounded-string branch, so the key was inert by construction on every other '
@@ -5909,7 +5911,9 @@ const step18: MigrationStep = {
         + '`BOUNDED_STRING_FIELD_TYPES` (`boolean`, `lookup`, `autonumber`, `formula`, `select`, '
         + '`json`, `secret`, …)',
       replacement: 'a positive-integer `minLength` (>= 1) on a bounded-string field type — `text`, '
-        + '`textarea`, `email`, `url`, `phone`, `password`, `markdown`, `html`, `richtext`, `code` '
+        + '`textarea`, `email`, `url`, `phone`, `password`, `markdown`, `html`, `richtext`, `code`, '
+        + '`signature`, `qrcode` (the twelve-member `BOUNDED_STRING_FIELD_TYPES` set; '
+        + '`signature`/`qrcode` joined in #11875) '
         + '— or no declaration at all ("no minimum" is expressed by OMITTING the key, never by '
         + '`minLength: 0`). Deleting the key is mechanical and behaviour-preserving for a '
         + 'MISPLACED declaration (the write-time validator only ever applied `min_length` inside '
