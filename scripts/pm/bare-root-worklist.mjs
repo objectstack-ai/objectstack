@@ -206,6 +206,21 @@ const TRIAGE = new Map([
     verdict: 'REFUSE-UNSPELLABLE',
     why: 'test files only, 2510 of 4903 (51%)',
   }],
+  ['check:objectql-double-limit SCAN_ROOT packages', {
+    verdict: 'REFUSE-UNSPELLABLE',
+    why: 'test files only — the walk admits `*.test.ts` and nothing else, 2696 of 5161 (52%), the '
+      + 'same file-KIND filter as its check:where-matcher and check:examples-live-imports '
+      + 'neighbours above and refused alike. Measured rather than assumed, in both directions: the '
+      + 'only spellable claim, `packages/**`, covers all 2696 test files AND all 2465 non-test '
+      + 'files under the root, so it would name this gate for 2465 files it never opens — the '
+      + 'costlier error, since a find double can only land in a test file. Nothing narrower is '
+      + 'spellable: every glob form of the real population collapses to a malformed '
+      + 'double-separator prefix (`packages/**/*.test.ts` -> `packages//.test.ts`) that hintCovers '
+      + 'matches against 0 of 2696, so a narrow declaration would not be a precise hint but a live '
+      + 'hint covering nothing. No narrower SUBTREE exists either — the corpus is spread over 28 '
+      + 'second-level directories, and 274 of the 2696 sit outside any `src` segment, so even the '
+      + 'check:runner-env-posture `src`-segment shape would be false here as well as uncollapsible',
+  }],
   ['check:i18n-coverage EXAMPLES_DIR examples', {
     verdict: 'REFUSE-UNSPELLABLE',
     why: 'one named config file per child directory — 3 of 238 (1.3%)',
@@ -234,6 +249,24 @@ const TRIAGE = new Map([
       + 'would drown that precision rather than add to it. The root reached the sweep only once the '
       + 'fix for #11647 gave the literal a population-constant name, so this row records a '
       + 'population that was previously unnameable rather than one the fix introduced',
+  }],
+  ['check:i18n-stale-fill PACKAGES_DIR packages', {
+    verdict: 'REFUSE-UNSPELLABLE',
+    why: 'the THIRD gate on this list to reach its population through the shared '
+      + 'findExtractConfigs walk, so it is refused with the two above rather than judged apart — '
+      + 'files named i18n-extract.config.ts beneath a scripts segment, 9 of 5185 (0.17%). The walk '
+      + 'IS recursive across the root, which is not the question these verdicts ask: what it '
+      + 'ADMITS is a filename-and-segment test, and that is the unspellable shape. Re-measured '
+      + 'here rather than inherited from the sibling rows — both star spellings of the real '
+      + 'population collapse to the same malformed double-separator prefix, which hintCovers was '
+      + 'checked against a real config path and matched NOTHING, while the only spellings that '
+      + 'cover anything collapse to the bare root. So the choice is a live hint over zero files or '
+      + 'a hint over 5185 files to reach 9. This gate additionally READS the 40 committed bundle '
+      + 'files, but it reaches those through each config docstring and its documented out flag, '
+      + 'never through this walk, so they widen what it opens and not what this constant names. '
+      + 'The miss is smaller than the row for the same reason its siblings record: the cards that '
+      + 'can actually strand a leaf reach this gate through the convention trigger for a package '
+      + 'owning an extract config, which #11671 extended to name this gate alongside check:i18n',
   }],
   ['scripts/check-skills-token-ratchet.mjs SKILLS_DIR skills', {
     verdict: 'REFUSE-UNSPELLABLE',

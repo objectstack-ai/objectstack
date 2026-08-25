@@ -771,6 +771,25 @@ type LocalizationResult = { timezone: string; locale: string; currency?: string 
  * where the read is actively failing — while never caching a value a caller
  * could observe going stale.
  *
+ * [#11877] "the underlying read itself THREW" means the DIRECT `sys_setting`
+ * read, and only it. The write condition used to be a single `failed` flag
+ * that five SETTINGS-SERVICE legs also set (a thrown `getMany`, each of the
+ * three older per-key `get`s, and the whole-block "service unavailable"
+ * handler). Those legs are reachable inside the settings engine's BIND
+ * WINDOW — `SettingsService.getMany` refuses all-or-nothing for a namespace
+ * whose manifest is not yet registered — so a caller that deliberately
+ * re-reads AFTER the bind (the #11580 repair re-resolves at
+ * `kernel:bootstrapped`) was answered from the in-window memo for up to 30s,
+ * silently keeping the very value the re-read existed to replace. And a
+ * settings refusal standing alongside a SUCCESSFUL direct read memoized that
+ * successful value — exactly the staleness the paragraph above forbids.
+ *
+ * Narrowing to the backend leg costs nothing #10221 bought: those refusals
+ * throw out of an in-memory registry check BEFORE any query and before any
+ * log line, so memoizing them suppressed neither — while #10221's own
+ * environment (table not migrated yet) still memoizes, because the direct
+ * read throws there whether or not a settings refusal stands in front of it.
+ *
  * Keyed on the `ql` instance (one entry-set per environment engine, so two
  * environments/tenants sharing a process never see each other's cached
  * outcome) and then `tenantId|userId` beneath it, matching the audit writer's
@@ -786,10 +805,12 @@ const localizationFailureCache = new WeakMap<object, Map<string, { value: Locali
  * platform default → global → tenant); falls back to direct tenant-scoped
  * `sys_setting` rows, then the built-ins `UTC` / `en-US`. Never throws.
  *
- * A read that fails outright (backend fault — table missing, connection
- * refused, etc.) is memoized for {@link LOCALIZATION_FAILURE_CACHE_TTL_MS}
- * per `(ql, tenantId, userId)` so the failing query — and the driver's log
- * line for it — does not repeat every request (#10221). A successful read,
+ * The DIRECT `sys_setting` read failing outright (backend fault — table
+ * missing, connection refused, etc.) is memoized for
+ * {@link LOCALIZATION_FAILURE_CACHE_TTL_MS} per `(ql, tenantId, userId)` so
+ * the failing query — and the driver's log line for it — does not repeat
+ * every request (#10221). Nothing else is: a settings-service refusal is not
+ * a backend fault and never populates the memo (#11877). A successful read,
  * including a legitimate "no settings configured yet" empty result, is NEVER
  * cached: the next call always re-reads, so a settings write takes effect
  * immediately (see the cache doc above for why — the dogfood analytics
@@ -803,8 +824,8 @@ export async function resolveLocalizationContext(input: ResolveLocalizationInput
     if (hit && hit.expiresAt > Date.now()) return hit.value;
   }
 
-  const { value, failed } = await resolveLocalizationContextUncached(input);
-  if (failed && ql && typeof ql === 'object') {
+  const { value, backendFailed } = await resolveLocalizationContextUncached(input);
+  if (backendFailed && ql && typeof ql === 'object') {
     const bucket = localizationFailureCache.get(ql) ?? new Map<string, { value: LocalizationResult; expiresAt: number }>();
     bucket.set(cacheKey, { value, expiresAt: Date.now() + LOCALIZATION_FAILURE_CACHE_TTL_MS });
     localizationFailureCache.set(ql, bucket);
@@ -814,9 +835,11 @@ export async function resolveLocalizationContext(input: ResolveLocalizationInput
 
 async function resolveLocalizationContextUncached(
   input: ResolveLocalizationInput,
-): Promise<{ value: LocalizationResult; failed: boolean }> {
+): Promise<{ value: LocalizationResult; backendFailed: boolean }> {
   const { ql, settings, tenantId, userId } = input;
-  let failed = false;
+  // ONLY the direct `sys_setting` read below sets this. The settings-service
+  // legs deliberately do not — see the cache doc above (#11877).
+  let backendFailed = false;
   try {
     if (settings && typeof settings.get === 'function') {
       const sctx = { tenantId, userId } as any;
@@ -826,9 +849,10 @@ async function resolveLocalizationContextUncached(
       // answers by the service's own equivalence contract. Feature-detected:
       // an older service without `getMany` keeps the three parallel `get`s
       // (still 1 leg — this is a query-count fix, per the card's calibration).
-      // A thrown `getMany` lands in the same place a thrown `get` did —
-      // `failed = true` and the direct `$in` fallback below, which reads the
-      // exact same three keys.
+      // A thrown `getMany` lands in the same place a thrown `get` did — the
+      // direct `$in` fallback below, which reads the exact same three keys.
+      // Neither populates the failure memo: a settings refusal is not the
+      // backend fault that memo is for (#11877; see the cache doc above).
       //
       // [#11222 item 4] ONE non-equivalence, inherent to batching and recorded
       // here because it is this CALLER's degradation, not the service's:
@@ -850,34 +874,28 @@ async function resolveLocalizationContextUncached(
           localeRes = many.locale;
           currencyRes = many.currency;
         } catch {
-          failed = true;
+          // Settings refusal → fall through to the direct `$in` read below.
+          // Not a backend fault, so it does not populate the memo (#11877).
         }
       } else {
+        // Same rule as the batched arm above: a refused key falls through to
+        // the direct `$in` read and does not populate the memo (#11877).
         [tzRes, localeRes, currencyRes] = await Promise.all([
-          settings.get('localization', 'timezone', sctx).catch(() => {
-            failed = true;
-            return undefined;
-          }),
-          settings.get('localization', 'locale', sctx).catch(() => {
-            failed = true;
-            return undefined;
-          }),
-          settings.get('localization', 'currency', sctx).catch(() => {
-            failed = true;
-            return undefined;
-          }),
+          settings.get('localization', 'timezone', sctx).catch(() => undefined),
+          settings.get('localization', 'locale', sctx).catch(() => undefined),
+          settings.get('localization', 'currency', sctx).catch(() => undefined),
         ]);
       }
       const tz = coerceTimeZone(tzRes?.value);
       const locale = coerceLocale(localeRes?.value);
       const currency = coerceCurrency(currencyRes?.value);
       if (tz || locale || currency) {
-        return { value: { timezone: tz ?? 'UTC', locale: locale ?? 'en-US', currency }, failed: false };
+        return { value: { timezone: tz ?? 'UTC', locale: locale ?? 'en-US', currency }, backendFailed: false };
       }
     }
   } catch {
-    // settings service unavailable → direct read
-    failed = true;
+    // Settings service unavailable → direct read. Still not a backend fault,
+    // so it does not populate the memo either (#11877).
   }
   // One read for all three keys instead of a query per key (`$in` on `key`).
   // Inlined (rather than the shared `tryFind`) so a genuine backend fault —
@@ -898,7 +916,8 @@ async function resolveLocalizationContextUncached(
       if (result && (result as any).value) result = (result as any).value;
       rows = Array.isArray(result) ? result : [];
     } catch {
-      failed = true;
+      // THE backend fault the failure memo exists for (#10221).
+      backendFailed = true;
     }
   }
   const valueOf = (k: string) => rows.find((r) => r.key === k)?.value;
@@ -908,6 +927,6 @@ async function resolveLocalizationContextUncached(
       locale: coerceLocale(valueOf('locale')) ?? 'en-US',
       currency: coerceCurrency(valueOf('currency')),
     },
-    failed,
+    backendFailed,
   };
 }

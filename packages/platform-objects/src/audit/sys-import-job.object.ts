@@ -92,7 +92,35 @@ export const SysImportJob = ObjectSchema.create({
     // ── lifecycle timestamps ──
     started_at: Field.datetime({ label: 'Started At', required: false, group: 'State' }),
     completed_at: Field.datetime({ label: 'Completed At', required: false, group: 'State' }),
-    created_by: Field.text({ label: 'Created By', required: false, readonly: true, group: 'System' }),
+    // [#11374 route A] The value is `context.userId`, stamped by the rest-server
+    // import route (`String(context?.userId ?? context?.user?.id ?? '')` in
+    // `rest-server.ts`) — i.e. a `sys_user.id`. The bound is derived by
+    // referenced-column transitivity from three converging in-repo producers,
+    // never guessed:
+    //   - the physical column the id itself lives in: driver-sql creates every
+    //     table's primary key as `table.string('id').primary()`, which is knex's
+    //     `varchar(255)`, so no id this column can ever receive exceeds 255;
+    //   - what this column would be if it were declared like its siblings: every
+    //     other actor column on a platform object is `Field.lookup('sys_user')`,
+    //     which driver-sql emits at `DEFAULT_STRING_VARCHAR_CHARS` = 255;
+    //   - the landed text declarations for the same value class:
+    //     `sys_metadata_audit.actor`, `sys_metadata_commit.actor` and
+    //     `sys_view_definition.owner` all declare `maxLength: 255`.
+    // The floor is cleared with room to spare: a minted platform id is 26
+    // characters (measured on #11431, where honouring a bound below that made a
+    // column structurally unable to hold any id at all).
+    // 255 is also <= the 768-character utf8mb4 key ceiling, so the
+    // `(created_by, created_at)` index below is expressible on MySQL — which is
+    // the whole point: unbounded, this column was emitted TEXT and MySQL refused
+    // the index with `ER_BLOB_KEY_WITHOUT_LENGTH`, landing the object
+    // registered-but-broken.
+    created_by: Field.text({
+      label: 'Created By',
+      required: false,
+      readonly: true,
+      maxLength: 255,
+      group: 'System',
+    }),
     created_at: Field.datetime({
       label: 'Created At',
       required: true,

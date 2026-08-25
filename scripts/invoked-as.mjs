@@ -75,7 +75,7 @@
  * failure. That gate is what stops a TWELFTH spelling, which is the whole
  * reason this file exists rather than a one-time sweep.
  *
- * ## The sibling in `packages/cli`, and why the duplication is deliberate
+ * ## The siblings, and why the duplication is deliberate
  *
  * `packages/cli/src/utils/invocation.ts` exports `isProcessEntry`, the same
  * predicate for the same reason (its header cites this defect). It is NOT
@@ -83,10 +83,15 @@
  * against a possibly-unbuilt tree, and making the whole tooling layer depend on
  * a package build to answer "was I run?" trades this bug for a worse one.
  *
+ * A third copy lives outside this repo: objectui's `scripts/invoked-as.mjs`
+ * carries the same predicate under the same name (ported from here, #5984), so
+ * the pairing is a CROSS-REPO obligation as well as a local one.
+ *
  * The duplication is therefore structural, but DIVERGENCE is not allowed --
  * two predicates answering this question differently is precisely the defect
- * being closed. Both carry the same two legs: realpath for symlinks, and
- * directory resolution for `node <dir>`. Change one, change the other.
+ * being closed. All three copies carry the same two legs: realpath for
+ * symlinks, and directory resolution for `node <dir>`. Change one, change the
+ * others.
  */
 
 import { spawnSync } from 'node:child_process';
