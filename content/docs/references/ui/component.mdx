@@ -340,7 +340,7 @@ const result = AIChatWindowProps.parse(data);
 | **objectName** | `string` | optional | PARENT object. Optional because the component-level `dataSource` binding can supply the object instead (#7121) |
 | **recordId** | `string \| number` | optional | Parent record to load (edit mode) |
 | **mode** | `Enum<'create' \| 'edit'>` | optional | Form mode |
-| **formType** | `string` | optional | Parent form presentation |
+| **formType** | `Enum<'simple' \| 'tabbed'>` | optional | Parent form presentation — the two variants the renderer honours for the parent half (#11873, objectui#5939) |
 | **sections** | `any[]` | optional | Parent form sections |
 | **fields** | `any[]` | optional | Parent fields shown |
 | **details** | `any[]` | optional | Detail collections (`{ title, childObject, addLabel?, columns?, relationshipField? }` — FK and columns auto-derive from child metadata) |

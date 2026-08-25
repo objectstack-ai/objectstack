@@ -73,6 +73,70 @@
  *
  * Missing file or empty read is RED, never a pass (#4690: a gate that cannot
  * find its input must fail, not skip).
+ *
+ * ## The max-line-length rule (#11106) — what makes a LINE a unit again
+ *
+ * The ratchet counts LINES while the paragraph above prices a per-session token
+ * read, and tokens track BYTES, not lines. The drift was measured, not inferred:
+ * one PR added five fact entries to `references/platform-readings.md` and grew it
+ * 16,953 → 22,559 bytes (+33%) at a flat 134/134 line count, green on every run,
+ * no ceiling raised and nothing in this gate able to see it. A file whose lines
+ * run 400–830 bytes lets an author add arbitrary content at zero measured cost,
+ * while an author who wraps at 80 columns pays a line per 80 bytes — the
+ * incentive points at the less readable spelling.
+ *
+ * Maintainer ruling 2026-08-23 (option B), verbatim and untranslated:
+ * 「10950 不考虑存量,其他接受你的建议」 — a max-line-length rule on the
+ * ceilinged files plus a one-off re-wrap of the legacy long lines, restoring the
+ * proportionality the line count was always assumed to have. Deliberately NOT a
+ * second ratchet (option A) and not a disclaimer in this header (option C).
+ *
+ * ### Why 120 bytes
+ *
+ * It is the corpus's OWN upper bound, not a new house style: measured over the
+ * 4,028 lines of the map above, 34 land at exactly 120 bytes and both wrap styles
+ * already present sit under it — ASCII prose wraps at ≤91 bytes (~88 columns),
+ * CJK prose at ≤120 bytes (50–60 characters, ~100–120 display columns, a CJK
+ * character being 3 bytes and 2 columns wide). 120 is the one number both
+ * conventions already satisfy, so the rule codifies what the careful authors were
+ * doing rather than reflowing the corpus to an invented width. Bytes — not
+ * characters, not columns — because bytes is what the header prices.
+ *
+ * ### The exemptions live in the RULE, and are STRUCTURAL
+ *
+ * A length rule that can demand an ILLEGAL wrap is worse than no rule: it teaches
+ * authors to break a table, split a fence, or — the sharpest case here — wrap a
+ * 行锚定 directive line (`Blocked-by:` / `Restart-when:` / `Restart-touch:`),
+ * whose entire contract is that a grep finds it ANCHORED AT A LINE. So every
+ * exemption is derived from the line's own syntax, and there is deliberately NO
+ * exemption registry and no per-file allowlist: a list of blessed long lines
+ * would be precisely the ratchet-expanding remedy #8435 keeps out of an author's
+ * reach, and it would rot. The exempt classes are {@link EXEMPTION_CLASSES}.
+ *
+ * `unbreakable` is the load-bearing one: the gate asks only for wraps it can
+ * itself produce. {@link wrapLine} is the canonical form, and an over-long line
+ * is RED exactly when re-wrapping it would change it. A bare URL, a long path or
+ * a single long code span has no legal break point, so it comes back unchanged
+ * and passes — the rule never asks for the impossible.
+ *
+ * Two of the classes are about what a WRAP COSTS rather than what markdown
+ * allows, and both were found by running the re-wrap and reading what broke:
+ * `blockquote` (a continuation must repeat `>`, so the wrap would insert a
+ * non-whitespace byte into a quotation) and `quotation` (a 「…」 ruling that
+ * already spans lines is left exactly as its author broke it — moving the break
+ * moved a phrase across it and turned `check-skill-frame-sync` red). Both cost
+ * the corpus a handful of long lines, and both are cheaper than a rule that
+ * edits a verbatim maintainer ruling to satisfy itself.
+ *
+ * ### What a wrap may move, stated once
+ *
+ * ONLY whitespace: a space becomes a newline, or a newline is inserted between
+ * two East Asian characters (a segment break there is removed by the CSS
+ * segment-break transformation rules, which is why the corpus already wraps CJK
+ * prose mid-run). No break is offered at a CJK↔Latin junction without a space,
+ * because that one WOULD render as a space. That property is what let the one-off
+ * re-wrap prove itself: every file compared byte-identical after whitespace
+ * normalization, with its inline code spans identical in sequence.
  */
 
 import { readFileSync } from 'node:fs';
@@ -84,13 +148,27 @@ const REPO_ROOT = new URL('../../', import.meta.url);
 // Post-compression counts (#8700 one-time pass; SKILL.md keeps its #7885
 // value). Shrink-only: lower freely, raise only with a maintainer ruling
 // quoted in the raising PR (see header).
+//
+// ⚠️ RE-PINNED ONCE, WHOLESALE, BY #11106. Eighteen of these numbers moved in a
+// single stroke and NONE of them is a content raise: the one-off re-wrap that
+// landed the max-line-length rule above re-flowed 555 legacy over-long lines,
+// and a line that used to hold 400–830 bytes is now three to seven lines holding
+// the same bytes. Each file's content was proved byte-identical after whitespace
+// normalization before its ceiling moved (per-file arithmetic in that PR's body).
+// So the pre-#11106 numbers are not comparable to these, and reading a jump like
+// 666 → 1,050 as slack would be exactly backwards — headroom is 0 on every one of
+// them, and each line is now capped at 120 bytes, which is what makes the count
+// track the token read the header prices. `landing-operations.md` moved the other
+// way (82 → 80, its standing headroom locked in) and `state-machine.md`,
+// `lanes/{engine,services,cli,skills}.md` and `CLAUDE.md` did not move at all —
+// they were already within budget on every line.
 export const CEILINGS = new Map([
   // Lowered 682 → 666 by the maintainer-ordered whole-text restructuring round
   // (ruling 2026-08-23, verbatim: 「接受你的重构提案」): the four long
   // state-table rows and the clause-② review-chain bullets sank to the two new
   // references below, and the report-contract JSON is single-sourced from the
   // dev-agent definition. Landed count, headroom 0, same convention.
-  ['.claude/skills/pm-dispatch/SKILL.md', 666],
+  ['.claude/skills/pm-dispatch/SKILL.md', 1008],
   // Raised 223 → 244 by the triage reading-cost card (maintainer ruling
   // 2026-08-20, quoted in the raising PR): three mandated conventions land in
   // the runbook's triage sections. Landed count, headroom 0, same convention.
@@ -98,18 +176,18 @@ export const CEILINGS = new Map([
   // to the reference file below (lowering is always legitimate).
   // Lowered 243 → 242 by the restructuring round: the stale hourly-fire
   // rationale clause collapsed into a pointer at contract-review.md.
-  ['.claude/skills/pm-dispatch/references/dispatch-runbook.md', 242],
+  ['.claude/skills/pm-dispatch/references/dispatch-runbook.md', 274],
   // Whole-text restructuring round (maintainer ruling 2026-08-23, Q1 = A):
   // mechanism detail extracted from SKILL.md — the four long state-table rows
   // (state-machine.md) and the clause-② review-chain operational detail
   // (contract-review.md). Set at landed line counts (headroom 0, same
   // convention as the entries above).
   ['.claude/skills/pm-dispatch/references/state-machine.md', 43],
-  ['.claude/skills/pm-dispatch/references/contract-review.md', 44],
+  ['.claude/skills/pm-dispatch/references/contract-review.md', 48],
   // Business-perspective decision-analysis writing guide (maintainer ruling
   // 2026-08-20: the four-facet analysis must argue from the business
   // standpoint). Set at landed line count (headroom 0, same convention).
-  ['.claude/skills/pm-dispatch/references/decision-analysis.md', 38],
+  ['.claude/skills/pm-dispatch/references/decision-analysis.md', 48],
   // 134 → 133: whole-text restructuring round, PR-2 (maintainer ruling
   // 2026-08-23) — the three write-side sanitizer rows consolidated to one
   // author rule + one measured-behaviour row per surface (body / comment).
@@ -119,7 +197,7 @@ export const CEILINGS = new Map([
   // operation channel mapping moved out to references/rest-channel.md below.
   // The two right-sized-reads rows the same ruling ordered were paid from that
   // saving in place, and three lines came back. Headroom 0 again.
-  ['.claude/skills/pm-dispatch/references/platform-readings.md', 130],
+  ['.claude/skills/pm-dispatch/references/platform-readings.md', 315],
   // Per-operation REST/GraphQL/git channel mapping — which fleet operation has
   // a REST twin (each row executed in a real session, provenance date carried
   // per row), the handful that are GraphQL-only, and the queue-routing
@@ -127,9 +205,9 @@ export const CEILINGS = new Map([
   // file is the lookup table it points at, so the policy flip did not have to
   // grow the hot file. Set at landed line count (headroom 0, same convention
   // as the entries above).
-  ['.claude/skills/pm-dispatch/references/rest-channel.md', 46],
-  ['.claude/skills/pm-dispatch/references/review-checklist.md', 82],
-  ['.claude/skills/pm-dispatch/references/landing-operations.md', 82],
+  ['.claude/skills/pm-dispatch/references/rest-channel.md', 87],
+  ['.claude/skills/pm-dispatch/references/review-checklist.md', 84],
+  ['.claude/skills/pm-dispatch/references/landing-operations.md', 80],
   // Release-aftercare duties — what a lane PM still owes AFTER a tagged release
   // rolls to production, which the landing window (ends at MERGED) never
   // covered: post-roll placement/latency reading with the waker-bias re-draw
@@ -139,7 +217,7 @@ export const CEILINGS = new Map([
   // landing-operations.md rides existing slack on that file's last
   // MERGED-tracking line, so that ceiling stays at 82 — no re-wrap, no cut.
   ['.claude/skills/pm-dispatch/references/release-aftercare.md', 58],
-  ['.claude/skills/pm-dispatch/references/seat-post-protocol.md', 101],
+  ['.claude/skills/pm-dispatch/references/seat-post-protocol.md', 105],
   // Lane job descriptions (maintainer ruling 2026-08-19: per-lane PM job
   // descriptions move from seat-post prose into versioned skill references).
   // Set at landed line counts (headroom 0, same convention as above).
@@ -150,29 +228,29 @@ export const CEILINGS = new Map([
   ['.claude/skills/pm-dispatch/references/lanes/engine.md', 40],
   ['.claude/skills/pm-dispatch/references/lanes/services.md', 30],
   ['.claude/skills/pm-dispatch/references/lanes/cli.md', 35],
-  ['.claude/skills/pm-dispatch/references/lanes/devx.md', 37],
+  ['.claude/skills/pm-dispatch/references/lanes/devx.md', 39],
   ['.claude/skills/pm-dispatch/references/lanes/skills.md', 35],
-  ['.claude/skills/pm-dispatch/references/lanes/spec.md', 43],
+  ['.claude/skills/pm-dispatch/references/lanes/spec.md', 46],
   // repo:hotcrm lane charter (maintainer rulings 2026-08-20: exemplar-app repo —
   // platform capabilities implemented upstream, 展现平台能力, 不扩散需求, runs on
   // community edition). Set at landed line count (headroom 0, same convention).
   // 45 → 44: same patrol-anchor hoist deletion as the six lanes above.
-  ['.claude/skills/pm-dispatch/references/lanes/hotcrm.md', 44],
+  ['.claude/skills/pm-dispatch/references/lanes/hotcrm.md', 57],
   // 399 → 405 (#11126): maintainer-ruled (2026-08-23, option B, quoted in that
   // PR) — the +6-line cross-repo dispatch-gates caveat, sized so the queued
   // #11137 (395→399 on main) and this PR's +6 compose to exactly 405.
-  ['.claude/agents/os-dev.md', 405],
+  ['.claude/agents/os-dev.md', 470],
   // #9473: the other four `.claude/skills/` are read in full by the sessions
   // that use them too — the erosion mechanism the ratchet exists to stop
   // isn't specific to the pm-dispatch surface. Set at current counts on
   // `origin/main` (headroom 0, same convention as the entries above).
-  ['.claude/skills/checklist-test/SKILL.md', 232],
-  ['.claude/skills/checklist-author/SKILL.md', 61],
-  ['.claude/skills/dogfood-verification/SKILL.md', 155],
+  ['.claude/skills/checklist-test/SKILL.md', 238],
+  ['.claude/skills/checklist-author/SKILL.md', 62],
+  ['.claude/skills/dogfood-verification/SKILL.md', 157],
   // 328 → 334 (#10848): maintainer-ruled (2026-08-22, Option A) — convention 5
   // replaced with the pin's house sentence AND the pin docblock's one allowed
   // variant shape carried into the skill, +6 lines within the card's budget.
-  ['.claude/skills/spec-property-retirement/SKILL.md', 334],
+  ['.claude/skills/spec-property-retirement/SKILL.md', 337],
   // #9792: root AGENTS.md is the largest, most-read, most binding instruction
   // file in the repo and had no ceiling — the hole the oversized 39-line
   // read-layer clause (compacted by #9715) entered through. Set at its line
@@ -186,7 +264,7 @@ export const CEILINGS = new Map([
   // 2026-08-20, verbatim and untranslated: 「A — 抬上限到 961 (Recommended)」
   // (issue #10126, comment 5353111732). Headroom is 0 again by construction, and
   // the next author needing a line is back to compressing.
-  ['AGENTS.md', 961],
+  ['AGENTS.md', 1149],
   // #9965: root CLAUDE.md is the other repo-root instruction file — same read
   // path (every seat session), same governance (Prime Directive #14). It is
   // structurally growth-prone in the way the ratchet is built for: it exists to
@@ -263,6 +341,237 @@ function countLines(text) {
   return text.length === 0 ? 0 : text.split('\n').length - (text.endsWith('\n') ? 1 : 0);
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// The max-line-length rule (#11106). See the header for why 120 and why bytes.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const MAX_LINE_BYTES = 120;
+
+/** The closed, structural exemption set — no registry, no per-file allowlist. */
+export const EXEMPTION_CLASSES = Object.freeze({
+  fence: 'fenced code block (``` / ~~~), fence lines included — a wrapped fence is a different program',
+  table: 'markdown table row — a wrapped `|` row is a different table',
+  heading: 'ATX heading — a heading has no continuation line',
+  frontmatter: 'YAML front matter — a scalar is not markdown prose',
+  anchored: 'line-anchored directive example (Blocked-by: / Restart-when: / Restart-touch: / Unlock-when:) — 行锚定: the contract IS that a grep finds it at a line start, so wrapping one teaches a broken spelling',
+  quotation: 'a line inside a MULTI-line 「…」/『…』 verbatim maintainer ruling — the quote already spans lines exactly as its author wrote it, and re-flowing it moves where phrases split. Measured: an earlier cut of the #11106 wrapper moved one break and turned check-skill-frame-sync red, because 「我们是一个创业项目,…」 stopped being findable on one line. A quote that fits on ONE line is not exempt — it is an atom instead, so surrounding prose still wraps around it intact',
+  blockquote: 'blockquote line — its continuation must repeat `>`, so wrapping one INSERTS a non-whitespace byte. Every blockquote in this corpus is a verbatim maintainer ruling, and a length rule may not demand a content edit to a quotation. (Lazy continuation would avoid the marker and is refused for the same reason it is refused by hand: a later blank line silently drops text out of the quote.)',
+  unbreakable: 'no legal break point — a bare URL, a long path or one long code span; wrapLine returns it unchanged, so the gate never demands a wrap it cannot produce',
+});
+
+const bytes = (s) => Buffer.byteLength(s, 'utf8');
+
+// Wide (East Asian) characters: a segment break BETWEEN two of these is removed
+// by the CSS segment-break transformation rules, which is why the corpus already
+// wraps CJK prose mid-run with no space. A break at a CJK↔Latin junction with no
+// space would render AS a space, so it is not a legal break and is not offered.
+const WIDE =
+  /[ᄀ-ᅟ⺀-〾ぁ-㏿㐀-䶿一-鿿ꀀ-꓏가-힣豈-﫿︰-﹏＀-｠￠-￦]/;
+// Kinsoku: never strand a closing mark at a line head, never leave an opener at a line tail.
+const NO_BREAK_BEFORE = '。，、;；:：?？!!)）]】}』」〉》·…%,.;:?!)]}’”';
+const NO_BREAK_AFTER = '(（[【{『「〈《‘“';
+// Sequences markdown reads as the start of a NEW block — a continuation line may never begin with one.
+const BLOCK_START = /^(#{1,6}(\s|$)|[-*+](\s|$)|\d+[.)](\s|$)|>|\||`{3}|~{3}|-{3}|={3})/;
+
+const isFence = (line) => /^\s*(```|~~~)/.test(line);
+const isTableRow = (line) => /^\s*\|/.test(line);
+const isHeading = (line) => /^\s*#{1,6}(\s|$)/.test(line);
+// Anchored at the line's own head, after at most an indent, a quote/list marker and an opening backtick.
+const isAnchoredDirective = (line) =>
+  /^\s*(?:>\s*)?(?:[-*+]\s+)?`?(?:Blocked-by|Restart-when|Restart-touch|Unlock-when):/.test(line);
+
+/**
+ * Split a line into its markdown prefix, the continuation prefix a wrapped tail
+ * inherits, and the body to be re-flowed. List continuations align under the
+ * marker's content column; blockquote continuations repeat the quote marker.
+ */
+export function splitPrefix(line) {
+  let m;
+  if ((m = /^(\s*(?:[-*+]|\d+[.)])\s+)/.exec(line))) return { head: m[1], cont: ' '.repeat(m[1].length), body: line.slice(m[1].length) };
+  if ((m = /^(\s*>+\s?)/.exec(line))) return { head: m[1], cont: m[1], body: line.slice(m[1].length) };
+  m = /^(\s*)/.exec(line);
+  return { head: m[1], cont: m[1], body: line.slice(m[1].length) };
+}
+
+/**
+ * Break the body into atoms — the units a wrap may be placed BETWEEN, never
+ * inside. Inline code spans, markdown links, autolinks and bare URLs are single
+ * atoms (that is what protects `Blocked-by: #N` written as a code span, and every
+ * URL in the corpus); a CJK character is its own atom; everything else is a word.
+ *
+ * 「…」 and 『…』 are atoms too, and that one is load-bearing rather than tidy.
+ * A corner-bracket quotation in this corpus is a VERBATIM maintainer ruling —
+ * AGENTS.md 语言规则 requires it be carried untranslated and unrewritten — and
+ * things GREP it. Measured while landing #11106: an earlier cut of this wrapper
+ * broke 「我们是一个创业项目,…」 across two lines and turned
+ * `check-skill-frame-sync`'s self-test red, because a phrase inside a governed
+ * quotation stopped being findable on one line. A soft break does not change what
+ * a reader sees, but it does change what a matcher sees, and quoted rulings are
+ * the text most likely to be matched.
+ */
+export function atomize(body) {
+  const atoms = [];
+  let sp = false;
+  for (let i = 0; i < body.length; ) {
+    if (/\s/.test(body[i])) { sp = true; i++; continue; }
+    const rest = body.slice(i);
+    const m =
+      /^(`+)[\s\S]*?\1/.exec(rest) ||
+      /^「[^」\n]*」/.exec(rest) ||          // verbatim maintainer ruling — see below
+      /^『[^』\n]*』/.exec(rest) ||
+      /^!?\[[^\]\n]*\]\([^)\s]*\)/.exec(rest) ||
+      /^<https?:[^>\s]*>/.exec(rest) ||
+      /^https?:\/\/\S+/.exec(rest);
+    if (m) { atoms.push({ text: m[0], cjk: false, sp }); i += m[0].length; sp = false; continue; }
+    if (WIDE.test(body[i])) { atoms.push({ text: body[i], cjk: true, sp }); i++; sp = false; continue; }
+    let j = i;
+    while (j < body.length && !/\s/.test(body[j]) && !WIDE.test(body[j])) {
+      if (j > i && (body[j] === '`' || body[j] === '[' || /^https?:\/\//.test(body.slice(j)))) break;
+      j++;
+    }
+    atoms.push({ text: body.slice(i, j), cjk: false, sp });
+    i = j;
+    sp = false;
+  }
+  return atoms;
+}
+
+function breakLegal(a, b) {
+  const last = a.text[a.text.length - 1];
+  if (NO_BREAK_AFTER.includes(last)) return false;
+  if (NO_BREAK_BEFORE.includes(b.text[0])) return false;
+  if (b.sp) return true;          // an existing space becomes the newline
+  return a.cjk && b.cjk;          // segment break between two wide chars renders as nothing
+}
+
+function renderSeg(atoms, from, to, pfx) {
+  let s = pfx;
+  for (let i = from; i < to; i++) s += (i > from && atoms[i].sp ? ' ' : '') + atoms[i].text;
+  return s;
+}
+
+// A break is refused when the tail it starts would read as a new markdown block.
+// Tested on the tail alone: the continuation prefix is whitespace (or a repeated
+// quote marker), which is the block context being CONTINUED, never a new one.
+function startsBlock(atoms, k) {
+  const tail = atoms[k].text + (atoms[k + 1] ? (atoms[k + 1].sp ? ' ' : '') + atoms[k + 1].text : '');
+  return BLOCK_START.test(tail);
+}
+
+/**
+ * The canonical wrapped form of one line. Greedy, and it only ever moves
+ * WHITESPACE: a space becomes a newline, or a newline is inserted between two
+ * wide characters. Returns `[line]` unchanged when the line already fits or when
+ * no legal break exists — which is exactly the `unbreakable` exemption.
+ */
+export function wrapLine(line, limit = MAX_LINE_BYTES) {
+  if (bytes(line) <= limit) return [line];
+  const { head, cont, body } = splitPrefix(line);
+  const trail = /\s*$/.exec(body)[0];
+  const atoms = atomize(body.slice(0, body.length - trail.length));
+  if (atoms.length === 0) return [line];
+  const out = [];
+  let from = 0;
+  let pfx = head;
+  for (;;) {
+    const full = renderSeg(atoms, from, atoms.length, pfx);
+    if (bytes(full) <= limit) { out.push(full); break; }
+    let chosen = -1;
+    for (let k = from + 1; k < atoms.length; k++) {
+      if (!breakLegal(atoms[k - 1], atoms[k]) || startsBlock(atoms, k)) continue;
+      if (bytes(renderSeg(atoms, from, k, pfx)) <= limit) chosen = k;
+      else break;                 // segment length is monotonic in k
+    }
+    if (chosen === -1) {          // nothing fits: take the first legal break at all, if any
+      for (let k = from + 1; k < atoms.length; k++) {
+        if (breakLegal(atoms[k - 1], atoms[k]) && !startsBlock(atoms, k)) { chosen = k; break; }
+      }
+    }
+    if (chosen === -1) { out.push(full); break; }
+    out.push(renderSeg(atoms, from, chosen, pfx));
+    from = chosen;
+    pfx = cont;
+  }
+  out[out.length - 1] += trail;
+  return out.length === 1 ? [line] : out;
+}
+
+/**
+ * Classify one line of `text` at index `i` (0-based) given the block state the
+ * scan carries. Returns an exemption key, `null` when the line is compliant, or
+ * `'over'` when it is over budget and re-wrappable — the RED case.
+ */
+/** The block state a line-by-line scan carries. Both the gate and any re-wrap must advance it identically. */
+export function initialState() {
+  return { fence: false, frontMatter: false, quote: false };
+}
+
+const quoteMarks = (line) => [/「/g, /」/g, /『/g, /』/g].map((r) => (line.match(r) ?? []).length);
+
+/** Advance the block state PAST `line` (index `i`, 0-based). Pure — returns a new state. */
+export function advanceState(line, state, i) {
+  const s = { ...state };
+  if (i === 0 && line.trim() === '---') { s.frontMatter = true; return s; }
+  if (state.frontMatter) { if (line.trim() === '---') s.frontMatter = false; return s; }
+  if (isFence(line)) { s.fence = !s.fence; return s; }
+  if (s.fence) return s;
+  const [open, close, open2, close2] = quoteMarks(line);
+  const opens = open + open2;
+  const closes = close + close2;
+  if (s.quote) { if (closes > 0 && closes >= opens) s.quote = false; }
+  else if (opens > closes) s.quote = true;
+  return s;
+}
+
+export function classifyLine(line, state) {
+  if (state.frontMatter) return 'frontmatter';
+  if (state.fence || isFence(line)) return 'fence';
+  // A multi-line ruling quote is judged before the budget: its line structure is
+  // the author's, and it stays whether or not this particular line is long.
+  const [open, close, open2, close2] = quoteMarks(line);
+  if (state.quote || open + open2 > close + close2) return bytes(line) <= MAX_LINE_BYTES ? null : 'quotation';
+  if (bytes(line) <= MAX_LINE_BYTES) return null;
+  if (isTableRow(line)) return 'table';
+  if (isHeading(line)) return 'heading';
+  if (isAnchoredDirective(line)) return 'anchored';
+  if (/^\s*>/.test(line)) return 'blockquote';
+  if (wrapLine(line).length === 1) return 'unbreakable';
+  return 'over';
+}
+
+/** Scan a whole file; returns `{ offenders, exempt }`, offenders being 1-based line numbers. */
+export function scanLineLengths(text) {
+  const lines = text.split('\n');
+  if (text.endsWith('\n')) lines.pop();
+  let state = initialState();
+  const offenders = [];
+  const exempt = new Map();
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const kind = classifyLine(line, state);
+    state = advanceState(line, state, i);
+    if (kind === 'over') offenders.push({ line: i + 1, bytes: bytes(line) });
+    else if (kind) exempt.set(kind, (exempt.get(kind) ?? 0) + 1);
+  }
+  return { offenders, exempt };
+}
+
+export function lengthVerdict(rel, offenders) {
+  if (offenders.length === 0) return { ok: true, msg: `${rel}: every line is within ${MAX_LINE_BYTES} bytes (or structurally exempt).` };
+  const shown = offenders.slice(0, 5).map((o) => `L${o.line} (${o.bytes}B)`).join(', ');
+  return {
+    ok: false,
+    msg:
+      `${rel} has ${offenders.length} line(s) over the ${MAX_LINE_BYTES}-byte budget: ${shown}` +
+      `${offenders.length > 5 ? `, +${offenders.length - 5} more` : ''}. ` +
+      'The ratchet counts lines to price a per-session token read, so a long line is an unmetered tax — ' +
+      'wrap each one at a legal break point (a space, or between two CJK characters), keeping its content ' +
+      'byte-identical. Tables, fences, headings, front matter, line-anchored `Blocked-by:`-family directives ' +
+      'and lines with no legal break point are already exempt by shape — the exemptions are structural and ' +
+      'there is no allowlist to add a line to.',
+  };
+}
+
 function run() {
   let failed = 0;
   for (const [rel, maxLines] of CEILINGS) {
@@ -273,6 +582,11 @@ function run() {
       console.error(`✗ check-skill-line-ratchet: cannot read ${rel} — red, not a skip (#4690).`);
       failed++;
       continue;
+    }
+    const lv = lengthVerdict(rel, scanLineLengths(text).offenders);
+    if (!lv.ok) {
+      failed++;
+      console.error(`✗ check-skill-line-ratchet: ${lv.msg}`);
     }
     const v = verdict(rel, countLines(text), maxLines);
     if (!v.ok) {
@@ -323,7 +637,84 @@ function selfTest() {
     // silently. Extending coverage to the published catalog is a policy change
     // — it lands with a maintainer ruling that also deletes this case.
     ['the published skills/ catalog is deliberately uncovered', [...CEILINGS.keys()].some((k) => k.startsWith('skills/')), false],
-  ];
+    // ── The max-line-length rule (#11106): red/green pairs, one per class ────
+    // Each pair is the SAME content in a compliant and a non-compliant shape, so
+    // a case can only pass by the rule actually discriminating. The exemption
+    // cases carry a RED twin in a non-exempt shape for the same reason: an
+    // exemption that swallowed everything would run green against a bare assert.
+    ...(() => {
+      const clean = { fence: false, frontMatter: false };
+      const asciiShort = `- ${'word '.repeat(20).trim()}`;                       // 104 bytes
+      const asciiLong = `- ${'word '.repeat(30).trim()}`;                        // 154 bytes
+      const cjkShort = `${'中文内容'.repeat(9)}。`;                                // 111 bytes
+      const cjkLong = `${'中文内容'.repeat(20)}。`;                                // 243 bytes
+      const url = `  <https://example.invalid/${'x'.repeat(200)}>`;
+      const wrapped = wrapLine(cjkLong);
+      const wrappedAscii = wrapLine(asciiLong);
+      return [
+        ['budget is 120 bytes', MAX_LINE_BYTES, 120],
+        ['a short ASCII line -> green', classifyLine(asciiShort, clean), null],
+        ['a long ASCII line -> RED', classifyLine(asciiLong, clean), 'over'],
+        ['a short CJK line -> green', classifyLine(cjkShort, clean), null],
+        ['a long CJK line -> RED', classifyLine(cjkLong, clean), 'over'],
+        ['the RED message names the budget', lengthVerdict('f.md', [{ line: 1, bytes: 200 }]).msg.includes('120-byte'), true],
+        ['the RED message names the line number', lengthVerdict('f.md', [{ line: 7, bytes: 200 }]).msg.includes('L7'), true],
+        ['the RED message offers NO allowlist to add a line to', lengthVerdict('f.md', [{ line: 1, bytes: 200 }]).msg.includes('no allowlist'), true],
+        ['no offenders -> green verdict', lengthVerdict('f.md', []).ok, true],
+        // E1 fence
+        ['a long line inside a fence is exempt', classifyLine(cjkLong, { fence: true, frontMatter: false }), 'fence'],
+        ['...and the SAME line outside one is RED', classifyLine(cjkLong, clean), 'over'],
+        ['scan: a fenced long line yields no offender', scanLineLengths(`\`\`\`js\n// ${'x'.repeat(200)}\n\`\`\`\n`).offenders.length, 0],
+        ['scan: the fence closes again', scanLineLengths(`\`\`\`\nx\n\`\`\`\n${cjkLong}\n`).offenders.length, 1],
+        // E2 table
+        ['a long table row is exempt', classifyLine(`| a | ${cjkLong} |`, clean), 'table'],
+        ['...and the same cells as prose are RED', classifyLine(`a ${cjkLong}`, clean), 'over'],
+        // E3 heading / front matter
+        ['a long heading is exempt', classifyLine(`## ${cjkLong}`, clean), 'heading'],
+        ['...and the same text as a paragraph is RED', classifyLine(cjkLong, clean), 'over'],
+        ['front matter is exempt', classifyLine(`description: ${cjkLong}`, { fence: false, frontMatter: true }), 'frontmatter'],
+        ['scan: front matter closes at the second ---', scanLineLengths(`---\nname: x\n---\n${cjkLong}\n`).offenders.length, 1],
+        // E4 line-anchored directives — 行锚定 doctrine
+        ['an anchored Blocked-by: line is exempt', classifyLine(`Blocked-by: #1 ${cjkLong}`, clean), 'anchored'],
+        ['Restart-when: too', classifyLine(`- \`Restart-when: closed o/r#1\` ${cjkLong}`, clean), 'anchored'],
+        ['Restart-touch: too', classifyLine(`> Restart-touch: a/b.ts ${cjkLong}`, clean), 'anchored'],
+        ['but a MID-PROSE mention is not exempt — the escape hatch is line-anchored only', classifyLine(`${cjkLong} \`Blocked-by:\``, clean), 'over'],
+        // E6 blockquote — wrapping one would INSERT a `>`, i.e. a content edit
+        ['a long blockquote line is exempt', classifyLine(`> ${cjkLong}`, clean), 'blockquote'],
+        ['...including one indented inside a list', classifyLine(`    > ${cjkLong}`, clean), 'blockquote'],
+        ['...and the same quotation unquoted is RED', classifyLine(cjkLong, clean), 'over'],
+        // E5 unbreakable — the class that keeps the gate from demanding the impossible
+        ['a bare over-long URL is exempt', classifyLine(url, clean), 'unbreakable'],
+        ['a single over-long code span is exempt', classifyLine(`\`${'p/'.repeat(80)}\``, clean), 'unbreakable'],
+        ['...but prose LEADING to that URL is RED (wrap first, URL lands alone)', classifyLine(`${cjkShort} ${url.trim()}`, clean), 'over'],
+        // wrapLine: the canonical form, and it only ever moves whitespace
+        ['wrapLine splits a long CJK line', wrapped.length > 1, true],
+        ['every wrapped CJK segment is within budget', wrapped.every((l) => Buffer.byteLength(l, 'utf8') <= 120), true],
+        ['wrapping a CJK line changes NOTHING but whitespace', wrapped.join('').replace(/\s+/g, ''), cjkLong.replace(/\s+/g, '')],
+        ['wrapping an ASCII line changes NOTHING but whitespace', wrappedAscii.join(' ').replace(/\s+/g, ' '), asciiLong],
+        ['a list continuation is indented under the marker', wrappedAscii.slice(1).every((l) => l.startsWith('  ') && !l.startsWith('   ')), true],
+        ['no continuation line opens a new markdown block', [...wrapped.slice(1), ...wrappedAscii.slice(1)].every((l) => !/^([-*+>|]|#{1,6}|\d+[.)])(\s|$)/.test(l.trimStart())), true],
+        ['wrapLine is idempotent — its output is the canonical form', wrapped.flatMap((l) => wrapLine(l)).join('\n'), wrapped.join('\n')],
+        ['wrapLine leaves a short line untouched', wrapLine(cjkShort), [cjkShort]],
+        ['wrapLine never breaks inside a code span', wrapLine(`${cjkShort} \`a b c d\` ${cjkShort}`).every((l) => (l.match(/`/g) ?? []).length % 2 === 0), true],
+        // A verbatim ruling quote is grep-visible only while it stays on one line.
+        ['wrapLine never breaks inside a 「…」 ruling quote', wrapLine(`${cjkShort}(维护者指示:「我们是一个创业项目,核心能力优先」)${cjkShort}`).every((l) => (l.match(/[「」]/g) ?? []).length !== 1), true],
+        ['...nor inside a 『…』 one', wrapLine(`${cjkShort}『${'引文'.repeat(12)}』${cjkShort}`).every((l) => (l.match(/[『』]/g) ?? []).length !== 1), true],
+        ['a quote longer than the budget makes its line unbreakable, not RED', classifyLine(`「${'引文'.repeat(30)}」`, clean), 'unbreakable'],
+        // E7 multi-line ruling quotes — line structure preserved, not re-flowed
+        ['a line OPENING an unterminated 「 is exempt', classifyLine(`维护者指示:「${'引文'.repeat(30)}`, clean), 'quotation'],
+        ['a line INSIDE an open quote is exempt', classifyLine(cjkLong, { fence: false, frontMatter: false, quote: true }), 'quotation'],
+        ['...and the same line outside one is RED — the exemption is the quote, not the text', classifyLine(cjkLong, clean), 'over'],
+        ['a SHORT line inside a quote is simply green, not counted exempt', classifyLine(cjkShort, { fence: false, frontMatter: false, quote: true }), null],
+        ['advanceState opens on an unmatched 「', advanceState('说:「引文', initialState(), 3).quote, true],
+        ['advanceState closes on the matching 」', advanceState('引文结束」后续', { fence: false, frontMatter: false, quote: true }, 4).quote, false],
+        ['a quote opened and closed on ONE line does not open the state', advanceState('说:「引文」完', initialState(), 3).quote, false],
+        ['advanceState does not track quotes inside a fence', advanceState('说:「引文', { fence: true, frontMatter: false, quote: false }, 3).quote, false],
+        ['scan: a two-line quote yields quotation exemptions, not offenders', scanLineLengths(`维护者:「${'引'.repeat(60)}\n${'文'.repeat(60)}」\n`).offenders.length, 0],
+        ['wrapLine never strands a closing 。 at a line head', wrapped.slice(1).every((l) => !'。,、;:?!)]}'.includes(l.trimStart()[0])), true],
+      ];
+    })(),
+  ].map((c) => (Array.isArray(c[1]) || (c[1] && typeof c[1] === 'object') ? [c[0], JSON.stringify(c[1]), JSON.stringify(c[2])] : c));
   let failed = 0;
   for (const [name, actual, expected] of cases) {
     const ok = actual === expected;

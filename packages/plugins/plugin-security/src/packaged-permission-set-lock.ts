@@ -33,11 +33,17 @@
  *
  * ⛔ So the answer is NOT taken from a name-keyed page over
  * `sys_permission_set`. The batched existence oracle
- * (`seed-name-lookup.ts`'s `buildExistingByName`) caps its UNSCOPED page at
+ * (`seed-name-lookup.ts`'s `buildExistingByName`) capped its UNSCOPED page at
  * `limit: names.length`, which truncates the moment one name can carry more
- * than one row — and a truncated page reads as `absent` (#11518, open at the
- * time of writing; ⛔ not fixed here, it belongs to whoever takes it). Under
- * this lock that `absent` would read as "not package-declared".
+ * than one row — and a truncated page read as `absent`. #11518 has since
+ * repaired that: the page budget is measured (one row more than it will hold is
+ * requested, so overflow is DETECTED) and an overflowing page degrades to the
+ * per-item read instead of answering. ⚠️ That does not make this oracle safe to
+ * ask HERE, and the reason is worth stating rather than re-deriving: unscoped,
+ * `buildExistingByName` answers with the FIRST row by id for a name, so on a
+ * name several organizations hold it can answer with somebody else's row — a
+ * different wrong answer to the same question. This lock's read must have no
+ * page in it at all.
  *
  * ⭐ The answer comes from the engine's SchemaRegistry instead — the same
  * source `bootstrapDeclaredPermissions`' {@link readDeclared} and

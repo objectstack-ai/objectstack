@@ -169,7 +169,7 @@ To grant data exploration to your own (platform-internal) agent, add
 | `tools` | Direct tool references — legacy fallback |
 | `surface` | `'ask' \| 'build'` — the product surface this agent is (default `'ask'`) |
 | `model` | LLM model configuration — `provider`, `model`, `temperature`, `maxTokens`, `topP` |
-| ~~`knowledge`~~ | REMOVED in protocol 17 (#3896 close-out) — declaring sources/indexes on an agent never scoped retrieval (`search_knowledge` takes `sourceIds` from the LLM's tool-call arguments). Restrict at the knowledge-service/source level; describe intended grounding in `instructions` |
+| ~~`knowledge`~~ | REMOVED in protocol 17 — declaring sources/indexes on an agent never scoped retrieval (`search_knowledge` takes `sourceIds` from the LLM's tool-call arguments). Restrict at the knowledge-service/source level; describe intended grounding in `instructions` |
 | `guardrails` | `maxTokensPerInvocation`, `maxExecutionTimeSec`, `blockedTopics` |
 | `structuredOutput` | Output format (JSON schema, regex, etc.) |
 | `planning` | Autonomous reasoning — `maxIterations` (default 10) |
@@ -298,10 +298,10 @@ A tool authored as metadata (`type: 'tool'`, `*.tool.ts`) is validated by
 `ToolSchema`: required `name` / `label` / `description`, a **JSON Schema**
 `parameters` object, plus optional `objectName` and `outputSchema`. `ToolSchema`
 is **strict** — an unknown key (a typo, or a retired key) is a parse error, not
-a silent strip. Retired in the #3896 close-out: `category`, `permissions`,
+a silent strip. Retired in protocol 17: `category`, `permissions`,
 `active` and `builtIn` (all were authorable and inert; `permissions` gated
 nothing and `active: false` withdrew nothing — the rejection message carries
-each key's replacement), joining `requiresConfirmation` (#3715).
+each key's replacement), joining `requiresConfirmation`.
 
 <!-- os:check -->
 ```typescript
@@ -334,7 +334,7 @@ enforced surface).
 > executor loads a metadata-authored tool. The runtime executes a
 > separately-registered `AIToolDefinition` (cloud `@objectstack/service-ai`);
 > tool metadata is a one-way projection for Studio / discovery. Do not expect a
-> hand-authored tool to run in the open edition (liveness audit #1878/#1892).
+> hand-authored tool to run in the open edition.
 
 ### Inline Agent `tools[]` (legacy)
 
@@ -544,7 +544,7 @@ On validation failure the runtime retries by default
    `ai.requiresConfirmation` on the **action**, or `approval: 'always'` on an
    MCP tool binding. AI metadata edits are already gated: they land as drafts a
    human must publish (ADR-0033).
-   ⚠️ `requiresConfirmation` on the **tool** was REMOVED (#3715, ADR-0033 §2) —
+   ⚠️ `requiresConfirmation` on the **tool** was REMOVED (ADR-0033 §2) —
    it was read by no execution path, so it produced no pause. `ToolSchema` is
    strict, so authoring it now fails the parse with the migration attached.
    There is no `requireApprovalFor` field.

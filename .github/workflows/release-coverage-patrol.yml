@@ -241,7 +241,16 @@ jobs:
           PROVENANCE: >-
             run [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
             · commit `${{ github.sha }}` · trigger `${{ github.event_name }}`
-        run: node scripts/render-release-coverage-anchor.mjs > "$RUNNER_TEMP/body.md"
+        # Runs its own `--self-test` first (#11150). That leg is not ceremony
+        # here: the renderer's assertions pin `verdict()` — the mapping from the
+        # sweep's two exit codes onto did-not-run / findings / clean — and a
+        # broken mapping still renders a body. The live run below would stay
+        # exit 0 and publish a WRONG report, including the one reading #4690
+        # forbids, a broken instrument rendered as a clean corpus. Only the live
+        # run is redirected; the self-test's own verdict goes to the step log.
+        run: |
+          node scripts/render-release-coverage-anchor.mjs --self-test
+          node scripts/render-release-coverage-anchor.mjs > "$RUNNER_TEMP/body.md"
 
       # The rendered body is the product of the run, so it goes to the step
       # summary on EVERY trigger — including the pull_request runs that must not

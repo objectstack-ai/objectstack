@@ -36,7 +36,7 @@ function makeQl(declared: any[] = []) {
       // of these names exist" — so every provenance case below would silently
       // become a first-boot insert while the suite reported green. That is the
       // double's limits masquerading as the seeder's behaviour.
-      return rows.filter((r) =>
+      const matched = rows.filter((r) =>
         Object.entries(where).every(([k, v]) => {
           if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
           if (v && typeof v === 'object' && !Array.isArray(v)) {
@@ -47,6 +47,16 @@ function makeQl(declared: any[] = []) {
           return (v === null ? r[k] == null : r[k] === v);
         }),
       );
+      // [#11518] `limit` is HONOURED, and a paged read is ordered by `id`
+      // ascending (#4363's pagination tie-breaker). Both are properties of the
+      // shipped drivers, measured for the sibling double in
+      // `bootstrap-system-capabilities.test.ts`; this one ignored `limit`
+      // entirely, which made the whole class of page-cap defect INEXPRESSIBLE
+      // here — including #11518's, whose consequence lands on THIS seeder.
+      if (q?.limit === undefined) return matched;
+      return [...matched]
+        .sort((a, b) => (String(a.id) < String(b.id) ? -1 : String(a.id) > String(b.id) ? 1 : 0))
+        .slice(0, q.limit);
     },
     async insert(object: string, data: any) {
       if (object !== 'sys_capability') return null;
@@ -407,5 +417,88 @@ describe('unowned-declaration diagnostic (#4967 Part 3)', () => {
     await bootstrapDeclaredCapabilities(ql, null, { logger, permissionSets: [{ systemPermissions: ['orphan_cap'] }] });
     const w = warns.find((x) => x.msg.includes('orphan_cap'));
     expect(w!.meta?.grantedBy).toEqual(['(unnamed permission set)']);
+  });
+});
+
+/**
+ * [#11518] THE CONSEQUENCE THIS SEEDER PAYS FOR A TRUNCATED EXISTENCE PAGE.
+ *
+ * This is one of the two callers on `main` that read UNSCOPED (the other is
+ * `permission-set-projection`'s overlay pass), and `seed-name-lookup.ts` capped
+ * an unscoped page at `names.length` — exact only while one row can exist per
+ * name. Since #8461 / ADR-0120 D1 `sys_capability.name` is unique PER
+ * ORGANIZATION and ADR-0066 D1 encourages admins to EXTEND the registry inside
+ * their own organization, so a healthy install carries a row per organization
+ * plus the package's. The rows that fall off a full page are the highest `id`s
+ * (#4363's `ORDER BY id ASC`), so whole names vanish — and a vanished name reads
+ * as `absent`, which sends THIS loop to its INSERT branch.
+ *
+ * That is the whole severity of the card: not a read that under-reports, but a
+ * read that under-reports and then WRITES. Measured here on the seeder rather
+ * than argued, which needs the double above to honour `limit` — it did not, and
+ * that is why nothing in this file could see the defect.
+ */
+describe('#11518 — a truncated existence page must never route this seeder to INSERT', () => {
+  const NAMES = Array.from({ length: 8 }, (_, i) => `acme.cap_${i}`);
+  const PACKAGE_ID = 'com.acme.suite';
+  const declared = NAMES.map((name, i) => ({
+    name, label: `Cap ${i}`, description: `Capability ${i}.`, scope: 'org', _packageId: PACKAGE_ID,
+  }));
+
+  /**
+   * A REBUILD on a healthy install: every declared name already has this
+   * package's row, and two organizations have extended the first one. Their ids
+   * sort first, so they take the head of the page and the package's own rows are
+   * what falls off the end.
+   */
+  function fixture() {
+    const ql = makeQl(declared);
+    ql.rows.push(
+      { id: 'aaa_org_jia', organization_id: 'org_jia', name: NAMES[0], label: 'Jia copy', description: 'jia', scope: 'org', managed_by: 'admin', active: true },
+      { id: 'aab_org_yi', organization_id: 'org_yi', name: NAMES[0], label: 'Yi copy', description: 'yi', scope: 'org', managed_by: 'admin', active: true },
+    );
+    NAMES.forEach((name, i) => ql.rows.push({
+      id: `cap_${i}`, name, label: `Cap ${i}`, description: `Capability ${i}.`, scope: 'org',
+      managed_by: 'package', package_id: PACKAGE_ID, organization_id: null, active: true,
+    }));
+    return ql;
+  }
+
+  it('POSITIVE CONTROL: at the cap that was live before this fix, two declared names have no row on the page', async () => {
+    // Pins the DOUBLE, so it holds before and after the repair — without it,
+    // "the seeder wrote nothing" could be green because the trap was never set.
+    const ql = fixture();
+    const page: any[] = await ql.find('sys_capability', {
+      where: { name: { $in: NAMES } },
+      limit: NAMES.length, // ← the UNSCOPED cap this card repairs
+    });
+    const onThePage = new Set(page.map((r) => r.name));
+    expect(page).toHaveLength(NAMES.length);
+    expect([...onThePage].sort()).toEqual(NAMES.slice(0, 6).sort());
+    for (const lost of [NAMES[6], NAMES[7]]) {
+      expect(onThePage.has(lost), `${lost} fell off a full page`).toBe(false);
+      expect(ql.rows.some((r: any) => r.name === lost && r.managed_by === 'package')).toBe(true);
+    }
+  });
+
+  it('re-seeds a healthy multi-organization install WITHOUT writing anything', async () => {
+    const ql = fixture();
+    const rowsBefore = ql.rows.length;
+    const out = await bootstrapDeclaredCapabilities(ql, null);
+
+    // ⛔ The load-bearing assertion. Before the repair this was `seeded: 2` and
+    // two DUPLICATE rows for names whose package rows were sitting in the table
+    // — every boot, on an install that is simply using ADR-0066 D1.
+    expect(out.seeded).toBe(0);
+    expect(ql.rows).toHaveLength(rowsBefore);
+    // Nothing else was written either: seven of the names resolve to this
+    // package's own unchanged row…
+    expect(out.updated).toBe(0);
+    expect(out.unchanged).toBe(NAMES.length - 1);
+    // …and the eighth resolves to an organization's authored copy, which this
+    // seeder never clobbers. Unscoped, the first row by id is the row — the
+    // pre-#10946 per-item answer, unchanged by this repair.
+    expect(out.skippedAdmin).toBe(1);
+    expect(out.unreadable).toBe(0);
   });
 });
