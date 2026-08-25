@@ -4,7 +4,7 @@ import { blog } from '@/lib/source';
 import { getMDXComponents } from '@/mdx-components';
 import { HomeLayout } from 'fumadocs-ui/layouts/home';
 import { baseOptions } from '@/lib/layout.shared';
-import { absoluteUrl } from '@/lib/site';
+import { absoluteUrl, HERO_COVER } from '@/lib/site';
 import {
   compact,
   JsonLd,
@@ -78,7 +78,7 @@ function postGraph(url: string, data: BlogPostData): JsonLdNode[] {
       url: canonical,
       mainEntityOfPage: canonical,
       inLanguage: 'en',
-      image: absoluteUrl(BLOG_CARD.url),
+      image: absoluteUrl(HERO_COVER.url),
       datePublished: isoDate(data.date),
       dateModified: sitemapLastModified(url),
       keywords: data.tags,
@@ -251,29 +251,25 @@ export async function generateStaticParams() {
   }));
 }
 
+const BLOG_INDEX_TITLE = 'Blog';
+const BLOG_INDEX_DESCRIPTION =
+  'Insights, updates, and best practices from the ObjectStack team.';
+
 /**
- * The blog's social card.
+ * Metadata for the blog index and for every post.
+ *
+ * The social card in both branches is the shared hero cover, `HERO_COVER` from
+ * `lib/site.ts` — the same image the homepage presents itself with, and the same
+ * one `postGraph()` above puts in the `BlogPosting` node. It used to be a literal
+ * spelled here and again on the homepage; one declaration now, so a re-encode
+ * cannot leave half the site pointing at a file that no longer exists.
  *
  * ⚠️ The card generator at `app/og/docs/[...slug]/route.tsx` is docs-only: it
  * renders from `source` (the `content/docs` loader) and has no branch for `blog`,
  * so there is no per-post card to reference and this card is shared by the index
  * and every post. Giving posts their own generated cards is a separate decision,
  * not a gap in this wiring — it would mean a second `app/og/**` route.
- *
- * ⚠️ Same path as `apps/docs/app/[lang]/page.tsx`'s `HOME_CARD`; that file
- * carries the note on why it is spelled twice and what must change together.
  */
-const BLOG_CARD = {
-  url: '/hero-cover-dark.png',
-  width: 2400,
-  height: 1200,
-  alt: 'ObjectStack — the metadata framework for AI-written apps',
-};
-
-const BLOG_INDEX_TITLE = 'Blog';
-const BLOG_INDEX_DESCRIPTION =
-  'Insights, updates, and best practices from the ObjectStack team.';
-
 export async function generateMetadata({
   params,
 }: {
@@ -296,13 +292,13 @@ export async function generateMetadata({
         title: BLOG_INDEX_TITLE,
         description: BLOG_INDEX_DESCRIPTION,
         url: canonical,
-        images: [BLOG_CARD],
+        images: [HERO_COVER],
       },
       twitter: {
         card: 'summary_large_image',
         title: BLOG_INDEX_TITLE,
         description: BLOG_INDEX_DESCRIPTION,
-        images: [BLOG_CARD.url],
+        images: [HERO_COVER.url],
       },
     };
   }
@@ -324,13 +320,13 @@ export async function generateMetadata({
       title: page.data.title,
       description: page.data.description,
       url: canonical,
-      images: [BLOG_CARD],
+      images: [HERO_COVER],
     },
     twitter: {
       card: 'summary_large_image',
       title: page.data.title,
       description: page.data.description,
-      images: [BLOG_CARD.url],
+      images: [HERO_COVER.url],
     },
   };
 }

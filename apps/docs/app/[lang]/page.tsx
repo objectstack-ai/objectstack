@@ -4,7 +4,7 @@ import { ArrowRight, Check } from 'lucide-react';
 import { Bricolage_Grotesque, IBM_Plex_Mono } from 'next/font/google';
 import { HomeLayout } from 'fumadocs-ui/layouts/home';
 import { baseOptions, gitConfig } from '@/lib/layout.shared';
-import { absoluteUrl } from '@/lib/site';
+import { absoluteUrl, HERO_COVER } from '@/lib/site';
 import {
   APACHE_2_0_URL,
   GITHUB_REPO_URL,
@@ -36,7 +36,8 @@ const HOME_DESCRIPTION =
   'ObjectStack turns the whole app — data model, UI, workflows, permissions — into typed metadata: a complete CRM in under 150k tokens, one context window.';
 
 /**
- * The homepage's social card.
+ * The homepage's metadata. Its social card is the shared hero cover,
+ * `HERO_COVER` from `lib/site.ts` — the same image the video poster below uses.
  *
  * ⚠️ Deliberately NOT the docs card generator. `app/og/docs/[...slug]/route.tsx`
  * renders from a `source.getPage()` result, and the homepage has no MDX file
@@ -44,22 +45,13 @@ const HOME_DESCRIPTION =
  * which is already shipped and already the video poster on this page, so the
  * shared card costs no extra bytes and no extra route.
  *
- * ⚠️ `apps/docs/app/[lang]/blog/[[...slug]]/page.tsx` spells this same path for
- * the blog's card. Two spellings rather than one shared constant because
- * `lib/site.ts` is the origin's home, not the asset manifest's; if a third page
- * ever needs it, hoist it there. Anything that renames, re-encodes or deletes
- * `public/hero-cover-dark.png` must update BOTH — an `og:image` that 404s is
- * worse than none, because crawlers then scrape whatever else the page offers.
+ * The path used to be spelled as a literal here, again in the blog's card, and a
+ * third time as the `poster` further down this file — with a note asking whoever
+ * added a third consumer to hoist it. That happened; it lives in `lib/site.ts`
+ * now, and the reasons a re-encode has to be careful live with it.
  *
  * Left site-relative: `metadataBase` in `app/layout.tsx` absolutises it.
  */
-const HOME_CARD = {
-  url: '/hero-cover-dark.png',
-  width: 2400,
-  height: 1200,
-  alt: 'ObjectStack — the metadata framework for AI-written apps',
-};
-
 export const metadata: Metadata = {
   title: HOME_TITLE,
   description: HOME_DESCRIPTION,
@@ -77,13 +69,13 @@ export const metadata: Metadata = {
     // Same absolute URL as the canonical link — see the docs route for why the
     // two must not drift.
     url: absoluteUrl('/'),
-    images: [HOME_CARD],
+    images: [HERO_COVER],
   },
   twitter: {
     card: 'summary_large_image',
     title: HOME_TITLE,
     description: HOME_DESCRIPTION,
-    images: [HOME_CARD.url],
+    images: [HERO_COVER.url],
   },
 };
 
@@ -104,7 +96,7 @@ export const metadata: Metadata = {
  *
  * Every field is drawn from something already on this page or in `lib/`: the
  * title and description are the same constants `metadata` uses, the image is
- * `HOME_CARD`, the licence is the repo's own, and the two `sameAs` links are the
+ * `HERO_COVER`, the licence is the repo's own, and the two `sameAs` links are the
  * GitHub organisation and the YouTube channel this page links to in its hero.
  */
 function homeGraph(): JsonLdNode[] {
@@ -119,7 +111,7 @@ function homeGraph(): JsonLdNode[] {
       // itself one way to a crawler and another way to a social card.
       headline: HOME_TITLE,
       description: HOME_DESCRIPTION,
-      image: absoluteUrl(HOME_CARD.url),
+      image: absoluteUrl(HERO_COVER.url),
       codeRepository: GITHUB_REPO_URL,
       programmingLanguage: 'TypeScript',
       runtimePlatform: 'Node.js',
@@ -279,7 +271,7 @@ export default function HomePage() {
             <YouTubeEmbed
               videoId={OVERVIEW_VIDEO_ID}
               title="ObjectStack in 90 Seconds"
-              poster="/hero-cover-dark.png"
+              poster={HERO_COVER.url}
             />
             <figcaption
               className="mt-3 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-[12px] text-fd-muted-foreground"
