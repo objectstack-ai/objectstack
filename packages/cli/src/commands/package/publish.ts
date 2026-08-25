@@ -16,6 +16,14 @@
  * way to publish. (The legacy direct-to-environment `os publish` / `os
  * rollback` commands, which wrote sys_environment_revision, have been
  * removed.)
+ *
+ * NOTE — `os publish` and `os rollback` above are RETIRED ids, named here on
+ * purpose: the sentence is *about* their removal, and neither resolves today.
+ * Measured against the built oclif `Config`: the registered `publish` ids are
+ * `package publish` and `plugin publish`, and no `rollback` id exists at all.
+ * A sweep for documented `os …` invocations that do not resolve will flag
+ * these two — leave them. Re-spelling either to a live id would make the
+ * sentence false, and deleting the sentence would drop accurate history.
  */
 
 import { readFile } from 'node:fs/promises';

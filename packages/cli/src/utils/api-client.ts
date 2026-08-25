@@ -17,7 +17,7 @@ export interface ApiClientOptions {
   token?: string;
   /**
    * Explicit project id. Overrides the stored `activeEnvironmentId` from
-   * `~/.objectstack/credentials.json` (written by `os projects switch`).
+   * `~/.objectstack/credentials.json` (written by `os environments switch`).
    */
   environmentId?: string;
   /**
