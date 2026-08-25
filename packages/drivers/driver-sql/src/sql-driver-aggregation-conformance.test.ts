@@ -39,25 +39,39 @@
  * rather than a per-dialect exemption, and the difference matters — a `skipIf`
  * would have been the silent narrowing this card was filed about.
  *
+ * Measured under full CI parity (`OS_EXPECT_LIVE_DIALECT_MATRIX=1`, both URLs
+ * provisioned, `TZ=America/New_York`): **55 passed, 0 skipped** — 18 per cell
+ * on all three, plus the axis guard. The suite it replaced ran 18, on one.
+ *
  * ### The readings the faces are built from, measured 2026-08-25
  *
- * Live PostgreSQL 16.13 (`timezone=Asia/Shanghai`, process `TZ=America/New_York`
- * — CI parity) against the SQLite cell as control. Measured, not ported:
+ * All three cells on live servers at CI parity — PostgreSQL 16.13
+ * (`timezone=Asia/Shanghai`), MySQL 8.0.46 (`@@global.time_zone='+08:00'`),
+ * process `TZ=America/New_York`. Measured, not ported:
  *
- * | reading                              | sqlite            | pg                   |
- * | ------------------------------------ | ----------------- | -------------------- |
- * | `count` / `count_distinct` result    | `6` (number)      | `"6"` (**string**)   |
- * | `sum`/`avg`/`min`/`max` over `score`  | `210` (number)    | `210` (number)       |
- * | identifier quoting in emitted SQL    | `` `stage` ``     | `"stage"`            |
- * | field-less `count_distinct` refusal  | `INVALID_QUERY`/400 | identical          |
+ * | reading                             | sqlite        | pg             | mysql         |
+ * | ----------------------------------- | ------------- | -------------- | ------------- |
+ * | `count` / `count_distinct` result   | `6` number    | `"6"` STRING   | `6` number    |
+ * | `sum`/`avg`/`min`/`max` over `score` | `210` number  | `210` number   | `210` number  |
+ * | identifier quoting in emitted SQL   | `` `stage` `` | `"stage"`      | `` `stage` `` |
+ * | field-less `count_distinct` refusal | `INVALID_QUERY`/400 | identical | identical   |
  *
- * ⚠️ Note the SECOND row, because "pg returns aggregates as strings" is the
- * tempting summary and it is WRONG: node-pg hands `count` back as a string
- * because `COUNT` is `bigint`, while `sum`/`avg`/`min`/`max` over this fixture's
- * `score` arrive as JS numbers because `type: 'number'` lowers to a float
- * column. The wire type is a property of the RESULT type per aggregate, not of
- * the dialect — so the coercion below is deliberate everywhere rather than
- * switched on `cell.id`.
+ * ⚠️ Two things in that table are worth reading slowly, because the tempting
+ * summary — "the live servers answer differently" — is wrong in both.
+ *
+ * FIRST: the divergent cell is **pg alone**, not "the live cells". mysql2 hands
+ * `COUNT`'s `BIGINT` back as a JS number; node-pg hands the same `BIGINT` back
+ * as a string rather than lose precision. So this is a property of one CLIENT
+ * LIBRARY's type parsing, and a face switched on `cell.live` would have been
+ * built on a distinction that is not the one doing the work.
+ *
+ * SECOND: within pg it is not uniform either. `count` arrives as a string while
+ * `sum`/`avg`/`min`/`max` over this fixture's `score` arrive as numbers,
+ * because `type: 'number'` lowers to a float column and node-pg parses float8
+ * to a number. The wire type is a property of the RESULT type per aggregate,
+ * not of the dialect — which is why the coercion below is unconditional rather
+ * than switched on `cell.id`. A `cell.id === 'pg'` branch would be green today
+ * and wrong the first time an aggregand's column type changed.
  *
  * {@link actualFor}'s `Number(r.n)` was already the right shape and needed no
  * change; it is now load-bearing rather than incidental, and that is why it is
