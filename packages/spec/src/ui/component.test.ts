@@ -2175,6 +2175,56 @@ describe('#7751 — object-* block props schemas', () => {
     expect(r.success, JSON.stringify((r as any).error?.issues)).toBe(true);
   });
 
+  describe('`object-master-detail-form` `formType` speaks the measured vocabulary (#11873)', () => {
+    // Spec half of objectui#5939: the renderer honours exactly `simple` and
+    // `tabbed` for the parent half; the old bare `z.string()` let any value
+    // parse clean, match no branch, and render a silently sectionless parent
+    // form (the objectui#3840 probe read GREEN through a real crash this way).
+    const schema = ComponentPropsMap['object-master-detail-form'];
+
+    for (const value of ['simple', 'tabbed'] as const) {
+      it(`'${value}' is accepted`, () => {
+        const r = schema.safeParse({ objectName: 'po', details: [], formType: value });
+        expect(r.success, JSON.stringify((r as any).error?.issues)).toBe(true);
+      });
+    }
+
+    it("a never-vocabulary value ('wizzard' — the issue's own repro) refuses with the plain enum refusal", () => {
+      const result = schema.safeParse({ objectName: 'po', details: [], formType: 'wizzard' });
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        const issue = result.error.issues[0]!;
+        expect(issue.code).toBe('invalid_value');
+        expect(issue.path).toEqual(['formType']);
+        // Never a legal spelling anywhere, so it gets zod's own enum message,
+        // not a retirement prescription.
+        expect(issue.message).not.toContain('is not part of');
+      }
+    });
+
+    describe('the four `object-form` spellings refuse with a per-value prescription', () => {
+      // Each names the measured way it breaks the atomic parent+details
+      // contract and prescribes the two honoured values — the `record:chatter`
+      // `position` precedent (#8762): an enum-VALUE narrowing has no
+      // `retiredKey()` tombstone, so the enum's own error map carries the
+      // prescription, keyed on `issue.input`.
+      for (const from of ['wizard', 'split', 'drawer', 'modal'] as const) {
+        it(`'${from}' → refused, prescribing 'simple' or 'tabbed'`, () => {
+          const result = schema.safeParse({ objectName: 'po', details: [], formType: from });
+          expect(result.success).toBe(false);
+          if (!result.success) {
+            const issue = result.error.issues[0]!;
+            expect(issue.code).toBe('invalid_value');
+            expect(issue.path).toEqual(['formType']);
+            expect(issue.message).toContain(`'${from}' is not part of`);
+            expect(issue.message).toContain("Write 'simple'");
+            expect(issue.message).toContain('object-form');
+          }
+        });
+      }
+    });
+  });
+
   it("the designer's dead `groupField` spelling is answered with the `groupBy` the board reads", () => {
     // Producer: objectui previews/block-config.ts publishes `groupField` for
     // object-kanban; ObjectKanban.tsx reads only `groupBy` (#7973 class).
