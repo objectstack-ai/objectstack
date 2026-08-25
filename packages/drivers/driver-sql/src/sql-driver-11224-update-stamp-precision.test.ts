@@ -364,6 +364,16 @@ function measure(cell: DialectCell): void {
       // from it: these are the gaps the clock reported back, not the ones the
       // timer was asked for. Nothing below is readable until this holds — an
       // unspaced run is exactly the probabilistic instrument this replaced.
+      //
+      // The COUNT first, so the bound below cannot pass vacuously: `Math.min()`
+      // of an empty list is `Infinity`, so a loop that stopped spacing its
+      // updates would satisfy the gap assertion instead of failing it.
+      expect(
+        gaps.length,
+        `[#11572] §3 spaced ${gaps.length} of the ${ROUNDS - 1} intervals between its ${ROUNDS} ` +
+          `updates — every update after the first must be preceded by a verified gap, or the ` +
+          `distinctness below is racing the machine again for the unspaced ones.`,
+      ).toBe(ROUNDS - 1);
       expect(
         Math.min(...gaps),
         `[#11572] §3 could not space its updates: it required ${MIN_GAP_MS} ms of real clock ` +
