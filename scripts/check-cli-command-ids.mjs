@@ -117,6 +117,23 @@ const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const OCLIF_COMMANDS_DIR = 'src/commands';
 
 /**
+ * This gate's own source, excluded from its own population.
+ *
+ * ⭐ A CHECKER CANNOT BE ITS OWN EVIDENCE. Every negative fixture below --
+ * `'os migrate nonexistent-command'`, `'os demo'`, `'os nope nope'` -- is an
+ * unresolvable id ON PURPOSE, because that is what a self-test for this gate is made
+ * of. Scanning them would make the gate red exactly in proportion to how well it is
+ * tested, and the only way to go green would be to delete the tests.
+ *
+ * This was found the honest way rather than reasoned out: the gate ran green while the
+ * file was still UNTRACKED (`populationFiles` reads `git ls-files`) and reded on the
+ * first run after it was committed. Same shape as the fixtures in
+ * `scripts/docs-audit/*` that `FIXTURE_EXEMPTIONS` carries -- this one just happens to
+ * be in this file, so it is excluded whole rather than line by line.
+ */
+const OWN_SOURCE = relative(REPO_ROOT, fileURLToPath(import.meta.url)).split(sep).join('/');
+
+/**
  * ## The two ledgers, and why an exemption has to assert its own cause
  *
  * Both are keyed by file AND by the exact candidate text, so a genuinely wrong literal
@@ -302,6 +319,7 @@ function populationFiles(root = REPO_ROOT, cliDirs = []) {
     .toString().trim().split('\n');
   return tracked.filter((f) => {
     if (!/\.(?:ts|tsx|js|mjs|cjs)$/.test(f)) return false;
+    if (f === OWN_SOURCE) return false;
     if (cliDirs.some((d) => f.startsWith(`${d}/`))) return false;
     if (/\.(?:test|spec)\.[tj]sx?$/.test(f) || f.includes('/__tests__/')) return false;
     return /(?:^|\/)src\//.test(f) || f.startsWith('scripts/');
@@ -460,6 +478,12 @@ function selfTest() {
         && !live.violations.some((x) => x.file === fake.file);
     })(),
     'the staleness check is keyed on what the scan actually saw');
+
+  t('the gate excludes its OWN source from its population',
+    OWN_SOURCE === 'scripts/check-cli-command-ids.mjs'
+    && !audit().resolved.some((x) => x.file === OWN_SOURCE)
+    && !audit().violations.some((x) => x.file === OWN_SOURCE),
+    'every negative fixture in this file is an unresolvable id by construction');
 
   // -- bin names come from declared data ------------------------------------
   t('oclif.bin is read', binNamesOf({ oclif: { bin: 'os' } }).includes('os'));
