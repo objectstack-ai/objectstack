@@ -2283,6 +2283,14 @@ export const ObjectGridPropsSchema = lazySchema(() => strictObject({
 }));
 /** Author state (ADR-0122: the bare name is the author state). */
 export type ObjectGridProps = z.input<typeof ObjectGridPropsSchema>;
+/**
+ * ADR-0122: the parsed state differs from the authored state on exactly one
+ * key — `data` carries `ViewDataSchema` (the ui#6207 convergence), whose own
+ * input ≠ infer. So `object-grid` leaves the type-alias convention pin's
+ * default-free family (the Iso839 line deleted with this alias), taking the
+ * `RecordAlertPropsParsed` route its comment prescribes.
+ */
+export type ObjectGridPropsParsed = z.infer<typeof ObjectGridPropsSchema>;
 
 /**
  * `object-metric` (objectui `plugin-dashboard/src/ObjectMetricWidget.tsx` @

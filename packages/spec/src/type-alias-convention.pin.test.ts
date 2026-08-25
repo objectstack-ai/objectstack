@@ -1566,9 +1566,11 @@ export type Iso849 = Assert<Eq< z.input< typeof M170.RecordHistoryProps >, z.inf
 // The object-* block family (#7751) — deliberately default-free in its first,
 // warning-tier step ("the author said nothing" must stay distinguishable from
 // "the author asked for the renderer's fallback"), so input === infer holds.
-// A default added to any of these six goes red here, and the fix is the ADR's:
+// A default added to any of these goes red here, and the fix is the ADR's:
 // declare the XParsed alias and delete the pin line.
-export type Iso839 = Assert<Eq< z.input< typeof M170.ObjectGridPropsSchema >, z.infer< typeof M170.ObjectGridPropsSchema > >>;
+// `ObjectGridPropsSchema` (Iso839) left the family exactly that way on the
+// ui#6207 convergence: its `data` now carries `ViewDataSchema`, whose own
+// input ≠ infer, so `ObjectGridPropsParsed` is declared and the pin deleted.
 export type Iso840 = Assert<Eq< z.input< typeof M170.ObjectMetricPropsSchema >, z.infer< typeof M170.ObjectMetricPropsSchema > >>;
 export type Iso841 = Assert<Eq< z.input< typeof M170.ObjectKanbanPropsSchema >, z.infer< typeof M170.ObjectKanbanPropsSchema > >>;
 export type Iso842 = Assert<Eq< z.input< typeof M170.ObjectCalendarPropsSchema >, z.infer< typeof M170.ObjectCalendarPropsSchema > >>;

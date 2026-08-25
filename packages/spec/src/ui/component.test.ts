@@ -2146,7 +2146,7 @@ describe('#7751 — object-* block props schemas', () => {
     // `object-grid-data-view-data-converged`.
     const r = ComponentPropsMap['object-grid'].safeParse({ data: [{ id: 1 }] });
     expect(r.success).toBe(false);
-    expect(r.error!.issues.some((i: { path: (string | number)[] }) => i.path[0] === 'data')).toBe(true);
+    expect(r.error!.issues.some((i) => i.path[0] === 'data')).toBe(true);
   });
 
   it('`defaultFilters` stays HONOURED — it is a read legacy fallback, not an inert spelling', () => {
