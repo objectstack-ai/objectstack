@@ -127,6 +127,20 @@
         "$TURBO_ROOT$/examples/app-showcase/src/ui/views/contact.view.ts"
       ]
     },
+    "@objectstack/cloud-connection#test": {
+      "dependsOn": [
+        "^build"
+      ],
+      "outputs": [],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "!dist/**",
+        "!coverage/**",
+        "!.turbo/**",
+        "$TURBO_ROOT$/scripts/js-comment-mask.mjs",
+        "$TURBO_ROOT$/scripts/js-comment-mask.d.mts"
+      ]
+    },
     "@objectstack/platform-objects#test": {
       "dependsOn": ["^build"],
       "outputs": [],
@@ -135,7 +149,11 @@
         "!dist/**",
         "!coverage/**",
         "!.turbo/**",
-        "$TURBO_ROOT$/packages/**/*.object.ts"
+        "$TURBO_ROOT$/packages/**/*.object.ts",
+      "$TURBO_ROOT$/scripts/js-comment-mask.mjs",
+      "$TURBO_ROOT$/scripts/js-comment-mask.d.mts",
+      "$TURBO_ROOT$/packages/lint/src/page-envelope-audit.test.ts",
+      "$TURBO_ROOT$/packages/cloud-connection/src/cloud-connection-ui.ts"
       ]
     },
     "@objectstack/plugin-auth#test": {

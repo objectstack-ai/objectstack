@@ -40,6 +40,14 @@ import { join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import type { Page } from '@objectstack/spec/ui';
 import { auditPageExpressionEnvelopes, renderBareExpressionFindings } from '@objectstack/lint';
+// The one answer this tree has to "comment, literal, or code". It is a plain
+// `.mjs`, but `scripts/js-comment-mask.d.mts` beside it is a hand-written
+// declaration mirror (governed by `check:declaration-mirrors`), so this import
+// is typed and needs no suppression -- a `@ts-expect-error` here would be an
+// UNUSED directive. That `.d.mts` is what gives `maskComments` its type, so it
+// is an input to this package's typecheck verdict as well as to this scan.
+// Same spelling `packages/cli`'s contract tests use.
+import { maskComments } from '../../../../scripts/js-comment-mask.mjs';
 import * as pageExports from './index.js';
 
 type AnyRec = Record<string, unknown>;
@@ -90,9 +98,45 @@ function tsFilesUnder(dir: string, out: string[] = []): string[] {
   return out;
 }
 
-/** Strip comments so a `: Page =` inside prose is not read as a declaration. */
-function stripComments(source: string): string {
-  return source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^[ \t]*\/\/.*$/gm, '');
+/**
+ * Every `export const X: Page = …` this source text declares, read from CODE.
+ *
+ * ## Why the shared mask and not a private comment-stripper
+ *
+ * Masking is not a detail of this scan, it is the scan's population rule: text
+ * this function mistakes for a comment is a page this gate never audits, and
+ * the gate still reports GREEN — a green line over a page nobody read, which is
+ * the exact defect class this file exists to prevent, re-entering through the
+ * detector instead of through the authoring.
+ *
+ * What used to stand here was two regexes, block pass first
+ * (`/\*[\s\S]*?\*\/` lazily, then `^[ \t]*\/\/.*$`) — the same pair #9367
+ * retired from six gates and #10453 found surviving in two `packages/cli`
+ * tests. Its failure is
+ * the silent one: a block-comment OPENER that is not a comment at all — inside
+ * a string literal, or inside a line comment — opens a phantom comment that
+ * runs to the next real `\*\/` and deletes every line between, declarations
+ * included.
+ *
+ * That is not a shape only a fixture writes. Measured on this tree at the time
+ * of the conversion, `packages/cloud-connection/src/cloud-connection-ui.ts`
+ * carries one: the line comment `// … /api/v1/cloud-connection/* routes this
+ * plugin mounts.` opens a phantom that the next docblock's terminator closes,
+ * and the retired regex deletes 122 bytes of live page literal in between. Both
+ * gates stayed green only because the opener happens to sit BELOW the
+ * `export const … : Page =` the scan anchors on — a page declared thirty lines
+ * further down that file would simply have vanished from the population.
+ *
+ * `maskComments` blanks comment spans and leaves string, template and regex
+ * literals intact, so offsets and line numbers both survive and a `: Page =`
+ * inside prose still cannot be read as a declaration.
+ *
+ * Split out from the walk so the pin below drives the REAL scan over a fixture
+ * rather than over whatever this package happens to contain today.
+ */
+function pageDeclarationsIn(source: string): string[] {
+  return [...maskComments(source).matchAll(/export\s+const\s+(\w+)\s*:\s*Page\s*=/g)]
+    .map(match => match[1]!);
 }
 
 /**
@@ -108,9 +152,8 @@ function stripComments(source: string): string {
 function declaredPageExports(): { name: string; file: string }[] {
   const out: { name: string; file: string }[] = [];
   for (const file of tsFilesUnder(PACKAGE_SRC)) {
-    const source = stripComments(readFileSync(file, 'utf8'));
-    for (const match of source.matchAll(/export\s+const\s+(\w+)\s*:\s*Page\s*=/g)) {
-      out.push({ name: match[1]!, file: file.slice(PACKAGE_SRC.length + 1) });
+    for (const name of pageDeclarationsIn(readFileSync(file, 'utf8'))) {
+      out.push({ name, file: file.slice(PACKAGE_SRC.length + 1) });
     }
   }
   return out.sort((a, b) => a.name.localeCompare(b.name));
@@ -223,5 +266,90 @@ describe('downgrade control — a shipped page, predicate downgraded to bare', (
       pageLabel('SysUserDetailPage', pageExports.SysUserDetailPage),
     );
     expect(renderBareExpressionFindings(pristine.findings)).toBe('');
+  });
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// Pin — a phantom comment cannot delete a page from the population
+// ───────────────────────────────────────────────────────────────────────────
+
+/**
+ * The conversion above, pinned by the shape it was made for.
+ *
+ * Both fixtures carry a block-comment OPENER that is not a comment — one in a
+ * line comment, one in a string literal — followed by a real terminator further
+ * down, with a `Page` declaration in between. The retired two-regex stripper
+ * honours the opener, runs lazily to that terminator, and the declaration
+ * between them is gone; the scan then reports a population one page short and
+ * every audit downstream is green over a page it never read.
+ *
+ * Measured at the conversion, on this exact text: the retired regex found only
+ * the trailing page in each fixture, `maskComments` finds both. Reverting
+ * `pageDeclarationsIn` to that stripper reds these two cases and nothing else
+ * in this file — the scan is the only thing they exercise.
+ *
+ * The `openerIsNotAComment` precondition is here so the pin cannot go quietly
+ * vacuous: strip the opener out of a fixture while editing and both strippers
+ * agree again, leaving two tests that pass without asserting anything.
+ */
+const PHANTOM_IN_LINE_COMMENT = [
+  "import type { Page } from '@objectstack/spec/ui';",
+  '',
+  '// The console panel talks to the same-origin /api/v1/cloud-connection/*',
+  '// routes this plugin mounts.',
+  '',
+  'export const PhantomPage: Page = {',
+  "    name: 'phantom_page',",
+  "    regions: [{ name: 'main', width: 'full', components: [] }],",
+  '};',
+  '',
+  '/** Setup-nav contribution — the terminator that closes the phantom. */',
+  "export const LaterPage: Page = { name: 'later_page', regions: [] };",
+].join('\n');
+
+const PHANTOM_IN_STRING_LITERAL = [
+  "import type { Page } from '@objectstack/spec/ui';",
+  '',
+  "const PROXY_GLOB = '/api/v1/marketplace/*';",
+  '',
+  'export const LiteralPhantomPage: Page = {',
+  "    name: 'literal_phantom_page',",
+  '    regions: [],',
+  '};',
+  '',
+  '/** A docblock whose terminator closes the phantom opened in the string. */',
+  "export const LiteralLaterPage: Page = { name: 'literal_later', regions: [] };",
+].join('\n');
+
+/** The fixture still carries the shape: an opener above, a terminator below. */
+function openerIsNotAComment(fixture: string, declaration: string): void {
+  const opener = fixture.indexOf('/' + '*');
+  const declaredAt = fixture.indexOf(declaration);
+  const terminator = fixture.indexOf('*' + '/', opener);
+  expect(opener, 'fixture lost its block-comment opener').toBeGreaterThan(-1);
+  expect(declaredAt, 'fixture lost its page declaration').toBeGreaterThan(opener);
+  expect(terminator, 'fixture lost the terminator that closes the phantom')
+    .toBeGreaterThan(declaredAt);
+}
+
+describe('population scan reads comments, not comment-shaped text', () => {
+  it('keeps a page straddled by an opener inside a LINE COMMENT', () => {
+    openerIsNotAComment(PHANTOM_IN_LINE_COMMENT, 'export const PhantomPage');
+    expect(pageDeclarationsIn(PHANTOM_IN_LINE_COMMENT)).toEqual(['PhantomPage', 'LaterPage']);
+  });
+
+  it('keeps a page straddled by an opener inside a STRING LITERAL', () => {
+    openerIsNotAComment(PHANTOM_IN_STRING_LITERAL, 'export const LiteralPhantomPage');
+    expect(pageDeclarationsIn(PHANTOM_IN_STRING_LITERAL))
+      .toEqual(['LiteralPhantomPage', 'LiteralLaterPage']);
+  });
+
+  it('still refuses a `: Page =` written inside genuine prose', () => {
+    const prose = [
+      '/** Authors write `export const X: Page = {}` in docblocks like this. */',
+      "// and in line comments: export const YPage: Page = {}",
+      "export const RealPage: Page = { name: 'real', regions: [] };",
+    ].join('\n');
+    expect(pageDeclarationsIn(prose)).toEqual(['RealPage']);
   });
 });

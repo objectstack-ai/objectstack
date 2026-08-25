@@ -90,6 +90,18 @@
 // the failure mode that actually happened: three drivers silently not running a
 // standard three changesets said they were held to.
 //
+// A MENTION is not a reference (#12135). The scan reads CODE: every file is
+// passed through `scripts/js-comment-mask.mjs` before the import-and-reference
+// rule is applied, so a docblock that names a marker cannot make a cell green.
+// It used to be able to, and the shape was live on this tree -- `sql-driver.ts`
+// and `mongodb-filter.ts` are driver IMPLEMENTATIONS that name
+// `FILTER_LOGIC_CASES` only in prose, and both were scored as covering files.
+// It changed no cell's verdict, because both cells are genuinely covered by a
+// real suite as well; that is precisely why it had to be fixed on a day it was
+// harmless. Delete a driver's only suite for a case-set and leave the sentence
+// that describes it, and the cell stayed green -- a coverage claim satisfied by
+// prose, which is the declared-not-enforced shape this gate exists to close.
+//
 // ## DEBT is frozen debt, not a permission slip
 //
 // Every entry was measured against `main`. To clear one: write the suite, then
@@ -982,9 +994,14 @@ function walkTsInto(dir, out) {
  * behind. Extracted so the dialect axis asserts a stance the same way this
  * script asserts a case-set, rather than inventing a second idiom next to it.
  *
- * @param {string} src file text — pass it through `stripComments` when a
- *   comment mentioning the symbol must not count. (`consumes` deliberately does
- *   not, so its verdicts stay byte-identical to what they were.)
+ * @param {string} src file text. This function reads whatever TEXT it is given
+ *   and has no opinion about comments — both callers strip first, because on
+ *   both axes a comment mentioning the symbol must not count
+ *   ({@link coveringFiles} via {@link codeOf}, `dialectStance` via its own
+ *   `stripComments`). Kept comment-agnostic rather than stripping in here so
+ *   that `dialectStance`, which already holds stripped text and applies this
+ *   rule to several symbols in a row, does not re-mask the same text per
+ *   symbol.
  */
 function drivenFrom(src, symbol, specifier) {
   if (!src.includes(symbol)) return false;
@@ -1005,13 +1022,49 @@ function drivenFrom(src, symbol, specifier) {
  * different dialect stances, and scoring only the first would let an
  * undeclared one hide behind a matrix-routed sibling — which is exactly the
  * arrangement FILTER_TEXT_CASES is in on this tree.
+ *
+ * Read through {@link codeOf}, so a marker named only in PROSE is not coverage
+ * (#12135). Measured when that was added, over 5 drivers x 9 case-sets: the
+ * covered-cell count did not move (45 -> 45) and no cell changed hands, because
+ * the two files whose answer flipped are driver implementations whose cells are
+ * covered by a real suite too. What moved is WHICH files this returns, which
+ * the dialect axis scores and which `consumes` quotes back to the author.
  */
 function coveringFiles(driverDir, marker) {
   const hits = [];
   for (const file of walkTs(join(driverDir, 'src'))) {
-    if (drivenFrom(readFileSync(file, 'utf8'), marker, '@objectstack/spec/data')) hits.push(file);
+    if (drivenFrom(codeOf(file), marker, '@objectstack/spec/data')) hits.push(file);
   }
   return hits;
+}
+
+/**
+ * This file's text with its COMMENT spans gone — the only form the coverage
+ * scan is allowed to read.
+ *
+ * `stripComments` rather than `maskComments`, on the discriminator
+ * `js-comment-mask.mjs` documents rather than on which one was already
+ * imported: pick `maskComments` when the caller reports a LINE or a byte offset
+ * into the original text, `stripComments` when it feeds a scanner and reports
+ * neither. This axis reports FILES — `consumes` returns a path, the RECONCILED
+ * and CONSUMED messages quote a path — so nothing downstream can be made wrong
+ * by the offsets moving, and the deleting form is the one that stays cheap
+ * (the same module records a gate that took 51x longer on `maskComments`,
+ * because a scan over the whitespace runs blanking leaves is quadratic in the
+ * comment bytes).
+ *
+ * Deliberately NOT memoised per path, though the walk is per (driver x marker)
+ * and so re-reads each file once per marker. A cache here is a correctness
+ * hazard for the only caller that rewrites a file between two calls — the
+ * self-test, which writes three different bodies to one `a.test.ts` path and
+ * asserts a different verdict for each. A stale entry would make those three
+ * assertions read the first body and pass in a way no refactor could disturb,
+ * which is the failure this file's own #4930 note is about: a guard reporting a
+ * verdict it did not measure. Measured cost of not caching: the whole gate runs
+ * in ~0.4s over this tree.
+ */
+function codeOf(file) {
+  return stripComments(readFileSync(file, 'utf8'));
 }
 
 /**
@@ -1435,6 +1488,67 @@ function selfTest() {
     expect(
       'local re-declaration must not count as coverage',
       consumes(tmp, 'PAGINATION_CASES') === null,
+    );
+
+    // #12135 — a marker named only in PROSE must not count as coverage.
+    //
+    // The fixture is the shape that was LIVE on this tree, not an invented one:
+    // real imports from the case-set module at the top, the marker mentioned in
+    // a line comment among them and again in a docblock far below, and no
+    // reference to it anywhere in the code. `sql-driver.ts` and
+    // `mongodb-filter.ts` — two driver implementations, neither a suite — both
+    // scored as covering files for FILTER_LOGIC_CASES this way.
+    //
+    // The first assertion is what keeps the second one falsifiable. A fixture
+    // the old detector would ALSO have rejected pins nothing: it would go green
+    // the day someone reverts `codeOf`, and the case would read as a guard
+    // while guarding nothing. So the raw text is asserted to be a case the
+    // unmasked rule ACCEPTS, and only then is the real detector asserted to
+    // refuse it. Revert the masking and this pair fails on the second line.
+    const proseOnly = [
+      "import { TEMPORAL_CASES } from '@objectstack/spec/data';",
+      "// The `PAGINATION_CASES` table this driver's conformance suite runs; this",
+      '// file only compiles the paging clause it exercises.',
+      "import { FILTER_LOGIC_CASES } from '@objectstack/spec/data';",
+      '',
+      'export function compile() { return [TEMPORAL_CASES, FILTER_LOGIC_CASES]; }',
+      '',
+      '/**',
+      ' * Kept in step with the `PAGINATION_CASES` table above.',
+      ' */',
+      'export const VERSION = 1;',
+      '',
+    ].join('\n');
+    writeFileSync(join(tmp, 'src', 'a.test.ts'), proseOnly);
+    expect(
+      '#12135 — the prose-only fixture IS accepted by the unmasked rule (else the case below '
+        + 'pins nothing and would survive a revert)',
+      drivenFrom(proseOnly, 'PAGINATION_CASES', '@objectstack/spec/data'),
+    );
+    expect(
+      '#12135 — a marker mentioned only in a comment must not count as coverage',
+      consumes(tmp, 'PAGINATION_CASES') === null,
+    );
+    expect(
+      '#12135 — and the file is not returned as a covering file either (the dialect axis scores '
+        + 'these, and `consumes` quotes one back to the author)',
+      coveringFiles(tmp, 'PAGINATION_CASES').length === 0,
+    );
+
+    // The mirror: prose about the marker does not DISARM a genuine reference.
+    // Over-masking would be the quiet direction to fail in here — every cell
+    // still green, coverage now judged by a rule that cannot see a suite whose
+    // author documented it.
+    writeFileSync(
+      join(tmp, 'src', 'a.test.ts'),
+      proseOnly
+        + "import { PAGINATION_CASES } from '@objectstack/spec/data';\n"
+        + 'for (const c of PAGINATION_CASES) {}\n',
+    );
+    expect(
+      '#12135 — a real driving reference still counts when the same file also discusses the '
+        + 'marker in prose',
+      consumes(tmp, 'PAGINATION_CASES') !== null,
     );
   } finally {
     rmSync(tmp, { recursive: true, force: true });
@@ -1915,7 +2029,9 @@ function selfTest() {
     process.exit(1);
   }
   console.log(
-    'OK  self-test: detects driven / unused / re-declared fixtures, discovers both axes, accounts for '
+    'OK  self-test: detects driven / unused / re-declared / prose-only fixtures (#12135 — a marker '
+      + 'named only in a comment is not coverage, proven against a fixture the unmasked rule '
+      + 'accepts, and a documented suite is still coverage), discovers both axes, accounts for '
       + 'every entry under DRIVERS_DIR (a dropped or manifestless row is red, not a smaller matrix), '
       + 'holds the dead-root hard error (red when a scan root is renamed, green when restored), and '
       + 'keeps CONSUMED\'s ledger offer marked maintainer-only (#8435). It also declares the driver '

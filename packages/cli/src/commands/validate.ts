@@ -126,6 +126,31 @@ export default class Validate extends Command {
       ...capProviderWarnings,
       ...structuralWarnings,
     ];
+    // [#12125] The ADR-0087 D2 conversion notices, hoisted for the SAME reason
+    // and under the SAME ruling as the five lists above — one field over. The
+    // notices were computed at step 2 (below) and reached the terminal SUCCESS
+    // payload alone, so all five failure exits dropped a list already in hand.
+    //
+    // ⛔ CARRYING, NOT COMPUTING — and here that is a pure SCOPE change. This is
+    // the same `const` array the `onConversionNotice` sink pushes into, moved
+    // above the `try` only so the catch-all exit can read it. `normalizeStackInput`
+    // still runs at exactly step 2, so a run that throws in `loadConfig` — above
+    // it — reports `[]` honestly, exactly as `warningsSoFar()` does there.
+    //
+    // ⛔ NOT FOLDED INTO `warningsSoFar()`, in either direction. The two fields
+    // are separate on the success payload by an explicit decision recorded at
+    // that call site: the text face folds these notices into its `⚠` block (so
+    // `--strict` gates on them) while the payload carries them under their own
+    // key with their structured `conversionId`/`retiresIn` fields intact — the
+    // one advisory class that carries an EXPIRY. Whether the two should become
+    // one field is an open question this change was explicitly not given the
+    // authority to settle, so the shape is mirrored, not merged.
+    //
+    // No `conversionsSoFar()` wrapper: `warningsSoFar()` exists because five
+    // producers had to be concatenated in ONE stated order, and this list has
+    // exactly one producer. Reading the binding directly already is the "a list
+    // cannot drift from itself" idiom the wrapper was built to buy.
+    const conversionNotices: ConversionNotice[] = [];
 
     try {
       // 1. Load configuration
@@ -143,7 +168,8 @@ export default class Validate extends Command {
       //    the author knows the source still carries an old-shape key that will
       //    retire from the load path in a future major.
       if (!flags.json) printStep('Validating against ObjectStack Protocol...');
-      const conversionNotices: ConversionNotice[] = [];
+      // The sink is declared above the `try` (see its note there); the CALL that
+      // fills it stays right here, at the step that owns it.
       const normalized = normalizeStackInput(config as Record<string, unknown>, {
         onConversionNotice: (n) => conversionNotices.push(n),
       });
@@ -169,6 +195,9 @@ export default class Validate extends Command {
             // called the strongest instance: the hoist exists so the finding
             // SURVIVES a schema error, and this payload discarded it anyway.
             warnings: warningsSoFar(),
+            // [#12125] Filled by `normalizeStackInput` two statements above this
+            // exit — the tightest instance of this card, and the one it measured.
+            conversions: conversionNotices,
             duration: timer.elapsed(),
           });
           this.exit(1);
@@ -213,6 +242,8 @@ export default class Validate extends Command {
             // the pre-parse `unknownKeyWarnings` — computed long before this
             // gate — and keeps the member ORDER identical to every other exit.
             warnings: warningsSoFar(),
+            // [#12125] Computed at step 2, above this gate.
+            conversions: conversionNotices,
             duration: timer.elapsed(),
           });
           this.exit(1);
@@ -258,6 +289,8 @@ export default class Validate extends Command {
             // `warnings` beside the two lists computed before this gate. The
             // two classes being separate is the whole point of the split.
             warnings: warningsSoFar(),
+            // [#12125] Computed at step 2, above this gate.
+            conversions: conversionNotices,
             duration: timer.elapsed(),
           });
           this.exit(1);
@@ -294,6 +327,8 @@ export default class Validate extends Command {
             // capability hints, and the pre-parse key findings were all in
             // hand and none of them reached the payload.
             warnings: warningsSoFar(),
+            // [#12125] Computed at step 2, above this gate.
+            conversions: conversionNotices,
             duration: timer.elapsed(),
           });
           this.exit(1);
@@ -490,6 +525,9 @@ export default class Validate extends Command {
           // is a FILE, say, which makes `readdirSync` raise ENOTDIR) carries
           // the three lists already in hand.
           warnings: warningsSoFar(),
+          // [#12125] Same reading, one field over: `[]` for a throw at load —
+          // step 2 had not run — and the notices in hand for any later throw.
+          conversions: conversionNotices,
           duration: timer.elapsed(),
         });
         this.exit(1);

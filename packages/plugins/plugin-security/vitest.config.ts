@@ -54,6 +54,16 @@ export default defineConfig({
         find: /^@objectstack\/types$/,
         replacement: path.resolve(__dirname, '../../types/src/index.ts'),
       },
+      // [#11843] `packaged-permission-set-lock-gate.test.ts` drives the REAL
+      // `ObjectStackProtocolImplementation` (its `saveMetaItem` seam is the
+      // door under test), so the protocol must be read from the producer's
+      // source in this checkout — a stale `dist/` would run the pin against a
+      // seam that predates `registerAuthoringGate('permission', ...)` and
+      // report a verdict about the last build rather than about this tree.
+      {
+        find: /^@objectstack\/metadata-protocol$/,
+        replacement: path.resolve(__dirname, '../../metadata-protocol/src/index.ts'),
+      },
     ],
   },
 });

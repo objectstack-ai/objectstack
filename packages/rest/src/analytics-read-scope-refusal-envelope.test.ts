@@ -2,8 +2,24 @@
 
 /**
  * [#5367, maintainer ruling 2026-08-06] A read-scope lowering failure reaches the
- * caller as `500 ANALYTICS_QUERY_FAILED` **with the RLS policy withheld**, and the
- * full text reaches the operator's log.
+ * caller as a **500 with the RLS policy withheld**, and the full text reaches the
+ * operator's log.
+ *
+ * [#11718] The CODE in that sentence was `ANALYTICS_QUERY_FAILED` and is now
+ * `READ_SCOPE_COMPILE_FAILED` — the one these refusals declare. Nothing in the
+ * 2026-08-06 ruling moved: the family is still a SERVER fault, still `500`, still
+ * has its policy content withheld, and the `400 DATASET_INVALID` it was rescued
+ * from is still asserted against below. What changed is that
+ * `/analytics/dataset/query` stopped OVERWRITING the producer's declaration with
+ * a code of its own. That overwrite was never ruled — it was what ③'s hand-built
+ * envelope happened to emit — and it made this face the only one of three that
+ * did it: `/data` relays a declared 5xx's status and code (#5582), and the
+ * SIBLING analytics face `/analytics/query` has shipped
+ * `READ_SCOPE_COMPILE_FAILED` to clients all along
+ * (`analytics-query-read-scope-withhold.test.ts`, measured against a real
+ * `AnalyticsService`). So this file's answer now equals its sibling's for one
+ * refusal, where before the same fault was named two different things depending
+ * on which analytics door the caller used.
  *
  * ## What this closes
  *
@@ -178,13 +194,19 @@ describe('[#5367] POST /analytics/dataset/query — a read-scope failure is a 50
   ];
 
   for (const c of CASES) {
-    it(`${c.name} → 500 ANALYTICS_QUERY_FAILED, body carries no policy detail`, async () => {
+    it(`${c.name} → 500 READ_SCOPE_COMPILE_FAILED, body carries no policy detail`, async () => {
       const route = buildRoute(async () => analyticsWithScope(c.scope));
       const res = await post(route, { dataset, selection });
 
       // Classification: a server fault, not the caller's mistake.
       expect(res.statusCode).toBe(500);
-      expect(res.body.code).toBe('ANALYTICS_QUERY_FAILED');
+      // [#11718] …named by its PRODUCER. `read-scope-sql` declares
+      // `READ_SCOPE_COMPILE_FAILED` / 500 and the route relays it instead of
+      // overwriting it with `ANALYTICS_QUERY_FAILED`. The status is untouched
+      // by that repair — this family declares 500 — so the 2026-08-06 ruling's
+      // own subject is asserted unchanged, immediately above.
+      expect(res.body.code).toBe('READ_SCOPE_COMPILE_FAILED');
+      expect(res.body.code).not.toBe('ANALYTICS_QUERY_FAILED');
       // …and specifically NOT the pre-ruling answer.
       expect(res.statusCode).not.toBe(400);
       expect(res.body.code).not.toBe('DATASET_INVALID');
