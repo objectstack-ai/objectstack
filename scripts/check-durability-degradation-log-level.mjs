@@ -5005,9 +5005,19 @@ function selfTestReadSeams() {
             // whose try guards a MetadataService call and no storage read at all.
             name: 'passes: #11921 — an array `find` inside a same-file helper does not make its CALLER a read seam',
             code: `
-                function mergeOverlay(base: unknown[], records: unknown[]) {
+                function mergeOverlay(base: unknown[], records: any[]) {
                     const list = base as any[];
-                    return records.map((r) => list.find((c) => c.pkg === (r as any).pkg) ?? r);
+                    const out: unknown[] = [];
+                    // SAME-TICK on purpose: the wrapper recursion does not descend
+                    // into a nested function body, so spelling this as
+                    // \`records.map((r) => list.find(...))\` makes the fixture pass
+                    // for a reason that has nothing to do with the shape test —
+                    // measured, it stayed green under ablation.
+                    for (const r of records) {
+                        const prev = list.find((c) => c.pkg === r.pkg);
+                        out.push(prev ?? r);
+                    }
+                    return out;
                 }
                 class P {
                     async getMetaItems(type: string) {
