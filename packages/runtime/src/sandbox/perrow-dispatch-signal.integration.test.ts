@@ -126,7 +126,9 @@ describe('#11552 — a shipped body observes the per-row dispatch signal and the
     noise.captureEngine(engine);
     engine.registerDriver(driver, true);
     await engine.init();
-    engine.registry.registerObject(ARTICLE as any);
+    // `packageId` is a required parameter (`registerObject(schema, packageId, …)`)
+    // — the sibling harness's 1-arg spelling is frozen TEST_DEBT, not a template.
+    engine.registry.registerObject(ARTICLE as any, 'probe');
 
     const seen: any[] = [];
     const logger = {
