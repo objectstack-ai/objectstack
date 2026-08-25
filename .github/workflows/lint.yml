@@ -1111,6 +1111,27 @@ jobs:
       - name: Docs redirect destinations resolve, and no chains
         run: pnpm check:docs-redirects
 
+      # The docs site's `app/[lang]/` is a catch-all that matches ANY single
+      # path segment, and `proxy.ts`'s matcher deliberately excludes dotted
+      # paths from locale rewriting — so before the guard landed, `/ads.txt`,
+      # `/security.txt`, `/sitemap_index.xml` and every other dotted
+      # single-segment URL rendered the full homepage under a 200 (measured on
+      # the dev server; the request log shows no `proxy.ts:` timing for those
+      # paths, and a probe printed `lang="ads.txt"`).
+      #
+      # It sits here rather than in a test because nothing else can see the
+      # regression: delete the three-line guard and every page still renders,
+      # every type still checks, every link still resolves. The only symptom is
+      # a 200 where a 404 belongs, on URLs no test requests.
+      #
+      # Runs its own --self-test first (via the pnpm script). Not ceremony: the
+      # live tree is green by construction after the fix, so a passing run over
+      # real data cannot distinguish a working gate from one that approves
+      # everything. The self-test is where every limb is observed failing, and
+      # where the proxy condition is observed flipping the requirement off.
+      - name: Docs locale catch-all rejects non-locale segments
+        run: pnpm check:docs-locale-catch-all
+
       # #11050 route spellings taught in prose: every /api/v1 wire-path
       # literal in the published corpora (content/docs/** minus releases/,
       # plus skills/**) is judged against the route ledgers, and a literal
