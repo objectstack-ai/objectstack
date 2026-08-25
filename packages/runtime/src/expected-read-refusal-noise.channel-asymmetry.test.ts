@@ -58,11 +58,10 @@ import {
   type ExpectedReadRefusalCapture,
 } from './expected-read-refusal-noise.js';
 
-// [#10126] Pay the first transform of these dist-resolved workspace deps at
-// MODULE LOAD, not inside a clocked `it()` body — see
-// `scripts/check-test-source-alias.mjs` (the clocked-window rule).
-import '@objectstack/objectql';
-import '@objectstack/driver-sqlite-wasm';
+// [#10126] Both dist-resolved workspace deps above are STATIC imports, so their
+// first transform is already paid at module load rather than inside a clocked
+// `it()` body — no bare re-import is needed here (see
+// `scripts/check-test-source-alias.mjs`, the clocked-window rule).
 
 const BOOT_TIMEOUT = 60_000;
 

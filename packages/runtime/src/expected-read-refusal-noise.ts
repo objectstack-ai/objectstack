@@ -93,8 +93,10 @@
  * (see the asymmetry note above, and {@link captureExpectedReadRefusals}'s
  * `captureEngine`).
  *
- * ⛔ Nothing here reads or relaxes a fixture's own assertions. This is the
- * console side-effect only.
+ * ⛔ Nothing here reads or relaxes a fixture's own assertions. This is the LOG
+ * side-effect only — and "the log" means `console` on the driver channel and
+ * the engine's own logger on the engine channel, which is the whole of the
+ * asymmetry above.
  *
  * ## Why a shared module rather than a copy per fixture
  *
