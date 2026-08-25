@@ -134,6 +134,24 @@ export type {
   EngineUpdateDispatchCase,
 } from './engine-update-dispatch.js';
 
+// [#11957] The READ-side sibling of the two dispatches above, on exactly the
+// same terms. `ObjectQL.findOne` applies `limit: 1`, so a query with no `where`
+// and no `orderBy` would return an ARBITRARY row — `requireFindOnePredicate`
+// REFUSES it (#4419) and every in-memory double answered it happily, which is
+// how #11767 shipped a first-run bypass that was permanently inert on real
+// deployments while a 641-line unit matrix stayed green.
+export {
+  resolveEngineFindOnePredicate,
+  assertEngineFindOnePredicate,
+  engineFindOnePredicateRefusalMessage,
+  ENGINE_FINDONE_PREDICATE_CASES,
+} from './engine-findone-predicate.js';
+export type {
+  EngineFindOnePredicate,
+  EngineFindOneQueryInput,
+  EngineFindOnePredicateCase,
+} from './engine-findone-predicate.js';
+
 // Export in-memory aggregation fallback (used by engine.aggregate when the
 // driver lacks native groupBy/aggregations support; also useful for tests).
 export { applyInMemoryAggregation, bucketDateValue } from './in-memory-aggregation.js';

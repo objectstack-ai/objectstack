@@ -29,6 +29,11 @@ export * from './engine-update-dispatch.js';
 // [#11009] The refusal both write dispatches share: a by-id call whose
 // `where` carries keys the by-id path would silently discard.
 export * from './engine-dispatch-unhonoured-predicate.js';
+// [#11957] The READ-side sibling: `ObjectQL.findOne` REFUSES a call that selects
+// no particular record (#4419), and every in-memory double answered it happily —
+// which is how #11767 shipped a bootstrap bypass that was permanently inert on
+// real deployments under a 641-line all-green matrix.
+export * from './engine-findone-predicate.js';
 
 // [#4513] The audit-family GOVERNANCE table (#4447) and its normalizer, sunk
 // here for the same reason and by the same criterion as the two dispatch
