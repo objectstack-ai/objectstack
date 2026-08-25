@@ -47,7 +47,8 @@
         "$TURBO_ROOT$/packages/plugins/plugin-audit/src/**",
         "$TURBO_ROOT$/content/docs/api/error-catalog.mdx",
         "$TURBO_ROOT$/docs/audits/2026-07-unknown-key-strictness-ledger.md",
-        "$TURBO_ROOT$/.claude/skills/spec-property-retirement/SKILL.md"
+        "$TURBO_ROOT$/.claude/skills/spec-property-retirement/SKILL.md",
+        "$TURBO_ROOT$/skills/**"
       ]
     },
     "@objectstack/core#test": {

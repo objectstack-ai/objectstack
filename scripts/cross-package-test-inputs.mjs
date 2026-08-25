@@ -149,6 +149,20 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       // maintainer-ruled): the retirement playbook that teaches authors the
       // prescription sentence the pin holds. One file, not `.claude/**`.
       '.claude/skills/spec-property-retirement/SKILL.md',
+      // scripts/export-list.test.ts ends in a corpus gate over the PUBLISHED
+      // skill references — it enumerates `skills/` and reads every
+      // `<skill>/references/_index.md`, asserting none of their `Exports:` rows
+      // names a machine constant (#12201). The artifacts are what a customer
+      // agent actually loads, so they are the population that gate must judge;
+      // checking the generator's output in memory instead would re-assert the
+      // rule and see nothing about what is checked in.
+      //
+      // The whole subtree rather than `skills/*/references/_index.md`: the test
+      // reads the DIRECTORY too (a new skill dir changes its verdict), and a
+      // glob that names only files does not cover a directory listing —
+      // `coversDirectory` is the check, and it is why the narrower spelling was
+      // tried first and rejected by this gate.
+      'skills/**',
     ],
     heldBy: {
       // The two repo-wide `*.object.ts` walkers. Each seeds a recognised

@@ -25,6 +25,7 @@
 
 import fs from 'fs';
 import path from 'path';
+import { exportListDescription } from './lib/export-list';
 import { findModuleDocBlock } from './lib/file-description';
 import { createSink, type Owns } from './lib/generated-output';
 
@@ -212,6 +213,14 @@ function resolveAll(entryFiles: string[]): { files: string[]; missing: string[] 
  * A module with no doc block of its own falls through to the export list
  * rather than refusing: that line states a true fact about the file, where the
  * wrong block asserted a false one about its subject.
+ *
+ * WHICH exports that line may name is `exportListDescription()`'s rule, and it
+ * lives beside this one in `lib/` for the same reason (#12201): the list used
+ * to rank by source order with no notion of authorable surface, so three rows
+ * headlined `DEPRECATED_APPROVER_TYPES`, `CORE_PLUGIN_TYPES` and friends —
+ * machine vocabulary, published to a surface whose job is to teach an agent
+ * what it may author. `check:skill-refs` could not see that either; it compares
+ * the artifact against this generator, which ranked faithfully.
  */
 function extractDescription(filePath: string): string {
   const content = fs.readFileSync(filePath, 'utf-8');
@@ -228,12 +237,7 @@ function extractDescription(filePath: string): string {
       return sentence.length > 120 ? sentence.slice(0, 117) + '...' : sentence;
     }
   }
-  const exports: string[] = [];
-  const re = /export\s+const\s+(\w+Schema|\w+)\s*(?:[:=])/g;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(content)) !== null) exports.push(m[1]);
-  if (exports.length > 0) return `Exports: ${exports.slice(0, 5).join(', ')}`;
-  return '';
+  return exportListDescription(content) ?? '';
 }
 
 // ── Index generator ──────────────────────────────────────────────────────────
