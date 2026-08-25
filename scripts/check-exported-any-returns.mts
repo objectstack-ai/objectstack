@@ -100,6 +100,24 @@
 // dist this one would report "no exported callable resolves to `any`" without
 // ever having read the method the developer just added.
 
+/// <reference types="node" />
+//
+// The root tsc program (`tsconfig.json`) declares `lib: ["ES2020"]` and no
+// `types`, so `process`, `console` and the `node:*` builtins are absent from
+// every file in it. Without this line THIS file contributed 35 raw errors to
+// the `@objectstack/spec-monorepo` entry of `check:type-check-debt` — a
+// shrink-only ratchet, so the remedy is to make the file typecheck, never to
+// raise the entry.
+//
+// It has to be a REFERENCE and not explicit imports, measured rather than
+// assumed: with the reference removed and every builtin imported by name
+// (`import process from 'node:process'`, and so on for fs/path/url/os/console),
+// the file still carried 12 errors and the `node:*` specifiers THEMSELVES did
+// not resolve. @types/node is not reachable in this program without being asked
+// for. Because @types/node declares globals, asking for it here also supplies
+// them to the rest of the program — which is why landing this file lowered the
+// ledger entry by 54 errors it did not author. See the PR body.
+
 import ts from 'typescript';
 import fs from 'node:fs';
 import path from 'node:path';
