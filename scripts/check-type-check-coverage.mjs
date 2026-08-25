@@ -622,7 +622,8 @@ const DEBT = {
       + 'the next new error here goes red on arrival (#5278 option A).',
   },
   '@objectstack/spec-monorepo': {
-    errors: 80,
+    errors: 26,
+    compositionAt: 80,
     note: 'the workspace root itself: code-tier 4 (TS2304 x2, TS2339 x2); config-tier 68 '
       + '(TS2591 x28 / TS2584 x22 -- the root tsconfig still has no `types:["node"]` -- plus TS2307 x17 '
       + 'and TS2550); noise 8 (TS7006 x7, TS6133). Re-measured 80 at 5ab08428, up from 50. This entry '

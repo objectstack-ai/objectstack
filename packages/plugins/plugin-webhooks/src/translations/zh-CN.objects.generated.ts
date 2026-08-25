@@ -51,7 +51,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       method: {
         label: "HTTP 方法",
-        help: "GET / POST / PUT / PATCH / DELETE",
+        help: "回调请求使用的 HTTP 方法",
         options: {
           get: "GET",
           post: "POST",

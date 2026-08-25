@@ -238,7 +238,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       principal: {
         label: "Principal",
-        help: "Subscriber selector: 'role:x' | 'team:x' | 'user:id' | bare user id."
+        help: "Selector de suscriptor: 'role:x' | 'team:x' | 'user:id' | 'owner_of:object:id' | un correo electrónico | un id de usuario sin prefijo."
       },
       enabled: {
         label: "Enabled",
@@ -356,7 +356,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       attempts: {
         label: "Attempts",
-        help: "Number of attempts made so far"
+        help: "Número de intentos realizados hasta ahora. Un 0 en una fila en estado terminal significa que la entrega quedó en PARKED — nunca se envió y no admite reenvío (#8069); consulta `error` para ver la causa."
       },
       claimed_by: {
         label: "Claimed By"
