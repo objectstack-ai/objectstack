@@ -8105,11 +8105,12 @@ function selfTest() {
       'measurement above shows is lost on the predicate path.',
   );
   const fired21 = h21NegatedClosingKeyword(pr10241);
+  const fired21Row = String(fired21 ?? '');
   t('H21: the #10241 specimen FIRES', typeof fired21, 'string');
-  t('H21: …and names the card it will close', fired21.includes('`fixed #10240`'), true);
-  t('H21: …and quotes the offending sentence back', fired21.includes('Filed, not fixed: #10240'), true);
-  t('H21: …and says the parser ignores the negation', fired21.includes('negations included'), true);
-  t('H21: …and offers the safe rewordings', fired21.includes('#10240 is not addressed here'), true);
+  t('H21: …and names the card it will close', fired21Row.includes('`fixed #10240`'), true);
+  t('H21: …and quotes the offending sentence back', fired21Row.includes('Filed, not fixed: #10240'), true);
+  t('H21: …and says the parser ignores the negation', fired21Row.includes('negations included'), true);
+  t('H21: …and offers the safe rewordings', fired21Row.includes('#10240 is not addressed here'), true);
   // H7 is silent on this body — the gap that made the row necessary. If this
   // ever inverts, H21 is redundant rather than merely quiet.
   t('H21: …and H7 is silent on it (the gap this row exists for)', h7PartOfWithClosingKeyword(pr10241), null);
@@ -8556,8 +8557,8 @@ function selfTest() {
   // across, so H7's own sentence is asserted to CARRY the clause this one must
   // never carry — a one-sided assertion would pass against a sentence that lost
   // both.
-  const fired23 = h23CommitMessageContradiction(squashOf('9320', '9478'));
-  const fired7 = h7PartOfWithClosingKeyword({ body: 'Part of #77\n\nFixes #77' });
+  const fired23 = String(h23CommitMessageContradiction(squashOf('9320', '9478')) ?? '');
+  const fired7 = String(h7PartOfWithClosingKeyword({ body: 'Part of #77\n\nFixes #77' }) ?? '');
   t('H23: the sentence prescribes REWORDING', fired23.includes('REWORD'), true);
   t('H23: …and never the body-surface backtick remedy', fired23.includes('put the keyword in backticks'), false);
   t('H23: …nor any "in backticks" advice at all', fired23.includes('in backticks'), false);
@@ -8645,7 +8646,7 @@ function selfTest() {
   t('H9: …and still names the manual shape', h9row(hold('**Restart-when: manual — reason**')).includes('manual'), true);
 
   // -- H9's remedy text: verify/unwrap first, close last (#10102) ------------
-  const h9NoLine = h9OnHoldNoRestartWhen(hold('parked until the train ships'));
+  const h9NoLine = String(h9OnHoldNoRestartWhen(hold('parked until the train ships')) ?? '');
   t('H9: the no-line row names the decorated/unparsed possibility', h9NoLine.includes('cannot parse'), true);
   t('H9: …and tells the seat to read the body before acting', h9NoLine.includes('READ THE BODY BEFORE ACTING'), true);
   t('H9: …and demotes closing to the last resort', h9NoLine.includes('Closing is the LAST resort'), true);
@@ -9165,17 +9166,18 @@ function selfTest() {
 
   // POSITIVE — a closed target fires.
   const expired10112 = h19BlockOutlivedBlocker(blockedCard(10112), [target(10126, 'closed', { closedAt: '2026-08-20T09:03:37Z' })]);
+  const expired10112Row = String(expired10112 ?? '');
   t('H19: a CLOSED target fires', typeof expired10112, 'string');
-  t('H19: …and names the target', expired10112.includes('`#10126`'), true);
-  t('H19: …with the close timestamp, so the latency is readable off the row', expired10112.includes('closed 2026-08-20T09:03:37Z'), true);
-  t('H19: …and says the block outlived its blocker', expired10112.includes('outlived its blocker'), true);
-  t('H19: …and says nothing else here asks this question', expired10112.includes('H4 asks whether the line EXISTS'), true);
-  t('H19: …and hands the release to the unlock sweep\'s double-checks', expired10112.includes('放行双查'), true);
-  t('H19: …naming double-check ① (most recent conversion comment)', expired10112.includes('MOST RECENT conversion comment'), true);
-  t('H19: …and double-check ② (a newer merged PR refuses release)', expired10112.includes('MERGED PR newer than that conversion comment'), true);
-  t('H19: …and forbids a label written from this script', expired10112.includes('never a label written from this script'), true);
-  t('H19: a fully discharged block says every target is closed', expired10112.includes('Every target it names is closed'), true);
-  t('H19: …and does not claim a partial discharge', expired10112.includes('PARTIAL'), false);
+  t('H19: …and names the target', expired10112Row.includes('`#10126`'), true);
+  t('H19: …with the close timestamp, so the latency is readable off the row', expired10112Row.includes('closed 2026-08-20T09:03:37Z'), true);
+  t('H19: …and says the block outlived its blocker', expired10112Row.includes('outlived its blocker'), true);
+  t('H19: …and says nothing else here asks this question', expired10112Row.includes('H4 asks whether the line EXISTS'), true);
+  t('H19: …and hands the release to the unlock sweep\'s double-checks', expired10112Row.includes('放行双查'), true);
+  t('H19: …naming double-check ① (most recent conversion comment)', expired10112Row.includes('MOST RECENT conversion comment'), true);
+  t('H19: …and double-check ② (a newer merged PR refuses release)', expired10112Row.includes('MERGED PR newer than that conversion comment'), true);
+  t('H19: …and forbids a label written from this script', expired10112Row.includes('never a label written from this script'), true);
+  t('H19: a fully discharged block says every target is closed', expired10112Row.includes('Every target it names is closed'), true);
+  t('H19: …and does not claim a partial discharge', expired10112Row.includes('PARTIAL'), false);
 
   // NEGATIVE — an open target is clean, and silence here is a real reading.
   t('H19: an OPEN target -> clean', h19BlockOutlivedBlocker(blockedCard(1), [target(2, 'open')]), null);
@@ -9186,38 +9188,40 @@ function selfTest() {
 
   // PARTIAL — one of two closed. Fires, and says it is partial.
   const partial = h19BlockOutlivedBlocker(blockedCard(1), [target(2, 'closed', { closedAt: '2026-08-20T07:58:08Z' }), target(3, 'open')]);
+  const partialRow = String(partial ?? '');
   t('H19: one closed of two still fires', typeof partial, 'string');
-  t('H19: …and reports the count as 1 of 2', partial.includes('1 of 2 `Blocked-by:` target(s)'), true);
-  t('H19: …names it a PARTIAL discharge', partial.includes('PARTIAL'), true);
-  t('H19: …names the target that is still open', partial.includes('`#3`'), true);
-  t('H19: …and does not decide the card is unblocked', partial.includes('it does not decide it'), true);
+  t('H19: …and reports the count as 1 of 2', partialRow.includes('1 of 2 `Blocked-by:` target(s)'), true);
+  t('H19: …names it a PARTIAL discharge', partialRow.includes('PARTIAL'), true);
+  t('H19: …names the target that is still open', partialRow.includes('`#3`'), true);
+  t('H19: …and does not decide the card is unblocked', partialRow.includes('it does not decide it'), true);
   t('H19: two closed of two reads as 2 of 2', h19row(blockedCard(1), [target(2, 'closed'), target(3, 'closed')]).includes('2 of 2'), true);
 
   // UNRESOLVED — never reads as clean, and never reads as closed either.
   const unresolvedOnly = h19BlockOutlivedBlocker(blockedCard(1), [foreign('objectstack-ai/cloud', 88, 'unresolved', { detail: 'HTTP 404' })]);
+  const unresolvedOnlyRow = String(unresolvedOnly ?? '');
   t('H19: an UNRESOLVED target fires rather than reading clean', typeof unresolvedOnly, 'string');
-  t('H19: …saying the liveness is UNJUDGED', unresolvedOnly.includes('UNJUDGED, not confirmed'), true);
-  t('H19: …and never claims the block is expired', unresolvedOnly.includes('outlived its blocker. Nothing else here'), false);
-  t('H19: …citing the unreadable-is-not-absent rule', unresolvedOnly.includes('#4690'), true);
-  t('H19: …naming the cross-repo target in full owner/repo#N form', unresolvedOnly.includes('`objectstack-ai/cloud#88`'), true);
-  t('H19: …with the observed status', unresolvedOnly.includes('HTTP 404'), true);
-  t('H19: …and still routes the release through the unlock sweep', unresolvedOnly.includes('放行双查'), true);
+  t('H19: …saying the liveness is UNJUDGED', unresolvedOnlyRow.includes('UNJUDGED, not confirmed'), true);
+  t('H19: …and never claims the block is expired', unresolvedOnlyRow.includes('outlived its blocker. Nothing else here'), false);
+  t('H19: …citing the unreadable-is-not-absent rule', unresolvedOnlyRow.includes('#4690'), true);
+  t('H19: …naming the cross-repo target in full owner/repo#N form', unresolvedOnlyRow.includes('`objectstack-ai/cloud#88`'), true);
+  t('H19: …with the observed status', unresolvedOnlyRow.includes('HTTP 404'), true);
+  t('H19: …and still routes the release through the unlock sweep', unresolvedOnlyRow.includes('放行双查'), true);
   // UNJUDGED must not read at judged-row weight (#11218 half 2). The premise
   // re-verification asked for exactly this check against the live report.
-  t('H19: …and says UNJUDGED is not a quiet row', unresolvedOnly.includes('must not be skimmed'), true);
-  t('H19: …and equates it with having read nothing at all', unresolvedOnly.includes('exactly as unverified as if nothing had been read'), true);
+  t('H19: …and says UNJUDGED is not a quiet row', unresolvedOnlyRow.includes('must not be skimmed'), true);
+  t('H19: …and equates it with having read nothing at all', unresolvedOnlyRow.includes('exactly as unverified as if nothing had been read'), true);
   // With NO repo probe taken, the wording stays undiagnosed — the pre-#11218
   // posture, preserved rather than silently upgraded.
-  t('H19: an unprobed cross-repo target claims no cause', unresolvedOnly.includes('resolves only when its repo answers'), true);
-  t('H19: …and asserts nothing about the repo either way', unresolvedOnly.includes('is NOT readable') || unresolvedOnly.includes('IS readable'), false);
+  t('H19: an unprobed cross-repo target claims no cause', unresolvedOnlyRow.includes('resolves only when its repo answers'), true);
+  t('H19: …and asserts nothing about the repo either way', unresolvedOnlyRow.includes('is NOT readable') || unresolvedOnlyRow.includes('IS readable'), false);
 
   // -- The MEASURED cause (#11218 half 1, the half that can land) ------------
   //
   // A cross-repo 404 is ambiguous; `GET /repos/<owner>/<name>` disambiguates
   // it. The row reports the measurement, never an inference from the issue 404.
-  const scopeGap = h19BlockOutlivedBlocker(blockedCard(10938), [
+  const scopeGap = String(h19BlockOutlivedBlocker(blockedCard(10938), [
     foreign('objectstack-ai/cloud', 944, 'unresolved', { detail: 'HTTP 404', repoReadable: false }),
-  ]);
+  ]) ?? '');
   t('H19 cause: an unreadable REPO is named per target', scopeGap.includes("`objectstack-ai/cloud` is NOT readable to this sweep's credential"), true);
   t('H19 cause: …and the observed status is still carried', scopeGap.includes('HTTP 404'), true);
   t('H19 cause: …and it is declared measured, not inferred', scopeGap.includes('measured directly'), true);
@@ -9226,39 +9230,40 @@ function selfTest() {
   t('H19 cause: …and the credential call is routed to routing/security', scopeGap.includes('routing/security'), true);
   t('H19 cause: …and ⛔ the card is not the place to fix it', scopeGap.includes('Do not "fix" it on the card'), true);
   // The OTHER leg of the same probe: repo readable, so the number is not there.
-  const missingNumber = h19BlockOutlivedBlocker(blockedCard(1), [
+  const missingNumber = String(h19BlockOutlivedBlocker(blockedCard(1), [
     foreign('objectstack-ai/objectui', 999999, 'unresolved', { detail: 'HTTP 404', repoReadable: true }),
-  ]);
+  ]) ?? '');
   t('H19 cause: a READABLE repo means the number is not there', missingNumber.includes('IS readable, so that number is not there'), true);
   t('H19 cause: …and that is NOT reported as a scope gap', missingNumber.includes('is NOT readable'), false);
   t('H19 cause: …nor as an accepted cross-repo limit', missingNumber.includes('standing, ACCEPTED'), false);
   // A failed probe (`null`) picks NEITHER side — #4690 at the probe's own level.
-  const probeFailed = h19BlockOutlivedBlocker(blockedCard(1), [
+  const probeFailed = String(h19BlockOutlivedBlocker(blockedCard(1), [
     foreign('objectstack-ai/cloud', 88, 'unresolved', { detail: 'HTTP 500', repoReadable: null }),
-  ]);
+  ]) ?? '');
   t('H19 cause: an unreadable PROBE names no cause at all', probeFailed.includes('IS readable') || probeFailed.includes('is NOT readable'), false);
   t('H19 cause: …but the target and status are still named', probeFailed.includes('`objectstack-ai/cloud#88`') && probeFailed.includes('HTTP 500'), true);
   // Mixed: only the scope-gapped ones are counted in the loud clause.
-  const mixedCause = h19BlockOutlivedBlocker(blockedCard(1), [
+  const mixedCause = String(h19BlockOutlivedBlocker(blockedCard(1), [
     foreign('objectstack-ai/cloud', 944, 'unresolved', { detail: 'HTTP 404', repoReadable: false }),
     foreign('objectstack-ai/objectui', 4356, 'unresolved', { detail: 'HTTP 404', repoReadable: true }),
-  ]);
+  ]) ?? '');
   t('H19 cause: the scope-gap count is the unreadable-repo ones only', mixedCause.includes('1 of them are unjudgeable'), true);
   // A LOCAL target is never probed, and renders exactly as it always did.
-  const localUnresolved = h19BlockOutlivedBlocker(blockedCard(1), [target(77, 'unresolved', { detail: 'HTTP 404' })]);
+  const localUnresolved = String(h19BlockOutlivedBlocker(blockedCard(1), [target(77, 'unresolved', { detail: 'HTTP 404' })]) ?? '');
   t('H19 cause: a LOCAL unresolved target claims no repo reading', localUnresolved.includes('readable'), false);
   t('H19 cause: …and is still named with its status', localUnresolved.includes('`#77` (HTTP 404)'), true);
   // An unresolved target alongside an open one still fires, and says which.
   const mixedUnresolved = h19BlockOutlivedBlocker(blockedCard(1), [target(2, 'open'), foreign('objectstack-ai/objectui', 4356, 'unresolved', { detail: 'HTTP 403' })]);
+  const mixedUnresolvedRow = String(mixedUnresolved ?? '');
   t('H19: unresolved + open still fires', typeof mixedUnresolved, 'string');
-  t('H19: …and reports the resolved remainder as open', mixedUnresolved.includes("The card's other 1 target(s) did resolve, and are still open."), true);
+  t('H19: …and reports the resolved remainder as open', mixedUnresolvedRow.includes("The card's other 1 target(s) did resolve, and are still open."), true);
   // Closed AND unresolved: the closed row leads, the gap is appended.
-  const closedAndUnresolved = h19BlockOutlivedBlocker(blockedCard(1), [target(2, 'closed'), foreign('objectstack-ai/cloud', 88, 'unresolved', { detail: 'HTTP 404' })]);
+  const closedAndUnresolved = String(h19BlockOutlivedBlocker(blockedCard(1), [target(2, 'closed'), foreign('objectstack-ai/cloud', 88, 'unresolved', { detail: 'HTTP 404' })]) ?? '');
   t('H19: a closed target leads even when another is unresolved', closedAndUnresolved.includes('outlived its blocker'), true);
   t('H19: …and the unresolved one is still declared unjudged', closedAndUnresolved.includes('unjudged, not open'), true);
 
   // The render budget: many targets are capped and the row says it counted.
-  const manyClosed = h19BlockOutlivedBlocker(blockedCard(1), [2, 3, 4, 5, 6, 7, 8].map((n) => target(n, 'closed')));
+  const manyClosed = String(h19BlockOutlivedBlocker(blockedCard(1), [2, 3, 4, 5, 6, 7, 8].map((n) => target(n, 'closed'))) ?? '');
   t('H19: the target list is capped at the render budget', manyClosed.includes(`+${7 - H19_TARGET_LIST_CAP} more`), true);
   t('H19: …and the count is the full one, not the shown one', manyClosed.includes('7 of 7'), true);
 
@@ -9390,18 +9395,19 @@ function selfTest() {
   const refState = (branch, state, detail = null) => ({ branch, state, detail });
   const absentRef = [refState('claude/issue-8878-dispatch-latency', 'absent')];
   const fired20 = h20DispatchedNoBranchRef(dispatchedCard(), gov(claim8878), absentRef, NOW_20);
+  const fired20Row = String(fired20 ?? '');
   t('H20: the measured #8878 shape FIRES', typeof fired20, 'string');
-  t('H20: …and names the branch that has no ref', fired20.includes('`claude/issue-8878-dispatch-latency`'), true);
-  t('H20: …and says NO SUCH REMOTE REF EXISTS', fired20.includes('NO SUCH REMOTE REF EXISTS'), true);
-  t('H20: …with the measured age and the threshold', fired20.includes(`~74 min after the claim was posted (threshold ${DISPATCHED_NO_REF_STALE_MINUTES} min)`), true);
-  t('H20: …and states the two-acts mechanism', fired20.includes('Claiming and dispatching are two acts with a gap between them'), true);
-  t('H20: …and that it is invisible from the card itself', fired20.includes('invisible from the card'), true);
-  t('H20: …and warns the symptom is identical to a DEAD agent', fired20.includes('IDENTICAL to a dev agent that died'), true);
-  t('H20: …naming the opposite remedies rather than diagnosing one', fired20.includes('a dead agent needs a probe, an undispatched claim needs a dispatch'), true);
-  t('H20: …and carries the ⛔ keying rule verbatim', fired20.includes('keys on NO REF AT ALL, never on "no PR yet"'), true);
-  t('H20: …with the reason a PR key would be wrong', fired20.includes('legitimately has a ref and no PR for over an hour'), true);
-  t('H20: …and routes an already-merged delivery to H8 instead', fired20.includes("the missing paired write is H8's"), true);
-  t('H20: …and forbids a label written from this script', fired20.includes('never a label written from this script'), true);
+  t('H20: …and names the branch that has no ref', fired20Row.includes('`claude/issue-8878-dispatch-latency`'), true);
+  t('H20: …and says NO SUCH REMOTE REF EXISTS', fired20Row.includes('NO SUCH REMOTE REF EXISTS'), true);
+  t('H20: …with the measured age and the threshold', fired20Row.includes(`~74 min after the claim was posted (threshold ${DISPATCHED_NO_REF_STALE_MINUTES} min)`), true);
+  t('H20: …and states the two-acts mechanism', fired20Row.includes('Claiming and dispatching are two acts with a gap between them'), true);
+  t('H20: …and that it is invisible from the card itself', fired20Row.includes('invisible from the card'), true);
+  t('H20: …and warns the symptom is identical to a DEAD agent', fired20Row.includes('IDENTICAL to a dev agent that died'), true);
+  t('H20: …naming the opposite remedies rather than diagnosing one', fired20Row.includes('a dead agent needs a probe, an undispatched claim needs a dispatch'), true);
+  t('H20: …and carries the ⛔ keying rule verbatim', fired20Row.includes('keys on NO REF AT ALL, never on "no PR yet"'), true);
+  t('H20: …with the reason a PR key would be wrong', fired20Row.includes('legitimately has a ref and no PR for over an hour'), true);
+  t('H20: …and routes an already-merged delivery to H8 instead', fired20Row.includes("the missing paired write is H8's"), true);
+  t('H20: …and forbids a label written from this script', fired20Row.includes('never a label written from this script'), true);
   t('H20: not a loud finding', isLoudFinding(fired20), false);
 
   // ★ The regression pin the filing card asked for by name: a dev inside a long
@@ -9442,24 +9448,25 @@ function selfTest() {
     [refState('claude/issue-8878-dispatch-latency', 'unreadable', 'HTTP 500')],
     NOW_20,
   );
+  const unread20Row = String(unread20 ?? '');
   t('H20 unreadable: does NOT read as healthy', unread20 === null, false);
   t('H20 unreadable: fires its own row', typeof unread20, 'string');
-  t('H20 unreadable: …which says the dispatch is UNJUDGED', unread20.includes('UNJUDGED, not confirmed'), true);
-  t('H20 unreadable: …and reports the observed status', unread20.includes('HTTP 500'), true);
-  t('H20 unreadable: …and does NOT assert the finding it did not measure', unread20.includes('NO SUCH REMOTE REF EXISTS'), false);
-  t('H20 unreadable: …citing the unread-is-not-absent rule', unread20.includes('#4690'), true);
-  t('H20 unreadable: …and refuses to guess WHY', unread20.includes('the cause is not guessed at'), true);
+  t('H20 unreadable: …which says the dispatch is UNJUDGED', unread20Row.includes('UNJUDGED, not confirmed'), true);
+  t('H20 unreadable: …and reports the observed status', unread20Row.includes('HTTP 500'), true);
+  t('H20 unreadable: …and does NOT assert the finding it did not measure', unread20Row.includes('NO SUCH REMOTE REF EXISTS'), false);
+  t('H20 unreadable: …citing the unread-is-not-absent rule', unread20Row.includes('#4690'), true);
+  t('H20 unreadable: …and refuses to guess WHY', unread20Row.includes('the cause is not guessed at'), true);
   t('H20 unreadable: not a loud finding either', isLoudFinding(unread20), false);
 
   // Mixed readings. "No ref at all" is a claim about EVERY branch the card
   // names, so one unread probe is enough to withhold it — and one existing ref
   // is enough to call the card healthy.
-  const mixedUnread20 = h20DispatchedNoBranchRef(
+  const mixedUnread20 = String(h20DispatchedNoBranchRef(
     dispatchedCard(),
     gov([claimRow(minsAgo20(74), 'Claim: seat.\nBranch: `claude/issue-1-a`\nBranch: `claude/issue-1-b`')]),
     [refState('claude/issue-1-a', 'absent'), refState('claude/issue-1-b', 'unreadable', 'HTTP 502')],
     NOW_20,
-  );
+  ) ?? '');
   t('H20 mixed: absent + unreadable takes the quieter row', mixedUnread20.includes('UNJUDGED, not confirmed'), true);
   t('H20 mixed: …and still names the branch that resolved absent', mixedUnread20.includes('`claude/issue-1-a`'), true);
   t('H20 mixed: …explaining why one unread probe withholds the finding', mixedUnread20.includes('one unread probe is enough to withhold it'), true);
@@ -9481,15 +9488,16 @@ function selfTest() {
   t('H20: absent ref states -> no row', h20DispatchedNoBranchRef(dispatchedCard(), gov(claim8878), undefined, NOW_20), null);
   t('H20: a missing issue does not crash', h20DispatchedNoBranchRef(undefined, gov(claim8878), absentRef, NOW_20), null);
   const unstamped20 = h20DispatchedNoBranchRef(dispatchedCard(), gov([claimRow('not-a-date', claimBody8878)]), absentRef, NOW_20);
+  const unstamped20Row = String(unstamped20 ?? '');
   t('H20: an unreadable claim timestamp fires rather than reading fresh', typeof unstamped20, 'string');
-  t('H20: …and says so in place of an age', unstamped20.includes('an unreadable claim timestamp (which must not read as fresh)'), true);
+  t('H20: …and says so in place of an age', unstamped20Row.includes('an unreadable claim timestamp (which must not read as fresh)'), true);
   const many20 = Array.from({ length: 7 }, (_, i) => refState(`claude/issue-1-b${i}`, 'absent'));
-  const capped20 = h20DispatchedNoBranchRef(
+  const capped20 = String(h20DispatchedNoBranchRef(
     dispatchedCard(),
     gov([claimRow(minsAgo20(74), `Claim: seat.\n${many20.map((r) => `Branch: \`${r.branch}\``).join('\n')}`)]),
     many20,
     NOW_20,
-  );
+  ) ?? '');
   t('H20: the branch list is capped at the render budget', capped20.includes(`+${7 - H20_BRANCH_LIST_CAP} more`), true);
 
   // The summary line's fifth `read X of Y` pair — H19's shape, and owed for the
@@ -9631,8 +9639,9 @@ function selfTest() {
   t('H27: a young claim -> no row even with a frozen branch', dead27({ claim: claim27('2026-08-24T04:00:00Z') }), null);
   t('H27: exactly AT the threshold is not past it', dead27({ claim: claim27(new Date(NOW_27 - DEAD_CLAIM_STALE_HOURS * 3_600_000).toISOString()) }), null);
   const unstamped27 = dead27({ claim: claim27('not-a-date') });
+  const unstamped27Row = String(unstamped27 ?? '');
   t('H27: an unreadable claim timestamp does not read as fresh', unstamped27 === null, false);
-  t('H27: …and yields the UNJUDGED row (the comparison is impossible)', unstamped27.includes('UNJUDGED'), true);
+  t('H27: …and yields the UNJUDGED row (the comparison is impossible)', unstamped27Row.includes('UNJUDGED'), true);
   const many27 = Array.from({ length: 7 }, (_, i) => ({ branch: `claude/issue-1-b${i}`, state: 'exists', headCommittedAt: '2026-08-22T09:00:00Z' }));
   t('H27: the branch list is capped at the render budget', dead27Row({ refs: many27 }).includes(`+${7 - H20_BRANCH_LIST_CAP} more`), true);
 
@@ -10873,18 +10882,18 @@ function selfTest() {
   t('H26: …and it says to look one level further', h26row(waiting(1395), [tgt(10101, ['pm:blocked'])]).includes('TRANSITIVE'), true);
   t('H26: …and does not claim the block can never release', h26row(waiting(1395), [tgt(10101, ['pm:blocked'])]).includes('NO MECHANISM'), false);
   // Both legs at once, on two different targets, in one row.
-  const bothLegs = h26BlockOnIndefiniteTarget(waiting(), [tgt(987, ['pm:on-hold']), tgt(10101, ['pm:blocked'])]);
+  const bothLegs = String(h26BlockOnIndefiniteTarget(waiting(), [tgt(987, ['pm:on-hold']), tgt(10101, ['pm:blocked'])]) ?? '');
   t('H26: both legs report together', bothLegs.includes('NO MECHANISM THAT WILL EVER RELEASE IT') && bothLegs.includes('TRANSITIVE'), true);
   // A target that is BOTH parked and blocked is named ONCE, under the reading
   // that ends the wait forever rather than the one that merely lengthens it.
-  const bothOnOne = h26BlockOnIndefiniteTarget(waiting(), [tgt(987, ['pm:on-hold', 'pm:blocked'])]);
+  const bothOnOne = String(h26BlockOnIndefiniteTarget(waiting(), [tgt(987, ['pm:on-hold', 'pm:blocked'])]) ?? '');
   t('H26: a parked AND blocked target is named once, as indefinite', bothOnOne.includes('NO MECHANISM THAT WILL EVER RELEASE IT'), true);
   t('H26: …and not a second time as a chain', bothOnOne.includes('TRANSITIVE'), false);
   // A partially indefinite block still reports: one live blocker does not make
   // the indefinite one fireable.
   t('H26: one indefinite target among open ones still fires', typeof h26BlockOnIndefiniteTarget(waiting(), [tgt(900, ['pm:queue']), tgt(987, ['pm:on-hold'])]), 'string');
   // The render cap, shared with H19 so one card cannot flood the anchor body.
-  const manyIndefinite = h26BlockOnIndefiniteTarget(waiting(), [1, 2, 3, 4, 5, 6, 7].map((n) => tgt(n, ['pm:on-hold'])));
+  const manyIndefinite = String(h26BlockOnIndefiniteTarget(waiting(), [1, 2, 3, 4, 5, 6, 7].map((n) => tgt(n, ['pm:on-hold']))) ?? '');
   t('H26: the target list is capped like H19\'s', manyIndefinite.includes(`+${7 - H19_TARGET_LIST_CAP} more`), true);
   t('H26: …and still counts the full set', manyIndefinite.includes('on 7 target(s)'), true);
   // Cross-repo targets are addressed by full key, as in H19's rows.
@@ -10923,14 +10932,14 @@ function selfTest() {
   // the liveness read, so the card resolved ONE target and it was closed.
   const asSwept = reparkKeys(undefined);
   t('H28 repro (OLD, gated): only the stale body target is resolved', asSwept, 'objectstack-ai/objectstack#9255');
-  const falseCandidate = h19BlockOutlivedBlocker(reparked, [target(9255, 'closed', { closedAt: '2026-08-19T11:28:26Z' })]);
+  const falseCandidate = String(h19BlockOutlivedBlocker(reparked, [target(9255, 'closed', { closedAt: '2026-08-19T11:28:26Z' })]) ?? '');
   t('H28 repro (OLD, gated): H19 publishes 1 of 1 CLOSED', falseCandidate.includes('1 of 1 `Blocked-by:` target(s)'), true);
   t('H28 repro (OLD, gated): …as a FULL discharge — the false unlock candidate', falseCandidate.includes('Every target it names is closed'), true);
   t('H28 repro (OLD, gated): …and never says PARTIAL', falseCandidate.includes('PARTIAL'), false);
   // NEW behaviour = ungated: both channels, so the live blocker is resolved too.
   const ungated = [target(9255, 'closed', { closedAt: '2026-08-19T11:28:26Z' }), target(11501, 'open')];
   t('H28 repro (NEW, ungated): both channels are unioned', reparkKeys([REPARK_COMMENT]), 'objectstack-ai/objectstack#9255 objectstack-ai/objectstack#11501');
-  const partialNow = h19BlockOutlivedBlocker(reparked, ungated);
+  const partialNow = String(h19BlockOutlivedBlocker(reparked, ungated) ?? '');
   t('H28 repro (NEW, ungated): H19 reads 1 of 2', partialNow.includes('1 of 2 `Blocked-by:` target(s)'), true);
   t('H28 repro (NEW, ungated): …and calls it a PARTIAL discharge', partialNow.includes('PARTIAL'), true);
   t('H28 repro (NEW, ungated): …naming the live blocker as still open', partialNow.includes('`#11501`'), true);
@@ -10938,14 +10947,15 @@ function selfTest() {
 
   // The PAIRED row — what ungating alone does not say.
   const stale9592 = h28StaleBodyBlockerLine(reparked, ungated, [REPARK_COMMENT], 'objectstack-ai/objectstack');
+  const stale9592Row = String(stale9592 ?? '');
   t('H28: the re-park shape fires', typeof stale9592, 'string');
-  t('H28: …naming the spent BODY target', stale9592.includes('`#9255` (closed 2026-08-19T11:28:26Z)'), true);
-  t('H28: …and the live COMMENT target', stale9592.includes('`#11501`'), true);
-  t('H28: …calling the body line STALE', stale9592.includes('the body line is ') && stale9592.includes('STALE'), true);
-  t('H28: …and asking for the migration to the canonical home', stale9592.includes('rewrite the body line to name the live blocker'), true);
-  t('H28: …naming the re-park as the write that produced it', stale9592.includes('RE-PARK'), true);
-  t('H28: …and recording the false unlock candidate the gate used to publish', stale9592.includes('FALSE unlock candidate'), true);
-  t('H28: report-only, never a body written from this script', stale9592.includes('never a body or a label written from this script'), true);
+  t('H28: …naming the spent BODY target', stale9592Row.includes('`#9255` (closed 2026-08-19T11:28:26Z)'), true);
+  t('H28: …and the live COMMENT target', stale9592Row.includes('`#11501`'), true);
+  t('H28: …calling the body line STALE', stale9592Row.includes('the body line is ') && stale9592Row.includes('STALE'), true);
+  t('H28: …and asking for the migration to the canonical home', stale9592Row.includes('rewrite the body line to name the live blocker'), true);
+  t('H28: …naming the re-park as the write that produced it', stale9592Row.includes('RE-PARK'), true);
+  t('H28: …and recording the false unlock candidate the gate used to publish', stale9592Row.includes('FALSE unlock candidate'), true);
+  t('H28: report-only, never a body written from this script', stale9592Row.includes('never a body or a label written from this script'), true);
   // H19 and H28 fire TOGETHER on this card — different halves of one wait.
   t('H28 + H19: both rows fire on the re-parked card', Boolean(partialNow) && Boolean(stale9592), true);
 
@@ -10976,12 +10986,12 @@ function selfTest() {
   t('H28 split: a mid-sentence prose mention is NOT a directive', [...blockerChannelKeys('the stated **Blocked-by: #9255** is discharged', reparked, 'objectstack-ai/objectstack')].join(' '), '');
   t('H28 split: no text at all is an empty set', blockerChannelKeys(undefined, reparked, 'objectstack-ai/objectstack').size, 0);
   // Multiple stale/live targets are counted and capped like every other row.
-  const manyStale = h28StaleBodyBlockerLine(
+  const manyStale = String(h28StaleBodyBlockerLine(
     { ...issue(['pm:blocked'], [], 'Blocked-by: #1\nBlocked-by: #2'), number: 9592 },
     [target(1, 'closed'), target(2, 'closed'), target(11501, 'open')],
     [REPARK_COMMENT],
     'objectstack-ai/objectstack',
-  );
+  ) ?? '');
   t('H28: two stale body targets are counted', manyStale.includes('names 2 CLOSED'), true);
   t('H28: …and the live one is still named', manyStale.includes('`#11501`'), true);
 
@@ -11104,7 +11114,7 @@ function selfTest() {
   t('H33: an unreadable CLAIM stamp declines', h33ClaimPredatesRuling(dispatched33(), [row33('nope', 'Claim: PM loop round R6'), rulingRow33]), null);
   t('H33: an unreadable RULING stamp declines', h33ClaimPredatesRuling(dispatched33(), [claimRow33, row33('nope', 'Triage: routed')]), null);
   // Multiple rulings are counted, and the NEWEST is the one named.
-  const twoRulings = h33ClaimPredatesRuling(dispatched33(), [claimRow33, rulingRow33, row33('2026-08-22T09:00:00Z', 'Maintainer ruling — option 1 stands')]);
+  const twoRulings = String(h33ClaimPredatesRuling(dispatched33(), [claimRow33, rulingRow33, row33('2026-08-22T09:00:00Z', 'Maintainer ruling — option 1 stands')]) ?? '');
   t('H33: two later rulings are counted', twoRulings.includes('2 triage-ruling comment(s)'), true);
   t('H33: …and the NEWEST is the one quoted', twoRulings.includes('2026-08-22T09:00:00Z'), true);
 
