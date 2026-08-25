@@ -839,11 +839,18 @@ them right the first time:
    - `{var}` / `{record.title}` — variable / record field
    - `{record.tags.0}` — **array index** (e.g. a `multiple: true` lookup, stored as an array)
    - `{$User.Id}` / `{NOW()}` / `{TODAY() + 30}` — current user / date macros
+   - `{round(x)}` `{floor(x)}` `{ceil(x)}` `{abs(x)}` `{min(a,b)}` `{max(a,b)}` —
+     mirror the CEL stdlib 1:1. `round` is **integer-only** (no `round(x, 2)`);
+     for N decimals write `{round(x * 100) / 100}` (scale 2)
    - anything without `{…}` is a **literal**
 
    ❌ `body: '{{ai_reply}}'` — double-brace is the *formula / template-field* dialect, **not** flow values
    ❌ `ticket: '$source.id'` — a bare `$ref` is a literal string, not interpolated
    ✅ `body: '{ai_reply}'`, `ticket: '{source.id}'`
+   ❌ `'{ROUND(x, 2)}'` / `'{Math.round(x)}'` / `'{(x).toFixed(2)}'` — any other
+   name in call position **fails the node** with a named error naming the
+   supported set. The build does **not** catch these (conditions are checked,
+   value expressions are not) and a `fault` edge cannot route it.
 
 7. **`create_record`'s `outputVariable` holds the created RECORD, not its id.**
    Reference a field explicitly.

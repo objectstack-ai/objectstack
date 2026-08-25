@@ -219,8 +219,8 @@ localStorage / auth gotchas.
 11. **Worktree-first — never edit on the shared `main` checkout.** This repo is edited by **multiple agents at once**;
     the shared tree has its HEAD switched and reset *under you*, silently clobbering uncommitted work — a feature
     branch on the *shared* checkout is **not** enough (it still gets switched under you). Before your **first file
-    edit**, be in a dedicated worktree on a feature branch:
-    `git worktree add ../objectstack-<task> -b <branch> main && cd ../objectstack-<task> && pnpm install`. Two
+    edit**, be in a dedicated worktree on a feature branch: `git fetch origin main &&
+    git worktree add ../objectstack-<task> -b <branch> origin/main && cd ../objectstack-<task> && pnpm install`. Two
     PreToolUse hooks **enforce** this — `.claude/hooks/guard-main-checkout.sh` blocks `Edit`/`Write`/`NotebookEdit`,
     and `.claude/hooks/guard-main-checkout-bash.sh` blocks the identical write arriving through **Bash** (`>`/`>>`
     redirection, `sed -i`, `perl -i`, `tee`, `cp`, `mv`, `rm`, `touch`) — and both check the **target file's own
@@ -323,15 +323,16 @@ localStorage / auth gotchas.
     readable by every seat — which is why it lives here, not only in a lane-specific skill file. **Release-adjacent
     work stays open to every seat.** The release board, `.objectui-sha` pin bumps, version reconciliation, writing
     changesets, compiling release notes when asked, and *verifying* release state (`npm view`, `git ls-remote --tags`)
-    are ordinary tasks. What is reserved is the **release act itself**: ⛔ running `changeset publish` /
-    `pnpm run release`, ⛔ pushing a version tag, ⛔ cutting a GitHub Release, ⛔ pushing a runtime image, ⛔
+    are ordinary tasks. What is reserved is the **release act itself**: ⛔ running `changeset publish` / `pnpm run
+    release`, ⛔ pushing a version tag, ⛔ cutting a GitHub Release, ⛔ pushing a runtime image, ⛔
     `workflow_dispatch`-ing `release.yml` or any other publish-capable workflow, ⛔ **approving a pending `release`
     environment deployment** (ADR-0125 — since 2026-08-20 that click IS the publish authorisation, and a deployment
     waiting for hours is the system working, not a state you clear), and ⛔ merging — or queueing, or arming
     auto-merge on — the **Version Packages** PR (`chore: version packages`). That PR is bot-authored and standing-open
-    by design: it is regenerated on every push to `main`, so "green, current, and nobody has objected" is its permanent
-    resting state, not a signal that it is due. When you find a publish nobody ordered — a tag or an npm version that
-    simply appeared — ⛔ do not "repair" it with a counter-publish: file it as an incident for the maintainer.
+    by design: it is regenerated six-hourly by `release.yml`'s `version-pr` job — never on a push to `main`; push
+    drives the publish lane — so "green, current, and nobody has objected" is its permanent resting state, not a
+    signal that it is due. When you find a publish nobody ordered — a tag or an npm version that simply appeared —
+    ⛔ do not "repair" it with a counter-publish: file it as an incident for the maintainer.
 
     **The precedent is that the mechanical channel fires with nobody deciding to use it.** The release workflow's
     `on: push` lane once shipped a full release candidate end to end — 69 packages to npm, tags, GitHub Releases,
@@ -354,26 +355,24 @@ localStorage / auth gotchas.
 ## Multi-agent working discipline
 
 This repo is worked on by **multiple agents in parallel**. **Use one git worktree per
-agent/task** (`git worktree add ../objectstack-<task> -b <branch>`; run `pnpm install`
-in the new tree) so file systems are physically isolated — mandatory, not a preference
-(Prime Directive #11), and hook-enforced. Working in the shared `main` checkout is *not*
-a supported fallback: branches get switched and shared files — including ones you just
-wrote — get reset *under you* mid-task (full sessions of work were silently reverted
-this way before the rule was enforced).
+agent/task** (`git fetch origin main && git worktree add ../objectstack-<task> -b <branch>
+origin/main`; run `pnpm install` in the new tree) so file systems are physically isolated —
+mandatory, not a preference (Prime Directive #11), and hook-enforced. Working in the shared `main` checkout is *not* a
+supported fallback: branches get switched and shared files — including ones you just wrote
+— get reset *under you* mid-task (full sessions were silently reverted before enforcement).
 
-**⛔ `git stash` is the one thing the worktree does NOT isolate — never run a bare
-`git stash push`/`pop`.** `refs/stash` lives in the **common** `.git` directory, so
-every linked worktree pushes onto and pops off **one shared LIFO stack**. Two agents
-stashing at the same time swap entries — your `pop` restores the other agent's changes,
-your own work stays on the stack for them to take, and **`pop` reports success**; the
-only symptom is another agent's files in your `git status`, after which a `git add -A`
-commits their half-finished work into your PR. It has really happened, mid reverse-
-verification. A PreToolUse hook (`.claude/hooks/guard-shared-stash.sh`; details and the
-`OS_ALLOW_STASH=1` escape in its header, self-test alongside) blocks the mutating forms
-— including `stash@{N}`, a *position* in a stack you don't own — and allows
-`list`/`show`/`create` and `apply`/`store` pinned to a literal hex object id. It fails
-open on shapes it cannot parse, so the rule still outranks the hook. The collision-free
-replacements, all inside your own worktree:
+**⛔ `git stash` is the sharpest thing the worktree does NOT isolate — never run a bare
+`git stash push`/`pop`.** `refs/stash` lives in the **common** `.git` directory, so every
+linked worktree pushes onto and pops off **one shared LIFO stack**: two agents stashing
+at once swap entries — your `pop` restores the other agent's changes, your own work stays
+on the stack for them to take, and **`pop` reports success**. The only symptom is another
+agent's files in your `git status`, after which a `git add -A` commits their half-finished
+work into your PR; it has really happened, mid reverse-verification. A PreToolUse hook
+(`.claude/hooks/guard-shared-stash.sh`; details and the `OS_ALLOW_STASH=1` escape in its
+header, self-test alongside) blocks the mutating forms — including `stash@{N}`, a
+*position* in a stack you don't own — allows `list`/`show`/`create` and `apply`/`store`
+pinned to a literal hex object id, and fails open on shapes it cannot parse, so the rule
+still outranks the hook. The collision-free replacements, all inside your own worktree:
 
 ```
 git diff > /tmp/wip.patch && git checkout -- <paths>    # then: git apply /tmp/wip.patch
@@ -381,34 +380,49 @@ git commit -am wip                          # then: git reset --soft HEAD~1
 git worktree add ../objectstack-<task>-cmp <ref>        # a second tree to compare against
 ```
 
-**Doing reverse verification ("revert the fix, watch the diagnostics")? Commit the fix
-FIRST.** Committed, restoring is `git checkout <your-branch> -- <path>` — pulling the
-file back out of a commit that really exists. Against an **uncommitted** edit,
-`git checkout origin/main -- <path>` leaves no restore point at all: the working tree
-is the only copy, the stash is banned above, and discarding local modifications is a
-normal, silent, exit-0 operation. The change is simply gone — it has happened
-repeatedly across the sibling repos, and every recovery depended on the change still
-being in the session transcript. If you ever retype a lost change, prove identity with
-`git diff` against a saved patch or `git hash-object <path>` — a matching `--stat`
-insertion count is **not** byte-identity — then re-run the reverse verification from
-the committed state, so the red/green numbers you report are trustworthy.
+**⛔ The stash is one CASE — a worktree isolates your checkout and exactly four ref
+namespaces (`HEAD`, `refs/bisect`, `refs/worktree`, `refs/rewritten`) and NOTHING else:**
+not the object store, not the config, not any other ref, so "worktrees isolate refs,
+except stash" is exactly backwards. **`refs/remotes/*` is shared** — a sibling's fetch
+advances **your** `origin/main` (measured next door: three moves in ten minutes), so
+`git checkout origin/main -- <paths>` restores wherever that ref points **now**, possibly
+newer than your base: another agent's merged work entering your tree under the name of a
+"revert", and **staged** on arrival by the rule below. **`FETCH_HEAD` is per CHECKOUT —
+the last fetch in this checkout wins** (⚠️ not per worktree: measured on git 2.43, a
+linked worktree has its own, so a sibling's fetch does **not** move yours and the hazard
+is the **shared primary checkout**, where every agent's first fetch lands before it builds
+one). It fails by **absence**, not wrong content: split from its `git fetch` by any
+intervening fetch, `git diff …FETCH_HEAD` **exits 0 printing nothing** — read as *"the
+change isn't there"*, a confidently wrong verdict on someone else's work, worst for
+**reviewing** seats. Practices: pin `BASE=$(git rev-parse HEAD)` at worktree creation and
+restore against that commit, never a moving ref name; verify a named remote-tracking
+ref's content by occurrence counts on disk; fetch into a ref you own (`git fetch origin
+<branch>:refs/<ns>/<id> -f`) and read that; diff restored paths against `BASE` before
+staging. ⛔ **No hook backs this one** — safe and unsafe spellings are both ordinary
+`git checkout` / `git fetch`, so a mechanical block would fire on correct usage.
 
-**⛔ And `git checkout <ref> -- <path>` STAGES what it retrieves — putting the file
-back with `cp` undoes only half of it.** It writes the **index** as well as the working
-tree, so after `git checkout origin/main -- <path>` … `cp` your copy back, the index
-holds `main`'s content while the tree holds yours. Measured here:
-`git status --porcelain` shows `MM` (staged *and* unstaged modifications on one path)
-and `git show :<path>` reads back `main`'s copy — but `git diff HEAD` is **clean** (it
-compares the tree with HEAD and never consults the index), the tests pass because they
-read the tree, and a bare `git commit` builds from the **index**: a commit that deletes
-your own fix, in a PR whose body accurately describes a change it does not contain (one
-real PR had 157 such deletions staged, caught only by the `MM`). Restore with
-`git checkout HEAD -- <path>` or `git restore --source=HEAD --staged --worktree <path>`
-— both reset index *and* tree — and read `git status --porcelain` before you commit;
-⛔ never trust `git diff HEAD` alone after a checkout-from-ref. Better still, don't
-stage it at all: `git restore --source=<ref> -- <path>` (no `--staged`) writes the tree
-only — porcelain shows a lone unstaged `M`, not `MM` — so prefer it when standing
-another ref's version up for a counterfactual.
+**Doing reverse verification ("revert the fix, watch the diagnostics")? Commit the fix
+FIRST.** Committed, restoring is `git checkout <your-branch> -- <path>`, out of a commit
+that really exists. Against an **uncommitted** edit there is no restore point at all: the
+working tree is the only copy, the stash is banned above, and discarding local
+modifications is a normal, silent, exit-0 operation that has cost changes repeatedly.
+Prove any retyped change identical with `git diff` against a saved patch or
+`git hash-object <path>` (a matching `--stat` insertion count is **not** byte-identity),
+then re-run from the committed state so your red/green numbers are trustworthy.
+
+**⛔ And `git checkout <ref> -- <path>` STAGES what it retrieves — putting the file back
+with `cp` undoes only half of it.** It writes the **index** as well as the working tree,
+so the index holds the ref's content while the tree holds yours: `git status --porcelain`
+shows `MM` and `git show :<path>` reads back the ref's copy, but `git diff HEAD` is
+**clean** (it compares tree with HEAD and never consults the index), the tests pass
+because they read the tree, and a bare `git commit` builds from the **index** — a commit
+that deletes your own fix, in a PR whose body accurately describes a change it does not
+contain (one real PR: 157 such deletions, caught only by the `MM`). Restore with
+`git checkout HEAD -- <path>` or `git restore --source=HEAD --staged --worktree <path>` —
+both reset index *and* tree — read `git status --porcelain` before you commit, and ⛔
+never trust `git diff HEAD` alone after a checkout-from-ref. Better still, don't stage it
+at all: `git restore --source=<ref> -- <path>` (no `--staged`) writes the tree only, a
+lone unstaged `M`.
 
 **A windowed history question ("how many commits on `<ref>` in `<window>`") goes through
 `scripts/pm/git-history.mjs` — answer, or REFUSE.** A shallow clone answers windowed
@@ -419,30 +433,28 @@ tools that answer their own question.
 **Claim the issue BEFORE you write any code.** Assign it to yourself
 (`gh issue edit <n> --add-assignee @me`, or `issue_write` with `assignees`) as the
 *first* action of the task — before the worktree, before the first read. An unassigned
-issue reads as an open invitation: two agents that both start on it burn the same hours
-twice, then race to land conflicting shapes for one problem. Already assigned to
-someone else? It is taken — pick another or ask; never reassign it to yourself. And
-because every agent here shares one GitHub identity, the assignee field alone cannot
-answer "is this claim *mine*?" — a claim is two acts: assign, **and a claim comment
-carrying your session ID and branch name** (`claude/issue-<n>-<slug>`). Before writing
-code, re-read the issue's comments; an earlier claim with a different session ID or
-branch means the issue is taken no matter what the assignee field seems to say —
-skipping that read is how one issue got implemented twice in one morning. The claim is
-also what makes the *finding* rule (Prime Directive #10) safe: once findings become
-issues, the list is a real queue other agents read — file unassigned when merely
-recording; assign at the moment you actually start.
+issue reads as an open invitation: two agents burn the same hours twice, then race to
+land conflicting shapes for one problem. Already assigned to someone else? It is taken —
+pick another or ask; never reassign it to yourself. And because every agent here shares
+one GitHub identity, the assignee field alone cannot answer "is this claim *mine*?" — a
+claim is two acts: assign, **and a claim comment carrying your session ID and branch
+name** (`claude/issue-<n>-<slug>`). Before writing code, re-read the issue's comments; an
+earlier claim with a different session ID or branch means it is taken whatever the
+assignee field says — skipping that read is how one issue got implemented twice in one
+morning. The claim is also what makes the *finding* rule (Prime Directive #10) safe:
+findings become a real queue other agents read, so file unassigned when merely recording
+and assign at the moment you actually start.
 
-**State on your PR that you did not set belongs to another actor — ask, never
-"correct" it.** Under one shared identity every other participant's write arrives
-unsigned: the PM flipping your draft to ready and arming auto-merge, a bot
-re-labelling, the platform rewriting your body. The worked failure: a dev found its PR
-footer in a form it had never typed, correctly concluded *something is rewriting my
-PR*, then extended that to the **draft flag** and flipped the PM's ready PR back to
-draft — destroying auto-merge and queue membership at once (§7's draft-flip re-arm
-note), invisibly (`pull_request_read` reports neither). The observation was right;
-the inference did not follow — body rewriting is a known platform behaviour and is
-evidence of nothing else. When state you did not write changes under you: read the
-timeline event's actor, or ask. Undo it only once you know who set it and why.
+**State on your PR that you did not set belongs to another actor — ask, never "correct"
+it.** Under one shared identity every other participant's write arrives unsigned: the PM
+flipping your draft to ready and arming auto-merge, a bot re-labelling, the platform
+rewriting your body. The worked failure: a dev read its own rewritten footer as proof
+*something is rewriting my PR*, extended that to the **draft flag**, and flipped the PM's
+ready PR back to draft — destroying auto-merge and queue membership at once (§7's
+draft-flip re-arm note), invisibly (`pull_request_read` reports neither). The observation
+was right, the inference did not follow: body rewriting is a known platform behaviour and
+evidence of nothing else. Read the timeline event's actor, or ask; undo only once you
+know who set it and why.
 
 **Write the attribution footer in the form the surface keeps:**
 
@@ -452,35 +464,35 @@ _Generated by [Claude Code](https://claude.ai/code/session_<id>)_    ← session
 ```
 
 **PR body:** bare loses the **whole** footer, `---` included, on every `update_pull_request` edit;
-session-URL survives both write paths, and `create_pull_request` *rewrites* bare into it — how a
-body comes back in a shape nobody typed. **Issue comment:** the platform APPENDS a bare footer to
-every one (measured 2026-08-20 — MCP `add_issue_comment` and direct REST agree: per-surface, not
-per-tool). It is idempotent if yours is already bare; if yours is the session-URL form *it survives
+session-URL survives both write paths, and `create_pull_request` *rewrites* bare into it — how a body
+comes back in a shape nobody typed. An edit also **APPENDS a fresh platform bare footer** under yours,
+and the next edit strips that one and appends another — the floor is your session-URL footer plus one
+platform bare, so ⛔ don't loop trying to normalize it. **Issue comment:** the platform APPENDS a bare
+footer to every one (measured 2026-08-20 — MCP `add_issue_comment` and direct REST agree: per-surface,
+not per-tool). It is idempotent if yours is already bare; if yours is the session-URL form *it survives
 verbatim* and a bare one lands under it, leaving two. ⛔ A tail bare footer on a comment is the
 platform's, not your form downgraded. Which layer does this is unknown; don't go establishing it.
 
 **GitHub mutates body BYTES — spell poison-shaped tokens out in words, never literally.**
-Regex literals and script-tag-shaped tokens go in fenced code with the dangerous
-character spelled out, or are described in words (fences do NOT protect them); after
-writing any less-than fragment, read the body back and verify it survived. The two
-measured mutation shapes and their triggers live in pm-dispatch `references/platform-readings.md`.
-⛔ A body reading short only through the API is probably intact — check the rendered page before "repairing" it; a
-rewrite destroys a correct card.
+Regex literals and script-tag-shaped tokens go in fenced code with the dangerous character
+spelled out, or are described in words (fences do NOT protect them); after writing any
+less-than fragment, read the body back and verify it survived. The two measured mutation
+shapes and their triggers live in pm-dispatch `references/platform-readings.md`. ⛔ A body
+reading short only through the API is probably intact — check the rendered page before
+"repairing" it; a rewrite destroys a correct card.
 
 Even inside your own worktree, operate defensively:
 
 1. **Only touch the files your task needs.** Don't "fix" unrelated diffs, reverts, or
    other agents' in-flight edits, and don't try to manage the whole working tree. If a
    file you didn't change shows as modified, leave it.
-2. **One feature branch + one PR per task.** Branch off `main`. **Never commit task
-   work straight to `main`.** Name the branch after the issue it fixes:
-   `claude/issue-<n>-<slug>`. The issue number in the name is what makes in-flight work
-   *discoverable* — `git ls-remote --heads origin | grep issue-<n>` is a one-command
-   pre-check, and the Duplicate Fix Guard workflow warns on fix PRs whose branch names
-   no declared issue (how one implementation once got duplicated).
+2. **One feature branch + one PR per task.** Branch off `main`. **Never commit task work
+   straight to `main`.** Name the branch after the issue it fixes: `claude/issue-<n>-<slug>`.
+   The issue number is what makes in-flight work *discoverable* — `git ls-remote --heads
+   origin | grep issue-<n>` is a one-command pre-check, and the Duplicate Fix Guard
+   workflow warns on fix PRs whose branch names no declared issue.
 3. **Never `git push --force` / `--force-with-lease`, and never push `main`.** A
-   force-push can clobber a parallel agent's work; `main` is shared — land everything
-   via PR.
+   force-push can clobber a parallel agent's work; `main` is shared — land all via PR.
 4. **Verify the current branch before every commit/push**
    (`git rev-parse --abbrev-ref HEAD`). HEAD may have been switched by another agent —
    if it isn't your feature branch, stop and re-checkout before pushing.
@@ -498,13 +510,12 @@ Even inside your own worktree, operate defensively:
    the older blanket auto-merge ban; the ban's true half survives as the precondition:
    **arm only what is already green and accepted.**
 
-   ⛔ **Two classes of PR never enter this path, however green:** (a) a diff touching
-   any **governed surface** (**Prime Directive #14**, which names them and holds the
-   current list) — that list is much longer than `docs/adr/**`, it grew three times in
-   two days, and **this file and `CLAUDE.md` are on it**, so re-read it rather than
-   recalling it; (b) the **Version Packages** PR, or any PR whose merge performs a
-   release (**Prime Directive #15**). Read the PR's file list (`get_files`) **and its
-   author** before you arm anything.
+   ⛔ **Two classes of PR never enter this path, however green:** (a) a diff touching any
+   **governed surface** (**Prime Directive #14**, which names them and holds the current
+   list) — much longer than `docs/adr/**` and it grows fast, and **this file and
+   `CLAUDE.md` are on it**, so re-read it rather than recalling it; (b) the **Version
+   Packages** PR, or any PR whose merge performs a release (**Prime Directive #15**).
+   Read the PR's file list (`get_files`) **and its author** before you arm anything.
 
    **Green means the gate-carrying jobs' `conclusion` is `success`** — not "no failure
    yet"; `in_progress` is not a pass. Arming a red PR does not queue it, it hides it:
@@ -515,39 +526,36 @@ Even inside your own worktree, operate defensively:
    `Dogfood Regression Gate`, `Build Core` and `Temporal Conformance (live PG + MySQL)`.
    A check outside those six is advisory and rides through, and an advisory red that
    lands rides `main`'s merge ref into every later PR until stanched. A required context
-   is matched by check-run name, so a rename detaches its gate silently — treat those
-   six names as contract. That is why "arm only on green" is a rule, not a formality.
+   is matched by check-run name, so a rename detaches its gate silently — treat those six
+   names as contract.
 
-   **Re-arm awareness** — none of these is a reason to avoid the queue; all are reasons
-   to confirm a PR is still *in* it: a red queue build **ejects** your entry and drops
-   auto-merge, often on a package your PR never touched (the queue runs the full suite;
-   the PR ran affected-only) — diagnose against `merge-queue-triage.yml`'s comment,
-   recognise a known-flaky signature, then re-arm once, never reflexively; **collateral
-   eviction is silent** (triage comments only on `failure`, so an entry cancelled
-   because something *ahead* failed gets nothing) — neither on `main` nor in the queue
-   means dropped, re-arm; **flipping back to draft drops auto-merge and queue
-   membership at once**, and neither returns by itself — ready *first*, arm *second*.
-   One non-fix: **a stale red does not clear by re-running** — `rerun_failed_jobs`
-   reuses the original run's commit and merge ref, so a fix that landed on `main` since
-   is invisible to it; only a new commit (`git merge origin/main`) helps. Whether a
-   direct `gh pr merge` is refused here is deliberately unmeasured — do not establish
-   it by attempting one.
+   **Re-arm awareness** — none of these is a reason to avoid the queue; all are reasons to
+   confirm a PR is still *in* it: a red queue build **ejects** your entry and drops
+   auto-merge, often on a package your PR never touched (the queue runs the full suite; the
+   PR ran affected-only) — diagnose against `merge-queue-triage.yml`'s comment, recognise a
+   known-flaky signature, then re-arm once, never reflexively; **collateral eviction is
+   silent** (triage comments only on `failure`, so an entry cancelled because something
+   *ahead* failed gets nothing) — neither on `main` nor in the queue means dropped, re-arm;
+   **flipping back to draft drops auto-merge and queue membership at once**, and neither
+   returns by itself — ready *first*, arm *second*. One non-fix: **a stale red does not
+   clear by re-running** — `rerun_failed_jobs` reuses the original run's commit and merge
+   ref, so a fix that landed on `main` since is invisible to it; only a new commit
+   (`git merge origin/main`) helps. Whether a direct `gh pr merge` is refused here is
+   deliberately unmeasured — do not establish it by attempting one.
 
    **Fallback, when the queue is unavailable:** merge serially, only after remote CI is
-   fully green, rebasing other open branches before merging the next. It loses under
-   load (`main` lands a PR every few minutes at peak; a manual merge–reverify loop
-   takes ~25) — which is why the queue is the default path, not an optimisation.
-8. **Testing needs a server? Start your own temporary one — never stop someone
-   else's.** A running dev server you didn't start probably belongs to another agent or
-   the user; killing it (or its port) breaks their in-flight work. Spin up your own
-   instance on a random high port (`pnpm dev -- --fresh -p <random>`) and **shut it
-   down yourself when the task is done** (`kill $(lsof -ti tcp:<port>)`). Don't leave
-   orphan servers behind.
-9. **After pulling `main` into a long-lived worktree, refresh its build state before
-   you trust a single test or gate.** A worktree that has been open across several
-   merges accumulates artefacts that are stale relative to the source, and every one of
-   them fails **as if your change broke something** — naming other people's exports,
-   other packages' files, or config you never touched:
+   fully green, rebasing other open branches before merging the next. It loses badly
+   under load, which is why the queue is the default path, not an optimisation.
+8. **Testing needs a server? Start your own temporary one — never stop someone else's.**
+   A running dev server you didn't start probably belongs to another agent or the user;
+   killing it (or its port) breaks their in-flight work. Spin up your own instance on a
+   random high port (`pnpm dev -- --fresh -p <random>`) and **shut it down yourself when
+   the task is done** (`kill $(lsof -ti tcp:<port>)`). Don't leave orphan servers behind.
+9. **After pulling `main` into a long-lived worktree, refresh its build state before you
+   trust a single test or gate.** A worktree open across several merges accumulates
+   artefacts stale relative to the source, and every one of them fails **as if your change
+   broke something** — naming other people's exports, other packages' files, or config you
+   never touched:
 
    | stale artefact | how it presents | why it lies |
    |---|---|---|
@@ -561,21 +569,18 @@ Even inside your own worktree, operate defensively:
    (add `rm -rf .cache` if you have run the console build). Note `OS_SKIP_DTS=1` keeps
    a build fast but leaves no `.d.ts`, so `gen:api-surface` cannot run at all under it —
    that one needs a real build. None of this is CI-visible (CI checks out fresh), which
-   is exactly why it is worth recognising in one step rather than re-diagnosing per
-   gate. Only the first row has a gate: `check:dev-prereqs` refuses `pnpm dev` on a
-   stale `packages/spec/dist` (content-hash, never mtime); for every other row the
-   prescription above is the whole remedy — the gate's own pass line says "existence,
-   not freshness" so its green cannot be read as vouching for them.
+   is why it is worth recognising in one step rather than re-diagnosing per gate. Only
+   the first row has a gate: `check:dev-prereqs` refuses `pnpm dev` on a stale
+   `packages/spec/dist` (content-hash, never mtime); for every other row the prescription
+   above is the whole remedy — the gate's own pass line says "existence, not freshness"
+   so its green cannot be read as vouching for them.
 10. **A clean merge is not a working merge — but scope the re-check to the overlap.**
    Git conflicts on overlapping lines; nothing warns you when two changes are
-   individually fine and jointly wrong (a test asserting a response body's exact shape
-   has landed while that shape was being changed elsewhere — merged clean, failed CI; a
-   domain file has been deleted while another agent's guard still declared it).
-   **Before opening a PR, pull `main`, refresh build state (§9), and run the full suite
-   once.** For the *subsequent* pre-merge merges of `main` — the ones you do only
-   because `main` moved again while CI ran — the full suite is usually re-proving what
-   three identical runs already proved, at ~15 minutes per lap while `main` lands a PR
-   every few. Scope it instead:
+   individually fine and jointly wrong. **Before opening a PR, pull `main`, refresh build
+   state (§9), and run the full suite once.** For the *subsequent* pre-merge merges of
+   `main` — the ones you do only because `main` moved again while CI ran — the full suite
+   is usually re-proving what three identical runs already proved, at ~15 minutes per lap
+   while `main` lands a PR every few. Scope it instead:
    - **Always:** rebuild what the merge touched, and if `packages/spec` moved on either
      side, `pnpm --filter @objectstack/spec build && pnpm --filter @objectstack/spec
      check:generated` — generated snapshots (`api-surface`, baselines) are the classic
@@ -586,39 +591,35 @@ Even inside your own worktree, operate defensively:
    - **Full `pnpm typecheck && pnpm test` again only when** the incoming commits touch
      the same packages or the same behavior your diff does, or a conflict occurred
      outside trivially-mechanical files.
-   - CI on the PR, and then the merge queue on its rebuilt generation (§7), validates
-     the merge commit itself — that second CI round is where joint breakage surfaces,
-     and the guards in `scripts/check-*.mjs` exist largely because this class of
-     breakage is invisible to `git merge`.
+   - CI on the PR, and then the merge queue on its rebuilt generation (§7), validates the
+     merge commit itself — that second CI round is where joint breakage surfaces, and the
+     guards in `scripts/check-*.mjs` exist largely because it is invisible to `git merge`.
 11. **Generated artifacts don't text-merge — a driver defers them and `pre-commit`
    collects the debt.** §10's "never trust git's textual merge of a generated file" is
-   mechanical: `.gitattributes` routes the generator-owned artifacts to
-   `merge=os-regen` (the list is the `.gitattributes` entries themselves; `pnpm
-   check:merge-driver` reconciles both directions), so a merge stops only on the
-   hand-written files that actually need you. The driver does **not** regenerate — git
-   runs merge drivers while the worktree still holds pre-merge sources, so a generator
-   run there would describe a half-merged tree; instead it records each path in
-   `$GIT_DIR/os-regen-pending` and `pre-commit` refuses the commit until those
-   artifacts check clean. Sequence after a merge unchanged from §9: rebuild, then
-   `check:generated --fix` — you just cannot forget it. Worth knowing:
-   - **The MERGE commit itself is the one exemption, and it is a deferral, not a
-     pass** (maintainer ruling 2026-08-12). `scripts/pm/os-regen-merge.sh` is the
-     in-repo authority for landing one of these branches, and its step 3 commits
-     the merge **before**
-     regenerating on purpose: the driver exits 0 while silently dropping one side, so
-     only a separate regeneration commit on a known-good base lets a reviewer read
-     "what main brought" apart from "what the change produces". `pre-commit` records
-     that merge as a deferral and then holds you to it — the immediately following
-     commit must discharge it (every commit until then is refused, and a second merge
-     cannot defer on top of an outstanding one), and `.githooks/pre-push` refuses a
-     push that still owes one. ⛔ So this step never needs `--no-verify`, which was
-     the old spelling and skips *every* pre-commit check rather than this one.
+   mechanical: `.gitattributes` routes the generator-owned artifacts to `merge=os-regen`
+   (the list is the `.gitattributes` entries themselves; `pnpm check:merge-driver`
+   reconciles both directions), so a merge stops only on the hand-written files that
+   actually need you. The driver does **not** regenerate — git runs merge drivers while
+   the worktree still holds pre-merge sources, so a generator run there would describe a
+   half-merged tree; instead it records each path in `$GIT_DIR/os-regen-pending` and
+   `pre-commit` refuses the commit until those artifacts check clean. Sequence after a
+   merge unchanged from §9: rebuild, then `check:generated --fix`. Worth knowing:
+   - **The MERGE commit itself is the one exemption, and it is a deferral, not a pass**
+     (maintainer ruling 2026-08-12). `scripts/pm/os-regen-merge.sh` is the in-repo
+     authority for landing one of these branches, and its step 3 commits the merge
+     **before** regenerating on purpose: the driver exits 0 while silently dropping one
+     side, so only a separate regeneration commit on a known-good base lets a reviewer
+     read "what main brought" apart from "what the change produces". `pre-commit` records
+     that merge as a deferral and then holds you to it — the immediately following commit
+     must discharge it (every commit until then is refused, and a second merge cannot
+     defer on top of an outstanding one), and `.githooks/pre-push` refuses a push that
+     still owes one. ⛔ So this step never needs `--no-verify`, the old spelling, which
+     skips *every* pre-commit check rather than this one.
    - **The driver is a LOCAL facility** — the merge queue rebuilds server-side where no
-     custom driver runs, so the three hottest artifacts are **sharded** per
-     category/entry (`authorable-surface/`, `json-schema.manifest/`, `api-surface/`) to
-     keep parallel spec PRs textually disjoint; every gate reads the whole directory as
-     one set, so ratchet semantics are unchanged
-     (`packages/spec/scripts/lib/sharded-artifacts.ts`).
+     custom driver runs, so the three hottest artifacts are **sharded** per category/entry
+     (`authorable-surface/`, `json-schema.manifest/`, `api-surface/`) to keep parallel
+     spec PRs textually disjoint; every gate reads the whole directory as one set, so
+     ratchet semantics are unchanged (`packages/spec/scripts/lib/sharded-artifacts.ts`).
    - **Registration is per clone** (`pnpm install` → `prepare` →
      `scripts/setup-git-hooks.mjs`); an unregistered clone falls back to git's default
      text merge — older behaviour, not breakage.

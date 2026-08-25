@@ -27,6 +27,8 @@ import { ObjectStackProtocolImplementation, resetEnvWritableMetadataTypes } from
 import { ObjectQL } from './engine.js';
 import { SchemaRegistry } from './registry.js';
 import { assertEngineUpdateDispatch } from './engine-update-dispatch.js';
+import { assertEngineFindOnePredicate } from './engine-findone-predicate.js';
+import type { EngineFindOneQueryInput } from './engine-findone-predicate.js';
 
 const PKG = 'com.objectstack.test-pkg';
 
@@ -311,7 +313,15 @@ describe('registry shadow — scoped-kernel lock enforcement is shadow-immune', 
         const mockEngine: any = {
             registry,
             find: async () => [],
-            findOne: async () => null,
+            findOne: async (table: string, query?: EngineFindOneQueryInput) => {
+                // [#11957] Pinned to ObjectQL.findOne's OWN #4419 predicate: `findOne`
+                // applies limit: 1, so a query naming no record returns an ARBITRARY row
+                // and the engine REFUSES it. A double that answers it anyway is how
+                // #11767 shipped a bootstrap bypass that was inert on every real
+                // deployment while a 641-line unit matrix stayed green.
+                assertEngineFindOnePredicate(table, query);
+                return null;
+            },
             insert: async () => ({ id: 'x' }),
             update: async (_o: string, data: any, opts?: any) => {
                 // [#5480] Pinned to ObjectQL.update's OWN dispatch predicate — the twin of

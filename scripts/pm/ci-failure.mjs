@@ -291,13 +291,26 @@ import {
   describeProbe,
   needsRepoProbe,
   parseRemaining,
+  resolveSweepRepo,
 } from './check-half-states.mjs';
 import { PROXY_FLAG, PROXY_REARM_GUARD, proxyRearmPlan } from './check-governed-merges.mjs';
 import { isEntrypoint } from '../invoked-as.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, '..', '..');
-const OWNER_REPO = process.env.PM_SWEEP_REPO ?? 'objectstack-ai/objectstack';
+// Which board this file reads, resolved by the sweeper's own resolver rather
+// than by a hardcoded default of its own: `PM_SWEEP_REPO` -> `GITHUB_REPOSITORY`
+// (what Actions sets to the repo the workflow is INSTALLED IN) -> the literal
+// default, a seat's terminal. The default the line used to carry is the one
+// shape that reads as correct in every review — on a runner the override is
+// normally unset, so a verbatim copy of this file in a sibling repo would read
+// OBJECTSTACK's Actions API and report about THIS repo's CI while its caller
+// believed it was reading its own. A wrong-repo answer is indistinguishable from
+// a right one by its shape; only the run ids give it away, and nobody checks run
+// ids against a repo they did not doubt. Same resolution order, same reasoning
+// and same refusal below as `check-half-states.mjs` — see `resolveSweepRepo`.
+const SWEEP_REPO = resolveSweepRepo(process.env);
+const OWNER_REPO = SWEEP_REPO.repo;
 const API = 'https://api.github.com';
 const TOKEN = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN ?? '';
 
@@ -2427,6 +2440,21 @@ if (!invokedDirectly) {
 } else if (process.argv.includes('--help') || process.argv.includes('-h')) {
   console.log(usageText(readFileSync(fileURLToPath(import.meta.url), 'utf8')));
 } else {
+  // A malformed sweep target is bad usage, refused BEFORE any request — the
+  // transport probe's second stage is already a repo-scoped read of this very
+  // string. Silently falling back to the default would read a board nobody
+  // asked for and render a confident report about it. The two offline branches
+  // above are exempt by construction: they make no request and must stay
+  // runnable in any container, whatever the environment carries.
+  if (!SWEEP_REPO.valid) {
+    console.error(
+      `ci-failure: ${SWEEP_REPO.source}=${JSON.stringify(SWEEP_REPO.repo)} is not an ` +
+        '`owner/name` repository. Refusing to fall back to a different board — a report about ' +
+        'the wrong repo reads exactly like a report about this one.',
+    );
+    process.exit(EXIT_UNDETERMINED);
+  }
+
   // Transport before credentials: behind the session proxy an unproxied fetch
   // answers 401 on every endpoint, and the probe below would classify that as a
   // dead credential. The flag only takes effect at process start.

@@ -3,9 +3,10 @@
 /**
  * @module shared/retry-policy
  *
- * The **single declaration** of the exponential-backoff retry policy (#4661,
- * the #4535 C8 dual-source cluster; completed for the anonymous inline blocks
- * by #4964 / #4962).
+ * The **single declaration** of the exponential-backoff retry policy.
+ *
+ * Converged in 17.0.0 in two passes: first the two same-named exports a
+ * dual-source scan could see, then the anonymous inline blocks it could not.
  *
  * Until 17 this shape existed twice — `automation/control-flow.zod.ts` (the
  * `try_catch` node's `retry` region) and `system/job.zod.ts` (`job.retryPolicy`)

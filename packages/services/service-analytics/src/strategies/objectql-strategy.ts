@@ -29,14 +29,29 @@ import {
 } from './cross-object-rebucket.js';
 
 /**
- * [#10861] Where a member in the cross-object envelope's inventory came from.
+ * [#10861 / #11461] Where a member in the cross-object envelope's inventory
+ * came from.
  *
- * Two producers put predicates in front of `engine.aggregate` on this path: the
- * caller's own `where`, and — since PR #10758 — the compiled dataset's
- * definition-level `filter`. Both are judged by the same envelope check; only
- * the DIAGNOSTIC differs, because only one of them names a key the caller sent.
+ * THREE producers put predicates in front of `engine.aggregate` on this path:
+ * the caller's own `where`; the compiled dataset's definition-level `filter`
+ * (PR #10758); and — since #10413 phase 2 — a compiled measure's OWN `filter`,
+ * lowered onto that measure's `aggregations[].filter` entry (the #10576 contract
+ * field). All three are judged by the same envelope check; only the DIAGNOSTIC
+ * differs, because they differ in what the reader can go and fix: a request key,
+ * a dataset document, or ONE named measure inside that document.
+ *
+ * A record rather than a bare string tag, because the third producer's
+ * diagnostic needs a locator the KEY cannot carry. The view is keyed by RESOLVED
+ * FIELD NAME (`account.region`) and the actionable thing for a measure filter is
+ * the MEASURE whose filter named it (`west_count`) — two measures in one dataset
+ * can name the same field and mean two different edits. Carrying provenance was
+ * always this slot's job (#10861); this widens what provenance is allowed to
+ * say. It still never reaches a driver.
  */
-type FilterMemberOrigin = 'where' | 'dataset-filter';
+type FilterMemberOrigin =
+  | { kind: 'where' }
+  | { kind: 'dataset-filter' }
+  | { kind: 'measure-filter'; measure: string };
 
 /** Scalar analytics operators → their SQL spelling (display SQL only). */
 const SCALAR_SQL_OPS: Record<string, string> = {
@@ -612,7 +627,7 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
    * the members inside were unreadable from the outside and the envelope check
    * could not reject what it could not see.
    *
-   * ## Two producers, one inventory (#10861)
+   * ## Three producers, one inventory (#10861, #11461)
    *
    * The caller's `where` is not the only thing that reaches `engine.aggregate`
    * as a predicate. Since PR #10758 the compiled dataset's own definition-level
@@ -627,6 +642,36 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
    * which driver will serve the dataset and would refuse a dataset that is
    * perfectly legal on a native-SQL deployment.
    *
+   * [#11461] #10413 phase 2 then added a THIRD producer with the same reach and
+   * none of the coverage: a compiled measure's own `filter`, lowered onto that
+   * measure's `aggregations[].filter` entry (#10576). This view enumerated two
+   * origins, so the third was invisible to the envelope check and the arm of
+   * `planCrossObject` that inspects `query.measures` reads only each measure's
+   * resolved FIELD, never its filter. Measured on the unfixed tree, one fixture,
+   * both doors:
+   *
+   * ```
+   * BEFORE  execute()     ACCEPTED -> aggregations: [{field:"*",method:"count",
+   *                                   alias:"west_count",
+   *                                   filter:{"account.region":"West"}}]
+   *                                -> rows [{stage:"won",total_count:3,west_count:0}]
+   *                                   (the truthful west_count is 2; total_count
+   *                                    is right, so the wrong number arrived in
+   *                                    the same response shape as the right one)
+   *         generateSql() ACCEPTED -> COUNT(CASE WHEN account.region = $1 THEN 1 END)
+   *                                   over a FROM with no join in it at all
+   * AFTER   both doors    REFUSED   INVALID_FIELD / 400, engine never reached
+   * ```
+   *
+   * The same maintainer ruling covers it — same hazard, same physical verdict,
+   * one more producer — so it folds in HERE for the #10861 reason and not into
+   * `dataset-compiler.ts`, which still cannot see which driver will serve the
+   * dataset. Only the REQUESTED measures are folded: both doors' aggregation
+   * loops read `measureFilters[m]` for `m of query.measures` and nothing else,
+   * so a filter declared on a measure this query never asks for reaches no
+   * engine, and refusing on it would reject a query for a member that was never
+   * going to be evaluated.
+   *
    * Structure is discarded on purpose — a member is cross-object or it is not,
    * and which branch of a disjunction it sits in cannot make
    * `engine.aggregate` able to join it. PROVENANCE is not discarded, because it
@@ -636,9 +681,12 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
    * `planCrossObject`. The value slot carries that and nothing else; it never
    * reaches a driver.
    *
-   * Dataset leaves are inserted FIRST so a member named by BOTH producers keeps
-   * the caller's provenance (last write wins on a duplicate key): if it is in
-   * the request too, the request is the actionable place to fix it.
+   * Insertion order is measure-filter, then dataset-filter, then `where`, and
+   * last write wins on a duplicate key. Two things follow, in that order of
+   * importance. A member named by the request too keeps the CALLER's provenance,
+   * because if it is in the request that is the actionable place to fix it. And
+   * every shape that was refused before #11461 keeps the exact message it had:
+   * the new origin can only ever win a key no older producer names.
    *
    * Time-dimension WINDOWS are deliberately absent (they live in
    * `dateRangeBounds`, not in `where`). They need no arm here: a cross-object
@@ -654,16 +702,31 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
   ): Record<string, FilterMemberOrigin> {
     // Read from the SAME channel both doors lower the scope from, so the view
     // and the predicate cannot disagree about what the engine will receive.
-    const datasetFilter = (ctx as DatasetScopedStrategyContext).getDatasetScope?.(query.cube!)?.filter;
+    // [#11461] The whole scope now, not just `.filter` — the per-measure filters
+    // travel the identical channel to the identical engine call.
+    const datasetScope = (ctx as DatasetScopedStrategyContext).getDatasetScope?.(query.cube!);
     const leaves = (node: ReturnType<typeof normalizeAnalyticsFilterTree>, origin: FilterMemberOrigin) =>
       collectFilterLeaves(node).map(
         (f) => [this.resolveFieldName(cube, f.member, 'any'), origin] as const,
       );
+    // [#11461] Keyed by measure so the refusal can name the measure to go and
+    // edit; `query.measures` is the iteration order both aggregation loops use,
+    // so the view covers exactly the filters that will be lowered.
+    const measureLeaves = (query.measures ?? []).flatMap((m) => {
+      const measureFilter = datasetScope?.measureFilters?.[m];
+      return measureFilter
+        ? leaves(
+            normalizeAnalyticsFilterTree({ where: measureFilter }),
+            { kind: 'measure-filter', measure: m },
+          )
+        : [];
+    });
     return Object.fromEntries([
-      ...(datasetFilter
-        ? leaves(normalizeAnalyticsFilterTree({ where: datasetFilter }), 'dataset-filter')
+      ...measureLeaves,
+      ...(datasetScope?.filter
+        ? leaves(normalizeAnalyticsFilterTree({ where: datasetScope.filter }), { kind: 'dataset-filter' })
         : []),
-      ...leaves(normalizeAnalyticsFilterTree(query), 'where'),
+      ...leaves(normalizeAnalyticsFilterTree(query), { kind: 'where' }),
     ]);
   }
 
@@ -679,18 +742,20 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
    * THROWS for anything outside the envelope — a cross-object MEASURE or FILTER
    * (needs a real join to evaluate), a cross-object leaf in the DATASET's own
    * definition-level `filter` (#10861 — same join it does not have, arriving
-   * from the producer PR #10758 added), a MULTI-HOP dimension (`a.b.c`), or a
-   * non-recombinable measure (`avg`/`count_distinct`, whose sub-bucket values
-   * cannot be merged). A loud error beats the silent mis-bucket #3654 kills.
+   * from the producer PR #10758 added), a cross-object leaf in ONE MEASURE's own
+   * `filter` (#11461 — the same join again, arriving from the producer #10413
+   * phase 2 added), a MULTI-HOP dimension (`a.b.c`), or a non-recombinable
+   * measure (`avg`/`count_distinct`, whose sub-bucket values cannot be merged).
+   * A loud error beats the silent mis-bucket #3654 kills.
    * `generateSql()` calls this too, so the preview accepts/rejects the same set
    * — and since #10759 both callers derive `filter` from the one
    * {@link filterMemberView}, so that sentence is enforced by construction
    * instead of restated at two call sites.
    *
-   * [#5716] All five refusals below are `invalidMemberError` — `INVALID_FIELD` /
+   * [#5716] All six refusals below are `invalidMemberError` — `INVALID_FIELD` /
    * 400, naming the member — and the four that predate #10861 keep their
    * MESSAGES unchanged (they are good diagnostics, and #5923's tests read
-   * them). Each is decided by two facts and nothing else: a member that will
+   * them); so does #10861's own, which #11461 left untouched beside it. Each is decided by two facts and nothing else: a member that will
    * reach the engine's predicate, and whether that member resolves across a
    * join. Neither is an internal invariant — a cube where the member exists and
    * a driver that could serve it are both perfectly ordinary, which is exactly
@@ -699,14 +764,15 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
    * because the fix is always to change or drop ONE named member, and because
    * four of them fire on `/analytics/query` where no dataset exists.
    *
-   * [#10861] The fifth is the exception that proves the rule and is written to
-   * it: it can only fire where a dataset DOES exist, and it is the one refusal
-   * here whose member no request key named — so it carries `cube` and no
-   * `param`, and says in its own words which document to go and edit. It stays
+   * [#10861, #11461] The fifth and sixth are the exceptions that prove the rule
+   * and are written to it: they can only fire where a dataset DOES exist, and
+   * they are the two refusals here whose member no request key named — so each
+   * carries `cube` and no `param`, and says in its own words which document to
+   * go and edit, the sixth naming the MEASURE inside it as well. Both stay
    * `INVALID_FIELD` rather than becoming `DATASET_INVALID` because the verdict
-   * is the same physical one as its neighbour — this engine cannot join this
+   * is the same physical one as their neighbours — this engine cannot join this
    * member — and splitting the code by PROVENANCE would make a caller branch on
-   * two wire shapes for one capability limit.
+   * three wire shapes for one capability limit.
    *
    * Detection is on RESOLVED field names, so a dotted dimension the cube
    * flattens to a real column is treated as base, not cross-object.
@@ -743,7 +809,7 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
         where: 'measure', member: m, field: this.resolveMeasureAggregation(cube, m).field,
       })),
       ...Object.entries(filter)
-        .filter(([, origin]) => origin === 'where')
+        .filter(([, origin]) => origin.kind === 'where')
         .map(([f]) => ({ where: 'filter', member: f, field: f })),
     ].filter((r) => this.isCrossObjectField(cube, r.field, baseObject));
     if (nonDim.length > 0) {
@@ -782,7 +848,7 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     // locator that IS actionable: the dataset whose definition holds the leaf.
     const scopeCross = Object.entries(filter)
       .filter(([field, origin]) =>
-        origin === 'dataset-filter' && this.isCrossObjectField(cube, field, baseObject))
+        origin.kind === 'dataset-filter' && this.isCrossObjectField(cube, field, baseObject))
       .map(([field]) => field);
     if (scopeCross.length > 0) {
       throw invalidMemberError(
@@ -794,6 +860,65 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
         `dataset's own \`filter\`, or serve this dataset on a native-SQL driver, ` +
         `where the same definition is valid.`,
         { member: scopeCross[0], cube: cube.name },
+      );
+    }
+
+    // [#11461] The THIRD producer, and the same physical verdict a third time:
+    // a leaf of one compiled MEASURE's own `filter`, lowered onto that measure's
+    // `aggregations[].filter` entry (#10413 phase 2 / #10576). Checked last, so
+    // every shape refused before this card is refused with the message it
+    // already had.
+    //
+    // What it closes, measured on the unfixed tree over one fixture, both doors
+    // in one run — the card was code-read, so this was reproduced first:
+    //
+    // ```
+    // BEFORE  execute()     ACCEPTED, engine.aggregate reached once with
+    //                       {field:"*",method:"count",alias:"west_count",
+    //                        filter:{"account.region":"West"}} and answered
+    //                       west_count 0 where the truth is 2 — beside a correct
+    //                       total_count 3, so the wrong number came back wearing
+    //                       the shape of the right one
+    //         generateSql() ACCEPTED, rendering
+    //                       COUNT(CASE WHEN account.region = $1 THEN 1 END)
+    //                       over a FROM carrying no join whatsoever
+    // ```
+    //
+    // Same family and same envelope as its two neighbours — `INVALID_FIELD` /
+    // 400 — because it is the same physical fact about the same member: this
+    // engine has no join. It is ALSO the arm that squares this door with a
+    // PUBLISHED promise: `content/docs/api/data-api.mdx` documents that a bad
+    // field in an `aggregations` entry answers `400 INVALID_FIELD`. The same
+    // `aggregations` object kept that promise in the `field` position and broke
+    // it in the `filter` position, answering `200` with a silent 0 — which is
+    // the exact failure mode that page's own preamble says it exists to rule
+    // out.
+    //
+    // `param` is ABSENT for the #10861 reason, and the reason bites harder here
+    // rather than less. `measures` IS a request key and the caller did name the
+    // measure — but `member` is the cross-object FIELD, and `member` +
+    // `param: 'measures'` would send a reader to look for `account.region`
+    // inside `measures`, where it is not and cannot be. What is wrong is the
+    // dataset's DECLARATION of that measure, so the message names the measure
+    // and `cube` carries the document to open. Widening the envelope with a
+    // `measure` field of its own would be a new wire shape for one diagnostic;
+    // the message is where a locator with no request key belongs.
+    const measureCross = Object.entries(filter).flatMap(([field, origin]) =>
+      origin.kind === 'measure-filter' && this.isCrossObjectField(cube, field, baseObject)
+        ? [{ field, measure: origin.measure }]
+        : [],
+    );
+    if (measureCross.length > 0) {
+      const { field, measure } = measureCross[0];
+      throw invalidMemberError(
+        `[Analytics] ObjectQLStrategy cannot evaluate the cross-object filter ` +
+        `("${field}") that dataset "${cube.name}" declares on its measure ` +
+        `"${measure}" — the engine cannot join in an aggregate, so this measure ` +
+        `would be counted over a predicate that matches nothing and would answer ` +
+        `0 rather than the scoped number. Remove the cross-object leaf from that ` +
+        `measure's own \`filter\`, or serve this dataset on a native-SQL driver, ` +
+        `where the same definition is valid.`,
+        { member: field, cube: cube.name },
       );
     }
 

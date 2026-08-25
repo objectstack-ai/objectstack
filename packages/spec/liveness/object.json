@@ -45,6 +45,10 @@
       "proof": "packages/qa/dogfood/test/semantic-roles.dogfood.test.ts#semantic-roles-served",
       "note": "ADR-0085 semantic role: objectui plugin-detail detectStatusField drives the record:path stepper; string names the lifecycle field, false suppresses heuristic stage detection."
     },
+    "editMode": {
+      "status": "live",
+      "note": "objectui record-edit routing: app-shell recordFormNavigation branches on editMode !== 'page' and AppContent handleEdit routes modal form vs dedicated /record/:id/edit route. Declared by the #11408 ruling (#10144 declare-or-rule-out family)."
+    },
     "fieldGroups": {
       "status": "live",
       "proof": "packages/qa/dogfood/test/semantic-roles.dogfood.test.ts#semantic-roles-served",

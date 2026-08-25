@@ -22,7 +22,20 @@ export type {
     RunRecord,
     StepLogEntry,
     UnknownNodeTypeAuditEntry,
+    // [#11997] The shadowing receipt: which body is armed for a bare flow name,
+    // and which same-named definitions it displaced. Exported so a host building
+    // an admin surface reads the platform's own answer rather than re-deriving
+    // one it cannot derive — the shadowed definition is not in the flow map.
+    FlowContender,
+    FlowShadowingRecord,
 } from './engine.js';
+
+// [#11997] ADR-0005 overlay precedence for same-named flow definitions. The boot
+// pull applies this; exported so a host that assembles its own flow list (or a
+// test) collapses contenders the same deterministic way instead of inventing a
+// second precedence.
+export { resolveFlowPrecedence, describeFlowContender } from './flow-precedence.js';
+export type { FlowPrecedenceWinner } from './flow-precedence.js';
 
 // Per-run summary (#4354): the fold that turns a run's step log into
 // "selected N, acted M, skipped K by <gate>". Exported so a host building its

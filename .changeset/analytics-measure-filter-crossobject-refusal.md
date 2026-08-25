@@ -1,0 +1,9 @@
+---
+"@objectstack/service-analytics": minor
+---
+
+`ObjectQLStrategy` now refuses a cross-object leaf in a compiled measure's own `filter`, on both of its doors, instead of sending it to an engine that cannot join (#11461). This is the third producer of a predicate on that path — after the caller's `where` and the dataset's definition-level `filter` (#10861) — and the one `filterMemberView` did not fold in: #10413 phase 2 lowers `measureFilters[m]` onto that measure's `aggregations[].filter` entry (#10576), and the envelope check enumerated only two origins while its `query.measures` arm read each measure's resolved *field* and never its filter.
+
+Measured on one fixture before the change, both doors in one run: a measure declaring `filter: { 'account.region': 'West' }` on a cube with `include: ['account']` was ACCEPTED, `engine.aggregate` received `{field:"*",method:"count",alias:"west_count",filter:{"account.region":"West"}}`, and an honest evaluator answered `west_count: 0` where the truthful answer was `2` — beside a correct `total_count: 3`, so the wrong number came back wearing the same response shape as the right one. The `/analytics/sql` echo rendered `COUNT(CASE WHEN account.region = $1 THEN 1 END)` over a `FROM` carrying no join at all. Both doors now answer `INVALID_FIELD`/400 before the engine is reached, naming the offending field, the dataset, and — the locator neither sibling refusal has — the measure whose declaration holds the leaf.
+
+Ordinary per-measure filters are unaffected and still reach the engine carrying their own `aggregations[].filter`, and a cross-object filter declared on a measure a query does not ask for changes nothing: only the measures in `query.measures` are judged, which is exactly the set both doors lower. The same definition remains valid on a native-SQL driver, which the refusal says.

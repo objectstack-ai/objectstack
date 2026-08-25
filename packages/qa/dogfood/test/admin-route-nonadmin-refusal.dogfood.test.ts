@@ -75,7 +75,25 @@
 //     bridges while SSO is off). That is what proves the member's 403 is a
 //     gate verdict and not a payload the server rejects for everyone.
 //
-//   `better-auth-gate` (9 routes) — refusal side only, DELIBERATELY. The
+//   `shaded-vendor-gate` (1 route: `remove-user`) — the two halves belong to
+//     DIFFERENT layers, which is why it is neither of its neighbours. #11477
+//     gave the route the raw-mount shading `ban-user` already had, so an
+//     ObjectStack gate answers the refusal (member 403 PERMISSION_DENIED, anon
+//     401 UNAUTHENTICATED) — but the mount DELEGATES rather than
+//     re-implementing, so admission is still better-auth's `adminMiddleware` on
+//     the legacy `role` scalar and a platform admin is still refused
+//     `403 YOU_ARE_NOT_ALLOWED_TO_DELETE_USERS` (#9969, closed `not_planned`:
+//     consumer-less vendor routes are not re-implemented).
+//
+//     The both-sides contrast is therefore not a 2xx but a DIFFERENCE: the
+//     member and the admin hear two different refusals, which is what proves
+//     the member's 403 is an authorization verdict and not a blanket refusal.
+//     The bucket also carries the #11477 negative — a member must never again
+//     see the break-glass guard's `409 LAST_LOCAL_CREDENTIAL`, which before the
+//     shading was answered ahead of every authorization layer and VARIED WITH
+//     THE TARGET, disclosing per-record state to a caller entitled to none.
+//
+//   `better-auth-gate` (8 routes) — refusal side only, DELIBERATELY. The
 //     ANONYMOUS half is now the full ADR-0112 pin, identical to the bucket
 //     above — `401` and `code: 'UNAUTHENTICATED'`. It was `[401, 403].includes(
 //     status)` until #10349, because the vendor's `adminMiddleware` answered an
@@ -113,8 +131,9 @@
 //     a session-scoped synthesis is discarded before the check runs. It moved
 //     the two routes `sys_user` actions call — `ban-user` / `unban-user` —
 //     onto ObjectStack mounts, where the allowed side IS pinned above. The
-//     nine below still answer the platform admin with the vendor's own
-//     `YOU_ARE_NOT_ALLOWED_*`; that is a known, filed gap, not drift.
+//     eight below — and `remove-user`, one bucket up — still answer the
+//     platform admin with the vendor's own `YOU_ARE_NOT_ALLOWED_*`; that is a
+//     known, filed state (#9969, closed `not_planned`), not drift.
 //
 //   `self-scoped` (2 routes) — `has-permission` and `stop-impersonating` answer
 //     a non-admin without a refusal BY DESIGN, and the invariant is asserted in
@@ -164,6 +183,7 @@ const AUTH_BASE = '/api/v1/auth';
 /** How a non-admin must be answered by one derived route. */
 type Bucket =
   | 'objectstack-gate'
+  | 'shaded-vendor-gate'
   | 'better-auth-gate'
   | 'self-scoped'
   | 'not-mounted';
@@ -285,6 +305,36 @@ function expectationsFor(targetUserId: string): Record<string, RouteExpectation>
       body: { userId: targetUserId },
     },
 
+    // ── #11477 — shaded for ORDERING, still admitted by the vendor ─────────
+    //
+    // The only member of its bucket, and the bucket exists because this route
+    // genuinely has a third shape rather than because the other two did not
+    // fit. Its raw mount runs `gateAdmin` and then RE-DISPATCHES into
+    // better-auth instead of re-implementing removal, so the two halves are
+    // owned by different layers:
+    //
+    //   refusal   → ObjectStack's gate (403 PERMISSION_DENIED), because the
+    //               mount answers first. That is #11477's whole point: the
+    //               break-glass `hooks.before` guard used to answer an
+    //               authenticated non-admin BEFORE any authorization ran, and
+    //               its 409 differed per target — a per-record disclosure.
+    //   admission → still better-auth's `adminMiddleware` on the legacy `role`
+    //               scalar, so a platform admin is still refused
+    //               403 YOU_ARE_NOT_ALLOWED_TO_DELETE_USERS. #9969 closed
+    //               `not_planned`: consumer-less vendor routes are not
+    //               re-implemented, and that refusal is intended.
+    //
+    // ⛔ Do not "simplify" this into either neighbouring bucket. In
+    // `objectstack-gate` the admin-is-not-refused assertion would be red (the
+    // vendor still refuses); in `better-auth-gate` the member's code assertion
+    // would be red (`PERMISSION_DENIED` is not `YOU_ARE_NOT_ALLOWED_*`).
+    // Forcing either one would mean weakening a live security assertion.
+    'POST /api/v1/auth/admin/remove-user': {
+      bucket: 'shaded-vendor-gate',
+      body: { userId: targetUserId },
+      note: '#11477 — ObjectStack gate answers the refusal, better-auth still owns admission (#9969)',
+    },
+
     // ── better-auth admin plugin (legacy `role` scalar gate) ────────────────
     //
     // Still refusal-side only, and still for the reason in the header: the
@@ -293,7 +343,6 @@ function expectationsFor(targetUserId: string): Record<string, RouteExpectation>
     // re-implementable); the rest stay on the vendor's gate pending the
     // maintainer's call on the remaining surface.
     'POST /api/v1/auth/admin/set-role': { bucket: 'better-auth-gate', body: { userId: targetUserId, role: 'admin' } },
-    'POST /api/v1/auth/admin/remove-user': { bucket: 'better-auth-gate', body: { userId: targetUserId } },
     'POST /api/v1/auth/admin/impersonate-user': { bucket: 'better-auth-gate', body: { userId: targetUserId } },
     'POST /api/v1/auth/admin/revoke-user-sessions': { bucket: 'better-auth-gate', body: { userId: targetUserId } },
     'POST /api/v1/auth/admin/revoke-user-session': { bucket: 'better-auth-gate', body: { sessionToken: 'probe-session-token' } },
@@ -553,6 +602,50 @@ describe('#9482 C9: every derived /admin/ route refuses a non-admin', () => {
     }
   }, 600_000);
 
+  it('the shaded vendor route refuses a non-admin from the ObjectStack gate, before the break-glass guard', async () => {
+    // #11477. The both-sides contrast here is NOT a 2xx — it is that the two
+    // callers hear DIFFERENT refusals. A member is turned away by ObjectStack's
+    // gate (`PERMISSION_DENIED`) and a platform admin gets past it only to be
+    // turned away by the vendor's (`YOU_ARE_NOT_ALLOWED_*`, #9969). Two
+    // distinct codes on the same route and payload is what proves the member's
+    // 403 is an authorization verdict rather than a blanket refusal — the same
+    // job the 2xx does in the `objectstack-gate` bucket above.
+    const routes = derived.all.filter((r) => expectations[r]?.bucket === 'shaded-vendor-gate');
+    expect(routes.length, 'no shaded-vendor-gate routes were derived').toBeGreaterThan(0);
+
+    for (const route of routes) {
+      const anon = await fire(route, undefined);
+      expect(anon.status, `${route} anonymous: ${anon.body}`).toBe(401);
+      expect(anon.code, `${route} anonymous code: ${anon.body}`).toBe('UNAUTHENTICATED');
+
+      const member = await fire(route, memberToken);
+      expect(member.status, `${route} member: ${member.body}`).toBe(403);
+      expect(member.code, `${route} member code: ${member.body}`).toBe('PERMISSION_DENIED');
+
+      // ⛔ The load-bearing negative. Before #11477 the break-glass
+      // `hooks.before` guard answered an authenticated non-admin ahead of every
+      // authorization layer, and its answer varied with the TARGET — a
+      // per-record disclosure to a caller entitled to nothing. A member must
+      // never see the guard's verdict on this route again.
+      expect(member.code, `${route} member must not reach the break-glass guard`).not.toBe(
+        'LAST_LOCAL_CREDENTIAL',
+      );
+      expect(member.status, `${route} member must not reach the break-glass guard`).not.toBe(409);
+
+      const admin = await fire(route, adminToken);
+      expect(
+        admin.code,
+        `${route} platform admin: the vendor gate still owns admission (#9969), ` +
+          `so this must be the vendor's own code, got ${admin.status} ${admin.body}`,
+      ).toMatch(/^YOU_ARE_NOT_ALLOWED/);
+      expect(
+        admin.code,
+        `${route} platform admin was refused by the OBJECTSTACK gate — the member's ` +
+          `403 above therefore proves nothing about authorization`,
+      ).not.toBe('PERMISSION_DENIED');
+    }
+  }, 600_000);
+
   it('the better-auth admin routes refuse a non-admin with a named vendor code', async () => {
     const routes = derived.all.filter((r) => expectations[r]?.bucket === 'better-auth-gate');
     expect(routes.length, 'no better-auth-gate routes were derived').toBeGreaterThan(0);
@@ -595,6 +688,14 @@ describe('#9482 C9: every derived /admin/ route refuses a non-admin', () => {
       // `403 YOU_ARE_NOT_ALLOWED_*`. The privileged read now joins the ambient
       // transaction, so this route answers the authorization question like
       // every other member of the bucket and needs no exception.
+      //
+      // ⚠️ #11477 moved `remove-user` OUT of this bucket entirely — its raw
+      // mount now answers a member from ObjectStack's gate
+      // (`403 PERMISSION_DENIED`) before better-auth is reached at all, so the
+      // vendor-vocabulary rule below no longer describes it. It lives in
+      // `shaded-vendor-gate`, which asserts that code exactly. This is the
+      // reverse of re-widening: the vocabulary here stayed narrow and the route
+      // that stopped matching it was reclassified.
       //
       // ⛔ Do not re-widen the vocabulary — for this route or for all of them.
       // A route that answers `UNAUTHENTICATED` to a signed-in caller is
