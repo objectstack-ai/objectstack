@@ -7714,6 +7714,55 @@ function selfTest() {
     title,
   });
 
+  // -- Row-text wrappers: every message assertion goes through one -----------
+  //
+  // Each `hNrow(...)` is `String(hN…(...) ?? '')`. The predicates here are
+  // three-valued BY DESIGN — `null` when the card is clean, a string when the
+  // row fires — so a bare `predicate(...).includes(needle)` throws
+  // `TypeError: Cannot read properties of null (reading 'includes')` the
+  // moment a change makes that predicate go clean. That throw happens while
+  // evaluating `t()`'s ARGUMENTS, before `t()` runs, so no harness-level
+  // catch can convert it into a case: the suite ABORTS at the first such
+  // line, every later case never runs, and the output names a TypeError
+  // instead of a row. Which line you land on depends on ordering, so the
+  // information you lose is arbitrary.
+  //
+  // The cost is paid exactly during ABLATION — mutate a predicate, read which
+  // cases go red — which is the discipline this file's own headers lean on to
+  // prove a new row is failable. Through a wrapper, a nulled row instead
+  // reports `(got false, want true)` under its own case name and the suite
+  // runs to completion. ⚠️ The predicates themselves are UNCHANGED and are
+  // still asserted three-valued directly: `typeof pred(...) === 'string'` and
+  // `pred(...) === null` sites deliberately do NOT go through a wrapper —
+  // wrapping those would make every one of them trivially true.
+  const h4row = (...args) => String(h4BlockedNoBlockedBy(...args) ?? '');
+  const h7row = (...args) => String(h7PartOfWithClosingKeyword(...args) ?? '');
+  const h8row = (...args) => String(h8MergedPrStillDispatched(...args) ?? '');
+  const h9row = (...args) => String(h9OnHoldNoRestartWhen(...args) ?? '');
+  const h10row = (...args) => String(h10StaleUnclaimedP0(...args) ?? '');
+  const h11row = (...args) => String(h11ImportantParked(...args) ?? '');
+  const h12row = (...args) => String(h12OrphanLanding(...args) ?? '');
+  const h13row = (...args) => String(h13DomainWithoutPmState(...args) ?? '');
+  const h14row = (...args) => String(h14BlockingCacheIncoherent(...args) ?? '');
+  const h16row = (...args) => String(h16StuckMergeConflict(...args) ?? '');
+  const h18row = (...args) => String(h18RetriageAged(...args) ?? '');
+  const h19row = (...args) => String(h19BlockOutlivedBlocker(...args) ?? '');
+  const h22row = (...args) => String(h22ClosedCardPmResidue(...args) ?? '');
+  const h24row = (...args) => String(h24QueuedWithAssignee(...args) ?? '');
+  const h25row = (...args) => String(h25AwaitingMaintainerExclusivity(...args) ?? '');
+  const h26row = (...args) => String(h26BlockOnIndefiniteTarget(...args) ?? '');
+  const h32row = (...args) => String(h32SeatIdleOverQueue(...args) ?? '');
+  const h33row = (...args) => String(h33ClaimPredatesRuling(...args) ?? '');
+  // H34's wrapper (the pattern this generalizes) stays beside its own block,
+  // as do H8's `halvesRow` and H27's `dead27Row` — all three wrap a helper
+  // that is itself declared locally, next to the fixtures it closes over.
+  // H29/H30/H31 use a different reader, `says()`, declared at those blocks:
+  // it returns a DESCRIBING string (`NO MESSAGE (null)`) rather than `''`, so
+  // it also distinguishes "row fired without the needle" from "row went
+  // silent" on a case whose expectation is `false`. Both shapes run to
+  // completion; `says()` is the more informative and the more invasive, and
+  // unifying on one of them is a diff of its own, not this one.
+
   t('H1: dispatched + no assignee -> finding', h1DispatchedNoAssignee(issue(['pm:dispatched'])), true);
   t('H1: dispatched + assignee -> clean', h1DispatchedNoAssignee(issue(['pm:dispatched'], ['os-help'])), false);
   t('H2: assignee + no claim comment -> finding', h2AssigneeNoClaimComment(issue(['pm:dispatched'], ['os-help']), ['looks good', 'triage: routed']), true);
@@ -7735,23 +7784,23 @@ function selfTest() {
   t('H4: blocked without body line -> finding', typeof h4BlockedNoBlockedBy(issue(['pm:blocked'], [], 'waiting on upstream')), 'string');
   t('H4: blocked with Blocked-by line -> clean', h4BlockedNoBlockedBy(issue(['pm:blocked'], [], 'Blocked-by: #123')), null);
   t('H4: unblocked card is out of scope', h4BlockedNoBlockedBy(issue([], [], '')), null);
-  t('H4: …and an unconsulted comment channel is not claimed as empty', h4BlockedNoBlockedBy(issue(['pm:blocked'], [], 'waiting on upstream')).includes('NEITHER channel'), false);
-  t('H4: the body-only sentence still names the unlock sweep as the stake', h4BlockedNoBlockedBy(issue(['pm:blocked'], [], 'waiting on upstream')).includes('unlock sweep greps'), true);
+  t('H4: …and an unconsulted comment channel is not claimed as empty', h4row(issue(['pm:blocked'], [], 'waiting on upstream')).includes('NEITHER channel'), false);
+  t('H4: the body-only sentence still names the unlock sweep as the stake', h4row(issue(['pm:blocked'], [], 'waiting on upstream')).includes('unlock sweep greps'), true);
 
   // H4 — the COMMENT channel (#8941 / #10061). Four shapes, positive and
   // negative, plus the unreadable one that is neither.
   t('H4: body clean but a comment carries the line -> clean', h4BlockedNoBlockedBy(issue(['pm:blocked'], [], 'waiting on upstream'), ['triage note', 'Blocked-by: #9465']), null);
   t('H4: body line AND a comment line (the union shape) -> clean', h4BlockedNoBlockedBy(issue(['pm:blocked'], [], 'Blocked-by: #123'), ['Blocked-by: #9465']), null);
   t('H4: neither channel -> finding', typeof h4BlockedNoBlockedBy(issue(['pm:blocked'], [], 'waiting on upstream'), ['triage note', 'graded p2']), 'string');
-  t('H4: …and the sentence names BOTH channels', h4BlockedNoBlockedBy(issue(['pm:blocked'], [], 'waiting'), ['nothing here']).includes('NEITHER channel'), true);
-  t('H4: …and says a comment discharges the duty too', h4BlockedNoBlockedBy(issue(['pm:blocked'], [], 'waiting'), ['nothing here']).includes('Either channel discharges'), true);
-  t('H4: an empty comment thread is a real reading, not an unconsulted one', h4BlockedNoBlockedBy(issue(['pm:blocked'], [], 'waiting'), []).includes('NEITHER channel'), true);
+  t('H4: …and the sentence names BOTH channels', h4row(issue(['pm:blocked'], [], 'waiting'), ['nothing here']).includes('NEITHER channel'), true);
+  t('H4: …and says a comment discharges the duty too', h4row(issue(['pm:blocked'], [], 'waiting'), ['nothing here']).includes('Either channel discharges'), true);
+  t('H4: an empty comment thread is a real reading, not an unconsulted one', h4row(issue(['pm:blocked'], [], 'waiting'), []).includes('NEITHER channel'), true);
   // Unreadable is neither of the two: the row FIRES (a transport failure must
   // not shrink the patrol below its pre-fallback reach) and says why.
   t('H4: an UNREADABLE comment thread still fires', typeof h4BlockedNoBlockedBy(issue(['pm:blocked'], [], 'waiting'), null), 'string');
-  t('H4: …but never claims the second channel is empty', h4BlockedNoBlockedBy(issue(['pm:blocked'], [], 'waiting'), null).includes('NEITHER channel'), false);
-  t('H4: …and says the thread could not be read', h4BlockedNoBlockedBy(issue(['pm:blocked'], [], 'waiting'), null).includes('could'), true);
-  t('H4: …citing the unreadable-is-not-absent rule', h4BlockedNoBlockedBy(issue(['pm:blocked'], [], 'waiting'), null).includes('#4690'), true);
+  t('H4: …but never claims the second channel is empty', h4row(issue(['pm:blocked'], [], 'waiting'), null).includes('NEITHER channel'), false);
+  t('H4: …and says the thread could not be read', h4row(issue(['pm:blocked'], [], 'waiting'), null).includes('could'), true);
+  t('H4: …citing the unreadable-is-not-absent rule', h4row(issue(['pm:blocked'], [], 'waiting'), null).includes('#4690'), true);
   // A comment line clears H4 whatever the ref says: H4's question is "did the
   // author leave the machine anything", which a cross-repo blocker answers.
   t('H4: a cross-repo comment line still discharges the duty', h4BlockedNoBlockedBy(issue(['pm:blocked'], [], 'waiting'), ['Blocked-by: objectstack-ai/objectui#4356']), null);
@@ -7941,11 +7990,11 @@ function selfTest() {
       'the PM should close #8131 deliberately once #8136 lands.',
   );
   t('H7: the #8277 specimen is a finding', typeof h7PartOfWithClosingKeyword(pr8277), 'string');
-  t('H7: …and it names the card it will close', h7PartOfWithClosingKeyword(pr8277).includes('Part of #8131'), true);
+  t('H7: …and it names the card it will close', h7row(pr8277).includes('Part of #8131'), true);
   // The measurement that refutes the sidebar hypothesis: the SAME body names
   // #8136 one clause later with no keyword, and #8136 took no closing link.
   // The predicate must reproduce that asymmetry, not blanket-flag both numbers.
-  t('H7: …and does NOT implicate #8136 from the same sentence', h7PartOfWithClosingKeyword(pr8277).includes('#8136'), false);
+  t('H7: …and does NOT implicate #8136 from the same sentence', h7row(pr8277).includes('#8136'), false);
 
   // Specimen 2 — PR #8261 (`Part of #8103`), the same round's other partial
   // delivery, which stayed open. No keyword anywhere near its number.
@@ -8161,12 +8210,12 @@ function selfTest() {
   );
   t(
     'H8: …and the finding names the delivering PR',
-    h8MergedPrStillDispatched(dispatched(4321), [mergedPr(4400, 'Part of #4321')]).includes('#4400'),
+    h8row(dispatched(4321), [mergedPr(4400, 'Part of #4321')]).includes('#4400'),
     true,
   );
   t(
     'H8: …and prescribes the paired write, not just the fact',
-    h8MergedPrStillDispatched(dispatched(4321), [mergedPr(4400, 'Part of #4321')]).includes('pm:dispatched'),
+    h8row(dispatched(4321), [mergedPr(4400, 'Part of #4321')]).includes('pm:dispatched'),
     true,
   );
   // The closing-keyword arm: an OPEN dispatched card named by a merged PR's
@@ -8210,7 +8259,7 @@ function selfTest() {
   );
   t(
     'H8: two merged deliverers -> both named',
-    h8MergedPrStillDispatched(dispatched(4321), [mergedPr(4400, 'Part of #4321'), mergedPr(4500, 'Fixes #4321')]).includes('#4500'),
+    h8row(dispatched(4321), [mergedPr(4400, 'Part of #4321'), mergedPr(4500, 'Fixes #4321')]).includes('#4500'),
     true,
   );
   t('H8: empty merged window -> clean', h8MergedPrStillDispatched(dispatched(4321), []), null);
@@ -8314,38 +8363,43 @@ function selfTest() {
   const openHalf = (number, body, draft = false) => ({ number, body, draft, merged_at: null });
   const halves = (openPrs) =>
     h8MergedPrStillDispatched(dispatched(9834), [mergedPr(10004, 'Part of #9834')], openPrs);
+  // `halves` is itself three-valued, so it needs the same row-text wrapper as
+  // the predicate it closes over — and it must stay a SEPARATE binding rather
+  // than `halves` being stringified in place, because the `typeof halves(...)`
+  // cases below assert exactly the nullability a `String()` would erase.
+  const halvesRow = (...args) => String(halves(...args) ?? '');
 
   t('H8 open: a half-delivered card still reports', typeof halves([openHalf(10226, 'Part of #9834', true)]), 'string');
   // The whole point of the downgrade: the destructive prescription must not
   // fire on a card whose remaining half is open.
   t(
     'H8 open: …and does NOT prescribe dropping the label',
-    halves([openHalf(10226, 'Part of #9834', true)]).includes('Drop `pm:dispatched`'),
+    halvesRow([openHalf(10226, 'Part of #9834', true)]).includes('Drop `pm:dispatched`'),
     false,
   );
   t(
     'H8 open: …and says the label is CORRECT here',
-    halves([openHalf(10226, 'Part of #9834', true)]).includes('must NOT be dropped'),
+    halvesRow([openHalf(10226, 'Part of #9834', true)]).includes('must NOT be dropped'),
     true,
   );
-  t('H8 open: …and names the open half', halves([openHalf(10226, 'Part of #9834', true)]).includes('#10226'), true);
-  t('H8 open: …and the merged half too', halves([openHalf(10226, 'Part of #9834', true)]).includes('#10004'), true);
-  t('H8 open: …and counts them, N of M', halves([openHalf(10226, 'Part of #9834', true)]).includes('1 of 2'), true);
+  t('H8 open: …and names the open half', halvesRow([openHalf(10226, 'Part of #9834', true)]).includes('#10226'), true);
+  t('H8 open: …and the merged half too', halvesRow([openHalf(10226, 'Part of #9834', true)]).includes('#10004'), true);
+  t('H8 open: …and counts them, N of M', halvesRow([openHalf(10226, 'Part of #9834', true)]).includes('1 of 2'), true);
   // A draft open half is the specimen's own shape — never filtered out.
-  t('H8 open: …and marks the open half as a draft', halves([openHalf(10226, 'Part of #9834', true)]).includes('(draft)'), true);
+  t('H8 open: …and marks the open half as a draft', halvesRow([openHalf(10226, 'Part of #9834', true)]).includes('(draft)'), true);
   t('H8 open: a NON-draft open half counts identically', typeof halves([openHalf(10226, 'Part of #9834', false)]), 'string');
 
   // …and the row it replaces is unchanged whenever every deliverer HAS merged —
   // the genuine #8683 case, which must keep its prescription.
   t(
     'H8 open: no open deliverer -> the destructive prescription still fires',
-    halves([]).includes('Drop `pm:dispatched`'),
+    halvesRow([]).includes('Drop `pm:dispatched`'),
     true,
   );
-  t('H8 open: a missing open list is the pre-#10468 reading', halves(undefined).includes('Drop `pm:dispatched`'), true);
+  t('H8 open: a missing open list is the pre-#10468 reading', halvesRow(undefined).includes('Drop `pm:dispatched`'), true);
   t(
     'H8 open: an open PR delivering a DIFFERENT card does not downgrade the row',
-    halves([openHalf(10226, 'Part of #9999')]).includes('Drop `pm:dispatched`'),
+    halvesRow([openHalf(10226, 'Part of #9999')]).includes('Drop `pm:dispatched`'),
     true,
   );
   // No merged deliverer at all is still clean — the open side never MANUFACTURES
@@ -8359,19 +8413,19 @@ function selfTest() {
   // included — a `Refs #N` open half is as live as a `Part of #N` one.
   t(
     'H8 open: the branch-name fallback applies to the open side too',
-    halves([{ number: 10226, body: 'Refs #9834', draft: false, merged_at: null, head: { ref: 'claude/issue-9834-error-counter' } }]).includes('must NOT be dropped'),
+    halvesRow([{ number: 10226, body: 'Refs #9834', draft: false, merged_at: null, head: { ref: 'claude/issue-9834-error-counter' } }]).includes('must NOT be dropped'),
     true,
   );
   // …and its re-scope guard travels with it.
   t(
     'H8 open: a re-scoped open branch does not soften the row',
-    halves([{ number: 10226, body: 'Part of #9999', draft: false, merged_at: null, head: { ref: 'claude/issue-9834-x' } }]).includes('Drop `pm:dispatched`'),
+    halvesRow([{ number: 10226, body: 'Part of #9999', draft: false, merged_at: null, head: { ref: 'claude/issue-9834-x' } }]).includes('Drop `pm:dispatched`'),
     true,
   );
   // A merged row appearing in the open list is not an outstanding half.
   t(
     'H8 open: a merged row in the open list is not an open half',
-    halves([{ number: 10226, body: 'Part of #9834', merged_at: '2026-08-20T00:00:00Z' }]).includes('Drop `pm:dispatched`'),
+    halvesRow([{ number: 10226, body: 'Part of #9834', merged_at: '2026-08-20T00:00:00Z' }]).includes('Drop `pm:dispatched`'),
     true,
   );
 
@@ -8384,21 +8438,21 @@ function selfTest() {
   });
 
   t('H22: closed + pm:dispatched -> finding', typeof h22ClosedCardPmResidue(closedCard(['pm:dispatched'])), 'string');
-  t('H22: …and names the residue label', h22ClosedCardPmResidue(closedCard(['pm:dispatched'])).includes('`pm:dispatched`'), true);
-  t('H22: …and names the close reason', h22ClosedCardPmResidue(closedCard(['pm:dispatched'])).includes('closed `completed`'), true);
+  t('H22: …and names the residue label', h22row(closedCard(['pm:dispatched'])).includes('`pm:dispatched`'), true);
+  t('H22: …and names the close reason', h22row(closedCard(['pm:dispatched'])).includes('closed `completed`'), true);
   t(
     'H22: …and prescribes only the label strip, no other write',
-    h22ClosedCardPmResidue(closedCard(['pm:dispatched'])).includes('already closed'),
+    h22row(closedCard(['pm:dispatched'])).includes('already closed'),
     true,
   );
   t('H22: a not_planned close is residue too', typeof h22ClosedCardPmResidue(closedCard(['pm:queue'], 'not_planned')), 'string');
   t('H22: a missing state_reason still renders a sentence', typeof h22ClosedCardPmResidue({ ...closedCard(['pm:queue']), state_reason: null }), 'string');
   t(
     'H22: …and never prints the string undefined',
-    h22ClosedCardPmResidue({ ...closedCard(['pm:queue']), state_reason: null }).includes('undefined'),
+    h22row({ ...closedCard(['pm:queue']), state_reason: null }).includes('undefined'),
     false,
   );
-  t('H22: several residue labels are all named', h22ClosedCardPmResidue(closedCard(['pm:blocked', 'pm:blocking'])).includes('`pm:blocking`'), true);
+  t('H22: several residue labels are all named', h22row(closedCard(['pm:blocked', 'pm:blocking'])).includes('`pm:blocking`'), true);
 
   // The gate that keeps this from restating H3: an OPEN card is never this
   // row's, whatever it carries — every other item here already reads it.
@@ -8414,8 +8468,8 @@ function selfTest() {
   t('H22: `pm:epic` likewise', h22ClosedCardPmResidue(closedCard(['pm:epic'])), null);
   t('H22: `pm:retriage` is deliberately out of the measured set', h22ClosedCardPmResidue(closedCard(['pm:retriage'])), null);
   // …but a seat card ALSO carrying a state label is still residue.
-  t('H22: `pm:seat` + a state label is residue for the state label', h22ClosedCardPmResidue(closedCard(['pm:seat', 'pm:dispatched'])).includes('`pm:dispatched`'), true);
-  t('H22: …and does not name the identity sticker', h22ClosedCardPmResidue(closedCard(['pm:seat', 'pm:dispatched'])).includes('`pm:seat`'), false);
+  t('H22: `pm:seat` + a state label is residue for the state label', h22row(closedCard(['pm:seat', 'pm:dispatched'])).includes('`pm:dispatched`'), true);
+  t('H22: …and does not name the identity sticker', h22row(closedCard(['pm:seat', 'pm:dispatched'])).includes('`pm:seat`'), false);
 
   // The census's five plus the state ruled in on 2026-08-23, each pinned — the
   // set is the item's scope, so a silent edit to it should break a test rather
@@ -8548,14 +8602,14 @@ function selfTest() {
   // -- H9: `pm:on-hold` without a machine-fireable `Restart-when:` ------------
   const hold = (body) => issue(['pm:on-hold'], [], body);
   t('H9: hold with no Restart-when line -> finding', typeof h9OnHoldNoRestartWhen(hold('parked until the train ships')), 'string');
-  t('H9: …and the finding prescribes the close default', h9OnHoldNoRestartWhen(hold('parked')).includes('not planned'), true);
+  t('H9: …and the finding prescribes the close default', h9row(hold('parked')).includes('not planned'), true);
   t('H9: closed-upstream form -> clean', h9OnHoldNoRestartWhen(hold('Restart-when: closed acme/widgets#123')), null);
   t('H9: executable-predicate form -> clean', h9OnHoldNoRestartWhen(hold('Restart-when: npm view create-objectstack dist-tags reports >= 17.0.0')), null);
   t('H9: mid-body line -> clean', h9OnHoldNoRestartWhen(hold('Context first.\nRestart-when: closed acme/widgets#123\nMore prose.')), null);
   // `manual` is a hold trying to opt out of having an exit — it counts as
   // missing, or the one-word spelling defeats the invariant.
   t('H9: manual form -> finding', typeof h9OnHoldNoRestartWhen(hold('Restart-when: manual — first EE customer asking')), 'string');
-  t('H9: …and the finding names the manual shape', h9OnHoldNoRestartWhen(hold('Restart-when: manual — reason')).includes('manual'), true);
+  t('H9: …and the finding names the manual shape', h9row(hold('Restart-when: manual — reason')).includes('manual'), true);
   t('H9: Manual case-insensitive as a VALUE -> finding', typeof h9OnHoldNoRestartWhen(hold('Restart-when: Manual — reason')), 'string');
   t('H9: manual line + fireable line -> clean', h9OnHoldNoRestartWhen(hold('Restart-when: manual — x\nRestart-when: closed acme/widgets#9')), null);
   // The KEY is byte-stable like `Blocked-by:` — a lowercase key is a line the
@@ -8588,7 +8642,7 @@ function selfTest() {
   // hold must still fire, or backticks would become the opt-out the bare
   // spelling is denied.
   t('H9: a decorated `manual` hold still fires', typeof h9OnHoldNoRestartWhen(hold('`Restart-when: manual — first EE customer asking`')), 'string');
-  t('H9: …and still names the manual shape', h9OnHoldNoRestartWhen(hold('**Restart-when: manual — reason**')).includes('manual'), true);
+  t('H9: …and still names the manual shape', h9row(hold('**Restart-when: manual — reason**')).includes('manual'), true);
 
   // -- H9's remedy text: verify/unwrap first, close last (#10102) ------------
   const h9NoLine = h9OnHoldNoRestartWhen(hold('parked until the train ships'));
@@ -8599,15 +8653,15 @@ function selfTest() {
   // The `manual` row is NOT a parse failure — a line was read — so it must not
   // carry the "maybe it is there" hedge, or the one row that really does mean
   // "this hold has no exit" starts reading as uncertain.
-  t('H9: the manual row carries no unparsed hedge', h9OnHoldNoRestartWhen(hold('Restart-when: manual — reason')).includes('cannot parse'), false);
-  t('H9: …but does still demote closing', h9OnHoldNoRestartWhen(hold('Restart-when: manual — reason')).includes('Closing is the LAST resort'), true);
+  t('H9: the manual row carries no unparsed hedge', h9row(hold('Restart-when: manual — reason')).includes('cannot parse'), false);
+  t('H9: …but does still demote closing', h9row(hold('Restart-when: manual — reason')).includes('Closing is the LAST resort'), true);
   // The channel contract, stated in the row itself — two channels since
   // #10403, symmetric with H4/H14. An undocumented difference between two
   // adjacent rules is how the last two half-states on that lane were made,
   // and an undocumented SAMENESS would repeat it in mirror image.
   t('H9: the row states the two-channel contract', h9NoLine.includes('body OR a comment'), true);
   t('H9: …and names the predicates it now matches', h9NoLine.includes('H4/H14'), true);
-  t('H9: …and the manual row states it too', h9OnHoldNoRestartWhen(hold('Restart-when: manual — x')).includes('body OR a comment'), true);
+  t('H9: …and the manual row states it too', h9row(hold('Restart-when: manual — x')).includes('body OR a comment'), true);
 
   // -- H9's COMMENT channel (#10403) -----------------------------------------
   // The incident fixture: a machine-fireable exit parked in a comment — the
@@ -8627,21 +8681,21 @@ function selfTest() {
   t('H9: a mid-sentence mention in a comment is not a line', typeof h9OnHoldNoRestartWhen(hold('parked'), ['someone should add a `Restart-when: closed acme/w#1` line']), 'string');
   // Both channels read and empty: the sentence says EITHER, so the reader
   // knows both were judged — and an unconsulted channel is never claimed.
-  t('H9: neither channel -> the sentence names EITHER channel', h9OnHoldNoRestartWhen(hold('parked'), ['no directive here']).includes('EITHER channel'), true);
-  t('H9: an empty comment thread is a real reading', h9OnHoldNoRestartWhen(hold('parked'), []).includes('EITHER channel'), true);
-  t('H9: an unconsulted comment channel is not claimed as read', h9OnHoldNoRestartWhen(hold('parked')).includes('EITHER channel'), false);
-  t('H9: …and the both-channels hedge tells the seat to read the thread too', h9OnHoldNoRestartWhen(hold('parked'), []).includes('BODY AND THE THREAD'), true);
+  t('H9: neither channel -> the sentence names EITHER channel', h9row(hold('parked'), ['no directive here']).includes('EITHER channel'), true);
+  t('H9: an empty comment thread is a real reading', h9row(hold('parked'), []).includes('EITHER channel'), true);
+  t('H9: an unconsulted comment channel is not claimed as read', h9row(hold('parked')).includes('EITHER channel'), false);
+  t('H9: …and the both-channels hedge tells the seat to read the thread too', h9row(hold('parked'), []).includes('BODY AND THE THREAD'), true);
   // Unreadable is neither read nor absent (#4690): the row fires on the cheap
   // side, says the thread could not be read, and never claims EITHER.
   t('H9: an UNREADABLE comment thread still fires', typeof h9OnHoldNoRestartWhen(hold('parked'), null), 'string');
-  t('H9: …but never claims the second channel is empty', h9OnHoldNoRestartWhen(hold('parked'), null).includes('EITHER channel'), false);
-  t('H9: …and says the thread could not be read', h9OnHoldNoRestartWhen(hold('parked'), null).includes('could NOT be read'), true);
-  t('H9: …citing the unreadable-is-not-absent rule', h9OnHoldNoRestartWhen(hold('parked'), null).includes('#4690'), true);
+  t('H9: …but never claims the second channel is empty', h9row(hold('parked'), null).includes('EITHER channel'), false);
+  t('H9: …and says the thread could not be read', h9row(hold('parked'), null).includes('could NOT be read'), true);
+  t('H9: …citing the unreadable-is-not-absent rule', h9row(hold('parked'), null).includes('#4690'), true);
   t('H9: a fireable BODY line clears even an unreadable thread', h9OnHoldNoRestartWhen(hold('Restart-when: closed acme/widgets#123'), null), null);
   // Manual across channels: a manual body line plus a fireable comment line is
   // the mixed shape a seat actually writes when upgrading a hold in place.
   t('H9: manual body line + fireable comment line -> clean', h9OnHoldNoRestartWhen(hold('Restart-when: manual — x'), ['Restart-when: closed acme/widgets#9']), null);
-  t('H9: manual lines in BOTH channels still name the manual shape', h9OnHoldNoRestartWhen(hold('Restart-when: manual — x'), ['Restart-when: manual — y']).includes('manual'), true);
+  t('H9: manual lines in BOTH channels still name the manual shape', h9row(hold('Restart-when: manual — x'), ['Restart-when: manual — y']).includes('manual'), true);
 
   // The gathering policy — what gets READ AT ALL (mirrors the H4 gate pins).
   t('gate: a body-clean pm:on-hold card is an H9 candidate', needsRestartWhenComments(hold('no line here')), true);
@@ -8658,7 +8712,7 @@ function selfTest() {
     updated_at: updatedAt,
   });
   t('H10: unassigned p0 past the threshold -> finding', typeof h10StaleUnclaimedP0(p0([], hoursAgo(36), ['pm:queue']), NOW), 'string');
-  t('H10: …and the finding names the threshold', h10StaleUnclaimedP0(p0([], hoursAgo(36)), NOW).includes(`${P0_UNCLAIMED_STALE_HOURS}h`), true);
+  t('H10: …and the finding names the threshold', h10row(p0([], hoursAgo(36)), NOW).includes(`${P0_UNCLAIMED_STALE_HOURS}h`), true);
   t('H10: fresh unassigned p0 -> clean', h10StaleUnclaimedP0(p0([], hoursAgo(1)), NOW), null);
   t('H10: exactly at the threshold -> clean (strictly beyond fires)', h10StaleUnclaimedP0(p0([], hoursAgo(P0_UNCLAIMED_STALE_HOURS)), NOW), null);
   t('H10: assigned p0 is out of scope however old', h10StaleUnclaimedP0(p0(['os-help'], hoursAgo(200)), NOW), null);
@@ -8682,8 +8736,8 @@ function selfTest() {
   t('H11: bug label + blocked -> finding', typeof h11ImportantParked(parkedCard(['bug', 'pm:blocked']), NOW), 'string');
   t('H11: security label + on-hold -> finding', typeof h11ImportantParked(parkedCard(['security', 'pm:on-hold']), NOW), 'string');
   t('H11: priority:p1 + blocked -> finding', typeof h11ImportantParked(parkedCard(['priority:p1', 'pm:blocked']), NOW), 'string');
-  t('H11: …and the finding names the parked state', h11ImportantParked(parkedCard(['bug', 'pm:blocked']), NOW).includes('pm:blocked'), true);
-  t('H11: …and the threshold', h11ImportantParked(parkedCard(['bug', 'pm:blocked']), NOW).includes(`${IMPORTANT_PARKED_STALE_DAYS}d`), true);
+  t('H11: …and the finding names the parked state', h11row(parkedCard(['bug', 'pm:blocked']), NOW).includes('pm:blocked'), true);
+  t('H11: …and the threshold', h11row(parkedCard(['bug', 'pm:blocked']), NOW).includes(`${IMPORTANT_PARKED_STALE_DAYS}d`), true);
   t('H11: fresh park is clean', h11ImportantParked(parkedCard(['bug', 'pm:on-hold'], { created: daysAgo(2) }), NOW), null);
   t('H11: exactly at the threshold is clean (strictly beyond fires)', h11ImportantParked(parkedCard(['bug', 'pm:on-hold'], { created: daysAgo(IMPORTANT_PARKED_STALE_DAYS) }), NOW), null);
   t('H11: important but not parked is out of scope', h11ImportantParked(parkedCard(['bug', 'pm:queue']), NOW), null);
@@ -8704,8 +8758,8 @@ function selfTest() {
     merged_at: null,
   });
   t('H12: ready + unarmed + stale -> finding', typeof h12OrphanLanding(openPr(), NOW), 'string');
-  t('H12: …and the finding names the threshold', h12OrphanLanding(openPr(), NOW).includes(`${ORPHAN_LANDING_STALE_HOURS}h`), true);
-  t('H12: …and prescribes the landing-window re-read, not just the fact', h12OrphanLanding(openPr(), NOW).includes('landing window'), true);
+  t('H12: …and the finding names the threshold', h12row(openPr(), NOW).includes(`${ORPHAN_LANDING_STALE_HOURS}h`), true);
+  t('H12: …and prescribes the landing-window re-read, not just the fact', h12row(openPr(), NOW).includes('landing window'), true);
   t('H12: draft is out of scope however old (parked deliberately)', h12OrphanLanding(openPr({ draft: true, updated: hoursAgo(200) }), NOW), null);
   t('H12: armed auto-merge -> clean (queue machinery holds it)', h12OrphanLanding(openPr({ auto_merge: { merge_method: 'squash' } }), NOW), null);
   t('H12: fresh ready PR -> clean', h12OrphanLanding(openPr({ updated: hoursAgo(1) }), NOW), null);
@@ -8726,8 +8780,8 @@ function selfTest() {
     ...extra,
   });
   t('H13: aged domain card with no pm-state -> finding', typeof h13DomainWithoutPmState(domainCard(['domain:engine-core', 'bug', 'regression'], hoursAgo(26)), NOW), 'string');
-  t('H13: …and the finding names the threshold', h13DomainWithoutPmState(domainCard(['domain:engine-core'], hoursAgo(26)), NOW).includes(`${DOMAIN_HALF_STATE_STALE_HOURS}h`), true);
-  t('H13: …and blames the healing loop, not inventory', h13DomainWithoutPmState(domainCard(['domain:engine-core'], hoursAgo(26)), NOW).includes('healing loop'), true);
+  t('H13: …and the finding names the threshold', h13row(domainCard(['domain:engine-core'], hoursAgo(26)), NOW).includes(`${DOMAIN_HALF_STATE_STALE_HOURS}h`), true);
+  t('H13: …and blames the healing loop, not inventory', h13row(domainCard(['domain:engine-core'], hoursAgo(26)), NOW).includes('healing loop'), true);
   t('H13: pm:queue pairs the domain label -> clean', h13DomainWithoutPmState(domainCard(['domain:engine-core', 'pm:queue'], hoursAgo(26)), NOW), null);
   t('H13: needs-user-decision is a state (the inbox reads it) -> clean', h13DomainWithoutPmState(domainCard(['domain:spec', 'needs-user-decision'], hoursAgo(200)), NOW), null);
   t('H13: finding is a state (the grading round reads it) -> clean', h13DomainWithoutPmState(domainCard(['domain:cli', 'finding'], hoursAgo(200)), NOW), null);
@@ -8745,23 +8799,23 @@ function selfTest() {
   t('H13: absent updated_at -> finding, not fresh', typeof h13DomainWithoutPmState(domainCard(['domain:engine-core'], undefined), NOW), 'string');
   // The louder line — the measured card carried its trigger in its own body.
   const p0Body = { body: 'P0 checklist-item failure (data-integrity DELETE regression) — priority label is triage’s to set' };
-  t('H13: body self-declaring P0 -> louder line', h13DomainWithoutPmState(domainCard(['domain:engine-core'], hoursAgo(26), p0Body), NOW).includes('P0-SUSPECT'), true);
-  t('H13: …which prescribes the emergency-triage channel', h13DomainWithoutPmState(domainCard(['domain:engine-core'], hoursAgo(26), p0Body), NOW).includes('emergency-triage'), true);
+  t('H13: body self-declaring P0 -> louder line', h13row(domainCard(['domain:engine-core'], hoursAgo(26), p0Body), NOW).includes('P0-SUSPECT'), true);
+  t('H13: …which prescribes the emergency-triage channel', h13row(domainCard(['domain:engine-core'], hoursAgo(26), p0Body), NOW).includes('emergency-triage'), true);
   t('H13: data-integrity phrasing alone fires the louder line', h13SelfDeclaredP0({ title: '', body: 'a data integrity regression in DELETE' }), true);
   t('H13: the title is scanned too', h13SelfDeclaredP0({ title: 'p0 suspect: rows vanish', body: '' }), true);
   // Strip reuse (H7 reading 4): quoting the token in backticks is not a
   // self-declaration, and `P0` inside a word is not the token.
   t('H13: P0 only inside backticks is not a self-declaration', h13SelfDeclaredP0({ title: '', body: 'the card quotes `P0` in passing' }), false);
   t('H13: P0 inside a word does not fire', h13SelfDeclaredP0({ title: '', body: 'the HTTP0 protocol note' }), false);
-  t('H13: a quiet body stays on the base line', h13DomainWithoutPmState(domainCard(['domain:engine-core'], hoursAgo(26), { body: 'ordinary defect' }), NOW).includes('P0-SUSPECT'), false);
+  t('H13: a quiet body stays on the base line', h13row(domainCard(['domain:engine-core'], hoursAgo(26), { body: 'ordinary defect' }), NOW).includes('P0-SUSPECT'), false);
 
   // -- H18: `pm:retriage` aged past one triage cycle (2026-08-19/20 ruling) --
   // Reuses `domainCard` — a generic (labels, updated_at, extra) issue builder,
   // not a domain-specific one despite the name.
   t('H18: retriage past the threshold, coexisting pm:queue -> finding', typeof h18RetriageAged(domainCard(['pm:retriage', 'pm:queue'], hoursAgo(3)), NOW), 'string');
-  t('H18: …and the finding names the threshold', h18RetriageAged(domainCard(['pm:retriage', 'pm:queue'], hoursAgo(3)), NOW).includes(`${RETRIAGE_STALE_HOURS}h`), true);
-  t('H18: …and names the coexisting standing label', h18RetriageAged(domainCard(['pm:retriage', 'pm:queue'], hoursAgo(3)), NOW).includes('`pm:queue`'), true);
-  t('H18: multiple coexisting labels are all named', h18RetriageAged(domainCard(['pm:retriage', 'pm:blocked', 'pm:blocking'], hoursAgo(3)), NOW).includes('`pm:blocked`') && h18RetriageAged(domainCard(['pm:retriage', 'pm:blocked', 'pm:blocking'], hoursAgo(3)), NOW).includes('`pm:blocking`'), true);
+  t('H18: …and the finding names the threshold', h18row(domainCard(['pm:retriage', 'pm:queue'], hoursAgo(3)), NOW).includes(`${RETRIAGE_STALE_HOURS}h`), true);
+  t('H18: …and names the coexisting standing label', h18row(domainCard(['pm:retriage', 'pm:queue'], hoursAgo(3)), NOW).includes('`pm:queue`'), true);
+  t('H18: multiple coexisting labels are all named', h18row(domainCard(['pm:retriage', 'pm:blocked', 'pm:blocking'], hoursAgo(3)), NOW).includes('`pm:blocked`') && h18row(domainCard(['pm:retriage', 'pm:blocked', 'pm:blocking'], hoursAgo(3)), NOW).includes('`pm:blocking`'), true);
   // Under-threshold: fresh objection is normal intake latency, not a finding.
   t('H18: retriage under the threshold -> clean', h18RetriageAged(domainCard(['pm:retriage', 'pm:queue'], hoursAgo(1)), NOW), null);
   t('H18: exactly at the threshold -> clean (strictly beyond fires)', h18RetriageAged(domainCard(['pm:retriage', 'pm:queue'], hoursAgo(RETRIAGE_STALE_HOURS)), NOW), null);
@@ -8769,10 +8823,10 @@ function selfTest() {
   t('H18: no pm:retriage label -> out of scope however old', h18RetriageAged(domainCard(['pm:queue'], hoursAgo(200)), NOW), null);
   // The disputed-target variant: `pm:retriage` alone, no coexisting `pm:*`.
   t('H18: retriage ALONE (no coexisting pm:* label) -> finding', typeof h18RetriageAged(domainCard(['pm:retriage'], hoursAgo(3)), NOW), 'string');
-  t('H18: …and names the disputed-target note', h18RetriageAged(domainCard(['pm:retriage'], hoursAgo(3)), NOW).includes('异议对象不明'), true);
-  t('H18: …and does not claim a coexisting label it does not have', h18RetriageAged(domainCard(['pm:retriage'], hoursAgo(3)), NOW).includes('alongside its standing'), false);
+  t('H18: …and names the disputed-target note', h18row(domainCard(['pm:retriage'], hoursAgo(3)), NOW).includes('异议对象不明'), true);
+  t('H18: …and does not claim a coexisting label it does not have', h18row(domainCard(['pm:retriage'], hoursAgo(3)), NOW).includes('alongside its standing'), false);
   // A non-`pm:*` label (e.g. `domain:*`) never counts as the coexisting label.
-  t('H18: a domain: label is not counted as a coexisting pm:* label', h18RetriageAged(domainCard(['pm:retriage', 'domain:skills'], hoursAgo(3)), NOW).includes('异议对象不明'), true);
+  t('H18: a domain: label is not counted as a coexisting pm:* label', h18row(domainCard(['pm:retriage', 'domain:skills'], hoursAgo(3)), NOW).includes('异议对象不明'), true);
   // #4690 in miniature, same as H10–H13: unreadable must not read as fresh.
   t('H18: unreadable updated_at -> finding, not fresh', typeof h18RetriageAged(domainCard(['pm:retriage'], 'not-a-date'), NOW), 'string');
   t('H18: absent updated_at -> finding, not fresh', typeof h18RetriageAged(domainCard(['pm:retriage'], undefined), NOW), 'string');
@@ -8866,19 +8920,19 @@ function selfTest() {
 
   // Direction A — the label carried with nothing targeting it.
   t('H14-A: pm:blocking with nothing targeting it -> finding', typeof h14BlockingCacheIncoherent(carded(7276, ['pm:queue', 'pm:blocking']), idx([])), 'string');
-  t('H14-A: …and it names the stale-cache reading', h14BlockingCacheIncoherent(carded(7276, ['pm:blocking']), idx([])).includes('stale derived cache'), true);
-  t('H14-A: …and prescribes the derivation pass, never a label from here', h14BlockingCacheIncoherent(carded(7276, ['pm:blocking']), idx([])).includes('derivation pass'), true);
-  t('H14-A: …and says why stale is worse than absent', h14BlockingCacheIncoherent(carded(7276, ['pm:blocking']), idx([])).includes('with authority'), true);
+  t('H14-A: …and it names the stale-cache reading', h14row(carded(7276, ['pm:blocking']), idx([])).includes('stale derived cache'), true);
+  t('H14-A: …and prescribes the derivation pass, never a label from here', h14row(carded(7276, ['pm:blocking']), idx([])).includes('derivation pass'), true);
+  t('H14-A: …and says why stale is worse than absent', h14row(carded(7276, ['pm:blocking']), idx([])).includes('with authority'), true);
   // The repo-boundary wording (#10139): STALE reads as "no dependent in this
   // repo", never as exhaustive over the population, and the remedy is
   // conditional on a cross-repo check rather than an outright drop.
-  t('H14-A: …names the repo boundary', h14BlockingCacheIncoherent(carded(7276, ['pm:blocking']), idx([])).includes('no dependent found in this repo'), true);
-  t('H14-A: …and says cross-repo dependents are not swept', h14BlockingCacheIncoherent(carded(7276, ['pm:blocking']), idx([])).includes('cross-repo dependents are not swept'), true);
-  t('H14-A: …and the remedy is conditional on verifying cross-repo dependents', h14BlockingCacheIncoherent(carded(7276, ['pm:blocking']), idx([])).includes('verify cross-repo dependents before'), true);
+  t('H14-A: …names the repo boundary', h14row(carded(7276, ['pm:blocking']), idx([])).includes('no dependent found in this repo'), true);
+  t('H14-A: …and says cross-repo dependents are not swept', h14row(carded(7276, ['pm:blocking']), idx([])).includes('cross-repo dependents are not swept'), true);
+  t('H14-A: …and the remedy is conditional on verifying cross-repo dependents', h14row(carded(7276, ['pm:blocking']), idx([])).includes('verify cross-repo dependents before'), true);
   // The negative: the old exhaustive phrasing ("the full two-channel index",
   // instructing an unconditional drop) must be gone — it is what would have
   // told a reader to sever the live #7917 / objectui#4356 edge.
-  t('H14-A: …and the old exhaustive phrasing is GONE', h14BlockingCacheIncoherent(carded(7276, ['pm:blocking']), idx([])).includes('full two-channel index'), false);
+  t('H14-A: …and the old exhaustive phrasing is GONE', h14row(carded(7276, ['pm:blocking']), idx([])).includes('full two-channel index'), false);
   // The negative for direction A: the label is EARNED, so nothing to report.
   t(
     'H14-A: pm:blocking with a real dependent -> clean',
@@ -8889,8 +8943,8 @@ function selfTest() {
   // Direction B — targeted, but the cache never landed.
   const missingIdx = idx([carded(9650, ['pm:queue'], 'Blocked-by: #9832')]);
   t('H14-B: targeted without pm:blocking -> finding', typeof h14BlockingCacheIncoherent(carded(9832, ['bug', 'pm:dispatched', 'domain:cli']), missingIdx), 'string');
-  t('H14-B: …and it names the waiting card', h14BlockingCacheIncoherent(carded(9832, ['pm:dispatched']), missingIdx).includes('#9650'), true);
-  t('H14-B: …and calls it an invisible unblocker', h14BlockingCacheIncoherent(carded(9832, ['pm:dispatched']), missingIdx).includes('selection order cannot see'), true);
+  t('H14-B: …and it names the waiting card', h14row(carded(9832, ['pm:dispatched']), missingIdx).includes('#9650'), true);
+  t('H14-B: …and calls it an invisible unblocker', h14row(carded(9832, ['pm:dispatched']), missingIdx).includes('selection order cannot see'), true);
   // The negative for direction B: no label and nobody waiting is the ordinary
   // shape of ~230 of this board's ~234 open cards. It must be silent, or the
   // row means nothing.
@@ -8904,8 +8958,8 @@ function selfTest() {
   );
   // Fan-out cap: named, then counted.
   const manyDeps = idx(Array.from({ length: 7 }, (_, i) => carded(100 + i, [], 'Blocked-by: #5')));
-  t('H14-B: a large fan-out names the cap and counts the rest', h14BlockingCacheIncoherent(carded(5, ['pm:queue']), manyDeps).includes(`+${7 - BLOCKING_DEPENDENT_LIST_CAP} more`), true);
-  t('H14-B: …and reports the true total, not the capped one', h14BlockingCacheIncoherent(carded(5, ['pm:queue']), manyDeps).includes('targeted by 7 open card(s)'), true);
+  t('H14-B: a large fan-out names the cap and counts the rest', h14row(carded(5, ['pm:queue']), manyDeps).includes(`+${7 - BLOCKING_DEPENDENT_LIST_CAP} more`), true);
+  t('H14-B: …and reports the true total, not the capped one', h14row(carded(5, ['pm:queue']), manyDeps).includes('targeted by 7 open card(s)'), true);
   t('H14: a missing index does not crash and reads as untargeted', h14BlockingCacheIncoherent(carded(5, ['pm:blocking']), undefined) !== null, true);
 
   // Reverse verification against the LIVE board, 2026-08-19 (234 open cards).
@@ -8925,7 +8979,7 @@ function selfTest() {
   ];
   const liveIdx = idx(liveBodies);
   t('H14 reverse-verify: #7276 (the board\'s only pm:blocking card) -> stale finding', typeof h14BlockingCacheIncoherent(carded(7276, ['pm:queue', 'domain:devx', 'pm:blocking']), liveIdx), 'string');
-  t('H14 reverse-verify: #9832 (targeted by #9650, unlabeled) -> missing finding naming #9650', h14BlockingCacheIncoherent(carded(9832, ['bug', 'pm:dispatched', 'domain:cli']), liveIdx).includes('#9650'), true);
+  t('H14 reverse-verify: #9832 (targeted by #9650, unlabeled) -> missing finding naming #9650', h14row(carded(9832, ['bug', 'pm:dispatched', 'domain:cli']), liveIdx).includes('#9650'), true);
   t('H14 reverse-verify: #9919 (targeted by #9249, unlabeled) -> missing finding', typeof h14BlockingCacheIncoherent(carded(9919, ['pm:queue', 'repo:cloud']), liveIdx), 'string');
   // …and the four measured NON-findings from the same reading, which is what
   // makes the six above readable as signal rather than as a predicate that
@@ -8965,8 +9019,8 @@ function selfTest() {
   const epic9465 = carded(9465, ['domain:devx', 'pm:epic', 'pm:blocking']);
   const decision9968 = carded(9968, ['pm:decision', 'pm:blocking']);
   // The defect, pinned: this is what the body-only index reported.
-  t('H14 false-stale: #9465 reads STALE against a body-only index', h14BlockingCacheIncoherent(epic9465, bodyOnlyIdx)?.includes('stale derived cache'), true);
-  t('H14 false-stale: #9968 reads STALE against a body-only index', h14BlockingCacheIncoherent(decision9968, bodyOnlyIdx)?.includes('stale derived cache'), true);
+  t('H14 false-stale: #9465 reads STALE against a body-only index', h14row(epic9465, bodyOnlyIdx).includes('stale derived cache'), true);
+  t('H14 false-stale: #9968 reads STALE against a body-only index', h14row(decision9968, bodyOnlyIdx).includes('stale derived cache'), true);
   // The fix: the same two cards against the two-channel index.
   t('H14 false-stale: #9465 is CLEAN once comment edges are read', h14BlockingCacheIncoherent(epic9465, unionIdx), null);
   t('H14 false-stale: #9968 is CLEAN once comment edges are read', h14BlockingCacheIncoherent(decision9968, unionIdx), null);
@@ -8974,9 +9028,9 @@ function selfTest() {
   t('H14 false-stale: …and #9969 and #9652 both point at #9968', unionIdx.get(9968).join(','), '9969,9652');
   // Direction B rides the same union: a comment-only edge is enough to call a
   // card an invisible unblocker.
-  t('H14-B: a comment-only edge produces a missing-cache row', h14BlockingCacheIncoherent(carded(9465, ['domain:devx']), unionIdx)?.includes('#9709'), true);
-  t('H14-B: …and the sentence names the channel pair', h14BlockingCacheIncoherent(carded(9465, ['domain:devx']), unionIdx).includes('body or comment'), true);
-  t('H14-A: …the stale sentence names both channels too', h14BlockingCacheIncoherent(epic9465, bodyOnlyIdx).includes('body OR comment'), true);
+  t('H14-B: a comment-only edge produces a missing-cache row', h14row(carded(9465, ['domain:devx']), unionIdx).includes('#9709'), true);
+  t('H14-B: …and the sentence names the channel pair', h14row(carded(9465, ['domain:devx']), unionIdx).includes('body or comment'), true);
+  t('H14-A: …the stale sentence names both channels too', h14row(epic9465, bodyOnlyIdx).includes('body OR comment'), true);
 
   // -- H14 under an INCOMPLETE index (a gated comment fetch failed) ----------
   //
@@ -8986,7 +9040,7 @@ function selfTest() {
   t('H14-A: stale is SUSPENDED when the index is known incomplete', h14BlockingCacheIncoherent(epic9465, bodyOnlyIdx, { indexComplete: false }), null);
   t('H14-A: …and still fires when the index is complete', typeof h14BlockingCacheIncoherent(epic9465, bodyOnlyIdx, { indexComplete: true }), 'string');
   t('H14-A: …and completeness defaults to true for body-only callers', typeof h14BlockingCacheIncoherent(epic9465, bodyOnlyIdx), 'string');
-  t('H14-B: missing SURVIVES an incomplete index', h14BlockingCacheIncoherent(carded(9465, ['domain:devx']), unionIdx, { indexComplete: false })?.includes('#9709'), true);
+  t('H14-B: missing SURVIVES an incomplete index', h14row(carded(9465, ['domain:devx']), unionIdx, { indexComplete: false }).includes('#9709'), true);
   t('H14-B: …and an earned label stays clean either way', h14BlockingCacheIncoherent(epic9465, unionIdx, { indexComplete: false }), null);
 
   // The summary line carries the third `read X of Y` pair, and says out loud
@@ -9137,7 +9191,7 @@ function selfTest() {
   t('H19: …names it a PARTIAL discharge', partial.includes('PARTIAL'), true);
   t('H19: …names the target that is still open', partial.includes('`#3`'), true);
   t('H19: …and does not decide the card is unblocked', partial.includes('it does not decide it'), true);
-  t('H19: two closed of two reads as 2 of 2', h19BlockOutlivedBlocker(blockedCard(1), [target(2, 'closed'), target(3, 'closed')]).includes('2 of 2'), true);
+  t('H19: two closed of two reads as 2 of 2', h19row(blockedCard(1), [target(2, 'closed'), target(3, 'closed')]).includes('2 of 2'), true);
 
   // UNRESOLVED — never reads as clean, and never reads as closed either.
   const unresolvedOnly = h19BlockOutlivedBlocker(blockedCard(1), [foreign('objectstack-ai/cloud', 88, 'unresolved', { detail: 'HTTP 404' })]);
@@ -9224,7 +9278,7 @@ function selfTest() {
   t('H19 measured ①: …a body-only read would have found nothing', keysOf(blockedCard(10112, 'body carries no line')), '');
   t(
     'H19 measured ①: …and the card fires once its target is resolved closed',
-    h19BlockOutlivedBlocker(blockedCard(10112, 'body carries no line'), [target(10126, 'closed', { closedAt: '2026-08-20T09:03:37Z' })]).includes('`#10126` (closed 2026-08-20T09:03:37Z)'),
+    h19row(blockedCard(10112, 'body carries no line'), [target(10126, 'closed', { closedAt: '2026-08-20T09:03:37Z' })]).includes('`#10126` (closed 2026-08-20T09:03:37Z)'),
     true,
   );
 
@@ -9238,7 +9292,7 @@ function selfTest() {
   t('H19 measured ②: the decorated body line yields the target', keysOf(blockedCard(10063, liveDecoratedBody)), 'objectstack-ai/objectstack#9612');
   t(
     'H19 measured ②: …and the card fires once its target is resolved closed',
-    h19BlockOutlivedBlocker(blockedCard(10063, liveDecoratedBody), [target(9612, 'closed', { closedAt: '2026-08-20T07:58:08Z' })]).includes('closed 2026-08-20T07:58:08Z'),
+    h19row(blockedCard(10063, liveDecoratedBody), [target(9612, 'closed', { closedAt: '2026-08-20T07:58:08Z' })]).includes('closed 2026-08-20T07:58:08Z'),
     true,
   );
   // The prose around the line names #9612 four more times; only the DIRECTIVE
@@ -9493,27 +9547,31 @@ function selfTest() {
       'delivery' in over ? over.delivery : noDelivery,
       NOW_27,
     );
+  // Same reason as H8's `halvesRow`: `dead27` is three-valued, and the
+  // `typeof dead27()` / `dead27(…) === null` cases below assert precisely the
+  // nullability that stringifying `dead27` itself would erase.
+  const dead27Row = (...args) => String(dead27(...args) ?? '');
 
   // ★ The finding itself, and the facts the sentence must carry.
   t('H27: a frozen branch + no PR past 24h -> finding', typeof dead27(), 'string');
-  t('H27: …and names the branch', dead27().includes(`\`${BR_27}\``), true);
-  t('H27: …and says the branch has not moved since the claim', dead27().includes('NOT MOVED SINCE IT WAS CLAIMED'), true);
-  t('H27: …and reports the age against the protocol threshold', dead27().includes(`threshold ${DEAD_CLAIM_STALE_HOURS}h`), true);
-  t('H27: …calling that threshold the protocol\'s own line, not a heuristic', dead27().includes("protocol's own stale-claim line"), true);
-  t('H27: …and states the measured ~26h age', dead27().includes('~26h after the claim was posted'), true);
-  t('H27: …and names the lane-block consequence, not just the silence', dead27().includes('mutual-exclusion read'), true);
-  t('H27: …and explains WHY H20 cannot see it', dead27().includes('pushing the empty branch the first action'), true);
-  t('H27: …and rules out the pre-window merged delivery first', dead27().includes(`${MERGED_WINDOW_PAGES} pages`), true);
+  t('H27: …and names the branch', dead27Row().includes(`\`${BR_27}\``), true);
+  t('H27: …and says the branch has not moved since the claim', dead27Row().includes('NOT MOVED SINCE IT WAS CLAIMED'), true);
+  t('H27: …and reports the age against the protocol threshold', dead27Row().includes(`threshold ${DEAD_CLAIM_STALE_HOURS}h`), true);
+  t('H27: …calling that threshold the protocol\'s own line, not a heuristic', dead27Row().includes("protocol's own stale-claim line"), true);
+  t('H27: …and states the measured ~26h age', dead27Row().includes('~26h after the claim was posted'), true);
+  t('H27: …and names the lane-block consequence, not just the silence', dead27Row().includes('mutual-exclusion read'), true);
+  t('H27: …and explains WHY H20 cannot see it', dead27Row().includes('pushing the empty branch the first action'), true);
+  t('H27: …and rules out the pre-window merged delivery first', dead27Row().includes(`${MERGED_WINDOW_PAGES} pages`), true);
   t('H27: not a loud finding', isLoudFinding(dead27()), false);
 
   // ★ Report-only, and specifically NOT a reclaim — the protocol protects a
   // claim whose branch carries commits, so this row must never read as
   // authority to drop an assignee.
-  t('H27: the remedy is the recovery inspection', dead27().includes('post-kill recovery'), true);
-  t('H27: …naming all three recovery states', dead27().includes('on the remote / on the container disk only / gone'), true);
-  t('H27: …and the UNVERIFIED hand-off', dead27().includes('flagged UNVERIFIED'), true);
-  t('H27: …quoting the protocol rule that forbids reclaiming this card', dead27().includes('有带提交活分支的认领永不回收'), true);
-  t('H27: …and never a label written from this script', dead27().includes('Never a label written from this script'), true);
+  t('H27: the remedy is the recovery inspection', dead27Row().includes('post-kill recovery'), true);
+  t('H27: …naming all three recovery states', dead27Row().includes('on the remote / on the container disk only / gone'), true);
+  t('H27: …and the UNVERIFIED hand-off', dead27Row().includes('flagged UNVERIFIED'), true);
+  t('H27: …quoting the protocol rule that forbids reclaiming this card', dead27Row().includes('有带提交活分支的认领永不回收'), true);
+  t('H27: …and never a label written from this script', dead27Row().includes('Never a label written from this script'), true);
 
   // ★ Disjoint from H20 BY CONSTRUCTION, in both directions, on one fixture.
   const absent27 = [{ branch: BR_27, state: 'absent', detail: null, headCommittedAt: null }];
@@ -9531,10 +9589,10 @@ function selfTest() {
   t('H27: activity is measured against the CLAIM, not the threshold', dead27({ refs: frozen('2026-08-23T05:47:00Z') }), null);
   // Three-valued, never two (#4690): an unreadable comparison is not a "no".
   t('H27: an unreadable head timestamp does NOT read as healthy', dead27({ refs: frozen(null) }) === null, false);
-  t('H27: …and fires the quieter UNJUDGED row instead', dead27({ refs: frozen(null) }).includes('UNJUDGED, not confirmed healthy'), true);
-  t('H27: …which does not assert the finding it did not measure', dead27({ refs: frozen(null) }).includes('NOT MOVED SINCE IT WAS CLAIMED'), false);
-  t('H27: …citing the unread-is-not-absent rule', dead27({ refs: frozen(null) }).includes('#4690'), true);
-  t('H27: an absent head field reads as unknown, not as an old date', dead27({ refs: [{ branch: BR_27, state: 'exists' }] }).includes('UNJUDGED'), true);
+  t('H27: …and fires the quieter UNJUDGED row instead', dead27Row({ refs: frozen(null) }).includes('UNJUDGED, not confirmed healthy'), true);
+  t('H27: …which does not assert the finding it did not measure', dead27Row({ refs: frozen(null) }).includes('NOT MOVED SINCE IT WAS CLAIMED'), false);
+  t('H27: …citing the unread-is-not-absent rule', dead27Row({ refs: frozen(null) }).includes('#4690'), true);
+  t('H27: an absent head field reads as unknown, not as an old date', dead27Row({ refs: [{ branch: BR_27, state: 'exists' }] }).includes('UNJUDGED'), true);
   t('H27: branchMovedSinceClaim is three-valued', [branchMovedSinceClaim(frozen()[0], claim27()), branchMovedSinceClaim(frozen('2026-08-23T09:00:00Z')[0], claim27()), branchMovedSinceClaim(frozen(null)[0], claim27())].join(','), 'false,true,');
 
   // ★ The delivery term, through H8's own relation so the two cannot drift.
@@ -9576,7 +9634,7 @@ function selfTest() {
   t('H27: an unreadable claim timestamp does not read as fresh', unstamped27 === null, false);
   t('H27: …and yields the UNJUDGED row (the comparison is impossible)', unstamped27.includes('UNJUDGED'), true);
   const many27 = Array.from({ length: 7 }, (_, i) => ({ branch: `claude/issue-1-b${i}`, state: 'exists', headCommittedAt: '2026-08-22T09:00:00Z' }));
-  t('H27: the branch list is capped at the render budget', dead27({ refs: many27 }).includes(`+${7 - H20_BRANCH_LIST_CAP} more`), true);
+  t('H27: the branch list is capped at the render budget', dead27Row({ refs: many27 }).includes(`+${7 - H20_BRANCH_LIST_CAP} more`), true);
 
   // -- H16: open non-draft PR stuck in a merge conflict (2026-08-19 incident) --
   // The single-PR payload shape, since `mergeable_state` is absent from the
@@ -9592,12 +9650,12 @@ function selfTest() {
   } = {}) => ({ draft, mergeable_state, auto_merge, head, body, updated_at: updated, merged_at });
 
   t('H16: dirty beyond the threshold -> finding', typeof h16StuckMergeConflict(conflictPr(), NOW), 'string');
-  t('H16: …and the finding names the threshold', h16StuckMergeConflict(conflictPr(), NOW).includes(`${MERGE_CONFLICT_STALE_HOURS}h`), true);
-  t('H16: …and names the platform state it read', h16StuckMergeConflict(conflictPr(), NOW).includes('mergeable_state: dirty'), true);
-  t('H16: …and prescribes the merge-and-resolve remedy', h16StuckMergeConflict(conflictPr(), NOW).includes('merges `main` into the branch'), true);
+  t('H16: …and the finding names the threshold', h16row(conflictPr(), NOW).includes(`${MERGE_CONFLICT_STALE_HOURS}h`), true);
+  t('H16: …and names the platform state it read', h16row(conflictPr(), NOW).includes('mergeable_state: dirty'), true);
+  t('H16: …and prescribes the merge-and-resolve remedy', h16row(conflictPr(), NOW).includes('merges `main` into the branch'), true);
   // The proxy must be DECLARED in the row, not silently substituted: a reader
   // shown "~4h" has to know it is silence on the PR, not the conflict's age.
-  t('H16: …and declares the age is the PR\'s updated_at, not the conflict\'s', h16StuckMergeConflict(conflictPr(), NOW).includes("Age is the PR's `updated_at`, not the conflict's"), true);
+  t('H16: …and declares the age is the PR\'s updated_at, not the conflict\'s', h16row(conflictPr(), NOW).includes("Age is the PR's `updated_at`, not the conflict's"), true);
   t('H16: dirty within the threshold -> clean (a fresh push is mid-resolution)', h16StuckMergeConflict(conflictPr({ updated: hoursAgo(1) }), NOW), null);
   t('H16: exactly at the threshold -> clean (strictly beyond fires)', h16StuckMergeConflict(conflictPr({ updated: hoursAgo(MERGE_CONFLICT_STALE_HOURS) }), NOW), null);
   t('H16: draft is out of scope however old (parked deliberately)', h16StuckMergeConflict(conflictPr({ draft: true, updated: hoursAgo(200) }), NOW), null);
@@ -9626,16 +9684,16 @@ function selfTest() {
   // `auto_merge` as finding-reducing and is right to; here the arming is what
   // made every proxy signal read healthy while the PR went nowhere.
   t('H16: armed auto-merge does NOT suppress the row', typeof h16StuckMergeConflict(conflictPr({ auto_merge: { merge_method: 'squash' } }), NOW), 'string');
-  t('H16: …and the row says auto-merge does not resolve conflicts', h16StuckMergeConflict(conflictPr({ auto_merge: { merge_method: 'squash' } }), NOW).includes('does NOT resolve conflicts'), true);
+  t('H16: …and the row says auto-merge does not resolve conflicts', h16row(conflictPr({ auto_merge: { merge_method: 'squash' } }), NOW).includes('does NOT resolve conflicts'), true);
   // The contrast that makes the divergence deliberate rather than an oversight:
   // one PR row, two predicates, opposite readings of the same armed field.
   t('H16: …while H12 stays clean on that same armed PR (the divergence is by design)', h12OrphanLanding(conflictPr({ auto_merge: { merge_method: 'squash' }, updated: hoursAgo(50) }), NOW), null);
 
   // The held-card clause — the row names the delivery, not only the branch.
-  t('H16: a `Fixes #N` body names the card it is holding', h16StuckMergeConflict(conflictPr({ body: 'Fixes #9763\n\nsome prose' }), NOW).includes('holding card #9763'), true);
-  t('H16: `Part of #N` counts as held too (H8\'s reading of delivery)', h16StuckMergeConflict(conflictPr({ body: 'Part of #9652' }), NOW).includes('holding card #9652'), true);
-  t('H16: two cards are pluralised and listed in order', h16StuckMergeConflict(conflictPr({ body: 'Fixes #9961\nFixes #9936' }), NOW).includes('holding cards #9936, #9961'), true);
-  t('H16: a body with no card carries no holding clause', h16StuckMergeConflict(conflictPr({ body: 'no card here' }), NOW).includes('holding'), false);
+  t('H16: a `Fixes #N` body names the card it is holding', h16row(conflictPr({ body: 'Fixes #9763\n\nsome prose' }), NOW).includes('holding card #9763'), true);
+  t('H16: `Part of #N` counts as held too (H8\'s reading of delivery)', h16row(conflictPr({ body: 'Part of #9652' }), NOW).includes('holding card #9652'), true);
+  t('H16: two cards are pluralised and listed in order', h16row(conflictPr({ body: 'Fixes #9961\nFixes #9936' }), NOW).includes('holding cards #9936, #9961'), true);
+  t('H16: a body with no card carries no holding clause', h16row(conflictPr({ body: 'no card here' }), NOW).includes('holding'), false);
   // #8293 reading 4 carries over: a body QUOTING the spelling names nothing.
   t('H16: a backticked `Fixes #N` is not a held card', h16HeldCards('the dispatch asked for `Fixes #8284`').length, 0);
   t('H16: h16HeldCards de-duplicates and sorts', h16HeldCards('Fixes #30\nPart of #12\nFixes #30').join(','), '12,30');
@@ -9709,9 +9767,9 @@ function selfTest() {
     head: { ref: 'claude/issue-9763-literal-collector-spellings' },
   });
   t('H16 incident: the #9826 shape is a finding', typeof h16StuckMergeConflict(pr9826, NOW), 'string');
-  t('H16 incident: …fires despite auto-merge being armed', h16StuckMergeConflict(pr9826, NOW).includes('MERGE CONFLICT'), true);
-  t('H16 incident: …and names the card it was holding', h16StuckMergeConflict(pr9826, NOW).includes('holding card #9763'), true);
-  t('H16 incident: …at its measured ~4h age', h16StuckMergeConflict(pr9826, NOW).includes('untouched for ~4h'), true);
+  t('H16 incident: …fires despite auto-merge being armed', h16row(pr9826, NOW).includes('MERGE CONFLICT'), true);
+  t('H16 incident: …and names the card it was holding', h16row(pr9826, NOW).includes('holding card #9763'), true);
+  t('H16 incident: …at its measured ~4h age', h16row(pr9826, NOW).includes('untouched for ~4h'), true);
   t('H16 incident: …and the sweep would have spent a request on it', h16NeedsDetail(pr9826, NOW), true);
   // The counterfactual that makes the fixture mean something: at the moment
   // the conflict appeared, the same PR was silent — the threshold is what
@@ -10499,15 +10557,15 @@ function selfTest() {
   t('H24: assigned but not queued is out of scope (H1/H2 own it)', h24QueuedWithAssignee(queued(['pm:dispatched'], ['os-elon'])), null);
   t('H24: neither -> clean', h24QueuedWithAssignee(queued(['domain:skills'], [])), null);
   t('H24: a missing issue does not crash', h24QueuedWithAssignee(undefined), null);
-  t('H24: …and the row names the login so residue and ownership are separable', h24QueuedWithAssignee(queued(['pm:queue'], ['yinlianghui'])).includes('`yinlianghui`'), true);
-  t('H24: every assignee is named, not just the first', h24QueuedWithAssignee(queued(['pm:queue'], ['os-elon', 'qq9340100'])).includes('`qq9340100`'), true);
+  t('H24: …and the row names the login so residue and ownership are separable', h24row(queued(['pm:queue'], ['yinlianghui'])).includes('`yinlianghui`'), true);
+  t('H24: every assignee is named, not just the first', h24row(queued(['pm:queue'], ['os-elon', 'qq9340100'])).includes('`qq9340100`'), true);
   t('H24: assignees given as plain logins are read too', typeof h24QueuedWithAssignee({ ...queued(['pm:queue']), assignees: ['os-elon'] }), 'string');
   // The ruling's ORDER, pinned: the rule fires on a human assignment too, and
   // the sentence carries the asymmetric remedy rather than an exemption.
   t('H24: a human assignment still fires (exemption is a later explicit marker)', typeof h24QueuedWithAssignee(queued(['pm:queue'], ['yinlianghui'])), 'string');
-  t('H24: …and the row refuses the human-clearing write', h24QueuedWithAssignee(queued(['pm:queue'], ['yinlianghui'])).includes('never be cleared by an agent'), true);
-  t('H24: …and names the paired write it is owed', h24QueuedWithAssignee(queued(['pm:queue'], ['os-elon'])).includes('同笔摘 assignee'), true);
-  t('H24: …and names both contradicting readers', h24QueuedWithAssignee(queued(['pm:queue'], ['os-elon'])).includes('dispatchable NOW'), true);
+  t('H24: …and the row refuses the human-clearing write', h24row(queued(['pm:queue'], ['yinlianghui'])).includes('never be cleared by an agent'), true);
+  t('H24: …and names the paired write it is owed', h24row(queued(['pm:queue'], ['os-elon'])).includes('同笔摘 assignee'), true);
+  t('H24: …and names both contradicting readers', h24row(queued(['pm:queue'], ['os-elon'])).includes('dispatchable NOW'), true);
   // The closed gate, in mirror image to H22's open gate: one card, one row.
   t('H24: a CLOSED queued+assigned card is H22 residue, not this row', h24QueuedWithAssignee(queued(['pm:queue'], ['os-elon'], { state: 'closed' })), null);
   t('H24: …and H22 does fire on that same card', typeof h22ClosedCardPmResidue(queued(['pm:queue'], ['os-elon'], { state: 'closed', state_reason: 'completed' })), 'string');
@@ -10526,25 +10584,25 @@ function selfTest() {
   // half-delivered branch must NOT (there the label and the claim are CORRECT).
   const pairedMerged = [{ number: 900, merged_at: '2026-08-22T10:00:00Z', body: 'Fixes #10638', head: { ref: 'x' } }];
   const pairedOpenHalf = [{ number: 901, merged_at: null, draft: true, body: 'Part of #10638', head: { ref: 'y' } }];
-  t('H8: the full-delivery remedy names 同笔摘 assignee', h8MergedPrStillDispatched(queued(['pm:dispatched'], ['os-elon']), pairedMerged, []).includes('同笔摘 assignee'), true);
-  t('H8: …and points at H24 as the state it prevents', h8MergedPrStillDispatched(queued(['pm:dispatched'], ['os-elon']), pairedMerged, []).includes('H24'), true);
-  t('H8: …and keeps the human-assignment refusal', h8MergedPrStillDispatched(queued(['pm:dispatched'], ['os-elon']), pairedMerged, []).includes('never cleared by an agent'), true);
-  t('H8: the HALF-delivered branch prescribes no assignee drop', h8MergedPrStillDispatched(queued(['pm:dispatched'], ['os-elon']), pairedMerged, pairedOpenHalf).includes('同笔摘 assignee'), false);
-  t('H8: …and still says the label is correct there', h8MergedPrStillDispatched(queued(['pm:dispatched'], ['os-elon']), pairedMerged, pairedOpenHalf).includes('must NOT be dropped'), true);
-  t('H19: the release text names 同笔摘 assignee', h19BlockOutlivedBlocker(queued(['pm:blocked']), [{ key: 'objectstack-ai/objectstack#2', number: 2, local: true, state: 'closed' }]).includes('同笔摘 assignee'), true);
-  t('H19: …on the unresolved branch too (one release contract, one sentence)', h19BlockOutlivedBlocker(queued(['pm:blocked']), [{ key: 'objectstack-ai/cloud#2', number: 2, local: false, state: 'unresolved', detail: 'HTTP 404' }]).includes('同笔摘 assignee'), true);
+  t('H8: the full-delivery remedy names 同笔摘 assignee', h8row(queued(['pm:dispatched'], ['os-elon']), pairedMerged, []).includes('同笔摘 assignee'), true);
+  t('H8: …and points at H24 as the state it prevents', h8row(queued(['pm:dispatched'], ['os-elon']), pairedMerged, []).includes('H24'), true);
+  t('H8: …and keeps the human-assignment refusal', h8row(queued(['pm:dispatched'], ['os-elon']), pairedMerged, []).includes('never cleared by an agent'), true);
+  t('H8: the HALF-delivered branch prescribes no assignee drop', h8row(queued(['pm:dispatched'], ['os-elon']), pairedMerged, pairedOpenHalf).includes('同笔摘 assignee'), false);
+  t('H8: …and still says the label is correct there', h8row(queued(['pm:dispatched'], ['os-elon']), pairedMerged, pairedOpenHalf).includes('must NOT be dropped'), true);
+  t('H19: the release text names 同笔摘 assignee', h19row(queued(['pm:blocked']), [{ key: 'objectstack-ai/objectstack#2', number: 2, local: true, state: 'closed' }]).includes('同笔摘 assignee'), true);
+  t('H19: …on the unresolved branch too (one release contract, one sentence)', h19row(queued(['pm:blocked']), [{ key: 'objectstack-ai/cloud#2', number: 2, local: false, state: 'unresolved', detail: 'HTTP 404' }]).includes('同笔摘 assignee'), true);
 
   // -- H25 + the `pm:awaiting-maintainer` vocabulary (#11196 fix 5) -----------
   t('the ruled spelling is pm:-prefixed', AWAITING_MAINTAINER_LABEL, 'pm:awaiting-maintainer');
   t('H25: awaiting + pm:queue -> finding', typeof h25AwaitingMaintainerExclusivity(queued([AWAITING_MAINTAINER_LABEL, 'pm:queue'])), 'string');
-  t('H25: …and the row names the coexisting label', h25AwaitingMaintainerExclusivity(queued([AWAITING_MAINTAINER_LABEL, 'pm:queue'])).includes('`pm:queue`'), true);
-  t('H25: …and the specific lie, not a tidiness complaint', h25AwaitingMaintainerExclusivity(queued([AWAITING_MAINTAINER_LABEL, 'pm:on-hold'])).includes('Restart-when'), true);
+  t('H25: …and the row names the coexisting label', h25row(queued([AWAITING_MAINTAINER_LABEL, 'pm:queue'])).includes('`pm:queue`'), true);
+  t('H25: …and the specific lie, not a tidiness complaint', h25row(queued([AWAITING_MAINTAINER_LABEL, 'pm:on-hold'])).includes('Restart-when'), true);
   t('H25: awaiting ALONE -> clean', h25AwaitingMaintainerExclusivity(queued([AWAITING_MAINTAINER_LABEL])), null);
   t('H25: awaiting + a non-state label -> clean', h25AwaitingMaintainerExclusivity(queued([AWAITING_MAINTAINER_LABEL, 'domain:skills', 'priority:p0', 'pm:blocking'])), null);
   t('H25: no awaiting label -> out of scope however many states', h25AwaitingMaintainerExclusivity(queued(['pm:queue', 'pm:dispatched'])), null);
   t('H25: a CLOSED card is H22 residue, not a live exclusivity breach', h25AwaitingMaintainerExclusivity(queued([AWAITING_MAINTAINER_LABEL, 'pm:queue'], [], { state: 'closed' })), null);
   t('H25: a missing issue does not crash', h25AwaitingMaintainerExclusivity(undefined), null);
-  t('H25: several conflicts are ALL named', h25AwaitingMaintainerExclusivity(queued([AWAITING_MAINTAINER_LABEL, 'pm:queue', 'needs-user-decision'])).includes('`needs-user-decision`'), true);
+  t('H25: several conflicts are ALL named', h25row(queued([AWAITING_MAINTAINER_LABEL, 'pm:queue', 'needs-user-decision'])).includes('`needs-user-decision`'), true);
   for (const conflicting of AWAITING_MAINTAINER_EXCLUSIVE_LABELS) {
     t(`H25: awaiting + \`${conflicting}\` -> finding`, typeof h25AwaitingMaintainerExclusivity(queued([AWAITING_MAINTAINER_LABEL, conflicting])), 'string');
   }
@@ -10552,13 +10610,13 @@ function selfTest() {
   // the vocabulary cannot be half-added (the defect class this family is about).
   t('vocabulary: H13 treats awaiting as a real state -> clean', h13DomainWithoutPmState(domainCard(['domain:skills', AWAITING_MAINTAINER_LABEL], hoursAgo(200)), NOW), null);
   t('vocabulary: …while the same card without it is still H13', typeof h13DomainWithoutPmState(domainCard(['domain:skills'], hoursAgo(200)), NOW), 'string');
-  t('vocabulary: H22 counts awaiting as residue on a closed card', h22ClosedCardPmResidue(closedCard([AWAITING_MAINTAINER_LABEL])).includes(`\`${AWAITING_MAINTAINER_LABEL}\``), true);
+  t('vocabulary: H22 counts awaiting as residue on a closed card', h22row(closedCard([AWAITING_MAINTAINER_LABEL])).includes(`\`${AWAITING_MAINTAINER_LABEL}\``), true);
   t('vocabulary: …and an open card carrying it is not H22 residue', h22ClosedCardPmResidue(queued([AWAITING_MAINTAINER_LABEL])), null);
   t('vocabulary: H11 sees awaiting as a PARKED state', typeof h11ImportantParked(parkedCard(['bug', AWAITING_MAINTAINER_LABEL]), NOW), 'string');
-  t('vocabulary: …and names it as the parked state', h11ImportantParked(parkedCard(['bug', AWAITING_MAINTAINER_LABEL]), NOW).includes(`\`${AWAITING_MAINTAINER_LABEL}\``), true);
-  t('vocabulary: …with the exit this state actually has (no Restart-when re-check)', h11ImportantParked(parkedCard(['bug', AWAITING_MAINTAINER_LABEL]), NOW).includes('Restart-when'), false);
-  t('vocabulary: …and it says the state has no machine exit', h11ImportantParked(parkedCard(['bug', AWAITING_MAINTAINER_LABEL]), NOW).includes('NO machine exit'), true);
-  t('vocabulary: H11 keeps the mechanical remedy for a BLOCKED card', h11ImportantParked(parkedCard(['bug', 'pm:blocked']), NOW).includes('Restart-when'), true);
+  t('vocabulary: …and names it as the parked state', h11row(parkedCard(['bug', AWAITING_MAINTAINER_LABEL]), NOW).includes(`\`${AWAITING_MAINTAINER_LABEL}\``), true);
+  t('vocabulary: …with the exit this state actually has (no Restart-when re-check)', h11row(parkedCard(['bug', AWAITING_MAINTAINER_LABEL]), NOW).includes('Restart-when'), false);
+  t('vocabulary: …and it says the state has no machine exit', h11row(parkedCard(['bug', AWAITING_MAINTAINER_LABEL]), NOW).includes('NO machine exit'), true);
+  t('vocabulary: H11 keeps the mechanical remedy for a BLOCKED card', h11row(parkedCard(['bug', 'pm:blocked']), NOW).includes('Restart-when'), true);
   t('vocabulary: a fresh awaiting park is still clean', h11ImportantParked(parkedCard(['bug', AWAITING_MAINTAINER_LABEL], { created: daysAgo(2) }), NOW), null);
   t('vocabulary: an UNimportant awaiting card is not inventory', h11ImportantParked(parkedCard([AWAITING_MAINTAINER_LABEL]), NOW), null);
 
@@ -10792,10 +10850,10 @@ function selfTest() {
     ...extra,
   });
   t('H26: target parked in pm:on-hold -> finding', typeof h26BlockOnIndefiniteTarget(waiting(), [tgt(987, ['pm:on-hold'])]), 'string');
-  t('H26: …and the row says the block has no releasing mechanism', h26BlockOnIndefiniteTarget(waiting(), [tgt(987, ['pm:on-hold'])]).includes('NO MECHANISM THAT WILL EVER RELEASE IT'), true);
-  t('H26: …and names the target and its state', h26BlockOnIndefiniteTarget(waiting(), [tgt(987, ['pm:on-hold'])]).includes('`#987` (`pm:on-hold`)'), true);
+  t('H26: …and the row says the block has no releasing mechanism', h26row(waiting(), [tgt(987, ['pm:on-hold'])]).includes('NO MECHANISM THAT WILL EVER RELEASE IT'), true);
+  t('H26: …and names the target and its state', h26row(waiting(), [tgt(987, ['pm:on-hold'])]).includes('`#987` (`pm:on-hold`)'), true);
   t('H26: target parked in needs-user-decision -> finding', typeof h26BlockOnIndefiniteTarget(waiting(75), [tgt(68, ['needs-user-decision'])]), 'string');
-  t('H26: a target carrying BOTH indefinite states names both', h26BlockOnIndefiniteTarget(waiting(), [tgt(987, ['pm:on-hold', 'needs-user-decision'])]).includes('`pm:on-hold` + `needs-user-decision`'), true);
+  t('H26: a target carrying BOTH indefinite states names both', h26row(waiting(), [tgt(987, ['pm:on-hold', 'needs-user-decision'])]).includes('`pm:on-hold` + `needs-user-decision`'), true);
   // The clean directions — an ordinary open target is not this row's business.
   t('H26: an ordinary open target -> clean', h26BlockOnIndefiniteTarget(waiting(), [tgt(987, ['pm:queue', 'domain:devx'])]), null);
   t('H26: an unlabelled open target -> clean', h26BlockOnIndefiniteTarget(waiting(), [tgt(987, [])]), null);
@@ -10809,11 +10867,11 @@ function selfTest() {
   // An unresolved target is silent HERE and loud in H19 — one gap, one row.
   t('H26: an unresolved target is silent (H19 owns the unjudged sentence)', h26BlockOnIndefiniteTarget(waiting(), [{ ...tgt(987, null), state: 'unresolved', detail: 'HTTP 404' }]), null);
   t('H26: …and a labels-less open row cannot be judged either', h26BlockOnIndefiniteTarget(waiting(), [{ ...tgt(987, undefined) }]), null);
-  t('H26: …while H19 states that gap', h19BlockOutlivedBlocker(waiting(), [{ ...tgt(987, null), state: 'unresolved', detail: 'HTTP 404' }]).includes('UNJUDGED'), true);
+  t('H26: …while H19 states that gap', h19row(waiting(), [{ ...tgt(987, null), state: 'unresolved', detail: 'HTTP 404' }]).includes('UNJUDGED'), true);
   // The chain leg.
   t('H26: a target that is itself pm:blocked -> the transitive row', typeof h26BlockOnIndefiniteTarget(waiting(1395), [tgt(10101, ['pm:blocked'])]), 'string');
-  t('H26: …and it says to look one level further', h26BlockOnIndefiniteTarget(waiting(1395), [tgt(10101, ['pm:blocked'])]).includes('TRANSITIVE'), true);
-  t('H26: …and does not claim the block can never release', h26BlockOnIndefiniteTarget(waiting(1395), [tgt(10101, ['pm:blocked'])]).includes('NO MECHANISM'), false);
+  t('H26: …and it says to look one level further', h26row(waiting(1395), [tgt(10101, ['pm:blocked'])]).includes('TRANSITIVE'), true);
+  t('H26: …and does not claim the block can never release', h26row(waiting(1395), [tgt(10101, ['pm:blocked'])]).includes('NO MECHANISM'), false);
   // Both legs at once, on two different targets, in one row.
   const bothLegs = h26BlockOnIndefiniteTarget(waiting(), [tgt(987, ['pm:on-hold']), tgt(10101, ['pm:blocked'])]);
   t('H26: both legs report together', bothLegs.includes('NO MECHANISM THAT WILL EVER RELEASE IT') && bothLegs.includes('TRANSITIVE'), true);
@@ -10830,7 +10888,7 @@ function selfTest() {
   t('H26: the target list is capped like H19\'s', manyIndefinite.includes(`+${7 - H19_TARGET_LIST_CAP} more`), true);
   t('H26: …and still counts the full set', manyIndefinite.includes('on 7 target(s)'), true);
   // Cross-repo targets are addressed by full key, as in H19's rows.
-  t('H26: a cross-repo target is named owner/repo#N', h26BlockOnIndefiniteTarget(waiting(), [{ ...tgt(68, ['needs-user-decision']), local: false, key: 'objectstack-ai/objectos#68' }]).includes('`objectstack-ai/objectos#68`'), true);
+  t('H26: a cross-repo target is named owner/repo#N', h26row(waiting(), [{ ...tgt(68, ['needs-user-decision']), local: false, key: 'objectstack-ai/objectos#68' }]).includes('`objectstack-ai/objectos#68`'), true);
   // Both rows can fire on ONE card — different halves of one wait.
   const expiredAndIndefinite = [{ ...tgt(900, ['pm:queue']), state: 'closed' }, tgt(987, ['pm:on-hold'])];
   t('H26 + H19: a partially expired, partially indefinite block fires both', Boolean(h19BlockOutlivedBlocker(waiting(), expiredAndIndefinite)) && Boolean(h26BlockOnIndefiniteTarget(waiting(), expiredAndIndefinite)), true);
@@ -10965,8 +11023,8 @@ function selfTest() {
 
   // The board halves — both required.
   t('H32: held + idle lane + stale marker -> finding', typeof h32SeatIdleOverQueue(seat(HELD), marker('Round-start marker — R6.', 600), idleLane, NOW32), 'string');
-  t('H32: …and it names the lane', h32SeatIdleOverQueue(seat(HELD), marker('Round-start marker — R6.', 600), idleLane, NOW32).includes('`domain:spec`'), true);
-  t('H32: …and the unclaimed count', h32SeatIdleOverQueue(seat(HELD), marker('Round-start marker — R6.', 600), idleLane, NOW32).includes('15 unclaimed'), true);
+  t('H32: …and it names the lane', h32row(seat(HELD), marker('Round-start marker — R6.', 600), idleLane, NOW32).includes('`domain:spec`'), true);
+  t('H32: …and the unclaimed count', h32row(seat(HELD), marker('Round-start marker — R6.', 600), idleLane, NOW32).includes('15 unclaimed'), true);
   t('H32: work IN FLIGHT is a working seat -> clean', h32SeatIdleOverQueue(seat(HELD), marker('Round-start marker — R6.', 600), busy, NOW32), null);
   t('H32: an EMPTY queue is a finished lane -> clean', h32SeatIdleOverQueue(seat(HELD), marker('Round-start marker — R6.', 600), { unclaimed: 0, inFlight: 0 }, NOW32), null);
   t('H32: a vacant seat is out of scope however deep the queue', h32SeatIdleOverQueue(seat('[PM seat] domain:spec — ⏳ vacant'), marker('收班', 6000), idleLane, NOW32), null);
@@ -11004,7 +11062,7 @@ function selfTest() {
   // An unreadable STAMP still fires — that is the #4690 direction, and it
   // differs from an unreadable THREAD because the wait exemption was still read.
   t('H32: an unreadable marker stamp must not read as fresh', typeof h32SeatIdleOverQueue(seat(HELD), { body: 'Round-start marker', createdAt: 'not-a-date' }, idleLane, NOW32), 'string');
-  t('H32: …and the row says so rather than printing a number', h32SeatIdleOverQueue(seat(HELD), { body: 'Round-start marker', createdAt: 'not-a-date' }, idleLane, NOW32).includes('unreadable marker timestamp'), true);
+  t('H32: …and the row says so rather than printing a number', h32row(seat(HELD), { body: 'Round-start marker', createdAt: 'not-a-date' }, idleLane, NOW32).includes('unreadable marker timestamp'), true);
 
   // latestSeatMarker — recency, with governingClaim's thread-order fallback.
   t('H32 marker: the NEWEST comment wins', latestSeatMarker([{ body: 'old', created_at: minsAgo(600) }, { body: 'new', created_at: minsAgo(10) }]).body, 'new');
@@ -11032,7 +11090,7 @@ function selfTest() {
   const rulingRow33 = row33(RULING_AT, 'Triage: lands in packages/rest — dispatch scope = option 1 as a sweep.');
 
   t('H33: a claim predating a ruling -> finding', typeof h33ClaimPredatesRuling(dispatched33(), [claimRow33, rulingRow33]), 'string');
-  t('H33: …and it names both stamps', h33ClaimPredatesRuling(dispatched33(), [claimRow33, rulingRow33]).includes(RULING_AT), true);
+  t('H33: …and it names both stamps', h33row(dispatched33(), [claimRow33, rulingRow33]).includes(RULING_AT), true);
   t('H33: a ruling BEFORE the claim -> clean (the order could carry it)', h33ClaimPredatesRuling(dispatched33(), [row33('2026-08-19T09:00:00Z', 'Triage: routed'), claimRow33]), null);
   t('H33: no ruling on the thread at all -> clean (the ordinary card)', h33ClaimPredatesRuling(dispatched33(), [claimRow33, row33(RULING_AT, 'ACCEPT — PR #12066 reviewed')]), null);
   t('H33: no claim at all -> clean', h33ClaimPredatesRuling(dispatched33(), [rulingRow33]), null);
