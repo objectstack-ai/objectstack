@@ -2764,3 +2764,214 @@ describe('[#11391] the destructive-409 remedy loop is now closed for an SDK call
         expect(saved).toEqual({ success: true, version: 3 });
     });
 });
+
+// ----------------------------------------------------------------------
+// [#11713] `meta.saveItem`'s `If-Match` HEADER — the ADR-0008 OCC token the
+// method's own docstring told callers to echo back, on BOTH clients.
+//
+// The docstring above `saveItem` has always said: the resolved `version` is
+// the optimistic-concurrency token, echo it back as `If-Match` and a
+// concurrent edit answers 409 instead of silently overwriting. Both REST PUT
+// doors read `if-match` and thread it as `parentVersion`, so that sentence was
+// true of a raw-HTTP caller. It was FALSE of a first-party SDK caller: neither
+// declaration accepted a header, an `ifMatch`, or anything that became one, so
+// following the instruction was impossible and the concurrent edit overwrote.
+//
+// ⭐ These pins are on the HEADERS the client BUILDS. The pre-existing #11391
+// pins measure the URL only — and a URL pin cannot see this defect, because
+// the whole defect is that the value goes NOWHERE: an `ifMatch` swallowed
+// silently leaves the URL byte-identical, which is exactly what those pins
+// assert. So each case here asserts both directions — the header PRESENT with
+// the caller's token when supplied, and ABSENT when it is not.
+// ----------------------------------------------------------------------
+
+/** Pull the headers object the client handed `fetch` on its Nth call. */
+function headersOfCall(fetchMock: ReturnType<typeof vi.fn>, i = 0): Record<string, string> {
+    return (fetchMock.mock.calls[i]?.[1]?.headers ?? {}) as Record<string, string>;
+}
+
+/**
+ * The header NAMES that call put on the wire, sorted.
+ *
+ * The byte-identity claim has to be spelled this way rather than as "the
+ * `init` has no `headers` key": the mock here is `fetchImpl`, and the client's
+ * private `fetch` always hands it a merged header object (`Content-Type`, plus
+ * auth / environment / locale when configured). `metaSaveHeaders` returning
+ * `undefined` is what keeps that merge byte-identical to an un-pinned save —
+ * this is where that shows up.
+ */
+function headerNamesOf(fetchMock: ReturnType<typeof vi.fn>, i = 0): string[] {
+    return Object.keys(headersOfCall(fetchMock, i)).sort();
+}
+
+/** What an un-pinned save sends on this bare mock client: nothing but the body type. */
+const BASELINE_HEADERS = ['Content-Type'];
+
+const OCC_TOKEN = 'sha256:' + 'b'.repeat(64);
+
+describe('[#11713] meta.saveItem sends the If-Match header (unscoped client)', () => {
+    it('sends `ifMatch` as the If-Match request header, verbatim', async () => {
+        const { client, fetchMock } = createMockClient({ success: true, version: 'sha256:next' });
+        await client.meta.saveItem('object', 'customer', { name: 'customer' }, { ifMatch: OCC_TOKEN });
+        // THE assertion this card exists for: the token reaches the wire.
+        expect(headersOfCall(fetchMock)['If-Match']).toBe(OCC_TOKEN);
+        // Verbatim and unquoted — the sibling first-party client
+        // (`@object-ui/data-objectstack` MetadataClient.save) sends exactly
+        // these bytes, and the door strips ETag quotes rather than requiring
+        // them.
+        expect(headersOfCall(fetchMock)['If-Match']).not.toContain('"');
+    });
+
+    it('ABSENT when the caller does not pin: no If-Match, and no `headers` key at all', async () => {
+        const { client, fetchMock } = createMockClient({ success: true });
+        await client.meta.saveItem('object', 'customer', { name: 'customer' });
+        expect(headersOfCall(fetchMock)['If-Match']).toBeUndefined();
+        // Byte-identity, not merely "no If-Match": the builder returns
+        // `undefined`, so the header set this save puts on the wire is exactly
+        // the one an un-pinned save always sent. Last-write-wins stays default.
+        expect(headerNamesOf(fetchMock)).toEqual(BASELINE_HEADERS);
+    });
+
+    it('ABSENT when the bag is present but carries no token', async () => {
+        const { client, fetchMock } = createMockClient({ success: true });
+        await client.meta.saveItem('object', 'customer', {}, { force: true });
+        expect(headersOfCall(fetchMock)['If-Match']).toBeUndefined();
+        expect(headerNamesOf(fetchMock)).toEqual(BASELINE_HEADERS);
+    });
+
+    it("ABSENT for an empty token — `''` never reaches the wire", async () => {
+        const { client, fetchMock } = createMockClient({ success: true });
+        await client.meta.saveItem('object', 'customer', {}, { ifMatch: '' });
+        // An empty `If-Match` is not a no-op on the door: presence means "pin
+        // this write", so an emitted empty header would pin against the empty
+        // string and refuse a save the caller never asked to pin.
+        expect(headersOfCall(fetchMock)['If-Match']).toBeUndefined();
+        expect(headerNamesOf(fetchMock)).toEqual(BASELINE_HEADERS);
+    });
+
+    it('is a HEADER, not a query parameter: the URL is byte-identical to an unpinned save', async () => {
+        const { client, fetchMock } = createMockClient({ success: true });
+        await client.meta.saveItem('object', 'customer', {}, { ifMatch: OCC_TOKEN });
+        // `?ifMatch=` is read by neither PUT door. If it ever appeared here it
+        // would look set at the call site and protect nothing.
+        expect(String(fetchMock.mock.calls[0][0])).toBe(
+            'http://localhost:3000/api/v1/meta/object/customer',
+        );
+        expect(headersOfCall(fetchMock)['If-Match']).toBe(OCC_TOKEN);
+    });
+
+    it('rides alongside the #11391 query parameters without disturbing them', async () => {
+        const { client, fetchMock } = createMockClient({ success: true });
+        await client.meta.saveItem('object', 'customer', { name: 'customer' }, {
+            ifMatch: OCC_TOKEN,
+            force: true,
+            packageId: 'app.crm',
+            mode: 'draft',
+        });
+        expect(String(fetchMock.mock.calls[0][0])).toBe(
+            'http://localhost:3000/api/v1/meta/object/customer?force=true&package=app.crm&mode=draft',
+        );
+        expect(headersOfCall(fetchMock)['If-Match']).toBe(OCC_TOKEN);
+        const init = fetchMock.mock.calls[0][1];
+        expect(init.method).toBe('PUT');
+        // The token is not a field on the document being saved.
+        expect(JSON.parse(init.body)).toEqual({ name: 'customer' });
+    });
+
+    it('OCC-guards a COMPOUND name too — unlike `mode`, this reaches both doors', async () => {
+        const { client, fetchMock } = createMockClient({ success: true });
+        await client.meta.saveItem('object', 'views/all_leads', { label: 'All leads' }, { ifMatch: OCC_TOKEN });
+        // The compound-name door `PUT /meta/:type/:section/:name` reads
+        // `if-match` and strips ETag quotes exactly as the single-segment door
+        // does — measured in rest-server.ts. `mode` is the member that does NOT
+        // reach it; this one does, so the slash must survive AND the pin must
+        // ride along.
+        expect(String(fetchMock.mock.calls[0][0])).toBe(
+            'http://localhost:3000/api/v1/meta/object/views/all_leads',
+        );
+        expect(headersOfCall(fetchMock)['If-Match']).toBe(OCC_TOKEN);
+    });
+});
+
+describe('[#11713] meta.saveItem sends the If-Match header (environment-scoped twin)', () => {
+    it('sends the header on the scoped client too', async () => {
+        const { client, fetchMock } = createMockClient({ success: true });
+        await client.project('proj-123').meta.saveItem(
+            'object', 'customer', { name: 'customer' }, { ifMatch: OCC_TOKEN },
+        );
+        expect(String(fetchMock.mock.calls[0][0])).toBe(
+            'http://localhost:3000/api/v1/environments/proj-123/meta/object/customer',
+        );
+        expect(headersOfCall(fetchMock)['If-Match']).toBe(OCC_TOKEN);
+    });
+
+    it('ABSENT on the scoped client when the caller does not pin', async () => {
+        const { client, fetchMock } = createMockClient({ success: true });
+        await client.project('proj-123').meta.saveItem('object', 'customer', { name: 'customer' });
+        expect(headersOfCall(fetchMock)['If-Match']).toBeUndefined();
+        expect(headerNamesOf(fetchMock)).toEqual(BASELINE_HEADERS);
+    });
+
+    it('IN STEP with the unscoped twin: identical If-Match for identical options', async () => {
+        // The divergence this card is about is a fix landing on one twin only.
+        // Comparing the two headers keeps holding if either path changes,
+        // rather than restating a literal on both sides.
+        const { client, fetchMock } = createMockClient({ success: true });
+        const opts = { ifMatch: OCC_TOKEN, force: true } as const;
+        await client.meta.saveItem('object', 'customer', {}, opts);
+        await client.project('proj-123').meta.saveItem('object', 'customer', {}, opts);
+        expect(headersOfCall(fetchMock, 1)['If-Match']).toBe(headersOfCall(fetchMock, 0)['If-Match']);
+        expect(headersOfCall(fetchMock, 0)['If-Match']).toBe(OCC_TOKEN);
+    });
+
+    it('IN STEP when unpinned too: neither twin adds a header', async () => {
+        const { client, fetchMock } = createMockClient({ success: true });
+        await client.meta.saveItem('object', 'customer', {}, { force: true });
+        await client.project('proj-123').meta.saveItem('object', 'customer', {}, { force: true });
+        expect(headerNamesOf(fetchMock, 0)).toEqual(BASELINE_HEADERS);
+        expect(headerNamesOf(fetchMock, 1)).toEqual(BASELINE_HEADERS);
+    });
+});
+
+describe('[#11713] the docstring\'s OCC instruction is now executable end to end', () => {
+    it('save → pin the resolved `version` → the stale write is REFUSED, not silently applied', async () => {
+        // Round 1 answers a real save body; round 2 answers the real conflict
+        // envelope the door emits when `parentVersion` does not match
+        // (`{ code: 'METADATA_CONFLICT' }` at HTTP 409 — pinned in
+        // packages/rest/src/rest.test.ts).
+        const conflict = {
+            error: 'parentVersion mismatch',
+            code: 'METADATA_CONFLICT',
+        };
+        const responses: any[] = [
+            {
+                ok: true, status: 200, statusText: 'OK',
+                json: async () => ({ success: true, version: OCC_TOKEN, seq: 4, state: 'active' }),
+                headers: new Headers(),
+            },
+            { ok: false, status: 409, statusText: 'Conflict', json: async () => conflict, headers: new Headers() },
+        ];
+        const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(responses.shift()));
+        const client = new ObjectStackClient({ baseUrl: 'http://localhost:3000', fetch: fetchMock });
+
+        // 1. A save resolves the OCC carrier the docstring names.
+        const saved = await client.meta.saveItem('object', 'customer', { name: 'customer' });
+        expect(saved.version).toBe(OCC_TOKEN);
+        // Un-pinned, so no token was sent — this is the before-state.
+        expect(headersOfCall(fetchMock, 0)['If-Match']).toBeUndefined();
+
+        // 2. Do literally what the docstring prescribes. THIS is the
+        //    acceptance criterion: before #11713 there was no argument to
+        //    pass here, so the instruction could not be followed at all.
+        const err: any = await client.meta
+            .saveItem('object', 'customer', { name: 'customer v2' }, { ifMatch: saved.version })
+            .then(() => { throw new Error('expected the stale save to be refused'); }, (e) => e);
+        // Assert the ENVELOPE the caller branches on, not merely that
+        // something threw: a bare `.toThrow()` stays green against any error,
+        // including one from a client that never sent the header.
+        expect(err.code).toBe('METADATA_CONFLICT');
+        expect(err.httpStatus).toBe(409);
+        // And the pin really rode the second request.
+        expect(headersOfCall(fetchMock, 1)['If-Match']).toBe(OCC_TOKEN);
+    });
+});
