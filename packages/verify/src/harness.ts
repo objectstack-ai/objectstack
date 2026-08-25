@@ -700,7 +700,10 @@ export async function bootStack(
         'sys_invitation',
         {
           id: `inv_verify_${Math.random().toString(36).slice(2, 10)}`,
-          email,
+          // [#11770] Normalized, as the invitation route stores it — the
+          // audience probe reads `sys_invitation` by address, and better-auth
+          // lowercases both the stored address and the registrant's.
+          email: email.trim().toLowerCase(),
           status: 'pending',
           // A dedicated org id so fixtures counting THEIR invitations never
           // see these rows.
