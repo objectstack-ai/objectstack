@@ -603,9 +603,6 @@
     "packages/plugins/plugin-security/src/auto-org-admin-grant.test.ts": {
       "unjudged": 1
     },
-    "packages/plugins/plugin-security/src/bootstrap-declared-capabilities.test.ts": {
-      "blind": 1
-    },
     "packages/plugins/plugin-security/src/bootstrap-declared-permissions.test.ts": {
       "blind": 1
     },
@@ -632,6 +629,9 @@
     },
     "packages/plugins/plugin-security/src/packaged-permission-set-overlay-detection.test.ts": {
       "unjudged": 1
+    },
+    "packages/plugins/plugin-security/src/packaged-permission-set-restore-leg.test.ts": {
+      "blind": 1
     },
     "packages/plugins/plugin-security/src/permission-denied-user-copy.test.ts": {
       "blind": 1
@@ -691,6 +691,9 @@
       "blind": 1
     },
     "packages/rest/src/meta-compound-save-force-parity.test.ts": {
+      "blind": 1
+    },
+    "packages/rest/src/meta-compound-save-mode-parity.test.ts": {
       "blind": 1
     },
     "packages/rest/src/meta-object-extension-property-classes.test.ts": {
@@ -824,6 +827,9 @@
     },
     "packages/services/service-storage/src/lax-deviation-reclamation-gate.test.ts": {
       "blind": 2
+    },
+    "packages/services/service-storage/src/tombstone-hydration-download-agreement.test.ts": {
+      "unjudged": 1
     },
     "packages/triggers/trigger-record-change/src/bulk-write-per-row-context.test.ts": {
       "blind": 1
