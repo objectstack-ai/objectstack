@@ -110,6 +110,17 @@ const result = EnhancedApiErrorSchema.parse(data);
 * `INTEGRATION_ERROR`
 * `WEBHOOK_DELIVERY_FAILED`
 
+### Nested Shape: `EnhancedApiError.fields[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **field** | `string` | ✅ | Field path (supports dot notation) |
+| **code** | `Enum<'required' \| 'invalid_type' \| 'invalid_shape' \| 'unknown_field' \| …>` | ✅ | Which constraint the value violated (field-level catalog, ADR-0114) |
+| **message** | `string` | ✅ | Human-readable error message, rendered in the caller’s locale |
+| **label** | `string` | optional | Field display label in the caller’s locale |
+| **value** | `any` | optional | The invalid value that was provided |
+| **constraint** | `Record<string, any>` | optional | The constraint that was violated, as discrete values (e.g. `{ maxLength: 512, actual: 3000 }`) |
+
 
 ---
 
@@ -139,6 +150,27 @@ const result = EnhancedApiErrorSchema.parse(data);
 | **success** | `false` | ✅ | Always false for error responses |
 | **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>; message: string; userMessage?: string; category?: Enum<'validation' \| 'authentication' \| 'authorization' \| 'not_found' \| 'conflict' \| …>; … }` | ✅ | Error details |
 | **meta** | `{ timestamp?: string; requestId?: string; traceId?: string }` | optional | Response metadata |
+
+### Nested Shape: `ErrorResponse.error`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>` | ✅ | Machine-readable error code |
+| **message** | `string` | ✅ | Human-readable error message |
+| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim (#9934) — see ApiErrorSchema.userMessage. Present only when the producer opted in at throw time; unmarked errors keep the generic consumer substitution (#3821). |
+| **category** | `Enum<'validation' \| 'authentication' \| 'authorization' \| 'not_found' \| 'conflict' \| …>` | optional | Error category |
+| **httpStatus** | `number` | optional | HTTP status code |
+| **retryable** | `boolean` | optional (default: `false`) | Whether the request can be retried |
+| **retryStrategy** | `Enum<'no_retry' \| 'retry_immediate' \| 'retry_backoff' \| 'retry_after'>` | optional | Recommended retry strategy |
+| **retryAfter** | `number` | optional | Seconds to wait before retrying |
+| **details** | `any` | optional | Additional error context |
+| **fields** | `{ field: string; code: Enum<'required' \| 'invalid_type' \| 'invalid_shape' \| 'unknown_field' \| …>; message: string; label?: string; … }[]` | optional | One entry per offending value |
+| **fieldErrors** | `never` | optional | [REMOVED] `EnhancedApiError.fieldErrors` was renamed to `fields` in @objectstack/spec 17 (ADR-0114 D4, #3977) — the array is unchanged, only the property name. Every producer already emitted `fields`; `fieldErrors` was declared and never emitted, so a reader keying on it was reading a field no server sent. |
+| **timestamp** | `string` | optional | When the error occurred |
+| **requestId** | `string` | optional | Request ID for tracking |
+| **traceId** | `string` | optional | Distributed trace ID |
+| **documentation** | `string` | optional | URL to error documentation |
+| **helpText** | `string` | optional | Suggested actions to resolve the error |
 
 
 ---

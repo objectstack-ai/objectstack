@@ -46,6 +46,40 @@ const result = KernelSecurityPolicySchema.parse(data);
 | **encryption** | `{ dataAtRest: boolean; dataInTransit: boolean; algorithm?: string; minKeyLength?: integer }` | optional |  |
 | **auditLog** | `{ enabled: boolean; events?: string[]; retention?: integer }` | optional |  |
 
+### Nested Shape: `KernelSecurityPolicy.rateLimit`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **enabled** | `boolean` | optional (default: `true`) |  |
+| **maxRequests** | `integer` | ✅ |  |
+| **windowMs** | `integer` | ✅ | Time window in milliseconds |
+| **strategy** | `Enum<'fixed' \| 'sliding' \| 'token-bucket'>` | optional (default: `"sliding"`) |  |
+
+### Nested Shape: `KernelSecurityPolicy.authentication`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **required** | `boolean` | optional (default: `true`) |  |
+| **methods** | `Enum<'jwt' \| 'oauth2' \| 'api-key' \| 'session' \| 'certificate'>[]` | ✅ |  |
+| **tokenExpiration** | `integer` | optional | Token expiration in seconds |
+
+### Nested Shape: `KernelSecurityPolicy.encryption`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **dataAtRest** | `boolean` | optional (default: `false`) | Encrypt data at rest |
+| **dataInTransit** | `boolean` | optional (default: `true`) | Enforce HTTPS/TLS |
+| **algorithm** | `string` | optional | Encryption algorithm |
+| **minKeyLength** | `integer` | optional | Minimum key length in bits |
+
+### Nested Shape: `KernelSecurityPolicy.auditLog`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **enabled** | `boolean` | optional (default: `true`) |  |
+| **events** | `string[]` | optional | Events to log |
+| **retention** | `integer` | optional | Log retention in days |
+
 
 ---
 
@@ -63,6 +97,17 @@ const result = KernelSecurityPolicySchema.parse(data);
 | **dependencyVulnerabilities** | `{ package: string; version: string; vulnerability: object }[]` | optional |  |
 | **licenseCompliance** | `{ status: Enum<'compliant' \| 'non-compliant' \| 'unknown'>; issues?: object[] }` | optional |  |
 | **summary** | `{ totalVulnerabilities: integer; criticalCount: integer; highCount: integer; mediumCount: integer; … }` | ✅ |  |
+
+### Nested Shape: `KernelSecurityScanResult.codeIssues[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **severity** | `Enum<'error' \| 'warning' \| 'info'>` | ✅ |  |
+| **type** | `string` | ✅ | Issue type (e.g., sql-injection, xss) |
+| **file** | `string` | ✅ |  |
+| **line** | `integer` | optional |  |
+| **message** | `string` | ✅ |  |
+| **suggestion** | `string` | optional |  |
 
 
 ---
@@ -164,6 +209,14 @@ Scope of permission application
 * `process.spawn`
 * `process.env`
 
+### Nested Shape: `PluginPermission.filter`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **resourceIds** | `string[]` | optional |  |
+| **condition** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Predicate (CEL) filter, e.g. P`record.owner == os.user.id`. |
+| **fields** | `string[]` | optional | Allowed fields for data resources |
+
 
 ---
 
@@ -176,6 +229,27 @@ Scope of permission application
 | **permissions** | `{ id: string; resource: Enum<'data.object' \| 'data.record' \| 'data.field' \| 'ui.view' \| 'ui.dashboard' \| …>; actions: Enum<'create' \| 'read' \| 'update' \| 'delete' \| 'execute' \| 'manage' \| 'configure' \| …>[]; scope?: Enum<'global' \| 'tenant' \| 'user' \| 'resource' \| 'plugin'>; … }[]` | ✅ |  |
 | **groups** | `{ name: string; description: string; permissions: string[] }[]` | optional |  |
 | **defaultGrant** | `Enum<'prompt' \| 'allow' \| 'deny' \| 'inherit'>` | optional (default: `"prompt"`) |  |
+
+### Nested Shape: `PluginPermissionSet.permissions[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ | Unique permission identifier |
+| **resource** | `Enum<'data.object' \| 'data.record' \| 'data.field' \| 'ui.view' \| 'ui.dashboard' \| …>` | ✅ | Type of resource being accessed |
+| **actions** | `Enum<'create' \| 'read' \| 'update' \| 'delete' \| 'execute' \| 'manage' \| 'configure' \| …>[]` | ✅ |  |
+| **scope** | `Enum<'global' \| 'tenant' \| 'user' \| 'resource' \| 'plugin'>` | optional (default: `"plugin"`) | Scope of permission application |
+| **filter** | `{ resourceIds?: string[]; condition?: string \| object; fields?: string[] }` | optional |  |
+| **description** | `string` | ✅ |  |
+| **required** | `boolean` | optional (default: `true`) |  |
+| **justification** | `string` | optional | Why this permission is needed |
+
+### Nested Shape: `PluginPermissionSet.groups[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Group name |
+| **description** | `string` | ✅ |  |
+| **permissions** | `string[]` | ✅ | Permission IDs in this group |
 
 
 ---
@@ -197,6 +271,38 @@ Scope of permission application
 | **certifications** | `{ name: string; issuer: string; issuedDate: string; expiryDate?: string; … }[]` | optional |  |
 | **securityContact** | `{ email?: string; url?: string; pgpKey?: string }` | optional |  |
 | **vulnerabilityDisclosure** | `{ policyUrl?: string; responseTime?: integer; bugBounty?: boolean }` | optional |  |
+
+### Nested Shape: `PluginSecurityManifest.sandbox`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **enabled** | `boolean` | optional (default: `true`) |  |
+| **level** | `Enum<'none' \| 'minimal' \| 'standard' \| 'strict' \| 'paranoid'>` | optional (default: `"standard"`) |  |
+| **runtime** | `{ engine?: Enum<'v8-isolate' \| 'wasm' \| 'container' \| 'process'>; engineConfig?: object; resourceLimits?: object }` | optional | Execution environment and isolation settings |
+| **filesystem** | `{ mode?: Enum<'none' \| 'readonly' \| 'restricted' \| 'full'>; allowedPaths?: string[]; deniedPaths?: string[]; maxFileSize?: integer }` | optional |  |
+| **network** | `{ mode?: Enum<'none' \| 'local' \| 'restricted' \| 'full'>; allowedHosts?: string[]; deniedHosts?: string[]; allowedPorts?: number[]; … }` | optional |  |
+| **process** | `{ allowSpawn?: boolean; allowedCommands?: string[]; timeout?: integer }` | optional |  |
+| **memory** | `{ maxHeap?: integer; maxStack?: integer }` | optional |  |
+| **cpu** | `{ maxCpuPercent?: number; maxThreads?: integer }` | optional |  |
+| **environment** | `{ mode?: Enum<'none' \| 'readonly' \| 'restricted' \| 'full'>; allowedVars?: string[]; deniedVars?: string[] }` | optional |  |
+
+### Nested Shape: `PluginSecurityManifest.certifications[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Certification name (e.g., SOC 2, ISO 27001) |
+| **issuer** | `string` | ✅ |  |
+| **issuedDate** | `string` | ✅ |  |
+| **expiryDate** | `string` | optional |  |
+| **certificateUrl** | `string` | optional |  |
+
+### Nested Shape: `PluginSecurityManifest.vulnerabilityDisclosure`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **policyUrl** | `string` | optional |  |
+| **responseTime** | `integer` | optional | Expected response time in hours |
+| **bugBounty** | `boolean` | optional (default: `false`) |  |
 
 
 ---
@@ -252,6 +358,14 @@ Type of resource being accessed
 | **engineConfig** | `{ wasm?: object; container?: object; v8Isolate?: object }` | optional |  |
 | **resourceLimits** | `{ maxMemory?: integer; maxCpu?: number; timeout?: integer }` | optional |  |
 
+### Nested Shape: `RuntimeConfig.resourceLimits`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **maxMemory** | `integer` | optional | Maximum memory allocation |
+| **maxCpu** | `number` | optional | Maximum CPU usage percentage |
+| **timeout** | `integer` | optional | Maximum execution time |
+
 
 ---
 
@@ -270,6 +384,48 @@ Type of resource being accessed
 | **memory** | `{ maxHeap?: integer; maxStack?: integer }` | optional |  |
 | **cpu** | `{ maxCpuPercent?: number; maxThreads?: integer }` | optional |  |
 | **environment** | `{ mode: Enum<'none' \| 'readonly' \| 'restricted' \| 'full'>; allowedVars?: string[]; deniedVars?: string[] }` | optional |  |
+
+### Nested Shape: `SandboxConfig.runtime`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **engine** | `Enum<'v8-isolate' \| 'wasm' \| 'container' \| 'process'>` | optional (default: `"v8-isolate"`) | Execution environment engine |
+| **engineConfig** | `{ wasm?: object; container?: object; v8Isolate?: object }` | optional |  |
+| **resourceLimits** | `{ maxMemory?: integer; maxCpu?: number; timeout?: integer }` | optional |  |
+
+### Nested Shape: `SandboxConfig.filesystem`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **mode** | `Enum<'none' \| 'readonly' \| 'restricted' \| 'full'>` | optional (default: `"restricted"`) |  |
+| **allowedPaths** | `string[]` | optional | Whitelisted paths |
+| **deniedPaths** | `string[]` | optional | Blacklisted paths |
+| **maxFileSize** | `integer` | optional | Maximum file size in bytes |
+
+### Nested Shape: `SandboxConfig.network`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **mode** | `Enum<'none' \| 'local' \| 'restricted' \| 'full'>` | optional (default: `"restricted"`) |  |
+| **allowedHosts** | `string[]` | optional | Whitelisted hosts |
+| **deniedHosts** | `string[]` | optional | Blacklisted hosts |
+| **allowedPorts** | `number[]` | optional | Allowed port numbers |
+| **maxConnections** | `integer` | optional |  |
+
+### Nested Shape: `SandboxConfig.process`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **allowSpawn** | `boolean` | optional (default: `false`) | Allow spawning child processes |
+| **allowedCommands** | `string[]` | optional | Whitelisted commands |
+| **timeout** | `integer` | optional | Process timeout in ms |
+
+### Nested Shape: `SandboxConfig.memory`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **maxHeap** | `integer` | optional | Maximum heap size in bytes |
+| **maxStack** | `integer` | optional | Maximum stack size in bytes |
 
 
 ---

@@ -61,6 +61,18 @@ const result = BookSchema.parse(data);
 | **_packageVersion** | `string` | optional | Owning package version. |
 | **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
 
+### Nested Shape: `Book.groups[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **key** | `string` | ✅ | Stable group key (used by overrides, deep links, explicit `doc.group`) |
+| **label** | `string` | ✅ | Section title — first-class, i18n-homed |
+| **translations** | `never` | optional | [REMOVED] Inline `translations` on a book (and on a book group) was removed in @objectstack/spec 17.0.0 (#4667, ADR-0049) — no resolver ever read it. The book tree endpoint and the docs portal render `label` / `description` verbatim in every locale, so a localized book shipped its authoring-locale strings to every reader. Delete the key. NOTE the near neighbour that DOES work: `doc.translations` is live and read on every doc render path — localize the docs themselves, and the portal picks the reader's locale up from there. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
+| **order** | `number` | optional | Order of THIS group within the book |
+| **include** | `string \| { tag: string }` | optional | Rule that derives membership (glob or tag) |
+| **package** | `string` | optional | Scope the rule to a package id (default: the book package; cross-package via ADR-0048) |
+| **pages** | `(string \| { doc?: string; href?: string; label?: string; badge?: string; … })[]` | optional | OPTIONAL explicit override — hand-pin a curated order; wins over `include` |
+
 
 ---
 
@@ -108,6 +120,16 @@ Type: `'public'`
 | **include** | `string \| { tag: string }` | optional | Rule that derives membership (glob or tag) |
 | **package** | `string` | optional | Scope the rule to a package id (default: the book package; cross-package via ADR-0048) |
 | **pages** | `(string \| { doc?: string; href?: string; label?: string; badge?: string; … })[]` | optional | OPTIONAL explicit override — hand-pin a curated order; wins over `include` |
+
+### Nested Shape: `BookGroup.pages[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **doc** | `string` | optional | Doc name to reference |
+| **href** | `string` | optional | External link (use instead of `doc`) |
+| **label** | `string` | optional | Optional label override; title authority stays in the doc |
+| **badge** | `string` | optional | e.g. "beta" \| "new" |
+| **icon** | `string` | optional |  |
 
 
 ---

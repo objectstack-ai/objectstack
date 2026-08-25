@@ -58,6 +58,22 @@ const result = AwarenessEventSchema.parse(data);
 | **lastUpdate** | `string` | ✅ | ISO 8601 datetime of last update |
 | **metadata** | `Record<string, any>` | optional | Session metadata |
 
+### Nested Shape: `AwarenessSession.users[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **userId** | `string` | ✅ | User identifier |
+| **sessionId** | `string` | ✅ | Session identifier |
+| **userName** | `string` | ✅ | Display name |
+| **userAvatar** | `string` | optional | User avatar URL |
+| **status** | `Enum<'active' \| 'idle' \| 'viewing' \| 'disconnected'>` | ✅ | Current activity status |
+| **currentDocument** | `string` | optional | Document ID user is currently editing |
+| **currentView** | `string` | optional | Current view/page user is on |
+| **lastActivity** | `string` | ✅ | ISO 8601 datetime of last activity |
+| **joinedAt** | `string` | ✅ | ISO 8601 datetime when user joined session |
+| **permissions** | `string[]` | optional | User permissions in this session |
+| **metadata** | `Record<string, any>` | optional | Additional user state metadata |
+
 
 ---
 
@@ -105,6 +121,14 @@ const result = AwarenessEventSchema.parse(data);
 | **state** | `{ type: 'lww-register'; value: any; timestamp: string; replicaId: string; … } \| { type: 'g-counter'; counts: Record<string, integer> } \| { type: 'pn-counter'; positive: Record<string, integer>; negative: Record<string, integer> } \| { type: 'or-set'; elements: object[] } \| … +1 more` | ✅ | Merged CRDT state |
 | **conflicts** | `{ type: string; description: string; resolved: boolean }[]` | optional | Conflicts encountered during merge |
 
+### Nested Shape: `CRDTMergeResult.conflicts[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `string` | ✅ | Conflict type |
+| **description** | `string` | ✅ | Conflict description |
+| **resolved** | `boolean` | ✅ | Whether conflict was automatically resolved |
+
 
 ---
 
@@ -127,6 +151,12 @@ This schema accepts one of the following structures:
 | **timestamp** | `string` | ✅ | ISO 8601 datetime of last write |
 | **replicaId** | `string` | ✅ | ID of replica that performed last write |
 | **vectorClock** | `{ clock: Record<string, integer> }` | optional | Optional vector clock for causality tracking |
+
+### Nested Shape: `CRDTState.vectorClock`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **clock** | `Record<string, integer>` | ✅ | Map of replica ID to logical timestamp |
 
 ---
 
@@ -168,6 +198,16 @@ This schema accepts one of the following structures:
 | **type** | `'or-set'` | ✅ |  |
 | **elements** | `{ value: any; timestamp: string; replicaId: string; uid: string; … }[]` | ✅ | Set elements with metadata |
 
+### Nested Shape: `CRDTState.elements[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **value** | `any` | ✅ | Element value |
+| **timestamp** | `string` | ✅ | Addition timestamp |
+| **replicaId** | `string` | ✅ | Replica that added the element |
+| **uid** | `string` | ✅ | Unique identifier for this addition |
+| **removed** | `boolean` | optional (default: `false`) | Whether element has been removed |
+
 ---
 
 #### Option 5
@@ -184,6 +224,24 @@ This schema accepts one of the following structures:
 | **operations** | `{ operationId: string; replicaId: string; position: integer; insert?: string; … }[]` | ✅ | History of operations |
 | **lamportClock** | `integer` | ✅ | Current Lamport clock value |
 | **vectorClock** | `{ clock: Record<string, integer> }` | ✅ | Vector clock for causality |
+
+### Nested Shape: `CRDTState.operations[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **operationId** | `string` | ✅ | Unique operation identifier |
+| **replicaId** | `string` | ✅ | Replica identifier |
+| **position** | `integer` | ✅ | Position in document |
+| **insert** | `string` | optional | Text to insert |
+| **delete** | `integer` | optional | Number of characters to delete |
+| **timestamp** | `string` | ✅ | ISO 8601 datetime of operation |
+| **lamportTimestamp** | `integer` | ✅ | Lamport timestamp for ordering |
+
+### Nested Shape: `CRDTState.vectorClock`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **clock** | `Record<string, integer>` | ✅ | Map of replica ID to logical timestamp |
 
 ---
 
@@ -236,6 +294,51 @@ This schema accepts one of the following structures:
 | **lastActivity** | `string` | ✅ | ISO 8601 datetime of last activity |
 | **status** | `Enum<'active' \| 'idle' \| 'ended'>` | ✅ | Session status |
 
+### Nested Shape: `CollaborationSession.config`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **mode** | `Enum<'ot' \| 'crdt' \| 'lock' \| 'hybrid'>` | ✅ | Collaboration mode to use |
+| **enableCursorSharing** | `boolean` | optional (default: `true`) | Enable cursor sharing |
+| **enablePresence** | `boolean` | optional (default: `true`) | Enable presence tracking |
+| **enableAwareness** | `boolean` | optional (default: `true`) | Enable awareness state |
+| **maxUsers** | `integer` | optional | Maximum concurrent users |
+| **idleTimeout** | `integer` | optional (default: `300000`) | Idle timeout in milliseconds |
+| **conflictResolution** | `Enum<'ot' \| 'crdt' \| 'manual'>` | optional (default: `"ot"`) | Conflict resolution strategy |
+| **persistence** | `boolean` | optional (default: `true`) | Enable operation persistence |
+| **snapshot** | `{ enabled: boolean; interval: integer }` | optional | Snapshot configuration |
+
+### Nested Shape: `CollaborationSession.users[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **userId** | `string` | ✅ | User identifier |
+| **sessionId** | `string` | ✅ | Session identifier |
+| **userName** | `string` | ✅ | Display name |
+| **userAvatar** | `string` | optional | User avatar URL |
+| **status** | `Enum<'active' \| 'idle' \| 'viewing' \| 'disconnected'>` | ✅ | Current activity status |
+| **currentDocument** | `string` | optional | Document ID user is currently editing |
+| **currentView** | `string` | optional | Current view/page user is on |
+| **lastActivity** | `string` | ✅ | ISO 8601 datetime of last activity |
+| **joinedAt** | `string` | ✅ | ISO 8601 datetime when user joined session |
+| **permissions** | `string[]` | optional | User permissions in this session |
+| **metadata** | `Record<string, any>` | optional | Additional user state metadata |
+
+### Nested Shape: `CollaborationSession.cursors[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **userId** | `string` | ✅ | User identifier |
+| **sessionId** | `string` | ✅ | Session identifier |
+| **documentId** | `string` | ✅ | Document identifier |
+| **userName** | `string` | ✅ | Display name of user |
+| **position** | `{ line: integer; column: integer }` | ✅ | Current cursor position |
+| **selection** | `{ anchor: object; focus: object; direction?: Enum<'forward' \| 'backward'> }` | optional | Current text selection |
+| **style** | `{ color: Enum<'blue' \| 'green' \| 'red' \| 'yellow' \| 'purple' \| 'orange' \| 'pink' \| 'teal' \| 'indigo' \| 'cyan'> \| string; opacity: number; label?: string; showLabel: boolean; … }` | ✅ | Visual style for this cursor |
+| **isTyping** | `boolean` | optional (default: `false`) | Whether user is currently typing |
+| **lastUpdate** | `string` | ✅ | ISO 8601 datetime of last cursor update |
+| **metadata** | `Record<string, any>` | optional | Additional cursor metadata |
+
 
 ---
 
@@ -254,6 +357,13 @@ This schema accepts one of the following structures:
 | **conflictResolution** | `Enum<'ot' \| 'crdt' \| 'manual'>` | optional (default: `"ot"`) | Conflict resolution strategy |
 | **persistence** | `boolean` | optional (default: `true`) | Enable operation persistence |
 | **snapshot** | `{ enabled: boolean; interval: integer }` | optional | Snapshot configuration |
+
+### Nested Shape: `CollaborationSessionConfig.snapshot`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **enabled** | `boolean` | ✅ | Enable periodic snapshots |
+| **interval** | `integer` | ✅ | Snapshot interval in milliseconds |
 
 
 ---
@@ -274,6 +384,31 @@ This schema accepts one of the following structures:
 | **isTyping** | `boolean` | optional (default: `false`) | Whether user is currently typing |
 | **lastUpdate** | `string` | ✅ | ISO 8601 datetime of last cursor update |
 | **metadata** | `Record<string, any>` | optional | Additional cursor metadata |
+
+### Nested Shape: `CollaborativeCursor.position`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **line** | `integer` | ✅ | Cursor line number (0-indexed) |
+| **column** | `integer` | ✅ | Cursor column number (0-indexed) |
+
+### Nested Shape: `CollaborativeCursor.selection`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **anchor** | `{ line: integer; column: integer }` | ✅ | Selection anchor (start point) |
+| **focus** | `{ line: integer; column: integer }` | ✅ | Selection focus (end point) |
+| **direction** | `Enum<'forward' \| 'backward'>` | optional | Selection direction |
+
+### Nested Shape: `CollaborativeCursor.style`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **color** | `Enum<'blue' \| 'green' \| 'red' \| 'yellow' \| 'purple' \| 'orange' \| 'pink' \| 'teal' \| 'indigo' \| 'cyan'> \| string` | ✅ | Cursor color (preset or custom hex) |
+| **opacity** | `number` | optional (default: `1`) | Cursor opacity (0-1) |
+| **label** | `string` | optional | Label to display with cursor (usually username) |
+| **showLabel** | `boolean` | optional (default: `true`) | Whether to show label |
+| **pulseOnUpdate** | `boolean` | optional (default: `true`) | Whether to pulse when cursor moves |
 
 
 ---
@@ -319,6 +454,20 @@ This schema accepts one of the following structures:
 | **focus** | `{ line: integer; column: integer }` | ✅ | Selection focus (end point) |
 | **direction** | `Enum<'forward' \| 'backward'>` | optional | Selection direction |
 
+### Nested Shape: `CursorSelection.anchor`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **line** | `integer` | ✅ | Anchor line number |
+| **column** | `integer` | ✅ | Anchor column number |
+
+### Nested Shape: `CursorSelection.focus`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **line** | `integer` | ✅ | Focus line number |
+| **column** | `integer` | ✅ | Focus column number |
+
 
 ---
 
@@ -348,6 +497,14 @@ This schema accepts one of the following structures:
 | **isTyping** | `boolean` | optional | Updated typing state |
 | **metadata** | `Record<string, any>` | optional | Updated metadata |
 
+### Nested Shape: `CursorUpdate.selection`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **anchor** | `{ line: integer; column: integer }` | ✅ | Selection anchor (start point) |
+| **focus** | `{ line: integer; column: integer }` | ✅ | Selection focus (end point) |
+| **direction** | `Enum<'forward' \| 'backward'>` | optional | Selection direction |
+
 
 ---
 
@@ -375,6 +532,12 @@ This schema accepts one of the following structures:
 | **replicaId** | `string` | ✅ | ID of replica that performed last write |
 | **vectorClock** | `{ clock: Record<string, integer> }` | optional | Optional vector clock for causality tracking |
 
+### Nested Shape: `LWWRegister.vectorClock`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **clock** | `Record<string, integer>` | ✅ | Map of replica ID to logical timestamp |
+
 
 ---
 
@@ -386,6 +549,16 @@ This schema accepts one of the following structures:
 | :--- | :--- | :--- | :--- |
 | **type** | `'or-set'` | ✅ |  |
 | **elements** | `{ value: any; timestamp: string; replicaId: string; uid: string; … }[]` | ✅ | Set elements with metadata |
+
+### Nested Shape: `ORSet.elements[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **value** | `any` | ✅ | Element value |
+| **timestamp** | `string` | ✅ | Addition timestamp |
+| **replicaId** | `string` | ✅ | Replica that added the element |
+| **uid** | `string` | ✅ | Unique identifier for this addition |
+| **removed** | `boolean` | optional (default: `false`) | Whether element has been removed |
 
 
 ---
@@ -494,6 +667,19 @@ This schema accepts one of the following structures:
 | **transformed** | `boolean` | ✅ | Whether transformation was applied |
 | **conflicts** | `string[]` | optional | Conflict descriptions if any |
 
+### Nested Shape: `OTTransformResult.operation`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **operationId** | `string` | ✅ | Unique operation identifier |
+| **documentId** | `string` | ✅ | Document identifier |
+| **userId** | `string` | ✅ | User who created the operation |
+| **sessionId** | `string` | ✅ | Session identifier |
+| **components** | `({ type: 'insert'; text: string; attributes?: Record<string, any> } \| { type: 'delete'; count: integer } \| { type: 'retain'; count: integer; attributes?: Record<string, any> })[]` | ✅ | Operation components |
+| **baseVersion** | `integer` | ✅ | Document version this operation is based on |
+| **timestamp** | `string` | ✅ | ISO 8601 datetime when operation was created |
+| **metadata** | `Record<string, any>` | optional | Additional operation metadata |
+
 
 ---
 
@@ -539,6 +725,24 @@ This schema accepts one of the following structures:
 | **operations** | `{ operationId: string; replicaId: string; position: integer; insert?: string; … }[]` | ✅ | History of operations |
 | **lamportClock** | `integer` | ✅ | Current Lamport clock value |
 | **vectorClock** | `{ clock: Record<string, integer> }` | ✅ | Vector clock for causality |
+
+### Nested Shape: `TextCRDTState.operations[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **operationId** | `string` | ✅ | Unique operation identifier |
+| **replicaId** | `string` | ✅ | Replica identifier |
+| **position** | `integer` | ✅ | Position in document |
+| **insert** | `string` | optional | Text to insert |
+| **delete** | `integer` | optional | Number of characters to delete |
+| **timestamp** | `string` | ✅ | ISO 8601 datetime of operation |
+| **lamportTimestamp** | `integer` | ✅ | Lamport timestamp for ordering |
+
+### Nested Shape: `TextCRDTState.vectorClock`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **clock** | `Record<string, integer>` | ✅ | Map of replica ID to logical timestamp |
 
 
 ---

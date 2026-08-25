@@ -36,6 +36,15 @@ const result = ElementDataSourceSchema.parse(data);
 | **sort** | `{ field: string; order: Enum<'asc' \| 'desc'> }[]` | optional | Sort order |
 | **limit** | `integer` | optional | Max records to display |
 
+### Nested Shape: `ElementDataSource.sort[number]`
+
+Sort field and direction pair
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **field** | `string` | ✅ | Field name to sort by |
+| **order** | `Enum<'asc' \| 'desc'>` | ✅ | Sort direction |
+
 
 ---
 
@@ -61,6 +70,86 @@ Interface-level page configuration (Airtable parity)
 | **recordAction** | `Enum<'drawer' \| 'page' \| 'modal' \| 'none'>` | optional | How clicking a record opens its detail (drawer \| page \| modal \| none). Default: drawer |
 | **showRecordCount** | `boolean` | optional | Show record count at page bottom |
 | **allowPrinting** | `boolean` | optional | Allow users to print the page |
+
+### Nested Shape: `InterfacePageConfig.columns[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **field** | `string` | ✅ | Field name (snake_case) |
+| **label** | `string \| Record<string, string>` | optional | Display label override |
+| **width** | `number` | optional | Column width in pixels |
+| **align** | `Enum<'left' \| 'center' \| 'right'>` | optional | Text alignment |
+| **hidden** | `boolean` | optional | Hide column by default |
+| **sortable** | `boolean` | optional | Allow sorting by this column |
+| **resizable** | `boolean` | optional | Allow resizing this column |
+| **wrap** | `boolean` | optional | Allow text wrapping |
+| **type** | `string` | optional | Renderer type override (e.g., "currency", "date") |
+| **pinned** | `Enum<'left' \| 'right'>` | optional | Pin/freeze column to left or right side |
+| **summary** | `Enum<'none' \| 'count' \| 'count_empty' \| 'count_filled' \| 'count_unique' \| …> \| { type: Enum<'none' \| 'count' \| 'count_empty' \| 'count_filled' \| 'count_unique' \| …>; field?: string }` | optional | Footer aggregation for this column — the function alone, or `{ type, field }` to aggregate another field |
+| **prefix** | `{ field: string; type: Enum<'badge' \| 'text'> }` | optional | Field rendered inline before this cell value |
+| **link** | `boolean` | optional | Functions as the primary navigation link (triggers View navigation) |
+| **action** | `string` | optional | Registered Action ID to execute when clicked |
+
+### Nested Shape: `InterfacePageConfig.sort[number]`
+
+Sort field and direction pair
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **field** | `string` | ✅ | Field name to sort by |
+| **order** | `Enum<'asc' \| 'desc'>` | ✅ | Sort direction |
+
+### Nested Shape: `InterfacePageConfig.filterBy[number]`
+
+View filter rule
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **field** | `string` | ✅ | Field name to filter on |
+| **operator** | `Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>` | ✅ | Filter operator |
+| **value** | `string \| number \| boolean \| null \| (string \| number)[]` | optional | Filter value. The accepted SHAPE depends on the operator: `in` / `not_in` take an array (any length, including []), `between` takes exactly [min, max], every other operator takes a scalar. The unary operators (is_empty / is_not_empty / is_null / is_not_null) take their direction from the operator name and ignore this key. |
+
+### Nested Shape: `InterfacePageConfig.appearance`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **showDescription** | `boolean` | optional (default: `true`) | Show the view description text |
+| **allowedVisualizations** | `Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>[]` | optional | Whitelist of visualization types users can switch between (e.g. ["grid", "gallery", "kanban"]) |
+
+### Nested Shape: `InterfacePageConfig.userFilters`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **element** | `Enum<'dropdown' \| 'tabs' \| 'toggle'>` | optional (default: `"dropdown"`) | Filter control style: "dropdown" (per-field value selectors) or "tabs" (named presets). "toggle" is deprecated. |
+| **fields** | `{ field: string; label?: string \| Record<string, string>; type?: Enum<'select' \| 'multi-select' \| 'boolean' \| 'date-range' \| 'text'>; options?: object[]; … }[]` | optional | Fields exposed as quick filters (dropdown/toggle elements) |
+| **tabs** | `{ name: string; label?: string \| Record<string, string>; icon?: string; view?: string; … }[]` | optional | Named filter presets rendered as tabs (tabs element). Reuses ViewTabSchema |
+| **showAllRecords** | `boolean` | optional | Show an "All records" tab before the presets (tabs element) |
+| **allowAddTab** | `boolean` | optional | Let end users add their own tab after the presets (tabs element): the affordance asks for a name and snapshots the filters currently applied as a new tab. SESSION-SCOPED — an added tab lives only for the current mount, is never written back as metadata (ADR-0047), and carries a remove control the authored presets do not. Page lists only — object views use `listViews` for named presets |
+
+### Nested Shape: `InterfacePageConfig.userActions`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **sort** | `boolean` | optional (default: `true`) | Allow users to sort records |
+| **search** | `boolean` | optional (default: `true`) | Allow users to search records |
+| **filter** | `boolean` | optional (default: `true`) | Allow users to filter records |
+| **refresh** | `boolean` | optional (default: `true`) | Allow users to reload the view data from the backend without a full page reload |
+| **rowHeight** | `boolean` | optional (default: `true`) | Allow users to toggle row height/density |
+| **group** | `boolean` | optional (default: `true`) | Allow users to change record grouping from the toolbar. Toggle only — the grouping itself is configured in the view-level `grouping` block. |
+| **addRecordForm** | `boolean` | optional (default: `false`) | Add records through a form instead of inline |
+| **editInline** | `boolean` | optional (default: `false`) | Allow users to edit records inline — click a cell to edit it with the field's type-aware widget (the same control the form uses). Off by default: the list is read-only unless the author opts in. |
+| **hideFields** | `boolean` | optional (default: `false`) | Allow users to hide/show fields from the toolbar (the affordance behind the view-level `hiddenFields` list). Boolean toggle — distinct from the record-details component's `hideFields`, which is an array of field names to omit. Off by default: column hiding is opt-in. |
+| **rowColor** | `boolean` | optional (default: `false`) | Allow users to configure row colouring from the toolbar. Boolean toggle — the colour rules themselves live in the view-level `rowColor` block. Off by default: row colouring is opt-in. |
+| **buttons** | `string[]` | optional | Custom action button IDs to show in the toolbar |
+
+### Nested Shape: `InterfacePageConfig.addRecord`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **enabled** | `boolean` | optional (default: `true`) | Show the add record entry point |
+| **position** | `Enum<'top' \| 'bottom' \| 'both'>` | optional (default: `"bottom"`) | Position of the add record button |
+| **mode** | `Enum<'inline' \| 'form' \| 'modal'>` | optional (default: `"inline"`) | How to add a new record |
+| **formView** | `string` | optional | Named form view to use when mode is "form" or "modal" |
 
 
 ---
@@ -96,6 +185,50 @@ Interface-level page configuration (Airtable parity)
 | **_packageVersion** | `string` | optional | Owning package version. |
 | **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
 
+### Nested Shape: `Page.variables[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Variable name. Exposed to expressions as `page.<name>`. |
+| **type** | `Enum<'string' \| 'number' \| 'boolean' \| 'object' \| 'array' \| 'record_id'>` | optional (default: `"string"`) |  |
+| **defaultValue** | `any` | optional | Initial value. Defaults to a type-appropriate empty value when omitted. |
+| **source** | `string` | optional | Component id that writes this variable (e.g. an element:record_picker whose `id` matches). |
+
+### Nested Shape: `Page.regions[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Region name (e.g. "sidebar", "main", "header") |
+| **width** | `Enum<'small' \| 'medium' \| 'large' \| 'full'>` | optional |  |
+| **components** | `{ type: Enum<'page:header' \| 'page:footer' \| 'page:sidebar' \| 'page:tabs' \| 'page:accordion' \| …> \| string; id?: string; label?: string \| Record<string, string>; properties?: Record<string, any>; … }[]` | ✅ | Components in this region |
+
+### Nested Shape: `Page.interfaceConfig`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **source** | `string` | optional | Source object name for the page |
+| **columns** | `string[] \| { field: string; label?: string \| Record<string, string>; width?: number; align?: Enum<'left' \| 'center' \| 'right'>; … }[]` | optional | Columns shown by the page. Blank = all object fields. Defined directly on the page (no view inheritance). |
+| **sort** | `{ field: string; order: Enum<'asc' \| 'desc'> }[]` | optional | Default sort order for the page, defined directly on the page. |
+| **filterBy** | `{ field: string; operator?: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Always-on page filter (base filter). |
+| **levels** | `integer` | optional | Number of hierarchy levels to display |
+| **sourceView** | `string` | optional | @deprecated Legacy named-view inheritance. Define columns/sort/filterBy on the page instead. |
+| **appearance** | `{ showDescription?: boolean; allowedVisualizations?: Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>[] }` | optional | Appearance and visualization configuration |
+| **userFilters** | `{ element?: Enum<'dropdown' \| 'tabs' \| 'toggle'>; fields?: object[]; tabs?: object[]; showAllRecords?: boolean; … }` | optional | End-user quick-filter bar for this page (overrides the source view's userFilters) |
+| **userActions** | `{ sort?: boolean; search?: boolean; filter?: boolean; refresh?: boolean; … }` | optional | User action toggles |
+| **addRecord** | `{ enabled?: boolean; position?: Enum<'top' \| 'bottom' \| 'both'>; mode?: Enum<'inline' \| 'form' \| 'modal'>; formView?: string }` | optional | Add record entry point configuration |
+| **buttons** | `string[]` | optional | Toolbar buttons — names of the source object's actions to surface in the page toolbar |
+| **recordAction** | `Enum<'drawer' \| 'page' \| 'modal' \| 'none'>` | optional | How clicking a record opens its detail (drawer \| page \| modal \| none). Default: drawer |
+| **showRecordCount** | `boolean` | optional | Show record count at page bottom |
+| **allowPrinting** | `boolean` | optional | Allow users to print the page |
+
+### Nested Shape: `Page.aria`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **ariaLabel** | `string \| Record<string, string>` | optional | Accessible label for screen readers (WAI-ARIA aria-label). Plain string, or an inline locale map — no translation-bundle slot addresses this key, so a plain string is announced in the source language. |
+| **ariaDescribedBy** | `string` | optional | ID of element providing additional description (WAI-ARIA aria-describedby) |
+| **role** | `string` | optional | WAI-ARIA role attribute (e.g., "dialog", "navigation", "alert") |
+
 
 ---
 
@@ -118,6 +251,33 @@ Interface-level page configuration (Airtable parity)
 | **dataSource** | `{ object: string; view?: string; filter?: any; sort?: object[]; … }` | optional | Per-element data binding for multi-object pages |
 | **responsive** | `never` | optional | [REMOVED] `page.components[].responsive` was removed in @objectstack/spec 17 (#11027, ADR-0049 D2) — no renderer ever read it, so per-breakpoint layout overrides (columns/order/visibility) parsed, validated, and then did nothing. Delete the key. For breakpoint behaviour that IS applied, use the sibling `responsiveStyles` (ADR-0065) — per-breakpoint CSS maps compiled to id-scoped CSS at render, e.g. `responsiveStyles: { xsmall: { display: 'none' } }` to hide a component on the narrowest screens. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand. |
 | **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
+
+### Nested Shape: `PageComponent.responsiveStyles`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **large** | `Record<string, string \| number>` | optional | Unconditional base (desktop-first) |
+| **medium** | `Record<string, string \| number>` | optional | Applied at ≤ medium breakpoint |
+| **small** | `Record<string, string \| number>` | optional | Applied at ≤ small breakpoint |
+| **xsmall** | `Record<string, string \| number>` | optional | Applied at ≤ xsmall breakpoint |
+
+### Nested Shape: `PageComponent.dataSource`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **object** | `string` | ✅ | Object to query |
+| **view** | `string` | optional | Named view to apply |
+| **filter** | `any` | optional | Additional filter criteria |
+| **sort** | `{ field: string; order: Enum<'asc' \| 'desc'> }[]` | optional | Sort order |
+| **limit** | `integer` | optional | Max records to display |
+
+### Nested Shape: `PageComponent.aria`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **ariaLabel** | `string \| Record<string, string>` | optional | Accessible label for screen readers (WAI-ARIA aria-label). Plain string, or an inline locale map — no translation-bundle slot addresses this key, so a plain string is announced in the source language. |
+| **ariaDescribedBy** | `string` | optional | ID of element providing additional description (WAI-ARIA aria-describedby) |
+| **role** | `string` | optional | WAI-ARIA role attribute (e.g., "dialog", "navigation", "alert") |
 
 
 ---
@@ -172,6 +332,24 @@ Interface-level page configuration (Airtable parity)
 | **name** | `string` | ✅ | Region name (e.g. "sidebar", "main", "header") |
 | **width** | `Enum<'small' \| 'medium' \| 'large' \| 'full'>` | optional |  |
 | **components** | `{ type: Enum<'page:header' \| 'page:footer' \| 'page:sidebar' \| 'page:tabs' \| 'page:accordion' \| …> \| string; id?: string; label?: string \| Record<string, string>; properties?: Record<string, any>; … }[]` | ✅ | Components in this region |
+
+### Nested Shape: `PageRegion.components[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `Enum<'page:header' \| 'page:footer' \| 'page:sidebar' \| 'page:tabs' \| 'page:accordion' \| …> \| string` | ✅ | Component Type (Standard enum or custom string) |
+| **id** | `string` | optional | Unique instance ID |
+| **label** | `string \| Record<string, string>` | optional | Display label — the default-language string, or an inline locale map (`{ en, "zh-CN" }`) resolved at render time |
+| **properties** | `Record<string, any>` | optional (default: `{}`) | Component props passed to the widget. See component.zod.ts for schemas. |
+| **events** | `Record<string, string>` | optional | Event handlers map |
+| **style** | `Record<string, string>` | optional | Inline styles or utility classes |
+| **className** | `string` | optional | CSS class names |
+| **responsiveStyles** | `{ large?: Record<string, string \| number>; medium?: Record<string, string \| number>; small?: Record<string, string \| number>; xsmall?: Record<string, string \| number> }` | optional | Per-breakpoint scoped style maps (ADR-0065) |
+| **visibleWhen** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL) — component rendered only when TRUE. Contract-bound roots: `record`, `current_user` (ADR-0068 aliases `user` / `ctx.user` — one object, three spellings), and page state as `page.<var>`. The shipping renderer additionally mounts `app`, `features`, `os.user` and binds `data` to the data-source ADAPTER here — renderer behaviour, NOT contract-guaranteed (ADR-0068 rules the user object only). ⚠️ `data` is surface-dependent: on a `page:tabs` item `visibleWhen` it is the record ROW instead. e.g. "page.selectedProjectId != ''" |
+| **visibility** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | [DEPRECATED → `visibleWhen`] Visibility predicate (CEL). Normalized to `visibleWhen` at parse. |
+| **dataSource** | `{ object: string; view?: string; filter?: any; sort?: object[]; … }` | optional | Per-element data binding for multi-object pages |
+| **responsive** | `never` | optional | [REMOVED] `page.components[].responsive` was removed in @objectstack/spec 17 (#11027, ADR-0049 D2) — no renderer ever read it, so per-breakpoint layout overrides (columns/order/visibility) parsed, validated, and then did nothing. Delete the key. For breakpoint behaviour that IS applied, use the sibling `responsiveStyles` (ADR-0065) — per-breakpoint CSS maps compiled to id-scoped CSS at render, e.g. `responsiveStyles: { xsmall: { display: 'none' } }` to hide a component on the narrowest screens. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand. |
+| **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
 
 
 ---

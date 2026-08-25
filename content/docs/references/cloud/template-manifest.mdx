@@ -61,6 +61,18 @@ objectstack.manifest.json — template / package source descriptor
 | **scaffold** | `{ variables?: Record<string, any>; postInstall?: string[] }` | optional |  |
 | **readmePath** | `string` | optional | Path (relative to manifest) to long-form README |
 
+### Nested Shape: `TemplateManifest.translations[string]`
+
+Per-locale overrides for a package listing
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **displayName** | `string` | optional | Localized display name |
+| **description** | `string` | optional | Localized short description |
+| **readme** | `string` | optional | Localized long-form readme (markdown) |
+| **tagline** | `string` | optional | Localized short tagline (marketplace listing only) |
+| **screenshotCaptions** | `Record<string, string>` | optional | Per-index screenshot caption overrides |
+
 
 ---
 

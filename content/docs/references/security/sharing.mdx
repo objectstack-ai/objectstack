@@ -47,6 +47,13 @@ const result = CriteriaSharingRuleSchema.parse(data);
 | **type** | `'criteria'` | ✅ |  |
 | **condition** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | ✅ | Predicate (CEL). e.g. P`record.department == "Sales"` |
 
+### Nested Shape: `CriteriaSharingRule.sharedWith`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `Enum<'user' \| 'team' \| 'position' \| 'unit_and_subordinates' \| 'business_unit'>` | ✅ |  |
+| **value** | `string` | ✅ | ID or code of the recipient (user / team / position / business unit) |
+
 
 ---
 
@@ -107,6 +114,13 @@ const result = CriteriaSharingRuleSchema.parse(data);
 | **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
 | **type** | `'criteria'` | ✅ |  |
 | **condition** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | ✅ | Predicate (CEL). e.g. P`record.department == "Sales"` |
+
+### Nested Shape: `SharingRule.sharedWith`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `Enum<'user' \| 'team' \| 'position' \| 'unit_and_subordinates' \| 'business_unit'>` | ✅ |  |
+| **value** | `string` | ✅ | ID or code of the recipient (user / team / position / business unit) |
 
 
 ---

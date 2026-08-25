@@ -68,6 +68,62 @@ const result = AppDiscoveryRequestSchema.parse(data);
 | **newArrivals** | `{ listingId: string; name: string; tagline?: string; iconUrl?: string; … }[]` | optional |  |
 | **collections** | `{ id: string; name: string; description?: string; coverImageUrl?: string; … }[]` | optional |  |
 
+### Nested Shape: `AppDiscoveryResponse.featured[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **listingId** | `string` | ✅ |  |
+| **name** | `string` | ✅ |  |
+| **tagline** | `string` | optional |  |
+| **iconUrl** | `string` | optional |  |
+| **category** | `Enum<'crm' \| 'erp' \| 'hr' \| 'finance' \| 'project' \| 'collaboration' \| 'analytics' \| …>` | ✅ | Marketplace package category |
+| **pricing** | `Enum<'free' \| 'freemium' \| 'paid' \| 'subscription' \| 'usage-based' \| 'contact-sales'>` | ✅ | Package pricing model |
+| **averageRating** | `number` | optional |  |
+| **activeInstalls** | `integer` | optional |  |
+| **reason** | `Enum<'popular-in-category' \| 'similar-users' \| 'complements-installed' \| 'trending' \| …>` | ✅ |  |
+
+### Nested Shape: `AppDiscoveryResponse.recommended[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **listingId** | `string` | ✅ |  |
+| **name** | `string` | ✅ |  |
+| **tagline** | `string` | optional |  |
+| **iconUrl** | `string` | optional |  |
+| **category** | `Enum<'crm' \| 'erp' \| 'hr' \| 'finance' \| 'project' \| 'collaboration' \| 'analytics' \| …>` | ✅ | Marketplace package category |
+| **pricing** | `Enum<'free' \| 'freemium' \| 'paid' \| 'subscription' \| 'usage-based' \| 'contact-sales'>` | ✅ | Package pricing model |
+| **averageRating** | `number` | optional |  |
+| **activeInstalls** | `integer` | optional |  |
+| **reason** | `Enum<'popular-in-category' \| 'similar-users' \| 'complements-installed' \| 'trending' \| …>` | ✅ |  |
+
+### Nested Shape: `AppDiscoveryResponse.trending[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **listingId** | `string` | ✅ |  |
+| **name** | `string` | ✅ |  |
+| **tagline** | `string` | optional |  |
+| **iconUrl** | `string` | optional |  |
+| **category** | `Enum<'crm' \| 'erp' \| 'hr' \| 'finance' \| 'project' \| 'collaboration' \| 'analytics' \| …>` | ✅ | Marketplace package category |
+| **pricing** | `Enum<'free' \| 'freemium' \| 'paid' \| 'subscription' \| 'usage-based' \| 'contact-sales'>` | ✅ | Package pricing model |
+| **averageRating** | `number` | optional |  |
+| **activeInstalls** | `integer` | optional |  |
+| **reason** | `Enum<'popular-in-category' \| 'similar-users' \| 'complements-installed' \| 'trending' \| …>` | ✅ |  |
+
+### Nested Shape: `AppDiscoveryResponse.newArrivals[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **listingId** | `string` | ✅ |  |
+| **name** | `string` | ✅ |  |
+| **tagline** | `string` | optional |  |
+| **iconUrl** | `string` | optional |  |
+| **category** | `Enum<'crm' \| 'erp' \| 'hr' \| 'finance' \| 'project' \| 'collaboration' \| 'analytics' \| …>` | ✅ | Marketplace package category |
+| **pricing** | `Enum<'free' \| 'freemium' \| 'paid' \| 'subscription' \| 'usage-based' \| 'contact-sales'>` | ✅ | Package pricing model |
+| **averageRating** | `number` | optional |  |
+| **activeInstalls** | `integer` | optional |  |
+| **reason** | `Enum<'popular-in-category' \| 'similar-users' \| 'complements-installed' \| 'trending' \| …>` | ✅ |  |
+
 
 ---
 
@@ -170,6 +226,24 @@ const result = AppDiscoveryRequestSchema.parse(data);
 | **page** | `integer` | ✅ |  |
 | **pageSize** | `integer` | ✅ |  |
 | **ratingSummary** | `{ averageRating: number; totalRatings: integer; distribution: object }` | optional |  |
+
+### Nested Shape: `ListReviewsResponse.items[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ | Review ID |
+| **listingId** | `string` | ✅ | Listing being reviewed |
+| **userId** | `string` | ✅ | Review author user ID |
+| **displayName** | `string` | optional | Reviewer display name |
+| **rating** | `integer` | ✅ | Star rating (1-5) |
+| **title** | `string` | optional | Review title |
+| **body** | `string` | optional | Review text |
+| **appVersion** | `string` | optional | App version being reviewed |
+| **moderationStatus** | `Enum<'pending' \| 'approved' \| 'flagged' \| 'rejected'>` | optional (default: `"pending"`) |  |
+| **helpfulCount** | `integer` | optional (default: `0`) |  |
+| **publisherResponse** | `{ body: string; respondedAt: string }` | optional | Publisher response to review |
+| **submittedAt** | `string` | ✅ |  |
+| **updatedAt** | `string` | optional |  |
 
 
 ---

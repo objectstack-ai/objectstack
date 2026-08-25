@@ -46,6 +46,15 @@ const result = EventQueueConfigSchema.parse(data);
 | **deadLetterQueue** | `string` | optional | Dead letter queue name for failed events |
 | **priorityEnabled** | `boolean` | optional (default: `true`) | Process events based on priority |
 
+### Nested Shape: `EventQueueConfig.retryPolicy`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **maxRetries** | `integer` | optional (default: `3`) | Max retries for failed events |
+| **backoffStrategy** | `Enum<'fixed' \| 'linear' \| 'exponential'>` | optional (default: `"exponential"`) | Backoff strategy |
+| **initialDelayMs** | `integer` | optional (default: `1000`) | Initial retry delay |
+| **maxDelayMs** | `integer` | optional (default: `60000`) | Maximum retry delay |
+
 
 ---
 
@@ -77,6 +86,13 @@ const result = EventQueueConfigSchema.parse(data);
 | **retention** | `integer` | optional (default: `365`) | Days to retain events |
 | **aggregateTypes** | `string[]` | optional | Aggregate types to enable event sourcing for |
 | **storage** | `{ type: Enum<'database' \| 'file' \| 's3' \| 'eventstore'>; options?: Record<string, any> }` | optional | Event store configuration |
+
+### Nested Shape: `EventSourcingConfig.storage`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `Enum<'database' \| 'file' \| 's3' \| 'eventstore'>` | optional (default: `"database"`) | Storage backend |
+| **options** | `Record<string, any>` | optional | Storage-specific options |
 
 
 ---

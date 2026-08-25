@@ -32,6 +32,15 @@ const result = BlueprintAppSchema.parse(data);
 | **icon** | `string` | optional | Lucide icon for the App Launcher |
 | **nav** | `{ type: Enum<'object' \| 'dashboard'>; target: string; label?: string; icon?: string }[]` | optional | Navigation entries; omit to auto-surface every created object and dashboard |
 
+### Nested Shape: `BlueprintApp.nav[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `Enum<'object' \| 'dashboard'>` | optional (default: `"object"`) | What this nav entry opens |
+| **target** | `string` | ✅ | Object or dashboard machine name to surface (snake_case) |
+| **label** | `string` | optional | Nav entry label (defaults to the target label/name) |
+| **icon** | `string` | optional | Lucide icon name for the nav entry |
+
 
 ---
 
@@ -57,6 +66,18 @@ const result = BlueprintAppSchema.parse(data);
 | **name** | `string` | ✅ | Dashboard machine name (snake_case) |
 | **label** | `string` | optional | Human-readable dashboard label |
 | **widgets** | `{ id: string; title?: string; object?: string; chart?: Enum<'metric' \| 'bar' \| 'line' \| 'pie' \| 'table'>; … }[]` | optional | Widgets to place on the dashboard |
+
+### Nested Shape: `BlueprintDashboard.widgets[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ | Widget id (snake_case) |
+| **title** | `string` | optional | Widget title |
+| **object** | `string` | optional | Source object for the widget |
+| **chart** | `Enum<'metric' \| 'bar' \| 'line' \| 'pie' \| 'table'>` | optional | Widget visualization |
+| **measure** | `string` | optional | The field this widget aggregates (e.g. "amount", "probability"), or "count" to count records. The aggregation is chosen automatically from the field type — a money field SUMs, a percentage/rate AVERAGEs — so name the FIELD, not "total_amount". A "total revenue" widget sets measure:"amount"; an "average win rate" widget sets measure:"win_rate"; a "number of deals" widget sets measure:"count". Omit to let the builder infer from the title. |
+| **groupBy** | `string` | optional | The field to break the widget down by — the category or time axis (e.g. "stage", "created_at"). A "by status" chart MUST set this to the status field; the title and this field MUST name the SAME field. Omit for a single-number metric. |
+| **condition** | `{ field: string; op: Enum<'lt' \| 'lte' \| 'gt' \| 'gte' \| 'eq' \| 'ne'>; value: number \| string \| boolean }` | optional | Restrict WHICH records the widget counts/aggregates when its title implies a threshold or status (e.g. "stock below 10" → `{field:"stock_quantity", op:"lt", value:10}`; "open tickets" → `{field:"status", op:"eq", value:"open"}`). Without it the widget covers ALL records — so a "低于10的备件预警" / "overdue" card would wrongly count everything. Omit when the widget genuinely spans every record. |
 
 
 ---
@@ -128,6 +149,17 @@ const result = BlueprintAppSchema.parse(data);
 * `tags`
 * `vector`
 
+### Nested Shape: `BlueprintField.summaryOperations`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **object** | `string` | ✅ | The CHILD object whose records are aggregated (snake_case). It must carry a lookup / master_detail field pointing back at this parent, or the roll-up never computes. |
+| **function** | `Enum<'count' \| 'sum' \| 'avg' \| 'min' \| 'max'>` | ✅ | Aggregation: "数量 / 个数 / 计数" → count; "合计 / 总额 / 累计" → sum; "平均" → avg |
+| **field** | `string` | optional | Numeric field on the CHILD object to aggregate. Ignored for "count" (pass "id" or omit it). |
+| **relationshipField** | `string` | optional | The child FK field pointing back at this parent. Auto-detected from the child's lookup / master_detail; set it only when the child has more than one reference to this parent. |
+| **conditions** | `{ field: string; op: Enum<'lt' \| 'lte' \| 'gt' \| 'gte' \| 'eq' \| 'ne'>; value: number \| string \| boolean }[]` | optional | CONDITIONAL roll-up: aggregate only the child rows matching these comparisons (ANDed). REQUIRED whenever the field name carries a qualifier — "已完成任务数 / 已收货金额 / 待处理工单数", any 已X / 未X / `<某状态>`的 count-or-sum → e.g. [`{ field: "status", op: "eq", value: "completed" }`]. WITHOUT it the roll-up silently counts EVERY child and reports a plausible-looking WRONG number, which is worse than a visible 0. |
+| **filter** | `any` | optional | The same predicate as a canonical query filter map (e.g. `{ status: "completed" }`, `{ status: { $in: ["received", "partial"] } }`). Use it when hand-authoring a blueprint; the structured design path uses `conditions` instead. Wins over `conditions` when both are given. |
+
 
 ---
 
@@ -158,6 +190,19 @@ const result = BlueprintAppSchema.parse(data);
 | **sharingModel** | `Enum<'private' \| 'public_read' \| 'public_read_write' \| 'controlled_by_parent'>` | optional | Org-Wide Default record visibility (OWD) for INTERNAL users — the deliberate sharing choice for this object (ADR-0090). Canonical four only: private (owner-only) \| public_read (everyone reads, owner writes) \| public_read_write (everyone reads+writes) \| controlled_by_parent (derived from the master record — ONLY for an object whose fields include a master_detail reference). SET it when the user's description implies a visibility intent — personal/private data (HR, 绩效, salary, 个人隐私) → "private"; shared reference data everyone edits → "public_read_write". Omit to accept the platform's deterministic default (business object → public_read_write; master-detail child → controlled_by_parent) — omitting on privacy-sensitive data silently over-shares it. |
 | **nameField** | `string` | optional | The record title field — which field holds the human-readable name shown on cards, lookup chips, breadcrumbs and search (ADR-0079). Set it to the object's text label field (e.g. "product_name"). For a numbered entity (invoice/ticket), set it to a formula field that composes number + name (e.g. "`{order_no}` · `{customer}`"). Omitting it lets the platform auto-pick a text field, but declaring it is strongly preferred. |
 
+### Nested Shape: `BlueprintObject.fields[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Field machine name (snake_case) |
+| **label** | `string` | optional | Human-readable field label |
+| **type** | `Enum<'text' \| 'textarea' \| 'email' \| 'url' \| 'phone' \| 'password' \| 'secret' \| …>` | ✅ | Field data type |
+| **required** | `boolean` | optional | Whether the field is required |
+| **reference** | `string` | optional | Target object name for lookup / master_detail relationship fields |
+| **options** | `{ label: string; value: string }[]` | optional | Choices for select / multiselect / radio fields |
+| **summaryOperations** | `{ object: string; function: Enum<'count' \| 'sum' \| 'avg' \| 'min' \| 'max'>; field?: string; relationshipField?: string; … }` | optional | REQUIRED when `type` is "summary" (a roll-up of child records: 任务总数 / 报名人数 / 合计金额 / 已完成任务数). Names the child object, the aggregation, and — for a qualified count/sum — the condition. A "summary" field without it materializes runtime-dead. |
+| **expression** | `string` | optional | REQUIRED when `type` is "formula" — the CEL body the field computes, e.g. "record.quantity * record.unit_price", or "record.order_no + ' · ' + record.customer" for a composed title. A "formula" field without it materializes runtime-dead: the engine builds its formula plan only from fields that HAVE an expression, so the field reads null everywhere, forever. Same failure shape as a "summary" with no `summaryOperations`. Note `nameField` on the object recommends a formula for numbered entities (invoice/ticket) — that formula needs THIS key, or the record title is blank on every card, lookup chip and breadcrumb. |
+
 
 ---
 
@@ -185,6 +230,14 @@ const result = BlueprintAppSchema.parse(data);
 | **relationshipField** | `string` | optional | The child FK field pointing back at this parent. Auto-detected from the child's lookup / master_detail; set it only when the child has more than one reference to this parent. |
 | **conditions** | `{ field: string; op: Enum<'lt' \| 'lte' \| 'gt' \| 'gte' \| 'eq' \| 'ne'>; value: number \| string \| boolean }[]` | optional | CONDITIONAL roll-up: aggregate only the child rows matching these comparisons (ANDed). REQUIRED whenever the field name carries a qualifier — "已完成任务数 / 已收货金额 / 待处理工单数", any 已X / 未X / `<某状态>`的 count-or-sum → e.g. [`{ field: "status", op: "eq", value: "completed" }`]. WITHOUT it the roll-up silently counts EVERY child and reports a plausible-looking WRONG number, which is worse than a visible 0. |
 | **filter** | `any` | optional | The same predicate as a canonical query filter map (e.g. `{ status: "completed" }`, `{ status: { $in: ["received", "partial"] } }`). Use it when hand-authoring a blueprint; the structured design path uses `conditions` instead. Wins over `conditions` when both are given. |
+
+### Nested Shape: `BlueprintSummaryOperations.conditions[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **field** | `string` | ✅ | Field on the target object to filter by (e.g. "stock_quantity", "status") |
+| **op** | `Enum<'lt' \| 'lte' \| 'gt' \| 'gte' \| 'eq' \| 'ne'>` | ✅ | Comparison operator |
+| **value** | `number \| string \| boolean` | ✅ | Comparison value — for a select field use its option VALUE, never its label (e.g. "completed", not "已完成") |
 
 
 ---
@@ -233,6 +286,52 @@ const result = BlueprintAppSchema.parse(data);
 | **app** | `{ name: string; label?: string; icon?: string; nav?: object[] }` | optional | The navigation shell (app) that surfaces the created objects/dashboards to end users |
 | **seedData** | `{ object: string; records: Record<string, any>[] }[]` | optional | Suggested seed data (reported, not auto-applied in Phase C) |
 
+### Nested Shape: `SolutionBlueprint.objects[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Object machine name (snake_case) |
+| **label** | `string` | optional | Human-readable singular label |
+| **description** | `string` | optional | What this object represents |
+| **fields** | `{ name: string; label?: string; type: Enum<'text' \| 'textarea' \| 'email' \| 'url' \| 'phone' \| 'password' \| 'secret' \| …>; required?: boolean; … }[]` | ✅ | Fields to create on the object |
+| **sharingModel** | `Enum<'private' \| 'public_read' \| 'public_read_write' \| 'controlled_by_parent'>` | optional | Org-Wide Default record visibility (OWD) for INTERNAL users — the deliberate sharing choice for this object (ADR-0090). Canonical four only: private (owner-only) \| public_read (everyone reads, owner writes) \| public_read_write (everyone reads+writes) \| controlled_by_parent (derived from the master record — ONLY for an object whose fields include a master_detail reference). SET it when the user's description implies a visibility intent — personal/private data (HR, 绩效, salary, 个人隐私) → "private"; shared reference data everyone edits → "public_read_write". Omit to accept the platform's deterministic default (business object → public_read_write; master-detail child → controlled_by_parent) — omitting on privacy-sensitive data silently over-shares it. |
+| **nameField** | `string` | optional | The record title field — which field holds the human-readable name shown on cards, lookup chips, breadcrumbs and search (ADR-0079). Set it to the object's text label field (e.g. "product_name"). For a numbered entity (invoice/ticket), set it to a formula field that composes number + name (e.g. "`{order_no}` · `{customer}`"). Omitting it lets the platform auto-pick a text field, but declaring it is strongly preferred. |
+
+### Nested Shape: `SolutionBlueprint.views[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **object** | `string` | ✅ | Object this view displays (snake_case) |
+| **name** | `string` | ✅ | View machine name (snake_case) |
+| **label** | `string` | optional | Human-readable view label |
+| **type** | `Enum<'list' \| 'form' \| 'kanban' \| 'calendar' \| 'gallery' \| 'gantt'>` | optional (default: `"list"`) | View kind. Pick the surface that fits the data: "gallery" for a visual card/cover browse when the user asks for a 画廊/相册/卡片墙/封面/海报/图集 (a gallery / card wall / cover / poster grid) or the object has an image/avatar/file field worth showing as a card cover; "gantt" for a 甘特图/时间线/排期 (timeline / schedule) when the object has BOTH a start and an end date field; "kanban" for a board grouped by a status/select field; "calendar" for a single-date schedule; "form" for a record editor; else "list". |
+| **columns** | `string[]` | optional | Field names shown as columns (in order). For a gallery, INCLUDE the image/avatar/file field (it becomes the card cover); for a gantt, INCLUDE the start date column before the end date column. |
+| **groupBy** | `string` | optional | REQUIRED for kanban views: the select/status field whose options become the board columns (e.g. "stage", "status"). Without it a kanban renders as a plain list. Optional for gantt (groups leaf tasks into summary rows). |
+
+### Nested Shape: `SolutionBlueprint.dashboards[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Dashboard machine name (snake_case) |
+| **label** | `string` | optional | Human-readable dashboard label |
+| **widgets** | `{ id: string; title?: string; object?: string; chart?: Enum<'metric' \| 'bar' \| 'line' \| 'pie' \| 'table'>; … }[]` | optional | Widgets to place on the dashboard |
+
+### Nested Shape: `SolutionBlueprint.app`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | App machine name (snake_case) |
+| **label** | `string` | optional | App display label |
+| **icon** | `string` | optional | Lucide icon for the App Launcher |
+| **nav** | `{ type: Enum<'object' \| 'dashboard'>; target: string; label?: string; icon?: string }[]` | optional | Navigation entries; omit to auto-surface every created object and dashboard |
+
+### Nested Shape: `SolutionBlueprint.seedData[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **object** | `string` | ✅ | Target object name (snake_case) |
+| **records** | `Record<string, any>[]` | ✅ | Rows to seed |
+
 
 ---
 
@@ -249,6 +348,45 @@ const result = BlueprintAppSchema.parse(data);
 | **views** | `{ object: string; name: string; label: string \| null; type: Enum<'list' \| 'form' \| 'kanban' \| 'calendar' \| 'gallery' \| 'gantt'> \| null; … }[] \| null` | ✅ | Views to create, or null |
 | **dashboards** | `{ name: string; label: string \| null; widgets: object[] \| null }[] \| null` | ✅ | Dashboards to create, or null |
 | **app** | `{ name: string; label: string \| null; icon: string \| null; nav: object[] \| null } \| null` | ✅ | The navigation shell (app) that surfaces the created objects/dashboards, or null |
+
+### Nested Shape: `SolutionBlueprintStrict.objects[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Object machine name (snake_case) |
+| **label** | `string \| null` | ✅ | Human-readable singular label, or null |
+| **description** | `string \| null` | ✅ | What this object represents, or null |
+| **fields** | `{ name: string; label: string \| null; type: Enum<'text' \| 'textarea' \| 'email' \| 'url' \| 'phone' \| 'password' \| 'secret' \| …>; required: boolean \| null; … }[]` | ✅ | Fields to create on the object |
+| **sharingModel** | `Enum<'private' \| 'public_read' \| 'public_read_write' \| 'controlled_by_parent'> \| null` | ✅ | Org-Wide Default record visibility (OWD) for INTERNAL users (ADR-0090), or null to accept the platform default (business object → public_read_write; master-detail child → controlled_by_parent). SET it when the user's description implies a visibility intent: personal/private data (HR, 绩效, salary, 个人隐私) → "private" (owner-only); "public_read" = everyone reads, owner writes; "public_read_write" = everyone reads+writes; "controlled_by_parent" ONLY for an object with a master_detail reference field. Null on privacy-sensitive data silently over-shares it. |
+| **nameField** | `string \| null` | ✅ | The record title field — which field holds the human-readable name shown on cards, lookup chips, breadcrumbs and search (ADR-0079), or null to let the platform auto-pick a text field. Set it to the object's text label field (e.g. "product_name") — snake_case. For a numbered entity (invoice/ticket), set it to a formula field that composes number + name (e.g. "`{order_no}` · `{customer}`"). Declaring it is strongly preferred over null. |
+
+### Nested Shape: `SolutionBlueprintStrict.views[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **object** | `string` | ✅ | Object this view displays (snake_case) |
+| **name** | `string` | ✅ | View machine name (snake_case) |
+| **label** | `string \| null` | ✅ | Human-readable view label, or null |
+| **type** | `Enum<'list' \| 'form' \| 'kanban' \| 'calendar' \| 'gallery' \| 'gantt'> \| null` | ✅ | View kind, or null for list. "gallery" = visual card/cover browse (画廊/相册/卡片墙/封面/海报, or an object with an image/avatar/file field); "gantt" = timeline/schedule (甘特图/时间线/排期, object with BOTH a start and an end date field); "kanban" = board grouped by a status/select field; "calendar" = single-date schedule; "form" = record editor. |
+| **columns** | `string[] \| null` | ✅ | Field names shown as columns, or null. For a gallery, INCLUDE the image/avatar/file field (becomes the card cover); for a gantt, INCLUDE the start date column before the end date column. |
+| **groupBy** | `string \| null` | ✅ | REQUIRED for kanban: the select/status field whose options become the board columns (e.g. "stage"). Optional for gantt (groups leaf tasks). Null for list/form/calendar/gallery. |
+
+### Nested Shape: `SolutionBlueprintStrict.dashboards[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Dashboard machine name (snake_case) |
+| **label** | `string \| null` | ✅ | Human-readable dashboard label, or null |
+| **widgets** | `{ id: string; title: string \| null; object: string \| null; chart: Enum<'metric' \| 'bar' \| 'line' \| 'pie' \| 'table'> \| null; … }[] \| null` | ✅ | Widgets to place on the dashboard, or null |
+
+### Nested Shape: `SolutionBlueprintStrict.app`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | App machine name (snake_case) |
+| **label** | `string \| null` | ✅ | App display label, or null |
+| **icon** | `string \| null` | ✅ | Lucide icon for the App Launcher, or null |
+| **nav** | `{ type: Enum<'object' \| 'dashboard'>; target: string; label: string \| null; icon: string \| null }[] \| null` | ✅ | Navigation entries; null to auto-surface every created object and dashboard |
 
 
 ---

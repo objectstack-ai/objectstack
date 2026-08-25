@@ -88,6 +88,75 @@ const result = ApiRoutesSchema.parse(data);
 | **scoping** | `{ enabled: boolean; resolution: Enum<'required' \| 'optional' \| 'auto'>; scoped: boolean; environmentId?: string }` | optional | Environment-scoping posture, added by the REST discovery endpoint |
 | **metadata** | `Record<string, any>` | optional | Custom metadata key-value pairs for extensibility |
 
+### Nested Shape: `Discovery.routes`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **data** | `string` | ✅ | e.g. /api/v1/data |
+| **metadata** | `string` | ✅ | e.g. /api/v1/meta |
+| **discovery** | `string` | optional | e.g. /api/v1/discovery |
+| **ui** | `string` | optional | e.g. /api/v1/ui |
+| **auth** | `string` | optional | e.g. /api/v1/auth |
+| **automation** | `string` | optional | e.g. /api/v1/automation |
+| **storage** | `string` | optional | e.g. /api/v1/storage |
+| **analytics** | `string` | optional | e.g. /api/v1/analytics |
+| **packages** | `string` | optional | e.g. /api/v1/packages |
+| **datasources** | `string` | optional | e.g. /api/v1/datasources — base for the datasources/:name/external/* federation-admin family; absent when no host mounts it |
+| **email** | `string` | optional | e.g. /api/v1/email — base for the email/send endpoint; absent when no host mounts it |
+| **approvals** | `string` | optional | e.g. /api/v1/approvals |
+| **realtime** | `string` | optional | e.g. /api/v1/realtime |
+| **notifications** | `string` | optional | e.g. /api/v1/notifications |
+| **ai** | `string` | optional | e.g. /api/v1/ai |
+| **i18n** | `string` | optional | e.g. /api/v1/i18n |
+| **mcp** | `string` | optional | e.g. /api/v1/mcp — always the unscoped base; absent when MCP is disabled or unserveable |
+
+### Nested Shape: `Discovery.services[string]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **enabled** | `boolean` | ✅ |  |
+| **status** | `Enum<'available' \| 'registered' \| 'unavailable' \| 'degraded' \| 'stub'>` | ✅ | available = fully operational, registered = route declared but handler unverified, unavailable = not installed, degraded = partial, stub = placeholder that returns 501 |
+| **handlerReady** | `boolean` | optional | Whether the HTTP handler is confirmed to be mounted. Omitted = readiness unknown/unverified; true = handler mounted; false = handler missing or stub (likely 501). |
+| **route** | `string` | optional | e.g. /api/v1/analytics |
+| **provider** | `string` | optional | e.g. "objectql", "plugin-redis", "driver-memory" |
+| **version** | `string` | optional | Semantic version of the service implementation (e.g. "3.0.6") |
+| **message** | `string` | optional | e.g. "Install plugin-workflow to enable" |
+| **rateLimit** | `{ requestsPerMinute?: integer; requestsPerHour?: integer; burstLimit?: integer; retryAfterMs?: integer }` | optional | Rate limit and quota info for this service |
+
+### Nested Shape: `Discovery.capabilities`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **comments** | `{ enabled: boolean; features?: Record<string, boolean>; description?: string }` | ✅ | Whether the backend supports record comments / chatter (the `sys_comment` object served via the data API) |
+| **automation** | `{ enabled: boolean; features?: Record<string, boolean>; description?: string }` | ✅ | Whether the backend supports Automation CRUD (flows, triggers) |
+| **cron** | `{ enabled: boolean; features?: Record<string, boolean>; description?: string }` | ✅ | Whether the backend supports cron scheduling |
+| **search** | `{ enabled: boolean; features?: Record<string, boolean>; description?: string }` | ✅ | Whether the backend supports full-text search |
+| **export** | `{ enabled: boolean; features?: Record<string, boolean>; description?: string }` | ✅ | Whether the backend supports async export |
+| **chunkedUpload** | `{ enabled: boolean; features?: Record<string, boolean>; description?: string }` | ✅ | Whether the backend supports chunked (multipart) uploads |
+| **transactionalBatch** | `{ enabled: boolean; features?: Record<string, boolean>; description?: string }` | ✅ | Whether the backend exposes the atomic cross-object batch endpoint (POST `{basePath}`/batch, #1604/ADR-0034): all ops commit or roll back together in one transaction. Lets clients skip non-atomic client-side simulation instead of runtime-probing 404/405/501. True ⟺ the /batch route is mounted AND the runtime can honour a transaction. |
+| **websockets** | `{ enabled: boolean; features?: Record<string, boolean>; description?: string }` | ✅ | Whether the backend mounts a realtime push surface (WebSocket/SSE) clients can subscribe to. False while realtime is an in-process bus with no mounted HTTP/WS surface (ADR-0076 D12, #2462). |
+| **files** | `{ enabled: boolean; features?: Record<string, boolean>; description?: string }` | ✅ | Whether a file-storage surface (upload/download/attachments) is served |
+| **analytics** | `{ enabled: boolean; features?: Record<string, boolean>; description?: string }` | ✅ | Whether the backend serves the analytics / BI query surface |
+| **ai** | `{ enabled: boolean; features?: Record<string, boolean>; description?: string }` | ✅ | Whether the backend serves the AI surface (NLQ, chat, agents, suggest) |
+| **notifications** | `{ enabled: boolean; features?: Record<string, boolean>; description?: string }` | ✅ | Whether the backend serves the notification surface (inbox, delivery) |
+| **i18n** | `{ enabled: boolean; features?: Record<string, boolean>; description?: string }` | ✅ | Whether the backend serves the i18n surface (translations, locale negotiation) |
+
+### Nested Shape: `Discovery.schemaDiscovery`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **openapi** | `string` | optional | URL to OpenAPI (Swagger) specification (e.g., "/api/v1/openapi.json") |
+| **jsonSchema** | `string` | optional | URL to JSON Schema definitions |
+
+### Nested Shape: `Discovery.scoping`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **enabled** | `boolean` | ✅ | Whether environment-scoped routes are mounted at all |
+| **resolution** | `Enum<'required' \| 'optional' \| 'auto'>` | ✅ | How the environment id is resolved when scoping is enabled (mirrors RestApiConfig.projectResolution) |
+| **scoped** | `boolean` | ✅ | Whether THIS response was served from the environment-scoped mount |
+| **environmentId** | `string` | optional | The resolved environment id — present only on a scoped mount |
+
 
 ---
 
@@ -134,6 +203,18 @@ Deployment posture a discovery response advertises. Deliberately three coarse bu
 | **totalMissing** | `integer` | ✅ | Routes missing a handler |
 | **routes** | `{ route: string; method: Enum<'GET' \| 'POST' \| 'PUT' \| 'DELETE' \| 'PATCH' \| 'HEAD' \| 'OPTIONS'>; service: string; declared: boolean; … }[]` | ✅ | Per-route health entries |
 
+### Nested Shape: `RouteHealthReport.routes[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **route** | `string` | ✅ | Route path pattern |
+| **method** | `Enum<'GET' \| 'POST' \| 'PUT' \| 'DELETE' \| 'PATCH' \| 'HEAD' \| 'OPTIONS'>` | ✅ | HTTP method (GET, POST, etc.) |
+| **service** | `string` | ✅ | Target service name |
+| **declared** | `boolean` | ✅ | Whether the route is declared in discovery/metadata |
+| **handlerRegistered** | `boolean` | ✅ | Whether the HTTP handler is registered |
+| **healthStatus** | `Enum<'pass' \| 'fail' \| 'missing' \| 'skip'>` | ✅ | pass = handler responds, fail = 501/503, missing = no handler (404), skip = not checked |
+| **message** | `string` | optional | Diagnostic message |
+
 
 ---
 
@@ -151,6 +232,15 @@ Deployment posture a discovery response advertises. Deliberately three coarse bu
 | **version** | `string` | optional | Semantic version of the service implementation (e.g. "3.0.6") |
 | **message** | `string` | optional | e.g. "Install plugin-workflow to enable" |
 | **rateLimit** | `{ requestsPerMinute?: integer; requestsPerHour?: integer; burstLimit?: integer; retryAfterMs?: integer }` | optional | Rate limit and quota info for this service |
+
+### Nested Shape: `ServiceInfo.rateLimit`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **requestsPerMinute** | `integer` | optional | Maximum requests per minute |
+| **requestsPerHour** | `integer` | optional | Maximum requests per hour |
+| **burstLimit** | `integer` | optional | Maximum burst request count |
+| **retryAfterMs** | `integer` | optional | Suggested retry-after delay in milliseconds when rate-limited |
 
 
 ---

@@ -132,6 +132,20 @@ const result = ErrorHandlingConfigSchema.parse(data);
 | **license** | `{ name: string; url?: string }` | optional | API license information |
 | **securitySchemes** | `Record<string, { type: Enum<'apiKey' \| 'http' \| 'oauth2' \| 'openIdConnect'>; scheme?: string; bearerFormat?: string }>` | optional | Security scheme definitions |
 
+### Nested Shape: `OpenApiGenerationConfig.servers[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **url** | `string` | ✅ | Server URL |
+| **description** | `string` | optional | Server description |
+
+### Nested Shape: `OpenApiGenerationConfig.license`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | License name |
+| **url** | `string` | optional | License URL |
+
 
 ---
 
@@ -216,6 +230,101 @@ const result = ErrorHandlingConfigSchema.parse(data);
 | **cors** | `{ enabled: boolean; origins?: string[]; methods?: Enum<'GET' \| 'POST' \| 'PUT' \| 'DELETE' \| 'PATCH' \| 'HEAD' \| 'OPTIONS'>[]; credentials: boolean }` | optional | CORS configuration |
 | **performance** | `{ enableCompression: boolean; enableETag: boolean; enableCaching: boolean; defaultCacheTtl: integer }` | optional | Performance optimization settings |
 
+### Nested Shape: `RestApiPluginConfig.routes[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **prefix** | `string` | ✅ | URL path prefix for this route group |
+| **service** | `string` | ✅ | Core service name (metadata, data, auth, etc.) |
+| **category** | `Enum<'discovery' \| 'metadata' \| 'data' \| 'batch' \| 'permission' \| 'analytics' \| …>` | ✅ | Primary category for this route group |
+| **methods** | `string[]` | optional | Protocol method names implemented |
+| **endpoints** | `{ method: Enum<'GET' \| 'POST' \| 'PUT' \| 'DELETE' \| 'PATCH' \| 'HEAD' \| 'OPTIONS'>; path: string; handler: string; category: Enum<'discovery' \| 'metadata' \| 'data' \| 'batch' \| 'permission' \| 'analytics' \| …>; … }[]` | optional | Endpoint definitions |
+| **middleware** | `{ name: string; type: Enum<'authentication' \| 'authorization' \| 'logging' \| 'validation' \| 'transformation' \| 'error' \| 'custom'>; enabled: boolean; order: integer; … }[]` | optional | Middleware stack for this route group |
+| **authRequired** | `boolean` | optional (default: `true`) | Whether authentication is required by default |
+| **documentation** | `{ title?: string; description?: string; tags?: string[] }` | optional | Documentation metadata for this route group |
+
+### Nested Shape: `RestApiPluginConfig.validation`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **enabled** | `boolean` | optional (default: `true`) | Enable automatic request validation |
+| **mode** | `Enum<'strict' \| 'permissive' \| 'strip'>` | optional (default: `"strict"`) | How to handle validation errors |
+| **validateBody** | `boolean` | optional (default: `true`) | Validate request body against schema |
+| **validateQuery** | `boolean` | optional (default: `true`) | Validate query string parameters |
+| **validateParams** | `boolean` | optional (default: `true`) | Validate URL path parameters |
+| **validateHeaders** | `boolean` | optional (default: `false`) | Validate request headers |
+| **includeFieldErrors** | `boolean` | optional (default: `true`) | Include field-level error details in response |
+| **errorPrefix** | `string` | optional | Custom prefix for validation error messages |
+| **schemaRegistry** | `string` | optional | Schema registry name to use for validation |
+
+### Nested Shape: `RestApiPluginConfig.responseEnvelope`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **enabled** | `boolean` | optional (default: `true`) | Enable automatic response envelope wrapping |
+| **includeMetadata** | `boolean` | optional (default: `true`) | Include meta object in responses |
+| **includeTimestamp** | `boolean` | optional (default: `true`) | Include timestamp in response metadata |
+| **includeRequestId** | `boolean` | optional (default: `true`) | Include requestId in response metadata |
+| **includeDuration** | `boolean` | optional (default: `false`) | Include request duration in ms |
+| **includeTraceId** | `boolean` | optional (default: `false`) | Include distributed traceId |
+| **customMetadata** | `Record<string, any>` | optional | Additional metadata fields to include |
+| **skipIfWrapped** | `boolean` | optional (default: `true`) | Skip wrapping if response already has success field |
+
+### Nested Shape: `RestApiPluginConfig.errorHandling`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **enabled** | `boolean` | optional (default: `true`) | Enable standardized error handling |
+| **includeStackTrace** | `boolean` | optional (default: `false`) | Include stack traces in error responses |
+| **logErrors** | `boolean` | optional (default: `true`) | Log errors to system logger |
+| **exposeInternalErrors** | `boolean` | optional (default: `false`) | Expose internal error details in responses |
+| **includeRequestId** | `boolean` | optional (default: `true`) | Include requestId in error responses |
+| **includeTimestamp** | `boolean` | optional (default: `true`) | Include timestamp in error responses |
+| **includeDocumentation** | `boolean` | optional (default: `true`) | Include documentation URLs for errors |
+| **documentationBaseUrl** | `string` | optional | Base URL for error documentation |
+| **customErrorMessages** | `Record<string, string>` | optional | Custom error messages by error code |
+| **redactFields** | `string[]` | optional | Field names to redact from error details |
+
+### Nested Shape: `RestApiPluginConfig.openApi`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **enabled** | `boolean` | optional (default: `true`) | Enable automatic OpenAPI documentation generation |
+| **version** | `Enum<'3.0.0' \| '3.0.1' \| '3.0.2' \| '3.0.3' \| '3.1.0'>` | optional (default: `"3.0.3"`) | OpenAPI specification version |
+| **title** | `string` | optional (default: `"ObjectStack API"`) | API title |
+| **description** | `string` | optional | API description |
+| **apiVersion** | `string` | optional (default: `"1.0.0"`) | API version |
+| **outputPath** | `string` | optional (default: `"/api/docs/openapi.json"`) | URL path to serve OpenAPI JSON |
+| **uiPath** | `string` | optional (default: `"/api/docs"`) | URL path to serve documentation UI |
+| **uiFramework** | `Enum<'swagger-ui' \| 'redoc' \| 'rapidoc' \| 'elements'>` | optional (default: `"swagger-ui"`) | Documentation UI framework |
+| **includeInternal** | `boolean` | optional (default: `false`) | Include internal endpoints in documentation |
+| **generateSchemas** | `boolean` | optional (default: `true`) | Auto-generate schemas from Zod definitions |
+| **includeExamples** | `boolean` | optional (default: `true`) | Include request/response examples |
+| **servers** | `{ url: string; description?: string }[]` | optional | Server URLs for API |
+| **contact** | `{ name?: string; url?: string; email?: string }` | optional | API contact information |
+| **license** | `{ name: string; url?: string }` | optional | API license information |
+| **securitySchemes** | `Record<string, { type: Enum<'apiKey' \| 'http' \| 'oauth2' \| 'openIdConnect'>; scheme?: string; bearerFormat?: string }>` | optional | Security scheme definitions |
+
+### Nested Shape: `RestApiPluginConfig.globalMiddleware[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Middleware name (snake_case) |
+| **type** | `Enum<'authentication' \| 'authorization' \| 'logging' \| 'validation' \| 'transformation' \| 'error' \| 'custom'>` | ✅ | Middleware type |
+| **enabled** | `boolean` | optional (default: `true`) | Whether middleware is enabled |
+| **order** | `integer` | optional (default: `100`) | Execution order priority |
+| **config** | `Record<string, any>` | optional | Middleware configuration object |
+| **paths** | `{ include?: string[]; exclude?: string[] }` | optional | Path filtering |
+
+### Nested Shape: `RestApiPluginConfig.performance`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **enableCompression** | `boolean` | optional (default: `true`) | Enable response compression |
+| **enableETag** | `boolean` | optional (default: `true`) | Enable ETag generation |
+| **enableCaching** | `boolean` | optional (default: `true`) | Enable HTTP caching |
+| **defaultCacheTtl** | `integer` | optional (default: `300`) | Default cache TTL in seconds |
+
 
 ---
 
@@ -254,6 +363,46 @@ const result = ErrorHandlingConfigSchema.parse(data);
 | **authRequired** | `boolean` | optional (default: `true`) | Whether authentication is required by default |
 | **documentation** | `{ title?: string; description?: string; tags?: string[] }` | optional | Documentation metadata for this route group |
 
+### Nested Shape: `RestApiRouteRegistration.endpoints[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **method** | `Enum<'GET' \| 'POST' \| 'PUT' \| 'DELETE' \| 'PATCH' \| 'HEAD' \| 'OPTIONS'>` | ✅ | HTTP method for this endpoint |
+| **path** | `string` | ✅ | URL path pattern (e.g., /api/v1/data/:object/:id) |
+| **handler** | `string` | ✅ | Protocol method name or handler identifier |
+| **category** | `Enum<'discovery' \| 'metadata' \| 'data' \| 'batch' \| 'permission' \| 'analytics' \| …>` | ✅ | Route category |
+| **public** | `boolean` | optional (default: `false`) | Is publicly accessible without authentication |
+| **permissions** | `string[]` | optional | Required permissions (e.g., ["data.read", "object.account.read"]) |
+| **summary** | `string` | optional | Short description for OpenAPI |
+| **description** | `string` | optional | Detailed description for OpenAPI |
+| **tags** | `string[]` | optional | OpenAPI tags for grouping |
+| **requestSchema** | `string` | optional | Request schema name (for validation) |
+| **responseSchema** | `string` | optional | Response schema name (for documentation) |
+| **timeout** | `integer` | optional | Request timeout in milliseconds |
+| **rateLimit** | `string` | optional | Rate limit policy name |
+| **cacheable** | `boolean` | optional (default: `false`) | Whether response can be cached |
+| **cacheTtl** | `integer` | optional | Cache TTL in seconds |
+| **handlerStatus** | `Enum<'implemented' \| 'stub' \| 'planned'>` | optional | Handler implementation status: implemented (default if omitted), stub, or planned |
+
+### Nested Shape: `RestApiRouteRegistration.middleware[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Middleware name (snake_case) |
+| **type** | `Enum<'authentication' \| 'authorization' \| 'logging' \| 'validation' \| 'transformation' \| 'error' \| 'custom'>` | ✅ | Middleware type |
+| **enabled** | `boolean` | optional (default: `true`) | Whether middleware is enabled |
+| **order** | `integer` | optional (default: `100`) | Execution order priority |
+| **config** | `Record<string, any>` | optional | Middleware configuration object |
+| **paths** | `{ include?: string[]; exclude?: string[] }` | optional | Path filtering |
+
+### Nested Shape: `RestApiRouteRegistration.documentation`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **title** | `string` | optional | Route group title |
+| **description** | `string` | optional | Route group description |
+| **tags** | `string[]` | optional | OpenAPI tags |
+
 
 ---
 
@@ -283,6 +432,26 @@ const result = ErrorHandlingConfigSchema.parse(data);
 | **adapter** | `string` | ✅ | Adapter name (e.g. "hono", "express", "nextjs") |
 | **summary** | `{ total: integer; implemented: integer; stub: integer; planned: integer }` | ✅ |  |
 | **entries** | `{ path: string; method: Enum<'GET' \| 'POST' \| 'PUT' \| 'DELETE' \| 'PATCH' \| 'HEAD' \| 'OPTIONS'>; category: Enum<'discovery' \| 'metadata' \| 'data' \| 'batch' \| 'permission' \| 'analytics' \| …>; handlerStatus: Enum<'implemented' \| 'stub' \| 'planned'>; … }[]` | ✅ | Per-endpoint coverage entries |
+
+### Nested Shape: `RouteCoverageReport.summary`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **total** | `integer` | ✅ | Total declared endpoints |
+| **implemented** | `integer` | ✅ | Endpoints with real handlers |
+| **stub** | `integer` | ✅ | Endpoints with stub handlers (501) |
+| **planned** | `integer` | ✅ | Endpoints not yet implemented |
+
+### Nested Shape: `RouteCoverageReport.entries[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **path** | `string` | ✅ | Full URL path (e.g. /api/v1/analytics/query) |
+| **method** | `Enum<'GET' \| 'POST' \| 'PUT' \| 'DELETE' \| 'PATCH' \| 'HEAD' \| 'OPTIONS'>` | ✅ | HTTP method (GET, POST, etc.) |
+| **category** | `Enum<'discovery' \| 'metadata' \| 'data' \| 'batch' \| 'permission' \| 'analytics' \| …>` | ✅ | Route category |
+| **handlerStatus** | `Enum<'implemented' \| 'stub' \| 'planned'>` | ✅ | Handler status |
+| **service** | `string` | ✅ | Target service name |
+| **healthCheckPassed** | `boolean` | optional | Whether the health check probe succeeded |
 
 
 ---

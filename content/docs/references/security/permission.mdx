@@ -142,6 +142,65 @@ const result = AdminScopeSchema.parse(data);
 | **_packageVersion** | `string` | optional | Owning package version. |
 | **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
 
+### Nested Shape: `PermissionSet.objects[string]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **allowCreate** | `boolean` | optional (default: `false`) | Create permission |
+| **allowRead** | `boolean` | optional (default: `false`) | Read permission |
+| **allowEdit** | `boolean` | optional (default: `false`) | Edit permission |
+| **allowDelete** | `boolean` | optional (default: `false`) | Delete permission |
+| **allowExport** | `boolean` | optional | [#3544] User-level export axis over read (opt-in grant). true = export granted (still bounded by read); unset/false = no export. Merged most-permissively like the CRUD bits; NOT implied by viewAllRecords/modifyAllRecords. |
+| **allowTransfer** | `boolean` | optional (default: `false`) | [RBAC-gated; ENFORCED now via insert/update owner_id guard, #3004] Change record ownership (assign/reassign/disown owner_id) |
+| **allowRestore** | `boolean` | optional (default: `false`) | [RBAC-gated; operation pending M2] Restore from trash (Undelete) |
+| **allowPurge** | `boolean` | optional (default: `false`) | [RBAC-gated; operation pending M2] Permanently delete (Hard Delete/GDPR) |
+| **viewAllRecords** | `boolean` | optional (default: `false`) | View All Data (Bypass Sharing) |
+| **modifyAllRecords** | `boolean` | optional (default: `false`) | Modify All Data (Bypass Sharing) — bypasses sharing rules and ownership on the objects record sharing enforces on; on an object with NO owner field sharing abstains, so the platform created_by write floor still applies (#6698). |
+| **readScope** | `Enum<'own' \| 'own_and_reports' \| 'unit' \| 'unit_and_below' \| 'org'>` | optional | [ADR-0057 D1] Read depth: own\|unit\|unit_and_below\|org |
+| **writeScope** | `Enum<'own' \| 'own_and_reports' \| 'unit' \| 'unit_and_below' \| 'org'>` | optional | [ADR-0057 D1] Write depth: own\|unit\|unit_and_below\|org |
+
+### Nested Shape: `PermissionSet.fields[string]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **readable** | `boolean` | optional (default: `true`) | Field read access |
+| **editable** | `boolean` | optional (default: `false`) | Field edit access |
+
+### Nested Shape: `PermissionSet.rowLevelSecurity[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Policy unique identifier (snake_case) |
+| **label** | `string` | optional | Human-readable policy label |
+| **description** | `string` | optional | Policy description and business justification |
+| **object** | `string` | ✅ | Target object name |
+| **operation** | `Enum<'select' \| 'insert' \| 'update' \| 'delete' \| 'all'>` | ✅ | Database operation this policy applies to |
+| **using** | `string` | optional | Filter condition for SELECT/UPDATE/DELETE, authored in canonical CEL (ADR-0058 D1). It enforces when the predicate lowers to an ObjectQL filter: a field compared against a literal or a `current_user.*` context value using `==`, `!=`, `<`, `<=`, `>` or `>=`; `in` against a `current_user.*` array or an inline literal list (e.g. status in ['draft', 'pending']); these combined with `&&` / `\|\|`; or the bare allow-all `true`. Anything that does not lower fails closed — the policy matches zero rows. The legacy SQL-ish spellings are still accepted through a transitional bridge that rewrites `=` to `==` and `IN` to `in` (deprecated under ADR-0058 D1); SQL `AND` / `OR` / `NOT IN` / `IS NULL` / `LIKE` are NOT bridged and fail closed. Optional for INSERT-only policies. |
+| **check** | `string` | optional | Validation condition for INSERT/UPDATE (defaults to USING clause if not specified - enforced at application level) |
+| **positions** | `string[]` | optional | Positions this policy applies to (omit for all) |
+| **enabled** | `boolean` | optional (default: `true`) | Whether this policy is active |
+| **priority** | `never` | optional | [REMOVED] `rowLevelSecurity[].priority` was removed in @objectstack/spec 17.0.0 (#3896 security audit). It never had an effect and could not: applicable policies OR-combine (most permissive wins), so there is no conflict to order. Delete the key — policy outcomes are unchanged. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
+| **tags** | `string[]` | optional | Policy categorization tags |
+
+### Nested Shape: `PermissionSet.adminScope`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **businessUnit** | `string` | ✅ | [ADR-0090 D12] Delegation boundary: sys_business_unit.name of the subtree root |
+| **includeSubtree** | `boolean` | optional (default: `true`) | Cover descendant business units too (default true) |
+| **manageAssignments** | `boolean` | optional (default: `false`) | Manage user↔position assignments within the subtree |
+| **manageBindings** | `boolean` | optional (default: `false`) | Manage position↔permission-set bindings within the subtree |
+| **authorEnvironmentSets** | `boolean` | optional (default: `false`) | Author environment-owned permission sets |
+| **assignablePermissionSets** | `string[]` | optional (default: `[]`) | Allowlist of permission-set names the delegate may hand out |
+
+### Nested Shape: `PermissionSet.protection`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | ✅ | Lock policy — none \| no-overlay \| no-delete \| full. |
+| **reason** | `string` | ✅ | User-visible reason shown when the lock blocks an action. |
+| **docsUrl** | `string` | optional | Optional URL the Studio banner links to for more context. |
+
 
 ---
 

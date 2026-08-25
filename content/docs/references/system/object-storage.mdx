@@ -50,6 +50,14 @@ const result = AccessControlConfigSchema.parse(data);
 | **allowedIps** | `string[]` | optional | Allowed IP addresses/CIDR blocks |
 | **blockedIps** | `string[]` | optional | Blocked IP addresses/CIDR blocks |
 
+### Nested Shape: `AccessControlConfig.publicAccess`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **allowPublicRead** | `boolean` | optional (default: `false`) | Allow public read access |
+| **allowPublicWrite** | `boolean` | optional (default: `false`) | Allow public write access |
+| **allowPublicList** | `boolean` | optional (default: `false`) | Allow public bucket listing |
+
 
 ---
 
@@ -74,6 +82,47 @@ const result = AccessControlConfigSchema.parse(data);
 | **tags** | `Record<string, string>` | optional | Bucket tags for organization |
 | **description** | `string` | optional | Bucket description |
 | **enabled** | `boolean` | optional (default: `true`) | Enable this bucket |
+
+### Nested Shape: `BucketConfig.encryption`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **enabled** | `boolean` | optional (default: `false`) | Enable server-side encryption |
+| **algorithm** | `Enum<'AES256' \| 'aws:kms' \| 'azure:kms' \| 'gcp:kms'>` | optional (default: `"AES256"`) | Encryption algorithm |
+| **kmsKeyId** | `string` | optional | KMS key ID for managed encryption |
+
+### Nested Shape: `BucketConfig.accessControl`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **acl** | `Enum<'private' \| 'public_read' \| 'public_read_write' \| 'authenticated_read' \| …>` | optional (default: `"private"`) | Default access control level |
+| **allowedOrigins** | `string[]` | optional | CORS allowed origins |
+| **allowedMethods** | `Enum<'GET' \| 'PUT' \| 'POST' \| 'DELETE' \| 'HEAD'>[]` | optional | CORS allowed HTTP methods |
+| **allowedHeaders** | `string[]` | optional | CORS allowed headers |
+| **exposeHeaders** | `string[]` | optional | CORS exposed headers |
+| **maxAge** | `number` | optional | CORS preflight cache duration in seconds |
+| **corsEnabled** | `boolean` | optional (default: `false`) | Enable CORS configuration |
+| **publicAccess** | `{ allowPublicRead: boolean; allowPublicWrite: boolean; allowPublicList: boolean }` | optional | Public access control |
+| **allowedIps** | `string[]` | optional | Allowed IP addresses/CIDR blocks |
+| **blockedIps** | `string[]` | optional | Blocked IP addresses/CIDR blocks |
+
+### Nested Shape: `BucketConfig.lifecyclePolicy`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **enabled** | `boolean` | optional (default: `false`) | Enable lifecycle policies |
+| **rules** | `{ id: string; enabled: boolean; action: Enum<'transition' \| 'delete' \| 'abort'>; prefix?: string; … }[]` | optional (default: `[]`) | Lifecycle rules |
+
+### Nested Shape: `BucketConfig.multipartConfig`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **enabled** | `boolean` | optional (default: `true`) | Enable multipart uploads |
+| **partSize** | `number` | optional (default: `10485760`) | Part size in bytes (min 5MB, max 5GB) |
+| **maxParts** | `number` | optional (default: `10000`) | Maximum number of parts (max 10,000) |
+| **threshold** | `number` | optional (default: `104857600`) | File size threshold to trigger multipart upload (bytes) |
+| **maxConcurrent** | `number` | optional (default: `4`) | Maximum concurrent part uploads |
+| **abortIncompleteAfterDays** | `number` | optional | Auto-abort incomplete uploads after N days |
 
 
 ---
@@ -117,6 +166,19 @@ Lifecycle policy action type
 | :--- | :--- | :--- | :--- |
 | **enabled** | `boolean` | optional (default: `false`) | Enable lifecycle policies |
 | **rules** | `{ id: string; enabled: boolean; action: Enum<'transition' \| 'delete' \| 'abort'>; prefix?: string; … }[]` | optional (default: `[]`) | Lifecycle rules |
+
+### Nested Shape: `LifecyclePolicyConfig.rules[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ | Rule identifier |
+| **enabled** | `boolean` | optional (default: `true`) | Enable this rule |
+| **action** | `Enum<'transition' \| 'delete' \| 'abort'>` | ✅ | Action to perform |
+| **prefix** | `string` | optional | Object key prefix filter (e.g., "uploads/") |
+| **tags** | `Record<string, string>` | optional | Object tag filters |
+| **daysAfterCreation** | `number` | optional | Days after object creation |
+| **daysAfterModification** | `number` | optional | Days after last modification |
+| **targetStorageClass** | `Enum<'standard' \| 'intelligent' \| 'infrequent_access' \| 'glacier' \| 'deep_archive'>` | optional | Target storage class for transition action |
 
 
 ---
@@ -174,6 +236,13 @@ Lifecycle policy action type
 | **encryption** | `{ algorithm: string; keyId?: string }` | optional | Server-side encryption configuration |
 | **custom** | `Record<string, string>` | optional | Custom user-defined metadata |
 
+### Nested Shape: `ObjectMetadata.encryption`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **algorithm** | `string` | ✅ | Encryption algorithm (e.g., AES256, aws:kms) |
+| **keyId** | `string` | optional | KMS key ID if using managed encryption |
+
 
 ---
 
@@ -195,6 +264,43 @@ Lifecycle policy action type
 | **options** | `Record<string, any>` | optional | Provider-specific configuration options |
 | **enabled** | `boolean` | optional (default: `true`) | Enable this storage configuration |
 | **description** | `string` | optional | Configuration description |
+
+### Nested Shape: `ObjectStorageConfig.connection`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **accessKeyId** | `string` | optional | AWS access key ID or MinIO access key |
+| **secretAccessKey** | `string` | optional | AWS secret access key or MinIO secret key |
+| **sessionToken** | `string` | optional | AWS session token for temporary credentials |
+| **accountName** | `string` | optional | Azure storage account name |
+| **accountKey** | `string` | optional | Azure storage account key |
+| **sasToken** | `string` | optional | Azure SAS token |
+| **environmentId** | `string` | optional | GCP project ID |
+| **credentials** | `string` | optional | GCP service account credentials JSON |
+| **endpoint** | `string` | optional | Custom endpoint URL |
+| **region** | `string` | optional | Default region |
+| **useSSL** | `boolean` | optional (default: `true`) | Use SSL/TLS for connections |
+| **timeout** | `number` | optional | Connection timeout in milliseconds |
+
+### Nested Shape: `ObjectStorageConfig.buckets[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Bucket identifier in ObjectStack (snake_case) |
+| **label** | `string` | ✅ | Display label |
+| **bucketName** | `string` | ✅ | Actual bucket/container name in storage provider |
+| **region** | `string` | optional | Storage region (e.g., us-east-1, westus) |
+| **provider** | `Enum<'s3' \| 'azure_blob' \| 'gcs' \| 'minio' \| 'r2' \| 'spaces' \| 'wasabi' \| 'backblaze' \| 'local'>` | ✅ | Storage provider |
+| **endpoint** | `string` | optional | Custom endpoint URL (for S3-compatible providers) |
+| **pathStyle** | `boolean` | optional (default: `false`) | Use path-style URLs (for S3-compatible providers) |
+| **versioning** | `boolean` | optional (default: `false`) | Enable object versioning |
+| **encryption** | `{ enabled: boolean; algorithm: Enum<'AES256' \| 'aws:kms' \| 'azure:kms' \| 'gcp:kms'>; kmsKeyId?: string }` | optional | Server-side encryption configuration |
+| **accessControl** | `{ acl: Enum<'private' \| 'public_read' \| 'public_read_write' \| 'authenticated_read' \| …>; allowedOrigins?: string[]; allowedMethods?: Enum<'GET' \| 'PUT' \| 'POST' \| 'DELETE' \| 'HEAD'>[]; allowedHeaders?: string[]; … }` | optional | Access control configuration |
+| **lifecyclePolicy** | `{ enabled: boolean; rules: object[] }` | optional | Lifecycle policy configuration |
+| **multipartConfig** | `{ enabled: boolean; partSize: number; maxParts: number; threshold: number; … }` | optional | Multipart upload configuration |
+| **tags** | `Record<string, string>` | optional | Bucket tags for organization |
+| **description** | `string` | optional | Bucket description |
+| **enabled** | `boolean` | optional (default: `true`) | Enable this bucket |
 
 
 ---

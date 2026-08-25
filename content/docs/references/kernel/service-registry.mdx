@@ -73,6 +73,14 @@ const result = ScopeConfigSchema.parse(data);
 | **singleton** | `boolean` | optional (default: `true`) | Whether to cache the factory result (singleton pattern) |
 | **cluster** | `{ clusterScope: Enum<'node' \| 'cluster'>; leaderStrategy?: Enum<'leader-elected' \| 'partitioned' \| 'idempotent-broadcast'>; clusterId?: string }` | optional | Cluster scope & leader strategy for this service. |
 
+### Nested Shape: `ServiceFactoryRegistration.cluster`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **clusterScope** | `Enum<'node' \| 'cluster'>` | optional (default: `"node"`) | Per-node vs cluster-singleton presence. |
+| **leaderStrategy** | `Enum<'leader-elected' \| 'partitioned' \| 'idempotent-broadcast'>` | optional | How the cluster-singleton invariant is maintained. |
+| **clusterId** | `string` | optional | Logical cluster identity used for leader election (defaults to service name). |
+
 
 ---
 
@@ -88,6 +96,14 @@ const result = ScopeConfigSchema.parse(data);
 | **registeredAt** | `integer` | optional | Unix timestamp in milliseconds when service was registered |
 | **metadata** | `Record<string, any>` | optional | Additional service-specific metadata |
 | **cluster** | `{ clusterScope: Enum<'node' \| 'cluster'>; leaderStrategy?: Enum<'leader-elected' \| 'partitioned' \| 'idempotent-broadcast'>; clusterId?: string }` | optional | Cluster scope & leader strategy. See cluster-semantics.mdx §5. |
+
+### Nested Shape: `ServiceMetadata.cluster`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **clusterScope** | `Enum<'node' \| 'cluster'>` | optional (default: `"node"`) | Per-node vs cluster-singleton presence. |
+| **leaderStrategy** | `Enum<'leader-elected' \| 'partitioned' \| 'idempotent-broadcast'>` | optional | How the cluster-singleton invariant is maintained. |
+| **clusterId** | `string` | optional | Logical cluster identity used for leader election (defaults to service name). |
 
 
 ---

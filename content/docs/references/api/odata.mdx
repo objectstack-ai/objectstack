@@ -93,6 +93,14 @@ const result = ODataConfigSchema.parse(data);
 | **path** | `string` | optional (default: `"/odata"`) | OData endpoint path |
 | **metadata** | `{ namespace: string; entityTypes: object[]; entitySets: object[] }` | optional | OData metadata configuration |
 
+### Nested Shape: `ODataConfig.metadata`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **namespace** | `string` | ✅ | Service namespace |
+| **entityTypes** | `{ name: string; key: string[]; properties: object[]; navigationProperties?: object[] }[]` | ✅ | Entity types |
+| **entitySets** | `{ name: string; entityType: string }[]` | ✅ | Entity sets |
+
 
 ---
 
@@ -103,6 +111,16 @@ const result = ODataConfigSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **error** | `{ code: string; message: string; target?: string; details?: object[]; … }` | ✅ |  |
+
+### Nested Shape: `ODataError.error`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **code** | `string` | ✅ | Error code |
+| **message** | `string` | ✅ | Error message |
+| **target** | `string` | optional | Error target |
+| **details** | `{ code: string; message: string; target?: string }[]` | optional | Error details |
+| **innererror** | `Record<string, any>` | optional | Inner error details |
 
 
 ---
@@ -152,6 +170,22 @@ const result = ODataConfigSchema.parse(data);
 | **namespace** | `string` | ✅ | Service namespace |
 | **entityTypes** | `{ name: string; key: string[]; properties: object[]; navigationProperties?: object[] }[]` | ✅ | Entity types |
 | **entitySets** | `{ name: string; entityType: string }[]` | ✅ | Entity sets |
+
+### Nested Shape: `ODataMetadata.entityTypes[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Entity type name |
+| **key** | `string[]` | ✅ | Key fields |
+| **properties** | `{ name: string; type: string; nullable: boolean }[]` | ✅ |  |
+| **navigationProperties** | `{ name: string; type: string; partner?: string }[]` | optional |  |
+
+### Nested Shape: `ODataMetadata.entitySets[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Entity set name |
+| **entityType** | `string` | ✅ | Entity type |
 
 
 ---

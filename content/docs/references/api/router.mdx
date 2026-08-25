@@ -95,6 +95,41 @@ HTTP method — the full routing vocabulary (`api/*` endpoints, router and REST-
 | **cors** | `{ enabled: boolean; origins: string \| string[]; methods?: Enum<'GET' \| 'POST' \| 'PUT' \| 'DELETE' \| 'PATCH' \| 'HEAD' \| 'OPTIONS'>[]; credentials: boolean; … }` | optional |  |
 | **staticMounts** | `{ path: string; directory: string; cacheControl?: string }[]` | optional |  |
 
+### Nested Shape: `RouterConfig.mounts`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **data** | `string` | optional (default: `"/data"`) | Data Protocol (CRUD) |
+| **metadata** | `string` | optional (default: `"/meta"`) | Metadata Protocol (Schemas) |
+| **auth** | `string` | optional (default: `"/auth"`) | Auth Protocol |
+| **automation** | `string` | optional (default: `"/automation"`) | Automation Protocol |
+| **storage** | `string` | optional (default: `"/storage"`) | Storage Protocol |
+| **analytics** | `string` | optional (default: `"/analytics"`) | Analytics Protocol |
+| **ui** | `string` | optional (default: `"/ui"`) | UI Metadata Protocol (Views, Layouts) |
+| **realtime** | `string` | optional (default: `"/realtime"`) | Realtime/WebSocket Protocol |
+| **notifications** | `string` | optional (default: `"/notifications"`) | Notification Protocol |
+| **ai** | `string` | optional (default: `"/ai"`) | AI Engine Protocol (NLQ, Chat, Suggest) |
+| **i18n** | `string` | optional (default: `"/i18n"`) | Internationalization Protocol |
+| **packages** | `string` | optional (default: `"/packages"`) | Package Management Protocol |
+
+### Nested Shape: `RouterConfig.cors`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **enabled** | `boolean` | optional (default: `true`) | Enable CORS |
+| **origins** | `string \| string[]` | optional (default: `"*"`) | Allowed origins (* for all) |
+| **methods** | `Enum<'GET' \| 'POST' \| 'PUT' \| 'DELETE' \| 'PATCH' \| 'HEAD' \| 'OPTIONS'>[]` | optional | Allowed HTTP methods |
+| **credentials** | `boolean` | optional (default: `false`) | Allow credentials (cookies, authorization headers) |
+| **maxAge** | `integer` | optional | Preflight cache duration in seconds |
+
+### Nested Shape: `RouterConfig.staticMounts[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **path** | `string` | ✅ | URL path to serve from |
+| **directory** | `string` | ✅ | Physical directory to serve |
+| **cacheControl** | `string` | optional | Cache-Control header value |
+
 
 ---
 

@@ -559,6 +559,135 @@ export function formatPropertyType(prop: any, ctx?: TypeContext): RenderedProper
 }
 
 /**
+ * The single `{ … }` shape a property's cell opens, and the TypeScript indexed
+ * accessor that selects it out of the property's type.
+ *
+ * `node` is the JSON Schema object node itself, so a caller can render its keys
+ * with the same table code the enclosing section already uses.
+ */
+export interface NestedShape {
+  /** The object node whose keys the cell summarizes into `{ … }`. */
+  node: any;
+  /**
+   * `''` for a property whose own type IS the shape, `'[number]'` for an array
+   * element, `'[string]'` for a `Record` value — composed left to right for a
+   * wrapper stack (`'[string][number]'`).
+   *
+   * These are real TypeScript indexed-access spellings, not a notation invented
+   * for the docs: `Props['items'][number]` IS the element type. That is what
+   * lets a heading name the shape without a second omission/relocation sigil in
+   * a table that already carries `…` and `… +N more`.
+   */
+  accessor: string;
+  /** Live (non-tombstone) key names, in declaration order. */
+  keys: string[];
+}
+
+/**
+ * The ONE shape a property opens at depth 0 — or `null` when it opens none, or
+ * more than one (#11601).
+ *
+ * ## What this is for
+ *
+ * `renderType` spends `SHAPE_DEPTH_LIMIT` on the first object it meets and
+ * prints `{ label: string; icon?: string; … }` — a summary with **no
+ * description column**. Every `.describe()` an author wrote on a key of that
+ * shape is therefore unreachable from the page: not truncated, not marked, just
+ * absent, and `check:docs` is green because generated and committed output
+ * agree about text neither contains. `page:tabs`'s item-level `visibleWhen`
+ * carries a 600-character contract note — including a ⚠️ that its evaluation
+ * environment is NOT the page-component `visibleWhen` of the same name — and
+ * `content/docs/references/ui/component.mdx` rendered it as an empty cell.
+ *
+ * This function names the node a caller can put under its own table, so the
+ * description column exists exactly once for those keys.
+ *
+ * ## Why it lives beside `renderType` rather than in the section renderer
+ *
+ * The two must agree, key for key, about what "one shape level" means: the
+ * table below a cell has to be the shape that cell summarized, or the page
+ * documents something it did not print. Wrappers do not spend the budget and
+ * shapes do — the accounting in the object branch above — so an array of
+ * objects, a `Record` of objects and a `string | { … }` union all open exactly
+ * one shape, and all three reach it here the same way `renderType` does:
+ * anonymous `$defs` expanded, tombstones filtered, cycles refused.
+ *
+ * ## Why more than one shape returns `null`
+ *
+ * `formatPropertyType`'s vocabulary relocation is matched to its cell CONDITION
+ * FOR CONDITION, and refuses the positions where "the allowed values of this
+ * property" would not be the whole truth. Same rule here: a property whose type
+ * is a union of several object shapes has no single "the shape of this
+ * property" to name — `App.navigation`'s nine variants would need a variant
+ * index in the heading, i.e. a second addressing notation — so those keep the
+ * rendering they have. Measured on the tree at the time of the fix: 28 of 1293
+ * shape-opening property rows are in that state.
+ *
+ * A NAMED `$ref` also returns `null`, and a self `$ref` (`"#"`) with it: both
+ * resolve to a schema with its own `## Section` on some page, where the keys
+ * and their descriptions are already published in full. (Zod inlines
+ * everything today, so every ref in the emitted tree is anonymous or self —
+ * this is the branch that keeps the rule true if that changes.)
+ */
+export function nestedShapeOf(prop: any, ctx?: TypeContext): NestedShape | null {
+  const found: NestedShape[] = [];
+
+  const walk = (node: any, expanding: Set<string>, accessor: string, guard: number): void => {
+    if (!node || typeof node !== 'object' || guard > 8) return;
+    // Two or more already: the answer is `null` whatever else we find.
+    if (found.length > 1) return;
+    // A tombstone accepts nothing; there is no shape under it.
+    if (isNeverNode(node)) return;
+
+    if (node.$ref) {
+      // Both spellings name a schema documented in its own section.
+      if (node.$ref === '#') return;
+      const name = refName(node.$ref);
+      if (!isAnonymousRef(name)) return;
+      if (expanding.has(name)) return;
+      const target = ctx?.defs?.[name];
+      if (!target) return;
+      const next = new Set(expanding);
+      next.add(name);
+      walk({ ...target, $ref: undefined }, next, accessor, guard + 1);
+      return;
+    }
+
+    // Checked before the object branch for the same reason `renderType` checks
+    // them there: a vocabulary or a literal is a leaf, never a shape.
+    if (node.enum || node.const !== undefined) return;
+
+    if (node.type === 'array') {
+      walk(node.items, expanding, `${accessor}[number]`, guard + 1);
+      return;
+    }
+
+    if (Array.isArray(node.anyOf) || Array.isArray(node.oneOf)) {
+      for (const variant of node.anyOf || node.oneOf) {
+        walk(variant, new Set(expanding), accessor, guard + 1);
+      }
+      return;
+    }
+
+    if (node.type === 'object' || node.properties || node.additionalProperties) {
+      const keys = node.properties
+        ? Object.keys(node.properties).filter(k => !isNeverNode(node.properties[k]))
+        : [];
+      if (keys.length > 0) {
+        found.push({ node, accessor, keys });
+        return;
+      }
+      if (node.additionalProperties && typeof node.additionalProperties === 'object') {
+        walk(node.additionalProperties, expanding, `${accessor}[string]`, guard + 1);
+      }
+    }
+  };
+
+  walk(prop, new Set(ctx?.expanding ?? []), '', 0);
+  return found.length === 1 ? found[0] : null;
+}
+
+/**
  * `depth` is the count of `{ … }` shape levels already OPEN above this node,
  * and it is a parameter rather than a `TypeContext` field on purpose: a caller
  * that passes no `ctx` (every unit test that only wants a type string) must

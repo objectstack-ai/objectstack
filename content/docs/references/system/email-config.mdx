@@ -89,6 +89,13 @@ const result = EmailAddressConfigSchema.parse(data);
 | **appName** | `string` | optional | Product name templates interpolate as the appName variable — OS_APP_NAME env wins, then this, then defaultTemplateContext.appName, then the top-level config appName, then "ObjectStack". Also seeds the placeholder no-reply sender when no defaultFrom is configured |
 | **defaultTemplateContext** | `Record<string, any>` | optional | Free-form render context merged into every sendTemplate() call, under the per-call data. Passed through unchanged except appName, which is resolved by its own chain — OS_APP_NAME and the appName key both override the value written here |
 
+### Nested Shape: `EmailServiceConfig.defaultFrom`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | optional | Display name (e.g. "Acme CRM") |
+| **address** | `string` | ✅ | RFC-5322 address |
+
 
 ---
 

@@ -47,6 +47,42 @@ Complete dependency graph for a package and its transitive dependencies
 | **edges** | `{ from: string; to: string; constraint: string }[]` | ✅ | Directed edges representing dependency relationships |
 | **stats** | `{ totalDependencies: integer; directDependencies: integer; maxDepth: integer }` | ✅ | Summary statistics for the dependency graph |
 
+### Nested Shape: `DependencyGraph.root`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ | Identifier of the root package |
+| **version** | `string` | ✅ | Version of the root package |
+
+### Nested Shape: `DependencyGraph.nodes[number]`
+
+A node in the dependency graph representing a resolved package
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ | Unique identifier of the package |
+| **version** | `string` | ✅ | Resolved version of the package |
+| **dependencies** | `{ name: string; versionConstraint: string; type: Enum<'required' \| 'optional' \| 'peer' \| 'dev'>; resolvedVersion?: string }[]` | optional (default: `[]`) | Dependencies required by this package |
+| **depth** | `integer` | ✅ | Depth level in the dependency tree (0 = root) |
+| **isDirect** | `boolean` | ✅ | Whether this is a direct (top-level) dependency |
+| **metadata** | `{ name: string; description?: string; license?: string; homepage?: string }` | optional | Additional metadata about the package |
+
+### Nested Shape: `DependencyGraph.edges[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **from** | `string` | ✅ | Package ID |
+| **to** | `string` | ✅ | Package ID |
+| **constraint** | `string` | ✅ | Version constraint |
+
+### Nested Shape: `DependencyGraph.stats`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **totalDependencies** | `integer` | ✅ | Total number of resolved dependencies |
+| **directDependencies** | `integer` | ✅ | Number of direct (top-level) dependencies |
+| **maxDepth** | `integer` | ✅ | Maximum depth of the dependency tree |
+
 
 ---
 
@@ -65,6 +101,26 @@ A node in the dependency graph representing a resolved package
 | **isDirect** | `boolean` | ✅ | Whether this is a direct (top-level) dependency |
 | **metadata** | `{ name: string; description?: string; license?: string; homepage?: string }` | optional | Additional metadata about the package |
 
+### Nested Shape: `DependencyGraphNode.dependencies[number]`
+
+A resolver-side package dependency: version constraint plus its resolution outcome
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Package name or identifier |
+| **versionConstraint** | `string` | ✅ | Semver range (e.g., `^1.0.0`, `>=2.0.0 <3.0.0`) |
+| **type** | `Enum<'required' \| 'optional' \| 'peer' \| 'dev'>` | optional (default: `"required"`) | Category of the dependency relationship |
+| **resolvedVersion** | `string` | optional | Concrete version resolved during dependency resolution |
+
+### Nested Shape: `DependencyGraphNode.metadata`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Display name of the package |
+| **description** | `string` | optional | Short description of the package |
+| **license** | `string` | optional | SPDX license identifier of the package |
+| **homepage** | `string` | optional | Homepage URL of the package |
+
 
 ---
 
@@ -80,6 +136,22 @@ A detected conflict between dependency version requirements
 | **conflicts** | `{ version: string; requestedBy: string[]; constraint: string }[]` | ✅ | List of conflicting version requirements |
 | **resolution** | `{ strategy: Enum<'pick-highest' \| 'pick-lowest' \| 'manual'>; version?: string; reason?: string }` | optional | Suggested resolution for the conflict |
 | **severity** | `Enum<'error' \| 'warning' \| 'info'>` | ✅ | Severity level of the dependency conflict |
+
+### Nested Shape: `PackageDependencyConflict.conflicts[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **version** | `string` | ✅ | Conflicting version of the package |
+| **requestedBy** | `string[]` | ✅ | Packages that require this version |
+| **constraint** | `string` | ✅ | Semver constraint that produced this version requirement |
+
+### Nested Shape: `PackageDependencyConflict.resolution`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **strategy** | `Enum<'pick-highest' \| 'pick-lowest' \| 'manual'>` | ✅ | Strategy used to resolve the conflict |
+| **version** | `string` | optional | Resolved version selected by the strategy |
+| **reason** | `string` | optional | Explanation of why this resolution was chosen |
 
 
 ---
@@ -99,6 +171,33 @@ Result of a dependency resolution process
 | **installOrder** | `string[]` | optional (default: `[]`) | Topologically sorted list of package IDs for installation |
 | **resolvedIn** | `integer` | optional | Time taken to resolve dependencies in milliseconds |
 
+### Nested Shape: `PackageDependencyResolutionResult.graph`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **root** | `{ id: string; version: string }` | ✅ | Root package of the dependency graph |
+| **nodes** | `{ id: string; version: string; dependencies: object[]; depth: integer; … }[]` | ✅ | All resolved package nodes in the dependency graph |
+| **edges** | `{ from: string; to: string; constraint: string }[]` | ✅ | Directed edges representing dependency relationships |
+| **stats** | `{ totalDependencies: integer; directDependencies: integer; maxDepth: integer }` | ✅ | Summary statistics for the dependency graph |
+
+### Nested Shape: `PackageDependencyResolutionResult.conflicts[number]`
+
+A detected conflict between dependency version requirements
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **package** | `string` | ✅ | Name of the package with conflicting version requirements |
+| **conflicts** | `{ version: string; requestedBy: string[]; constraint: string }[]` | ✅ | List of conflicting version requirements |
+| **resolution** | `{ strategy: Enum<'pick-highest' \| 'pick-lowest' \| 'manual'>; version?: string; reason?: string }` | optional | Suggested resolution for the conflict |
+| **severity** | `Enum<'error' \| 'warning' \| 'info'>` | ✅ | Severity level of the dependency conflict |
+
+### Nested Shape: `PackageDependencyResolutionResult.errors[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **package** | `string` | ✅ | Name of the package that caused the error |
+| **error** | `string` | ✅ | Error message describing what went wrong |
+
 
 ---
 
@@ -117,6 +216,42 @@ Verifiable provenance and chain of custody for a plugin artifact
 | **signatures** | `{ algorithm: Enum<'rsa' \| 'ecdsa' \| 'ed25519'>; publicKey: string; signature: string; signedBy: string; … }[]` | optional (default: `[]`) | Cryptographic signatures for the plugin artifact |
 | **attestations** | `{ type: Enum<'code-review' \| 'security-scan' \| 'test-results' \| 'ci-build'>; status: Enum<'passed' \| 'failed'>; url?: string; timestamp: string }[]` | optional (default: `[]`) | Verification attestations for the plugin |
 
+### Nested Shape: `PluginProvenance.build`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **timestamp** | `string` | ✅ | ISO 8601 timestamp when the build was produced |
+| **environment** | `{ os: string; arch: string; nodeVersion: string }` | optional | Environment details where the build was executed |
+| **source** | `{ repository: string; commit: string; branch?: string; tag?: string }` | optional | Source repository information for the build |
+| **builder** | `{ name: string; email?: string }` | optional | Identity of the builder who produced the artifact |
+
+### Nested Shape: `PluginProvenance.artifacts[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **filename** | `string` | ✅ | Name of the artifact file |
+| **sha256** | `string` | ✅ | SHA-256 hash of the artifact |
+| **size** | `integer` | ✅ | Size of the artifact in bytes |
+
+### Nested Shape: `PluginProvenance.signatures[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **algorithm** | `Enum<'rsa' \| 'ecdsa' \| 'ed25519'>` | ✅ | Cryptographic algorithm used for signing |
+| **publicKey** | `string` | ✅ | Public key used to verify the signature |
+| **signature** | `string` | ✅ | Digital signature value |
+| **signedBy** | `string` | ✅ | Identity of the signer |
+| **timestamp** | `string` | ✅ | ISO 8601 timestamp when the signature was created |
+
+### Nested Shape: `PluginProvenance.attestations[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `Enum<'code-review' \| 'security-scan' \| 'test-results' \| 'ci-build'>` | ✅ | Type of attestation |
+| **status** | `Enum<'passed' \| 'failed'>` | ✅ | Result status of the attestation |
+| **url** | `string` | optional | URL with details about the attestation |
+| **timestamp** | `string` | ✅ | ISO 8601 timestamp when the attestation was issued |
+
 
 ---
 
@@ -134,6 +269,16 @@ Trust score and verification status for a plugin
 | **level** | `Enum<'verified' \| 'trusted' \| 'neutral' \| 'untrusted' \| 'blocked'>` | ✅ | Computed trust level based on the overall score |
 | **badges** | `Enum<'official' \| 'verified-vendor' \| 'security-scanned' \| 'code-signed' \| 'open-source' \| 'popular'>[]` | optional (default: `[]`) | Verification badges earned by the plugin |
 | **updatedAt** | `string` | ✅ | ISO 8601 timestamp when the trust score was last updated |
+
+### Nested Shape: `PluginTrustScore.components`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **vendorReputation** | `number` | ✅ | Vendor reputation score from 0 to 100 |
+| **securityScore** | `number` | ✅ | Security scan results score from 0 to 100 |
+| **codeQuality** | `number` | ✅ | Code quality score from 0 to 100 |
+| **communityScore** | `number` | ✅ | Community engagement score from 0 to 100 |
+| **maintenanceScore** | `number` | ✅ | Maintenance and update frequency score from 0 to 100 |
 
 
 ---
@@ -169,6 +314,35 @@ Software Bill of Materials for a plugin
 | **generatedAt** | `string` | ✅ | ISO 8601 timestamp when the SBOM was generated |
 | **generator** | `{ name: string; version: string }` | optional | Tool used to generate this SBOM |
 
+### Nested Shape: `SBOM.plugin`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ | Plugin identifier |
+| **version** | `string` | ✅ | Plugin version |
+| **name** | `string` | ✅ | Human-readable plugin name |
+
+### Nested Shape: `SBOM.components[number]`
+
+A single entry in a Software Bill of Materials
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Name of the software component |
+| **version** | `string` | ✅ | Version of the software component |
+| **purl** | `string` | optional | Package URL identifier |
+| **license** | `string` | optional | SPDX license identifier of the component |
+| **hashes** | `{ sha256?: string; sha512?: string }` | optional | Cryptographic hashes for integrity verification |
+| **supplier** | `{ name: string; url?: string }` | optional | Supplier information for the component |
+| **externalRefs** | `{ type: Enum<'website' \| 'repository' \| 'documentation' \| 'issue-tracker'>; url: string }[]` | optional (default: `[]`) | External references related to the component |
+
+### Nested Shape: `SBOM.generator`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Name of the SBOM generator tool |
+| **version** | `string` | ✅ | Version of the SBOM generator tool |
+
 
 ---
 
@@ -187,6 +361,27 @@ A single entry in a Software Bill of Materials
 | **hashes** | `{ sha256?: string; sha512?: string }` | optional | Cryptographic hashes for integrity verification |
 | **supplier** | `{ name: string; url?: string }` | optional | Supplier information for the component |
 | **externalRefs** | `{ type: Enum<'website' \| 'repository' \| 'documentation' \| 'issue-tracker'>; url: string }[]` | optional (default: `[]`) | External references related to the component |
+
+### Nested Shape: `SBOMEntry.hashes`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **sha256** | `string` | optional | SHA-256 hash of the component artifact |
+| **sha512** | `string` | optional | SHA-512 hash of the component artifact |
+
+### Nested Shape: `SBOMEntry.supplier`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Name of the component supplier |
+| **url** | `string` | optional | URL of the component supplier |
+
+### Nested Shape: `SBOMEntry.externalRefs[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `Enum<'website' \| 'repository' \| 'documentation' \| 'issue-tracker'>` | ✅ | Type of external reference |
+| **url** | `string` | ✅ | URL of the external reference |
 
 
 ---
@@ -207,6 +402,38 @@ Security policy governing plugin scanning and enforcement
 | **prohibitedLicenses** | `string[]` | optional (default: `["GPL-3.0","AGPL-3.0"]`) | List of SPDX license identifiers that are prohibited |
 | **codeSigning** | `{ required: boolean; allowedSigners: string[] }` | optional | Code signing requirements for plugin artifacts |
 | **sandbox** | `{ networkAccess: Enum<'none' \| 'localhost' \| 'allowlist' \| 'all'>; allowedDestinations: string[]; filesystemAccess: Enum<'none' \| 'read-only' \| 'temp-only' \| 'full'>; maxMemoryMB?: integer; … }` | optional | Sandbox restrictions for plugin execution |
+
+### Nested Shape: `SecurityPolicy.autoScan`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **enabled** | `boolean` | optional (default: `true`) | Whether automatic scanning is enabled |
+| **frequency** | `Enum<'on-publish' \| 'daily' \| 'weekly' \| 'monthly'>` | optional (default: `"daily"`) | How often automatic scans are performed |
+
+### Nested Shape: `SecurityPolicy.thresholds`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **maxCritical** | `integer` | optional (default: `0`) | Maximum allowed critical vulnerabilities before blocking |
+| **maxHigh** | `integer` | optional (default: `0`) | Maximum allowed high vulnerabilities before blocking |
+| **maxMedium** | `integer` | optional (default: `5`) | Maximum allowed medium vulnerabilities before warning |
+
+### Nested Shape: `SecurityPolicy.codeSigning`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **required** | `boolean` | optional (default: `false`) | Whether code signing is required for plugins |
+| **allowedSigners** | `string[]` | optional (default: `[]`) | List of trusted signer identities |
+
+### Nested Shape: `SecurityPolicy.sandbox`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **networkAccess** | `Enum<'none' \| 'localhost' \| 'allowlist' \| 'all'>` | optional (default: `"all"`) | Level of network access granted to the plugin |
+| **allowedDestinations** | `string[]` | optional (default: `[]`) | Permitted network destinations when using allowlist mode |
+| **filesystemAccess** | `Enum<'none' \| 'read-only' \| 'temp-only' \| 'full'>` | optional (default: `"full"`) | Level of file system access granted to the plugin |
+| **maxMemoryMB** | `integer` | optional | Maximum memory allocation in megabytes |
+| **maxCPUSeconds** | `integer` | optional | Maximum CPU time allowed in seconds |
 
 
 ---
@@ -229,6 +456,67 @@ Result of a security scan performed on a plugin
 | **licenseIssues** | `{ package: string; license: string; reason: string; severity: Enum<'error' \| 'warning' \| 'info'> }[]` | optional (default: `[]`) | License compliance issues found during the scan |
 | **codeQuality** | `{ score?: number; issues: object[] }` | optional | Code quality analysis results |
 | **nextScanAt** | `string` | optional | ISO 8601 timestamp for the next scheduled scan |
+
+### Nested Shape: `SecurityScanResult.plugin`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ | Plugin identifier |
+| **version** | `string` | ✅ | Plugin version that was scanned |
+
+### Nested Shape: `SecurityScanResult.scanner`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Scanner name (e.g., snyk, osv, trivy) |
+| **version** | `string` | ✅ | Version of the scanner tool |
+
+### Nested Shape: `SecurityScanResult.vulnerabilities[number]`
+
+A known security vulnerability in a package dependency
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **cve** | `string` | optional | CVE identifier |
+| **id** | `string` | ✅ | Vulnerability ID |
+| **title** | `string` | ✅ | Short title summarizing the vulnerability |
+| **description** | `string` | ✅ | Detailed description of the vulnerability |
+| **severity** | `Enum<'critical' \| 'high' \| 'medium' \| 'low' \| 'info'>` | ✅ | Severity level of this vulnerability |
+| **cvss** | `number` | optional | CVSS score ranging from 0 to 10 |
+| **package** | `{ name: string; version: string; ecosystem?: string }` | ✅ | Affected package information |
+| **vulnerableVersions** | `string` | ✅ | Semver range of vulnerable versions |
+| **patchedVersions** | `string` | optional | Semver range of patched versions |
+| **references** | `{ type: Enum<'advisory' \| 'article' \| 'report' \| 'web'>; url: string }[]` | optional (default: `[]`) | External references related to the vulnerability |
+| **cwe** | `string[]` | optional (default: `[]`) | CWE identifiers associated with this vulnerability |
+| **publishedAt** | `string` | optional | ISO 8601 date when the vulnerability was published |
+| **mitigation** | `string` | optional | Recommended steps to mitigate the vulnerability |
+
+### Nested Shape: `SecurityScanResult.summary`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **critical** | `integer` | optional (default: `0`) | Count of critical severity vulnerabilities |
+| **high** | `integer` | optional (default: `0`) | Count of high severity vulnerabilities |
+| **medium** | `integer` | optional (default: `0`) | Count of medium severity vulnerabilities |
+| **low** | `integer` | optional (default: `0`) | Count of low severity vulnerabilities |
+| **info** | `integer` | optional (default: `0`) | Count of informational severity vulnerabilities |
+| **total** | `integer` | optional (default: `0`) | Total count of all vulnerabilities |
+
+### Nested Shape: `SecurityScanResult.licenseIssues[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **package** | `string` | ✅ | Name of the package with a license issue |
+| **license** | `string` | ✅ | License identifier of the package |
+| **reason** | `string` | ✅ | Reason the license is flagged |
+| **severity** | `Enum<'error' \| 'warning' \| 'info'>` | ✅ | Severity of the license compliance issue |
+
+### Nested Shape: `SecurityScanResult.codeQuality`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **score** | `number` | optional | Overall code quality score from 0 to 100 |
+| **issues** | `{ type: Enum<'security' \| 'quality' \| 'style'>; severity: Enum<'error' \| 'warning' \| 'info'>; message: string; file?: string; … }[]` | optional (default: `[]`) | List of individual code quality issues |
 
 
 ---
@@ -254,6 +542,21 @@ A known security vulnerability in a package dependency
 | **cwe** | `string[]` | optional (default: `[]`) | CWE identifiers associated with this vulnerability |
 | **publishedAt** | `string` | optional | ISO 8601 date when the vulnerability was published |
 | **mitigation** | `string` | optional | Recommended steps to mitigate the vulnerability |
+
+### Nested Shape: `SecurityVulnerability.package`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Name of the affected package |
+| **version** | `string` | ✅ | Version of the affected package |
+| **ecosystem** | `string` | optional | Package ecosystem (e.g., npm, pip, maven) |
+
+### Nested Shape: `SecurityVulnerability.references[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `Enum<'advisory' \| 'article' \| 'report' \| 'web'>` | ✅ | Type of reference source |
+| **url** | `string` | ✅ | URL of the reference |
 
 
 ---

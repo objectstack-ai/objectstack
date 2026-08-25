@@ -77,6 +77,36 @@ const result = ApprovalDecision.parse(data);
 | **escalation** | `{ enabled: boolean; timeoutHours: number; action: Enum<'reassign' \| 'auto_approve' \| 'auto_reject' \| 'notify'>; escalateTo?: string; … }` | optional | Per-node SLA escalation |
 | **maxRevisions** | `integer` | optional (default: `3`) | Max send-backs for revision before auto-reject (0 = send-back disabled) |
 
+### Nested Shape: `ApprovalNodeConfig.approvers[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `Enum<'manager' \| 'position' \| 'department' \| 'team' \| 'field' \| 'expression' \| …>` | ✅ |  |
+| **value** | `string` | optional | User id / membership tier / position / team / department / field — per `type`; for `expression`, a CEL expression over `current.*` / `trigger.*` / `vars.*` |
+| **resolveAs** | `Enum<'user' \| 'department' \| 'position' \| 'team'>` | optional | How an `expression` result is expanded into approvers (default 'user') |
+| **group** | `string` | optional | Group label for per_group sign-off (e.g. "legal", "finance") |
+| **organization** | `string` | optional | ADR-0105 D9 — organization whose directory resolves this approver: `$root` (group org), `$parent` (one level up), or an organization slug. Omitted = the request's own organization. |
+
+### Nested Shape: `ApprovalNodeConfig.decisionOutputs[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **key** | `string` | ✅ | Output key (the flow variable name under the node id) |
+| **label** | `string` | optional | Field label in the decision dialog |
+| **type** | `Enum<'text' \| 'user' \| 'department' \| 'position' \| 'team'>` | optional | Decision-dialog input widget (default 'text') |
+| **multiple** | `boolean` | optional | Collect multiple values (id array) |
+| **required** | `boolean` | optional | Approver must supply this output to approve |
+
+### Nested Shape: `ApprovalNodeConfig.escalation`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **enabled** | `boolean` | optional (default: `false`) | Enable SLA-based escalation for this node |
+| **timeoutHours** | `number` | ✅ | Hours before escalation triggers |
+| **action** | `Enum<'reassign' \| 'auto_approve' \| 'auto_reject' \| 'notify'>` | optional (default: `"notify"`) | Action on escalation timeout |
+| **escalateTo** | `string` | optional | User id or position machine name to escalate to |
+| **notifySubmitter** | `boolean` | optional (default: `true`) | Notify the original submitter on escalation |
+
 
 ---
 

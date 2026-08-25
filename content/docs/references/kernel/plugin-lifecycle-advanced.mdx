@@ -45,6 +45,62 @@ const result = AdvancedPluginLifecycleConfigSchema.parse(data);
 | **resources** | `{ maxMemory?: integer; maxCpu?: number; maxConnections?: integer; timeout?: integer }` | optional |  |
 | **observability** | `{ enableMetrics: boolean; enableTracing: boolean; enableProfiling: boolean; metricsInterval: integer }` | optional |  |
 
+### Nested Shape: `AdvancedPluginLifecycleConfig.health`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **interval** | `integer` | optional (default: `30000`) | How often to perform health checks (default: 30s) |
+| **timeout** | `integer` | optional (default: `5000`) | Maximum time to wait for health check response |
+| **failureThreshold** | `integer` | optional (default: `3`) | Consecutive failures needed to mark unhealthy |
+| **successThreshold** | `integer` | optional (default: `1`) | Consecutive successes needed to mark healthy |
+| **checkMethod** | `string` | optional | Method name to call for health check |
+| **autoRestart** | `boolean` | optional (default: `false`) | Automatically restart plugin on health check failure |
+| **maxRestartAttempts** | `integer` | optional (default: `3`) | Maximum restart attempts before giving up |
+| **restartBackoff** | `Enum<'fixed' \| 'linear' \| 'exponential'>` | optional (default: `"exponential"`) | Backoff strategy for restart delays |
+
+### Nested Shape: `AdvancedPluginLifecycleConfig.hotReload`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **enabled** | `boolean` | optional (default: `false`) |  |
+| **watchPatterns** | `string[]` | optional | Glob patterns to watch for changes |
+| **debounceDelay** | `integer` | optional (default: `1000`) | Wait time after change detection before reload |
+| **preserveState** | `boolean` | optional (default: `true`) | Keep plugin state across reloads |
+| **stateStrategy** | `Enum<'memory' \| 'disk' \| 'distributed' \| 'none'>` | optional (default: `"memory"`) | How to preserve state during reload |
+| **distributedConfig** | `{ provider: Enum<'redis' \| 'etcd' \| 'custom'>; endpoints?: string[]; keyPrefix?: string; ttl?: integer; … }` | optional | Configuration for distributed state management |
+| **shutdownTimeout** | `integer` | optional (default: `30000`) | Maximum time to wait for graceful shutdown |
+| **beforeReload** | `string[]` | optional | Hook names to call before reload |
+| **afterReload** | `string[]` | optional | Hook names to call after reload |
+
+### Nested Shape: `AdvancedPluginLifecycleConfig.degradation`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **enabled** | `boolean` | optional (default: `true`) |  |
+| **fallbackMode** | `Enum<'minimal' \| 'cached' \| 'readonly' \| 'offline' \| 'disabled'>` | optional (default: `"minimal"`) |  |
+| **criticalDependencies** | `string[]` | optional | Plugin IDs that are required for operation |
+| **optionalDependencies** | `string[]` | optional | Plugin IDs that are nice to have but not required |
+| **degradedFeatures** | `{ feature: string; enabled: boolean; reason?: string }[]` | optional |  |
+| **autoRecovery** | `{ enabled: boolean; retryInterval: integer; maxAttempts: integer }` | optional |  |
+
+### Nested Shape: `AdvancedPluginLifecycleConfig.resources`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **maxMemory** | `integer` | optional | Maximum memory in bytes |
+| **maxCpu** | `number` | optional | Maximum CPU percentage |
+| **maxConnections** | `integer` | optional | Maximum concurrent connections |
+| **timeout** | `integer` | optional | Operation timeout in milliseconds |
+
+### Nested Shape: `AdvancedPluginLifecycleConfig.observability`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **enableMetrics** | `boolean` | optional (default: `true`) |  |
+| **enableTracing** | `boolean` | optional (default: `true`) |  |
+| **enableProfiling** | `boolean` | optional (default: `false`) |  |
+| **metricsInterval** | `integer` | optional (default: `60000`) | Metrics collection interval in ms |
+
 
 ---
 
@@ -78,6 +134,22 @@ const result = AdvancedPluginLifecycleConfigSchema.parse(data);
 | **degradedFeatures** | `{ feature: string; enabled: boolean; reason?: string }[]` | optional |  |
 | **autoRecovery** | `{ enabled: boolean; retryInterval: integer; maxAttempts: integer }` | optional |  |
 
+### Nested Shape: `GracefulDegradation.degradedFeatures[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **feature** | `string` | ✅ | Feature name |
+| **enabled** | `boolean` | ✅ | Whether feature is available in degraded mode |
+| **reason** | `string` | optional |  |
+
+### Nested Shape: `GracefulDegradation.autoRecovery`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **enabled** | `boolean` | optional (default: `true`) |  |
+| **retryInterval** | `integer` | optional (default: `60000`) | Interval between recovery attempts (ms) |
+| **maxAttempts** | `integer` | optional (default: `5`) | Maximum recovery attempts before giving up |
+
 
 ---
 
@@ -96,6 +168,18 @@ const result = AdvancedPluginLifecycleConfigSchema.parse(data);
 | **shutdownTimeout** | `integer` | optional (default: `30000`) | Maximum time to wait for graceful shutdown |
 | **beforeReload** | `string[]` | optional | Hook names to call before reload |
 | **afterReload** | `string[]` | optional | Hook names to call after reload |
+
+### Nested Shape: `HotReloadConfig.distributedConfig`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **provider** | `Enum<'redis' \| 'etcd' \| 'custom'>` | ✅ | Distributed state backend provider |
+| **endpoints** | `string[]` | optional | Backend connection endpoints |
+| **keyPrefix** | `string` | optional | Prefix for all keys (e.g., "plugin:my-plugin:") |
+| **ttl** | `integer` | optional | State expiration time in seconds |
+| **auth** | `{ username?: string; password?: string; token?: string; certificate?: string }` | optional |  |
+| **replication** | `{ enabled: boolean; minReplicas: integer }` | optional |  |
+| **customConfig** | `Record<string, any>` | optional | Provider-specific configuration |
 
 
 ---
@@ -131,6 +215,34 @@ const result = AdvancedPluginLifecycleConfigSchema.parse(data);
 | **checks** | `{ name: string; status: Enum<'passed' \| 'failed' \| 'warning'>; message?: string; data?: Record<string, any> }[]` | optional |  |
 | **dependencies** | `{ pluginId: string; status: Enum<'healthy' \| 'degraded' \| 'unhealthy' \| 'failed' \| 'recovering' \| 'unknown'>; message?: string }[]` | optional |  |
 
+### Nested Shape: `PluginHealthReport.metrics`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **uptime** | `number` | optional | Plugin uptime in milliseconds |
+| **memoryUsage** | `number` | optional | Memory usage in bytes |
+| **cpuUsage** | `number` | optional | CPU usage percentage |
+| **activeConnections** | `number` | optional | Number of active connections |
+| **errorRate** | `number` | optional | Error rate (errors per minute) |
+| **responseTime** | `number` | optional | Average response time in ms |
+
+### Nested Shape: `PluginHealthReport.checks[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Check name |
+| **status** | `Enum<'passed' \| 'failed' \| 'warning'>` | ✅ |  |
+| **message** | `string` | optional |  |
+| **data** | `Record<string, any>` | optional |  |
+
+### Nested Shape: `PluginHealthReport.dependencies[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **pluginId** | `string` | ✅ |  |
+| **status** | `Enum<'healthy' \| 'degraded' \| 'unhealthy' \| 'failed' \| 'recovering' \| 'unknown'>` | ✅ | Current health status of the plugin |
+| **message** | `string` | optional |  |
+
 
 ---
 
@@ -162,6 +274,14 @@ Current health status of the plugin
 | **state** | `Record<string, any>` | ✅ |  |
 | **metadata** | `{ checksum?: string; compressed: boolean; encryption?: string }` | optional |  |
 
+### Nested Shape: `PluginStateSnapshot.metadata`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **checksum** | `string` | optional | State checksum for verification |
+| **compressed** | `boolean` | optional (default: `false`) |  |
+| **encryption** | `string` | optional | Encryption algorithm if encrypted |
+
 
 ---
 
@@ -176,6 +296,14 @@ Current health status of the plugin
 | **schedule** | `{ cron?: string; timezone: string; maintenanceWindow: integer }` | optional |  |
 | **rollback** | `{ enabled: boolean; automatic: boolean; keepVersions: integer; timeout: integer }` | optional |  |
 | **validation** | `{ checkCompatibility: boolean; runTests: boolean; testSuite?: string }` | optional |  |
+
+### Nested Shape: `PluginUpdateStrategy.autoUpdateConstraints`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **major** | `boolean` | optional (default: `false`) | Allow major version updates |
+| **minor** | `boolean` | optional (default: `true`) | Allow minor version updates |
+| **patch** | `boolean` | optional (default: `true`) | Allow patch version updates |
 
 
 ---

@@ -87,6 +87,26 @@ const result = FileKnowledgeSourceSchema.parse(data);
 | **refresh** | `{ onRecordChange?: boolean; cron?: string }` | optional (default: `{}`) |  |
 | **aiExposed** | `boolean` | optional (default: `true`) |  |
 
+### Nested Shape: `KnowledgeSource.embedding`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **provider** | `Enum<'openai' \| 'cohere' \| 'azure_openai' \| 'huggingface' \| 'local' \| 'custom'>` | ✅ |  |
+| **model** | `string` | ✅ | Provider-specific model identifier |
+| **dimensions** | `integer` | ✅ | Embedding vector dimensions |
+| **endpoint** | `string` | optional | Custom endpoint URL |
+| **secretRef** | `string` | optional | Reference to stored API key secret |
+
+### Nested Shape: `KnowledgeSource.vectorStore`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **provider** | `Enum<'pgvector' \| 'chroma' \| 'qdrant' \| 'pinecone' \| 'weaviate' \| 'milvus' \| 'redis' \| …>` | ✅ |  |
+| **collection** | `string` | ✅ | Collection / index / namespace name |
+| **endpoint** | `string` | optional | Connection string or endpoint URL |
+| **secretRef** | `string` | optional | Reference to stored credential secret |
+| **dimensions** | `integer` | optional |  |
+
 
 ---
 

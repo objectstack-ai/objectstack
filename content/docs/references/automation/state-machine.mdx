@@ -146,6 +146,19 @@ Type: `string`
 | **states** | `Record<string, { type: Enum<'atomic' \| 'compound' \| 'parallel' \| 'final' \| 'history'>; entry?: (string \| object)[]; exit?: (string \| object)[]; on?: Record<string, string \| object \| object[]>; … }>` | ✅ | State Nodes |
 | **on** | `Record<string, string \| { target?: string; cond?: string \| object; actions?: (string \| object)[]; description?: string } \| { target?: string; cond?: string \| object; actions?: (string \| object)[]; description?: string }[]>` | optional |  |
 
+### Nested Shape: `StateMachine.states[string]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `Enum<'atomic' \| 'compound' \| 'parallel' \| 'final' \| 'history'>` | optional (default: `"atomic"`) |  |
+| **entry** | `(string \| { type: string; params?: Record<string, any> })[]` | optional | Actions to run when entering this state |
+| **exit** | `(string \| { type: string; params?: Record<string, any> })[]` | optional | Actions to run when leaving this state |
+| **on** | `Record<string, string \| { target?: string; cond?: string \| object; actions?: (string \| object)[]; description?: string } \| { target?: string; cond?: string \| object; actions?: (string \| object)[]; description?: string }[]>` | optional | Map of Event Type -> Transition Definition |
+| **always** | `{ target?: string; cond?: string \| object; actions?: (string \| object)[]; description?: string }[]` | optional |  |
+| **initial** | `string` | optional | Initial child state (if compound) |
+| **states** | `Record<string, { type: Enum<'atomic' \| 'compound' \| 'parallel' \| 'final' \| 'history'>; entry?: (string \| object)[]; exit?: (string \| object)[]; on?: Record<string, string \| object \| object[]>; … }>` | optional |  |
+| **meta** | `{ label?: string; description?: string; color?: string; aiInstructions?: string }` | optional |  |
+
 
 ---
 
@@ -163,6 +176,24 @@ Type: `string`
 | **initial** | `string` | optional | Initial child state (if compound) |
 | **states** | `Record<string, [StateNode](#statenode)>` | optional |  |
 | **meta** | `{ label?: string; description?: string; color?: string; aiInstructions?: string }` | optional |  |
+
+### Nested Shape: `StateNode.always[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **target** | `string` | optional | Target State ID |
+| **cond** | `string \| { type: string; params?: Record<string, any> }` | optional | Condition (Guard) required to take this path |
+| **actions** | `(string \| { type: string; params?: Record<string, any> })[]` | optional | Actions to execute during transition |
+| **description** | `string` | optional | Human readable description of this rule |
+
+### Nested Shape: `StateNode.meta`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **label** | `string` | optional |  |
+| **description** | `string` | optional |  |
+| **color** | `string` | optional |  |
+| **aiInstructions** | `string` | optional | Specific instructions for AI when in this state |
 
 
 ---
