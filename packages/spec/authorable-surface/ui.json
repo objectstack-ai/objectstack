@@ -719,7 +719,7 @@
     "ui/ObjectGridProps:conditionalFormatting",
     "ui/ObjectGridProps:data",
     "ui/ObjectGridProps:defaultFilters",
-    "ui/ObjectGridProps:defaultSort [RETIRED]",
+    "ui/ObjectGridProps:defaultSort",
     "ui/ObjectGridProps:editable",
     "ui/ObjectGridProps:exportOptions",
     "ui/ObjectGridProps:fields",

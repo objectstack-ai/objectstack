@@ -275,7 +275,7 @@ const result = AIChatWindowProps.parse(data);
 | **filter** | `any` | optional | Base query filter (ObjectQL filter array/AST) — lowered to the wire `$filter`. THE key #7750 misspelled as plural |
 | **defaultFilters** | `any` | optional | Legacy base-filter fallback, read only when `filter` is absent. Prefer `filter` |
 | **sort** | `any` | optional | Initial sort (array of `{ field, order }`) |
-| **defaultSort** | `never` | optional | [REMOVED] `object-grid` property `defaultSort` was removed in @objectstack/spec 17 (#11805, ADR-0049) — it was the legacy second spelling of `sort`: a single `{ field, order }` pair read only when `sort` was absent, so one intent had two spellings and a grid authoring both silently ignored this one. Rename the key to `sort` and wrap the value in an array (`defaultSort: { field, order }` becomes `sort: [{ field, order }]`); the pair itself is unchanged. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand. |
+| **defaultSort** | `any` | optional | Legacy single-sort fallback (`{ field, order }`), read only when `sort` is absent. Prefer `sort` |
 | **pagination** | `any` | optional | Pagination config (`{ pageSize, pageSizeOptions, … }`); its presence enables paging |
 | **pageSize** | `number` | optional | Flat page-size shorthand; `pagination.pageSize` wins when both are set |
 | **showPagination** | `boolean` | optional | Show the pager (read only when `pagination` is absent) |
