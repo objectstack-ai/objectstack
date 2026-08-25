@@ -17,7 +17,7 @@ import {
 } from './common.zod';
 
 /**
- * Turso / libSQL Driver Protocol (#6345).
+ * Turso / libSQL Driver Protocol.
  *
  * ## Why this arrives late, and what it closes
  *

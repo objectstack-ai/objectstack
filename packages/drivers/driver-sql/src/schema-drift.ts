@@ -161,7 +161,11 @@ export type DriftOp =
    * Measured consequence of having no arm, on live Postgres 16.13 (the same on
    * MySQL 8.0.46): `applyDriftOpInPlace` matches no case and returns `false`,
    * so `applyMigrationEntries` reports the entry as **skipped, never applied**,
-   * and logs it. That is the intended behaviour, not a gap to close.
+   * and logs it. That is the intended behaviour, not a gap to close. SQLite
+   * reaches the same verdict by a different road (#11722): its arm rebuilds the
+   * table and reports as applied only the entries the rebuild actually acted
+   * on, so an op with no arm is skipped there too rather than announced as
+   * migrated.
    *
    * `from`/`to` are the physical and declared type words, carried so a renderer
    * can show the divergence without re-deriving it from the message.
