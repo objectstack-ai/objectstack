@@ -1388,6 +1388,19 @@ jobs:
       - name: Reserved-word ("role") docs ratchet
         run: pnpm check:role-word
 
+      # #11671: `os i18n extract --fill=default` fills GAPS only, so revising a
+      # source string rewrites `en` and strands the previous source text in every
+      # other locale. The bundle stays in sync BY KEY, so `check:i18n` reports OK
+      # and `check:i18n-coverage` counts the leaf translated (it tests presence,
+      # not freshness) — measured on PR #11659, three locales serving a 602-char
+      # superseded draft of a 411-char help string under 31 green checks.
+      # This gate reads the committed bundles as TEXT — no workspace build — which
+      # is why it sits here rather than with its two i18n siblings in `typecheck`.
+      # Existing drift is frozen in scripts/i18n-stale-fill-baseline.json with a
+      # reason per entry; NEW drift fails. Improvements ratchet down via --update.
+      - name: Stale translation fills (i18n) ratchet
+        run: pnpm check:i18n-stale-fill
+
       # #6319: content/docs/getting-started/quick-reference.mdx is the protocol
       # index, and each "## <Name> Protocol (N schemas)" heading is a DECLARATION
       # about the table under it. The page is hand-written (build-docs.ts writes
