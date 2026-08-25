@@ -1649,7 +1649,7 @@ export function globInNonFinalSegment(hint) {
  * How many `**` segments one hint may carry before the enumeration below stops
  * being exhaustive. The forms are a power set, so the bound is what keeps a
  * pathological hint from costing 2^n comparisons per file. Measured over all
- * 763 distinct hints in the fleet, the maximum any hint carries is ONE; the cap
+ * 764 distinct hints in the fleet, the maximum any hint carries is ONE; the cap
  * is headroom, not a live constraint, and the self-test pins what a hint above
  * it still gets.
  */
@@ -1705,7 +1705,7 @@ export const ZERO_SEGMENT_STAR_CAP = 8;
  *   - a single `*` is never droppable — `a/*\/b` means exactly one segment in
  *     every glob language, `skills/*\/references/_index.md` included.
  *
- * ## Measured, both directions, on 173 families × 763 distinct hints × 6859
+ * ## Measured, both directions, on 174 families × 764 distinct hints × 6861
  * ## tracked files
  *
  * The blast radius is enumerable rather than estimated: four of the six live
@@ -1719,7 +1719,7 @@ export const ZERO_SEGMENT_STAR_CAP = 8;
  *   skills/*\/references/_index.md   no `**` segment        9 →    9
  *   spec/src/*\/index.ts            no `**` segment        0 →    0
  *
- *   watch-hint (gate, file) pairs   70172 → 70172 (ZERO change)
+ *   watch-hint (gate, file) pairs   70188 → 70188 (ZERO change)
  *   families gaining or losing coverage                    0
  *   (check, hint) newly live 0; newly inert 0
  *   hints reaching zero tracked files                388 → 388
@@ -1734,7 +1734,7 @@ export const ZERO_SEGMENT_STAR_CAP = 8;
  * The `ROOT_DIR_WATCH_HINTS` idiom #12300 measured at −7404 pairs on each of
  * three gates if widened wrongly is untouched, because no trailing glob reaches
  * this function at all: `packages/*` 5253, `examples/*` 241, `skills/**` 50,
- * `content/**` 442, `scripts/**` 271, all unchanged, and the three gates hold
+ * `content/**` 442, `scripts/**` 272, all unchanged, and the three gates hold
  * at check:test-source-alias 5534, check:type-source-resolution 5534,
  * check:published-files 5535.
  *
