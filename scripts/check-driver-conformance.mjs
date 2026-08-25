@@ -987,12 +987,92 @@ function walkTsInto(dir, out) {
 }
 
 /**
+ * One `import … from '<specifier>'` STATEMENT: its clause, its specifier, and
+ * the span it occupies. The unit BOTH halves of {@link drivenFrom} are read in.
+ *
+ * ## The false green this bounds (#12320)
+ *
+ * The import half used to be one roaming regex over the whole file:
+ *
+ *   import[\s\S]*?\bSYMBOL\b[\s\S]*?from\s+['"]SPECIFIER['"]
+ *
+ * Both `[\s\S]*?` are unbounded, so the three parts it wants never had to come
+ * from the same STATEMENT. `#12135`'s comment masking removed the *prose*
+ * assembly path and not this one: the `import` keyword, the symbol and the
+ * `from '@objectstack/spec/data'` can be three different lines of live code.
+ *
+ *   import { AGGREGATION_CASES } from './local-fixture.js';
+ *   import { TEMPORAL_CASES } from '@objectstack/spec/data';
+ *   for (const c of AGGREGATION_CASES) {}
+ *
+ * The marker is imported from a LOCAL module and never from the shared one, and
+ * the cell scored as covered. That defeats the rule the self-test already pins
+ * one spelling of — a locally re-declared fixture is not the shared standard —
+ * by IMPORTING the local fixture instead of declaring it with `const`. Both
+ * directions are pinned below.
+ *
+ * ## Why a bounded regex and not a real parse
+ *
+ * `scripts/ts-parse.mjs` is this repo's answer to "did this source parse?" and
+ * `check-parse-guard` enforces routing through it, so an AST read of the import
+ * clauses is the obvious alternative. Measured on this tree before choosing:
+ * it is CORRECT (it refuses the synthetic above and accepts a genuine import),
+ * it found 0 unparseable files among the 296 driver sources, and it costs
+ * 911ms for one pass — against ~0.4s for this whole gate today, and 4.5s at the
+ * per-(file x marker) rate this scan actually runs at. The decisive cost is not
+ * the milliseconds: `ts-parse.mjs` imports `typescript`, so adopting it trades
+ * a gate that runs in a FRESH WORKTREE WITH NO `node_modules` for one that
+ * refuses until `pnpm install` has run. This gate's only dependency is
+ * `js-comment-mask.mjs`, and that is worth keeping for a question this narrow.
+ *
+ * The objection a bounded regex has to answer is that it is a second roaming
+ * regex next to the first. It is not, and the clause class is what makes it so:
+ * `[^;'"]` cannot cross a statement terminator OR a string literal, so a match
+ * that starts at one `import` keyword cannot reach the `from` of a later
+ * statement — every intervening specifier is quoted. That is also why this is
+ * the ONLY import matcher in the file: the reference half used to carry its own
+ * roaming `import[\s\S]*?from…` for stripping, and leaving it would have left
+ * the smell the fix exists to remove.
+ *
+ * Two shapes this deliberately does NOT count, both narrowings from the loose
+ * form, both measured to move no cell on this tree: a bare re-export
+ * (`export { X } from '@objectstack/spec/data'` — a driver that re-exports the
+ * cases is not running them), and a side-effect import (no clause, no symbol).
+ */
+const IMPORT_STATEMENT = /\bimport\b\s*([^;'"]*?)\s*from\s*['"]([^'"]+)['"]/g;
+
+/** Every import statement in `src`, in source order. */
+function importStatements(src) {
+  return [...src.matchAll(IMPORT_STATEMENT)].map((m) => ({
+    clause: m[1],
+    specifier: m[2],
+    start: m.index,
+    end: m.index + m[0].length,
+  }));
+}
+
+/** `src` with the spans of `statements` cut out, rebuilt from their offsets. */
+function withoutImportStatements(src, statements) {
+  let out = '';
+  let last = 0;
+  for (const s of statements) {
+    out += src.slice(last, s.start);
+    last = s.end;
+  }
+  return out + src.slice(last);
+}
+
+/**
  * Is `symbol` imported from `specifier` AND referenced outside that import?
  *
  * The two-part shape is the one {@link consumes} has always used — an unused
  * import is not coverage, and it is the shape a half-finished suite leaves
  * behind. Extracted so the dialect axis asserts a stance the same way this
  * script asserts a case-set, rather than inventing a second idiom next to it.
+ *
+ * The import half is bounded to ONE statement (#12320) — see
+ * {@link IMPORT_STATEMENT} for the false green that requires it and for why
+ * this is not an AST read.
  *
  * @param {string} src file text. This function reads whatever TEXT it is given
  *   and has no opinion about comments — both callers strip first, because on
@@ -1005,13 +1085,11 @@ function walkTsInto(dir, out) {
  */
 function drivenFrom(src, symbol, specifier) {
   if (!src.includes(symbol)) return false;
-  const quoted = specifier.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const imported = new RegExp(
-    `import[\\s\\S]*?\\b${symbol}\\b[\\s\\S]*?from\\s+['"]${quoted}['"]`,
-  ).test(src);
+  const named = new RegExp(`\\b${symbol}\\b`);
+  const statements = importStatements(src);
+  const imported = statements.some((s) => s.specifier === specifier && named.test(s.clause));
   if (!imported) return false;
-  const withoutImports = src.replace(/import[\s\S]*?from\s+['"][^'"]+['"];?/g, '');
-  return new RegExp(`\\b${symbol}\\b`).test(withoutImports);
+  return named.test(withoutImportStatements(src, statements));
 }
 
 /**
@@ -1464,6 +1542,22 @@ function selfTest() {
     if (!cond) failures.push(label);
   };
 
+  /**
+   * The import rule as it stood BEFORE #12320 bounded it to one statement —
+   * unbounded `[\s\S]*?` on both sides of the symbol.
+   *
+   * Spelled out here rather than reached through `drivenFrom`, because the
+   * cases that use it assert what the OLD rule accepted, and a probe that calls
+   * the live detector stops measuring that the moment the live detector is
+   * fixed. That is not hypothetical: the #12135 falsifiability probe was
+   * written as `drivenFrom(proseOnly, …)` and #12320's bound turned it from a
+   * statement about masking into a statement about the bound. Keeping the
+   * superseded rule as text is what lets both pins stay falsifiable against the
+   * thing they are actually about.
+   */
+  const roamingRule = (symbol) =>
+    new RegExp(`import[\\s\\S]*?\\b${symbol}\\b[\\s\\S]*?from\\s+['"]@objectstack/spec/data['"]`);
+
   // CONSUMED: an unused import must not count as coverage.
   const tmp = join(ROOT, 'node_modules', '.check-driver-conformance-selftest');
   try {
@@ -1521,9 +1615,9 @@ function selfTest() {
     ].join('\n');
     writeFileSync(join(tmp, 'src', 'a.test.ts'), proseOnly);
     expect(
-      '#12135 — the prose-only fixture IS accepted by the unmasked rule (else the case below '
+      '#12135 — the prose-only fixture IS accepted by the roaming rule (else the case below '
         + 'pins nothing and would survive a revert)',
-      drivenFrom(proseOnly, 'PAGINATION_CASES', '@objectstack/spec/data'),
+      roamingRule('PAGINATION_CASES').test(proseOnly),
     );
     expect(
       '#12135 — a marker mentioned only in a comment must not count as coverage',
@@ -1549,6 +1643,125 @@ function selfTest() {
       '#12135 — a real driving reference still counts when the same file also discusses the '
         + 'marker in prose',
       consumes(tmp, 'PAGINATION_CASES') !== null,
+    );
+
+    // #12135's OTHER half, which #12320's statement bound made load-bearing.
+    //
+    // The fixture above is now refused for TWO independent reasons: the marker
+    // is named only in prose (masking), and it is not in any import clause (the
+    // #12320 bound). That is a stronger tree and a WEAKER pin — the bound alone
+    // refuses it, so it can no longer witness that masking does anything, which
+    // is why the probe above had to be re-spelled against the roaming rule it
+    // was really talking about.
+    //
+    // Masking is still load-bearing, on the shape where the two rules come
+    // apart: the marker is GENUINELY imported from the shared module, so the
+    // bound is satisfied, and the only thing standing between this file and a
+    // covered cell is that its sole mention of the marker is a docblock. This
+    // is the residue of the real #12135 shape — `sql-driver.ts` and
+    // `mongodb-filter.ts` were driver implementations that named a marker in
+    // prose — and it is measured, not assumed: unmasked this fixture is
+    // coverage, masked it is not. Delete the `codeOf` strip and this pair fails
+    // on the second line.
+    const importedButProseOnly = [
+      "import { PAGINATION_CASES } from '@objectstack/spec/data';",
+      '',
+      '/**',
+      ' * This driver compiles the paging clause that `PAGINATION_CASES` exercises;',
+      ' * the suite that actually runs the table lives next door.',
+      ' */',
+      'export const VERSION = 1;',
+      '',
+    ].join('\n');
+    expect(
+      '#12135 — an imported-but-prose-only marker IS coverage before masking (else the case '
+        + 'below pins nothing, now that the #12320 bound refuses the older fixture on its own)',
+      drivenFrom(importedButProseOnly, 'PAGINATION_CASES', '@objectstack/spec/data'),
+    );
+    expect(
+      '#12135 — and is NOT coverage after it: a docblock cannot be the only reference',
+      !drivenFrom(stripComments(importedButProseOnly), 'PAGINATION_CASES', '@objectstack/spec/data'),
+    );
+
+    // #12320: the cross-statement false green. A marker imported from a LOCAL
+    // module, never from the shared one, used to score as covered because the
+    // import scan roamed across statements to borrow a SIBLING import's
+    // specifier. This is the same rule the re-declared-fixture case above pins
+    // — "a local imitation is not the shared standard" — reached by importing
+    // the local fixture instead of declaring it with `const`.
+    //
+    // The pair is falsifiable the way the #12135 pair is. The first assertion
+    // holds the fixture to being a case the ROAMING rule accepts, so a revert
+    // of the bound fails HERE rather than quietly leaving a green guard over
+    // nothing; only then is the real detector asserted to refuse it. The
+    // roaming rule is spelled out locally on purpose: quoting the deleted regex
+    // is what makes "the old rule accepted this" a measurement rather than a
+    // claim about code that no longer exists.
+    const localFixture = [
+      "import { AGGREGATION_CASES } from './local-fixture.js';",
+      "import { TEMPORAL_CASES } from '@objectstack/spec/data';",
+      '',
+      'export function run() { return [AGGREGATION_CASES, TEMPORAL_CASES]; }',
+      '',
+    ].join('\n');
+    expect(
+      '#12320 — the locally-imported fixture IS accepted by the roaming rule (else the case '
+        + 'below pins nothing and would survive a revert of the statement bound)',
+      roamingRule('AGGREGATION_CASES').test(localFixture),
+    );
+    expect(
+      '#12320 — a marker imported from a LOCAL module is not shared-standard coverage, even '
+        + 'when a sibling statement imports something else from the shared module',
+      !drivenFrom(localFixture, 'AGGREGATION_CASES', '@objectstack/spec/data'),
+    );
+    writeFileSync(join(tmp, 'src', 'a.test.ts'), localFixture);
+    expect(
+      '#12320 — and the cell it would have covered is uncovered, through the real scan',
+      consumes(tmp, 'AGGREGATION_CASES') === null,
+    );
+    expect(
+      '#12320 — while the sibling that IS a genuine shared import still counts, so the bound '
+        + 'narrowed the import scan and not the case-set axis',
+      consumes(tmp, 'TEMPORAL_CASES') !== null,
+    );
+
+    // The mirror, on the shape a bound is most likely to break: a genuine
+    // shared import is still coverage when it is one of several statements,
+    // when the clause spans lines, and when a LOCAL import of a DIFFERENT
+    // symbol sits between it and the reference. Over-narrowing is the quiet
+    // direction to fail in here — every previously covered cell would go red,
+    // and the DEBT ledger is where that pressure gets absorbed.
+    const genuine = [
+      "import { helper } from './helper.js';",
+      'import {',
+      '  PAGINATION_CASES,',
+      '  PAGINATION_ZERO_LIMIT_CASES,',
+      "} from '@objectstack/spec/data';",
+      "import type { Driver } from './types.js';",
+      '',
+      'export function run(d: Driver) {',
+      '  helper(d);',
+      '  for (const c of PAGINATION_CASES) {}',
+      '  for (const c of PAGINATION_ZERO_LIMIT_CASES) {}',
+      '}',
+      '',
+    ].join('\n');
+    expect(
+      '#12320 — a multi-line clause among sibling statements is still a shared-standard import',
+      drivenFrom(genuine, 'PAGINATION_CASES', '@objectstack/spec/data'),
+    );
+    expect(
+      '#12320 — and so is its second named binding',
+      drivenFrom(genuine, 'PAGINATION_ZERO_LIMIT_CASES', '@objectstack/spec/data'),
+    );
+    expect(
+      '#12320 — an IMPORTED-but-unreferenced marker is still not coverage (the bound must not '
+        + 'have cost the second half of the rule)',
+      !drivenFrom(
+        "import { FILTER_TEXT_CASES } from '@objectstack/spec/data';\nexport const V = 1;\n",
+        'FILTER_TEXT_CASES',
+        '@objectstack/spec/data',
+      ),
     );
   } finally {
     rmSync(tmp, { recursive: true, force: true });
@@ -2029,9 +2242,14 @@ function selfTest() {
     process.exit(1);
   }
   console.log(
-    'OK  self-test: detects driven / unused / re-declared / prose-only fixtures (#12135 — a marker '
-      + 'named only in a comment is not coverage, proven against a fixture the unmasked rule '
-      + 'accepts, and a documented suite is still coverage), discovers both axes, accounts for '
+    'OK  self-test: detects driven / unused / re-declared / locally-imported / prose-only fixtures '
+      + '(#12135 — a marker named only in a comment is not coverage, proven on the fixture where '
+      + 'masking is what decides it, and a documented suite is still coverage; #12320 — the import '
+      + 'scan is bounded to ONE statement, so a marker imported from a LOCAL module is not '
+      + 'shared-standard coverage even with a sibling statement importing from the shared one, '
+      + 'proven against a fixture the roaming rule accepts, while multi-line clauses among sibling '
+      + 'statements still are and an imported-but-unreferenced marker still is not), discovers both '
+      + 'axes, accounts for '
       + 'every entry under DRIVERS_DIR (a dropped or manifestless row is red, not a smaller matrix), '
       + 'holds the dead-root hard error (red when a scan root is renamed, green when restored), and '
       + 'keeps CONSUMED\'s ledger offer marked maintainer-only (#8435). It also declares the driver '
