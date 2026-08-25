@@ -108,6 +108,23 @@
  * three bare `any` annotations, all in one block, so the wider scope cost nothing
  * to adopt and there is no ratchet file: the baseline is zero and stays zero.
  *
+ * ── The fourth assertion: REFUSE when a marked block does not PARSE (#12051) ─
+ * Trap 1 above is written as advice to whoever sweeps the corpus by hand. It is
+ * also a property of this gate's own run, and arrives through the gate's front
+ * door: the build-file extension is taken from the FENCE LANGUAGE, so a marked
+ * block whose body is JSX under a ` ```ts ` fence lands in a `.ts` file, where
+ * JSX is a syntax error — and one syntactic diagnostic anywhere in the program
+ * means the semantic pass never runs, for any file in it.
+ *
+ * The run went red before this landed (measured — the "Parse-level refusal"
+ * section records the ablation and corrects #12051's claim that it stayed
+ * green), but it went red in the vocabulary of a semantic result, over a surface
+ * whose semantic pass had not run. Two guards now separate those states: marked
+ * blocks that do not parse produce a REFUSE verdict naming the surface and the
+ * count of blocks left unchecked, and the unmarked JSX-under-a-ts-fence
+ * population is swept before anyone arms it. The green line says which of the
+ * two happened, and is printed only when every surface reached `tsc`.
+ *
  * ── SURFACES (#10969) ─────────────────────────────────────────────────────
  * Until #10969 the only prose scanned was `skills/**` + `content/docs/**`, and
  * the only thing marked blocks were checked against was `@objectstack/spec`.
@@ -424,6 +441,32 @@ interface Example {
   fileName: string;
 }
 
+/**
+ * One top-level `ts` / `tsx` / `typescript` fenced block — MARKED OR NOT (#12051).
+ *
+ * `Example` is the opt-in compile claim; this is the raw population the fence
+ * language itself is judged over. The distinction matters in one direction only:
+ * an unmarked block is never compiled, so it cannot break a build today — but
+ * its fence language is what will decide its build-file extension the moment
+ * anyone marks it, and JSX under a `ts` fence stops the whole surface's semantic
+ * pass at that moment. Recording unmarked fences is what lets the gate refuse
+ * the tripwire before it is armed rather than after.
+ */
+interface FencedBlock {
+  /** Source file (absolute). */
+  source: string;
+  /** The fence's info string: `ts`, `tsx` or `typescript`. */
+  lang: string;
+  /** 1-based line of the fence-OPEN line itself. */
+  fenceLine: number;
+  /** 1-based line in the source of the FIRST code line inside the fence. */
+  bodyStartLine: number;
+  /** Raw fence body. */
+  code: string;
+  /** Is an `os:check` marker directly above this fence? */
+  marked: boolean;
+}
+
 /** Every candidate prose/source file across a surface's roots, with the root that owns it. */
 function sourceFiles(roots: SourceRoot[]): Array<{ file: string; root: SourceRoot }> {
   const out: Array<{ file: string; root: SourceRoot }> = [];
@@ -597,11 +640,15 @@ function logicalLines(rawLines: string[], root: SourceRoot): string[] {
  * failure mode this gate exists to prevent — so the caller treats an orphan
  * as an error, not a no-op.
  */
-function extractFromFile(source: string, root: SourceRoot): { examples: Example[]; orphans: number[] } {
+function extractFromFile(
+  source: string,
+  root: SourceRoot,
+): { examples: Example[]; orphans: number[]; fences: FencedBlock[] } {
   const rawLines = fs.readFileSync(source, 'utf-8').split('\n');
   const lines = logicalLines(rawLines, root);
   const { owners, closeLine } = fenceOwners(lines);
   const examples: Example[] = [];
+  const fences: FencedBlock[] = [];
   const claimed = new Set<number>(); // MARKER line indices that opened a real block
   let n = 0;
 
@@ -617,9 +664,23 @@ function extractFromFile(source: string, root: SourceRoot): { examples: Example[
     // Body end is the SAME line the walk above closed this fence on (#11690) —
     // never re-derived with a second, looser regex that could disagree with it.
     const close = closeLine[i];
+    const body = lines.slice(i + 1, close);
+    // EVERY top-level ts/tsx/typescript fence, marked or not (#12051). Marking
+    // is what makes a block a compile CLAIM, but the fence language is a
+    // property of the block itself, and an unmarked JSX block wearing a `ts`
+    // fence is a loaded tripwire rather than a non-issue: the day someone marks
+    // it, it stops the whole surface's semantic pass. The same walk answers both
+    // questions, so there is no second notion of "which fences exist" to drift.
+    fences.push({
+      source,
+      lang: open[1],
+      fenceLine: i + 1, // 1-based line of the fence-OPEN line
+      bodyStartLine: i + 2, // 1-based line of body[0]
+      code: body.join('\n'),
+      marked,
+    });
     if (marked) {
       claimed.add(i - 1);
-      const body = lines.slice(i + 1, close);
       n += 1;
       examples.push({
         source,
@@ -641,7 +702,7 @@ function extractFromFile(source: string, root: SourceRoot): { examples: Example[
     // checks nothing, which is precisely what this guard exists to catch.
     if (ALL_MARKERS.includes(lines[i].trim()) && !claimed.has(i)) orphans.push(i + 1); // 1-based
   }
-  return { examples, orphans };
+  return { examples, orphans, fences };
 }
 
 // ── Bare-`any` guard (#5943) ─────────────────────────────────────────────────
@@ -788,6 +849,253 @@ function surfacePaths(pkgDirs: string[]): { paths: Record<string, string[]>; mis
   return { paths, missing };
 }
 
+// ── Parse-level refusal: a block that does not PARSE checks nothing (#12051) ─
+
+/**
+ * `tsc` reports syntactic diagnostics and then STOPS — the semantic pass never
+ * runs, for ANY file in the program. That is documented at the top of this file
+ * as a trap for whoever SWEEPS the corpus by hand; #12051 is the same mechanism
+ * arriving through the gate's own front door, because the build-file extension
+ * is derived from the FENCE LANGUAGE (`buildFileName`): a marked block whose
+ * body is JSX but whose fence says ` ```ts ` / ` ```typescript ` is written to a
+ * `.ts` file, where JSX is a syntax error, and every semantic diagnostic on that
+ * surface — 227 blocks on the skills+docs surface at the time of writing —
+ * vanishes with it.
+ *
+ * ⚠️ MEASURED CORRECTION to #12051's own headline. The card states the gate
+ * "still prints a green verdict" under this condition and that the answer to
+ * "would this gate still be green if its semantic pass never ran?" is *yes*.
+ * Ablated on the real corpus before this change (one JSX line forced into a
+ * marked ` ```ts ` block in `content/docs/permissions/sso.mdx`), the pre-fix
+ * gate printed `✗ … examples do not compile` and exited 1 — the verdict line
+ * DID change. The green path was never reachable: `tsc` exits non-zero on a
+ * syntactic diagnostic and prints it, and the surface loop only skips a surface
+ * on `code === 0 && diags.length === 0`.
+ *
+ * What was real, and is what this section closes, is the DEGRADATION either
+ * side of that red:
+ *
+ *   - the failure text read as ordinary type drift ("Fix the example to match
+ *     the current declarations"), while the truth was that the surface had not
+ *     been type-checked at all;
+ *   - the 226 other blocks' semantic pass had silently not run, and nothing in
+ *     the output said so — an author who fixes the five reported syntax errors
+ *     is *then* meeting the surface's real diagnostics for the first time;
+ *   - and nothing enumerated the unmarked JSX-in-`ts`-fence blocks that become
+ *     this failure the moment anyone marks them.
+ *
+ * So the refusal below is not "make a green run red". It is: make the gate say
+ * WHICH of the two things happened, and never let a surface's un-run semantic
+ * pass be reported in the vocabulary of a semantic result.
+ */
+
+/**
+ * The exact bytes a block is written to disk as.
+ *
+ * Shared by `writeBuildDir()` and every parse guard here on purpose: a guard
+ * that clears a *different* string than the compiler reads is the dormant-checker
+ * shape this file keeps closing. The one transformation (`export {}` for a
+ * non-module block) is appended at the END so it never shifts the line of a real
+ * diagnostic.
+ */
+function buildFileText(code: string): string {
+  const isModule = /^\s*(import|export)\b/m.test(code);
+  return code + (isModule ? '' : '\nexport {};\n');
+}
+
+interface ParseUnit {
+  /** Unique within one call; the extension decides TS vs TSX parsing. */
+  name: string;
+  text: string;
+}
+
+/**
+ * Syntactic diagnostics per file, from TypeScript's OWN parser.
+ *
+ * `program.getSyntacticDiagnostics()` is precisely the predicate `tsc` itself
+ * uses to decide whether to run the semantic pass, so this guard cannot drift
+ * from the compiler's behaviour the way a "TS1xxx means syntax" code-range
+ * heuristic would (several 1xxx codes are grammar errors the CHECKER reports,
+ * which do NOT suppress the semantic pass — reading them as refusal-worthy
+ * would manufacture a REFUSE over a surface that was in fact fully checked).
+ *
+ * ONE program for the whole population, not one per block: the population scan
+ * below runs over every ts fence in every root (~1k blocks), and a program per
+ * block is the same answer at a thousand times the cost.
+ *
+ * `noLib` + `noResolve` are load-bearing, not tuning. This guard runs BEFORE the
+ * dist-freshness refusal, so it must not read `dist` at all: resolving
+ * `@objectstack/spec` here would make a parse-level verdict depend on build
+ * state, which is exactly the coupling that makes a guard unrunnable in the
+ * situations it matters most. Parsing needs neither.
+ */
+function syntacticErrorsByFile(units: ParseUnit[]): Map<string, readonly ts.Diagnostic[]> {
+  const texts = new Map(units.map((u) => [u.name, u.text]));
+  const sources = new Map<string, ts.SourceFile>(
+    units.map((u) => [
+      u.name,
+      ts.createSourceFile(
+        u.name,
+        u.text,
+        ts.ScriptTarget.ES2020,
+        /* setParentNodes */ false,
+        u.name.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
+      ),
+    ]),
+  );
+
+  const host: ts.CompilerHost = {
+    getSourceFile: (name) => sources.get(name),
+    getDefaultLibFileName: () => 'lib.d.ts',
+    writeFile: () => {},
+    getCurrentDirectory: () => '',
+    getCanonicalFileName: (name) => name,
+    useCaseSensitiveFileNames: () => true,
+    getNewLine: () => '\n',
+    fileExists: (name) => texts.has(name),
+    readFile: (name) => texts.get(name),
+    resolveModuleNames: (names) => names.map(() => undefined),
+  };
+
+  const program = ts.createProgram({
+    rootNames: units.map((u) => u.name),
+    options: {
+      noLib: true,
+      noResolve: true,
+      target: ts.ScriptTarget.ES2020,
+      // Matches `writeBuildDir`'s tsconfig, so a `.tsx` unit parses JSX here the
+      // same way it will there.
+      jsx: ts.JsxEmit.ReactJSX,
+    },
+    host,
+  });
+
+  const out = new Map<string, readonly ts.Diagnostic[]>();
+  for (const u of units) {
+    const sf = program.getSourceFile(u.name);
+    out.set(u.name, sf ? program.getSyntacticDiagnostics(sf) : []);
+  }
+  return out;
+}
+
+/** A parse diagnostic rendered against the block body: 1-based line/col + text. */
+function formatParseError(d: ts.Diagnostic): { line: number; col: number; text: string } {
+  const message = ts.flattenDiagnosticMessageText(d.messageText, ' ');
+  if (d.file && d.start !== undefined) {
+    const { line, character } = d.file.getLineAndCharacterOfPosition(d.start);
+    return { line: line + 1, col: character + 1, text: `error TS${d.code}: ${message}` };
+  }
+  return { line: 1, col: 1, text: `error TS${d.code}: ${message}` };
+}
+
+/**
+ * Does this body contain a real JSX node when parsed as TSX?
+ *
+ * The second half of the zero-false-positive predicate. "Fails to parse as `.ts`
+ * but parses clean as `.tsx`" is nearly sufficient on its own, but *nearly* is
+ * how a guard acquires a false positive that costs someone a corpus rewrite —
+ * so the JSX node is required to actually be there before this gate tells an
+ * author their block is JSX.
+ */
+function containsJsx(code: string): boolean {
+  const sf = ts.createSourceFile('probe.tsx', code, ts.ScriptTarget.ES2020, false, ts.ScriptKind.TSX);
+  let found = false;
+  const visit = (node: ts.Node): void => {
+    if (found) return;
+    if (ts.isJsxElement(node) || ts.isJsxSelfClosingElement(node) || ts.isJsxFragment(node)) {
+      found = true;
+      return;
+    }
+    ts.forEachChild(node, visit);
+  };
+  ts.forEachChild(sf, visit);
+  return found;
+}
+
+/** A block whose body is JSX while its fence claims plain TypeScript. */
+interface FenceLanguageMismatch {
+  source: string;
+  fenceLine: number;
+  lang: string;
+  marked: boolean;
+}
+
+/**
+ * The POPULATION half (#12051): every `ts`/`typescript`-fenced block whose body
+ * is JSX, marked or not, across every root this gate already reads.
+ *
+ * The predicate is deliberately three-part and each part removes a class of
+ * false positive:
+ *
+ *   1. does NOT parse as `.ts` — a body that parses fine either way has no
+ *      fence-language defect to report;
+ *   2. parses CLEAN as `.tsx` — this is what separates JSX from the corpus's
+ *      ordinary prose fragments. `defineStack({ ... })` and a `columns: [...]`
+ *      subtree fail to parse BOTH ways (TS1109), and are correct as prose;
+ *   3. contains an actual JSX node.
+ *
+ * Measured over the real corpus, 1 and 2 together already selected exactly the
+ * JSX blocks; 3 is kept because the cost is one extra parse of an already-broken
+ * block and the alternative is a guard whose zero-false-positive claim rests on
+ * "nothing else happened to qualify today".
+ *
+ * ⚠️ Why this cannot live in `check:doc-authoring`'s `FENCE_OPEN` instead
+ * (#12051's third open question, answered here rather than forked to devx): that
+ * scanner is line-wise — `FENCE_OPEN` matches the fence-open LINE and the body
+ * is then tested one line at a time against a literal regex. It never parses a
+ * block, so it cannot distinguish JSX from any other text, and widening it to
+ * carry this check would mean giving a devx-owned lint its own TypeScript
+ * parser. The check belongs where the fence language is *consumed* — here, where
+ * it decides a build-file extension — not where fences are merely recognised.
+ */
+function findJsxInTsFence(fences: FencedBlock[]): FenceLanguageMismatch[] {
+  const candidates = fences.filter((f) => f.lang === 'ts' || f.lang === 'typescript');
+  if (candidates.length === 0) return [];
+
+  const tsErrors = syntacticErrorsByFile(candidates.map((f, i) => ({ name: `fence-${i}.ts`, text: f.code })));
+  const broken = candidates.filter((_, i) => (tsErrors.get(`fence-${i}.ts`) ?? []).length > 0);
+  if (broken.length === 0) return [];
+
+  const tsxErrors = syntacticErrorsByFile(broken.map((f, i) => ({ name: `fence-${i}.tsx`, text: f.code })));
+  return broken
+    .filter((f, i) => (tsxErrors.get(`fence-${i}.tsx`) ?? []).length === 0 && containsJsx(f.code))
+    .map((f) => ({ source: f.source, fenceLine: f.fenceLine, lang: f.lang, marked: f.marked }));
+}
+
+/** A MARKED block that does not parse — so nothing on its surface got checked. */
+interface UnparsedExample {
+  example: Example;
+  errors: { line: number; col: number; text: string }[];
+  /** True when the body would parse clean as `.tsx` and really is JSX. */
+  jsxUnderTsFence: boolean;
+}
+
+/**
+ * The REFUSAL half (#12051): marked blocks on one surface that do not PARSE.
+ *
+ * Runs over the EXACT text `writeBuildDir` will write (`buildFileText`), so the
+ * verdict is about the file `tsc` reads, not about a near-copy of it.
+ */
+function findUnparsedExamples(examples: Example[]): UnparsedExample[] {
+  const errors = syntacticErrorsByFile(examples.map((ex) => ({ name: ex.fileName, text: buildFileText(ex.code) })));
+  const out: UnparsedExample[] = [];
+  for (const ex of examples) {
+    const diags = errors.get(ex.fileName) ?? [];
+    if (diags.length === 0) continue;
+    const asTsx = ex.fileName.endsWith('.tsx')
+      ? diags
+      : (syntacticErrorsByFile([{ name: 'probe.tsx', text: buildFileText(ex.code) }]).get('probe.tsx') ?? []);
+    out.push({
+      example: ex,
+      // Three is enough to recognise the shape; a JSX body in a `.ts` file
+      // produces a cascade, and printing all of it buries the prescription.
+      errors: diags.slice(0, 3).map(formatParseError),
+      jsxUnderTsFence: !ex.fileName.endsWith('.tsx') && asTsx.length === 0 && containsJsx(ex.code),
+    });
+  }
+  return out;
+}
+
 // ── tsc harness ──────────────────────────────────────────────────────────────
 
 function writeBuildDir(buildDir: string, examples: Example[], paths: Record<string, string[]>): void {
@@ -797,14 +1105,11 @@ function writeBuildDir(buildDir: string, examples: Example[], paths: Record<stri
   for (const ex of examples) {
     // Written verbatim (no prepended wrapper) so a tsc line N maps to source
     // line (bodyStartLine + N - 1) with zero arithmetic guesswork. A block with
-    // no import/export is a script, not a module; append `export {}` so two such
-    // files can't collide on a global — appended at the end, it never shifts the
-    // line of any real diagnostic.
-    const isModule = /^\s*(import|export)\b/m.test(ex.code);
-    fs.writeFileSync(
-      path.join(buildDir, ex.fileName),
-      ex.code + (isModule ? '' : '\nexport {};\n'),
-    );
+    // no import/export is a script, not a module; `buildFileText` appends
+    // `export {}` so two such files can't collide on a global — appended at the
+    // end, it never shifts the line of any real diagnostic. That helper is
+    // shared with the parse guards (#12051) so both read the same bytes.
+    fs.writeFileSync(path.join(buildDir, ex.fileName), buildFileText(ex.code));
   }
 
   const tsconfig = {
@@ -878,6 +1183,22 @@ function runTsc(buildDir: string): { code: number; output: string } {
 
 function fail(message: string): never {
   console.error(`\n✗ ${message}\n`);
+  process.exit(1);
+}
+
+/**
+ * REFUSE — "this gate produced no result", as distinct from `fail()`'s "this
+ * gate produced a result and it is bad" (#12051).
+ *
+ * Deliberately NOT `fail()` with a different string: the two states need two
+ * verdict tokens a reader can grep for and tell apart at a glance, and stacking
+ * the prefixes (`✗ ⛔ REFUSE`) reads as one emphatic failure rather than as a
+ * different KIND of failure. Same exit code — a refusal is still a red build,
+ * because a gate that cannot check its surface must never look like one that
+ * did.
+ */
+function refuse(message: string): never {
+  console.error(`\n⛔ REFUSE — ${message}\n`);
   process.exit(1);
 }
 
@@ -1634,6 +1955,141 @@ function selfTest(): never {
       'build-dir fixture: a distinct `buildDirName` on a shared resolution dir was reported as a clash — ' +
         'sharing a resolution dir is legitimate and must stay legal',
     );
+
+    // ── Fence language vs body language, and refusal (#12051) ─────────────
+    //
+    // Both directions, because both failures are silent. A false NEGATIVE here
+    // is the defect itself: the guard passes, someone marks a JSX block under a
+    // `ts` fence, and the surface's semantic pass stops running while the gate
+    // reports in the vocabulary of a compile result. A false POSITIVE is just
+    // as costly the other way — the corpus is full of prose fragments that
+    // parse as neither TS nor TSX, and flagging those would force a rewrite of
+    // documentation that is correct as written.
+    const JSX_BODY = ['function Card() {', '  return <div className="card">hi</div>;', '}'].join('\n');
+    const FRAGMENT_BODY = 'defineStack({ ... })';
+
+    const jsxFences = path.join(dir, 'jsx-fences.md');
+    fs.writeFileSync(
+      jsxFences,
+      [
+        '<!-- os:check -->', // 1
+        '```ts', // 2  ← MARKED JSX under a plain-ts fence: the live defect
+        ...JSX_BODY.split('\n'), // 3-5
+        '```', // 6
+        '', // 7
+        '```typescript', // 8  ← UNMARKED JSX: the loaded tripwire
+        ...JSX_BODY.split('\n'), // 9-11
+        '```', // 12
+        '', // 13
+        '<!-- os:check -->', // 14
+        '```tsx', // 15  ← the SAME body, correctly fenced: must NOT be flagged
+        ...JSX_BODY.split('\n'), // 16-18
+        '```', // 19
+        '', // 20
+        '```ts', // 21  ← UNMARKED prose fragment: parses as NEITHER, not a fence defect
+        FRAGMENT_BODY, // 22
+        '```', // 23
+        '',
+      ].join('\n'),
+      'utf8',
+    );
+    const fenced = extractFromFile(jsxFences, skillsRoot);
+    check(
+      fenced.fences.length === 4,
+      `fence-language fixture: collected ${fenced.fences.length} fence(s), expected 4 — unmarked fences must be ` +
+        'collected too, or the tripwire half of the guard cannot see anything',
+    );
+    check(
+      fenced.examples.length === 2,
+      `fence-language fixture: extracted ${fenced.examples.length} marked block(s), expected 2`,
+    );
+    const mismatches = findJsxInTsFence(fenced.fences);
+    check(
+      mismatches.length === 2,
+      `fence-language fixture: flagged ${mismatches.length} JSX-under-ts fence(s), expected 2 — got ` +
+        JSON.stringify(mismatches.map((m) => `${m.fenceLine}:${m.lang}:${m.marked ? 'marked' : 'unmarked'}`)),
+    );
+    check(
+      JSON.stringify(mismatches.map((m) => m.fenceLine)) === JSON.stringify([2, 8]),
+      `fence-language fixture: flagged lines ${JSON.stringify(mismatches.map((m) => m.fenceLine))}, expected [2,8] — ` +
+        'line 15 is the same body under a ```tsx fence (correct, must not be flagged) and line 21 is a prose ' +
+        'fragment that parses as neither TS nor TSX (not a fence-language defect)',
+    );
+    check(
+      JSON.stringify(mismatches.map((m) => m.marked)) === JSON.stringify([true, false]),
+      `fence-language fixture: marked flags ${JSON.stringify(mismatches.map((m) => m.marked))}, expected [true,false] — ` +
+        'an UNMARKED JSX block must still be reported; it is the tripwire, not a non-issue',
+    );
+
+    // The refusal half, over the marked blocks of the same fixture. The JSX one
+    // must refuse AND be diagnosed as a fence-language defect; the correctly
+    // fenced one must parse clean, or the guard is flagging JSX rather than the
+    // mismatch.
+    const unparsed = findUnparsedExamples(fenced.examples);
+    check(
+      unparsed.length === 1,
+      `refusal fixture: ${unparsed.length} marked block(s) failed to parse, expected 1 — the tsx-fenced block ` +
+        'carries the identical body and must parse clean',
+    );
+    if (unparsed.length === 1) {
+      check(
+        unparsed[0].example.fileName.endsWith('.ts') && !unparsed[0].example.fileName.endsWith('.tsx'),
+        `refusal fixture: the failing block was written as ${unparsed[0].example.fileName} — the plain-ts fence ` +
+          'is what puts a JSX body in a .ts file, and that is the whole mechanism',
+      );
+      check(
+        unparsed[0].jsxUnderTsFence,
+        'refusal fixture: the failing block was NOT diagnosed as JSX-under-a-ts-fence — without that the author ' +
+          'reads a cascade of TS1005s and has no way to reach the one-word fix',
+      );
+      check(
+        unparsed[0].errors.length > 0 && /TS\d+/.test(unparsed[0].errors[0].text),
+        `refusal fixture: reported no parse diagnostic text (got ${JSON.stringify(unparsed[0].errors)})`,
+      );
+      const pageLine = unparsed[0].example.bodyStartLine + unparsed[0].errors[0].line - 1;
+      check(
+        pageLine >= 3 && pageLine <= 5,
+        `refusal fixture: mapped the first parse error to page line ${pageLine}, expected 3-5 (the JSX body) — ` +
+          'a refusal pointing at the wrong line is worse than none',
+      );
+    }
+
+    // A marked ellipsis fragment refuses too. Refusal is about PARSING, not
+    // about JSX: this is the shape the file header records as having suppressed
+    // a whole sweep's semantic pass (#10924's three TS1109 blocks), and it must
+    // reach the same verdict by the same route — with `jsxUnderTsFence` false,
+    // so the JSX prescription is not offered for a defect that is not JSX.
+    const markedFragment = path.join(dir, 'marked-fragment.md');
+    fs.writeFileSync(
+      markedFragment,
+      ['<!-- os:check -->', '```ts', FRAGMENT_BODY, '```', ''].join('\n'),
+      'utf8',
+    );
+    const fragmentExtract = extractFromFile(markedFragment, skillsRoot);
+    const fragmentUnparsed = findUnparsedExamples(fragmentExtract.examples);
+    check(
+      fragmentUnparsed.length === 1 && !fragmentUnparsed[0].jsxUnderTsFence,
+      `marked-fragment fixture: expected 1 refusal with jsxUnderTsFence=false, got ${JSON.stringify(
+        fragmentUnparsed.map((u) => u.jsxUnderTsFence),
+      )} — a non-JSX parse failure must refuse without recommending a tsx retag`,
+    );
+    check(
+      findJsxInTsFence(fragmentExtract.fences).length === 0,
+      'marked-fragment fixture: a prose ellipsis fragment was reported as JSX under a ts fence — that is the ' +
+        'false positive that would force a corpus-wide rewrite of correct documentation',
+    );
+
+    // The bytes the refusal guard parses ARE the bytes `writeBuildDir` writes.
+    // Pinned directly, because the two drifting apart is how a guard ends up
+    // clearing a string the compiler never reads.
+    check(
+      buildFileText('const a = 1;') === 'const a = 1;\nexport {};\n',
+      `buildFileText fixture: a non-module block was not given its \`export {}\` (got ${JSON.stringify(buildFileText('const a = 1;'))})`,
+    );
+    check(
+      buildFileText("import { z } from 'zod';") === "import { z } from 'zod';",
+      'buildFileText fixture: a block that is already a module was given an extra `export {}`',
+    );
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -1748,7 +2204,12 @@ function selfTest(): never {
       '    cwd reads as indeterminate rather than as a false violation; an indented, an over-long,\n' +
       '    and a combined indent+over-long closing fence all extract identically to the walk\'s own\n' +
       '    span, and a CR-trailing closer reads as unclosed the SAME way for both loops instead of\n' +
-      '    disagreeing about where the fence ends.',
+      '    disagreeing about where the fence ends; a JSX body under a ```ts fence is flagged whether\n' +
+      '    it is marked or not, the identical body under a ```tsx fence is not, a prose ellipsis\n' +
+      '    fragment (parses as neither) is not, a marked block that does not parse REFUSES with its\n' +
+      '    first error mapped to the right page line — recommending a tsx retag only when the body\n' +
+      '    really is JSX — and the bytes the refusal parses are the bytes the build dir is written\n' +
+      '    with.',
   );
   process.exit(0);
 }
@@ -1879,12 +2340,14 @@ function main() {
   const bySurface = SURFACES.map((surface) => {
     const examples: Example[] = [];
     const orphans: string[] = [];
+    const fences: FencedBlock[] = [];
     for (const { file, root } of sourceFiles(surface.roots)) {
-      const { examples: found, orphans: bad } = extractFromFile(file, root);
+      const { examples: found, orphans: bad, fences: all } = extractFromFile(file, root);
       examples.push(...found);
+      fences.push(...all);
       for (const line of bad) orphans.push(`${rel(file)}:${line}`);
     }
-    return { surface, examples, orphans };
+    return { surface, examples, orphans, fences };
   });
 
   // A marker that is not directly above a ```ts/```tsx fence checks nothing.
@@ -1927,6 +2390,66 @@ function main() {
 
   const allExamples = bySurface.flatMap((s) => s.examples);
 
+  // ── REFUSE, rather than degrade (#12051) ──────────────────────────────────
+  //
+  // A marked block that does not PARSE does not produce a type-checking result
+  // that is merely wrong — it produces NO type-checking result for its entire
+  // surface, because tsc reports syntactic diagnostics and then stops before the
+  // semantic pass, for every file in the program. Before this guard the run
+  // still went red (measured — see the "Parse-level refusal" section), but it
+  // went red saying "examples do not compile … fix the example to match the
+  // current declarations": the vocabulary of a semantic result, over a surface
+  // where the semantic pass had not run. The reader's next move — fix these
+  // diagnostics, trust the rest — is wrong in a way the output gave them no way
+  // to see.
+  //
+  // So the verdict is separated from the diagnosis. REFUSE says: this surface
+  // was not checked, here is what stopped it, and here is how many blocks that
+  // leaves unchecked. It runs BEFORE the dist-freshness refusal and before any
+  // build dir is written, because parsing depends on neither — and before the
+  // bare-`any` guard below, which walks a `createSourceFile` tree: that call
+  // degrades silently on input it cannot parse (it never throws), so running it
+  // over an unparseable block is the dormant-checker shape its own docblock
+  // warns about. Refusing first means every guard after this line is looking at
+  // a tree TypeScript actually built.
+  const refusals = bySurface
+    .map(({ surface, examples }) => ({ surface, examples, unparsed: findUnparsedExamples(examples) }))
+    .filter((r) => r.unparsed.length > 0);
+  if (refusals.length > 0) {
+    const lines: string[] = [];
+    for (const { surface, examples, unparsed } of refusals) {
+      lines.push(
+        `[${surface.name}] was NOT type-checked.\n\n` +
+          `   ${unparsed.length} marked block(s) do not parse. TypeScript reports syntactic errors and\n` +
+          `   then STOPS: the semantic pass never runs, for any file in the program. So the other\n` +
+          `   ${examples.length - unparsed.length} marked block(s) on this surface were not type-checked either — this run\n` +
+          `   proves nothing about them, in either direction.\n`,
+      );
+      for (const u of unparsed) {
+        lines.push(`   ${rel(u.example.source)}  (block written as ${u.example.fileName})`);
+        for (const e of u.errors) {
+          lines.push(`     ${rel(u.example.source)}:${u.example.bodyStartLine + e.line - 1}:${e.col}  ${e.text}`);
+        }
+        if (u.jsxUnderTsFence) {
+          lines.push(
+            `     ↳ This body is JSX and parses clean as .tsx. Its fence says \`\`\`ts / \`\`\`typescript,\n` +
+              `       which is what put it in a .ts file. Retag the fence \`\`\`tsx.`,
+          );
+        }
+        lines.push('');
+      }
+    }
+    refuse(
+      lines.join('\n') +
+        `  Fix the parse errors, or drop the os:check marker from a block that is an\n` +
+        `  illustrative fragment rather than a compile claim (an ellipsis placeholder like\n` +
+        `  \`defineStack({ ... })\` is correct as prose and can never parse).\n\n` +
+        `  ⚠️ Do NOT read the diagnostics above as this surface's problem list. They are the\n` +
+        `     reason there IS no problem list yet. Re-run once they are gone — that run is the\n` +
+        `     first one whose result means anything.`,
+    );
+  }
+
   // Third anti-idle assertion (#5943): a marked block that annotates anything
   // `any` compiles by definition and proves nothing about it. Runs BEFORE any
   // build dir is written, so the author reads one crisp verdict instead of a
@@ -1956,6 +2479,38 @@ function main() {
     );
   }
 
+  // The UNMARKED population (#12051): JSX bodies under a ` ```ts ` /
+  // ` ```typescript ` fence, across every root this gate reads.
+  //
+  // The build-file extension is derived from the fence language, so a JSX body
+  // under a plain-ts fence is written to a `.ts` file where JSX cannot parse,
+  // and a program carrying one syntactic error never reaches its semantic pass
+  // — for ANY file in it. An unmarked block of that shape breaks nothing today,
+  // because nothing compiles it; it is a tripwire, and marking it is a one-line
+  // edit. So it is swept here rather than left to be discovered by the surface
+  // -wide loss of type-checking it causes on the day someone arms it.
+  //
+  // MARKED blocks are deliberately NOT reported here — the REFUSE guard above
+  // owns every marked block that fails to parse, JSX or otherwise, and says the
+  // one thing this message cannot: that the surface has no result at all. One
+  // block, one verdict; a defect that appears in two of them teaches the reader
+  // to skim both.
+  const fenceMismatches = bySurface.flatMap((s) => findJsxInTsFence(s.fences)).filter((m) => !m.marked);
+  if (fenceMismatches.length > 0) {
+    fail(
+      `JSX inside a \`\`\`ts / \`\`\`typescript fence — the fence language decides the build-file\n` +
+        `extension, and JSX is a SYNTAX error in a .ts file:\n\n` +
+        fenceMismatches.map((m) => `  - ${rel(m.source)}:${m.fenceLine}  (\`\`\`${m.lang}, unmarked)`).join('\n') +
+        `\n\n  Retag each fence \`\`\`tsx. Nothing else about the block changes: \`tsx\` is already\n` +
+        `  accepted by this gate and by check:doc-authoring's fence scanner.\n\n` +
+        `  None of these is marked, so none breaks a build today — that is why they are worth\n` +
+        `  reporting now. Marking one is a one-line edit, and what it buys is a surface-wide\n` +
+        `  loss of type-checking (${allExamples.length} marked blocks across ${bySurface.length} surfaces at present) delivered as an\n` +
+        `  ordinary-looking compile error. The fence language is also what every reader and\n` +
+        `  every syntax highlighter goes by, so the retag is right on its own terms.`,
+    );
+  }
+
   console.log(`   ${allExamples.length} marked example(s) across ${new Set(allExamples.map((e) => e.source)).size} file(s), ${bySurface.length} surface(s):`);
   for (const { surface, examples } of bySurface) {
     console.log(`     • ${surface.name}: ${examples.length} block(s)`);
@@ -1971,6 +2526,13 @@ function main() {
   const buildDirs: string[] = [];
   let anyDiags = false;
   const diagBlocks: string[] = [];
+  // Which surfaces actually reached `tsc` (#12051). The green line below is a
+  // claim about the SEMANTIC pass, so it is printed only when every surface got
+  // one — and "every surface" is asserted from a set built inside the loop
+  // rather than assumed from the loop existing. The refusal above makes the
+  // syntactic half of that claim true; this makes the "for all surfaces" half
+  // true against the next edit that adds a skip or an early `continue` up here.
+  const compiled = new Set<string>();
 
   for (const { surface, examples } of bySurface) {
     // BEFORE any declaration is resolved (#7181, adopting #7122's primitive).
@@ -2019,6 +2581,10 @@ function main() {
     buildDirs.push(buildDir);
     writeBuildDir(buildDir, examples, paths);
     const { code, output } = runTsc(buildDir);
+    // Every marked block on this surface parsed (the refusal above proved it),
+    // so tsc's syntactic pass was clean and its semantic pass ran. Record that
+    // this surface has a real result — clean or not.
+    compiled.add(surface.name);
 
     const byFile = new Map(examples.map((e) => [e.fileName, e]));
     const diags = parseDiagnostics(output);
@@ -2048,7 +2614,20 @@ function main() {
   }
 
   if (!anyDiags) {
-    console.log(`✅ ${allExamples.length} prose examples type-check across ${bySurface.length} surface(s)`);
+    if (compiled.size !== bySurface.length) {
+      const skipped = bySurface.map((s) => s.surface.name).filter((n) => !compiled.has(n));
+      refuse(
+        `${skipped.length} surface(s) never reached tsc: ${skipped.join(', ')}.\n\n` +
+          `  Nothing below this line may report success: a green verdict here would be a claim\n` +
+          `  about a semantic pass that did not run. This is an internal invariant (#12051) — if\n` +
+          `  you just added a skip or an early \`continue\` to the compile loop, that is the cause,\n` +
+          `  and the fix is to give the skipped surface its own verdict rather than to relax this.`,
+      );
+    }
+    console.log(
+      `✅ ${allExamples.length} prose examples type-check across ${bySurface.length} surface(s)` +
+        ` — every marked block parsed, so tsc ran the SEMANTIC pass on all of them`,
+    );
     if (!KEEP) for (const d of buildDirs) fs.rmSync(d, { recursive: true, force: true });
     return;
   }

@@ -89,6 +89,10 @@ export const jaJP: TranslationData = {
           title: 'メンバーシップ',
           description: '新しく作成されたユーザーが所属する先。上のセルフサービス登録と対になる設定です。',
         },
+        audience: {
+          title: '登録対象',
+          description: 'この環境のアプリのユーザーになれる対象。「招待のみ」以外のポスチャではメール確認が強制されます。招待、管理者による作成、SCIM プロビジョニング、エンタープライズ SSO はどのポスチャでも許可されます。',
+        },
         password_policy: {
           title: 'パスワードポリシー',
           description: 'サインアップおよびパスワードリセット時に認証プロバイダーが強制する長さ制限。',
@@ -126,6 +130,23 @@ export const jaJP: TranslationData = {
             auto: '既定の組織に自動的に参加',
             'invite-only': '招待のみ — 自動では参加しない',
           },
+        },
+        audience_posture: {
+          label: 'セルフ登録の対象',
+          help: '「招待のみ」はセルフ登録を閉じます。ユーザーは運用側の行為(招待、管理者による作成/インポート、SCIM、エンタープライズ SSO)によってのみ作成されます。「メールドメイン」は下の許可リストのドメインにのみ開放し、「オープン」は誰でも登録できます。「招待のみ」以外ではメール確認が強制され、下のセルフ登録権限セットの指定が必要です。',
+          options: {
+            invite_only: '招待のみ — セルフ登録なし(既定)',
+            email_domain: '許可リストのメールドメインのみ',
+            open: 'オープン — 誰でもセルフ登録可能',
+          },
+        },
+        audience_allowed_email_domains: {
+          label: '許可するメールドメイン',
+          help: '裸のドメイン名を 1 行に 1 つ、またはカンマ区切りで指定します(例: acme.com)。完全一致・大文字小文字は区別しません。サブドメインは個別に指定が必要で、ワイルドカードは使えません。',
+        },
+        audience_self_registration_permission_set: {
+          label: 'セルフ登録の権限セット',
+          help: '各セルフ登録ユーザーに付与される sys_permission_set 名(member_default の明示宣言は可。admin_full_access は拒否されます)。',
         },
         password_min_length: { label: 'パスワードの最小文字数' },
         password_max_length: { label: 'パスワードの最大文字数', help: '非常に長いパスワードのハッシュ化によるサービス拒否を防ぎます。' },

@@ -4,6 +4,10 @@ import { Plugin, PluginContext, IHttpServer } from '@objectstack/core';
 import type { BetterAuthOptions } from 'better-auth';
 import {
   AuthConfig,
+  type AudienceConfig,
+  AUDIENCE_POSTURES,
+  audiencePermitsSelfRegistration,
+  isAudiencePosture,
   type SocialProviderConfig,
   type SettingsChangeHandler,
   type SettingsUnsubscribe,
@@ -1530,6 +1534,94 @@ export class AuthPlugin implements Plugin {
 
         if (Object.keys(patch).length > 0) {
           this.authManager.applyConfigPatch(patch);
+        }
+
+        // [#11768] Audience posture (#11739) — the console switch for
+        // `invite_only | email_domain | open`. The three `audience_*` keys are
+        // ONE atomic declaration mapped to ONE `applyConfigPatch({ audience })`
+        // (the #11767 contract: the patch replaces the WHOLE audience object
+        // and validates the MERGED result), applied AFTER the main patch so
+        // that validation judges the audience against the `emailAndPassword`
+        // state this same pass just applied — an explicit
+        // `require_email_verification: false` beside a self-registration
+        // posture is a contradiction `assertAudienceConfig` refuses.
+        //
+        // #5152's rules, exactly as `membership_policy` above:
+        //   - EXPLICIT-only. The manifest default (`invite_only`) is a UI
+        //     default and must not mask a deployment that declared its
+        //     audience in stack config at boot.
+        //   - An off-vocabulary posture is REFUSED loudly, never coerced —
+        //     a coerced value on this setting fails OPEN (an operator who
+        //     typed `invite-only` believing the wall is up while sign-ups
+        //     ride whatever posture the coercion picked).
+        //
+        // Composition rule: the declaration carries only the keys the
+        // explicitly selected posture READS (the spec marks the siblings
+        // "only read under" their postures). In particular, switching BACK to
+        // `invite_only` sends `{ posture: 'invite_only' }` alone — leftover
+        // text in the (hidden) domain-list field must never make CLOSING the
+        // wall refusable, because that refusal would leave the previous, more
+        // open posture ruling: the one direction that must not fail.
+        // Missing required siblings are NOT guessed: the patch goes out
+        // without them and `applyConfigPatch` refuses the merged result
+        // (standing config keeps ruling — refusing to OPEN fails closed).
+        const audienceKeys = [
+          'audience_posture',
+          'audience_allowed_email_domains',
+          'audience_self_registration_permission_set',
+        ];
+        if (audienceKeys.some((key) => isExplicit(key))) {
+          const rawPosture = values.audience_posture;
+          if (!isExplicit('audience_posture')) {
+            ctx.logger.error(
+              '[auth] audience settings IGNORED — a domain list or permission set is declared without a posture. ' +
+                `The standing posture ('${this.authManager.getAudience().posture}') keeps ruling. ` +
+                `Set auth.audience_posture (or OS_AUTH_AUDIENCE_POSTURE) to one of: ${AUDIENCE_POSTURES.join(', ')}.`,
+            );
+          } else if (!isAudiencePosture(rawPosture)) {
+            ctx.logger.error(
+              `[auth] audience_posture '${String(rawPosture)}' is not a recognized audience posture — IGNORED, the deployment keeps its ` +
+                `current posture ('${this.authManager.getAudience().posture}') and self-registration continues to follow it. ` +
+                `Set auth.audience_posture (or OS_AUTH_AUDIENCE_POSTURE) to one of: ${AUDIENCE_POSTURES.join(', ')}.`,
+            );
+          } else {
+            const audience: AudienceConfig = { posture: rawPosture };
+            if (rawPosture === 'email_domain' && isExplicit('audience_allowed_email_domains')) {
+              const rawDomains = typeof values.audience_allowed_email_domains === 'string'
+                ? values.audience_allowed_email_domains
+                : '';
+              // Same textarea convention as `allowed_ip_ranges`: newline- or
+              // comma-separated. Entries are NOT filtered for shape here —
+              // a malformed domain must be refused loudly by the validator,
+              // never silently dropped from the allowlist it was typed into.
+              audience.allowedEmailDomains = rawDomains
+                .split(/[\n,]+/)
+                .map((d) => d.trim())
+                .filter(Boolean);
+            }
+            if (
+              audiencePermitsSelfRegistration(rawPosture) &&
+              isExplicit('audience_self_registration_permission_set')
+            ) {
+              const set = asTrimmedString(values.audience_self_registration_permission_set);
+              if (set !== undefined) audience.selfRegistrationPermissionSet = set;
+            }
+            try {
+              this.authManager.applyConfigPatch({ audience });
+            } catch (audienceErr: any) {
+              // The merged-result validation refused the declaration (empty
+              // domain list, missing/forbidden permission set, verification
+              // contradiction, …). The standing config keeps ruling — report
+              // with the validator's own remedy-bearing message. `error`, not
+              // `warn`, for the #5152 reason: the console shows the saved
+              // values while the runtime refused them, so nothing else looks
+              // broken afterwards.
+              ctx.logger.error(
+                `[auth] audience settings REFUSED — the standing posture ('${this.authManager.getAudience().posture}') keeps ruling. ` +
+                  String(audienceErr?.message ?? audienceErr),
+              );
+            }
+          }
         }
       } catch (err: any) {
         ctx.logger.warn('Auth: failed to apply auth settings: ' + (err?.message ?? err));
