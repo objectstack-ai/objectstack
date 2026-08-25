@@ -1617,7 +1617,8 @@ export function collapseHint(hint) {
  * refused, because the narrowing would be the false statement.
  */
 export function hintCovers(hint, inputPath) {
-  if (globInNonFinalSegment(hint)) return triggerCovers(hint, inputPath);
+  if (globInNonFinalSegment(hint))
+    return zeroSegmentForms(hint).some((form) => triggerCovers(form, inputPath));
   const plain = collapseHint(hint);
   if (plain.length < 2) return false;
   // `hint`, not `plain`: glob collapse destroys the separator this refusal is
@@ -1642,6 +1643,132 @@ export function globInNonFinalSegment(hint) {
   const segments = hint.split('/');
   for (let i = 0; i < segments.length - 1; i++) if (segments[i].includes('*')) return true;
   return false;
+}
+
+/**
+ * How many `**` segments one hint may carry before the enumeration below stops
+ * being exhaustive. The forms are a power set, so the bound is what keeps a
+ * pathological hint from costing 2^n comparisons per file. Measured over all
+ * 763 distinct hints in the fleet, the maximum any hint carries is ONE; the cap
+ * is headroom, not a live constraint, and the self-test pins what a hint above
+ * it still gets.
+ */
+export const ZERO_SEGMENT_STAR_CAP = 8;
+
+/**
+ * ## `a/**\/b` must reach `a/b` — the spellings a hint author writes, not the
+ * ## ones CI's trigger language happens to share
+ *
+ * Every spelling of a hint that carries a glob in a non-final segment is judged
+ * by `triggerCovers`, which is `triggerPatternRegex` and therefore GitHub's
+ * filter-pattern language verbatim: there `**` is a CHARACTER wildcard ("zero
+ * or more of any character, `/` included"), so the `/` written after it is a
+ * literal that must still appear. The consequence is segment-wise arithmetic no
+ * hint author expects — `scripts/**\/*.d.mts` compiles to
+ * `^scripts/.*\/[^/]*\.d\.mts$`, which needs at least one intervening
+ * segment, so `**` there means ONE OR MORE and a top-level file is unreachable
+ * BY CONSTRUCTION:
+ *
+ *   scripts/check-regen-pending.d.mts   ← 3 tracked files, the natural
+ *   scripts/invoked-as.d.mts              spelling for them reaches 0 of them
+ *   scripts/js-comment-mask.d.mts
+ *
+ * That is the same dead-hint species #12246 was filed for, arriving through the
+ * branch that fixed it: a hint that matches nothing while looking like an
+ * ordinary literal, which `unreachableClass` then files as "THE LAYOUT MOVED …
+ * a real miss, worth triaging" — the wrong-classification-plus-wrong-evidence
+ * row this output calls the worst one it can print.
+ *
+ * ## Why the repair is HERE and not in `triggerPatternRegex`
+ *
+ * `triggerPatternRegex` is the CI mirror. `triggerListCovers`/`coveringTrigger`
+ * evaluate real workflow `paths:` lists with it, and its docblock's whole claim
+ * is that it reads the trigger language rather than approximating it. Teaching
+ * `**` to swallow its own separator THERE would change what this file says CI
+ * does — a fleet-wide semantic change, and a lie about a `paths:` list, for
+ * every workflow (`validate-deps.yml`'s `'**\/package.json'` is the live
+ * specimen). So the character-wildcard translation stays exactly as it is, and
+ * the difference is confined to the side that actually differs: a HINT is a
+ * glob a gate author wrote to describe what the gate reads, not a filter GitHub
+ * will evaluate, and in that language `a/**\/b` covers `a/b`.
+ *
+ * ## The rule
+ *
+ * A hint's forms are itself plus every spelling reachable by deleting some
+ * subset of its whole-`**` non-final segments — the power set, because each
+ * `**` means "zero or more" independently of the others. A match against ANY
+ * form is a match. Deliberately narrow in three ways:
+ *
+ *   - only a segment that is EXACTLY `**` is droppable. `packages/client*` and
+ *     `*.d.mts` are partial-segment globs and keep the meaning they have;
+ *   - only NON-FINAL segments, so nothing that reaches the collapse is touched;
+ *   - a single `*` is never droppable — `a/*\/b` means exactly one segment in
+ *     every glob language, `skills/*\/references/_index.md` included.
+ *
+ * ## Measured, both directions, on 173 families × 763 distinct hints × 6859
+ * ## tracked files
+ *
+ * The blast radius is enumerable rather than estimated: four of the six live
+ * hints with a glob in a non-final segment carry a whole-`**` segment, and the
+ * form this rule adds for each reaches nothing the tree has.
+ *
+ *   packages/**\/*.ts          + packages/*.ts          4718 → 4718
+ *   packages/**\/*.object.ts   + packages/*.object.ts     79 →   79
+ *   src/**\/*                  + src/*                     0 →    0
+ *   src/**\/*.zod.ts           + src/*.zod.ts              0 →    0
+ *   skills/*\/references/_index.md   no `**` segment        9 →    9
+ *   spec/src/*\/index.ts            no `**` segment        0 →    0
+ *
+ *   watch-hint (gate, file) pairs   70172 → 70172 (ZERO change)
+ *   families gaining or losing coverage                    0
+ *   (check, hint) newly live 0; newly inert 0
+ *   hints reaching zero tracked files                388 → 388
+ *
+ * Zero is the expected reading, not a disappointing one: `packages/` holds no
+ * file at its top level, and the two `src/**` hints are package-relative module
+ * specifiers that were never repo paths. What the rule buys is that the natural
+ * spelling for a top-level population STOPS BEING A TRAP — `scripts/**\/*.d.mts`
+ * goes 0 → 3 the moment a gate declares it, instead of being recorded as an
+ * unspellable population.
+ *
+ * The `ROOT_DIR_WATCH_HINTS` idiom #12300 measured at −7404 pairs on each of
+ * three gates if widened wrongly is untouched, because no trailing glob reaches
+ * this function at all: `packages/*` 5253, `examples/*` 241, `skills/**` 50,
+ * `content/**` 442, `scripts/**` 271, all unchanged, and the three gates hold
+ * at check:test-source-alias 5534, check:type-source-resolution 5534,
+ * check:published-files 5535.
+ *
+ * ## What this deliberately does NOT fix
+ *
+ * The sibling spelling `scripts/*.d.mts` is dead too, by the OLDER route: a
+ * glob in the LAST segment still goes through `collapseHint`, which deletes the
+ * `*` and yields `scripts/.d.mts` — a path no tree holds. That is a different
+ * species (deletion-collapse mangling a final segment whose glob carries a
+ * literal SUFFIX, next door to the DECIDED partial-segment trade), it is not
+ * the zero-segment question, and it is left exactly as it was. Pinned below so
+ * the asymmetry reads as recorded rather than overlooked.
+ */
+export function zeroSegmentForms(hint) {
+  const segments = hint.split('/');
+  const droppable = [];
+  for (let i = 0; i < segments.length - 1; i++) if (segments[i] === '**') droppable.push(i);
+  if (droppable.length === 0) return [hint];
+  // Above the cap the power set is refused rather than truncated arbitrarily:
+  // the two forms that carry meaning are the hint as written (every `**` at one
+  // or more) and the hint fully reduced (every `**` at zero).
+  const dropSets =
+    droppable.length > ZERO_SEGMENT_STAR_CAP
+      ? [[], droppable]
+      : Array.from({ length: 1 << droppable.length }, (_, mask) =>
+          droppable.filter((_, k) => (mask >> k) & 1),
+        );
+  const forms = [];
+  for (const drop of dropSets) {
+    const dropped = new Set(drop);
+    const form = segments.filter((_, i) => !dropped.has(i)).join('/');
+    if (form.length > 0 && !forms.includes(form)) forms.push(form);
+  }
+  return forms;
 }
 
 /**
@@ -5005,6 +5132,49 @@ function selfTest() {
   t('the ROOT_DIR_WATCH_HINTS idiom is untouched', hintCovers('skills/**', 'skills/objectstack-formula/SKILL.md'));
   t('and so is a trailing single `*`', hintCovers('examples/*', 'examples/app-showcase/src/x.ts'));
   t('the DECIDED partial-segment trade still refuses the sibling', !hintCovers('packages/client*', 'packages/client-react/src/index.ts'));
+
+  // ── `**` covers ZERO segments too (#12329) ───────────────────────────────
+  //
+  // The branch above judges these hints with `triggerCovers`, i.e. with
+  // GitHub's filter-pattern language, where `**` is a CHARACTER wildcard and
+  // the `/` written after it is a literal that must still appear. That makes
+  // `**` mean ONE OR MORE segments, so the natural spelling for a top-level
+  // population reaches none of it. Read from the real corpus, not a fixture: a
+  // fixture cannot show that the tree still has the shape the trap needs.
+  const topLevelMirrors = trackedFiles().filter((f) => /^scripts\/[^/]+\.d\.mts$/.test(f));
+  t('the tree really does hold top-level `.d.mts` files under a root', topLevelMirrors.length >= 3);
+  t('a `**` root reaches the top-level files under it', topLevelMirrors.every((f) => hintCovers('scripts/**/*.d.mts', f)));
+  t('and claims nothing else in the whole tree', trackedFiles().filter((f) => hintCovers('scripts/**/*.d.mts', f)).length === topLevelMirrors.length);
+  t('the ONE-OR-MORE reading it used to have is still there', hintCovers('scripts/**/*.d.mts', 'scripts/pm/x.d.mts'));
+  t('at any depth', hintCovers('scripts/**/*.d.mts', 'scripts/a/b/x.d.mts'));
+  t('the extension the glob names is still honoured at the top level', !hintCovers('scripts/**/*.d.mts', 'scripts/invoked-as.mjs'));
+  t('and a directory surface above it still derives the gate', hintCovers('scripts/**/*.d.mts', 'scripts'));
+  // The forms are itself first, then the reductions — the original spelling is
+  // never lost, which is what keeps the one-or-more cases above passing.
+  t('the forms of a `**` hint are the hint and its zero-segment reduction', zeroSegmentForms('scripts/**/*.d.mts').join(' ') === 'scripts/**/*.d.mts scripts/*.d.mts');
+  t('each `**` drops independently, so two of them give the power set', zeroSegmentForms('a/**/b/**/c').join(' ') === 'a/**/b/**/c a/b/**/c a/**/b/c a/b/c');
+  t('a hint with no `**` segment has exactly one form', zeroSegmentForms('skills/*/references/_index.md').join(' ') === 'skills/*/references/_index.md');
+  t('and so does a hint with no glob at all', zeroSegmentForms('packages/spec/src/index.ts').join(' ') === 'packages/spec/src/index.ts');
+  t('a hint above the cap keeps its written and fully-reduced forms only', zeroSegmentForms('a/**/**/**/**/**/**/**/**/**/z').length === 2);
+  // ⛔ Deliberately NOT droppable — three refusals that keep this narrow.
+  t('a single `*` segment is not a zero-segment wildcard', !hintCovers('skills/*/references/_index.md', 'skills/references/_index.md'));
+  t('nor is a `**` that is only PART of a segment', zeroSegmentForms('packages/a**/b.ts').join(' ') === 'packages/a**/b.ts');
+  t('and a trailing `**` never reaches this rule at all', hintCovers('packages/**', 'packages/spec/src/index.ts') && !globInNonFinalSegment('packages/**'));
+  // The CI mirror is untouched, which is the whole reason the repair lives in
+  // `hintCovers` and not in `triggerPatternRegex`: a hint is a glob a gate
+  // author wrote, a trigger is a filter GitHub will evaluate, and this file
+  // must keep saying what GitHub does. `validate-deps.yml` declares
+  // `'**/package.json'` and is the live specimen.
+  t('the trigger language still reads `**` as the character wildcard GitHub documents', !triggerCovers('**/package.json', 'package.json'));
+  t('while the same spelling as a HINT covers the root file', hintCovers('**/package.json', 'package.json'));
+  // ⛔ The sibling spelling is dead by the OLDER route and is NOT repaired
+  // here: a glob in the LAST segment still goes through `collapseHint`, which
+  // yields `scripts/.d.mts`. A different species (deletion-collapse mangling a
+  // final segment whose glob carries a literal SUFFIX), next door to the
+  // DECIDED partial-segment trade. Pinned so the asymmetry reads as recorded
+  // rather than overlooked — see zeroSegmentForms' docblock.
+  t('the final-segment spelling of the same population is still dead', collapseHint('scripts/*.d.mts') === 'scripts/.d.mts');
+  t('and still reaches none of the files it names', !topLevelMirrors.some((f) => hintCovers('scripts/*.d.mts', f)));
 
   // The trailing-separator strip is ONE call, not two: `/\/+$/` is greedy and
   // anchored, so nothing survives for a second `/\/$/` to remove. Measured at
