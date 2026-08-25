@@ -475,6 +475,33 @@ function multiValueColumnTypeIsLoadBearing(dialect: SqlDialectName): boolean {
 }
 
 /**
+ * The operator-run command that repairs a stale multi-value column (#11535).
+ *
+ * Named in the finding's `message` because a message that only DESCRIBES a
+ * problem leaves the operator to invent the repair. Until `os migrate
+ * multi-value-columns` shipped (#11733) there was nothing else to say, so the
+ * message told them to run raw SQL by hand — and the sentence it opened with,
+ * "ObjectStack will NOT change this column for you", became false the moment
+ * that command landed. The hand-run route is still printed below it, because
+ * the statement is what the command runs and an operator without the CLI still
+ * needs it; it is no longer the FIRST thing offered.
+ *
+ * ⛔ Module-exported so this package's own suites can pin the spelling, and
+ * deliberately NOT added to `index.ts`: naming a CLI command in a warning is a
+ * string, and a published export is the step that would let the CLI import its
+ * own id back out of the driver it boots. `schema-drift.base-type-mismatch.test.ts`
+ * asserts the emitted message contains it; the command id itself lives in
+ * `packages/cli/src/commands/migrate/multi-value-columns.ts`.
+ *
+ * ⚠️ It changes NOTHING about how loud this finding is or what it gates:
+ * `severity: 'error'` and `category: 'needs_confirm'` are untouched, so the
+ * finding still refuses no boot (see the emission site's comment — the boot
+ * gate reads CATEGORY, and `destructive` is the value that would stop an
+ * already-serving database from starting).
+ */
+export const MULTI_VALUE_COLUMN_REMEDY_COMMAND = 'os migrate multi-value-columns';
+
+/**
  * The hand-run statement that converts a stale textual column to `json`,
  * spelled for the dialect the operator is actually on.
  *
@@ -674,9 +701,34 @@ export function diffManagedTable(args: {
     //
     // The residue is stated rather than hidden: `os migrate apply` hands a
     // `needs_confirm` entry to the reconciler, which — having no arm for this op
-    // by design — declines it (`applied=0, skipped=1`) and says so. A finding
-    // that is reported every time and applied never is exactly the contract
-    // while the automatic migration remains the maintainer's open decision.
+    // by design — declines it (`applied=0, skipped=1`) and says so.
+    //
+    // ## The message NAMES the remedy, because there is now a remedy to name
+    //
+    // Ruled C on #11700 (maintainer, 2026-08-24): the platform warns and ships
+    // an explicit, operator-run migration, and never runs it at boot.
+    // ⛔ Quoted verbatim, not translated:
+    // 「11700 11693 不需要考虑历史数据，其他按照你的建议继续」
+    //
+    // That command is `os migrate multi-value-columns` (#11733, landed
+    // `0e5bea6`), which is what changes this message's job. Before it existed
+    // the finding could only DESCRIBE the problem and hand over raw SQL; it
+    // opened its remedy with "ObjectStack will NOT change this column for you",
+    // a sentence the command falsified. It now names the command first — the
+    // route with a dry run, a confirmation prompt, and a post-run re-detection
+    // that exits non-zero if the finding has not cleared — and keeps the
+    // hand-run statement after it for an operator without the CLI.
+    //
+    // ⚠️ The raw statement stays in the message VERBATIM, and that is a
+    // contract, not prose: `planStaleColumnTargets`
+    // (packages/cli/src/commands/migrate/multi-value-columns.ts) recovers the
+    // DIALECT by testing `message.includes(manualJsonConversionSql(d, …))` for
+    // each corrupting dialect — a `ManagedDriftEntry` carries no dialect of its
+    // own. Reword this message so the statement no longer appears character for
+    // character and the command refuses every finding with
+    // `remedy_not_recognized`, i.e. the remedy this text points at stops
+    // working. Pinned from this side by the `toContain(manualJsonConversionSql(…))`
+    // cases in `schema-drift.base-type-mismatch.test.ts`.
     const declaresJsonColumn = field.multiple === true;
     if (declaresJsonColumn && multiValueColumnTypeIsLoadBearing(dialect) && acceptsStringifiedJson(col.type)) {
       out.push({
@@ -694,12 +746,16 @@ export function diffManagedTable(args: {
           `column is \`${col.type}\` — the database was created while the field was single-value and the ` +
           `additive sync never migrates a column's type. Arrays are being written as the STRINGIFIED ` +
           `literal (e.g. '["a","b"]') and read back as a string, so anything consuming the value ` +
-          `receives one opaque id instead of a list (#11535). ObjectStack will NOT change this column ` +
-          `for you. Migrate it by hand, in a transaction, with a backup taken first — dropping any ` +
-          `index on the column first, since a json column cannot carry a plain btree: ` +
+          `receives one opaque id instead of a list (#11535). REMEDY: run ` +
+          `"${MULTI_VALUE_COLUMN_REMEDY_COMMAND}" — it is a DRY RUN by default that executes nothing ` +
+          `and prints the statements; take a backup, then re-run it with --apply. ObjectStack never ` +
+          `migrates this column on its own: the boot path only reports it and "os migrate apply" ` +
+          `skips it, so nothing changes until you run that command. To do it by hand instead, in a ` +
+          `transaction and with a backup taken first — dropping any index on the column first, since ` +
+          `a json column cannot carry a plain btree: ` +
           `${manualJsonConversionSql(dialect, table, fieldName)} ` +
           `Rows written while the column was stale may already hold a stringified array in a RELATED ` +
-          `single-value column; those are not repaired by the statement above.`,
+          `single-value column; neither route repairs those.`,
       });
     }
 
