@@ -6735,7 +6735,17 @@ export class RestServer {
                     // Threading `force` here without also naming it here would
                     // have re-opened that inversion on a fresh door, on a
                     // destructive verb, reported as 200.
-                    if (refuseRepeatedQueryParams(req, res, ['force', 'package'])) return;
+                    //
+                    // [#11712] `mode` joins for the same reason and in the same
+                    // stroke as the read below. The single-segment twin has
+                    // listed all three since #6877; this door listed two,
+                    // because it read two. The mechanism is #6877's unchanged:
+                    // a repeated `?mode=draft&mode=draft` arrives as an ARRAY,
+                    // the `typeof req.query?.mode === 'string'` test below is
+                    // FALSE for it, and the save falls silently back to
+                    // publishing live — the very outcome this card is about,
+                    // re-entered through the door the fix opens.
+                    if (refuseRepeatedQueryParams(req, res, ['force', 'package', 'mode'])) return;
                     // [#11095] Phase 3a-destructive: `?force=true` opts past the
                     // destructive-change safety check — BYTE-IDENTICAL to the
                     // single-segment `PUT /meta/:type/:name` above, truthy
@@ -6816,6 +6826,42 @@ export class RestServer {
                         ...(actor ? { actor } : {}),
                         ...(force ? { force: true } : {}),
                         ...(packageId ? { packageId } : {}),
+                        // [#11712] ADR-0005 per-item lifecycle: `?mode=draft`
+                        // stages the write instead of publishing it live.
+                        // BYTE-IDENTICAL to the single-segment
+                        // `PUT /meta/:type/:name` above, spelling test and all,
+                        // because it is byte-identically the same decision —
+                        // #7019's ruling applied a fifth time, with its reason:
+                        // this route is "word for word the same operation" as
+                        // its twin, one generic `saveMetaItem` reached by a name
+                        // spelled in two segments. #6603/#7019 (capability
+                        // gate), #8805 (write-side org), #7035 (the 501
+                        // envelope) and #11095 (`?force`) each closed a
+                        // divergence on this pair on exactly that finding.
+                        //
+                        // The harm was measured, not reasoned. Until this
+                        // landed the request was built field by field with no
+                        // `mode` among the fields, so `saveMetaItem` fell to its
+                        // `'publish'` default: `PUT /meta/object/crm/task
+                        // ?mode=draft` answered `200` with `state: 'active'` and
+                        // OVERWROTE the live row, while the byte-identical
+                        // intent one route over inserted a `state: 'draft'` row
+                        // and left the live one alone. Nothing in the answer
+                        // said the parameter had been ignored — a caller asking
+                        // for a staging buffer got a publish.
+                        //
+                        // ⛔ NOT repaired by refusing the parameter here: the
+                        // draft store keys on `type`/`name`/org/package and is
+                        // indifferent to how the name is spelled, and the
+                        // ADR-0033 read half is ALREADY mounted in both arities
+                        // (`GET /:type/:section/:name/published`, #7526, whose
+                        // own comment cites `getPublished('lead',
+                        // 'views/all_leads')`). A compound draft is a shape this
+                        // surface already serves; only the write door was
+                        // missing.
+                        ...((typeof req.query?.mode === 'string'
+                            && req.query.mode.toLowerCase() === 'draft')
+                            ? { mode: 'draft' } : {}),
                     } as any);
                     res.json(result);
                 } catch (error: any) {
