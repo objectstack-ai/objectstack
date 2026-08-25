@@ -7,17 +7,14 @@
   当合并应当关卡**;只落地了可实施一半(另一半在决策箱或按范围排除)⇒ 必须 `Part of
   #<n>`,否则合并会静默关掉一张正躺在决策箱里的卡,而 `needs-user-decision` 的收件
   箱过滤只看 open issue。翻 ready 之前亲核首行,别只信报告。
-- **`Part of` PR 翻 ready 前,再扫一遍正文的闭合关键词形状**(解析器行为与安全写
-  法见平台读数事实表):⛔ 永不把闭合关键词放在另一张 open 卡编号旁 —— 为防止误关
-  而写的否定句恰恰就是执行误关的那句。半状态巡查器的矛盾检测只巡开着的 PR,翻
-  ready 前的这一扫是唯一挡在合并前面的人工步骤。
+- **闭合关键词两读:翻 ready 前扫正文,合并后读每张相关卡的 `closed_by_pull_requests`**(body 与
+  commit message 分开解析,细则见平台读数事实表):⛔ 永不把它放在另一张 open 卡编号旁 ——
+  解析器不理会否定句,为防误关而写的那句恰是执行误关的那句;半状态巡查器只巡开着的
+  PR,这一扫是合并前唯一的人工关口。合并后确认应关的关了、**没有别的卡被一并关掉**
+  —— 误关的卡以 completed 对「只看 open」的过滤隐身,这一读是唯一兜得住的机械检查。
 - **`Part of` 收口的卡不会自动关,`pm:dispatched` 必须手工摘**(动作与评论要件见
   入队与落地细则 B):ACCEPT 一张 `Part of` PR 的那一刻就把这步记进落地待办,
   ⛔ 不留给「下次巡检看到再说」—— 漏摘的标签让在飞视图数进一张无人认领的开卡。
-- **合并后读一次每张相关卡的 `closed_by_pull_requests`**:确认应关的关了,**并确
-  认没有别的卡被一并关掉**(闭合关键词解析器不理会否定句,body 与 commit
-  message 分开解析,细则见平台读数事实表);误关的卡以 completed 状态对一切「只看
-  open」的过滤隐身,这一读是唯一能兜住它的机械检查。
 - **范围检查**(取 changed files,⛔ 不看报告自述):无 `content/docs/releases/` 改
   动、用户可见改动有 changeset、无与卡无关的文件。Tests/docs-only 按仓库分流:本仓
   库走 `skip-changeset` 标签、不走空 changeset(空 changeset 在本仓库滞留发布),含
@@ -31,14 +28,17 @@
   布,看起来像修好了,比不合更糟。
 - **测试证据**要有真实命令与通过输出,不是一句 tests pass。**测量类交付先看阳性对
   照**:对照本身失败 ⇒ 该读数记 INCONCLUSIVE,⛔ 不把它的「绿」当被测风险的证据入账。
-- **CI 收敛读数只属于复核侧**(维护者 2026-08-10 裁定;dev 的契约是草稿 PR 时点交
-  报,报告里 gate `in_progress` 是诚实读数、预期内常态):翻 ready / 挂 auto-merge
-  / 入队前亲核 Lint & Repo Gates 与 TypeScript Type Check 两个 job 的 `conclusion` 已为
-  `success`(门禁族跑在其内),⛔ 不因报告写了「本地绿」跳过;两 job 只是 required 地板,入队资
-  格另要求 PR 全部 check 全绿(主文件条款),各仓真绿跑法与 CI 日志看不见的门禁见
-  `true-green.md`。收敛期转红走补丁轮
-  (SendMessage 续派原 dev —— 那是这笔交换已付过的价钱,不是 REWORK 的理由;红着
-  合并才是)。重量级卡可在派发令显式写「本单等 CI」。
+- **报告 `tests`/证据里有 git 本可回答的 API 读吗?**(dev 契约的读序是 git → REST →
+  MCP/GraphQL)判据:MCP `list_issues`/`search_issues` 一类 GraphQL 读,或重跑派发词已下发的去重读数
+  —— fetch 之后本地 git 就答得了文件内容、diff、提交史与分支态。⛔ 不因此判 REWORK,ACCEPT
+  照给,但把这条记进 ACCEPT 评论:复核不记它,退化就没有任何地方看得见。
+- **CI 收敛读数只属于复核侧**(维护者 2026-08-10 裁定;dev 的契约是草稿 PR 时点交报,报告里
+  gate `in_progress` 是诚实读数、预期内常态):翻 ready / 挂 auto-merge / 入队前亲核 Lint & Repo Gates
+  与 TypeScript Type Check 两个 job 的 `conclusion` 已为 `success`(门禁族跑在其内),⛔ 不因报告写
+  了「本地绿」跳过;两 job 只是 required 地板,入队资格另要求 PR 全部 check 全绿(主文件条
+  款),各仓真绿跑法与 CI 日志看不见的门禁见 `true-green.md`。收敛期转红走补丁轮 (SendMessage
+  续派原 dev —— 那是这笔交换已付过的价钱,不是 REWORK 的理由;红着合并才是)。重量级卡
+  可在派发令显式写「本单等 CI」。
 - **每个门禁读数先钉到 PR 的当前 head**:先读 PR 的 `head.sha`,再比对 run 的
   `head_sha` —— 不一致的 run 是关于一个死提交的读数,绿与红**双向都不入账**(旧 head
   的绿把「新推送未验」读成「消费者干净」,旧 head 的红把已修掉的缺陷重新挂回 PR)。
