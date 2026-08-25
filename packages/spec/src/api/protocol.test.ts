@@ -1865,6 +1865,7 @@ describe('AuditMetaItemResponseSchema declares the compliance-trail body (#11678
         source: 'protocol.saveMetaItem',
         operation: 'save',
         outcome: 'denied',
+        // adr0112-ok: D6b — persisted audit column, its own lowercase vocabulary
         code: 'item_locked',
         lockState: 'full',
         lockOverridden: false,
