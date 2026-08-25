@@ -102,6 +102,30 @@ export const FieldType = z.enum([
 export type FieldType = z.input<typeof FieldType>;
 
 /**
+ * Field types whose stored value is a BOUNDED STRING — the set on which a
+ * `maxLength` / `minLength` character bound describes something that is
+ * actually stored (#11566, maintainer ruling 2026-08-24).
+ *
+ * This is the write-time validator's own enforcement list (objectql
+ * `record-validator.ts`, the string-types branch) promoted to the protocol:
+ * three lists used to disagree (field.form showed the key for 3 types,
+ * object.form for 9, the validator enforced 10), and the validator's ten is
+ * the only one with a measured reader. `FieldSchema` refuses `maxLength`
+ * outside this set (see the superRefine below), and the two authoring forms
+ * show the key for exactly this set — declared converges to enforced
+ * (ADR-0078).
+ *
+ * Deliberately NOT here: `secret` (stored ciphertext handle — the authored
+ * value's length is not what the column holds), `select`/`multiselect`
+ * (bounded by their options, not by a character count), `json`/`code`-adjacent
+ * structured types other than `code` itself, and every non-string type.
+ */
+export const BOUNDED_STRING_FIELD_TYPES: ReadonlySet<string> = new Set([
+  'text', 'textarea', 'email', 'url', 'phone', 'password',
+  'markdown', 'html', 'richtext', 'code',
+] as const satisfies readonly FieldType[]);
+
+/**
  * Field types whose stored value the RUNTIME owns outright — issued by the
  * engine (or the driver's persistent sequence), never supplied by a caller on
  * either write path. Today exactly `autonumber` (#5503).
@@ -853,7 +877,14 @@ export const FieldSchema = lazySchema(() => {
   defaultValue: z.unknown().optional().describe('Default applied on INSERT when the field is omitted or null (`\'\'` is a real value, not absence). Three legal shapes (#7127), discriminated in the engine\'s own order: a CEL Expression envelope `{ dialect: \'cel\', source: \'today()\' }` (accepted structurally; result type is a runtime concern); a runtime TOKEN — `NOW()` on `datetime`/`date`/`time` only, `current_user` on `user` or `lookup` with `reference: \'sys_user\'` only, neither on a multi-value field; or a LITERAL, which must satisfy this field\'s own stored value contract (ADR-0104 D1 `valueSchemaFor`). Anything else is refused at parse time with a prescriptive message.'),
   
   /** Text/String Constraints */
-  maxLength: z.number().optional().describe('Max character length'),
+  // #11566 — a character length is a positive integer, so `0`, `-5` and `12.5`
+  // are refused at the producer (house pattern: the #8321 `precision`/`scale`
+  // refusal below; same "a malformed count has no defined meaning" argument —
+  // `maxLength: 0` measurably sent schema-drift planning `varchar(0)` DDL no
+  // server accepts, at severity error/destructive, before #11431 taught the
+  // consumer to defend itself). Which TYPES may author the key is the
+  // superRefine below (BOUNDED_STRING_FIELD_TYPES).
+  maxLength: z.number().int().min(1).optional().describe('Max character length (positive integer). Only authorable on types that store a bounded string: text, textarea, email, url, phone, password, markdown, html, richtext, code.'),
   minLength: z.number().optional().describe('Min character length'),
   
   /** Number Constraints */
@@ -1601,6 +1632,31 @@ export const FieldSchema = lazySchema(() => {
         'ever produce: declared multi, rendered single. Use a multi-choice type instead: `checkboxes` ' +
         '(all options visible, radio-like layout), `multiselect` (dropdown), or `tags` (free-form ' +
         'values). For a single-choice field, drop `multiple`.',
+    });
+  }
+
+  // [#11566] (maintainer ruling 2026-08-24 — 「四维分析一致的，接手你的建议。」):
+  // `maxLength` is only authorable on types that store a bounded string.
+  // The key sat on the BASE schema, so it was legal on `boolean` / `lookup` /
+  // `autonumber` / `formula` — types where it describes nothing that is
+  // stored — while the write-time validator has only ever enforced it on the
+  // BOUNDED_STRING_FIELD_TYPES ten. Declared converges to enforced
+  // (ADR-0078): the inert declaration is refused at the authoring seam, where
+  // the fix is one keystroke away, instead of parsing cleanly and doing
+  // nothing (the declared-but-inert shape that hides AI-authored metadata
+  // errors). `maxLength` has no schema default, so `undefined` here always
+  // means "not authored" — a field without the key can never fire this.
+  if (field.maxLength !== undefined && !BOUNDED_STRING_FIELD_TYPES.has(field.type)) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['maxLength'],
+      message:
+        `\`maxLength\` is only valid on field types that store a bounded string — ` +
+        `'text', 'textarea', 'email', 'url', 'phone', 'password', 'markdown', 'html', ` +
+        `'richtext', 'code' — and this field is \`${field.type}\`: its stored value has no ` +
+        'character length for the bound to constrain, so the declaration would parse and ' +
+        'enforce nothing (the write-time validator applies `maxLength` to exactly those ' +
+        'types). Drop the key, or use a bounded string type.',
     });
   }
 
