@@ -22,11 +22,9 @@ const mono = IBM_Plex_Mono({
 });
 
 export const metadata: Metadata = {
-  title: {
-    absolute: 'ObjectStack — Apps small enough for AI to hold whole.',
-  },
+  title: 'Metadata framework for AI-written apps',
   description:
-    'ObjectStack turns the whole app — data model, UI, workflows, permissions — into typed metadata: a complete CRM in under 150k tokens, one context window. Agents read it whole, reason it whole, refactor it whole. The business logic alone — every object, workflow and permission — is under 100k tokens; the UI adds just 50k more. That metadata is your business ontology — an open, versioned definition you own. Strict TypeScript, Zod, and a validation gate catch the agent\'s mistakes at authoring time, and the runtime derives the database, REST API, UI, and MCP server, enforcing permissions and audit on every call.',
+    'ObjectStack turns the whole app — data model, UI, workflows, permissions — into typed metadata: a complete CRM in under 150k tokens, one context window.',
 };
 
 const VOCABULARY: { tag: string; title: string; copy: string }[] = [

@@ -77,6 +77,9 @@ import {
   CrossObjectBatchOperation,
   CrossObjectBatchRequest,
   CrossObjectBatchResponse,
+  // [#11924] The GLOBAL cross-object search body — NOT the per-object
+  // `SearchResult` in `@objectstack/spec/contracts` (the #8140 near-miss trap).
+  SearchAllResponse,
 } from '@objectstack/spec/api';
 import type {
   ApprovalRequestRow,
@@ -372,6 +375,20 @@ export interface CreateDataResult<T = any> {
    * mirrors this in the `X-ObjectStack-Dropped-Fields` response header.
    */
   droppedFields?: DroppedFieldsEvent[];
+}
+
+/**
+ * Spec: CloneDataResponseSchema (#11924)
+ *
+ * `CreateDataResult`'s structural sibling plus `sourceId` — `id` names the NEW
+ * record, `sourceId` the record it was copied from. No `droppedFields`: unlike
+ * `createData`, the clone producer emits no write-observability event.
+ */
+export interface CloneDataResult<T = any> {
+  object: string;
+  id: string;
+  sourceId: string;
+  record: T;
 }
 
 /** Spec: UpdateDataResponseSchema */
@@ -4310,28 +4327,27 @@ export class ObjectStackClient {
    * object the caller can read. 501s on kernels without `searchAll`.
    * (#3587 gap closure)
    *
-   * [#8140] ⛔ `Promise<any>` is DELIBERATE — a missing CONTRACT, not a
-   * missing annotation. The response shape
-   * (`{ query, hits, totalObjects, totalHits, truncated }`) is declared
-   * INLINE on the implementation (`@objectstack/metadata-protocol`'s
-   * `searchAll`), not in `@objectstack/spec`, and `metadata-protocol` is not
-   * a dependency of this package — so there is nothing reachable to bind.
-   * ⚠️ `SearchResult` (`@objectstack/spec/contracts`) is a NEAR-MISS trap: it
-   * types the per-object `ISearchService.search`, whose `hits` carry
+   * [#11924] Bound to `SearchAllResponse` (`@objectstack/spec/api`), the
+   * contract #8140 had to leave missing: the route answers the whole body
+   * BARE, relaying `searchAll`'s `{ query, hits, totalObjects, totalHits,
+   * truncated }` verbatim, and conformance coverage on both the producer and
+   * the mount is what entitles the declaration (#3877).
+   * ⚠️ `SearchResult` (`@objectstack/spec/contracts`) is STILL the near-miss
+   * trap: it types the per-object `ISearchService.search`, whose `hits` carry
    * `score`/`document`, not this route's `object`/`title`/`snippet`/`record`.
-   * Binding it would typecheck and be false.
+   * `return-type-precision.test.ts` pins the mismatch.
    */
   search = async (
       q: string,
       opts?: { objects?: string[]; limit?: number; perObject?: number },
-  ): Promise<any> => {
+  ): Promise<SearchAllResponse> => {
       const params = new URLSearchParams();
       params.set('q', q);
       if (opts?.objects?.length) params.set('objects', opts.objects.join(','));
       if (opts?.limit !== undefined) params.set('limit', String(opts.limit));
       if (opts?.perObject !== undefined) params.set('perObject', String(opts.perObject));
       const res = await this.fetch(`${this.baseUrl}/api/v1/search?${params.toString()}`);
-      return this.unwrapResponse<any>(res);
+      return this.unwrapResponse<SearchAllResponse>(res);
   };
 
   /**
@@ -5208,20 +5224,22 @@ export class ObjectStackClient {
      * `overrides` are applied on top of the copied values — e.g. a new name
      * or a cleared unique field. (#3587 gap closure)
      *
-     * [#8140] ⛔ `Promise<any>` is DELIBERATE — a missing CONTRACT. The route
-     * returns `{ object, id, sourceId, record }`, produced inline by
-     * `@objectstack/metadata-protocol`'s `cloneData` and declared nowhere in
-     * `@objectstack/spec`. It is the structural sibling of this file's own
-     * `CreateDataResult<T>` plus `sourceId`, but writing that equivalence
-     * here would mint an undeclared contract in a consumer.
+     * [#11924] Bound to `CloneDataResult<T>`, the declared mirror of
+     * `CloneDataResponseSchema` (`@objectstack/spec/api`) — the contract #8140
+     * had to leave missing. The route answers `{ object, id, sourceId,
+     * record }` BARE with 201, relaying `cloneData` verbatim; `id` is the NEW
+     * record's, `sourceId` the copied record's. The caller-supplied generic
+     * follows its `data.*` siblings (`T = any` — the payload is the caller's
+     * object shape); conformance coverage on both the producer and the mount
+     * is what entitles the declaration (#3877).
      */
-    clone: async (object: string, id: string, overrides?: Record<string, any>): Promise<any> => {
+    clone: async <T = any>(object: string, id: string, overrides?: Record<string, any>): Promise<CloneDataResult<T>> => {
         const route = this.getRoute('data');
         const res = await this.fetch(
             `${this.baseUrl}${route}/${encodeURIComponent(object)}/${encodeURIComponent(id)}/clone`,
             { method: 'POST', body: JSON.stringify(overrides ? { overrides } : {}) },
         );
-        return this.unwrapResponse<any>(res);
+        return this.unwrapResponse<CloneDataResult<T>>(res);
     },
 
     /**
@@ -6041,6 +6059,12 @@ export type {
   CrossObjectBatchOperation,
   CrossObjectBatchRequest,
   CrossObjectBatchResponse,
+  // [#11924] The global cross-object search body + hit — the RIGHT names to
+  // reach for on `client.search` (the same-named `SearchResult` in
+  // `@objectstack/spec/contracts` types the per-object `ISearchService.search`
+  // and is the wrong shape for this route — the #8140 near-miss trap).
+  SearchAllHit,
+  SearchAllResponse,
 } from '@objectstack/spec/api';
 
 // Approval runtime types (ADR-0019) — surfaced so SDK consumers can type the

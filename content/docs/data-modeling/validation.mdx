@@ -3,8 +3,6 @@ title: Validation Metadata
 description: Define data integrity rules — formula conditions, format, cross-field checks, state machine transitions, and more
 ---
 
-# Validation Metadata
-
 **Validation rules** enforce data integrity at the platform level. They run automatically on the write path (insert/update), preventing invalid data from being saved. A validation rule is a deterministic, synchronous, side-effect-free predicate over a single record — it must be decidable from the incoming write (and, on update, the prior record) with no I/O. ObjectStack supports 6 validation types: `script`, `state_machine`, `format`, `cross_field`, `json_schema`, and `conditional`.
 
 <Callout type="info">

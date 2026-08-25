@@ -253,7 +253,9 @@ export const REST_ROUTE_LEDGER: readonly RestRouteLedgerEntry[] = [
   // its `note`, and re-point the platform-checklist item that this comment's
   // counterpart clause sends to the platform path
   // (`access-security.capability-declaration-lifecycle`).
-  { route: 'POST /api/v1/data/:object/:id/clone', family: 'data-actions', source: 'route-manager', disposition: 'sdk', client: 'data.clone' },
+  { route: 'POST /api/v1/data/:object/:id/clone', family: 'data-actions', source: 'route-manager', disposition: 'sdk', client: 'data.clone',
+    responseSchema: 'CloneDataResponseSchema',
+    note: '[#11924] answers BARE with 201 (res.status(201).json(result), no envelope), so the named schema is the whole body. Filled with its conformance coverage: search-clone-route-schema-conformance.test.ts drives this mount, and metadata-protocol\'s search-clone-schema-conformance.test.ts parses the real cloneData producer' },
   { route: 'POST /api/v1/data/:object/import', family: 'data-actions', source: 'route-manager', disposition: 'sdk', client: 'data.import' },
   { route: 'POST /api/v1/data/:object/import/jobs', family: 'data-actions', source: 'route-manager', disposition: 'sdk', client: 'data.createImportJob' },
   { route: 'POST /api/v1/data/import/jobs/:jobId/cancel', family: 'data-actions', source: 'route-manager', disposition: 'sdk', client: 'data.cancelImportJob' },
@@ -265,7 +267,9 @@ export const REST_ROUTE_LEDGER: readonly RestRouteLedgerEntry[] = [
     note: 'file-stream response; the SDK returns the raw Response rather than a JSON envelope' },
 
   // ── search ────────────────────────────────────────────────────────────────
-  { route: 'GET /api/v1/search', family: 'search', source: 'route-manager', disposition: 'sdk', client: 'search' },
+  { route: 'GET /api/v1/search', family: 'search', source: 'route-manager', disposition: 'sdk', client: 'search',
+    responseSchema: 'SearchAllResponseSchema',
+    note: '[#11924] answers BARE (res.json(result), no envelope), so the named schema is the whole body. ⚠️ NOT `SearchResult` — that exported contract types the per-object ISearchService.search (hits of score/document), the #8140 near-miss trap. Filled with its conformance coverage: search-clone-route-schema-conformance.test.ts drives this mount, and metadata-protocol\'s search-clone-schema-conformance.test.ts parses the real searchAll producer' },
 
   // ── email ─────────────────────────────────────────────────────────────────
   { route: 'POST /api/v1/email/send', family: 'email', source: 'route-manager', disposition: 'sdk', client: 'email.send' },
