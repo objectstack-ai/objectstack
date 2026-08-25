@@ -223,15 +223,30 @@ export async function returnTypePrecisionPins11925(): Promise<void> {
     }>();
 
     // ── direction 2: a WRONG shape must now be rejected ───────────────────
-    // Each suppression below is unused — and therefore a TS2578 error — while
-    // the method still returns `any`.
+    // ⚠️ Only ONE of the three below is red before this change, and the split
+    // is stated here rather than glossed, because a suppression that was
+    // already used is a regression guard and not evidence the binding was
+    // needed. Ablation (revert `index.ts` to `origin/main`, keep this file)
+    // measured it: the ablated run reports TS2578 at `wrongUpdate` ONLY.
+    //
+    // `packages.update` was bare `any` before, and `any` IS assignable to
+    // `string`, so its suppression went unused → TS2578. The other two were
+    // never bare: they declared a real envelope (`{ packages: any[]; total }`
+    // and `{ package: any }`) whose MEMBER was the erased part, and an
+    // envelope is not assignable to a bare row or array in either state. Their
+    // suppressions are used before AND after — regression guards against a
+    // future "narrowing" that flattens the envelope away.
 
+    // GREEN IN BOTH STATES — regression guard, not red-before evidence.
     // @ts-expect-error the route answers `{ packages, total }`, not a bare array
     const wrongList: InstalledPackage[] = await client.packages.list();
 
+    // RED BEFORE: `any` is assignable to `string`, so this suppression is
+    // unused (TS2578) until `packages.update` is bound.
     // @ts-expect-error `packages.update` answers the row, not a string
     const wrongUpdate: string = await client.packages.update('com.acme.crm', { name: 'Acme' });
 
+    // GREEN IN BOTH STATES — regression guard, not red-before evidence.
     // @ts-expect-error the scoped detail route answers `{ package }`, not the bare row
     const wrongScopedGet: InstalledPackage = await scoped.packages.get('com.acme.crm');
 
