@@ -23,9 +23,10 @@
 
 <p align="center">
   <a href="https://youtu.be/CX_FlOoOtr0">
-    <img src="docs/screenshots/hero-cover-dark.png#gh-dark-mode-only" width="900" alt="ObjectStack in 90 Seconds — watch the overview on YouTube">
-    <img src="docs/screenshots/hero-cover-light.png#gh-light-mode-only" width="900" alt="ObjectStack in 90 Seconds — watch the overview on YouTube">
+    <img src="docs/screenshots/hero-cover-dark.png" width="900" alt="ObjectStack in 90 Seconds — watch the overview on YouTube">
   </a>
+  <br>
+  <a href="https://youtu.be/CX_FlOoOtr0"><b>▶&nbsp; Watch: ObjectStack in 90 Seconds</b></a>
 </p>
 
 **Everything in this repo is the open stack** — protocol, microkernel, SDK,
