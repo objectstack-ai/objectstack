@@ -248,15 +248,23 @@ const ROWS: CaseRow[] = [
 
 /**
  * Just enough of the engine's filter semantics for this fixture: `$and`
- * arrays, direct equality, `$eq`. Anything else in the captured condition
- * would fail the equality assertions below rather than silently pass.
+ * arrays, direct equality, `$eq`. Every other combinator or operator REFUSES
+ * loudly rather than being misread as a field name — the where-matcher
+ * conformance convention (`check:where-matcher`), so a query shape this
+ * fixture does not model fails the test instead of silently matching.
  */
 function rowMatches(row: CaseRow, cond: unknown): boolean {
   if (cond == null || typeof cond !== 'object') return true;
   return Object.entries(cond as Record<string, unknown>).every(([k, v]) => {
     if (k === '$and') return (v as unknown[]).every((c) => rowMatches(row, c));
-    if (v !== null && typeof v === 'object' && '$eq' in (v as object)) {
-      return row[k] === (v as { $eq: unknown }).$eq;
+    if (k.startsWith('$')) {
+      throw new Error(`rowMatches: combinator "${k}" is not implemented by this fixture — refusing rather than reading it as a field name`);
+    }
+    if (v !== null && typeof v === 'object') {
+      return Object.entries(v as Record<string, unknown>).every(([op, operand]) => {
+        if (op === '$eq') return row[k] === operand;
+        throw new Error(`rowMatches: operator "${op}" is not implemented by this fixture — refusing rather than guessing`);
+      });
     }
     return row[k] === v;
   });
