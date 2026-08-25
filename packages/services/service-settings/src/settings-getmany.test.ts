@@ -55,10 +55,19 @@ const MANIFEST = {
   ],
 } as any;
 
+// [#12172] Values are stored DECODED, exactly as the persist path writes them
+// and as a real driver hands them back — not as JSON text. `sys_setting.value`
+// is a `Field.json` column, but the SERVICE is verbatim in both directions
+// (`setMany` writes `storedValue = rawValue`; `materialiseRow`'s non-encrypted
+// branch is `return row.value ?? null`), so the DRIVER owns the codec and the
+// round trip lands back on the raw value on both dialects. The fake engine
+// below skips that codec and returns rows exactly as written, so anything
+// spelled '"America/New_York"' here would resolve one JSON encoding deep.
+// (Matches the sibling fixture in `settings-loadrows-scope.test.ts`.)
 const ROWS = [
-  { namespace: 'localization', key: 'timezone', scope: 'global', value: '"America/New_York"', user_id: null },
-  { namespace: 'localization', key: 'locale', scope: 'user', value: '"zh-CN"', user_id: 'u1' },
-  { namespace: 'localization', key: 'currency', scope: 'tenant', value: '"USD"', user_id: null },
+  { namespace: 'localization', key: 'timezone', scope: 'global', value: 'America/New_York', user_id: null },
+  { namespace: 'localization', key: 'locale', scope: 'user', value: 'zh-CN', user_id: 'u1' },
+  { namespace: 'localization', key: 'currency', scope: 'tenant', value: 'USD', user_id: null },
 ];
 
 async function makeService(rows = ROWS) {
@@ -165,5 +174,40 @@ describe('[#10826] SettingsService.getMany', () => {
     engine.find.mockClear();
     await svc.getNamespace('localization', ctx);
     expect(engine.find.mock.calls.length).toBeLessThanOrEqual(2);
+  });
+
+  // [#12172] The ENCODING pin — the one assertion in this file that reads a
+  // LITERAL resolved value.
+  //
+  // Every other assertion here compares `getMany` against `get`, so both sides
+  // move together and a fixture stored one JSON encoding deep stays invisible:
+  // the same "a fake that lies consistently" shape this file's header already
+  // warns about for `$or` matchers. That insensitivity is BY CONSTRUCTION, so
+  // "the suite is green" proves nothing about the encoding — only a literal can.
+  //
+  // Why the literal is the decoded string and not JSON text: `sys_setting.value`
+  // is a `Field.json` column, and the SERVICE is verbatim in both directions
+  // (`setMany` writes `storedValue = rawValue`; `materialiseRow`'s non-encrypted
+  // branch is `return row.value ?? null`). The DRIVER owns the JSON codec and it
+  // round-trips to the RAW value on both dialects — SQLite stores primitives
+  // as-is and re-parses on read, Postgres stringifies into the `jsonb` column and
+  // the client parses it back. So a row handed back by a real driver carries
+  // 'America/New_York', never '"America/New_York"'. The fake engine skips that
+  // codec, which is why the fixture must already hold the decoded value.
+  it('[#12172] resolves the LITERAL stored value — no doubled JSON encoding', async () => {
+    const { svc } = await makeService();
+    const ctx = { userId: 'u1', tenantId: 't1' };
+    const many = await svc.getMany('localization', ['timezone', 'locale', 'currency'], ctx);
+
+    // Global row, user-scope key, no user/tenant override.
+    expect(many.timezone.value).toBe('America/New_York');
+    // User row for u1.
+    expect(many.locale.value).toBe('zh-CN');
+    // Tenant row.
+    expect(many.currency.value).toBe('USD');
+
+    // ...and the per-key path agrees on the same literal, so the pin holds the
+    // ENCODING rather than a `getMany`-only quirk.
+    expect((await svc.get('localization', 'timezone', ctx)).value).toBe('America/New_York');
   });
 });
