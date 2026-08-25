@@ -703,7 +703,7 @@ function selfTest() {
     // the case teeth at that point. (The `ESCAPABLE_LITERAL_LEDGER` cases in
     // scripts/pm/dispatch-gates.mjs are the worked precedent for the idiom.)
     const WITNESS_RULED = { file: 'w/itness.test.ts', kind: 'import', axis: 'ruled-permanent', rulingMarkers: ['#6664'] };
-    const WITNESS_UNRULED = { file: 'w/itness.test.ts', kind: 'import', axis: 'ruled-permanent', rulingMarkers: ['#9999'] };
+    const WITNESS_UNRULED = { file: 'w/itness.test.ts', kind: 'import', axis: 'ruled-permanent', rulingMarkers: ['#0'] };
     expect('every ruled consumer is admitted by one of this programme\'s two rulings',
       [...ruled, WITNESS_RULED].every(admittedByARuling));
     expect('…and that rule can FAIL: a marker neither ruling issued does not admit a consumer',
