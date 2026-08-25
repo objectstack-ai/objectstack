@@ -5172,7 +5172,20 @@ const step18: MigrationStep = {
     'other authorable carrier and leave with the key (RETIRED_DEFS_BY_MAJOR[18]); the live ' +
     'per-breakpoint channel on a page component is `responsiveStyles` (ADR-0065), which ' +
     'objectui really compiles. The mechanical conversion strips the key from stored pages ' +
-    '(pure lossless delete — it never had an effect to lose).',
+    '(pure lossless delete — it never had an effect to lose). ' +
+    'Finally, it retires nine of the eleven members of the plugin manifest\'s ' +
+    '`contributes` block (#10724, ADR-0049 enforce-or-remove; triage graded 2026-08-21, ' +
+    'cloud census leg discharged clean 2026-08-24): `events`, `menus`, `themes`, ' +
+    '`translations`, `actions`, `drivers`, `fieldTypes`, `functions` and `commands`. ' +
+    '#10627 measured — three repos, controlled — that the whole monorepo contains exactly ' +
+    'one non-test read of `manifest.contributes`, and it reads `kinds`; the other nine ' +
+    'members parsed, entered the manifest, and changed nothing, while published docs and ' +
+    'the schema\'s own JSDoc kept teaching them (`commands` documented Commander.js ' +
+    'resolution the CLI dropped for oclif; `fieldTypes` advertised a registration seam ' +
+    'that never existed). All nine are retiredKey tombstones mirroring `loading`; ' +
+    '`kinds` survives (live reader) and `routes` is untouched pending its own fork ' +
+    '(#10726). D3 semantic, no D2 conversion: a manifest is not a stack collection ' +
+    'member, so a conversion would be a transform with no seam that ever runs.',
   conversionIds: [
     'field-malformed-scale-precision-removed',
     'record-chatter-position-vocabulary',
@@ -6038,6 +6051,58 @@ const step18: MigrationStep = {
         + 'rather than saved with the key silently dropped.',
     },
     {
+      id: 'plugin-manifest-contributes-dead-members-retired',
+      surface:
+        'manifest.contributes.events / manifest.contributes.menus / manifest.contributes.themes / '
+        + 'manifest.contributes.translations / manifest.contributes.actions / '
+        + 'manifest.contributes.drivers / manifest.contributes.fieldTypes / '
+        + 'manifest.contributes.functions / manifest.contributes.commands (nine of the block\'s '
+        + 'eleven members; `kinds` and `routes` are NOT part of this retirement)',
+      replacement:
+        'delete the keys — each capability already has its one enforced channel: `events` → '
+        + "subscribe imperatively in plugin code (`ctx.hook('kernel:ready', …)` from `init`/`start`); "
+        + '`menus` → the app `navigation` tree or `manifest.navigationContributions` (ADR-0029 D7); '
+        + '`themes` → the stack-level `themes` metadata collection (an unrelated `ThemeSchema` '
+        + 'surface); `translations` → the `translation` metadata type, authored with '
+        + '`defineTranslationBundle` in `defineStack({ translations })`; `actions` → the stack '
+        + '`actions` collection or `engine.registerAction`; `drivers` → register a kernel service '
+        + 'named `driver.*` (objectql calls `registerDriver` on it); `fieldTypes` → nothing (no '
+        + 'registration seam exists; the vocabulary is the spec `FieldType` enum); `functions` → '
+        + '`defineStack({ functions })` → `engine.registerFunction`; `commands` → oclif native '
+        + "plugin auto-discovery (an `oclif` section in the plugin's own `package.json`; see "
+        + '`cli-extension.zod.ts`)',
+      reason:
+        'ADR-0049 enforce-or-remove; #10724 (triage graded 2026-08-21, cloud precondition '
+        + 'discharged 2026-08-24). #10627 measured, monorepo-wide and non-test with control probes, '
+        + 'that the ENTIRE monorepo contains exactly one read of `manifest.contributes` — '
+        + '`packages/objectql/src/engine.ts`, member `kinds` — so all nine members above parsed, '
+        + 'entered the manifest, and changed nothing. The census stands on three repos: objectstack '
+        + '(re-verified on current main at claim time), objectui (0 property reads; control: 63 '
+        + 'files carry the bare word), and cloud (measured clean 2026-08-24 at `5b5925a`: zero '
+        + '`manifest.contributes` reads, controls held). Several members were actively misleading: '
+        + '`events` was authored in-repo by a plugin that already subscribes imperatively; '
+        + '`commands` documented Commander.js resolution the CLI dropped for oclif auto-discovery; '
+        + '`fieldTypes` advertised a registration seam that has never existed. '
+        + 'Why D3 semantic and not a D2 conversion: the conversion chain walks a normalized STACK '
+        + 'and `PLURAL_TO_SINGULAR` has no `packages` / `plugins` entry, so a manifest is not a '
+        + 'stack collection member and a conversion would be a transform with no seam that ever '
+        + 'runs (the `kernel/Manifest:loading` precedent, recorded verbatim in its retired-key '
+        + 'entry).',
+      acceptanceCriteria:
+        'No `objectstack.config.ts` manifest and no packaged `manifest.json` authors any of the '
+        + 'nine members. The enforced channel is the one place a manifest is parsed with an author '
+        + 'present: `os plugin build` runs `ManifestSchema.safeParse` and exits non-zero printing '
+        + 'the per-key tombstone prescription; TypeScript authors fail earlier still (each key is '
+        + 'typed `never`). `contributes.kinds` keeps parsing and registering '
+        + '(`registry.registerKind`), and `contributes.routes` is untouched pending its own fork '
+        + '(#10726). ⚠️ Runtime behaviour is deliberately UNCHANGED and must be verified as such: '
+        + 'nothing ever read the nine members, so removing them removes no behaviour. A package '
+        + 'ALREADY INSTALLED whose stored manifest carries one degrades to a single '
+        + '`[metadata_spec_invalid]` log line at registration (the registry\'s `validate()` is a '
+        + 'diagnostic, not a gate) rather than a boot failure; clear it by deleting the key from '
+        + 'the source manifest and reinstalling.',
+    },
+    {
       id: 'record-chatter-position-vocabulary-converged',
       surface:
         '`record:chatter` / `record:discussion` component props (one shared schema object): '
@@ -6680,6 +6745,124 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // conversion `metric-filters-removed`, which strips the key from every metric
     // in `analyticsCubes[].measures`.
     'data/Metric:filters',
+    // #10724 — ADR-0049 enforce-or-remove on the plugin manifest's `contributes`
+    // block; one of NINE members tombstoned together. Census, registration major,
+    // and the why-no-D2-conversion reasoning are recorded once in the sibling
+    // entry `kernel/Manifest:contributes.events` (this family) and in
+    // `kernel/Manifest:loading` (the precedent); the D3 semantic entry is
+    // `plugin-manifest-contributes-dead-members-retired`.
+    //
+    // `actions` declared invocable server actions nothing ever registered. The
+    // working surfaces are the stack `actions` collection (METADATA_ARRAY_KEYS,
+    // registered by the engine) and `engine.registerAction`.
+    'kernel/Manifest:contributes.actions',
+    // #10724 — ADR-0049 enforce-or-remove on the plugin manifest's `contributes`
+    // block; one of NINE members tombstoned together. Census, registration major,
+    // and the why-no-D2-conversion reasoning are recorded once in the sibling
+    // entry `kernel/Manifest:contributes.events` (this family) and in
+    // `kernel/Manifest:loading` (the precedent); the D3 semantic entry is
+    // `plugin-manifest-contributes-dead-members-retired`.
+    //
+    // `commands` documented Commander.js runtime resolution as current behaviour;
+    // the CLI never resolved commands from it. Commands are auto-discovered via
+    // oclif's native plugin system (`cli-extension.zod.ts` records the migration:
+    // "The `objectstack.config.ts` plugins array no longer determines CLI
+    // commands").
+    'kernel/Manifest:contributes.commands',
+    // #10724 — ADR-0049 enforce-or-remove on the plugin manifest's `contributes`
+    // block; one of NINE members tombstoned together. Census, registration major,
+    // and the why-no-D2-conversion reasoning are recorded once in the sibling
+    // entry `kernel/Manifest:contributes.events` (this family) and in
+    // `kernel/Manifest:loading` (the precedent); the D3 semantic entry is
+    // `plugin-manifest-contributes-dead-members-retired`.
+    //
+    // `drivers` declared storage drivers nothing ever read. A driver is wired by
+    // registering a kernel SERVICE named `driver.*` (objectql's plugin calls
+    // `registerDriver` on it); the only in-repo author (driver-memory) was
+    // registered that way, not by its declaration.
+    'kernel/Manifest:contributes.drivers',
+    // #10724 — ADR-0049 enforce-or-remove on the plugin manifest's `contributes`
+    // block (triage graded 2026-08-21; cloud leg measured clean 2026-08-24). One
+    // of NINE members tombstoned together: #10627 measured exactly ONE non-test
+    // read of `manifest.contributes` monorepo-wide (engine.ts, member `kinds`),
+    // with controls, re-verified across objectstack + objectui + cloud at claim
+    // time. `events` in particular was decorative twice over: its only in-repo
+    // author (plugin-hono-server) already subscribed to the same events
+    // imperatively in plugin code, so the declaration drove nothing even for the
+    // one package that wrote it.
+    //
+    // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
+    // tombstone ships on the 17.x line (launch-window convention) and the
+    // prescription lives at the major boundary where `migrate meta` users look.
+    //
+    // Registered here but NOT in `src/conversions/registry.ts`, for the reason
+    // `kernel/Manifest:loading` gives: a package manifest is not a stack
+    // collection member (`PLURAL_TO_SINGULAR` has no `packages` / `plugins`
+    // entry), so a D2 conversion would be a transform with no seam that ever
+    // runs. The prescription reaches authors through the tombstone at
+    // `os plugin build` → `ManifestSchema.safeParse` and through the D3 semantic
+    // entry `plugin-manifest-contributes-dead-members-retired`.
+    'kernel/Manifest:contributes.events',
+    // #10724 — ADR-0049 enforce-or-remove on the plugin manifest's `contributes`
+    // block; one of NINE members tombstoned together. Census, registration major,
+    // and the why-no-D2-conversion reasoning are recorded once in the sibling
+    // entry `kernel/Manifest:contributes.events` (this family) and in
+    // `kernel/Manifest:loading` (the precedent); the D3 semantic entry is
+    // `plugin-manifest-contributes-dead-members-retired`.
+    //
+    // `fieldTypes` advertised an extension point the platform does not have:
+    // there is no `registerFieldType` seam anywhere — zero hits monorepo-wide.
+    // The field-type vocabulary is the spec `FieldType` enum.
+    'kernel/Manifest:contributes.fieldTypes',
+    // #10724 — ADR-0049 enforce-or-remove on the plugin manifest's `contributes`
+    // block; one of NINE members tombstoned together. Census, registration major,
+    // and the why-no-D2-conversion reasoning are recorded once in the sibling
+    // entry `kernel/Manifest:contributes.events` (this family) and in
+    // `kernel/Manifest:loading` (the precedent); the D3 semantic entry is
+    // `plugin-manifest-contributes-dead-members-retired`.
+    //
+    // `functions` declared ObjectQL functions nothing ever registered from here.
+    // The working surface is `defineStack({ functions })` → hook-binder →
+    // `engine.registerFunction`.
+    'kernel/Manifest:contributes.functions',
+    // #10724 — ADR-0049 enforce-or-remove on the plugin manifest's `contributes`
+    // block; one of NINE members tombstoned together. Census, registration major,
+    // and the why-no-D2-conversion reasoning are recorded once in the sibling
+    // entry `kernel/Manifest:contributes.events` (this family) and in
+    // `kernel/Manifest:loading` (the precedent); the D3 semantic entry is
+    // `plugin-manifest-contributes-dead-members-retired`.
+    //
+    // `menus` had the tightest control in the census: the bare word has only three
+    // non-test hits monorepo-wide — this declaration plus two alias maps that
+    // redirect the spelling to `navigation`. The working surface is app
+    // `navigation` / `manifest.navigationContributions` (ADR-0029 D7), which the
+    // engine registers.
+    'kernel/Manifest:contributes.menus',
+    // #10724 — ADR-0049 enforce-or-remove on the plugin manifest's `contributes`
+    // block; one of NINE members tombstoned together. Census, registration major,
+    // and the why-no-D2-conversion reasoning are recorded once in the sibling
+    // entry `kernel/Manifest:contributes.events` (this family) and in
+    // `kernel/Manifest:loading` (the precedent); the D3 semantic entry is
+    // `plugin-manifest-contributes-dead-members-retired`.
+    //
+    // `themes` here was a `{ id, label, path }` shape with no reader anywhere. It
+    // is UNRELATED to the stack-level `themes` collection (a `ThemeSchema`
+    // surface, itself retired as a carrier by `stack-themes-carrier-retired`):
+    // stack-level theme hits reach the registry through top-level metadata
+    // collections, never through `contributes.themes`.
+    'kernel/Manifest:contributes.themes',
+    // #10724 — ADR-0049 enforce-or-remove on the plugin manifest's `contributes`
+    // block; one of NINE members tombstoned together. Census, registration major,
+    // and the why-no-D2-conversion reasoning are recorded once in the sibling
+    // entry `kernel/Manifest:contributes.events` (this family) and in
+    // `kernel/Manifest:loading` (the precedent); the D3 semantic entry is
+    // `plugin-manifest-contributes-dead-members-retired`.
+    //
+    // `translations` promised `{ locale, path }` file registration no loader ever
+    // performed. The working surface is the `translation` metadata type — stack
+    // `translations` collection (`defineTranslationBundle`), governed by
+    // `packages/spec/liveness/translation.json`.
+    'kernel/Manifest:contributes.translations',
     // #8586 — ADR-0049 enforce-or-remove (maintainer ruling 2026-08-14, ruled
     // REMOVE). `additionalTypes` was declared, authorable, and documented on four
     // docs pages as THE way a plugin registers a custom metadata type — and read

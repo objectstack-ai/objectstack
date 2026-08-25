@@ -316,7 +316,21 @@ export const ManifestSchema = z.object({
 
   /**
    * Contribution Points (VS Code Style).
-   * formalized way to extend the platform capabilities.
+   *
+   * NINE MEMBERS REMOVED in v17.x (#10724, ADR-0049 enforce-or-remove):
+   * `events`, `menus`, `themes`, `translations`, `actions`, `drivers`,
+   * `fieldTypes`, `functions`, `commands`. The census behind it (#10627,
+   * re-verified at claim time, three repos with control probes) measured
+   * exactly ONE non-test read of `manifest.contributes` in the entire
+   * monorepo — `packages/objectql/src/engine.ts` reading `kinds` — so every
+   * other member parsed, entered the manifest, and changed nothing.
+   * Tombstoned rather than deleted because this object is not `.strict()`:
+   * a plain deletion would silently strip the key, replacing an inert
+   * declaration with an invisible one (the `loading` precedent below).
+   *
+   * Survivors: `kinds` (live reader: engine → `registry.registerKind`) and
+   * `routes` (open enforce-or-remove fork #10726 — deliberately untouched
+   * by #10724; do not tombstone it here without its own ruling).
    */
   contributes: z.object({
     /**
@@ -330,81 +344,81 @@ export const ManifestSchema = z.object({
       description: z.string().optional().describe('Description of what this kind represents'),
     })).optional().describe('New Metadata Types to recognize'),
 
-    /**
-     * Register System Hooks.
-     * Declares that this plugin listens to specific system events.
-     */
-    events: z.array(z.string()).optional().describe('Events this plugin listens to'),
+    /** REMOVED (#10724) — the declaration drove nothing; subscribe in plugin code. */
+    events: retiredKey(
+      '`manifest.contributes.events` was removed in @objectstack/spec 17 (#10724, ' +
+      'ADR-0049 enforce-or-remove) — nothing ever read the list: its only in-repo ' +
+      'author already subscribed imperatively in plugin code, so the declaration was ' +
+      'decorative. Delete the key. Subscribe to system events in the plugin itself — ' +
+      "`ctx.hook('kernel:ready', …)` (or the events service) from `init`/`start` is " +
+      'the enforced channel; record lifecycle hooks register on the data engine.',
+    ),
 
-    /**
-     * Register UI Menus.
-     */
-    menus: z.record(z.string(), z.array(z.object({
-       id: z.string(),
-       label: z.string(),
-       command: z.string().optional(),
-    }))).optional().describe('UI Menu contributions'),
+    /** REMOVED (#10724) — use app `navigation` / `manifest.navigationContributions`. */
+    menus: retiredKey(
+      '`manifest.contributes.menus` was removed in @objectstack/spec 17 (#10724, ' +
+      'ADR-0049 enforce-or-remove) — no renderer ever read it; two alias maps already ' +
+      'redirected this spelling to `navigation`. Delete the key. Declare navigation in ' +
+      "the app's `navigation` tree, or inject items into another package's app via " +
+      '`manifest.navigationContributions` (ADR-0029 D7), which the engine registers.',
+    ),
 
-    /**
-     * Register Custom Themes.
-     */
-    themes: z.array(z.object({
-      id: z.string(),
-      label: z.string(),
-      path: z.string(),
-    })).optional().describe('Theme contributions'),
+    /** REMOVED (#10724) — this `{id,label,path}` shape had no reader anywhere. */
+    themes: retiredKey(
+      '`manifest.contributes.themes` was removed in @objectstack/spec 17 (#10724, ' +
+      'ADR-0049 enforce-or-remove) — it never had an effect: theme registration reaches ' +
+      'the registry only through the stack-level `themes` collection (a ' +
+      '`ThemeSchema` surface, unrelated to this `{ id, label, path }` shape), never ' +
+      'through `contributes.themes`. Delete the key; declare themes in the stack ' +
+      '`themes` collection instead.',
+    ),
 
-    /**
-     * Register Translations.
-     * Path to translation files (e.g. "locales/en.json").
-     */
-    translations: z.array(z.object({
-      locale: z.string(),
-      path: z.string(),
-    })).optional().describe('Translation resources'),
+    /** REMOVED (#10724) — use the `translation` metadata type / stack `translations`. */
+    translations: retiredKey(
+      '`manifest.contributes.translations` was removed in @objectstack/spec 17 ' +
+      '(#10724, ADR-0049 enforce-or-remove) — no loader ever read these `{ locale, ' +
+      'path }` entries; authoring them registered no translations. Delete the key. ' +
+      'Declare translations as `translation` metadata: `defineTranslationBundle({ … })` ' +
+      "in the stack's `translations` collection (`defineStack({ translations: […] })`), " +
+      'which the engine registers and the i18n pipeline serves.',
+    ),
 
-    /**
-     * Register Server Actions.
-     * Invocable functions exposed to Flows or API.
-     */
-    actions: z.array(z.object({
-       name: z.string().describe('Unique action name'),
-       label: z.string().optional(),
-       description: z.string().optional(),
-       input: z.unknown().optional().describe('Input validation schema'),
-       output: z.unknown().optional().describe('Output schema'),
-    })).optional().describe('Exposed server actions'),
+    /** REMOVED (#10724) — use the stack `actions` collection / `registerAction`. */
+    actions: retiredKey(
+      '`manifest.contributes.actions` was removed in @objectstack/spec 17 (#10724, ' +
+      'ADR-0049 enforce-or-remove) — nothing ever read it; actions declared here were ' +
+      'never invocable. Delete the key. Declare actions in the stack `actions` ' +
+      'collection (registered by the engine) or register imperatively via ' +
+      '`engine.registerAction`.',
+    ),
 
-    /**
-     * Register Storage Drivers.
-     * Enables connecting to new types of datasources.
-     */
-    drivers: z.array(z.object({
-      id: z.string().describe('Driver unique identifier (e.g. "postgres", "mongodb")'),
-      label: z.string().describe('Human readable name'),
-      description: z.string().optional(),
-    })).optional().describe('Driver contributions'),
+    /** REMOVED (#10724) — a driver is a `driver.*` kernel service, not a declaration. */
+    drivers: retiredKey(
+      '`manifest.contributes.drivers` was removed in @objectstack/spec 17 (#10724, ' +
+      'ADR-0049 enforce-or-remove) — it never had an effect: a storage driver is wired ' +
+      'by registering a kernel SERVICE named `driver.*` (the objectql plugin picks it ' +
+      'up and calls `registerDriver`), and its only in-repo author was registered that ' +
+      'way, not by this declaration. Delete the key.',
+    ),
 
-    /**
-     * Register Custom Field Types.
-     * Extends the data model with new widget types.
-     */
-    fieldTypes: z.array(z.object({
-      name: z.string().describe('Unique field type name (e.g. "vector")'),
-      label: z.string().describe('Display label'),
-      description: z.string().optional(),
-    })).optional().describe('Field Type contributions'),
-    
-    /**
-     * Register Custom Query Operators/Functions.
-     * Extends ObjectQL with new functions (e.g. distance()).
-     */
-    functions: z.array(z.object({
-      name: z.string().describe('Function name (e.g. "distance")'),
-      description: z.string().optional(),
-      args: z.array(z.string()).optional().describe('Argument types'),
-      returnType: z.string().optional(),
-    })).optional().describe('Query Function contributions'),
+    /** REMOVED (#10724) — no field-type registration seam exists. */
+    fieldTypes: retiredKey(
+      '`manifest.contributes.fieldTypes` was removed in @objectstack/spec 17 (#10724, ' +
+      'ADR-0049 enforce-or-remove) — there is no `registerFieldType` seam anywhere: ' +
+      'the declaration advertised an extension point the platform does not have, so ' +
+      'authoring it configured nothing. Delete the key. The field-type vocabulary is ' +
+      'the spec `FieldType` enum; extending it is a spec change, not a manifest ' +
+      'declaration.',
+    ),
+
+    /** REMOVED (#10724) — use `defineStack({ functions })` → `registerFunction`. */
+    functions: retiredKey(
+      '`manifest.contributes.functions` was removed in @objectstack/spec 17 (#10724, ' +
+      'ADR-0049 enforce-or-remove) — nothing ever read it; ObjectQL functions declared ' +
+      'here were never registered. Delete the key. Declare functions on the stack ' +
+      '(`defineStack({ functions: […] })`), which the hook binder registers via ' +
+      '`engine.registerFunction`.',
+    ),
 
     /**
       * Register API Route Namespaces.
@@ -427,39 +441,20 @@ export const ManifestSchema = z.object({
     })).optional().describe('API route contributions to HttpDispatcher'),
 
     /**
-      * Register CLI Commands.
-      * Allows plugins to extend the ObjectStack CLI with custom commands.
-      * Each command entry declares metadata; the actual Commander.js command
-      * is resolved at runtime by importing the plugin's module.
-      * 
-      * The plugin package must export a `commands` array of Commander.js `Command` instances
-      * from its main entry point or from the path specified in `module`.
-      * 
-      * @example
-      * ```yaml
-      * commands:
-      *   - name: marketplace
-      *     description: "Manage marketplace apps"
-      *     module: "./cli"       # optional, defaults to package main
-      *   - name: deploy
-      *     description: "Deploy to cloud"
-      * ```
-      */
-    commands: z.array(z.object({
-      /** CLI command name (e.g., "marketplace", "deploy"). Must be a valid CLI identifier. */
-      name: z.string()
-        .regex(/^[a-z][a-z0-9-]*$/, 'Command name must be lowercase alphanumeric with hyphens')
-        .describe('CLI command name'),
-      /** Brief description shown in `os --help` */
-      description: z.string().optional().describe('Command description for help text'),
-      /** 
-       * Optional module path (relative to package root) that exports the Commander.js commands.
-       * If omitted, the CLI will import from the package's main entry point.
-       * The module must export a `commands` array of Commander.js `Command` instances,
-       * or a single `Command` instance as default export.
-       */
-      module: z.string().optional().describe('Module path exporting Commander.js commands'),
-    })).optional().describe('CLI command contributions'),
+     * REMOVED (#10724) — CLI commands are oclif-auto-discovered, never resolved
+     * from this declaration. The JSDoc that used to sit here described
+     * Commander.js runtime resolution as current behaviour; that contradicted
+     * `cli-extension.zod.ts`, which records the oclif migration: "The
+     * `objectstack.config.ts` plugins array no longer determines CLI commands."
+     */
+    commands: retiredKey(
+      '`manifest.contributes.commands` was removed in @objectstack/spec 17 (#10724, ' +
+      'ADR-0049 enforce-or-remove) — the CLI never resolved commands from this ' +
+      'declaration: commands are auto-discovered through oclif\'s native plugin system ' +
+      "(the plugin package declares an `oclif` section in its own `package.json`; see " +
+      '`cli-extension.zod.ts`), and the `objectstack.config.ts` plugins array no longer ' +
+      'determines CLI commands. Delete the key.',
+    ),
   }).optional().describe('Platform contributions'),
 
   /** 
