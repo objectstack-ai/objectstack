@@ -3,6 +3,7 @@ import { blog } from '@/lib/source';
 import { getMDXComponents } from '@/mdx-components';
 import { HomeLayout } from 'fumadocs-ui/layouts/home';
 import { baseOptions } from '@/lib/layout.shared';
+import { absoluteUrl } from '@/lib/site';
 import Link from 'next/link';
 import { ArrowLeft } from 'lucide-react';
 
@@ -192,6 +193,9 @@ export async function generateMetadata({
     return {
       title: 'Blog',
       description: 'Insights, updates, and best practices from the ObjectStack team.',
+      // The index has no MDX file behind it, so its route is spelled out here — the
+      // same literal `app/sitemap.ts` lists it under.
+      alternates: { canonical: absoluteUrl('/blog') },
     };
   }
   
@@ -204,5 +208,6 @@ export async function generateMetadata({
   return {
     title: page.data.title,
     description: page.data.description,
+    alternates: { canonical: absoluteUrl(page.url) },
   };
 }

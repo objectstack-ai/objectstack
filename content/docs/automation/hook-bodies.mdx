@@ -3,7 +3,7 @@ title: Hook & Action Bodies (L1 / L2)
 description: How hook handlers and script-action bodies travel through ObjectStack as pure metadata, and the spec they must conform to.
 ---
 
-# Hook & Action Bodies
+## Hook & Action Bodies
 
 ObjectStack treats every hook handler and every `type: 'script'` action as **pure metadata**. In the self-contained (body-only) form there is no separate `.mjs` file shipped alongside the project artifact, no dynamic `import()` at runtime, and no filesystem dependency on the cloud — though today a legacy `objectstack-runtime.{hash}.mjs` back-compat bundle can still ship, and does get dynamically imported at boot, for any handler that hasn't been lowered to a metadata `body` yet (see [Migration](#migration) below). A body is either:
 

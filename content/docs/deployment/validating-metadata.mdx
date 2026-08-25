@@ -3,8 +3,6 @@ title: Validating Metadata
 description: Why ObjectStack metadata mistakes fail silently at runtime, and the one command that catches them at author time — run it after every metadata edit.
 ---
 
-# Validating Metadata
-
 ObjectStack metadata is data, not code paths — so most mistakes are **not** caught
 by the TypeScript compiler. They pass `tsc`, load fine, and then fail **silently
 at runtime**. The fix is one command you run after every metadata edit:

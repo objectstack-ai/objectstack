@@ -18,7 +18,9 @@
  * (`OS_MCP_SERVER_ENABLED=false`) gets no page and no nav entry.
  */
 
-export const CONNECT_AGENT_PAGE = {
+import type { Page } from '@objectstack/spec/ui';
+
+export const CONNECT_AGENT_PAGE: Page = {
   name: 'connect_agent',
   label: 'Connect an Agent',
   type: 'app' as const,

@@ -2160,6 +2160,36 @@ describe('#7751 — object-* block props schemas', () => {
     expect(parsed.defaultFilters).toEqual([['status', '=', 'open']]);
   });
 
+  // #11805 — the grid's legacy single-sort fallback, retired by maintainer
+  // ruling 2026-08-25 (decision-inbox batch 4; the producer half of
+  // objectui#5861 under the objectui#4869 「接受所有」 direction). Unlike
+  // `defaultFilters` above — a read fallback that STAYS — `defaultSort` was
+  // the second spelling of `sort` (read only when `sort` was absent, and
+  // wrapped `[schema.defaultSort]` by the renderer's own header-arrow path),
+  // so the one-intent-two-spellings rule retires it at the producer.
+  describe('object-grid `defaultSort` is retired (#11805)', () => {
+    it('rejects the retired `defaultSort` with the wrap-and-rename prescription', () => {
+      expect(() => ComponentPropsMap['object-grid'].parse({
+        objectName: 'showcase_task',
+        defaultSort: { field: 'due_date', order: 'asc' },
+      })).toThrow(/`defaultSort`.*removed.*`sort`/s);
+    });
+
+    it('does not materialize the retired `defaultSort` on a clean parse', () => {
+      expect(ComponentPropsMap['object-grid'].parse({ objectName: 'showcase_task' }))
+        .not.toHaveProperty('defaultSort');
+    });
+
+    // The live half of the intent: the array spelling every read path honours.
+    it('keeps `sort`, the canonical spelling', () => {
+      const parsed = ComponentPropsMap['object-grid'].parse({
+        objectName: 'showcase_task',
+        sort: [{ field: 'due_date', order: 'asc' }],
+      });
+      expect(parsed.sort).toEqual([{ field: 'due_date', order: 'asc' }]);
+    });
+  });
+
   it('every object-metric node of the showcase corpus parses GREEN (the clean-corpus control)', () => {
     // Copies of all three my-work.page.ts metrics + the command-center shape
     // (variant/format) — the exact nodes the lint must NOT start warning on.

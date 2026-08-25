@@ -91,6 +91,9 @@ export type {
 export type {
     INotificationOutbox,
     NotificationDeliveryRecord,
+    // [#11859] What claim()/claimDigest() hand out and ack() takes back — the
+    // record carrying the claim credential the compare-and-set binds.
+    ClaimedDeliveryRecord,
     DeliveryStatus,
     DeliveryPayload,
     EnqueueDeliveryInput,
