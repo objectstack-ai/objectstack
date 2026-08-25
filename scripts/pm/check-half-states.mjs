@@ -3044,14 +3044,31 @@ export function needsBlockerLivenessComments(issue) {
  */
 export const H19_TARGET_LIST_CAP = 5;
 
-/** `#N` for a local target, `owner/repo#N` for a cross-repo one, + its note. */
+/**
+ * `#N` for a local target, `owner/repo#N` for a cross-repo one, + its note.
+ *
+ * An unresolved target carries the disambiguating repo reading when one was
+ * taken (#11218), so the CAUSE is legible per target rather than only in the
+ * aggregate sentence — a reader walking rows must be able to tell "we cannot
+ * see that repo" from "that number is not there" without leaving the row.
+ * `repoReadable === undefined` (no probe taken, e.g. a LOCAL target) renders
+ * exactly as it always did.
+ */
 function namedTargets(rows) {
   const shown = rows.slice(0, H19_TARGET_LIST_CAP);
   const named = shown
     .map((r) => {
       const ref = `\`${r.local ? `#${r.number}` : r.key}\``;
       if (r.state === 'closed') return `${ref}${r.closedAt ? ` (closed ${r.closedAt})` : ' (closed)'}`;
-      if (r.state === 'unresolved') return `${ref}${r.detail ? ` (${r.detail})` : ''}`;
+      if (r.state === 'unresolved') {
+        const why =
+          r.repoReadable === false
+            ? `${r.detail ? `${r.detail}; ` : ''}\`${r.repo}\` is NOT readable to this sweep's credential`
+            : r.repoReadable === true
+              ? `${r.detail ? `${r.detail}; ` : ''}\`${r.repo}\` IS readable, so that number is not there`
+              : r.detail ?? '';
+        return `${ref}${why ? ` (${why})` : ''}`;
+      }
       return ref;
     })
     .join(', ');
@@ -3071,13 +3088,47 @@ function namedTargets(rows) {
  * target FIRES a row — a quieter one, which says the liveness is unjudged
  * rather than asserting anything about the block.
  *
- * What the row deliberately does NOT do is name a CAUSE for an unresolved
- * target. A 404 on `owner/repo#N` is equally "that repo is not reachable to
+ * ## The cause is MEASURED now, not guessed — and still never inferred (#11218)
+ *
+ * This row used to refuse to name a CAUSE for an unresolved target, on solid
+ * grounds: a 404 on `owner/repo#N` is equally "that repo is not reachable to
  * this credential" and "that issue number does not exist in a perfectly
- * reachable repo", and this file's standing posture is to refuse to name what
- * it cannot distinguish (the transport classifier's narrowness, and H16's
- * refusal to vouch for an `unknown` mergeability). The observation — the ref
- * and the HTTP status — is reported; the diagnosis is the reader's.
+ * reachable repo", and this file's standing posture is to refuse to name what it
+ * cannot DISTINGUISH (the transport classifier's narrowness, H16's refusal to
+ * vouch for an `unknown` mergeability).
+ *
+ * The two ARE distinguishable, by one extra reading, and refusing to make it was
+ * leaving a real fact on the floor. `GET /repos/<owner>/<name>` answers whether
+ * this credential can see the repo AT ALL, independently of any issue number in
+ * it. Repo readable + issue 404 ⇒ the number does not exist there. Repo 404 ⇒ a
+ * CREDENTIAL SCOPE gap, and the target is unjudgeable for a reason that has
+ * nothing to do with the card. That is the same two-stage shape
+ * `classifyRepoRead` already uses on the swept repo — a second reading turning
+ * an ambiguous refusal into a named one — and it costs ONE request per distinct
+ * SIBLING repo per sweep (2 on this board), cached, never per target.
+ *
+ * ⛔ What did NOT change is the posture: the row still reports only what it
+ * OBSERVED. The probe is a measurement, not an inference, and where it is
+ * unavailable the wording falls back to the old undiagnosed sentence rather than
+ * guessing.
+ *
+ * ## Why this is the whole of the cross-repo half that CAN land here
+ *
+ * The unresolvable class is cross-repo by construction — the contract-first
+ * split manufactures it (a parent plus one sub-issue per repo, the downstream
+ * carrying `Blocked-by:`). Giving the resolver a genuine cross-repo READ needs a
+ * credential the patrol does not hold and by standing ruling will not be given:
+ * the workflow header states it (「⛔ Each install uses its OWN
+ * `secrets.GITHUB_TOKEN` and reads its own repo. No cross-repo credential, no
+ * matrix over repos, no PAT」 — refused at grading, per-repo install chosen
+ * instead), and Actions' own token is repo-scoped by construction, so this is not
+ * a knob this file could turn even if it wanted to. ⛔ Widening it is a
+ * routing/security decision and not this script's to take.
+ *
+ * The accepted consequence, named in that same ruling, is that a cross-repo
+ * target stays UNJUDGED in each install. This row's job is therefore to make
+ * that UNJUDGED honest and LOUD rather than to pretend it away — which is what
+ * the probe above and the anti-truncation handling in `renderMarkdown` do.
  *
  * ## A PARTIAL discharge is reported as partial, not as an unblock
  *
@@ -3140,14 +3191,26 @@ export function h19BlockOutlivedBlocker(issue, resolutions) {
     );
   }
 
+  const scoped = unresolved.filter((r) => r.repoReadable === false);
+  const scopeNote =
+    scoped.length === 0
+      ? ' A cross-repo target resolves only when its repo answers this sweep\'s credential.'
+      : ` ⚠️ ${scoped.length} of them are unjudgeable for a reason that has NOTHING to do with this ` +
+        'card: the repo itself does not answer this sweep\'s credential (measured directly, by a ' +
+        'separate `GET /repos/<owner>/<name>` — not inferred from the issue 404). That is the ' +
+        'cross-repo class the contract-first split manufactures, and it is a standing, ACCEPTED ' +
+        'limit rather than a defect to chase: each patrol install reads its own repo with its own ' +
+        'repo-scoped token by ruling, so no re-run and no re-read of this card will ever resolve ' +
+        'these. ⛔ Do not "fix" it on the card — judge the target BY HAND, or take a credential ' +
+        'change to routing/security, whose call it is.';
   return (
     `\`pm:blocked\` and ${unresolved.length} of ${rows.length} \`Blocked-by:\` target(s) could NOT be ` +
     `resolved this sweep (${namedTargets(unresolved)}) — so whether this block has outlived its blocker ` +
     'is UNJUDGED, not confirmed. Unread is not still-open (#4690): a target dropped in silence reads as ' +
     'a healthy block forever, which is the exact failure this item exists to end, so it is named here ' +
-    'instead. A cross-repo target resolves when its repo answers this sweep\'s credential; the status is ' +
-    'reported and the cause is not guessed at (a 404 is equally an unreachable repo and a number that ' +
-    'does not exist).' +
+    'instead. ⚠️ UNJUDGED is not a quiet row and must not be skimmed as one: this card\'s block is ' +
+    'exactly as unverified as if nothing had been read at all.' +
+    scopeNote +
     (open.length > 0
       ? ` The card's other ${open.length} target(s) did resolve, and are still open.`
       : '') +
@@ -4881,6 +4944,493 @@ export function h28StaleBodyBlockerLine(issue, resolutions, commentBodies, owner
 }
 
 // ---------------------------------------------------------------------------
+// H32 — a HELD seat sitting idle over a non-empty lane queue (#11706).
+//
+// Every other row here watches a CARD or a PR. This one watches the SEAT, and
+// it is the first: the patrol could see a card that nobody moved and could not
+// see a lane whose seat had stopped moving it. The filing seat reported its own
+// defect — it ended round after round with 「要我继续派吗?」 while in-flight was
+// zero and 40+ dispatchable cards sat in its queue — against a skill clause that
+// already says ⛔ 不等人闸 in as many words. So ⛔ this row adds no prose rule:
+// the rule is not missing, the DETECTABILITY was (「规则不缺,措辞也不含糊」).
+//
+// ## The shape, and why it is the same two-signals-unpaired register as the rest
+//
+// The board asserts two things that cannot both be healthy: a lane that has
+// dispatchable work and nothing in flight, and a seat that declares itself HELD.
+// Either one alone is ordinary — an empty lane is a finished lane, and a held
+// seat with work in flight is a working seat. Together they say the lane's
+// throughput is zero while someone is on the clock for it, which is invisible
+// from any single card: every queued card looks exactly like an ordinary queued
+// card (that is H30's whole point), and the seat post looks exactly like a seat
+// post.
+//
+// ## The threshold, derived the H30 way — from the measured distribution
+//
+// Grading declined to let this number be guessed and named the precedent
+// (`QUEUE_ROT_STALE_DAYS`, derived from the live queue-age distribution). So it
+// is measured, from the quantity the card itself names — the gap between one
+// claim and the next on a lane that is working.
+//
+// Census, 2026-08-25, every `Claim:` comment on the six active objectstack
+// lanes' open `pm:dispatched` cards plus the recently-closed window (n = 169
+// inter-claim gaps, per-lane then pooled):
+//
+//   p50 7 min · p75 41 min · p90 324 min · p95 731 min · max 6073 min
+//
+// The distribution is BIMODAL and reading it as one hump is the trap: inside a
+// dispatch wave a seat claims a batch minutes apart (hence p50 = 7), and between
+// waves it goes quiet for hours. The upper mode is the one this threshold has to
+// clear. Inspected individually, all 12 gaps above 480 min span a shift boundary
+// or a night — `domain:devx` 2026-08-19T11:48 → 08-23T17:01, `domain:engine`
+// 08-24T15:22 → 08-25T01:47 across a 收班/开轮 pair — i.e. NOT an active seat
+// pausing, which is the population this row must never report. Nothing measured
+// between waves WITHIN a held shift reached 480.
+//
+// 480 minutes (8h) therefore sits above the whole measured active-seat tail and
+// below the cross-shift band that dominates everything past it. The patrol fires
+// four times a day, so an idle seat surfaces on the second sweep after the
+// threshold passes — a detection latency well inside the shift it is wasting.
+//
+// ⚠️ The threshold is the LAST gate, not the main one. Three structural gates in
+// front of it do the real narrowing, and they are why this number can be this
+// tight without manufacturing accusations. A false 怠工 row costs a working seat
+// an argument; a late one costs six hours. The asymmetry is deliberate.
+//
+// ## Legitimate waits are excluded STRUCTURALLY, never by the threshold
+//
+// Grading was explicit: a seat whose latest marker names a live blocker (等 CI /
+// 等裁决 / 等人工步骤, or an awaiting-class state) is exempt REGARDLESS of
+// elapsed time. That is the difference between a seat that is idle and a seat
+// that is waiting, and no amount of clock can tell them apart — only the seat's
+// own declaration can. So the exemption is a read of the latest marker, and it
+// is unbounded: a seat blocked for three days is not reported by this row.
+// ---------------------------------------------------------------------------
+
+/**
+ * H32's idleness horizon — 8 hours, derived in the header above from the
+ * measured inter-claim distribution rather than chosen. Minutes rather than
+ * days (H30's unit) because the quantity it bounds is a within-shift interval:
+ * a seat's round is hours long, and a horizon in days could not fire inside the
+ * shift it is about.
+ */
+export const SEAT_IDLE_STALE_MINUTES = 480;
+
+/**
+ * Markers that put a seat in a DECLARED WAIT — the structural exemption, read
+ * off the seat's latest marker and unbounded by time.
+ *
+ * A closed set of measured terms, in `H17_TRIGGER_ANCHOR_TERMS`'s register and
+ * for its reason: an invented spelling would exempt nothing that exists, and a
+ * loose one would exempt everything. Both spellings of each wait are carried
+ * because seat posts are written in both languages and neither is canonical.
+ *
+ * ⚠️ Under-matching here FIRES the row on a seat that really is waiting, which
+ * is the expensive direction — so this list is the one part of H32 that should
+ * grow the moment a seat is seen declaring a wait in a spelling it lacks.
+ */
+export const SEAT_WAIT_MARKERS = [
+  '等 ci',
+  '等ci',
+  '等裁决',
+  '等待裁决',
+  '等人工',
+  '等维护者',
+  '等人合',
+  '决策箱',
+  'awaiting',
+  'awaiting-maintainer',
+  'blocked',
+  'blocked-by',
+  'needs-user-decision',
+  'waiting on ci',
+  'waiting for ci',
+  'waiting on a ruling',
+  'waiting on the maintainer',
+];
+
+/**
+ * Does this seat marker declare a live wait? Case-folded substring over the
+ * marker body — deliberately LOOSER than the anchored first-line reads
+ * elsewhere in this file, because the asymmetry runs the other way here: a
+ * missed exemption is a false accusation against a working seat, while an
+ * over-eager one merely keeps this row quiet on a seat a human can still see.
+ */
+export function seatDeclaresWait(markerBody) {
+  const text = String(markerBody ?? '').toLowerCase();
+  return SEAT_WAIT_MARKERS.some((term) => text.includes(term));
+}
+
+/**
+ * The lane a seat post speaks for, parsed from its title, plus whether that
+ * lane is READABLE FROM THIS BOARD.
+ *
+ * Seat titles are `[PM seat] <lane> — <status>`, and the lane half is one of
+ * three measured shapes (2026-08-25 census, all 12 open seat posts):
+ *
+ *   `domain:engine`               — a lane on THIS board
+ *   `domain:devx @ objectui`      — a lane on a SIBLING board
+ *   `repo:cloud` / `skills` / `triage (objectstack-wide)`
+ *
+ * The `foreign` flag is the load-bearing half and it exists for the same reason
+ * H19 refuses to guess at a cross-repo 404: this sweep reads ONE repo. A seat
+ * whose lane lives in a sibling repo has an inventory this patrol cannot see at
+ * all, so its queue reads as EMPTY here — and an empty queue makes this row
+ * silent, which is the harmless direction, but only by accident. Naming the
+ * class keeps the accident from turning into a finding the day the counting
+ * changes. `repo:*`-scoped and lane-less seats (`triage`) are foreign for the
+ * same reason: there is no `domain:*` label to count a lane inventory against.
+ *
+ * @returns {{ lane: string|null, foreign: boolean }}
+ */
+export function seatLane(issue) {
+  const m = /^\[PM seat\]\s*(.*?)\s*—\s*(.*)$/u.exec(issue?.title ?? '');
+  if (!m) return { lane: null, foreign: true };
+  const raw = m[1].trim();
+  // An `@ <repo>` suffix names the board the lane lives on. Present ⇒ the lane
+  // is only READABLE there, whatever its `domain:*` spelling says here.
+  const at = /^(.*?)\s*@\s*(\S+)\s*$/u.exec(raw);
+  const lane = (at ? at[1] : raw).trim();
+  const elsewhere = at ? at[2] !== SWEEP_REPO.repo.split('/')[1] : false;
+  if (!/^domain:[a-z0-9][a-z0-9._-]*$/i.test(lane)) return { lane: null, foreign: true };
+  return { lane, foreign: elsewhere };
+}
+
+/**
+ * Is this seat post declaring a HELD seat — a 🟢 with a real holder?
+ *
+ * Reuses `h5SeatStickerDesync`'s reading of the status word rather than
+ * re-deriving it, so the two items can never disagree about what 🟢 means. A
+ * ⏳ vacant / 🔴 收班 vacant / ⏸️ paused seat is deliberately OUT of scope: an
+ * unheld seat over a non-empty queue is a ROUTING gap (nobody is on the clock),
+ * not the 怠工 this row is about, and reporting it here would put an accusation
+ * on a seat that has correctly said it is not working. The queue cards
+ * themselves are H30's population and are reported there, on their own terms.
+ *
+ * `Routine` seats are held by a scheduled caller with no claim cadence of their
+ * own, so they are excluded on the same grounds `h5SeatStickerDesync` excludes
+ * them from the assignee comparison.
+ */
+export function seatIsHeld(issue) {
+  const m = /^\[PM seat\]\s*(.*?)\s*—\s*(.*)$/u.exec(issue?.title ?? '');
+  if (!m) return false;
+  const status = m[2].trim();
+  if (!status.startsWith('🟢')) return false;
+  const holder = status.replace('🟢', '').trim().split(/\s+/u)[0] ?? '';
+  return holder.length > 0 && holder !== 'Routine';
+}
+
+/**
+ * The seat's latest utterance — the marker whose age is this row's clock and
+ * whose text carries the wait exemption.
+ *
+ * Recency is `created_at` with a THREAD-ORDER fallback, exactly as
+ * `governingClaim` resolves it and for the same reason: an unparseable stamp
+ * must not silently promote an older comment to "latest". An unreadable stamp
+ * yields a `null` age, which the predicate treats as "must not read as fresh"
+ * — H10/H13/H18/H20's standing call on an unreadable timestamp (#4690).
+ *
+ * @param {{ body?: string, created_at?: string }[]} commentRows
+ * @returns {{ body: string, createdAt: string|null } | null}
+ */
+export function latestSeatMarker(commentRows) {
+  const rows = Array.isArray(commentRows) ? commentRows : [];
+  let best = null;
+  rows.forEach((row, index) => {
+    const parsed = Date.parse(row?.created_at ?? '');
+    const stamp = Number.isFinite(parsed) ? parsed : null;
+    const candidate = { body: String(row?.body ?? ''), createdAt: row?.created_at ?? null, stamp, index };
+    if (best === null) {
+      best = candidate;
+      return;
+    }
+    const newer = stamp === null || best.stamp === null ? index > best.index : stamp >= best.stamp;
+    if (newer) best = candidate;
+  });
+  return best === null ? null : { body: best.body, createdAt: best.createdAt };
+}
+
+/** How old the seat's latest marker is, in minutes — `null` when unreadable (#4690). */
+export function seatMarkerAgeMinutes(marker, nowMs = Date.now()) {
+  const posted = Date.parse(marker?.createdAt ?? '');
+  return Number.isFinite(posted) ? (nowMs - posted) / 60_000 : null;
+}
+
+/**
+ * Which seat posts buy a comment fetch — exported for the reason every
+ * gathering policy here is: a policy that decides what gets READ AT ALL is
+ * where a silent hole would live.
+ *
+ * A HELD seat on a lane THIS board can count, and nothing else. The `foreign`
+ * and unheld cases are decided from the title alone, so the fetch is bought
+ * only for seats this row could actually speak about — 6 of the 12 open seat
+ * posts at the 2026-08-25 census, and the only comment fetches the seat
+ * population has ever bought (the H2 branch explicitly skips `pm:seat`).
+ */
+export function h32NeedsSeatComments(issue) {
+  if (!labelNames(issue ?? {}).includes('pm:seat')) return false;
+  if (!seatIsHeld(issue)) return false;
+  return !seatLane(issue).foreign;
+}
+
+/**
+ * H32 — null when clean, else the finding sentence.
+ *
+ * @param {object} issue — the seat post.
+ * @param {{ body: string, createdAt: string|null }|null|undefined} marker —
+ *   the latest seat-post comment. `undefined` unconsulted, `null` unreadable.
+ * @param {{ unclaimed: number, inFlight: number }} lane — the lane inventory,
+ *   counted off listings this sweep already holds.
+ */
+export function h32SeatIdleOverQueue(issue, marker, lane, nowMs = Date.now()) {
+  if (!labelNames(issue ?? {}).includes('pm:seat')) return null;
+  if (!seatIsHeld(issue)) return null;
+  const { lane: laneName, foreign } = seatLane(issue);
+  if (foreign || !laneName) return null;
+
+  const unclaimed = Number(lane?.unclaimed ?? 0);
+  const inFlight = Number(lane?.inFlight ?? 0);
+  // The board half. Both halves are required: an empty queue is a finished
+  // lane, and work in flight is a working seat.
+  if (!(unclaimed > 0 && inFlight === 0)) return null;
+
+  // An unconsulted or unreadable thread declines to judge rather than firing.
+  // The asymmetry against H4 (which fires on an unreadable channel) is
+  // deliberate and runs on the same rule H4 states: H4's remedy is "add a
+  // line", cheap and idempotent, so an unreadable channel can safely fire it.
+  // This row's output is an accusation that a named holder is not working, and
+  // an unread thread is exactly where a declared wait would have been. Firing
+  // blind here would manufacture the false positive the wait exemption exists
+  // to prevent.
+  if (marker === undefined || marker === null) return null;
+  if (seatDeclaresWait(marker.body)) return null;
+
+  const age = seatMarkerAgeMinutes(marker, nowMs);
+  if (age !== null && age <= SEAT_IDLE_STALE_MINUTES) return null;
+  const clock =
+    age === null
+      ? 'an unreadable marker timestamp (which must not read as fresh)'
+      : `~${Math.round(age)} min since the seat's latest marker (threshold ${SEAT_IDLE_STALE_MINUTES} min)`;
+
+  return (
+    `\`pm:seat\` HELD, and its lane \`${laneName}\` has ${unclaimed} unclaimed \`pm:queue\` card(s) with ` +
+    `NOTHING in flight — ${clock}. The board is asserting two things that cannot both be healthy: a lane ` +
+    'with dispatchable work and zero throughput, and a named holder on the clock for it. Neither half is ' +
+    'visible from any card — a queued card looks exactly like an ordinary queued card however long it has ' +
+    'been one (H30), and a seat post looks exactly like a seat post — which is why the measured incident ' +
+    'was reported by the seat ITSELF and by no gauge: it ended round after round with 「要我继续派吗?」 ' +
+    'while in-flight was zero and 40+ dispatchable cards sat in the queue, against a clause that already ' +
+    'says ⛔ 不等人闸 in as many words. ⛔ So this row is NOT a new rule and must not be read as one — the ' +
+    'rule is not missing, the detectability was (「规则不缺,措辞也不含糊」). ⚠️ A DECLARED wait is exempt ' +
+    'here regardless of elapsed time: a latest marker naming 等 CI / 等裁决 / 等人工步骤 or an ' +
+    'awaiting-class state silences this row, so a seat that IS waiting states it and is not reported. ' +
+    'That is also the remedy when this fires and the wait is real — say what it is waiting on, in the ' +
+    'marker. Otherwise the move is the one the clause already names: dispatch the next wave, or hand the ' +
+    'seat over and mark it vacant so the lane reads as unheld rather than held-and-still. Report-only: ' +
+    '⛔ never a label, a title or a marker written from this script — which of those two moves applies is ' +
+    'the whole judgement.'
+  );
+}
+
+// ---------------------------------------------------------------------------
+// H33 — an in-flight claim written BEFORE the ruling that now stands (#11724).
+//
+// The filing seat skipped the mandatory decision re-read under speed-up and
+// wrote a dispatch order that INVERTED a standing triage ruling — the ruling
+// scoped the work to option 1 executed as a sweep and said in as many words
+// that options 2/3 were 「file, don't fold in」; the order forbade the sweep and
+// pointed the dev at 2/3. The dev followed the LATER ruling (correct) and
+// reported the conflict, seeing one of the three contradictions.
+//
+// ⛔ Like H32 this adds no rule. The step exists, and the same session had
+// already been saved by it twice that day — two cards whose bodies said 「A/B
+// 未决」 while triage had long since ruled direction A in a COMMENT. Grading
+// declined the other half of the card's remedy menu (a mandatory
+// `Prior rulings read:` claim field) on the card's own reasoning: a field 99%
+// filled with `none` is ritual, and a ritual field is as untrustworthy as none.
+// What it promoted is this — structurally decidable, no threshold, no ritual,
+// and silent on the overwhelming majority of cards, which carry no ruling at all.
+//
+// ## What the row actually asserts, precisely
+//
+// NOT "the dispatcher failed to read" — that is unobservable. What is observable
+// is an ORDERING: the claim that put this card in flight is older than a ruling
+// now standing on its thread. The dispatch order therefore cannot carry that
+// ruling's constraints, whether it was written blind to a ruling already there
+// or overtaken by one posted after. Both readings have the same consequence and
+// the same remedy, which is why the row does not try to tell them apart: a dev
+// is working from an order that predates the current ruling, and somebody has to
+// re-read before the work lands rather than after.
+//
+// Same two-signals-unpaired register as the rest: a standing ruling and an
+// in-flight claim, which should be paired and are not.
+//
+// ## Measured yield — a LOW-yield row, and silence is its normal reading
+//
+// Run over the live board on 2026-08-25 it reports NOTHING: of 54 open
+// `pm:dispatched` cards, 27 carry no claim this file's marker can read (see
+// `latestClaimComment`'s blind-spot note), 4 carry no ruling at all, and on the
+// remainder every ruling PRECEDES its claim — which is the healthy ordering and
+// exactly what the row wants to see.
+//
+// That a check reports nothing today is worth distinguishing from a check that
+// CANNOT report anything — H30's header makes the point, and it is the reason
+// this number was measured rather than assumed. Over the recently-closed window
+// the shape is real and rare: 4 of the 107 closed cards carrying a readable
+// claim have a ruling posted after it (#11781, #11673, #11106, #10166; the gaps
+// run 8 min to ~17 h). So the expected steady state is a quiet row that fires a
+// few times a week, in H23's register (~6 in 1,546) rather than H30's.
+// ---------------------------------------------------------------------------
+
+/**
+ * What counts as a TRIAGE RULING comment — a closed set of measured opening
+ * shapes, in `H17_TRIGGER_ANCHOR_TERMS`'s register and for its reason.
+ *
+ * Census of every comment on 40 open `pm:dispatched` cards (2026-08-25), by
+ * first non-empty line with markdown decoration stripped:
+ *
+ *   `Triage: lands in …` · `Triage routing: domain:skills + finding` ·
+ *   `Triage (first-touch grading): …` · `Triage (Routine seat, hourly round): …` ·
+ *   `Triage: → decision inbox …` · `Concentrated triage batch: …` ·
+ *   `Concentrated triage batch (final tail): …` · `Concentrated triage round: …` ·
+ *   `Skills-lane self-triage (run-to-empty fire): …` · `Grading (skills seat, …)` ·
+ *   `Maintainer ruling — option 1: …`
+ *
+ * Anchored at the START of the first line, never a substring of the body, and
+ * the reason is measured too: the same census carries 「Serial-constraint
+ * addendum … the triage comment above」 and 「⚠️ Section 3's REST-fallback claim
+ * needs qualifying」 — prose that MENTIONS a ruling or a claim without being
+ * one. A contains-match would read both as rulings and manufacture a row on
+ * every card that discusses its own triage. Under-reporting on an unrecognised
+ * spelling is H17's and H20's standing call, for H20's stated reason: a
+ * fabricated row sends a reader to check something that was never there.
+ */
+export const TRIAGE_RULING_ANCHORS = [
+  /^triage\b/iu,
+  /^concentrated\s+triage\b/iu,
+  /^[\w:@.-]+[\s-]lane\s+self-triage\b/iu,
+  /^grading\b/iu,
+  /^maintainer\s+ruling\b/iu,
+];
+
+/**
+ * Is this comment body a triage ruling? Read from its FIRST non-empty line,
+ * with markdown decoration stripped — seats bold and blockquote these openings
+ * (「**Triage: …**」, 「> Triage routing: …」) and the decorated-directive lesson
+ * H4 paid for (#10102) applies verbatim.
+ */
+export function isTriageRulingComment(body) {
+  const first = String(body ?? '')
+    .split('\n')
+    .map((l) => l.trim())
+    .find((l) => l.length > 0);
+  if (!first) return false;
+  const bare = first.replace(/^[>\s]*/u, '').replace(/[*_`#]/gu, '').trim();
+  return TRIAGE_RULING_ANCHORS.some((re) => re.test(bare));
+}
+
+/**
+ * The newest `Claim:` comment on a thread, WITH its timestamp — and
+ * deliberately not `governingClaim`, which is the same read narrowed to claims
+ * that name a protocol-shaped BRANCH.
+ *
+ * That narrowing is right for H20/H27, whose whole question is about the branch
+ * a claim names. It would be wrong here and would silently empty this row's
+ * population: the measured claim census carries 「Claim: PM loop round R6」,
+ * 「Claim — domain:cli lane execution seat, session …, round R36」 and 「Claim
+ * pointer: folded into the 11678 family dispatch」 — real claims, correctly
+ * formed, naming no branch of their own. What this row needs from a claim is
+ * only WHEN it was written.
+ *
+ * ## ⚠️ The inherited blind spot, measured
+ *
+ * `CLAIM_COMMENT_MARKER` requires a COLON after the word, and a large minority
+ * of live claims do not have one: 24 of the 54 open `pm:dispatched` cards on
+ * the 2026-08-25 board carry 「Claim — <seat>, session …」 with an EM DASH,
+ * which the marker does not match. Those cards are invisible to this row.
+ *
+ * Inherited on purpose rather than patched here. Defining a second, WIDER
+ * notion of "a claim" for H33 alone would leave the file disagreeing with
+ * itself about what a claim IS — H2 would go on calling those 24 cards
+ * claimless while H33 read their claims off the same threads — and a file that
+ * contradicts itself about its own vocabulary is a worse defect than the gap.
+ * The consequence here is UNDER-reporting, which is the direction this file
+ * takes on every unrecognised spelling (H17's extractor, H20's branch shape),
+ * never a fabricated row. The marker's own coverage has a wider blast radius —
+ * it is also why H2 reports those 24 cards as carrying no claim comment at all
+ * — so it is filed as its own card rather than folded in here.
+ *
+ * @param {{ body?: string, created_at?: string }[]} commentRows
+ * @returns {{ createdAt: string|null } | null}
+ */
+export function latestClaimComment(commentRows) {
+  const rows = Array.isArray(commentRows) ? commentRows : [];
+  let best = null;
+  rows.forEach((row, index) => {
+    if (!CLAIM_COMMENT_MARKER.test(String(row?.body ?? ''))) return;
+    const parsed = Date.parse(row?.created_at ?? '');
+    const stamp = Number.isFinite(parsed) ? parsed : null;
+    const candidate = { createdAt: row?.created_at ?? null, stamp, index };
+    if (best === null) {
+      best = candidate;
+      return;
+    }
+    const newer = stamp === null || best.stamp === null ? index > best.index : stamp >= best.stamp;
+    if (newer) best = candidate;
+  });
+  return best === null ? null : { createdAt: best.createdAt };
+}
+
+/**
+ * H33 — null when clean, else the finding sentence.
+ *
+ * Both timestamps must be READABLE for the row to fire, and that is the one
+ * place this item declines where its neighbours insist. Elsewhere an unreadable
+ * stamp must not read as fresh, because there the stamp is an AGE and the
+ * conservative reading is "old". Here the stamp is one side of an ORDER
+ * comparison, and an unreadable one does not make the comparison conservative —
+ * it makes it undefined. A row asserting that a claim predates a ruling, built
+ * on a stamp nobody could read, would be a fabricated ordering, which is worse
+ * than a missing row (#4690 cuts the other way when the unread datum is not the
+ * finding but its evidence).
+ *
+ * @param {object} issue — an OPEN issue.
+ * @param {{ body?: string, created_at?: string }[]|null|undefined} commentRows
+ */
+export function h33ClaimPredatesRuling(issue, commentRows) {
+  if (!labelNames(issue ?? {}).includes('pm:dispatched')) return null;
+  if (!Array.isArray(commentRows)) return null;
+  const claim = latestClaimComment(commentRows);
+  const claimStamp = Date.parse(claim?.createdAt ?? '');
+  if (!Number.isFinite(claimStamp)) return null;
+
+  const rulings = commentRows
+    .filter((row) => isTriageRulingComment(row?.body))
+    .map((row) => ({ at: row?.created_at ?? null, stamp: Date.parse(row?.created_at ?? '') }))
+    .filter((r) => Number.isFinite(r.stamp) && r.stamp > claimStamp)
+    .sort((a, b) => b.stamp - a.stamp);
+  if (rulings.length === 0) return null;
+
+  const newest = rulings[0];
+  return (
+    `\`pm:dispatched\` whose latest \`Claim:\` comment (${claim.createdAt}) PREDATES ` +
+    `${rulings.length} triage-ruling comment(s) on this same card, the newest posted ${newest.at} — so ` +
+    'the order this card is in flight under was written before the ruling that now stands on its thread, ' +
+    'and cannot be carrying that ruling\'s constraints. ⚠️ The row asserts an ORDERING, not a state of ' +
+    'mind: whether the dispatcher wrote blind to a ruling already there or was overtaken by one posted ' +
+    'after is not observable and does not change the remedy. The measured cost of the first reading: a ' +
+    'dispatch order INVERTED a standing ruling — the ruling scoped the work to option 1 executed as a ' +
+    'sweep and said 「file, don\'t fold in」 about options 2/3, and the order forbade the sweep and ' +
+    'pointed the dev at 2/3. The dev followed the later ruling and reported the conflict, seeing one of ' +
+    'three contradictions. Remedy: re-read the ruling against the dispatch order NOW, while the work is ' +
+    'still in flight and the correction is a message rather than a rollback — and if they disagree, say ' +
+    'so on the card so the dev is not left arbitrating between two orders. ⛔ This is not a new rule: the ' +
+    're-read step exists, and the same session it failed on had already been saved by it twice that day. ' +
+    'Report-only: ⛔ never a label written from this script.'
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Report rendering — pure over (findings, counts), so `--self-test` pins both
 // media offline. The live sweep below picks a renderer and prints it; nothing
 // about WHAT is swept or WHICH predicates fire depends on the format.
@@ -4914,6 +5464,96 @@ export function isLoudFinding(message) {
 }
 
 /**
+ * The marker an UNJUDGED row carries — a row reporting that an input could not
+ * be read, as opposed to one reporting a state that was read (#11218).
+ *
+ * ## Why this needs to exist at all: the promise was measurably false
+ *
+ * The summary sentence has been saying 「each unresolved target is named on its
+ * own card's row, never dropped」 — and on the 2026-08-25T02:08Z sweep it was
+ * not true. That run resolved 25 of 28 targets and rendered FIVE H19 rows, all
+ * of them same-repo and closed-led; not one carried an unresolved target,
+ * because the markdown body ran out of budget and 199 rows were trimmed. The
+ * rows the header promised were never dropped had been dropped, by the trim,
+ * while the header went on promising it.
+ *
+ * That is precisely #4690 wearing this item's own uniform: "could not read the
+ * input" rendered as clean, inside the mechanism built to stop exactly that. A
+ * reader could not have caught it either — the trimmed rows announce themselves
+ * only as a COUNT, so 「199 further row(s) omitted」 and 「every unresolved target
+ * is named」 sat in one body, contradicting each other, with nothing to say which
+ * was true.
+ *
+ * The fix is ordering, not budget: unjudged rows sort ahead of judged ones, so
+ * the trim can only ever fall on rows that DID make a determination. Judged rows
+ * are recoverable from the run log and say so; an unjudged one is the report's
+ * only trace of a gap in what was read. This is the same reservation
+ * `renderTriggerIndex` gets and for the same reason — a section whose absence is
+ * indistinguishable from good news must not be what the trim eats.
+ */
+export const UNJUDGED_MARKER = '⚠️ UNJUDGED:';
+
+/**
+ * Is this row an unjudged one — an input that could not be read, rather than a
+ * state that was?
+ *
+ * Two sources, deliberately: the explicit marker, and H19's unresolved-branch
+ * sentence, which is load-bearing prose that predates the marker and is pinned
+ * by the self-test. Matching the sentence rather than only the marker keeps the
+ * protection working for the population it was measured on rather than only for
+ * rows written after it.
+ */
+export function isUnjudgedFinding(message) {
+  const text = String(message ?? '');
+  return text.startsWith(UNJUDGED_MARKER) || text.includes('is UNJUDGED, not confirmed');
+}
+
+/**
+ * Every counter the summary sentence reads OFF `stats` — the forwarding
+ * contract between the sweep and the renderers, in one place.
+ *
+ * ## Why this is a list and not eleven hand-written lines
+ *
+ * It used to be eleven hand-written lines, and two of them were missing.
+ * `dispatchRefTargets`/`dispatchRefRead` were computed by the H20/H27 pass and
+ * never copied into `counts`, so the dispatch-liveness clause rendered
+ * `read on 0 of 0` on every live sweep from the day it was added — the
+ * 2026-08-25T02:08Z run said it had read no branch at all while publishing two
+ * H20 findings, which only a non-empty ref cache can produce.
+ *
+ * The failure is invisible by construction: `counts.x ?? 0` renders a missing
+ * key and a genuine zero identically, and a genuine zero is a legitimate
+ * reading ("nothing to probe this sweep"). So the coverage pair — the mechanism
+ * whose entire job is to prove a pass examined something — was the one thing in
+ * the report that could go quiet without any evidence that it had. #4690,
+ * wearing the uniform of the check built to prevent it.
+ *
+ * Enumerating the keys makes the assembly mechanical: `sweep()` copies THIS
+ * list, so adding a counter to `stats` and forgetting to forward it is no
+ * longer possible, and the self-test can assert the contract directly rather
+ * than re-deriving it from a rendered sentence.
+ */
+export const SWEEP_COUNT_KEYS = [
+  'conflictCandidates',
+  'conflictProbed',
+  'fallbackCandidates',
+  'fallbackProbed',
+  'restartCandidates',
+  'restartProbed',
+  'blockerTargets',
+  'blockerResolved',
+  'dispatchRefTargets',
+  'dispatchRefRead',
+  'crossRepoProbed',
+  'crossRepoUnreadable',
+  'seatCandidates',
+  'seatMarkersRead',
+  'commits',
+  'commitBindings',
+  'commitBindingMessages',
+];
+
+/**
  * The summary sentence both media end on — the one line that says what was
  * READ, not just what was found. It is the difference between "the board is
  * clean" and "nothing was swept", and it carries the report-only contract so
@@ -4933,10 +5573,13 @@ export function isLoudFinding(message) {
  *   holdProbed?: number, holdCandidates?: number, fallbackProbed?: number,
  *   fallbackCandidates?: number, restartProbed?: number,
  *   restartCandidates?: number, blockerResolved?: number,
- *   blockerTargets?: number, commits?: number, commitBindings?: number,
+ *   blockerTargets?: number, crossRepoProbed?: number,
+ *   crossRepoUnreadable?: number, seatMarkersRead?: number,
+ *   seatCandidates?: number, commits?: number, commitBindings?: number,
  *   commitBindingMessages?: number }} counts
  * @param {number} findingCount
  */
+
 export function summaryLine(counts, findingCount) {
   const probed = counts.conflictProbed ?? 0;
   const candidates = counts.conflictCandidates ?? 0;
@@ -4964,6 +5607,19 @@ export function summaryLine(counts, findingCount) {
   // still live (#4690).
   const btResolved = counts.blockerResolved ?? 0;
   const btTargets = counts.blockerTargets ?? 0;
+  // H19's cross-repo reachability readings (#11218) — how many DISTINCT sibling
+  // repos this sweep probed directly, and how many refused. Reported because it
+  // is what turns an unresolved cross-repo target from a guess into a
+  // measurement, and because a reader needs to know the limit is structural
+  // (a ruling) rather than a transient failure worth re-running.
+  const crossRepoProbed = counts.crossRepoProbed ?? 0;
+  const crossRepoUnreadable = counts.crossRepoUnreadable ?? 0;
+  // H32's coverage pair — held, own-board seats and how many had their marker
+  // thread read. A shortfall is not silent (an unread thread makes H32 DECLINE
+  // to judge that seat, which is the quiet direction), so this is the only
+  // place a reader could see that a seat went unexamined.
+  const seatsRead = counts.seatMarkersRead ?? 0;
+  const seatCandidates = counts.seatCandidates ?? 0;
   // The fifth pair, H20's, and the same shape as H19's for the same reason: an
   // unreadable ref fires its own card's quieter row, so this is a total rather
   // than the only place the gap shows. Still owed — a pass that read no ref at
@@ -4997,12 +5653,31 @@ export function summaryLine(counts, findingCount) {
     `${rwProbed < rwCandidates ? " — each unread thread fires its own card's H9 row, never dropped" : ''}. ` +
     `Blocker liveness (H19): targets resolved on ${btResolved} of ${btTargets} distinct \`Blocked-by:\` ` +
     `target(s) named by open \`pm:blocked\` card(s)` +
-    `${btResolved < btTargets ? ' — each unresolved target is named on its own card\'s row, never dropped' : ''}. ` +
+    `${
+      btResolved < btTargets
+        ? ` — the ${btTargets - btResolved} unresolved target(s) are named on their own cards' rows, and ` +
+          'those rows sort ABOVE the size trim so they cannot be what a truncated body drops (#11218: ' +
+          'this clause used to be an unconditional promise, and on the 2026-08-25T02:08Z sweep it was ' +
+          'false — 199 rows were trimmed and not one rendered row carried an unresolved target)'
+        : ''
+    }` +
+    `${
+      crossRepoProbed > 0
+        ? ` Cross-repo reachability was measured directly on ${crossRepoProbed} sibling repo(s), of which ` +
+          `${crossRepoUnreadable} do(es) not answer this credential — those targets are unjudgeable by ` +
+          'ruling (each install reads its own repo with its own repo-scoped token) and ⛔ no re-run ' +
+          'resolves them.'
+        : ''
+    } ` +
     `Dispatch liveness (H20 + H27): remote branch read on ${refRead} of ${refTargets} distinct claimed ` +
     `branch(es) named by open \`pm:dispatched\` card(s) past the ${DISPATCHED_NO_REF_STALE_MINUTES}-minute ` +
     `threshold — one read serving both rows, so H27's ${DEAD_CLAIM_STALE_HOURS}h population is a subset ` +
     'of this one and costs no request of its own' +
     `${refRead < refTargets ? ' — each unread branch is named on its own card\'s row, never dropped' : ''}. ` +
+    `Seat liveness (H32): marker thread read on ${seatsRead} of ${seatCandidates} HELD seat post(s) whose ` +
+    'lane is countable on THIS board — a seat held for a sibling repo\'s lane is out of scope here (its ' +
+    'inventory is unreadable from this sweep, so an empty-looking queue would mean nothing), and an ' +
+    'unread thread makes H32 decline to judge that seat rather than accuse it. ' +
     `Report-only: findings are patrol input, not a gate verdict.`
   );
 }
@@ -5140,10 +5815,18 @@ export function normalizeProvenance(text) {
 export function renderMarkdown(findings, counts, options = {}) {
   const provenance = normalizeProvenance(options.provenance);
   const sweptAt = options.sweptAt instanceof Date ? options.sweptAt : new Date();
+  // Three ranks, and the middle one is load-bearing (#11218): P0-suspect rows,
+  // then UNJUDGED rows, then everything else by card number. The trim below
+  // eats the TAIL, so this ordering is what makes the summary's "never dropped"
+  // clause true — see `UNJUDGED_MARKER` for the sweep on which it was false.
   const rows = [...findings].sort(
-    (a, b) => Number(isLoudFinding(b[2])) - Number(isLoudFinding(a[2])) || a[0].number - b[0].number,
+    (a, b) =>
+      Number(isLoudFinding(b[2])) - Number(isLoudFinding(a[2])) ||
+      Number(isUnjudgedFinding(b[2])) - Number(isUnjudgedFinding(a[2])) ||
+      a[0].number - b[0].number,
   );
   const loudCount = rows.filter(([, , msg]) => isLoudFinding(msg)).length;
+  const unjudgedCount = rows.filter(([, , msg]) => isUnjudgedFinding(msg)).length;
 
   const head = [
     'os-half-state-sweep — machine-findable marker for this generated view.',
@@ -5168,6 +5851,16 @@ export function renderMarkdown(findings, counts, options = {}) {
       `🚨 **${loudCount} P0-SUSPECT row(s) in this sweep** — for that class the mandated move is the` +
         ' emergency-triage channel (an immediate triage subagent), never waiting for the next hourly' +
         ' Routine fire. They are sorted to the top of the list below.',
+      '',
+    );
+  }
+
+  if (unjudgedCount > 0) {
+    head.push(
+      `⚠️ **${unjudgedCount} UNJUDGED row(s) in this sweep** — an input this patrol could NOT read,` +
+        ' not a state it read and found clean. They are sorted above the ordinary rows so the' +
+        " body's size trim can never be what removes them (#4690, #11218), and they are the rows to" +
+        ' judge BY HAND: nothing in a later sweep will resolve them on its own.',
       '',
     );
   }
@@ -5788,6 +6481,13 @@ async function sweep(options = {}) {
     // got a definite open/closed answer.
     blockerTargets: 0,
     blockerResolved: 0,
+    // H19's cross-repo reachability pair (#11218) and H32's seat pair (#11706)
+    // — initialised here for the reason the commit counts are: a sweep that
+    // throws before those passes still renders numbers rather than `undefined`.
+    crossRepoProbed: 0,
+    crossRepoUnreadable: 0,
+    seatCandidates: 0,
+    seatMarkersRead: 0,
     // H23's coverage numbers (#10942) — how many commit messages this pass read
     // and how much closing-keyword traffic they carry. Initialised to 0 here
     // rather than left absent so a sweep that throws before the commit pass
@@ -5815,19 +6515,17 @@ async function sweep(options = {}) {
     prs: seenPrs.size,
     merged: seenMerged.size,
     closed: seenClosed.size,
-    conflictCandidates: stats.conflictCandidates,
-    conflictProbed: stats.conflictProbed,
+    // The hold pair is the one counter that does NOT live on `stats` — it is
+    // accumulated on the H17 gathering object — so it is forwarded by hand and
+    // everything else comes off the enumerated contract below.
     holdCandidates: hold.candidates,
     holdProbed: hold.probed,
-    fallbackCandidates: stats.fallbackCandidates,
-    fallbackProbed: stats.fallbackProbed,
-    restartCandidates: stats.restartCandidates,
-    restartProbed: stats.restartProbed,
-    blockerTargets: stats.blockerTargets,
-    blockerResolved: stats.blockerResolved,
-    commits: stats.commits,
-    commitBindings: stats.commitBindings,
-    commitBindingMessages: stats.commitBindingMessages,
+    // ⚠️ Copied from `SWEEP_COUNT_KEYS` rather than listed here, because two of
+    // these keys were missing from the hand-written list and rendered the
+    // dispatch-liveness clause as `read on 0 of 0` on every live sweep. See the
+    // constant for the incident; the point of the loop is that forgetting a key
+    // is no longer a thing this assembly can do.
+    ...Object.fromEntries(SWEEP_COUNT_KEYS.map((key) => [key, stats[key]])),
   };
   // The oracle is read ONCE per sweep, after gathering: it is a local
   // `git ls-files`, not a request, and every candidate token is checked
@@ -6176,6 +6874,13 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
   const restartFor = (issue) =>
     restart.unreadable.has(issue.number) ? null : restart.comments.get(issue.number);
 
+  // H32's gathered seat markers (#11706), judged after the label pages finish:
+  // the predicate needs the LANE INVENTORY, and that is a count over the
+  // `pm:queue`/`pm:dispatched` listings which are only complete once this loop
+  // has consumed them. Gathering and judging are therefore split across the
+  // loop boundary, the same way H8's merged-PR window is.
+  const seatMarkers = new Map();
+
   for (const issue of seen.values()) {
     const labels = labelNames(issue);
     if (h1DispatchedNoAssignee(issue)) {
@@ -6238,6 +6943,25 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
         const kb = (Buffer.byteLength(issue.body ?? '', 'utf8') / 1024).toFixed(1);
         findings.push([issue, 'H6', `seat body is ${kb} KB (soft bound ~10 KB) — compact to the six-section current-state template (#7583; edit history is the archive)`]);
       }
+      // H32 (#11706) — gathered here, judged after the lane inventory exists.
+      // The seat population has never bought a comment fetch (the H2 branch
+      // below skips `pm:seat` explicitly), so this is a NEW cost and it is
+      // gated hard: HELD seats on a lane this board can count, 6 of 12 at the
+      // 2026-08-25 census. An unreadable thread leaves the seat unjudged — the
+      // predicate declines rather than accusing — and the summary pair says so.
+      if (h32NeedsSeatComments(issue)) {
+        stats.seatCandidates = (stats.seatCandidates ?? 0) + 1;
+        try {
+          const marker = latestSeatMarker(await commentRowsFor(issue));
+          stats.seatMarkersRead = (stats.seatMarkersRead ?? 0) + 1;
+          seatMarkers.set(issue.number, { issue, marker });
+        } catch {
+          // Left out of `seatMarkers` entirely: the predicate's `undefined`
+          // and `null` both decline, and the coverage pair is what states the
+          // gap. No rethrow — a seat this sweep could not read is one seat
+          // unexamined, not a report worth discarding.
+        }
+      }
     } else if ((issue.assignees ?? []).length > 0 && labels.some((l) => l === 'pm:queue' || l === 'pm:dispatched')) {
       // H2 needs the comment thread — fetched only for candidates (exactly the
       // pm-tracked set h2 judges; the on-hold/p0 listings above must not buy
@@ -6280,6 +7004,38 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
   // shape is identical and deliberately shared rather than re-derived.
   if (hold && h16DetailPassUnreadable(hold.candidates, hold.probed)) {
     throw lastHoldError;
+  }
+
+  // H32 (#11706) — the lane inventory, then the verdicts. Counted off the label
+  // pages this sweep already holds, so the whole row costs nothing beyond the
+  // gated seat-marker fetches above.
+  //
+  // "Unclaimed" is `pm:queue` with NO assignee, which is the queue view's own
+  // dispatchable population — an assigned `pm:queue` card is H24's
+  // contradiction and is deliberately NOT counted as work this seat could take
+  // (the claim protocol reads it as taken). Counting it would let one
+  // half-state manufacture another.
+  const laneInventory = new Map();
+  const laneBucket = (lane) => {
+    if (!laneInventory.has(lane)) laneInventory.set(lane, { unclaimed: 0, inFlight: 0 });
+    return laneInventory.get(lane);
+  };
+  for (const issue of seen.values()) {
+    const labels = labelNames(issue);
+    const lanes = labels.filter((l) => /^domain:/u.test(l));
+    if (lanes.length === 0) continue;
+    const unclaimed = labels.includes('pm:queue') && (issue.assignees ?? []).length === 0;
+    const inFlight = labels.includes('pm:dispatched');
+    for (const lane of lanes) {
+      const bucket = laneBucket(lane);
+      if (unclaimed) bucket.unclaimed += 1;
+      if (inFlight) bucket.inFlight += 1;
+    }
+  }
+  for (const { issue, marker } of seatMarkers.values()) {
+    const { lane } = seatLane(issue);
+    const idle = h32SeatIdleOverQueue(issue, marker, laneInventory.get(lane) ?? { unclaimed: 0, inFlight: 0 });
+    if (idle) findings.push([issue, 'H32', idle]);
   }
 
   // H7 + H12 + H21 — the PR side. Listed straight from `/pulls` rather than
@@ -6520,7 +7276,16 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
 
   for (const issue of seen.values()) {
     if (!labelNames(issue).includes('pm:dispatched')) continue;
-    const claim = governingClaim(await commentRowsFor(issue));
+    const commentRows = await commentRowsFor(issue);
+    // H33 (#11724) — the same thread this loop already holds, asked a
+    // different question: not "is the claimed branch alive" but "was the order
+    // this card is in flight under written before the ruling that now stands".
+    // Judged for EVERY `pm:dispatched` card, ahead of H20's age gate, because
+    // the ordering it reads has nothing to do with how old the claim is: a
+    // claim posted five minutes ago can already be behind a ruling posted four.
+    const blindClaim = h33ClaimPredatesRuling(issue, commentRows);
+    if (blindClaim) findings.push([issue, 'H33', blindClaim]);
+    const claim = governingClaim(commentRows);
     if (!h20NeedsRefProbe(issue, claim)) continue;
     const states = [];
     for (const branch of claim.branches) states.push({ branch, ...(await resolveBranchRef(branch)) });
@@ -6577,6 +7342,31 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
   for (const [number, issue] of seenUnscoped) openLocalIssues.set(number, issue);
   for (const [number, issue] of seen) openLocalIssues.set(number, issue);
   const blockerCache = new Map();
+
+  // The disambiguating second reading (#11218). A target 404 is ambiguous —
+  // unreachable repo, or a number that is not there — and `GET /repos/<o>/<n>`
+  // separates them, independently of any issue number. One request per distinct
+  // SIBLING repo per sweep (2 on this board), taken LAZILY: it is bought only
+  // when a cross-repo target actually failed, so a sweep whose cross-repo
+  // targets all resolve pays nothing at all.
+  //
+  // `true` readable · `false` not readable · `null` the probe itself failed for
+  // some other reason, which must not be reported as either (#4690) — the row
+  // falls back to the undiagnosed wording rather than picking a side.
+  const repoReadCache = new Map();
+  const probeRepoReadable = async (repo) => {
+    if (repoReadCache.has(repo)) return repoReadCache.get(repo);
+    let verdict;
+    try {
+      await rest(`/repos/${repo}`);
+      verdict = true;
+    } catch (err) {
+      verdict = err?.status === 404 || err?.status === 403 || err?.status === 401 ? false : null;
+    }
+    repoReadCache.set(repo, verdict);
+    return verdict;
+  };
+
   const resolveBlockerTarget = async (target) => {
     const cached = blockerCache.get(target.key);
     if (cached) return cached;
@@ -6609,6 +7399,12 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
           state: 'unresolved',
           closedAt: null,
           detail: err?.status ? `HTTP ${err.status}` : 'unreadable',
+          // LOCAL targets get no probe: the swept repo's readability is already
+          // settled by the pre-sweep transport prerequisite, and a local 404 is
+          // unambiguous (the number is not on this board). `undefined` — not
+          // `null` — so the renderer can tell "not asked" from "asked, and the
+          // asking failed".
+          repoReadable: target.local ? undefined : await probeRepoReadable(target.repo),
         };
       }
     }
@@ -6643,6 +7439,12 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
   // as a per-card edge count.
   stats.blockerTargets = blockerCache.size;
   stats.blockerResolved = [...blockerCache.values()].filter((r) => r.state !== 'unresolved').length;
+  // The cross-repo reachability readings (#11218) — distinct SIBLING repos
+  // probed, and how many refused this credential. `false` only: a `null` probe
+  // failed for some other reason and is not evidence of a scope gap, so it is
+  // counted as probed and not as unreadable.
+  stats.crossRepoProbed = repoReadCache.size;
+  stats.crossRepoUnreadable = [...repoReadCache.values()].filter((v) => v === false).length;
 }
 
 // ---------------------------------------------------------------------------
@@ -8092,8 +8894,53 @@ function selfTest() {
   t('H19: …citing the unreadable-is-not-absent rule', unresolvedOnly.includes('#4690'), true);
   t('H19: …naming the cross-repo target in full owner/repo#N form', unresolvedOnly.includes('`objectstack-ai/cloud#88`'), true);
   t('H19: …with the observed status', unresolvedOnly.includes('HTTP 404'), true);
-  t('H19: …and refuses to guess WHY it did not resolve', unresolvedOnly.includes('the cause is not guessed at'), true);
   t('H19: …and still routes the release through the unlock sweep', unresolvedOnly.includes('放行双查'), true);
+  // UNJUDGED must not read at judged-row weight (#11218 half 2). The premise
+  // re-verification asked for exactly this check against the live report.
+  t('H19: …and says UNJUDGED is not a quiet row', unresolvedOnly.includes('must not be skimmed'), true);
+  t('H19: …and equates it with having read nothing at all', unresolvedOnly.includes('exactly as unverified as if nothing had been read'), true);
+  // With NO repo probe taken, the wording stays undiagnosed — the pre-#11218
+  // posture, preserved rather than silently upgraded.
+  t('H19: an unprobed cross-repo target claims no cause', unresolvedOnly.includes('resolves only when its repo answers'), true);
+  t('H19: …and asserts nothing about the repo either way', unresolvedOnly.includes('is NOT readable') || unresolvedOnly.includes('IS readable'), false);
+
+  // -- The MEASURED cause (#11218 half 1, the half that can land) ------------
+  //
+  // A cross-repo 404 is ambiguous; `GET /repos/<owner>/<name>` disambiguates
+  // it. The row reports the measurement, never an inference from the issue 404.
+  const scopeGap = h19BlockOutlivedBlocker(blockedCard(10938), [
+    foreign('objectstack-ai/cloud', 944, 'unresolved', { detail: 'HTTP 404', repoReadable: false }),
+  ]);
+  t('H19 cause: an unreadable REPO is named per target', scopeGap.includes("`objectstack-ai/cloud` is NOT readable to this sweep's credential"), true);
+  t('H19 cause: …and the observed status is still carried', scopeGap.includes('HTTP 404'), true);
+  t('H19 cause: …and it is declared measured, not inferred', scopeGap.includes('measured directly'), true);
+  t('H19 cause: …and named a standing ACCEPTED limit, not a defect to chase', scopeGap.includes('standing, ACCEPTED'), true);
+  t('H19 cause: …so no re-run is prescribed', scopeGap.includes('no re-run and no re-read of this card will ever resolve'), true);
+  t('H19 cause: …and the credential call is routed to routing/security', scopeGap.includes('routing/security'), true);
+  t('H19 cause: …and ⛔ the card is not the place to fix it', scopeGap.includes('Do not "fix" it on the card'), true);
+  // The OTHER leg of the same probe: repo readable, so the number is not there.
+  const missingNumber = h19BlockOutlivedBlocker(blockedCard(1), [
+    foreign('objectstack-ai/objectui', 999999, 'unresolved', { detail: 'HTTP 404', repoReadable: true }),
+  ]);
+  t('H19 cause: a READABLE repo means the number is not there', missingNumber.includes('IS readable, so that number is not there'), true);
+  t('H19 cause: …and that is NOT reported as a scope gap', missingNumber.includes('is NOT readable'), false);
+  t('H19 cause: …nor as an accepted cross-repo limit', missingNumber.includes('standing, ACCEPTED'), false);
+  // A failed probe (`null`) picks NEITHER side — #4690 at the probe's own level.
+  const probeFailed = h19BlockOutlivedBlocker(blockedCard(1), [
+    foreign('objectstack-ai/cloud', 88, 'unresolved', { detail: 'HTTP 500', repoReadable: null }),
+  ]);
+  t('H19 cause: an unreadable PROBE names no cause at all', probeFailed.includes('IS readable') || probeFailed.includes('is NOT readable'), false);
+  t('H19 cause: …but the target and status are still named', probeFailed.includes('`objectstack-ai/cloud#88`') && probeFailed.includes('HTTP 500'), true);
+  // Mixed: only the scope-gapped ones are counted in the loud clause.
+  const mixedCause = h19BlockOutlivedBlocker(blockedCard(1), [
+    foreign('objectstack-ai/cloud', 944, 'unresolved', { detail: 'HTTP 404', repoReadable: false }),
+    foreign('objectstack-ai/objectui', 4356, 'unresolved', { detail: 'HTTP 404', repoReadable: true }),
+  ]);
+  t('H19 cause: the scope-gap count is the unreadable-repo ones only', mixedCause.includes('1 of them are unjudgeable'), true);
+  // A LOCAL target is never probed, and renders exactly as it always did.
+  const localUnresolved = h19BlockOutlivedBlocker(blockedCard(1), [target(77, 'unresolved', { detail: 'HTTP 404' })]);
+  t('H19 cause: a LOCAL unresolved target claims no repo reading', localUnresolved.includes('readable'), false);
+  t('H19 cause: …and is still named with its status', localUnresolved.includes('`#77` (HTTP 404)'), true);
   // An unresolved target alongside an open one still fires, and says which.
   const mixedUnresolved = h19BlockOutlivedBlocker(blockedCard(1), [target(2, 'open'), foreign('objectstack-ai/objectui', 4356, 'unresolved', { detail: 'HTTP 403' })]);
   t('H19: unresolved + open still fires', typeof mixedUnresolved, 'string');
@@ -8156,8 +9003,13 @@ function selfTest() {
   t('summary: the H19 coverage pair is reported', summaryLine(btCounts(11, 12), 1).includes('targets resolved on 11 of 12 distinct `Blocked-by:` target(s)'), true);
   t('summary: …and says the unit is DISTINCT targets, not per-card edges', summaryLine(btCounts(11, 12), 1).includes('distinct'), true);
   t('summary: …scoped to the population H19 judges', summaryLine(btCounts(11, 12), 1).includes('named by open `pm:blocked` card(s)'), true);
-  t('summary: an H19 shortfall points at the rows that carry it', summaryLine(btCounts(11, 12), 1).includes('each unresolved target is named on its own card\'s row, never dropped'), true);
-  t('summary: a complete H19 pass adds no shortfall clause', summaryLine(btCounts(12, 12), 1).includes('never dropped'), false);
+  // The shortfall clause still points at the rows that carry the gap — but it
+  // no longer PROMISES they survive, it says what makes them survive (the
+  // unjudged sort band). The bare "never dropped" wording was measurably false
+  // on 2026-08-25T02:08Z; see `UNJUDGED_MARKER`.
+  t('summary: an H19 shortfall points at the rows that carry it', summaryLine(btCounts(11, 12), 1).includes("unresolved target(s) are named on their own cards' rows"), true);
+  t('summary: …and names the mechanism instead of promising the outcome', summaryLine(btCounts(11, 12), 1).includes('sort ABOVE the size trim'), true);
+  t('summary: a complete H19 pass adds no shortfall clause', summaryLine(btCounts(12, 12), 1).includes('unresolved target(s) are named'), false);
   t('summary: absent H19 counts degrade to 0, never to undefined', summaryLine({ repo: 'r', issues: 1, unscoped: 1, prs: 0, merged: 0 }, 0).includes('resolved on 0 of 0 distinct'), true);
   t('summary: …and the H19 clause never prints the string undefined', summaryLine({ repo: 'r', issues: 1, unscoped: 1, prs: 0, merged: 0 }, 0).includes('undefined'), false);
   t('summary: the report-only contract still ends the sentence', summaryLine(btCounts(12, 12), 1).endsWith('not a gate verdict.'), true);
@@ -8351,6 +9203,7 @@ function selfTest() {
   t('summary: the pair is declared as serving BOTH rows', summaryLine(refCounts(5, 5), 1).includes('Dispatch liveness (H20 + H27)'), true);
   t('summary: …naming H27\'s threshold', summaryLine(refCounts(5, 5), 1).includes(`H27's ${DEAD_CLAIM_STALE_HOURS}h population is a subset`), true);
   t('summary: …and that it costs no request of its own', summaryLine(refCounts(5, 5), 1).includes('costs no request of its own'), true);
+
   t('summary: the report-only contract still ends the sentence after H20', summaryLine(refCounts(5, 5), 1).endsWith('not a gate verdict.'), true);
 
   // -- H27: the claim is PERFECT and the claimant is dead (#11248) ------------
@@ -8879,6 +9732,43 @@ function selfTest() {
   t('summaryLine: absent H16 counts degrade to 0, never to undefined', summaryLine({ repo: 'o/r', issues: 1, unscoped: 1, prs: 1, merged: 1 }, 0).includes('read on 0 of 0'), true);
   t('summaryLine: …and never prints the string undefined', summaryLine({ repo: 'o/r', issues: 1, unscoped: 1, prs: 1, merged: 1 }, 0).includes('undefined'), false);
 
+  // -- The H19 coverage clause, and the promise it used to make falsely -------
+  const btCounts2 = (blockerResolved, blockerTargets, extra = {}) => ({ ...counts, blockerResolved, blockerTargets, ...extra });
+  t('summary: a complete H19 pass adds no shortfall clause', summaryLine(btCounts2(12, 12), 1).includes('unresolved target(s) are named'), false);
+  t('summary: an H19 shortfall counts the unresolved targets', summaryLine(btCounts2(25, 28), 1).includes('the 3 unresolved target(s) are named on their own cards\' rows'), true);
+  t('summary: …and promises the TRIM cannot drop them, which is the fixable half', summaryLine(btCounts2(25, 28), 1).includes('sort ABOVE the size trim'), true);
+  t('summary: …and cites the sweep on which the old promise was false', summaryLine(btCounts2(25, 28), 1).includes('2026-08-25T02:08Z'), true);
+  t('summary: …and no longer makes the bare "never dropped" claim for H19', summaryLine(btCounts2(25, 28), 1).includes('each unresolved target is named on its own card\'s row, never dropped'), false);
+
+  // -- The cross-repo reachability pair (#11218) ------------------------------
+  const xCounts = (crossRepoProbed, crossRepoUnreadable) => btCounts2(25, 28, { crossRepoProbed, crossRepoUnreadable });
+  t('summary: cross-repo probes are reported', summaryLine(xCounts(2, 1), 1).includes('measured directly on 2 sibling repo(s)'), true);
+  t('summary: …naming how many refused', summaryLine(xCounts(2, 1), 1).includes('1 do(es) not answer this credential'), true);
+  t('summary: …and that a re-run will not help', summaryLine(xCounts(2, 1), 1).includes('no re-run'), true);
+  t('summary: no probes taken -> no cross-repo clause at all', summaryLine(xCounts(0, 0), 1).includes('sibling repo(s)'), false);
+  t('summary: absent cross-repo counts degrade to 0, never to undefined', summaryLine(counts, 0).includes('undefined'), false);
+
+  // -- H32's seat coverage pair (#11706) -------------------------------------
+  const seatCounts = (seatMarkersRead, seatCandidates) => ({ ...counts, seatMarkersRead, seatCandidates });
+  t('summary: the H32 seat pair is reported', summaryLine(seatCounts(6, 6), 1).includes('marker thread read on 6 of 6 HELD seat post(s)'), true);
+  t('summary: …scoped to lanes countable on this board', summaryLine(seatCounts(6, 6), 1).includes('countable on THIS board'), true);
+  t('summary: …and says a sibling-lane seat is out of scope', summaryLine(seatCounts(6, 6), 1).includes("a seat held for a sibling repo's lane is out of scope"), true);
+  t('summary: …and that an unread thread declines rather than accuses', summaryLine(seatCounts(2, 6), 1).includes('decline to judge that seat rather than accuse it'), true);
+  t('summary: absent H32 counts degrade to 0, never to undefined', summaryLine(counts, 0).includes('marker thread read on 0 of 0'), true);
+
+  // -- The dispatch-liveness pair was COMPUTED and never forwarded -----------
+  //
+  // A wiring regression, not a wording one: `sweep()` assembled `counts`
+  // without `dispatchRefTargets`/`dispatchRefRead`, so this clause rendered
+  // `0 of 0` on every live sweep — including 2026-08-25T02:08Z, which said
+  // `read on 0 of 0` while publishing two H20 findings that a non-empty ref
+  // cache is the only way to produce. Pinned as the CONTRACT the assembly owes,
+  // so a future edit that drops the keys again fails here rather than in the
+  // anchor body six hours later.
+  t('summary: the H20/H27 pair is a real reading, not a constant 0 of 0', summaryLine(refCounts(4, 5), 1).includes('read on 0 of 0 distinct claimed'), false);
+  t('summary: SWEEP_COUNT_KEYS names every count the summary consumes', SWEEP_COUNT_KEYS.includes('dispatchRefTargets') && SWEEP_COUNT_KEYS.includes('dispatchRefRead'), true);
+  t('summary: …including the pairs added since', SWEEP_COUNT_KEYS.includes('crossRepoProbed') && SWEEP_COUNT_KEYS.includes('seatCandidates'), true);
+
   // The loudness contract between H13 and the renderer — one constant, two
   // readers. If the prefix ever drifts, this pair fails rather than the alarm
   // going quietly unsorted.
@@ -8946,6 +9836,37 @@ function selfTest() {
   t('markdown: …and under the renderer\'s own budget', trimmed.length <= MARKDOWN_BODY_BUDGET, true);
   t('markdown: the trim announces itself in the body', trimmed.includes('further row(s) omitted'), true);
   t('markdown: truncation can never reach a loud row', trimmed.includes('#900'), true);
+
+  // -- The UNJUDGED band and the trim (#11218) -------------------------------
+  //
+  // The regression this pins is MEASURED, not hypothetical. On the
+  // 2026-08-25T02:08Z sweep the summary said "each unresolved target is named
+  // on its own card's row, never dropped" while 199 rows were trimmed and NOT
+  // ONE rendered row carried an unresolved target. The header promised exactly
+  // what the trim had just eaten.
+  const unjudgedRow = finding(
+    9999,
+    'H19',
+    h19BlockOutlivedBlocker(blockedCard(9999), [foreign('objectstack-ai/cloud', 944, 'unresolved', { detail: 'HTTP 404', repoReadable: false })]),
+  );
+  t('markdown: an UNJUDGED row is recognised as such', isUnjudgedFinding(unjudgedRow[2]), true);
+  t('markdown: …a judged H19 row is NOT', isUnjudgedFinding(h19BlockOutlivedBlocker(blockedCard(1), [target(2, 'closed')])), false);
+  t('markdown: …and an ordinary row is NOT', isUnjudgedFinding('`pm:dispatched` with no assignee'), false);
+  t('markdown: the explicit marker is recognised too', isUnjudgedFinding(`${UNJUDGED_MARKER} something could not be read`), true);
+  const withUnjudged = renderMarkdown([...many, unjudgedRow], counts);
+  t('markdown: the trim can never reach an UNJUDGED row', withUnjudged.includes('#9999'), true);
+  t('markdown: …even though that row sorts LAST by card number', many.every(([i]) => i.number < 9999), true);
+  t('markdown: …and the trim still fired', withUnjudged.includes('further row(s) omitted'), true);
+  t('markdown: …and the body is still under budget', withUnjudged.length <= MARKDOWN_BODY_BUDGET, true);
+  t('markdown: an UNJUDGED row is banner-announced', withUnjudged.includes('UNJUDGED row(s) in this sweep'), true);
+  t('markdown: …and the banner says a later sweep will not fix it', withUnjudged.includes('nothing in a later sweep will resolve them'), true);
+  t('markdown: no banner when nothing is unjudged', renderMarkdown([quietRow], counts).includes('UNJUDGED row(s) in this sweep'), false);
+  // A loud P0 row still outranks an unjudged one: the emergency channel is the
+  // more urgent of the two, and both survive the trim regardless.
+  t('markdown: a loud row still sorts above an UNJUDGED one', renderMarkdown([unjudgedRow, loudRow], counts).indexOf('#900') < renderMarkdown([unjudgedRow, loudRow], counts).indexOf('#9999'), true);
+  t('markdown: an UNJUDGED row sorts above an ordinary one', renderMarkdown([quietRow, unjudgedRow], counts).indexOf('#9999') < renderMarkdown([quietRow, unjudgedRow], counts).indexOf('#200'), true);
+  // The plain renderer keeps the caller's order, as it always has.
+  t('plain: applies no unjudged sort either', renderPlain([quietRow, unjudgedRow], counts).indexOf('#200') < renderPlain([quietRow, unjudgedRow], counts).indexOf('#9999'), true);
 
   // Provenance is caller-supplied text interpolated into one italic line: a
   // newline in it would break the header apart, so it is flattened, not trusted.
@@ -9752,6 +10673,179 @@ function selfTest() {
   );
   t('H28: two stale body targets are counted', manyStale.includes('names 2 CLOSED'), true);
   t('H28: …and the live one is still named', manyStale.includes('`#11501`'), true);
+
+  // -- H32 — a HELD seat idle over a non-empty lane queue (#11706) ------------
+  //
+  // Driven with the REAL seat-title shapes from the 2026-08-25 census (all 12
+  // open seat posts), because every gate in this row is a read of that title
+  // and invented spellings would prove nothing about the population it runs on.
+  const NOW32 = Date.parse('2026-08-25T08:00:00Z');
+  const minsAgo = (m) => new Date(NOW32 - m * 60_000).toISOString();
+  const seat = (title, comments = 0) => ({
+    ...issue(['pm:seat'], [], '', title),
+    number: 6017,
+    comments,
+  });
+  const HELD = '[PM seat] domain:spec — 🟢 session_01NDGG54XF5gbTLdQzCtnaVV · R6 dispatch wave (batch:5)';
+  const marker = (body, m) => ({ body, createdAt: minsAgo(m) });
+  const busy = { unclaimed: 15, inFlight: 7 };
+  const idleLane = { unclaimed: 15, inFlight: 0 };
+
+  // The lane parse, across the three measured title shapes.
+  t('H32 lane: a plain domain lane is own-board', seatLane(seat(HELD)).lane, 'domain:spec');
+  t('H32 lane: …and not foreign', seatLane(seat(HELD)).foreign, false);
+  t('H32 lane: an `@ sibling` suffix is FOREIGN', seatLane(seat('[PM seat] domain:devx @ objectui — 🟢 os-x')).foreign, true);
+  t('H32 lane: an `@ own-repo` suffix is NOT foreign', seatLane(seat('[PM seat] domain:devx @ objectstack — 🟢 os-x')).foreign, false);
+  t('H32 lane: …and keeps the bare lane label', seatLane(seat('[PM seat] domain:devx @ objectstack — 🟢 os-x')).lane, 'domain:devx');
+  t('H32 lane: a repo-scoped seat has no countable lane', seatLane(seat('[PM seat] repo:cloud — 🟢 os-x')).lane, null);
+  t('H32 lane: …and is foreign', seatLane(seat('[PM seat] repo:cloud — 🟢 os-x')).foreign, true);
+  t('H32 lane: a lane-less seat (skills) is foreign', seatLane(seat('[PM seat] skills — 🟢 os-zhuang (session_x)')).foreign, true);
+  t('H32 lane: the triage seat is foreign', seatLane(seat('[PM seat] triage (objectstack-wide) — 🟢 Routine')).foreign, true);
+  t('H32 lane: an unparseable title is foreign, never guessed', seatLane(seat('not a seat title')).foreign, true);
+
+  // The held/vacant gate — an unheld seat is a ROUTING gap, never 怠工.
+  t('H32 held: 🟢 with a holder', seatIsHeld(seat(HELD)), true);
+  t('H32 held: ⏳ vacant is NOT held', seatIsHeld(seat('[PM seat] domain:devx @ objectui — ⏳ vacant')), false);
+  t('H32 held: 🔴 收班 vacant is NOT held', seatIsHeld(seat('[PM seat] domain:spec — 🔴 收班 vacant · 上一班 os-warren')), false);
+  t('H32 held: ⏸️ paused is NOT held', seatIsHeld(seat('[PM seat] domain:spec — ⏸️ paused')), false);
+  t('H32 held: a Routine seat is excluded (no claim cadence of its own)', seatIsHeld(seat('[PM seat] triage (objectstack-wide) — 🟢 Routine')), false);
+
+  // The board halves — both required.
+  t('H32: held + idle lane + stale marker -> finding', typeof h32SeatIdleOverQueue(seat(HELD), marker('Round-start marker — R6.', 600), idleLane, NOW32), 'string');
+  t('H32: …and it names the lane', h32SeatIdleOverQueue(seat(HELD), marker('Round-start marker — R6.', 600), idleLane, NOW32).includes('`domain:spec`'), true);
+  t('H32: …and the unclaimed count', h32SeatIdleOverQueue(seat(HELD), marker('Round-start marker — R6.', 600), idleLane, NOW32).includes('15 unclaimed'), true);
+  t('H32: work IN FLIGHT is a working seat -> clean', h32SeatIdleOverQueue(seat(HELD), marker('Round-start marker — R6.', 600), busy, NOW32), null);
+  t('H32: an EMPTY queue is a finished lane -> clean', h32SeatIdleOverQueue(seat(HELD), marker('Round-start marker — R6.', 600), { unclaimed: 0, inFlight: 0 }, NOW32), null);
+  t('H32: a vacant seat is out of scope however deep the queue', h32SeatIdleOverQueue(seat('[PM seat] domain:spec — ⏳ vacant'), marker('收班', 6000), idleLane, NOW32), null);
+  t('H32: a FOREIGN lane is out of scope (its inventory is unreadable here)', h32SeatIdleOverQueue(seat('[PM seat] domain:devx @ objectui — 🟢 os-x'), marker('Round-start marker', 600), idleLane, NOW32), null);
+  t('H32: a non-seat card is out of scope', h32SeatIdleOverQueue({ ...issue(['pm:queue']), title: HELD }, marker('x', 600), idleLane, NOW32), null);
+
+  // The threshold, at both edges of SEAT_IDLE_STALE_MINUTES.
+  t('H32: a marker inside the horizon -> clean', h32SeatIdleOverQueue(seat(HELD), marker('Round-start marker — R6.', SEAT_IDLE_STALE_MINUTES - 1), idleLane, NOW32), null);
+  t('H32: exactly at the horizon -> clean (strictly past it fires)', h32SeatIdleOverQueue(seat(HELD), marker('Round-start marker — R6.', SEAT_IDLE_STALE_MINUTES), idleLane, NOW32), null);
+  t('H32: one minute past -> finding', typeof h32SeatIdleOverQueue(seat(HELD), marker('Round-start marker — R6.', SEAT_IDLE_STALE_MINUTES + 1), idleLane, NOW32), 'string');
+  // The measured cross-shift interval that must NOT fire: domain:engine's
+  // 收班 23:10 -> 开轮 01:47 pair, the shape the 480-min horizon was set above.
+  t('H32: a 收班/开轮 turnaround inside the horizon is clean', h32SeatIdleOverQueue(seat(HELD), marker('**开轮 / ROUND-OPEN marker** — domain:engine seat', 157), idleLane, NOW32), null);
+
+  // The wait exemption — structural, unbounded by time (grading's ruling).
+  for (const [name, body] of [
+    ['等 CI', '开轮 R7 — 在飞 0,等 CI 收敛后再派'],
+    ['等裁决', 'Round brief — 队列非空但全部等裁决'],
+    ['等人工步骤', '收班简报 — 剩余卡等人工步骤(手动 release)'],
+    ['awaiting', 'Round-open marker — every queued card is awaiting-maintainer'],
+    ['a named Blocked-by', 'Round brief — the whole queue is Blocked-by: #123'],
+    ['决策箱', '收班 — 队列 12,其中 12 在决策箱'],
+  ]) {
+    t(`H32 exempt: a marker naming ${name} silences the row`, h32SeatIdleOverQueue(seat(HELD), marker(body, 6000), idleLane, NOW32), null);
+  }
+  t('H32 exempt: …and the exemption is UNBOUNDED by time', h32SeatIdleOverQueue(seat(HELD), marker('等裁决', 60_000), idleLane, NOW32), null);
+  t('H32: a marker with no wait declared is NOT exempt', typeof h32SeatIdleOverQueue(seat(HELD), marker('Round brief — 10 PR landed.', 6000), idleLane, NOW32), 'string');
+  t('H32 exempt: seatDeclaresWait is case-folded', seatDeclaresWait('Everything is AWAITING the maintainer'), true);
+  t('H32 exempt: …and plain prose declares nothing', seatDeclaresWait('Round 2 result — os-warren'), false);
+
+  // The unread/unconsulted thread DECLINES — the one asymmetry against H4.
+  t('H32: an unconsulted thread declines to judge', h32SeatIdleOverQueue(seat(HELD), undefined, idleLane, NOW32), null);
+  t('H32: an UNREADABLE thread declines too (never a blind accusation)', h32SeatIdleOverQueue(seat(HELD), null, idleLane, NOW32), null);
+  t('H32: a seat with NO marker at all declines', h32SeatIdleOverQueue(seat(HELD), latestSeatMarker([]), idleLane, NOW32), null);
+  // An unreadable STAMP still fires — that is the #4690 direction, and it
+  // differs from an unreadable THREAD because the wait exemption was still read.
+  t('H32: an unreadable marker stamp must not read as fresh', typeof h32SeatIdleOverQueue(seat(HELD), { body: 'Round-start marker', createdAt: 'not-a-date' }, idleLane, NOW32), 'string');
+  t('H32: …and the row says so rather than printing a number', h32SeatIdleOverQueue(seat(HELD), { body: 'Round-start marker', createdAt: 'not-a-date' }, idleLane, NOW32).includes('unreadable marker timestamp'), true);
+
+  // latestSeatMarker — recency, with governingClaim's thread-order fallback.
+  t('H32 marker: the NEWEST comment wins', latestSeatMarker([{ body: 'old', created_at: minsAgo(600) }, { body: 'new', created_at: minsAgo(10) }]).body, 'new');
+  t('H32 marker: …regardless of thread order', latestSeatMarker([{ body: 'new', created_at: minsAgo(10) }, { body: 'old', created_at: minsAgo(600) }]).body, 'new');
+  t('H32 marker: an unparseable stamp falls back to thread order', latestSeatMarker([{ body: 'first', created_at: 'nope' }, { body: 'last', created_at: 'nope' }]).body, 'last');
+  t('H32 marker: an empty thread is null', latestSeatMarker([]), null);
+  t('H32 marker: a non-array is null', latestSeatMarker(undefined), null);
+  t('H32 age: an unreadable stamp is null, not 0', seatMarkerAgeMinutes({ createdAt: 'nope' }, NOW32), null);
+
+  // The gathering gate buys a fetch only for seats the row can speak about.
+  t('H32 gate: a held own-board seat is a candidate', h32NeedsSeatComments(seat(HELD)), true);
+  t('H32 gate: a foreign-lane seat buys no fetch', h32NeedsSeatComments(seat('[PM seat] domain:devx @ objectui — 🟢 os-x')), false);
+  t('H32 gate: a vacant seat buys no fetch', h32NeedsSeatComments(seat('[PM seat] domain:spec — ⏳ vacant')), false);
+  t('H32 gate: a non-seat card buys no fetch', h32NeedsSeatComments(issue(['pm:queue'])), false);
+
+  // Adjacency: H32 must not restate what H30/H24 already say about the cards.
+  t('H32 adjacency: H30 speaks about the CARD, H32 about the SEAT', h30QueueRotting(seat(HELD), NOW32), null);
+
+  // -- H33 — a claim written before the ruling that now stands (#11724) -------
+  const dispatched33 = (n = 4964) => ({ ...issue(['pm:dispatched'], ['os-zhuang']), number: n });
+  const row33 = (createdAt, body) => ({ created_at: createdAt, body });
+  const CLAIM_AT = '2026-08-20T10:00:00Z';
+  const RULING_AT = '2026-08-21T09:00:00Z';
+  const claimRow33 = row33(CLAIM_AT, 'Claim: skills seat `session_x`.\nBranch: `claude/issue-4964-x`');
+  const rulingRow33 = row33(RULING_AT, 'Triage: lands in packages/rest — dispatch scope = option 1 as a sweep.');
+
+  t('H33: a claim predating a ruling -> finding', typeof h33ClaimPredatesRuling(dispatched33(), [claimRow33, rulingRow33]), 'string');
+  t('H33: …and it names both stamps', h33ClaimPredatesRuling(dispatched33(), [claimRow33, rulingRow33]).includes(RULING_AT), true);
+  t('H33: a ruling BEFORE the claim -> clean (the order could carry it)', h33ClaimPredatesRuling(dispatched33(), [row33('2026-08-19T09:00:00Z', 'Triage: routed'), claimRow33]), null);
+  t('H33: no ruling on the thread at all -> clean (the ordinary card)', h33ClaimPredatesRuling(dispatched33(), [claimRow33, row33(RULING_AT, 'ACCEPT — PR #12066 reviewed')]), null);
+  t('H33: no claim at all -> clean', h33ClaimPredatesRuling(dispatched33(), [rulingRow33]), null);
+  t('H33: the label gate outranks the shape', h33ClaimPredatesRuling({ ...issue(['pm:queue']) }, [claimRow33, rulingRow33]), null);
+  t('H33: an unconsulted thread -> clean', h33ClaimPredatesRuling(dispatched33(), undefined), null);
+  t('H33: an unreadable thread -> clean', h33ClaimPredatesRuling(dispatched33(), null), null);
+  // The LATEST claim is what counts — a re-claim after the ruling clears it.
+  t('H33: a re-claim AFTER the ruling clears the row', h33ClaimPredatesRuling(dispatched33(), [claimRow33, rulingRow33, row33('2026-08-22T08:00:00Z', 'Claim: PM loop round R7')]), null);
+  // Both stamps must be readable — an ordering built on an unreadable stamp
+  // would be fabricated, which is worse than a missing row.
+  t('H33: an unreadable CLAIM stamp declines', h33ClaimPredatesRuling(dispatched33(), [row33('nope', 'Claim: PM loop round R6'), rulingRow33]), null);
+  t('H33: an unreadable RULING stamp declines', h33ClaimPredatesRuling(dispatched33(), [claimRow33, row33('nope', 'Triage: routed')]), null);
+  // Multiple rulings are counted, and the NEWEST is the one named.
+  const twoRulings = h33ClaimPredatesRuling(dispatched33(), [claimRow33, rulingRow33, row33('2026-08-22T09:00:00Z', 'Maintainer ruling — option 1 stands')]);
+  t('H33: two later rulings are counted', twoRulings.includes('2 triage-ruling comment(s)'), true);
+  t('H33: …and the NEWEST is the one quoted', twoRulings.includes('2026-08-22T09:00:00Z'), true);
+
+  // The ruling anchors, driven with the measured openings (2026-08-25 census).
+  for (const [name, line] of [
+    ['Triage:', 'Triage: lands in packages/rest/src/rest-server.ts; domain:cli.'],
+    ['Triage routing:', 'Triage routing: domain:skills + finding — pm-dispatch process defect'],
+    ['Triage (first-touch grading):', 'Triage (first-touch grading): graduated finding → pm:blocked'],
+    ['Triage (Routine seat…)', 'Triage (Routine seat, hourly round): routed → finding + domain:skills'],
+    ['Concentrated triage batch:', 'Concentrated triage batch: finding → pm:queue + domain:engine, Task, M'],
+    ['Concentrated triage round:', 'Concentrated triage round: finding → pm:queue + domain:engine stands'],
+    ['Skills-lane self-triage', 'Skills-lane self-triage (run-to-empty fire): finding → pm:queue'],
+    ['Grading (…)', 'Grading (skills seat, session `session_x`, 2026-08-23 concentrated round): promoted'],
+    ['Maintainer ruling —', 'Maintainer ruling — option 1: every failure payload carries the advisory lists'],
+  ]) {
+    t(`H33 anchor: ${name} is a ruling`, isTriageRulingComment(line), true);
+  }
+  // Decoration is expected — seats bold and blockquote these openings.
+  t('H33 anchor: a BOLDED ruling opening still reads', isTriageRulingComment('**Triage: routed → pm:queue**'), true);
+  t('H33 anchor: a BLOCKQUOTED one too', isTriageRulingComment('> Triage routing: domain:skills'), true);
+  t('H33 anchor: a heading-marked one too', isTriageRulingComment('## Grading (skills seat)'), true);
+  t('H33 anchor: leading blank lines are skipped', isTriageRulingComment('\n\n   Triage: routed'), true);
+  // …and the strictness the tolerance must NOT cost. Both specimens are real
+  // comments from the same census that MENTION a ruling without being one.
+  t('H33 anchor: prose mentioning the triage comment is NOT a ruling', isTriageRulingComment('Serial-constraint addendum to the R6 claim above: the triage comment says'), false);
+  t('H33 anchor: a correction referencing a ruling is NOT one', isTriageRulingComment("⚠️ Section 3's REST-fallback claim needs qualifying before it lands"), false);
+  t('H33 anchor: a dev report is NOT a ruling', isTriageRulingComment('os-dev-report'), false);
+  t('H33 anchor: an ACCEPT is NOT a ruling', isTriageRulingComment('ACCEPT — PR #12066 · reviewed against GitHub'), false);
+  t('H33 anchor: a claim is NOT a ruling', isTriageRulingComment('Claim: PM loop round R6'), false);
+  t('H33 anchor: empty text is not a ruling', isTriageRulingComment(''), false);
+
+  // latestClaimComment — deliberately NOT branch-gated, unlike governingClaim.
+  const branchless = row33('2026-08-21T10:00:00Z', 'Claim: PM loop round R6');
+  t('H33 claim: a BRANCHLESS claim still counts here', latestClaimComment([branchless]).createdAt, '2026-08-21T10:00:00Z');
+  t('H33 claim: …while governingClaim correctly ignores it', governingClaim([branchless]), null);
+  t('H33 claim: the newest claim wins', latestClaimComment([claimRow33, branchless]).createdAt, '2026-08-21T10:00:00Z');
+  t('H33 claim: a thread with no claim is null', latestClaimComment([rulingRow33]), null);
+  t('H33 claim: a non-array is null', latestClaimComment(null), null);
+  // ⚠️ A KNOWN, MEASURED blind spot, pinned here so it is visible in the suite
+  // rather than discovered again from a silent row. `CLAIM_COMMENT_MARKER`
+  // requires a COLON, and 24 of the 54 open `pm:dispatched` cards on the
+  // 2026-08-25 board carry a well-formed claim written with an EM DASH
+  // (「Claim — skills seat `session_…`」), which the marker cannot see. H33
+  // inherits that blindness deliberately rather than defining a second, wider
+  // notion of "claim" than H2/H20/H27 use — a file that disagrees with itself
+  // about what a claim IS would be the worse defect. The consequence is
+  // UNDER-reporting, which is this file's standing direction for an
+  // unrecognised spelling (H17/H20), never a fabricated row. The marker itself
+  // is a separate defect with a wider blast radius (it also makes H2 report
+  // those 24 cards as claimless) and is filed on its own card.
+  t('H33 claim: an EM-DASH claim is invisible to the shared marker (known gap)', latestClaimComment([row33(CLAIM_AT, 'Claim — skills seat `session_x`.')]), null);
+  t('H33: …so a card claimed that way under-reports rather than fabricating', h33ClaimPredatesRuling(dispatched33(), [row33(CLAIM_AT, 'Claim — skills seat `session_x`.'), rulingRow33]), null);
 
   // -- resolveSweepRepo: the parameterisation that makes a verbatim sibling
   // -- install correct rather than a green report about the wrong board (#11217)
