@@ -367,8 +367,9 @@ describe('FieldSchema', () => {
      * before #11431 taught the consumer to defend itself). Applicability: the
      * key was on the BASE schema — authorable on `boolean`/`lookup`/
      * `autonumber` where nothing bounded is stored — and now converges to the
-     * write-time validator's ten bounded-string types
-     * (BOUNDED_STRING_FIELD_TYPES).
+     * write-time validator's bounded-string types
+     * (BOUNDED_STRING_FIELD_TYPES; ten at #11566, `signature`/`qrcode`
+     * joined in #11875 when the write seam gained their bound).
      */
     describe('malformed or misplaced maxLength declarations are refused at authoring (#11566)', () => {
       const shapeCases: Array<[value: number, code: string]> = [
@@ -394,11 +395,13 @@ describe('FieldSchema', () => {
 
       // One representative per family the base-schema placement wrongly
       // accepted: logic, numeric, temporal, selection, relational,
-      // runtime-owned, derived, structured — plus `secret`, the near-miss
-      // (stores a ciphertext handle, deliberately outside the ten).
+      // runtime-owned, derived, structured — plus `secret` and `color`, the
+      // near-misses the #11875 ruling explicitly left OUT of the set (`secret`
+      // stores a ciphertext handle per ADR-0100; `color` is short by
+      // construction).
       const wrongTypes = [
         'boolean', 'number', 'date', 'select', 'lookup', 'autonumber',
-        'formula', 'json', 'secret',
+        'formula', 'json', 'secret', 'color',
       ] as const;
       for (const type of wrongTypes) {
         it(`refuses maxLength on type: '${type}' with a custom issue at [maxLength]`, () => {
@@ -417,12 +420,15 @@ describe('FieldSchema', () => {
         });
       }
 
-      it('accepts a positive-integer maxLength on every bounded-string type (the validator\'s ten)', () => {
-        const ten = [
+      it('accepts a positive-integer maxLength on every bounded-string type (the validator\'s twelve)', () => {
+        // Ten at #11566; `signature` / `qrcode` joined in #11875 (maintainer
+        // ruling 2026-08-25, option 1) — the write seam enforces their bound,
+        // so the declaration is no longer inert and the authoring seam admits it.
+        const twelve = [
           'text', 'textarea', 'email', 'url', 'phone', 'password',
-          'markdown', 'html', 'richtext', 'code',
+          'markdown', 'html', 'richtext', 'code', 'signature', 'qrcode',
         ] as const;
-        for (const type of ten) {
+        for (const type of twelve) {
           const result = FieldSchema.safeParse({
             name: 'f', label: 'F', type, maxLength: 255,
           });

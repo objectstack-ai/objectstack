@@ -999,6 +999,27 @@ export class ObjectStackClient {
     /* [#3563 PR-5] The three meta routes that had no SDK expression. */
 
     /**
+     * ⛔ [#11925] The nine `meta.*` history / diagnostics methods below keep
+     * `unwrapResponse< any >` DELIBERATELY — Class C, a missing contract
+     * rather than a missing annotation (#12038).
+     *
+     * `getPublished`, `listDrafts`, `migrateStored`, `getDiagnostics`,
+     * `getReferences`, `getBookTree`, `getAudit`, `rollbackItem`, `diffItem`.
+     *
+     * Nothing in `@objectstack/spec` declares any of these nine route
+     * responses: every ledger row reports `responseSchema=None`, and the
+     * producers hand back whatever the protocol service returns. The one named
+     * type that exists — `StoredMigrationReport`, which `migrateStored`'s
+     * docblock points at — lives in `@objectstack/metadata-protocol`, which is
+     * not a dependency of this package.
+     *
+     * `publishItem` below is the counter-example and the precedent: it is
+     * annotated only because #7294 declared `PublishMetaItemResponseSchema`
+     * first. Same order applies here — schema, then ledger row, then
+     * annotation. ⛔ Do not reach for a same-named neighbour instead.
+     */
+
+    /**
      * ADR-0033: the published version of a metadata item. Compound names are
      * passed through unencoded (e.g. `getPublished('lead', 'views/all_leads')`),
      * matching how `getItem` addresses sub-resources.
@@ -1358,8 +1379,18 @@ export class ObjectStackClient {
   packages = {
     /**
      * List all installed packages with optional filters.
+     *
+     * [#11925] Bound to `InstalledPackage`. Both mounted surfaces answer the
+     * SAME envelope for this route, which is what makes it bindable:
+     * `runtime`'s `/packages` domain sends `success({ packages, total:
+     * packages.length })` and `rest`'s `GET {base}/packages` sends
+     * `sendOk(res, { packages, total: packages.length })`. The REST rows carry
+     * an extra `source: 'database' | 'registry' | 'both'` discriminator that is
+     * deliberately NOT declared here — the dispatcher rows have no such key, so
+     * declaring it would be false on that surface. #8140 bound the identical
+     * scoped sibling (`ScopedProjectClient.packages.list`) the same way.
      */
-    list: async (filters?: { status?: string; type?: string; enabled?: boolean }) => {
+    list: async (filters?: { status?: string; type?: string; enabled?: boolean }): Promise<{ packages: InstalledPackage[]; total: number }> => {
         const route = this.getRoute('packages');
         const params = new URLSearchParams();
         if (filters?.status) params.set('status', filters.status);
@@ -1368,11 +1399,24 @@ export class ObjectStackClient {
         const qs = params.toString();
         const url = `${this.baseUrl}${route}${qs ? '?' + qs : ''}`;
         const res = await this.fetch(url);
-        return this.unwrapResponse<{ packages: any[]; total: number }>(res);
+        return this.unwrapResponse<{ packages: InstalledPackage[]; total: number }>(res);
     },
 
     /**
      * Get a specific installed package by its ID (reverse domain identifier).
+     *
+     * ⛔ [#11925] NOT bound, and the `{ package }` envelope is left exactly as
+     * it was — the two mounted surfaces answer this route with DIFFERENT
+     * envelopes, so no single declaration is true (#12034). `runtime`'s
+     * `/packages` domain sends `success(pkg)` — the bare row — while `rest`'s
+     * `GET {base}/packages/:id` sends `sendOk(res, { package: { ...pkg,
+     * source } })`, and the REST routes "shadow live dispatcher twins" only
+     * where a `package` service is registered. Binding the member here would
+     * harden a claim that is already false on one of the two.
+     *
+     * Its SCOPED twin `ScopedProjectClient.packages.get` IS bound, because
+     * only the REST registrar serves the scoped mount — one surface, one
+     * shape.
      */
     get: async (id: string) => {
         const route = this.getRoute('packages');
@@ -1382,6 +1426,15 @@ export class ObjectStackClient {
 
     /**
      * Install a new package from its manifest.
+     *
+     * ⛔ [#11925] NOT bound. This method and its `enable` / `disable`
+     * neighbours declare `{ package; message? }`, and the ONLY surface that
+     * serves them — `runtime`'s `/packages` domain; `rest` mounts no twin for
+     * any of the three — answers `success(pkg)`, the bare row (#12034). The
+     * declared envelope is not merely erased, it is false, and the `any`
+     * member is what keeps that invisible. Correcting it is a response-shape
+     * decision with its own clause-② analysis, not the `any`-binding this card
+     * carries, so the shape is left untouched here.
      *
      * By default the server rejects a manifest whose `id` is already
      * installed with **409 Conflict** (duplicate-id guard) instead of
@@ -1447,15 +1500,42 @@ export class ObjectStackClient {
      * Edit a package's manifest (partial: name / description / version).
      * Identity (`id` / `scope` / `type`) and lifecycle state are not editable
      * here; the server rejects an empty patch and non-semantic versions.
+     *
+     * [#11925] Bound to `InstalledPackage` — the BARE row, with no envelope.
+     * `PATCH /packages/:id` is served only by `runtime`'s `/packages` domain
+     * (`rest` mounts no PATCH twin), and that handler answers
+     * `success((updated as any)?.package ?? updated)` on the protocol path and
+     * `success(pkg)` on the registry fallback — the row either way. This method
+     * declared no envelope before the binding, so the shape claim is unchanged
+     * and only the erased `any` moved.
      */
-    update: async (id: string, patch: { name?: string; description?: string; version?: string }) => {
+    update: async (id: string, patch: { name?: string; description?: string; version?: string }): Promise<InstalledPackage> => {
         const route = this.getRoute('packages');
         const res = await this.fetch(`${this.baseUrl}${route}/${encodeURIComponent(id)}`, {
             method: 'PATCH',
             body: JSON.stringify(patch),
         });
-        return this.unwrapResponse<any>(res);
+        return this.unwrapResponse<InstalledPackage>(res);
     },
+
+    /**
+     * ⛔ [#11925] The eight methods from here down — `publish`,
+     * `discardDrafts`, `listCommits`, `revertCommit`, `rollback`, `export`,
+     * `adoptOrphans`, `duplicate` — keep `unwrapResponse< any >` on purpose:
+     * Class C, a missing contract (#12038). Their handlers reach the protocol
+     * service through an `any` cast (`(protocol as any).listCommits`,
+     * `.revertCommit`, `.rollbackToPackageCommit`, `.duplicatePackage`, …), so
+     * there is no declared type anywhere on the path to lift, and every ledger
+     * row reports `responseSchema=None`.
+     *
+     * ⭐ `rollback` in particular: `PackageRollbackResponse` sits one import
+     * away in `@objectstack/spec/api` and is the WRONG type for it. That
+     * schema declares `{ success, restoredVersion?, message? }` — a VERSION
+     * rollback — while this method posts `{ commitId }` and the dispatcher
+     * routes it to `rollbackToPackageCommit`, the ADR-0067 COMMIT rollback.
+     * Binding it would compile and be false. `return-type-precision.test.ts`
+     * holds a compile-time guard against that substitution.
+     */
 
     /** Publish the package's metadata snapshot. */
     publish: async (id: string, opts?: Record<string, unknown>) => {
@@ -1593,6 +1673,27 @@ export class ObjectStackClient {
    * - POST   /api/v1/cloud/environments/:id/credentials/rotate → rotate credential
    *
    * @see docs/adr/0002-project-database-isolation.md
+   */
+  /**
+   * ⛔ [#11925] Every unannotated method in this namespace, and in the
+   * environment-scoped `packages` block nested inside it, keeps its erased
+   * `any` DELIBERATELY (#12036).
+   *
+   * `@objectstack/spec/cloud` does declare row contracts that look like the
+   * obvious binding — `Environment`, `EnvironmentCredential`,
+   * `EnvironmentPackageInstallation` — and they are camelCase
+   * (`displayName`, `organizationId`, `isDefault`, `databaseUrl`; zero
+   * snake_case keys across all three schemas). The `/api/v1/cloud/*` control
+   * plane this namespace calls speaks **snake_case**: the in-repo CLI
+   * consumers read `p.display_name`, `p.organization_id`, `p.is_default`,
+   * `res.database.database_url`, `res.membership.role`, and send
+   * `organization_id` / `display_name` / `clone_from_environment_id`.
+   *
+   * So those contracts are not this wire's types. Binding to them would
+   * typecheck, be false, and break the CLI at compile time while telling it
+   * that it is wrong when it is right — the `SearchResult` near-miss class
+   * #8140 recorded, at family scale. The control-plane implementation is not
+   * in this repo, so the casing cannot be settled from here.
    */
   projects = {
     /**
@@ -5680,10 +5781,26 @@ export class ScopedProjectClient {
       const res = await this.parent._fetch(this.url('/packages'));
       return this.parent._unwrap<{ packages: InstalledPackage[]; total: number }>(res);
     },
-    get: async (id: string, version?: string) => {
+    /**
+     * [#11925] The asymmetry #8140 recorded, now closed. Its neighbour `list`
+     * above carried BOTH a return annotation and a type argument, so #8140
+     * bound it; this method carried neither and was left erased — same object
+     * literal, same route family, opposite treatment purely because one lacked
+     * the annotation.
+     *
+     * The scoped mount is unambiguous, which is what makes it bindable while
+     * the GLOBAL `client.packages.get` is not: `registerPackageRoutes` is
+     * mounted at both `{base}/packages` and
+     * `{base}/environments/:environmentId/packages`, and only the REST
+     * registrar serves the scoped path — so the `{ package }` envelope
+     * declared here is the one that route actually sends. The handler also
+     * spreads a `source: 'database' | 'registry'` discriminator onto the row,
+     * left undeclared for the same reason `list` leaves it undeclared.
+     */
+    get: async (id: string, version?: string): Promise<{ package: InstalledPackage }> => {
       const qs = version ? `?version=${encodeURIComponent(version)}` : '';
       const res = await this.parent._fetch(this.url(`/packages/${encodeURIComponent(id)}${qs}`));
-      return this.parent._unwrap<{ package: any }>(res);
+      return this.parent._unwrap<{ package: InstalledPackage }>(res);
     },
   };
 
