@@ -1125,8 +1125,13 @@ async function selfTest() {
   );
 }
 
-if (process.argv.includes('--self-test')) {
-  await selfTest();
-} else if (isEntrypoint(import.meta.url)) {
-  await main(process.argv.slice(2));
+// The guard comes FIRST, then the mode. The other order — `--self-test`
+// tested before `isEntrypoint` — read the IMPORTER's argv: a tool that imports
+// this module for its exports while carrying `--self-test` in its own argv ran
+// this file's self-test inside itself. That leak is invisible to exit status
+// (this branch does not exit on success) and shows only as foreign output on
+// the importer's stdout.
+if (isEntrypoint(import.meta.url)) {
+  if (process.argv.includes('--self-test')) await selfTest();
+  else await main(process.argv.slice(2));
 }
