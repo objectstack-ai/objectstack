@@ -736,6 +736,58 @@ jobs:
           node scripts/check-step-collectors.mjs --self-test
           node scripts/check-step-collectors.mjs
 
+      # Self-test wiring gate (#11150) — the guard over the `--self-test` legs
+      # themselves, in this file and every other workflow.
+      #
+      # A gate whose defect class is its MATCHING RULE cannot detect its own
+      # regression on a clean tree. Green means the finding set is empty;
+      # weakening the rule can only SHRINK that set; and the empty set is the
+      # fixed point of shrinking. So the production verdict is byte-identical
+      # before and after the rule breaks, and `--self-test` — which supplies an
+      # adversarial input a clean tree by construction does not contain — is the
+      # ONLY instrument watching it.
+      #
+      # Measured rather than argued, one ablation per gate with the mutation
+      # confirmed on disk before any reading was taken: loosening
+      # `check-auth-mount-ledger`'s exact `METHOD path` accounting into a
+      # strict-prefix credit, and deleting the recognizer `check-error-code-
+      # casing` needed for the lowercase codes that shipped past it, each left
+      # the production run GREEN and reddened only the self-test. So the
+      # `<gate> --self-test` + `<gate>` steps throughout this file are not
+      # ceremony beside the live run — for that family the first line is the
+      # only line carrying coverage, and deleting it to save CI time would
+      # remove the coverage while every available signal still said the gate
+      # works.
+      #
+      # What this step holds is the mechanically decidable SUPERSET: every
+      # script CI runs that ships a `--self-test` must have that self-test run
+      # by CI too. Membership needs no classifier, and that is the point —
+      # membership in the family itself is NOT statically decidable. The same
+      # kind of ablation on `check-dispatcher-error-vocabulary` REDDENS its
+      # production run, because a row it declares stops being reached and its
+      # ledger is an equality rather than an emptiness; while a second rule
+      # inside `check-route-envelope` moves neither run. Two rules in one file
+      # can sit on opposite sides, so a family enumerated by name would wire the
+      # wrong set and then read as complete.
+      #
+      # Scripts whose self-test CI runs by some route other than the flag (a
+      # wrapper that spawns another tool's, a gate that runs its own cases on
+      # every invocation) are a shrink-only ledger inside the script, and every
+      # row carries evidence that is re-checked on each run rather than
+      # believed.
+      #
+      # ⚠️ No count is written into this comment on purpose: a number in CI
+      # prose goes stale in silence, which is the same class of defect as the
+      # card that produced this step. The gate prints its own scope line.
+      #
+      # Invoked as `node scripts/…` rather than through a `pnpm check:*` alias:
+      # see the GATE INVOCATION IDIOM note at the top of this file. Reads
+      # `scripts/` and `.github/workflows/` off disk, no network, ~1 s.
+      - name: Self-test wiring gate
+        run: |
+          node scripts/check-self-test-wired.mjs --self-test
+          node scripts/check-self-test-wired.mjs
+
       # Verify-lock entry-point self-test (#9661). `scripts/pm/os-verify-lock.sh`
       # is the ONE way an agent takes the container's shared heavy-verify lock,
       # and it is the enforcement of a rule that used to live only in prose: the
