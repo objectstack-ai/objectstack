@@ -444,6 +444,21 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       'packages/cloud-connection/src/cloud-connection-ui.ts',
     ],
   },
+  '@objectstack/mcp': {
+    // src/canonical-expression-envelopes.test.ts (#12269) imports `maskComments`
+    // from `js-comment-mask.mjs` to decide which text in this package's `src/` is
+    // a comment and which is a `Page` declaration — the third package to carry
+    // this gate, and declared for the same two reasons the two entries above
+    // record. The import is a real coupling: that gate's POPULATION is a
+    // function of the module's masking behaviour, so a change to it has to
+    // re-run this package's suite. The `.d.mts` sibling is what gives
+    // `maskComments` its type, so this package's typecheck verdict is a
+    // function of it too.
+    globs: [
+      'scripts/js-comment-mask.mjs',
+      'scripts/js-comment-mask.d.mts',
+    ],
+  },
   '@objectstack/plugin-auth': {
     // src/managed-extension-fields.test.ts walks every `*.object.ts`, and pins
     // core's api-key source alongside it.

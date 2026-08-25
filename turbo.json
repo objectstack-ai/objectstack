@@ -156,6 +156,18 @@
       "$TURBO_ROOT$/packages/cloud-connection/src/cloud-connection-ui.ts"
       ]
     },
+    "@objectstack/mcp#test": {
+      "dependsOn": ["^build"],
+      "outputs": [],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "!dist/**",
+        "!coverage/**",
+        "!.turbo/**",
+        "$TURBO_ROOT$/scripts/js-comment-mask.mjs",
+        "$TURBO_ROOT$/scripts/js-comment-mask.d.mts"
+      ]
+    },
     "@objectstack/plugin-auth#test": {
       "dependsOn": ["^build"],
       "outputs": [],

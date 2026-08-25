@@ -33,8 +33,21 @@ export default defineConfig({
     // any subpath and resolve it to `…/src/index.ts/<subpath>` (ENOTDIR) — a
     // config that looks right and fails at run time. Same shape as
     // `plugin-sharing`'s.
+    //
+    // The second entry is for `canonical-expression-envelopes.test.ts` (#12269)
+    // — the only suite here that imports `@objectstack/lint` as a VALUE. It
+    // runs the shared canonical-envelope detector
+    // (`auditPageExpressionEnvelopes`) over this package's own `Page` export.
+    // Unaliased, that specifier resolves through `exports` to `lint/dist`, and
+    // the failure mode is the same silent one the note above describes: a dist
+    // merely BEHIND lets this gate run GREEN against the detector's old
+    // behaviour, while the gate's whole purpose is to run the CURRENT detector
+    // over the CURRENT page. Anchored for a second reason here — `@objectstack/lint`
+    // exports a `./runtime` subpath, and the object form would swallow it and
+    // resolve it to `…/lint/src/index.ts/runtime` (ENOTDIR) at run time.
     alias: [
       { find: /^@objectstack\/metadata-core$/, replacement: path.resolve(__dirname, '../metadata-core/src/index.ts') },
+      { find: /^@objectstack\/lint$/, replacement: path.resolve(__dirname, '../lint/src/index.ts') },
     ],
   },
 });

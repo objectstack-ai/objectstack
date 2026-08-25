@@ -1115,6 +1115,9 @@ importers:
         specifier: ^4.4.3
         version: 4.4.3
     devDependencies:
+      '@objectstack/lint':
+        specifier: workspace:*
+        version: link:../lint
       '@objectstack/metadata-core':
         specifier: workspace:*
         version: link:../metadata-core
