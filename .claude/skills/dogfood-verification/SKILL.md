@@ -112,7 +112,7 @@ dev 工作树、dev-server 端口、preview 浏览器全是**共享的**:并行�
 - [ ] 确认页面渲染完成*之后*(先截图,再查 selector),DOM dump 没问题。
 - [ ] **门的两侧都要测**:`requiresService`/`requiresObject`/权限门要在依赖存在*与*
       缺席两种状态下各验一次。
-- [ ] 服务端是权威可见性门(ADR-0057 D10)—— 客户端过滤只是「礼貌」。元数据开关不改
+- [ ] 服务端是权威可见性门(ADR-0124 D1)—— 客户端过滤只是「礼貌」。元数据开关不改
       UI 时,先查强制在服务端(框架,可在本仓修)还是客户端(objectui console,另一
       个仓)。
 - [ ] 用 `preview_screenshot`(API 改动用 `preview_network`)向用户证明;loading

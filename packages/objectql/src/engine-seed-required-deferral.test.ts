@@ -133,14 +133,22 @@ function emptyMetadata(): IMetadataService {
 
 function silentLogger() {
   const calls: Record<string, unknown[][]> = { info: [], warn: [], error: [], debug: [] };
-  return {
-    calls,
-    info: (...a: unknown[]) => { calls.info.push(a); },
-    warn: (...a: unknown[]) => { calls.warn.push(a); },
-    error: (...a: unknown[]) => { calls.error.push(a); },
-    debug: (...a: unknown[]) => { calls.debug.push(a); },
-  } as any;
+  /**
+   * Every line in the ORDER it was emitted, across levels — which is how the
+   * author reads a seed run, and the only shape in which "the loader said it
+   * BEFORE the engine did" (#11674's B half) is a measurable claim rather than
+   * an assertion about two unrelated arrays.
+   */
+  const lines: Array<{ level: string; message: string }> = [];
+  const at = (level: string) => (...a: unknown[]) => {
+    calls[level].push(a);
+    lines.push({ level, message: String(a[0]) });
+  };
+  return { calls, lines, info: at('info'), warn: at('warn'), error: at('error'), debug: at('debug') };
 }
+
+/** The load-time early signal, isolated from every other line the loader logs. */
+const EARLY_SIGNAL = /is `required: true`, but record #/;
 
 const CONFIG = {
   dryRun: false,
@@ -186,6 +194,17 @@ describe('seed deferral vs required:true, on the real engine (#11674)', () => {
         status: { type: 'select', options: [{ value: 'pending' }, { value: 'approved' }] },
       },
     } as any, 'test-package');
+    // NOT a shape any adopted object has — the boundary of the early signal's
+    // predicate. `required` AND `readonly`: required-validation skips readonly
+    // fields on insert, so a deferral here is accepted by this very engine.
+    engine.registry.registerObject({
+      name: 'rq_approval_ro',
+      fields: {
+        process_name: { type: 'text', required: true },
+        object_name: { type: 'text', required: true },
+        record_id: { type: 'text', required: true, readonly: true, referenceVia: 'object_name' },
+      },
+    } as any, 'test-package');
     // The sys_audit_log shape: pointer pair declared, id half OPTIONAL.
     engine.registry.registerObject({
       name: 'rq_ledger',
@@ -203,9 +222,13 @@ describe('seed deferral vs required:true, on the real engine (#11674)', () => {
     expect(approval?.referenceVia, 'registry dropped referenceVia — cases below would not defer at all').toBe('object_name');
     expect(approval?.required, 'registry dropped required — case 1 would measure nothing').toBe(true);
     expect((engine.getSchema('rq_ledger') as any)?.fields?.record_id?.referenceVia).toBe('object_name');
+    const approvalRo = (engine.getSchema('rq_approval_ro') as any)?.fields?.record_id;
+    expect(approvalRo?.required, 'registry dropped required on the readonly variant').toBe(true);
+    expect(approvalRo?.readonly, 'registry dropped readonly — the boundary case would measure the ordinary one').toBe(true);
   });
 
-  const loader = () => new SeedLoaderService(engine as unknown as IDataEngine, emptyMetadata(), silentLogger());
+  const loader = (logger: ReturnType<typeof silentLogger> = silentLogger()) =>
+    new SeedLoaderService(engine as unknown as IDataEngine, emptyMetadata(), logger as any);
 
   it('MEASURED: the real engine REJECTS the deferred insert of a required id half — pass-2 write-back cannot save it', async () => {
     // Keyless approval dataset BEFORE its target: the pointer cannot resolve
@@ -284,5 +307,132 @@ describe('seed deferral vs required:true, on the real engine (#11674)', () => {
     expect(ledgerResult.referencesDeferred).toBe(0);
     // Never the verbatim natural key.
     expect(ledger.record_id).not.toBe('Lisa Thompson');
+  });
+  it('EARLY SIGNAL: the loader names the required deferral BEFORE the engine rejects the row (#11674 B)', async () => {
+    const logger = silentLogger();
+    // Exactly case 1's scenario. The measured failure below is UNCHANGED — the
+    // signal moves when the author learns, it does not move the verdict.
+    const result = await loader(logger).load({
+      seeds: [
+        { object: 'rq_approval', mode: 'insert', env: ENV, records: [
+          { process_name: 'flow:discount', object_name: 'rq_lead', record_id: 'Lisa Thompson', status: 'pending' },
+        ] },
+        LEAD_SEED,
+      ] as any,
+      config: CONFIG,
+    });
+
+    // ⛔ ACCEPT SET UNCHANGED: same rejection, same counters, same success.
+    expect(storeFor('rq_approval').size).toBe(0);
+    expect(result.success).toBe(false);
+
+    const signalAt = logger.lines.findIndex((l) => l.level === 'warn' && EARLY_SIGNAL.test(l.message));
+    const rejectionAt = logger.lines.findIndex((l) => l.level === 'error' && /record_id/.test(l.message));
+    expect(signalAt, 'the early signal never fired against the real engine').toBeGreaterThanOrEqual(0);
+    expect(rejectionAt, 'the engine did not reject — the ordering claim would be vacuous').toBeGreaterThanOrEqual(0);
+    // THE claim of this half of the card, measured rather than argued: the
+    // loader says it first, on the engine that really does the rejecting.
+    expect(signalAt).toBeLessThan(rejectionAt);
+
+    const signal = logger.lines[signalAt].message;
+    expect(signal).toContain('rq_approval.record_id is `required: true`');
+    expect(signal).toContain('Order the `rq_lead` dataset BEFORE `rq_approval`');
+  });
+
+  it('DOES NOT FIRE for the optional id half — the case the write-back really did make order-independent', async () => {
+    const logger = silentLogger();
+    const result = await loader(logger).load({
+      seeds: [
+        { object: 'rq_ledger', mode: 'insert', env: ENV, records: [
+          { action: 'read', object_name: 'rq_lead', record_id: 'Lisa Thompson' },
+        ] },
+        LEAD_SEED,
+      ] as any,
+      config: CONFIG,
+    });
+
+    // Same deferral, same order, same engine — only `required` differs, and
+    // this one heals. A signal that fired here would be a false alarm on every
+    // correctly-authored optional pointer in the repo.
+    expect(result.success).toBe(true);
+    expect(logger.lines.some((l) => EARLY_SIGNAL.test(l.message))).toBe(false);
+  });
+
+  /**
+   * ⛔ THE REFUSAL FORK, measured — triage's 2026-08-24 ruling admits a
+   * load-time REFUSAL "only on an arm where the pass-1 insert is measured to be
+   * rejected by the real engine anyway", and says that any reachable
+   * configuration where a refusal would reject a load that succeeds today is a
+   * fork on which the refusal arm must NOT ship.
+   *
+   * The two cases below are that measurement, against the real engine, on the
+   * same predicate a refusal would have to key on ("this dataset defers a
+   * reference on a `required` column"). Both SUCCEED today. They are pinned
+   * because they are the reason the shipped diagnostic is warn-only, and
+   * because they are exactly the boundary the warning's predicate must keep
+   * honouring — the same fixtures answer both questions.
+   */
+  it('REFUSAL FORK 1: a required deferral on the UPDATE arm succeeds today — an omitted column is not a cleared one', async () => {
+    // Round 1: the row exists, seeded in the correct order.
+    await loader().load({
+      seeds: [
+        LEAD_SEED,
+        { object: 'rq_approval', externalId: 'process_name', mode: 'upsert', env: ENV, records: [
+          { process_name: 'flow:discount', object_name: 'rq_lead', record_id: 'Lisa Thompson', status: 'pending' },
+        ] },
+      ] as any,
+      config: CONFIG,
+    });
+    expect(storeFor('rq_approval').size, 'round 1 did not seed — round 2 would measure an insert').toBe(1);
+
+    // Round 2 — the dev-server-restart shape: the same row is replayed, now
+    // pointing at a lead THIS load seeds later. The pointer cannot resolve in
+    // pass 1, so the loader defers by deleting required `record_id` — the
+    // identical predicate case 1 fails on.
+    const logger = silentLogger();
+    const result = await loader(logger).load({
+      seeds: [
+        { object: 'rq_approval', externalId: 'process_name', mode: 'upsert', env: ENV, records: [
+          { process_name: 'flow:discount', object_name: 'rq_lead', record_id: 'Marco Diaz', status: 'approved' },
+        ] },
+        { object: 'rq_lead', externalId: 'name', mode: 'upsert', env: ENV, records: [{ name: 'Marco Diaz' }] },
+      ] as any,
+      config: CONFIG,
+    });
+
+    // MEASURED: it SUCCEEDS. Update-mode validation checks only the fields the
+    // write supplies, and the deferral removed the key rather than nulling it
+    // — so the required check never runs, and pass 2 back-fills the resolved
+    // id afterwards. A load-time refusal keyed on the deferral would have
+    // rejected this load. ⇒ refusal arm not shipped.
+    expect(result.success).toBe(true);
+    const marcoId = [...storeFor('rq_lead').values()].find((r) => r.name === 'Marco Diaz')!.id;
+    expect([...storeFor('rq_approval').values()][0].record_id).toBe(marcoId);
+    // …and the warning correctly stays silent here, for the same reason.
+    expect(logger.lines.some((l) => EARLY_SIGNAL.test(l.message))).toBe(false);
+  });
+
+  it('REFUSAL FORK 2: a required READONLY column deferring on INSERT is accepted today — required-validation skips it', async () => {
+    const logger = silentLogger();
+    const result = await loader(logger).load({
+      seeds: [
+        { object: 'rq_approval_ro', mode: 'insert', env: ENV, records: [
+          { process_name: 'flow:discount', object_name: 'rq_lead', record_id: 'Lisa Thompson' },
+        ] },
+        LEAD_SEED,
+      ] as any,
+      config: CONFIG,
+    });
+
+    // MEASURED: the row LANDS. Same deferral, same `required: true`, same
+    // engine as case 1 — the only difference is `readonly`, which
+    // required-validation skips on insert. A load-time refusal keyed on
+    // `required` alone would have rejected a row this engine accepts.
+    expect(storeFor('rq_approval_ro').size, 'the deferred insert was rejected — the fork claim would be wrong').toBe(1);
+    expect(result.success).toBe(true);
+    // The warning's predicate MIRRORS the contract's rather than approximating
+    // it, so it stays silent here too. If this ever flips, the predicate and
+    // the write contract have drifted apart.
+    expect(logger.lines.some((l) => EARLY_SIGNAL.test(l.message))).toBe(false);
   });
 });

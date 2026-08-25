@@ -245,9 +245,10 @@ function allPathsMounted(rawApp: any, paths: readonly string[]): boolean {
  * (`admin_full_access` `'*': {modifyAllRecords}`) who ALSO holds
  * `organization_admin` (which denies writes on identity tables): the client
  * would see `sys_user.allowEdit:false` and disable a form the server accepts
- * (verified: `PATCH /data/sys_user {name}` → 200). The rule this repo cites as
- * ADR-0057 D10 — an attribution, not a resolvable anchor (#9628) — makes the
- * server the authoritative gate; the client must mirror it, never diverge.
+ * (verified: `PATCH /data/sys_user {name}` → 200). ADR-0124 D1 makes the
+ * server the authoritative gate, and D4 makes this direction explicit: what
+ * the client is told must be derived from the server's actual effective
+ * enforcement, never from an independent reading of the declarations.
  *
  * The super-user grant covers private/managed objects on the server, so folding
  * it here is exactly as broad as real enforcement — never broader.
