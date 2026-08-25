@@ -8,6 +8,14 @@ until this merges).
 **Deciders**: maintainer charter, 2026-08-25, live PM chat, verbatim and untranslated:
 「要整体评估除了流程还有哪些需要自定义的也有类似的问题，开始写adr」, following
 「很多所有的元数据都有类似的个性化需求，要统一考虑。」
+**Amendment rulings** (maintainer, 2026-08-25, live PM chat, after reading the first draft —
+verbatim and untranslated, both incorporated throughout this revision):
+1. 「hook 也算代码类吧，我觉得也不需要修改。」 — `hook` is reclassified out of the model
+   (§2, §3): packaged hooks are package code, no ledger rows, no disable switch.
+2. 「行为类 能否搞一个启用停用的功能，我不想要可以停用，然后克隆一个。」 — Regime C is
+   simplified to two independent primitives, enable/disable + clone-as-sibling, with **no
+   designation linkage** (§2, §4, §7): `replaced_by` and `cloned_from` are dropped from the
+   ledger; the clone is an ordinary artifact with no recorded linkage to its base.
 **Builds on**: [ADR-0005](./0005-metadata-customization-overlay.md) (org overlay + the two-tier
 write model), [ADR-0029](./0029-kernel-object-ownership-and-platform-objects-decomposition.md)
 D7/D9 (contributor kinds, navigation contributions),
@@ -37,12 +45,12 @@ customize** for permission sets, package-grain **extend** for objects and app na
 each was invented per type, with its own ledger. This ADR writes the model down once:
 
 1. **Three regimes, assigned by what the artifact does** (§3): presentational → overlay;
-   behavioral → clone + takeover, ⛔ never silent override; structural → extend. Code-only types
-   sit outside customization entirely.
-2. **One generic data-plane activation ledger** for the clone+takeover family (§4):
-   `sys_metadata_activation` — operational row state per packaged artifact.
+   behavioral → locked base + **enable/disable** + **clone-as-sibling**, ⛔ never silent
+   override; structural → extend. Code-only types sit outside customization entirely.
+2. **One generic data-plane activation ledger** for the disable+clone family (§4):
+   `sys_metadata_activation` — operational row state per packaged artifact, nothing more.
    `sys_metadata` remains the **sole definition ledger**; the activation ledger stores no
-   definitions, ever.
+   definitions and records no clone linkage, ever.
 3. **Install-level scope now, operator-gated writes in multi-org postures, org column reserved**
    (§5).
 4. **The walls stand** (§6): the #6190 phantom-overlay wall (no `allowOrgOverride` flip on a
@@ -120,9 +128,13 @@ the artifact are live at once, or when a customization is wrong?**
   pair (overlay schema + written render-only rationale) is the gate.
 - **Behavioral** (runs with side effects — fires triggers, writes records, grants access, sends
   mail; two live versions double-fire, a silent replacement mis-fires invisibly)
-  → **Clone + takeover** (Regime C). The packaged base is locked and refused loudly at the write
-  door; customization is a NEW org/install-owned artifact plus an explicit, ledger-recorded
-  takeover. ⛔ Never silent override, never an overlay read path.
+  → **Disable + clone** (Regime C — amendment ruling 2, the landed #11513 shape generalized).
+  Three independent parts, no ceremony connecting them: the packaged base is **locked** —
+  in-place edit refused loudly at the write door, the refusal naming the sanctioned path; each
+  packaged behavioral artifact carries an **enable/disable switch** — a ledger row flip (§4),
+  operator-gated per §5; customization is **authoring an ordinary sibling artifact** (clone or
+  from scratch; new machine name mandatory, whole-definition copy — §7.1). There is no
+  designated-replacement linkage. ⛔ Never silent override, never an overlay read path.
 - **Structural** (schema/wiring the physical world depends on — tables, columns, connections;
   per-org divergence diverges DDL)
   → **Extend** (Regime E). Additive contributions from another package (`objectExtensions`,
@@ -130,7 +142,12 @@ the artifact are live at once, or when a customization is wrong?**
   a packaged artifact with package provenance.
 - **Code-only** types (field, job, api, capability, agent — each closed by its own recorded
   ruling) sit **outside** the model: customization = ship a new package version. This ADR does
-  not reopen any of them.
+  not reopen any of them. **`hook` joins them by amendment ruling 1** (「hook 也算代码类吧，
+  我觉得也不需要修改。」): a hook body is imperative package code maintaining the package's own
+  data invariants — the managed-package trigger analogy (Salesforce locks managed Apex triggers;
+  customization = the vendor ships a new version). Packaged hooks get **no ledger rows and no
+  disable switch** — the same posture as `job`. The registry flags are untouched: authoring a
+  brand-new sibling hook stays open, exactly as today.
 
 A **new metadata type** (or newly admitted dynamic kind) must declare its regime at admission,
 in its registry-entry comment, using this rule. A customization mechanism that fits none of the
@@ -146,9 +163,9 @@ From the survey's per-type table; classes are the survey's measurements, not asp
 | Regime | Types | Notes |
 |:--|:--|:--|
 | **O — overlay** | view, dashboard, report, translation, email_template | Unchanged, exactly these five. Promotion into this set is an ADR-0005 admission-pair revision, never a registry edit (the #6483 rollbacks are the precedent). |
-| **C — clone + takeover** | **flow** (first consumer, §7) · **permission** (landed machinery, converges later — §8) · pre-charted as pull appears: hook, action, tool, skill, position | All behavioral tier-B types. Each type's implementation is its own card consuming this model; the ledger (§4) is shared. |
+| **C — disable + clone** | **flow** (first consumer, §7) · **permission** (landed machinery, converges later — §8) · pre-charted as pull appears: action, tool, skill, position | Behavioral tier-B types (minus `hook`, reclassified out by amendment ruling 1). Each type's implementation is its own card consuming this model; the ledger (§4) is shared. |
 | **E — extend** | object (fields/validations/indexes via `objectExtensions`) · app (navigation via ADR-0029 D7 contributions) | Already live. No ledger involvement: the customization IS a package, and package identity supplies provenance and upgrade isolation. |
-| **outside** | field, job, api, capability, agent (code-only) · seed, external_catalog (one-shot / derived — nothing durable to customize) · datasource (origin-gated: code-defined read-only, runtime-created free) | Recorded so their absence from the regimes reads as decided, not overlooked. |
+| **outside** | field, job, api, capability, agent (code-only) · **hook** (amendment ruling 1 — package code maintaining the package's own invariants; no ledger row, no disable switch; sibling authoring open as today) · seed, external_catalog (one-shot / derived — nothing durable to customize) · datasource (origin-gated: code-defined read-only, runtime-created free) | Recorded so their absence from the regimes reads as decided, not overlooked. |
 | **unassigned, deliberately** | page, dataset, doc, book, mapping | Presentational/content tier-B types with no measured customization pull beyond re-authoring a sibling. Today's posture (locked base + free sibling authoring) stands. First real pull picks a regime **by the D1 rule** — likely O via the ADR-0005 admission pair (page/dataset/book) — and does so in an ADR-0005 revision, not ad hoc. |
 
 Two clarifications the survey forces:
@@ -165,10 +182,10 @@ Two clarifications the survey forces:
 
 ## 4. Decision (D2): one generic activation ledger — `sys_metadata_activation`
 
-The clone+takeover family shares **one data-plane platform object**. Proposed name:
+The disable+clone family shares **one data-plane platform object**. Proposed name:
 **`sys_metadata_activation`** — it joins the existing data-plane siblings of the definition store
 (`sys_metadata_history`, `sys_automation_run`, `sys_flow_dispatch`) and says what it is: the
-activation/replacement record for metadata artifacts. It is declared in
+activation record for packaged metadata artifacts. It is declared in
 `packages/platform-objects` like its siblings, so it needs **zero `packages/spec` surface**
 (#11665 §6 item 1).
 
@@ -179,20 +196,22 @@ activation/replacement record for metadata artifacts. It is declared in
 | `package_id` | string | The package that ships the base artifact |
 | `organization_id` | string, **nullable — reserved** | NULL today (install-level row, §5); the per-org dimension is an additive column later, never a redesign |
 | `active` | boolean | Is the packaged artifact armed for this scope |
-| `replaced_by` | string, nullable | Machine name of the org/install-authored replacement artifact, when a takeover designates one |
-| `cloned_from` | `{ package, name, version }`, nullable | Provenance of the designated replacement: what it was cloned from and the base's version **at clone time**. Provenance, ⛔ not upgrade linkage — used for nothing at runtime; it is what lets a surface say *"clone based on v3, base now v5"* (§7.4) without diff machinery. |
 
+That is the whole schema — amendment ruling 2 (「行为类 能否搞一个启用停用的功能，我不想要
+可以停用，然后克隆一个。」) removed the designation columns an earlier draft carried
+(`replaced_by`, `cloned_from`): there is **no recorded linkage** between a clone and its base,
+matching the landed #11513 posture ("an ordinary org-owned set with no upgrade linkage").
 Uniqueness: one row per `(metadata_type, name, organization_id NULL-collapsed)`; absence of a row
-means the packaged default — **active, not replaced**. The ledger is written by the takeover
-actions and read at each runtime's own consult point; an empty ledger changes nothing anywhere.
+means the packaged default — **active**. The ledger is written by the enable/disable actions and
+read at each runtime's own consult point; an empty ledger changes nothing anywhere.
 
 **What the ledger is NOT:**
 
 - ⛔ **Not a definition store.** `sys_metadata` remains the **sole definition ledger** — the
   maintainer probed exactly this in the 2026-08-25 discussion, and the recorded grounds are the
   #6190 phantom-overlay wall and the upgrade-vs-choice separation (§6). The activation ledger
-  holds booleans, names and provenance; never fields, nodes, grants, or any fragment of an
-  artifact body.
+  holds a boolean per artifact and nothing else; never fields, nodes, grants, or any fragment of
+  an artifact body.
 - ⛔ **Not a metadata type.** It is an ordinary platform object with ordinary rows: an ordinary
   `organization_id` column and an ordinary read path — the construction #6190's measurement
   leaves open, where an org-scoped `sys_metadata` row has neither (F3). The #11513 deactivation
@@ -216,9 +235,9 @@ actions and read at each runtime's own consult point; an empty ledger changes no
   measured a tenant flipping a shipped flow off environment-wide through an unscoped in-process
   map; a durable install-wide row writable by tenants would be the same leak with persistence.
 - **The org column is reserved, and per-org semantics are pre-charted narrowly:** when a real
-  multi-org customer asks, per-org takeover is added for **record-change-triggered flows only**
+  multi-org customer asks, per-org disable is added for **record-change-triggered flows only**
   (the one trigger type whose context carries an organization — F4: record-change 5 matches,
-  schedule/time-relative/api 0). A per-org takeover attempted on any other trigger type **refuses
+  schedule/time-relative/api 0). A per-org disable attempted on any other trigger type **refuses
   loudly at the moment of the attempt, naming the trigger type** — never a silent fallback to
   install scope. A3 (plumbing an org into the other trigger types) is **not opened**; it is a
   product question ("which org does a nightly sweep belong to"), not a plumbing one.
@@ -228,17 +247,18 @@ actions and read at each runtime's own consult point; an empty ledger changes no
 1. **The #6190 phantom-overlay wall.** Any design that needs `allowOrgOverride` flipped on a
    behavioral type has drifted back into #6190 — that is a stop-and-report, not a pin to update.
    The identity pin (`protocol.org-scoped-write-refused.test.ts`, exactly five overlay types)
-   turning red on such a flip is the pin working. Q2's rejected option (b) is this wall's
-   corollary: takeover-by-name-redirection is an overlay **read** path under another name, and is
-   rejected on the record (2026-08-25 discussion).
+   turning red on such a flip is the pin working. This wall's corollary stands too:
+   name-redirection — resolving a packaged artifact's name to some other artifact at dispatch —
+   is an overlay **read** path under another name, rejected on the record (2026-08-25
+   discussion); with no designation linkage in the model (§4) there is also nothing to redirect
+   to.
 2. **Sole definition ledger.** Definitions live in `sys_metadata` (or the shipped artifact),
    nowhere else. A customization that wants to store a definition fragment anywhere but a new
    artifact row is out of contract.
 3. **Upgrade-vs-choice separation.** Package upgrades rewrite the packaged BASE (definitions);
    they never write the ledger — the ledger records the customer's **choices**, and no upgrade
-   un-makes a choice. The converse holds too: taking over never blocks or edits the base's
-   upgrade stream. The only place the two meet is the §7.4 factual notice, computed from
-   `cloned_from.version` at read time.
+   un-makes a choice. The converse holds too: disabling never blocks or edits the base's upgrade
+   stream. The two never meet: the base's version history and the ledger share no columns.
 4. **The paper protocol is not the model.** The three-layer
    `metadata-customization.zod.ts` surface (#12057 — exported, documented, zero consumers) is
    **superseded by this ADR as a matter of record**: nothing may build against it, and its
@@ -250,12 +270,15 @@ actions and read at each runtime's own consult point; an empty ledger changes no
 
 ## 7. The worked example: packaged flows (first consumer)
 
-Everything in this section is the 2026-08-25 maintainer discussion's tentative direction,
-incorporated as required by #12049. **Provenance: live chat; the final ruling is the maintainer's
-merge of this ADR — ⛔ none of the following is settled until then.** Implementation stays on
-#11665's cards; this section is the contract they consume.
+Everything in this section is the 2026-08-25 maintainer discussion's tentative direction, **as
+amended by the same-day rulings quoted in the header** (which supersede the earlier discussion
+record where they conflict: the C3 provenance pointer, the Q3 base-moved notice, and the Q4
+two-step takeover ceremony are all withdrawn; A1, C1 and the loud-refusal walls stand).
+**Provenance: live chat; the final ruling is the maintainer's merge of this ADR — ⛔ none of the
+following is settled until then.** Implementation stays on #11665's cards; this section is the
+contract they consume.
 
-### 7.1 Clone (Fork C: C1 + C3)
+### 7.1 Clone (Fork C: C1, without C3)
 
 - **New machine name, mandatory** (the #11513 shape exactly). ⛔ No same-name clone in a second
   package: storage legitimately holds both — the uniqueness index keys on
@@ -268,47 +291,53 @@ merge of this ADR — ⛔ none of the following is settled until then.** Impleme
   assembled from an enumerated facet list silently dropped three of six facets; a flow has far
   more facets than a permission set. (#11753 carries the objectui half: carried-over definition
   blobs are not editable form fields.)
-- **Provenance recorded**: the takeover row's `cloned_from` captures `{package, name, version}`
-  at clone time (§4). Provenance, not linkage — upgrades keep flowing to the base untouched
-  (#11513's ruled non-goal stands).
+- **No linkage to the base** (amendment ruling 2): the clone is an ordinary org/install-owned
+  flow with no recorded relationship to what it was copied from — exactly #11513's "ordinary
+  org-owned set with no upgrade linkage". Upgrades keep flowing to the base untouched; nothing
+  records, tracks, or reports the copy's ancestry (§9).
 
-### 7.2 Takeover (Fork A: A1; Q4: two steps)
+### 7.2 Enable / disable (Fork A: A1)
 
-- Two **deliberate** steps: (1) clone; (2) take over — write the ledger row
-  (`active: false, replaced_by: <clone>`). An admin may clone for inspection without changing
-  runtime behaviour; the half-done state (cloned, not taken over, packaged original still
-  running) is a **displayed state, never silence** (§7.4).
+- **A single deliberate act**: flipping a packaged flow off (or back on) writes the ledger row's
+  `active` bit — no clone required first, no designation to record, operator-gated per §5. Clone
+  and disable are **independent primitives**: cloned-without-disabled and disabled-without-clone
+  are both ordinary states the surface shows plainly (§7.4), not halves of an unfinished
+  ceremony.
 - Enforcement seam: `execute()`-time refusal beside the existing `FLOW_DISABLED` guard, reusing
   the `FLOW_DISABLED` code (no new ADR-0112 ledger entry; the distinction rides the message —
   #11665 §6.3). The install-level row may **also** unbind the trigger, preserving today's
-  documented `toggleFlow` semantics; a future per-org row cannot unbind (the hook is registered
-  once env-wide) and is an entry-time refusal only — a stated cost, accepted.
+  documented `toggleFlow` semantics; a future per-org row cannot unbind (the trigger's event
+  hook is registered once env-wide) and is an entry-time refusal only — a stated cost, accepted.
 - The durable ledger row **replaces** the process-local `flowEnabled` map as the sanctioned
   off-switch for packaged flows, retiring the #10243 leak's mechanism rather than refining it.
 
-### 7.3 The subflow cascade (Q2: option (c))
+### 7.3 The subflow cascade (Q2: option (c), attached to disable)
 
-A takeover of flow B is **refused while any packaged flow references B as a subflow, and the
-refusal names the callers**. Rationale on the record: option (a) ships a silent late failure
-inside the caller; option (b) — resolving `execute('B')` to the replacement — is name
-redirection, rejected under wall §6.1. The refusal is honest, actionable (take over the callers
-first, or don't), and preserves "packaged code calls what it names".
+**Disabling flow B is refused while any packaged flow references B as a subflow, and the refusal
+names the callers** — otherwise a vendor flow breaks mid-run at its subflow node with an
+inexplicable failure (`subflow 'B' failed: Flow 'B' is disabled`, composed from `execute()`'s
+own refusal). Rationale on the record: silently letting the caller fail late (the Q2(a) shape)
+ships exactly the class of invisible breakage this regime exists to close, and name-redirection
+(the Q2(b) shape) is rejected under wall §6.1. The refusal is honest, actionable (disable the
+callers first, or don't), and preserves "packaged code calls what it names".
 
-### 7.4 The surface (Fork D: leaning D2; Q3)
+### 7.4 The surface (Fork D: leaning D2)
 
 - **Leaning D2 — a Setup page for packaged automation** (final call rides this ADR's merge):
-  packaged flows with their activation state and the clone/takeover actions, contributed the way
-  `nav_permission_sets` is (`security-plugin.ts:974`). The maintainer corrected the record here:
-  automation UI is **Studio-only today** (`studio.app.ts:234-239`), so this page is new work, and
-  the Setup permission-set page is the precedent shape. Studio keeps the editing; Setup gets the
-  operational state. Minimum honest content per packaged flow: on/off for this scope · designated
-  replacement, if any · the §7.1 provenance.
-- **Q3 — a one-line factual notice, no diff machinery**: *"clone based on v3, base now v5"*,
-  computed from `cloned_from.version` against the installed base version. ⛔ No diff-vs-base, no
-  `drift_status` columns, no "Needs Attention" view — that is the ServiceNow-style layer the
-  2026-08-24 permission-set ruling recorded as deliberately unchartered, and it stays deferred
-  (D3 in #11665's fork D table). Saying "no drift information exists" plainly beats a
-  `customized` flag that the #11513 precedent measured going silently wrong.
+  packaged flows with their activation state and the enable/disable and clone actions,
+  contributed the way `nav_permission_sets` is (`security-plugin.ts:974`). The maintainer
+  corrected the record here: automation UI is **Studio-only today** (`studio.app.ts:234-239`),
+  so this page is new work, and the Setup permission-set page is the precedent shape. Studio
+  keeps the editing; Setup gets the operational state. Minimum honest content per packaged flow:
+  **on/off for this scope** — that is all the ledger knows (§4), and the page claims nothing
+  more.
+- ⛔ **No drift or ancestry surface**: no diff-vs-base, no `drift_status` columns, no "Needs
+  Attention" view, and — with `cloned_from` withdrawn (amendment ruling 2) — no base-moved
+  notice either; the earlier draft's *"clone based on v3, base now v5"* line has no data source
+  and is removed (§9). That is the ServiceNow-style layer the 2026-08-24 permission-set ruling
+  recorded as deliberately unchartered, and it stays deferred (D3 in #11665's fork D table).
+  Saying "no drift information exists" plainly beats a `customized` flag that the #11513
+  precedent measured going silently wrong.
 
 ---
 
@@ -316,11 +345,13 @@ first, or don't), and preserves "packaged code calls what it names".
 
 1. **Flows first** — #11665's implementation cards consume §7 once this ADR merges (that card is
    `Blocked-by:` #12049 by its own record).
-2. **Permission sets converge in a later card.** The landed #11513 machinery (lock, clone action,
-   row-state `active`, drift detection of the enforced copy) **stays valid meanwhile** — it is
-   the regime's first instance, not a violation of it. The convergence card decides how
-   `sys_permission_set.active` and the generic ledger relate (projection vs migration), and it
-   inherits §4's walls; nothing about it is urgent, because the semantics already match.
+2. **Permission sets converge in a later card — and the amendment made it simpler.** The landed
+   #11513 machinery (lock, clone action, row-state `active`, drift detection of the enforced
+   copy) **stays valid meanwhile** — it is the regime's first instance, not a violation of it,
+   and with ruling 2 the regime's semantics are now **identical** to what already shipped
+   (active row state + free clone, no linkage). The convergence card decides one thing only: how
+   `sys_permission_set.active` and the generic ledger relate (projection vs migration). Nothing
+   about it is urgent.
 3. **The five overlay types are untouched.** No overlay-type work is chartered, implied, or
    permitted by this ADR.
 4. **Docs**: the §1.3 promise pages are corrected to promise what each regime actually delivers
@@ -333,6 +364,12 @@ first, or don't), and preserves "packaged code calls what it names".
 - The ServiceNow-style overlay layer (badge / customization list / diff-vs-base / revert /
   upgrade skip-report) — recorded as the mature direction **if** customer pull for in-place
   customization appears; deferred again here.
+- **Clone provenance and any base-moved notice** (amendment ruling 2): a clone's ancestry is
+  deliberately not tracked — no `cloned_from` column, no *"clone based on v3, base now v5"*
+  line — consistent with the deferred ServiceNow-style layer above and with the landed
+  permission-set posture, where clone-vs-base drift is deliberately absent
+  (`permission-set-drift.ts` covers only the enforced copy of the base against its own
+  artifact).
 - A3 (org-scoping the schedule / time-relative / api trigger contexts).
 - Automatic re-pointing of references on clone (no reference index exists — #11665 §3.2; the
   clone's references stay pointed at what the original pointed at, and the surface tells the
@@ -347,10 +384,10 @@ first, or don't), and preserves "packaged code calls what it names".
   only when a type resists the D1 rule — which is the signal worth a human ruling anyway.
 - The published "customize in Studio" promise becomes narrow-true (tier A), then broader-true as
   Regime C surfaces land, instead of broadly false.
-- Two silent-failure classes are structurally closed for Regime C types: the double-fire (clone
-  running beside the base) and the silent replacement (same-name shadow), both measured in
-  #11665. The half-done state remains possible by design (Q4: two steps) — but as a displayed
-  state, never a silent one.
+- Two silent-failure classes are structurally closed for Regime C types, both measured in
+  #11665: the double-fire is closed by **disable** (the packaged original can actually be
+  switched off, durably), and the silent replacement is closed by **name uniqueness plus the
+  no-redirection wall** (a clone can never shadow or capture its base's name).
 - AI authors get one rule per regime instead of per-type folklore: a locked base that refuses
   loudly with the sanctioned path in the refusal message is the shape that keeps AI-written
   metadata from guessing (the axis-③ analysis in #11665's fork recommendations, adopted).
