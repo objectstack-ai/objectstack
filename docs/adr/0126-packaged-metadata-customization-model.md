@@ -9,13 +9,17 @@ until this merges).
 「要整体评估除了流程还有哪些需要自定义的也有类似的问题，开始写adr」, following
 「很多所有的元数据都有类似的个性化需求，要统一考虑。」
 **Amendment rulings** (maintainer, 2026-08-25, live PM chat, after reading the first draft —
-verbatim and untranslated, both incorporated throughout this revision):
+verbatim and untranslated, all incorporated throughout this revision):
 1. 「hook 也算代码类吧，我觉得也不需要修改。」 — `hook` is reclassified out of the model
    (§2, §3): packaged hooks are package code, no ledger rows, no disable switch.
 2. 「行为类 能否搞一个启用停用的功能，我不想要可以停用，然后克隆一个。」 — Regime C is
    simplified to two independent primitives, enable/disable + clone-as-sibling, with **no
    designation linkage** (§2, §4, §7): `replaced_by` and `cloned_from` are dropped from the
    ledger; the clone is an ordinary artifact with no recorded linkage to its base.
+3. 「动作 可能是需要开关的，因为有的 action 我不想启用。」 — `action` stays in Regime C
+   (§3, §8): its **disable** half has first-party maintainer pull on record and follows the
+   flow legs when the post-merge implementation cards are cut; its **clone** half stays
+   pre-charted, waiting for real pull.
 **Builds on**: [ADR-0005](./0005-metadata-customization-overlay.md) (org overlay + the two-tier
 write model), [ADR-0029](./0029-kernel-object-ownership-and-platform-objects-decomposition.md)
 D7/D9 (contributor kinds, navigation contributions),
@@ -163,7 +167,7 @@ From the survey's per-type table; classes are the survey's measurements, not asp
 | Regime | Types | Notes |
 |:--|:--|:--|
 | **O — overlay** | view, dashboard, report, translation, email_template | Unchanged, exactly these five. Promotion into this set is an ADR-0005 admission-pair revision, never a registry edit (the #6483 rollbacks are the precedent). |
-| **C — disable + clone** | **flow** (first consumer, §7) · **permission** (landed machinery, converges later — §8) · pre-charted as pull appears: action, tool, skill, position | Behavioral tier-B types (minus `hook`, reclassified out by amendment ruling 1). Each type's implementation is its own card consuming this model; the ledger (§4) is shared. |
+| **C — disable + clone** | **flow** (first consumer, §7) · **permission** (landed machinery, converges later — §8) · **action** (disable half: maintainer pull on record 2026-08-25, amendment ruling 3 — follows the flow legs, §8; clone half pre-charted) · pre-charted as pull appears: tool, skill, position | Behavioral tier-B types (minus `hook`, reclassified out by amendment ruling 1; ruling 3 settles the boundary the pair leaves: internal package plumbing → code-only, customer-facing business behavior → disable + clone). Each type's implementation is its own card consuming this model; the ledger (§4) is shared. |
 | **E — extend** | object (fields/validations/indexes via `objectExtensions`) · app (navigation via ADR-0029 D7 contributions) | Already live. No ledger involvement: the customization IS a package, and package identity supplies provenance and upgrade isolation. |
 | **outside** | field, job, api, capability, agent (code-only) · **hook** (amendment ruling 1 — package code maintaining the package's own invariants; no ledger row, no disable switch; sibling authoring open as today) · seed, external_catalog (one-shot / derived — nothing durable to customize) · datasource (origin-gated: code-defined read-only, runtime-created free) | Recorded so their absence from the regimes reads as decided, not overlooked. |
 | **unassigned, deliberately** | page, dataset, doc, book, mapping | Presentational/content tier-B types with no measured customization pull beyond re-authoring a sibling. Today's posture (locked base + free sibling authoring) stands. First real pull picks a regime **by the D1 rule** — likely O via the ADR-0005 admission pair (page/dataset/book) — and does so in an ADR-0005 revision, not ad hoc. |
@@ -345,19 +349,24 @@ callers first, or don't), and preserves "packaged code calls what it names".
 
 1. **Flows first** — #11665's implementation cards consume §7 once this ADR merges (that card is
    `Blocked-by:` #12049 by its own record).
-2. **Permission sets converge in a later card — and the amendment made it simpler.** The landed
+2. **The action-disable leg follows the flow legs** (amendment ruling 3 — 「动作 可能是需要开关
+   的，因为有的 action 我不想启用。」, the first-party pull on record): same
+   `sys_metadata_activation` ledger, same §5 write authority, a consult point at action dispatch,
+   a surface row. ⛔ The action-**clone** half is not chartered — it stays on §3's pre-chart
+   discipline until real pull appears.
+3. **Permission sets converge in a later card — and the amendment made it simpler.** The landed
    #11513 machinery (lock, clone action, row-state `active`, drift detection of the enforced
    copy) **stays valid meanwhile** — it is the regime's first instance, not a violation of it,
    and with ruling 2 the regime's semantics are now **identical** to what already shipped
    (active row state + free clone, no linkage). The convergence card decides one thing only: how
    `sys_permission_set.active` and the generic ledger relate (projection vs migration). Nothing
    about it is urgent.
-3. **The five overlay types are untouched.** No overlay-type work is chartered, implied, or
+4. **The five overlay types are untouched.** No overlay-type work is chartered, implied, or
    permitted by this ADR.
-4. **Docs**: the §1.3 promise pages are corrected to promise what each regime actually delivers
+5. **Docs**: the §1.3 promise pages are corrected to promise what each regime actually delivers
    (own card, docs lane) once the flow surface exists — not before, which would trade an
    over-promise for a differently-shaped one.
-5. **The paper protocol** (#12057) gets its enforce-or-remove card per §6.4.
+6. **The paper protocol** (#12057) gets its enforce-or-remove card per §6.4.
 
 ## 9. Explicitly not chartered (recorded so silence cannot be read as consent)
 
