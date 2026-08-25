@@ -103,6 +103,11 @@ export const CONDITIONAL_AGGREGATE_SQL_KEYS = Object.keys(CONDITIONAL_AGGREGATE_
  * expression and emit a bare column. `metric-type-coverage.test.ts` asserts these
  * two sets partition `AggregationMetricType`, so a new member fails a test
  * instead of picking a default.
+ *
+ * [#12209] `ObjectQLStrategy.resolveMeasureAggregation` keys its refusal arm on
+ * this same set — the engine aggregate AST cannot carry a raw SQL expression,
+ * so the ObjectQL path REFUSES exactly what this strategy emits verbatim. One
+ * set, two strategies, so the partition cannot fork per path.
  */
 export const EXPRESSION_METRIC_TYPES = new Set(['number', 'string', 'boolean']);
 

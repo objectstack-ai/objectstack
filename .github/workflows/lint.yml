@@ -12,6 +12,45 @@ on:
   # the trigger alone is enough.
   merge_group:
 
+# ── MEASURED 2026-08-25 (#12211) — a NEGATIVE result, recorded so it is not
+# re-measured. After the stale-ledger outage the queue's check set was measured
+# rather than assumed, because two observations of that day read as
+# contradictory: a PR landing an inconsistent tree at 11:50Z (which looked like
+# "the consumer-gates lane does not run in the queue"), and five queue entries
+# dequeued 12:26-13:05Z while main was red (which looked like the opposite).
+#
+# Both halves were read, and there is NO merge_group coverage gap to close:
+#
+#   - STATIC. Every gate step in this workflow runs on merge_group; the claim
+#     three lines above is exact. The only event-conditioned step in the file is
+#     `Save Turbo cache (main only)`, which stores a cache and judges nothing.
+#     ci.yml is the same shape — its single merge_group exclusion sits on the
+#     paths filter, which on a queue build widens to "everything changed"
+#     rather than narrowing. All six required contexts live in these two
+#     merge_group-triggered workflows (scripts/check-required-contexts.mjs).
+#
+#   - DYNAMIC. 180 merge_group runs of this workflow were read across
+#     09:15-18:49Z. In run 32847794799 — a real queue build — the
+#     `Type Check · consumer gates` lane RAN and FAILED on
+#     `check:exported-any-returns`, and the required `TypeScript Type Check`
+#     aggregate carried that red into the queue. Tree-global ratchets do kick
+#     there; the 12:26-13:05Z dequeues are that gate, on innocent candidates,
+#     while main itself was red. CI was green on those same merge groups.
+#
+# What the 11:50Z landing actually was: that commit produced NO merge_group
+# build at all — 4 of the 29 PRs landing 09:20-12:10Z produced none — and its
+# PR-level required checks were green as measured at 07:20Z, ~3h before the
+# gate that would have refused it existed. The residual is therefore not a
+# trigger this file is missing. It is that a commit can reach main without a
+# queue build, plus `strict_required_status_checks_policy: false` on the `main`
+# ruleset (measured 2026-08-18, #9642). Both are repository SETTINGS and
+# maintainer-only; neither is reachable from this file.
+#
+# ⛔ So do not "close the gap" by adding merge_group to the advisory workflows
+# (check-links.yml, docs-drift-check.yml, validate-deps.yml, the patrols). A
+# non-required check on a queue build costs runners and blocks nothing, and
+# check-links.yml's own header already refuses it for that reason.
+
 # Same policy as ci.yml: superseded runs on the same PR/branch waste runners
 # and delay feedback; cancel them. Push runs to main group by commit ref, so an
 # in-flight main run is cancelled only by a newer main push.
