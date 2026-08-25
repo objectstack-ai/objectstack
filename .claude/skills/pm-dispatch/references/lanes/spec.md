@@ -10,7 +10,8 @@
   spec 契约转的工具链(门禁/生成器/lint 规则/报错散文/references 管线)。
 - 一般开发工具面留 devx(维护者 2026-08-09 裁决);`packages/spec` 恒归本席,不论
   谁需要它。
-- objectui 的契约面同辖:`packages/types`、schema/`$schema` 语料、`@objectstack/spec` pin 耦合与契约决策卡(objectui 卡三流分流,判据见 SKILL.md 多仓协调)。
+- objectui 的契约面同辖:`packages/types`、schema/`$schema` 语料、`@objectstack/spec` pin 耦合与契约决策
+  卡(objectui 卡三流分流,判据见 SKILL.md 多仓协调)。
 
 ## 席内分派参考
 
@@ -36,8 +37,10 @@
 - **契约面卡的 fixture triage 必须跑消费包测试**(A 包的改动可让 B 包的 fixture
   反着断言,spec 范围内任何 sweep 都看不见)—— 派发令点名消费包测试清单,报告要有
   各消费包真实读数。
-- 派发前触发文件必查照 SKILL.md 标签纪律执行(读锚 H17 索引相交);跨仓 pin 滞后读法在 SKILL.md 多仓协调。
+- 派发前触发文件必查照 SKILL.md 标签纪律执行(读锚 H17 索引相交);跨仓 pin 滞后读法在
+  SKILL.md 多仓协调。
 
 ## 席内判断
 
-- 候选卡评论必读(SKILL.md 候选与批次);裁决与撤销住在评论里,即使正文看起来已是决策形状。
+- 候选卡评论必读(SKILL.md 候选与批次);裁决与撤销住在评论里,即使正文看起来已是决策形
+  状。
