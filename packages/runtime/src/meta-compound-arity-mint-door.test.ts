@@ -1,27 +1,31 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * #8421 — the COMPOUND `/meta` arity survives the unrecognised-type refusal,
- * pinned at the LIVE ROUTE.
+ * #8421/#12194 — the COMPOUND `/meta` arity write is refused at the item-name
+ * grammar gate, pinned at the LIVE ROUTE.
  *
  * `/metadata/lead/views/all_leads` is `type='lead'`, `name='views/all_leads'`:
- * ONE operation reaching ONE `saveMetaItem`, the shape this dispatcher's own
- * `/meta` branch documents verbatim ("compound names are how the client
- * expresses sub-resources of a type"). The segment in the `:type` position is an
- * OBJECT name — runtime data, which no static contract can enumerate — so a
- * static type verdict applied there refuses every object name that is not
- * coincidentally a metadata type.
+ * ONE operation reaching ONE `saveMetaItem`. Under #8421 that shape was
+ * EXEMPTED from the unrecognised-type refusal (the `:type` segment carries an
+ * OBJECT name no static contract can enumerate), and this file pinned the
+ * exemption at the wire. #12194 (stage 1 of #12176's maintainer-ruled
+ * retirement of compound-name addressing, 2026-08-25) reverses the pinned
+ * direction: the item-name grammar refuses every slash-bearing name BEFORE the
+ * type verdict runs, so the compound WRITE now answers `400 INVALID_REQUEST`
+ * with the dotted prescription — and this file pins that the refusal reaches
+ * the wire with the ADR-0112 envelope, not a 500.
  *
  * ## Why this file exists rather than one more case next door
  *
  * `domains/meta-save-capability-gate.test.ts` already drives this exact path,
- * and it stayed GREEN through the regression: its caller holds no capabilities,
- * so `PERMISSION_DENIED` answers before the protocol is ever resolved, and its
- * `saveMetaItem` is a `vi.fn()` that could not have refused anything anyway. The
- * site was masked, not unaffected — a 403 arriving first is not evidence about
- * what the door behind it does. So every case here holds `manage_metadata` and
- * drives the REAL `ObjectStackProtocolImplementation` over a real store, and
- * then reads the stored ROW rather than the response body.
+ * and it stayed GREEN through the original regression: its caller holds no
+ * capabilities, so `PERMISSION_DENIED` answers before the protocol is ever
+ * resolved, and its `saveMetaItem` is a `vi.fn()` that could not have refused
+ * anything anyway. The site was masked, not unaffected — a 403 arriving first
+ * is not evidence about what the door behind it does. So every case here holds
+ * `manage_metadata` and drives the REAL `ObjectStackProtocolImplementation`
+ * over a real store, and then reads the stored ROW rather than the response
+ * body.
  *
  * ⚠️ `packages/runtime` resolves `@objectstack/metadata-protocol` through its
  * built `dist`, and stack traces are source-mapped back to `src` — so any
@@ -30,11 +34,12 @@
  *
  * ## Reverse verification, direction predicted BEFORE running
  *
- * Deleting the compound exemption from `refuseUnmintableMetaType` (the
- * `request.name.includes('/')` line) and rebuilding must turn the two compound
- * cases RED — `400 INVALID_REQUEST`, no row — and leave the simple-arity
- * refusal and the recognised-type control GREEN. Predicted 2 red / 3 green;
- * measured 2 red / 3 green.
+ * On the pre-#12194 tree (grammar gate absent, compound exemption present)
+ * the two compound cases run the OTHER way — `200`, row stored under the
+ * slash key. Measured on `origin/main@22c42c9b` before the door change: this
+ * file's two compound pins were the acceptance direction; after the door
+ * change and a rebuild they pin the refusal. The simple-arity refusal and the
+ * recognised-type control are green on both trees.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -209,7 +214,7 @@ describe('#8421 — the compound `/meta` arity is not a metadata-type claim', ()
         vi.spyOn(console, 'error').mockImplementation(() => {});
     });
 
-    it('saves a sub-resource addressed under an OBJECT name', async () => {
+    it('refuses the compound-arity write at the wire with the grammar envelope (#12194)', async () => {
         const { engine, dispatcher } = makeStack();
 
         const res = responseOf(await dispatcher.handleMetadata(
@@ -217,22 +222,28 @@ describe('#8421 — the compound `/meta` arity is not a metadata-type claim', ()
             { name: 'all_leads', label: 'All Leads', columns: ['name'] },
         ));
 
-        expect(res.status).toBe(200);
-        // The stored ROW, not the answer: the compound name is reassembled and
-        // used as ONE key — not split, not truncated to its last segment.
-        expect(metaRow(engine, 'lead', 'views/all_leads')).toBeDefined();
+        // The refusal reaches the WIRE as the caller's mistake, not a server
+        // fault: 400 + code, with the grammar and the dotted prescription in
+        // the message — and the stored ROW proves nothing was minted under
+        // the slash key (the pre-#12194 direction stored it as one opaque key).
+        expect(res.status).toBe(400);
+        expect(res.body?.error?.code).toBe('INVALID_REQUEST');
+        expect(String(res.body?.error?.message ?? '')).toMatch(/is not a legal metadata item name/);
+        expect(String(res.body?.error?.message ?? '')).toMatch(/crm_lead\.pipeline/);
+        expect(metaRow(engine, 'lead', 'views/all_leads')).toBeUndefined();
         expect(metaRow(engine, 'lead', 'all_leads')).toBeUndefined();
     });
 
-    it('…on a deeper compound name too', async () => {
+    it('…and a deeper compound name is refused the same way', async () => {
         const { engine, dispatcher } = makeStack();
 
         const res = responseOf(await dispatcher.handleMetadata(
             '/lead/views/all_leads/columns', ctx(), 'PUT', { name: 'columns', label: 'Columns' },
         ));
 
-        expect(res.status).toBe(200);
-        expect(metaRow(engine, 'lead', 'views/all_leads/columns')).toBeDefined();
+        expect(res.status).toBe(400);
+        expect(res.body?.error?.code).toBe('INVALID_REQUEST');
+        expect(metaRow(engine, 'lead', 'views/all_leads/columns')).toBeUndefined();
     });
 
     it('ANTI-VACUITY — the same object name at the SIMPLE arity is still refused', async () => {

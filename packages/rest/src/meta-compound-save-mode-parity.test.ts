@@ -5,6 +5,18 @@
  * — the FIFTH divergence closed on this door pair, and the first one whose
  * harmful direction is a silent WRITE rather than a silent refusal.
  *
+ * ## ⚠️ #12194 reversed the compound door's WRITE outcome
+ *
+ * Stage 1 of #12176 (maintainer ruling 2026-08-25): the item-name grammar
+ * refuses every slash-bearing name at `saveMetaItem`, so the compound door's
+ * folded `crm/task` is now refused `400 INVALID_REQUEST` before the lifecycle
+ * split this file was written about is reached — `?mode=draft` cannot stage a
+ * slash-named draft any more. The route still folds and still threads `mode`
+ * (the seam pins below stay true); the single-segment twin keeps the full
+ * #11712 contract; the repeated-parameter guard still answers first. The
+ * compound-door cases pin the refusal; the twins now DIVERGE BY DESIGN at the
+ * write (the route retirement itself is D3, #12195).
+ *
  * ## The defect, as measured
  *
  * ADR-0005's per-item lifecycle stages a write when the caller sends
@@ -296,31 +308,29 @@ const PUBLISHED = [SUBMITTED_LABEL, undefined];
 // 1. ⭐ The compound door, `?mode=draft` — the case that fails without the fix
 // ═══════════════════════════════════════════════════════════════════════════
 
-describe('[#11712] compound-name PUT — `?mode=draft` stages instead of publishing', () => {
-    it('⭐ leaves the LIVE row alone and stages the edit beside it', async () => {
+describe('[#11712 / #12194] compound-name PUT — `?mode=draft` is refused at the grammar gate', () => {
+    it('⭐ refuses the folded slash name: live row untouched, NOTHING staged', async () => {
         const stack = boot();
 
         const answer = await stack.compoundPut({ mode: 'draft' });
 
-        expect(answer.status).toBe(200);
-        // ⛔ The status is NOT the pin. The unfixed door answers 200 here too —
-        // it accepts the parameter and ignores it. These two lines are the
-        // claim: the caller's edit is STAGED, and the live body is untouched.
-        expect(stack.compoundOutcome()).toEqual(STAGED);
-        // Pre-fix this read `['Edited label', undefined]`: the live row
-        // overwritten, nothing staged. A publish, answered 200, for a request
-        // that asked for a draft.
+        // The grammar gate answers before the lifecycle split is reached: a
+        // slash-named DRAFT is as refused as a slash-named publish, or the
+        // staging buffer would become the one channel that still mints slash
+        // rows (they would surface at promote time instead).
+        expect(answer.status).toBe(400);
+        expect(answer.body?.code).toBe('INVALID_REQUEST');
+        expect(stack.compoundOutcome()).toEqual([LIVE_LABEL, undefined]);
     });
 
-    it('⭐ says so in the answer too — `state` is the staged one, not the live one', async () => {
+    it('⭐ the refusal names the grammar and the dotted prescription', async () => {
         const stack = boot();
 
         const answer = await stack.compoundPut({ mode: 'draft' });
 
-        // The protocol's save answer carries the lifecycle state it wrote.
-        // Pre-fix this said `active` while reporting success — the silence the
-        // card is about, one field along from the store itself.
-        expect(answer.body?.state).toBe('draft');
+        // `handleRouteError`'s body is FLAT — the message string is `error`.
+        expect(answer.body?.error).toContain('is not a legal metadata item name');
+        expect(answer.body?.error).toContain('crm_lead.pipeline');
     });
 
     it('threads `mode: \'draft\'` into the protocol request, and only when asked', async () => {
@@ -342,13 +352,14 @@ describe('[#11712] compound-name PUT — `?mode=draft` stages instead of publish
         expect(stack.seen[1].writeFace).toBe('meta-envelope');
     });
 
-    it('accepts the `DRAFT` spelling case-insensitively, byte-identically to the twin', async () => {
+    it('the `DRAFT` spelling is refused the same way — case-folding buys no bypass', async () => {
         const stack = boot();
 
         const answer = await stack.compoundPut({ mode: 'DRAFT' });
 
-        expect(answer.status).toBe(200);
-        expect(stack.compoundOutcome()).toEqual(STAGED);
+        expect(answer.status).toBe(400);
+        expect(answer.body?.code).toBe('INVALID_REQUEST');
+        expect(stack.compoundOutcome()).toEqual([LIVE_LABEL, undefined]);
     });
 });
 
@@ -358,19 +369,22 @@ describe('[#11712] compound-name PUT — `?mode=draft` stages instead of publish
 //    red-before case.
 // ═══════════════════════════════════════════════════════════════════════════
 
-describe('[#11712] the compound door still publishes when nothing asked for a draft', () => {
+describe('[#11712 / #12194] no `mode` spelling changes the compound refusal — the gate reads the name', () => {
     it.each([
         { label: 'no `mode` at all', query: {} },
         { label: 'an explicit `mode=publish`', query: { mode: 'publish' } },
         { label: 'an unrecognised `mode=staged`', query: { mode: 'staged' } },
         { label: 'an empty `mode=`', query: { mode: '' } },
-    ])('$label goes live — legacy semantics, unchanged', async ({ query }) => {
+    ])('$label is refused identically — 400, store untouched', async ({ query }) => {
         const stack = boot();
 
         const answer = await stack.compoundPut(query);
 
-        expect(answer.status).toBe(200);
-        expect(stack.compoundOutcome()).toEqual(PUBLISHED);
+        expect(answer.status).toBe(400);
+        expect(answer.body?.code).toBe('INVALID_REQUEST');
+        expect(stack.compoundOutcome()).toEqual([LIVE_LABEL, undefined]);
+        // The request REACHED the door (the refusal is the protocol's, not the
+        // route's), and none of these spellings threaded a `mode`.
         expect(stack.seen[0].mode).toBeUndefined();
     });
 });
@@ -416,13 +430,21 @@ describe('[#11712 / #6877] a REPEATED `?mode` is refused, never read as publish-
         expect(stack.compoundOutcome()).toEqual([LIVE_LABEL, undefined]);
     });
 
-    it('one occurrence encoded as an array still stages — the guard unwraps, it does not blanket-refuse', async () => {
+    it('one occurrence encoded as an array still REACHES the door — the guard unwraps, it does not blanket-refuse', async () => {
         const stack = boot();
 
         const answer = await stack.compoundPut({ mode: ['draft'] });
 
-        expect(answer.status).toBe(200);
-        expect(stack.compoundOutcome()).toEqual(STAGED);
+        // The guard's own verdict would be the nested VALIDATION_ERROR with
+        // `seen` empty (as the repeated cases above pin). A single
+        // array-encoded occurrence unwraps and travels: the request reaches
+        // `saveMetaItem` with `mode: 'draft'` threaded — recorded at the seam —
+        // where the #12194 grammar gate is what answers now.
+        expect(stack.seen).toHaveLength(1);
+        expect(stack.seen[0].mode).toBe('draft');
+        expect(answer.status).toBe(400);
+        expect(answer.body?.code).toBe('INVALID_REQUEST');
+        expect(stack.compoundOutcome()).toEqual([LIVE_LABEL, undefined]);
     });
 
     it('the twin refuses a repeated `mode` the same way — it always did', async () => {
@@ -481,41 +503,51 @@ describe('[#11712 / #11095] adding `mode` to the list did not disturb `force` or
 // 5. ⭐ [#7019] The twins agree — the ruling this card inherits, executable
 // ═══════════════════════════════════════════════════════════════════════════
 
-describe('[#11712 / #7019] the two `PUT` doors answer `?mode` the same way', () => {
+describe('[#11712 / #7019 / #12194] the two `PUT` doors now DIVERGE by design at the write', () => {
     /**
-     * ⛔ Deliberately literal-free on both sides: these cases assert that the
-     * two doors AGREE, never what they agree on. §1 names the outcome; this
-     * section names only the equality, so a future move on EITHER door reddens
-     * here independently of whichever literal §1 happens to pin. (#11731 §4 is
-     * the precedent — "every classified refusal gets the same status at both
-     * doors", with the status read off the other door rather than written down.)
-     *
-     * The single-segment door is untouched by this card and is the control: its
-     * behaviour is asserted rather than assumed, which is the only shape in
-     * which "the twins agree" is a pin instead of a comment.
+     * #7019's "one operation, two spellings" premise is what #12176 retired:
+     * the compound spelling is no longer a legal way to say the operation.
+     * The single-segment twin keeps the FULL #11712 `?mode` contract (asserted
+     * per spelling, never assumed), while every compound write is refused at
+     * the grammar gate before `mode` matters. Both directions are pinned so
+     * this fails if EITHER door moves. One agreement survives: a REPEATED
+     * `mode` is the route guard's own 400 at both doors, because the guard
+     * runs before either door's verdict.
      */
     it.each([
-        { label: 'no `mode`', query: {} },
-        { label: '`mode=draft`', query: { mode: 'draft' } },
-        { label: '`mode=DRAFT`', query: { mode: 'DRAFT' } },
-        { label: '`mode=publish`', query: { mode: 'publish' } },
-        { label: '`mode=staged` (unrecognised)', query: { mode: 'staged' } },
-        { label: 'a repeated `mode`', query: { mode: ['draft', 'draft'] } },
-    ])('⭐ $label: same status, same lifecycle, same store outcome at both doors', async ({ query }) => {
+        { label: 'no `mode`', query: {}, singleOutcome: PUBLISHED },
+        { label: '`mode=draft`', query: { mode: 'draft' }, singleOutcome: STAGED },
+        { label: '`mode=DRAFT`', query: { mode: 'DRAFT' }, singleOutcome: STAGED },
+        { label: '`mode=publish`', query: { mode: 'publish' }, singleOutcome: PUBLISHED },
+        { label: '`mode=staged` (unrecognised)', query: { mode: 'staged' }, singleOutcome: PUBLISHED },
+    ])('⭐ $label: single door keeps the #11712 contract, compound door refuses', async ({ query, singleOutcome }) => {
         const compoundStack = boot();
         const singleStack = boot();
 
         const compound = await compoundStack.compoundPut(query);
         const single = await singleStack.singlePut(query);
 
-        // 1. The answer.
+        expect(single.status).toBe(200);
+        expect(singleStack.singleOutcome()).toEqual(singleOutcome);
+        expect(compound.status).toBe(400);
+        expect(compound.body?.code).toBe('INVALID_REQUEST');
+        expect(compoundStack.compoundOutcome()).toEqual([LIVE_LABEL, undefined]);
+    });
+
+    it('a REPEATED `mode` is still refused identically at both doors — the guard answers first', async () => {
+        const compoundStack = boot();
+        const singleStack = boot();
+
+        const compound = await compoundStack.compoundPut({ mode: ['draft', 'draft'] });
+        const single = await singleStack.singlePut({ mode: ['draft', 'draft'] });
+
         expect(compound.status).toBe(single.status);
-        expect(compound.body?.state).toBe(single.body?.state);
+        expect(compound.status).toBe(400);
+        // The guard's NESTED body at both doors — neither request reached a door.
         expect(compound.body?.error?.code).toBe(single.body?.error?.code);
-        // 2. What the write actually DID, as `[live label, staged label]`.
-        //    Pre-fix, `mode=draft` read `['Edited label', undefined]` on the
-        //    compound side and `['Live label', 'Edited label']` on the twin.
-        expect(compoundStack.compoundOutcome()).toEqual(singleStack.singleOutcome());
+        expect(compound.body?.error?.code).toBe('VALIDATION_ERROR');
+        expect(compoundStack.seen).toHaveLength(0);
+        expect(singleStack.seen).toHaveLength(0);
     });
 
     it('and the twin is UNTOUCHED — its request shape is what it always was', async () => {
@@ -531,17 +563,16 @@ describe('[#11712 / #7019] the two `PUT` doors answer `?mode` the same way', () 
         });
     });
 
-    it('both doors reach ONE store, so a draft staged at either is the same draft', async () => {
+    it('a refused compound write leaves the single door\'s staging untouched — one store, one refusal', async () => {
         const stack = boot();
 
-        // Same fixture, both doors, both staging: the names differ, so the two
-        // drafts are two rows and neither door's staging leaks onto the other's
-        // live body. This is the claim "one generic `saveMetaItem`, reached by a
-        // name spelled in two segments" reduced to something executable.
+        // Same fixture, both doors: the compound attempt is refused at the
+        // grammar gate and must not disturb the twin's staging beside it in
+        // the same store.
         await stack.compoundPut({ mode: 'draft' });
         await stack.singlePut({ mode: 'draft' });
 
-        expect(stack.outcome(COMPOUND_NAME)).toEqual(STAGED);
+        expect(stack.outcome(COMPOUND_NAME)).toEqual([LIVE_LABEL, undefined]);
         expect(stack.outcome(SINGLE_NAME)).toEqual(STAGED);
     });
 });
