@@ -44,7 +44,14 @@ interface TablesEngine {
 export function inviteForAudienceGate(engineOrManager: unknown, email: string): Promise<void> {
   const row = {
     id: `inv_audience_${Math.random().toString(36).slice(2, 10)}`,
-    email,
+    // [#11770] Stored NORMALIZED, because that is the only form the product
+    // writes: `organization/invite-member` lowercases the address before it
+    // reaches `createInvitation`, and the vendor's own reads
+    // (`findPendingInvitation`, `listUserInvitations`) look it up with
+    // `email.toLowerCase()`. A fixture holding the inviter's raw casing would
+    // pin a row shape no invitation route can produce and no accept route
+    // could redeem.
+    email: email.trim().toLowerCase(),
     status: 'pending',
     // A dedicated org id so suites that count THEIR invitations per
     // organization never see these rows.

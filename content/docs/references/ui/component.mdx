@@ -302,8 +302,8 @@ const result = AIChatWindowProps.parse(data);
 | **showColumnTypeIcons** | `boolean` | optional | Show field-type icons in column headers |
 | **exportOptions** | `any` | optional | Export config (`{ formats, streaming }`) |
 | **operations** | `any` | optional | Operation toggles (`{ export: false, … }`) |
-| **data** | `{ provider: 'object'; object: string } \| { provider: 'api'; read?: object; write?: object } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }` | optional | Data source binding (ViewDataSchema — discriminated on `provider`: object \| api \| value \| schema). Static inline rows live at `{ provider: 'value', items: [...] }`; the bare-array shortcut is refused — see migration `object-grid-data-view-data-converged` |
-| **staticData** | `any[]` | optional | Deprecated bare-array static-rows shortcut the renderer still reads. Prefer `data: { provider: 'value', items: [...] }` |
+| **data** | `any[]` | optional | Static inline rows — bypasses the object query |
+| **staticData** | `any[]` | optional | Alternate spelling of `data` the renderer also reads |
 
 
 ---

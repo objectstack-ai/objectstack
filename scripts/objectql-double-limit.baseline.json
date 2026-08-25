@@ -1,0 +1,844 @@
+{
+  "$comment": [
+    "Measured baseline for scripts/check-objectql-double-limit.mjs (#11525, from #10978).",
+    "",
+    "WHAT AN ENTRY IS. One test file holding in-memory ObjectQL `find` double(s) that do not",
+    "hold the caller's `limit`. An entry is DEBT, never an exemption: the remedy is the double,",
+    "and the entry is deleted by the PR that repairs it. The per-file counts are MEASURED by the",
+    "gate, never asserted by hand -- run the gate and it prints what it measured for every file",
+    "it disagrees with.",
+    "",
+    "`blind`    the double ignores the bound outright: it matches `where` and hands back every",
+    "           matched row. It cannot tell a read bounded at 200 from the same read bounded at",
+    "           1000, or from one carrying no bound at all, so every limit change on that read is",
+    "           green BY CONSTRUCTION and the production symptom is a silently truncated result",
+    "           set rather than an error.",
+    "",
+    "`wrong`    the double DOES apply the bound but breaks one of the three shape rules -- most",
+    "           of this population reads it by truthiness (`opts.limit ? ... : rows`, or",
+    "           `limit > 0`), so a request for NOTHING is answered with the WHOLE table. Kept in",
+    "           its own count rather than folded into `blind`, because the two have different",
+    "           remedies and a folded count cannot tell a repair from a regression.",
+    "",
+    "`unjudged` the double could not be lifted out of its file and driven, so the gate has no",
+    "           verdict on it. Declared rather than skipped: \"could not run\" is a failure, not a",
+    "           pass (AGENTS.md, \"Absence must be loud\"). Shrinking this count is a real repair --",
+    "           it usually means widening the lift, not editing the double.",
+    "",
+    "ABSENCE FROM THIS FILE MEANS GRADED AND CONFORMING -- never \"unscanned\". Membership is",
+    "decided behaviourally: a candidate the control probe cannot seat as a query-honouring,",
+    "row-selecting `find` is dropped OUT OF SCOPE (`find` is also a Map lookup, a registry read",
+    "and an array search), and a `find` that answers with a record rather than a list is a",
+    "different verb. The gate PRINTS the whole census on every run -- candidates proposed,",
+    "graded, unjudged, dropped -- so those populations are visible rather than implied.",
+    "",
+    "PROVENANCE, and the number this ledger does NOT carry. #11525 was filed against a census",
+    "recorded on PR #11521: 49 limit-blind doubles across 43 files and 10 packages, 9 of them",
+    "converted there, 40 left. Re-derived behaviourally at the merge base of this gate's own PR,",
+    "the population is MUCH larger -- 167 blind, 32 breaking a shape rule and 54 unjudged, across",
+    "the files below. The two measurements are not the same instrument: the earlier one was",
+    "scoped by hand, this one seats every candidate by driving it. Seeding this ledger from 40",
+    "would have pinned the ratchet to a number the corpus does not have, and it would have read",
+    "as green forever. The nine doubles PR #11521 converted are the positive control on the",
+    "re-derivation: all nine grade CONFORMING here, so they are absent below.",
+    "",
+    "WHAT IS NOT IN HERE, and why this count is lower than a first measurement of the same corpus.",
+    "A candidate is seated only on a POSITIVE reading of the control probe -- the rows it answers with",
+    "must actually carry the probe's field. 19 candidates answered BOTH control probes with rows of",
+    "their OWN (constant stubs like `async find(o, q) { return [{ id: 'r1' }]; }`, and schema-signature",
+    "fixtures that exist only to satisfy a `parse()`), so the control read nothing from them and",
+    "obtained no evidence of filtering at all. Seating them anyway graded them limit-blind -- debt with",
+    "no possible remedy, because there is no corpus to bound -- and a ledger carrying unfixable entries",
+    "can never burn down. They are routed by structure instead: 15 dropped OUT OF SCOPE (the body never",
+    "filters), 4 DECLARED unjudged (it does, but this lift cannot drive it). Both are pinned by",
+    "--self-test fixtures, so reading \"not disproven\" as \"proven\" again fails the gate's own test.",
+    "",
+    "TWO ways to clear an entry, and the cheap one is usually right:",
+    "  1. apply the bound AFTER the filter, by PRESENCE --",
+    "       const page = typeof opts?.limit === 'number' ? rows.slice(0, opts.limit) : rows;",
+    "  2. make the double REFUSE a bound it does not implement (`throw` when `limit` arrives).",
+    "Option 2 is one line and is already the recorded practice next door for unknown operators",
+    "in `packages/objectql/src/engine-autonumber-*.test.ts` -- \"silently ignoring an unknown",
+    "operator would let a bad query pass as a good one\". A double whose reads never carry a",
+    "bound does not need a bound implementation; it needs to stop answering as if it had one.",
+    "",
+    "SHRINK-ONLY and hand-edited under review. The gate fails in BOTH directions: a count that",
+    "went down must be lowered here in the same PR, and a file with nothing left must lose its",
+    "entry entirely. The key set is additionally checked against the merge base with origin/main,",
+    "because counts alone cannot see a newly-added file matching its own count -- that would turn",
+    "this ledger into a general-purpose mute button (the SLOT_LOOKUP_UNSWEPT precedent, #4251).",
+    "There is deliberately no --update flag: a generator would let a new limit-blind double in by",
+    "\"just run the update command\".",
+    "",
+    "DO NOT DELETE THIS FILE WHEN IT EMPTIES. With the file absent the gate prints",
+    "\"check-objectql-double-limit: missing\" followed by this path and exits 2 BEFORE it scans",
+    "anything -- a hard refusal, never a clean pass, because an absent ledger cannot tell settled",
+    "debt from a new defect. Deleting and later re-adding it also costs the monotonicity check for",
+    "that run. `files: {}` is the SUCCESS state, and the loader reads `baseline.files ?? {}`, so",
+    "an empty ledger is a passing run rather than a half-written one.",
+    "",
+    "Key is the repo-relative test file path; its value is the measured counts for that file.",
+    "Run the gate to see exactly what it measured."
+  ],
+  "files": {
+    "packages/core/src/utils/migration-journal.test.ts": {
+      "unjudged": 1
+    },
+    "packages/metadata-protocol/src/migrations/recorded-by-sentinel.test.ts": {
+      "unjudged": 1
+    },
+    "packages/metadata-protocol/src/migrations/seed-tenancy-backfill.test.ts": {
+      "unjudged": 1
+    },
+    "packages/metadata-protocol/src/protocol-publish-drafts-advisories.test.ts": {
+      "blind": 1
+    },
+    "packages/metadata-protocol/src/protocol-publish-drafts-closure.test.ts": {
+      "blind": 1
+    },
+    "packages/metadata-protocol/src/protocol-publish-drafts-endpoint-gate.test.ts": {
+      "blind": 1
+    },
+    "packages/metadata-protocol/src/protocol-publish-drafts-org-scope.test.ts": {
+      "blind": 1
+    },
+    "packages/metadata-protocol/src/protocol-publish-drafts-package-scope.test.ts": {
+      "blind": 1
+    },
+    "packages/metadata-protocol/src/protocol.audit-field-governance.test.ts": {
+      "blind": 1
+    },
+    "packages/metadata-protocol/src/protocol.batch-verb-driver-code.test.ts": {
+      "blind": 1
+    },
+    "packages/metadata-protocol/src/protocol.batch-verb-driver-text.test.ts": {
+      "blind": 1
+    },
+    "packages/metadata-protocol/src/protocol.dashboard-dataset-publish-gate.test.ts": {
+      "unjudged": 1
+    },
+    "packages/metadata-protocol/src/protocol.destructive-409-face-inventory.test.ts": {
+      "blind": 1
+    },
+    "packages/metadata-protocol/src/protocol.destructive-gate-reachable-types.test.ts": {
+      "blind": 1
+    },
+    "packages/metadata-protocol/src/protocol.diff-canonical-type-and-history-outage.test.ts": {
+      "blind": 1
+    },
+    "packages/metadata-protocol/src/protocol.diff-credential-redaction.test.ts": {
+      "blind": 1
+    },
+    "packages/metadata-protocol/src/protocol.diff-dead-history-read.test.ts": {
+      "blind": 1
+    },
+    "packages/metadata-protocol/src/protocol.graft-folded-form-sections.test.ts": {
+      "unjudged": 1
+    },
+    "packages/metadata-protocol/src/protocol.hydrate-overlay-canonical-type.test.ts": {
+      "blind": 1
+    },
+    "packages/metadata-protocol/src/protocol.i18n-bundle-list-merge.test.ts": {
+      "blind": 1
+    },
+    "packages/metadata-protocol/src/protocol.injected-system-columns.test.ts": {
+      "blind": 1
+    },
+    "packages/metadata-protocol/src/protocol.lifecycle-audit-rows.test.ts": {
+      "blind": 1
+    },
+    "packages/metadata-protocol/src/protocol.meta-list-runtime-baseline-dedup.test.ts": {
+      "blind": 1
+    },
+    "packages/metadata-protocol/src/protocol.metadata-redaction.test.ts": {
+      "blind": 1
+    },
+    "packages/metadata-protocol/src/protocol.migrate-stored-noncanonical-type.test.ts": {
+      "blind": 1
+    },
+    "packages/metadata-protocol/src/protocol.object-registry-write-through-spelling.test.ts": {
+      "blind": 1
+    },
+    "packages/metadata-protocol/src/protocol.org-scoped-cold-boot-audit-live-registry.test.ts": {
+      "blind": 1
+    },
+    "packages/metadata-protocol/src/protocol.org-scoped-cold-boot-audit.test.ts": {
+      "unjudged": 1
+    },
+    "packages/metadata-protocol/src/protocol.org-scoped-write-refused.test.ts": {
+      "blind": 1
+    },
+    "packages/metadata-protocol/src/protocol.package-closure-gate.test.ts": {
+      "unjudged": 1
+    },
+    "packages/metadata-protocol/src/protocol.package-publish-audit-rows.test.ts": {
+      "blind": 1
+    },
+    "packages/metadata-protocol/src/protocol.platform-schedule-org-gate.test.ts": {
+      "unjudged": 1
+    },
+    "packages/metadata-protocol/src/protocol.publish-commit-capture-read-failure.test.ts": {
+      "blind": 1
+    },
+    "packages/metadata-protocol/src/protocol.publish-item-draft-org-scope.test.ts": {
+      "blind": 1
+    },
+    "packages/metadata-protocol/src/protocol.publish-item-rebind-announce.test.ts": {
+      "blind": 1
+    },
+    "packages/metadata-protocol/src/protocol.publish-side-effects-canonical-type.test.ts": {
+      "blind": 1
+    },
+    "packages/metadata-protocol/src/protocol.publish-stored-type-canonical.test.ts": {
+      "blind": 1
+    },
+    "packages/metadata-protocol/src/protocol.read-decorations.test.ts": {
+      "blind": 1
+    },
+    "packages/metadata-protocol/src/protocol.read-verb-canonical-fold.test.ts": {
+      "blind": 1
+    },
+    "packages/metadata-protocol/src/protocol.record-package-commit-durability.test.ts": {
+      "blind": 1
+    },
+    "packages/metadata-protocol/src/protocol.revert-stored-type-canonical.test.ts": {
+      "blind": 1
+    },
+    "packages/metadata-protocol/src/protocol.runtime-authoring-gate.test.ts": {
+      "unjudged": 1
+    },
+    "packages/metadata-protocol/src/protocol.save-flow-canonicalization.test.ts": {
+      "unjudged": 1
+    },
+    "packages/metadata-protocol/src/protocol.stored-conversions.test.ts": {
+      "blind": 1
+    },
+    "packages/metadata-protocol/src/protocol.stored-migration.test.ts": {
+      "blind": 1
+    },
+    "packages/metadata-protocol/src/protocol.stored-residue-resave.test.ts": {
+      "blind": 1
+    },
+    "packages/metadata-protocol/src/protocol.unrecognised-meta-type.test.ts": {
+      "unjudged": 1
+    },
+    "packages/metadata-protocol/src/sys-metadata-repository.draft-drain.test.ts": {
+      "blind": 1
+    },
+    "packages/metadata-protocol/src/sys-metadata-repository.draft-package-inherit.test.ts": {
+      "blind": 1
+    },
+    "packages/metadata-protocol/src/sys-metadata-repository.history-counters.test.ts": {
+      "blind": 1
+    },
+    "packages/metadata-protocol/src/sys-metadata-repository.package-writability.test.ts": {
+      "blind": 1
+    },
+    "packages/metadata-protocol/src/sys-metadata-repository.recorded-by.test.ts": {
+      "blind": 1
+    },
+    "packages/metadata-protocol/src/view-container-runtime-expansion.test.ts": {
+      "blind": 1
+    },
+    "packages/objectql/src/adr0104-attestation-evidence.test.ts": {
+      "blind": 1
+    },
+    "packages/objectql/src/adr0104-lax-deviation-marker.test.ts": {
+      "blind": 1
+    },
+    "packages/objectql/src/bulk-write-per-row-hooks.test.ts": {
+      "blind": 1
+    },
+    "packages/objectql/src/engine-audit-anchor-write.test.ts": {
+      "blind": 1
+    },
+    "packages/objectql/src/engine-author-state-query.test.ts": {
+      "wrong": 1
+    },
+    "packages/objectql/src/engine-autonumber-runtime-owned.test.ts": {
+      "blind": 1
+    },
+    "packages/objectql/src/engine-cascade-delete-atomic.test.ts": {
+      "blind": 1
+    },
+    "packages/objectql/src/engine-cascade-delete-multivalue-probe.test.ts": {
+      "blind": 1
+    },
+    "packages/objectql/src/engine-cascade-delete-probe-failure.test.ts": {
+      "unjudged": 1
+    },
+    "packages/objectql/src/engine-cascade-delete.test.ts": {
+      "blind": 1
+    },
+    "packages/objectql/src/engine-cascade-registry-read-failure.test.ts": {
+      "blind": 1
+    },
+    "packages/objectql/src/engine-comparand-type-door.test.ts": {
+      "blind": 1
+    },
+    "packages/objectql/src/engine-data-events.test.ts": {
+      "blind": 1
+    },
+    "packages/objectql/src/engine-delete-prior-read-scope.test.ts": {
+      "unjudged": 1
+    },
+    "packages/objectql/src/engine-delete-restricted-locale.test.ts": {
+      "blind": 1
+    },
+    "packages/objectql/src/engine-filter-alias.test.ts": {
+      "wrong": 1
+    },
+    "packages/objectql/src/engine-filter-array-lowering.test.ts": {
+      "wrong": 1
+    },
+    "packages/objectql/src/engine-findone-contract.test.ts": {
+      "wrong": 1
+    },
+    "packages/objectql/src/engine-formula-scale.test.ts": {
+      "blind": 1
+    },
+    "packages/objectql/src/engine-lookup-referential-integrity.test.ts": {
+      "blind": 1
+    },
+    "packages/objectql/src/engine-privileged-read-ambient-transaction.test.ts": {
+      "unjudged": 1
+    },
+    "packages/objectql/src/engine-readonly-strict-writes.test.ts": {
+      "blind": 1
+    },
+    "packages/objectql/src/engine-readonly-strip-caller-values.test.ts": {
+      "blind": 1
+    },
+    "packages/objectql/src/engine-readonly-strip-signal.test.ts": {
+      "blind": 1
+    },
+    "packages/objectql/src/engine-readonly-when-derived-writes.test.ts": {
+      "blind": 1
+    },
+    "packages/objectql/src/engine-readonly-when-parent.test.ts": {
+      "blind": 1
+    },
+    "packages/objectql/src/engine-required-when-parent.test.ts": {
+      "blind": 1
+    },
+    "packages/objectql/src/engine-seed-required-deferral.test.ts": {
+      "blind": 1
+    },
+    "packages/objectql/src/engine-summary-index-registry-read-failure.test.ts": {
+      "blind": 1
+    },
+    "packages/objectql/src/engine-summary-recompute-context.test.ts": {
+      "blind": 1
+    },
+    "packages/objectql/src/engine-summary-retry.test.ts": {
+      "blind": 1
+    },
+    "packages/objectql/src/engine-temporal-comparand-door.test.ts": {
+      "blind": 1
+    },
+    "packages/objectql/src/engine-unknown-option.test.ts": {
+      "wrong": 1
+    },
+    "packages/objectql/src/engine-unscoped-multi-write-dispatch.test.ts": {
+      "blind": 1
+    },
+    "packages/objectql/src/engine-update-prior-read-scope.test.ts": {
+      "blind": 1
+    },
+    "packages/objectql/src/engine-wire-alias-reject.test.ts": {
+      "wrong": 1
+    },
+    "packages/objectql/src/engine-write-formula-hydration.test.ts": {
+      "blind": 1
+    },
+    "packages/objectql/src/engine-write-not-found-gate.test.ts": {
+      "blind": 1
+    },
+    "packages/objectql/src/hook-condition-bulk-previous.test.ts": {
+      "blind": 1
+    },
+    "packages/objectql/src/hook-condition-fail-loud.test.ts": {
+      "blind": 1
+    },
+    "packages/objectql/src/hook-condition-merged-record.test.ts": {
+      "blind": 1
+    },
+    "packages/objectql/src/hook-condition-previous-scope.test.ts": {
+      "blind": 1
+    },
+    "packages/objectql/src/hook-input-shape-contract.test.ts": {
+      "blind": 1
+    },
+    "packages/objectql/src/internal-fields.test.ts": {
+      "blind": 1
+    },
+    "packages/objectql/src/layered-overlay-integration.test.ts": {
+      "unjudged": 1
+    },
+    "packages/objectql/src/lifecycle/lifecycle-service.test.ts": {
+      "unjudged": 1
+    },
+    "packages/objectql/src/meta-object-primary-designation-roundtrip.test.ts": {
+      "blind": 1
+    },
+    "packages/objectql/src/meta-object-search-companion-roundtrip.test.ts": {
+      "blind": 1
+    },
+    "packages/objectql/src/meta-object-tenant-index-roundtrip.test.ts": {
+      "blind": 1
+    },
+    "packages/objectql/src/package-disable-enforcement.test.ts": {
+      "blind": 1
+    },
+    "packages/objectql/src/plugin.authoring-channel.test.ts": {
+      "blind": 1
+    },
+    "packages/objectql/src/protocol-boot-hydration-scoped.test.ts": {
+      "blind": 1
+    },
+    "packages/objectql/src/protocol-boot-object-package-binding.test.ts": {
+      "blind": 1
+    },
+    "packages/objectql/src/protocol-clone-real-engine.test.ts": {
+      "blind": 1
+    },
+    "packages/objectql/src/protocol-commit-history.test.ts": {
+      "blind": 1
+    },
+    "packages/objectql/src/protocol-delete-object-registry-heal.test.ts": {
+      "blind": 1
+    },
+    "packages/objectql/src/protocol-meta-effective-schema.test.ts": {
+      "blind": 1
+    },
+    "packages/objectql/src/protocol-object-overlay-layer.test.ts": {
+      "blind": 1
+    },
+    "packages/objectql/src/protocol-packaged-object-base.test.ts": {
+      "blind": 1
+    },
+    "packages/objectql/src/protocol-publish-canonical-fold.test.ts": {
+      "blind": 1
+    },
+    "packages/objectql/src/protocol-publish-rollback.test.ts": {
+      "unjudged": 1
+    },
+    "packages/objectql/src/protocol-recorded-by-null.test.ts": {
+      "blind": 1
+    },
+    "packages/objectql/src/protocol-registry-shadow.test.ts": {
+      "blind": 1
+    },
+    "packages/objectql/src/protocol-revert-org-scope.test.ts": {
+      "blind": 1
+    },
+    "packages/objectql/src/protocol-save-meta-repo-path-real-engine.test.ts": {
+      "blind": 1
+    },
+    "packages/objectql/src/protocol-save-meta-repo-path.test.ts": {
+      "unjudged": 1
+    },
+    "packages/objectql/src/protocol-unregistered-object.test.ts": {
+      "blind": 1
+    },
+    "packages/objectql/src/protocol-view-identity-overlay.test.ts": {
+      "unjudged": 1
+    },
+    "packages/objectql/src/protocol-writepath-object-ownership.test.ts": {
+      "blind": 1
+    },
+    "packages/objectql/src/publish-meta-response-conformance.test.ts": {
+      "blind": 1
+    },
+    "packages/objectql/src/publish-package-drafts-response-conformance.test.ts": {
+      "blind": 1
+    },
+    "packages/objectql/src/save-meta-response-conformance.test.ts": {
+      "blind": 1
+    },
+    "packages/objectql/src/secret-fields.test.ts": {
+      "blind": 1
+    },
+    "packages/objectql/src/seed-loader-authoring-feedback.test.ts": {
+      "blind": 1
+    },
+    "packages/objectql/src/summary-rollup.test.ts": {
+      "blind": 1
+    },
+    "packages/objectql/src/sys-metadata-repository.test.ts": {
+      "unjudged": 1
+    },
+    "packages/platform-objects/src/plugin.test.ts": {
+      "unjudged": 1
+    },
+    "packages/platform-objects/src/system/migration-flag.test.ts": {
+      "unjudged": 1
+    },
+    "packages/plugins/plugin-approvals/src/approval-node.test.ts": {
+      "wrong": 1
+    },
+    "packages/plugins/plugin-approvals/src/approval-restart-resume.test.ts": {
+      "wrong": 1
+    },
+    "packages/plugins/plugin-approvals/src/approval-revise.test.ts": {
+      "wrong": 1
+    },
+    "packages/plugins/plugin-approvals/src/approver-cross-org.integration.test.ts": {
+      "blind": 1
+    },
+    "packages/plugins/plugin-approvals/src/team-approver-org-screen.test.ts": {
+      "unjudged": 1
+    },
+    "packages/plugins/plugin-approvals/src/team-member-org-screen.test.ts": {
+      "unjudged": 1
+    },
+    "packages/plugins/plugin-audit/src/activity-type-vocabulary-enforcement.test.ts": {
+      "blind": 1
+    },
+    "packages/plugins/plugin-audit/src/audit-bound-previous.test.ts": {
+      "unjudged": 1
+    },
+    "packages/plugins/plugin-audit/src/audit-hook-object-scope.test.ts": {
+      "blind": 1
+    },
+    "packages/plugins/plugin-audit/src/audit-lookup-summary.test.ts": {
+      "unjudged": 1
+    },
+    "packages/plugins/plugin-audit/src/audit-milestone-summary.test.ts": {
+      "unjudged": 1
+    },
+    "packages/plugins/plugin-audit/src/audit-option-label-summary.test.ts": {
+      "unjudged": 1
+    },
+    "packages/plugins/plugin-audit/src/auth-event-audit.test.ts": {
+      "blind": 1
+    },
+    "packages/plugins/plugin-audit/src/capability-gate-update-verb.test.ts": {
+      "blind": 1
+    },
+    "packages/plugins/plugin-audit/src/comment-access-hooks.test.ts": {
+      "blind": 1
+    },
+    "packages/plugins/plugin-audit/src/objects/sys-audit-log-record-views-columns.test.ts": {
+      "blind": 1
+    },
+    "packages/plugins/plugin-audit/src/read-audit.test.ts": {
+      "blind": 1
+    },
+    "packages/plugins/plugin-auth/src/accept-invitation-adopt-membership.test.ts": {
+      "wrong": 1
+    },
+    "packages/plugins/plugin-auth/src/account-issuer-parity.test.ts": {
+      "blind": 1
+    },
+    "packages/plugins/plugin-auth/src/admin-revoke-user-session-match-guard.test.ts": {
+      "wrong": 1
+    },
+    "packages/plugins/plugin-auth/src/auth-manager.jwt-eddsa-fallback.test.ts": {
+      "wrong": 1
+    },
+    "packages/plugins/plugin-auth/src/auth-manager.optional-plugin-isolation.test.ts": {
+      "wrong": 1
+    },
+    "packages/plugins/plugin-auth/src/change-email-delete-user-wiring.test.ts": {
+      "wrong": 1
+    },
+    "packages/plugins/plugin-auth/src/impersonation-bearer-rotation.test.ts": {
+      "wrong": 1
+    },
+    "packages/plugins/plugin-auth/src/org-create-posture-gate.test.ts": {
+      "wrong": 1
+    },
+    "packages/plugins/plugin-auth/src/organization-add-member.test.ts": {
+      "wrong": 1
+    },
+    "packages/plugins/plugin-auth/src/remove-member-permission-guard.test.ts": {
+      "wrong": 1
+    },
+    "packages/plugins/plugin-auth/src/remove-user-atomicity.test.ts": {
+      "wrong": 1
+    },
+    "packages/plugins/plugin-auth/src/revoke-session-match-guard.test.ts": {
+      "wrong": 1
+    },
+    "packages/plugins/plugin-auth/src/session-of-record.test.ts": {
+      "wrong": 1
+    },
+    "packages/plugins/plugin-auth/src/session-tombstone.test.ts": {
+      "wrong": 1
+    },
+    "packages/plugins/plugin-email/src/attachment-reclaim.test.ts": {
+      "wrong": 1
+    },
+    "packages/plugins/plugin-email/src/bootstrap-declared-email-templates.test.ts": {
+      "unjudged": 1
+    },
+    "packages/plugins/plugin-email/src/email-headers-internal.integration.test.ts": {
+      "blind": 1
+    },
+    "packages/plugins/plugin-email/src/email-plugin.attachment-storage.test.ts": {
+      "wrong": 1
+    },
+    "packages/plugins/plugin-email/src/email-plugin.outbox-sweep.test.ts": {
+      "wrong": 1
+    },
+    "packages/plugins/plugin-email/src/email-plugin.queue-delivery.test.ts": {
+      "wrong": 1
+    },
+    "packages/plugins/plugin-email/src/email-plugin.template-runtime-write.test.ts": {
+      "unjudged": 1
+    },
+    "packages/plugins/plugin-email/src/plugin-shutdown-detaches-template-bridge.test.ts": {
+      "unjudged": 1
+    },
+    "packages/plugins/plugin-hono-server/src/server-timing-e2e.test.ts": {
+      "unjudged": 1
+    },
+    "packages/plugins/plugin-pinyin-search/src/companion-projection.test.ts": {
+      "unjudged": 1
+    },
+    "packages/plugins/plugin-security/src/audience-anchors.test.ts": {
+      "blind": 1
+    },
+    "packages/plugins/plugin-security/src/auto-org-admin-grant.test.ts": {
+      "unjudged": 1
+    },
+    "packages/plugins/plugin-security/src/bootstrap-declared-permissions.test.ts": {
+      "blind": 1
+    },
+    "packages/plugins/plugin-security/src/bootstrap-declared-positions.test.ts": {
+      "blind": 1
+    },
+    "packages/plugins/plugin-security/src/bootstrap-platform-admin-walled-owner.test.ts": {
+      "blind": 1
+    },
+    "packages/plugins/plugin-security/src/bootstrap-platform-admin.test.ts": {
+      "blind": 1
+    },
+    "packages/plugins/plugin-security/src/bootstrap-seed-round-trips.test.ts": {
+      "unjudged": 1
+    },
+    "packages/plugins/plugin-security/src/cleanup-package-permissions.test.ts": {
+      "blind": 1
+    },
+    "packages/plugins/plugin-security/src/explain-engine.test.ts": {
+      "blind": 1
+    },
+    "packages/plugins/plugin-security/src/normalize-managed-by.test.ts": {
+      "blind": 1
+    },
+    "packages/plugins/plugin-security/src/packaged-permission-set-overlay-detection.test.ts": {
+      "unjudged": 1
+    },
+    "packages/plugins/plugin-security/src/packaged-permission-set-restore-leg.test.ts": {
+      "blind": 1
+    },
+    "packages/plugins/plugin-security/src/permission-denied-user-copy.test.ts": {
+      "blind": 1
+    },
+    "packages/plugins/plugin-security/src/permission-set-active.test.ts": {
+      "unjudged": 1
+    },
+    "packages/plugins/plugin-security/src/permission-set-drift.test.ts": {
+      "unjudged": 1
+    },
+    "packages/plugins/plugin-security/src/permission-set-overlay-discard.test.ts": {
+      "unjudged": 1
+    },
+    "packages/plugins/plugin-security/src/permission-set-projection.test.ts": {
+      "unjudged": 1
+    },
+    "packages/plugins/plugin-security/src/resolve-permission-sets-for-context.pin.test.ts": {
+      "unjudged": 1
+    },
+    "packages/plugins/plugin-security/src/security-denial-user-copy.test.ts": {
+      "unjudged": 1
+    },
+    "packages/plugins/plugin-security/src/share-link-tenant-wall.test.ts": {
+      "unjudged": 1
+    },
+    "packages/plugins/plugin-security/src/suggested-audience-bindings.test.ts": {
+      "blind": 1
+    },
+    "packages/plugins/plugin-sharing/src/business-unit-graph.test.ts": {
+      "blind": 1
+    },
+    "packages/plugins/plugin-sharing/src/federated-phantom-owner-scoping.test.ts": {
+      "blind": 1
+    },
+    "packages/plugins/plugin-sharing/src/manager-org-screen.test.ts": {
+      "blind": 1
+    },
+    "packages/plugins/plugin-sharing/src/position-graph.test.ts": {
+      "unjudged": 1
+    },
+    "packages/plugins/plugin-sharing/src/share-link-enforcement-context.test.ts": {
+      "blind": 1
+    },
+    "packages/plugins/plugin-sharing/src/share-link-service.test.ts": {
+      "blind": 1
+    },
+    "packages/plugins/plugin-webhooks/src/auto-enqueuer.test.ts": {
+      "unjudged": 1
+    },
+    "packages/plugins/plugin-webhooks/src/bootstrap-declared-webhooks.test.ts": {
+      "unjudged": 1
+    },
+    "packages/plugins/plugin-webhooks/src/webhook-headers-gate.test.ts": {
+      "blind": 1
+    },
+    "packages/plugins/plugin-webhooks/src/webhook-secret-at-rest.test.ts": {
+      "blind": 1
+    },
+    "packages/rest/src/meta-compound-save-force-parity.test.ts": {
+      "blind": 1
+    },
+    "packages/rest/src/meta-compound-save-mode-parity.test.ts": {
+      "blind": 1
+    },
+    "packages/rest/src/meta-object-extension-property-classes.test.ts": {
+      "blind": 1
+    },
+    "packages/rest/src/meta-object-overlay-extension-fold.test.ts": {
+      "blind": 1
+    },
+    "packages/rest/src/meta-object-search-companion-agreement.test.ts": {
+      "blind": 1
+    },
+    "packages/rest/src/meta-published-overlay.test.ts": {
+      "blind": 1
+    },
+    "packages/rest/src/remote-tables-twin.equivalence.test.ts": {
+      "unjudged": 1
+    },
+    "packages/rest/src/rest-exec-ctx-principal-kind.test.ts": {
+      "unjudged": 1
+    },
+    "packages/rest/src/rest-server-meta-read-org-scope.test.ts": {
+      "blind": 1
+    },
+    "packages/rest/src/rest-server-timing.test.ts": {
+      "unjudged": 1
+    },
+    "packages/rest/src/rest-update-path-id-not-a-dropped-field.test.ts": {
+      "blind": 1
+    },
+    "packages/rest/src/rest-write-response-formula.test.ts": {
+      "blind": 1
+    },
+    "packages/rest/src/rest-write-response-internal-fields.tripwire.test.ts": {
+      "blind": 1
+    },
+    "packages/runtime/src/action-execution-calldata-batch-retired.test.ts": {
+      "unjudged": 1
+    },
+    "packages/runtime/src/domains/meta-published-runtime-publish.test.ts": {
+      "blind": 1
+    },
+    "packages/runtime/src/domains/meta-save-destructive-remedy.test.ts": {
+      "blind": 1
+    },
+    "packages/runtime/src/http-dispatcher.keys.test.ts": {
+      "blind": 2
+    },
+    "packages/runtime/src/http-dispatcher.test.ts": {
+      "blind": 1
+    },
+    "packages/runtime/src/meta-compound-arity-mint-door.test.ts": {
+      "blind": 1
+    },
+    "packages/runtime/src/meta-field-overlay-lock.test.ts": {
+      "blind": 1
+    },
+    "packages/runtime/src/meta-write-org-scope.test.ts": {
+      "blind": 1
+    },
+    "packages/runtime/src/migration-recovery-plugin.test.ts": {
+      "unjudged": 1
+    },
+    "packages/runtime/src/sandbox/nested-write.canary.test.ts": {
+      "blind": 1
+    },
+    "packages/runtime/src/sandbox/nested-write.integration.test.ts": {
+      "blind": 1
+    },
+    "packages/services/service-automation/src/builtin/crud-bulk-intent.test.ts": {
+      "blind": 1
+    },
+    "packages/services/service-automation/src/builtin/wait-node-degraded-run.test.ts": {
+      "wrong": 1
+    },
+    "packages/services/service-automation/src/plugin-suspended-run-wiring.test.ts": {
+      "unjudged": 1
+    },
+    "packages/services/service-automation/src/runas-grant-resolution.integration.test.ts": {
+      "blind": 1
+    },
+    "packages/services/service-datasource/src/__tests__/datasource-admin-plugin.test.ts": {
+      "blind": 1
+    },
+    "packages/services/service-job/src/db-job-adapter.degraded-outcome.test.ts": {
+      "wrong": 1
+    },
+    "packages/services/service-job/src/db-job-adapter.test.ts": {
+      "wrong": 1
+    },
+    "packages/services/service-job/src/db-job-adapter.timeout.test.ts": {
+      "wrong": 1
+    },
+    "packages/services/service-job/src/job-service-plugin.test.ts": {
+      "blind": 1
+    },
+    "packages/services/service-messaging/src/preference-resolver.test.ts": {
+      "unjudged": 1
+    },
+    "packages/services/service-queue/src/db-queue-adapter.test.ts": {
+      "wrong": 1
+    },
+    "packages/services/service-queue/src/job-queue-retention.test.ts": {
+      "wrong": 1
+    },
+    "packages/services/service-settings/src/config-change-audit.test.ts": {
+      "blind": 1
+    },
+    "packages/services/service-settings/src/settings-crypto-fail-closed.test.ts": {
+      "blind": 1
+    },
+    "packages/services/service-settings/src/settings-engine-bind-window.test.ts": {
+      "blind": 1
+    },
+    "packages/services/service-settings/src/settings-prebind-read-warning.test.ts": {
+      "blind": 1
+    },
+    "packages/services/service-settings/src/settings-secret-rotation.test.ts": {
+      "blind": 1
+    },
+    "packages/services/service-settings/src/sys-secret-orphan-report.test.ts": {
+      "blind": 1
+    },
+    "packages/services/service-storage/src/attachment-access-hooks.test.ts": {
+      "blind": 1
+    },
+    "packages/services/service-storage/src/attachment-lifecycle.test.ts": {
+      "blind": 1
+    },
+    "packages/services/service-storage/src/files-to-references-migration.test.ts": {
+      "unjudged": 1
+    },
+    "packages/services/service-storage/src/lax-deviation-reclamation-gate.test.ts": {
+      "blind": 2
+    },
+    "packages/services/service-storage/src/tombstone-hydration-download-agreement.test.ts": {
+      "unjudged": 1
+    },
+    "packages/triggers/trigger-record-change/src/bulk-write-per-row-context.test.ts": {
+      "blind": 1
+    },
+    "packages/triggers/trigger-record-change/src/formula-context.test.ts": {
+      "blind": 1
+    },
+    "packages/triggers/trigger-record-change/src/multilookup-context.test.ts": {
+      "blind": 1
+    }
+  }
+}

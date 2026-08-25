@@ -234,7 +234,6 @@
     "ObjectFormProps (type)",
     "ObjectFormPropsSchema (const)",
     "ObjectGridProps (type)",
-    "ObjectGridPropsParsed (type)",
     "ObjectGridPropsSchema (const)",
     "ObjectKanbanProps (type)",
     "ObjectKanbanPropsSchema (const)",

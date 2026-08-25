@@ -479,15 +479,17 @@ describe('scaffold rendering — round-trip', () => {
     for (const rel of written) {
       expect(rel).not.toMatch(/-/);
     }
-    // Object file is namespace-prefixed.
-    const objFile = path.join(tmpRoot, 'src', 'objects', 'my_app_item.ts');
+    // Object file is namespace-prefixed AND carries the `object` type infix
+    // the registry declares (#11598) — see
+    // `init-scaffold-file-name-registry-parity.test.ts` for the derived contract.
+    const objFile = path.join(tmpRoot, 'src', 'objects', 'my_app_item.object.ts');
     expect(fs.existsSync(objFile)).toBe(true);
     const objSrc = fs.readFileSync(objFile, 'utf8');
     // Rendered object name must satisfy `${namespace}_${shortName}`.
     expect(objSrc).toMatch(/name: 'my_app_item'/);
     // Index re-exports the canonical identifier.
     const indexSrc = fs.readFileSync(path.join(tmpRoot, 'src', 'objects', 'index.ts'), 'utf8');
-    expect(indexSrc).toMatch(/from '\.\/my_app_item'/);
+    expect(indexSrc).toMatch(/from '\.\/my_app_item\.object'/);
     expect(indexSrc).toMatch(/myAppItem/);
     // Rendered config embeds the sanitized namespace.
     const cfg = fs.readFileSync(path.join(tmpRoot, 'objectstack.config.ts'), 'utf8');
