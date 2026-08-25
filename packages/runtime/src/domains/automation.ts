@@ -322,6 +322,23 @@ const FLOW_ENABLEMENT_DENY_MESSAGE =
     `Enabling or disabling an automation flow requires the \`${FLOW_AUTHORING_CAPABILITY}\` capability.`;
 
 /**
+ * [#11666] Is THIS request the enablement door, `POST /automation/:name/toggle`?
+ *
+ * Extracted so the question is asked once. {@link isFlowAuthoringWrite} needs
+ * it to decide whether the route is gated at all, and
+ * {@link refuseUngrantedFlowWrite} needs the SAME answer to decide which
+ * sentence the refusal carries — and this file's own rule is that a question
+ * spelled at two call sites is two questions that happen to agree today.
+ *
+ * ⛔ The truth table is [#10243]'s, moved nowhere: the exclusion of
+ * `parts[0] === 'trigger'` and the absence of any depth bound are that arm's,
+ * for that arm's reasons, restated below where they are read.
+ */
+function isFlowEnablementWrite(parts: string[], method: string): boolean {
+    return method === 'POST' && parts[1] === 'toggle' && parts[0] !== 'trigger';
+}
+
+/**
  * [#10145] Which `/automation` routes the `manage_metadata` write set covers.
  *
  * One predicate, for the reason {@link isRunStateRead} is one predicate: this
@@ -371,23 +388,6 @@ const FLOW_ENABLEMENT_DENY_MESSAGE =
  * The reads are untouched: `GET /` and `GET /:name` serve flow definitions and
  * keep the posture the #7900 audit recorded for them.
  */
-/**
- * [#11666] Is THIS request the enablement door, `POST /automation/:name/toggle`?
- *
- * Extracted so the question is asked once. {@link isFlowAuthoringWrite} needs
- * it to decide whether the route is gated at all, and
- * {@link refuseUngrantedFlowWrite} needs the SAME answer to decide which
- * sentence the refusal carries — and this file's own rule is that a question
- * spelled at two call sites is two questions that happen to agree today.
- *
- * ⛔ The truth table is [#10243]'s, moved nowhere: the exclusion of
- * `parts[0] === 'trigger'` and the absence of any depth bound are that arm's,
- * for that arm's reasons, restated below where they are read.
- */
-function isFlowEnablementWrite(parts: string[], method: string): boolean {
-    return method === 'POST' && parts[1] === 'toggle' && parts[0] !== 'trigger';
-}
-
 function isFlowAuthoringWrite(parts: string[], method: string): boolean {
     // `POST /automation` — the create door. `parts` is empty only for the
     // domain root, so `POST /trigger/:name` (parts `['trigger', name]`) and
