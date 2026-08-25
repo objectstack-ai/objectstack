@@ -220,6 +220,15 @@
  *     stops matching, so it lands back on the surface that cannot resolve it —
  *     the original defect, restored silently by an unrelated edit.
  *     `assertScopedPagesExist()` makes that a hard error.
+ *   - **But "this tree has no such corpus" is not "this corpus lost a page".**
+ *     This script is run against repo-SHAPED sandbox trees too (the #7181
+ *     dist-freshness pins build one with no `content/docs` at all), so the
+ *     missing-page guard skips a root whose `dir` is absent — the same
+ *     presence rule `sourceFiles()` already applies. When the two predicates
+ *     disagreed on that, the guard reported both SDK pages missing in the
+ *     sandbox and, being an assert that runs first, spoke ahead of the three
+ *     verdicts those tests pin. `content/docs` always exists in a real
+ *     checkout, so the rename protection above is untouched.
  *
  * ── Fence-awareness, in BOTH of extractFromFile's loops ───────────────────
  * `fenceOwners()` tracks every top-level fence of ANY language (lifted from
@@ -2318,6 +2327,42 @@ function selfTest(): never {
       `page-scope fixture: a scoped page list naming a non-existent file was not flagged (got ${JSON.stringify(stale)}) — ` +
         'the page would return to the surface that cannot resolve its imports, restoring the gap silently',
     );
+
+    // ── Absent-dir root: present in this checkout at all? (#12048) ─────────
+    //
+    // This script runs against repo-SHAPED sandbox trees as well as the repo —
+    // `dist-freshness-adoption.test.ts` builds one with `skills/`,
+    // `packages/spec/src` and the two client packages but NO `content/docs`.
+    // `sourceFiles()` skips a root whose `dir` is absent; `findMissingScopedPages`
+    // must answer the same way, or it reports every scoped page "missing" there
+    // and — running as an assert before everything else — speaks ahead of the
+    // verdicts those tests pin.
+    //
+    // BOTH directions, and the control is what separates them: an absent `dir`
+    // must be silent, while the SAME page list under a `dir` that DOES exist
+    // must still be flagged. Without the control, a predicate that had simply
+    // stopped finding anything would pass the first assertion.
+    const absentDirRoot: SourceRoot = {
+      ...scopedRoot,
+      dir: path.join(dir, 'no-such-tree'),
+      pages: ['b.mdx', 'renamed-away.mdx'],
+    };
+    check(
+      findMissingScopedPages([stubSurface('sandboxed', [absentDirRoot])]).length === 0,
+      'page-scope fixture: a scoped root whose `dir` does not exist in this checkout was reported as having missing ' +
+        'pages — that is a tree which does not carry this corpus at all, not a corpus that lost a page, and the ' +
+        'sandbox trees this script is run against by dist-freshness-adoption.test.ts are exactly that',
+    );
+    check(
+      sourceFiles([absentDirRoot]).length === 0,
+      'page-scope fixture: a scoped root with an absent `dir` scanned files — `sourceFiles()` and ' +
+        '`findMissingScopedPages()` must agree about whether a root is present at all',
+    );
+    check(
+      findMissingScopedPages([stubSurface('present', [{ ...absentDirRoot, dir: tree }])]).length === 1,
+      'page-scope CONTROL: the identical page list under a `dir` that DOES exist was not flagged — the absent-dir ' +
+        'exemption must be about the dir, not about the predicate having gone quiet, or a real rename stops reding',
+    );
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -2462,7 +2507,10 @@ function selfTest(): never {
       '    scans everything BUT it (with the un-partitioned control proving the page was reachable),\n' +
       '    the two roots produce distinct build-file names, a page claimed by two surfaces is caught\n' +
       '    and a correct partition is not, a `pages` entry naming a file that is not there is caught\n' +
-      '    and an existing one is not — and the real SURFACES satisfy both invariants today.',
+      '    and an existing one is not, while a scoped root whose `dir` is absent from this checkout\n' +
+      '    entirely is silent in BOTH predicates (with the same list under an existing dir still\n' +
+      '    flagged, so the exemption is the dir and not a predicate gone quiet) — and the real\n' +
+      '    SURFACES satisfy both invariants today.',
   );
   process.exit(0);
 }
@@ -2580,13 +2628,32 @@ function assertGitignoredBuildDirs(): void {
  * Every `pages` entry that names a file which is not there (#12048).
  *
  * A page-scoped root is a carve-out from a broad root over the same tree, and
- * the two read one shared list — so a path that stops resolving (the page
- * renamed, moved, or the list typo'd) does not merely shrink the scoped root:
- * the broad root's `excludePages` stops matching in the same instant, the page
- * returns to the surface that cannot resolve its imports, and the next marked
- * block on it reds with the exact TS2307 the carve-out exists to end. Both
- * halves fail in the same direction, silently, from one edit — which is why
- * this is a hard error and not a warning.
+ * the two read one shared list — so a path that stops resolving does not merely
+ * shrink the scoped root: the broad root's `excludePages` stops matching in the
+ * same instant, the page returns to the surface that cannot resolve its imports,
+ * and the next marked block on it reds with the exact TS2307 the carve-out
+ * exists to end. Both halves fail in the same direction, silently, from one
+ * edit — which is why this is a hard error and not a warning.
+ *
+ * ⚠️ A ROOT WHOSE `dir` IS ABSENT IS NOT A FINDING, and this is the same
+ * presence rule `sourceFiles()` already applies one function up (it `continue`s
+ * past a root whose `dir` does not exist). The two must agree about whether a
+ * root is present in this checkout at all: this script is executed against
+ * repo-SHAPED sandbox trees as well as against the repo — the `#7181`
+ * dist-freshness pins in `dist-freshness-adoption.test.ts` build one that seeds
+ * `skills/`, `packages/spec/src` and the two client packages but has no
+ * `content/docs` at all. When the two predicates disagreed, this one reported
+ * both SDK pages "missing" in that sandbox and, being an assert that runs before
+ * everything, spoke *ahead of* the three verdicts those tests pin — hijacking a
+ * positive control, a staleness refusal and an orphan-marker finding alike. Same
+ * shape as the two-closers (#11690) and the two fence-ownership notions
+ * (#11355) this file has already collapsed: one predicate, not two that can
+ * drift apart.
+ *
+ * The rename protection is untouched by that carve-out, because it is a
+ * different question: `content/docs` always exists in a real checkout, so a page
+ * renamed *inside* it is still judged, and still reds. Absent-dir means "this
+ * tree does not carry this corpus", never "this corpus lost a page".
  *
  * Judged over `SURFACES` rather than a hand-listed set, so a fifth root with
  * `pages` is covered without an edit here.
@@ -2595,7 +2662,10 @@ function findMissingScopedPages(surfaces: Surface[]): Array<{ surface: string; l
   const missing: Array<{ surface: string; label: string; page: string }> = [];
   for (const surface of surfaces) {
     for (const root of surface.roots) {
-      for (const page of root.pages ?? []) {
+      if (!root.pages) continue;
+      // The `sourceFiles()` presence rule, restated — see the docblock above.
+      if (!fs.existsSync(root.dir)) continue;
+      for (const page of root.pages) {
         if (!fs.existsSync(path.resolve(root.dir, page))) {
           missing.push({ surface: surface.name, label: root.label, page });
         }
