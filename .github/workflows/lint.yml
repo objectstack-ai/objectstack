@@ -3024,6 +3024,43 @@ jobs:
       - name: No committed command forwards args to vitest through a bare --
         run: pnpm check:agent-test-spelling
 
+      # Every `<pkg>#<task>` override in turbo.json must name a package the
+      # workspace HAS and a script that package RUNS (#12046).
+      #
+      # ⛔ Turbo does NOT refuse either miss. Measured on turbo 2.10.10 against a
+      # fixture workspace, each case a real `turbo run <task> --dry=json`:
+      #
+      #     @fx/nope#build   (no such package)     -> exit 0, no diagnostic, key
+      #                                               never reaches the graph
+      #     @fx/a#typecheck  (package has no such
+      #                       script)              -> exit 0, task shown in the
+      #                                               dry-run graph, never runs
+      #
+      # So a task-graph edit meant to change what CI builds, orders or caches can
+      # configure NOTHING while every signal its author has — exit code, dry-run
+      # output, this whole workflow — reads as landed. The stale direction is the
+      # same silence: rename a package or drop a script and the entry that used
+      # to configure it goes quietly inert.
+      #
+      # `dependsOn` is deliberately out of scope here: turbo already refuses an
+      # unresolvable one loudly (exit 1, `x Could not find "@fx/a#prebuildxyz"`),
+      # and re-checking it would be this gate claiming a population the tool that
+      # owns it polices better — the #11556 failure this card was filed against.
+      #
+      # The gate is also the first thing in the repo that DECLARES turbo.json as
+      # a path population, in the `turbo.json/**` subtree spelling the dispatch
+      # derivation can match. Before it, a card whose surface was turbo.json
+      # derived zero gate families: the one gate that parses the file
+      # (check:cross-package-test-inputs) reaches it as a bare filename, which
+      # `extractWatchHints` refuses as too generic.
+      #
+      # Reads turbo.json and the workspace manifests. No build, no pnpm
+      # invocation, no network, sub-second. The `check:` key runs `--self-test`
+      # first: this gate's defect class is its matching rule, which a clean tree
+      # cannot distinguish from a rule that stopped matching.
+      - name: turbo.json package tasks name real packages and real scripts
+        run: pnpm check:turbo-task-graph
+
   # Lane 1 of 4 behind the required `TypeScript Type Check` context. The
   # aggregator job at the bottom of this file explains the split, holds the
   # contract, and is the thing the merge queue actually requires — read it

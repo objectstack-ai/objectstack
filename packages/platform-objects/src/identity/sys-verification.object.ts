@@ -57,6 +57,12 @@ export const SysVerification = ObjectSchema.create({
     value: Field.text({
       label: 'Verification Token',
       required: true,
+      // [#11374/#11701] Deliberately UNBOUNDED: better-auth's oauth-provider
+      // writes OIDC authorization-code payloads here as a JSON blob, so no
+      // bound provably admits every value it may write. That is only
+      // survivable because the column carries no index — see the `indexes`
+      // note below, which is what makes an unbounded TEXT column safe on
+      // MySQL.
       description: 'Token or code for verification',
     }),
     
@@ -81,13 +87,34 @@ export const SysVerification = ObjectSchema.create({
   },
   
   indexes: [
-    // `value` must NOT be unique. better-auth's oauth-provider stores OIDC
-    // authorization codes in this table with `value` = a JSON blob keyed by
-    // user+client+state, which can legitimately repeat. A UNIQUE constraint
-    // makes `/api/v1/auth/oauth2/authorize` fail (`UNIQUE constraint failed:
-    // sys_verification.value`) → 503, breaking cloud-as-IdP SSO entirely.
-    // better-auth keys verification lookups on `identifier`, not `value`.
-    { fields: ['value'], unique: false },
+    // [#11701] `value` carries NO index — and must not gain one.
+    //
+    // Removing the index it used to declare is the maintainer's 2026-08-25
+    // ruling, taken on MEASURED liveness rather than on convenience:
+    //
+    //   • better-auth 1.7.1 keys every verification lookup on `identifier`
+    //     (or on `id`, or on `expiresAt` for cleanup) — see
+    //     `internal-adapter.mjs`'s `findByIdentifier` / `consumeByIdentifier`;
+    //   • upstream declares the field unindexed and unbounded;
+    //   • no in-repo query filters `sys_verification` by `value`.
+    //
+    // ⛔ It could not be indexed here even if a reader wanted it. `value` is
+    // UNBOUNDABLE — better-auth's oauth-provider stores OIDC
+    // authorization-code payloads in it as a JSON blob, so no defensible
+    // `maxLength` exists — so on MySQL the column stays TEXT and ANY index
+    // over it is refused (`ER_BLOB_KEY_WITHOUT_LENGTH`), failing the whole
+    // object's schema-sync over an index nothing reads. #11627's hash-shadow
+    // route cannot rescue it either: a shadow carries a UNIQUE constraint,
+    // and an index over a digest accelerates no `WHERE value = ?` the planner
+    // can reach. An index that silently does not exist on one dialect is the
+    // worst of both worlds; removing it makes the metadata match reality,
+    // which is the `declared = enforced` property this family restores.
+    //
+    // ⛔ A UNIQUE index here would be wrong twice over: those JSON payloads
+    // legitimately repeat (they are keyed by user+client+state), and a unique
+    // constraint made `/api/v1/auth/oauth2/authorize` fail (`UNIQUE
+    // constraint failed: sys_verification.value`) → 503, breaking
+    // cloud-as-IdP SSO entirely.
     { fields: ['identifier'], unique: false },
     { fields: ['expires_at'], unique: false },
   ],
