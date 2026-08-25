@@ -20,6 +20,24 @@
  * output folder before rewriting will delete such a file on the next real run,
  * so the check must fail on it too. `git diff --exit-code` cannot see this
  * class at all — a stale *untracked* leftover is invisible to it.
+ *
+ * ## `--generated-manifest=<file>` — the output set, declared by the generator
+ *
+ * The governed-merge register (`scripts/pm/check-governed-merges.mjs`) carves
+ * generator-owned files inside `skills/**` out of the human-merge fork
+ * (maintainer ruling 2026-08-25, #11705). That carve-out is granted per FILE
+ * and only on proof, and the proof has two halves: the bytes must match (the
+ * `--check` run above answers that), and the path must be one this generator
+ * actually writes. The second half cannot be answered from the checker's side
+ * without hand-copying a path list — exactly what the ruling forbids — so the
+ * generator answers it: with this flag, `flush()` writes the repo-relative
+ * paths of everything it emitted, as JSON, to the given file.
+ *
+ * Nothing about generation changes: the manifest is written from the same
+ * `emitted` map the write and `--check` dispositions read, so it cannot name a
+ * file a real run would not produce, and it is written BEFORE any drift exit so
+ * a failing check still reports what it was checking. The flag only ever writes
+ * to the path the caller names — never into the repo.
  */
 
 import fs from 'fs';
@@ -27,6 +45,15 @@ import path from 'path';
 
 /** Decides which on-disk paths a managed dir's regeneration owns. */
 export type Owns = (absPath: string) => boolean;
+
+/** The flag that asks `flush()` to declare its output set. */
+export const MANIFEST_FLAG = '--generated-manifest=';
+
+/** Where to write the output manifest, or null when the flag is absent. */
+export function manifestPathFromArgv(argv: string[] = process.argv): string | null {
+  const flag = argv.find((a) => a.startsWith(MANIFEST_FLAG));
+  return flag ? flag.slice(MANIFEST_FLAG.length) : null;
+}
 
 export interface FlushOptions {
   /** Human name of the generated surface, for drift messages. */
@@ -42,8 +69,9 @@ export interface FlushOptions {
   guard?: () => string | null;
 }
 
-export function createSink(options: { check: boolean; repoRoot: string }) {
+export function createSink(options: { check: boolean; repoRoot: string; manifestPath?: string | null }) {
   const { check, repoRoot } = options;
+  const manifestPath = options.manifestPath !== undefined ? options.manifestPath : manifestPathFromArgv();
 
   /** Absolute path → intended content. */
   const emitted = new Map<string, string>();
@@ -102,7 +130,22 @@ export function createSink(options: { check: boolean; repoRoot: string }) {
     }
   }
 
+  /** Repo-relative, POSIX-spelled, sorted — the paths a real run writes. */
+  function declaredOutputs(): string[] {
+    return [...emitted.keys()].map((f) => rel(f).split(path.sep).join('/')).sort();
+  }
+
   function flush(opts: FlushOptions): void {
+    // Before the guard and before any drift exit: a check that is about to fail
+    // must still be able to say WHAT it was checking, and the caller reads this
+    // file alongside the exit code rather than instead of it.
+    if (manifestPath) {
+      fs.writeFileSync(
+        manifestPath,
+        JSON.stringify({ surface: opts.surface, mode: check ? 'check' : 'write', outputs: declaredOutputs() }, null, 2) + '\n',
+      );
+    }
+
     const failure = opts.guard?.();
     if (failure) {
       console.error(`\n✗ ${failure}\n`);
@@ -150,5 +193,5 @@ export function createSink(options: { check: boolean; repoRoot: string }) {
     process.exit(1);
   }
 
-  return { emit, manageDir, wasEmitted, flush };
+  return { emit, manageDir, wasEmitted, declaredOutputs, flush };
 }

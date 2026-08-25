@@ -188,7 +188,16 @@ export const CEILINGS = new Map([
   // (state-machine.md) and the clause-② review-chain operational detail
   // (contract-review.md). Set at landed line counts (headroom 0, same
   // convention as the entries above).
-  ['.claude/skills/pm-dispatch/references/state-machine.md', 43],
+  // Raised 43 → 44 by the generated-artifact carve-out ruling (maintainer
+  // 2026-08-25, verbatim: "files that are generator-owned outputs inside
+  // `skills/**` are carved out of the governed-merge fork", with the follow-up
+  // ordering "the exemption in `check-governed-merges.mjs` plus the one-line
+  // state-machine doc note"). ONE line, and it could not be paid in place: the
+  // file holds 34 content lines over 3,467 bytes, and every bullet is already
+  // packed to its own minimum at the 120-byte cap (measured per bullet), so the
+  // only in-place payment available was deleting a ruled clause. Landed count,
+  // headroom 0 again, same convention.
+  ['.claude/skills/pm-dispatch/references/state-machine.md', 44],
   ['.claude/skills/pm-dispatch/references/contract-review.md', 48],
   // Business-perspective decision-analysis writing guide (maintainer ruling
   // 2026-08-20: the four-facet analysis must argue from the business

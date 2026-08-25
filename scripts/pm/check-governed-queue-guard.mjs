@@ -127,8 +127,24 @@
  * register's own `applyGeneratedExceptions`, with provenance recomputed
  * BYTE-EXACT against this build's own base sha — never a stored baseline, and
  * fail-closed on every error path, exactly as the four ruled constraints
- * require. The verdict function is the register's `docsAuditRegenVerdict`
- * itself, imported rather than reimplemented.
+ * require.
+ *
+ * NOTHING about the exception is decided here: membership is the register's
+ * `generatedExceptionFor` and the recompute is its `recomputeProvenanceFor`,
+ * both imported rather than reimplemented, so this guard and the seat-side
+ * `--test` predicate cannot answer differently about the same diff. That
+ * sharing is a #11705 ruled constraint ("⛔ do not author a second mechanism")
+ * and it is also what makes a new register row reach this file for free.
+ *
+ * ⚠️ One measured limit, stated so a queue log is readable: the #11705 rows
+ * (generator-owned files inside `skills/**`) recompute by running the
+ * generator's own `--check`, and THIS JOB INSTALLS NO DEPENDENCIES. Here they
+ * therefore fail closed — a spec PR carrying its regenerated
+ * `references/_index.md` is still governed at merge-group time and needs the
+ * approving review, even though the seat-side `--test` lifts it in a dev
+ * container. Giving this job a dependency install would close that, at a cost
+ * on every queue build, and no ruling covers that trade — it is filed, not
+ * taken.
  *
  * ## Exit codes — the refusal is impossible to read as clean
  *
@@ -165,12 +181,13 @@ import { appendFileSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  GENERATED_SURFACE_EXCEPTIONS,
   GOVERNED_SURFACES,
   applyGeneratedExceptions,
-  docsAuditRegenVerdict,
+  generatedExceptionFor,
   governedPathsIn,
+  groupHitsByException,
   pullNumberFromSubject,
+  recomputeProvenanceFor,
   testVerdict,
 } from './check-governed-merges.mjs';
 import { isEntrypoint } from '../invoked-as.mjs';
@@ -559,77 +576,57 @@ export function enumerateRows(root, baseSha, headSha, fallbackPull = null) {
 }
 
 /**
- * The generated-artifact exception (#9866 / #10277), recomputed against THIS
- * build's base sha rather than against `origin/main`, which a queue build has
- * no reason to have. Byte-exact, recomputed, fail-closed — the four ruled
- * constraints — and the verdict itself is the register's own
- * `docsAuditRegenVerdict`, imported so the two cannot drift.
- */
-async function recomputeExceptionProvenance(root, baseSha, exception) {
-  const failClosed = (reason) => ({ pureRegeneration: false, reason: `${reason} — fail closed: the path stays governed` });
-  let replaceBlock;
-  try {
-    ({ replaceBlock } = await import('../docs-audit/check-audit-scope.mjs'));
-    if (typeof replaceBlock !== 'function') return failClosed('the generator module exports no replaceBlock');
-  } catch (error) {
-    return failClosed(`could not load the generator module (${String(error?.message ?? error).split('\n')[0]})`);
-  }
-  let prSource;
-  try {
-    prSource = readFileSync(join(root, exception.path), 'utf8');
-  } catch (error) {
-    return failClosed(`could not read ${exception.path} from the tree under test (${String(error?.message ?? error).split('\n')[0]})`);
-  }
-  let baseSource;
-  try {
-    baseSource = git(root, ['show', `${baseSha}:${exception.path}`]);
-  } catch (error) {
-    return failClosed(`could not read ${exception.path} at ${baseSha} (${String(error?.message ?? error).split('\n')[0]})`);
-  }
-  let derivedDocs;
-  try {
-    derivedDocs = JSON.parse(
-      execFileSync(process.execPath, [join(root, 'scripts/docs-audit/affected-docs.mjs'), '--all', '--json'], {
-        cwd: root,
-        encoding: 'utf8',
-        maxBuffer: 64 * 1024 * 1024,
-        stdio: ['ignore', 'pipe', 'ignore'],
-      }),
-    ).docs;
-  } catch (error) {
-    return failClosed(`could not derive the doc set on this tree (${String(error?.message ?? error).split('\n')[0]})`);
-  }
-  return docsAuditRegenVerdict({ baseSource, prSource, derivedDocs, replaceBlock });
-}
-
-/**
- * Drop the registered generated-artifact path from a row's path list when — and
+ * Drop a registered generated-artifact path from a row's path list when — and
  * only when — this build's own recomputation certifies it as a pure
  * regeneration. Everything else about the row is untouched, so a row that never
- * contains the registered path never consults provenance at all (ruled
+ * contains a registered path never consults provenance at all (ruled
  * constraint 3: every other governed-surface judgment is unchanged).
+ *
+ * ⭐ ONE mechanism, not a second copy (#11705 ruled: "⛔ do not author a second
+ * mechanism"). Membership is the register's own `generatedExceptionFor`, and
+ * the recompute is the register's own `recomputeProvenanceFor` — so a row added
+ * there reaches this guard with nothing to change here. Before #11705 this file
+ * derived its own set from `.path`, which reads `undefined` for a row that
+ * matches by candidate instead: a silent miss, in the direction of leaving
+ * paths governed, that a second register row would have made real.
+ *
+ * Two things this build supplies that a seat run does not: `baseRef`, because a
+ * queue build has no reason to hold `origin/main`; and a `cache`, because the
+ * generator runs read the TREE, which is the same for every row in the range.
+ * `recompute` is injectable for the self-test only — the default IS the shared
+ * driver, so nothing in production reaches this file with a different one.
+ * ⚠️ The #11705 rows recompute by running the generator's own `--check`, and
+ * this job installs no dependencies — so there they fail closed and the path
+ * stays governed, which the note below states in full rather than implying.
  */
-async function liftGeneratedExceptions(root, baseSha, rows, notes) {
-  const registered = new Set(GENERATED_SURFACE_EXCEPTIONS.map((e) => e.path));
-  if (!rows.some((row) => row.paths.some((p) => registered.has(p)))) return rows;
-  const provenance = new Map();
-  for (const exception of GENERATED_SURFACE_EXCEPTIONS) {
-    if (!rows.some((row) => row.paths.includes(exception.path))) continue;
-    provenance.set(exception.path, await recomputeExceptionProvenance(root, baseSha, exception));
-  }
-  return rows.map((row) => {
-    if (!row.paths.some((p) => registered.has(p))) return row;
+export async function liftGeneratedExceptions(root, baseSha, rows, notes, recompute = recomputeProvenanceFor) {
+  const registered = (row) => row.paths.filter((p) => generatedExceptionFor(p) !== null);
+  if (!rows.some((row) => registered(row).length > 0)) return rows;
+  const cache = new Map();
+  const out = [];
+  for (const row of rows) {
+    const hits = registered(row);
+    if (hits.length === 0) {
+      out.push(row);
+      continue;
+    }
+    const provenance = await recompute(root, groupHitsByException(hits), {
+      allPaths: row.paths,
+      baseRef: baseSha,
+      cache,
+    });
     const lifted = applyGeneratedExceptions(testVerdict(row.paths), provenance);
     for (const e of lifted.exceptions ?? []) {
       notes.push(
         e.pureRegeneration
-          ? `  ℹ️  generated-surface exception (#9866) LIFTED ${e.path} on ${row.sha.slice(0, 12)}: ${e.reason}`
-          : `  ⛔  generated-surface exception (#9866) did NOT lift ${e.path} on ${row.sha.slice(0, 12)}: ${e.reason}`,
+          ? `  ℹ️  generated-surface exception (${e.ruling ?? '#9866'}) LIFTED ${e.path} on ${row.sha.slice(0, 12)}: ${e.reason}`
+          : `  ⛔  generated-surface exception (${e.ruling ?? '#9866'}) did NOT lift ${e.path} on ${row.sha.slice(0, 12)}: ${e.reason}`,
       );
     }
     const stillGoverned = new Set(lifted.hitPaths);
-    return { ...row, paths: row.paths.filter((p) => !registered.has(p) || stillGoverned.has(p)) };
-  });
+    out.push({ ...row, paths: row.paths.filter((p) => generatedExceptionFor(p) === null || stillGoverned.has(p)) });
+  }
+  return out;
 }
 
 // ── the GitHub review read (the only API surface) ───────────────────────────
@@ -992,6 +989,53 @@ export async function selfTest() {
   assert('the-three-refusal-kinds-render-three-different-explanations', new Set(kinds).size === 3);
   assert('the-unreadable-refusal-says-it-is-deliberately-not-a-pass', /refusal and not a pass/.test(kinds[1]), kinds[1]);
 
+  // ── the generated-artifact exception reaches THIS guard (#9866 / #11705) ──
+  //
+  // The lift path had no case here at all, which is how the register's second
+  // shape nearly slipped past: this file used to derive its own membership set
+  // from `.path`, and a candidate row has none. These drive the real
+  // `liftGeneratedExceptions` with the recompute injected, so the row filtering
+  // and the note wording are pinned without a generator process.
+  const genIndex = 'skills/objectstack-ui/references/_index.md';
+  const handAuthored = 'skills/objectstack-ui/SKILL.md';
+  const verified = (reason = 'byte-equal (fixture)') => async (_root, hits) =>
+    new Map([...hits.values()].flat().map((p) => [p, { pureRegeneration: true, reason }]));
+  const refused = (reason = 'differs (fixture)') => async (_root, hits) =>
+    new Map([...hits.values()].flat().map((p) => [p, { pureRegeneration: false, reason }]));
+  const liftNotes = [];
+  const liftedRows = await liftGeneratedExceptions(
+    '/w',
+    'base',
+    [{ ...row(1, ['packages/spec/src/ui/responsive.zod.ts', genIndex]) }],
+    liftNotes,
+    verified(),
+  );
+  assert('a-certified-regeneration-inside-skills-leaves-the-row-with-nothing-governed',
+    governedPathsIn(liftedRows[0].paths).length === 0, JSON.stringify(liftedRows[0].paths));
+  assert('and-the-note-cites-the-ruling-that-lifted-it', liftNotes.some((n) => n.includes('#11705') && n.includes('LIFTED')), JSON.stringify(liftNotes));
+  const mixedNotes = [];
+  const mixedRows = await liftGeneratedExceptions('/w', 'base', [{ ...row(2, [genIndex, handAuthored]) }], mixedNotes, verified());
+  assert('but-hand-authored-skill-content-in-the-same-commit-still-governs-the-row',
+    governedPathsIn(mixedRows[0].paths).map((s) => s.files).flat().join() === handAuthored, JSON.stringify(mixedRows[0].paths));
+  const refusedNotes = [];
+  const refusedRows = await liftGeneratedExceptions('/w', 'base', [{ ...row(3, [genIndex]) }], refusedNotes, refused());
+  assert('a-refused-provenance-keeps-the-generated-path-governed-here-too',
+    refusedRows[0].paths.join() === genIndex && refusedNotes.some((n) => n.includes('did NOT lift')), JSON.stringify(refusedNotes));
+  // The real environment this job runs in: no dependencies, so the #11705 rows
+  // cannot recompute. Fail-closed is the ruled answer, and it must be the one a
+  // reader sees stated.
+  const noToolNotes = [];
+  const noToolRows = await liftGeneratedExceptions('/w', 'base', [{ ...row(4, [genIndex]) }], noToolNotes,
+    refused('could not run `pnpm --filter @objectstack/spec gen:skill-refs` on this tree (spawn pnpm ENOENT) — the generator toolchain is not available in this environment'));
+  assert('with-no-generator-toolchain-this-guard-keeps-the-path-governed-and-says-why',
+    noToolRows[0].paths.join() === genIndex && noToolNotes.some((n) => /toolchain is not available/.test(n)), JSON.stringify(noToolNotes));
+  // A commit that touches no registered path never consults provenance — the
+  // recompute is handed a spy that throws if it is called at all.
+  const untouched = await liftGeneratedExceptions('/w', 'base', [{ ...row(5, ['AGENTS.md']) }], [], async () => {
+    throw new Error('the recompute must not run for a diff with no registered path');
+  });
+  assert('an-ordinary-governed-diff-never-pays-for-a-recompute', untouched[0].paths.join() === 'AGENTS.md');
+
   // ── the WIRING pin: the workflow still spells this context name ──────────
   //
   // Without this, renaming the job detaches the required context silently —
@@ -1020,7 +1064,9 @@ export async function selfTest() {
   console.log(
     `✓ check-governed-queue-guard self-test: ${checked} cases pass ` +
       '(register-driven verdicts, the queue/PR event split, latest-decisive approval reduction, multi-PR group ' +
-      'decomposition, three replayed incidents, the zero-API ordering guarantee measured with a throwing spy, and the workflow wiring pin).',
+      'decomposition, three replayed incidents, the zero-API ordering guarantee measured with a throwing spy, the ' +
+      'generated-artifact lift path — certified, refused, mixed with hand-authored skill content, and the no-toolchain ' +
+      'environment this job actually runs in — and the workflow wiring pin).',
   );
   return 0;
 }

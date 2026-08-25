@@ -42,12 +42,11 @@
  *      cannot silently turn a governed answer into an environment complaint.
  *   1  bad args — no paths given. ⛔ Silence never reads as "not governed":
  *      `--test` with an empty path list is a failure, never a green light.
- *   One register row carries a provenance-aware exception (the generated-
- *   artifact section below): a hit on exactly
- *   `.claude/workflows/docs-accuracy-audit.js` answers 0 only when that file's
- *   diff byte-equals its own generator's output recomputed on the tree under
- *   test — every other reading of that path, and every other path, is
- *   unchanged.
+ *   The register rows in `GENERATED_SURFACE_EXCEPTIONS` carry a provenance-
+ *   aware exception (the generated-artifact sections below): a hit on a
+ *   generator-owned path answers 0 only when that file byte-equals its own
+ *   generator's output recomputed on the tree under test — every other reading
+ *   of those paths, and every other path, is unchanged.
  *
  * ## The regime this audit belongs to (maintainer ruling, 2026-08-18)
  *
@@ -144,6 +143,66 @@
  * against historical trees is a different machine, and the maintainer
  * recognising a regen entry costs a glance — so the list stays complete and
  * the predicate stops forcing the crossing in the first place.
+ *
+ * ## Generator-owned files inside `skills/**` (#11705; maintainer 2026-08-25)
+ *
+ * The same collision, one surface over, and this time the strict reading was
+ * not merely heavy but UNWORKABLE. `skills/<skill>/references/_index.md` is
+ * written by `gen:skill-refs` and verified by the required `check:skill-refs`;
+ * a spec PR that moves an indexed headline MUST carry the regenerated index or
+ * main goes red on that gate. Measured on PR #11685 (2026-08-24): the
+ * dispatching seat read the regenerated line as a hand-authored `skills/**`
+ * edit and split it out under the governed fork — head `7125cdc6e` went red on
+ * `check:skill-refs` (job 97435569091), because the artifact must ride the
+ * source change. Under the strict reading every such spec PR also loses
+ * merge-queue eligibility for one mechanical line.
+ *
+ * The maintainer ruled option A (2026-08-25, issue #11705 comment 5406727512),
+ * verbatim from the ruling: "files that are **generator-owned outputs** inside
+ * `skills/**` are carved out of the governed-merge fork. The generator plus its
+ * verifying gate (`gen:skill-refs` + `check:skill-refs`) **are** the review for
+ * these files — no agent-authored instruction content can enter through them,
+ * which is what the governed fence exists to stop." And on the shape: "The
+ * exemption is **enumerated from the generator**, never a hand-copied path list
+ * … Extend that registry; ⛔ do not author a second mechanism." And the limit:
+ * "⛔ **Hand-authored `skills/**` content is untouched** — it stays governed,
+ * human-merge-only. A file qualifies only by being reproducible from its
+ * generator, and the checker must prove that per-file rather than trust the
+ * path."
+ *
+ * So these rows are NOT path exemptions. Each names a generator, and a hit is
+ * lifted only when BOTH halves are proven on the tree under test:
+ *
+ *   1. THE GENERATOR OWNS THE PATH. The spec generators write through the
+ *      shared sink (`packages/spec/scripts/lib/generated-output.ts`), which
+ *      declares its output set on demand — `--generated-manifest=<file>` writes
+ *      the repo-relative paths of everything a real run emits, from the same
+ *      map the write disposition uses. The register consults THAT list; it
+ *      never restates it. An `_index.md` under a skill the generator does not
+ *      write (`objectstack-upgrade` and `objectstack-pm-dispatch` have no
+ *      SKILL_MAP entry today) is absent from the manifest and stays governed,
+ *      which is the ruling's own limit in code.
+ *   2. THE BYTES MATCH. The generator's own `--check` — "the real run minus the
+ *      writes", by the sink's construction — must report no drift. One
+ *      hand-edited byte reddens it, so it cannot certify a hand edit; and
+ *      because `--check` also fails on a stale owned file, the pass covers the
+ *      whole generated surface, not just the hit path.
+ *
+ * A row's `candidate` regexp is a NARROWING gate and nothing else: matching it
+ * only earns a path the QUESTION, never the answer. Too narrow and a real
+ * regeneration stays governed (heavy, safe); too wide and the manifest refuses
+ * it anyway (safe). No spelling of it can lift a file on its own — the same
+ * property the #11084 fence has, and the self-test pins both directions.
+ *
+ * Fail-closed is unchanged and now covers a third way to fail: an environment
+ * with no generator toolchain (the merge-group guard job installs no
+ * dependencies) cannot recompute, so it keeps the path GOVERNED and says so.
+ * ⚠️ Consequence worth knowing before reading a queue-build log: in that job
+ * these rows never lift, so a spec PR carrying a regenerated index is still
+ * governed THERE. The seat-side `--test` — the predicate the measured incident
+ * turned on — runs in a dev container and lifts it. Closing that gap means
+ * giving the guard job dependencies, which is a CI-cost decision no ruling
+ * covers; it is filed rather than taken.
  *
  * ## The governed REPOS (maintainer 「同意」 2026-08-18, wired here by #9619)
  *
@@ -341,15 +400,18 @@
  * fetch if it predates your last one. The GitHub API is consulted only for
  * ATTRIBUTION, one `GET /pulls/{n}` per governed entry — on the ordinary day
  * with no governed merges the sweep costs ZERO lookups. `--test` never
- * touches the network, and touches git in exactly one case: a hit on the one
- * `GENERATED_SURFACE_EXCEPTIONS` path recomputes the generator's output on
- * the local tree under test (reads the file, `git merge-base`/`git show` for
- * the base version, and the docs derivation) — still zero API calls; every
- * other `--test` run reads only the register in this file.
+ * touches the network, and spends anything at all in exactly one case: a hit
+ * on a `GENERATED_SURFACE_EXCEPTIONS` row recomputes that generator's output
+ * on the local tree under test (the #9866 row reads the file, `git
+ * merge-base`/`git show` for the base version and the docs derivation; a
+ * #11705 row runs that generator's own `--check` once, ~3 s, for every path it
+ * owns in the diff) — still zero API calls; every other `--test` run reads
+ * only the register in this file.
  */
 
 import { execFileSync, spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { historyHorizon } from './git-history.mjs';
@@ -410,38 +472,93 @@ export const GOVERNED_SURFACES = Object.freeze([
 export const ROOT_FILE_WATCH_HINTS = ['AGENTS.md/**', 'CLAUDE.md/**'];
 
 /**
- * The provenance-aware exception (#9866; header section above carries the
- * rulings verbatim). A NAMED single-file list, seeded with exactly one entry
- * by maintainer ruling — ⛔ do not add a second entry without a ruling of its
- * own: the structure is a list so the next real `--write` target has a place
- * to land, not a license to widen this one.
+ * The provenance-aware exception register (#9866 + #11705; the header sections
+ * above carry both rulings verbatim). Every row is a GENERATOR, not a path
+ * exemption — ⛔ do not add a row without a ruling of its own, and ⛔ never add
+ * one whose membership test is a hand-copied list of output paths: the ruled
+ * shape is "the checker proves per-file that the content matches its
+ * generator's output".
  *
- * `generator` is the command whose recomputed output the tree's copy must
- * byte-equal; it is rendered to the operator, and the recompute imports the
- * generator's own exported `replaceBlock` so the two cannot drift.
+ * Row fields:
+ *   `path`       — an exact repo-relative path, for a generator that owns
+ *                  exactly one file the register can name (the #9866 row).
+ *   `candidate`  — a NARROWING gate for a generator whose output set is
+ *                  enumerated at run time: matching it earns a path the
+ *                  question, never the answer. See the header — a candidate
+ *                  cannot lift anything by itself, in either direction.
+ *   `verify`     — the sink-generator recompute (#11705): run this package
+ *                  script's `--check` on the tree under test and read the
+ *                  output manifest it declares. Absent ⇒ the #9866 splice
+ *                  recompute.
+ *   `generator`  — the command an operator runs to regenerate; rendered in
+ *                  every verdict, lifted or not.
+ *   `trustedGeneratorPrefixes` — the tree whose co-edit fences this row
+ *                  (#11084): a PR that edits the instrument cannot be measured
+ *                  by it.
  */
 export const GENERATED_SURFACE_EXCEPTIONS = Object.freeze([
   Object.freeze({
+    id: 'docs-audit-scope',
+    ruling: '#9866',
     path: '.claude/workflows/docs-accuracy-audit.js',
     surfaceId: 'claude-tree',
     generator: 'node scripts/docs-audit/check-audit-scope.mjs --write',
+    trustedGeneratorPrefixes: Object.freeze(['scripts/docs-audit/']),
     what: "the docs-audit workflow's generated ALL_HANDWRITTEN scope block (a gate-owned --write artifact, not instruction-tree prose)",
+  }),
+  Object.freeze({
+    id: 'spec-skill-refs',
+    ruling: '#11705',
+    candidate: /^skills\/[^/]+\/references\/_index\.md$/,
+    surfaceId: 'skills-catalog',
+    generator: 'pnpm --filter @objectstack/spec gen:skill-refs',
+    verify: Object.freeze({ pkg: '@objectstack/spec', script: 'scripts/build-skill-references.ts', gate: 'check:skill-refs' }),
+    trustedGeneratorPrefixes: Object.freeze(['packages/spec/scripts/']),
+    what: "a skill's generated schema reference index (gen:skill-refs output, enumerated from the generator — not hand-authored skill content)",
+  }),
+  Object.freeze({
+    id: 'spec-react-blocks',
+    ruling: '#11705',
+    candidate: /^skills\/[^/]+\/(references\/react-blocks\.md|contracts\/react-blocks\.contract\.json)$/,
+    surfaceId: 'skills-catalog',
+    generator: 'pnpm --filter @objectstack/spec gen:react-blocks',
+    verify: Object.freeze({ pkg: '@objectstack/spec', script: 'scripts/build-react-blocks-contract.ts', gate: 'check:react-blocks' }),
+    trustedGeneratorPrefixes: Object.freeze(['packages/spec/scripts/']),
+    what: 'the react-tier component contract (gen:react-blocks output, enumerated from the generator — not hand-authored skill content)',
   }),
 ]);
 
 /**
- * The generator tree the exception's recompute TRUSTS: constraint 1 executes
+ * The register row a path belongs to, or null. THE membership test — both
+ * scripts call this one function, so neither can hold a second, drifting copy
+ * of "which paths are registered" (the queue guard used to derive its own set
+ * from `.path`, which reads `undefined` for a row that has none).
+ *
+ * An exact row matches byte-for-byte; a `candidate` row matches its narrowing
+ * regexp. Neither answer lifts anything: a matched path still has to survive
+ * its row's recompute, and an unmatched path never consults provenance at all.
+ */
+export function generatedExceptionFor(path) {
+  if (typeof path !== 'string' || path === '') return null;
+  return GENERATED_SURFACE_EXCEPTIONS.find((e) => (e.path ? e.path === path : e.candidate.test(path))) ?? null;
+}
+
+/**
+ * The generator tree the #9866 row's recompute TRUSTS: constraint 1 executes
  * this directory's `affected-docs.mjs` and imports its `check-audit-scope.mjs`
  * `replaceBlock`, both from the tree under test. A PR that edits anything
- * here is editing the instrument the certificate is measured with.
+ * here is editing the instrument the certificate is measured with. Kept as a
+ * named export because it is that row's own prefix; every row carries its own
+ * list in `trustedGeneratorPrefixes`.
  */
 export const TRUSTED_GENERATOR_PREFIX = 'scripts/docs-audit/';
 
 /**
  * The #11084 fence, pure so `--self-test` pins both directions offline. Given
- * the PR's submitted path list, answer a fail-closed provenance verdict when
- * the tree under test also modifies the trusted generator — or `null` when it
- * does not, which is the ONLY branch that goes on to recompute.
+ * the PR's submitted path list and the register row under consideration,
+ * answer a fail-closed provenance verdict when the tree under test also
+ * modifies that row's trusted generator — or `null` when it does not, which is
+ * the ONLY branch that goes on to recompute.
  *
  * Direction matters: a `null` answer changes nothing (the recompute runs and
  * rules exactly as before), and a non-null answer can only keep a path
@@ -449,10 +566,16 @@ export const TRUSTED_GENERATOR_PREFIX = 'scripts/docs-audit/';
  * function fails to recognise can open the fence — recognising a co-edit is
  * strictly a tightening, which is why the leading `./` spelling is folded in
  * rather than left to `startsWith` alone.
+ *
+ * PER ROW, not global: the fence names the instrument that measures THIS row.
+ * A docs PR that also edits the spec generator tree has not touched the
+ * docs-audit generator, and fencing it there would refuse a regeneration the
+ * ruling allows.
  */
-export function generatorCoEditProvenance(paths) {
+export function generatorCoEditProvenance(paths, entry = GENERATED_SURFACE_EXCEPTIONS[0]) {
+  const prefixes = entry?.trustedGeneratorPrefixes ?? [TRUSTED_GENERATOR_PREFIX];
   const coEdited = (Array.isArray(paths) ? paths : []).filter(
-    (p) => typeof p === 'string' && (p.startsWith(TRUSTED_GENERATOR_PREFIX) || p.startsWith(`./${TRUSTED_GENERATOR_PREFIX}`)),
+    (p) => typeof p === 'string' && prefixes.some((prefix) => p.startsWith(prefix) || p.startsWith(`./${prefix}`)),
   );
   if (coEdited.length === 0) return null;
   return {
@@ -515,14 +638,15 @@ export function docsAuditRegenVerdict({ baseSource, prSource, derivedDocs, repla
  * path keeps the whole PR governed — the mixed-diff rule is untouched.
  */
 export function applyGeneratedExceptions(verdict, provenanceByPath = new Map()) {
-  const registered = new Map(GENERATED_SURFACE_EXCEPTIONS.map((e) => [e.path, e]));
   const exceptions = verdict.hitPaths
-    .filter((p) => registered.has(p))
-    .map((path) => {
+    .map((path) => ({ path, entry: generatedExceptionFor(path) }))
+    .filter(({ entry }) => entry !== null)
+    .map(({ path, entry }) => {
       const provenance = provenanceByPath.get(path) ?? null;
       return {
         path,
-        generator: registered.get(path).generator,
+        generator: entry.generator,
+        ruling: entry.ruling,
         pureRegeneration: provenance?.pureRegeneration === true,
         reason: provenance?.reason ?? 'provenance was not recomputed — fail closed: the path stays governed',
       };
@@ -683,10 +807,10 @@ export function renderExceptionLines(verdict) {
     exceptions
       .map((e) =>
         e.pureRegeneration
-          ? `  ℹ️  generated-surface exception (#9866): ${e.path} is a PURE REGENERATION —\n` +
+          ? `  ℹ️  generated-surface exception (${e.ruling ?? '#9866'}): ${e.path} is a PURE REGENERATION —\n` +
             `      byte-equal to \`${e.generator}\` recomputed on THIS tree (never a stored baseline),\n` +
             `      so this path does not govern the PR by itself. Any other governed hit still forks the whole PR.`
-          : `  ⛔  generated-surface exception (#9866) did NOT lift ${e.path}:\n` +
+          : `  ⛔  generated-surface exception (${e.ruling ?? '#9866'}) did NOT lift ${e.path}:\n` +
             `      ${e.reason}\n` +
             `      The path stays governed; a pure \`${e.generator}\` regeneration is the only thing the exception passes.`,
       )
@@ -729,7 +853,7 @@ export function renderTestVerdict(verdict) {
  * generator's own exported `replaceBlock`, never read from anywhere stored.
  * Every failure path answers fail-closed with a stated reason. No network.
  */
-export async function recomputeDocsAuditProvenance(root, exception) {
+export async function recomputeDocsAuditProvenance(root, exception, { baseRef = null } = {}) {
   const failClosed = (reason) => ({ pureRegeneration: false, reason: `${reason} — fail closed: the path stays governed` });
   let replaceBlock;
   try {
@@ -746,10 +870,12 @@ export async function recomputeDocsAuditProvenance(root, exception) {
   }
   let baseSource;
   try {
-    const base = git(root, ['merge-base', 'origin/main', 'HEAD']).trim();
+    // `baseRef` is how a merge-group build names its base (it has no reason to
+    // hold `origin/main`); a seat run resolves the merge base itself.
+    const base = baseRef ?? git(root, ['merge-base', 'origin/main', 'HEAD']).trim();
     baseSource = git(root, ['show', `${base}:${exception.path}`]);
   } catch (error) {
-    return failClosed(`could not read the merge-base version of ${exception.path} (${String(error?.message ?? error).split('\n')[0]})`);
+    return failClosed(`could not read the base version of ${exception.path} (${String(error?.message ?? error).split('\n')[0]})`);
   }
   let derivedDocs;
   try {
@@ -765,6 +891,158 @@ export async function recomputeDocsAuditProvenance(root, exception) {
     return failClosed(`could not derive the doc set on this tree (${String(error?.message ?? error).split('\n')[0]})`);
   }
   return docsAuditRegenVerdict({ baseSource, prSource, derivedDocs, replaceBlock });
+}
+
+/**
+ * The #11705 verdict, pure so `--self-test` pins every branch offline. Inputs:
+ * the hit `path`, its register `entry`, and `run` — what the generator answered
+ * on the tree under test, as `{ ok, outputs, reason }`.
+ *
+ * Pass ⟺ the generator DECLARED this path among its outputs AND its own
+ * `--check` reported no drift. Both halves are the generator's own answer, not
+ * this file's: the first is the ruling's "enumerated from the generator", the
+ * second is its "proven per-file". Every other input answers fail-closed with a
+ * stated reason, and there is no heuristic branch — a path the manifest does
+ * not name is hand-authored content sitting beside generated output, which is
+ * exactly the case the ruling says stays governed.
+ */
+export function sinkGeneratorVerdict({ path, entry, run }) {
+  const failClosed = (reason) => ({ pureRegeneration: false, reason: `${reason} — fail closed: the path stays governed` });
+  if (!run || typeof run !== 'object') return failClosed('the generator was not run');
+  if (!Array.isArray(run.outputs) || run.outputs.length === 0) {
+    return failClosed(
+      `the generator declared no output set (${run.reason ?? 'no manifest was produced'}); ` +
+        "without the generator's own list of the files it writes there is nothing to prove ownership against",
+    );
+  }
+  if (!run.outputs.includes(path)) {
+    return failClosed(
+      `\`${entry.generator}\` does not write ${path} — it is not among the ${run.outputs.length} file(s) that generator ` +
+        'declared on this tree, so it is hand-authored content sitting beside generated output',
+    );
+  }
+  if (run.ok !== true) {
+    return failClosed(
+      `\`${entry.verify?.gate ?? "the generator's --check"}\` does not certify this tree (${run.reason ?? 'no reason reported'}); ` +
+        'byte-exact agreement with the generator is the only pass, so a hand edit keeps the path governed',
+    );
+  }
+  return {
+    pureRegeneration: true,
+    reason:
+      `byte-equal to \`${entry.generator}\` recomputed on this tree — the generator declared ${run.outputs.length} output(s), ` +
+      `this path among them, and its own \`${entry.verify?.gate ?? '--check'}\` reported no drift across all of them ` +
+      '(no stored baseline consulted)',
+  };
+}
+
+/**
+ * Run a sink-based generator's `--check` on the tree under test and read the
+ * output set it declares. The generator is the tree's OWN copy, run through
+ * the package manager exactly as an operator would; nothing here re-implements
+ * it, and the manifest is written by the generator, to a temp file, never into
+ * the repo.
+ *
+ * Every failure — no toolchain, spawn error, unreadable manifest, drift —
+ * returns `ok: false` with the reason, and `sinkGeneratorVerdict` turns that
+ * into a governed verdict. ⚠️ "No toolchain" is a real environment here, not a
+ * hypothetical: the merge-group guard job installs no dependencies (see the
+ * header), so there it fails closed on every run.
+ */
+export function runSinkGenerator(root, entry) {
+  let dir;
+  try {
+    dir = mkdtempSync(join(tmpdir(), 'os-governed-manifest-'));
+  } catch (error) {
+    return { ok: false, outputs: null, reason: `could not create a temp dir for the output manifest (${String(error?.message ?? error).split('\n')[0]})` };
+  }
+  const manifest = join(dir, 'outputs.json');
+  try {
+    const res = spawnSync(
+      'pnpm',
+      ['--filter', entry.verify.pkg, 'exec', 'tsx', entry.verify.script, '--check', `--generated-manifest=${manifest}`],
+      { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 300_000 },
+    );
+    let outputs = null;
+    try {
+      outputs = JSON.parse(readFileSync(manifest, 'utf8')).outputs ?? null;
+    } catch {
+      outputs = null;
+    }
+    if (res.error) {
+      return {
+        ok: false,
+        outputs,
+        reason:
+          `could not run \`${entry.generator}\` on this tree (${String(res.error.message).split('\n')[0]}) — ` +
+          'the generator toolchain is not available in this environment',
+      };
+    }
+    if (res.status !== 0) {
+      const drift = `${res.stderr ?? ''}${res.stdout ?? ''}`
+        .split('\n')
+        .map((l) => l.trim())
+        .filter((l) => /^[+~-] /.test(l) || /out of date|✗/.test(l))
+        .slice(0, 4)
+        .join(' | ');
+      return { ok: false, outputs, reason: `the generator's own --check exited ${res.status ?? 'by signal'}${drift ? `: ${drift}` : ''}` };
+    }
+    if (!outputs) return { ok: false, outputs: null, reason: 'the generator ran clean but declared no readable output manifest' };
+    return { ok: true, outputs, reason: 'the generator reported no drift' };
+  } finally {
+    try {
+      rmSync(dir, { recursive: true, force: true });
+    } catch {
+      /* a leftover temp dir is not a provenance answer */
+    }
+  }
+}
+
+/**
+ * The hit paths that consult the register, grouped by the row they belong to.
+ * Pure; the grouping is what lets one generator run answer for every path it
+ * owns in the same diff.
+ */
+export function groupHitsByException(hitPaths) {
+  const groups = new Map();
+  for (const path of Array.isArray(hitPaths) ? hitPaths : []) {
+    const entry = generatedExceptionFor(path);
+    if (!entry) continue;
+    const bucket = groups.get(entry) ?? [];
+    bucket.push(path);
+    groups.set(entry, bucket);
+  }
+  return groups;
+}
+
+/**
+ * THE recompute driver — one mechanism, both scripts (#11705 ruled: "⛔ do not
+ * author a second mechanism"). Answers a path → provenance Map for every
+ * registered hit, applying the per-row co-edit fence FIRST (it can only keep a
+ * path governed, and it costs no process), then the row's own recompute.
+ *
+ * `allPaths` is the whole diff under test, which the fence reads; `baseRef`
+ * names the base a merge-group build must diff against; `cache` lets a caller
+ * that judges several commits of one build pay for each generator run once —
+ * the run reads the TREE, which does not change between those rows.
+ */
+export async function recomputeProvenanceFor(root, hitsByEntry, { allPaths = [], baseRef = null, cache = new Map() } = {}) {
+  const provenance = new Map();
+  for (const [entry, paths] of hitsByEntry) {
+    const coEdit = generatorCoEditProvenance(allPaths, entry);
+    if (coEdit) {
+      for (const path of paths) provenance.set(path, coEdit);
+      continue;
+    }
+    if (entry.verify) {
+      if (!cache.has(entry.id)) cache.set(entry.id, runSinkGenerator(root, entry));
+      const run = cache.get(entry.id);
+      for (const path of paths) provenance.set(path, sinkGeneratorVerdict({ path, entry, run }));
+      continue;
+    }
+    for (const path of paths) provenance.set(path, await recomputeDocsAuditProvenance(root, entry, { baseRef }));
+  }
+  return provenance;
 }
 
 // ── local git (enumeration + diff paths; zero API) ──────────────────────────
@@ -991,27 +1269,16 @@ async function runTestMode(args) {
     return EXIT_CANNOT_SWEEP;
   }
   let verdict = testVerdict(paths);
-  // The one provenance-aware exception (#9866): recompute only when a
+  // The provenance-aware exceptions (#9866 + #11705): recompute only when a
   // registered path is actually among the hits, so every other `--test` run
-  // stays the zero-git, zero-cost read it always was.
-  const hitExceptions = GENERATED_SURFACE_EXCEPTIONS.filter((e) => verdict.hitPaths.includes(e.path));
-  if (hitExceptions.length > 0) {
-    const provenance = new Map();
-    // #11084, BEFORE consulting provenance: the recompute runs the tree under
-    // test's own `scripts/docs-audit/**`, so a diff that edits the generator
-    // alongside the artifact would be certifying itself. Skip the recompute
-    // entirely and fail closed — no git, no generator exec, reason stated.
-    const coEdit = generatorCoEditProvenance(paths);
-    if (coEdit) {
-      for (const exception of hitExceptions) provenance.set(exception.path, coEdit);
-    } else {
-      const rootIdx = args.indexOf('--root');
-      const root = resolve(rootIdx > -1 && args[rootIdx + 1] ? args[rootIdx + 1] : resolve(scriptDir, '..', '..'));
-      for (const exception of hitExceptions) {
-        provenance.set(exception.path, await recomputeDocsAuditProvenance(root, exception));
-      }
-    }
-    verdict = applyGeneratedExceptions(verdict, provenance);
+  // stays the zero-git, zero-cost read it always was. The driver applies each
+  // row's #11084 co-edit fence before spending anything — a diff that edits a
+  // generator alongside its artifact would otherwise certify itself.
+  const hitsByEntry = groupHitsByException(verdict.hitPaths);
+  if (hitsByEntry.size > 0) {
+    const rootIdx = args.indexOf('--root');
+    const root = resolve(rootIdx > -1 && args[rootIdx + 1] ? args[rootIdx + 1] : resolve(scriptDir, '..', '..'));
+    verdict = applyGeneratedExceptions(verdict, await recomputeProvenanceFor(root, hitsByEntry, { allPaths: paths }));
   }
   if (args.includes('--json')) console.log(JSON.stringify(verdict, null, 2));
   else console.log(renderTestVerdict(verdict));
@@ -1218,6 +1485,18 @@ const REPLAYS = [
   { name: 'the queue-landed skills PR of 2026-08-17 (zero reviews)', subject: 'docs(pm-skill): seat protocol updates (#9238)', files: ['.claude/skills/pm-dispatch/SKILL.md', '.claude/skills/pm-dispatch/references/platform-readings.md'], pr: 9238 },
   { name: 'the first human merge under the new regime', subject: 'docs(pm-skill): stale-premise check covers ruling-named cards; triage self-exit guard sees in-flight sibling rounds (#9501)', files: ['.claude/skills/pm-dispatch/SKILL.md'], pr: 9501 },
 ];
+
+/**
+ * One REAL path per candidate row, for the surface-membership case below. A
+ * sample is evidence, never mechanism: nothing lifts because a path appears
+ * here, and the row's own candidate has to match it — asserted below, so a
+ * sample that stops being representative fails loudly rather than pinning a
+ * row against a path it no longer covers.
+ */
+const REGISTER_SAMPLES = {
+  'spec-skill-refs': 'skills/objectstack-ui/references/_index.md',
+  'spec-react-blocks': 'skills/objectstack-ui/contracts/react-blocks.contract.json',
+};
 
 async function selfTest() {
   let checked = 0;
@@ -1453,17 +1732,28 @@ async function selfTest() {
   // `replaceBlock` stops splicing these fixtures and the pure-regen case goes
   // red HERE — loud, which is the point.
   const { renderBlock: genRender, replaceBlock: genReplace } = await import('../docs-audit/check-audit-scope.mjs');
-  // The register: exactly the one ruled entry, and it must name a path its
-  // declared surface actually governs — an exception for an ungoverned path
-  // would be a register row nothing reads.
-  assert('exactly-one-generated-exception-is-registered-the-ruled-single-file',
-    GENERATED_SURFACE_EXCEPTIONS.length === 1 && GENERATED_SURFACE_EXCEPTIONS[0].path === '.claude/workflows/docs-accuracy-audit.js',
-    JSON.stringify(GENERATED_SURFACE_EXCEPTIONS.map((e) => e.path)));
+  // The register: every row is ruled, and the #9866 row is still the exact
+  // single file its ruling named. A row must also name a surface its own paths
+  // are actually governed by — an exception for an ungoverned path would be a
+  // register row nothing reads.
+  assert('every-register-row-cites-the-ruling-that-put-it-there',
+    GENERATED_SURFACE_EXCEPTIONS.every((e) => typeof e.ruling === 'string' && /^#\d+$/.test(e.ruling)),
+    JSON.stringify(GENERATED_SURFACE_EXCEPTIONS.map((e) => [e.id, e.ruling])));
+  assert('the-9866-row-is-still-the-exact-single-file-its-ruling-named',
+    GENERATED_SURFACE_EXCEPTIONS[0].path === '.claude/workflows/docs-accuracy-audit.js' && GENERATED_SURFACE_EXCEPTIONS[0].ruling === '#9866',
+    JSON.stringify(GENERATED_SURFACE_EXCEPTIONS[0]));
+  assert('a-row-matches-either-an-exact-path-or-a-narrowing-candidate-never-neither-and-never-both',
+    GENERATED_SURFACE_EXCEPTIONS.every((e) => (typeof e.path === 'string') !== (e.candidate instanceof RegExp)),
+    JSON.stringify(GENERATED_SURFACE_EXCEPTIONS.map((e) => [e.id, typeof e.path, String(e.candidate)])));
+  assert('no-candidate-carries-the-g-flag-a-stateful-regexp-would-answer-differently-every-other-call',
+    GENERATED_SURFACE_EXCEPTIONS.every((e) => !e.candidate || !e.candidate.global));
   assert('the-exception-names-a-path-its-surface-actually-governs',
     GENERATED_SURFACE_EXCEPTIONS.every((e) => {
-      const m = governedPathsIn([e.path]);
+      const m = governedPathsIn([e.path ?? REGISTER_SAMPLES[e.id]]);
       return m.length === 1 && m[0].id === e.surfaceId;
-    }));
+    }), JSON.stringify(GENERATED_SURFACE_EXCEPTIONS.map((e) => e.path ?? REGISTER_SAMPLES[e.id])));
+  assert('every-row-names-its-generator-command-and-its-trusted-instrument-tree',
+    GENERATED_SURFACE_EXCEPTIONS.every((e) => typeof e.generator === 'string' && e.generator !== '' && (e.trustedGeneratorPrefixes ?? []).length > 0));
   assert('the-exception-names-its-generator-command',
     GENERATED_SURFACE_EXCEPTIONS[0].generator.includes('check-audit-scope.mjs --write'));
 
@@ -1580,6 +1870,130 @@ async function selfTest() {
   assert('a-near-miss-sibling-directory-is-not-mistaken-for-the-generator-tree',
     generatorCoEditProvenance(['scripts/docs-auditing/other.mjs']) === null);
 
+  // ── the #11705 generator-owned rows inside `skills/**` ───────────────────
+  //
+  // The ruling's own limit is the thing to pin: a file qualifies ONLY by being
+  // reproducible from its generator, proven per file. Two halves, both the
+  // generator's own answer — it declared the path among its outputs, and its
+  // `--check` reported no drift — and every other input fails closed.
+  const skillRefs = GENERATED_SURFACE_EXCEPTIONS.find((e) => e.id === 'spec-skill-refs');
+  const reactBlocks = GENERATED_SURFACE_EXCEPTIONS.find((e) => e.id === 'spec-react-blocks');
+  const genIndex = REGISTER_SAMPLES['spec-skill-refs'];
+  const handAuthored = 'skills/objectstack-ui/SKILL.md';
+  // Real, and the reason this case is not hypothetical: `objectstack-upgrade`
+  // and `objectstack-pm-dispatch` are shipped skills with NO SKILL_MAP entry,
+  // so an `_index.md` under either would be hand-written prose at a path the
+  // candidate matches.
+  const unownedIndex = 'skills/objectstack-upgrade/references/_index.md';
+  const declaredOutputs = [genIndex, 'skills/objectstack-data/references/_index.md'];
+  const cleanRun = { ok: true, outputs: declaredOutputs, reason: 'the generator reported no drift' };
+
+  assert('both-ruled-generator-rows-are-registered-under-the-skills-catalog-surface',
+    skillRefs?.surfaceId === 'skills-catalog' && reactBlocks?.surfaceId === 'skills-catalog' && skillRefs.ruling === '#11705' && reactBlocks.ruling === '#11705');
+  assert('every-sample-is-matched-by-the-row-it-illustrates',
+    Object.entries(REGISTER_SAMPLES).every(([id, p]) => generatedExceptionFor(p)?.id === id), JSON.stringify(REGISTER_SAMPLES));
+  assert('a-generated-index-routes-to-the-skill-refs-generator', generatedExceptionFor(genIndex) === skillRefs);
+  assert('both-react-blocks-outputs-route-to-their-own-generator',
+    generatedExceptionFor('skills/objectstack-ui/references/react-blocks.md') === reactBlocks &&
+      generatedExceptionFor('skills/objectstack-ui/contracts/react-blocks.contract.json') === reactBlocks);
+  // ⭐ The ruled limit, stated as a membership question: hand-authored skill
+  // content is not on the register at all, so it never reaches a generator.
+  assert('a-hand-authored-skills-file-is-not-registered-and-is-never-consulted-against-a-generator',
+    generatedExceptionFor(handAuthored) === null && generatedExceptionFor('skills/objectstack-ui/references/plugin-hooks.md') === null &&
+      generatedExceptionFor('skills/objectstack-ui/references/_index.mdx') === null);
+
+  // Ruled case A — a genuine generated file passes.
+  const genuine = sinkGeneratorVerdict({ path: genIndex, entry: skillRefs, run: cleanRun });
+  assert('11705-case-A-a-genuine-generated-file-passes-the-exemption', genuine.pureRegeneration === true, genuine.reason);
+  assert('and-the-pass-names-the-recompute-and-consults-no-stored-baseline',
+    /recomputed on this tree/.test(genuine.reason) && /no stored baseline/.test(genuine.reason), genuine.reason);
+  // Ruled case B — the SAME path with one hand-edited byte does not. That edit
+  // is what reddens the generator's own `--check`, so this is the shape the
+  // measured ablation produced (see the PR body): exit 1 with a drift line.
+  const handEdited = sinkGeneratorVerdict({
+    path: genIndex,
+    entry: skillRefs,
+    run: { ok: false, outputs: declaredOutputs, reason: "the generator's own --check exited 1: ~ skills/objectstack-ui/references/_index.md (out of date)" },
+  });
+  assert('11705-case-B-the-same-path-with-one-hand-edited-byte-does-NOT-pass', handEdited.pureRegeneration === false, handEdited.reason);
+  assert('and-the-refusal-quotes-the-generators-own-drift-line-rather-than-asserting-one',
+    handEdited.reason.includes('out of date') && handEdited.reason.includes('check:skill-refs'), handEdited.reason);
+  // Ruled case C — a path the generator does not write is hand-authored
+  // content beside generated output, whatever the candidate says.
+  const notOwned = sinkGeneratorVerdict({ path: unownedIndex, entry: skillRefs, run: cleanRun });
+  assert('11705-case-C-a-path-the-generator-never-declared-stays-governed', notOwned.pureRegeneration === false, notOwned.reason);
+  assert('and-that-refusal-says-the-generator-does-not-write-it-not-that-it-differs',
+    notOwned.reason.includes('does not write') && notOwned.reason.includes('hand-authored'), notOwned.reason);
+  // Fail-closed inputs, each with its own stated reason — including the one
+  // real environment that cannot recompute at all.
+  assert('a-row-whose-generator-never-ran-fails-closed', sinkGeneratorVerdict({ path: genIndex, entry: skillRefs, run: null }).pureRegeneration === false);
+  const noManifest = sinkGeneratorVerdict({ path: genIndex, entry: skillRefs, run: { ok: true, outputs: [], reason: 'x' } });
+  assert('an-empty-output-set-fails-closed-rather-than-vacuously-passing',
+    noManifest.pureRegeneration === false && /nothing to prove ownership against/.test(noManifest.reason), noManifest.reason);
+  const noToolchain = sinkGeneratorVerdict({
+    path: genIndex,
+    entry: skillRefs,
+    run: { ok: false, outputs: null, reason: 'could not run `pnpm …` on this tree (spawn pnpm ENOENT) — the generator toolchain is not available in this environment' },
+  });
+  assert('an-environment-with-no-generator-toolchain-fails-closed-and-says-so',
+    noToolchain.pureRegeneration === false && /toolchain is not available/.test(noToolchain.reason), noToolchain.reason);
+
+  // The fence is PER ROW: the instrument that measures a row is that row's
+  // generator tree, and the shared sink both spec generators write through is
+  // part of it. Editing spec SOURCE is not a co-edit — the derivation is
+  // REQUIRED to reflect it, which is the whole reason the artifact rides the
+  // source PR.
+  assert('editing-the-spec-generator-fences-the-row-it-would-certify',
+    generatorCoEditProvenance([genIndex, 'packages/spec/scripts/build-skill-references.ts'], skillRefs) !== null);
+  assert('and-the-shared-output-sink-counts-as-the-instrument-too',
+    generatorCoEditProvenance([genIndex, 'packages/spec/scripts/lib/generated-output.ts'], skillRefs) !== null);
+  assert('editing-spec-SOURCE-is-not-a-generator-co-edit', generatorCoEditProvenance([genIndex, 'packages/spec/src/ui/view.zod.ts'], skillRefs) === null);
+  assert('the-fences-are-per-row-neither-tree-fences-the-other-rows-generator',
+    generatorCoEditProvenance(['packages/spec/scripts/build-skill-references.ts'], GENERATED_SURFACE_EXCEPTIONS[0]) === null &&
+      generatorCoEditProvenance(['scripts/docs-audit/affected-docs.mjs'], skillRefs) === null);
+
+  // Applied to a verdict: the #11685 shape lifts, and the ruled limit holds.
+  const specPr = applyGeneratedExceptions(testVerdict(['packages/spec/src/ui/responsive.zod.ts', genIndex]), new Map([[genIndex, genuine]]));
+  assert('the-#11685-shape-a-spec-pr-carrying-its-own-regenerated-index-is-NOT-governed',
+    specPr.governed === false && specPr.hitPaths.length === 0 && specPr.exceptions[0].pureRegeneration === true, JSON.stringify(specPr.hitPaths));
+  const withHandAuthored = applyGeneratedExceptions(testVerdict([genIndex, handAuthored]), new Map([[genIndex, genuine]]));
+  assert('but-one-hand-authored-skills-file-beside-it-still-forks-the-whole-pr',
+    withHandAuthored.governed === true && withHandAuthored.hitPaths.join() === handAuthored, JSON.stringify(withHandAuthored.hitPaths));
+  const fabricated = applyGeneratedExceptions(testVerdict([handAuthored]), new Map([[handAuthored, { pureRegeneration: true, reason: 'claims to be verified' }]]));
+  assert('provenance-that-claims-to-be-verified-cannot-lift-an-unregistered-skills-file',
+    fabricated.governed === true && fabricated.exceptions.length === 0, JSON.stringify(fabricated.exceptions));
+  const grouped = groupHitsByException([genIndex, 'skills/objectstack-data/references/_index.md', 'skills/objectstack-ui/references/react-blocks.md', handAuthored]);
+  assert('grouping-pays-for-one-generator-run-per-row-not-per-path',
+    grouped.size === 2 && grouped.get(skillRefs).length === 2 && grouped.get(reactBlocks).length === 1, JSON.stringify([...grouped.values()]));
+  assert('and-an-unregistered-path-is-in-no-group-at-all', ![...grouped.values()].flat().includes(handAuthored));
+
+  // ── #11705 end to end, against the REAL generator ────────────────────────
+  //
+  // A fixture cannot show that the enumeration still reaches the register: the
+  // output set is the GENERATOR's answer, and this is the only case that asks
+  // it. Read-only — `--check` writes nothing to the tree, and the manifest goes
+  // to a temp file. Both branches assert; a missing toolchain is the merge-group
+  // guard job's real environment, where fail-closed is the correct answer, so
+  // it is pinned rather than skipped.
+  const liveRun = runSinkGenerator(resolve(scriptDir, '..', '..'), skillRefs);
+  let liveNote;
+  if (Array.isArray(liveRun.outputs) && liveRun.outputs.length > 0) {
+    assert('the-live-generator-declares-the-output-set-itself-never-a-hand-copied-list',
+      liveRun.outputs.includes(genIndex), JSON.stringify(liveRun.outputs.slice(0, 4)));
+    assert('and-a-skill-it-does-not-write-is-absent-from-that-set',
+      !liveRun.outputs.includes(unownedIndex), JSON.stringify(liveRun.outputs));
+    const live = sinkGeneratorVerdict({ path: genIndex, entry: skillRefs, run: liveRun });
+    assert('the-live-verdict-is-exactly-the-generators-own-verdict',
+      live.pureRegeneration === (liveRun.ok === true), `${live.reason} / run.ok=${liveRun.ok}`);
+    liveNote = liveRun.ok
+      ? `live: the real generator declared ${liveRun.outputs.length} output(s) and certified this tree`
+      : `live: the real generator declared ${liveRun.outputs.length} output(s) and REFUSED this tree (${liveRun.reason}) — the row stayed governed`;
+  } else {
+    assert('with-no-generator-toolchain-the-live-row-fails-closed-and-names-why',
+      sinkGeneratorVerdict({ path: genIndex, entry: skillRefs, run: liveRun }).pureRegeneration === false, JSON.stringify(liveRun));
+    liveNote = `live: no generator toolchain in this environment (${liveRun.reason}) — the row failed closed, which is the ruled answer here`;
+  }
+
   // The words a seat reads.
   const liftedRender = renderTestVerdict(liftedVerdict);
   assert('a-lifted-render-names-the-exception-the-generator-and-the-recompute',
@@ -1595,7 +2009,7 @@ async function selfTest() {
     for (const failure of failures) console.error(`  • ${failure}`);
     process.exit(1);
   }
-  console.log(`✓ check-governed-merges --self-test: ${checked} assertions (the unified governed predicate + near misses, subject→PR spellings, window parsing, the replay fixtures, the four-repo resolution incl. absent/wrong-origin/relocated checkouts, the attribution channel chain + its proxy-transport re-arm plan and its one named fallback line, the --test pre-arm predicate, the generated-artifact provenance exception — the four ruled cases against the generator's own splice, byte-exactness, fail-closed inputs, the untouched mixed-diff rule, single-file-not-a-class, the #11084 generator co-edit fence in both directions, and its render words — the exit table, and the report wording pins).`);
+  console.log(`✓ check-governed-merges --self-test: ${checked} assertions (the unified governed predicate + near misses, subject→PR spellings, window parsing, the replay fixtures, the four-repo resolution incl. absent/wrong-origin/relocated checkouts, the attribution channel chain + its proxy-transport re-arm plan and its one named fallback line, the --test pre-arm predicate, the generated-artifact provenance exception — the four ruled cases against the generator's own splice, byte-exactness, fail-closed inputs, the untouched mixed-diff rule, single-file-not-a-class, the #11084 generator co-edit fence in both directions, and its render words — the #11705 generator-owned rows inside skills/** (a genuine generated file passes, the same path hand-edited does not, a path no generator declares is hand-authored content, per-row fences, and the enumeration read from the real generator), the exit table, and the report wording pins).\n  ${liveNote}`);
 }
 
 /** The exit code `--test` would return for a path list — pinned without spawning. */
