@@ -33,6 +33,8 @@
 
 import { describe, it, expect, expectTypeOf, vi } from 'vitest';
 import { ObjectStackClient, ScopedProjectClient } from './index';
+import type { CloneDataResult } from './index';
+import type { SearchAllResponse } from '@objectstack/spec/api';
 import type {
     AutomationResult,
     DelegableScope,
@@ -121,6 +123,17 @@ export async function returnTypePrecisionPins(): Promise<void> {
         total: number;
     }>();
 
+    // ── [#11924] the two contracts #8140 had to leave missing ─────────────
+    // `search` and `data.clone` were deliberate `Promise<any>` holes: their
+    // shapes were declared inline on the implementation, reachable from no
+    // spec export. #11924 authored `SearchAllResponseSchema` /
+    // `CloneDataResponseSchema` in `@objectstack/spec/api` (with conformance
+    // coverage on producer and mount — #3877), so the bindings now exist to
+    // pin. `search` binds the WHOLE body (the route answers bare);
+    // `data.clone` follows its `data.*` siblings' caller-supplied generic.
+    expectTypeOf(await client.search('acme')).toEqualTypeOf<SearchAllResponse>();
+    expectTypeOf(await client.data.clone('lead', 'rec_1')).toEqualTypeOf<CloneDataResult<any>>();
+
     // ── shape class 7: z.input vs z.infer, decided by the CONTRACT ─────────
     // `ISecurityService.explain` declares `Promise<ExplainDecision>` (the
     // `z.input` form) and the route relays it with `res.json(decision)` — no
@@ -144,10 +157,24 @@ export async function returnTypePrecisionPins(): Promise<void> {
     // @ts-expect-error a flow definition is not an execution log
     const wrongFlow: ExecutionLog = await client.automation.getFlow('flow_a');
 
+    // [#11924] The near-miss trap, now pinned at the BINDING too: the global
+    // search body must not satisfy the per-object `SearchResult` contract.
+    // Before the binding this suppression was unused (`any` satisfied it).
+    // @ts-expect-error the global-search hits carry object/title/snippet/record, not score/document
+    const wrongSearch: SearchResult = await client.search('acme');
+
+    // [#11924] And the family distinction: a create's body is NOT a clone's —
+    // `CreateDataResult` lacks `sourceId`, so reading a clone through the
+    // create type would compile only against an erased return.
+    // @ts-expect-error a create result carries no `sourceId`
+    const wrongClone: CloneDataResult = await client.data.create('lead', {});
+
     void wrongScope;
     void wrongTables;
     void wrongReport;
     void wrongFlow;
+    void wrongSearch;
+    void wrongClone;
 }
 
 /**
@@ -157,10 +184,13 @@ export async function returnTypePrecisionPins(): Promise<void> {
  * is the WRONG type for it — it contracts the per-object
  * `ISearchService.search`, whose hits carry `score` / `document`, while the
  * cross-object route answers hits of `object` / `id` / `title` / `snippet` /
- * `record`. Binding it would compile and be false. `client.search` therefore
- * stays `Promise<any>` deliberately (a missing contract, not a missing
- * annotation) and this guard exists so the next sweep does not "finish" the
- * card by reaching for the same-named neighbour.
+ * `record`. Binding it would compile and be false. [#11924] `client.search`
+ * is now bound to the RIGHT contract (`SearchAllResponse`,
+ * `@objectstack/spec/api` — authored with conformance coverage), but the trap
+ * itself is unchanged: both exports still exist one import apart, so this
+ * guard stays exactly as #8140 left it, and the binding-side twin above
+ * (`wrongSearch`) pins the same mismatch in the direction the new declaration
+ * makes expressible.
  */
 type GlobalSearchHit = {
     object: string;
