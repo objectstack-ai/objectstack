@@ -13483,6 +13483,10 @@ export class SqlDriver implements IDataDriver {
       case 'markdown':
       case 'richtext':
       case 'code':
+      // #11875 — moved out of the catch-all together with `createColumn`'s
+      // text-family case: the write seam now enforces their declared bound.
+      case 'signature':
+      case 'qrcode':
         return keyed ? this.keyableTextLength(field) : null;
       // Virtual — `createColumn` returns without emitting anything.
       case 'formula':
@@ -13792,13 +13796,11 @@ export class SqlDriver implements IDataDriver {
       // declaration still binds once the column stops binding.
       //
       // objectql's record-validator applies its `max_length` / `min_length`
-      // branch to exactly `text` / `textarea` / `email` / `url` / `phone` /
-      // `password` / `markdown` / `html` / `richtext` / `code`. Both new
-      // members are inside that list — measured, not read off it: a
-      // `maxLength: 64` field of each type refuses a 100-character value with
-      // a field-named ADR-0112 envelope, before any column is reached. So
-      // moving them here RESTORES the declared contract (any string, as
-      // `valueSchemaFor` says) instead of widening past it.
+      // branch to exactly the spec's BOUNDED_STRING_FIELD_TYPES — measured,
+      // not read off it: a `maxLength: 64` field of each member refuses a
+      // 100-character value with a field-named ADR-0112 envelope, before any
+      // column is reached. So membership here RESTORES the declared contract
+      // (any string, as `valueSchemaFor` says) instead of widening past it.
       //
       // `richtext` is the headline member: the spec groups `markdown` / `html`
       // / `richtext` together as "Rich Content" (`field.zod.ts`) and two of
@@ -13810,17 +13812,21 @@ export class SqlDriver implements IDataDriver {
       // (`ER_DATA_TOO_LONG` under `STRICT_TRANS_TABLES`) and Postgres 16
       // (`22001`). `code` is the same defect on the same evidence — a code
       // editor's contents, refused identically on both dialects.
-      //
-      // ⛔ `signature` and `qrcode` are STRING_VALUE_TYPES members whose stored
-      // value is also the author's own and also routinely far past 255
-      // characters (field-zoo writes a data-URI PNG for `signature`), and they
-      // are deliberately NOT here — see the catch-all's note. The validator
-      // branch above does not list them, so nothing enforces their declared
-      // `maxLength` anywhere: for them an unbounded TEXT column would accept
-      // values the declaration forbids, which is a widening of the physical
-      // surface past the contract rather than a restoration of it.
       case 'richtext':
-      case 'code': {
+      case 'code':
+      // #11875 (maintainer ruling 2026-08-25, option 1): `signature` and
+      // `qrcode` join under exactly the invariant above. #11794 measured them
+      // (same live refusal: a 1000-char data-URI landed varchar(255) and was
+      // refused `22001` on PG, `ER_DATA_TOO_LONG` on MySQL) and deliberately
+      // left them in the catch-all, because at that point NOTHING enforced
+      // their declared `maxLength` — an unbounded TEXT would have accepted
+      // values the declaration forbids. That gap is now closed at both seams:
+      // `FieldSchema` admits `maxLength` on them (BOUNDED_STRING_FIELD_TYPES)
+      // and the record-validator's `max_length` branch reads the same set, so
+      // a TEXT column here refuses nothing the declaration allows — the bound
+      // is enforced at the write seam, and the data-URI refusal goes away.
+      case 'signature':
+      case 'qrcode': {
         // #11374: a text-family column that some declared index KEYS ON is
         // emitted as `varchar(maxLength)` rather than TEXT, whenever the field
         // declared a bound this dialect can key on.
@@ -13977,20 +13983,11 @@ export class SqlDriver implements IDataDriver {
         // any of those from the author's `maxLength` would size the wrong
         // string. (`code` used to be mis-listed here among the option-valued
         // ones — measured in field-zoo it stores the editor's contents
-        // verbatim, which is why #11794 moved it to the text family above.)
-        //
-        // ⚠️ `signature` and `qrcode` are here for a DIFFERENT reason, and it is
-        // an OPEN DEFECT rather than a design. Their stored value IS the
-        // declared value and it is routinely far past 255 characters — a
-        // data-URI PNG for `signature` — so varchar(255) refuses ordinary
-        // authored values on both enforcing dialects, exactly the way it did
-        // for `richtext`. #11794 measured them and left them here anyway,
-        // because NOTHING enforces their declared `maxLength`: the
-        // record-validator's `max_length` branch does not list them, so an
-        // unbounded TEXT column would trade an under-accepting column for an
-        // over-accepting one — a physical surface wider than the contract.
-        // They need an enforced bound before they can move; see the text-family
-        // case above for the invariant that decides it.
+        // verbatim, which is why #11794 moved it to the text family above.
+        // `signature` / `qrcode` sat here as a measured OPEN DEFECT — their
+        // stored value IS the declared value, routinely a data-URI far past
+        // 255 chars, refused by both enforcing dialects — until #11875 gave
+        // the write seam their bound and moved them to the text family too.)
         //
         // A type that genuinely wants the bound belongs in the string-family
         // case above, named — never acquired by falling through to here.

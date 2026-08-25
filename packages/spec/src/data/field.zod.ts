@@ -115,14 +115,26 @@ export type FieldType = z.input<typeof FieldType>;
  * show the key for exactly this set — declared converges to enforced
  * (ADR-0078).
  *
+ * `signature` / `qrcode` joined in #11875 (maintainer ruling 2026-08-25,
+ * option 1): their stored value IS the author's own string and routinely far
+ * past 255 characters (a data-URI PNG for `signature`), and the write-time
+ * validator now enforces their declared bound — declared = enforced holds in
+ * both directions, which is also what licenses their unbounded TEXT column in
+ * `driver-sql` (the #11794 invariant: TEXT is permitted exactly because the
+ * write seam enforces the declared `maxLength`).
+ *
  * Deliberately NOT here: `secret` (stored ciphertext handle — the authored
- * value's length is not what the column holds), `select`/`multiselect`
- * (bounded by their options, not by a character count), `json`/`code`-adjacent
- * structured types other than `code` itself, and every non-string type.
+ * value's length is not what the column holds; ADR-0100 — explicitly outside
+ * the #11875 ruling), `color` (short by construction — same ruling),
+ * `select`/`multiselect` (bounded by their options, not by a character count),
+ * `json`/`code`-adjacent structured types other than `code` itself, and every
+ * non-string type.
  */
 export const BOUNDED_STRING_FIELD_TYPES: ReadonlySet<string> = new Set([
   'text', 'textarea', 'email', 'url', 'phone', 'password',
   'markdown', 'html', 'richtext', 'code',
+  // #11875 — the write seam enforces these two's declared bound (see above).
+  'signature', 'qrcode',
 ] as const satisfies readonly FieldType[]);
 
 /**
@@ -884,7 +896,7 @@ export const FieldSchema = lazySchema(() => {
   // server accepts, at severity error/destructive, before #11431 taught the
   // consumer to defend itself). Which TYPES may author the key is the
   // superRefine below (BOUNDED_STRING_FIELD_TYPES).
-  maxLength: z.number().int().min(1).optional().describe('Max character length (positive integer). Only authorable on types that store a bounded string: text, textarea, email, url, phone, password, markdown, html, richtext, code.'),
+  maxLength: z.number().int().min(1).optional().describe('Max character length (positive integer). Only authorable on types that store a bounded string: text, textarea, email, url, phone, password, markdown, html, richtext, code, signature, qrcode.'),
   minLength: z.number().optional().describe('Min character length'),
   
   /** Number Constraints */
@@ -1639,21 +1651,26 @@ export const FieldSchema = lazySchema(() => {
   // `maxLength` is only authorable on types that store a bounded string.
   // The key sat on the BASE schema, so it was legal on `boolean` / `lookup` /
   // `autonumber` / `formula` — types where it describes nothing that is
-  // stored — while the write-time validator has only ever enforced it on the
-  // BOUNDED_STRING_FIELD_TYPES ten. Declared converges to enforced
+  // stored — while the write-time validator has only ever enforced it on
+  // exactly the BOUNDED_STRING_FIELD_TYPES members (ten then; `signature` /
+  // `qrcode` joined in #11875). Declared converges to enforced
   // (ADR-0078): the inert declaration is refused at the authoring seam, where
   // the fix is one keystroke away, instead of parsing cleanly and doing
   // nothing (the declared-but-inert shape that hides AI-authored metadata
   // errors). `maxLength` has no schema default, so `undefined` here always
   // means "not authored" — a field without the key can never fire this.
+  //
+  // The message enumerates the set ITSELF rather than a prose copy of it —
+  // #11875 found the hand-written enumeration already one revision behind the
+  // set it described, which is the #12017 two-copies failure shape.
   if (field.maxLength !== undefined && !BOUNDED_STRING_FIELD_TYPES.has(field.type)) {
     ctx.addIssue({
       code: 'custom',
       path: ['maxLength'],
       message:
         `\`maxLength\` is only valid on field types that store a bounded string — ` +
-        `'text', 'textarea', 'email', 'url', 'phone', 'password', 'markdown', 'html', ` +
-        `'richtext', 'code' — and this field is \`${field.type}\`: its stored value has no ` +
+        `${[...BOUNDED_STRING_FIELD_TYPES].map((t) => `'${t}'`).join(', ')} — ` +
+        `and this field is \`${field.type}\`: its stored value has no ` +
         'character length for the bound to constrain, so the declaration would parse and ' +
         'enforce nothing (the write-time validator applies `maxLength` to exactly those ' +
         'types). Drop the key, or use a bounded string type.',
