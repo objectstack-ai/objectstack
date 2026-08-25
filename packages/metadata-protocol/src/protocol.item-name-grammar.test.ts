@@ -83,11 +83,21 @@ function makeProtocol(seedRows: Array<Partial<Row>> = []) {
             }
             return null;
         },
-        async find(_t: string, opts?: { where?: Record<string, unknown> }) {
+        async find(_t: string, opts?: { where?: Record<string, unknown>; limit?: number }) {
             const where = opts?.where ?? {};
-            return [...rows.values()].filter((row) =>
-                (where.type === undefined || row.type === where.type)
-                && (where.name === undefined || row.name === where.name));
+            // Every provided where key is matched, by nullish-normalised
+            // equality — the only shapes protocol.ts sends here are flat
+            // scalars ({ type, state, organization_id, package_id, name }).
+            // An operator object would match nothing rather than silently
+            // widening the result.
+            const matched = [...rows.values()].filter((row) =>
+                Object.entries(where).every(([k, v]) =>
+                    v === undefined
+                    || ((row as unknown as Record<string, unknown>)[k] ?? null) === (v ?? null)));
+            // The caller's bound is held — applied AFTER the filter, by
+            // presence — so a bounded read through this double cannot see
+            // more rows than the real engine would return.
+            return typeof opts?.limit === 'number' ? matched.slice(0, opts.limit) : matched;
         },
         async insert(_t: string, data: Record<string, unknown>) {
             if (_t !== 'sys_metadata') return { id: 'side_effect_skip' };
