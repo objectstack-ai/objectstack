@@ -9,3 +9,6 @@ feat(spec)!: `ObjectMasterDetailFormPropsSchema.formType` narrows from bare `str
 **Write instead:** `simple` or `tabbed` — the two variants the renderer honours end-to-end for the parent half. For a wizard/split/drawer/modal presentation without inline details, author an `object-form`, whose `formType` keeps all six values.
 
 Breaking ships as minor per the launch-window convention (`scripts/check-changeset-no-major.mjs`).
+
+<!-- adr-0087: not-required (no-migration-prescription) the four dropped names were never this block's declared vocabulary — the key was a bare `z.string()`, so unlike the #8762 / #8010 precedents there is no spec-promised old value to rewrite — and the authored-value census on both repos (this repo, #11873; objectui, objectui#5939) found zero out-of-vocabulary occurrences. Nothing exists to migrate, so no migration is prescribed; live authors are taught at parse by the enum's per-value error-map prescriptions. -->
+
