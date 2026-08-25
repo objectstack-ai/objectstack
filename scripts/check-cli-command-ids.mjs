@@ -134,6 +134,48 @@ const OCLIF_COMMANDS_DIR = 'src/commands';
 const OWN_SOURCE = relative(REPO_ROOT, fileURLToPath(import.meta.url)).split(sep).join('/');
 
 /**
+ * The repo roots this gate reads WHOLE — every tracked source file under them is in the
+ * population, with no further predicate. `populationFiles` derives its admission test
+ * from this list, so the two cannot drift.
+ *
+ * The gate's other half is not a root at all: a `src/` PATH SEGMENT anywhere
+ * (`packages/<pkg>/src/**`, `apps/<app>/src/**`). That is a shape, not a subtree, and it is
+ * deliberately not declared below.
+ */
+const POPULATION_ROOTS = ['scripts'];
+
+/**
+ * ⭐ THE LANDING OBLIGATION A NEW GATE CANNOT SEE, AND THIS ONE WALKED INTO TWICE.
+ *
+ * `scripts/pm/dispatch-gates.mjs` derives WHICH gates a card must run by matching the
+ * path literals in each gate's source against the card's changed files. `hintCovers`
+ * REFUSES a bare single-segment literal as too generic — a measured refusal (+139084
+ * fabricated pairs), and it stays. `'scripts/'` collapses to `scripts`, so the
+ * admission predicate above names a root no derivation can match, and this gate would
+ * have "landed already invisible": never named for a card touching its own population,
+ * scoring the same quiet green for every card in the tree.
+ *
+ * The escape is this declaration — the `ROOT_DIR_WATCH_HINTS` idiom, carried by
+ * `check-role-word.mjs` (`['skills/**']`) and `check-examples-live-imports.mjs`
+ * (`['examples/**']`). A subtree spelling is a DIFFERENT CLAIM from a bare word: an
+ * author stating what the gate actually reads.
+ *
+ * ⛔ It must be spelled as a LITERAL, not built from `POPULATION_ROOTS` — the hint
+ * extractor reads source text, so a computed `` `${r}/**` `` would produce no hint and
+ * leave the gate exactly as invisible. The coupling is enforced from the other side
+ * instead, in `--self-test`: every separator-less root must appear here as `<root>/**`,
+ * and nothing may appear here that the gate does not walk. A declaration that can drift
+ * from the scan is worse than none — it replaces a silent gate with a lying one.
+ *
+ * ⛔ And only roots the gate reads WHOLE belong here. `packages/**` does not: this gate
+ * opens `packages/<pkg>/package.json` and each package's `src` subtree, not the root entire, so
+ * declaring it would name this gate for a card touching a package README. Naming a root
+ * the gate does not read is a FABRICATED lead, which `hintCovers` prices above the
+ * silence it would cure.
+ */
+const ROOT_DIR_WATCH_HINTS = ['scripts/**'];
+
+/**
  * ## The two ledgers, and why an exemption has to assert its own cause
  *
  * Both are keyed by file AND by the exact candidate text, so a genuinely wrong literal
@@ -322,7 +364,7 @@ function populationFiles(root = REPO_ROOT, cliDirs = []) {
     if (f === OWN_SOURCE) return false;
     if (cliDirs.some((d) => f.startsWith(`${d}/`))) return false;
     if (/\.(?:test|spec)\.[tj]sx?$/.test(f) || f.includes('/__tests__/')) return false;
-    return /(?:^|\/)src\//.test(f) || f.startsWith('scripts/');
+    return /(?:^|\/)src\//.test(f) || POPULATION_ROOTS.some((r) => f.startsWith(`${r}/`));
   });
 }
 
@@ -484,6 +526,26 @@ function selfTest() {
     && !audit().resolved.some((x) => x.file === OWN_SOURCE)
     && !audit().violations.some((x) => x.file === OWN_SOURCE),
     'every negative fixture in this file is an unresolvable id by construction');
+
+  // -- the dispatch-gates declaration (#12016's own landing obligation) ------
+  //
+  // Enforcement cannot hold either half here: the declaration is read by ANOTHER TOOL
+  // (`scripts/pm/dispatch-gates.mjs`), so a wrong or stale one runs green in this file
+  // forever and pays itself out as a dev dispatched on a scripts/ card with this gate
+  // missing from the brief. Both directions are pinned, and both matter — a missing
+  // declaration is a silent gate, a surplus one is a lying gate.
+  const separatorless = POPULATION_ROOTS.filter((r) => !r.includes('/'));
+  t('every whole-root population entry is declared as a subtree (a bare root is refused by '
+    + 'hintCovers as too generic, so it needs the `<root>/**` spelling)',
+    separatorless.length > 0 && separatorless.every((r) => ROOT_DIR_WATCH_HINTS.includes(`${r}/**`)));
+  t('and nothing is declared that this gate does not walk whole — no fabricated lead',
+    ROOT_DIR_WATCH_HINTS.every((h) => POPULATION_ROOTS.includes(h.replace(/\/\*+$/, ''))));
+  t('the declaration is spelled as a LITERAL in this source, not computed',
+    readFileSync(fileURLToPath(import.meta.url), 'utf8').includes("'scripts/**'"),
+    'the hint extractor reads source text; a computed `${r}/**` builds no hint at all');
+  t('scripts is the root it declares, and the population really reaches across it',
+    ROOT_DIR_WATCH_HINTS.includes('scripts/**')
+    && new Set(audit().resolved.filter((x) => x.file.startsWith('scripts/')).map((x) => x.file)).size >= 5);
 
   // -- bin names come from declared data ------------------------------------
   t('oclif.bin is read', binNamesOf({ oclif: { bin: 'os' } }).includes('os'));
