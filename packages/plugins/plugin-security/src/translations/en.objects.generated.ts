@@ -290,6 +290,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       clone_permission_set: {
         label: "Clone",
+        description: "Copies this set's permissions into a new organization-owned set you can edit. Delegated-admin scope is not copied — grant it deliberately on the new set if it needs one.",
         successMessage: "Permission set cloned",
         params: {
           label: {

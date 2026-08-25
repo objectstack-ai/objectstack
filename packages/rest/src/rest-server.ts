@@ -59,6 +59,11 @@ import { refuseRepeatedQueryParams, assertFilterParamSuppliedOnce } from './quer
 import { refuseUnknownQueryParams } from './query-allowlist.js';
 import type { DirectMountedRoute, MountedRouteSource } from './direct-mount.js';
 import { RestServerConfig, RestApiConfig, CrudEndpointsConfig, MetadataEndpointsConfig, BatchEndpointsConfig, RouteGenerationConfig } from '@objectstack/spec/api';
+// [#11683] The catalog's own floor for "a required `code` and no more specific
+// one" — see its use in `registerSharingEndpoints`, where the nested ADR-0112
+// envelope declares `code` REQUIRED while the flat classification it re-dresses
+// legitimately carries none.
+import { standardErrorCodeForHttpStatus } from '@objectstack/spec/api';
 import { DataProtocol, MetadataProtocol } from '@objectstack/spec/api';
 // [#9741] Declared request shapes for the meta-read doors below — imported so
 // each door's request literal is compiled against the spec contract instead of
@@ -194,6 +199,7 @@ import { logError, logWarn } from './log.js';
 import {
     mapDataError,
     sandboxBusinessMessage,
+    classifiedRefusalAnswer,
     sendThrownError,
     sendDeclaredFault,
     sendFieldVisibilityFault,
@@ -9107,6 +9113,13 @@ export class RestServer {
                     //
                     // Neither arm's STATUS moves. ① keeps answering the declared
                     // 4xx and ③ keeps answering 500; only the sentence changes.
+                    //
+                    // [#11684] …and that last sentence was the defect report
+                    // for the card below: leaving the status alone left an
+                    // UNDECLARED sandbox refusal in ③, answering 500 where the
+                    // `/data` door answers 400 for the identical throw. ①b now
+                    // sits between the two arms and moves exactly that class.
+                    // The sentence this line computes is unchanged.
                     const clientMsg = sandboxBusinessMessage(error) ?? msg;
                     // ── [#5352] ① The ADR-0112 envelope, read FIRST ──────────
                     // A thrown error that already carries `code` + a 4xx
@@ -9140,6 +9153,55 @@ export class RestServer {
                     const envelopeCode = typeof error?.code === 'string' && error.code.length > 0 ? error.code : undefined;
                     if (envelopeStatus !== undefined && envelopeStatus >= 400 && envelopeStatus < 500 && envelopeCode) {
                         return res.status(envelopeStatus).json({ code: envelopeCode, message: clientMsg.slice(0, 1000) });
+                    }
+                    // ── [#11684] ①b The refusal ① could not read ─────────────
+                    // ① answers a refusal that declared BOTH halves of the
+                    // envelope, spelled `status`. Two classified refusals fell
+                    // past it into ③ and were reported to the caller as server
+                    // faults:
+                    //
+                    //   - **An UNDECLARED sandboxed hook refusal.** A hook body
+                    //     running `throw new Error('month-end close is in
+                    //     progress')` — the most common shape an app author
+                    //     writes — declares no `status` and no `code`, so ①
+                    //     never opened. Measured: `500 ANALYTICS_QUERY_FAILED`
+                    //     here against `400` with the same sentence on
+                    //     `POST /data/:object`, i.e. one hook body, one
+                    //     `throw`, two statuses decided by whether the caller
+                    //     hit a dashboard tile or a list view.
+                    //   - **The `statusCode` spelling** (#7525). ①'s read is
+                    //     `error.status` alone, and `plugin-approvals`'
+                    //     lifecycle hooks — plus `runtime`'s
+                    //     `action-execution.ts` and `metadata-protocol` — spell
+                    //     it `statusCode`. Same refusal, same declaration, 500.
+                    //
+                    // {@link classifiedRefusalAnswer} is the `/data` door's own
+                    // classification, imported rather than re-derived for the
+                    // same reason {@link sandboxBusinessMessage} above it is: a
+                    // third local opinion at this boundary is precisely how the
+                    // two faces came to disagree. It answers `undefined` for
+                    // everything ③ still owns — a declared 5xx, a crashed body
+                    // (#7543), a driver fault, anything unclassified — so ③'s
+                    // reach is unchanged except for the two shapes named above.
+                    //
+                    // ⛔ This is NOT a widening of ①'s both-halves gate. That
+                    // gate is #5352's ruling for producers that ship half an
+                    // ADR-0112 envelope, it still stands, and the seam encodes
+                    // it. What crosses here without a `code` is the SANDBOX
+                    // limb, where "no code" is not half a declaration: the
+                    // author declared the condition by reporting it, and
+                    // `classifyDataError`'s unwrap door has answered that with
+                    // 400 and the verbatim sentence since it existed
+                    // (`hook-error-format.dogfood.test.ts`). Nothing is
+                    // invented — a refusal that declared no code is answered
+                    // with no code, exactly as `/data` answers it.
+                    const refusal = classifiedRefusalAnswer(error);
+                    if (refusal) {
+                        const { error: refusalText, ...refusalFields } = refusal.body;
+                        return res.status(refusal.status).json({
+                            ...refusalFields,
+                            message: String(refusalText ?? clientMsg).slice(0, 1000),
+                        });
                     }
                     // ── ② … is GONE. The message-sniffing list is retired ────
                     // [#5367] `/analytics/dataset/query` used to classify six
@@ -9546,7 +9608,73 @@ export class RestServer {
         // readers are this file's own route mappings plus one
         // `plugin-approvals` check on an error it threw itself in-process).
         // It therefore stays exactly as it is; only the response SHAPE moved.
+        //
+        // [#11683] …and it stays exactly as it is here too. What moved is that
+        // the prefix read is no longer the FIRST question, and no longer the
+        // only one. It is the ADR-0111 idiom for producers that declare
+        // nothing else, and the census that made it safe to keep is still
+        // true: every throw site in `plugin-sharing/src/sharing-service.ts`
+        // (11 of them, re-censused at claim) is a bare `Error` carrying one of
+        // these prefixes and NO `code`, NO `status`. Backward compatibility is
+        // therefore not a courtesy — it is the only channel this service has.
+        //
+        // What it could never read is a refusal that DID declare itself, and
+        // two of those reach these three catches today:
+        //
+        //   - `plugin-sharing`'s own write gate throws
+        //     `{ code: 'FORBIDDEN', status: 403 }` (`sharing-plugin.ts`).
+        //     `FORBIDDEN` is not one of the five, so a refusal that declared
+        //     403 twice over was answered `500 SHARE_*_FAILED`.
+        //   - A sandboxed hook on the `sys_record_share` write arrives with
+        //     the QuickJS debug wrapper on `.message` and the business text on
+        //     `.innerMessage`. The wrapper IS the prefix, so nothing matched
+        //     and the wrapper was interpolated verbatim into the 500 — #11588's
+        //     leak on a branch #11588 did not reach.
+        //
+        // Both are asked FIRST now, through {@link classifiedRefusalAnswer} —
+        // the `/data` door's own classification, so this family cannot answer
+        // a refusal differently from every other face that catches it. A
+        // declaration outranking a message read is the whole point: this
+        // route's defect was that classification was a property of how the
+        // sentence happened to start.
+        //
+        // ⛔ The DIALECT does not move. #8111 converted these arms onto the
+        // nested ADR-0112 D5 envelope and the `check:route-envelope` ratchet
+        // only ticks down, so the classification is re-dressed through
+        // `respondError` rather than sent by `handleRouteError` (which speaks
+        // the flat dialect). Vocabulary and position stay two decisions.
         const respondSharingError = (res: any, error: any): boolean => {
+            // A refusal the producer classified — answered exactly as `/data`
+            // answers it. `undefined` for everything else, which falls to the
+            // prefix idiom below and then to the caller's own 500 arm, both
+            // unchanged.
+            const refusal = classifiedRefusalAnswer(error);
+            if (refusal) {
+                // `code` is REQUIRED by the nested envelope, and the flat
+                // classification legitimately carries none for an undeclared
+                // sandbox refusal (ADR-0112: the producer names the condition,
+                // so nothing is invented for the half it did not name). The
+                // catalog's own floor fills the required field —
+                // `standardErrorCodeForHttpStatus`, whose docblock exists for
+                // exactly this ("Total by construction: a producer can always
+                // fill a required `code`") and which is the same derivation
+                // `resolveThrownHttpError` applies at every other door. This
+                // is the one place the two dialects genuinely differ: the flat
+                // body may omit `code`, the nested one may not.
+                //
+                // ⚠️ Measured and NOT repaired here: an UNREGISTERED producer
+                // code is demoted by the shared resolver to a `declaredCode`
+                // sibling (ADR-0112 #9232), and `sendError`'s `extra` does not
+                // accept that field — so the author's own spelling is dropped
+                // on this family while `/data` carries it. Widening the shared
+                // envelope writer is a `@objectstack/types` change outside
+                // this card's surface; filed separately.
+                const code = typeof refusal.body.code === 'string'
+                    ? refusal.body.code as ErrorCode
+                    : standardErrorCodeForHttpStatus(refusal.status);
+                respondError(res, refusal.status, code, String(refusal.body.error ?? ''));
+                return true;
+            }
             const msg = String(error?.message ?? error ?? '');
             const map: Array<[ErrorCode, number]> = [
                 ['VALIDATION_FAILED', 400],
@@ -9566,6 +9694,31 @@ export class RestServer {
             }
             return false;
         };
+        /**
+         * [#11683] The text the three 500 arms may put on the wire.
+         *
+         * The arms interpolate the caught error's own message, and that is
+         * unchanged for every ordinary fault — `sharing-envelope.test.ts` pins
+         * a plain `Error('boom')` arriving as `boom` and it still does.
+         *
+         * The one shape it withholds is a SANDBOX error that reached a 500 at
+         * all, which after the classification above means one thing: a hook
+         * body that CRASHED rather than refused (`isScriptFaultMessage`,
+         * #7543). Its `.message` is the QuickJS debug wrapper and its
+         * `.innerMessage` is a `TypeError: …` — the wrapper the card measured
+         * leaking, wrapped around a runtime fault the caller must not read
+         * either. `/data` answers that case `INTERNAL_ERROR_MESSAGE` through
+         * {@link UNCLASSIFIED_FAULT}; this says the same sentence, so the leak
+         * is closed on this family unconditionally rather than only for the
+         * refusals the classification door catches.
+         *
+         * The full wrapper still reaches the operator: every caller logs the
+         * whole error object immediately above its `respondError`.
+         */
+        const sharingFaultMessage = (error: any): string =>
+            typeof error?.innerMessage === 'string' && error.innerMessage
+                ? INTERNAL_ERROR_MESSAGE
+                : String(error?.message ?? error).slice(0, 500);
 
         // GET — list shares on a record. [ADR-0111 D5] Management-gated in the
         // service: invisible record → 404, visible-but-not-manager → 403.
@@ -9587,7 +9740,7 @@ export class RestServer {
                     // The 500 arms keep their 500-char cap: an unexpected
                     // fault's message is not a contract, and truncating it
                     // stays a sanitization step — only the position moves.
-                    respondError(res, 500, 'SHARES_LIST_FAILED', String(error?.message ?? error).slice(0, 500));
+                    respondError(res, 500, 'SHARES_LIST_FAILED', sharingFaultMessage(error));
                 }
             },
             metadata: { summary: 'List per-record sharing grants', tags: ['sharing'] },
@@ -9621,7 +9774,7 @@ export class RestServer {
                 } catch (error: any) {
                     if (respondSharingError(res, error)) return;
                     logError('[REST] Grant share error:', error);
-                    respondError(res, 500, 'SHARE_GRANT_FAILED', String(error?.message ?? error).slice(0, 500));
+                    respondError(res, 500, 'SHARE_GRANT_FAILED', sharingFaultMessage(error));
                 }
             },
             metadata: { summary: 'Grant a per-record share to a principal', tags: ['sharing'] },
@@ -9650,7 +9803,7 @@ export class RestServer {
                 } catch (error: any) {
                     if (respondSharingError(res, error)) return;
                     logError('[REST] Revoke share error:', error);
-                    respondError(res, 500, 'SHARE_REVOKE_FAILED', String(error?.message ?? error).slice(0, 500));
+                    respondError(res, 500, 'SHARE_REVOKE_FAILED', sharingFaultMessage(error));
                 }
             },
             metadata: { summary: 'Revoke a per-record share by id', tags: ['sharing'] },

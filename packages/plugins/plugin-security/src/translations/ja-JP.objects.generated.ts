@@ -290,6 +290,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       clone_permission_set: {
         label: "複製",
+        description: "このセットの権限を、編集可能な組織所有の新しい権限セットにコピーします。委任管理スコープはコピーされません。新しいセットに必要な場合は、個別に付与してください。",
         successMessage: "権限セットを複製しました",
         params: {
           label: {

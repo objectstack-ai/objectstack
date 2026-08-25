@@ -36,6 +36,7 @@
 
 import { readdirSync, readFileSync, existsSync } from 'node:fs';
 import { join, basename, dirname } from 'node:path';
+import { isEntrypoint } from './invoked-as.mjs';
 
 const ROOT = new URL('..', import.meta.url).pathname;
 const AREAS_DIR = join(ROOT, 'docs/qa/platform-checklist/areas');
@@ -117,7 +118,7 @@ function isBlocked(it) {
 }
 
 // ── self-test ────────────────────────────────────────────────────────────────
-if (process.argv.includes('--self-test')) {
+function selfTest() {
   const FIX = [
     { id: 'a.one', status: 'active', priority: 'P0', surface: 'browser', since: 'v16', source: ['packages/foo/bar.ts'] },
     { id: 'a.two', status: 'active', priority: 'P1', surface: 'api', since: 'v16.1', source: ['#3358'], blocked: { by: 'fixture', ref: '#1' } },
@@ -153,39 +154,49 @@ if (process.argv.includes('--self-test')) {
 }
 
 // ── CLI ──────────────────────────────────────────────────────────────────────
-const args = process.argv.slice(2);
-const json = args.includes('--json');
-const includeBlocked = args.includes('--include-blocked');
-const selector = args.find((a) => !a.startsWith('--'));
+function main() {
+  const args = process.argv.slice(2);
+  const json = args.includes('--json');
+  const includeBlocked = args.includes('--include-blocked');
+  const selector = args.find((a) => !a.startsWith('--'));
 
-if (!selector) {
-  console.error('usage: node scripts/checklist-select.mjs <selector> [--json] [--include-blocked]');
-  console.error('       selectors: <id> | area:<a> | capability:<k> | priority:P0 | surface:api | since:vN | file:<path> | all');
-  process.exit(2);
-}
-if (!existsSync(AREAS_DIR)) {
-  console.error(`checklist-select: ${AREAS_DIR} not found`);
-  process.exit(1);
+  if (!selector) {
+    console.error('usage: node scripts/checklist-select.mjs <selector> [--json] [--include-blocked]');
+    console.error('       selectors: <id> | area:<a> | capability:<k> | priority:P0 | surface:api | since:vN | file:<path> | all');
+    process.exit(2);
+  }
+  if (!existsSync(AREAS_DIR)) {
+    console.error(`checklist-select: ${AREAS_DIR} not found`);
+    process.exit(1);
+  }
+
+  const items = loadItems();
+  const coverage = existsSync(COVERAGE) ? JSON.parse(readFileSync(COVERAGE, 'utf8')) : { metadataKinds: {} };
+  let matched = selectItems(selector, items, coverage);
+  const droppedBlocked = includeBlocked ? [] : matched.filter(isBlocked);
+  if (!includeBlocked) matched = matched.filter((it) => !isBlocked(it));
+
+  if (json) {
+    process.stdout.write(JSON.stringify(matched.map((it) => ({ id: it.id, priority: it.priority, surface: it.surface, since: it.since, revision: it.revision })), null, 2) + '\n');
+  }
+
+  console.error(`\nselector: ${selector} → ${matched.length} runnable item(s)${droppedBlocked.length ? ` (${droppedBlocked.length} blocked, hidden — pass --include-blocked)` : ''}\n`);
+  for (const it of matched) {
+    console.error(`  ${it.priority}  ${String(it.surface).padEnd(8)}  ${it.id}${isBlocked(it) ? '  [BLOCKED]' : ''}`);
+  }
+  if (droppedBlocked.length) {
+    console.error(`\n  hidden (blocked): ${droppedBlocked.map((i) => i.id).join(', ')}`);
+  }
+  if (matched.length === 0) {
+    console.error('  (nothing matched — check the selector; try `all` or `area:<name>`)');
+    process.exit(1);
+  }
 }
 
-const items = loadItems();
-const coverage = existsSync(COVERAGE) ? JSON.parse(readFileSync(COVERAGE, 'utf8')) : { metadataKinds: {} };
-let matched = selectItems(selector, items, coverage);
-const droppedBlocked = includeBlocked ? [] : matched.filter(isBlocked);
-if (!includeBlocked) matched = matched.filter((it) => !isBlocked(it));
-
-if (json) {
-  process.stdout.write(JSON.stringify(matched.map((it) => ({ id: it.id, priority: it.priority, surface: it.surface, since: it.since, revision: it.revision })), null, 2) + '\n');
-}
-
-console.error(`\nselector: ${selector} → ${matched.length} runnable item(s)${droppedBlocked.length ? ` (${droppedBlocked.length} blocked, hidden — pass --include-blocked)` : ''}\n`);
-for (const it of matched) {
-  console.error(`  ${it.priority}  ${String(it.surface).padEnd(8)}  ${it.id}${isBlocked(it) ? '  [BLOCKED]' : ''}`);
-}
-if (droppedBlocked.length) {
-  console.error(`\n  hidden (blocked): ${droppedBlocked.map((i) => i.id).join(', ')}`);
-}
-if (matched.length === 0) {
-  console.error('  (nothing matched — check the selector; try `all` or `area:<name>`)');
-  process.exit(1);
+// The dispatch runs only when node ran THIS file. Imported for `selectItems`
+// (the skill's front half is a pure resolver), the old top-level CLI printed a
+// usage block to the importer's stderr and killed it with exit 2 mid-import.
+if (isEntrypoint(import.meta.url)) {
+  if (process.argv.includes('--self-test')) selfTest();
+  main();
 }

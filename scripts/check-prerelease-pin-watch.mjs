@@ -145,6 +145,33 @@ export class RegistryUnreadable extends Error {}
 // Unmapped is legal and is itself reported: a prerelease pin with no recorded
 // revert plan is the #5024 shape again, and saying so is cheaper than
 // discovering it later.
+//
+// THE RULE FOR A NOTE: carry the ACTION, point at the PIN for the MEASUREMENT.
+// -----------------------------------------------------------------------------
+// A note's job is to tell its reader what to DO. It must not restate a fact
+// that is measured and written down somewhere else -- above all not a COUNT.
+// The SCIM model set is measured in the `@better-auth/scim` block of
+// `pnpm-workspace.yaml`; this note used to carry its own typed copy of that
+// measurement ("all six new models present"), which is a second copy with
+// nothing holding it to the first.
+//
+// It rotted exactly the way a second copy rots. The measurement was re-taken
+// and corrected in the pin comment (#11372, #11764) and the copy here went on
+// printing the old number on every nightly run -- to the single reader this
+// probe exists to inform, at the moment they have the least context. #11761
+// deleted the copy rather than correcting it a second time: a correction would
+// have left a third copy waiting to rot.
+//
+// Deriving the number here instead was considered and measured as impractical:
+// the count lives in a `#` comment, which `readOverrides` skips by design, and
+// that block states three different counts (the core set, what
+// `managedConnections` adds, and the total). A regex over wrapped English prose
+// would have to GUESS which one a note meant -- a tolerant reader of an
+// unspecified producer, which is the shape this repo removes rather than adds.
+// So the note points, and the pin comment stays the single source.
+//
+// `restatedModelCounts()` mechanizes the COUNT half of this rule -- the half
+// that has demonstrably rotted -- and the self-test proves it can still fail.
 // ---------------------------------------------------------------------------
 
 /** @type {Array<{ match: RegExp, issues: string[], note: string }>} */
@@ -158,10 +185,12 @@ const FOLLOW_UPS = [
     note:
       'SCIM is a MIGRATION, not a bump (#3653): rc.2 replaced the model set and moved ' +
       'connections from runtime rows to boot config, and the STABLE 1.7 releases ship that ' +
-      'same rewrite (measured on the 1.7.1 tarball: no scimProvider model, no generate-token ' +
-      'endpoint, all six new models present). Do the migration against the stable models — ' +
-      'do not "align" this pin with the family first. #3002 moved the REST of the family to ' +
-      'stable ^1.7.1 and left this pin behind deliberately, so #3653 is the only card left.',
+      'same rewrite. That rewrite is measured against the published tarball and written ' +
+      'down ONCE, in the `@better-auth/scim` block of pnpm-workspace.yaml — read it there ' +
+      'for which models the stable line ships, what it dropped, and what `managedConnections` ' +
+      'adds. Do the migration against the stable models — do not "align" this pin with the ' +
+      'family first. #3002 moved the REST of the family to stable ^1.7.1 and left this pin ' +
+      'behind deliberately, so #3653 is the only card left.',
   },
   {
     match: /^(better-auth|@better-auth\/.+)$/,
@@ -178,6 +207,28 @@ const FOLLOW_UPS = [
 /** @returns {{ issues: string[], note: string } | null} */
 export function followUpFor(pkg) {
   return FOLLOW_UPS.find((f) => f.match.test(pkg)) ?? null;
+}
+
+/**
+ * The ledger rule above, mechanized for the half that rots: a note may not
+ * state a COUNT of upstream models. Version numbers and issue refs are stripped
+ * first — `1.7.1` and `#3653` are identifiers, not counts of anything, and a
+ * guard that reddens on them would be turned off rather than obeyed.
+ *
+ * @returns {string[]} every offending fragment; empty means the note obeys.
+ */
+export function restatedModelCounts(note) {
+  const prose = String(note)
+    .replace(/#\d+/g, '')
+    .replace(/\brc\.\d+\b/gi, '')
+    .replace(/\b\d+(?:\.\d+)+(?:-[0-9A-Za-z.]+)?\b/g, '');
+  const CARDINAL =
+    '(?:\\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)';
+  const re = new RegExp(
+    `\\b${CARDINAL}\\b[^.]{0,40}?\\bmodels?\\b|\\bmodels?\\b[^.]{0,40}?\\b${CARDINAL}\\b`,
+    'gi',
+  );
+  return prose.match(re) ?? [];
 }
 
 // ---------------------------------------------------------------------------
@@ -635,6 +686,41 @@ function selfTest() {
   check(
     'the rest of the family carries a follow-up card too',
     watch.find((w) => w.name === 'better-auth').followUp.issues.join() === '#3653',
+  );
+
+  // --- 1b. the ledger rule: a note points at the pin, it does not restate it -
+  // Two correction rounds found one copy each and left the other (#11372 fixed
+  // the pin comment, #11761 the note). What forbids a third copy is this check,
+  // not the memory of those rounds.
+  const restated = FOLLOW_UPS.flatMap((f) =>
+    restatedModelCounts(f.note).map((m) => `${f.match.source} -> "${m.trim()}"`),
+  );
+  check(
+    'no follow-up note restates a model COUNT (the pin comment is the single source)',
+    restated.length === 0,
+    restated.join(' | '),
+  );
+  check(
+    'the scim note routes its reader to that single source BY NAME',
+    followUpFor('@better-auth/scim').note.includes('pnpm-workspace.yaml'),
+    followUpFor('@better-auth/scim').note,
+  );
+  // Positive control. A guard that cannot fail is not a guard, and the zero
+  // above is only worth reading next to this one: the exact wording #11761
+  // deleted, kept here verbatim so the check can never quietly become a no-op.
+  check(
+    'the count guard FIRES on the exact wording this ledger used to print',
+    restatedModelCounts(
+      'the STABLE 1.7 releases ship that same rewrite (measured on the 1.7.1 tarball: no ' +
+        'scimProvider model, no generate-token endpoint, all six new models present).',
+    ).length > 0,
+  );
+  // Negative control: a version is an identifier, not a count. A guard that
+  // reddened on `1.7.1` next to `models` would be switched off, not obeyed.
+  check(
+    'the count guard does NOT fire on version numbers or issue refs',
+    restatedModelCounts('the models changed in 1.7.1, again in rc.2, tracked by #3653')
+      .length === 0,
   );
   check(
     'a prerelease pin with no declared follow-up is watched anyway (unmapped is legal)',

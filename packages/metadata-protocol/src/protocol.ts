@@ -72,6 +72,23 @@ import {
 import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL, canonicalMetaUrlType, metaUrlSpellingRefusal, unrecognisedMetaTypeRefusal } from '@objectstack/spec/shared';
 import { applyConversionsToStoredItem, type ConversionNotice } from '@objectstack/spec';
 import { type FormView, isAggregatedViewContainer, expandViewContainer } from '@objectstack/spec/ui';
+// [#11350] Emitted-specifier pin. This module's inferred public declarations
+// structurally mention `FormFieldInput` (FormView `sections[].fields`), and
+// this file imports BOTH `@objectstack/spec` (root, for
+// `applyConversionsToStoredItem` above) and `@objectstack/spec/ui`. Once
+// #11350 made `FormFieldInput` nameable from the root entry, tsc's
+// declaration emitter switched its synthesized reference from the `/ui` slice
+// to the root — both are portable, but the root specifier drags spec's ENTIRE
+// root module graph into every downstream tsc program that reads this
+// package's dts (measured on PR #11716: +190k types, +805k instantiations,
+// +~560MB on the debt-ledger re-measure of @objectstack/http-conformance —
+// past a 4GB heap). An IMPORT (not a bare re-export — that creates no local
+// binding) makes the emitter reuse this binding, keeping the emitted
+// reference on the narrow `/ui` entry; the export statement is what keeps
+// no-unused-locals green. index.ts deliberately does not re-export it
+// (curated entry, unchanged).
+import { type FormFieldInput } from '@objectstack/spec/ui';
+export type { FormFieldInput };
 import { METADATA_FORM_REGISTRY, CORE_SERVICE_PROVIDER, serviceUnavailableMessage, inProcessServiceMessage } from '@objectstack/spec/system';
 import { DEFAULT_METADATA_TYPE_REGISTRY, getMetadataTypeSchema, getMetadataTypeActions, getMetadataCreateSeed, PROTOCOL_VERSION } from '@objectstack/spec/kernel';
 import {
@@ -9863,7 +9880,19 @@ export class ObjectStackProtocolImplementation implements
         // pre-tokenised channel is exactly the divergence this card closed.
         const terms = q.split(/\s+/).filter(Boolean).slice(0, 8);
 
-        const allObjects = (this.engine as any).registry?.getAllObjects?.() ?? [];
+        // [#11754] No `?.` and no `?? []` on this read. The invented empty
+        // list made the whole sweep a silent no-op — zero hits,
+        // `objectsScanned: 0`, and a successful response — for a host whose
+        // registry cannot enumerate at all. `SchemaRegistry.getAllObjects()`
+        // walks in-memory Maps and has no throwing path, so what the guards
+        // absorbed was only the STRUCTURAL omission (a registry without the
+        // method), which never throws and is therefore invisible by
+        // construction. A registry that cannot enumerate its objects is
+        // never truthfully "no objects" (ADR-0110 D3) — the omission
+        // propagates, the same disposition as the engine's own registry
+        // sweeps (#9284). `registry` is a declared member of
+        // `MetadataHostEngine`, so the cast went with the guards.
+        const allObjects = this.engine.registry.getAllObjects();
         const hits: Array<{ object: string; id: string; title: string; snippet?: string; record: any }> = [];
         let objectsScanned = 0;
 

@@ -9,7 +9,9 @@
  * metadata forms this repo actually SHIPS (`METADATA_FORM_REGISTRY`), which is
  * both the corpus count the widening discipline requires before an `error`-level
  * gate may land, and the reverse verification — restoring #6254's pre-fix
- * `object.form.ts` spellings must turn the count from 0 to 16.
+ * `object.form.ts` spellings must turn the count from 0 to the number of
+ * `data.type`-rooted predicates that form ships today (17; #6254 itself
+ * measured 16, and #11410 added the second `deleteBehavior` declaration).
  */
 
 import { describe, it, expect } from 'vitest';
@@ -474,7 +476,7 @@ describe('registry wiring', () => {
 // ────────────────────────────────────────────────────────────────────────────
 //
 // `METADATA_FORM_REGISTRY` is the whole population of `data.`-rooted predicates
-// this repo ships (17 forms; 46 predicates, all `visibleWhen`). Every entry is a
+// this repo ships (17 forms; 48 predicates, all `visibleWhen`). Every entry is a
 // `defineForm` output, i.e. exactly the bare FormView shape `formViewSites`
 // walks as its `self` rung — so the corpus is fed through the rule's PRODUCTION
 // entry point, not through a parallel walker written for the test.
@@ -498,7 +500,7 @@ describe('#7010 corpus — shipped METADATA_FORM_REGISTRY', () => {
     // this way. The obvious version — "resolve every form against an empty
     // schema, expect a finding per predicate" — is WRONG here and was measured
     // wrong: an empty schema also fails to resolve the `fields` repeater, so the
-    // walk stops before the 16 sub-field predicates and the count comes out
+    // walk stops before the 17 sub-field predicates and the count comes out
     // BELOW the corpus while looking like proof of reach.
     //
     // So keep the real schemas (descent works exactly as in production) and
@@ -529,7 +531,7 @@ describe('#7010 corpus — shipped METADATA_FORM_REGISTRY', () => {
       for (const value of Object.values(rec)) corrupt(value);
     };
     corrupt(corrupted.views);
-    expect(predicates, 'the shipped metadata forms carry no predicates at all').toBe(46);
+    expect(predicates, 'the shipped metadata forms carry no predicates at all').toBe(48);
 
     const findings = validatePredicatePathRefs(corrupted);
     expect(findings).toHaveLength(predicates);
@@ -596,7 +598,7 @@ describe('#7010 corpus — shipped METADATA_FORM_REGISTRY', () => {
       for (const value of Object.values(rec)) rewrite(value);
     };
     rewrite(corrupted.views);
-    expect(comparisons, 'no shipped predicate carries an `==`/`!=` literal comparison').toBe(45);
+    expect(comparisons, 'no shipped predicate carries an `==`/`!=` literal comparison').toBe(47);
 
     const rhsFindings = validatePredicatePathRefs(corrupted)
       .filter((f) => f.rule === PREDICATE_RHS_PATH_SHAPED);
@@ -607,9 +609,16 @@ describe('#7010 corpus — shipped METADATA_FORM_REGISTRY', () => {
   it('catches the pre-#6254 bare spellings when they are restored (reverse verification)', () => {
     // The reverse direction is RED-on-restore: #6254 rewrote 16 predicates in
     // `object.form.ts` from `type ...` to `data.type ...`. Restoring the bare
-    // spelling on a deep copy of the shipped `object` form must produce exactly
-    // 16 `predicate-path-unrooted` findings — the count the issue measured, and
-    // the count this rule exists to have caught before it shipped.
+    // spelling on a deep copy of the shipped `object` form must produce one
+    // `predicate-path-unrooted` finding per `data.type`-rooted predicate the
+    // form ships — the class the issue measured, and the class this rule exists
+    // to have caught before it shipped.
+    //
+    // The count tracks the CORPUS, not the issue: it is 17 today because
+    // #11410 split `deleteBehavior` into two declarations with disjoint
+    // `visibleWhen` (`lookup` / `master_detail`), so a `master_detail` author is
+    // no longer offered a `set_null` the schema refuses. #6254's own measurement
+    // was 16 and stays 16 — that number is history, this one is a census.
     const objectForm = structuredClone(METADATA_FORM_REGISTRY.object) as Record<string, unknown>;
     let restored = 0;
     const debare = (node: unknown): void => {
@@ -636,10 +645,13 @@ describe('#7010 corpus — shipped METADATA_FORM_REGISTRY', () => {
       for (const value of Object.values(rec)) debare(value);
     };
     debare(objectForm);
-    expect(restored, 'the 16 sites #6254 rewrote are no longer where this test looks').toBe(16);
+    expect(
+      restored,
+      "the object form's `data.type`-rooted predicates are no longer where this test looks",
+    ).toBe(17);
 
     const findings = validatePredicatePathRefs({ views: [objectForm] });
-    expect(findings).toHaveLength(16);
+    expect(findings).toHaveLength(17);
     expect(new Set(findings.map((f) => f.rule))).toEqual(new Set([PREDICATE_PATH_UNROOTED]));
     expect(findings[0].message).toContain('`type`');
   });

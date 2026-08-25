@@ -1,0 +1,46 @@
+# REST 通道操作对照表(references —— 按需加载)
+
+出处:`platform-readings.md` API 配额段(**默认读序 git → REST → MCP/GraphQL** 的策略住那里,本表是逐操作的通道归属)。做一件事之前查一行:它有没有 REST 对应物。⛔ 不引用 issue 编号 —— 每行自含边界与日期。
+
+**通道边界**:容器 curl = App installation token,REST core 15,000/时、与 GraphQL 池独立计;出口代理按设计只放 **repo-scoped 路径**(`/repos/{o}/{r}/...`)加 `/rate_limit`,org 级端点未实测。下文每条 ✓ = **2026-08-23 在真实会话里实调通过**(未另标日期者同此日);⛔ 未带 ✓ 的形状不当已验证事实复述。
+
+## 读侧 —— 全部可迁移(MCP list/search 家族才是 GraphQL 燃烧源)
+
+- ✓ 按标签/状态列卡:`GET /repos/{o}/{r}/issues?state=open&labels=a,b&per_page=N` —— `labels=` 是**真 AND**(MCP `list_issues` 的 labels 数组是 OR;语义相反那条住 `platform-readings.md`)。
+- ✓ 卡 / PR 元数据:`GET .../issues/{n}` · `GET .../pulls/{n}`(assignees、labels、body 齐全 —— MCP `list_issues` 永不返回 assignees,这条差别本身就是走 REST 的理由)。
+- ✓ 整条评论线:`GET .../issues/{n}/comments?per_page=100`。
+- ✓ Timeline 事件:`GET .../issues/{n}/timeline`(cross-ref、`added_to_merge_queue`、ready_for_review)。
+- ✓ PR diff / 文件清单:`GET .../pulls/{n}` 带 Accept `application/vnd.github.diff` · `.../pulls/{n}/files`(后者实测可瞬态 404 ⇒ PR 文件读取优先走 git)。
+- ✓ 取某 ref 上的文件:`GET .../contents/{path}?ref=...`(raw accept)。
+- ✓ 祖先 / 对比:`GET .../compare/{base}...{head}` —— 浅检出上本地祖先判据不可信时的正解。
+- ✓ 门禁 / workflow:`GET .../commits/{sha}/check-runs` · `GET .../actions/runs`。
+- ✓ 配额自读:`GET /rate_limit`(端点自身零计费,开轮先读的就是它)。
+
+## 写侧 —— 全部可迁移
+
+- ✓ 评论:`POST .../issues/{n}/comments`;改评论 `PATCH .../issues/comments/{id}`。
+- ✓ 标签:**加法** `POST .../issues/{n}/labels` + **定向删** `DELETE .../issues/{n}/labels/{name}` —— 比 MCP `issue_write` 的整组替换安全:加法写剥不掉并发席位刚挂的标签(整组替换按隔轮旧读数回写会静默剥标,纪律住 `platform-readings.md`)。
+- ✓ 建卡带标签 `POST .../issues` · 改正文/状态 `PATCH .../issues/{n}` · 认领 `POST .../issues/{n}/assignees`。
+- ✓ 请求复审 `POST .../pulls/{n}/requested_reviewers` · 开 PR `POST .../pulls`(带 `draft=true`;GraphQL 池为 0 的同一分钟里实测开得出 draft PR ⇒ 交付不必等重置)。
+
+## 不可迁移 —— 只有这几件,围着它们排计划
+
+1. **draft → ready 翻转**:GraphQL-only mutation;出口代理只放钉住的 PR-review GraphQL 集(实测拒绝)。判据 = REST 的 update-a-pull-request 只收 `title`/`body`/`state`/`base`/`maintainer_can_modify`,**无 `draft`**(下面 2 与 5 同批核对:2026-08-24 核对官方 REST 文档,未逐个实调端点)。断粮出路:等 MCP 恢复,或人工点一下。
+2. **auto-merge / 入队挂载**:GraphQL mutation(MCP `enable_pr_auto_merge`)。走合并队列的仓落地必经它 ⇒ 配额红窗**无退路**;直合仓有退路(合并本身有 REST 端点 `PUT .../pulls/{n}/merge`)。
+3. **语义搜索**:`/search/*` 被出口代理按设计拒绝。退路 = REST 列表端点 + 本地 grep(既有纪律)。
+4. **Projects field_values**:GraphQL-only —— 舰队并不需要它;MCP 服务器端**无条件**抓它才是漏点,不是需求。
+5. **`issue transfer`**(2026-08-24 官方 REST 文档核对补入;原表只列前四件):issues 端点表里没有 transfer 路由 ⇒ 同为 GraphQL-only。拿不到时当轮改走「在目的仓重建」配方(纯 REST、配额免疫),配方住 `platform-readings.md`。
+
+`until remaining > 阈值` 的守候只留给这几件,⛔ 其余一切不为配额空等。
+
+## 第三桶 —— git 零配额等价物(先问 git,再问 REST)
+
+分支存在性、合并队列分支、按内容判落地、squash 验证:四条 `ls-remote` / `git log` 拼写与各自的失效边界是 `platform-readings.md` 的既有正典行,本表只指路 —— ⛔ 不在两处各存一份。
+
+## 队列路由的读法(2026-08-24 实测)
+
+- **`merged_by` 是入队者,⛔ 不是绕队证据**:GitHub 把队列合并归属给**入队的那个账户**,该字段对「队列合并 vs 直接合并」零分辨力。一周内三席各自把人形 `merged_by` 读成「我们绕过了队列」,实测三次全为假 —— 都是队列合并。
+- **问「本仓 auto-merge 是否经队列」,答案来自尝试动作,不来自属性字段**:① 直接合并 `PUT .../pulls/{n}/merge`,强制队列 ruleset 下回 **405 `Changes must be made through the merge queue`**;② PR 上的 `added_to_merge_queue` timeline 事件;③ 对已入队 PR 调 update-branch 回「已入合并队列的分支不能更新,要改先出队」。①② 的拼写与边界是 `platform-readings.md` 队列段的既有行,本条只把三读法归拢成一个判据。
+- ⚠️ **计数不是机理读数(本行是一次被推翻的推断的墓碑)**:「repo 级 `GET .../actions/runs?event=merge_group` 计数为 0 ⇒ required 集为空、队列什么都不校验」这条推断**提出当天即被自身推翻** —— 同一姊妹仓 2026-08-24 11:04Z 首次产出 merge_group run(0 → 8),同日再测 224(阳性对照 `event=pull_request` 全程非零)。计数答的是「至今发生过没有」,不是「机制在不在」:零计数只作**弱先验**,判 required 集为空要读 ruleset 的 required 集本身、或看队列合并是否真在等检查。⛔ 别处写下的计数值一律先复测再用。
+- **required job 名与分片矩阵的改名耦合(现行,自 2026-08-24)**:队列 required 集按 **job / check-run 名**匹配,**workflow 名从不作为 check context 出现**(所以拿 workflow 名在选择器里搜什么也搜不到);改其中任一 job 名**或 test 分片矩阵的形状**,必须**同一笔**更新队列的 required 集,否则队列静默挂起。姊妹仓 objectui 当日配置为 **9 个**:`Lint` · `Type Check` · `Test (shard 1/4 … 4/4)` · `Build & E2E` · `Build Docs` · `Changeset Declaration`。⛔ required 选择只 gate**等待**、不 gate**触发** —— 未列入的检查照跑、算力相同,红了不再挡队列(维护者当日裁定,原话:「我觉得够了」)。
+- **配 required 集时先排掉 push-only job**:`if: github.event_name == 'push'` 的 job 在 `merge_group` 构建上永不报到,列为 required 即挂死队列;未展开的矩阵名(带字面 `${{ }}` 的串)是被跳过的占位符,不是真 context。

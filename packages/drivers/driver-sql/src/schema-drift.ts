@@ -145,6 +145,29 @@ export type DriftOp =
    */
   | { type: 'drop_column_default'; table: string; column: string }
   /**
+   * REPORT ONLY (#11535). The column's base type diverges from the one the
+   * declaration materialises, and **the platform deliberately does not change
+   * it** — an operator must, by hand.
+   *
+   * ⛔ There is NO reconciler arm for this op, and adding one is not a
+   * refactor. Whether ObjectStack should perform the `ALTER TABLE … TYPE …
+   * USING …` itself is a **live maintainer decision** (the other half of
+   * #11535): it is a migration over existing rows plus an index drop/rebuild,
+   * i.e. destructive and hard to roll back. This op exists so the divergence
+   * can be SEEN travelling the same plan/report road as every other finding —
+   * it is the absence of an automatic migration made explicit, not a
+   * placeholder for one.
+   *
+   * Measured consequence of having no arm, on live Postgres 16.13 (the same on
+   * MySQL 8.0.46): `applyDriftOpInPlace` matches no case and returns `false`,
+   * so `applyMigrationEntries` reports the entry as **skipped, never applied**,
+   * and logs it. That is the intended behaviour, not a gap to close.
+   *
+   * `from`/`to` are the physical and declared type words, carried so a renderer
+   * can show the divergence without re-deriving it from the message.
+   */
+  | { type: 'manual_column_type_change'; table: string; column: string; to: string; from: string }
+  /**
    * Retire the legacy platform-wide UNIQUE index on a now-tenant-scoped field
    * and put the composite `(tenantField, field)` in its place (#3696). The two
    * names differ, so the reconciler creates before it drops — uniqueness is
@@ -407,6 +430,98 @@ function isCharacterColumn(type: string | undefined): boolean {
 }
 
 /**
+ * Is this physical column one that ACCEPTS a stringified JSON array without
+ * complaint — i.e. `varchar`/`char`/`text` in any dialect's spelling (#11535)?
+ *
+ * Wider than {@link isCharacterColumn} by exactly the TEXT family, and that
+ * width is the point rather than an accident: the write path stringifies a
+ * multi-value field's array, and a text column takes the literal as happily as
+ * a varchar does. Both are the silent-corruption shape.
+ *
+ * Deliberately NOT "anything that is not json". A stale `integer` or
+ * `timestamp` column under a now-multi-value field is already LOUD — Postgres
+ * refuses `'["a","b"]'` with `22P02 invalid input syntax`, MySQL with
+ * `ER_TRUNCATED_WRONG_VALUE` — so it needs no finding to become visible, and
+ * matching it here would report a divergence the database itself already
+ * refuses. The textual family is the one that says yes and corrupts.
+ */
+function acceptsStringifiedJson(type: string | undefined): boolean {
+  return /char|text/i.test(String(type ?? ''));
+}
+
+/**
+ * Does a multi-value field's JSON column carry its type on THIS dialect — i.e.
+ * does a stale textual column silently corrupt the value (#11535)?
+ *
+ * Postgres and MySQL: yes. Measured end to end on live Postgres 16.13 and MySQL
+ * 8.0.46 — a field that gained `multiple: true` over a pre-existing
+ * `varchar(255)` column round-trips as the LITERAL STRING `["a","b"]`
+ * (`typeof === 'string'`, `Array.isArray === false`), because the write path
+ * stringifies for a json field on every non-SQLite dialect while the read path
+ * relies on the driver's column-type-based decoding, which a stale textual
+ * column defeats.
+ *
+ * SQLite: **no**, and the exclusion is measured rather than assumed. The same
+ * stale column reads back as a real `['a','b']` array there (the read path
+ * `JSON.parse`s on SQLite regardless of what the column calls itself), so there
+ * is no corruption to report — reporting it anyway would put a permanent
+ * `error` finding on every long-lived SQLite development database for a
+ * divergence that changes no value. SQLite's column type is an affinity label,
+ * not an enforced type, which is the same reason
+ * {@link enforcesVarcharLength} excludes it.
+ */
+function multiValueColumnTypeIsLoadBearing(dialect: SqlDialectName): boolean {
+  return dialect === 'postgres' || dialect === 'mysql';
+}
+
+/**
+ * The hand-run statement that converts a stale textual column to `json`,
+ * spelled for the dialect the operator is actually on.
+ *
+ * The Postgres form keeps the SHAPE of the reporter's own production workaround
+ * (#11535) — the three-way CASE over the three states a stale column's rows are
+ * actually in — with one arm changed, for a reason that was measured rather than
+ * reasoned: the reporter's `to_json(col)` turns a legacy single value into the
+ * JSON **scalar** `"a"`, under a field the metadata now declares MULTI-VALUE. On
+ * live Postgres 16.13 that row read back as a string with `Array.isArray ===
+ * false`, i.e. still not the shape the declaration promises, while live MySQL
+ * 8.0.46's `JSON_ARRAY(col)` produced `["a"]`. `json_build_array` makes the two
+ * dialects hand back the same value for the same row, which is the standing rule
+ * here — one declaration with two enforcement answers is the defect class this
+ * package's conformance matrices exist to close.
+ *
+ * Both forms are EXECUTED against live servers by
+ * `schema-drift.base-type-mismatch.test.ts`, over rows in every state the column
+ * can be in (legacy single value, already-stringified array, empty string,
+ * NULL), and the finding is asserted to clear afterwards — an operator-facing
+ * remedy nobody runs is a remedy that drifts into being wrong.
+ */
+export function manualJsonConversionSql(dialect: SqlDialectName, table: string, column: string): string {
+  if (dialect === 'mysql') {
+    // MySQL will not cast text to json implicitly: rows holding a legacy single
+    // value have to become one-element arrays FIRST, or the ALTER fails with
+    // `ER_INVALID_JSON_TEXT` on the first non-JSON row.
+    return (
+      `UPDATE \`${table}\` SET \`${column}\` = JSON_ARRAY(\`${column}\`) ` +
+      `WHERE \`${column}\` IS NOT NULL AND \`${column}\` <> '' AND LEFT(\`${column}\`, 1) <> '['; ` +
+      `UPDATE \`${table}\` SET \`${column}\` = NULL WHERE \`${column}\` = ''; ` +
+      `ALTER TABLE \`${table}\` MODIFY \`${column}\` json;`
+    );
+  }
+  return (
+    `ALTER TABLE "${table}" ALTER COLUMN "${column}" TYPE json USING ` +
+    // The `IS NULL` arm is not redundant with the `= ''` one and is not
+    // decoration: `json_build_array(NULL)` is `[null]`, a one-element array, so
+    // without it every NULL row silently gains a value. Measured on live
+    // Postgres 16.13 while writing this — the arm exists because the version
+    // without it was run and produced `[null]`.
+    `(CASE WHEN "${column}" IS NULL THEN NULL WHEN "${column}" = '' THEN NULL ` +
+    `WHEN "${column}" LIKE '[%' THEN "${column}"::json ` +
+    `ELSE json_build_array("${column}") END);`
+  );
+}
+
+/**
  * Diff one table's metadata fields against its physical columns and return the
  * set of *drift* findings. Metadata is authoritative.
  *
@@ -518,6 +633,76 @@ export function diffManagedTable(args: {
       });
     }
 
+    // ── base type: a multi-value field over a stale textual column (#11535) ──
+    //
+    // `createColumn` materialises a multi-value field as `table.json(name)` —
+    // its FIRST branch, taken before the field's type or `maxLength` is read at
+    // all. On a database created while the field was single-value the column is
+    // `varchar`/`text`, and the additive sync (`ALTER TABLE ADD COLUMN`) can
+    // never revisit it: nothing here is missing, so nothing is added.
+    //
+    // Until this branch existed the divergence was reported by NOTHING.
+    // Measured on live Postgres 16.13 and MySQL 8.0.46 on the pre-fix tree: a
+    // `lookup` field that gained `multiple: true` over an existing
+    // `character varying(255)` column produced `detectManagedDrift() === []` and
+    // zero `[schema-drift]` log lines, while the very next write stored the
+    // literal string `["user_A","user_B"]` into the column and read it back as a
+    // string. Downstream code that copies the value into a single-value column
+    // then writes that whole string as one id — the silent corruption reported
+    // in #11535, which a display-layer glitch it is not.
+    //
+    // ## Severity `error`, category `needs_confirm` — both MEASURED, and the
+    // ## category is load-bearing in a way the words do not suggest
+    //
+    // ⛔ Do NOT "correct" this to `destructive` to match how bad it sounds.
+    // What consumes `category` was measured, not inferred:
+    //
+    //   - The artifact-pinned boot gate (`runArtifactBootMigrationGate`, on
+    //     `kernel:ready` before the HTTP socket opens) refuses the boot for
+    //     `category === 'destructive'` and nothing else. Measured: a
+    //     `destructive` entry yields `ok=false`; this entry as written yields
+    //     `ok=true`. Every database this finding describes is ALREADY SERVING —
+    //     that is the premise of the report — so a `destructive` spelling would
+    //     convert a running (if corrupt) deployment into a crash-loop on the
+    //     next restart. Reporting a corruption must not be the thing that takes
+    //     the app down.
+    //   - Dev auto-reconcile takes `category === 'safe'` only, so
+    //     `needs_confirm` is never applied unattended either.
+    //   - `severity` is read by NO gate: the ordinary boot path warns on every
+    //     entry regardless of it. It is the render weight (`✗` in
+    //     `os migrate plan`), which is why `error` is both honest and free.
+    //
+    // The residue is stated rather than hidden: `os migrate apply` hands a
+    // `needs_confirm` entry to the reconciler, which — having no arm for this op
+    // by design — declines it (`applied=0, skipped=1`) and says so. A finding
+    // that is reported every time and applied never is exactly the contract
+    // while the automatic migration remains the maintainer's open decision.
+    const declaresJsonColumn = field.multiple === true;
+    if (declaresJsonColumn && multiValueColumnTypeIsLoadBearing(dialect) && acceptsStringifiedJson(col.type)) {
+      out.push({
+        kind: 'type_mismatch',
+        remoteName: table,
+        table,
+        column: fieldName,
+        expected: 'json',
+        actual: col.type,
+        severity: 'error',
+        category: 'needs_confirm',
+        op: { type: 'manual_column_type_change', table, column: fieldName, to: 'json', from: col.type },
+        message:
+          `${table}.${fieldName}: metadata declares a multi-value field (stored as \`json\`) but the ` +
+          `column is \`${col.type}\` — the database was created while the field was single-value and the ` +
+          `additive sync never migrates a column's type. Arrays are being written as the STRINGIFIED ` +
+          `literal (e.g. '["a","b"]') and read back as a string, so anything consuming the value ` +
+          `receives one opaque id instead of a list (#11535). ObjectStack will NOT change this column ` +
+          `for you. Migrate it by hand, in a transaction, with a backup taken first — dropping any ` +
+          `index on the column first, since a json column cannot carry a plain btree: ` +
+          `${manualJsonConversionSql(dialect, table, fieldName)} ` +
+          `Rows written while the column was stale may already hold a stringified array in a RELATED ` +
+          `single-value column; those are not repaired by the statement above.`,
+      });
+    }
+
     // ── varchar length (only where the dialect enforces it) ──────────
     //
     // `maxLength` must be a POSITIVE INTEGER to be a bound (#11431). Without
@@ -535,12 +720,26 @@ export function diffManagedTable(args: {
     // disagreeing about which declarations count is the defect class #11431
     // exists to close, and a differ that still honoured a malformed
     // `maxLength` would have re-opened it one case to the left.
+    //
+    // A MULTI-VALUE field is excluded for the same reason and by the same
+    // authority: `createColumn` returns at `if (field.multiple) { table.json();
+    // return; }` BEFORE `maxLength` is consulted, so the emitter provably never
+    // gives such a field a declared width, and a differ that honours one is the
+    // two-halves-disagree defect #11431 exists to close — one case to the left
+    // again. Measured on the pre-fix tree, `{ multiple: true, maxLength: 50 }`
+    // over a stale `varchar(255)` column reported `narrow_varchar` at severity
+    // `error`, category **destructive** on both enforcing dialects: a finding
+    // that refuses the artifact-pinned boot and invites `os migrate apply
+    // --allow-destructive` to rewrite the column to `varchar(50)` — the exact
+    // OPPOSITE of the repair the column needs, which is `json`. That shape is
+    // now reported once, correctly, by the base-type branch above.
     const declaredMaxLength =
       typeof field.maxLength === 'number' && Number.isInteger(field.maxLength) && field.maxLength > 0
         ? field.maxLength
         : undefined;
     if (
       enforcesVarcharLength(dialect) &&
+      !declaresJsonColumn &&
       declaredMaxLength !== undefined &&
       isCharacterColumn(col.type) &&
       typeof col.maxLength === 'number' &&

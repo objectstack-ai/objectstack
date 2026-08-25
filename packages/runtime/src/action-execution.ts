@@ -1244,6 +1244,11 @@ export async function invokeBusinessAction(deps: ActionExecutionDeps,
     if (!dispatch.dispatched) {
         throw new Error(`No handler registered for action '${name}' on '${objectName}'`);
     }
+    // [#11519] Same doubled post-success-navigation diagnostic as the REST
+    // seam — the defect is a property of the authored action + handler pair,
+    // observable wherever the two meet. Observe-only; the result is untouched.
+    const doubled = doubledPostSuccessNavigationWarning(deps, action, dispatch.result, objectName);
+    if (doubled) console.warn(doubled);
     return { ok: true, action: action.name, objectName, ...(recordId ? { recordId } : {}), result: dispatch.result ?? null };
 }
 
@@ -1355,6 +1360,59 @@ export function standaloneActionObjectName(_deps: ActionExecutionDeps, action: a
  */
 export function isActionNotRegisteredError(err: any): boolean {
     return /Action '.+' on object '.+' not found/i.test(String(err?.message ?? err));
+}
+
+
+/**
+ * [#11519] The DOUBLED post-success-navigation diagnostic — the runtime half
+ * of the maintainer's 2026-08-24 ruling (refuse the doubled channel; ⛔ no
+ * `precedence` contract field).
+ *
+ * Two channels can name a post-success destination for one `type: 'script'`
+ * action: the declared `ActionSchema.onSuccess` block, and the
+ * handler-returned `{ redirectUrl }` convention. The statically-knowable half
+ * (`onSuccess` beside `opensInNewTab: true`, the schema-visible marker of the
+ * handler-redirect channel) is refused at parse time by `@objectstack/spec`.
+ * This helper covers the remainder no schema can see — "the handler returns
+ * `redirectUrl`" is runtime-only knowledge (`target` names an opaque registry
+ * entry; `HookBodySchema` declares no return contract) — at the one seam
+ * where both channels are finally in hand: the script dispatch, holding the
+ * resolved declaration AND the handler's return value.
+ *
+ * Returns the warning text on the doubled case, `null` otherwise; the caller
+ * logs it (the `actionPermissionError` string-or-null convention). It only
+ * OBSERVES — the result still reaches the client intact, and the interim
+ * renderer precedence (declared `onSuccess` wins, objectui#5933) still
+ * decides the navigation until the author takes the remedy the warning
+ * names. `warn`, not `error`, by the degradation-log-level rule: nothing
+ * claimed-persisted is lost, and the system is visibly navigating — to the
+ * declared destination.
+ *
+ * Both dispatch surfaces call it — the REST `/actions` route and the MCP
+ * `run_action` bridge — because the defect it names is a property of the
+ * AUTHORED action + handler pair, observable wherever the two meet, not of
+ * whichever caller happened to invoke it.
+ */
+export function doubledPostSuccessNavigationWarning(
+    _deps: ActionExecutionDeps,
+    actionDef: any,
+    result: unknown,
+    objectName?: string,
+): string | null {
+    const navigate: unknown = actionDef?.onSuccess?.navigate;
+    if (typeof navigate !== 'string' || navigate.length === 0) return null;
+    if (!result || typeof result !== 'object' || Array.isArray(result)) return null;
+    const redirectUrl: unknown = (result as Record<string, unknown>).redirectUrl;
+    if (typeof redirectUrl !== 'string' || redirectUrl.length === 0) return null;
+    const where = objectName ? `${objectName}/${actionDef?.name ?? '<unnamed>'}` : String(actionDef?.name ?? '<unnamed>');
+    return (
+        `[action-contract] Action '${where}': the handler returned \`redirectUrl\` while the action `
+        + 'also declares `onSuccess.navigate` — two post-success destinations for one success '
+        + '(#11519). The DECLARED `onSuccess` wins and the handler\'s `redirectUrl` is ignored '
+        + '(interim renderer precedence, objectui#5933). Fix the action, not the renderer: keep '
+        + '`onSuccess` and stop returning `redirectUrl` from the handler, or drop `onSuccess` and '
+        + 'let the handler return drive the navigation. There is no `precedence` field, by ruling.'
+    );
 }
 
 

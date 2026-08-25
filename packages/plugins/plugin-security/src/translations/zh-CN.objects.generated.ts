@@ -290,6 +290,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       clone_permission_set: {
         label: "克隆",
+        description: "将此权限集的权限复制到一个新的、由组织拥有且可编辑的权限集。委派管理范围不会被复制——如果新权限集需要，请单独在其上授予。",
         successMessage: "已克隆权限集",
         params: {
           label: {

@@ -234,9 +234,9 @@ defineView({
     data: { provider: 'object', object: 'project' },
     // In tabbed forms each section renders as its own tab.
     sections: [
-      { label: 'Basic Info', columns: 2, fields: ['name', 'status'] },
-      { label: 'Dates', columns: 2, fields: ['start_date', 'end_date'] },
-      { label: 'Team', fields: ['manager', 'team_lead'] }
+      { name: 'basic_info', label: 'Basic Info', columns: 2, fields: ['name', 'status'] },
+      { name: 'dates', label: 'Dates', columns: 2, fields: ['start_date', 'end_date'] },
+      { name: 'team', label: 'Team', fields: ['manager', 'team_lead'] }
     ]
   }
 });

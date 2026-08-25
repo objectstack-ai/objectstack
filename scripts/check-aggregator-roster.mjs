@@ -80,6 +80,7 @@
  * naming what could not be read (#4690). The self-test pins each refusal.
  */
 
+import { requireDependency } from './import-prerequisite.mjs';
 import { readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -324,7 +325,7 @@ export function judge({ workflows }) {
 
 /** Read and parse both workflows into the shape `judge` consumes. */
 export async function readWorkflows(root) {
-  const { parse } = await import('yaml');
+  const { parse } = await requireDependency('yaml', () => import('yaml'), import.meta.url);
   const workflows = new Map();
   for (const file of WORKFLOW_FILES) {
     const path = join(root, '.github', 'workflows', file);
@@ -381,7 +382,7 @@ async function selfTest() {
   };
 
   const root = scriptRepoRoot();
-  const { parse } = await import('yaml');
+  const { parse } = await requireDependency('yaml', () => import('yaml'), import.meta.url);
   const sources = Object.fromEntries(
     WORKFLOW_FILES.map((file) => [file, readFileSync(join(root, '.github', 'workflows', file), 'utf8')]),
   );

@@ -58,7 +58,7 @@ import type { FlowFunctionEffect } from '@objectstack/spec/automation';
 // Imported from spec directly rather than through `@objectstack/core`'s
 // re-export block: that block is labelled backward-compatibility, and this
 // contract is new (#5945).
-import type { IScopedContext, IScopedObjectRepository } from '@objectstack/spec/contracts';
+import type { IScopedContext, IScopedObjectRepository, IntrospectedSchema as SpecIntrospectedSchema } from '@objectstack/spec/contracts';
 import {
   IDataDriver,
   IDataEngine,
@@ -1899,6 +1899,24 @@ export type EngineMiddleware = (
 ) => Promise<void>;
 
 /**
+ * "Which of these tombstoned `sys_file` rows is something still holding?"
+ * (#11427).
+ *
+ * Takes the whole tombstoned set from ONE record read and returns the subset
+ * still held, as a set of stringified ids. Batched rather than per-row on
+ * purpose: hydration runs over many rows per read, so asking per file would be
+ * N queries per read.
+ *
+ * The engine declares this shape but never implements it — "still held" has one
+ * definition (`findFileHolder`, the union of `sys_attachment` join rows and the
+ * `ref_*` ownership columns) and it lives in the storage package. See
+ * `ObjectQL.registerHeldFileResolver`.
+ */
+export type HeldFileResolver = (
+  rows: Array<Record<string, any>>,
+) => Promise<Set<string>>;
+
+/**
  * The stack collections the engine decomposes into individual registry items —
  * ONE list, read by the ONE body both registration seams run
  * (`registerMetadataCollections()`, called from the manifest seam in
@@ -3070,6 +3088,33 @@ export class ObjectQL implements IObjectQLEngine {
         this.actions.delete(key);
       }
     }
+  }
+
+  /**
+   * "Which of these tombstoned `sys_file` rows is something still holding?"
+   * (#11427) — supplied by the storage plugin, never derived here.
+   *
+   * File-field hydration must answer the same question the download path
+   * answers (#10246) or one row gets two answers. That question has exactly one
+   * definition, `findFileHolder`, and it lives in `@objectstack/service-storage`
+   * — a package this one does not and must not depend on. So the engine
+   * declares the seam and the storage plugin fills it, the same handover
+   * `resolveFileHolder` makes to the download routes.
+   *
+   * BATCHED on purpose: hydration runs over many rows per read, so a per-row
+   * holder check would be N queries per read. The resolver takes the whole
+   * tombstoned set and returns the ids still held.
+   */
+  private _heldFileResolver?: HeldFileResolver;
+
+  /**
+   * Wire the batched holder question (#11427). Last registration wins; leaving
+   * it unwired keeps tombstoned files un-hydrated, which is what this engine
+   * did before the seam existed.
+   */
+  registerHeldFileResolver(fn: HeldFileResolver): void {
+    this._heldFileResolver = fn;
+    this.logger.debug('Registered held-file resolver for sys_file hydration');
   }
 
   /**
@@ -8078,8 +8123,52 @@ export class ObjectQL implements IObjectQLEngine {
     }
 
     const fileMap = new Map<string, any>();
+    // [#11427] `committed` is servable and always was. A TOMBSTONE
+    // (`status: 'deleted'` + `deleted_at`) is recoverable state, not a delete:
+    // it is a claim about the future (this row is reapable once the grace
+    // window ends) that the sweep re-checks and often withdraws. #10246 already
+    // stopped the two download endpoints treating it as the last word — they
+    // ask the reap guard's own `findFileHolder` and serve the row for as long
+    // as something still holds it. This pass did not, so one `sys_file` row
+    // answered 200 at `/files/:id` and a bare id here: two read surfaces, two
+    // answers, and consumers render the bare id as "no attachment".
+    //
+    // ⛔ The predicate is NOT re-derived here. "Still held" has ONE definition
+    // (`findFileHolder`, a deliberate union of `sys_attachment` join rows AND
+    // the `ref_*` ownership columns) and it lives in the storage package, which
+    // this one cannot import. A copy narrower by a limb would hide files the
+    // sweep refuses to reap — the same defect one limb over — so the question
+    // arrives through {@link registerHeldFileResolver} instead, the same
+    // handover `resolveFileHolder` makes to the download routes. Unwired (bare
+    // kernel, no storage plugin, tests): tombstones stay hidden, exactly as
+    // before this existed.
+    const tombstoned: any[] = [];
     for (const row of fileRows) {
-      if (row?.id != null && row.status === 'committed') fileMap.set(String(row.id), row);
+      if (row?.id == null) continue;
+      if (row.status === 'committed') fileMap.set(String(row.id), row);
+      else if (row.status === 'deleted') tombstoned.push(row);
+    }
+    // Lazy by construction: a batch with no tombstone — every ordinary read —
+    // costs nothing at all, and the resolver is BATCHED, so the residual case
+    // costs one extra query for the whole read rather than one per row.
+    if (tombstoned.length > 0 && this._heldFileResolver) {
+      try {
+        const held = await this._heldFileResolver(tombstoned);
+        for (const row of tombstoned) {
+          if (held?.has(String(row.id))) fileMap.set(String(row.id), row);
+        }
+      } catch (error) {
+        // Unreadable evidence is not evidence of a holder. Keep the ids
+        // un-hydrated — the answer this pass gave before #11427, and the same
+        // direction the download path fails in (`isServableForDownload`) and
+        // the reap guard fails in (it vetoes rather than reaps when it cannot
+        // tell). Distinct from the #6116 catch above, which covers the
+        // `sys_file` read itself and is untouched.
+        this.logger.warn(
+          'sys_file holder check failed; tombstoned file fields keep their raw ids for this read',
+          { object: objectName, tombstonedIds: tombstoned.length, error: (error as Error)?.message },
+        );
+      }
     }
     if (fileMap.size === 0) return records;
 
@@ -10823,15 +10912,44 @@ export class ObjectQL implements IObjectQLEngine {
         //
         // [#9625] "Only an explicit `restrict` deviates" is the whole of it:
         // every other value a master_detail can declare — including an
-        // explicit `deleteBehavior: 'set_null'`, which `FieldSchema` accepts
-        // on this type — resolves to `cascade` here, silently. Measured and
-        // pinned (`engine-cascade-delete.test.ts`); whether the spec should
-        // reject the combination at publish time instead of the engine
-        // dropping it at delete time is a judgement, carded separately.
+        // explicit `deleteBehavior: 'set_null'` — resolves to `cascade` here,
+        // silently. Measured and pinned (`engine-cascade-delete.test.ts`).
         let behavior: string =
           fdef.type === 'master_detail'
             ? (fdef.deleteBehavior === 'restrict' ? 'restrict' : 'cascade')
             : (fdef.deleteBehavior || 'set_null');
+
+        // [#9689] (maintainer ruling 2026-08-19, Q3 = B): the judgement the
+        // #9625 comment above deferred is now taken — `FieldSchema` REJECTS an
+        // authored `deleteBehavior: 'set_null'` on a `master_detail` at parse
+        // time, so the value is meaningful again: one that still reaches this
+        // site came in around the parse seam (a raw `registerObject`, or a
+        // stored/artifact row written before the tightening — the two
+        // populations parse-time rejection measurably cannot catch, since the
+        // engine registers raw objects and never re-parses). The coercion
+        // itself stays: this delete is about to CASCADE children whose
+        // declaration asked for them to be kept, and that divergence must be
+        // loud and attributable, not silent. Sanctioned logger shape per
+        // PR #9750: reach for `error`, fall back to `warn` — NEVER an optional
+        // call like `logger.error?.()`, which emits nothing against a sink
+        // with no `error`. Caveat, measured (#4447): a built app artifact
+        // materializes FieldSchema defaults, so an artifact-loaded BARE
+        // master_detail also carries `set_null` and logs here — that residual
+        // imprecision is the materialized-default defect tracked as #9784, not
+        // a reason to soften this log.
+        if (fdef.type === 'master_detail' && fdef.deleteBehavior === 'set_null') {
+          const msg =
+            `[cascade-delete] ${childName}.${fieldName} declares deleteBehavior: 'set_null' on a ` +
+            `master_detail referencing '${object}' — that value is NOT honored on master_detail: the ` +
+            `delete of ${object}/${String(id)} CASCADES its referencing child rows, the opposite of what ` +
+            `the declaration asks (children kept). FieldSchema now rejects this combination at parse time; ` +
+            `this row reached the engine around the parse seam (raw registration, or metadata stored ` +
+            `before the tightening). Re-declare the field: 'restrict' refuses the parent delete while ` +
+            `children exist (no data loss), 'cascade' (or omitting the key) accepts the cascade ` +
+            `deliberately, or make it a lookup if children must survive the parent.`;
+          if (typeof this.logger.error === 'function') this.logger.error(msg);
+          else this.logger.warn(msg);
+        }
 
         // A REQUIRED foreign key cannot be nulled — set_null would issue an
         // UPDATE clearing the FK, which the child's required-field validator
@@ -12210,9 +12328,18 @@ export class ObjectQL implements IObjectQLEngine {
    *
    * @throws if the datasource has no registered driver, or the driver does
    *   not support introspection.
+   *
+   * [#11493] The return is the spec's ONE introspection shape — the
+   * `IDataEngine.introspectDatasource?` contract member this method
+   * implements — not the untyped `Promise<unknown>` it declared while
+   * `IDataDriver` was silent about `introspectSchema`. The `as any` on the
+   * driver lookup went in the same stroke: the member is on the driver
+   * contract now, so the duck-typed probe below is a typed read. Runtime is
+   * deliberately byte-identical — both throws and the delegation are
+   * unchanged.
    */
-  async introspectDatasource(datasource: string): Promise<unknown> {
-    const driver = this.drivers.get(datasource) as any;
+  async introspectDatasource(datasource: string): Promise<SpecIntrospectedSchema> {
+    const driver = this.drivers.get(datasource);
     if (!driver) {
       throw new Error(`[ObjectQL] Datasource '${datasource}' has no registered driver to introspect.`);
     }

@@ -268,7 +268,8 @@
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import ts from 'typescript';
+import { requireDefaultExport } from './import-prerequisite.mjs';
+const ts = await requireDefaultExport('typescript', () => import('typescript'), import.meta.url);
 import { parseSourceFile } from './ts-parse.mjs';
 import { maskComments } from './js-comment-mask.mjs';
 import { isEntrypoint } from './invoked-as.mjs';
@@ -596,13 +597,13 @@ function selfTest() {
       'BLIND: the same shape inside a template literal'],
     ['/*\n a block comment interior line naming session.tenantId\n*/\nconst ok = 1;', 0,
       'FABRICATE: an interior comment line with no leading star'],
-    ['doThing(); /* session.tenantId was removed in v11 */', 0,
+    ['doThing(); /* session.tenantId was removed in v16 */', 0,
       'FABRICATE: a trailing block comment on a code line'],
     ['const org = ctx.user.organizationId; // session.tenantId is gone (#3290)', 0,
       'a trailing line comment naming the alias is documentation'],
-    ['// the deprecated session.tenantId alias was removed in v11', 0,
+    ['// the deprecated session.tenantId alias was removed in v16', 0,
       'a whole-line comment is documentation'],
-    ['/**\n * the deprecated session.tenantId alias was removed in v11\n */\nconst ok = 1;', 0,
+    ['/**\n * the deprecated session.tenantId alias was removed in v16\n */\nconst ok = 1;', 0,
       'a JSDoc continuation line inside a real docblock is documentation'],
     ['const t = ctx.session.tenantId; // os-allow-tenant-id: driver isolation column', 0,
       'the waiver marker still exempts the line'],
@@ -640,7 +641,7 @@ function selfTest() {
       'the blessed name on a session receiver is the whole point and is never a finding'],
     ['function pick(o) {\n  return o.tenantId;\n}\nfunction h(opts) {\n  return pick(opts);\n}', 0,
       'NO FALSE RED: the same helper fed DRIVER options does not become a session'],
-    ['function h(ctx) {\n  const sess = ctx.session;\n  // sess.tenantId was removed in v11 (#3290)\n  return sess.organizationId;\n}', 0,
+    ['function h(ctx) {\n  const sess = ctx.session;\n  // sess.tenantId was removed in v16 (#3290)\n  return sess.organizationId;\n}', 0,
       'a comment naming an ALIASED read is documentation -- the tree never sees it'],
     ['function h(ctx) {\n  const execCtx = ctx.input.options.context;\n  return execCtx.tenantId;\n}', 0,
       'NO FALSE RED: the driver-layer envelope is not reached through `.session`'],

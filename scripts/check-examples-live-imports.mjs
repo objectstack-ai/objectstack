@@ -118,7 +118,16 @@ import { maskComments } from './js-comment-mask.mjs';
 // importing it is silent and exit-neutral. The reason for the copy is gone, so
 // the copy is too -- one implementation, and no way for the two gates to drift
 // apart on the semantics that decide both their verdicts.
-import { globToRegExp } from './check-cross-package-test-inputs.mjs';
+//
+// The predicate now comes from a plain module rather than from that gate, and
+// which module it is decides what THIS gate derives (#11511). `glob-match.mjs`
+// declares no path population; the cross-package DECLARATION TABLE lives in a
+// separate module this gate does not import. That separation is the whole
+// point: dispatch-gates hands an importer the followed module's population
+// whole, so importing the table for a string predicate would claim 3105
+// (gate, file) pairs under `packages/**` for a gate whose subject is
+// `examples/`. Import the predicate, never the table.
+import { globToRegExp, selfTest as globMatchSelfTest } from './glob-match.mjs';
 import { join, resolve, relative, dirname, sep, posix } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import process from 'node:process';
@@ -872,6 +881,17 @@ function selfTest() {
       'the declared form is NOT a SCAN_ROOTS dir (provenance, never a lookup key: the glob form would send the walk at a directory that does not exist)',
       !SCAN_ROOTS.some((r) => ROOT_DIR_WATCH_HINTS.includes(r.dir)),
     ],
+
+    // ── the shared glob predicate ──
+    //
+    // `glob-match.mjs` is not a gate and has no CI invocation of its own, by
+    // design: a module with a `check:` name is one the dispatch derivation
+    // refuses to follow, which is the whole reason it exists. Folding its
+    // failures into the `--self-test` of each importer IS its coverage, and
+    // this gate is one of the two importers. Its cases include the pin that
+    // keeps it free of path literals -- the property that stops THIS gate from
+    // inheriting a `packages/**` population it never opens.
+    ...globMatchSelfTest().map((failure) => [failure, false]),
   ];
 
   let failed = 0;

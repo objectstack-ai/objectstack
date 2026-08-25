@@ -15,7 +15,7 @@
   },
   "scripts": {
     "build": "tsup --config ../../../tsup.config.ts",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.scripts.json",
     "test": "vitest run"
   },
   "dependencies": {

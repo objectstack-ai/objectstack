@@ -21,7 +21,7 @@ import { StorageMetadataStore } from './metadata-store.js';
 import type { FileRecord } from './metadata-store.js';
 import { registerStorageRoutes } from './storage-routes.js';
 import type { FileReadVerdict } from './storage-routes.js';
-import { installAttachmentLifecycleHooks, createSysFileReapGuard, createUploadSessionReapGuard, findFileHolder } from './attachment-lifecycle.js';
+import { installAttachmentLifecycleHooks, createSysFileReapGuard, createUploadSessionReapGuard, findFileHolder, findHeldFiles } from './attachment-lifecycle.js';
 import { installFileReferenceHooks } from './file-reference-lifecycle.js';
 import { installAttachmentAccessHooks, installAttachmentReadVisibility } from './attachment-access-hooks.js';
 import { SystemFile, SystemUploadSession } from './objects/index.js';
@@ -353,6 +353,22 @@ export class StorageServicePlugin implements Plugin {
         // guard below re-verifies the ownership columns — and re-reads the
         // deployment flag, fresh — before any byte is deleted.
         installFileReferenceHooks(engine as any, () => this.storage, ctx.logger);
+        // "Is anything still holding this tombstone?" for RECORD FILE-FIELD
+        // HYDRATION (#11427). The download path got this question in #10246;
+        // the record read kept the older `status === 'committed'` rule, so one
+        // `sys_file` row answered 200 at `/files/:id` and a bare id inside a
+        // record payload — which UI and export render as "no attachment".
+        //
+        // Handed over rather than re-derived, exactly like `resolveFileHolder`
+        // below, and BATCHED: hydration runs over many rows per read, so the
+        // engine passes the whole tombstoned set and `findHeldFiles` answers it
+        // in at most one extra query. Duck-typed so an older engine without the
+        // seam simply keeps tombstones un-hydrated.
+        if (typeof (engine as any).registerHeldFileResolver === 'function') {
+          (engine as any).registerHeldFileResolver(
+            (rows: Array<Record<string, unknown>>) => findHeldFiles(engine as any, rows),
+          );
+        }
         try {
           const lifecycle = ctx.getService<any>('lifecycle');
           if (lifecycle && typeof lifecycle.registerReapGuard === 'function') {

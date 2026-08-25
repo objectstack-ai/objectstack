@@ -149,6 +149,7 @@ export {
   REACT_CHART_DRILLDOWN_INVALID,
   REACT_BLOCK_NEEDS_RECORD_CONTEXT,
   REACT_PAGE_SOURCE_UNPARSEABLE,
+  REACT_PROP_DEPRECATED,
 } from './validate-react-page-props.js';
 export type { ReactPropFinding, ReactPropSeverity } from './validate-react-page-props.js';
 

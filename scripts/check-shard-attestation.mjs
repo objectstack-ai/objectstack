@@ -118,6 +118,7 @@
  * `--verify`-in-a-comment fixture is the pin.
  */
 
+import { requireDependency } from './import-prerequisite.mjs';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -565,7 +566,7 @@ export function invokesScript(runText, flag) {
  * @returns {Promise<{ problems: string[], gates: number, legs: number, attesters: number }>}
  */
 export async function scanWorkflow(root) {
-  const { parse } = await import('yaml');
+  const { parse } = await requireDependency('yaml', () => import('yaml'), import.meta.url);
   const problems = [];
   const file = join(root, '.github', 'workflows', 'ci.yml');
   if (!existsSync(file)) {

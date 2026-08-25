@@ -4301,12 +4301,19 @@ function selfTest() {
   // gates rather than fixtures — a fixture cannot show that the tree still has
   // the shape. If one of these gates stops declaring its root, re-point the
   // case at whatever gate then does; deleting one deletes the evidence.
-  const crossPkgHints = extractWatchHints(readFileSync(join(ROOT, 'scripts/check-cross-package-test-inputs.mjs'), 'utf8'));
+  // Re-pointed at the module that DECLARES the table (#11511): it moved out of
+  // check-cross-package-test-inputs.mjs into a plain module precisely so the
+  // follow below could reach it, and this read is of the declaration, not of
+  // the gate. Exactly what the paragraph above asks for -- "if one of these
+  // gates stops declaring its root, re-point the case at whatever gate then
+  // does". Left pointing at the gate it would have gone green over an empty
+  // hint list, which is the vacuous-pass shape these cases exist to refuse.
+  const crossPkgHints = extractWatchHints(readFileSync(join(ROOT, 'scripts/cross-package-test-inputs.mjs'), 'utf8'));
   // NOT `scripts/check-nul-bytes.mjs`: that gate names that file explicitly
   // too, so the case would pass with the declaration still refused — measured,
   // it survived the ablation. Pick a scripts path reachable ONLY through the
   // declared subtree, or the case pins nothing.
-  t('the cross-package gate reaches the root scripts dir it declares', crossPkgHints.some((h) => hintCovers(h, 'scripts/pm/dispatch-gates.mjs')));
+  t('the cross-package declaration table reaches the root scripts dir it declares', crossPkgHints.some((h) => hintCovers(h, 'scripts/pm/dispatch-gates.mjs')));
   t('and the content tree it declares', crossPkgHints.some((h) => hintCovers(h, 'content/docs/getting-started/index.mdx')));
   const governedHints = extractWatchHints(readFileSync(join(ROOT, 'scripts/pm/check-governed-merges.mjs'), 'utf8'));
   t('the governed-merge gate reaches the published skills catalog it declares', governedHints.some((h) => hintCovers(h, 'skills/objectstack-upgrade/SKILL.md')));

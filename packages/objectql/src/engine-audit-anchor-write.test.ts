@@ -244,7 +244,12 @@ describe('[#4447] a declared audit field cannot loosen the platform posture', ()
     fields: {
       id: { name: 'id', label: 'ID', type: 'text' as const, primaryKey: true },
       title: { name: 'title', label: 'Title', type: 'text' as const },
-      // Verbatim from examples/app-showcase/dist/objectstack.json.
+      // Verbatim from the PRE-#9784 examples/app-showcase/dist/objectstack.json
+      // — the materializing era, when FieldSchema baked `deleteBehavior:
+      // 'set_null'` onto every type. Newly built artifacts omit the key on
+      // non-reference fields (#9784), but artifacts of this shape remain in
+      // the installed base and this suite pins that they cannot loosen audit
+      // governance — keep the bytes as they shipped.
       created_at: {
         label: 'Created At', type: 'datetime' as const, required: false,
         searchable: false, multiple: false, unique: false,

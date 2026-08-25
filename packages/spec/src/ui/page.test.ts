@@ -445,14 +445,53 @@ describe('Page ARIA Integration', () => {
   });
 });
 
-describe('Page Responsive Integration', () => {
-  it('should accept component with responsive config', () => {
-    const result = PageComponentSchema.parse({
+// ---------------------------------------------------------------------------
+// [#11027] `page.components[].responsive` is RETIRED (ADR-0049 D2)
+//
+// RUNTIME assertions, the dashboard.test.ts #4876 pattern: the tombstone's
+// `tsc` channel is proved by the build of the packages that author pages, not
+// by this file. This key was the destination the #4876 widget tombstone
+// prescribed as live; measured 2026-08, neither objectui consumer
+// implementation had a single caller, so the whole `ResponsiveConfig` layout
+// vocabulary left with its last carrier.
+// ---------------------------------------------------------------------------
+describe('[#11027] PageComponentSchema — retired `responsive`', () => {
+  it('REJECTS an authored `responsive` with the prescription (not "unrecognized key")', () => {
+    let message = '';
+    try {
+      PageComponentSchema.parse({
+        type: 'page:sidebar',
+        properties: {},
+        responsive: { hiddenOn: ['xs', 'sm'] },
+      });
+    } catch (e) { message = String((e as Error).message); }
+
+    // The prescription in the four parts an upgrading author needs: the
+    // fully-qualified key, the version, the issue, and the fix.
+    expect(message).toMatch(/page\.components\[\]\.responsive/);
+    expect(message).toMatch(/removed in @objectstack\/spec 17/);
+    expect(message).toMatch(/#11027/);
+    expect(message).toMatch(/Delete the key/);
+    // It must point at the per-breakpoint channel that IS applied, or an
+    // author who really wants breakpoints reads this as "responsive is gone".
+    expect(message).toMatch(/responsiveStyles/);
+    // The house migrate sentence, spanning lines (`s` flag).
+    expect(message).toMatch(/os migrate meta --from 17/s);
+    // `.strict()` on this schema would answer a DELETED key with a generic
+    // unrecognized-key error. The tombstone is what makes it a prescription.
+    expect(message).not.toMatch(/Unrecognized key/);
+  });
+
+  it('still accepts a component with no `responsive` (the retirement strips nothing else)', () => {
+    const c = PageComponentSchema.parse({
       type: 'page:sidebar',
       properties: {},
-      responsive: { hiddenOn: ['xs', 'sm'] },
+      responsiveStyles: { xsmall: { display: 'none' } },
     });
-    expect(result.responsive?.hiddenOn).toEqual(['xs', 'sm']);
+    expect(c).not.toHaveProperty('responsive');
+    // CONTROL: the LIVE per-breakpoint channel on the same component (ADR-0065)
+    // is not a second casualty of this removal.
+    expect(c.responsiveStyles?.xsmall?.display).toBe('none');
   });
 });
 

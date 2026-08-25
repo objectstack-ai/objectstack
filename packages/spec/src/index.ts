@@ -129,6 +129,23 @@ export { defineAgent } from './ai/agent.zod';
 export { defineTool } from './ai/tool.zod';
 export { defineSkill } from './ai/skill.zod';
 
+// [#11350] Root-entry nameability of the root's own inferred types. `defineStack`
+// returns `ObjectStackDefinition`, which is declared `z.input<typeof
+// ObjectStackDefinitionSchema>` — a generic instantiation the declaration
+// emitter does not preserve as an alias — so an un-annotated
+// `export default defineStack(...)` is emitted as the STRUCTURAL expansion,
+// and that expansion mentions these three types. Without root re-exports, tsc
+// can only name them through the hash-named internal dist chunk that declares
+// them (unaddressable through the package's `exports` map → TS2883 in every
+// consumer inferring through a root-entry function). All three are already
+// public on their domain subpaths (`/ui`, `/automation`); this block makes the
+// root entry self-consistent. Invariant (maintainer ruling 2026-08-23,
+// recorded on #11350): a type that appears structurally in an entry's public
+// declarations must be nameable from that same entry.
+export type { FormFieldInput } from './ui/view.zod';
+export type { NavigationItemInput } from './ui/app.zod';
+export type { StateNodeConfig } from './automation/state-machine.zod';
+
 // DX factories for the remaining authoring domains (issue #2035) — one type-safe
 // entry per writable domain, mirroring the 19 factories above. `defineX` is a
 // *value* import: a broken import hard-errors instead of silently degrading to

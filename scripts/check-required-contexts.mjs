@@ -177,6 +177,7 @@
  * below, with the decision in judgeInstructionSurfaces.
  */
 
+import { requireDependency } from './import-prerequisite.mjs';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -995,7 +996,7 @@ export function judge({ registry, workflows }) {
  * @param {ReadonlyArray<{ workflow: string, job: string, context: string }>} registry
  */
 export async function scanWorkflows(root, registry = REQUIRED_CONTEXTS) {
-  const { parse } = await import('yaml');
+  const { parse } = await requireDependency('yaml', () => import('yaml'), import.meta.url);
   const workflows = new Map();
   for (const file of new Set(registry.map((entry) => entry.workflow))) {
     const path = join(root, '.github', 'workflows', file);
@@ -1584,7 +1585,7 @@ async function selfTest() {
   };
 
   const root = scriptRepoRoot();
-  const { parse } = await import('yaml');
+  const { parse } = await requireDependency('yaml', () => import('yaml'), import.meta.url);
   const sources = {
     'lint.yml': readFileSync(join(root, '.github', 'workflows', 'lint.yml'), 'utf8'),
     'ci.yml': readFileSync(join(root, '.github', 'workflows', 'ci.yml'), 'utf8'),

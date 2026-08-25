@@ -63,7 +63,7 @@ export type { CompanionFieldMeta, CompanionObjectMeta } from './search-companion
 
 // Export Engine
 export { ObjectQL, ObjectRepository, ScopedContext } from './engine.js';
-export type { HookHandler, HookEntry, OperationContext, EngineMiddleware } from './engine.js';
+export type { HookHandler, HookEntry, OperationContext, EngineMiddleware, HeldFileResolver } from './engine.js';
 export type { AdmittedValueShapeViolationTally } from './engine.js';
 export { SummaryRecomputeError } from './summary-errors.js';
 export type { SummaryRecomputeFailure } from './summary-errors.js';

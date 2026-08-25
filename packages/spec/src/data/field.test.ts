@@ -481,6 +481,191 @@ describe('FieldSchema', () => {
       expect(result.deleteBehavior).toBe('set_null');
     });
 
+    // [#9689] (maintainer ruling 2026-08-19, Q1 = A): an AUTHORED
+    // `deleteBehavior: 'set_null'` on a `master_detail` is a named parse-time
+    // rejection — the engine resolves it to `cascade` (measured and pinned in
+    // `engine-cascade-delete.test.ts`), the opposite of what the declaration
+    // asks for. The default relocated off the property (`.optional()` +
+    // `.meta({default})` + `.overwrite()`, the #7918 Option A shape) so this
+    // check can tell authored from defaulted. Second ruling (2026-08-24,
+    // idempotent materialization): the `.overwrite()` never materializes a
+    // default the schema itself would refuse as authored — a bare
+    // `master_detail` parses to output that OMITS `deleteBehavior`, so
+    // `parse(parse(x))` holds on the mainline `create()` → `defineStack`
+    // path. The reference types that still materialize (`lookup`/`tree`)
+    // keep byte-identity with the `.default()` era — that half is pinned
+    // here; #9784 (the block below) gates materialization off every
+    // NON-reference type.
+    describe('[#9689] deleteBehavior: set_null on master_detail is a parse-time rejection', () => {
+      const md = (extra: Record<string, unknown> = {}) => ({
+        name: 'parent_id',
+        label: 'Parent Record',
+        type: 'master_detail',
+        reference: 'parent_object',
+        ...extra,
+      });
+
+      it('rejects an AUTHORED set_null on a master_detail, at path deleteBehavior, with the named message', () => {
+        const result = FieldSchema.safeParse(md({ deleteBehavior: 'set_null' }));
+        expect(result.success).toBe(false);
+        if (result.success) return;
+        const issue = result.error.issues.find((i) => i.path.join('.') === 'deleteBehavior');
+        expect(issue).toBeDefined();
+        // The message head is contract: it must say the declaration is NOT
+        // honored and that the children would be DELETED, so an AI author
+        // reading the rejection learns the actual outcome, not just "invalid".
+        expect(issue?.message).toContain("`deleteBehavior: 'set_null'` is not honored on a `master_detail` field");
+        expect(issue?.message).toContain('DELETED');
+        // And it must name both legal ways out.
+        expect(issue?.message).toContain("'restrict'");
+        expect(issue?.message).toContain("'cascade'");
+      });
+
+      it('still parses a BARE master_detail — and no longer materializes set_null (2026-08-24 ruling: idempotent materialization)', () => {
+        // The schema refuses an AUTHORED `set_null` on this type, and the
+        // materialized spelling is indistinguishable from the authored one BY
+        // DESIGN — so baking it made parse output self-rejecting on re-parse
+        // (measured: 4 bare `master_detail` fields red the showcase build via
+        // `create()` → `defineStack`). Absent is what the output must say; the
+        // engine treats absent and `set_null` identically on this type (both
+        // cascade — `engine-cascade-delete.test.ts`).
+        const result = FieldSchema.parse(md());
+        expect(result.deleteBehavior).toBeUndefined();
+        expect('deleteBehavior' in result).toBe(false);
+      });
+
+      it('parse is IDEMPOTENT on a bare master_detail — the mainline create() → defineStack chain re-parses parse output', () => {
+        // This is the exact chain that carried the pre-ruling defect: parse #1
+        // baked `set_null`, parse #2 rejected it. Both layers pinned green.
+        const once = FieldSchema.parse(md());
+        expect(FieldSchema.safeParse(once).success).toBe(true);
+        const obj = ObjectSchema.create({
+          name: 'child_thing',
+          label: 'Child Thing',
+          fields: { parent: { label: 'Parent', type: 'master_detail', reference: 'parent_thing' } },
+        });
+        expect(ObjectSchema.safeParse(obj).success).toBe(true);
+      });
+
+      it('materializes the default at its SHAPE position on every other type, not appended at the tail (byte-identity with the .default() era)', () => {
+        // Serialized parse output is what built app artifacts ship (#4447), so
+        // key ORDER is part of the byte-identity contract for the types that
+        // still materialize the default. `deleteBehavior` sits between
+        // `reference` and `hidden` in the shape; a naive
+        // `{ ...field, deleteBehavior }` re-materialization would emit it last.
+        const json = JSON.stringify(FieldSchema.parse({
+          name: 'account_id', label: 'Account', type: 'lookup', reference: 'account',
+        }));
+        expect(json).toContain('"reference":"account","deleteBehavior":"set_null","hidden":false');
+      });
+
+      it('leaves an authored cascade and restrict on master_detail untouched', () => {
+        expect(FieldSchema.parse(md({ deleteBehavior: 'cascade' })).deleteBehavior).toBe('cascade');
+        expect(FieldSchema.parse(md({ deleteBehavior: 'restrict' })).deleteBehavior).toBe('restrict');
+      });
+
+      it('keeps an authored set_null legal on lookup — required or not', () => {
+        const lookup = {
+          name: 'account_id', label: 'Account', type: 'lookup',
+          reference: 'account', deleteBehavior: 'set_null',
+        };
+        expect(FieldSchema.parse(lookup).deleteBehavior).toBe('set_null');
+        expect(FieldSchema.parse({ ...lookup, required: true }).deleteBehavior).toBe('set_null');
+      });
+
+      it('keeps non-reference types ACCEPTING the key (installed-base artifact shape, #4447) — materialization moved to the #9784 block below', () => {
+        // Verbatim shape from the pre-#9784 examples/app-showcase/dist/
+        // objectstack.json — a materialized datetime carrying only FieldSchema
+        // defaults. Built artifacts of the materializing era ship this on
+        // EVERY field type; it must STAY legal (accept-set unchanged), and the
+        // authored value must round-trip verbatim, even though a bare
+        // datetime no longer materializes it.
+        const showcaseVerbatim = {
+          label: 'Created At', type: 'datetime', required: false,
+          searchable: false, multiple: false, unique: false,
+          deleteBehavior: 'set_null', hidden: false,
+          readonly: false, sortable: true, externalId: false,
+        };
+        expect(() => FieldSchema.parse(showcaseVerbatim)).not.toThrow();
+        expect(FieldSchema.parse(showcaseVerbatim).deleteBehavior).toBe('set_null');
+      });
+
+      it('keeps FieldSchema.shape enumerable (no pipe degradation from the relocation)', () => {
+        // `.overwrite()` rather than `.transform()` is load-bearing: a pipe
+        // answers shape introspection with an empty set, and form generators
+        // enumerate this shape.
+        expect(Object.keys(FieldSchema.shape).length).toBeGreaterThan(50);
+        expect(Object.keys(FieldSchema.shape)).toContain('deleteBehavior');
+      });
+    });
+
+    // [#9784] `deleteBehavior` materializes ONLY on reference types. On every
+    // other type the key was inert by construction — the engine's
+    // `cascadeDeleteRelations` reads it exclusively behind a
+    // `master_detail`/`lookup` + `fdef.reference` guard — yet the materialized
+    // default shipped in every built artifact as an apparent explicit
+    // declaration (#4447 mechanism) and read as meaningful to AI authors
+    // (ADR-0033 direction). The accept-set is UNTOUCHED: authored values on
+    // any type round-trip verbatim (the installed-base test above).
+    describe('[#9784] deleteBehavior materializes only on reference types', () => {
+      const bare = (type: string) => ({ name: 'f1', label: 'F1', type });
+
+      it('omits deleteBehavior from bare non-reference fields (text/datetime/number)', () => {
+        for (const type of ['text', 'datetime', 'number']) {
+          const result = FieldSchema.parse(bare(type));
+          expect(result.deleteBehavior, `type=${type}`).toBeUndefined();
+          expect('deleteBehavior' in result, `type=${type}`).toBe(false);
+        }
+      });
+
+      it('omits deleteBehavior from bare `user` fields — outside today\'s cascade guard, same as text', () => {
+        // `user` is stored identically to `lookup` but the engine's cascade
+        // guard admits only `master_detail`/`lookup`, so the key is inert on
+        // `user` exactly as on `text`. It takes the non-reference side of the
+        // line; an authored value still round-trips (below).
+        const result = FieldSchema.parse({ ...bare('user'), reference: 'sys_user' });
+        expect('deleteBehavior' in result).toBe(false);
+      });
+
+      it('still materializes set_null on bare lookup and tree, at shape position (byte-identity)', () => {
+        // Key ORDER is part of the byte-identity contract (#4447):
+        // `deleteBehavior` sits between `reference` and `hidden` in the shape.
+        const lookupJson = JSON.stringify(FieldSchema.parse({
+          name: 'account_id', label: 'Account', type: 'lookup', reference: 'account',
+        }));
+        expect(lookupJson).toContain('"reference":"account","deleteBehavior":"set_null","hidden":false');
+        const treeJson = JSON.stringify(FieldSchema.parse({
+          name: 'parent_id', label: 'Parent', type: 'tree', reference: 'category',
+        }));
+        expect(treeJson).toContain('"reference":"category","deleteBehavior":"set_null","hidden":false');
+      });
+
+      it('keeps an AUTHORED deleteBehavior on non-reference types, verbatim (accept-set unchanged)', () => {
+        expect(FieldSchema.parse({ ...bare('text'), deleteBehavior: 'cascade' }).deleteBehavior).toBe('cascade');
+        expect(FieldSchema.parse({ ...bare('number'), deleteBehavior: 'restrict' }).deleteBehavior).toBe('restrict');
+        expect(FieldSchema.parse({ ...bare('datetime'), deleteBehavior: 'set_null' }).deleteBehavior).toBe('set_null');
+        expect(FieldSchema.parse({ ...bare('user'), deleteBehavior: 'set_null' }).deleteBehavior).toBe('set_null');
+      });
+
+      it('parse(parse(x)) is byte-stable for bare and authored spellings across the type boundary', () => {
+        const cases = [
+          bare('text'),
+          bare('datetime'),
+          bare('number'),
+          { ...bare('user'), reference: 'sys_user' },
+          { name: 'account_id', label: 'Account', type: 'lookup', reference: 'account' },
+          { name: 'parent_id', label: 'Parent', type: 'tree', reference: 'category' },
+          { ...bare('text'), deleteBehavior: 'cascade' },
+          { name: 'account_id', label: 'Account', type: 'lookup', reference: 'account', deleteBehavior: 'restrict' },
+        ];
+        for (const input of cases) {
+          const once = FieldSchema.parse(input);
+          const twice = FieldSchema.parse(once);
+          expect(JSON.stringify(twice), `type=${(input as { type: string }).type}`).toBe(JSON.stringify(once));
+        }
+      });
+    });
+
     it('should accept the relatedList prominence tri-state (false | true | primary)', () => {
       for (const relatedList of [false, true, 'primary'] as const) {
         const field: Field = {

@@ -288,7 +288,7 @@ export const CurrencyConfigSchema = lazySchema(() => strictObject({
   if (contradiction !== undefined) {
     ctx.addIssue({ code: 'custom', path: ['precision'], message: contradiction });
   }
-}).overwrite((config) => ({
+}).overwrite((config) => {
   // #7918 — the relocated `.default(2)`, applied AFTER the check above.
   // `.overwrite()` rather than `.transform()` per the measured #6926 precedent
   // (view.zod.ts `foldFormGroupsIntoSections`): it keeps this schema a
@@ -296,15 +296,44 @@ export const CurrencyConfigSchema = lazySchema(() => strictObject({
   // an empty set), and checks run in attachment order, so the superRefine
   // above always sees the pre-materialized value. Rebuilt in shape order so
   // the output is byte-identical to the `.default(2)` era:
-  // `{precision, currencyMode, defaultCurrency}`, `precision` always a number.
-  // The one accepted cost, same as #6926's: the INFERRED output type still
-  // declares `precision?` even though a parsed config always carries it
-  // (ADR-0122 forbids hand-narrowing `CurrencyConfigParsed`); the runtime
-  // contract is the enforced one.
-  precision: config.precision ?? 2,
-  currencyMode: config.currencyMode,
-  defaultCurrency: config.defaultCurrency,
-})));
+  // `{precision, currencyMode, defaultCurrency}`, `precision` always a number
+  // — except on the guarded combination below. The one accepted cost, same as
+  // #6926's: the INFERRED output type still declares `precision?` even though
+  // a parsed config normally carries it (ADR-0122 forbids hand-narrowing
+  // `CurrencyConfigParsed`); the runtime contract is the enforced one.
+  //
+  // #11423 (maintainer ruling on #9689, 2026-08-24, routed to this twin —
+  // 「The same principle prescribes the fix for the #7918 currency twin
+  // (#11423) — the spec seat should route it under this ruling.」): NEVER
+  // materialize a default the schema itself would refuse as authored. The
+  // superRefine above rejects an AUTHORED `precision: 2` on a fixed
+  // zero-/three-fraction-digit currency (JPY/KRW/KWD class), and the two
+  // spellings are indistinguishable to any later parse BY DESIGN — so baking
+  // `2` onto a bare fixed-JPY config made parse output self-rejecting on
+  // re-parse, and `ObjectSchema.create()` → `defineStack` re-parses on the
+  // MAINLINE app-build path (measured: `parse(parse(x))` threw at
+  // `currencyConfig.precision` for accepted x). A bare fixed config whose
+  // currency contradicts the default 2 therefore parses to output that OMITS
+  // `precision`: renderers already derive display width from the currency
+  // when the key is absent, and built artifacts stop carrying a value the
+  // schema itself refuses. Every other combination keeps byte-identity —
+  // `dynamic` mode and unknown codes (fail-open table) can never be refused,
+  // so they keep materializing. The #9689 master_detail `deleteBehavior`
+  // conditional in `FieldSchema`'s `.overwrite()` below is the worked
+  // precedent; #11423 is its recorded currency twin.
+  if (
+    config.precision === undefined &&
+    config.currencyMode === 'fixed' &&
+    currencyPrecisionContradiction(config.defaultCurrency, 2) !== undefined
+  ) {
+    return config;
+  }
+  return {
+    precision: config.precision ?? 2,
+    currencyMode: config.currencyMode,
+    defaultCurrency: config.defaultCurrency,
+  };
+}));
 
 /**
  * Currency Value Schema
@@ -685,7 +714,8 @@ export const InlineGridColumnSchema = lazySchema(() => strictObject({
   requiredWhen: ExpressionInputSchema.optional().describe('Predicate (CEL) — the cell is required when TRUE. Same `record` + `parent` scope as `readonlyWhen`.'),
 }));
 
-export const FieldSchema = lazySchema(() => strictObject({
+export const FieldSchema = lazySchema(() => {
+  const base = strictObject({
   surface: 'this field',
   history: FIELD_HISTORY,
   aliases: {
@@ -955,7 +985,38 @@ export const FieldSchema = lazySchema(() => strictObject({
   // `referenceFilters` (string[]) removed in the 16.x line (#2377, ADR-0049):
   // the lookup picker reads the structured `lookupFilters` ({field,operator,value}),
   // never this string[] form — as authored it filtered nothing. Use `lookupFilters`.
-  deleteBehavior: z.enum(['set_null', 'cascade', 'restrict']).optional().default('set_null').describe('What happens if referenced record is deleted'),
+  /**
+   * #9689 (maintainer ruling 2026-08-19, Q1 = A — the #7918 Option A shape) —
+   * `.default('set_null')` moved off this property and into the `.overwrite()`
+   * below, and this placement is load-bearing. A property-level default
+   * materializes AT PARSE, so a refinement over the parsed object cannot tell
+   * an authored `deleteBehavior: 'set_null'` from an untouched one — measured:
+   * a bare `master_detail` and one explicitly declaring `set_null` parsed to
+   * BYTE-IDENTICAL output, so a naive per-type refinement would refuse every
+   * bare `master_detail` ever parsed (the permanently-noisy shape the #7918
+   * ruling forbids). Declared `.optional()`, the authored-vs-absent
+   * distinction survives to the `.superRefine` below — where an AUTHORED
+   * `set_null` on a `master_detail` is a named parse-time rejection — and the
+   * `.overwrite` then materializes the same `'set_null'` AFTER the check, at
+   * its shape position, so parse OUTPUT is byte-identical to the
+   * `.default('set_null')` era. The `default` annotation states the contract
+   * default to schema consumers without touching parse order — the
+   * `autonumberFormat` pattern below.
+   *
+   * #9784 — the `.overwrite` materializes the default ONLY on the reference
+   * types where the key has meaning (`lookup` / `tree`; `master_detail` omits
+   * it per the #9689 idempotent-materialization ruling). On every other type
+   * the key was inert by construction — the engine reads it exclusively
+   * behind a `master_detail`/`lookup` + `reference` guard — yet the
+   * materialized value shipped in every built artifact as an apparent
+   * explicit declaration (the #4447 shadowing mechanism). A bare `text` /
+   * `datetime` / `number` field now parses to output WITHOUT the key; an
+   * authored value on any type is preserved verbatim (accept-set unchanged).
+   */
+  deleteBehavior: z.enum(['set_null', 'cascade', 'restrict']).optional().meta({
+    description: 'What happens if referenced record is deleted',
+    default: 'set_null',
+  }),
   /**
    * Master-detail INLINE EDITING. On a child's `master_detail`/`lookup` field
    * (whose `reference` is the parent object), declare that "this child is
@@ -1464,7 +1525,13 @@ export const FieldSchema = lazySchema(() => strictObject({
   // (see `metadata-type-schemas.test.ts` for how the other 24 took an early
   // return) — so it has been a known gap longer than any of its siblings.
   ...MetadataProtectionFields,
-}).superRefine((field, ctx) => {
+  });
+  // #9689 — the shape's declaration order, captured so the `.overwrite()` below
+  // can re-insert the materialized `deleteBehavior` at its shape POSITION.
+  // Zod builds parse output in shape order; a plain spread would append the
+  // key at the tail and break the byte-identity contract above.
+  const shapeOrder = Object.keys(base.shape);
+  return base.superRefine((field, ctx) => {
   // [#11339] `referenceVia` declares the id half of a polymorphic pointer
   // pair (ADR-0052 §5) — semantics only a plain `text` column carries. On a
   // relationship type it contradicts the type's own single static target, and
@@ -1563,6 +1630,32 @@ export const FieldSchema = lazySchema(() => strictObject({
     }
   }
 
+  // #9689 (maintainer ruling 2026-08-19, Q1 = A): an AUTHORED
+  // `deleteBehavior: 'set_null'` on a `master_detail` is a publish-time error.
+  // The engine resolves every value except `restrict` on this type to
+  // `cascade` (`cascadeDeleteRelations` — measured and pinned in
+  // `engine-cascade-delete.test.ts`), so this declaration asks for the child
+  // rows to be KEPT and gets them DELETED — data loss relative to the declared
+  // intent, silently, at the moment the parent goes away. Honoring it is ruled
+  // out (a detail row whose master reference is nulled becomes an unreachable
+  // orphan — the outcome #8772/#9138 exist to prevent). `field.deleteBehavior`
+  // here is pre-`.overwrite`, so `undefined` means "not authored" — a bare
+  // `master_detail` (the overwhelmingly common spelling) never fires this.
+  if (field.type === 'master_detail' && field.deleteBehavior === 'set_null') {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['deleteBehavior'],
+      message:
+        "`deleteBehavior: 'set_null'` is not honored on a `master_detail` field: a detail row "
+        + 'cannot outlive its master (a nulled master reference would orphan it), so the engine '
+        + "resolves every value except 'restrict' to 'cascade' — the children this declaration "
+        + "asks to keep would be DELETED. Declare 'restrict' to refuse deleting a master that "
+        + "still has details (no data loss — the closest reading of \"keep my children\"), "
+        + "declare 'cascade' (or omit the key) to accept the cascade deliberately, or use a "
+        + '`lookup` field if the children must survive the parent.',
+    });
+  }
+
   // #7127: an authored `defaultValue` must be one of the key's three legal
   // shapes — CEL envelope / runtime token / literal — and legal for THIS
   // field. The shapes are told apart FIRST (`default-value-shape.ts`, the
@@ -1616,7 +1709,74 @@ export const FieldSchema = lazySchema(() => strictObject({
         + `({ dialect: 'cel', source: '…' }).${suggestionText}`,
     });
   }
-}));
+  }).overwrite((field) => {
+    // #9689 — the relocated `.default('set_null')`, applied AFTER the checks
+    // above. `.overwrite()` rather than `.transform()` per the measured #6926
+    // precedent (`CurrencyConfigSchema` in this file is the sibling): it keeps
+    // this schema a `ZodObject` (a pipe has no `.extend` and answers shape
+    // introspection with an empty set), and checks run in attachment order, so
+    // the superRefine above always sees the pre-materialized value. The key is
+    // re-inserted at its SHAPE position (Zod emits parse output in shape
+    // order), so output is byte-identical to the `.default('set_null')` era on
+    // the reference types that still materialize it (`lookup` / `tree`) — see
+    // the two rulings below for why `master_detail` and every non-reference
+    // type omit it instead. The one accepted cost, same as the currency
+    // precedent's: the INFERRED output type declares `deleteBehavior?` even
+    // though a parsed `lookup`/`tree` field always carries it (ADR-0122
+    // forbids hand-narrowing the inferred type); the runtime contract is the
+    // enforced one.
+    if (field.deleteBehavior !== undefined) return field;
+    // #9689 (maintainer ruling 2026-08-24, idempotent materialization —
+    // 「四维分析一致的，接手你的建议。」): NEVER materialize a default the
+    // schema itself would refuse as authored. The superRefine above rejects an
+    // AUTHORED `set_null` on a `master_detail`, and the two spellings are
+    // indistinguishable to any later parse BY DESIGN — so baking `set_null`
+    // onto a bare `master_detail` made parse output self-rejecting on
+    // re-parse, and `ObjectSchema.create()` → `defineStack` re-parses on the
+    // MAINLINE app-build path (measured: 4 bare `master_detail` fields red the
+    // showcase build; `parse(parse(x))` threw for accepted x). A bare
+    // `master_detail` therefore parses to output that OMITS `deleteBehavior`:
+    // the engine treats absent exactly as it treated the baked `set_null`
+    // (both resolve to `cascade` — measured in the #9689 exhaustion matrix,
+    // pinned in `engine-cascade-delete.test.ts`), and built artifacts stop
+    // carrying a value the schema itself refuses. Every other type keeps
+    // byte-identity, and the #7918 currency `precision` twin of this landmine
+    // is #11423 — same principle, its own card.
+    if (field.type === 'master_detail') return field;
+    // #9784 — materialize the default ONLY on reference types. `deleteBehavior`
+    // has no meaning on a non-reference field: the engine's
+    // `cascadeDeleteRelations` reaches the key exclusively on
+    // `master_detail`/`lookup` fields carrying a `reference`
+    // (`packages/objectql/src/engine.ts`, the type + `fdef.reference` guards),
+    // so on a `text`/`datetime`/`number` field the materialized value was
+    // inert by construction — yet it shipped in every built app artifact,
+    // where a default materialized at parse becomes an EXPLICIT declaration
+    // downstream (the #4447 shadowing mechanism), and where an AI author
+    // reading the artifact reasonably concludes the key is meaningful there
+    // (ADR-0033 direction). Non-reference fields therefore parse to output
+    // that OMITS the key. The accept-set is untouched: an AUTHORED
+    // `deleteBehavior` on any type still parses exactly as before (the
+    // `!== undefined` early return above), so stored artifacts from the
+    // materializing era stay legal. `tree` (hierarchical reference) keeps
+    // materializing with `lookup`: it is in the relational family, where the
+    // key states delete semantics — the conservative byte-identity side of
+    // the line. `user` is stored identically to `lookup` but sits outside
+    // today's cascade guard exactly like `text` does, so it takes the
+    // non-reference side; an authored value there still round-trips.
+    if (field.type !== 'lookup' && field.type !== 'tree') return field;
+    const withDefault: Record<string, unknown> = { ...field, deleteBehavior: 'set_null' };
+    const out: Record<string, unknown> = {};
+    for (const key of shapeOrder) {
+      if (key in withDefault) out[key] = withDefault[key];
+    }
+    // A strict object emits no unknown keys; this tail loop is belt-and-braces
+    // so a future passthrough key could never be silently dropped here.
+    for (const key of Object.keys(withDefault)) {
+      if (!(key in out)) out[key] = withDefault[key];
+    }
+    return out as typeof field;
+  });
+});
 
 /**
  * Author-facing shape of a field — what `FieldSchema.parse(...)` accepts. Since

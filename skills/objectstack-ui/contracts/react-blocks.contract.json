@@ -253,7 +253,7 @@
     {
       "tag": "ListView",
       "schemaType": "list-view",
-      "summary": "Server-connected object table with toolbar and switchable visualizations (grid/kanban/calendar/gantt/…). Config props come from the spec ListView schema.",
+      "summary": "Server-connected object table with toolbar and switchable visualizations (grid/kanban/calendar/gantt/…). Config props come from the spec ListView schema. Bind the object with the metadata-tier data source — data={{ provider: 'object', object: '…' }} — and pick the visualization with `type`; `objectName` / `viewType` are the deprecated spellings of the same two bindings.",
       "specSchema": true,
       "props": [
         {
@@ -261,14 +261,22 @@
           "type": "string",
           "kind": "binding",
           "required": true,
-          "description": "The object this block binds to (server-connected)."
+          "description": "[DEPRECATED → `data={{ provider: 'object', object }}`] The object this block binds to (server-connected). Converging on the metadata-tier spelling (#11284); this alias is removed after the deprecation window.",
+          "deprecated": {
+            "replacedBy": "data",
+            "note": "Write the metadata-tier data source instead: data={{ provider: 'object', object: '…' }} — the same spelling a metadata list view authors. objectName keeps working during the deprecation window."
+          }
         },
         {
           "name": "viewType",
           "type": "'grid' | 'kanban' | 'gallery' | 'calendar' | 'timeline' | 'gantt' | 'map'",
           "kind": "binding",
           "required": false,
-          "description": "Which visualization to render (default grid). How you get a kanban/calendar/gantt of the object."
+          "description": "[DEPRECATED → `type`] Which visualization to render (default grid). Converging on the metadata-tier spelling (#11284): write `type`, the same key a metadata list view authors.",
+          "deprecated": {
+            "replacedBy": "type",
+            "note": "Write type=\"kanban\" (ListViewSchema's own `type`, the metadata-tier view kind) instead. viewType keeps working during the deprecation window."
+          }
         },
         {
           "name": "navigation",
@@ -318,6 +326,20 @@
           "kind": "data",
           "required": true,
           "description": "Fields to display as columns"
+        },
+        {
+          "name": "type",
+          "type": "'grid' | 'kanban' | 'gallery' | 'calendar' | 'timeline' | 'gantt' | 'map' | 'chart' | 'tree'",
+          "kind": "data",
+          "required": false,
+          "description": ""
+        },
+        {
+          "name": "data",
+          "type": "object",
+          "kind": "data",
+          "required": false,
+          "description": "Data source configuration (defaults to \"object\" provider)"
         },
         {
           "name": "sort",

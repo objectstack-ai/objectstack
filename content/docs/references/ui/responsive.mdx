@@ -12,78 +12,12 @@ description: Responsive protocol schemas
 ## TypeScript Usage
 
 ```typescript
-import { BreakpointColumnMapSchema, BreakpointName, BreakpointOrderMapSchema, ResponsiveConfigSchema, ResponsiveStylesSchema, StyleMapSchema } from '@objectstack/spec/ui';
-import type { BreakpointColumnMap, BreakpointName, BreakpointOrderMap, ResponsiveConfig, ResponsiveStyles, StyleMap } from '@objectstack/spec/ui';
+import { ResponsiveStylesSchema, StyleMapSchema } from '@objectstack/spec/ui';
+import type { ResponsiveStyles, StyleMap } from '@objectstack/spec/ui';
 
 // Validate data
-const result = BreakpointColumnMapSchema.parse(data);
+const result = ResponsiveStylesSchema.parse(data);
 ```
-
----
-
-## BreakpointColumnMap
-
-Grid columns per breakpoint (1-12)
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **xs** | `number` | optional |  |
-| **sm** | `number` | optional |  |
-| **md** | `number` | optional |  |
-| **lg** | `number` | optional |  |
-| **xl** | `number` | optional |  |
-| **2xl** | `number` | optional |  |
-
-
----
-
-## BreakpointName
-
-### Allowed Values
-
-* `xs`
-* `sm`
-* `md`
-* `lg`
-* `xl`
-* `2xl`
-
-
----
-
-## BreakpointOrderMap
-
-Display order per breakpoint
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **xs** | `number` | optional |  |
-| **sm** | `number` | optional |  |
-| **md** | `number` | optional |  |
-| **lg** | `number` | optional |  |
-| **xl** | `number` | optional |  |
-| **2xl** | `number` | optional |  |
-
-
----
-
-## ResponsiveConfig
-
-Responsive layout configuration
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **breakpoint** | `Enum<'xs' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| '2xl'>` | optional | Minimum breakpoint for visibility |
-| **hiddenOn** | `Enum<'xs' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| '2xl'>[]` | optional | Hide on these breakpoints |
-| **columns** | `{ xs?: number; sm?: number; md?: number; lg?: number; … }` | optional | Grid columns per breakpoint |
-| **order** | `{ xs?: number; sm?: number; md?: number; lg?: number; … }` | optional | Display order per breakpoint |
-
 
 ---
 

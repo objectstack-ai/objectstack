@@ -104,8 +104,10 @@ describe('[#4988] ui/ interaction config family retirement', () => {
    * Names that must SURVIVE on `./ui`, one per neighbouring concern a
    * too-wide sweep would plausibly take:
    *
-   * - `ResponsiveConfigSchema` — batch 13's sixth file, measured REACHABLE and
-   *   tightened instead of retired. The single most likely over-deletion.
+   * - (`ResponsiveConfigSchema` stood here — batch 13's sixth file, measured
+   *   graph-REACHABLE and tightened — until #11027 measured its consumers dead
+   *   and retired the shape with its last carrier, ADR-0049. A survivor list
+   *   entry follows its subject out.)
    * - `AriaPropsSchema` / `I18nLabelSchema` — the two shapes the five retired
    *   modules imported; deleting a consumer must not take its dependency.
    * - `NotificationTypeSchema` — `ui/notification.zod.ts` kept its presentation
@@ -117,7 +119,6 @@ describe('[#4988] ui/ interaction config family retirement', () => {
    *   vocabularies would have hung off had they ever had a carrier.
    */
   const MUST_SURVIVE = [
-    'ResponsiveConfigSchema',
     'AriaPropsSchema',
     'I18nLabelSchema',
     'NotificationTypeSchema',

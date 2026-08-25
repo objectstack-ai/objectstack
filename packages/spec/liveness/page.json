@@ -1,6 +1,6 @@
 {
   "type": "page",
-  "_note": "PageSchema (UI). Renderers live in objectui; objectui paths are cited with the `objectui:` realm marker (in `evidence` or `note` prose) and counted, not resolved against this repo (#5623). Seeded from the Studio page-design dogfood (framework#2254/#2261/#2265). Containers (variables/regions/interfaceConfig/slots/aria) classified at top level — one drill level, no divergent sub-statuses. The removed roadmap page types (record_review/blank) and their config fields (recordReview/blankLayout) were hard-removed — no longer authorable.",
+  "_note": "PageSchema (UI). Renderers live in objectui; objectui paths are cited with the `objectui:` realm marker (in `evidence` or `note` prose) and counted, not resolved against this repo (#5623). Seeded from the Studio page-design dogfood (framework#2254/#2261/#2265). Containers (variables/regions/interfaceConfig/slots/aria) classified at top level — one drill level, no divergent sub-statuses. The removed roadmap page types (record_review/blank) and their config fields (recordReview/blankLayout) were hard-removed — no longer authorable. RETIREMENT RECORD (#11027, 2026-08-24): `regions[].components[].responsive` is a retiredKey tombstone (ADR-0049 D2) — measured dead across both repos (zero callers of either objectui consumer implementation); the shared `ResponsiveConfigSchema` left with it. The walk drills one level only, so no component-level key has a row here (`page/regions` stays RECORDED in undrilled-containers.baseline.json — #4956's page-side instance, still open for the other component keys); the checkable record of THIS retirement is the authorable-surface `ui/PageComponent:responsive [RETIRED]` row, RETIRED_KEYS_BY_MAJOR[18], and the `page-component-responsive-removed` conversion.",
   "props": {
     "source": {
       "status": "live",
@@ -50,7 +50,7 @@
       "verifiedAt": "2026-08-10",
       "evidenceScope": "cross-repo",
       "evidence": "objectui: packages/components/src/renderers/layout/page.tsx:290 branches on schema.regions, :197-204 resolves the named slots (header/sidebar/main/aside/footer) and appends the remainder below main at :211, and :157 flattens their components for the JSX-source path — measured objectui @11c1e71e",
-      "note": "region → component tree rendering (header/main/sidebar/footer). RE-CITED 2026-08-10 (#7133/#7142): same split-citation pruning as `template` — at objectui @11c1e71e the containers.tsx half names `regions` only in a comment (:798, 'page:section — thin wrapper used inside regions'). Verdict unchanged: LIVE."
+      "note": "region → component tree rendering (header/main/sidebar/footer). RE-CITED 2026-08-10 (#7133/#7142): same split-citation pruning as `template` — at objectui @11c1e71e the containers.tsx half names `regions` only in a comment (:798, 'page:section — thin wrapper used inside regions'). Verdict unchanged: LIVE. Component-level liveness stays unclassified (undrilled container, #4956); one component key carries a verdict OUTSIDE this file: `components[].responsive` is a retiredKey tombstone (#11027, ADR-0049 D2 — dead on a two-repo measurement; see the file _note)."
     },
     "isDefault": {
       "status": "live",

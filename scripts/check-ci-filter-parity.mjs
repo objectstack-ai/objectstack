@@ -99,11 +99,18 @@
  *
  * ## Why it reads the table instead of holding a copy
  *
- * `CROSS_PACKAGE_TEST_INPUTS` is imported from the sibling gate, which exports it
- * for this purpose. A copy here would be a second list of the declarations kept
- * in step by hand -- exactly the defect this gate exists to close, one file
- * further out. Importing that module runs nothing: its dispatch is behind
- * `isEntrypoint`, and its own `--self-test` spawns a real child to pin that.
+ * `CROSS_PACKAGE_TEST_INPUTS` is imported from `scripts/cross-package-test-inputs.mjs`,
+ * the plain module that declares it. A copy here would be a second list of the
+ * declarations kept in step by hand -- exactly the defect this gate exists to
+ * close, one file further out.
+ *
+ * That module is a plain module and not the sibling GATE, which is a difference
+ * this gate is the beneficiary of (#11511). The table used to live inside
+ * `check-cross-package-test-inputs.mjs`, and `scripts/pm/dispatch-gates.mjs`
+ * follows a gate's first-party imports one level but never into a file that is
+ * itself a discovered gate -- so the dispatch derivation named this gate for
+ * NOTHING the table declares, though the table is precisely this gate's
+ * population. Measured on 589758d22: 1 (gate, file) pair before, 3253 after.
  *
  * ## Wiring
  *
@@ -120,9 +127,10 @@ import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import process from 'node:process';
 
-import { parse } from 'yaml';
+import { requireDependency } from './import-prerequisite.mjs';
+const { parse } = await requireDependency('yaml', () => import('yaml'), import.meta.url);
 
-import { CROSS_PACKAGE_TEST_INPUTS } from './check-cross-package-test-inputs.mjs';
+import { CROSS_PACKAGE_TEST_INPUTS } from './cross-package-test-inputs.mjs';
 import { isEntrypoint } from './invoked-as.mjs';
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');

@@ -316,12 +316,13 @@ const COMPONENT_LEVEL_GUIDANCE: readonly KeySetGuidance[] = [
 /**
  * A component that declares no props at all — `app:launcher`, `nav:menu`,
  * `nav:breadcrumb`, `global:search`, `global:notifications`, `user:profile`,
- * `element:divider`.
+ * `element:divider`, and the two plugin console widgets `cloud-connection:panel`
+ * and `marketplace:installed-list` (#11575).
  *
  * A factory rather than one shared `EmptyProps` const, because the surface name
  * is the whole value of the rejection here: an empty shape has no candidate
  * keys, so the edit-distance fallback can say nothing, and "unrecognized key on
- * this component" would leave the author guessing which of the seven it meant.
+ * this component" would leave the author guessing which of the nine it meant.
  * One `strictObject(` call site either way — the ledger counts sites from the
  * AST, and this is one.
  *
@@ -891,7 +892,34 @@ export const RecordDetailsProps = strictObject({
     collapsible: z.boolean().optional().describe('Render this section as a collapsible card — the heading becomes a chevron toggle, initially expanded (renderer default: off).'),
     /** Card chrome; the renderer derives it from the presence of a title. */
     showBorder: z.boolean().optional().describe('Draw this section\'s card chrome (renderer default: derived — on for a titled section, off for an untitled one). Set `false` for a borderless titled section, or `true` for a bordered untitled one.'),
-  })).optional().describe('Field groups rendered as the detail body, in order. Object form: `{ name?, label?, columns?, fields, hideEmpty?, collapsible?, showBorder? }`.'),
+    /**
+     * Three more section keys the renderer has honoured all along (#11661 —
+     * same defect class as #11289, inheriting its 2026-08-23 ruling WITH its
+     * reason: declare what the renderer honours; the renderer is unchanged).
+     * Optional with NO schema default, for the same `maxVisible` reason as the
+     * #11289 trio above; the defaults in the describe() texts are MEASURED at
+     * the `.objectui-sha` pin (`190fbd01`, objectui `plugin-detail/src/
+     * renderers/record-details.tsx` + `plugin-detail/src/DetailSection.tsx`).
+     *
+     * Two keys the same measurement found are deliberately NOT declared here
+     * (#11661 holds their forks):
+     * - `title` — the renderer's `s.title ?? s.label` limb is a second
+     *   spelling of the heading slot `label` already declares (identical
+     *   localization handling, zero producers). Same shape as the `page:card`
+     *   `body`-vs-`children` pair, which #5775 CONVERGED rather than declared
+     *   — one heading slot, not two de-facto contracts (Prime Directive #12).
+     *   Held for the maintainer's declare-vs-converge ruling.
+     * - `headerColor` — the renderer's only read is `bg-${headerColor}`, a
+     *   template-literal Tailwind class: Tailwind v4 scans source text with
+     *   no safelist, so this call site generates NO CSS and an authored value
+     *   works only when some other source file happens to use the same class
+     *   literally. Dead-in-practice at the pin (zero producers); declaring it
+     *   would advertise a capability the renderer does not deliver.
+     */
+    defaultCollapsed: z.boolean().optional().describe('Start a `collapsible: true` section collapsed (renderer default: expanded). Consulted only when `collapsible` is on — a non-collapsible section never reads its collapse state.'),
+    icon: z.string().optional().describe('Heading icon, as a lucide icon name (kebab-case, e.g. `building-2`). A value that is not an ASCII identifier (emoji, CJK text) renders as literal text beside the heading instead. Shown where the section heading renders: a titled section, or any collapsible section.'),
+    description: z.string().optional().describe('Sub-heading text rendered under the section heading (plain string — the renderer applies no translation to it, unlike `label`). Renders on a titled or collapsible section; a collapsible section hides it while collapsed.'),
+  })).optional().describe('Field groups rendered as the detail body, in order. Object form: `{ name?, label?, columns?, fields, hideEmpty?, collapsible?, showBorder?, defaultCollapsed?, icon?, description? }`.'),
   fields: z.array(z.string()).optional().describe('Explicit field list to display (optional, overrides highlightFields)'),
   /**
    * Field names to omit from the body, applied to both `fields` and every
@@ -2574,7 +2602,24 @@ export const ComponentPropsMap = {
   'global:search': emptyProps('global:search'),
   'global:notifications': emptyProps('global:notifications'),
   'user:profile': emptyProps('user:profile'),
-  
+
+  // Plugin console widgets — #11575, the #8691/#8744 mechanism two instances
+  // over, on `@objectstack/cloud-connection`'s published Setup pages: both
+  // types are console-registered renderers reachable only through the type
+  // union's open string arm, and with no row here the #5068 gate's dispatch
+  // skipped them as unregistered — any authored key would have ridden through
+  // in silence (nothing authors one today: both shipped pages carry `{}`).
+  // Key sets measured from the renderers' ACTUAL read points at the
+  // `.objectui-sha` pin (app-shell `console/cloud-connection/
+  // CloudConnectionPanel.tsx`, `console/marketplace/InstalledListWidget.tsx`):
+  // both registrations discard the schema node entirely (`() => <Widget />`)
+  // and neither component function takes a prop, so the accepted key set is
+  // EMPTY — strict, refuses every key. The registrations' declared
+  // `inputs: []` happen to agree here, but the row is the measurement, not
+  // the claim (#8691/#8744 record where those diverge).
+  'cloud-connection:panel': emptyProps('cloud-connection:panel'),
+  'marketplace:installed-list': emptyProps('marketplace:installed-list'),
+
   // AI
   'ai:chat_window': AIChatWindowProps,
   'ai:suggestion': strictObject({

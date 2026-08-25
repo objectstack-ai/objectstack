@@ -2,6 +2,7 @@
 
 import type { DriverOptions, DriverCapabilities } from '../data/driver.zod.js';
 import type { QueryAST } from '../data/query.zod.js';
+import type { IntrospectedSchema } from './schema-diff-service.js';
 
 /**
  * DriverQuery — the query AST as a **driver** receives it: {@link QueryAST}
@@ -362,6 +363,36 @@ export interface IDataDriver {
    * vouch for a store's newness.
    */
   getSchemaSyncStats?(): { created: number; existing: number };
+
+  /**
+   * Introspect the live physical schema this driver is connected to
+   * (ADR-0015): table names, columns, and primary-key membership, as the
+   * spec's ONE introspection shape — {@link IntrospectedSchema}.
+   *
+   * The return type is CONTRACTUAL, and it is declared here for the same
+   * reason `DatasourceDriverHandle.introspectSchema` was typed by #11381
+   * (option C of the #11123 ruling): a custom driver has TWO documented roads
+   * into the same runtime read — the host-factory handle, and direct
+   * `IDataEngine.registerDriver()` — and until #11493 only the first was
+   * reachable by a compiler. A driver author implementing THIS interface had
+   * no signature to mis-match against, so a column flag spelled `isPrimary`,
+   * or a bare `{ tables }` with no `dialect`/`introspectedAt`, compiled clean
+   * and surfaced only as a federated table whose records silently could not
+   * be located or updated (absorbed by the PR #11001 runtime shim). Declared
+   * here, `tsc` refuses the mis-shape at the offending field on either road.
+   *
+   * Extra facts a richer driver carries stay legal — driver-sql's table-level
+   * `primaryKeys` / `foreignKeys`, per-column `isUnique` / `maxLength` ride
+   * on declared types that EXTEND the spec contract, and assignability
+   * admits them. What is refused is a WRONG spelling of a declared key,
+   * which is the defect class this seam has actually shipped.
+   *
+   * Optional: introspection is a capability, not an obligation — drivers
+   * without it (memory, mongodb today) simply omit the member and stay
+   * conformant. The engine's `introspectDatasource()` answers their absence
+   * with a named error rather than a guess.
+   */
+  introspectSchema?(): Promise<IntrospectedSchema>;
 
   /** Drop the underlying table or collection (destructive) */
   dropTable(object: string, options?: DriverOptions): Promise<void>;

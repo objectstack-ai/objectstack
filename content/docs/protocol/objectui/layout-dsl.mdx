@@ -791,22 +791,6 @@ interface FormField {
 }
 ```
 
-### Responsive Columns
-
-{/* os:check */}
-```typescript
-// Source: packages/spec/src/ui/responsive.zod.ts (BreakpointColumnMapSchema)
-// Grid columns (1-12) per named breakpoint. All entries optional.
-interface ResponsiveColumns {
-  xs?: number;    // ~480px
-  sm?: number;    // ~640px
-  md?: number;    // ~768px
-  lg?: number;    // ~1024px
-  xl?: number;    // ~1280px
-  '2xl'?: number; // ~1536px
-}
-```
-
 ### Visibility Rule
 
 Visibility is a single **CEL expression** string, not a structured rule object.
@@ -820,7 +804,8 @@ expression evaluates truthy.
 // e.g. on a PageComponent — `record` and `current_user` are both bound:
 visibleWhen: "record.account_type == 'premium'"
 
-// e.g. on a FormSection / FormField — `record` is bound, `current_user` is NOT:
+// e.g. on a view FormField — `record`, `previous` and (since objectui#6010)
+// `current_user` are bound; on a FormSection, `current_user` is not:
 visibleWhen: "record.status != 'closed'"
 ```
 
@@ -829,8 +814,18 @@ The predicate's **binding root** is set by the layer, not the key:
 | Layer | Predicate binds |
 |---|---|
 | Page components (`*.page.ts`) | `record` + `current_user` (plus `page.<var>`) |
-| Runtime record form sections/fields (`*.view.ts`) | `record` + `previous` — **not** `current_user` |
+| Runtime record form **fields** (`*.view.ts`) | `record` + `previous` + `current_user` (objectui#6010) |
+| Runtime record form **sections** (`*.view.ts`) | `record` + `previous` — **not** `current_user` |
 | Metadata-editing forms (`*.form.ts`) | `data` — the row under edit |
+
+The two form rows were one row until objectui#6010 bound the host predicate scope
+on the form renderer's authored-predicate call sites — only the field half moved.
+Two measured caveats travel with them: a **field** predicate is still evaluated
+with `current_user` unbound on the console's standalone form routes
+(`/forms/:name`, and the public `/f/:slug`), which run a second form renderer
+(objectui#6110); and an authored **section** predicate is read by that second
+renderer alone, because the object-view chain drops the key before any evaluator
+sees it (objectui#6111).
 
 The legacy spellings `visibleOn` (view) and `visibility` (page) are `@deprecated`
 aliases: still accepted and folded into `visibleWhen` at parse time, so existing
@@ -844,8 +839,9 @@ error names the offending key and, when it looks like a visibility predicate,
 points you back at `visibleWhen`.
 
 Breakpoint-based show/hide is handled separately via the component's
-`responsive.hiddenOn` array (e.g. `hiddenOn: ['xs', 'sm']`), see
-`packages/spec/src/ui/responsive.zod.ts`.
+`responsiveStyles` scoped CSS (ADR-0065), e.g. `xsmall: { display: 'none' }` —
+see `packages/spec/src/ui/responsive.zod.ts`. (The former `responsive.hiddenOn`
+layout key was retired in v17.x; no renderer ever applied it.)
 
 #### Position-gated visibility
 
@@ -859,15 +855,32 @@ aliases:
 
 {/* os:check */}
 ```typescript
-// On a PageComponent, an app/nav entry, or a per-option `visibleWhen`:
-visibleWhen: "'sales_manager' in current_user.positions"
+import { P } from '@objectstack/spec';
+
+// On a PageComponent, an app/nav entry, a per-option `visibleWhen`, or a view
+// form field. `P` emits the canonical `{ dialect: 'cel' }` envelope:
+visibleWhen: P`'sales_manager' in current_user.positions`
 ```
 
-Two limits come with it. **First, `current_user` is not bound on form sections and
-form fields** — those predicates evaluate against `record` (plus `previous`) only,
-so the expression above names an unbound root there instead of gating anything.
-**Second, `visibleWhen` is presentation, not access control**: it decides what a
-client draws from data it already holds. To stop someone from *reading* something,
+Write the predicate as a `P` envelope rather than a bare string wherever the
+schema does not go through spec parse. Authored metadata is normalized for you —
+`ExpressionInputSchema` turns a bare string into `{ dialect: 'cel', source }` at
+parse time — but a component tree handed straight to the renderer keeps the bare
+string, and objectui routes bare strings to its legacy expression evaluator,
+which has no `in` operator: the membership test above is rejected there
+(`Unexpected token "i" at position 16`) and then fails open. That routing is
+deliberate and documented (objectui#2661); the envelope is what makes one
+predicate text mean one thing on every surface.
+
+Two limits come with it. **First, the binding is per surface, not per key.** A
+view form **field** predicate binds this scope since objectui#6010; a form
+**section** predicate does not (objectui#6111), and neither does an object-level
+field rule (`Field.*({ visibleWhen })`, ADR-0036) — that one is evaluated by the
+server as well as by the client, binds `record` (plus `previous`, `parent`) only,
+and naming `current_user` there is refused by `@objectstack/lint` at build time
+rather than faulting at runtime. **Second, `visibleWhen` is presentation, not
+access control**: it decides what a client draws from data it already holds. To
+stop someone from *reading* something,
 use the permission layer — [field-level security](/docs/permissions/field-level-security)
 and [permission sets](/docs/permissions/permission-metadata), or
 [row-level security](/docs/permissions/rls), whose `using` clause accepts the very
@@ -1032,4 +1045,4 @@ block. See
 
 - [Page Reference](/docs/references/ui/page) - Page, region, and component schemas
 - [View Reference](/docs/references/ui/view) - Form, list, kanban, and calendar views
-- [Responsive Reference](/docs/references/ui/responsive) - Breakpoint layout and scoped responsive styles
+- [Responsive Reference](/docs/references/ui/responsive) - Per-breakpoint scoped responsive styles (ADR-0065)

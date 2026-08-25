@@ -18,6 +18,20 @@ name: Docs Drift Check
 # package. The comment now also states what the run could NOT see — the derivation being
 # read past its precision, with its silence taken for absence, is what #9192 records.
 #
+# Since #11357 the same posture reaches the HEADLINE. A README exports no symbol, mounts
+# no route and declares no SDK method, so a README-only diff derives no anchor at all and
+# the comment answered it with "this run has no opinion" — while the file it could not
+# anchor was named only inside the collapsed fold. Two real README defects landed that way
+# on one day (#11180, #11262). The fold was right and stays; what changed is that a run
+# with an unanchored file now says so where a reviewer reads it, and withholds its ✅.
+#
+# Since #11356 the ✅ is withheld from the last arm that carried it: "N anchor(s) derived,
+# no hand-written page names any of them". That sentence reports the NAMING RELATION, and
+# a page is listed only when it already names a changed token — so a PR that widens an
+# enumerable vocabulary (a function table, an allowed-value set) is structurally invisible
+# to it, because the new members' absence from the page is precisely the defect. ⚠️ The
+# narrowing does NOT catch that class; it stops the run from claiming it did.
+#
 # And since #9519 it states WHICH TREE it read. On `pull_request`, actions/checkout gives
 # the MERGE of base and head, so the row set is a fact about a commit that exists on no
 # branch a reader can name — while the comment's own re-derivation command sent them to
@@ -77,6 +91,16 @@ jobs:
       # wrapper stays a plain `node` call for exactly that reason.
       - name: Self-test the change → docs mapper
         run: node scripts/docs-audit/check-affected-docs.mjs
+
+      # The advisory's own TEXT, pinned by rendering it (#11357). The step above answers
+      # "what did this run find"; this one answers "what does the comment SAY about what
+      # it did NOT find" — a question no other gate asks, because that wording lives in
+      # the inline `github-script` block below, which nothing imports and nothing
+      # type-checks. It runs THAT block against fixture diffs, so a blind-spot notice that
+      # stopped rendering — or started rendering unconditionally, which is the same defect
+      # wearing the opposite mask — fails here rather than on a reader.
+      - name: Self-test the drift comment's wording
+        run: node scripts/docs-audit/check-drift-comment.mjs
 
       - name: Compute affected docs
         id: affected
@@ -199,12 +223,82 @@ jobs:
               lines.push('</details>');
               return lines;
             })();
+            // ── WHAT THIS RUN COULD NOT COVER BELONGS IN THE HEADLINE (#11357) ────
+            //
+            // A README carries no `@docs-rule` block, exports no symbol, mounts no route
+            // and declares no SDK method, so a README-only diff derives NOTHING and lands
+            // in the zero-anchor arm below. Two such defects landed on one day (#11180 —
+            // `packages/cli/README.md` advertising `os studio`, a command the CLI does not
+            // ship; #11262 — `packages/console/README.md` asserting a `@object-ui/console`
+            // fallback the code no longer performs), and neither was detectable by this
+            // check on any run. A README IS documentation — the published front page of a
+            // package on npm — so this is a hole, not a tolerable exclusion.
+            //
+            // The run was already HONEST about it: the `limits` line below names the file
+            // it could not anchor, and that half is correct. But `limits` renders inside a
+            // <details> fold, which GitHub renders COLLAPSED, under a headline reading
+            // "**this run has no opinion** about the docs" — so a reviewer who does not
+            // expand the fold reads the whole comment as "nothing to check". That is #9192
+            // one surface up: the tool's silence taken for absence, this time by a reader
+            // of its own headline.
+            //
+            // So the blind spot is stated where it cannot be missed, and the fold keeps the
+            // detail. ⛔ NOTHING about anchor derivation changes here — this run finds
+            // exactly what it found before, and every verdict is byte-identical whenever
+            // `anchorless` is empty. The rendering is pinned both directions by
+            // `scripts/docs-audit/check-drift-comment.mjs`, which runs THIS script against
+            // fixture diffs; unconditional text would pass a one-direction pin.
+            const anchorlessNames = `\`${anchorless.slice(0, 3).join('`, `')}\`${anchorless.length > 3 ? ', …' : ''}`;
+            const notCovered = anchorless.length
+              ? `⚠️ **${anchorless.length}** changed file(s) yielded no anchor (${anchorlessNames}), so the pages documenting them are **NOT COVERED by this run** — this is not a clean bill of health for those files.`
+              : '';
             const limits = [];
-            if (anchorless.length) limits.push(`**${anchorless.length}** changed file(s) yielded no anchor (\`${anchorless.slice(0, 3).join('`, `')}\`${anchorless.length > 3 ? ', …' : ''}) — pages documenting those are invisible to this run`);
+            // Same names, one derivation: the headline and this line must never be able to
+            // disagree about which files went unseen.
+            if (anchorless.length) limits.push(`**${anchorless.length}** changed file(s) yielded no anchor (${anchorlessNames}) — pages documenting those are invisible to this run`);
             if (crossCutting.length) limits.push(`**${crossCutting.length}** cross-cutting symbol(s) contributed no route anchor: \`${crossCutting.join('`, `')}\``);
             if (overbroad.length) limits.push(`**${overbroad.length}** anchor(s) matched too much of the corpus to be a work list: \`${overbroad.join('`, `')}\``);
             if (weak.length) limits.push(`**${weak.length}** name(s) were too generic to anchor anything (single lowercase words)`);
             if (bridge && bridge.measured && bridge.unreachable > 0) limits.push(`the SDK route bridge reached **${bridge.reachable}** of **${bridge.clientRows}** client-bound route-ledger rows — the other **${bridge.unreachable}** have no registrar \`path:\` tail to select them, so pages documenting THEIR client methods cannot appear above, on this or any run: \`node scripts/docs-audit/affected-docs.mjs --bridge-coverage\``);
+            // ── THE RULE-CARRYING PAGE AN EMITTER DIFF CANNOT REACH (#11434) ──────
+            //
+            // Every line above is a REPORT about this run: a count this run produced, a
+            // set this run derived. This one is not — it is a BOUNDARY of the anchor
+            // model, and it is why it is pushed unconditionally.
+            //
+            // The pair it describes: a page states a rule by the rule's INPUTS, and the
+            // code that carries the rule is its EMITTER. They share no identifier, so
+            // precision-first anchoring (#9192) has nothing to join them with, and no
+            // per-run signal can be computed — the absence of a shared token is the whole
+            // defect, and an absence anchors nothing. Reported here rather than detected
+            // because there is nothing to detect on.
+            //
+            // Measured, twice, on the specimen from #11434. On the recorded diff (#11430,
+            // `sql-driver.ts` `createColumn`, re-run through today's mapper): 9 anchors
+            // derived, 7 pages listed, and `content/docs/protocol/objectql/types.mdx` —
+            // the page that diff falsified in four places — listed by none of them. Not
+            // by the coarse fallback either: the page never names the changed package. On
+            // today's tree an emitter-only change to `MAX_KEYABLE_VARCHAR_CHARS` derives
+            // 1 anchor, lists 0 pages, and leaves `anchorlessChanges`, `crossCuttingSymbols`,
+            // `overbroadAnchors` and `weakAnchorsDropped` all EMPTY — so no line above
+            // fires, and the run reads as narrow rather than blind. Positive control on
+            // the same tree and the same page: a change to `FieldSchema`, which that page
+            // does name, lists it via `FieldSchema (symbol)`. The page is reachable; this
+            // pairing is not.
+            //
+            // ⛔ NOT a detector, and must not grow into one here. The routes that would
+            // buy real coverage — a curated code↔page ledger, a per-type anchor
+            // vocabulary, authored enumeration marks — are the open question escalated as
+            // #11817, and deciding the cheap half of it by implementation would pre-empt
+            // that ruling. This says the gap exists; it does not close it.
+            //
+            // ⛔ And it is deliberately NOT the `notCovered` headline's posture. That
+            // sentence is conditional because it reports what THIS diff left unanchored,
+            // and unconditional text there would report nothing (see
+            // `scripts/docs-audit/check-drift-comment.mjs`). This one is true on every
+            // run by construction, exactly like the SDK bridge line above, and stating it
+            // only sometimes would be the lie.
+            limits.push('a page that states a rule by its **inputs** shares no identifier with the **emitter** that implements the rule, so an emitter-only diff cannot list it — not on this run and not on any run. Measured on #11430: `content/docs/protocol/objectql/types.mdx` documents the text-family column mapping by the ObjectQL type names it maps FROM (`text` / `textarea` / `html`) while the diff changed `createColumn`; it went unlisted, and it was the page that diff falsified, in four places. No shared token exists to detect this on, so a rule your change carries has to be re-read by hand in the pages that restate it.');
             // A broken scan is not a coverage number and must not read like one — see
             // `bridgeCoverageFrom`. Rendered outside the collapsed section below, because
             // "the bridge could not read the ledgers" is not a limit of this run, it is a
@@ -222,6 +316,11 @@ jobs:
             // say is "the wide net exists and holds N pages". A short list is the right
             // answer here, but a reader must be able to tell a short list from a blind one
             // without leaving the PR.
+            //
+            // Since #11434 `limits` is never empty — the rule-carrying line above holds on
+            // every run — so this fold now renders on every run too. The guard stays: it is
+            // what keeps the fold from rendering empty if that line is ever moved out, and
+            // an empty "what this run could not see" is the reading it exists to refuse.
             const limitsBlock = (limits.length || coarse.length)
               ? ['', '<details><summary>What this run could not see</summary>', '', ...limits.map(l => `- ${l}`), ...(limits.length ? [''] : []), `Coarse fallback — **${coarse.length}** page(s) merely *mention* a changed package (the pre-#9192 predicate, kept for the deliberately-wide backstop): \`${rederive}\` → \`packageMentionDocs\`.`, '</details>']
               : [];
@@ -248,9 +347,38 @@ jobs:
             if (docs.length === 0) {
               // "Nothing found" and "I derived nothing to look for" are DIFFERENT results
               // and must never render alike — that conflation is #9192's own subject.
+              // Since #11357 a THIRD result is separated from both: "part of this diff was
+              // never looked at". `anchorless.length` is what tells it apart, and it is
+              // already known here, at headline-composition time.
+              //
+              // ⛔ The ✅ is DROPPED whenever a file went unanchored, deliberately: a green
+              // tick is the clean-bill glyph, and "no page names the anchors I derived" is
+              // not a clean bill when some of the diff derived no anchor to name.
+              //
+              // ⛔ And since #11356 the ✅ is gone from this arm ENTIRELY — including the run
+              // where nothing went unanchored, which is where it used to live. "No page names
+              // the anchors I derived" is a fact about the NAMING RELATION, not about the
+              // docs: a page is listed because it ALREADY names a changed token, so a change
+              // that WIDENS an enumerable vocabulary can never be caught here — the new
+              // members' absence from the page IS the defect, and an absence names nothing.
+              // Measured on #11347 (six new flow-expression functions): 9 anchors derived, 0
+              // pages named them, ✅ — while `content/docs/automation/flows.mdx` carried a
+              // table enumerating the available bindings that the PR had just made
+              // incomplete, and a reviewing seat almost passed the PR on that tick.
+              //
+              // ⚠️ This does NOT catch that class, and must not be read as doing so. Nothing
+              // in the anchor model can (three in-model routes were measured to fail on the
+              // one real instance; the authoring-mark route that would catch it is escalated
+              // as #11817). What it stops is the run CLAIMING it did: the verdict now says
+              // only what it measured — anchors were derived, no page named them — and leaves
+              // the clean-bill glyph to a run that earned one.
               const headline = anchorList.length === 0
-                ? `Nothing in this diff resolved to a documentable surface (no symbol, route or SDK anchor derived from **${pkgs.length}** changed package(s)), so **this run has no opinion** about the docs.`
-                : `**${anchorList.length}** anchor(s) derived from **${pkgs.length}** changed package(s); no hand-written page names any of them. ✅`;
+                ? (anchorless.length
+                    ? `${notCovered} Nothing else in this diff resolved to a documentable surface (no symbol, route or SDK anchor derived from **${pkgs.length}** changed package(s)).`
+                    : `Nothing in this diff resolved to a documentable surface (no symbol, route or SDK anchor derived from **${pkgs.length}** changed package(s)), so **this run has no opinion** about the docs.`)
+                : (anchorless.length
+                    ? `**${anchorList.length}** anchor(s) derived from **${pkgs.length}** changed package(s); no hand-written page names any of them. ${notCovered}`
+                    : `**${anchorList.length}** anchor(s) derived from **${pkgs.length}** changed package(s); no hand-written page names any of them, so this run has **nothing to list** — **not a clean bill of health**. This check sees only pages that NAME a derived anchor: one that documents this change in prose, or enumerates it in an authoring dialect, names none and stays invisible to it on every run.`);
               // The tree identity is rendered here only when anchors WERE derived: that
               // is the run with an opinion ("no page names any of them"), and a reader
               // whose own tree does yield a row is owed the reason. With no anchors the
@@ -264,7 +392,11 @@ jobs:
               body = [
                 marker,
                 '### 📓 Docs Drift Check',
-                `This PR changes **${pkgs.length}** package(s): ${pkgs.map(p => `\`${p}\``).join(', ')}, touching **${anchorList.length}** documentable anchor(s).`,
+                // The row list below is a work list, and a work list that silently omits
+                // part of the diff is read as the whole of it — so the same sentence rides
+                // this headline too (#11357). It is the same conditional: with nothing
+                // unanchored, this line is byte-identical to what it always was.
+                `This PR changes **${pkgs.length}** package(s): ${pkgs.map(p => `\`${p}\``).join(', ')}, touching **${anchorList.length}** documentable anchor(s).${anchorless.length ? ` ${notCovered}` : ''}`,
               ];
               if (capped) {
                 // NO row list above the cap — folding rows behind a details tag would

@@ -129,3 +129,82 @@ describe('REACT_BLOCKS — the record:* family is out (#4413)', () => {
     expect(tags).toContain('ObjectForm');
   });
 });
+
+/**
+ * #11284 — the react tier converges on the metadata-tier vocabulary,
+ * deprecate-first (maintainer ruling 2026-08-23, recorded on-card). This step
+ * declares the canonical spellings and keeps the old ones as deprecated
+ * aliases; REMOVAL is a later card, so these pins hold the window open in both
+ * directions: the canonical props must be published, and the aliases must not
+ * quietly disappear before their card.
+ */
+describe('REACT_BLOCKS — deprecate-first vocabulary convergence (#11284)', () => {
+  it('every curated dataProps entry resolves to a real schema prop', () => {
+    // `build-react-blocks-contract`'s allow-list FILTERS the schema's props, so
+    // a curated name the schema does not declare is silently dropped from the
+    // published contract — the failure mode would be a canonical spelling that
+    // never actually ships. Pin the subset relation for every block.
+    for (const b of REACT_BLOCKS) {
+      if (!b.schema || !b.dataProps) continue;
+      const schemaProps = new Set(schemaPropNames(b.schema));
+      const missing = b.dataProps.filter((p) => !schemaProps.has(p));
+      expect(missing, `<${b.tag}> dataProps not on its spec schema`).toEqual([]);
+    }
+  });
+
+  it('a deprecated overlay prop names a real canonical prop on the same block, and says so in its description', () => {
+    for (const b of REACT_BLOCKS) {
+      const names = new Set([
+        ...b.interactions.map((i) => i.name),
+        ...(b.schema ? schemaPropNames(b.schema) : []),
+      ]);
+      for (const i of b.interactions) {
+        if (!i.deprecated) continue;
+        expect(
+          names.has(i.deprecated.replacedBy),
+          `<${b.tag}> ${i.name} → "${i.deprecated.replacedBy}" names no prop on the block`,
+        ).toBe(true);
+        // The established textual convention (FormViewSchema.groups /
+        // drawerWidth): the marker travels in the published description.
+        expect(
+          i.description.startsWith('[DEPRECATED'),
+          `<${b.tag}> ${i.name} description must carry the [DEPRECATED → …] marker`,
+        ).toBe(true);
+      }
+    }
+  });
+
+  it('ListView: objectName→data and viewType→type, canonical props surfaced, aliases still published', () => {
+    const lv = REACT_BLOCKS.find((b) => b.tag === 'ListView')!;
+    const dep = Object.fromEntries(
+      lv.interactions.filter((i) => i.deprecated).map((i) => [i.name, i.deprecated!.replacedBy]),
+    );
+    // The ruled mapping, exactly — objectui#2890 A6 (`objectName` →
+    // `data: { provider: 'object', object }`) and its sibling `viewType` → `type`.
+    expect(dep).toEqual({ objectName: 'data', viewType: 'type' });
+    expect(lv.dataProps).toContain('type');
+    expect(lv.dataProps).toContain('data');
+    // Deprecate-first: the aliases stay for the whole window.
+    const names = lv.interactions.map((i) => i.name);
+    expect(names).toContain('objectName');
+    expect(names).toContain('viewType');
+    // The binding requirement survives the deprecation (the lint lets the
+    // canonical `data` prop satisfy it — see validate-react-page-props).
+    expect(lv.interactions.find((i) => i.name === 'objectName')!.required).toBe(true);
+  });
+
+  it('ObjectForm and ObjectChart objectName are NOT converged by this step', () => {
+    // ObjectForm: objectui#2890 Scope B says its spec counterpart is "not 1:1"
+    // and wants an audit before any swap. ObjectChart: chart.zod.ts's own
+    // guidance declares the `objectName` PROP the sanctioned react binding —
+    // the metadata tier binds charts through a dashboard `dataset`, a
+    // different mechanism, so there is no metadata-tier spelling to adopt.
+    // Extending the convergence to either is a new ruling, not a drive-by.
+    for (const tag of ['ObjectForm', 'ObjectChart']) {
+      const b = REACT_BLOCKS.find((x) => x.tag === tag)!;
+      const objectName = b.interactions.find((i) => i.name === 'objectName')!;
+      expect(objectName.required, `<${tag}> objectName stays required`).toBe(true);
+      expect(objectName.deprecated, `<${tag}> objectName is not deprecated`).toBeUndefined();
+    }
+  });
+});

@@ -355,10 +355,14 @@ export function lintLivenessProperties(stack: AnyRec): LivenessLintFinding[] {
   const objectWarn = loadWarnMap(dir, 'object');
   const fieldWarn = loadWarnMap(dir, 'field');
   for (const obj of asArray(stack.objects)) {
+    // Malformed collection item — same "never throws" contract as the flat
+    // TYPE_COLLECTIONS loop and the translation bundle walk below (#11385).
+    if (!isRecord(obj)) continue;
     const objName = typeof obj.name === 'string' ? obj.name : '(unnamed object)';
     if (objectWarn.size > 0) checkItem('object', obj, `object '${objName}'`, objectWarn, findings);
     if (fieldWarn.size > 0) {
       for (const field of asArray(obj.fields)) {
+        if (!isRecord(field)) continue;
         const fieldName = typeof field.name === 'string' ? field.name : '(unnamed field)';
         checkItem('field', field, `object '${objName}' · field '${fieldName}'`, fieldWarn, findings);
       }
@@ -402,6 +406,8 @@ export function lintLivenessProperties(stack: AnyRec): LivenessLintFinding[] {
     const warnMap = loadWarnMap(dir, type);
     if (warnMap.size === 0) continue;
     for (const item of asArray(stack[key])) {
+      // Malformed collection item — "never throws" contract (#11385).
+      if (!isRecord(item)) continue;
       // view containers bind via `object`, not `name`
       const name = typeof item.name === 'string' ? item.name
         : typeof item.object === 'string' ? item.object
