@@ -63,7 +63,6 @@ import { RestServer } from './rest-server.js';
 
 const MIGRATE_PATH = '/api/v1/meta/_migrate-stored';
 const SINGLE_PATH = '/api/v1/meta/:type/:name';
-const COMPOUND_PATH = '/api/v1/meta/:type/:section/:name';
 
 function mockServer() {
     return {

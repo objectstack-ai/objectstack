@@ -43,11 +43,6 @@ import { RestServer } from './rest-server';
 
 const copy = <T>(value: T): T => JSON.parse(JSON.stringify(value));
 
-/** The four fields `FLS_CONTRACT_OBJECT` declares, sorted. */
-const ALL_FIELDS = ['bonus_formula', 'id', 'name', 'salary_grade'];
-/** What the security double lets a restricted caller read. */
-const READABLE_TO_RESTRICTED = ['id', 'name'];
-
 const COMPOUND_PATH = '/api/v1/meta/:type/:section/:name';
 const SINGLE_PATH = '/api/v1/meta/:type/:name';
 /** The compound name the section + name params spell. */
@@ -187,8 +182,10 @@ describe('[#7019 / #12195] the compound-name arity is retired', () => {
      * `meta-item-save-capability-gate.test.ts`; it is not duplicated here.
      */
     it('⭐ mounts neither GET nor PUT at /meta/:type/:section/:name', () => {
+        // Mounting happens at boot, before any caller exists — the anonymous
+        // boot is the honest probe here, not a permissioned one.
         expect(
-            boot({ systemPermissions: [] }).compoundRoutes(),
+            boot({ context: undefined }).compoundRoutes(),
             'a compound-name arity is mounted again. It was #6603\'s gate bypass '
             + 'until #7019, and a fresh mount does not inherit that gate',
         ).toEqual([undefined, undefined]);
@@ -196,7 +193,7 @@ describe('[#7019 / #12195] the compound-name arity is retired', () => {
 
     it('⭐ mounts no compound `:section` arity of any method', () => {
         expect(
-            boot({ systemPermissions: [] }).metaRouteKeys().filter((k: string) => k.includes(':section')),
+            boot({ context: undefined }).metaRouteKeys().filter((k: string) => k.includes(':section')),
         ).toEqual([]);
     });
 });

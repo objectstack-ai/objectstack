@@ -135,7 +135,6 @@ async function outcomeOf(
 
 const SINGLE_PATH = '/api/v1/meta/:type/:name';
 const LIST_PATH = '/api/v1/meta/:type';
-const COMPOUND_PATH = '/api/v1/meta/:type/:section/:name';
 
 const EXITS: ObjectSchemaMaskExit[] = [
     {
