@@ -26,6 +26,15 @@ export {
   DEFAULT_EXTENDER_PRIORITY,
 } from './registry.js';
 export type { ObjectContributor, SchemaRegistryOptions } from './registry.js';
+// [#11997] The canonical "does a code package ship this body?" test (ADR-0029
+// D9.6). Exported because the ADR-0005 overlay precedence is not the registry's
+// alone to apply: any consumer that collapses two same-named contenders into one
+// slot — the automation engine's flow map is the first — has to answer the SAME
+// question, and its whole reason for existing is that callers must not drift
+// into a second answer. Consumers ask this; they do not re-derive it from
+// `_packageId`, which cannot tell a tenant overlay from a code artifact on its
+// own (see the function's own doc, and `isTenantAuthored` above it).
+export { isCodeArtifactBody } from './registry.js';
 // [#7865] Injected-column provenance — the machine-readable marker for anchors
 // the registry registers without provisioning storage (external objects,
 // ADR-0015). Canonical home: `@objectstack/metadata-core`, beside the

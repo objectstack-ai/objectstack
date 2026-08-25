@@ -1132,7 +1132,7 @@ function isTenantAuthored(item: unknown): boolean {
  * Truthy `_packageId`, not the `'sys_metadata'` rehydration sentinel, and not
  * tenant provenance.
  */
-function isCodeArtifactBody(item: unknown): boolean {
+export function isCodeArtifactBody(item: unknown): boolean {
   const it = item as { _packageId?: unknown } | null | undefined;
   if (!it || !it._packageId || it._packageId === 'sys_metadata') return false;
   return !isTenantAuthored(it);

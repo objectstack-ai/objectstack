@@ -15,6 +15,7 @@ import { stripReadDecorations } from '@objectstack/spec/kernel';
 import { AutomationEngine } from './engine.js';
 import type { RunSummaryLogLevel } from './engine.js';
 import { describeThrownForLog, thrownMessageText } from './thrown-cause-diagnostics.js';
+import { resolveFlowPrecedence } from './flow-precedence.js';
 import { installBuiltinNodes, rearmSuspendedWaitTimers } from './builtin/index.js';
 import { resolveRunDataContext } from './runtime-identity.js';
 import { SysAutomationRun } from './sys-automation-run.object.js';
@@ -869,13 +870,25 @@ export class AutomationServicePlugin implements Plugin {
             }
             const flows = ql?.registry?.listItems?.('flow') ?? [];
             ctx.logger.debug(`[Automation] flow pull: registry returned ${flows.length} flow(s)`);
+            // [#11997] Collapse same-named contenders BEFORE anything is armed.
+            // `listItems` returns a packaged flow and a same-named runtime
+            // overlay as two entries (ADR-0048 §3.4 coexistence, deliberate);
+            // the engine's flow map is keyed by bare name, so registering both
+            // used to let Map iteration order decide which one dispatches.
+            // resolveFlowPrecedence applies the ADR-0005 direction — runtime
+            // overlay wins over the packaged artifact — and warns per colliding
+            // name, which is the artifact-vs-DB warning ADR-0048 §3.4 routes to.
+            const resolved = resolveFlowPrecedence(flows, ctx.logger);
+            const shadowedNames = resolved.filter((entry) => entry.shadowing).length;
             let registered = 0;
-            for (const f of flows) {
-                const def = f as { name?: string };
+            for (const entry of resolved) {
+                const def = entry.definition as { name?: string };
                 if (!def?.name) continue;
                 try {
-                    this.engine.registerFlow(def.name, def as never);
-                    this.syncedFlowNames.add(def.name);
+                    this.engine.registerFlow(entry.name, def as never);
+                    this.syncedFlowNames.add(entry.name);
+                    // The receipt, so the shadowed contender is observable at all.
+                    if (entry.shadowing) this.engine.recordFlowShadowing(entry.shadowing);
                     registered++;
                 } catch (e) {
                     // #5048 — the facts go in `meta`, never interpolated into the
@@ -890,7 +903,17 @@ export class AutomationServicePlugin implements Plugin {
                 }
             }
             if (registered > 0) {
-                ctx.logger.info(`[Automation] Pulled ${registered} flow(s) from ObjectQL registry`);
+                // [#11997] `registered` is now a count of DISTINCT names, because
+                // same-named contenders were collapsed above. Before the fix it
+                // counted registrations, so two definitions of one name read as
+                // "2 flows" while only one was ever armed. Name the shadowing
+                // here too, so the count and the collision agree in one place.
+                ctx.logger.info(
+                    `[Automation] Pulled ${registered} flow(s) from ObjectQL registry` +
+                    (shadowedNames > 0
+                        ? ` (${flows.length} candidate(s); ${shadowedNames} name(s) had shadowed definitions — see the collision warnings above)`
+                        : ''),
+                );
             }
         } catch (err) {
             ctx.logger.warn('[Automation] flow pull from ObjectQL registry failed', describeThrownForLog(err));
@@ -1021,6 +1044,23 @@ export class AutomationServicePlugin implements Plugin {
                     `[Automation] flow '${entry.flowName}' declares a '${entry.triggerType}' trigger but is NOT bound — it will never auto-launch. ${entry.reason}`,
                 );
             }
+            // [#11997] Name every flow whose bare name had more than one
+            // definition. The pull already warned at the moment it resolved
+            // precedence; this repeats it at bootstrap, where the other
+            // silent-miss audits are read, because a shadowed flow leaves NO
+            // trace on any other surface — `flows` is keyed by bare name, so
+            // the loser is not in `listFlows()` or in `states` below.
+            for (const record of this.engine.getShadowedFlows()) {
+                const describe = (c: { source: string; packageId?: string }) =>
+                    c.source === 'package' ? `package '${c.packageId}'` : 'a runtime-authored row (sys_metadata)';
+                ctx.logger.warn(
+                    `[Automation] flow '${record.name}' is claimed by ${record.shadowed.length + 1} definitions — ` +
+                        `${describe(record.armed)} is ARMED and ${record.shadowed.map(describe).join(', ')} ` +
+                        `${record.shadowed.length === 1 ? 'is' : 'are'} shadowed (ADR-0005 overlay precedence). ` +
+                        `Only the armed definition dispatches.`,
+                );
+            }
+
             const states = this.engine.getFlowRuntimeStates();
             const drafts = states.filter((s) => s.enabled && (s.status ?? 'draft') === 'draft');
             if (drafts.length > 0) {
