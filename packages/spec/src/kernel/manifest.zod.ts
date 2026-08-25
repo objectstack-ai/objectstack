@@ -334,15 +334,30 @@ export const ManifestSchema = z.object({
    */
   contributes: z.object({
     /**
-     * Register new Metadata Kinds (CRDs).
-     * Enables the system to parse and validate new file types.
-     * Example: Registering a BI plugin to handle *.report.ts
+     * Register new Metadata Kinds (identifiers).
+     *
+     * A declared kind is registered by the engine (`registry.registerKind`,
+     * keyed on `id`) and served back through `GET /metadata/kind`. It does
+     * NOT extend file-type discovery: artifact discovery globs `filePatterns`
+     * off the metadata type registry (`metadata-plugin.zod.ts`), which this
+     * declaration never fed — the former `globs` sub-field promised exactly
+     * that and was retired for it (#11169).
      */
     kinds: z.array(z.object({
       id: z.string().describe('The generic identifier of the kind (e.g., "sys.bi.report")'),
-      globs: z.array(z.string()).describe('File patterns to watch (e.g., ["**/*.report.ts"])'),
+      /** REMOVED (#11169) — discovery reads the metadata type registry's `filePatterns`, never this. */
+      globs: retiredKey(
+        '`manifest.contributes.kinds[].globs` was removed in @objectstack/spec 17 (#11169, ' +
+        'ADR-0049 enforce-or-remove) — it never had an effect: file-type discovery globs ' +
+        '`filePatterns` off the metadata type registry, which `contributes.kinds` does not ' +
+        'extend (`metadata-plugin.zod.ts` states this outright), so the watch patterns ' +
+        'declared here were stored, served back through `GET /metadata/kind`, and never ' +
+        "consulted. Delete the key; the kind's `id` (and optional `description`) still " +
+        'register. If plugin-extensible file-type discovery is wanted, it must be designed ' +
+        'against the `filePatterns` registry, not revived here.',
+      ),
       description: z.string().optional().describe('Description of what this kind represents'),
-    })).optional().describe('New Metadata Types to recognize'),
+    })).optional().describe('Metadata kind identifiers this package registers'),
 
     /** REMOVED (#10724) — the declaration drove nothing; subscribe in plugin code. */
     events: retiredKey(

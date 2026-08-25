@@ -100,9 +100,9 @@
         "kinds": {
           "status": "live",
           "evidence": "packages/objectql/src/engine.ts:4504-4518 → packages/objectql/src/registry.ts:3748 (`registerKind`)",
-          "verifiedAt": "2026-08-23",
+          "verifiedAt": "2026-08-25",
           "evidenceScope": "cross-repo",
-          "note": "THE ONLY LIVE MEMBER OF THIS BLOCK, and the entire reason the block is not uniformly dead: #10627 measured that the whole monorepo contains exactly one non-test read of `manifest.contributes` and it reads `kinds`. Line drift re-verified for this seeding — #10627 cited engine.ts:4499-4501 on 299b85e9d; on b9e9227e3 the same three lines are :4504-4506. BELOW THE WALK: `registerKind(kind: { id, globs })` (registry.ts:3748) reads `id` and `globs`; the item's third declared key `description` is not read. CAVEAT ON THE LIVE VERDICT, filed as #10729: the typed accessor `getAllKinds()` (registry.ts:3752) has zero callers, so what the registered kind is consumed FOR downstream is unclear — the registration itself is real, the consumption of the bucket is not established."
+          "note": "THE ONLY LIVE MEMBER OF THIS BLOCK, and the entire reason the block is not uniformly dead: #10627 measured that the whole monorepo contains exactly one non-test read of `manifest.contributes` and it reads `kinds`. Line drift re-verified for this seeding — #10627 cited engine.ts:4499-4501 on 299b85e9d; on b9e9227e3 the same three lines are :4504-4506. BELOW THE WALK: `globs` was RETIRED (#11169, maintainer ruling 2026-08-24, ADR-0087 D3 `plugin-manifest-kind-globs-retired`) — zero value reads anywhere (the only non-test occurrences were the schema declaration and the two type positions on `registerKind`/`getAllKinds`, which now drop it); the promised file-type discovery runs off the metadata type registry's `filePatterns`, which `contributes.kinds` does not extend. A kind entry is `{ id, description? }`; `registerKind` keys the item on `id`, and `description` is not read. CAVEAT ON THE LIVE VERDICT, filed as #10729: the typed accessor `getAllKinds()` (registry.ts:3752) has zero callers, so what the registered kind is consumed FOR downstream is unclear — the registration itself is real, the consumption of the bucket is not established."
         },
         "events": {
           "status": "dead",

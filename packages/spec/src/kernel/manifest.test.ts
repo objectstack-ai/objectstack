@@ -177,14 +177,14 @@ describe('ManifestSchema', () => {
         type: 'plugin',
         name: 'Business Intelligence',
         contributes: {
+            // `globs` retired (#11169) — a kind entry is `{ id, description? }`.
             kinds: [
                 {
                     id: 'bi.dataset',
-                    globs: ['**/*.dataset.json']
+                    description: 'BI dataset kind'
                 },
                 {
-                    id: 'bi.dashboard',
-                    globs: ['**/*.bi-dash.json']
+                    id: 'bi.dashboard'
                 }
             ]
         }
@@ -469,5 +469,43 @@ describe('contributes dead-member retirement (#10724, ADR-0049 — tombstoned, n
     const parsed = ManifestSchema.parse({ ...base, contributes: {} });
     expect(parsed.contributes).toEqual({});
     expect(parsed.contributes).not.toHaveProperty('commands');
+  });
+});
+
+describe('contributes.kinds[].globs retirement (#11169, ADR-0049 — maintainer-ruled 2026-08-24)', () => {
+  // The sub-field promised glob-driven file-type discovery that actually runs
+  // off the metadata type registry's `filePatterns` — which `contributes.kinds`
+  // does not extend — so an authored `globs` was stored, served back, and never
+  // consulted. The kinds item object is not `.strict()`, so the removal is a
+  // `retiredKey()` tombstone; the pin asserts the SPECIFIC zod issue.
+  const base = { id: 'com.example.kinds', version: '1.0.0', type: 'plugin', name: 'Kinds' };
+
+  it('REJECTS an authored kinds[].globs with the prescription as the issue', () => {
+    const result = ManifestSchema.safeParse({
+      ...base,
+      contributes: { kinds: [{ id: 'sys.bi.report', globs: ['**/*.report.ts'] }] },
+    });
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    const issue = result.error.issues.find(
+      (i) =>
+        i.path[0] === 'contributes' && i.path[1] === 'kinds' &&
+        i.path[2] === 0 && i.path[3] === 'globs',
+    );
+    expect(issue).toBeDefined();
+    expect(issue!.message).toMatch(
+      /manifest\.contributes\.kinds\[\]\.globs.*removed in @objectstack\/spec 17.*#11169.*filePatterns.*Delete the key/s,
+    );
+  });
+
+  it('still parses and keeps a kind entry of `{ id, description? }` — the bucket and `id` are untouched', () => {
+    const parsed = ManifestSchema.parse({
+      ...base,
+      contributes: { kinds: [{ id: 'sys.bi.report', description: 'BI report kind' }] },
+    });
+    expect(parsed.contributes!.kinds).toEqual([
+      { id: 'sys.bi.report', description: 'BI report kind' },
+    ]);
+    expect(parsed.contributes!.kinds![0]).not.toHaveProperty('globs');
   });
 });
