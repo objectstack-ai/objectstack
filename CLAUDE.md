@@ -30,7 +30,7 @@ shared checkout is NOT enough** — it still gets switched under you. You MUST b
 **dedicated per-task worktree**:
 
 ```
-git worktree add ../<repo>-<task> -b <branch> main && cd ../<repo>-<task> && pnpm install
+git fetch origin main && git worktree add ../<repo>-<task> -b <branch> origin/main && cd ../<repo>-<task> && pnpm install
 ```
 
 Then make all edits there. This applies **per repo**: if a task spans `framework` and
