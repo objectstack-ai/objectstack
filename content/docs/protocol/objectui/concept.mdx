@@ -345,7 +345,7 @@ Authorization: Bearer <token>
 ```
 
 **Renderer Logic (Simplified):**
-```typescript
+```tsx
 function FormRenderer({ layout }) {
   return (
     <Form title={layout.title}>
@@ -644,7 +644,7 @@ A conformant ObjectUI renderer must:
 
 Renderers maintain a mapping from JSON types to components:
 
-```typescript
+```tsx
 const componentRegistry = {
   text: TextFieldComponent,
   email: EmailFieldComponent,

@@ -508,6 +508,7 @@ describe('[#11588] the crash-with-a-declared-4xx divergence this card does NOT c
 // only the first:
 //   ① a declared 4xx + `code` → `{ code, message }`
 //   ③ everything else         → `500 ANALYTICS_QUERY_FAILED`
+// (③ has since split — see the #11718 block at the end of this header.)
 // Neither arm's STATUS moves here. ③ answering 500 for an undeclared hook
 // refusal (where `/data` answers 400) is a separate defect and is NOT touched.
 //
@@ -534,6 +535,32 @@ describe('[#11588] the crash-with-a-declared-4xx divergence this card does NOT c
 // Predicted before running the #11684 leg, against `4ceae8ab0`:
 //   §8a GREEN (① untouched) · §8b RED · §8c GREEN (③ untouched)
 //   §8d GREEN (① untouched) · §8e RED
+//
+// ── [#11718] …and §8f's recorded bound is now CLOSED, so it is FLIPPED ──────
+//
+// §8f recorded that the two faces still disagreed in the 5xx band: one
+// producer-declared `{ status: 503, code: 'SERVICE_UNAVAILABLE' }` answered
+// `503 SERVICE_UNAVAILABLE` on `/data` and `500 ANALYTICS_QUERY_FAILED` here.
+// #11718 asked which door was right and the repo had already answered at two
+// of three doors — `/data` (#5582) and the SIBLING analytics face
+// `/analytics/query` (via `dispatcher-plugin.errorResponseBase`) both relay the
+// declared status AND the declared code. This face was the sole collapse.
+//
+// ③ now splits, exactly as ① did in #11684:
+//   ③a a DECLARED 5xx  → relayed through `declaredServerFaultAnswer`, which is
+//      `/data`'s own arm imported rather than restated; prose still withheld
+//   ③b everything else → unchanged `500 ANALYTICS_QUERY_FAILED`, #5667 tiering
+//
+// §8f is FLIPPED rather than deleted, for §8b's reason: a pin that records a
+// measured defect is the only evidence the defect existed. §8g is added beside
+// it as the positive control on ③b, so §8f cannot pass for a route that stopped
+// classifying anything.
+//
+// Predicted before running the #11718 leg, against `2b9a5222`:
+//   §8a GREEN (① untouched) · §8b GREEN (①b untouched) · §8c RED (status moves)
+//   §8d GREEN (① untouched) · §8e GREEN (client band — REGRESSION GUARD, it was
+//     green before this change too) · §8f RED · §8g GREEN (③b untouched —
+//     REGRESSION GUARD, new pin over unchanged behaviour)
 // ---------------------------------------------------------------------------
 
 const ANALYTICS_PATH = '/api/v1/analytics/dataset/query';
@@ -641,15 +668,27 @@ describe('[#11588] the analytics dataset face answers in the hook\'s words too',
         expect(JSON.stringify(res.body)).not.toMatch(WRAPPER_RE);
     }, 60_000);
 
-    it('§8c a declared 5xx still has its prose withheld', async () => {
+    it('§8c a declared 5xx still has its prose withheld — and now keeps its status', async () => {
+        // [#11718] The PROSE half is what this pin was written for and it is
+        // unchanged: a declared server fault's detail is the operator's, and
+        // `connect ECONNREFUSED 10.0.0.5:5432` must not reach the caller.
+        //
+        // The STATUS literal moved with #11718's repair. It was `500` here
+        // because ③ hand-built that envelope, not because anything ruled that a
+        // declared `503` becomes a `500` — §8f measured the disagreement that
+        // literal encoded, and now pins the agreement. Asserted alongside the
+        // withhold precisely so the two halves cannot be confused again: the
+        // message is withheld, the classification is relayed.
         const res = await analyticsRefusal(
             sandboxRefusal('connect ECONNREFUSED 10.0.0.5:5432', {
                 code: 'SERVICE_UNAVAILABLE', status: 503,
             }),
         );
 
-        expect(res.statusCode).toBe(500);
+        expect(res.statusCode).toBe(503);
+        expect(res.body.code).toBe('SERVICE_UNAVAILABLE');
         expect(res.body.error).toBe(INTERNAL_ERROR_MESSAGE);
+        expect(String(JSON.stringify(res.body))).not.toContain('ECONNREFUSED');
     }, 60_000);
 
     it('§8d ⭐ POSITIVE CONTROL — a non-sandboxed refusal is still verbatim', async () => {
@@ -696,41 +735,103 @@ describe('[#11588] the analytics dataset face answers in the hook\'s words too',
         }
     }, 60_000);
 
-    it('§8f MEASURED AND NOT REPAIRED — the two faces still disagree in the 5xx band', async () => {
-        // Found by §8e's first draft, which included this case and reddened
-        // WITH the fix in place. Recorded rather than quietly dropped: a bound
-        // on a parity claim that nobody can see is how the next reader
-        // concludes the two faces agree everywhere.
+    it('§8f [#11718 — REPAIRED] the two faces agree in the 5xx band too', async () => {
+        // ── This pin used to assert the disagreement. It is flipped, not
+        //    deleted, for the same reason §8b was ────────────────────────────
         //
-        // A producer declaring `503` + a code is answered `503
-        // SERVICE_UNAVAILABLE` on `/data` (the #5582 passthrough: keep the
-        // status, keep the code, drop the prose) and `500
-        // ANALYTICS_QUERY_FAILED` here — 502/503 are `isExpectedDataStatus`
-        // lifecycle outcomes that proxies and retry policies read differently
-        // from a 500, so this is the same class of loss #5582 closed one door
-        // over.
+        // What it asserted, verbatim from #11718: "MEASURED AND NOT REPAIRED —
+        // the two faces still disagree in the 5xx band", `/data` answering
+        // `503 SERVICE_UNAVAILABLE` and this face `500 ANALYTICS_QUERY_FAILED`
+        // for ONE producer-declared refusal. That bound on §8e's parity claim
+        // was real and this pin is the evidence it was measured rather than
+        // missed, so the assertion is turned around and the reasoning kept.
         //
-        // NOT repaired by #11684, deliberately. ③'s "a declared 5xx keeps
-        // going through the `ANALYTICS_QUERY_FAILED` envelope" is #5352's
-        // ruling, re-argued by #5367 and #5811 and load-bearing for the
-        // read-scope refusals — moving it is a contract call on a shipped
-        // route that neither folded card asked for. `classifiedRefusalAnswer`
-        // hands a declared 5xx straight back for exactly this reason. Filed as
-        // its own card.
-        const error = sandboxRefusal('boom', { code: 'SERVICE_UNAVAILABLE', status: 503 });
+        // ── WHICH DOOR WAS RIGHT, AND HOW IT WAS DECIDED ────────────────────
+        //
+        // #11718 named three candidate answers — `503 SERVICE_UNAVAILABLE`,
+        // `503 ANALYTICS_QUERY_FAILED`, and "leave it at 500" — and recorded
+        // that #5352's text does not distinguish them, because it argues the
+        // MESSAGE, not the status. The repo had already committed, at two of
+        // its three analytics-and-data doors:
+        //
+        //  - `/data` relays both halves (#5582's passthrough: keep the status,
+        //    keep the code, drop the prose), argued on `502`/`503` being
+        //    `isExpectedDataStatus` lifecycle outcomes that proxies and retry
+        //    policies read differently from a `500`.
+        //  - The SIBLING analytics face `/analytics/query` relays both halves
+        //    too, through `dispatcher-plugin.errorResponseBase` — measured, and
+        //    pinned end-to-end against a real `AnalyticsService` in
+        //    `analytics-query-read-scope-withhold.test.ts`, which asserts a
+        //    read-scope refusal arrives as `500` + `READ_SCOPE_COMPILE_FAILED`.
+        //
+        // So `/analytics/dataset/query` was the only one of three collapsing a
+        // producer's declaration, and it collapsed it only because this arm
+        // built its 5xx body by hand. The repair imports `/data`'s own arm
+        // ({@link declaredServerFaultAnswer}) rather than restating it.
+        //
+        // ⛔ NOT a re-opening of #5352/#5367/#5811. Those rule the PROSE and the
+        // prose is still withheld on both faces — asserted below, on both, for
+        // exactly that reason.
+        //
+        // ⚠️ Neither status nor code is asserted only as "they agree". Agreement
+        // alone is vacuous against this defect in one direction — the defect IS
+        // a 5xx with a code, so "both are 5xx with a code" was already true. The
+        // DECLARED values are named too, so a future collapse on either side
+        // reddens here whichever side moves.
+        const cases: Array<[string, any, number, string, string | undefined]> = [
+            // A REGISTERED ADR-0112 code: relayed verbatim, both faces.
+            ['registered code', sandboxRefusal('boom', { code: 'SERVICE_UNAVAILABLE', status: 503 }),
+                503, 'SERVICE_UNAVAILABLE', undefined],
+            // An UNREGISTERED spelling: #9232's demote channel, and the two
+            // faces must agree on the demote as well as on the relay — this is
+            // the half a hand-built envelope could never have got right.
+            ['unregistered code', sandboxRefusal('boom', { code: 'WAREHOUSE_UNAVAILABLE', status: 503 }),
+                503, 'SERVICE_UNAVAILABLE', 'WAREHOUSE_UNAVAILABLE'],
+            // The `statusCode` spelling (#7525) in the 5xx band.
+            ['`statusCode` spelling', sandboxRefusal('boom', { code: 'SERVICE_UNAVAILABLE', statusCode: 502 }),
+                502, 'SERVICE_UNAVAILABLE', undefined],
+        ];
 
-        const analytics = await analyticsRefusal(error);
-        const rest = setup({ createData: vi.fn().mockRejectedValue(error) });
-        const data = await call(rest, 'POST', DATA_COLLECTION, {
-            params: { object: 'crm_account' }, body: { name: 'x' },
-        });
+        for (const [label, error, status, code, declaredCode] of cases) {
+            const analytics = await analyticsRefusal(error);
+            const rest = setup({ createData: vi.fn().mockRejectedValue(error) });
+            const data = await call(rest, 'POST', DATA_COLLECTION, {
+                params: { object: 'crm_account' }, body: { name: 'x' },
+            });
 
-        expect(data.statusCode).toBe(503);
-        expect(data.body.code).toBe('SERVICE_UNAVAILABLE');
-        expect(analytics.statusCode).toBe(500);
-        expect(analytics.body.code).toBe('ANALYTICS_QUERY_FAILED');
-        // Both still withhold the prose — that half never disagreed (§8c).
-        expect(analytics.body.error).toBe(INTERNAL_ERROR_MESSAGE);
-        expect(data.body.error).toBe(INTERNAL_ERROR_MESSAGE);
+            const where = `${label}: analytics ${analytics.statusCode} ${JSON.stringify(analytics.body)} `
+                + `vs /data ${data.statusCode} ${JSON.stringify(data.body)}`;
+
+            // The two faces agree…
+            expect(analytics.statusCode, where).toBe(data.statusCode);
+            expect(analytics.body.code, where).toBe(data.body.code);
+            expect(analytics.body.declaredCode, where).toBe(data.body.declaredCode);
+            // …on the values the PRODUCER declared, not merely with each other.
+            expect(analytics.statusCode, where).toBe(status);
+            expect(analytics.body.code, where).toBe(code);
+            expect(analytics.body.declaredCode, where).toBe(declaredCode);
+            // …and specifically NOT the pre-repair answer.
+            expect(analytics.statusCode, where).not.toBe(500);
+            expect(analytics.body.code, where).not.toBe('ANALYTICS_QUERY_FAILED');
+            // Both still withhold the prose — that half never disagreed (§8c).
+            expect(analytics.body.error, where).toBe(INTERNAL_ERROR_MESSAGE);
+            expect(data.body.error, where).toBe(INTERNAL_ERROR_MESSAGE);
+        }
+    }, 60_000);
+
+    it('§8g ⭐ POSITIVE CONTROL — an UNDECLARED fault still answers `500 ANALYTICS_QUERY_FAILED`', async () => {
+        // [#11718] The bound on §8f, and the reason the repair is a RELAY rather
+        // than a blanket. Without this, §8f could pass for a route that had
+        // stopped classifying anything at all. A fault nobody declared has no
+        // status and no code to relay, so ③ still owns it — `ANALYTICS_QUERY_FAILED`
+        // is this route's answer for exactly that class, and #5667's tiering
+        // keeps a self-authored fault readable.
+        const res = await analyticsRefusal(
+            new Error('[Analytics] no strategy can handle query for cube "pipeline"'),
+        );
+
+        expect(res.statusCode).toBe(500);
+        expect(res.body.code).toBe('ANALYTICS_QUERY_FAILED');
+        expect(String(res.body.error)).toMatch(/no strategy can handle query/);
     }, 60_000);
 });

@@ -255,6 +255,10 @@ export const zhCN: TranslationData = {
           title: '成员归属',
           description: '新建用户加入什么。与上方的自助注册成对配置。',
         },
+        audience: {
+          title: '注册受众',
+          description: '谁可以成为本环境应用的用户。除「仅限邀请」外的口径会强制开启邮箱验证。邀请、管理员创建、SCIM 开通和企业 SSO 在任何口径下都可进入。',
+        },
         password_policy: {
           title: '密码策略',
           description: '由认证提供商在注册和重置密码时强制的长度限制。',
@@ -291,6 +295,23 @@ export const zhCN: TranslationData = {
             auto: '自动加入默认组织',
             'invite-only': '仅限邀请——绝不自动加入',
           },
+        },
+        audience_posture: {
+          label: '自助注册受众',
+          help: '「仅限邀请」关闭自助注册:用户只能通过运营侧行为进入——邀请、管理员创建/导入、SCIM 开通或企业 SSO。「邮箱域名」仅向下方允许列表中的域名开放;「开放」允许任何人自助注册。除「仅限邀请」外的口径会强制开启邮箱验证,并要求配置下方的自助注册权限集。',
+          options: {
+            invite_only: '仅限邀请——不开放自助注册(默认)',
+            email_domain: '仅允许列表中的邮箱域名',
+            open: '开放——任何人都可自助注册',
+          },
+        },
+        audience_allowed_email_domains: {
+          label: '允许的邮箱域名',
+          help: '裸域名,每行一个或用逗号分隔(如 acme.com)。精确且不区分大小写匹配;子域名需单独列出;不支持通配符。',
+        },
+        audience_self_registration_permission_set: {
+          label: '自助注册权限集',
+          help: '每个自助注册用户获得的 sys_permission_set 名称(可显式声明 member_default;admin_full_access 会被拒绝)。',
         },
         password_min_length: { label: '密码最小长度' },
         password_max_length: { label: '密码最大长度', help: '防止超长密码哈希导致的拒绝服务。' },

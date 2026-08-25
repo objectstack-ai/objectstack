@@ -139,6 +139,10 @@ export const en: TranslationData = {
           title: 'Membership',
           description: 'What a newly created user joins. Pairs with self-service registration above.',
         },
+        audience: {
+          title: 'Audience',
+          description: 'Who may become a user of this environment\'s apps. Postures other than invitation-only force email verification on. Invitations, admin-created users, SCIM provisioning, and enterprise SSO are admitted under every posture.',
+        },
         password_policy: {
           title: 'Password policy',
           description: 'Length bounds enforced by the auth provider on sign-up and password reset.',
@@ -164,6 +168,23 @@ export const en: TranslationData = {
             auto: 'Join the default organization automatically',
             'invite-only': 'Invitation only — never join automatically',
           },
+        },
+        audience_posture: {
+          label: 'Self-registration audience',
+          help: 'invite_only closes self-registration: users come into existence only through an operator-side act (invitation, admin create/import, SCIM, enterprise SSO). email_domain opens it to the allowlisted domains below. open admits anyone. Any posture other than invite_only forces email verification on and requires the self-registration permission set below.',
+          options: {
+            invite_only: 'Invitation only — no self-registration (default)',
+            email_domain: 'Allowlisted email domains only',
+            open: 'Open — anyone may self-register',
+          },
+        },
+        audience_allowed_email_domains: {
+          label: 'Allowed email domains',
+          help: 'Bare domains, one per line or comma-separated (e.g. acme.com). Matching is exact and case-insensitive; subdomains need their own entries; no wildcards.',
+        },
+        audience_self_registration_permission_set: {
+          label: 'Self-registration permission set',
+          help: 'sys_permission_set name granted to each self-registrant (declaring member_default explicitly is fine; admin_full_access is refused). Required whenever the posture permits self-registration.',
         },
         password_min_length: { label: 'Minimum password length' },
         password_max_length: { label: 'Maximum password length', help: 'Guards against denial-of-service via very long password hashing.' },

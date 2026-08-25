@@ -419,6 +419,58 @@ function thrownCodeFields(error: any, status: number): { code?: string; declared
 }
 
 /**
+ * [#11718] The DECLARED-SERVER-FAULT relay, as one definition instead of a
+ * shape each door re-derives: a producer that declared a 5xx keeps its
+ * `status` and its ADR-0112 `code`, and loses only its prose.
+ *
+ * Answers `undefined` for everything else — no declared status, a declared
+ * 4xx, a status outside 400–599 — so a caller can ask it first and keep its
+ * own arm for the rest.
+ *
+ * ## Why this is a function and not a fourth copy
+ *
+ * #11718 measured one producer-declared `{ status: 503, code:
+ * 'SERVICE_UNAVAILABLE' }` through two doors and got two answers:
+ *
+ * ```
+ * POST /api/v1/data/:object              → 503 {"error":"Internal server error","code":"SERVICE_UNAVAILABLE"}
+ * POST /api/v1/analytics/dataset/query   → 500 {"code":"ANALYTICS_QUERY_FAILED","error":"Internal server error"}
+ * ```
+ *
+ * The analytics dataset face built its 5xx body by hand, so #5582's relay —
+ * argued on the ground that `502`/`503` are `isExpectedDataStatus` lifecycle
+ * outcomes that proxies and retry policies read differently from a `500` —
+ * simply never reached it. It is the same failure mode {@link
+ * classifiedRefusalAnswer} was extracted for one arm earlier: a third local
+ * opinion at this boundary is precisely how two faces come to disagree. So the
+ * arm is imported, not restated.
+ *
+ * ⚠️ Its gate is `declaredHttpStatus(...) >= 500`, NOT `declaresServerFault`
+ * alone. The two differ on a 5xx that declared no `code`, and the difference is
+ * load-bearing: a producer declaring `{ status: 503 }` and nothing else still
+ * gets its status relayed, carrying no code at all. Nothing is invented for the
+ * half that was not declared — see the paragraph in {@link mapDataError}'s arm
+ * this body was lifted from. Gating on `declaresServerFault` instead would
+ * silently keep collapsing that shape onto `500`, which is the very defect,
+ * one case narrower.
+ */
+export function declaredServerFaultAnswer(
+    error: any,
+): { status: number; body: Record<string, unknown> } | undefined {
+    const declaredStatus = declaredHttpStatus(error);
+    if (declaredStatus === undefined || declaredStatus < 500) return undefined;
+    return {
+        status: declaredStatus,
+        body: {
+            error: INTERNAL_ERROR_MESSAGE,
+            ...(declaresServerFault({ status: declaredStatus, code: error?.code })
+                ? thrownCodeFields(error, declaredStatus)
+                : {}),
+        },
+    };
+}
+
+/**
  * [#8264] Postgres' missing-relation template, anchored on the QUOTED
  * identifier the driver always emits — never on the bare "does not exist"
  * tail, which is ordinary business English. Module-scoped (not re-compiled
@@ -896,16 +948,16 @@ function classifyDataError(error: any, object?: string): { status: number; body:
         // still decides WHETHER a code rides — its non-empty-string half is the
         // same question `thrownCodeFields` asks internally, so the two agree by
         // construction and this arm's body-shape decision is unchanged.
-        if (declaredStatus >= 500) {
-            return {
-                status: declaredStatus,
-                body: {
-                    error: INTERNAL_ERROR_MESSAGE,
-                    ...(declaresServerFault({ status: declaredStatus, code: error?.code })
-                        ? thrownCodeFields(error, declaredStatus)
-                        : {}),
-                },
-            };
+        //
+        // [#11718] The arm's BODY now lives in {@link declaredServerFaultAnswer},
+        // unchanged — every paragraph above still describes it, and this call is
+        // the only reader of it that existed before. It was lifted out so the
+        // `/analytics/dataset/query` face could answer a declared 5xx with the
+        // same bytes rather than a second hand-built envelope; `/data`'s answer
+        // is the reference and does not move.
+        const declaredServerFault = declaredServerFaultAnswer(error);
+        if (declaredServerFault !== undefined) {
+            return declaredServerFault;
         }
         // [#5423] The 4xx arm is UNCHANGED by #5582: a 4xx message is addressed
         // TO the caller and is the remedy, so it keeps its wording, its

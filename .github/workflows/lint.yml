@@ -315,6 +315,38 @@ jobs:
       - name: scripts/ TypeScript parses go through one module
         run: pnpm check:parse-guard
 
+      # The bash-3.2 floor, over every shell file the repo ships (#12221).
+      # `/usr/bin/env bash` is bash 3.2.57 on macOS -- Apple ships no bash 4+,
+      # for licensing reasons -- and THIS RUNNER IS BASH 5, where every construct
+      # the gate refuses works perfectly. So the class is invisible to a normal
+      # green run in both directions: the defect passes CI, and so does its
+      # repair. It is found by an operator on a Mac, at status 127, at the moment
+      # they most needed the script to work. Two incidents, four sites, both
+      # caught by hand and late; one of them turned the shared verify lock's
+      # bounded wait into an unbounded spin, because an unbound `EPOCHSECONDS`
+      # leaves the deadline EMPTY rather than erroring.
+      # What this step buys that a bash-5 runner cannot otherwise see is a static
+      # verdict: the gate reads the text, so it never needs the construct to be
+      # reachable, only written. Rationale, the construct table with a bash
+      # version per row, and the three exemption rules that tell a file HUNTING
+      # these tokens from a file USING one: the gate script's header. The short
+      # version, for whoever is reading this because the step just went red --
+      # there is deliberately NO filename allowlist, and no waiver comment; a
+      # legitimate mention is already exempt by being a full-line comment, a
+      # guarded `${VAR:-}` read, or a token outside command position.
+      # ⛔ This does not supersede the two file-scoped scans in
+      # `check:objectui-changeset` and the verify lock's own self-test. Those
+      # pair their scan with a SIMULATED 3.2 run (`enable -n mapfile readarray`
+      # via BASH_ENV, plus `unset` of the bash-5 variables), which reaches
+      # runtime-assembled commands a static scan cannot see and proves the real
+      # path COMPLETES without the builtins. Different instruments, one class.
+      # Scans 20 tracked shell files, no spawns in the production run; ~0.1s.
+      # The `--self-test` half spawns a handful of real bash children (the
+      # known-bad fixture tree, and the simulated-3.2 probe that proves the
+      # harness is not vacuous); ~1s.
+      - name: shell scripts hold the bash 3.2 floor
+        run: pnpm check:bash32-floor
+
       # The comment-mask CORPUS sweep (#10640) — the other instrument for the
       # module the two gates above delegate "is this span a comment, or code?"
       # to. `js-comment-mask.mjs --self-test` pins the SHAPES someone wrote
