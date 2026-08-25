@@ -54,6 +54,22 @@ const result = BulkActionDefSchema.parse(data);
 | **maxRecords** | `integer` | optional | Selection size above which the run is blocked. Set it on defs whose server work is expensive — an aggregate def carries every selected id in one request. |
 | **batchSize** | `integer` | optional | Records per executor batch (default 200). Data-plane operations only — an aggregate run is a single call by definition. |
 
+### Nested Shape: `BulkActionDef.params[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Param key — becomes params[name] in the patch / action params bag. |
+| **label** | `string` | optional | Field label in the dialog. Plain string: an authored def is not i18n-resolved (see module header). |
+| **help** | `string` | optional | Help text under the field. (An ActionParam spells this `helpText` — known divergence, module header.) |
+| **type** | `Enum<'text' \| 'textarea' \| 'email' \| 'url' \| 'phone' \| 'password' \| 'secret' \| …>` | ✅ | Field widget to render, from the standard field-type vocabulary (text/number/select/lookup/date/…). |
+| **required** | `boolean` | optional | Blocks the Confirm button until a value is present. |
+| **default** | `any` | optional | Value applied when the dialog opens. (An ActionParam spells this `defaultValue`.) |
+| **options** | `({ label: string; value: string \| number \| boolean } & Record<string, any>)[]` | optional | Static options for select-style widgets. Each entry is `{ label, value }` plus any extra widget config — the entry is open (`.passthrough()`) because the renderer forwards unknown option keys to the field widget, which reads `color` / `icon` / `disabled` / `visibleWhen` beyond the declared pair. |
+| **object** | `string` | optional | Target object for a `lookup` widget. (An ActionParam spells this `reference`.) |
+| **labelField** | `string` | optional | Related-object field used as the option label for a `lookup` widget (defaults to name/full_name/email/id). |
+| **multiple** | `boolean` | optional | Allow picking multiple values — the param value becomes an array and is written to the patch as-is. |
+| **placeholder** | `string` | optional | Placeholder text. |
+
 
 ---
 
@@ -147,6 +163,13 @@ const result = BulkActionDefSchema.parse(data);
 * `progress`
 * `tags`
 * `vector`
+
+### Nested Shape: `BulkActionParam.options[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **label** | `string` | ✅ | Option label (plain string — not i18n-resolved on this path). |
+| **value** | `string \| number \| boolean` | ✅ | Stored value. |
 
 
 ---

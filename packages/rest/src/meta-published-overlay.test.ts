@@ -351,18 +351,29 @@ describe('[#8278] REST `/meta/:type/:name/published` resolves from the published
         expect(res.body).toEqual({ error: { code: 'NOT_FOUND', message: 'Not found' } });
     }, 60_000);
 
-    it('§6 the COMPOUND arity resolves the runtime-published sub-resource', async () => {
+    it('§6 the COMPOUND arity resolves a STORED sub-resource row — reads stay open for residue', async () => {
         // `getPublished('lead', 'views/all_leads')` is the shape the SDK
         // documents and the shape this route's own comment names
         // (`lead/views/all_leads/published`). It reaches a DIFFERENT route
         // registration than §1, so the overlay consult has to be on both or
         // the fix covers only one of the two doors this card puts in scope.
+        //
+        // [#12194] The fixture used to be authored through `runtimePublish` —
+        // the item-name grammar now refuses a slash name at that door, and the
+        // READ door deliberately stays open for pre-grammar residue rows. So
+        // the row is seeded directly in the store, which is exactly what such
+        // a row now is: residue this route must keep serving until D2/D3
+        // dispose of it.
         const { engine, rows } = makeStubEngine();
         const metadata = new MetadataManager({});
         const protocol = makeProtocol(engine, metadata);
 
         const viewBody = { name: 'all_leads', label: 'All Leads', columns: ['name'] };
-        await runtimePublish(protocol, 'views/all_leads', viewBody, 'lead');
+        await engine.insert('sys_metadata', {
+            type: 'lead', name: 'views/all_leads',
+            organization_id: null, package_id: 'app.projects', state: 'active',
+            metadata: JSON.stringify(viewBody), checksum: 'sha256:residue', version: 1,
+        });
 
         expect(Array.from(rows.values()).filter((r) => r.state === 'active')).toHaveLength(1);
 

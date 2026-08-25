@@ -106,6 +106,64 @@ const result = ActionSchema.parse(data);
 | **_packageVersion** | `string` | optional | Owning package version. |
 | **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
 
+### Nested Shape: `Action.params[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | optional |  |
+| **field** | `string` | optional | Snake case identifier (lowercase with underscores only) |
+| **objectOverride** | `string` | optional | Snake case identifier (lowercase with underscores only) |
+| **label** | `string \| Record<string, string>` | optional | Display label — the default-language string, or an inline locale map (`{ en, "zh-CN" }`) resolved at render time |
+| **type** | `Enum<'text' \| 'textarea' \| 'email' \| 'url' \| 'phone' \| 'password' \| 'secret' \| …>` | optional |  |
+| **required** | `boolean` | optional (default: `false`) |  |
+| **options** | `{ label: string \| Record<string, string>; value: string; visibleWhen?: string \| object }[]` | optional |  |
+| **placeholder** | `string` | optional |  |
+| **helpText** | `string` | optional |  |
+| **defaultValue** | `any` | optional |  |
+| **multiple** | `boolean` | optional | Allow multiple values (array value shape); mirrors FieldSchema.multiple. |
+| **accept** | `string[]` | optional | Accepted upload types (MIME types / extensions) for file/image params. |
+| **maxSize** | `integer` | optional | Max upload size in bytes for file/image params. |
+| **reference** | `string` | optional | Reference target object for inline lookup/master_detail params; mirrors FieldSchema.reference. |
+| **defaultFromRow** | `boolean` | optional |  |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Param visibility predicate (CEL); omits the param when false. |
+| **requiresFeature** | `Enum<'twoFactor' \| 'organization' \| 'multiOrgEnabled' \| 'degradedTenancy' \| …>` | optional | Public auth feature flag gating this param; lowered into `visible` at parse time. |
+
+### Nested Shape: `Action.resultDialog`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **title** | `string \| Record<string, string>` | optional | Display label — the default-language string, or an inline locale map (`{ en, "zh-CN" }`) resolved at render time |
+| **description** | `string \| Record<string, string>` | optional | Display label — the default-language string, or an inline locale map (`{ en, "zh-CN" }`) resolved at render time |
+| **acknowledge** | `string \| Record<string, string>` | optional | Acknowledge button label, e.g. "I have saved this" |
+| **format** | `Enum<'qrcode' \| 'code-list' \| 'secret' \| 'text' \| 'json'>` | optional | Default format for fields without their own format. Defaults to json when omitted. |
+| **fields** | `{ path: string; label?: string \| Record<string, string>; format?: Enum<'qrcode' \| 'code-list' \| 'secret' \| 'text' \| 'json'> }[]` | optional | Which fields from result.data to render. Omit to dump full JSON. |
+
+### Nested Shape: `Action.ai`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **exposed** | `boolean` | optional (default: `false`) | Expose this action to AI agents. Requires `description` when true. |
+| **description** | `string` | optional | LLM-facing description (≥40 chars). Required when exposed. |
+| **category** | `Enum<'data' \| 'action' \| 'flow' \| 'integration' \| 'vector_search' \| 'analytics' \| 'utility'>` | optional | Tool category override (defaults to "action"). |
+| **paramHints** | `Record<string, { description?: string; enum?: (string \| number)[]; examples?: any[] }>` | optional | Per-parameter AI hints keyed by param name. |
+| **outputSchema** | `Record<string, any>` | optional | JSON Schema for the action return value. |
+| **requiresConfirmation** | `boolean` | optional | Override HITL confirmation for AI invocations. |
+
+### Nested Shape: `Action.onSuccess`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **navigate** | `string` | ✅ | Route/URL template navigated to after the action succeeds. Interpolates $`{param.*}` (params-dialog values), $`{ctx.*}` (origin/apiBase/user/org/recordId/selection) and $`{result.*}` (the action's server response payload — NEW with this key, e.g. $`{result.id}`). Relative = SPA route hop; renderers MUST encodeURIComponent values in query positions. |
+| **openIn** | `Enum<'self' \| 'newTab'>` | optional (default: `"self"`) | Where to perform the post-success navigation: 'self' (default — in-place SPA navigation, immune to popup blocking) or 'newTab'. Closed enum — no general navigation DSL. |
+
+### Nested Shape: `Action.aria`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **ariaLabel** | `string \| Record<string, string>` | optional | Accessible label for screen readers (WAI-ARIA aria-label). Plain string, or an inline locale map — no translation-bundle slot addresses this key, so a plain string is announced in the source language. |
+| **ariaDescribedBy** | `string` | optional | ID of element providing additional description (WAI-ARIA aria-describedby) |
+| **role** | `string` | optional | WAI-ARIA role attribute (e.g., "dialog", "navigation", "alert") |
+
 
 ---
 
@@ -215,6 +273,14 @@ const result = ActionSchema.parse(data);
 * `tags`
 * `vector`
 
+### Nested Shape: `ActionParam.options[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **label** | `string \| Record<string, string>` | ✅ | Display label — the default-language string, or an inline locale map (`{ en, "zh-CN" }`) resolved at render time |
+| **value** | `string` | ✅ |  |
+| **visibleWhen** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Per-option visibility predicate (CEL) — option is offered only when TRUE (else omitted). Same env as the field-level per-option visibleWhen (record + current_user). e.g. P`record.tier == 'gold'` |
+
 
 ---
 
@@ -251,6 +317,28 @@ const result = ActionSchema.parse(data);
 | **errorMessage** | `string \| Record<string, string>` | optional | Error message to show when the action fails (overrides the raw error). |
 | **refreshAfter** | `boolean` | optional (default: `false`) | Refresh view after execution |
 | **opensInNewTab** | `boolean` | optional | Open the action result in a new tab. The renderer pre-opens the tab synchronously on click (popup-blocker-safe) and navigates it to the handler's redirectUrl. |
+
+### Nested Shape: `InlineAction.params[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | optional |  |
+| **field** | `string` | optional | Snake case identifier (lowercase with underscores only) |
+| **objectOverride** | `string` | optional | Snake case identifier (lowercase with underscores only) |
+| **label** | `string \| Record<string, string>` | optional | Display label — the default-language string, or an inline locale map (`{ en, "zh-CN" }`) resolved at render time |
+| **type** | `Enum<'text' \| 'textarea' \| 'email' \| 'url' \| 'phone' \| 'password' \| 'secret' \| …>` | optional |  |
+| **required** | `boolean` | optional (default: `false`) |  |
+| **options** | `{ label: string \| Record<string, string>; value: string; visibleWhen?: string \| object }[]` | optional |  |
+| **placeholder** | `string` | optional |  |
+| **helpText** | `string` | optional |  |
+| **defaultValue** | `any` | optional |  |
+| **multiple** | `boolean` | optional | Allow multiple values (array value shape); mirrors FieldSchema.multiple. |
+| **accept** | `string[]` | optional | Accepted upload types (MIME types / extensions) for file/image params. |
+| **maxSize** | `integer` | optional | Max upload size in bytes for file/image params. |
+| **reference** | `string` | optional | Reference target object for inline lookup/master_detail params; mirrors FieldSchema.reference. |
+| **defaultFromRow** | `boolean` | optional |  |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Param visibility predicate (CEL); omits the param when false. |
+| **requiresFeature** | `Enum<'twoFactor' \| 'organization' \| 'multiOrgEnabled' \| 'degradedTenancy' \| …>` | optional | Public auth feature flag gating this param; lowered into `visible` at parse time. |
 
 
 ---

@@ -44,6 +44,40 @@ const result = DatabaseLevelIsolationStrategySchema.parse(data);
 | **backup** | `{ strategy: Enum<'individual' \| 'consolidated' \| 'on_demand'>; frequencyHours: integer; retentionDays: integer }` | optional | Backup configuration |
 | **encryption** | `{ perTenantKeys: boolean; algorithm: string; keyManagement?: Enum<'aws_kms' \| 'azure_key_vault' \| 'gcp_kms' \| 'hashicorp_vault' \| 'custom'> }` | optional | Encryption configuration |
 
+### Nested Shape: `DatabaseLevelIsolationStrategy.database`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **namingPattern** | `string` | optional (default: `"tenant_{tenant_id}"`) | Database naming pattern |
+| **serverStrategy** | `Enum<'shared' \| 'sharded' \| 'dedicated'>` | optional (default: `"shared"`) | Server assignment strategy |
+| **separateCredentials** | `boolean` | optional (default: `true`) | Separate credentials per tenant |
+| **autoCreateDatabase** | `boolean` | optional (default: `true`) | Auto-create database |
+
+### Nested Shape: `DatabaseLevelIsolationStrategy.connectionPool`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **poolSize** | `integer` | optional (default: `10`) | Connection pool size |
+| **maxActivePools** | `integer` | optional (default: `100`) | Max active pools |
+| **idleTimeout** | `integer` | optional (default: `300`) | Idle pool timeout |
+| **usePooler** | `boolean` | optional (default: `true`) | Use connection pooler |
+
+### Nested Shape: `DatabaseLevelIsolationStrategy.backup`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **strategy** | `Enum<'individual' \| 'consolidated' \| 'on_demand'>` | optional (default: `"individual"`) | Backup strategy |
+| **frequencyHours** | `integer` | optional (default: `24`) | Backup frequency |
+| **retentionDays** | `integer` | optional (default: `30`) | Backup retention days |
+
+### Nested Shape: `DatabaseLevelIsolationStrategy.encryption`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **perTenantKeys** | `boolean` | optional (default: `false`) | Per-tenant encryption keys |
+| **algorithm** | `string` | optional (default: `"AES-256-GCM"`) | Encryption algorithm |
+| **keyManagement** | `Enum<'aws_kms' \| 'azure_key_vault' \| 'gcp_kms' \| 'hashicorp_vault' \| 'custom'>` | optional | Key management service |
+
 
 ---
 
@@ -87,6 +121,23 @@ Quota enforcement check result
 | **database** | `{ enableRLS: boolean; contextMethod: Enum<'session_variable' \| 'search_path' \| 'application_name'>; contextVariable: string; applicationValidation: boolean }` | optional | Database configuration |
 | **performance** | `{ usePartialIndexes: boolean; usePartitioning: boolean; poolSizePerTenant?: integer }` | optional | Performance settings |
 
+### Nested Shape: `RowLevelIsolationStrategy.database`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **enableRLS** | `boolean` | optional (default: `true`) | Enable PostgreSQL Row-Level Security |
+| **contextMethod** | `Enum<'session_variable' \| 'search_path' \| 'application_name'>` | optional (default: `"session_variable"`) | How to set tenant context |
+| **contextVariable** | `string` | optional (default: `"app.current_tenant"`) | Session variable name |
+| **applicationValidation** | `boolean` | optional (default: `true`) | Application-level tenant validation |
+
+### Nested Shape: `RowLevelIsolationStrategy.performance`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **usePartialIndexes** | `boolean` | optional (default: `true`) | Use partial indexes per tenant |
+| **usePartitioning** | `boolean` | optional (default: `false`) | Use table partitioning by tenant_id |
+| **poolSizePerTenant** | `integer` | optional | Connection pool size per tenant |
+
 
 ---
 
@@ -100,6 +151,30 @@ Quota enforcement check result
 | **schema** | `{ namingPattern: string; includePublicSchema: boolean; sharedSchema: string; autoCreateSchema: boolean }` | optional | Schema configuration |
 | **migrations** | `{ strategy: Enum<'parallel' \| 'sequential' \| 'on_demand'>; maxConcurrent: integer; rollbackOnError: boolean }` | optional | Migration configuration |
 | **performance** | `{ poolPerSchema: boolean; schemaCacheTTL: integer }` | optional | Performance settings |
+
+### Nested Shape: `SchemaLevelIsolationStrategy.schema`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **namingPattern** | `string` | optional (default: `"tenant_{tenant_id}"`) | Schema naming pattern |
+| **includePublicSchema** | `boolean` | optional (default: `true`) | Include public schema |
+| **sharedSchema** | `string` | optional (default: `"public"`) | Schema for shared resources |
+| **autoCreateSchema** | `boolean` | optional (default: `true`) | Auto-create schema |
+
+### Nested Shape: `SchemaLevelIsolationStrategy.migrations`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **strategy** | `Enum<'parallel' \| 'sequential' \| 'on_demand'>` | optional (default: `"parallel"`) | Migration strategy |
+| **maxConcurrent** | `integer` | optional (default: `10`) | Max concurrent migrations |
+| **rollbackOnError** | `boolean` | optional (default: `true`) | Rollback on error |
+
+### Nested Shape: `SchemaLevelIsolationStrategy.performance`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **poolPerSchema** | `boolean` | optional (default: `false`) | Separate pool per schema |
+| **schemaCacheTTL** | `integer` | optional (default: `3600`) | Schema cache TTL |
 
 
 ---
@@ -119,6 +194,26 @@ Quota enforcement check result
 | **plan** | `Enum<'free' \| 'pro' \| 'enterprise'>` | optional | Subscription plan |
 | **customizations** | `Record<string, any>` | optional | Custom configuration values |
 | **quotas** | `{ maxUsers?: integer; maxStorage?: integer; apiRateLimit?: integer; maxObjects?: integer; … }` | optional |  |
+
+### Nested Shape: `Tenant.connectionConfig`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **url** | `string` | ✅ | Database connection URL |
+| **authToken** | `string` | optional | Database auth token (encrypted at rest) |
+| **group** | `string` | optional | Turso database group name |
+
+### Nested Shape: `Tenant.quotas`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **maxUsers** | `integer` | optional | Maximum number of users |
+| **maxStorage** | `integer` | optional | Maximum storage in bytes |
+| **apiRateLimit** | `integer` | optional | API requests per minute |
+| **maxObjects** | `integer` | optional | Maximum number of custom objects |
+| **maxRecordsPerObject** | `integer` | optional | Maximum records per object |
+| **maxDeploymentsPerDay** | `integer` | optional | Maximum deployments per day |
+| **maxStorageBytes** | `integer` | optional | Maximum storage in bytes |
 
 
 ---
@@ -154,6 +249,23 @@ This schema accepts one of the following structures:
 | **database** | `{ enableRLS: boolean; contextMethod: Enum<'session_variable' \| 'search_path' \| 'application_name'>; contextVariable: string; applicationValidation: boolean }` | optional | Database configuration |
 | **performance** | `{ usePartialIndexes: boolean; usePartitioning: boolean; poolSizePerTenant?: integer }` | optional | Performance settings |
 
+### Nested Shape: `TenantIsolationConfig.database`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **enableRLS** | `boolean` | optional (default: `true`) | Enable PostgreSQL Row-Level Security |
+| **contextMethod** | `Enum<'session_variable' \| 'search_path' \| 'application_name'>` | optional (default: `"session_variable"`) | How to set tenant context |
+| **contextVariable** | `string` | optional (default: `"app.current_tenant"`) | Session variable name |
+| **applicationValidation** | `boolean` | optional (default: `true`) | Application-level tenant validation |
+
+### Nested Shape: `TenantIsolationConfig.performance`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **usePartialIndexes** | `boolean` | optional (default: `true`) | Use partial indexes per tenant |
+| **usePartitioning** | `boolean` | optional (default: `false`) | Use table partitioning by tenant_id |
+| **poolSizePerTenant** | `integer` | optional | Connection pool size per tenant |
+
 ---
 
 #### Option 2
@@ -166,6 +278,30 @@ This schema accepts one of the following structures:
 | **schema** | `{ namingPattern: string; includePublicSchema: boolean; sharedSchema: string; autoCreateSchema: boolean }` | optional | Schema configuration |
 | **migrations** | `{ strategy: Enum<'parallel' \| 'sequential' \| 'on_demand'>; maxConcurrent: integer; rollbackOnError: boolean }` | optional | Migration configuration |
 | **performance** | `{ poolPerSchema: boolean; schemaCacheTTL: integer }` | optional | Performance settings |
+
+### Nested Shape: `TenantIsolationConfig.schema`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **namingPattern** | `string` | optional (default: `"tenant_{tenant_id}"`) | Schema naming pattern |
+| **includePublicSchema** | `boolean` | optional (default: `true`) | Include public schema |
+| **sharedSchema** | `string` | optional (default: `"public"`) | Schema for shared resources |
+| **autoCreateSchema** | `boolean` | optional (default: `true`) | Auto-create schema |
+
+### Nested Shape: `TenantIsolationConfig.migrations`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **strategy** | `Enum<'parallel' \| 'sequential' \| 'on_demand'>` | optional (default: `"parallel"`) | Migration strategy |
+| **maxConcurrent** | `integer` | optional (default: `10`) | Max concurrent migrations |
+| **rollbackOnError** | `boolean` | optional (default: `true`) | Rollback on error |
+
+### Nested Shape: `TenantIsolationConfig.performance`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **poolPerSchema** | `boolean` | optional (default: `false`) | Separate pool per schema |
+| **schemaCacheTTL** | `integer` | optional (default: `3600`) | Schema cache TTL |
 
 ---
 
@@ -180,6 +316,40 @@ This schema accepts one of the following structures:
 | **connectionPool** | `{ poolSize: integer; maxActivePools: integer; idleTimeout: integer; usePooler: boolean }` | optional | Connection pool configuration |
 | **backup** | `{ strategy: Enum<'individual' \| 'consolidated' \| 'on_demand'>; frequencyHours: integer; retentionDays: integer }` | optional | Backup configuration |
 | **encryption** | `{ perTenantKeys: boolean; algorithm: string; keyManagement?: Enum<'aws_kms' \| 'azure_key_vault' \| 'gcp_kms' \| 'hashicorp_vault' \| 'custom'> }` | optional | Encryption configuration |
+
+### Nested Shape: `TenantIsolationConfig.database`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **namingPattern** | `string` | optional (default: `"tenant_{tenant_id}"`) | Database naming pattern |
+| **serverStrategy** | `Enum<'shared' \| 'sharded' \| 'dedicated'>` | optional (default: `"shared"`) | Server assignment strategy |
+| **separateCredentials** | `boolean` | optional (default: `true`) | Separate credentials per tenant |
+| **autoCreateDatabase** | `boolean` | optional (default: `true`) | Auto-create database |
+
+### Nested Shape: `TenantIsolationConfig.connectionPool`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **poolSize** | `integer` | optional (default: `10`) | Connection pool size |
+| **maxActivePools** | `integer` | optional (default: `100`) | Max active pools |
+| **idleTimeout** | `integer` | optional (default: `300`) | Idle pool timeout |
+| **usePooler** | `boolean` | optional (default: `true`) | Use connection pooler |
+
+### Nested Shape: `TenantIsolationConfig.backup`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **strategy** | `Enum<'individual' \| 'consolidated' \| 'on_demand'>` | optional (default: `"individual"`) | Backup strategy |
+| **frequencyHours** | `integer` | optional (default: `24`) | Backup frequency |
+| **retentionDays** | `integer` | optional (default: `30`) | Backup retention days |
+
+### Nested Shape: `TenantIsolationConfig.encryption`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **perTenantKeys** | `boolean` | optional (default: `false`) | Per-tenant encryption keys |
+| **algorithm** | `string` | optional (default: `"AES-256-GCM"`) | Encryption algorithm |
+| **keyManagement** | `Enum<'aws_kms' \| 'azure_key_vault' \| 'gcp_kms' \| 'hashicorp_vault' \| 'custom'>` | optional | Key management service |
 
 ---
 
@@ -223,6 +393,32 @@ This schema accepts one of the following structures:
 | **encryption** | `{ atRest: boolean; inTransit: boolean; fieldLevel: boolean }` | optional | Encryption requirements |
 | **accessControl** | `{ requireMFA: boolean; requireSSO: boolean; ipWhitelist?: string[]; sessionTimeout: integer }` | optional | Access control requirements |
 | **compliance** | `{ standards?: Enum<'sox' \| 'hipaa' \| 'gdpr' \| 'pci_dss' \| 'iso_27001' \| 'fedramp'>[]; requireAuditLog: boolean; auditRetentionDays: integer; dataResidency?: object }` | optional | Compliance requirements |
+
+### Nested Shape: `TenantSecurityPolicy.encryption`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **atRest** | `boolean` | optional (default: `true`) | Require encryption at rest |
+| **inTransit** | `boolean` | optional (default: `true`) | Require encryption in transit |
+| **fieldLevel** | `boolean` | optional (default: `false`) | Require field-level encryption |
+
+### Nested Shape: `TenantSecurityPolicy.accessControl`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **requireMFA** | `boolean` | optional (default: `false`) | Require MFA |
+| **requireSSO** | `boolean` | optional (default: `false`) | Require SSO |
+| **ipWhitelist** | `string[]` | optional | Allowed IP addresses |
+| **sessionTimeout** | `integer` | optional (default: `3600`) | Session timeout |
+
+### Nested Shape: `TenantSecurityPolicy.compliance`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **standards** | `Enum<'sox' \| 'hipaa' \| 'gdpr' \| 'pci_dss' \| 'iso_27001' \| 'fedramp'>[]` | optional | Compliance standards |
+| **requireAuditLog** | `boolean` | optional (default: `true`) | Require audit logging |
+| **auditRetentionDays** | `integer` | optional (default: `365`) | Audit retention days |
+| **dataResidency** | `{ region?: string; excludeRegions?: string[] }` | optional | Data residency requirements |
 
 
 ---

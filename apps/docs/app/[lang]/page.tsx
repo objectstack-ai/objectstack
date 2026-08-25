@@ -5,11 +5,20 @@ import { Bricolage_Grotesque, IBM_Plex_Mono } from 'next/font/google';
 import { HomeLayout } from 'fumadocs-ui/layouts/home';
 import { baseOptions, gitConfig } from '@/lib/layout.shared';
 import { absoluteUrl } from '@/lib/site';
+import {
+  APACHE_2_0_URL,
+  GITHUB_REPO_URL,
+  JsonLd,
+  ORGANIZATION,
+  ORGANIZATION_REF,
+  SOFTWARE_ID,
+  YOUTUBE_CHANNEL_URL,
+  type JsonLdNode,
+} from '@/lib/structured-data';
 import { YouTubeEmbed } from '@/components/youtube-embed';
 
 /** The 90-second overview — the same video the README's hero cover links to. */
 const OVERVIEW_VIDEO_ID = 'CX_FlOoOtr0';
-const YOUTUBE_CHANNEL_URL = 'https://www.youtube.com/@objectstack';
 
 const display = Bricolage_Grotesque({
   subsets: ['latin'],
@@ -78,6 +87,49 @@ export const metadata: Metadata = {
   },
 };
 
+/**
+ * The homepage's structured data.
+ *
+ * ⚠️ **`SoftwareSourceCode`, not `SoftwareApplication`.** Both are `CreativeWork`
+ * subtypes that carry `license`, so either satisfies the card; the choice is
+ * about what the validator does with it. Google's Software App rich result
+ * *requires* `offers`, `aggregateRating` or `review` — ObjectStack is an
+ * Apache-2.0 runtime with no price, no store listing and no ratings, so a
+ * `SoftwareApplication` node here would report missing-required-property errors
+ * in the very test this card is accepted against, in exchange for a rich result
+ * it can never be eligible for. `SoftwareSourceCode` has no Google rich-result
+ * feature and therefore no required properties, and `codeRepository` /
+ * `programmingLanguage` / `runtimePlatform` describe what this project actually
+ * is.
+ *
+ * Every field is drawn from something already on this page or in `lib/`: the
+ * title and description are the same constants `metadata` uses, the image is
+ * `HOME_CARD`, the licence is the repo's own, and the two `sameAs` links are the
+ * GitHub organisation and the YouTube channel this page links to in its hero.
+ */
+function homeGraph(): JsonLdNode[] {
+  return [
+    ORGANIZATION,
+    {
+      '@type': 'SoftwareSourceCode',
+      '@id': SOFTWARE_ID,
+      name: 'ObjectStack',
+      url: absoluteUrl('/'),
+      // Same two strings `metadata` above emits, so the page cannot describe
+      // itself one way to a crawler and another way to a social card.
+      headline: HOME_TITLE,
+      description: HOME_DESCRIPTION,
+      image: absoluteUrl(HOME_CARD.url),
+      codeRepository: GITHUB_REPO_URL,
+      programmingLanguage: 'TypeScript',
+      runtimePlatform: 'Node.js',
+      license: APACHE_2_0_URL,
+      author: ORGANIZATION_REF,
+      maintainer: ORGANIZATION_REF,
+    },
+  ];
+}
+
 const VOCABULARY: { tag: string; title: string; copy: string }[] = [
   { tag: 'object', title: 'Objects & fields', copy: 'Typed schemas with relations, validation, formulas, and files.' },
   { tag: 'permission', title: 'Permissions', copy: 'RBAC plus row- and field-level security, enforced by the runtime.' },
@@ -135,6 +187,7 @@ function DiffLine({ children, plain }: { children: React.ReactNode; plain?: bool
 export default function HomePage() {
   return (
     <HomeLayout {...baseOptions()}>
+      <JsonLd graph={homeGraph()} />
       <div
         className={`${display.variable} ${mono.variable} relative overflow-hidden`}
         style={{

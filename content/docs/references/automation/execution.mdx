@@ -114,6 +114,49 @@ const result = CheckpointSchema.parse(data);
 | **runAs** | `Enum<'system' \| 'user'>` | optional | Execution context identity |
 | **tenantId** | `string` | optional | Tenant ID for multi-tenant isolation |
 
+### Nested Shape: `ExecutionLog.trigger`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `string` | ✅ | Trigger type (e.g., "record_change", "schedule", "api", "manual") |
+| **recordId** | `string` | optional | Triggering record ID |
+| **object** | `string` | optional | Triggering object name |
+| **userId** | `string` | optional | User who triggered the execution |
+| **metadata** | `Record<string, any>` | optional | Additional trigger context |
+
+### Nested Shape: `ExecutionLog.steps[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **nodeId** | `string` | ✅ | Node ID that was executed |
+| **nodeType** | `string` | ✅ | Node action type (e.g., "decision", "http") |
+| **nodeLabel** | `string` | optional | Human-readable node label |
+| **status** | `Enum<'success' \| 'failure' \| 'skipped'>` | ✅ | Step execution result |
+| **startedAt** | `string` | ✅ | When the step started |
+| **completedAt** | `string` | optional | When the step completed |
+| **durationMs** | `integer` | optional | Step execution duration in milliseconds |
+| **input** | `Record<string, any>` | optional | Input data passed to the node |
+| **output** | `Record<string, any>` | optional | Output data produced by the node |
+| **error** | `{ code: string; message: string; stack?: string }` | optional | Error details if step failed |
+| **retryAttempt** | `integer` | optional | Retry attempt number (0 = first try) |
+| **parentNodeId** | `string` | optional | Enclosing structured-region container node ID (loop/parallel/try_catch) |
+| **iteration** | `integer` | optional | Zero-based loop iteration or parallel branch index of the enclosing region |
+| **regionKind** | `string` | optional | Region kind the step ran in: loop-body \| parallel-branch \| try \| catch |
+| **metrics** | `{ selected?: integer; acted?: integer; unmeasuredEffect?: boolean }` | optional | Records this step selected / acted on, as reported by the node executor |
+| **skippedBy** | `{ nodeId: string; edgeId?: string; label?: string }` | optional | The gate that closed, when `status` is `skipped` |
+
+### Nested Shape: `ExecutionLog.summary`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **selected** | `integer` | ✅ | Total records read by the run |
+| **acted** | `integer` | ✅ | Total records written / effects dispatched by the run |
+| **skipped** | `integer` | ✅ | Total node executions a closed gate prevented |
+| **unmeasured** | `integer` | optional | Total executions that may have caused an effect the platform cannot count. Absent = not tracked (an older run), which is not the same as zero. |
+| **nodes** | `{ nodeId: string; nodeType: string; nodeLabel?: string; status: Enum<'success' \| 'failure' \| 'skipped'>; … }[]` | ✅ | Per-node breakdown, in first-execution order |
+| **gates** | `{ nodeId: string; targetNodeId: string; edgeId?: string; label?: string; … }[]` | ✅ | Gates that closed during the run, most-skipped first |
+| **detailOmitted** | `boolean` | optional | Set when persistence dropped `nodes`/`gates` to keep the stored row bounded — the totals are still exact. Declared so empty arrays are never mistaken for "nothing ran". |
+
 
 ---
 
@@ -155,6 +198,30 @@ const result = CheckpointSchema.parse(data);
 | **regionKind** | `string` | optional | Region kind the step ran in: loop-body \| parallel-branch \| try \| catch |
 | **metrics** | `{ selected?: integer; acted?: integer; unmeasuredEffect?: boolean }` | optional | Records this step selected / acted on, as reported by the node executor |
 | **skippedBy** | `{ nodeId: string; edgeId?: string; label?: string }` | optional | The gate that closed, when `status` is `skipped` |
+
+### Nested Shape: `ExecutionStepLog.error`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **code** | `string` | ✅ | Error code |
+| **message** | `string` | ✅ | Error message |
+| **stack** | `string` | optional | Stack trace |
+
+### Nested Shape: `ExecutionStepLog.metrics`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **selected** | `integer` | optional | Records this node READ or matched (a `get_record` query, a lookup) |
+| **acted** | `integer` | optional | Records this node WROTE (created / updated / deleted) or effects it dispatched (notifications delivered) |
+| **unmeasuredEffect** | `boolean` | optional | This execution may have caused an effect the platform cannot count (an external write through a connector). NOT interchangeable with `acted: 0` — it says the count is unknown, not that it is zero. |
+
+### Nested Shape: `ExecutionStepLog.skippedBy`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **nodeId** | `string` | ✅ | Node whose out-edge did not open (the gate) |
+| **edgeId** | `string` | optional | Edge whose condition evaluated false |
+| **label** | `string` | optional | Edge label, when the flow names its branches |
 
 
 ---
@@ -233,6 +300,31 @@ const result = CheckpointSchema.parse(data);
 | **nodes** | `{ nodeId: string; nodeType: string; nodeLabel?: string; status: Enum<'success' \| 'failure' \| 'skipped'>; … }[]` | ✅ | Per-node breakdown, in first-execution order |
 | **gates** | `{ nodeId: string; targetNodeId: string; edgeId?: string; label?: string; … }[]` | ✅ | Gates that closed during the run, most-skipped first |
 | **detailOmitted** | `boolean` | optional | Set when persistence dropped `nodes`/`gates` to keep the stored row bounded — the totals are still exact. Declared so empty arrays are never mistaken for "nothing ran". |
+
+### Nested Shape: `FlowRunSummary.nodes[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **nodeId** | `string` | ✅ | Node ID |
+| **nodeType** | `string` | ✅ | Node action type (e.g., "get_record", "decision") |
+| **nodeLabel** | `string` | optional | Human-readable node label |
+| **status** | `Enum<'success' \| 'failure' \| 'skipped'>` | ✅ | Terminal status of the node across the run — `failure` if any execution failed, else `success` if any succeeded, else `skipped` |
+| **runs** | `integer` | ✅ | Times the node executed (loop iterations and parallel branches each count) |
+| **failures** | `integer` | ✅ | Executions that failed |
+| **skipped** | `integer` | ✅ | Times a closed gate kept this node from running at all |
+| **selected** | `integer` | optional | Records read across every execution — omitted for a node that reads none |
+| **acted** | `integer` | optional | Records written / effects dispatched across every execution — omitted for a node that writes none |
+| **unmeasured** | `integer` | optional | Executions that may have caused an effect the platform cannot count (see ExecutionStepMetrics.unmeasuredEffect) |
+
+### Nested Shape: `FlowRunSummary.gates[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **nodeId** | `string` | ✅ | Node whose out-edge did not open (the gate) |
+| **targetNodeId** | `string` | ✅ | Node the closed edge would have run |
+| **edgeId** | `string` | optional | Edge whose condition evaluated false |
+| **label** | `string` | optional | Edge label, when the flow names its branches |
+| **skipped** | `integer` | ✅ | Times this gate evaluated false (once per loop iteration) |
 
 
 ---

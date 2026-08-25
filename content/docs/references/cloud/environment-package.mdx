@@ -106,6 +106,25 @@ List of packages installed in an environment
 | **packages** | `{ id: string; environmentId: string; packageVersionId: string; packageId: string; … }[]` | ✅ | Packages installed in this environment |
 | **total** | `number` | ✅ | Total count |
 
+### Nested Shape: `ListEnvironmentPackagesResponse.packages[number]`
+
+Package installation record in an environment (sys_package_installation)
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ | Unique installation record ID |
+| **environmentId** | `string` | ✅ | Environment this installation belongs to |
+| **packageVersionId** | `string` | ✅ | UUID of the installed sys_package_version row |
+| **packageId** | `string` | ✅ | UUID of the parent sys_package row (denormalized for constraint enforcement) |
+| **status** | `Enum<'installed' \| 'installing' \| 'upgrading' \| 'disabled' \| 'error'>` | optional (default: `"installed"`) | Package installation status within an environment |
+| **enabled** | `boolean` | optional (default: `true`) | Whether the package metadata is loaded |
+| **settings** | `Record<string, any>` | optional | Per-installation configuration settings |
+| **withSampleData** | `boolean` | optional (default: `false`) | Replay the package seed datasets on next kernel cold-start |
+| **installedAt** | `string` | ✅ | Installation timestamp (ISO-8601) |
+| **installedBy** | `string` | optional | User ID of the installer |
+| **updatedAt** | `string` | optional | Last update timestamp (ISO-8601) |
+| **errorMessage** | `string` | optional | Error message when status is error |
+
 
 ---
 

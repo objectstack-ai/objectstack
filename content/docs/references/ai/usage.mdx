@@ -51,6 +51,14 @@ const result = AIUsageRecordSchema.parse(data);
 | **latencyMs** | `number` | optional |  |
 | **timestamp** | `string` | optional |  |
 
+### Nested Shape: `AIUsageRecord.usage`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **promptTokens** | `integer` | ✅ | Tokens consumed by the prompt |
+| **completionTokens** | `integer` | ✅ | Tokens generated in the completion |
+| **totalTokens** | `integer` | ✅ | Total tokens (prompt + completion) |
+
 
 ---
 

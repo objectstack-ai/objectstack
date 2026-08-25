@@ -53,6 +53,16 @@ Complete object dependency graph for seed data loading
 | **insertOrder** | `string[]` | ✅ | Topologically sorted insert order |
 | **circularDependencies** | `string[][]` | optional (default: `[]`) | Circular dependency chains (e.g., [["a", "b", "a"]]) |
 
+### Nested Shape: `ObjectDependencyGraph.nodes[number]`
+
+Object node in the seed data dependency graph
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **object** | `string` | ✅ | Object name (snake_case) |
+| **dependsOn** | `string[]` | ✅ | Objects this object depends on |
+| **references** | `{ field: string; targetObject: string; targetField: string; fieldType: Enum<'lookup' \| 'master_detail' \| 'user'>; … }[]` | ✅ | Field-level reference details |
+
 
 ---
 
@@ -67,6 +77,18 @@ Object node in the seed data dependency graph
 | **object** | `string` | ✅ | Object name (snake_case) |
 | **dependsOn** | `string[]` | ✅ | Objects this object depends on |
 | **references** | `{ field: string; targetObject: string; targetField: string; fieldType: Enum<'lookup' \| 'master_detail' \| 'user'>; … }[]` | ✅ | Field-level reference details |
+
+### Nested Shape: `ObjectDependencyNode.references[number]`
+
+Describes how a field reference is resolved during seed loading
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **field** | `string` | ✅ | Source field name containing the reference value |
+| **targetObject** | `string` | ✅ | Target object name (snake_case) |
+| **targetField** | `string` | optional (default: `"name"`) | Field on target object used for matching |
+| **fieldType** | `Enum<'lookup' \| 'master_detail' \| 'user'>` | ✅ | Relationship field type |
+| **multiple** | `boolean` | optional | Field stores an array of references (multiple: true) |
 
 
 ---
@@ -142,6 +164,20 @@ Result of loading a single dataset
 | **summariesStale** | `integer` | optional (default: `0`) | Roll-up summary values left stale by writes for this dataset |
 | **errors** | `{ sourceObject: string; field: string; targetObject: string; targetField: string; … }[]` | optional (default: `[]`) | Reference resolution errors |
 
+### Nested Shape: `SeedLoadResult.errors[number]`
+
+Actionable error for a failed reference resolution
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **sourceObject** | `string` | ✅ | Object with the broken reference |
+| **field** | `string` | ✅ | Field name with unresolved reference |
+| **targetObject** | `string` | ✅ | Target object searched for the reference |
+| **targetField** | `string` | ✅ | ExternalId field used for matching |
+| **attemptedValue** | `any` | ✅ | Value that failed to resolve |
+| **recordIndex** | `integer` | ✅ | Index of the record in the dataset |
+| **message** | `string` | ✅ | Human-readable error description |
+
 
 ---
 
@@ -163,6 +199,13 @@ Seed data loader configuration
 | **organizationId** | `string` | optional | Target organization id for per-tenant seed replay |
 | **identity** | `{ user?: object; org?: object }` | optional | Identity bound to os.user / os.org when resolving CEL seed values |
 
+### Nested Shape: `SeedLoaderConfig.identity`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **user** | `{ id: string; role?: string; email?: string }` | optional | Subject bound to os.user in seed CEL expressions |
+| **org** | `{ id: string; tier?: string }` | optional | Organization bound to os.org in seed CEL expressions |
+
 
 ---
 
@@ -176,6 +219,37 @@ Seed loader request with datasets and configuration
 | :--- | :--- | :--- | :--- |
 | **seeds** | `{ object: string; externalId: string \| string[]; mode: Enum<'insert' \| 'update' \| 'upsert' \| 'replace' \| 'ignore'>; env: Enum<'prod' \| 'dev' \| 'test'>[]; … }[]` | ✅ | Seeds to load |
 | **config** | `{ dryRun: boolean; haltOnError: boolean; multiPass: boolean; defaultMode: Enum<'insert' \| 'update' \| 'upsert' \| 'replace' \| 'ignore'>; … }` | optional (has default) | Loader configuration |
+
+### Nested Shape: `SeedLoaderRequest.seeds[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **object** | `string` | ✅ | Target Object Name |
+| **externalId** | `string \| string[]` | optional (default: `"name"`) | Field (or composite list of fields) matched for the uniqueness check |
+| **mode** | `Enum<'insert' \| 'update' \| 'upsert' \| 'replace' \| 'ignore'>` | optional (default: `"upsert"`) | Conflict resolution strategy |
+| **env** | `Enum<'prod' \| 'dev' \| 'test'>[]` | optional (default: `["prod","dev","test"]`) | Applicable environments |
+| **records** | `Record<string, any>[]` | ✅ | Data records |
+| **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
+| **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
+| **_lockSource** | `Enum<'artifact' \| 'package' \| 'env-forced'>` | optional | Layer that set _lock (artifact \| package \| env-forced). |
+| **_provenance** | `Enum<'package' \| 'org' \| 'env-forced'>` | optional | Origin of the item (package \| org \| env-forced). |
+| **_packageId** | `string` | optional | Owning package machine id. |
+| **_packageVersion** | `string` | optional | Owning package version. |
+| **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
+
+### Nested Shape: `SeedLoaderRequest.config`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **dryRun** | `boolean` | optional (default: `false`) | Validate references without writing data |
+| **haltOnError** | `boolean` | optional (default: `false`) | Stop on first reference resolution error |
+| **multiPass** | `boolean` | optional (default: `true`) | Enable multi-pass loading for circular dependencies |
+| **defaultMode** | `Enum<'insert' \| 'update' \| 'upsert' \| 'replace' \| 'ignore'>` | optional (default: `"upsert"`) | Default conflict resolution strategy |
+| **batchSize** | `integer` | optional (default: `1000`) | Maximum records per batch insert/upsert |
+| **transaction** | `boolean` | optional (default: `false`) | Wrap entire load in a transaction (all-or-nothing) |
+| **env** | `Enum<'prod' \| 'dev' \| 'test'>` | optional | Only load datasets matching this environment |
+| **organizationId** | `string` | optional | Target organization id for per-tenant seed replay |
+| **identity** | `{ user?: object; org?: object }` | optional | Identity bound to os.user / os.org when resolving CEL seed values |
 
 
 ---
@@ -194,6 +268,64 @@ Complete seed loader result
 | **results** | `{ object: string; mode: Enum<'insert' \| 'update' \| 'upsert' \| 'replace' \| 'ignore'>; inserted: integer; updated: integer; … }[]` | ✅ | Per-object load results |
 | **errors** | `{ sourceObject: string; field: string; targetObject: string; targetField: string; … }[]` | ✅ | All reference resolution errors |
 | **summary** | `{ objectsProcessed: integer; totalRecords: integer; totalInserted: integer; totalUpdated: integer; … }` | ✅ | Summary statistics |
+
+### Nested Shape: `SeedLoaderResult.dependencyGraph`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **nodes** | `{ object: string; dependsOn: string[]; references: object[] }[]` | ✅ | All objects in the dependency graph |
+| **insertOrder** | `string[]` | ✅ | Topologically sorted insert order |
+| **circularDependencies** | `string[][]` | optional (default: `[]`) | Circular dependency chains (e.g., [["a", "b", "a"]]) |
+
+### Nested Shape: `SeedLoaderResult.results[number]`
+
+Result of loading a single dataset
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **object** | `string` | ✅ | Object that was loaded |
+| **mode** | `Enum<'insert' \| 'update' \| 'upsert' \| 'replace' \| 'ignore'>` | ✅ | Import mode used |
+| **inserted** | `integer` | ✅ | Records inserted |
+| **updated** | `integer` | ✅ | Records updated |
+| **skipped** | `integer` | ✅ | Records skipped |
+| **errored** | `integer` | ✅ | Records with errors |
+| **total** | `integer` | ✅ | Total records in dataset |
+| **referencesResolved** | `integer` | ✅ | References resolved via externalId |
+| **referencesDeferred** | `integer` | ✅ | References deferred to second pass |
+| **referencesDropped** | `integer` | optional (default: `0`) | Reference fields dropped from records that were still written |
+| **summariesStale** | `integer` | optional (default: `0`) | Roll-up summary values left stale by writes for this dataset |
+| **errors** | `{ sourceObject: string; field: string; targetObject: string; targetField: string; … }[]` | optional (default: `[]`) | Reference resolution errors |
+
+### Nested Shape: `SeedLoaderResult.errors[number]`
+
+Actionable error for a failed reference resolution
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **sourceObject** | `string` | ✅ | Object with the broken reference |
+| **field** | `string` | ✅ | Field name with unresolved reference |
+| **targetObject** | `string` | ✅ | Target object searched for the reference |
+| **targetField** | `string` | ✅ | ExternalId field used for matching |
+| **attemptedValue** | `any` | ✅ | Value that failed to resolve |
+| **recordIndex** | `integer` | ✅ | Index of the record in the dataset |
+| **message** | `string` | ✅ | Human-readable error description |
+
+### Nested Shape: `SeedLoaderResult.summary`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **objectsProcessed** | `integer` | ✅ | Total objects processed |
+| **totalRecords** | `integer` | ✅ | Total records across all objects |
+| **totalInserted** | `integer` | ✅ | Total records inserted |
+| **totalUpdated** | `integer` | ✅ | Total records updated |
+| **totalSkipped** | `integer` | ✅ | Total records skipped |
+| **totalErrored** | `integer` | ✅ | Total records with errors |
+| **totalReferencesResolved** | `integer` | ✅ | Total references resolved |
+| **totalReferencesDeferred** | `integer` | ✅ | Total references deferred |
+| **totalReferencesDropped** | `integer` | optional (default: `0`) | Total reference fields dropped from written records |
+| **totalSummariesStale** | `integer` | optional (default: `0`) | Total roll-up summary values left stale across the load |
+| **circularDependencyCount** | `integer` | ✅ | Circular dependency chains detected |
+| **durationMs** | `number` | ✅ | Load duration in milliseconds |
 
 
 ---

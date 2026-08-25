@@ -31,6 +31,15 @@ const result = RealtimeConfigSchema.parse(data);
 | **transport** | `Enum<'websocket' \| 'sse' \| 'polling'>` | optional (default: `"websocket"`) | Transport protocol |
 | **subscriptions** | `{ id: string; events: object[]; transport: Enum<'websocket' \| 'sse' \| 'polling'>; channel?: string }[]` | optional | Default subscriptions |
 
+### Nested Shape: `RealtimeConfig.subscriptions[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ | Unique subscription identifier |
+| **events** | `{ type: Enum<'record.created' \| 'record.updated' \| 'record.deleted' \| 'field.changed'>; object?: string; filters?: any }[]` | ✅ | Array of events to subscribe to |
+| **transport** | `Enum<'websocket' \| 'sse' \| 'polling'>` | ✅ | Transport protocol to use |
+| **channel** | `string` | optional | Optional channel name for grouping subscriptions |
+
 
 ---
 
@@ -90,6 +99,14 @@ Realtime event type (not yet enforced — the runtime emits data.record.* event 
 | **events** | `{ type: Enum<'record.created' \| 'record.updated' \| 'record.deleted' \| 'field.changed'>; object?: string; filters?: any }[]` | ✅ | Array of events to subscribe to |
 | **transport** | `Enum<'websocket' \| 'sse' \| 'polling'>` | ✅ | Transport protocol to use |
 | **channel** | `string` | optional | Optional channel name for grouping subscriptions |
+
+### Nested Shape: `Subscription.events[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `Enum<'record.created' \| 'record.updated' \| 'record.deleted' \| 'field.changed'>` | ✅ | Type of event to subscribe to |
+| **object** | `string` | optional | Object name to subscribe to |
+| **filters** | `any` | optional | Filter conditions |
 
 
 ---

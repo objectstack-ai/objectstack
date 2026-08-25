@@ -143,6 +143,37 @@ Type: `string`
 | **distinct** | `never` | optional | [REMOVED] `query.distinct` was removed in @objectstack/spec 17 (#4286, ADR-0049 / ADR-0078) — no driver ever rendered SELECT DISTINCT; the flag's only observable effect was MIS-WIRED: the REST list path treated a distinct query as not countable and silently degraded `total`/`hasMore` to a page-local estimate while still returning duplicate rows. Delete the key; `QueryBuilder.distinct()` was removed with it, and the count suppression is gone (`total` is truthful again). For unique values of one column use the SQL/memory drivers' `distinct(object, field)` door; for unique combinations, `groupBy`; for a deduplicated count, the `count_distinct` aggregation. |
 | **expand** | `Record<string, [Query](#query)>` | optional | Recursive relation loading map. Keys are lookup/master_detail field names; values are nested QueryAST objects that control select (`fields`) and filter (`where`, AND-merged with the batch $in), plus further expansion on the related object. The engine resolves expand via batch $in queries (driver-agnostic) with a default max depth of 3; per-parent `limit`/`offset`/`orderBy` are NOT applied on this path. |
 
+### Nested Shape: `Query.search`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **query** | `string` | ✅ | Search query text |
+| **fields** | `string[]` | optional | Fields to search in (if not specified, searches all text fields) |
+| **fuzzy** | `boolean` | optional (default: `false`) | [EXPERIMENTAL — not enforced] Fuzzy matching (tolerate typos). The ADR-0061 expansion reads only `query` + `fields`; no executor receives this flag (#4286). |
+| **operator** | `Enum<'and' \| 'or'>` | optional (default: `"or"`) | [EXPERIMENTAL — not enforced] Logical operator between terms. The ADR-0061 expansion applies its own term semantics; no executor receives this flag (#4286). |
+| **boost** | `Record<string, number>` | optional | [EXPERIMENTAL — not enforced] Field-specific relevance boosting (field name -> boost factor). No executor scores results (#4286). |
+| **minScore** | `number` | optional | [EXPERIMENTAL — not enforced] Minimum relevance score threshold. No executor scores results (#4286). |
+| **language** | `string` | optional | [EXPERIMENTAL — not enforced] Language for text analysis (e.g., "en", "zh", "es"). No executor selects an analyzer (#4286). |
+| **highlight** | `boolean` | optional (default: `false`) | [EXPERIMENTAL — not enforced] Search result highlighting. No executor emits highlights (#4286). |
+
+### Nested Shape: `Query.aggregations[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **function** | `Enum<'count' \| 'sum' \| 'avg' \| 'min' \| 'max' \| 'count_distinct'>` | ✅ | Aggregation function |
+| **field** | `string` | optional | Field to aggregate (optional for COUNT(*)) |
+| **alias** | `string` | ✅ | Result column alias |
+| **distinct** | `never` | optional | [REMOVED] `query.aggregations[].distinct` was removed in @objectstack/spec 17 (#6815, ADR-0049) — exactly ONE of the six faces that read an aggregation honoured it. The objectql in-memory fallback deduplicated the values before applying the function, while `driver-sql`, `driver-turso`, `driver-mongodb`, `driver-memory` and the service-analytics SQL builder all ignored it — so `{ function: 'sum', field: 'amount', distinct: true }` answered a DEDUPLICATED sum when the engine fell back in memory and an ordinary sum on every SQL datasource: one query, two numbers, chosen by which backend happened to serve it. Both answers are plausible, so nothing surfaced the divergence. Delete the key. For a deduplicated COUNT the live spelling is the `count_distinct` aggregation function, which every SQL face compiles to `COUNT(DISTINCT field)` (#6409) and the in-memory fallback computes identically. `SUM(DISTINCT …)` / `AVG(DISTINCT …)` get no replacement: no backend ever computed them here, and a per-row measure that needs deduplicating is a modelling problem to fix in the data, not a flag on the read. |
+| **filter** | `any` | optional | Per-aggregation filter (SQL FILTER (WHERE …) semantics): narrows the source rows THIS aggregation reads, leaving sibling aggregations unfiltered. Enforced by engine.aggregate (#10576): lowered in memory for drivers without native conditional aggregation; a driver reached directly refuses rather than silently dropping it. |
+
+### Nested Shape: `Query.groupBy[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **field** | `string` | ✅ | Field to group by |
+| **dateGranularity** | `Enum<'day' \| 'week' \| 'month' \| 'quarter' \| 'year'>` | optional | Bucket date values into uniform periods (day/week/month/quarter/year) |
+| **alias** | `string` | optional | Alias for the projected group value |
+
 
 ---
 

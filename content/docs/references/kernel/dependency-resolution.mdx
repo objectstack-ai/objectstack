@@ -56,6 +56,29 @@ Complete dependency resolution result
 | **installOrder** | `string[]` | ✅ | Topologically sorted package IDs for installation |
 | **circularDependencies** | `string[][]` | optional | Circular dependency chains detected (e.g. [["A", "B", "A"]]) |
 
+### Nested Shape: `DependencyResolutionResult.dependencies[number]`
+
+Resolution result for a single dependency
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **packageId** | `string` | ✅ | Dependency package identifier |
+| **requiredRange** | `string` | ✅ | SemVer range required (e.g. "^2.0.0") |
+| **resolvedVersion** | `string` | optional | Actual version resolved from registry |
+| **installedVersion** | `string` | optional | Currently installed version |
+| **status** | `Enum<'satisfied' \| 'needs_install' \| 'needs_upgrade' \| 'conflict'>` | ✅ | Resolution status |
+| **conflictReason** | `string` | optional | Explanation of the conflict |
+
+### Nested Shape: `DependencyResolutionResult.requiredActions[number]`
+
+Action required before installation can proceed
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `Enum<'install' \| 'upgrade' \| 'confirm_conflict'>` | ✅ | Type of action required |
+| **packageId** | `string` | ✅ | Target package identifier |
+| **description** | `string` | ✅ | Human-readable action description |
+
 
 ---
 

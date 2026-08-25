@@ -51,6 +51,16 @@ const result = DispatcherConfigSchema.parse(data);
 | **fallback** | `Enum<'404' \| 'proxy' \| 'custom'>` | optional (default: `"404"`) | Behavior when no route matches |
 | **proxyTarget** | `string` | optional | Proxy target URL when fallback is "proxy" |
 
+### Nested Shape: `DispatcherConfig.routes[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **prefix** | `string` | ✅ | URL path prefix for routing (e.g. /api/v1/data) |
+| **service** | `Enum<'metadata' \| 'data' \| 'auth' \| 'storage' \| 'file-storage' \| 'search' \| 'cache' \| …>` | ✅ | Target core service name |
+| **authRequired** | `boolean` | optional (default: `true`) | Whether authentication is required |
+| **criticality** | `Enum<'required' \| 'core' \| 'optional'>` | optional (default: `"optional"`) | Service criticality level for unavailability handling |
+| **permissions** | `string[]` | optional | Required permissions for this route namespace |
+
 
 ---
 
@@ -76,6 +86,18 @@ Route-resolution failure mode emitted in `error.code`
 | :--- | :--- | :--- | :--- |
 | **success** | `false` | ✅ |  |
 | **error** | `{ code: string; message: string; httpStatus?: integer; route?: string; … }` | ✅ |  |
+
+### Nested Shape: `DispatcherErrorResponse.error`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **code** | `string` | ✅ | Machine-readable error code (e.g. ROUTE_NOT_FOUND, permission_denied) |
+| **message** | `string` | ✅ | Human-readable error message |
+| **httpStatus** | `integer` | optional | HTTP status code (404, 405, 501, 503, …) |
+| **route** | `string` | optional | Requested route path |
+| **service** | `string` | optional | Target service name, if resolvable |
+| **hint** | `string` | optional | Actionable hint for the developer (e.g., "Install plugin-workflow") |
+| **details** | `any` | optional | Additional error context |
 
 
 ---

@@ -179,6 +179,72 @@ const result = CurrencyConfigSchema.parse(data);
 * `tags`
 * `vector`
 
+### Nested Shape: `Field.storage`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **notNull** | `boolean` | optional | Emit a physical NOT NULL on the column (ADR-0113). Absent = the column stays nullable even under `required: true` — the write contract is enforced at the engine, the only sanctioned write path, not by the database. Declaring this over existing null rows is a destructive migration gated by the schema-drift ceremony. Incompatible with `requiredWhen` (a conditional contract cannot be an unconditional column constraint). |
+
+### Nested Shape: `Field.options[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **label** | `string` | ✅ | Display label (human-readable, any case allowed) |
+| **value** | `string` | ✅ | Stored value (lowercase machine identifier) |
+| **color** | `string` | optional | Color code for badges/charts |
+| **default** | `boolean` | optional | Is default option |
+| **visibleWhen** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Per-option visibility predicate (CEL) — option is offered only when TRUE (else omitted). Env: the live `record` plus the host predicate scope, which binds `current_user` — wider than field-level visibleWhen, which has no `current_user`. e.g. P`record.country == 'cn'` or P`'admin' in current_user.positions` |
+
+### Nested Shape: `Field.inlineColumns[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Child field this column shows — the key the grid reads and writes on each row object (objectui GridColumn.name, #3951). The retired `field` spelling is refused. |
+| **label** | `string` | optional | Column header; defaults to the child field's label via hydration. |
+| **type** | `Enum<'text' \| 'number' \| 'currency' \| 'date' \| 'datetime' \| 'time' \| 'select' \| 'lookup' \| 'file'>` | optional | Cell control, derived from the child field's type when omitted. Declaring it opts the column out of schema hydration — supply the extras (options / reference / …) yourself. |
+| **width** | `number` | optional | Fixed column width in px; omitted columns use type-based role sizing (text flexes, numeric/date/select stay fixed). |
+| **required** | `boolean` | optional | Cell is flagged inline-invalid while empty. Computed columns are never required. |
+| **options** | `{ label: string; value: string }[]` | optional | Select-cell options for `type: 'select'`; derived from the child field's options when the column declares no `type`. |
+| **prefix** | `string` | optional | Currency symbol rendered inside a `currency` cell (default '¥'). |
+| **step** | `number` | optional | Input step for numeric cells. |
+| **reference** | `string` | optional | Referenced object for `type: 'lookup'` cells; derived from the child lookup field when the column declares no `type`. |
+| **displayField** | `string` | optional | Label field shown for a picked lookup record. |
+| **idField** | `string` | optional | Id field stored for a picked lookup record. |
+| **multiple** | `boolean` | optional | Multi-value column: multi-record lookup, or multi-file upload cell. |
+| **accept** | `string[]` | optional | Accepted MIME types / extensions for a `file` cell's picker (e.g. ['image/*', '.pdf']); omit to accept anything. |
+| **defaultHidden** | `boolean` | optional | Collapsed into the grid's column chooser by default (not dropped); required columns are never default-hidden. |
+| **computed** | `boolean` | optional | Read-only computed column, recomputed live from sibling cells via `expr` and written back into the row. |
+| **expr** | `string` | optional | Arithmetic expression for a computed column — a BARE string over `+ - * / %`, parentheses, numeric literals and field refs (`record.qty` or `qty`), evaluated by the grid's own safe evaluator. Deliberately NOT a CEL Expression envelope; `{ dialect, source }` is refused here. |
+| **scale** | `integer` | optional | Decimal places to round a computed numeric/currency result to. |
+| **autofill** | `boolean` | optional | For `lookup` columns: picking a record copies its same-named fields into sibling columns (a product's unit_price/description). On by default; set false to disable. |
+| **readonlyWhen** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Predicate (CEL) — the cell is read-only when TRUE, evaluated per row against the row as `record` plus the header as `parent` (e.g. P`parent.status == 'paid'`). |
+| **requiredWhen** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Predicate (CEL) — the cell is required when TRUE. Same `record` + `parent` scope as `readonlyWhen`. |
+
+### Nested Shape: `Field.summaryOperations`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **object** | `string` | ✅ | Source child object name for roll-up |
+| **field** | `string` | ✅ | Field on child object to aggregate (ignored for count) |
+| **function** | `Enum<'count' \| 'sum' \| 'min' \| 'max' \| 'avg'>` | ✅ | Aggregation function to apply |
+| **relationshipField** | `string` | optional | FK field on the child pointing back to this parent. Auto-detected from the child's lookup/master_detail field referencing this object when omitted; set explicitly only when the child has more than one such reference. |
+| **filter** | `any` | optional | Predicate restricting which child rows are aggregated (a query `where` FilterCondition, e.g. `{ status: 'received' }` or `{ type: { $in: ['signup','trial'] } }`). Omit to aggregate all children. Lets one child object feed multiple filtered roll-ups. |
+
+### Nested Shape: `Field.currencyConfig`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **precision** | `integer` | optional (default: `2`) | Decimal precision (default: 2) |
+| **currencyMode** | `Enum<'dynamic' \| 'fixed'>` | optional (default: `"dynamic"`) | Currency mode: dynamic (user selectable) or fixed (single currency) |
+| **defaultCurrency** | `string` | optional (default: `"CNY"`) | Default or fixed currency code (ISO 4217, e.g., USD, CNY, EUR) |
+
+### Nested Shape: `Field.maskingRule`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **keepHead** | `integer` | ✅ | Number of leading characters to leave readable |
+| **keepTail** | `integer` | ✅ | Number of trailing characters to leave readable |
+
 
 ---
 
@@ -303,6 +369,13 @@ Allowed Values: `phone`, `id_card`, `bank_account`, `email`, `name`
 | **autofill** | `boolean` | optional | For `lookup` columns: picking a record copies its same-named fields into sibling columns (a product's unit_price/description). On by default; set false to disable. |
 | **readonlyWhen** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Predicate (CEL) — the cell is read-only when TRUE, evaluated per row against the row as `record` plus the header as `parent` (e.g. P`parent.status == 'paid'`). |
 | **requiredWhen** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Predicate (CEL) — the cell is required when TRUE. Same `record` + `parent` scope as `readonlyWhen`. |
+
+### Nested Shape: `InlineGridColumn.options[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **label** | `string` | ✅ | Option label shown in the select cell. |
+| **value** | `string` | ✅ | Stored option value; must match the child select field's option values. |
 
 
 ---

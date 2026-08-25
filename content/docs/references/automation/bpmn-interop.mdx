@@ -78,6 +78,17 @@ Options for exporting an ObjectStack flow as BPMN 2.0 XML
 | **prettyPrint** | `boolean` | optional (default: `true`) | Pretty-print XML output with indentation |
 | **namespacePrefix** | `string` | optional (default: `"bpmn"`) | XML namespace prefix for BPMN elements |
 
+### Nested Shape: `BpmnExportOptions.customMappings[number]`
+
+Mapping between BPMN XML element and ObjectStack FlowNodeAction
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **bpmnType** | `string` | ✅ | BPMN XML element type (e.g., "bpmn:parallelGateway") |
+| **flowNodeAction** | `string` | ✅ | ObjectStack FlowNodeAction value |
+| **bidirectional** | `boolean` | optional (default: `true`) | Whether the mapping supports both import and export |
+| **notes** | `string` | optional | Notes about mapping limitations |
+
 
 ---
 
@@ -96,6 +107,17 @@ Options for importing BPMN 2.0 XML into an ObjectStack flow
 | **flowName** | `string` | optional | Override flow name (defaults to BPMN process name) |
 | **validateAfterImport** | `boolean` | optional (default: `true`) | Validate imported flow against FlowSchema after import |
 
+### Nested Shape: `BpmnImportOptions.customMappings[number]`
+
+Mapping between BPMN XML element and ObjectStack FlowNodeAction
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **bpmnType** | `string` | ✅ | BPMN XML element type (e.g., "bpmn:parallelGateway") |
+| **flowNodeAction** | `string` | ✅ | ObjectStack FlowNodeAction value |
+| **bidirectional** | `boolean` | optional (default: `true`) | Whether the mapping supports both import and export |
+| **notes** | `string` | optional | Notes about mapping limitations |
+
 
 ---
 
@@ -111,6 +133,17 @@ Result of a BPMN import/export operation
 | **diagnostics** | `{ severity: Enum<'info' \| 'warning' \| 'error'>; message: string; bpmnElementId?: string; nodeId?: string }[]` | optional (default: `[]`) | Diagnostic messages from the operation |
 | **mappedCount** | `integer` | optional (default: `0`) | Number of elements successfully mapped |
 | **unmappedCount** | `integer` | optional (default: `0`) | Number of elements that could not be mapped |
+
+### Nested Shape: `BpmnInteropResult.diagnostics[number]`
+
+Diagnostic message from BPMN import/export
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **severity** | `Enum<'info' \| 'warning' \| 'error'>` | ✅ | Diagnostic severity |
+| **message** | `string` | ✅ | Diagnostic message |
+| **bpmnElementId** | `string` | optional | BPMN element ID related to this diagnostic |
+| **nodeId** | `string` | optional | ObjectStack node ID related to this diagnostic |
 
 
 ---

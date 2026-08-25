@@ -13,7 +13,13 @@
  */
 
 import { escapeMdxDescription } from './escape-mdx';
-import { formatPropertyType, formatType, type TypeContext } from './format-type';
+import {
+  formatPropertyType,
+  formatType,
+  nestedShapeOf,
+  type NestedShape,
+  type TypeContext,
+} from './format-type';
 
 /** What a section needs from the generator that a unit test can supply. */
 export interface SectionContext {
@@ -198,6 +204,30 @@ export function renderRequiredCell(prop: any, required: boolean): string {
 }
 
 /**
+ * Does this nested shape carry `.describe()` text a table could publish and a
+ * `{ … }` cell cannot (#11601)?
+ *
+ * The test is on the shape's OWN keys, one level, matching what the table under
+ * the heading will contain — never a deep walk. A deep walk would answer "yes"
+ * for a shape whose own keys are all undescribed and whose grandchildren carry
+ * prose, and then emit a table that publishes none of it: a section that exists
+ * because of text it does not contain.
+ *
+ * Tombstoned keys count. `retiredKey()` puts the whole `[REMOVED]` migration
+ * prescription in `description`, and `format-type.ts` drops tombstones from the
+ * `{ … }` summary precisely because a summary has no column to carry it — so a
+ * shape whose only described key is a tombstone is a shape whose only
+ * documentation is currently unreachable, which is this fix's case exactly.
+ */
+function carriesDescription(shape: NestedShape): boolean {
+  const props = shape.node?.properties;
+  if (!props || typeof props !== 'object') return false;
+  return Object.values(props).some(
+    (child: any) => typeof child?.description === 'string' && child.description.trim() !== '',
+  );
+}
+
+/**
  * Render one schema's section, heading included.
  *
  * `category` is not a parameter: everything category-scoped reaches this
@@ -224,19 +254,76 @@ export function renderSchemaSection(schemaName: string, schema: any, ctx: Sectio
 
   const typeCtx: TypeContext = { defs, currentSchema: schemaName, schemaHref: ctx.schemaHref };
 
-  const renderProperties = (props: any, required: Set<string> = new Set()) => {
+  const renderProperties = (
+    props: any,
+    required: Set<string> = new Set(),
+    heading = '### Properties',
+    // A nested-shape table does not open tables of its own. ONE level, matched
+    // to the ONE shape level `SHAPE_DEPTH_LIMIT` lets a cell open: the table
+    // documents exactly what the cell above it summarized, and a page's depth
+    // stays a fact about the renderer rather than about how deeply an author
+    // happened to nest a schema.
+    //
+    // It also turns the cells into SUMMARY cells — `INLINE_ENUM_WIDTH_LIMIT`
+    // with the unquantified `…`, and no `### Allowed Values` relocation. That
+    // is the same flag `format-type.ts` sets below a `{ … }`, and it must be
+    // set here for the same reason: this table is a SECOND position for those
+    // keys, and #6225's relocation budget is only spendable where the
+    // vocabulary's authoritative copy lives. Measured by regenerating without
+    // it: the 288-member `ApiError.code` vocabulary relocated into a bullet
+    // list under every nested `error` shape — **20,260 bullet lines across the
+    // tree**, `api/metadata.mdx` alone +6097 — for a vocabulary already
+    // published in full on `api/errors.mdx` and in `json-schema/`. #9182 took
+    // the COUNT out of this position for a smaller version of the same cost;
+    // taking the whole list out of it is the same decision.
+    expandNested = true,
+  ) => {
       // Vocabularies too wide for their own table cell. Collected while the
       // table is built and printed as `### Allowed Values` bullets right after
       // it, so the complete list never leaves the page the cell sits on
       // (#6225) — the same rendering a hoisted `type: 'string'` + `enum` schema
       // has always got, now reachable from a property position too.
       const relocated: Array<{ key: string; members: string[] }> = [];
-      let t = `### Properties\n\n`;
+      // Shapes whose keys' `.describe()` text the cell above cannot carry at
+      // all — there is no description column inside `{ … }` (#11601).
+      const nested: Array<{ path: string; ownDescription: string; shape: NestedShape }> = [];
+      // Empty for a nested-shape table: its `### Nested Shape: \`path\`` heading
+      // IS its heading, and a `#### Properties` under every one of them would
+      // put ~1200 identically-titled headings into the tree for no reader.
+      let t = heading ? `${heading}\n\n` : '';
       t += `| Property | Type | Required | Description |\n`;
       t += `| :--- | :--- | :--- | :--- |\n`;
       for (const [key, prop] of Object.entries(props) as [string, any][]) {
-          const { cell, allowedValues } = formatPropertyType(prop, typeCtx);
+          const { cell, allowedValues } = expandNested
+            ? formatPropertyType(prop, typeCtx)
+            : { cell: formatType(prop, { ...typeCtx, inShapeSummary: true }), allowedValues: null };
           if (allowedValues) relocated.push({ key, members: allowedValues });
+          if (expandNested) {
+            const shape = nestedShapeOf(prop, typeCtx);
+            // Only when there is text to relocate. The cell already states the
+            // shape's KEYS (four of them, then `…`) and their types; what it
+            // structurally cannot state is a description, so a table carrying
+            // none would restate the cell in more space. Measured on the tree
+            // at the time of the fix: 1208 of the 1293 shape-opening property
+            // rows carry at least one described key.
+            if (shape && carriesDescription(shape)) {
+              const own = typeof shape.node.description === 'string' ? shape.node.description : '';
+              nested.push({
+                // Qualified by schema AND property, for the reason the
+                // `### Allowed Values` headings below are: one page carries
+                // many schemas, and a heading naming only the property would
+                // give it two identical anchors. `schemaName` and not a
+                // threaded `owner` parameter — a nested table opens no
+                // relocation and no sub-table of its own, so an owner threaded
+                // into one would be a parameter nothing ever reads.
+                path: `${schemaName}.${key}${shape.accessor}`,
+                // The element/value node's OWN describe, when it is not simply
+                // the property's — that one is already in the row above.
+                ownDescription: own && own !== prop.description ? own : '',
+                shape,
+              });
+            }
+          }
           // Backslashes first, then pipes — same order as `desc` below, and for
           // the same reason: escaping pipes first lets a literal backslash in
           // the input pair with the escape and free the pipe again.
@@ -261,6 +348,28 @@ export function renderSchemaSection(schemaName: string, schema: any, ctx: Sectio
           t += `### Allowed Values: \`${schemaName}.${key}\`\n\n`;
           t += members.map(m => `* \`${m}\``).join('\n');
           t += `\n\n`;
+      }
+      // The relocations above, for shapes. Same position (immediately under the
+      // table whose cells they complete), same addressing (`Schema.key…`), same
+      // heading level — one page grammar, not a second one. The heading names
+      // the shape with a TypeScript indexed accessor (`items[number]`), so it
+      // states WHICH shape without inventing a sigil for the table.
+      for (const { path, ownDescription, shape } of nested) {
+          t += `### Nested Shape: \`${path}\`\n\n`;
+          if (ownDescription) {
+              t += `${escapeMdxDescription(ownDescription.replace(/\n/g, ' '))}\n\n`;
+          }
+          // Tombstoned keys are rendered here, unlike in the cell above: the
+          // `[REMOVED]` prescription needs a description column, and a summary
+          // has none — which is exactly why `format-type.ts` drops them from
+          // `{ … }` and says a named schema's own row is where they survive.
+          // This IS that row, for a shape that never had one.
+          t += renderProperties(
+              shape.node.properties,
+              new Set(shape.node.required || []),
+              '',
+              false,
+          );
       }
       return t;
   };

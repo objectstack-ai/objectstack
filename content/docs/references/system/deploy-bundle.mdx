@@ -48,6 +48,18 @@ Deploy bundle containing all metadata for deployment
 | **permissions** | `Record<string, any>[]` | optional (default: `[]`) | Permission definitions |
 | **seedData** | `Record<string, any>[]` | optional (default: `[]`) | Seed data records |
 
+### Nested Shape: `DeployBundle.manifest`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **version** | `string` | ✅ | Deployment version |
+| **checksum** | `string` | optional | SHA256 checksum |
+| **objects** | `string[]` | optional (default: `[]`) | Object names included |
+| **views** | `string[]` | optional (default: `[]`) | View names included |
+| **flows** | `string[]` | optional (default: `[]`) | Flow names included |
+| **permissions** | `string[]` | optional (default: `[]`) | Permission names included |
+| **createdAt** | `string` | optional | Bundle creation time |
+
 
 ---
 
@@ -62,6 +74,27 @@ Schema diff between current and desired state
 | **changes** | `{ entityType: Enum<'object' \| 'field' \| 'index' \| 'view' \| 'flow' \| 'permission'>; entityName: string; parentEntity?: string; changeType: Enum<'added' \| 'modified' \| 'removed'>; … }[]` | optional (default: `[]`) | List of schema changes |
 | **summary** | `{ added: integer; modified: integer; removed: integer }` | ✅ | Change summary counts |
 | **hasBreakingChanges** | `boolean` | optional (default: `false`) | Whether diff contains breaking changes |
+
+### Nested Shape: `DeployDiff.changes[number]`
+
+Individual schema change
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **entityType** | `Enum<'object' \| 'field' \| 'index' \| 'view' \| 'flow' \| 'permission'>` | ✅ | Entity type |
+| **entityName** | `string` | ✅ | Entity name |
+| **parentEntity** | `string` | optional | Parent entity name |
+| **changeType** | `Enum<'added' \| 'modified' \| 'removed'>` | ✅ | Change type |
+| **oldValue** | `any` | optional | Previous value |
+| **newValue** | `any` | optional | New value |
+
+### Nested Shape: `DeployDiff.summary`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **added** | `integer` | optional (default: `0`) | Number of added entities |
+| **modified** | `integer` | optional (default: `0`) | Number of modified entities |
+| **removed** | `integer` | optional (default: `0`) | Number of removed entities |
 
 
 ---
@@ -131,6 +164,17 @@ Bundle validation result
 | **errorCount** | `integer` | optional (default: `0`) | Number of errors |
 | **warningCount** | `integer` | optional (default: `0`) | Number of warnings |
 
+### Nested Shape: `DeployValidationResult.issues[number]`
+
+Validation issue
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **severity** | `Enum<'error' \| 'warning' \| 'info'>` | ✅ | Issue severity |
+| **path** | `string` | ✅ | Entity path (e.g., objects.project_task.fields.name) |
+| **message** | `string` | ✅ | Issue description |
+| **code** | `string` | optional | Validation error code |
+
 
 ---
 
@@ -146,6 +190,17 @@ Ordered migration plan
 | **dialect** | `string` | ✅ | Target SQL dialect |
 | **reversible** | `boolean` | optional (default: `true`) | Whether the plan can be fully rolled back |
 | **estimatedDurationMs** | `integer` | optional | Estimated execution time |
+
+### Nested Shape: `MigrationPlan.statements[number]`
+
+Single DDL migration statement
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **sql** | `string` | ✅ | SQL DDL statement |
+| **reversible** | `boolean` | optional (default: `true`) | Whether the statement can be reversed |
+| **rollbackSql** | `string` | optional | Reverse SQL for rollback |
+| **order** | `integer` | ✅ | Execution order |
 
 
 ---

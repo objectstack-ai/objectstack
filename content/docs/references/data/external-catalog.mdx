@@ -42,6 +42,16 @@ const result = ExternalCatalogSchema.parse(data);
 | **dialect** | `string` | optional | Remote SQL dialect, when known. |
 | **tables** | `{ remoteSchema?: string; remoteName: string; columns: object[]; indexes?: object[]; … }[]` | ✅ | Snapshotted remote tables. |
 
+### Nested Shape: `ExternalCatalog.tables[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **remoteSchema** | `string` | optional | Remote schema/database qualifier |
+| **remoteName** | `string` | ✅ | Remote table/view name |
+| **columns** | `{ name: string; sqlType: string; nullable: boolean; primaryKey: boolean; … }[]` | ✅ | Remote columns |
+| **indexes** | `{ name: string; columns: string[]; unique: boolean }[]` | optional | Remote indexes, when introspectable |
+| **rowCountEstimate** | `number` | optional | Approximate row count |
+
 
 ---
 
@@ -71,6 +81,16 @@ const result = ExternalCatalogSchema.parse(data);
 | **columns** | `{ name: string; sqlType: string; nullable: boolean; primaryKey: boolean; … }[]` | ✅ | Remote columns |
 | **indexes** | `{ name: string; columns: string[]; unique: boolean }[]` | optional | Remote indexes, when introspectable |
 | **rowCountEstimate** | `number` | optional | Approximate row count |
+
+### Nested Shape: `ExternalTable.columns[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Remote column name |
+| **sqlType** | `string` | ✅ | Raw remote SQL type (e.g. "numeric(10,2)") |
+| **nullable** | `boolean` | ✅ | Whether the remote column is nullable |
+| **primaryKey** | `boolean` | optional (default: `false`) | Part of the remote primary key |
+| **suggestedFieldType** | `string` | optional | ObjectStack field type suggested by the type-compat matrix |
 
 
 ---

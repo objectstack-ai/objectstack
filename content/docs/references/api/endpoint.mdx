@@ -51,6 +51,30 @@ const result = ApiEndpointSchema.parse(data);
 | **_packageVersion** | `string` | optional | Owning package version. |
 | **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
 
+### Nested Shape: `ApiEndpoint.inputMapping[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **source** | `string` | ✅ | Source field/path |
+| **target** | `string` | ✅ | Target field/path |
+| **transform** | `string` | optional | Transformation function name — NOT EXECUTED in 17.x, and publish REJECTS the key: there is no transformation-function registry anywhere in the platform, so it stays in the frozen vocabulary and is refused rather than parsed and ignored (#5040 E7). A mapping entry moves and renames fields by dot path and nothing more — shape the value where it is produced instead (a flow endpoint whose flow computes it, or a formula field on the object) |
+
+### Nested Shape: `ApiEndpoint.outputMapping[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **source** | `string` | ✅ | Source field/path |
+| **target** | `string` | ✅ | Target field/path |
+| **transform** | `string` | optional | Transformation function name — NOT EXECUTED in 17.x, and publish REJECTS the key: there is no transformation-function registry anywhere in the platform, so it stays in the frozen vocabulary and is refused rather than parsed and ignored (#5040 E7). A mapping entry moves and renames fields by dot path and nothing more — shape the value where it is produced instead (a flow endpoint whose flow computes it, or a formula field on the object) |
+
+### Nested Shape: `ApiEndpoint.rateLimit`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **enabled** | `boolean` | optional (default: `false`) | Enable rate limiting |
+| **windowMs** | `integer` | optional (default: `60000`) | Time window in milliseconds |
+| **maxRequests** | `integer` | optional (default: `100`) | Max requests per window |
+
 
 ---
 

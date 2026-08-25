@@ -45,6 +45,14 @@ const result = AiAgentCapabilitiesSchema.parse(data);
 | **context** | `Record<string, any>` | optional | Agent context (app, object, record, …) |
 | **options** | `Record<string, any>` | optional | Request options (model, temperature, …) |
 
+### Nested Shape: `AiAgentChatRequest.messages[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **role** | `Enum<'system' \| 'user' \| 'assistant' \| 'tool'>` | ✅ | Message role |
+| **content** | `any` | optional | Message content: a string, or an array of content parts |
+| **parts** | `any[]` | optional | Vercel AI SDK v6 message parts (alternative to `content`) |
+
 
 ---
 
@@ -59,6 +67,15 @@ const result = AiAgentCapabilitiesSchema.parse(data);
 | **role** | `string` | ✅ | Agent role |
 | **capabilities** | `{ authoring: boolean; canvas: boolean; debug: boolean; resume: boolean }` | ✅ | Capability set implied by the agent surface |
 
+### Nested Shape: `AiAgentSummary.capabilities`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **authoring** | `boolean` | ✅ | Authors app metadata (objects/views/flows) |
+| **canvas** | `boolean` | ✅ | Drives the Live Canvas split view (ADR-0037) |
+| **debug** | `boolean` | ✅ | Exposes the build-doctor debug drawer |
+| **resume** | `boolean` | ✅ | Turns resume durable multi-step runs (ADR-0013) |
+
 
 ---
 
@@ -69,6 +86,15 @@ const result = AiAgentCapabilitiesSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **agents** | `{ name: string; label: string; role: string; capabilities: object }[]` | ✅ | Agents this caller may chat with |
+
+### Nested Shape: `AiAgentsResponse.agents[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Agent name — the `:agentName` path segment |
+| **label** | `string` | ✅ | Display label |
+| **role** | `string` | ✅ | Agent role |
+| **capabilities** | `{ authoring: boolean; canvas: boolean; debug: boolean; resume: boolean }` | ✅ | Capability set implied by the agent surface |
 
 
 ---
@@ -89,6 +115,14 @@ const result = AiAgentCapabilitiesSchema.parse(data);
 | **turnId** | `string` | optional | Stable per-turn idempotency key (ADR-0013 D1) |
 | **options** | `Record<string, any>` | optional | Legacy nested request options |
 
+### Nested Shape: `AiChatRequest.messages[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **role** | `Enum<'system' \| 'user' \| 'assistant' \| 'tool'>` | ✅ | Message role |
+| **content** | `any` | optional | Message content: a string, or an array of content parts |
+| **parts** | `any[]` | optional | Vercel AI SDK v6 message parts (alternative to `content`) |
+
 
 ---
 
@@ -103,6 +137,14 @@ const result = AiAgentCapabilitiesSchema.parse(data);
 | **toolCalls** | `any[]` | optional | Tool calls the model requested (Vercel `ToolCallPart`) |
 | **usage** | `{ promptTokens: number; completionTokens: number; totalTokens: number }` | optional | Token usage |
 | **conversationId** | `string` | optional | Conversation the turn was persisted into |
+
+### Nested Shape: `AiChatResponse.usage`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **promptTokens** | `number` | ✅ | Tokens consumed by the prompt |
+| **completionTokens** | `number` | ✅ | Tokens generated |
+| **totalTokens** | `number` | ✅ | prompt + completion |
 
 
 ---
@@ -134,6 +176,14 @@ const result = AiAgentCapabilitiesSchema.parse(data);
 | **updatedAt** | `string` | ✅ | Last update timestamp (ISO 8601) |
 | **metadata** | `Record<string, any>` | optional | Conversation metadata |
 
+### Nested Shape: `AiConversation.messages[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **role** | `Enum<'system' \| 'user' \| 'assistant' \| 'tool'>` | ✅ | Message role |
+| **content** | `any` | optional | Message content: a string, or an array of content parts |
+| **parts** | `any[]` | optional | Vercel AI SDK v6 message parts (alternative to `content`) |
+
 
 ---
 
@@ -158,6 +208,14 @@ const result = AiAgentCapabilitiesSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **models** | `(string \| { id: string; label: string; default: boolean })[]` | ✅ | Models this environment offers |
 | **defaultModel** | `string` | optional | Default model id, when the service reports one |
+
+### Nested Shape: `AiModelsResponse.models[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ | Model id |
+| **label** | `string` | ✅ | Display label for the picker |
+| **default** | `boolean` | ✅ | Whether this is the environment default |
 
 
 ---
@@ -246,6 +304,22 @@ const result = AiAgentCapabilitiesSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **events** | `{ id: any; occurredAt: string; actor: string; source: string \| null; … }[]` | ✅ | Recent protection-audit events for the item, newest first. See the schema-level note for what an empty array means — and what it never means. |
 
+### Nested Shape: `AuditMetaItemResponse.events[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `any` | ✅ | Row id of the audit event. Opaque to callers. |
+| **occurredAt** | `string` | ✅ | When the attempt happened (ISO-8601 string). |
+| **actor** | `string` | ✅ | Who attempted the operation. `system` when the row recorded no actor. |
+| **source** | `string \| null` | ✅ | Which code path recorded the event (e.g. `protocol.deleteMetaItem`). `null` when the row recorded none. |
+| **operation** | `Enum<'save' \| 'publish' \| 'rollback' \| 'delete' \| 'reset'>` | ✅ | Which metadata-protection door was attempted. |
+| **outcome** | `Enum<'allowed' \| 'denied' \| 'forced'>` | ✅ | Whether the attempt went through, was refused, or overrode a lock (ADR-0010 §3.6). |
+| **code** | `string` | ✅ | Machine-readable verdict code for the outcome (e.g. `item_locked`). Empty string when the row recorded none. |
+| **lockState** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'> \| null` | ✅ | The lock verdict in force at the time of the attempt (ADR-0010 §3.3). `null` when no lock applied. |
+| **lockOverridden** | `boolean` | ✅ | True when the attempt went through by overriding a lock (`outcome: "forced"` rows). |
+| **requestId** | `string \| null` | ✅ | Correlation id of the originating request. `null` when the row recorded none. |
+| **note** | `string \| null` | ✅ | Free-text note recorded with the event. `null` when the row recorded none. |
+
 
 ---
 
@@ -257,6 +331,32 @@ const result = AiAgentCapabilitiesSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **actions** | `{ type: string; version: string; name: string; description?: string; … }[]` | ✅ | Registered action descriptors (built-in + plugin) |
 | **total** | `integer` | ✅ | Number of descriptors returned (after any filters) |
+
+### Nested Shape: `AutomationActionsResponse.actions[number]`
+
+Canonical cross-paradigm action/node descriptor (ADR-0018)
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `string` | ✅ | Registry action/node type (matches the executor type) |
+| **version** | `string` | ✅ | Executor version (semver) |
+| **name** | `string` | ✅ | Display label (or i18n key) |
+| **description** | `string` | optional | Action description |
+| **icon** | `string` | optional | Icon id resolved by the designer |
+| **category** | `Enum<'logic' \| 'data' \| 'io' \| 'human' \| 'control' \| 'custom'>` | optional (default: `"custom"`) | Palette category |
+| **paradigms** | `Enum<'flow' \| 'approval'>[]` | optional (default: `["flow"]`) | Authoring surfaces that may offer this action |
+| **configSchema** | `any` | optional | JSON Schema for the node config (drives the designer form; undeclared keys are rejected at registration) |
+| **supportsPause** | `boolean` | optional (default: `false`) | Supports async pause/resume |
+| **supportsCancellation** | `boolean` | optional (default: `false`) | Supports cancellation |
+| **supportsRetry** | `boolean` | optional (default: `true`) | Supports retry on failure |
+| **needsOutbox** | `boolean` | optional (default: `false`) | Dispatch via service-messaging outbox (retry/idempotency/dead-letter) |
+| **isAsync** | `never` | optional | [REMOVED] `ActionDescriptor.isAsync` was removed in @objectstack/spec 17 (#6748, ADR-0049) — no execution path ever read it, so declaring it never made a node suspend and omitting it never stopped one. Delete the key. The live mechanism is two-part: an executor suspends by RETURNING `suspend: true` from `execute()`, and its descriptor must declare `supportsPause: true` (plus the `resumeAuthority` its pauses need) or the engine refuses that suspension (#6667). Declaring `isAsync: true` alongside `supportsPause: true` was always redundant; declaring it alone was always inert. |
+| **handlerContract** | `Enum<'none' \| 'pure'>` | optional (default: `"none"`) | Effect contract for author-supplied code this action invokes: 'none' (invokes none) or 'pure' (must not write — it returns a value and the flow graph persists it) |
+| **resumeAuthority** | `Enum<'any' \| 'service'>` | optional | Who may resume a run this node suspended: 'any' (the generic resume route) or 'service' (only the owning service, e.g. approvals). Carries no schema default so an omission stays observable — and an omission is fail-CLOSED at run time, equivalent to 'service': a pausing node whose pause is open to the generic route must declare 'any' explicitly (#5561) |
+| **maturity** | `Enum<'ga' \| 'beta' \| 'reserved'>` | optional (default: `"ga"`) | Runtime maturity: ga (shipped), beta, or reserved (contract only — designers grey this out) |
+| **source** | `Enum<'builtin' \| 'plugin'>` | optional (default: `"plugin"`) | builtin = platform baseline; plugin = third-party contributed |
+| **deprecated** | `boolean` | optional (default: `false`) | Deprecated alias kept for back-compat |
+| **aliasOf** | `string` | optional | Canonical type this alias forwards to |
 
 
 ---
@@ -295,6 +395,14 @@ const result = AiAgentCapabilitiesSchema.parse(data);
 | **object** | `string` | ✅ | Object name |
 | **request** | `{ operation: Enum<'create' \| 'update' \| 'upsert' \| 'delete'>; records: object[]; options?: object }` | ✅ | Batch operation request |
 
+### Nested Shape: `BatchDataRequest.request`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **operation** | `Enum<'create' \| 'update' \| 'upsert' \| 'delete'>` | ✅ | Type of batch operation |
+| **records** | `{ id?: string; data?: Record<string, any>; externalId?: string }[]` | ✅ | Array of records to process (server caps the count — see batch.maxBatchSize) |
+| **options** | `{ atomic: boolean; returnRecords: boolean; continueOnError: boolean }` | optional | Batch operation options |
+
 
 ---
 
@@ -312,6 +420,30 @@ const result = AiAgentCapabilitiesSchema.parse(data);
 | **succeeded** | `number` | ✅ | Number of records that succeeded |
 | **failed** | `number` | ✅ | Number of records that failed |
 | **results** | `{ id?: string; success: boolean; errors?: object[]; data?: Record<string, any>; … }[]` | ✅ | Detailed results for each record |
+
+### Nested Shape: `BatchDataResponse.error`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>` | ✅ | Error code (e.g. VALIDATION_ERROR; StandardErrorCode ∪ the ledger the serving side registers — ERROR_CODE_LEDGER for framework packages) |
+| **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112, #9106) |
+| **message** | `string` | ✅ | Readable error message |
+| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim (#9934). Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution (#3821) for anything unmarked. Status-agnostic; never replaces `message`. |
+| **category** | `string` | optional | Error category (e.g. validation, authorization) |
+| **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
+| **details** | `any` | optional | Additional error context (e.g. field validation errors) |
+| **requestId** | `string` | optional | Request ID for tracking |
+
+### Nested Shape: `BatchDataResponse.results[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | optional | Record ID if operation succeeded |
+| **success** | `boolean` | ✅ | Whether this record was processed successfully |
+| **errors** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>; declaredCode?: string; message: string; userMessage?: string; … }[]` | optional | Array of errors if operation failed. Branch on `errors[0].code` — an atomic batch that rolled back marks rows that were written then undone with code ROLLED_BACK and rows never reached with NOT_ATTEMPTED, while the causal row keeps its own error (#4793). A NON-atomic batch that stopped (the `continueOnError: false` default) marks its un-attempted tail with the same NOT_ATTEMPTED code — rows before the failure stay written and keep reporting success, since nothing was rolled back (#7539). |
+| **data** | `Record<string, any>` | optional | Full record data (if returnRecords=true) |
+| **index** | `number` | optional | Index of the record in the request array |
+| **droppedFields** | `{ object: string; fields: string[]; reason: Enum<'readonly' \| 'readonly_when' \| 'primary_key'> }[]` | optional | Write-observability (#3407/#3431/#3455): caller-supplied fields LEGALLY stripped from THIS row before it was written — static `readonly` (#2948) / TRUE `readonlyWhen` (#3042) on update, or the #3043 create-ingress strip. Per-row because a batch can drop different fields on different rows (`readonlyWhen` is record-state-dependent). Present ONLY when ≥1 field was dropped for this row; the row still succeeded (success unchanged). A single response header cannot express per-row drops, so this body field is the canonical bulk channel — REST does not emit `X-ObjectStack-Dropped-Fields` for batches. Optional — omit-when-empty keeps the shape backward-compatible. |
 
 
 ---
@@ -392,6 +524,16 @@ const result = AiAgentCapabilitiesSchema.parse(data);
 | **record** | `Record<string, any>` | ✅ | The created record, including server-generated fields (created_at, owner). |
 | **droppedFields** | `{ object: string; fields: string[]; reason: Enum<'readonly' \| 'readonly_when' \| 'primary_key'> }[]` | optional | Write-observability (#3407/#3431): caller-supplied fields that were LEGALLY stripped before the record was written — a non-system create cannot seed a static `readonly` column (#3043 ingress strip), so those keys are dropped and the field re-derives its default. Present ONLY when ≥1 field was dropped; the create still succeeded without them (status/success semantics unchanged). REST additionally surfaces this as the `X-ObjectStack-Dropped-Fields` response header. Optional — omit-when-empty keeps the shape backward-compatible for existing clients. |
 
+### Nested Shape: `CreateDataResponse.droppedFields[number]`
+
+A write-path strip event: caller-supplied fields legally dropped from the payload (#3407)
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **object** | `string` | ✅ | Object the write targeted (resolved object name) |
+| **fields** | `string[]` | ✅ | Caller-supplied field names the engine removed from the write payload |
+| **reason** | `Enum<'readonly' \| 'readonly_when' \| 'primary_key'>` | ✅ | Why the fields were dropped: static readonly (#2948), a TRUE readonlyWhen predicate (#3042), or the primary-key strip of a payload id the engine ruled is not an identifier (#6437) |
+
 
 ---
 
@@ -417,6 +559,16 @@ const result = AiAgentCapabilitiesSchema.parse(data);
 | **records** | `Record<string, any>[]` | ✅ | Created records |
 | **count** | `number` | ✅ | Number of records created |
 | **droppedFields** | `{ object: string; fields: string[]; reason: Enum<'readonly' \| 'readonly_when' \| 'primary_key'> }[]` | optional | Write-observability (#3407/#3431/#3455): caller-supplied `readonly` fields the #3043 create-ingress strip removed before the rows were written. AGGREGATED across the batch (one event per object/reason with the union of dropped field names) rather than per-row, because the insert-time strip is static-`readonly` only — schema-uniform, so every row drops the same set. Present ONLY when ≥1 field was dropped; the creates still succeeded without them (count/success unchanged). Optional — omit-when-empty keeps the shape backward-compatible. (The per-row `insertMany`/`batch` paths carry per-row `droppedFields` on each result instead — see BatchOperationResultSchema.) |
+
+### Nested Shape: `CreateManyDataResponse.droppedFields[number]`
+
+A write-path strip event: caller-supplied fields legally dropped from the payload (#3407)
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **object** | `string` | ✅ | Object the write targeted (resolved object name) |
+| **fields** | `string[]` | ✅ | Caller-supplied field names the engine removed from the write payload |
+| **reason** | `Enum<'readonly' \| 'readonly_when' \| 'primary_key'>` | ✅ | Why the fields were dropped: static readonly (#2948), a TRUE readonlyWhen predicate (#3042), or the primary-key strip of a payload id the engine ruled is not an identifier (#6437) |
 
 
 ---
@@ -457,6 +609,15 @@ const result = AiAgentCapabilitiesSchema.parse(data);
 | **options** | `{ atomic: boolean; returnRecords: boolean; continueOnError: boolean }` | optional | Delete options |
 | **object** | `string` | ✅ | Object name |
 
+### Nested Shape: `DeleteManyDataRequest.options`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **atomic** | `boolean` | optional (default: `false`) | Opt-in all-or-nothing. When explicitly true the whole batch runs inside ONE engine transaction: the first failure rolls back every prior write, and the response reports zero successes — each row carries `errors[0].code` ROLLED_BACK (written, then undone), the causal row its own error, and rows never reached NOT_ATTEMPTED. A runtime that cannot roll back REFUSES the request (501 NOT_IMPLEMENTED) rather than silently degrading to best-effort — probe `capabilities.transactionalBatch` on /discovery first. Takes precedence over continueOnError. Default false: sequential best-effort. |
+| **returnRecords** | `boolean` | optional (default: `false`) | If true, return full record data in response |
+| **continueOnError** | `boolean` | optional (default: `false`) | If true (and atomic=false), continue processing remaining records after errors. Default false: the first failure ENDS the run — records before it stay written (nothing is rolled back on this arm), and every record after it is reported `errors[0].code` NOT_ATTEMPTED rather than omitted, so `results` always covers all `total` records and `succeeded + failed === total` (#7539). |
+| **validateOnly** | `never` | optional | [REMOVED] `options.validateOnly` was removed from BatchOptions in @objectstack/spec (#4052). It was never implemented: the batch surfaces persisted regardless, so a "dry-run" would have silently executed. There is no dry-run today — drop the key. If you need to preview a batch without writing, open an issue so it can be designed (no-commit cascade / constraint semantics) and reintroduced as a flag that actually holds. |
+
 
 ---
 
@@ -474,6 +635,30 @@ const result = AiAgentCapabilitiesSchema.parse(data);
 | **succeeded** | `number` | ✅ | Number of records that succeeded |
 | **failed** | `number` | ✅ | Number of records that failed |
 | **results** | `{ id?: string; success: boolean; errors?: object[]; data?: Record<string, any>; … }[]` | ✅ | Detailed results for each record |
+
+### Nested Shape: `DeleteManyDataResponse.error`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>` | ✅ | Error code (e.g. VALIDATION_ERROR; StandardErrorCode ∪ the ledger the serving side registers — ERROR_CODE_LEDGER for framework packages) |
+| **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112, #9106) |
+| **message** | `string` | ✅ | Readable error message |
+| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim (#9934). Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution (#3821) for anything unmarked. Status-agnostic; never replaces `message`. |
+| **category** | `string` | optional | Error category (e.g. validation, authorization) |
+| **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
+| **details** | `any` | optional | Additional error context (e.g. field validation errors) |
+| **requestId** | `string` | optional | Request ID for tracking |
+
+### Nested Shape: `DeleteManyDataResponse.results[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | optional | Record ID if operation succeeded |
+| **success** | `boolean` | ✅ | Whether this record was processed successfully |
+| **errors** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>; declaredCode?: string; message: string; userMessage?: string; … }[]` | optional | Array of errors if operation failed. Branch on `errors[0].code` — an atomic batch that rolled back marks rows that were written then undone with code ROLLED_BACK and rows never reached with NOT_ATTEMPTED, while the causal row keeps its own error (#4793). A NON-atomic batch that stopped (the `continueOnError: false` default) marks its un-attempted tail with the same NOT_ATTEMPTED code — rows before the failure stay written and keep reporting success, since nothing was rolled back (#7539). |
+| **data** | `Record<string, any>` | optional | Full record data (if returnRecords=true) |
+| **index** | `number` | optional | Index of the record in the request array |
+| **droppedFields** | `{ object: string; fields: string[]; reason: Enum<'readonly' \| 'readonly_when' \| 'primary_key'> }[]` | optional | Write-observability (#3407/#3431/#3455): caller-supplied fields LEGALLY stripped from THIS row before it was written — static `readonly` (#2948) / TRUE `readonlyWhen` (#3042) on update, or the #3043 create-ingress strip. Per-row because a batch can drop different fields on different rows (`readonlyWhen` is record-state-dependent). Present ONLY when ≥1 field was dropped for this row; the row still succeeded (success unchanged). A single response header cannot express per-row drops, so this body field is the canonical bulk channel — REST does not emit `X-ObjectStack-Dropped-Fields` for batches. Optional — omit-when-empty keeps the shape backward-compatible. |
 
 
 ---
@@ -532,6 +717,23 @@ Disable package response
 | **package** | `{ manifest: object; status?: Enum<'installed' \| 'disabled' \| 'installing' \| 'upgrading' \| 'uninstalling' \| 'error'>; enabled?: boolean; installedAt?: string; … }` | ✅ | Disabled package details |
 | **message** | `string` | optional | Disable status message |
 
+### Nested Shape: `DisablePackageResponse.package`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **manifest** | `{ id: string; namespace?: string; defaultDatasource?: string; version: string; … }` | ✅ | Full package manifest |
+| **status** | `Enum<'installed' \| 'disabled' \| 'installing' \| 'upgrading' \| 'uninstalling' \| 'error'>` | optional (default: `"installed"`) | Package state: installed, disabled, installing, upgrading, uninstalling, or error |
+| **enabled** | `boolean` | optional (default: `true`) | Whether the package is currently enabled |
+| **installedAt** | `string` | optional | Installation timestamp |
+| **updatedAt** | `string` | optional | Last update timestamp |
+| **installedVersion** | `string` | optional | Currently installed version for quick access |
+| **previousVersion** | `string` | optional | Version before the last upgrade |
+| **statusChangedAt** | `string` | optional | Status change timestamp |
+| **errorMessage** | `string` | optional | Error message when status is error |
+| **settings** | `Record<string, any>` | optional | User-provided configuration settings |
+| **upgradeHistory** | `{ fromVersion: string; toVersion: string; upgradedAt: string; status: Enum<'success' \| 'failed' \| 'rolled_back'>; … }[]` | optional | Version upgrade history |
+| **registeredNamespaces** | `string[]` | optional | Namespace prefixes registered by this package |
+
 
 ---
 
@@ -559,6 +761,23 @@ Enable package response
 | **package** | `{ manifest: object; status?: Enum<'installed' \| 'disabled' \| 'installing' \| 'upgrading' \| 'uninstalling' \| 'error'>; enabled?: boolean; installedAt?: string; … }` | ✅ | Enabled package details |
 | **message** | `string` | optional | Enable status message |
 
+### Nested Shape: `EnablePackageResponse.package`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **manifest** | `{ id: string; namespace?: string; defaultDatasource?: string; version: string; … }` | ✅ | Full package manifest |
+| **status** | `Enum<'installed' \| 'disabled' \| 'installing' \| 'upgrading' \| 'uninstalling' \| 'error'>` | optional (default: `"installed"`) | Package state: installed, disabled, installing, upgrading, uninstalling, or error |
+| **enabled** | `boolean` | optional (default: `true`) | Whether the package is currently enabled |
+| **installedAt** | `string` | optional | Installation timestamp |
+| **updatedAt** | `string` | optional | Last update timestamp |
+| **installedVersion** | `string` | optional | Currently installed version for quick access |
+| **previousVersion** | `string` | optional | Version before the last upgrade |
+| **statusChangedAt** | `string` | optional | Status change timestamp |
+| **errorMessage** | `string` | optional | Error message when status is error |
+| **settings** | `Record<string, any>` | optional | User-provided configuration settings |
+| **upgradeHistory** | `{ fromVersion: string; toVersion: string; upgradedAt: string; status: Enum<'success' \| 'failed' \| 'rolled_back'>; … }[]` | optional | Version upgrade history |
+| **registeredNamespaces** | `string[]` | optional | Namespace prefixes registered by this package |
+
 
 ---
 
@@ -570,6 +789,28 @@ Enable package response
 | :--- | :--- | :--- | :--- |
 | **object** | `string` | ✅ | The unique machine name of the object to query (e.g. "account"). |
 | **query** | `{ object: string; fields?: string[]; where?: any; search?: string \| object; … }` | optional | Structured query definition (filter, sort, select, pagination). |
+
+### Nested Shape: `FindDataRequest.query`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **object** | `string` | ✅ | Object name (e.g. account) |
+| **fields** | `string[]` | optional | Fields to retrieve — names of the queried object's OWN columns. A dotted path (`owner.name`) is not a projection: no driver resolves one, and the ingress refuses it with `400 INVALID_FIELD` (#7532). Related data is read with `expand`, whose nested QueryAST both filters (`where`) and selects (`fields`) the related record's columns. The projection must RETAIN the foreign-key column: `fields: ['title']` with `expand: 'project_id'` resolves nothing, because the relation is carried by that key — add `'project_id'` and it works. Where the value is wanted on the queried object itself, denormalise it onto that object (a stored field, written when the source changes), the same remedy the sort axis prescribes (#6924). |
+| **where** | `any` | optional | Filtering criteria (WHERE) |
+| **search** | `string \| { query: string; fields?: string[]; fuzzy: boolean; operator: Enum<'and' \| 'or'>; … }` | optional | Full-text search — the query text (canonical, ADR-0061 D1), or a structured FullTextSearch configuration |
+| **searchFields** | `string[]` | optional | Narrow the search to these fields (server-intersected with the allowed searchable set — can only narrow, never widen; ADR-0061 D1) |
+| **orderBy** | `{ field: string; order: Enum<'asc' \| 'desc'> }[]` | optional | Sorting instructions (ORDER BY) |
+| **limit** | `number` | optional | Max records to return (LIMIT) |
+| **offset** | `number` | optional | Records to skip (OFFSET) |
+| **top** | `number` | optional | Alias for limit (OData compatibility) |
+| **cursor** | `never` | optional | [REMOVED] `query.cursor` was removed in @objectstack/spec 17 (#4286, ADR-0049) — no driver ever implemented keyset pagination, so the cursor was accepted and ignored and every page came back identical (a caller looping "until hasMore is false" never terminates). Delete the key; `QueryBuilder.cursor()` was removed with it. Express the keyset as an ordinary `where` predicate on your sort key — `where: { created_at: { $gt: last.created_at } }` with the matching `orderBy` — which every driver executes with canonicalised comparands. A first-class cursor, if ever built, will be a response-minted opaque token, not this caller-built record. |
+| **joins** | `never` | optional | [REMOVED] `query.joins` was removed in @objectstack/spec 17 (#4286, ADR-0049) — no engine or driver ever read it: a query carrying `joins` behaved exactly as if the key were absent, while its name squatted on the reserved REST parameter set. Delete the key. Related records are read through `expand` — `expand: { owner_id: { object: 'user', fields: ['name'] } }` — which the engine resolves via batch $in queries, and whose nested query selects the related record's own columns. Keep the foreign key in your own projection (`fields: ['title', 'owner_id']`): the relation is carried by that column, so projecting it away leaves expansion nothing to resolve. A dotted `fields` path is NOT a replacement — no driver ever resolved one and the ingress refuses it (`400 INVALID_FIELD`, #7532). |
+| **aggregations** | `{ function: Enum<'count' \| 'sum' \| 'avg' \| 'min' \| 'max' \| 'count_distinct'>; field?: string; alias: string; filter?: any }[]` | optional | Aggregation functions |
+| **groupBy** | `(string \| { field: string; dateGranularity?: Enum<'day' \| 'week' \| 'month' \| 'quarter' \| 'year'>; alias?: string })[]` | optional | GROUP BY targets (strings or `{field, dateGranularity?}` objects for date bucketing) |
+| **having** | `any` | optional | HAVING — filter over the AGGREGATED rows (aggregation aliases + groupBy projections); applied engine-side after aggregation |
+| **windowFunctions** | `never` | optional | [REMOVED] `query.windowFunctions` was removed in @objectstack/spec 17 (#4286, ADR-0049) — `find()` never applied it: no engine or driver read the key on the query path, so every OVER clause it declared was silently dropped. Delete the key. Window functions are a SQL-driver capability behind `SqlDriver.findWithWindowFunctions(object, query)` (embedder-level; not on the `IDataDriver` contract or the REST surface); request-level analytics are `aggregations` + `groupBy`. |
+| **distinct** | `never` | optional | [REMOVED] `query.distinct` was removed in @objectstack/spec 17 (#4286, ADR-0049 / ADR-0078) — no driver ever rendered SELECT DISTINCT; the flag's only observable effect was MIS-WIRED: the REST list path treated a distinct query as not countable and silently degraded `total`/`hasMore` to a page-local estimate while still returning duplicate rows. Delete the key; `QueryBuilder.distinct()` was removed with it, and the count suppression is gone (`total` is truthful again). For unique values of one column use the SQL/memory drivers' `distinct(object, field)` door; for unique combinations, `groupBy`; for a deduplicated count, the `count_distinct` aggregation. |
+| **expand** | `Record<string, { object: string; fields?: string[]; where?: any; search?: string \| object; … }>` | optional | Recursive relation loading map. Keys are lookup/master_detail field names; values are nested QueryAST objects that control select (`fields`) and filter (`where`, AND-merged with the batch $in), plus further expansion on the related object. The engine resolves expand via batch $in queries (driver-agnostic) with a default max depth of 3; per-parent `limit`/`offset`/`orderBy` are NOT applied on this path. |
 
 
 ---
@@ -644,6 +885,75 @@ Enable package response
 | **metadata** | `Record<string, any>` | optional | Custom metadata key-value pairs for extensibility |
 | **apiName** | `string` | optional | API name (deprecated — use `name`; removed in protocol 18) |
 
+### Nested Shape: `GetDiscoveryResponse.routes`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **data** | `string` | ✅ | e.g. /api/v1/data |
+| **metadata** | `string` | ✅ | e.g. /api/v1/meta |
+| **discovery** | `string` | optional | e.g. /api/v1/discovery |
+| **ui** | `string` | optional | e.g. /api/v1/ui |
+| **auth** | `string` | optional | e.g. /api/v1/auth |
+| **automation** | `string` | optional | e.g. /api/v1/automation |
+| **storage** | `string` | optional | e.g. /api/v1/storage |
+| **analytics** | `string` | optional | e.g. /api/v1/analytics |
+| **packages** | `string` | optional | e.g. /api/v1/packages |
+| **datasources** | `string` | optional | e.g. /api/v1/datasources — base for the datasources/:name/external/* federation-admin family; absent when no host mounts it |
+| **email** | `string` | optional | e.g. /api/v1/email — base for the email/send endpoint; absent when no host mounts it |
+| **approvals** | `string` | optional | e.g. /api/v1/approvals |
+| **realtime** | `string` | optional | e.g. /api/v1/realtime |
+| **notifications** | `string` | optional | e.g. /api/v1/notifications |
+| **ai** | `string` | optional | e.g. /api/v1/ai |
+| **i18n** | `string` | optional | e.g. /api/v1/i18n |
+| **mcp** | `string` | optional | e.g. /api/v1/mcp — always the unscoped base; absent when MCP is disabled or unserveable |
+
+### Nested Shape: `GetDiscoveryResponse.services[string]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **enabled** | `boolean` | ✅ |  |
+| **status** | `Enum<'available' \| 'registered' \| 'unavailable' \| 'degraded' \| 'stub'>` | ✅ | available = fully operational, registered = route declared but handler unverified, unavailable = not installed, degraded = partial, stub = placeholder that returns 501 |
+| **handlerReady** | `boolean` | optional | Whether the HTTP handler is confirmed to be mounted. Omitted = readiness unknown/unverified; true = handler mounted; false = handler missing or stub (likely 501). |
+| **route** | `string` | optional | e.g. /api/v1/analytics |
+| **provider** | `string` | optional | e.g. "objectql", "plugin-redis", "driver-memory" |
+| **version** | `string` | optional | Semantic version of the service implementation (e.g. "3.0.6") |
+| **message** | `string` | optional | e.g. "Install plugin-workflow to enable" |
+| **rateLimit** | `{ requestsPerMinute?: integer; requestsPerHour?: integer; burstLimit?: integer; retryAfterMs?: integer }` | optional | Rate limit and quota info for this service |
+
+### Nested Shape: `GetDiscoveryResponse.capabilities`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **comments** | `{ enabled: boolean; features?: Record<string, boolean>; description?: string }` | ✅ | Whether the backend supports record comments / chatter (the `sys_comment` object served via the data API) |
+| **automation** | `{ enabled: boolean; features?: Record<string, boolean>; description?: string }` | ✅ | Whether the backend supports Automation CRUD (flows, triggers) |
+| **cron** | `{ enabled: boolean; features?: Record<string, boolean>; description?: string }` | ✅ | Whether the backend supports cron scheduling |
+| **search** | `{ enabled: boolean; features?: Record<string, boolean>; description?: string }` | ✅ | Whether the backend supports full-text search |
+| **export** | `{ enabled: boolean; features?: Record<string, boolean>; description?: string }` | ✅ | Whether the backend supports async export |
+| **chunkedUpload** | `{ enabled: boolean; features?: Record<string, boolean>; description?: string }` | ✅ | Whether the backend supports chunked (multipart) uploads |
+| **transactionalBatch** | `{ enabled: boolean; features?: Record<string, boolean>; description?: string }` | ✅ | Whether the backend exposes the atomic cross-object batch endpoint (POST `{basePath}`/batch, #1604/ADR-0034): all ops commit or roll back together in one transaction. Lets clients skip non-atomic client-side simulation instead of runtime-probing 404/405/501. True ⟺ the /batch route is mounted AND the runtime can honour a transaction. |
+| **websockets** | `{ enabled: boolean; features?: Record<string, boolean>; description?: string }` | ✅ | Whether the backend mounts a realtime push surface (WebSocket/SSE) clients can subscribe to. False while realtime is an in-process bus with no mounted HTTP/WS surface (ADR-0076 D12, #2462). |
+| **files** | `{ enabled: boolean; features?: Record<string, boolean>; description?: string }` | ✅ | Whether a file-storage surface (upload/download/attachments) is served |
+| **analytics** | `{ enabled: boolean; features?: Record<string, boolean>; description?: string }` | ✅ | Whether the backend serves the analytics / BI query surface |
+| **ai** | `{ enabled: boolean; features?: Record<string, boolean>; description?: string }` | ✅ | Whether the backend serves the AI surface (NLQ, chat, agents, suggest) |
+| **notifications** | `{ enabled: boolean; features?: Record<string, boolean>; description?: string }` | ✅ | Whether the backend serves the notification surface (inbox, delivery) |
+| **i18n** | `{ enabled: boolean; features?: Record<string, boolean>; description?: string }` | ✅ | Whether the backend serves the i18n surface (translations, locale negotiation) |
+
+### Nested Shape: `GetDiscoveryResponse.schemaDiscovery`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **openapi** | `string` | optional | URL to OpenAPI (Swagger) specification (e.g., "/api/v1/openapi.json") |
+| **jsonSchema** | `string` | optional | URL to JSON Schema definitions |
+
+### Nested Shape: `GetDiscoveryResponse.scoping`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **enabled** | `boolean` | ✅ | Whether environment-scoped routes are mounted at all |
+| **resolution** | `Enum<'required' \| 'optional' \| 'auto'>` | ✅ | How the environment id is resolved when scoping is enabled (mirrors RestApiConfig.projectResolution) |
+| **scoped** | `boolean` | ✅ | Whether THIS response was served from the environment-scoped mount |
+| **environmentId** | `string` | optional | The resolved environment id — present only on a scoped mount |
+
 
 ---
 
@@ -665,6 +975,24 @@ Enable package response
 | :--- | :--- | :--- | :--- |
 | **objects** | `Record<string, { allowCreate: boolean; allowRead: boolean; allowEdit: boolean; allowDelete: boolean; … }>` | ✅ | Effective object permissions keyed by object name |
 | **systemPermissions** | `string[]` | ✅ | Effective system-level permissions |
+
+### Nested Shape: `GetEffectivePermissionsResponse.objects[string]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **allowCreate** | `boolean` | optional (default: `false`) | Create permission |
+| **allowRead** | `boolean` | optional (default: `false`) | Read permission |
+| **allowEdit** | `boolean` | optional (default: `false`) | Edit permission |
+| **allowDelete** | `boolean` | optional (default: `false`) | Delete permission |
+| **allowExport** | `boolean` | optional | [#3544] User-level export axis over read (opt-in grant). true = export granted (still bounded by read); unset/false = no export. Merged most-permissively like the CRUD bits; NOT implied by viewAllRecords/modifyAllRecords. |
+| **allowTransfer** | `boolean` | optional (default: `false`) | [RBAC-gated; ENFORCED now via insert/update owner_id guard, #3004] Change record ownership (assign/reassign/disown owner_id) |
+| **allowRestore** | `boolean` | optional (default: `false`) | [RBAC-gated; operation pending M2] Restore from trash (Undelete) |
+| **allowPurge** | `boolean` | optional (default: `false`) | [RBAC-gated; operation pending M2] Permanently delete (Hard Delete/GDPR) |
+| **viewAllRecords** | `boolean` | optional (default: `false`) | View All Data (Bypass Sharing) |
+| **modifyAllRecords** | `boolean` | optional (default: `false`) | Modify All Data (Bypass Sharing) — bypasses sharing rules and ownership on the objects record sharing enforces on; on an object with NO owner field sharing abstains, so the platform created_by write floor still applies (#6698). |
+| **readScope** | `Enum<'own' \| 'own_and_reports' \| 'unit' \| 'unit_and_below' \| 'org'>` | optional | [ADR-0057 D1] Read depth: own\|unit\|unit_and_below\|org |
+| **writeScope** | `Enum<'own' \| 'own_and_reports' \| 'unit' \| 'unit_and_below' \| 'org'>` | optional | [ADR-0057 D1] Write depth: own\|unit\|unit_and_below\|org |
+| **apiOperations** | `Enum<'get' \| 'list' \| 'create' \| 'update' \| 'delete' \| 'upsert' \| 'bulk' \| …>[]` | optional | Server-resolved effective API operations for this object (#3391). Present only when the object tightens exposure via apiMethods; absent = default-allow. The frontend renders this effective set, never the raw whitelist. Vocabulary is the EFFECTIVE ApiOperation set (six primitives + eight derived verbs, #3543), not the authored six-value ApiMethod enum. |
 
 
 ---
@@ -691,6 +1019,14 @@ Enable package response
 | **locale** | `string` | ✅ | Locale code |
 | **labels** | `Record<string, { label: string; help?: string; options?: Record<string, string> }>` | ✅ | Field labels keyed by field name |
 
+### Nested Shape: `GetFieldLabelsResponse.labels[string]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **label** | `string` | ✅ | Translated field label |
+| **help** | `string` | optional | Translated help text |
+| **options** | `Record<string, string>` | optional | Translated option labels |
+
 
 ---
 
@@ -712,6 +1048,14 @@ Enable package response
 | :--- | :--- | :--- | :--- |
 | **locales** | `{ code: string; label: string; isDefault: boolean }[]` | ✅ | Available locales |
 
+### Nested Shape: `GetLocalesResponse.locales[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **code** | `string` | ✅ | BCP-47 locale code (e.g., en-US, zh-CN) |
+| **label** | `string` | ✅ | Locale label. Equals `code` on every serving surface today — the client names locales for its UI (#7634) |
+| **isDefault** | `boolean` | optional (default: `false`) | Whether this is the default locale |
+
 
 ---
 
@@ -726,6 +1070,14 @@ Enable package response
 | **cacheRequest** | `{ ifNoneMatch?: string; ifModifiedSince?: string; cacheControl?: object }` | optional | Cache validation parameters |
 | **locale** | `string` | optional | Resolved response locale. Folded into the ETag so a language switch never returns a stale-locale 304 — metadata is translated *after* the cache validator check (issue #1319). |
 | **organizationId** | `string` | optional | Organization (tenant) scope for the read. Selects the org partition in the ADR-0005 overlay read order — org overlay wins over env-wide overlay wins over packaged artifact — exactly as on the uncached read (#9454). Also folded into the ETag, so a scope switch never returns a stale 304 from another scope's cached representation. Absent = environment-wide read. |
+
+### Nested Shape: `GetMetaItemCachedRequest.cacheRequest`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **ifNoneMatch** | `string` | optional | ETag value for conditional request (If-None-Match header) |
+| **ifModifiedSince** | `string` | optional | Timestamp for conditional request (If-Modified-Since header) |
+| **cacheControl** | `{ directives: Enum<'public' \| 'private' \| 'no-cache' \| 'no-store' \| 'must-revalidate' \| 'max-age'>[]; maxAge?: number; staleWhileRevalidate?: number; staleIfError?: number }` | optional | Client cache control preferences |
 
 
 ---
@@ -742,6 +1094,22 @@ Enable package response
 | **cacheControl** | `{ directives: Enum<'public' \| 'private' \| 'no-cache' \| 'no-store' \| 'must-revalidate' \| 'max-age'>[]; maxAge?: number; staleWhileRevalidate?: number; staleIfError?: number }` | optional | Cache control directives |
 | **notModified** | `boolean` | optional (default: `false`) | True if resource has not been modified (304 response) |
 | **version** | `string` | optional | Metadata version identifier |
+
+### Nested Shape: `GetMetaItemCachedResponse.etag`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **value** | `string` | ✅ | ETag value (hash or version identifier) |
+| **weak** | `boolean` | optional (default: `false`) | Whether this is a weak ETag |
+
+### Nested Shape: `GetMetaItemCachedResponse.cacheControl`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **directives** | `Enum<'public' \| 'private' \| 'no-cache' \| 'no-store' \| 'must-revalidate' \| 'max-age'>[]` | ✅ | Cache control directives |
+| **maxAge** | `number` | optional | Maximum cache age in seconds |
+| **staleWhileRevalidate** | `number` | optional | Allow serving stale content while revalidating (seconds) |
+| **staleIfError** | `number` | optional | Allow serving stale content on error (seconds) |
 
 
 ---
@@ -784,6 +1152,14 @@ Enable package response
 | **deletable** | `boolean` | ✅ | Whether deleting the overlay is permitted. Always present on this path. |
 | **resettable** | `boolean` | ✅ | Whether the item can be reset to its packaged default. Always present on this path. |
 
+### Nested Shape: `GetMetaItemLayeredResponse._diagnostics`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **valid** | `boolean` | ✅ | Whether the metadata is valid |
+| **errors** | `{ path: string; message: string; code?: string }[]` | optional | Validation errors |
+| **warnings** | `{ path: string; message: string }[]` | optional | Validation warnings |
+
 
 ---
 
@@ -823,6 +1199,12 @@ Enable package response
 | **editable** | `boolean` | optional | Whether an overlay write is permitted — false iff `lock` is `no-overlay` or `full`. A derived verdict: do not recompute it from `lock` client-side. |
 | **deletable** | `boolean` | optional | Whether deleting the overlay is permitted — false iff `lock` is `no-delete` or `full`. |
 | **resettable** | `boolean` | optional | Whether the item can be reset to its packaged default — true iff it is artifact-backed, i.e. there is a baseline to reset TO. |
+
+### Nested Shape: `GetMetaItemResponse.sortability`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **fields** | `Record<string, { sortable: boolean; reason?: 'virtual-type'; caveat?: 'unprovisioned-anchor' }>` | ✅ | Verdict per sortable-addressable column, keyed by field name. The domain is the served field map plus the always-provisioned `id`; a name absent from this map (an unknown field, a dotted path, an unprovisioned audit column) has no platform sort behind it and must get no sort affordance. |
 
 
 ---
@@ -872,6 +1254,24 @@ Enable package response
 | **types** | `string[]` | ✅ | Available metadata type names (e.g., "object", "plugin", "view") |
 | **entries** | `{ type: string; label: string; description?: string; filePatterns: string[]; … }[]` | optional | Enriched per-type registry entries (Phase 3a) |
 
+### Nested Shape: `GetMetaTypesResponse.entries[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `string` | ✅ | Singular type identifier |
+| **label** | `string` | ✅ | Human-readable label |
+| **description** | `string` | optional | Brief description |
+| **filePatterns** | `string[]` | ✅ | Glob patterns used to discover artifacts of this type |
+| **supportsOverlay** | `boolean` | ✅ | Loader can merge per-org overlays on top of artifact |
+| **allowOrgOverride** | `boolean` | ✅ | Per-org overlay writes accepted at runtime (may be env-elevated) |
+| **allowRuntimeCreate** | `boolean` | ✅ | New artifacts of this type can be created via runtime API |
+| **supportsVersioning** | `boolean` | ✅ | History is tracked for this type |
+| **executionPinned** | `boolean` | ✅ | Runtime transactions pin a specific historical version_hash (ADR-0009) |
+| **loadOrder** | `integer` | ✅ | Loading priority (lower = earlier) |
+| **domain** | `Enum<'data' \| 'ui' \| 'automation' \| 'system' \| 'security' \| 'ai'>` | ✅ | Protocol domain |
+| **overrideSource** | `Enum<'registry' \| 'env'>` | ✅ | Whether allowOrgOverride is set in the static registry or via OS_METADATA_WRITABLE env var |
+| **createSeed** | `any` | optional | Authoritative minimal valid create seed for this type — Studio/CLI/API derive create defaults from it (single source of truth in @objectstack/spec). Absent for canvas-create types whose shape is built interactively. |
+
 
 ---
 
@@ -892,6 +1292,16 @@ Enable package response
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **preferences** | `{ email: boolean; push: boolean; inApp: boolean; digest: Enum<'none' \| 'daily' \| 'weekly'>; … }` | ✅ | Current notification preferences |
+
+### Nested Shape: `GetNotificationPreferencesResponse.preferences`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **email** | `boolean` | optional (default: `true`) | Receive email notifications |
+| **push** | `boolean` | optional (default: `true`) | Receive push notifications |
+| **inApp** | `boolean` | optional (default: `true`) | Receive in-app notifications |
+| **digest** | `Enum<'none' \| 'daily' \| 'weekly'>` | optional (default: `"none"`) | Email digest frequency |
+| **channels** | `Record<string, { enabled: boolean; email?: boolean; push?: boolean }>` | optional | Per-channel notification preferences |
 
 
 ---
@@ -916,6 +1326,30 @@ Enable package response
 | **object** | `string` | ✅ | Object name |
 | **permissions** | `{ allowCreate: boolean; allowRead: boolean; allowEdit: boolean; allowDelete: boolean; … }` | ✅ | Object-level permissions |
 | **fieldPermissions** | `Record<string, { readable: boolean; editable: boolean }>` | optional | Field-level permissions keyed by field name |
+
+### Nested Shape: `GetObjectPermissionsResponse.permissions`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **allowCreate** | `boolean` | optional (default: `false`) | Create permission |
+| **allowRead** | `boolean` | optional (default: `false`) | Read permission |
+| **allowEdit** | `boolean` | optional (default: `false`) | Edit permission |
+| **allowDelete** | `boolean` | optional (default: `false`) | Delete permission |
+| **allowExport** | `boolean` | optional | [#3544] User-level export axis over read (opt-in grant). true = export granted (still bounded by read); unset/false = no export. Merged most-permissively like the CRUD bits; NOT implied by viewAllRecords/modifyAllRecords. |
+| **allowTransfer** | `boolean` | optional (default: `false`) | [RBAC-gated; ENFORCED now via insert/update owner_id guard, #3004] Change record ownership (assign/reassign/disown owner_id) |
+| **allowRestore** | `boolean` | optional (default: `false`) | [RBAC-gated; operation pending M2] Restore from trash (Undelete) |
+| **allowPurge** | `boolean` | optional (default: `false`) | [RBAC-gated; operation pending M2] Permanently delete (Hard Delete/GDPR) |
+| **viewAllRecords** | `boolean` | optional (default: `false`) | View All Data (Bypass Sharing) |
+| **modifyAllRecords** | `boolean` | optional (default: `false`) | Modify All Data (Bypass Sharing) — bypasses sharing rules and ownership on the objects record sharing enforces on; on an object with NO owner field sharing abstains, so the platform created_by write floor still applies (#6698). |
+| **readScope** | `Enum<'own' \| 'own_and_reports' \| 'unit' \| 'unit_and_below' \| 'org'>` | optional | [ADR-0057 D1] Read depth: own\|unit\|unit_and_below\|org |
+| **writeScope** | `Enum<'own' \| 'own_and_reports' \| 'unit' \| 'unit_and_below' \| 'org'>` | optional | [ADR-0057 D1] Write depth: own\|unit\|unit_and_below\|org |
+
+### Nested Shape: `GetObjectPermissionsResponse.fieldPermissions[string]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **readable** | `boolean` | optional (default: `true`) | Field read access |
+| **editable** | `boolean` | optional (default: `false`) | Field edit access |
 
 
 ---
@@ -943,6 +1377,23 @@ Get package response
 | :--- | :--- | :--- | :--- |
 | **package** | `{ manifest: object; status?: Enum<'installed' \| 'disabled' \| 'installing' \| 'upgrading' \| 'uninstalling' \| 'error'>; enabled?: boolean; installedAt?: string; … }` | ✅ | Package details |
 
+### Nested Shape: `GetPackageResponse.package`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **manifest** | `{ id: string; namespace?: string; defaultDatasource?: string; version: string; … }` | ✅ | Full package manifest |
+| **status** | `Enum<'installed' \| 'disabled' \| 'installing' \| 'upgrading' \| 'uninstalling' \| 'error'>` | optional (default: `"installed"`) | Package state: installed, disabled, installing, upgrading, uninstalling, or error |
+| **enabled** | `boolean` | optional (default: `true`) | Whether the package is currently enabled |
+| **installedAt** | `string` | optional | Installation timestamp |
+| **updatedAt** | `string` | optional | Last update timestamp |
+| **installedVersion** | `string` | optional | Currently installed version for quick access |
+| **previousVersion** | `string` | optional | Version before the last upgrade |
+| **statusChangedAt** | `string` | optional | Status change timestamp |
+| **errorMessage** | `string` | optional | Error message when status is error |
+| **settings** | `Record<string, any>` | optional | User-provided configuration settings |
+| **upgradeHistory** | `{ fromVersion: string; toVersion: string; upgradedAt: string; status: Enum<'success' \| 'failed' \| 'rolled_back'>; … }[]` | optional | Version upgrade history |
+| **registeredNamespaces** | `string[]` | optional | Namespace prefixes registered by this package |
+
 
 ---
 
@@ -966,6 +1417,15 @@ Get package response
 | **channel** | `string` | ✅ | Channel name |
 | **members** | `{ userId: string; status: Enum<'online' \| 'away' \| 'busy' \| 'offline'>; lastSeen: string; metadata?: Record<string, any> }[]` | ✅ | Active members and their presence state |
 
+### Nested Shape: `GetPresenceResponse.members[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **userId** | `string` | ✅ | User identifier |
+| **status** | `Enum<'online' \| 'away' \| 'busy' \| 'offline'>` | ✅ | Current presence status |
+| **lastSeen** | `string` | ✅ | ISO 8601 datetime of last activity |
+| **metadata** | `Record<string, any>` | optional | Custom presence data (e.g., current page, custom status) |
+
 
 ---
 
@@ -988,6 +1448,21 @@ Get package response
 | :--- | :--- | :--- | :--- |
 | **locale** | `string` | ✅ | Locale code |
 | **translations** | `{ objects?: Record<string, object>; apps?: Record<string, object>; messages?: Record<string, string>; globalActions?: Record<string, object>; … }` | ✅ | Translation data |
+
+### Nested Shape: `GetTranslationsResponse.translations`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **objects** | `Record<string, { label?: string; pluralLabel?: string; description?: string; fields?: Record<string, object>; … }>` | optional | Object translations keyed by object name |
+| **apps** | `Record<string, { label: string; description?: string; navigation?: Record<string, object> }>` | optional | App translations keyed by app name |
+| **messages** | `Record<string, string>` | optional | UI message translations keyed by message ID |
+| **globalActions** | `Record<string, { label?: string; description?: string; confirmText?: string; successMessage?: string; … }>` | optional | Global action translations keyed by action name |
+| **dashboards** | `Record<string, { label?: string; description?: string; actions?: Record<string, object>; widgets?: Record<string, object> }>` | optional | Dashboard translations keyed by dashboard name |
+| **pages** | `Record<string, { label?: string; description?: string; title?: string; subtitle?: string; … }>` | optional | Page translations keyed by page name |
+| **flows** | `Record<string, { label?: string; screens?: Record<string, object> }>` | optional | Screen-flow translations keyed by flow name |
+| **settings** | `Record<string, { title?: string; description?: string; groups?: Record<string, object>; keys?: Record<string, object>; … }>` | optional | Settings manifest translations keyed by namespace |
+| **metadataForms** | `Record<string, { label?: string; description?: string; sections?: Record<string, object>; fields?: Record<string, object> }>` | optional | Translations for metadata-type configuration forms keyed by metadata type |
+| **settingsCommon** | `{ sourceLabels?: object }` | optional | Cross-namespace Settings UI strings |
 
 
 ---
@@ -1026,6 +1501,182 @@ Get package response
 | **_packageVersion** | `string` | optional | Owning package version. |
 | **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
 
+### Nested Shape: `GetUiViewResponse.list`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | optional | Internal view name (lowercase snake_case) |
+| **label** | `string \| Record<string, string>` | optional | Display label — the default-language string, or an inline locale map (`{ en, "zh-CN" }`) resolved at render time |
+| **type** | `Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>` | optional (default: `"grid"`) |  |
+| **data** | `{ provider: 'object'; object: string } \| { provider: 'api'; read?: object; write?: object } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }` | optional | Data source configuration (defaults to "object" provider) |
+| **columns** | `string[] \| { field: string; label?: string \| Record<string, string>; width?: number; align?: Enum<'left' \| 'center' \| 'right'>; … }[]` | ✅ | Fields to display as columns |
+| **filter** | `{ field: string; operator?: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Filter criteria (JSON Rules) |
+| **sort** | `string \| { field: string; order: Enum<'asc' \| 'desc'> }[]` | optional |  |
+| **searchableFields** | `string[]` | optional | Fields enabled for search |
+| **filterableFields** | `string[]` | optional | Legacy shorthand for userFilters.fields — bare field names enabled for end-user filtering. Prefer userFilters |
+| **resizable** | `boolean` | optional | Enable column resizing |
+| **compactToolbar** | `boolean` | optional | Collapse Group/Color/Density/Hide-fields into a single View settings popover |
+| **selection** | `{ type?: Enum<'none' \| 'single' \| 'multiple'> }` | optional | Row selection configuration |
+| **navigation** | `{ mode?: Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>; view?: string; preventNavigation?: boolean; openNewTab?: boolean; … }` | optional | Configuration for item click navigation (page, drawer, modal, etc.) |
+| **pagination** | `{ pageSize?: integer; pageSizeOptions?: integer[] }` | optional | Pagination configuration |
+| **kanban** | `{ groupByField: string; summarizeField?: string; columns: string[] }` | optional | Kanban-board configuration — applies when the view renders as a kanban layout |
+| **calendar** | `{ startDateField: string; endDateField?: string; titleField: string; colorField?: string }` | optional | Calendar configuration — applies when the view renders as a calendar layout |
+| **gantt** | `{ startDateField: string; endDateField: string; titleField: string; progressField?: string; … } & Record<string, any>` | optional | Gantt-timeline configuration — applies when the view renders as a gantt layout |
+| **gallery** | `{ coverField?: string; coverFit?: Enum<'cover' \| 'contain'>; cardSize?: Enum<'small' \| 'medium' \| 'large'>; titleField?: string; … }` | optional | Gallery/card view configuration |
+| **timeline** | `{ startDateField: string; endDateField?: string; titleField: string; groupByField?: string; … }` | optional | Timeline view configuration |
+| **chart** | `{ chartType?: Enum<'bar' \| 'line' \| 'pie' \| 'area' \| 'scatter'>; dataset: string; dimensions?: string[]; values: string[] }` | optional | List chart view configuration |
+| **map** | `{ latitudeField?: string; longitudeField?: string; locationField?: string; titleField?: string; … }` | optional | Map configuration — applies when the view renders as a map layout |
+| **tree** | `{ parentField?: string; labelField?: string; fields?: string[]; defaultExpandedDepth?: integer } & Record<string, any>` | optional | Tree/hierarchy configuration — applies when the view renders as a tree layout |
+| **description** | `string \| Record<string, string>` | optional | View description for documentation/tooltips |
+| **sharing** | `{ type?: Enum<'personal' \| 'collaborative'>; lockedBy?: string }` | optional | View sharing and access configuration |
+| **rowHeight** | `Enum<'compact' \| 'short' \| 'medium' \| 'tall' \| 'extra_tall'>` | optional | Row height / density setting |
+| **grouping** | `{ fields: object[] }` | optional | Group records by one or more fields |
+| **rowColor** | `{ field: string; colors?: Record<string, string> }` | optional | Color rows based on field value |
+| **hiddenFields** | `string[]` | optional | Fields to hide in this specific view |
+| **fieldOrder** | `string[]` | optional | Explicit field display order for this view |
+| **rowActions** | `string[]` | optional | Actions available for individual row items |
+| **bulkActions** | `string[]` | optional | Actions available when multiple rows are selected |
+| **bulkActionDefs** | `{ name: string; label?: string; icon?: string; variant?: Enum<'primary' \| 'secondary' \| 'danger' \| 'ghost' \| 'outline'>; … }[]` | optional | Rich bulk action definitions (schema-driven, executed via BulkActionDialog). Use a def for a mass data-plane mutation ('update' with a `patch` / 'delete') that no action expresses, or for an `operation: 'custom'` + `execution: 'aggregate'` entry (objectui#3139) that dispatches the action it NAMES once for the whole selection — the renderer injects `params._selectedIds: string[]` (read that on the server, not `recordId`) so a single call can produce one aggregate artifact (zip of QR codes, merged PDF, batch print). Aggregate results are all-or-nothing: a handler that cannot cover the whole selection must reject, and per-row retry is replaced by re-running the action. `batchSize` does not apply (the call is never chunked); set `maxRecords` on defs whose server work is expensive. For the PER-RECORD dispatch use `bulkActions: ['<name>']` instead — the bare-string form, promoted with the action's own label, params and `visible`; a 'custom' def without `execution: 'aggregate'` has no dispatcher and is refused at parse time (#4457). Toolbar url/api actions can also interpolate the current selection via `${ctx.selection.ids}` / `${ctx.selection.count}`. |
+| **conditionalFormatting** | `{ condition: string \| object; style: Record<string, string> }[]` | optional | Conditional formatting rules for list rows |
+| **inlineEdit** | `boolean` | optional | Allow inline editing of records directly in the list view |
+| **exportOptions** | `Enum<'csv' \| 'xlsx' \| 'json'>[] \| { formats?: Enum<'csv' \| 'xlsx' \| 'json'>[]; maxRecords?: integer; includeHeaders?: boolean; fileNamePrefix?: string; … }` | optional | Export configuration for the list toolbar export menu: `{ formats?, maxRecords?, includeHeaders?, fileNamePrefix?, streaming? }`. A bare format array is the legacy spelling and lifts to `{ formats: [...] }` at parse. |
+| **userActions** | `{ sort?: boolean; search?: boolean; filter?: boolean; refresh?: boolean; … }` | optional | User action toggles for the view toolbar |
+| **appearance** | `{ showDescription?: boolean; allowedVisualizations?: Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>[] }` | optional | Appearance and visualization configuration |
+| **tabs** | `{ name: string; label?: string \| Record<string, string>; icon?: string; view?: string; … }[]` | optional | Tab definitions for multi-tab view interface |
+| **addRecord** | `{ enabled?: boolean; position?: Enum<'top' \| 'bottom' \| 'both'>; mode?: Enum<'inline' \| 'form' \| 'modal'>; formView?: string }` | optional | Add record entry point configuration |
+| **showRecordCount** | `boolean` | optional | Show record count at the bottom of the list |
+| **allowPrinting** | `boolean` | optional | Allow users to print the view |
+| **emptyState** | `{ title?: string \| Record<string, string>; message?: string \| Record<string, string>; icon?: string }` | optional | Empty state configuration when no records found |
+| **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes for the list view |
+| **responsive** | `never` | optional | [REMOVED] `view.responsive` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — no renderer ever read it; the grid is responsive by its own layout rules. Delete the key. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
+| **performance** | `never` | optional | [REMOVED] `view.performance` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — no renderer or runtime read it; list-view performance tuning was never implemented. Delete the key. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
+| **striped** | `never` | optional | [REMOVED] `view.striped` was removed in @objectstack/spec 17.0.0 (#7176, ADR-0049 enforce-or-remove) — every measured reader only copied it forward and no renderer ever applied it, so authoring it was a parse-clean no-op. There is no authorable striped-rows switch; delete the key. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
+| **bordered** | `never` | optional | [REMOVED] `view.bordered` was removed in @objectstack/spec 17.0.0 (#7176, ADR-0049 enforce-or-remove) — every measured reader only copied it forward and no renderer ever applied it (the grid frame is the renderer's own constant, not authorable). Delete the key. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
+| **virtualScroll** | `never` | optional | [REMOVED] `view.virtualScroll` was removed in @objectstack/spec 17.0.0 (#7176, ADR-0049 enforce-or-remove) — every measured reader only copied it forward and no grid ever virtualized off it; authoring it was a parse-clean no-op. Delete the key; large datasets page via `pagination`. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
+| **userFilters** | `{ element?: Enum<'dropdown' \| 'toggle'>; fields?: object[] }` | optional |  |
+
+### Nested Shape: `GetUiViewResponse.form`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `Enum<'simple' \| 'tabbed' \| 'wizard' \| 'split' \| 'drawer' \| 'modal'>` | optional (default: `"simple"`) |  |
+| **layout** | `Enum<'vertical' \| 'horizontal' \| 'inline' \| 'grid'>` | optional | Field layout direction |
+| **columns** | `integer` | optional | Number of columns for the form body |
+| **title** | `string` | optional | Form title |
+| **description** | `string` | optional | Form description |
+| **defaultTab** | `string` | optional | Initially active tab (tabbed forms) |
+| **tabPosition** | `Enum<'top' \| 'bottom' \| 'left' \| 'right'>` | optional | Tab strip position (tabbed forms) |
+| **allowSkip** | `boolean` | optional | Allow skipping steps (wizard forms) |
+| **showStepIndicator** | `boolean` | optional | Show the step indicator (wizard forms) |
+| **splitDirection** | `Enum<'horizontal' \| 'vertical'>` | optional | Split orientation (split forms) |
+| **splitSize** | `number` | optional | Primary split panel size, % (split forms) |
+| **splitResizable** | `boolean` | optional | Whether the split is resizable (split forms) |
+| **drawerSide** | `Enum<'top' \| 'bottom' \| 'left' \| 'right'>` | optional | Drawer side (drawer forms) |
+| **drawerWidth** | `string` | optional | [DEPRECATED → size buckets] Drawer width, e.g. "480px". A pixel width cannot be chosen without knowing the client viewport — the renderer derives it. |
+| **modalSize** | `Enum<'sm' \| 'default' \| 'lg' \| 'xl' \| 'full'>` | optional | Modal size (modal forms) |
+| **data** | `{ provider: 'object'; object: string } \| { provider: 'api'; read?: object; write?: object } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }` | optional | Data source configuration (defaults to "object" provider) |
+| **sections** | `{ name?: string; label?: string \| Record<string, string>; description?: string; collapsible?: boolean; … }[]` | optional |  |
+| **groups** | `{ name?: string; label?: string \| Record<string, string>; description?: string; collapsible?: boolean; … }[]` | optional | [LEGACY ALIAS → `sections`] Accepted for back-compat and folded onto `sections` at parse; `sections` wins when both are present. Prefer `sections`. |
+| **subforms** | `{ childObject: string; relationshipField?: string; columns?: any[]; amountField?: string; … }[]` | optional | Inline master-detail child collections |
+| **defaultSort** | `never` | optional | [REMOVED] `form.defaultSort` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — nothing read it: a related list inside a form sorts by its own list view's `sort`. Delete the key and set the sort on the related list view instead. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
+| **sharing** | `{ enabled?: boolean; publicLink?: string; password?: string; allowedDomains?: string[]; … }` | optional | Public sharing configuration for this form |
+| **submitBehavior** | `{ kind: 'thank-you'; title?: string; message?: string } \| { kind: 'redirect'; url: string; delayMs?: integer } \| { kind: 'continue' } \| { kind: 'next-record' }` | optional | Post-submit behavior. On the `redirect` arm, `url` is relative-only and interpolates only declared record fields as `{{record.field_name}}`, URL-escaped (ruled 2026-08-11, #7496). |
+| **buttons** | `{ submit?: object; cancel?: object; reset?: object }` | optional | Form action-button visibility & labels; folded onto the flat renderer props by ObjectUI ObjectForm (framework#1894 / #2998). |
+| **defaults** | `Record<string, any>` | optional | Initial field values for create-mode forms (folded into ObjectUI ObjectForm initial values; framework#1894 / #2998). |
+| **aria** | `never` | optional | [REMOVED] `form.aria` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — no form renderer ever applied it, so declared ARIA attributes silently did not reach the DOM. Delete the key. The form renderer emits its own semantic markup; report gaps as renderer issues rather than per-view attribute overrides. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
+
+### Nested Shape: `GetUiViewResponse.listViews[string]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | optional | Internal view name (lowercase snake_case) |
+| **label** | `string \| Record<string, string>` | optional | Display label — the default-language string, or an inline locale map (`{ en, "zh-CN" }`) resolved at render time |
+| **type** | `Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>` | optional (default: `"grid"`) |  |
+| **data** | `{ provider: 'object'; object: string } \| { provider: 'api'; read?: object; write?: object } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }` | optional | Data source configuration (defaults to "object" provider) |
+| **columns** | `string[] \| { field: string; label?: string \| Record<string, string>; width?: number; align?: Enum<'left' \| 'center' \| 'right'>; … }[]` | ✅ | Fields to display as columns |
+| **filter** | `{ field: string; operator?: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Filter criteria (JSON Rules) |
+| **sort** | `string \| { field: string; order: Enum<'asc' \| 'desc'> }[]` | optional |  |
+| **searchableFields** | `string[]` | optional | Fields enabled for search |
+| **filterableFields** | `string[]` | optional | Legacy shorthand for userFilters.fields — bare field names enabled for end-user filtering. Prefer userFilters |
+| **resizable** | `boolean` | optional | Enable column resizing |
+| **compactToolbar** | `boolean` | optional | Collapse Group/Color/Density/Hide-fields into a single View settings popover |
+| **selection** | `{ type?: Enum<'none' \| 'single' \| 'multiple'> }` | optional | Row selection configuration |
+| **navigation** | `{ mode?: Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>; view?: string; preventNavigation?: boolean; openNewTab?: boolean; … }` | optional | Configuration for item click navigation (page, drawer, modal, etc.) |
+| **pagination** | `{ pageSize?: integer; pageSizeOptions?: integer[] }` | optional | Pagination configuration |
+| **kanban** | `{ groupByField: string; summarizeField?: string; columns: string[] }` | optional | Kanban-board configuration — applies when the view renders as a kanban layout |
+| **calendar** | `{ startDateField: string; endDateField?: string; titleField: string; colorField?: string }` | optional | Calendar configuration — applies when the view renders as a calendar layout |
+| **gantt** | `{ startDateField: string; endDateField: string; titleField: string; progressField?: string; … } & Record<string, any>` | optional | Gantt-timeline configuration — applies when the view renders as a gantt layout |
+| **gallery** | `{ coverField?: string; coverFit?: Enum<'cover' \| 'contain'>; cardSize?: Enum<'small' \| 'medium' \| 'large'>; titleField?: string; … }` | optional | Gallery/card view configuration |
+| **timeline** | `{ startDateField: string; endDateField?: string; titleField: string; groupByField?: string; … }` | optional | Timeline view configuration |
+| **chart** | `{ chartType?: Enum<'bar' \| 'line' \| 'pie' \| 'area' \| 'scatter'>; dataset: string; dimensions?: string[]; values: string[] }` | optional | List chart view configuration |
+| **map** | `{ latitudeField?: string; longitudeField?: string; locationField?: string; titleField?: string; … }` | optional | Map configuration — applies when the view renders as a map layout |
+| **tree** | `{ parentField?: string; labelField?: string; fields?: string[]; defaultExpandedDepth?: integer } & Record<string, any>` | optional | Tree/hierarchy configuration — applies when the view renders as a tree layout |
+| **description** | `string \| Record<string, string>` | optional | View description for documentation/tooltips |
+| **sharing** | `{ type?: Enum<'personal' \| 'collaborative'>; lockedBy?: string }` | optional | View sharing and access configuration |
+| **rowHeight** | `Enum<'compact' \| 'short' \| 'medium' \| 'tall' \| 'extra_tall'>` | optional | Row height / density setting |
+| **grouping** | `{ fields: object[] }` | optional | Group records by one or more fields |
+| **rowColor** | `{ field: string; colors?: Record<string, string> }` | optional | Color rows based on field value |
+| **hiddenFields** | `string[]` | optional | Fields to hide in this specific view |
+| **fieldOrder** | `string[]` | optional | Explicit field display order for this view |
+| **rowActions** | `string[]` | optional | Actions available for individual row items |
+| **bulkActions** | `string[]` | optional | Actions available when multiple rows are selected |
+| **bulkActionDefs** | `{ name: string; label?: string; icon?: string; variant?: Enum<'primary' \| 'secondary' \| 'danger' \| 'ghost' \| 'outline'>; … }[]` | optional | Rich bulk action definitions (schema-driven, executed via BulkActionDialog). Use a def for a mass data-plane mutation ('update' with a `patch` / 'delete') that no action expresses, or for an `operation: 'custom'` + `execution: 'aggregate'` entry (objectui#3139) that dispatches the action it NAMES once for the whole selection — the renderer injects `params._selectedIds: string[]` (read that on the server, not `recordId`) so a single call can produce one aggregate artifact (zip of QR codes, merged PDF, batch print). Aggregate results are all-or-nothing: a handler that cannot cover the whole selection must reject, and per-row retry is replaced by re-running the action. `batchSize` does not apply (the call is never chunked); set `maxRecords` on defs whose server work is expensive. For the PER-RECORD dispatch use `bulkActions: ['<name>']` instead — the bare-string form, promoted with the action's own label, params and `visible`; a 'custom' def without `execution: 'aggregate'` has no dispatcher and is refused at parse time (#4457). Toolbar url/api actions can also interpolate the current selection via `${ctx.selection.ids}` / `${ctx.selection.count}`. |
+| **conditionalFormatting** | `{ condition: string \| object; style: Record<string, string> }[]` | optional | Conditional formatting rules for list rows |
+| **inlineEdit** | `boolean` | optional | Allow inline editing of records directly in the list view |
+| **exportOptions** | `Enum<'csv' \| 'xlsx' \| 'json'>[] \| { formats?: Enum<'csv' \| 'xlsx' \| 'json'>[]; maxRecords?: integer; includeHeaders?: boolean; fileNamePrefix?: string; … }` | optional | Export configuration for the list toolbar export menu: `{ formats?, maxRecords?, includeHeaders?, fileNamePrefix?, streaming? }`. A bare format array is the legacy spelling and lifts to `{ formats: [...] }` at parse. |
+| **userActions** | `{ sort?: boolean; search?: boolean; filter?: boolean; refresh?: boolean; … }` | optional | User action toggles for the view toolbar |
+| **appearance** | `{ showDescription?: boolean; allowedVisualizations?: Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>[] }` | optional | Appearance and visualization configuration |
+| **tabs** | `{ name: string; label?: string \| Record<string, string>; icon?: string; view?: string; … }[]` | optional | Tab definitions for multi-tab view interface |
+| **addRecord** | `{ enabled?: boolean; position?: Enum<'top' \| 'bottom' \| 'both'>; mode?: Enum<'inline' \| 'form' \| 'modal'>; formView?: string }` | optional | Add record entry point configuration |
+| **showRecordCount** | `boolean` | optional | Show record count at the bottom of the list |
+| **allowPrinting** | `boolean` | optional | Allow users to print the view |
+| **emptyState** | `{ title?: string \| Record<string, string>; message?: string \| Record<string, string>; icon?: string }` | optional | Empty state configuration when no records found |
+| **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes for the list view |
+| **responsive** | `never` | optional | [REMOVED] `view.responsive` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — no renderer ever read it; the grid is responsive by its own layout rules. Delete the key. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
+| **performance** | `never` | optional | [REMOVED] `view.performance` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — no renderer or runtime read it; list-view performance tuning was never implemented. Delete the key. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
+| **striped** | `never` | optional | [REMOVED] `view.striped` was removed in @objectstack/spec 17.0.0 (#7176, ADR-0049 enforce-or-remove) — every measured reader only copied it forward and no renderer ever applied it, so authoring it was a parse-clean no-op. There is no authorable striped-rows switch; delete the key. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
+| **bordered** | `never` | optional | [REMOVED] `view.bordered` was removed in @objectstack/spec 17.0.0 (#7176, ADR-0049 enforce-or-remove) — every measured reader only copied it forward and no renderer ever applied it (the grid frame is the renderer's own constant, not authorable). Delete the key. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
+| **virtualScroll** | `never` | optional | [REMOVED] `view.virtualScroll` was removed in @objectstack/spec 17.0.0 (#7176, ADR-0049 enforce-or-remove) — every measured reader only copied it forward and no grid ever virtualized off it; authoring it was a parse-clean no-op. Delete the key; large datasets page via `pagination`. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
+| **userFilters** | `{ element?: Enum<'dropdown' \| 'toggle'>; fields?: object[] }` | optional |  |
+
+### Nested Shape: `GetUiViewResponse.formViews[string]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `Enum<'simple' \| 'tabbed' \| 'wizard' \| 'split' \| 'drawer' \| 'modal'>` | optional (default: `"simple"`) |  |
+| **layout** | `Enum<'vertical' \| 'horizontal' \| 'inline' \| 'grid'>` | optional | Field layout direction |
+| **columns** | `integer` | optional | Number of columns for the form body |
+| **title** | `string` | optional | Form title |
+| **description** | `string` | optional | Form description |
+| **defaultTab** | `string` | optional | Initially active tab (tabbed forms) |
+| **tabPosition** | `Enum<'top' \| 'bottom' \| 'left' \| 'right'>` | optional | Tab strip position (tabbed forms) |
+| **allowSkip** | `boolean` | optional | Allow skipping steps (wizard forms) |
+| **showStepIndicator** | `boolean` | optional | Show the step indicator (wizard forms) |
+| **splitDirection** | `Enum<'horizontal' \| 'vertical'>` | optional | Split orientation (split forms) |
+| **splitSize** | `number` | optional | Primary split panel size, % (split forms) |
+| **splitResizable** | `boolean` | optional | Whether the split is resizable (split forms) |
+| **drawerSide** | `Enum<'top' \| 'bottom' \| 'left' \| 'right'>` | optional | Drawer side (drawer forms) |
+| **drawerWidth** | `string` | optional | [DEPRECATED → size buckets] Drawer width, e.g. "480px". A pixel width cannot be chosen without knowing the client viewport — the renderer derives it. |
+| **modalSize** | `Enum<'sm' \| 'default' \| 'lg' \| 'xl' \| 'full'>` | optional | Modal size (modal forms) |
+| **data** | `{ provider: 'object'; object: string } \| { provider: 'api'; read?: object; write?: object } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }` | optional | Data source configuration (defaults to "object" provider) |
+| **sections** | `{ name?: string; label?: string \| Record<string, string>; description?: string; collapsible?: boolean; … }[]` | optional |  |
+| **groups** | `{ name?: string; label?: string \| Record<string, string>; description?: string; collapsible?: boolean; … }[]` | optional | [LEGACY ALIAS → `sections`] Accepted for back-compat and folded onto `sections` at parse; `sections` wins when both are present. Prefer `sections`. |
+| **subforms** | `{ childObject: string; relationshipField?: string; columns?: any[]; amountField?: string; … }[]` | optional | Inline master-detail child collections |
+| **defaultSort** | `never` | optional | [REMOVED] `form.defaultSort` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — nothing read it: a related list inside a form sorts by its own list view's `sort`. Delete the key and set the sort on the related list view instead. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
+| **sharing** | `{ enabled?: boolean; publicLink?: string; password?: string; allowedDomains?: string[]; … }` | optional | Public sharing configuration for this form |
+| **submitBehavior** | `{ kind: 'thank-you'; title?: string; message?: string } \| { kind: 'redirect'; url: string; delayMs?: integer } \| { kind: 'continue' } \| { kind: 'next-record' }` | optional | Post-submit behavior. On the `redirect` arm, `url` is relative-only and interpolates only declared record fields as `{{record.field_name}}`, URL-escaped (ruled 2026-08-11, #7496). |
+| **buttons** | `{ submit?: object; cancel?: object; reset?: object }` | optional | Form action-button visibility & labels; folded onto the flat renderer props by ObjectUI ObjectForm (framework#1894 / #2998). |
+| **defaults** | `Record<string, any>` | optional | Initial field values for create-mode forms (folded into ObjectUI ObjectForm initial values; framework#1894 / #2998). |
+| **aria** | `never` | optional | [REMOVED] `form.aria` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — no form renderer ever applied it, so declared ARIA attributes silently did not reach the DOM. Delete the key. The form renderer emits its own semantic markup; report gaps as renderer issues rather than per-view attribute overrides. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
+
+### Nested Shape: `GetUiViewResponse.protection`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | ✅ | Lock policy — none \| no-overlay \| no-delete \| full. |
+| **reason** | `string` | ✅ | User-visible reason shown when the lock blocks an action. |
+| **docsUrl** | `string` | optional | Optional URL the Studio banner links to for more context. |
+
 
 ---
 
@@ -1063,6 +1714,35 @@ Install package request
 | **enableOnInstall** | `boolean` | optional (default: `true`) | Whether to enable immediately after install |
 | **platformVersion** | `string` | optional | Current platform version for compatibility verification |
 
+### Nested Shape: `InstallPackageRequest.manifest`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ | Unique package identifier (reverse domain style) |
+| **namespace** | `string` | optional | Short namespace identifier; also the mandatory prefix of every object name (e.g. "todo" → object names "todo_task", "todo_project") |
+| **defaultDatasource** | `string` | optional (default: `"default"`) | Default datasource for all objects in this package |
+| **version** | `string` | ✅ | Package version (semantic versioning) |
+| **type** | `Enum<'plugin' \| 'ui' \| 'driver' \| 'server' \| 'app' \| 'theme' \| 'agent' \| 'objectql' \| …>` | ✅ | Type of package |
+| **scope** | `Enum<'cloud' \| 'system' \| 'project'>` | optional (default: `"project"`) | Deployment scope: cloud \| system \| project |
+| **name** | `string` | ✅ | Human-readable package name |
+| **description** | `string` | optional | Package description |
+| **permissions** | `string[] \| { services?: string[]; hooks?: string[]; network?: string[]; fs?: string[] }` | optional | Required permissions: legacy string[] or structured plugin block (ADR-0025 §3.2) |
+| **objects** | `string[]` | optional | Glob patterns for ObjectQL schemas files |
+| **datasources** | `string[]` | optional | Glob patterns for Datasource definitions |
+| **dependencies** | `Record<string, string>` | optional | Package dependencies |
+| **configuration** | `{ title?: string; properties: Record<string, object> }` | optional | Plugin configuration settings |
+| **contributes** | `{ kinds?: object[]; routes?: object[] }` | optional | Platform contributions |
+| **data** | `{ object: string; externalId?: string \| string[]; mode?: Enum<'insert' \| 'update' \| 'upsert' \| 'replace' \| 'ignore'>; env?: Enum<'prod' \| 'dev' \| 'test'>[]; … }[]` | optional | Initial seed data (prefer top-level data field) |
+| **capabilities** | `{ implements?: object[]; provides?: object[]; requires?: object[]; extensionPoints?: object[]; … }` | optional | Plugin capability declarations for interoperability |
+| **extensions** | `Record<string, any>` | optional | Extension points and contributions |
+| **navigationContributions** | `{ app: string; group?: string; priority?: integer; items: (object \| … +8 more)[] }[]` | optional | Navigation items this package contributes into apps owned by other packages |
+| **loading** | `never` | optional | [REMOVED] `manifest.loading` was removed in @objectstack/spec 17.0.0 (#4914, ADR-0049 enforce-or-remove) — the entire block (`strategy`, `preload`, `codeSplitting`, `dynamicImport`, `initialization`, `dependencyResolution`, `hotReload`, `caching`, `sandboxing`, `monitoring`) had no runtime reader in any repo, so authoring it configured nothing. Delete the key. Plugins are composed at boot — `defineStack` registers them and the kernel runs `init` then `start` in an order topologically resolved from each composed plugin's own `dependencies` / `optionalDependencies` (`resolvePluginOrder`); the set is fixed until the process restarts. ⚠️ `loading.sandboxing` in particular never isolated anything: it did not run plugins in a process, vm, iframe or web-worker, and `allowedServices` gated no call. If you were relying on it for isolation, you had none — use the plugin trust tier (`manifest.runtime`) and the permission declarations, which are enforced. |
+| **engine** | `{ objectstack: string }` | optional | Platform compatibility requirements (legacy; superseded by `engines`) |
+| **engines** | `{ platform?: string; protocol?: string }` | optional | Plugin compatibility ranges (ADR-0025 §3.2; supersedes `engine`) |
+| **runtime** | `Enum<'node' \| 'sandbox' \| 'worker'>` | optional | Plugin trust tier (ADR-0025 §3.6) |
+| **packaging** | `Enum<'bundled' \| 'manifest-deps'>` | optional | Dependency packaging strategy (ADR-0025 §3.3) |
+| **integrity** | `Record<string, string>` | optional | Per-file content digests of the plugin artifact (ADR-0025 §3.2) |
+
 
 ---
 
@@ -1077,6 +1757,33 @@ Install package response
 | **package** | `{ manifest: object; status?: Enum<'installed' \| 'disabled' \| 'installing' \| 'upgrading' \| 'uninstalling' \| 'error'>; enabled?: boolean; installedAt?: string; … }` | ✅ | Installed package details |
 | **message** | `string` | optional | Installation status message |
 | **dependencyResolution** | `{ dependencies: object[]; canProceed: boolean; requiredActions: object[]; installOrder: string[]; … }` | optional | Dependency resolution result from install analysis |
+
+### Nested Shape: `InstallPackageResponse.package`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **manifest** | `{ id: string; namespace?: string; defaultDatasource?: string; version: string; … }` | ✅ | Full package manifest |
+| **status** | `Enum<'installed' \| 'disabled' \| 'installing' \| 'upgrading' \| 'uninstalling' \| 'error'>` | optional (default: `"installed"`) | Package state: installed, disabled, installing, upgrading, uninstalling, or error |
+| **enabled** | `boolean` | optional (default: `true`) | Whether the package is currently enabled |
+| **installedAt** | `string` | optional | Installation timestamp |
+| **updatedAt** | `string` | optional | Last update timestamp |
+| **installedVersion** | `string` | optional | Currently installed version for quick access |
+| **previousVersion** | `string` | optional | Version before the last upgrade |
+| **statusChangedAt** | `string` | optional | Status change timestamp |
+| **errorMessage** | `string` | optional | Error message when status is error |
+| **settings** | `Record<string, any>` | optional | User-provided configuration settings |
+| **upgradeHistory** | `{ fromVersion: string; toVersion: string; upgradedAt: string; status: Enum<'success' \| 'failed' \| 'rolled_back'>; … }[]` | optional | Version upgrade history |
+| **registeredNamespaces** | `string[]` | optional | Namespace prefixes registered by this package |
+
+### Nested Shape: `InstallPackageResponse.dependencyResolution`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **dependencies** | `{ packageId: string; requiredRange: string; resolvedVersion?: string; installedVersion?: string; … }[]` | ✅ | Resolution result for each dependency |
+| **canProceed** | `boolean` | ✅ | Whether installation can proceed |
+| **requiredActions** | `{ type: Enum<'install' \| 'upgrade' \| 'confirm_conflict'>; packageId: string; description: string }[]` | ✅ | Actions required before proceeding |
+| **installOrder** | `string[]` | ✅ | Topologically sorted package IDs for installation |
+| **circularDependencies** | `string[][]` | optional | Circular dependency chains detected (e.g. [["A", "B", "A"]]) |
 
 
 ---
@@ -1102,6 +1809,19 @@ Install package response
 | :--- | :--- | :--- | :--- |
 | **conversations** | `{ id: string; title?: string; agentId?: string; userId?: string; … }[]` | ✅ | Matching conversations |
 
+### Nested Shape: `ListAiConversationsResponse.conversations[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ | Conversation id |
+| **title** | `string` | optional | Title / summary |
+| **agentId** | `string` | optional | Agent this conversation is bound to |
+| **userId** | `string` | optional | Owning user |
+| **messages** | `({ role: Enum<'system' \| 'user' \| 'assistant' \| 'tool'>; content?: any; parts?: any[] } & Record<string, any>)[]` | ✅ | Message history |
+| **createdAt** | `string` | ✅ | Creation timestamp (ISO 8601) |
+| **updatedAt** | `string` | ✅ | Last update timestamp (ISO 8601) |
+| **metadata** | `Record<string, any>` | optional | Conversation metadata |
+
 
 ---
 
@@ -1126,6 +1846,26 @@ Install package response
 | :--- | :--- | :--- | :--- |
 | **items** | `{ id: string; object_name: string; action_name: string; tool_name: string; … }[]` | ✅ | Queued actions, newest first |
 | **total** | `number` | ✅ | Number of rows returned (not a total across pages) |
+
+### Nested Shape: `ListAiPendingActionsResponse.items[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ | Pending action id |
+| **object_name** | `string` | ✅ | Object the action targets |
+| **action_name** | `string` | ✅ | Action name |
+| **tool_name** | `string` | ✅ | Tool that would execute it |
+| **tool_input** | `string` | ✅ | Serialized tool input |
+| **status** | `Enum<'pending' \| 'approved' \| 'executed' \| 'failed' \| 'rejected'>` | ✅ | Lifecycle status |
+| **result** | `string` | optional | Serialized result, once executed |
+| **error** | `string` | optional | Failure message, when status is failed |
+| **rejection_reason** | `string` | optional | Reason given at rejection |
+| **conversation_id** | `string` | optional | Conversation that proposed it |
+| **message_id** | `string` | optional | Message that proposed it |
+| **proposed_by** | `string` | optional | Actor that proposed it |
+| **decided_by** | `string` | optional | Actor that approved or rejected it |
+| **proposed_at** | `string` | ✅ | Proposal timestamp (ISO 8601) |
+| **decided_at** | `string` | optional | Decision timestamp (ISO 8601) |
 
 
 ---
@@ -1153,6 +1893,19 @@ Install package response
 | **notifications** | `{ id: string; type: string; title: string; body: string; … }[]` | ✅ | List of notifications — the newest window, not a page |
 | **unreadCount** | `number` | ✅ | Total number of unread notifications |
 | **cursor** | `never` | optional | [REMOVED] `cursor` was removed from GET /api/v1/notifications in @objectstack/spec 17 (#6361, ADR-0049) — it was declared on the request AND the response and honoured on neither: the server reads only `read`/`type`/`limit`, and no emit site ever wrote the response key, so a caller paginating by it re-read the first window forever with no error and no 400. Delete the key; the `cursor` argument of `client.notifications.list()` was removed with it. This route is NOT paginated — it answers the newest `limit` notifications and stops, so ask for a bigger window (`limit`, clamped by the server into 1..200) instead of a next page. A first-class inbox cursor, if ever built, will be a response-minted opaque token, not this key. |
+
+### Nested Shape: `ListNotificationsResponse.notifications[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ | Notification ID |
+| **type** | `string` | ✅ | Notification type |
+| **title** | `string` | ✅ | Notification title |
+| **body** | `string` | ✅ | Notification body text |
+| **read** | `boolean` | optional (default: `false`) | Whether notification has been read |
+| **data** | `Record<string, any>` | optional | Additional notification data |
+| **actionUrl** | `string` | optional | URL to navigate to when clicked |
+| **createdAt** | `string` | ✅ | When notification was created |
 
 
 ---
@@ -1182,6 +1935,25 @@ List packages response
 | :--- | :--- | :--- | :--- |
 | **packages** | `{ manifest: object; status?: Enum<'installed' \| 'disabled' \| 'installing' \| 'upgrading' \| 'uninstalling' \| 'error'>; enabled?: boolean; installedAt?: string; … }[]` | ✅ | List of installed packages |
 | **total** | `number` | ✅ | Total package count |
+
+### Nested Shape: `ListPackagesResponse.packages[number]`
+
+Installed package with runtime lifecycle state
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **manifest** | `{ id: string; namespace?: string; defaultDatasource?: string; version: string; … }` | ✅ | Full package manifest |
+| **status** | `Enum<'installed' \| 'disabled' \| 'installing' \| 'upgrading' \| 'uninstalling' \| 'error'>` | optional (default: `"installed"`) | Package state: installed, disabled, installing, upgrading, uninstalling, or error |
+| **enabled** | `boolean` | optional (default: `true`) | Whether the package is currently enabled |
+| **installedAt** | `string` | optional | Installation timestamp |
+| **updatedAt** | `string` | optional | Last update timestamp |
+| **installedVersion** | `string` | optional | Currently installed version for quick access |
+| **previousVersion** | `string` | optional | Version before the last upgrade |
+| **statusChangedAt** | `string` | optional | Status change timestamp |
+| **errorMessage** | `string` | optional | Error message when status is error |
+| **settings** | `Record<string, any>` | optional | User-provided configuration settings |
+| **upgradeHistory** | `{ fromVersion: string; toVersion: string; upgradedAt: string; status: Enum<'success' \| 'failed' \| 'rolled_back'>; … }[]` | optional | Version upgrade history |
+| **registeredNamespaces** | `string[]` | optional | Namespace prefixes registered by this package |
 
 
 ---
@@ -1261,6 +2033,14 @@ List packages response
 | **digest** | `Enum<'none' \| 'daily' \| 'weekly'>` | optional (default: `"none"`) | Email digest frequency |
 | **channels** | `Record<string, { enabled: boolean; email?: boolean; push?: boolean }>` | optional | Per-channel notification preferences |
 
+### Nested Shape: `NotificationPreferences.channels[string]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **enabled** | `boolean` | optional (default: `true`) | Whether this channel is enabled |
+| **email** | `boolean` | optional | Override email setting |
+| **push** | `boolean` | optional | Override push setting |
+
 
 ---
 
@@ -1271,7 +2051,7 @@ List packages response
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **type** | `string` | ✅ | Metadata type name |
-| **name** | `string` | ✅ | Item name |
+| **name** | `string` | ✅ | Item name — lowercase snake_case segments, optionally dot-qualified (`crm_lead`, `crm_lead.pipeline`). The promotion door enforces the same grammar as `saveMetaItem` (#12194). |
 | **organizationId** | `string` | optional | Organization (tenant) scope for the promotion. The implementation resolves the draft through the org partition (ADR-0005, #8805), so a draft authored org-scoped must be published under the same scope or the lookup answers 404 `[no_draft]`. Absent = environment-wide. |
 | **actor** | `string` | optional | Identity recorded on the `op='publish'` history event. On the REST door this is the request's authenticated identity (one producer, #7749) — never a caller-supplied header. |
 | **message** | `string` | optional | Optional human-readable note recorded with the publish history event. |
@@ -1295,6 +2075,43 @@ List packages response
 | **advisories** | `{ rule: string; path: string; where: string; message: string; … }[]` | optional | Non-gating findings from the #4463 runtime authoring gate — the same shared author-time rules `os validate` / `os build` / `os lint` run, applied to the DRAFT body this promotion carried to `active` (#9176, the same key `SaveMetaItemResponseSchema` carries, because the gate runs on both write doors by #4463 D1). The promotion SUCCEEDED; these are what the gate has to say about it anyway. Present ONLY when at least one advisory was raised — an empty array is never emitted, so a clean publish's response bytes are unchanged and absence means "nothing to report", never "the gate did not run". Advisory by construction: every entry has `severity` `warning` or `info`, because an `error` finding refuses the promotion and arrives as the 422 `invalid_metadata` envelope instead of here. A caller that ignores this key behaves exactly as before. This door is the one Studio's designer takes on every edit (draft save, then publish), and a Studio / MCP / AI author has no CLI at all — which is the gap #4463 exists to close. |
 | **message** | `string` | optional | Human-readable receipt, e.g. `Published draft — type=view, name=cases [seq=3]`. The producer sets it on every publish today; it stays optional to match the producer's own signature and its `SaveMetaItemResponse` twin, and because an absent human-readable string strips no data — the failure mode #5745 exists to prevent. |
 
+### Nested Shape: `PublishMetaItemResponse.seedApplied`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **success** | `boolean` | ✅ | False when the seed rows did not fully land. The publish itself still succeeded — check this rather than assuming data went live. |
+| **inserted** | `integer` | ✅ | Rows created by the externalId-keyed upsert. |
+| **updated** | `integer` | ✅ | Rows updated by the externalId-keyed upsert. |
+| **error** | `string` | optional | Single failure message, present when the seed apply threw before the loader ran (including "no readable seed bodies"). |
+| **errors** | `any[]` | optional | Per-record failures reported by the seed loader. Present only when the loader ran and returned a non-empty error list. |
+
+### Nested Shape: `PublishMetaItemResponse.materializeApplied`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **success** | `boolean` | ✅ | False when the materializer threw or reported failure; the publish still succeeded. |
+| **inserted** | `integer` | ✅ | Data-plane rows created by the materializer. |
+| **updated** | `integer` | ✅ | Data-plane rows updated by the materializer. |
+| **error** | `string` | optional | Materializer failure message, present only when `success` is false. |
+
+### Nested Shape: `PublishMetaItemResponse.projectionApplied`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **success** | `boolean` | ✅ | False when the projector threw; the metadata promotion itself still succeeded. |
+| **error** | `string` | optional | Projector failure message, present only when `success` is false. |
+
+### Nested Shape: `PublishMetaItemResponse.advisories[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **rule** | `string` | ✅ | Stable diagnostic rule id (`flow-multi-write-unfiltered`, `approval-expression-invalid`, …). Machine-readable and stable across releases — the key a renderer groups or suppresses by. |
+| **path** | `string` | ✅ | Config path inside the SUBMITTED body (`flows[0].nodes[1].config.multi`), so an editor can jump to the offending key. May be empty when the finding is about the item as a whole. For the collection-resident write types (`object` / `permission` / `book`) the TOP-LEVEL collection entry is keyed by NAME (`objects.acme_invoice.sharingModel`), never by an array index — the gate evaluates against a private per-write snapshot whose indexes no caller can resolve (#10064). Every other write type is the sole member of its own collection, so its `[0]` is trivially stable and stays positional (`flows[0]...`), as do nested positions inside one named item (`objects.acme_invoice.indexes[1]`), which index the author's own document. |
+| **where** | `string` | ✅ | Human-readable location — `flow "leave_approval" · node "approve"`. Prose for a person; use `path` for anything mechanical. |
+| **message** | `string` | ✅ | What is wrong, in the rule author's own words. |
+| **hint** | `string` | ✅ | How to fix it. |
+| **severity** | `Enum<'error' \| 'warning' \| 'info'>` | ✅ | How the gate treated this finding. `error` means the write was REFUSED (these appear on the 422, never on a 2xx); `warning` / `info` are advisory — the write succeeded and the finding is FYI. |
+
 
 ---
 
@@ -1317,6 +2134,45 @@ List packages response
 | **unhiddenApps** | `string[]` | optional | ADR-0045 §3 — names of the apps whose `_unpublished` gate this publish cleared (publish = live AND visible; a materialized additive build has no drafts, only this flip). Attached by the REST door, not the protocol helper. Present ONLY when at least one app flipped — on a mid-loop failure it names the apps that DID persist, beside `unhideError` (#5242's split report). Spelling is a permanent wire contract (see the door's #6955 note). |
 | **unhideError** | `string` | optional | Present when the ADR-0045 visibility flip failed (wholly or partway): the drafts ARE published, but apps still stored `_unpublished: true` stay externally unobservable. Client-facing text only — undeclared driver text is withheld per ADR-0112 (#8516); the full cause is in the server log. The route is idempotent: re-run it once the cause is resolved. |
 | **rebindError** | `string` | optional | Present when the post-publish `metadata:reloaded` announce failed: everything is published and stored, but boot-cached consumers keep the pre-publish view until re-run or restart (a newly published record-triggered flow does not bind its trigger). Client-facing text only, same ADR-0112 withhold as `unhideError` (#8516). |
+
+### Nested Shape: `PublishPackageDraftsResponse.published[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `string` | ✅ | Metadata type of the promoted draft (canonical singular). |
+| **name** | `string` | ✅ | Item name of the promoted draft. |
+| **version** | `string` | ✅ | Content hash of the just-promoted body — the same ADR-0008 optimistic-concurrency token the single-item doors return: echo it back as `If-Match` on the next write to this item. Opaque to callers; currently `sha256:<64 hex chars>`, but the format is not part of this contract. |
+| **advisories** | `{ rule: string; path: string; where: string; message: string; … }[]` | optional | Non-gating findings the #4463 runtime authoring gate raised against THIS draft's promotion (#9343 — the same element shape and the same omitted-when-empty discipline as `PublishMetaItemResponseSchema.advisories`, riding each element rather than a parallel top-level map). Present ONLY when at least one finding was raised — an empty array is never emitted, so an advisory-free batch's response bytes are unchanged. Advisory by construction: every entry is `warning`/`info`, because an `error` finding refuses the promotion and — the batch being all-or-nothing — aborts the whole batch as `failed[]` instead; `failed[]` elements never carry this key. |
+
+### Nested Shape: `PublishPackageDraftsResponse.failed[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `string` | ✅ | Metadata type of the item that did not publish. |
+| **name** | `string` | ✅ | Item name. |
+| **error** | `string` | ✅ | What refused it. On a rollback, the causal item carries its real error and every sibling carries the all-or-nothing explanation. A refusal that produced structured findings states a one-sentence HEADLINE here (what failed, where, which rules, how many); the per-path detail rides `issues[]` instead of being restated in this string (#10524 — consumers rendering both channels were showing every finding twice). |
+| **code** | `string` | optional | Machine code for the refusal class (SCREAMING_SNAKE, ADR-0112 vocabulary) — e.g. a pre-flight violation code, or BATCH_ABORTED on the non-causal items of a rolled-back batch. |
+| **issues** | `{ rule: string; path: string; where: string; message: string; … }[]` | optional | The structured findings behind the refusal, when the refusing error carried them — today the #4463 author-time gate's INVALID_METADATA refusal on the causal item. The producer has emitted this key since #8333; declaring it (#10524) is what lets a typed consumer read it back, and what lets `error` stay a headline without losing the per-path detail. Same element shape as `published[].advisories` and the single-item 422's `issues[]` (#4717 — one dialect, declared once). Present ONLY on the causal item and only when the refusal produced structured findings; BATCH_ABORTED siblings never carry it. Absent means "this refusal carried no structured findings", never "no problems". |
+
+### Nested Shape: `PublishPackageDraftsResponse.seedApplied`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **success** | `boolean` | ✅ | False when the seed rows did not fully land. The publish itself still succeeded — check this rather than assuming data went live. |
+| **inserted** | `integer` | optional | Rows created by the externalId-keyed upsert. Optional ONLY because the route-level fallback producer (custom protocols that do not self-apply) reports early failures without counters; the in-batch producer always emits both counters. |
+| **updated** | `integer` | optional | Rows updated by the externalId-keyed upsert. Same optionality rationale as `inserted`. |
+| **error** | `string` | optional | Single failure message, present when the apply failed before the loader ran (including "no readable seed bodies"). When the failure is the seed bodies' own schema refusal, this is a one-sentence headline and the per-path detail rides `issues[]` (#10524). |
+| **errors** | `any[]` | optional | Per-record failures reported by the seed loader, plus any seed-body read failures. May be present and empty on a clean load. |
+| **issues** | `{ path: string; message: string; code?: string }[]` | optional | Structured spec-validation findings behind `error`, present when the apply was refused by the seed bodies' own schema — the declared 422 `seedRequestValidationError` mints (#8443). The per-path detail lives HERE, once; `error` stays a one-sentence headline (#10524). Absent on non-validation failures (driver faults, unreadable bodies), whose whole story is `error` / `errors[]`. |
+
+### Nested Shape: `PublishPackageDraftsResponse.materializeApplied`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **success** | `boolean` | ✅ | False when any item's materializer failed; the publish still succeeded. |
+| **inserted** | `integer` | ✅ | Data-plane rows created across the batch. |
+| **updated** | `integer` | ✅ | Data-plane rows updated across the batch. |
+| **failures** | `{ type: string; name: string; error: string }[]` | ✅ | Each item whose data-plane projection did NOT land — named per-item, unlike the single-item door's scalar `error`, because one aggregate boolean over N items would hide WHICH ones never went live. |
 
 
 ---
@@ -1477,7 +2333,7 @@ List packages response
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **type** | `string` | ✅ | Metadata type name |
-| **name** | `string` | ✅ | Item name |
+| **name** | `string` | ✅ | Item name — lowercase snake_case segments, optionally dot-qualified (`crm_lead`, `crm_lead.pipeline`). Slash-compound names are refused at the publish door (#12176). |
 | **item** | `any` | ✅ | Metadata item definition |
 
 
@@ -1496,6 +2352,24 @@ List packages response
 | **projectionApplied** | `{ success: boolean; error?: string }` | optional | Outcome of the awaited ADR-0094 mutation projector — the post-persist step that materializes this metadata into its derived data-plane read model (e.g. `permission` → `sys_permission_set`). Present ONLY when a projector is registered for this metadata type, which is why it is optional: its absence means "no projector ran", never "the projection failed". Best-effort by design — a projector failure is reported here and logged, never thrown, so a caller that needs the read model to be live must check `projectionApplied.success` rather than rely on the 200. |
 | **advisories** | `{ rule: string; path: string; where: string; message: string; … }[]` | optional | Non-gating findings from the #4463 runtime authoring gate — the same shared author-time rules `os validate` / `os build` / `os lint` run, applied to this body on its way to `active`. The write SUCCEEDED; these are what the gate has to say about it anyway (#4717, closing #4463 D3). Present ONLY when at least one advisory was raised — an empty array is never emitted, so a clean save's response bytes are unchanged and absence means "nothing to report", never "the gate did not run". Advisory by construction: every entry has `severity` `warning` or `info`, because an `error` finding refuses the write and arrives as the 422 `invalid_metadata` envelope instead of here. A caller that ignores this key behaves exactly as before. Runtime-only: the CLI surfaces the same findings on its own stdout, and a Studio / MCP / AI author has no CLI at all, which is the gap #4463 exists to close. The gate runs on both write doors (#4463 D1), and both report: `POST /meta/:type/:name/publish` carries the same key on `PublishMetaItemResponseSchema` (#9176). |
 | **message** | `string` | optional |  |
+
+### Nested Shape: `SaveMetaItemResponse.projectionApplied`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **success** | `boolean` | ✅ | False when the projector threw; the metadata write itself still succeeded. |
+| **error** | `string` | optional | Projector failure message, present only when `success` is false. |
+
+### Nested Shape: `SaveMetaItemResponse.advisories[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **rule** | `string` | ✅ | Stable diagnostic rule id (`flow-multi-write-unfiltered`, `approval-expression-invalid`, …). Machine-readable and stable across releases — the key a renderer groups or suppresses by. |
+| **path** | `string` | ✅ | Config path inside the SUBMITTED body (`flows[0].nodes[1].config.multi`), so an editor can jump to the offending key. May be empty when the finding is about the item as a whole. For the collection-resident write types (`object` / `permission` / `book`) the TOP-LEVEL collection entry is keyed by NAME (`objects.acme_invoice.sharingModel`), never by an array index — the gate evaluates against a private per-write snapshot whose indexes no caller can resolve (#10064). Every other write type is the sole member of its own collection, so its `[0]` is trivially stable and stays positional (`flows[0]...`), as do nested positions inside one named item (`objects.acme_invoice.indexes[1]`), which index the author's own document. |
+| **where** | `string` | ✅ | Human-readable location — `flow "leave_approval" · node "approve"`. Prose for a person; use `path` for anything mechanical. |
+| **message** | `string` | ✅ | What is wrong, in the rule author's own words. |
+| **hint** | `string` | ✅ | How to fix it. |
+| **severity** | `Enum<'error' \| 'warning' \| 'info'>` | ✅ | How the gate treated this finding. `error` means the write was REFUSED (these appear on the 422, never on a 2xx); `warning` / `info` are advisory — the write succeeded and the finding is FYI. |
 
 
 ---
@@ -1527,6 +2401,16 @@ List packages response
 | **totalHits** | `number` | ✅ | Number of hits returned — equals `hits.length`. NOT a deployment-wide total-match count: matches beyond `limit` / `perObject` are not counted. |
 | **truncated** | `boolean` | ✅ | True when the sweep stopped at the overall `limit` — more matches may exist beyond the returned set. |
 
+### Nested Shape: `SearchAllResponse.hits[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **object** | `string` | ✅ | Name of the object the hit belongs to. |
+| **id** | `string` | ✅ | ID of the matched record. |
+| **title** | `string` | ✅ | Display title for the hit, resolved in order: the object's `titleFormat` template → the declared primary-title pointer (`nameField`, ADR-0079; deprecated alias `displayNameField` still honored) → conventional name fields → first/last name → the record ID as a string. |
+| **snippet** | `string` | optional | Excerpt cut around the first matched term in a searchable text column, ellipsized at both ends when truncated. ABSENT when no source column literally contains a term (e.g. a pinyin companion match, #7643) — absence is a correct answer, not a miss. |
+| **record** | `Record<string, any>` | ✅ | The matched record as the engine's find path returns it (row-level security applied, internal fields already stripped). Object-specific — no cross-object field shape is promised beyond "a record of the named object". |
+
 
 ---
 
@@ -1538,6 +2422,15 @@ List packages response
 | :--- | :--- | :--- | :--- |
 | **channel** | `string` | ✅ | Channel to set presence in |
 | **state** | `{ userId: string; status: Enum<'online' \| 'away' \| 'busy' \| 'offline'>; lastSeen: string; metadata?: Record<string, any> }` | ✅ | Presence state to set |
+
+### Nested Shape: `SetPresenceRequest.state`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **userId** | `string` | ✅ | User identifier |
+| **status** | `Enum<'online' \| 'away' \| 'busy' \| 'offline'>` | ✅ | Current presence status |
+| **lastSeen** | `string` | ✅ | ISO 8601 datetime of last activity |
+| **metadata** | `Record<string, any>` | optional | Custom presence data (e.g., current page, custom status) |
 
 
 ---
@@ -1640,6 +2533,16 @@ Uninstall package response
 | **record** | `Record<string, any>` | ✅ | Updated record |
 | **droppedFields** | `{ object: string; fields: string[]; reason: Enum<'readonly' \| 'readonly_when' \| 'primary_key'> }[]` | optional | Write-observability (#3407/#3431): caller-supplied fields the engine LEGALLY stripped from the write before persisting — static `readonly` (#2948) or a TRUE `readonlyWhen` predicate (#3042). Present ONLY when ≥1 field was dropped; the update still succeeded without them (status/success semantics unchanged — stripping is legitimate, not an error). REST additionally surfaces this as the `X-ObjectStack-Dropped-Fields` response header. Optional — omit-when-empty keeps the shape backward-compatible for existing clients that only read `record`. |
 
+### Nested Shape: `UpdateDataResponse.droppedFields[number]`
+
+A write-path strip event: caller-supplied fields legally dropped from the payload (#3407)
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **object** | `string` | ✅ | Object the write targeted (resolved object name) |
+| **fields** | `string[]` | ✅ | Caller-supplied field names the engine removed from the write payload |
+| **reason** | `Enum<'readonly' \| 'readonly_when' \| 'primary_key'>` | ✅ | Why the fields were dropped: static readonly (#2948), a TRUE readonlyWhen predicate (#3042), or the primary-key strip of a payload id the engine ruled is not an identifier (#6437) |
+
 
 ---
 
@@ -1652,6 +2555,22 @@ Uninstall package response
 | **records** | `{ id: string; data: Record<string, any> }[]` | ✅ | Array of records to update (server caps the count — see batch.maxBatchSize) |
 | **options** | `{ atomic: boolean; returnRecords: boolean; continueOnError: boolean }` | optional | Update options |
 | **object** | `string` | ✅ | Object name |
+
+### Nested Shape: `UpdateManyDataRequest.records[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ | Record ID |
+| **data** | `Record<string, any>` | ✅ | Fields to update |
+
+### Nested Shape: `UpdateManyDataRequest.options`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **atomic** | `boolean` | optional (default: `false`) | Opt-in all-or-nothing. When explicitly true the whole batch runs inside ONE engine transaction: the first failure rolls back every prior write, and the response reports zero successes — each row carries `errors[0].code` ROLLED_BACK (written, then undone), the causal row its own error, and rows never reached NOT_ATTEMPTED. A runtime that cannot roll back REFUSES the request (501 NOT_IMPLEMENTED) rather than silently degrading to best-effort — probe `capabilities.transactionalBatch` on /discovery first. Takes precedence over continueOnError. Default false: sequential best-effort. |
+| **returnRecords** | `boolean` | optional (default: `false`) | If true, return full record data in response |
+| **continueOnError** | `boolean` | optional (default: `false`) | If true (and atomic=false), continue processing remaining records after errors. Default false: the first failure ENDS the run — records before it stay written (nothing is rolled back on this arm), and every record after it is reported `errors[0].code` NOT_ATTEMPTED rather than omitted, so `results` always covers all `total` records and `succeeded + failed === total` (#7539). |
+| **validateOnly** | `never` | optional | [REMOVED] `options.validateOnly` was removed from BatchOptions in @objectstack/spec (#4052). It was never implemented: the batch surfaces persisted regardless, so a "dry-run" would have silently executed. There is no dry-run today — drop the key. If you need to preview a batch without writing, open an issue so it can be designed (no-commit cascade / constraint semantics) and reintroduced as a flag that actually holds. |
 
 
 ---
@@ -1671,6 +2590,30 @@ Uninstall package response
 | **failed** | `number` | ✅ | Number of records that failed |
 | **results** | `{ id?: string; success: boolean; errors?: object[]; data?: Record<string, any>; … }[]` | ✅ | Detailed results for each record |
 
+### Nested Shape: `UpdateManyDataResponse.error`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>` | ✅ | Error code (e.g. VALIDATION_ERROR; StandardErrorCode ∪ the ledger the serving side registers — ERROR_CODE_LEDGER for framework packages) |
+| **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112, #9106) |
+| **message** | `string` | ✅ | Readable error message |
+| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim (#9934). Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution (#3821) for anything unmarked. Status-agnostic; never replaces `message`. |
+| **category** | `string` | optional | Error category (e.g. validation, authorization) |
+| **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
+| **details** | `any` | optional | Additional error context (e.g. field validation errors) |
+| **requestId** | `string` | optional | Request ID for tracking |
+
+### Nested Shape: `UpdateManyDataResponse.results[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | optional | Record ID if operation succeeded |
+| **success** | `boolean` | ✅ | Whether this record was processed successfully |
+| **errors** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>; declaredCode?: string; message: string; userMessage?: string; … }[]` | optional | Array of errors if operation failed. Branch on `errors[0].code` — an atomic batch that rolled back marks rows that were written then undone with code ROLLED_BACK and rows never reached with NOT_ATTEMPTED, while the causal row keeps its own error (#4793). A NON-atomic batch that stopped (the `continueOnError: false` default) marks its un-attempted tail with the same NOT_ATTEMPTED code — rows before the failure stay written and keep reporting success, since nothing was rolled back (#7539). |
+| **data** | `Record<string, any>` | optional | Full record data (if returnRecords=true) |
+| **index** | `number` | optional | Index of the record in the request array |
+| **droppedFields** | `{ object: string; fields: string[]; reason: Enum<'readonly' \| 'readonly_when' \| 'primary_key'> }[]` | optional | Write-observability (#3407/#3431/#3455): caller-supplied fields LEGALLY stripped from THIS row before it was written — static `readonly` (#2948) / TRUE `readonlyWhen` (#3042) on update, or the #3043 create-ingress strip. Per-row because a batch can drop different fields on different rows (`readonlyWhen` is record-state-dependent). Present ONLY when ≥1 field was dropped for this row; the row still succeeded (success unchanged). A single response header cannot express per-row drops, so this body field is the canonical bulk channel — REST does not emit `X-ObjectStack-Dropped-Fields` for batches. Optional — omit-when-empty keeps the shape backward-compatible. |
+
 
 ---
 
@@ -1682,6 +2625,16 @@ Uninstall package response
 | :--- | :--- | :--- | :--- |
 | **preferences** | `{ email?: boolean; push?: boolean; inApp?: boolean; digest?: Enum<'none' \| 'daily' \| 'weekly'>; … }` | ✅ | Preferences to update |
 
+### Nested Shape: `UpdateNotificationPreferencesRequest.preferences`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **email** | `boolean` | optional (default: `true`) | Receive email notifications |
+| **push** | `boolean` | optional (default: `true`) | Receive push notifications |
+| **inApp** | `boolean` | optional (default: `true`) | Receive in-app notifications |
+| **digest** | `Enum<'none' \| 'daily' \| 'weekly'>` | optional (default: `"none"`) | Email digest frequency |
+| **channels** | `Record<string, { enabled: boolean; email?: boolean; push?: boolean }>` | optional | Per-channel notification preferences |
+
 
 ---
 
@@ -1692,6 +2645,16 @@ Uninstall package response
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **preferences** | `{ email: boolean; push: boolean; inApp: boolean; digest: Enum<'none' \| 'daily' \| 'weekly'>; … }` | ✅ | Updated notification preferences |
+
+### Nested Shape: `UpdateNotificationPreferencesResponse.preferences`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **email** | `boolean` | optional (default: `true`) | Receive email notifications |
+| **push** | `boolean` | optional (default: `true`) | Receive push notifications |
+| **inApp** | `boolean` | optional (default: `true`) | Receive in-app notifications |
+| **digest** | `Enum<'none' \| 'daily' \| 'weekly'>` | optional (default: `"none"`) | Email digest frequency |
+| **channels** | `Record<string, { enabled: boolean; email?: boolean; push?: boolean }>` | optional | Per-channel notification preferences |
 
 
 ---
@@ -1733,6 +2696,21 @@ Uninstall package response
 | **valid** | `boolean` | ✅ | True when EVERY row is valid — the whole-set answer. |
 | **results** | `{ valid: boolean; errors: object[]; warnings: object[] }[]` | ✅ | Per-row verdicts, in submission order. |
 | **posture** | `{ valueShapeStrict: boolean; mediaValueShapeStrict: boolean }` | ✅ | The ADR-0104 posture the verdict was reached under — reported because it is the difference between "this row is fine" and "this row is fine HERE". The same row can be an error on a self-certified deployment and an admitted warning on an un-migrated one, and a caller explaining a verdict needs to know which it got. An unconditionally-strict preview was considered and rejected (#4633 option B): it would fail rows on every un-migrated deployment that the write would have accepted. |
+
+### Nested Shape: `ValidateDataResponse.results[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **valid** | `boolean` | ✅ | True when this row would be accepted by the write path. |
+| **errors** | `{ field: string; code: string; message: string }[]` | ✅ | Findings that would REJECT this row. Empty when valid. |
+| **warnings** | `{ field: string; code: string; message: string }[]` | ✅ | Findings the target deployment ADMITS rather than rejects — today, ADR-0104 value shapes under a warn-first posture. The row is valid; the write would store it and log the same complaint. |
+
+### Nested Shape: `ValidateDataResponse.posture`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **valueShapeStrict** | `boolean` | ✅ | True when this deployment rejects non-conforming value shapes (ADR-0104 self-certified). |
+| **mediaValueShapeStrict** | `boolean` | ✅ | The same, for media field value shapes. |
 
 
 ---

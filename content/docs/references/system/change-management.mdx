@@ -37,6 +37,13 @@ const result = ChangeImpactSchema.parse(data);
 | **affectedUsers** | `number` | optional | Affected user count |
 | **downtime** | `{ required: boolean; durationMinutes?: number }` | optional | Downtime information |
 
+### Nested Shape: `ChangeImpact.downtime`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **required** | `boolean` | ✅ | Downtime required |
+| **durationMinutes** | `number` | optional | Downtime duration |
+
 
 ---
 
@@ -74,6 +81,66 @@ const result = ChangeImpactSchema.parse(data);
 | **approval** | `{ required: boolean; approvers: object[] }` | optional | Approval workflow |
 | **attachments** | `{ name: string; url: string }[]` | optional | Attachments |
 | **metadata** | `Record<string, any>` | optional | Custom metadata key-value pairs for extensibility |
+
+### Nested Shape: `ChangeRequest.impact`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **level** | `Enum<'low' \| 'medium' \| 'high' \| 'critical'>` | ✅ | Impact level |
+| **affectedSystems** | `string[]` | ✅ | Affected systems |
+| **affectedUsers** | `number` | optional | Affected user count |
+| **downtime** | `{ required: boolean; durationMinutes?: number }` | optional | Downtime information |
+
+### Nested Shape: `ChangeRequest.implementation`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **description** | `string` | ✅ | Implementation description |
+| **steps** | `{ order: number; description: string; estimatedMinutes: number }[]` | ✅ | Implementation steps |
+| **testing** | `string` | optional | Testing procedure |
+
+### Nested Shape: `ChangeRequest.rollbackPlan`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **description** | `string` | ✅ | Rollback description |
+| **steps** | `{ order: number; description: string; estimatedMinutes: number }[]` | ✅ | Rollback steps |
+| **testProcedure** | `string` | optional | Test procedure |
+
+### Nested Shape: `ChangeRequest.schedule`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **plannedStart** | `number` | ✅ | Planned start time |
+| **plannedEnd** | `number` | ✅ | Planned end time |
+| **actualStart** | `number` | optional | Actual start time |
+| **actualEnd** | `number` | optional | Actual end time |
+
+### Nested Shape: `ChangeRequest.securityImpact`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **assessed** | `boolean` | ✅ | Whether security impact has been assessed |
+| **riskLevel** | `Enum<'none' \| 'low' \| 'medium' \| 'high' \| 'critical'>` | optional | Security risk level |
+| **affectedDataClassifications** | `Enum<'pii' \| 'phi' \| 'pci' \| 'financial' \| 'confidential' \| 'internal' \| 'public'>[]` | optional | Affected data classifications |
+| **requiresSecurityApproval** | `boolean` | optional (default: `false`) | Whether security team approval is required |
+| **reviewedBy** | `string` | optional | Security reviewer user ID |
+| **reviewedAt** | `number` | optional | Security review timestamp |
+| **reviewNotes** | `string` | optional | Security review notes or conditions |
+
+### Nested Shape: `ChangeRequest.approval`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **required** | `boolean` | ✅ | Approval required |
+| **approvers** | `{ userId: string; approvedAt?: number; comments?: string }[]` | ✅ | Approvers |
+
+### Nested Shape: `ChangeRequest.attachments[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Attachment name |
+| **url** | `string` | ✅ | Attachment URL |
 
 
 ---
@@ -117,6 +184,14 @@ const result = ChangeImpactSchema.parse(data);
 | **description** | `string` | ✅ | Rollback description |
 | **steps** | `{ order: number; description: string; estimatedMinutes: number }[]` | ✅ | Rollback steps |
 | **testProcedure** | `string` | optional | Test procedure |
+
+### Nested Shape: `RollbackPlan.steps[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **order** | `number` | ✅ | Step order |
+| **description** | `string` | ✅ | Step description |
+| **estimatedMinutes** | `number` | ✅ | Estimated duration |
 
 
 ---
