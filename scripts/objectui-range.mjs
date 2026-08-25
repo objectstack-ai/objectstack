@@ -95,7 +95,18 @@ const positional = argv.filter(
 const JSON_OUT = has('--json');
 const SHOW_EXCLUDED = has('--all');
 
-if (has('-h') || has('--help')) {
+/**
+ * Usage text, read back out of this file's own `//` lines so the two cannot
+ * drift.
+ *
+ * It is a FUNCTION rather than a top-level `if` because this module exports
+ * bindings. As a bare top-level statement the test read the IMPORTER's argv:
+ * an importer that happened to carry `-h` or `--help` got this header written
+ * to its stdout and then `process.exit(0)` — its process ended mid-import
+ * carrying a SUCCESS status, which no caller reading the status alone can
+ * tell apart from a clean import.
+ */
+function printHelp() {
   console.log(
     readFileSync(fileURLToPath(import.meta.url), 'utf8')
       .split('\n')
@@ -103,7 +114,7 @@ if (has('-h') || has('--help')) {
       .map((l) => l.slice(3))
       .join('\n'),
   );
-  process.exit(0);
+  return 0;
 }
 
 function die(msg) {
@@ -617,5 +628,6 @@ function selfTest() {
 }
 
 if (isEntrypoint(import.meta.url)) {
+  if (has('-h') || has('--help')) process.exit(printHelp());
   process.exit(has('--self-test') ? selfTest() : main());
 }
