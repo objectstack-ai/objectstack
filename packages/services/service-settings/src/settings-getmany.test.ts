@@ -156,9 +156,13 @@ describe('[#10826] SettingsService.getMany', () => {
 
     // ...and here is the non-equivalence: per-key `get()` still answers every
     // declared key on the same input; only the undeclared one throws. Asserted
-    // on the resolved cascade LAYER, not on the literal — this fixture stores
-    // JSON text in `value` while the service persists values verbatim, so a
-    // literal here would pin the fixture's encoding rather than the rule.
+    // on the resolved cascade LAYER because the LAYER is this test's subject —
+    // the rule under test is "which keys still answer", not what they answer.
+    // [#12172] This once read as a workaround: the fixture stored JSON text in
+    // `value`, so a literal here would have pinned the fixture's encoding
+    // rather than the rule. The fixture now stores decoded values and the
+    // encoding has its own pin at the bottom of this file; the assertions on
+    // this line are unchanged, only the reason for their shape is.
     expect((await svc.get('localization', 'timezone')).source).toBe('global');
     expect((await svc.get('localization', 'currency')).source).toBe('tenant');
     await expect(svc.get('localization', 'nope')).rejects.toBeInstanceOf(UnknownKeyError);
