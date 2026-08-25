@@ -106,13 +106,20 @@ export class SmsServicePlugin implements Plugin {
    * `ObjectKernel.bootstrap`), so declaring the edge is what puts the bind
    * ahead of the read.
    *
-   * `sms` is the entry this card was filed about: it sits at index 6 of
-   * `PLATFORM_ALWAYS_ON_CAPABILITIES`, one past the pinned `slice(0, 6)`, so
-   * before this declaration its correct position relative to `settings` was
-   * held by nothing at all. In the window `getNamespace('sms')` answers from
-   * the manifest defaults — a `log` provider that reports every OTP "sent" and
-   * a default cost ceiling — while the operator's saved credentials sit unread
-   * in `sys_setting`.
+   * `sms` is the entry this card was filed about: it was added at index 6 of
+   * `PLATFORM_ALWAYS_ON_CAPABILITIES`, one past the `slice(0, 6)` prefix that
+   * was pinned there at the time, so before this declaration its correct
+   * position relative to `settings` was held by nothing at all. In the window
+   * `getNamespace('sms')` answers from the manifest defaults — a `log` provider
+   * that reports every OTP "sent" and a default cost ceiling — while the
+   * operator's saved credentials sit unread in `sys_setting`.
+   *
+   * That slice is retired (#11046): the slate pin states the rule instead —
+   * every always-on entry that is not a bind target (`queue`/`job`/`cache`/
+   * `settings`) is mounted after all of them — so `sms` is now held BY the pin
+   * rather than sitting one past it, and so is whatever is added next. That
+   * covers slate ORDER only; this declaration is still what orders the plugins,
+   * and the pin test named below is what keeps it honest.
    *
    * SOFT, not hard: a kernel with no settings service must still boot this
    * plugin (the transport is buildable from options alone). ADR-0049 —
