@@ -320,11 +320,37 @@ report_objectui_reachability() {
 
   # Enumerated only on this branch: with ~941 branches a --contains walk is not
   # free, and the healthy path must not pay for it.
+  #
+  # READ LOOP, NOT `mapfile` — THE BASH 3.2 FLOOR. `mapfile`/`readarray` are
+  # bash 4 builtins, and `/usr/bin/env bash` is bash 3.2.57 on macOS (Apple has
+  # not shipped bash 4+ for licensing reasons). This script is run BY HAND, BY
+  # AN OPERATOR, on a laptop — the pin-bump procedure in
+  # `docs/releases-maintenance.md` has no CI path — so a bash-4 builtin here
+  # does not fail on a fringe host, it fails on the ordinary one. And it fails
+  # on exactly the branch that must not fail: `mapfile` is only ever reached
+  # once the verdict is "NOT on origin/main", i.e. the #10495 warning is the
+  # single thing this shell cannot deliver. Measured with `mapfile` disabled:
+  # `mapfile: command not found`, then `set -e` kills the run at status
+  # 127 BEFORE the pin is written, and the operator is handed a bare builtin
+  # error where the warning should have been — an error whose obvious remedy
+  # (edit `.objectui-sha` by hand) walks around every guard in this file.
+  # CI runs bash 5, so neither the defect nor this repair is observable in a
+  # normal CI run; the digest self-test pins it with the builtin disabled
+  # (`enable -n mapfile readarray` via `BASH_ENV`) plus a static scan.
+  # Keep this loop bash-3.2-clean: no `mapfile`, no `readarray`, no
+  # `declare -A`, no `${x^^}`/`${x,,}`. The `if` (rather than `[[ … ]] &&`) is
+  # load-bearing under `set -e`: a trailing false `&&`-list would make the
+  # whole `while` return 1 and kill the run on an empty ref list.
   local -a local_refs=() remote_refs=()
-  mapfile -t local_refs < <(
+  local ref_line=''
+  while IFS= read -r ref_line; do
+    if [[ -n "$ref_line" ]]; then local_refs+=("$ref_line"); fi
+  done < <(
     git -C "$OBJECTUI_ROOT" for-each-ref --contains "$sha" --format='%(refname:short)' refs/heads 2>/dev/null || true
   )
-  mapfile -t remote_refs < <(
+  while IFS= read -r ref_line; do
+    if [[ -n "$ref_line" ]]; then remote_refs+=("$ref_line"); fi
+  done < <(
     git -C "$OBJECTUI_ROOT" for-each-ref --contains "$sha" --format='%(refname:short)' refs/remotes 2>/dev/null || true
   )
 

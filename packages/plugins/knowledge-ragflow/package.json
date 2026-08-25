@@ -13,7 +13,7 @@
     }
   },
   "scripts": {
-    "build": "tsup --config ../../../tsup.config.ts",
+    "build": "tsup --config ../../../tsup.config.ts && node ../../../scripts/check-dts-emitted.mjs",
     "dev": "tsc -w",
     "test": "vitest run"
   },

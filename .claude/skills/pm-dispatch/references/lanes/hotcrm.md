@@ -1,9 +1,8 @@
 # 车道岗位说明:repo:hotcrm(references/lanes —— 座位贴指针指向本文件)
 
 岗位说明版本化于此,升级走技能 PR;现值状态恒在座位贴,⛔ 不迁入本文件。本席为姊妹仓
-执行座位:在
-hotcrm 仓认领/派发/复核/落地,⛔ 不产 `domain:*`/type/定级(纪律全文在 SKILL.md 多仓协调规则
-4)。
+执行座位:在 hotcrm 仓认领/派发/复核/落地,⛔ 不产 `domain:*`/type/定级(纪律全文在 SKILL.md 多仓
+协调规则 4)。
 
 ## 宪章出处(维护者裁决 2026-08-20,逐字未译 —— 本席一切判断锚定于此)
 
@@ -25,16 +24,18 @@ hotcrm 仓认领/派发/复核/落地,⛔ 不产 `domain:*`/type/定级(纪律�
 
 ## 常设承诺
 
+- **半状态巡查在本仓无载体**(2026-08-25 实测:14 个 workflow 无 `half-state-patrol.yml`,无 workflow 即
+  无锚 issue):SKILL.md 执行座位职责的读锚第一步在此恒空,代之以手工半边 —— 开新派发前
+  整车道全交集读 open 卡,逐张核 `pm:dispatched`/`pm:in-review` 的交付 PR 是否已合并/关闭,先处置
+  半状态。⛔ 无锚不等于免检。
 - **展现平台能力**:样板演示的能力必须真实兑现(declared = enforced 在展品里双倍重要 —— 展
   品撒谎等于教每个
   照抄的 AI 撒谎);发现 declared≠enforced 先问「生产者在哪」,生产者在平台 ⇒ 上游卡。
 - **不扩散需求**:创业阶段聚焦原则全额适用,四维框架轴④是本车道首要过滤器(框架单源在 SKILL.md「升级与决
   策」,⛔ 不另抄);投机功能形状不入队 —— 走决策箱或关 not planned(定级归分诊/维护者,本席只供证据)。
 - **双版本兼容**:hotcrm 必须在 objectstack 社区版可运行;部署到 objectos 企业版时获得企业能
-  力。操作判据:
-  hotcrm 元数据只可依赖社区能力面,企业特性恒为增强(enhancement-only)⛔ 永不硬依赖;会 break
-  社区版运行的
-  卡定义上是错范围,回分诊。
+  力。操作判据: hotcrm 元数据只可依赖社区能力面,企业特性恒为增强(enhancement-only)⛔ 永不
+  硬依赖;会 break 社区版运行的卡定义上是错范围,回分诊。
 - **该仓有 changeset 流**(旧句「无 changeset 流」是假的,照抄它的派发词让 dev 的 PR 到岸即红):
   `changeset-check.yml` 门住每个到 main/develop 的 PR,判据是本 PR **新增**的 `.changeset/*.md`(对 base sha
   求
@@ -45,8 +46,7 @@ hotcrm 仓认领/派发/复核/落地,⛔ 不产 `domain:*`/type/定级(纪律�
   `target:*`);发版 = `changeset version` 一次消化存量(2026-08-23 吃掉 291 份出 3.0.0)+ `v*.*.*` tag 触发
   release.yml。
 - **依赖是已发布的 `@objectstack/*` 包(逐包定版号,非 git pin)**:平台侧修复必须先发版、再在此
-  升版号才到得
-  了展品 —— 上游卡对本道的解锁判据因此是「已发布」,不是「已合并」。
+  升版号才到得了展品 —— 上游卡对本道的解锁判据是「已发布」,不是「已合并」。
 - pm 状态机词表五仓统一(幂等创建在 `scripts/pm/ensure-pm-labels.sh`,对 hotcrm 实跑是落地步骤)。
 
 ## 席内判断

@@ -1240,6 +1240,34 @@ function graftConditionEnvelopes(converted: unknown, parsed: unknown): unknown {
     return converted;
 }
 
+/**
+ * [#11997] Where one flow body came from, as the boot pull could tell.
+ *
+ * `'package'` — a code-shipped artifact (`isCodeArtifactBody`, ADR-0029 D9.6).
+ * `'runtime'` — a `sys_metadata`/runtime-authored row with no real package
+ * provenance: the ADR-0005 overlay, and the sanctioned override path per
+ * ADR-0048 §1.5.
+ */
+export interface FlowContender {
+    source: 'package' | 'runtime';
+    /** The owning package id, when a code package ships this body. */
+    packageId?: string;
+}
+
+/**
+ * [#11997] What the ADR-0005 overlay precedence decided for one bare flow name.
+ *
+ * Emitted only when a name had more than one contender at pull time. `armed` is
+ * the body that is actually in the engine's flow map and will dispatch;
+ * `shadowed` are the ones that lost, in the order the registry listed them.
+ */
+export interface FlowShadowingRecord {
+    /** The bare name every contender claimed. */
+    name: string;
+    armed: FlowContender;
+    shadowed: FlowContender[];
+}
+
 export class AutomationEngine implements IAutomationService {
     /**
      * ADR-0044: maximum times a single node may be (re-)entered at the top
@@ -1250,6 +1278,22 @@ export class AutomationEngine implements IAutomationService {
     static readonly MAX_NODE_REENTRIES = 100;
 
     private flows = new Map<string, FlowParsed>();
+    /**
+     * [#11997] Shadowing receipts, keyed by the bare flow name.
+     *
+     * `flows` is keyed by BARE name and stays that way — making it
+     * package-aware is a much larger change than this defect warrants, and
+     * ADR-0048 does not ask for it. The consequence is that when a packaged
+     * flow and a runtime-authored flow claim one name, the loser leaves no
+     * trace in `flows`: `listFlows`/`getFlowRuntimeStates` enumerate
+     * `flows.keys()`, so the shadowed contender is invisible BY CONSTRUCTION,
+     * and an admin cannot tell which of the two is armed.
+     *
+     * This side map is the receipt. It never affects dispatch — it records
+     * what the ADR-0005 precedence decided, so {@link getShadowedFlows} and
+     * {@link getFlowRuntimeStates} can show it.
+     */
+    private flowShadowing = new Map<string, FlowShadowingRecord>();
     private flowEnabled = new Map<string, boolean>();
     /**
      * Re-entrancy guard for record-triggered flows (complements the intra-run
@@ -2596,9 +2640,15 @@ export class AutomationEngine implements IAutomationService {
         status?: string;
         triggerType?: string;
         object?: string;
+        armedFrom?: FlowContender;
+        shadowed?: FlowContender[];
     }> {
         return [...this.flows.keys()].map((name) => {
             const resolved = this.resolveTriggerBinding(name);
+            // [#11997] Attach the shadowing receipt to the row an admin already
+            // reads. This map holds ONE entry per bare name, so without these
+            // two fields a displaced contender leaves no trace on this surface.
+            const shadowing = this.flowShadowing.get(name);
             return {
                 name,
                 enabled: this.flowEnabled.get(name) !== false,
@@ -2606,6 +2656,9 @@ export class AutomationEngine implements IAutomationService {
                 status: (this.flows.get(name) as { status?: string } | undefined)?.status,
                 triggerType: resolved?.triggerType,
                 object: resolved?.binding.object,
+                ...(shadowing
+                    ? { armedFrom: shadowing.armed, shadowed: shadowing.shadowed }
+                    : {}),
             };
         });
     }
@@ -2632,6 +2685,33 @@ export class AutomationEngine implements IAutomationService {
             audit.push({ flowName: name, triggerType: resolved.triggerType, reason });
         }
         return audit;
+    }
+
+    /**
+     * [#11997] Record what the ADR-0005 overlay precedence decided for one bare
+     * name. Called by the boot pull when a name had more than one contender.
+     *
+     * Purely a receipt: it does not arm, disarm, or reorder anything. The pull
+     * has already registered the winner through the normal
+     * {@link registerFlow} path by the time this is called.
+     */
+    recordFlowShadowing(record: FlowShadowingRecord): void {
+        if (!record.shadowed.length) return;
+        this.flowShadowing.set(record.name, record);
+    }
+
+    /**
+     * [#11997] Admin-visible receipt: every bare flow name that had more than
+     * one contender at boot, which body is armed, and which were shadowed.
+     *
+     * Empty when no name collided — the normal case. Without this the shadowed
+     * flow is unobservable: {@link listFlows} and {@link getFlowRuntimeStates}
+     * both enumerate a map that holds one entry per name by construction, so a
+     * packaged flow displaced by a same-named runtime overlay simply is not
+     * there to be listed.
+     */
+    getShadowedFlows(): FlowShadowingRecord[] {
+        return [...this.flowShadowing.values()];
     }
 
     async listFlows(): Promise<string[]> {

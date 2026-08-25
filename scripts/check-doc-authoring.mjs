@@ -263,17 +263,13 @@ const FENCE_CLOSE = /^```\s*$/;
 // guard: the exact failure this file's header opens with, one rule over.
 const PUBLISHED_SKILLS_ROOT = 'skills';
 
-// Generated artifacts under `skills/**`. Their ids are not authored here — they
-// are projected from `.describe()` / TSDoc in `packages/spec`, so the fix for
-// one is a spec-source edit plus a regeneration, on a surface with its own
-// gates. Flagging them here would red a file no author can legally hand-edit
-// ("do not edit" is in their own headers) and point the remedy at the wrong
-// repo layer. They are exempt from THIS rule, not absolved: the spec-side ids
-// are tracked separately.
-const GENERATED_SKILL_ARTIFACTS = [
-  /\/references\/_index\.md$/,
-  /\/references\/react-blocks\.md$/,
-];
+// There is deliberately NO exemption for the generated artifacts under
+// `skills/**` (`references/_index.md`, `references/react-blocks.md`). The first
+// cut carried one, because those files still held ids projected from TSDoc in
+// `packages/spec/src/**`. Those source lines are stripped now, and an exemption
+// over a surface that no longer needs one is where the next regeneration would
+// smuggle one back in. A red here is fixed AT THE SPEC SOURCE, never by hand-
+// editing the artifact — the failure text below prescribes exactly that.
 
 // There is deliberately NO per-passage allowlist here, and adding one is not a
 // remedy this gate offers.
@@ -429,11 +425,11 @@ function collectFiles() {
 }
 
 /**
- * Every hand-authored Markdown file in the PUBLISHED catalog.
+ * Every Markdown file in the PUBLISHED catalog — generated artifacts included.
  *
  * Its own walk, for the reason argued at {@link PUBLISHED_SKILLS_ROOT}: the
- * `collectFiles()` walk skips `references/`, where hand-authored companions
- * live. Generated artifacts are dropped by path.
+ * `collectFiles()` walk skips `references/`, where both the hand-authored
+ * companions and the generated `_index.md` files live.
  *
  * Empty is a hard error here for the same reason it is in `collectFiles`
  * (#4932): "the catalog is clean" and "the catalog was never opened" are the
@@ -460,9 +456,8 @@ function collectPublishedSkillFiles(root = PUBLISHED_SKILLS_ROOT) {
       else if (/\.mdx?$/.test(e)) files.push(posix(p));
     }
   })(root);
-  const kept = files.filter((p) => !GENERATED_SKILL_ARTIFACTS.some((re) => re.test(p)));
-  if (kept.length === 0) throw new EmptyRootError([root], 0);
-  return kept.sort();
+  if (files.length === 0) throw new EmptyRootError([root], 0);
+  return files.sort();
 }
 
 /** Bare internal issue-id references in one published file's source. */
@@ -663,9 +658,9 @@ function selfTest() {
       'skills/objectstack-demo/SKILL.md': 'The `cursor` key was removed in protocol 17.',
       'skills/objectstack-demo/references/data-hooks.md': 'Hooks fire per row.',
       'skills/objectstack-demo/rules/indexing.md': '`type` was retired.',
-      // Generated artifacts — exempt: their ids come from packages/spec TSDoc.
-      'skills/objectstack-demo/references/_index.md': 'Driver registry (#4410).',
-      'skills/objectstack-ui/references/react-blocks.md': 'Converging on the metadata tier (#11284).',
+      // Generated artifacts — IN scope and clean; their text comes from spec TSDoc.
+      'skills/objectstack-demo/references/_index.md': 'Driver registry.',
+      'skills/objectstack-ui/references/react-blocks.md': 'Converging on the metadata tier.',
       // The internal roots are NOT this rule's business.
       '.claude/agents/os-dev.md': 'Lesson learned while fixing #4286.',
       'docs/adr/0049-enforce-or-remove.md': 'Superseded by #5248.',
@@ -686,14 +681,14 @@ function selfTest() {
       // GREEN: the corpus as stripped.
       expect('a clean published corpus is green', scan().length, 0);
 
-      // Scope: the collector reaches references/, and drops the generated files.
+      // Scope: the collector reaches references/, generated artifacts included.
       const seen = collectPublishedSkillFiles();
       expect('the id scan reaches hand-authored references/ (the other rule\'s walk does not)',
         seen.includes('skills/objectstack-demo/references/data-hooks.md'), true);
-      expect('generated references/_index.md is exempt',
-        seen.includes('skills/objectstack-demo/references/_index.md'), false);
-      expect('the generated react-blocks contract page is exempt',
-        seen.includes('skills/objectstack-ui/references/react-blocks.md'), false);
+      expect('the generated references/_index.md is IN scope (no exemption)',
+        seen.includes('skills/objectstack-demo/references/_index.md'), true);
+      expect('the generated react-blocks contract page is IN scope (no exemption)',
+        seen.includes('skills/objectstack-ui/references/react-blocks.md'), true);
       expect('the id scan does not reach .claude/', seen.some((f) => f.startsWith('.claude/')), false);
       expect('the id scan does not reach docs/', seen.some((f) => f.startsWith('docs/')), false);
       expect('the id scan does not reach content/', seen.some((f) => f.startsWith('content/')), false);
@@ -705,6 +700,17 @@ function selfTest() {
       expect('a planted id in published prose is RED', red.length, 1);
       expect('the red names the file', red[0]?.file, 'skills/objectstack-demo/SKILL.md');
       expect('the red names the id', red[0]?.ids?.join(','), '#4286');
+
+      // ...and in a GENERATED artifact — listing the file proves collection,
+      // this proves it is SCANNED, which is what dropping the exemption bought.
+      const regen = join(idDir, 'skills', 'objectstack-demo', 'references', '_index.md');
+      writeFileSync(planted, 'The `cursor` key was removed in protocol 17.');
+      writeFileSync(regen, 'Driver registry (#4410).');
+      red = scan();
+      expect('an id a regeneration put back into a generated artifact is RED', red.length, 1);
+      expect('the red names the generated file', red[0]?.file, 'skills/objectstack-demo/references/_index.md');
+      writeFileSync(regen, 'Driver registry.');
+      writeFileSync(planted, 'The `cursor` key was removed in protocol 17 (#4286).');
 
       // ...and in a comment inside a code fence, which is where half the
       // measured population lived.
@@ -918,6 +924,10 @@ function main() {
       + `\nresolvable anchor where one exists — a protocol version, an ADR number, a lint rule id.`
       + `\n\nWriting a usage example that needs an issue number? Use the placeholder \`#<n>\`.`
       + `\nIt teaches the same syntax and is unmistakable to a customer reading it.`
+      + `\n\nFlagged file says "Auto-generated — do not edit"? Then the id is not authored there:`
+      + `\nit is projected from a \`.describe()\` / TSDoc string in \`packages/spec/src/**\`. Strip it`
+      + `\nAT THE SOURCE and regenerate (\`gen:skill-refs\`, \`gen:react-blocks\`, \`gen:docs\`) — the`
+      + `\nartifact is not exempt, because an exemption there is where the next one would land.`
       + `\n\nThere is no per-passage exemption to reach for, by design: this rule has none.`
       + `\n\nMaintainer ruling 2026-08-12, verbatim: 「处理 issue 时犯的错应该总结成经验,保留 issue id没有意义」\n`,
     );

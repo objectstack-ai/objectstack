@@ -23,6 +23,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { SchemaRegistry } from './registry.js';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
+import { assertEngineFindOnePredicate } from './engine-findone-predicate.js';
 
 /** One env-wide, active overlay row for `rc1_probe`, stored under the canonical type. */
 const OVERLAY_ROW = {
@@ -61,6 +62,12 @@ describe('#4432 — canonical `/meta` type segment', () => {
                     && (w.organization_id === undefined || r.organization_id === w.organization_id));
             }),
             findOne: vi.fn(async (table: string, opts: any) => {
+                // [#11957] Pinned to ObjectQL.findOne's OWN #4419 predicate: `findOne`
+                // applies limit: 1, so a query naming no record returns an ARBITRARY row
+                // and the engine REFUSES it. A double that answers it anyway is how
+                // #11767 shipped a bootstrap bypass that was inert on every real
+                // deployment while a 641-line unit matrix stayed green.
+                assertEngineFindOnePredicate(table, opts);
                 const found = await engine.find(table, opts);
                 return found[0] ?? null;
             }),

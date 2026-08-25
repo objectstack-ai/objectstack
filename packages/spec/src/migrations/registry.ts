@@ -5854,6 +5854,101 @@ const step18: MigrationStep = {
         + 'the field deliberately when that happens.',
     },
     {
+      id: 'field-max-length-malformed-or-misplaced-refused',
+      surface: 'object field `maxLength` declarations — `maxLength: 0`, negative or non-integer '
+        + 'values on any type, and the key with any value on field types outside '
+        + '`BOUNDED_STRING_FIELD_TYPES` (`boolean`, `lookup`, `autonumber`, `formula`, `select`, '
+        + '`json`, `secret`, …)',
+      replacement: 'a positive-integer `maxLength` (>= 1) on a bounded-string field type — `text`, '
+        + '`textarea`, `email`, `url`, `phone`, `password`, `markdown`, `html`, `richtext`, `code`, '
+        + 'plus `signature`/`qrcode` since #11875 (the set is `BOUNDED_STRING_FIELD_TYPES`; the '
+        + '#11566 narrowing itself landed on the ten-member set of its day) '
+        + '— or no declaration at all. Deleting the key is mechanical and behaviour-preserving '
+        + 'for a MISPLACED declaration: the write-time validator only ever applied `max_length` '
+        + 'inside its bounded-string branch, so the key was inert by construction on every other '
+        + 'type. A MALFORMED value on a bounded-string type is the judgment case — the '
+        + 'validator\'s raw `>` comparison did consume it (`maxLength: 0` accepted only the '
+        + 'empty string, a negative value refused every write, `maxLength: 12.5` behaved as '
+        + '"at most 12"), and the SQL schema-drift planner consumed `maxLength: 0` as '
+        + '`varchar(0)` DDL until #11431 taught it to defend itself — so only the author knows '
+        + 'the bound they MEANT: re-declare it as a positive integer, or delete it deliberately '
+        + 'accepting the unbounding',
+      reason:
+        '#11566 (maintainer ruling 2026-08-24; enforcement shipped on the 17.x line in PR '
+        + '#11989 — accept-set narrowings ride minors, and this entry tells `migrate meta` users '
+        + 'at the major boundary; registration was deferred to #11950 because the registry file '
+        + 'was serialized behind an in-flight change when the enforcement landed). Shape: a '
+        + 'character length is a positive integer, so the key tightened from `z.number()` to '
+        + '`z.number().int().min(1)` — `maxLength: 0` measurably sent schema-drift planning '
+        + '`varchar(0)` DDL no server accepts, at severity error/destructive, before #11431 '
+        + 'taught that consumer to defend itself (the #8321 `precision`/`scale` house pattern). '
+        + 'Applicability: the key sat on the BASE field schema — authorable on `boolean` / '
+        + '`lookup` / `autonumber`, types where nothing bounded is stored — while the write-time '
+        + 'validator (objectql `record-validator.ts`) only ever enforced it on its ten '
+        + 'bounded-string types, the one list of the three that had a measured reader; that list '
+        + 'is promoted to the protocol as `BOUNDED_STRING_FIELD_TYPES`, the schema refuses the '
+        + 'key outside it (ADR-0078 declared=enforced), and both authoring forms '
+        + '(`field.form.ts`, previously 3 types; `object.form.ts`, previously 9) show the key '
+        + 'for exactly that set.',
+      acceptanceCriteria:
+        'Every field declaring `maxLength` carries a positive integer and is a bounded-string '
+        + 'type. Well-formed declarations (a positive-integer `maxLength` on a bounded-string '
+        + 'type) parse byte-identically to before; fields declaring no `maxLength` are '
+        + 'untouched, and absence stays absence — no default materializes. Deleting a misplaced '
+        + 'key changes no runtime behaviour (it sat outside the validator\'s bounded-string '
+        + 'branch and enforced nothing). For a malformed value on a bounded-string type the '
+        + 'author decides: re-declare the intended positive-integer bound (enforced by the '
+        + 'write-time validator from the next write on, and honoured by schema drift as '
+        + '`varchar(n)`), or delete the key and accept the type\'s unbounded/default column '
+        + 'shape — either way the accidental old behaviour (empty-only writes under '
+        + '`maxLength: 0`, unwritable fields under a negative value) is gone by decision, not '
+        + 'by silence.',
+    },
+    {
+      id: 'field-min-length-malformed-or-misplaced-refused',
+      surface: 'object field `minLength` declarations — `minLength: 0`, negative or non-integer '
+        + 'values on any type, and the key with any value on field types outside '
+        + '`BOUNDED_STRING_FIELD_TYPES` (`boolean`, `lookup`, `autonumber`, `formula`, `select`, '
+        + '`json`, `secret`, …)',
+      replacement: 'a positive-integer `minLength` (>= 1) on a bounded-string field type — `text`, '
+        + '`textarea`, `email`, `url`, `phone`, `password`, `markdown`, `html`, `richtext`, `code`, '
+        + '`signature`, `qrcode` (the twelve-member `BOUNDED_STRING_FIELD_TYPES` set; '
+        + '`signature`/`qrcode` joined in #11875) '
+        + '— or no declaration at all ("no minimum" is expressed by OMITTING the key, never by '
+        + '`minLength: 0`). Deleting the key is mechanical and behaviour-preserving for a '
+        + 'MISPLACED declaration (the write-time validator only ever applied `min_length` inside '
+        + 'its bounded-string branch, so the key was inert by construction elsewhere) and for '
+        + '`minLength: 0` / negative values anywhere (a string length is never below zero, so the '
+        + 'check could not fire). A FRACTIONAL value on a bounded-string type is the judgment '
+        + 'case: the validator\'s raw `<` comparison did consume it (`minLength: 2.5` behaved as '
+        + '"at least 3"), so only the author knows the integer they MEANT — re-declare it '
+        + 'deliberately if the constraint was wanted',
+      reason:
+        '#11949 (maintainer ruling 2026-08-25): `minLength` carried the exact defect pair #11566 '
+        + 'closed for `maxLength`, and converges on the same template. Shape: the key was '
+        + '`z.number()`, so `minLength: -5` and `minLength: 2.5` parsed cleanly while describing '
+        + 'no character length; it is now `z.number().int().min(1)`. The lower bound is 1 by '
+        + 'ruling: `minLength: 0` is refused loudly — a vacuous always-true declaration is '
+        + 'exactly the noise an AI metadata author mass-produces, and the refusal surfaces it at '
+        + 'authoring time. Applicability: the key sat on the BASE field schema — authorable on '
+        + '`boolean` / `lookup` / `autonumber`, types where nothing bounded is stored — while the '
+        + 'write-time validator (objectql `record-validator.ts`) only ever enforced it on the '
+        + 'bounded-string set; the schema now refuses it outside `BOUNDED_STRING_FIELD_TYPES` '
+        + '(ADR-0078 declared=enforced), and both authoring forms (`field.form.ts`, previously 3 '
+        + 'types; `object.form.ts`, previously 9) show the key for exactly that set.',
+      acceptanceCriteria:
+        'Every field declaring `minLength` carries a positive integer and is a bounded-string '
+        + 'type. Well-formed declarations (a positive-integer `minLength` on a bounded-string '
+        + 'type) parse byte-identically to before; fields declaring no `minLength` are untouched, '
+        + 'and absence stays absence — no default materializes. Deleting a misplaced key or a '
+        + '`0`/negative value changes no runtime behaviour (misplaced keys sat outside the '
+        + 'validator\'s bounded-string branch; a `0`/negative bound could never fire). Deleting a '
+        + 'fractional value on a bounded-string type relaxes the write seam by up to one '
+        + 'character — the author decides whether to delete or re-declare the integer they '
+        + 'meant; a wanted minimum is re-declared as a positive integer and enforced by the '
+        + 'write-time validator from the next write on.',
+    },
+    {
       id: 'field-scale-precision-integer-refused',
       surface: 'object field `scale` / `precision` declarations (`Field.number` and friends) — '
         + 'non-integer or negative values (`scale: 2.5`, `precision: -1`)',
@@ -6059,6 +6154,47 @@ const step18: MigrationStep = {
         + 'before and after.',
     },
     {
+      id: 'object-grid-data-view-data-converged',
+      surface:
+        "`object-grid` component props — `data` (the KIND: bare array `z.array(z.unknown())` "
+        + 'vs the `ViewDataSchema` provider object)',
+      replacement:
+        "`ViewDataSchema` — the provider-discriminated object (`provider: 'object' | 'api' | "
+        + "'value' | 'schema'`). Static inline rows move from `data: [...]` to "
+        + "`data: { provider: 'value', items: [...] }` — the same rows, wrapped in the one "
+        + 'arm that means "hardcoded data array". The other three arms are unchanged '
+        + '`ViewDataSchema` semantics; `staticData` (the deprecated bare-array shortcut the '
+        + 'renderer still reads) keeps its shape but is not the prescription',
+      reason:
+        'Two entries of one contract disagreed on the KIND (objectui#6207, contract-vs-'
+        + "contract): `ComponentPropsMap['object-grid'].data` said bare array ('Static inline "
+        + "rows — bypasses the object query') while `ViewDataSchema` — the authority "
+        + 'objectui#5090 ruled the registry declaration against, pinned by '
+        + '`gridDataInputContract.test.ts`, and what `ObjectGridSchema.data` resolves to — is '
+        + "an object discriminated on `provider`. Measured on @objectstack/spec@17.2.0: "
+        + "`{ provider: 'value', items: [] }` — the pinned-legal form — was REFUSED by the "
+        + 'props-map entry (`expected array, received object`) while the bare array parsed. '
+        + 'Whichever authority a value satisfied, the other refused it, and the objectui '
+        + 'parity gate had to carry the reasoned exemption `object-grid.data:object` to look '
+        + 'away. The maintainer ruling (2026-08-25, batch adjudication batch 4; verbatim: '
+        + '「同意」, Option A) converged the props-map entry onto `ViewDataSchema`; the '
+        + 'bare-array form is the deprecated `staticData` shortcut the objectui#4648 '
+        + 'carve-out already refuses to publish. The ruled migration check ran with the '
+        + 'change: the sweep of generated artifacts, templates and first-party corpora '
+        + '(examples/, skills/, create-objectstack, spec fixtures) found ZERO bare-array '
+        + '`data` authors, so no rewrite ships — this entry carries the prescription for '
+        + 'authors outside the repo.',
+      acceptanceCriteria:
+        "`ComponentPropsMap['object-grid'].safeParse({ data: { provider: 'value', items: [] } })` "
+        + 'succeeds (and the other `ViewDataSchema` arms parse through the same entry); a '
+        + 'bare-array `data: [...]` is refused at the `data` path. An author carrying '
+        + "`data: [...]` writes `data: { provider: 'value', items: [...] }` — same rows, "
+        + 'one wrapping object. Downstream (objectui, after a released spec version reaches '
+        + 'the pin): the `object-grid.data:object` exemption entry in '
+        + '`registry-inputs-spec-parity.test.ts` becomes deletable, which is what closes '
+        + 'objectui#6207.',
+    },
+    {
       id: 'object-index-unknown-keys-refused',
       surface: 'object `indexes[]` entries (`IndexSchema`) — undeclared keys',
       replacement: 'the declared surface: `name` / `fields` / `unique` (ADR-0120 scope). A key that '
@@ -6218,6 +6354,38 @@ const step18: MigrationStep = {
         + "'bottom'. If a panel relied on the old schema default `collapsible: true`, author "
         + '`collapsible: true` explicitly — an unset key now defers to the renderer, which does '
         + 'not collapse.',
+    },
+    {
+      id: 'send-template-input-org-retired',
+      surface: 'contracts.emailService.sendTemplate input.org',
+      replacement:
+        '(removed — never implemented; delete the key from the call. It is NOT replaced by '
+        + '`organizationId`: that member is the delivery row\'s tenant stamp '
+        + '(`sys_email.organization_id` pass-through, #11741) and opts into no template overlay '
+        + 'resolution)',
+      reason:
+        'ADR-0049 enforce-or-remove (#11832). `SendTemplateInput.org` was declared as "Tenant id '
+        + 'for org-overlay resolution (when supported)" and no implementation ever read it: '
+        + '`@objectstack/plugin-email` — the only IEmailService implementation — resolves templates '
+        + 'on `(name, locale)` only, so a caller passing `org` got no org-overlay resolution and no '
+        + 'error; the "(when supported)" hedge was the declaration admitting the gap. After #11741 '
+        + 'landed `organizationId` beside it, the input carried two org-shaped keys of which one did '
+        + 'nothing — exactly the shape that invites an AI author to pick the wrong one. There is no '
+        + 'behaviour to preserve and nothing stored to rewrite: the key only ever appeared in a '
+        + 'call-time input bag (the `data.engine.update options.upsert` precedent), which is why '
+        + 'this is a D3 semantic entry with no D2 conversion — no metadata seam ever runs on it. '
+        + 'Org-overlay template resolution, if it ever earns a measured business pull, is a new '
+        + 'capability with its own ruling — not this key revived.',
+      acceptanceCriteria:
+        'No caller passes `org` to `IEmailService.sendTemplate()`. The enforcement channel is the '
+        + 'compiler: `SendTemplateInput` is a programmatic contracts interface with no Zod surface, '
+        + 'so authoring `org` is an excess-property `tsc` error (pinned in '
+        + '`packages/spec/src/contracts/email-service.test.ts`). Runtime behaviour is deliberately '
+        + 'UNCHANGED: nothing ever read the member, so removing it removes no behaviour — a '
+        + 'JavaScript caller still passing `org` keeps its exact pre-removal outcome (the key is '
+        + 'carried inert and ignored). Template resolution still keys on `(name, locale)`, and '
+        + '`organizationId` still stamps `sys_email.organization_id` without acquiring any overlay '
+        + 'semantics.',
     },
     // Registered as D3 SEMANTIC and deliberately NOT as a D2 conversion, on the
     // D2 scope guard (lossless only — the `owd-legacy-read-aliases` / `'full'`

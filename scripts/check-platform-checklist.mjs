@@ -105,14 +105,17 @@ const err = (file, id, msg) => errors.push(`${file}${id ? ` · ${id}` : ''}: ${m
 //
 // The battery runs inline, on every invocation, not only behind `--self-test`,
 // because a `--self-test` here would otherwise execute NOWHERE: this gate is
-// not CI-wired by maintainer decision (README "Operating cadence"), and its
-// `pnpm` alias lives in root package.json, declared territory of the
-// @changesets/cli v3 lane (#9465) while that runs. A self-test nothing runs is
-// the documented defect of #10574/#10573 — CI enforcing the spelling of a
-// guarantee while never once checking the guarantee still holds. The battery
-// is in-memory string work (~1 ms of a ~270 ms run), so "always" costs nothing
-// worth naming, and its assertion count is printed on the OK line: the green
-// states how many rows it read and that its own control passed.
+// not CI-wired by maintainer decision (README "Operating cadence"), so nothing
+// on a PR would ever reach a `--self-test` leg. NOT because its `pnpm` alias is
+// unavailable to it: `check:platform-checklist` is already a key in root
+// package.json, and the reading that the #9465 fence covers that file is false
+// -- the GATE INVOCATION IDIOM note at the top of `.github/workflows/lint.yml`
+// carries that lane's verbatim scope, and is not restated here. A self-test
+// nothing runs is the documented defect of #10574/#10573 — CI enforcing the
+// spelling of a guarantee while never once checking the guarantee still holds.
+// The battery is in-memory string work (~1 ms of a ~270 ms run), so "always"
+// costs nothing worth naming, and its assertion count is printed on the OK
+// line: the green states how many rows it read and that its own control passed.
 
 const RUNNER_FILE = join(ROOT, 'docs/qa/platform-checklist/RUNNER.md');
 const TRAP_HEADING = '### Trap vocabulary';

@@ -2505,7 +2505,9 @@ function selfTest() {
       return dir;
     };
     // Offline by construction — a self-test must never reach the network.
-    const runBump = (fwDir, uiRoot, args) =>
+    // `extraEnv` exists for R7 below, which re-runs one of these cases under a
+    // shell with the bash 4 builtins taken away.
+    const runBump = (fwDir, uiRoot, args, extraEnv = {}) =>
       spawnSync('bash', [join(fwDir, 'scripts', 'bump-objectui.sh'), ...args], {
         encoding: 'utf8',
         env: {
@@ -2513,6 +2515,7 @@ function selfTest() {
           OBJECTUI_ROOT: uiRoot,
           OBJECTUI_NO_DEEPEN: '1',
           GIT_TERMINAL_PROMPT: '0',
+          ...extraEnv,
         },
       });
     const mkUi = (name) => {
@@ -2718,6 +2721,93 @@ function selfTest() {
       '#10495 R6 a capped branch list SAYS it is capped, with the real count',
       r6.stderr.includes('(+3 more; 13 total)'),
       r6.stderr,
+    );
+
+    // --- R7: the bash 3.2 floor --------------------------------------------
+    //
+    // `bump-objectui.sh` is run BY HAND by an operator (docs/releases-
+    // maintenance.md), and `/usr/bin/env bash` is bash 3.2.57 on macOS. Every
+    // case above ran on whatever bash the host has — bash 5 in CI — so the
+    // whole R1..R6 block is blind to a bash-4-only construct: it went green on
+    // a script that could not complete a single one of these runs on a Mac.
+    // Measured: with `mapfile` unavailable, R2/R2b/R2c/R2d/R3/R3b/R6 all fail,
+    // two of them with `status=127`, and the operator run dies at 127 with
+    // `mapfile: command not found` as its ONLY output — the #10495 warning,
+    // which is reached on no other branch, cannot print at all.
+    //
+    // Both halves are needed and they catch different things: the static scan
+    // sees parse-level constructs that `enable -n` cannot simulate, and the
+    // simulated run proves the real code path completes without the builtins.
+    const bash4Constructs = new RegExp(
+      [
+        'exec\\s+\\{[A-Za-z_]', // bash 4.1 fd auto-allocation
+        '\\$\\{[A-Za-z_][A-Za-z0-9_]*(\\[[^\\]]*\\])?(\\^|,)', // bash 4.0 ${x^^} / ${x,,}
+        '(declare|local|typeset)\\s+-[A-Za-z]*A\\s', // bash 4.0 associative arrays
+        '(mapfile|readarray)\\s', // bash 4.0 builtins — the one this card is about
+        '&>>', // bash 4.0 append-both redirection
+        'EPOCH(SECONDS|REALTIME)', // bash 5.0 variables
+      ].join('|'),
+    );
+    const bumpSrc = readFileSync(join(__dirname, 'bump-objectui.sh'), 'utf8');
+    // Comments are exempt: this file has to NAME the constructs it refuses in
+    // order to explain why, and the simulated run below covers what actually
+    // executes.
+    const bash4Hits = bumpSrc
+      .split('\n')
+      .map((line, i) => [i + 1, line])
+      .filter(([, line]) => !/^\s*#/.test(line))
+      .filter(([, line]) => bash4Constructs.test(line))
+      .map(([n, line]) => `${n}: ${line.trim()}`);
+    check(
+      '#12071 R7 bump-objectui.sh names no bash 4+/5 construct (mapfile, ${x^^}, declare -A, &>>, EPOCH*)',
+      bash4Hits.length === 0,
+      bash4Hits.join('\n'),
+    );
+
+    // Bash 3.2's world imposed on this host: `enable -n` really does make
+    // `mapfile`/`readarray` "command not found" — the same status 127 macOS
+    // produces — and BASH_ENV is sourced by every non-interactive bash, so the
+    // script under test inherits it through `spawnSync`.
+    const noBash4 = join(tmp, 'no-bash4-builtins.sh');
+    writeFileSync(noBash4, 'enable -n mapfile readarray 2>/dev/null\n');
+    // The instrument must not be vacuous. If BASH_ENV were ever ignored (a
+    // posix-mode bash, a future harness change), R7b would pass by proving
+    // nothing, so the disabling is measured on a probe FIRST, both ways.
+    const mapfileProbe = join(tmp, 'mapfile-probe.sh');
+    writeFileSync(mapfileProbe, 'mapfile -t x < <(printf "a\\n") && echo MAPFILE-WORKS\n');
+    const probePlain = spawnSync('bash', [mapfileProbe], { encoding: 'utf8' });
+    const probeSim = spawnSync('bash', [mapfileProbe], {
+      encoding: 'utf8',
+      env: { ...process.env, BASH_ENV: noBash4 },
+    });
+    check(
+      '#12071 R7a the simulated-3.2 harness really removes the builtin (else R7b proves nothing)',
+      probePlain.stdout.includes('MAPFILE-WORKS') &&
+        !probeSim.stdout.includes('MAPFILE-WORKS') &&
+        probeSim.stderr.includes('mapfile'),
+      `plain=${probePlain.stdout.trim()} sim.out=${probeSim.stdout.trim()} sim.err=${probeSim.stderr.trim()}`,
+    );
+
+    // The R2 shape again — pushed, never merged — through a shell that has no
+    // bash 4 builtins. This is the operator's macOS run, and the assertion is
+    // the WARNING, not merely a zero exit: the defect's signature was a run
+    // that produced the builtin error INSTEAD of the warning.
+    const fwNoB4 = mkFramework('fw-reach-nobash4', rBase);
+    const r7 = runBump(fwNoB4, uiR.dir, ['--no-commit', rPushed], { BASH_ENV: noBash4 });
+    check(
+      '#12071 R7b on a shell without bash 4 builtins the #10495 warning still fires, in full',
+      r7.stderr.includes('is NOT reachable from origin/main') &&
+        r7.stderr.includes('origin/feature/pushed-never-merged') &&
+        r7.stderr.includes('It IS pushed, but only onto branch(es) that have not merged'),
+      `status=${r7.status}\nSTDERR:${r7.stderr}`,
+    );
+    check(
+      '#12071 R7c … and the run completes as a warning, not a 127: exit 0, pin written, verdict on stdout',
+      r7.status === 0 &&
+        !r7.stderr.includes('command not found') &&
+        readFileSync(join(fwNoB4, '.objectui-sha'), 'utf8').trim() === rPushed &&
+        r7.stdout.includes('(NOT on origin/main)'),
+      `status=${r7.status}\nSTDOUT:${r7.stdout}\nSTDERR:${r7.stderr}`,
     );
 
   } finally {

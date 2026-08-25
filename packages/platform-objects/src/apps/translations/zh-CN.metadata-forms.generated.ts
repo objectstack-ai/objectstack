@@ -1260,7 +1260,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       measures: {
         label: "Measures",
-        helpText: "Each: name, aggregate, field (optional for count), display format/currency, and a “certified” governance flag"
+        helpText: "每个度量：名称、聚合函数、字段（count 时可省略）、显示格式/货币"
       }
     }
   },

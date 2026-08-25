@@ -3,7 +3,7 @@
 import { z } from 'zod';
 
 /**
- * Shared building blocks for the per-driver `datasource.config` shapes (#4410).
+ * Shared building blocks for the per-driver `datasource.config` shapes.
  *
  * Every schema under `data/driver/` describes ONE driver's `config` slot — the
  * keys an author may write and the platform actually reads. They are the
