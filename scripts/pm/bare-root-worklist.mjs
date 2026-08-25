@@ -206,6 +206,21 @@ const TRIAGE = new Map([
     verdict: 'REFUSE-UNSPELLABLE',
     why: 'test files only, 2510 of 4903 (51%)',
   }],
+  ['check:objectql-double-limit SCAN_ROOT packages', {
+    verdict: 'REFUSE-UNSPELLABLE',
+    why: 'test files only — the walk admits `*.test.ts` and nothing else, 2696 of 5161 (52%), the '
+      + 'same file-KIND filter as its check:where-matcher and check:examples-live-imports '
+      + 'neighbours above and refused alike. Measured rather than assumed, in both directions: the '
+      + 'only spellable claim, `packages/**`, covers all 2696 test files AND all 2465 non-test '
+      + 'files under the root, so it would name this gate for 2465 files it never opens — the '
+      + 'costlier error, since a find double can only land in a test file. Nothing narrower is '
+      + 'spellable: every glob form of the real population collapses to a malformed '
+      + 'double-separator prefix (`packages/**/*.test.ts` -> `packages//.test.ts`) that hintCovers '
+      + 'matches against 0 of 2696, so a narrow declaration would not be a precise hint but a live '
+      + 'hint covering nothing. No narrower SUBTREE exists either — the corpus is spread over 28 '
+      + 'second-level directories, and 274 of the 2696 sit outside any `src` segment, so even the '
+      + 'check:runner-env-posture `src`-segment shape would be false here as well as uncollapsible',
+  }],
   ['check:i18n-coverage EXAMPLES_DIR examples', {
     verdict: 'REFUSE-UNSPELLABLE',
     why: 'one named config file per child directory — 3 of 238 (1.3%)',
