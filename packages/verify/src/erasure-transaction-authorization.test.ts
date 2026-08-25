@@ -160,9 +160,16 @@ describe('#10792 — the erasure route answers authorization on a pool max=1 dia
   it('a signed-in plain member gets the AUTHORIZATION refusal, not 401', async () => {
     const answer = await fire('POST', '/auth/admin/remove-user', { userId: targets[2] }, memberToken);
     expect(answer.status, `member remove-user: ${answer.status} ${answer.body}`).toBe(403);
-    // The vendor's own denial vocabulary. Asserting only the status would let a
-    // 403 from some unrelated gate stand in for the authorization answer.
-    expect(answer.code).toBe('YOU_ARE_NOT_ALLOWED_TO_DELETE_USERS');
+    // #11477 (maintainer-ruled option A): the route is now shaded by an
+    // ObjectStack raw mount whose gateAdmin runs BEFORE the break-glass guard,
+    // so the refusal a plain member hears is the gate's target-independent
+    // PERMISSION_DENIED — no longer the vendor's
+    // YOU_ARE_NOT_ALLOWED_TO_DELETE_USERS, which the pre-#11477 route only
+    // reached after the guard had already answered. This pin's intent is
+    // unchanged: the member hears an AUTHORIZATION verdict, and asserting the
+    // code (not just the status) keeps a 403 from some unrelated layer from
+    // standing in for it.
+    expect(answer.code).toBe('PERMISSION_DENIED');
     expect(answer.ms).toBeLessThan(NOT_BLOCKED_MS);
     // …and the member's target survives: a refusal must erase nothing.
     const survivors = await ql.find('sys_user', { where: { id: targets[2] }, limit: 1 }, { context: SYS });

@@ -87,6 +87,11 @@ function realOrSelf(path: string): string {
  * basename matching, which #10086 also found in the wild and which fires for
  * any entry script that happens to share a filename.
  *
+ * This predicate is duplicated, not shared, in two other places: this repo's
+ * `scripts/invoked-as.mjs` (`isEntrypoint`) and objectui's own
+ * `scripts/invoked-as.mjs`. All three copies carry the same two legs above and
+ * must not diverge — change one, change the others.
+ *
  * @param entryArg `process.argv[1]` — undefined under `node --eval` / the REPL
  * @param selfUrl  the caller's `import.meta.url`
  */

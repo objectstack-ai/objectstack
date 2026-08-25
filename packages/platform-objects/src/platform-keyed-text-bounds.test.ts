@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
-import * as Identity from './index';
+import * as PlatformObjects from './index';
 
 /**
  * #11374 — every text-family column a declared index keys on must declare a
@@ -26,6 +26,18 @@ import * as Identity from './index';
  * has to live HERE, in the field declaration (maintainer ruling on #11374,
  * 2026-08-24: route A).
  *
+ * ## Why this file enumerates the WHOLE package, not just `identity/`
+ *
+ * It used to be `identity/identity-keyed-text-bounds.test.ts`, importing
+ * `./index` from `identity/`. That scoping is precisely how
+ * `sys_import_job.created_by` — a keyed, unbounded text column in `audit/` —
+ * survived route A's first pass: the pin could not see it, so nothing failed by
+ * name and the column was left for a follow-up card to find by hand. A pin that
+ * polices one directory does not police the defect class; it polices a
+ * directory. The enumeration now walks every object the package exports, and
+ * the vacuity control below asserts a column from OUTSIDE `identity/` is in
+ * the enumerated set, so the same narrowing cannot silently come back.
+ *
  * ## What a red on this file means
  *
  * A new keyed text-family field arrived without a `maxLength`. Do not silence
@@ -47,7 +59,7 @@ const TEXT_FAMILY = new Set(['text', 'textarea', 'html', 'markdown']);
 /**
  * Keyed text-family columns with NO defensible bound. Every entry must name
  * why. Entries that stop matching a real keyed unbounded column fail the
- * second test, so the list cannot rot.
+ * third test, so the list cannot rot.
  */
 const UNBOUNDABLE: ReadonlySet<string> = new Set([
   // better-auth's oauth-provider stores OIDC authorization-code payloads in
@@ -65,7 +77,7 @@ type AnyObject = {
   indexes?: Array<{ fields?: string[]; unique?: boolean }>;
 };
 
-const identityObjects: AnyObject[] = Object.values(Identity)
+const platformObjects: AnyObject[] = Object.values(PlatformObjects)
   .map((v) => v as unknown as AnyObject)
   .filter(
     (v) =>
@@ -84,19 +96,32 @@ function keyedTextColumns(o: AnyObject): Array<{ column: string; maxLength: unkn
     .map(([column, def]) => ({ column: `${o.name}.${column}`, maxLength: def.maxLength }));
 }
 
-describe('identity keyed text-family columns declare their bound (#11374)', () => {
+describe('platform keyed text-family columns declare their bound (#11374)', () => {
   it('enumerates a real surface — the probe itself is not vacuous', () => {
     // Positive control: if the export shape or field/index spelling changes so
     // this file stops seeing columns, fail loudly instead of passing empty.
-    const all = identityObjects.flatMap(keyedTextColumns);
-    expect(identityObjects.length).toBeGreaterThanOrEqual(20);
-    expect(all.length).toBeGreaterThanOrEqual(30);
+    const all = platformObjects.flatMap(keyedTextColumns);
+    expect(platformObjects.length).toBeGreaterThanOrEqual(40);
+    expect(all.length).toBeGreaterThanOrEqual(70);
     expect(all.map((c) => c.column)).toContain('sys_session.token');
+  });
+
+  it('reaches beyond identity/ — the scoping that let a keyed column escape', () => {
+    // The specific regression control for this file's own history: while it
+    // lived in `identity/` it enumerated only that directory, and
+    // `sys_import_job.created_by` (audit/) went unbounded through route A's
+    // first pass. These two names are in DIFFERENT source directories, so a
+    // future re-narrowing of the import fails here by name rather than by
+    // quietly enumerating less.
+    const columns = platformObjects.flatMap(keyedTextColumns).map((c) => c.column);
+    expect(columns).toContain('sys_import_job.created_by'); // audit/
+    expect(columns).toContain('sys_metadata.name'); // metadata/
+    expect(columns).toContain('sys_setting.key'); // system/
   });
 
   it('every keyed text-family column declares a positive integer maxLength, or is allowlisted by name', () => {
     const offenders: string[] = [];
-    for (const o of identityObjects) {
+    for (const o of platformObjects) {
       for (const { column, maxLength } of keyedTextColumns(o)) {
         if (UNBOUNDABLE.has(column)) continue;
         const bounded =
@@ -115,7 +140,7 @@ describe('identity keyed text-family columns declare their bound (#11374)', () =
 
   it('the UNBOUNDABLE allowlist matches only real, still-unbounded keyed columns', () => {
     const real = new Map(
-      identityObjects.flatMap(keyedTextColumns).map((c) => [c.column, c.maxLength]),
+      platformObjects.flatMap(keyedTextColumns).map((c) => [c.column, c.maxLength]),
     );
     for (const entry of UNBOUNDABLE) {
       expect(real.has(entry), `allowlist entry ${entry} is not a keyed text column any more — remove it`).toBe(true);

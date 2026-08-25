@@ -1694,6 +1694,19 @@ export class AuthManager {
             // the mount is conditional on the admin plugin, and because the
             // guard itself now lives in ONE module both call sites share —
             // `last-local-credential.ts`, whose header records this trap.
+            //
+            // ⚠️ `/admin/remove-user` IS ALSO SHADED NOW (#11477) — and it DOES
+            // still reach this hook, which is the opposite of the line above
+            // and is the point. Its mount only runs `gateAdmin` and then
+            // RE-DISPATCHES the request through `handleRequest`, so it re-enters
+            // better-auth's router and this hook fires exactly as before —
+            // just AFTER authorization instead of before it. That is the whole
+            // fix: an authenticated non-admin is now refused by the mount and
+            // never reaches the lookup below, while an admitted platform admin
+            // reaches the identical lookup and the identical `CONFLICT`.
+            // ⛔ Do not "reconcile" the two notes by deleting this path from
+            // the list — that would silently drop the guard on the one route
+            // that still depends on this hook to run it.
             // ── [#10776] AUTHENTICATE FIRST ────────────────────────────
             // A `hooks.before` runs AHEAD of the endpoint's own
             // `use: [adminMiddleware]`, and that middleware is the only layer
@@ -3467,6 +3480,21 @@ export class AuthManager {
    */
   private static readonly BOOTSTRAP_USER_PROBE_LIMIT = 50;
 
+  /**
+   * Page size of the pending-invitation probe ({@link hasPendingInvitationFor}).
+   * Unlike the bootstrap probe's limit this is NOT a bound on the answer — the
+   * probe's read is narrowed to one address and its page chain is exhausted —
+   * so the value only trades round trips against page size.
+   */
+  private static readonly PENDING_INVITATION_PROBE_PAGE = 50;
+
+  /**
+   * Termination guarantee for that page chain, not a ceiling on the answer:
+   * reaching it would mean 10k pending invitations addressed to a single
+   * person, and it is reported at error level rather than answered silently.
+   */
+  private static readonly PENDING_INVITATION_PROBE_MAX_PAGES = 200;
+
   /** `error` when the host logger carries it, else the guaranteed `warn` channel (#9754). */
   private audienceLogError(message: string, meta?: Record<string, unknown>): void {
     const logger = this.config.logger as
@@ -3632,12 +3660,55 @@ export class AuthManager {
   }
 
   /**
-   * A pending, unexpired `sys_invitation` row exists for this email. Rows are
-   * fetched by status and compared lowercased in JS because invitation
-   * addresses are stored as the inviter typed them while better-auth
-   * lowercases the registrant's — a case-sensitive store-side equality would
-   * dead-end `Bob@Acme.com`'s invitee. Bounded read (an environment's pending
-   * invitations are few); unanswerable ⇒ no carve-out (fail closed).
+   * A pending, unexpired `sys_invitation` row exists for this email.
+   *
+   * ## Why the address goes into the QUERY rather than into a memory scan
+   *
+   * The first spelling read `{ status: 'pending' }` with `limit: 200` and
+   * matched the address in JS. That is a CEILING, not a bound: past 200
+   * concurrently-pending invitations in one environment, an invitee outside
+   * the first page was not found, so under the `invite_only` default their
+   * registration was refused with `SELF_REGISTRATION_CLOSED` — the invitation
+   * lane silently failing for the TAIL of a large rollout, with no signal to
+   * the administrator or the invitee. A 500-employee onboarding reaches it.
+   *
+   * The scan existed to make the match case-insensitive, on the stated belief
+   * that invitation addresses are stored as the inviter typed them while
+   * better-auth lowercases the registrant's. Measured on the installed
+   * better-auth 1.7.1, that belief is wrong on BOTH halves — the vendor
+   * normalizes each side before this gate ever sees it:
+   *
+   *  - `organization/invite-member` lowercases `ctx.body.email` and carries
+   *    that value into `createInvitation` (and into the resend path), so the
+   *    stored `sys_invitation.email` is already the normalized form;
+   *  - `internalAdapter.createUser` lowercases `user.email` *before* it calls
+   *    `validateUserInfo`, so the address this gate is asked about is already
+   *    normalized too.
+   *
+   * The vendor's own reads agree: `findPendingInvitation`,
+   * `listUserInvitations` and `findMemberByEmail` all query with
+   * `email.toLowerCase()`. A mixed-case row would therefore be unredeemable
+   * by `accept-invitation` and invisible in the invitee's own inbox — the old
+   * tolerance admitted a registrant to an invitation they could never accept.
+   *
+   * So the address is pushed into the query (`sys_invitation.email` carries a
+   * declared index) and the page chain is EXHAUSTED. That removes the ceiling
+   * without putting a read of the environment's whole pending population on
+   * the self-serve sign-up path: a page here is "pending invitations
+   * addressed to this one person", which the vendor bounds by refusing a
+   * second pending invitation per organization.
+   *
+   * The JS comparison is KEPT and is not dead. `=` folds case on some
+   * collations (MySQL's default) and folds accents with it, so every returned
+   * row is re-checked against the normalized target: a case-only difference
+   * still matches — identical to the old behaviour on such a store — while an
+   * accent-only difference does not, so a folding collation cannot WIDEN what
+   * counts as an invitation. Expiry stays in JS for the reason it was there:
+   * a row with no readable `expires_at` keeps reading as live, which an
+   * `expires_at: { $gt: … }` predicate would silently narrow away.
+   *
+   * Unanswerable ⇒ no carve-out (fail CLOSED): the `catch` returns false, so
+   * the declared posture applies rather than an unverified admission.
    */
   private async hasPendingInvitationFor(email: string): Promise<boolean> {
     const engine = this.config.dataEngine;
@@ -3646,19 +3717,47 @@ export class AuthManager {
     if (!target) return false;
     try {
       const reader = withSystemReadContext(engine) as any;
-      const raw = await reader.find('sys_invitation', { where: { status: 'pending' }, limit: 200 });
-      const rows: any[] = Array.isArray(raw) ? raw : Array.isArray(raw?.records) ? raw.records : [];
       const nowMs = Date.now();
-      for (const row of rows) {
-        const rowEmail = typeof row?.email === 'string' ? row.email.trim().toLowerCase() : '';
-        if (rowEmail !== target) continue;
-        const expires = row?.expires_at ?? row?.expiresAt;
-        if (expires != null) {
-          const expMs = new Date(expires as any).getTime();
-          if (Number.isFinite(expMs) && expMs <= nowMs) continue;
+      const page = AuthManager.PENDING_INVITATION_PROBE_PAGE;
+      const seenIds = new Set<unknown>();
+      for (let pageIndex = 0; pageIndex < AuthManager.PENDING_INVITATION_PROBE_MAX_PAGES; pageIndex++) {
+        const offset = pageIndex * page;
+        const raw = await reader.find('sys_invitation', {
+          where: { status: 'pending', email: target },
+          limit: page,
+          // Omitted on the first page so the ordinary single-page read sends
+          // exactly the option shape every driver already answers.
+          ...(offset > 0 ? { offset } : {}),
+        });
+        const rows: any[] = Array.isArray(raw) ? raw : Array.isArray(raw?.records) ? raw.records : [];
+        const idsBefore = seenIds.size;
+        for (const row of rows) {
+          if (row?.id != null) seenIds.add(row.id);
+          const rowEmail = typeof row?.email === 'string' ? row.email.trim().toLowerCase() : '';
+          if (rowEmail !== target) continue;
+          const expires = row?.expires_at ?? row?.expiresAt;
+          if (expires != null) {
+            const expMs = new Date(expires as any).getTime();
+            if (Number.isFinite(expMs) && expMs <= nowMs) continue;
+          }
+          return true;
         }
-        return true;
+        // Exhausted: a short page is the end of the chain. The second arm is
+        // the termination guarantee against a driver that accepts `offset`
+        // and ignores it — a page that carried no row id this loop had not
+        // already read cannot carry a new answer either, and looping forever
+        // on the sign-up path would be worse than the ceiling being removed.
+        if (rows.length < page) return false;
+        if (seenIds.size === idsBefore && rows.some((r) => r?.id != null)) return false;
       }
+      // Unreachable on any real population (that is 10k pending invitations
+      // addressed to ONE person). Loud rather than silent: the defect this
+      // method closes was a boundary nobody could see from either side.
+      this.audienceLogError(
+        '[audience] pending-invitation probe hit its page ceiling — the carve-out is being refused '
+          + 'without having read every pending invitation for this address.',
+        { pages: AuthManager.PENDING_INVITATION_PROBE_MAX_PAGES, pageSize: page },
+      );
       return false;
     } catch {
       return false;

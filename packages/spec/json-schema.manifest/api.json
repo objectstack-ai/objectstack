@@ -33,6 +33,8 @@
     "api/ApiTestingUiType",
     "api/AppDefinitionResponse",
     "api/ApproveAiPendingActionResponse",
+    "api/AuditMetaItemRequest",
+    "api/AuditMetaItemResponse",
     "api/AuthEndpoint",
     "api/AuthFeaturesConfig",
     "api/AuthProvider",

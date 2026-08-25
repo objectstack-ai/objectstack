@@ -151,7 +151,7 @@ function refusedByDesignFor(targetUserId: string): Record<string, RefusalSpec> {
     code: 'YOU_ARE_NOT_ALLOWED_TO_DELETE_USERS',
     body: { userId: targetUserId },
     ruledBy: '#9969 (closed not_planned)',
-    why: 'no ObjectStack consumer; re-implement on demand. It also still carries better-auth\'s break-glass last-local-credential before-hook precisely BECAUSE it is not shadowed by a raw mount',
+    why: 'no ObjectStack consumer; re-implement on demand — so ADMISSION is still better-auth\'s adminMiddleware on the legacy `role` scalar and this refusal is intended. ⚠️ #11477 DID shade the path with a raw mount (gateAdmin first, to stop the break-glass before-hook answering an authenticated non-admin ahead of authorization), but that mount DELEGATES through handleRequest instead of re-implementing removal — so the request re-enters better-auth\'s router, the break-glass before-hook still fires, and this vendor refusal is unchanged. A future mount that stopped delegating would break BOTH this row and the guard',
   },
   'POST /api/v1/auth/admin/revoke-user-session': {
     code: 'YOU_ARE_NOT_ALLOWED_TO_REVOKE_USERS_SESSIONS',

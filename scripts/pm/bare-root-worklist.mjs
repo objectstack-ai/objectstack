@@ -113,6 +113,27 @@ const POPULATION_CONSTANT = /^(?:[A-Z0-9_]*_ROOTS?|[A-Z0-9_]*_DIRS?|POPULATION|[
  * Every percentage below was measured on the tree, not estimated: numerator is
  * the files the gate's own walk filter admits, denominator the tracked files
  * under the subtree a declaration would name.
+ *
+ * ⚠️ A row's numbers date from the pass that WROTE that row, and the tree grows
+ * under all of them — so they are not comparable across rows, and a denominator
+ * here that disagrees with today's `trackedFiles()` is a stale reading, not a
+ * different population. The failure this warns against is the one that produced
+ * the `check-declaration-mirrors` row: its `why` was copied from the row above
+ * it and was wrong in BOTH terms (a recursive extension filter recorded as
+ * top-level-only, 2 files recorded as 115), and `--self-test` cannot catch it —
+ * it audits keys and verdicts, never what a `why` SAYS, which is correct, since
+ * a prose assertion cannot be mechanised. Only re-measuring catches this class.
+ * ⛔ So never carry a sibling's numbers into a new row, and ⛔ never refresh a
+ * denominator alone: pairing today's denominator with an older numerator mints a
+ * ratio nothing ever measured, which is this defect wearing fresher digits.
+ *
+ * Re-derived on 2026-08-25 from each gate's own exported walk, and current as of
+ * that tree: the two `scripts` rows (`corpusFiles()`, `mirrorFiles()`) and the
+ * three `check:runner-env-posture` rows (`collectFiles()`); the
+ * `check:skills-token-ratchet` row re-measured unchanged at 11 of 50. Every
+ * other row still carries the numbers from the pass that wrote it, because its
+ * gate exports no walk to drive and reproducing the filter by hand would be the
+ * estimate this docblock refuses.
  */
 const TRIAGE = new Map([
   // ── Taken: a strictly narrower subtree ────────────────────────────────────
@@ -179,12 +200,21 @@ const TRIAGE = new Map([
   }],
   ['check:ratchet-remedy-authority SCRIPTS_DIR scripts', {
     verdict: 'REFUSE-UNSPELLABLE',
-    why: 'reads the TOP LEVEL of the root only, and only two extensions — 115 of 226 (51%). The '
-      + 'idiom has no non-recursive spelling: a subtree hint claims every nested directory too',
+    why: 'reads the TOP LEVEL of the root only, and only two extensions (`.mjs` and `.mts`) — 144 '
+      + 'of 261 (55%), re-derived from the gate own corpusFiles() walk. The idiom has no '
+      + 'non-recursive spelling: a subtree hint claims every nested directory too',
   }],
   ['scripts/check-declaration-mirrors.mjs SCRIPTS_DIR scripts', {
     verdict: 'REFUSE-UNSPELLABLE',
-    why: 'same top-level-only shape, 115 of 226 (51%)',
+    why: 'a RECURSIVE walk admitted by EXTENSION — every `scripts/**/*.d.mts`, 2 of 261 (0.77%), '
+      + 'read from the gate own mirrorFiles(). NOT the shape of the row above it, and measured '
+      + 'here rather than inherited from it: mirrorFiles() descends into every nested directory '
+      + 'and its own docblock says so. What cannot be spelled here is the EXTENSION filter, not a '
+      + 'non-recursive walk — `scripts/**` is spellable and TRUE of this walk, and refused anyway '
+      + 'because it would name this gate for 261 files to reach 2. Same class as the '
+      + 'check:driver-conformance CASE_SETS_DIR and check:skills-token-ratchet SKILLS_DIR rows '
+      + 'below, so lifting the row-above non-recursive limit would leave this one exactly as '
+      + 'refused',
   }],
   // ── Refused: the population is a filter the idiom cannot spell ────────────
   ['check:driver-conformance CASE_SETS_DIR packages', {
@@ -205,6 +235,21 @@ const TRIAGE = new Map([
   ['check:where-matcher SCAN_ROOT packages', {
     verdict: 'REFUSE-UNSPELLABLE',
     why: 'test files only, 2510 of 4903 (51%)',
+  }],
+  ['check:objectql-double-limit SCAN_ROOT packages', {
+    verdict: 'REFUSE-UNSPELLABLE',
+    why: 'test files only — the walk admits `*.test.ts` and nothing else, 2696 of 5161 (52%), the '
+      + 'same file-KIND filter as its check:where-matcher and check:examples-live-imports '
+      + 'neighbours above and refused alike. Measured rather than assumed, in both directions: the '
+      + 'only spellable claim, `packages/**`, covers all 2696 test files AND all 2465 non-test '
+      + 'files under the root, so it would name this gate for 2465 files it never opens — the '
+      + 'costlier error, since a find double can only land in a test file. Nothing narrower is '
+      + 'spellable: every glob form of the real population collapses to a malformed '
+      + 'double-separator prefix (`packages/**/*.test.ts` -> `packages//.test.ts`) that hintCovers '
+      + 'matches against 0 of 2696, so a narrow declaration would not be a precise hint but a live '
+      + 'hint covering nothing. No narrower SUBTREE exists either — the corpus is spread over 28 '
+      + 'second-level directories, and 274 of the 2696 sit outside any `src` segment, so even the '
+      + 'check:runner-env-posture `src`-segment shape would be false here as well as uncollapsible',
   }],
   ['check:i18n-coverage EXAMPLES_DIR examples', {
     verdict: 'REFUSE-UNSPELLABLE',
@@ -260,16 +305,16 @@ const TRIAGE = new Map([
   }],
   ['check:runner-env-posture SCANNED_ROOTS packages', {
     verdict: 'REFUSE-UNSPELLABLE',
-    why: 'non-test source beneath a `src` SEGMENT — 1757 of 5049 (35%). The segment is what makes '
+    why: 'non-test source beneath a `src` SEGMENT — 1794 of 5185 (35%). The segment is what makes '
       + 'this unspellable rather than merely wide: `packages/**/src/**` is the true population and '
       + 'collapseHint reduces it to `packages`, so the only spellable claim also names every '
-      + 'package manifest, changelog, fixture and the 2658 test files this gate deliberately skips. '
+      + 'package manifest, changelog, fixture and the 2746 test files this gate deliberately skips. '
       + 'Its nearest neighbour check:authz-resolver is REFUSE-WIDE at a similar 39% because ITS '
       + 'population really is every non-test source under the root; this one is not',
   }],
   ['check:runner-env-posture SCANNED_ROOTS examples', {
     verdict: 'REFUSE-UNSPELLABLE',
-    why: '150 of 240 (63%), the same `src`-segment filter, refused with its packages half rather '
+    why: '150 of 241 (62%), the same `src`-segment filter, refused with its packages half rather '
       + 'than split: declaring the smaller root would name the gate on example cards and stay '
       + 'silent on the package cards where product source actually lives',
   }],

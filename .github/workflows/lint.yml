@@ -2567,6 +2567,28 @@ jobs:
       - name: WHERE-matcher conformance gate
         run: pnpm check:where-matcher
 
+      # ObjectQL double `limit` gate (#11525, from #10978). The third member of
+      # the family above, and the one the other two leave uncovered: a
+      # `find(object, opts)` double that matches `where` correctly and then hands
+      # back EVERY matched row. It cannot tell a read bounded at 200 from the same
+      # read bounded at 1000, or from an unbounded one, so any limit change on
+      # that read is green by construction and the production symptom is a
+      # silently truncated result set rather than an error -- #10978's worked
+      # example truncates an RLS input. PR #11521 converted nine doubles on the
+      # authorization path and measured the population; #11525 is the observation
+      # one level up: nothing held those nine right. This lifts each discovered
+      # double out of its file and asks it a bounded question, encoding all three
+      # shape rules the nine settled -- presence not truthiness, bound after the
+      # filter, bound before any row-touching stage. Behavioural rather than
+      # syntactic on purpose: the bound is applied through inline slices, per-file
+      # helpers and shared helpers alike, and no pattern-match over source spans
+      # them. Pre-existing doubles are in a shrink-only measured baseline. Runs
+      # its own --self-test first: the detector can be broken while every double
+      # is fine, and a scan that quietly stops matching would report OK while
+      # reading nothing (#4868's family).
+      - name: ObjectQL double limit gate
+        run: pnpm check:objectql-double-limit
+
       # Paired kernel-hook pin gate (#5282, from #5170 / #5257 / #5274). The two
       # kernels — ObjectKernel (production) and LiteKernel (vitest / serverless /
       # edge) — run the same plugin code and the same hook vocabulary, but do NOT
@@ -4011,6 +4033,35 @@ jobs:
       # result is "nothing found" has to prove it can still find something.
       - name: Check no exported spec type resolves to `any`
         run: pnpm --filter @objectstack/spec run check:exported-any
+
+      # [#11927] The same question, asked of the SDK boundary instead of the
+      # spec surface — and asked because #8140 bound 51 erased return types
+      # across `packages/client` by hand, which buys a snapshot and not a
+      # property. Nothing stopped the 52nd.
+      #
+      # It reads the built `.d.ts` for the reason the neighbour above does, plus
+      # one this package makes sharper: the largest erasure class here carries NO
+      # return annotation at all, taking its type from `unwrapResponse<any>`
+      # (#11925) or from a bare `res.json()`, which lib.dom declares
+      # `Promise<any>` (#12104). Neither spelling contains the text `Promise` or
+      # `any`, so no grep can see them — only a checker asking what the export
+      # RESOLVES to. So it belongs here with the other dist-reading consumer
+      # gates, after the build steps, and on an unbuilt or stale tree it is a
+      # hard refusal naming the build command rather than a skip (#4690, #7122).
+      #
+      # Baseline, not zero: 65 sites are carried as NAMED, shrink-only ledger
+      # entries with a written reason each (packages/client/exported-any-returns.json),
+      # because four of them keep `any` deliberately — no contract exists to bind
+      # (#11924) — and a gate demanding zero would either block on that work or
+      # invite a false declaration to reach green. Self-tests first, like its
+      # neighbours, and that self-test is load-bearing in a specific direction
+      # here: a caller-supplied `<T = any>` is NOT erasure, and a detector that
+      # cannot tell the two apart produces pressure to replace a correct generic
+      # with a wrong concrete type. Both directions are pinned there.
+      #
+      # Adds no required context — a step in an existing lane (#9325).
+      - name: Check no exported client callable resolves to `any`
+        run: pnpm --filter @objectstack/client run check:exported-any-returns
 
       # Third axis on the same surface: api-surface/ shows a name on two
       # entries but not whether the two are ONE declaration re-exported (fine)
