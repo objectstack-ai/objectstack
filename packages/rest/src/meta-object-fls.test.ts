@@ -201,18 +201,11 @@ const EXITS: ObjectSchemaMaskExit[] = [
             );
         },
     },
-    {
-        name: 'GET /meta/:type/:section/:name — compound-name read',
-        run: (testCase) => {
-            const { rest } = boot({ testCase, cached: true });
-            return outcomeOf(
-                (res) => routeFor(rest, COMPOUND_PATH)!.handler(
-                    { params: { type: 'object', section: 'crm', name: 'account' }, query: {}, headers: {} }, res,
-                ),
-                (body) => body?.item,
-            );
-        },
-    },
+    // [#12195] The compound-name read `GET /meta/:type/:section/:name` was the
+    // fourth exit in this table until its arity was retired. Every name reaches
+    // the single-item read above now, and that exit carries the same ADR-0106
+    // masking contract — so the removal costs this table no coverage, it costs
+    // it a duplicate.
     {
         name: 'GET /meta/object — list read',
         run: (testCase) => {

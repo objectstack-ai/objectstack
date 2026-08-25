@@ -19,6 +19,12 @@
  * mechanism"), so it carried the sibling-key shape too — the card's table
  * sampled one of the twins, not both.
  *
+ * ⚠️ [#12195] The compound `PUT /meta/:type/:section/:name` in that table is
+ * RETIRED (#12176 stage 3). The row is kept because it is the historical
+ * measurement this file exists to explain; the case that drove it is replaced
+ * by a pin that the arity stays unmounted, so a re-mount cannot quietly
+ * reintroduce a fourth envelope dialect.
+ *
  * The cost is not cosmetic. A client reading `err.error.code` — the one position
  * ADR-0112 declares — got `undefined` on three of the four routes, and
  * `undefined` takes the "no code" branch rather than an error branch. That is
@@ -133,7 +139,14 @@ function boot() {
         /** The shape the other three converged ON — the ADR-0112 anchor. */
         migrateStored: () => drive('POST', MIGRATE_PATH, { params: {} }),
         singleSave: () => drive('PUT', SINGLE_PATH, { params: { type: 'object', name: 'account' } }),
-        compoundSave: () => drive('PUT', COMPOUND_PATH, { params: { type: 'object', section: 'crm', name: 'account' } }),
+        /**
+         * [#12195] The compound arity's REGISTRATION, not a call to it.
+         * `route()` above THROWS on an unregistered path, so this reads
+         * the route list directly.
+         */
+        compoundRoutes: () => (rest as any).getRoutes()
+            .filter((r: any) => String(r.path).includes(':section'))
+            .map((r: any) => `${String(r.method).toUpperCase()} ${r.path}`),
         reset: (query: Record<string, unknown> = {}) =>
             drive('DELETE', SINGLE_PATH, { params: { type: 'object', name: 'account' }, query }),
     };
@@ -187,21 +200,14 @@ describe('#7035 — the `/meta` 501 refusals all speak the ADR-0112 envelope', (
         expectNestedEnvelope(answer, 'Save operation not supported by protocol implementation');
     });
 
-    it('PUT /meta/:type/:section/:name — the compound twin, same dialect, same fix', async () => {
-        const answer = await boot().compoundSave();
-        expectNestedEnvelope(answer, 'Save operation not supported by protocol implementation');
-    });
-
-    it('the two `PUT` twins answer byte-identical bodies — the pair is one contract', async () => {
-        // The file's own comment calls these "WORD FOR WORD the same mechanism".
-        // Pinning their equality is what stops the pair splitting again: a fix
-        // applied to whichever line the next author scrolled to would show up
-        // here rather than shipping as a fourth shape.
-        const stack = boot();
-        const single = await stack.singleSave();
-        const compound = await stack.compoundSave();
-        expect(compound.status).toBe(single.status);
-        expect(compound.body).toEqual(single.body);
+    it('[#12195] the compound `PUT` twin is retired — no fourth dialect can reappear there', () => {
+        // This used to drive `PUT /meta/:type/:section/:name` and then assert
+        // the two twins answered BYTE-IDENTICAL bodies, because the pair
+        // splitting again is how a fourth shape would ship. The arity is
+        // retired, so the equality pin has no second side; what replaces it is
+        // the absence, which is what a re-mount (arriving with whatever
+        // envelope its author writes) would break.
+        expect(boot().compoundRoutes()).toEqual([]);
     });
 
     it('one code path reads every refusal — `err.error.code` on all four routes', async () => {
@@ -213,11 +219,12 @@ describe('#7035 — the `/meta` 501 refusals all speak the ADR-0112 envelope', (
             await stack.migrateStored(),
             await stack.reset(),
             await stack.singleSave(),
-            await stack.compoundSave(),
         ];
-        expect(answers.map((a) => a.status)).toEqual([501, 501, 501, 501]);
+        // [#12195] THREE routes, not four: the compound `PUT` twin that used to
+        // be the fourth is retired.
+        expect(answers.map((a) => a.status)).toEqual([501, 501, 501]);
         expect(answers.map((a) => a.body?.error?.code)).toEqual([
-            'NOT_IMPLEMENTED', 'NOT_IMPLEMENTED', 'NOT_IMPLEMENTED', 'NOT_IMPLEMENTED',
+            'NOT_IMPLEMENTED', 'NOT_IMPLEMENTED', 'NOT_IMPLEMENTED',
         ]);
         // And every message is readable at the declared position — the bare-string
         // dialect made this one `undefined`.

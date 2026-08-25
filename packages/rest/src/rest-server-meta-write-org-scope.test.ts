@@ -117,7 +117,10 @@ function boot(execCtx: any) {
         return { status: res.statusCode, body: res.json.mock.calls.at(-1)?.[0] };
     };
 
-    return { ...calls, drive };
+    /** [#12195] Every mounted route, for absence sweeps. */
+    const routes = () => (rest as any).getRoutes();
+
+    return { ...calls, drive, routes };
 }
 
 /** The request object the route handed to the protocol. */
@@ -197,16 +200,23 @@ describe('#8805 the REST /meta write doors carry the caller organization', () =>
         });
     });
 
-    describe('PUT /meta/:type/:section/:name (compound name)', () => {
-        it('scopes the compound twin too — gating one door and scoping the other leaves a bypass', async () => {
+    describe('[#12195] the compound-name PUT twin is retired', () => {
+        /**
+         * This drove `PUT /meta/:type/:section/:name` and asserted it carried
+         * the caller's organization, because #8805 measured that scoping one
+         * door and not its twin leaves the twin as a bypass — a tenant writing
+         * through the unscoped spelling reached the env-wide row.
+         *
+         * The arity is retired, so the bypass is closed by removal. The pin
+         * inverts to the absence: a re-mounted compound door arrives org-BLIND
+         * unless whoever mounts it re-derives #8805.
+         */
+        it('mounts no compound `:section` arity to leave unscoped', () => {
             const b = boot(AUTHORIZED);
-            await b.drive('PUT', `${META}/:type/:section/:name`, {
-                params: { type: OVERRIDABLE, section: 'lead', name: 'all_leads' },
-                body: { label: 'All leads' },
-            });
-            const request = requestFrom(b.saveMetaItem);
-            expect(request.organizationId).toBe(ORG);
-            expect(request.name).toBe('lead/all_leads');
+            const compound = b.routes()
+                .map((r: any) => String(r.path))
+                .filter((path: string) => path.includes(':section'));
+            expect(compound).toEqual([]);
         });
     });
 

@@ -964,6 +964,22 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
         }
         return { handled: true, response: deps.success({ types: ['object', 'app', 'plugin'] }) };
     }
-    
-    return { handled: false };
+
+    // [#12195] A LOCATED refusal, not a bare `{ handled: false }`.
+    //
+    // This tail was unreachable until this card: the branches above covered
+    // zero segments, one segment, and — through the compound fold — every path
+    // with two or MORE. Retiring the fold makes it reachable for the first
+    // time, and what reaches it is a `/meta` path with no route: three or more
+    // segments that is not `/published` or the four-segment FSM `/state/:field`.
+    //
+    // `{ handled: false }` would leave the answer to the adapter, which turns
+    // an unhandled result into a generic `404 'Not Found'` — losing both the
+    // path and the ADR-0112 code, on the very shape this retirement newly
+    // produces. "Absence must be loud" (AGENTS.md, Route & surface ownership
+    // §3): the caller most likely to land here is one still spelling a
+    // compound name, and they should be told the route does not exist rather
+    // than be handed an anonymous 404. Same shape `domains/ai.ts` and
+    // `domains/share-links.ts` already use for their own unmatched sub-paths.
+    return { handled: true, response: deps.routeNotFound(`/meta${path.startsWith('/') ? '' : '/'}${path}`) };
 }

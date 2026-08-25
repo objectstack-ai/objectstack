@@ -214,36 +214,63 @@ describe('#8421 — the compound `/meta` arity is not a metadata-type claim', ()
         vi.spyOn(console, 'error').mockImplementation(() => {});
     });
 
-    it('refuses the compound-arity write at the wire with the grammar envelope (#12194)', async () => {
+    it('⭐ [#12195] does not HANDLE the compound arity at all — the fold is gone', async () => {
         const { engine, dispatcher } = makeStack();
 
-        const res = responseOf(await dispatcher.handleMetadata(
+        const result = await dispatcher.handleMetadata(
             '/lead/views/all_leads', ctx(), 'PUT',
+            { name: 'all_leads', label: 'All Leads', columns: ['name'] },
+        );
+
+        // The domain answers a LOCATED not-found rather than serving the path.
+        // Until #12195 it folded `views/all_leads` out of the trailing segments
+        // and answered — first by minting the row under the slash key
+        // (pre-#12194), then by refusing it at the grammar gate (#12194).
+        // Neither happens now: there is no three-segment metadata route.
+        //
+        // ADR-0112: code AND status. A bare 404 assertion could not tell this
+        // apart from the metadata READ the old fold answered for this same path
+        // when no row matched — that was a `RESOURCE_NOT_FOUND` about an ITEM,
+        // not a statement about the route.
+        expect(result.handled).toBe(true);
+        expect(responseOf(result).status).toBe(404);
+        expect(responseOf(result).body?.error?.code).toBe('ROUTE_NOT_FOUND');
+        expect(metaRow(engine, 'lead', 'views/all_leads')).toBeUndefined();
+        expect(metaRow(engine, 'lead', 'all_leads')).toBeUndefined();
+    });
+
+    it('…and a deeper compound name is declined the same way', async () => {
+        const { engine, dispatcher } = makeStack();
+
+        const result = await dispatcher.handleMetadata(
+            '/lead/views/all_leads/columns', ctx(), 'PUT', { name: 'columns', label: 'Columns' },
+        );
+
+        expect(responseOf(result).status).toBe(404);
+        expect(responseOf(result).body?.error?.code).toBe('ROUTE_NOT_FOUND');
+        expect(metaRow(engine, 'lead', 'views/all_leads/columns')).toBeUndefined();
+    });
+
+    it('⭐ [#12195] the ENCODED spelling still reaches the grammar gate — the capability that replaced the arity', async () => {
+        const { engine, dispatcher } = makeStack();
+
+        // A caller who genuinely means the name `views/all_leads` percent-encodes
+        // it, which keeps the path at TWO segments. `decodeMetaNameSegment`
+        // restores the stored spelling, and #12194's grammar is what answers —
+        // 400 with the dotted prescription, the caller's mistake named as such.
+        //
+        // This is the pin that separates "the route is gone" from "the name is
+        // illegal": they are different facts and they answer differently.
+        const res = responseOf(await dispatcher.handleMetadata(
+            '/lead/views%2Fall_leads', ctx(), 'PUT',
             { name: 'all_leads', label: 'All Leads', columns: ['name'] },
         ));
 
-        // The refusal reaches the WIRE as the caller's mistake, not a server
-        // fault: 400 + code, with the grammar and the dotted prescription in
-        // the message — and the stored ROW proves nothing was minted under
-        // the slash key (the pre-#12194 direction stored it as one opaque key).
         expect(res.status).toBe(400);
         expect(res.body?.error?.code).toBe('INVALID_REQUEST');
         expect(String(res.body?.error?.message ?? '')).toMatch(/is not a legal metadata item name/);
         expect(String(res.body?.error?.message ?? '')).toMatch(/crm_lead\.pipeline/);
         expect(metaRow(engine, 'lead', 'views/all_leads')).toBeUndefined();
-        expect(metaRow(engine, 'lead', 'all_leads')).toBeUndefined();
-    });
-
-    it('…and a deeper compound name is refused the same way', async () => {
-        const { engine, dispatcher } = makeStack();
-
-        const res = responseOf(await dispatcher.handleMetadata(
-            '/lead/views/all_leads/columns', ctx(), 'PUT', { name: 'columns', label: 'Columns' },
-        ));
-
-        expect(res.status).toBe(400);
-        expect(res.body?.error?.code).toBe('INVALID_REQUEST');
-        expect(metaRow(engine, 'lead', 'views/all_leads/columns')).toBeUndefined();
     });
 
     it('ANTI-VACUITY — the same object name at the SIMPLE arity is still refused', async () => {
@@ -278,13 +305,16 @@ describe('#8421 — the compound `/meta` arity is not a metadata-type claim', ()
         expect(metaRow(engine, 'webhook', 'midnight_hook')).toBeDefined();
     });
 
-    it('CONTROL — the capability gate still fires first on the compound form', async () => {
+    it('CONTROL — the capability gate still fires first at the SIMPLE arity', async () => {
         // #7019's gate is what masked this site, and it must keep masking an
-        // UNAUTHORIZED caller: the fix moved the door behind it, not the gate.
+        // UNAUTHORIZED caller. [#12195] Driven at the simple arity now: the
+        // compound form this used to use is no longer handled at all, so it
+        // would answer ROUTE_NOT_FOUND before any gate — which would make this
+        // a control over nothing.
         const { engine, dispatcher } = makeStack();
 
         const res = responseOf(await dispatcher.handleMetadata(
-            '/lead/views/all_leads',
+            '/lead/all_leads',
             { request: { headers: {} }, environmentId: 'env_1', executionContext: { userId: 'u', systemPermissions: [] } } as any,
             'PUT',
             { name: 'all_leads', label: 'All Leads' },
@@ -292,6 +322,6 @@ describe('#8421 — the compound `/meta` arity is not a metadata-type claim', ()
 
         expect(res.status).toBe(403);
         expect(res.body?.error?.code).toBe('PERMISSION_DENIED');
-        expect(metaRow(engine, 'lead', 'views/all_leads')).toBeUndefined();
+        expect(metaRow(engine, 'lead', 'all_leads')).toBeUndefined();
     });
 });

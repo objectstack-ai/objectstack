@@ -321,19 +321,45 @@ describe('ObjectStackClient', () => {
         );
     });
 
-    it('meta.getItem/saveItem pass compound names through unencoded (reaches /meta/:type/:section/:name)', async () => {
+    it('[#12195] meta.getItem/saveItem ENCODE the name — one spelling, one door', async () => {
         const { client, fetchMock } = createMockClient({ success: true, data: { name: 'views/all_leads' } });
+        // ⚠️ This pin is INVERTED from what it was, and the inversion is the
+        // card. It used to require the slash to survive UNENCODED, so the
+        // request would reach the compound handler
+        // `/meta/:type/:section/:name` instead of collapsing onto the
+        // two-segment route. #12176 retired compound-name addressing: that
+        // handler is gone, so `%2F` is now the correct and only spelling.
+        //
+        // Encoding is a no-op for every name #12194's grammar admits (snake
+        // case, optionally dot-qualified), so this changes nothing a legal
+        // caller sends. What it changes is a pre-grammar residue name: it now
+        // reaches the surviving door with its slash intact as `%2F`, which Hono
+        // decodes back to `views/all_leads` — the capability that used to
+        // require a second route.
         await client.meta.getItem('object', 'views/all_leads');
-        // The slash must survive: %2F would collapse the request onto the
-        // 3-segment /meta/:type/:name route and miss the compound handler.
         expect(String(fetchMock.mock.calls[0][0])).toBe(
-            'http://localhost:3000/api/v1/meta/object/views/all_leads',
+            'http://localhost:3000/api/v1/meta/object/views%2Fall_leads',
         );
         await client.meta.saveItem('object', 'views/all_leads', { label: 'All leads' });
         expect(String(fetchMock.mock.calls[1][0])).toBe(
-            'http://localhost:3000/api/v1/meta/object/views/all_leads',
+            'http://localhost:3000/api/v1/meta/object/views%2Fall_leads',
         );
         expect(fetchMock.mock.calls[1][1].method).toBe('PUT');
+    });
+
+    it('[#12195] a LEGAL name is byte-identical before and after the encoding change', async () => {
+        // The other half: unifying on `encodeURIComponent` must not have moved
+        // the wire for any name a caller can actually write. Dotted and flat
+        // snake_case both pass through untouched.
+        const { client, fetchMock } = createMockClient({ success: true, data: {} });
+        await client.meta.getItem('object', 'crm_lead');
+        await client.meta.getItem('view', 'crm_lead.pipeline');
+        expect(String(fetchMock.mock.calls[0][0])).toBe(
+            'http://localhost:3000/api/v1/meta/object/crm_lead',
+        );
+        expect(String(fetchMock.mock.calls[1][0])).toBe(
+            'http://localhost:3000/api/v1/meta/view/crm_lead.pipeline',
+        );
     });
 });
 
@@ -2662,14 +2688,15 @@ describe('[#11391] meta.saveItem query string (unscoped client)', () => {
         );
     });
 
-    it('a compound name keeps its unencoded slash AND gets the query string', async () => {
+    it('[#12195] a slash-bearing name is ENCODED and still gets the query string', async () => {
         const { client, fetchMock } = createMockClient({ success: true });
         await client.meta.saveItem('object', 'views/all_leads', { label: 'All leads' }, { force: true });
-        // The slash must still survive (%2F would collapse this onto the
-        // 3-segment route and miss `PUT /meta/:type/:section/:name`), and the
-        // compound door reads `?force` too since #11095.
+        // Inverted by #12195: the slash used to be required to survive raw so
+        // the request reached `PUT /meta/:type/:section/:name`, which had read
+        // `?force` since #11095. That door is retired; `%2F` reaches the
+        // surviving door, which has always read `?force`.
         expect(String(fetchMock.mock.calls[0][0])).toBe(
-            'http://localhost:3000/api/v1/meta/object/views/all_leads?force=true',
+            'http://localhost:3000/api/v1/meta/object/views%2Fall_leads?force=true',
         );
     });
 });
@@ -2878,16 +2905,15 @@ describe('[#11713] meta.saveItem sends the If-Match header (unscoped client)', (
         expect(JSON.parse(init.body)).toEqual({ name: 'customer' });
     });
 
-    it('OCC-guards a COMPOUND name too — unlike `mode`, this reaches both doors', async () => {
+    it('[#12195] OCC-guards a slash-bearing name too, at the one surviving door', async () => {
         const { client, fetchMock } = createMockClient({ success: true });
         await client.meta.saveItem('object', 'views/all_leads', { label: 'All leads' }, { ifMatch: OCC_TOKEN });
-        // The compound-name door `PUT /meta/:type/:section/:name` reads
-        // `if-match` and strips ETag quotes exactly as the single-segment door
-        // does — measured in rest-server.ts. `mode` is the member that does NOT
-        // reach it; this one does, so the slash must survive AND the pin must
-        // ride along.
+        // This case used to say "unlike `mode`, this reaches BOTH doors" — the
+        // compound door read `if-match` while never reading `mode`. There is
+        // one door now, so every member of the options bag reaches it and the
+        // per-member carve-out is gone. The name is encoded like every other.
         expect(String(fetchMock.mock.calls[0][0])).toBe(
-            'http://localhost:3000/api/v1/meta/object/views/all_leads',
+            'http://localhost:3000/api/v1/meta/object/views%2Fall_leads',
         );
         expect(headersOfCall(fetchMock)['If-Match']).toBe(OCC_TOKEN);
     });

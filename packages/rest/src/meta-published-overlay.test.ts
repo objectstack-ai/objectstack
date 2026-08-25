@@ -48,7 +48,6 @@ import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protoco
 import { RestServer } from './rest-server.js';
 
 const PUBLISHED = '/api/v1/meta/:type/:name/published';
-const PUBLISHED_COMPOUND = '/api/v1/meta/:type/:section/:name/published';
 
 interface Row {
     id: string;
@@ -377,16 +376,27 @@ describe('[#8278] REST `/meta/:type/:name/published` resolves from the published
 
         expect(Array.from(rows.values()).filter((r) => r.state === 'active')).toHaveLength(1);
 
+        // [#12195] Read through the SINGLE-SEGMENT door, which is where a
+        // pre-grammar residue row is addressed now. This used to drive the
+        // compound arity `GET /:type/:section/:name/published` with
+        // `{ section: 'views', name: 'all_leads' }`, which the handler folded
+        // back into `views/all_leads`. That arity is retired.
+        //
+        // The capability is NOT lost, and this case is the pin for it: a caller
+        // percent-encodes the name, `%2F` matches `/:type/:name/published`
+        // (Hono does not split on an encoded slash — measured), and Hono decodes
+        // the parameter back to `views/all_leads` before the handler runs. So
+        // the handler receives exactly the value passed below, and #12194's
+        // "any stored junk name remains listable and clearable" still holds.
         const res = await callPublished(
             setup(protocol, metadata),
-            { type: 'lead', section: 'views', name: 'all_leads' },
-            PUBLISHED_COMPOUND,
+            { type: 'lead', name: 'views/all_leads' },
         );
 
         expect(res.statusCode).toBe(200);
         expect(res.body).toMatchObject({ label: 'All Leads' });
-        // The compound name was reassembled and used as ONE key — not split,
-        // and not truncated to its last segment.
+        // The name was used as ONE key — not split, and not truncated to its
+        // last segment.
         expect(Array.from(rows.values())[0]!.name).toBe('views/all_leads');
     }, 60_000);
 });

@@ -149,20 +149,15 @@ function boot(opts: BootOptions) {
         /** Whether the single-name item's customization overlay still exists. */
         hasOverlay: () => overlays.has('account'),
 
-        compoundGet: async () => {
-            const res = mockRes();
-            await route('GET', COMPOUND_PATH)!.handler(
-                { params: { type: 'object', section: 'crm', name: 'account' }, query: {}, headers: {} }, res,
-            );
-            return { res, body: res.json.mock.calls.at(-1)?.[0] };
-        },
-        compoundPut: async (item: unknown) => {
-            const res = mockRes();
-            await route('PUT', COMPOUND_PATH)!.handler(
-                { params: { type: 'object', section: 'crm', name: 'account' }, query: {}, headers: {}, body: item }, res,
-            );
-            return { res, body: res.json.mock.calls.at(-1)?.[0] };
-        },
+        /**
+         * [#12195] The compound arity's REGISTRATIONS, not calls to them. These
+         * used to be `compoundGet()` / `compoundPut()`; the arity is retired, so
+         * what is assertable now is that nothing is mounted there.
+         */
+        compoundRoutes: () => ['GET', 'PUT'].map((m) => route(m, COMPOUND_PATH)),
+        metaRouteKeys: () => (rest as any).getRoutes()
+            .map((r: any) => `${String(r.method).toUpperCase()} ${r.path}`)
+            .filter((k: string) => k.includes('/api/v1/meta')),
         del: async (query: Record<string, unknown> = {}) => {
             const res = mockRes();
             await route('DELETE', SINGLE_PATH)!.handler(
@@ -173,92 +168,36 @@ function boot(opts: BootOptions) {
     };
 }
 
-describe('#7019 — compound-name PUT: the ADR-0106 round trip, one route over', () => {
-    it('refuses the restricted round-trip write, and the masked fields SURVIVE in the store', async () => {
-        const stack = boot({
-            context: { userId: 'u_portal', systemPermissions: [] },
-            readable: READABLE_TO_RESTRICTED,
-        });
-
-        // 1. The compound read is masked — the premise, asserted rather than
-        //    assumed so this case cannot go quietly green if masking stops.
-        const read = await stack.compoundGet();
-        expect(Object.keys(read.body.item.fields).sort()).toEqual(READABLE_TO_RESTRICTED);
-        expect(read.body.item.fields).not.toHaveProperty('salary_grade');
-        expect(read.body.item.fields).not.toHaveProperty('bonus_formula');
-
-        // 2. The caller edits something unrelated and sends the body back —
-        //    the exact sequence that was MEASURED to still lose fields here
-        //    after #6603 gated the single-name door.
-        const write = await stack.compoundPut({ ...copy(read.body.item), label: 'Account (renamed)' });
-
-        // 3. Refused, with the envelope.
-        expect(write.res.statusCode).toBe(403);
-        expect(write.body).toMatchObject({ error: { code: 'FORBIDDEN' } });
-
-        // 4. THE POINT: nothing was written.
-        expect(stack.saveMetaItem).not.toHaveBeenCalled();
-        expect(stack.compoundFields()).toEqual(ALL_FIELDS);
-        expect(stack.compoundLabel()).toBe('Account');
+describe('[#7019 / #12195] the compound-name arity is retired', () => {
+    /**
+     * ⛔ REWORKED, not deleted. #7019 gated `PUT /meta/:type/:section/:name` on
+     * `manage_metadata` because leaving it ungated made it a BYPASS of the gate
+     * #6603 had just put on its single-segment twin — measured, not reasoned:
+     * with #6603 in place the identical ADR-0106 round trip (read a masked
+     * object schema, edit a label, PUT it back) still deleted the fields the
+     * caller was never allowed to see, through this door.
+     *
+     * #12176 retired the arity, so the bypass is closed by removal instead of
+     * by a second gate. The pin inverts to match: what must stay true is that
+     * the door is not mounted, because a re-mounted compound door arrives
+     * UNGATED unless whoever mounts it re-derives #6603/#7019 — which is
+     * exactly the history above.
+     *
+     * The surviving door's own capability gate is pinned by
+     * `meta-item-save-capability-gate.test.ts`; it is not duplicated here.
+     */
+    it('⭐ mounts neither GET nor PUT at /meta/:type/:section/:name', () => {
+        expect(
+            boot({ systemPermissions: [] }).compoundRoutes(),
+            'a compound-name arity is mounted again. It was #6603\'s gate bypass '
+            + 'until #7019, and a fresh mount does not inherit that gate',
+        ).toEqual([undefined, undefined]);
     });
 
-    it('the refusal is the gate, not the masking: an UNRESTRICTED but uncapable caller is refused too', async () => {
-        // Everything readable ⇒ no field would have been lost. Still refused,
-        // because the second reason — any authenticated session could clobber
-        // any metadata item — is independent of ADR-0106.
-        const stack = boot({ context: { userId: 'u_staff', systemPermissions: [] }, readable: ALL_FIELDS });
-
-        const read = await stack.compoundGet();
-        expect(Object.keys(read.body.item.fields).sort()).toEqual(ALL_FIELDS);
-
-        const write = await stack.compoundPut({ ...copy(read.body.item), label: 'clobbered' });
-        expect(write.res.statusCode).toBe(403);
-        expect(write.body).toMatchObject({ error: { code: 'FORBIDDEN' } });
-        expect(stack.compoundLabel()).toBe('Account');
-    });
-
-    it('fires BEFORE the protocol is probed, so 403-vs-501 leaks no kernel capability', async () => {
-        const stack = boot({ context: { userId: 'u1', systemPermissions: [] }, withoutWriters: true });
-        const write = await stack.compoundPut({ name: 'account' });
-        // An authorized caller would get 501 here.
-        expect(write.res.statusCode).toBe(403);
-        expect(write.body).toMatchObject({ error: { code: 'FORBIDDEN' } });
-    });
-
-    it('an anonymous caller never reaches the capability gate — 401 from the /meta umbrella', async () => {
-        const stack = boot({ context: undefined });
-        const write = await stack.compoundPut({ name: 'account' });
-        expect(write.res.statusCode).toBe(401);
-        expect(stack.saveMetaItem).not.toHaveBeenCalled();
-    });
-
-    it.each([
-        { held: 'no capabilities at all', systemPermissions: [] as string[], status: 403 },
-        { held: '`studio.access` alone — ADR-0106 D4-exempt, but not an authoring capability', systemPermissions: ['studio.access'], status: 403 },
-        { held: '`setup.access` alone — this is `organization_admin`', systemPermissions: ['setup.access'], status: 403 },
-        { held: '`manage_metadata` alone', systemPermissions: ['manage_metadata'], status: 200 },
-        { held: 'the shipped `admin_full_access` shape', systemPermissions: ['manage_metadata', 'studio.access', 'setup.access'], status: 200 },
-    ])('$held → $status', async ({ systemPermissions, status }) => {
-        const stack = boot({ context: { userId: 'u1', systemPermissions } });
-        const write = await stack.compoundPut({ name: 'account', label: 'Account', fields: {} });
-        expect(write.res.statusCode).toBe(status);
-    });
-
-    it('`isSystem` bypasses, matching every other capability gate on the platform', async () => {
-        const stack = boot({ context: { isSystem: true } });
-        const write = await stack.compoundPut({ name: 'account', label: 'Account', fields: {} });
-        expect(write.res.statusCode).toBe(200);
-        expect(stack.saveMetaItem).toHaveBeenCalledTimes(1);
-    });
-
-    it('leaves the compound READ alone — this card gates writes', async () => {
-        // The read side has its own posture (the ADR-0106 projection asserted
-        // in the headline case). Turning this into a blanket gate on the
-        // compound route pair would be a different, unruled change.
-        const stack = boot({ context: { userId: 'u_portal', systemPermissions: [] }, readable: READABLE_TO_RESTRICTED });
-        const read = await stack.compoundGet();
-        expect(read.res.statusCode).not.toBe(403);
-        expect(Object.keys(read.body.item.fields).sort()).toEqual(READABLE_TO_RESTRICTED);
+    it('⭐ mounts no compound `:section` arity of any method', () => {
+        expect(
+            boot({ systemPermissions: [] }).metaRouteKeys().filter((k: string) => k.includes(':section')),
+        ).toEqual([]);
     });
 });
 

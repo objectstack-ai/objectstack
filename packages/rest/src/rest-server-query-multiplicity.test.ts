@@ -307,15 +307,10 @@ describe('#6877 §1 — a repeated single-valued parameter is refused, not resol
         expect(protocol.diffMetaItem).not.toHaveBeenCalled();
     });
 
-    it('GET /meta/:type/:section/:name?package — the compound-name read', async () => {
-        const { drive, protocol } = boot();
-        const answer = await drive('GET', `${META}/:type/:section/:name`, {
-            params: { type: 'object', section: 'crm', name: 'account' },
-            query: { package: ['com.a', 'com.b'] },
-        });
-        expectRefusal(answer, 'package');
-        expect(protocol.getMetaItem).not.toHaveBeenCalled();
-    });
+    // [#12195] The compound-name read `GET /meta/:type/:section/:name?package`
+    // was pinned here until its arity was retired. The single-segment read
+    // above carries the same `?package` refusal, and it is the door every name
+    // reaches now.
 
     it('GET /data/import/jobs?status — the filter that silently stopped filtering', async () => {
         const { drive, protocol } = boot();

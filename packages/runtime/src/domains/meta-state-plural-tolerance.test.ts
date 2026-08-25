@@ -168,11 +168,43 @@ describe('dispatcher /meta FSM state read — the deliberate plural tolerance (#
                 'GET', `/meta/${segment}/task/state/status`, undefined, { from: 'todo' }, CTX(),
             );
 
+            // [#12195] `ROUTE_NOT_FOUND`, not `RESOURCE_NOT_FOUND`, and the
+            // change is the retirement showing through. `/meta/objectss/task/
+            // state/status` is four segments; the FSM branch requires the two
+            // literals, so it used to fall into the compound fold, which
+            // re-joined the tail into the item name `task/state/status` and
+            // answered a metadata READ that missed — a statement about an
+            // ITEM. With the fold retired nothing matches four segments, so
+            // the dispatcher says what is actually true: no such route.
+            //
+            // Both directions still refuse, which is what this case is for;
+            // the envelope is now the more accurate of the two.
             expect(res.response?.status).toBe(404);
-            expect(res.response?.body?.error?.code).toBe('RESOURCE_NOT_FOUND');
+            expect(res.response?.body?.error?.code).toBe('ROUTE_NOT_FOUND');
             expect(res.response?.body?.data).toBeUndefined();
         },
     );
+
+    it('⭐ [#12195] a compound `/meta` path answers the ROUTE_NOT_FOUND envelope', async () => {
+        // The retirement's wire pin, on the harness that can reach routing:
+        // this file resolves a REAL session, so `dispatch()` gets past identity
+        // instead of answering 401 first.
+        //
+        // ADR-0112: code AND status. A bare 404 assertion could not tell this
+        // apart from the metadata read the old fold answered for the same path
+        // when no row matched (`RESOURCE_NOT_FOUND`, about an item).
+        const { dispatcher } = boot();
+
+        const res = await dispatcher.dispatch(
+            'GET', '/meta/lead/views/all_leads', undefined, {}, CTX(),
+        );
+
+        expect(res.response?.status).toBe(404);
+        expect(res.response?.body?.error?.code).toBe('ROUTE_NOT_FOUND');
+        // Located, not anonymous: the path is named back to the caller, who is
+        // most likely still spelling a compound name.
+        expect(String(res.response?.body?.error?.message ?? '')).toContain('/meta/lead/views/all_leads');
+    });
 
     it('the plural is a TOLERANCE, not a second contract — an unknown object still 404s under it', async () => {
         // Keeps the pin honest in the other direction: the plural arm is the
