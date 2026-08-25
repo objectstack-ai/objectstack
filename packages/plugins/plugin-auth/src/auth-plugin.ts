@@ -8,8 +8,10 @@ import {
   type SettingsChangeHandler,
   type SettingsUnsubscribe,
   SystemObjectName,
-  SystemUserId,
 } from '@objectstack/spec/system';
+// [#11767] The shared bootstrap population predicate — the dev-admin seed and
+// the audience gate's bootstrap bypass must answer the same question.
+import { isHumanUserRow } from './audience-posture.js';
 import {
   // ADR-0048 — the Setup/Studio/Account apps moved to their own packages
   // (@objectstack/{setup,studio,account}); plugin-auth no longer registers them.
@@ -1554,17 +1556,23 @@ export class AuthPlugin implements Plugin {
     if (!ql || typeof ql.find !== 'function') return;
 
     try {
-      // Only seed when no HUMAN user exists yet. A fresh DB still contains
-      // the system service account (SystemUserId.SYSTEM, role='system'),
-      // which must NOT count — mirror plugin-security's first-user detection
-      // so the seed fires on a genuinely empty DB. Any real human user (or a
-      // prior sign-up) disables the seed for good; we never touch or
-      // overwrite an existing account.
+      // Only seed when no HUMAN user exists yet. A DB created by an older
+      // runtime may still contain the system service account
+      // (SystemUserId.SYSTEM, role='system'), which must NOT count — mirror
+      // plugin-security's first-user detection so the seed fires on a
+      // genuinely empty DB. Any real human user (or a prior sign-up) disables
+      // the seed for good; we never touch or overwrite an existing account.
+      //
+      // [#11767] The predicate itself is `isHumanUserRow`, shared with the
+      // audience gate's bootstrap bypass (`AuthManager.isBootstrapCreation`)
+      // — this seed's `signUpEmail` call passes through that gate, so the two
+      // MUST answer the same question. Two hand-spelled copies is how they
+      // drift, and a drift there means a seed that decides to run and a gate
+      // that then refuses it.
       const rows = await ql
         .find(SystemObjectName.USER, { where: {}, limit: 50 }, { context: { isSystem: true } })
         .catch(() => []);
-      const humans = (Array.isArray(rows) ? rows : [])
-        .filter((u: any) => u && u.id !== SystemUserId.SYSTEM && u.role !== 'system');
+      const humans = (Array.isArray(rows) ? rows : []).filter(isHumanUserRow);
       if (humans.length > 0) {
         ctx.logger.debug('[auth] dev admin seed skipped — a user already exists');
         // `os dev` defaults to a persistent DB, so the seed fires exactly

@@ -91,6 +91,7 @@
 
 import {
   AUDIENCE_POSTURES,
+  SystemUserId,
   isAudiencePosture,
   audiencePermitsSelfRegistration,
   type AudienceConfig,
@@ -276,6 +277,49 @@ export function emailDomainAllowed(email: unknown, allowedDomains: readonly stri
     if (typeof entry === 'string' && entry.toLowerCase() === domain) return true;
   }
   return false;
+}
+
+/**
+ * THE bootstrap population predicate — "does this environment already have a
+ * HUMAN user?" — owned once, here, and asked by every consumer of the
+ * first-run bypass.
+ *
+ * ## Humans, not rows (the canonical answer)
+ *
+ * The bootstrap bypass counts **non-system humans**, never "any `sys_user`
+ * row". Three call sites ask this same question and they must agree:
+ *
+ *  - the audience gate's bootstrap bypass (`isBootstrapCreation`);
+ *  - plugin-auth's dev-admin seed, whose own precondition has always filtered
+ *    `usr_system` / `role === 'system'` before deciding to seed;
+ *  - plugin-security's first-user detection, which prints "no human users yet
+ *    — first sign-up will be promoted to platform admin" off the identical
+ *    filter and then promotes that sign-up.
+ *
+ * If the audience gate counted ANY row while those two counted humans, the
+ * two would disagree on exactly one population: a database still carrying the
+ * legacy `usr_system` service row (`SystemUserId.SYSTEM` — no longer
+ * provisioned, but present in every DB an older runtime created). There,
+ * plugin-security would announce "no human users yet" and stand ready to
+ * promote the first sign-up while the audience gate refused that very
+ * sign-up with `SELF_REGISTRATION_CLOSED` — a fresh-looking install locked
+ * out of itself, which is the one outcome the bypass exists to prevent.
+ * Humans is therefore canonical, and the disagreement is closed by both
+ * plugin-auth call sites reading THIS function rather than re-spelling the
+ * filter.
+ *
+ * ## Why the filter runs in JS and not in the where-clause
+ *
+ * A store-side `role != 'system'` drops rows whose `role` is NULL under SQL
+ * three-valued logic — i.e. it would hide ordinary humans, the direction that
+ * fails open. The rows are read unfiltered and judged here.
+ */
+export function isHumanUserRow(row: unknown): boolean {
+  if (!row || typeof row !== 'object') return false;
+  const user = row as { id?: unknown; role?: unknown };
+  if (user.id === SystemUserId.SYSTEM) return false;
+  if (user.role === 'system') return false;
+  return true;
 }
 
 /**

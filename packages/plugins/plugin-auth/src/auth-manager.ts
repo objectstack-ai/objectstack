@@ -10,11 +10,12 @@ import type {
   AuthPluginConfig,
   OidcProvidersConfig,
 } from '@objectstack/spec/system';
-import { audiencePermitsSelfRegistration } from '@objectstack/spec/system';
+import { SystemObjectName, audiencePermitsSelfRegistration } from '@objectstack/spec/system';
 import {
   assertAudienceConfig,
   classifyCreationMethod,
   decideAudienceAdmission,
+  isHumanUserRow,
   resolveAudience,
   AUDIENCE_CONFIG_ERROR,
   type ResolvedAudience,
@@ -1810,15 +1811,16 @@ export class AuthManager {
           if (ctx?.path !== '/sign-up/email') return;
           const ep = ctx?.context?.options?.emailAndPassword;
           if (!ep?.disableSignUp) return;
-          try {
-            const adapter = ctx.context.adapter;
-            const existing = await adapter.findOne({ model: 'user', where: [] });
-            if (!existing) {
-              ctx.context.__osDisableSignUpOrig = ep.disableSignUp;
-              ep.disableSignUp = false;
-            }
-          } catch {
-            // Adapter not ready → keep disableSignUp on.
+          // [#11767] Same population question, same owner. This site used to
+          // ask `ctx.context.adapter.findOne({ model: 'user', where: [] })`,
+          // which the real ObjectQL engine REFUSES (#4419 —
+          // `requireFindOnePredicate`) rather than answers; the surrounding
+          // `catch` read that refusal as "users exist" and the declared
+          // bypass never fired on a real deployment. `isBootstrapCreation`
+          // owns the answerable form — see its doc.
+          if (await this.isBootstrapCreation()) {
+            ctx.context.__osDisableSignUpOrig = ep.disableSignUp;
+            ep.disableSignUp = false;
           }
         }),
         after: createAuthMiddleware(async (ctx: any) => {
@@ -3458,6 +3460,13 @@ export class AuthManager {
 
   private static readonly SELF_REG_GRANT_STAGE_TTL_MS = 10 * 60 * 1000;
 
+  /**
+   * Page size of the bootstrap population probe ({@link isBootstrapCreation}).
+   * Matches the bound the dev-admin seed reads with, so the two ask the same
+   * question of the same window.
+   */
+  private static readonly BOOTSTRAP_USER_PROBE_LIMIT = 50;
+
   /** `error` when the host logger carries it, else the guaranteed `warn` channel (#9754). */
   private audienceLogError(message: string, meta?: Record<string, unknown>): void {
     const logger = this.config.logger as
@@ -3507,7 +3516,7 @@ export class AuthManager {
       let hasPendingInvitation = false;
       if (creationClass === 'self-serve') {
         // Only the gated class pays for the probes.
-        isBootstrap = await this.isBootstrapCreation(ctx);
+        isBootstrap = await this.isBootstrapCreation();
         if (!isBootstrap && email) hasPendingInvitation = await this.hasPendingInvitationFor(email);
       }
       const verdict = decideAudienceAdmission({
@@ -3573,18 +3582,44 @@ export class AuthManager {
   }
 
   /**
-   * Zero users exist — the first-run owner wizard / seeded admin creating the
-   * very first account. Mirrors the `disableSignUp` bootstrap bypass in the
-   * `/sign-up/email` before-hook (a fresh install must never lock its
-   * operator out); an unanswerable probe reads as NOT bootstrap (gate stays
-   * on).
+   * Zero HUMAN users exist — the first-run owner wizard / seeded admin
+   * creating the very first account (a fresh install must never lock its
+   * operator out). {@link isHumanUserRow} owns the population predicate and
+   * says why it is humans rather than rows. An unanswerable probe reads as
+   * NOT bootstrap (gate stays on) — fail closed is deliberate here, which is
+   * exactly why the probe must be ANSWERABLE at every seam that asks.
+   *
+   * ## Why this reads the data engine and not `ctx.context.adapter`
+   *
+   * The first spelling of this probe was `adapter.findOne({ model: 'user',
+   * where: [] })`, copied from the `disableSignUp` bypass below. On the real
+   * ObjectQL engine that call does not answer — it THROWS. `where: []` lowers
+   * to an empty filter, and `requireFindOnePredicate` (#4419) refuses a
+   * `findOne` that selects no particular record rather than hand back an
+   * arbitrary row. The `catch` turned that refusal into `false`, so EVERY
+   * bootstrap creation read as "not bootstrap" and the `invite_only` default
+   * refused the operator's own first account — with the in-memory harness
+   * green throughout, because a fake engine has no such guard.
+   *
+   * So the probe is expressed the way it can actually be answered: a bounded
+   * `find` through `withSystemReadContext`, the same ctx-independent data
+   * path {@link hasPendingInvitationFor} uses one frame away. `find` carries
+   * no #4419 predicate requirement — asking for a PAGE is a well-posed
+   * question in a way that asking for an unspecified single row is not.
    */
-  private async isBootstrapCreation(ctx: any): Promise<boolean> {
+  private async isBootstrapCreation(): Promise<boolean> {
+    const engine = this.config.dataEngine;
+    if (!engine || typeof (engine as any).find !== 'function') return false;
     try {
-      const adapter = ctx?.context?.adapter;
-      if (!adapter || typeof adapter.findOne !== 'function') return false;
-      const existing = await adapter.findOne({ model: 'user', where: [] });
-      return !existing;
+      const reader = withSystemReadContext(engine) as any;
+      const raw = await reader.find(SystemObjectName.USER, {
+        limit: AuthManager.BOOTSTRAP_USER_PROBE_LIMIT,
+      });
+      const rows: any[] = Array.isArray(raw) ? raw : Array.isArray(raw?.records) ? raw.records : [];
+      if (rows.some(isHumanUserRow)) return false;
+      // A page that came back FULL of non-human rows cannot prove there is no
+      // human on the next page — fail closed rather than guess.
+      return rows.length < AuthManager.BOOTSTRAP_USER_PROBE_LIMIT;
     } catch {
       return false;
     }
