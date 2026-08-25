@@ -183,6 +183,44 @@
  * real consumer would, rather than relying on a same-package self-import
  * trick that may or may not resolve.
  *
+ * ── PAGE-SCOPED ROOTS: one tree, two surfaces (#12048) ────────────────────
+ * A surface is a resolution environment, and until #12048 a ROOT was always a
+ * whole subtree — which made "which packages can this page import?" a property
+ * of the tree a page happens to live in. `content/docs/**` is one tree, so
+ * every page in it resolved `@objectstack/spec` and nothing else. The SDK
+ * reference page (`api/client-sdk.mdx`) and the data-service page both import
+ * `@objectstack/client`; spec does not depend on the client, so a marker on
+ * either page red with `TS2307: Cannot find module '@objectstack/client'` on
+ * correct code. Both pages recorded that in prose and left their SDK blocks
+ * deliberately unmarked — two pages structurally unverifiable, for one
+ * resolution gap, while #8140's narrowing of 51 client return types falsified
+ * two examples on the SDK page with CI silent throughout.
+ *
+ * The fix is a root whose scope is a PAGE SET rather than a tree
+ * (`SourceRoot.pages`), on the client-SDK surface that already resolves those
+ * packages for its 19 TSDoc blocks. No new resolution environment, no new
+ * extraction code — the same file/marker/tsc pipeline, pointed at two named
+ * pages. The alternative (teaching the spec surface to resolve the SDK) was
+ * rejected: it inverts the dependency direction that surface exists to model,
+ * and would let any docs page silently acquire the SDK.
+ *
+ * Two roots over ONE tree brings its own failure mode, and both halves are
+ * asserted rather than trusted:
+ *
+ *   - **Partition, not overlap.** A page scanned by two surfaces is compiled
+ *     twice in two environments, and the one that cannot resolve its imports
+ *     reds against a page the other just proved correct — unfixable from the
+ *     page. The scoped root's `pages` and the broad root's `excludePages` read
+ *     ONE shared constant (`SDK_DOCS_PAGES`), and
+ *     `assertDisjointSourceFiles()` proves per run that no file is claimed
+ *     twice — an invariant that held by accident while every root owned its
+ *     own tree.
+ *   - **A page list that stops resolving fails BOTH ways at once.** Rename the
+ *     page and the scoped root loses it while the broad root's subtraction
+ *     stops matching, so it lands back on the surface that cannot resolve it —
+ *     the original defect, restored silently by an unrelated edit.
+ *     `assertScopedPagesExist()` makes that a hard error.
+ *
  * ── Fence-awareness, in BOTH of extractFromFile's loops ───────────────────
  * `fenceOwners()` tracks every top-level fence of ANY language (lifted from
  * the #10533 fence-awareness shape in `scripts/check-role-word.mjs`), and both
@@ -257,6 +295,35 @@ interface SourceRoot {
   /** Skip individual files by basename — e.g. test files, which are not the
    *  documented SDK surface even though they share the source root's `ext`. */
   excludeFile?: (name: string) => boolean;
+  /**
+   * PAGE-SCOPED root (#12048): an explicit file list, relative to `dir`,
+   * INSTEAD of walking the tree. A root with `pages` is a page SET, not a
+   * subtree — which is what lets one page of a shared prose tree belong to a
+   * different surface (a different module-resolution environment) from the
+   * tree around it, without moving the file or forking the extractor.
+   *
+   * `dir` still matters: it is what `buildFileName` takes each page's path
+   * relative to, so two roots over the same tree produce stable, distinct
+   * build-file names as long as their `label`s differ.
+   *
+   * `exclude` / `excludeFile` are not consulted for a `pages` root — the list
+   * IS the scope. Every entry must exist (`assertScopedPagesExist()`): a
+   * renamed page would otherwise drop out of its scoped root silently and be
+   * picked back up by the broad root it was carved out of, quietly restoring
+   * the very resolution gap the carve-out exists to close.
+   */
+  pages?: string[];
+  /**
+   * The complement of another root's `pages` (#12048): files under `dir`
+   * (relative paths) this root does NOT scan because a page-scoped root on
+   * another surface owns them. Both sides read ONE shared constant, so the
+   * partition cannot drift — and `assertDisjointSourceFiles()` fails the run
+   * if it ever does. Overlap is not cosmetic: a page scanned by two surfaces
+   * has every marked block on it compiled twice, in two different resolution
+   * environments, and the surface that cannot resolve its imports reports
+   * TS2307 against a page the other surface just proved correct.
+   */
+  excludePages?: string[];
   /** True when this root's prose lives inside a JSDoc/TSDoc block comment
    *  rather than free-standing markdown — every line then carries a leading
    *  JSDoc gutter (` * `) that must be stripped before the fence/marker
@@ -280,10 +347,48 @@ interface SourceRoot {
  * `content/docs/references/` is excluded: `build-docs.ts` regenerates it from the
  * schemas, so its snippets cannot drift independently of their source.
  */
+const DOCS_DIR = path.resolve(REPO_ROOT, 'content/docs');
+
+/**
+ * The docs pages whose examples import the CLIENT SDK, and so belong to the
+ * client-SDK surface's resolution environment rather than the spec surface's
+ * (#12048). Paths are relative to `content/docs`.
+ *
+ * ONE constant, read from both sides of the partition: the spec surface's
+ * broad docs root subtracts it (`excludePages`), the client-SDK surface's
+ * page-scoped docs root is exactly it (`pages`). Declaring it twice by hand is
+ * what would let the two drift into overlap or into a gap; declaring it once
+ * makes the partition true by construction, and `assertDisjointSourceFiles()`
+ * proves it every run rather than trusting this comment.
+ *
+ * WHY these two pages and not the whole tree. `content/docs/**` is resolved
+ * against `@objectstack/spec` alone, and spec does not depend on
+ * `@objectstack/client` — so before this list existed, a marker on ANY fence
+ * importing the SDK red with `TS2307: Cannot find module '@objectstack/client'`,
+ * and both pages below recorded that in prose and left their SDK blocks
+ * deliberately unmarked. Two pages structurally unverifiable, for one
+ * resolution gap, while #8140's narrowing of 51 client return types falsified
+ * two examples on `api/client-sdk.mdx` with CI silent throughout.
+ *
+ * The alternative — teaching the spec surface to resolve the SDK — was
+ * rejected: it inverts the dependency direction that surface exists to model
+ * (spec knows nothing of its consumers) and would let ANY docs page silently
+ * acquire the SDK. This list is the opposite posture: a page opts IN, by name,
+ * to a resolution environment that already exists and is already exercised by
+ * the 19 TSDoc blocks in `packages/client{,-react}/src`.
+ *
+ * Adding a page here moves the WHOLE file between surfaces, so add one only
+ * when its examples' imports are SDK-shaped. A page needing both `@objectstack/spec`
+ * and the SDK is fine — client-react depends on spec, so spec resolves through
+ * this surface's `node_modules` too; a page needing something NEITHER surface
+ * carries is a new surface question, not a new entry here.
+ */
+const SDK_DOCS_PAGES = ['api/client-sdk.mdx', 'kernel/runtime-services/data-service.mdx'];
+
 const SKILLS_DOCS_ROOTS: SourceRoot[] = [
   { dir: path.resolve(REPO_ROOT, 'skills'), ext: '.md', label: 'skills', marker: '<!-- os:check -->' },
   {
-    dir: path.resolve(REPO_ROOT, 'content/docs'),
+    dir: DOCS_DIR,
     ext: '.mdx',
     label: 'docs',
     // MDX has no HTML comments — fumadocs-mdx fails the build outright on
@@ -291,6 +396,8 @@ const SKILLS_DOCS_ROOTS: SourceRoot[] = [
     // `{/* text */}`"). The marker must follow each format's own comment syntax.
     marker: '{/* os:check */}',
     exclude: [path.resolve(REPO_ROOT, 'content/docs/references')],
+    // Carved out to the client-SDK surface (#12048) — see `SDK_DOCS_PAGES`.
+    excludePages: SDK_DOCS_PAGES,
   },
 ];
 
@@ -352,6 +459,25 @@ const CLIENT_SDK_ROOTS: SourceRoot[] = [
     marker: '<!-- os:check -->',
     commentPrefixed: true,
     excludeFile: isTestFile,
+  },
+  /**
+   * The SDK's PROSE pages (#12048) — free-standing MDX, not TSDoc, so no
+   * `commentPrefixed` gutter and the MDX marker spelling, exactly like the
+   * broad docs root it is carved out of. What differs is the surface it sits
+   * on, and that is the whole point: these pages resolve `@objectstack/client`
+   * (and `client-react`, and react's real types) because this surface's
+   * throwaway build dir lives inside `packages/client-react/`.
+   *
+   * A distinct `label` from the broad docs root is load-bearing, not cosmetic:
+   * `buildFileName` is `<label>__<path>__<n>`, and both roots take their paths
+   * relative to the SAME `content/docs` tree.
+   */
+  {
+    dir: DOCS_DIR,
+    ext: '.mdx',
+    label: 'docs-sdk',
+    marker: '{/* os:check */}',
+    pages: SDK_DOCS_PAGES,
   },
 ];
 
@@ -467,18 +593,34 @@ interface FencedBlock {
   marked: boolean;
 }
 
+/** The absolute paths a root's `pages` / `excludePages` list names. */
+function scopedPaths(root: SourceRoot, list: string[] | undefined): string[] {
+  return (list ?? []).map((p) => path.resolve(root.dir, p));
+}
+
 /** Every candidate prose/source file across a surface's roots, with the root that owns it. */
 function sourceFiles(roots: SourceRoot[]): Array<{ file: string; root: SourceRoot }> {
   const out: Array<{ file: string; root: SourceRoot }> = [];
   for (const root of roots) {
     if (!fs.existsSync(root.dir)) continue;
+    // A PAGE-SCOPED root (#12048) is an explicit list, not a walk. A listed
+    // page that does not exist is dropped here and reported by
+    // `assertScopedPagesExist()` — never silently, because the broad root this
+    // page was carved out of would pick it straight back up.
+    if (root.pages) {
+      for (const abs of scopedPaths(root, root.pages)) {
+        if (fs.existsSync(abs)) out.push({ file: abs, root });
+      }
+      continue;
+    }
     const exts = Array.isArray(root.ext) ? root.ext : [root.ext];
+    const excluded = new Set(scopedPaths(root, root.excludePages));
     const walk = (dir: string) => {
       if (root.exclude?.some((x) => dir === x || dir.startsWith(x + path.sep))) return;
       for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
         const full = path.join(dir, e.name);
         if (e.isDirectory()) walk(full);
-        else if (exts.some((ext) => e.name.endsWith(ext)) && !root.excludeFile?.(e.name)) {
+        else if (exts.some((ext) => e.name.endsWith(ext)) && !root.excludeFile?.(e.name) && !excluded.has(full)) {
           out.push({ file: full, root });
         }
       }
@@ -2090,8 +2232,115 @@ function selfTest(): never {
       buildFileText("import { z } from 'zod';") === "import { z } from 'zod';",
       'buildFileText fixture: a block that is already a module was given an extra `export {}`',
     );
+
+    // ── Page-scoped roots: one tree, two surfaces (#12048) ────────────────
+    //
+    // Three assertions, and the CONTROL is the load-bearing one. A scoped root
+    // that returned its page list and a broad root that had simply failed to
+    // find the page would satisfy the first two identically — the same
+    // "prove the green comes from the mechanism, not from an empty corpus"
+    // shape the nested-illustration fixture above is built around.
+    const tree = path.join(dir, 'pagetree');
+    fs.mkdirSync(path.join(tree, 'sub'), { recursive: true });
+    const pageA = path.join(tree, 'a.mdx');
+    const pageB = path.join(tree, 'b.mdx');
+    const pageC = path.join(tree, 'sub', 'c.mdx');
+    for (const p of [pageA, pageB, pageC]) fs.writeFileSync(p, '# page\n', 'utf8');
+
+    const broadUnpartitioned: SourceRoot = { dir: tree, ext: '.mdx', label: 'docs', marker: '{/* os:check */}' };
+    const broadRoot: SourceRoot = { ...broadUnpartitioned, excludePages: ['b.mdx'] };
+    const scopedRoot: SourceRoot = { ...broadUnpartitioned, label: 'docs-sdk', pages: ['b.mdx'] };
+
+    // CONTROL: without the subtraction the broad root really does reach page B.
+    check(
+      sourceFiles([broadUnpartitioned]).some((f) => f.file === pageB),
+      'page-scope control: the un-partitioned broad root did not reach the page at all — every assertion below ' +
+        'would then pass over an empty corpus rather than over a working carve-out',
+    );
+    check(
+      JSON.stringify(sourceFiles([broadRoot]).map((f) => f.file)) === JSON.stringify([pageA, pageC]),
+      `page-scope fixture: broad root scanned ${JSON.stringify(sourceFiles([broadRoot]).map((f) => path.basename(f.file)))}, ` +
+        'expected a.mdx and sub/c.mdx — `excludePages` must remove exactly the carved-out page, and nothing else',
+    );
+    check(
+      JSON.stringify(sourceFiles([scopedRoot]).map((f) => f.file)) === JSON.stringify([pageB]),
+      `page-scope fixture: scoped root scanned ${JSON.stringify(sourceFiles([scopedRoot]).map((f) => path.basename(f.file)))}, ` +
+        'expected exactly b.mdx — a `pages` root is a file list, never a walk',
+    );
+    // The two roots address the same tree, so only `label` keeps their
+    // build-file names apart. A collision would have one root's extracted block
+    // overwrite the other's inside a shared build dir.
+    check(
+      buildFileName(pageB, broadUnpartitioned, 1, '.ts') !== buildFileName(pageB, scopedRoot, 1, '.ts'),
+      `page-scope fixture: both roots produce the build-file name ${buildFileName(pageB, scopedRoot, 1, '.ts')} for the ` +
+        'same page — two roots over one tree must differ in `label`',
+    );
+
+    // Overlap detection, both directions. The partitioned pair must be clean;
+    // the un-partitioned pair must be caught — that is the state in which one
+    // page gets two verdicts from two resolution environments.
+    const stubSurface = (name: string, roots: SourceRoot[]): Surface => ({
+      name,
+      roots,
+      resolutionDir: dir,
+      selfPackages: [],
+    });
+    const partitioned = [stubSurface('broad', [broadRoot]), stubSurface('scoped', [scopedRoot])].map((surface) => ({
+      surface,
+      files: sourceFiles(surface.roots),
+    }));
+    check(
+      findOverlappingSourceFile(partitioned) === null,
+      `page-scope fixture: a correct partition was reported as overlapping (${JSON.stringify(findOverlappingSourceFile(partitioned))})`,
+    );
+    const overlapping = [stubSurface('broad', [broadUnpartitioned]), stubSurface('scoped', [scopedRoot])].map(
+      (surface) => ({ surface, files: sourceFiles(surface.roots) }),
+    );
+    const overlap = findOverlappingSourceFile(overlapping);
+    check(
+      overlap !== null && overlap.file === pageB,
+      `page-scope fixture: a page claimed by TWO surfaces was not flagged (got ${JSON.stringify(overlap)}) — this is ` +
+        'the state where one page is compiled in two resolution environments and the failing verdict cannot be fixed',
+    );
+
+    // A `pages` entry that names a file which is not there. Both halves of the
+    // partition fail together and silently when this happens, so it is pinned
+    // in both directions like every other guard here.
+    check(
+      findMissingScopedPages([stubSurface('scoped', [scopedRoot])]).length === 0,
+      'page-scope fixture: an existing scoped page was reported missing',
+    );
+    const stale = findMissingScopedPages([
+      stubSurface('scoped', [{ ...scopedRoot, pages: ['b.mdx', 'renamed-away.mdx'] }]),
+    ]);
+    check(
+      stale.length === 1 && stale[0].page === 'renamed-away.mdx',
+      `page-scope fixture: a scoped page list naming a non-existent file was not flagged (got ${JSON.stringify(stale)}) — ` +
+        'the page would return to the surface that cannot resolve its imports, restoring the gap silently',
+    );
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
+  }
+
+  // ── The same two invariants over the REAL corpus, not a fixture. Same
+  //    reasoning as the `findUnignoredBuildDir(SURFACES)` pin below: the
+  //    fixtures prove the predicates work, and these prove today's SURFACES
+  //    actually satisfy them — a scoped page that was renamed away, or a
+  //    carve-out whose `excludePages` was dropped, is a live defect rather
+  //    than a hypothetical one, and neither shows up as anything but a
+  //    resolution error on one page.
+  check(
+    findMissingScopedPages(SURFACES).length === 0,
+    `real-corpus fixture: page-scoped root(s) name file(s) that do not exist — ` +
+      JSON.stringify(findMissingScopedPages(SURFACES)),
+  );
+  {
+    const realFiles = SURFACES.map((surface) => ({ surface, files: sourceFiles(surface.roots) }));
+    const realOverlap = findOverlappingSourceFile(realFiles);
+    check(
+      realOverlap === null,
+      `real-corpus fixture: a source file is scanned by two surfaces — ${JSON.stringify(realOverlap)}`,
+    );
   }
 
   // ── Gitignore coverage (#11440). `assertGitignoredBuildDirs()` runs against
@@ -2209,7 +2458,11 @@ function selfTest(): never {
       '    fragment (parses as neither) is not, a marked block that does not parse REFUSES with its\n' +
       '    first error mapped to the right page line — recommending a tsx retag only when the body\n' +
       '    really is JSX — and the bytes the refusal parses are the bytes the build dir is written\n' +
-      '    with.',
+      '    with; a page-scoped root scans exactly its list while the broad root over the same tree\n' +
+      '    scans everything BUT it (with the un-partitioned control proving the page was reachable),\n' +
+      '    the two roots produce distinct build-file names, a page claimed by two surfaces is caught\n' +
+      '    and a correct partition is not, a `pages` entry naming a file that is not there is caught\n' +
+      '    and an existing one is not — and the real SURFACES satisfy both invariants today.',
   );
   process.exit(0);
 }
@@ -2323,6 +2576,96 @@ function assertGitignoredBuildDirs(): void {
   }
 }
 
+/**
+ * Every `pages` entry that names a file which is not there (#12048).
+ *
+ * A page-scoped root is a carve-out from a broad root over the same tree, and
+ * the two read one shared list — so a path that stops resolving (the page
+ * renamed, moved, or the list typo'd) does not merely shrink the scoped root:
+ * the broad root's `excludePages` stops matching in the same instant, the page
+ * returns to the surface that cannot resolve its imports, and the next marked
+ * block on it reds with the exact TS2307 the carve-out exists to end. Both
+ * halves fail in the same direction, silently, from one edit — which is why
+ * this is a hard error and not a warning.
+ *
+ * Judged over `SURFACES` rather than a hand-listed set, so a fifth root with
+ * `pages` is covered without an edit here.
+ */
+function findMissingScopedPages(surfaces: Surface[]): Array<{ surface: string; label: string; page: string }> {
+  const missing: Array<{ surface: string; label: string; page: string }> = [];
+  for (const surface of surfaces) {
+    for (const root of surface.roots) {
+      for (const page of root.pages ?? []) {
+        if (!fs.existsSync(path.resolve(root.dir, page))) {
+          missing.push({ surface: surface.name, label: root.label, page });
+        }
+      }
+    }
+  }
+  return missing;
+}
+
+function assertScopedPagesExist(): void {
+  const missing = findMissingScopedPages(SURFACES);
+  if (missing.length > 0) {
+    fail(
+      `Page-scoped root(s) name ${missing.length} file(s) that do not exist:\n\n` +
+        missing.map((m) => `  - ${m.page}   (root "${m.label}", surface "${m.surface}")`).join('\n') +
+        `\n\n  A scoped page list is one half of a partition — the broad root over the same\n` +
+        `  tree subtracts the SAME list. A path that no longer resolves therefore removes\n` +
+        `  the page from its scoped root AND hands it back to the broad one, restoring the\n` +
+        `  resolution gap the carve-out closed. Fix the path, or drop the entry (and the\n` +
+        `  page's markers with it) if the page is really gone.`,
+    );
+  }
+}
+
+/**
+ * The first file two different surfaces both scan, or null (#12048).
+ *
+ * Until page-scoped roots existed, every root addressed a tree no other root
+ * addressed, and the invariant held by accident. It is load-bearing: a file
+ * scanned by two surfaces has each of its marked blocks extracted twice and
+ * compiled in two different module-resolution environments, so the surface
+ * that cannot resolve the block's imports reports TS2307 against a page the
+ * other surface just proved correct — one page, two verdicts, and the failing
+ * one is the one with no way to be fixed.
+ *
+ * Takes pre-computed per-surface file lists rather than walking again: the
+ * caller has already paid for that walk, and asserting over a SECOND walk
+ * would be asserting about a corpus the run does not use.
+ */
+function findOverlappingSourceFile(
+  entries: Array<{ surface: Surface; files: Array<{ file: string; root: SourceRoot }> }>,
+): { file: string; first: string; second: string } | null {
+  const seen = new Map<string, string>();
+  for (const { surface, files } of entries) {
+    for (const { file } of files) {
+      const first = seen.get(file);
+      if (first && first !== surface.name) return { file, first, second: surface.name };
+      seen.set(file, surface.name);
+    }
+  }
+  return null;
+}
+
+function assertDisjointSourceFiles(
+  entries: Array<{ surface: Surface; files: Array<{ file: string; root: SourceRoot }> }>,
+): void {
+  const clash = findOverlappingSourceFile(entries);
+  if (clash) {
+    fail(
+      `${rel(clash.file)} is scanned by two surfaces — "${clash.first}" and "${clash.second}".\n\n` +
+        `  Each surface resolves modules in its own environment, so every marked block on\n` +
+        `  this file would be compiled twice against different declarations. Whichever\n` +
+        `  surface cannot resolve the block's imports reds with TS2307 on a page the other\n` +
+        `  surface just type-checked clean, and no edit to the page can satisfy both.\n\n` +
+        `  A page-scoped root (\`pages\`) and the broad root it is carved out of must read\n` +
+        `  ONE shared list — the broad root subtracting it via \`excludePages\`.`,
+    );
+  }
+}
+
 /** A package.json's own `name` field — used to look its self-entry up in the
  *  `paths` map `surfacePaths()` derived from it. */
 function pkgName(pkgDir: string): string {
@@ -2334,14 +2677,24 @@ function main() {
 
   assertDistinctBuildDirs();
   assertGitignoredBuildDirs();
+  // Before the corpus is read (#12048): a scoped page list that has stopped
+  // resolving would otherwise show up as a page quietly back on the surface
+  // that cannot resolve its imports, not as an error.
+  assertScopedPagesExist();
 
   console.log(`🧪 Type-checking prose TypeScript examples (${SURFACES.map((s) => s.name).join(' · ')})...\n`);
 
-  const bySurface = SURFACES.map((surface) => {
+  // One walk, read twice: the disjointness assertion below and the extraction
+  // loop must be talking about the SAME corpus, or the assertion is about a
+  // set this run does not use.
+  const filesBySurface = SURFACES.map((surface) => ({ surface, files: sourceFiles(surface.roots) }));
+  assertDisjointSourceFiles(filesBySurface);
+
+  const bySurface = filesBySurface.map(({ surface, files }) => {
     const examples: Example[] = [];
     const orphans: string[] = [];
     const fences: FencedBlock[] = [];
-    for (const { file, root } of sourceFiles(surface.roots)) {
+    for (const { file, root } of files) {
       const { examples: found, orphans: bad, fences: all } = extractFromFile(file, root);
       examples.push(...found);
       fences.push(...all);
