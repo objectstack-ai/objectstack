@@ -21,8 +21,8 @@
  * purpose: the sentence is *about* their removal, and neither resolves today.
  * Measured against the built oclif `Config`: the registered `publish` ids are
  * `package publish` and `plugin publish`, and no `rollback` id exists at all.
- * A sweep for documented `os …` invocations that do not resolve will flag
- * these two — leave them. Re-spelling either to a live id would make the
+ * A sweep over the documented CLI invocations in this package will flag both
+ * of them as unresolved — leave them. Re-spelling either to a live id would make the
  * sentence false, and deleting the sentence would drop accurate history.
  */
 

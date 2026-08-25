@@ -27,8 +27,8 @@
  * are `datasource introspect`, `datasource list-tables` and `datasource
  * validate` — verified against the built oclif `Config`, where `datasource`
  * appears among the topics and not among the commands. The prose above names
- * the topic, and naming it is correct; a sweep for documented `os …`
- * invocations that resolve to a registered id flags `os datasource`, and that
+ * the topic, and naming it is correct; a sweep over the documented CLI
+ * invocations in this package flags `os datasource` as unresolved, and that
  * flag is a false positive — do not rewrite the sentence around one
  * subcommand, which would say something narrower and untrue.)
  *
