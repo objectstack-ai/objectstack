@@ -2745,6 +2745,32 @@ export function reachesMetadataFormModule(path, modulePaths) {
  *     path each already carries is their own output, and a card editing a
  *     baseline matches through it today without making the gate derivable for
  *     anybody else.
+ *
+ *     ⚠ "A literal naming their POPULATION" is the whole of that criterion,
+ *     and one gate in this kind now fails it while READING as satisfied.
+ *     Measured on this tree (#11199, the day PR #12300 landed): of the 2771
+ *     tracked test files, the hint route names `check:cross-package-test-
+ *     inputs` for 2758 of them — 99.5%, against 0–3.3% for its five siblings
+ *     in this same kind — because #12300 taught `hintCovers` to read a glob in
+ *     a non-final segment and the deep `packages` glob for TypeScript files
+ *     came back to life. (That glob is not spelled here: its own wildcard
+ *     closes a block comment.) The hint
+ *     is neither this gate's population nor even its own literal: it is
+ *     INHERITED from the declaration table the gate imports, where it is ONE
+ *     package's declared turbo `inputs` glob (`@objectstack/core`'s, wide
+ *     because a single pin test there walks the whole repo with `git
+ *     ls-files`). It is a row the gate JUDGES, not a population the gate
+ *     DECLARES — so it narrows the day that package's declaration narrows,
+ *     which is the direction the gate's own repair advice pushes. And even at
+ *     99.5% it reaches no test file outside `packages/**` (10 tracked today,
+ *     all under `examples/**`), none with a `.tsx` suffix (3 today, all in
+ *     client-react), and none under `apps/**` the day one arrives — while
+ *     the KIND reaches every one of them, because the trigger really is "a
+ *     test file's content changed, full stop". Both routes are kept (two
+ *     routes to one gate is redundancy, not a defect); the KIND is the
+ *     load-bearing one. The residue and the inheritance are pinned in the
+ *     self-test, so the next reader re-points a red case instead of
+ *     re-deriving this paragraph.
  *   - i18n entry: when `check-i18n-bundles.mjs` stops discovering its targets
  *     at runtime and names its POPULATION in its own source — a literal each
  *     owning package path starts with — the path half matches and this entry
@@ -5972,6 +5998,59 @@ function selfTest() {
     'check:cross-package-test-inputs is a live family (#10542 moved it here from a path derivation that could name it at 49.6% precision at best)',
     liveFamilies.has('check:cross-package-test-inputs'),
   );
+
+  // ── The test-file entry's deletion criterion, MEASURED (#11199) ───────────
+  //
+  // The card behind these cases reported that no local derivation ever named
+  // `check:cross-package-test-inputs` for an edited test file. That is closed —
+  // the entry above has been in the table since #10542 — and the reason these
+  // cases exist rather than a seventh entry is what the re-measurement found:
+  // the entry now READS redundant against its own stated deletion criterion,
+  // and it is not. The full measurement is in that criterion's bullet in this
+  // table's docblock; what is pinned here is every load-bearing half of it, so
+  // the claim reddens instead of ageing.
+  //
+  // Both directions matter. The positive case keeps the redundancy honest (the
+  // hint route really does reach an ordinary packages test file — Zone rule:
+  // two routes to one gate is redundancy, never a bug, and neither may be
+  // deleted BECAUSE of the other). The negative cases are the residue: a class
+  // the hint route cannot reach in principle, with live tracked specimens.
+  const XPKG = 'check:cross-package-test-inputs';
+  const xpkgEntry = discoverFamilies().byCheck.get(XPKG);
+  // Live specimens, one per residue reason. If either file is ever deleted or
+  // renamed, re-point the case at another member of its class — and if a class
+  // ever EMPTIES, that is the measurement to redo, not a case to drop.
+  const OUTSIDE_PACKAGES = 'examples/app-crm/test/smoke.test.ts';   // not under packages/**
+  const TSX_TEST = 'packages/client-react/src/realtime-hooks.test.tsx'; // not *.ts
+  const APPS_TEST = 'apps/docs/src/x.test.ts';                      // no tracked member today
+  t('the gate is discovered with hints at all, so these cases are not vacuous', (xpkgEntry?.hints ?? []).length > 0);
+  t('both residue specimens are real tracked files, so the negatives are live rather than a pair of matching strings',
+    existsSync(join(ROOT, OUTSIDE_PACKAGES)) && existsSync(join(ROOT, TSX_TEST)));
+  t('the hint route really does reach an ordinary packages test file — the redundancy #12300 recovered is real',
+    covers(xpkgEntry.hints, 'packages/spec/src/x.test.ts'));
+  t('but no hint of this gate reaches a test file outside packages/**', !covers(xpkgEntry.hints, OUTSIDE_PACKAGES));
+  t('nor a .tsx test file inside it', !covers(xpkgEntry.hints, TSX_TEST));
+  t('nor one under apps/**, the class with no tracked member to lose', !covers(xpkgEntry.hints, APPS_TEST));
+  // The entry itself, anchored on both sides of the rendered name the way the
+  // STALE cases above are: a bare substring test stays green if some other
+  // gate's `why` ever quotes this gate's name.
+  t('the KIND names the gate for every one of them — delete the entry and this reddens',
+    [OUTSIDE_PACKAGES, TSX_TEST, APPS_TEST].every((p) =>
+      changeKindLines([p], (n) => n).some((l) => l.includes(`- ${XPKG}   —`))));
+  // The fragility half: the covering hint is INHERITED from the declaration
+  // table this gate imports (one package's declared turbo `inputs` glob), not
+  // declared by the gate as its own population. `hintOrigin` carries exactly
+  // that provenance, and it is what the output prints as `gate source via …`.
+  const xpkgCovering = xpkgEntry.hints.find((h) => hintCovers(h, 'packages/spec/src/x.test.ts'));
+  t('and that covering hint is inherited from a module the gate imports, not a population the gate declares',
+    Boolean(xpkgEntry.hintOrigin?.get(xpkgCovering)));
+  // The class-level claim, against the real corpus rather than two specimens:
+  // while ANY tracked test file is unreachable by every hint this gate has, the
+  // entry's deletion criterion is unmet. The day this reddens, re-measure the
+  // criterion and either retire the entry with these cases or re-point them.
+  const xpkgResidue = trackedFiles().filter((f) => isTestFilePath(f) && !covers(xpkgEntry.hints, f));
+  t(`the tree still holds test files no hint of this gate reaches (${xpkgResidue.length}), so the entry is not redundant`,
+    xpkgResidue.length > 0);
 
   // ── The check-family coverage guard (#9187) ───────────────────────────────
   //
