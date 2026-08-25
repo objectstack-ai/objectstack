@@ -64,7 +64,10 @@ sells recertification campaigns on top of exactly this substrate.
 | `valid_until` | Grant is inactive **at and after** this instant (half-open `[from, until)`, UTC). Null = never expires. |
 
 Plus lifecycle-audit columns shared by D3/D4/D5: `reason` (free text, required
-for delegation/break-glass rows), `delegated_from` (user id, D3),
+for delegation/break-glass rows), `delegated_from` (user id, D3 — retired from
+`sys_user_permission_set` per the #9730 ruling, ADR-0049 enforce-or-remove;
+still declared and runtime-enforced on `sys_user_position` only — see the
+ADR-0087 semantic ledger entry `ups-delegated-from-column-retired`),
 `last_certified_at` / `certified_by` (D5).
 
 Deliberately **not** effective-dated: `sys_position_permission_set` (bindings
