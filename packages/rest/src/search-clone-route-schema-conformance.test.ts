@@ -23,7 +23,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import * as specApi from '@objectstack/spec/api';
 import { CloneDataResponseSchema, SearchAllResponseSchema } from '@objectstack/spec/api';
-import { RestServer } from './rest-server';
+import { RestServer } from './rest-server.js';
 import { REST_ROUTE_LEDGER } from './rest-route-ledger.js';
 
 const ANON_API = { api: { requireAuth: false } };
@@ -103,7 +103,8 @@ async function dispatch(method: string, path: string, req: Record<string, unknow
     if (!route) throw new Error(`route not registered: ${method} ${path}`);
     const res = mockRes();
     await route.handler({ headers: {}, params: {}, query: {}, ...req }, res);
-    return { protocol, res, body: res.json.mock.calls.at(-1)?.[0] };
+    const calls = res.json.mock.calls;
+    return { protocol, res, body: calls[calls.length - 1]?.[0] };
 }
 
 describe('[#11924] GET /api/v1/search — declared body, relayed bare', () => {
