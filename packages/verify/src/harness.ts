@@ -671,11 +671,60 @@ export async function bootStack(
     return data.token;
   };
 
+  /**
+   * [#11739 / #11767] Fixture users beyond the FIRST enter through the
+   * invitation carve-out.
+   *
+   * Since #11739 the platform's default audience posture is `invite_only`:
+   * only the bootstrap account (zero human users) self-registers freely, and
+   * every later self-serve sign-up needs a pending invitation, an allowlisted
+   * domain, or an `open` posture. The harness's `signUp` exists to mint the
+   * SECOND, THIRD… fixture identity, so it lands squarely on the wall.
+   *
+   * The invitation lane is deliberate rather than declaring `open` on the
+   * harness config — `open` and `email_domain` force `requireEmailVerification`
+   * on, which stops sign-up from minting the very token this helper returns,
+   * and it keeps the audience gate honestly ON the path (the carve-out is a
+   * real admission verdict, not a bypass). Same choice, same reasons, as
+   * plugin-auth's own `audience-gate-test-support.ts`.
+   *
+   * Best-effort: a stack whose engine or `sys_invitation` object is not
+   * reachable simply signs up without the row and lets the gate answer.
+   */
+  const inviteForAudienceGate = async (email: string): Promise<void> => {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const engine = await kernel.getServiceAsync<any>('objectql');
+      if (!engine || typeof engine.insert !== 'function') return;
+      await engine.insert(
+        'sys_invitation',
+        {
+          id: `inv_verify_${Math.random().toString(36).slice(2, 10)}`,
+          // [#11770] Normalized, as the invitation route stores it — the
+          // audience probe reads `sys_invitation` by address, and better-auth
+          // lowercases both the stored address and the registrant's.
+          email: email.trim().toLowerCase(),
+          status: 'pending',
+          // A dedicated org id so fixtures counting THEIR invitations never
+          // see these rows.
+          organization_id: 'org_verify_audience_gate',
+          role: 'member',
+          inviter_id: 'usr_verify_audience_gate',
+          expires_at: new Date(Date.now() + 3_600_000),
+        },
+        { context: { isSystem: true } },
+      );
+    } catch {
+      /* best-effort — the gate answers either way */
+    }
+  };
+
   const signUp = async (
     email: string,
     password = 'Member-Pass-123',
     name?: string,
   ): Promise<string> => {
+    await inviteForAudienceGate(email);
     const res = await api('/auth/sign-up/email', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

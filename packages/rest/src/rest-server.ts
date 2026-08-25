@@ -64,6 +64,10 @@ import { RestServerConfig, RestApiConfig, CrudEndpointsConfig, MetadataEndpoints
 // envelope declares `code` REQUIRED while the flat classification it re-dresses
 // legitimately carries none.
 import { standardErrorCodeForHttpStatus } from '@objectstack/spec/api';
+// [#11637] The DECLARED contract for `config.api`, imported as a VALUE rather
+// than a type. Both hops into this package were casts, so this schema had
+// never run on any deployment path — see `assertDeclaredApiConfig` below.
+import { RestApiConfigSchema } from '@objectstack/spec/api';
 import { DataProtocol, MetadataProtocol } from '@objectstack/spec/api';
 // [#9741] Declared request shapes for the meta-read doors below — imported so
 // each door's request literal is compiled against the spec contract instead of
@@ -74,6 +78,8 @@ import type {
     GetMetaItemCachedRequest,
     GetMetaItemLayeredRequest,
     PublishMetaItemRequest,
+    AuditMetaItemRequest,
+    DeleteMetaItemRequest,
 } from '@objectstack/spec/api';
 // [#8073] The closed ADR-0112 error vocabulary, so the explain family's single
 // refusal emitter types its `code` parameter as the vocabulary rather than as
@@ -697,6 +703,21 @@ type NormalizedRestServerConfig = {
         overrides: RouteGenerationConfig['overrides'];
     };
 };
+
+/**
+ * The declared `api` contract, minus the retired keys whose posture this seam
+ * does not own (see {@link RestServer.assertDeclaredApiConfig}).
+ *
+ * Built on first use, not at module load: `RestApiConfigSchema` is a
+ * `lazySchema` Proxy whose whole point is deferring allocation until someone
+ * parses, and calling `.omit()` at module top level would resolve it on every
+ * import of this file. Cached because `.omit()` allocates a fresh schema and a
+ * `RestServer` is constructed per boot (and per test).
+ */
+function buildDeclaredApiConfigSchema() {
+    return RestApiConfigSchema.omit({ requireAuth: true, projectResolution: true });
+}
+let declaredApiConfigSchemaCache: ReturnType<typeof buildDeclaredApiConfigSchema> | undefined;
 
 /**
  * RestServer
@@ -2918,9 +2939,112 @@ export class RestServer {
     }
     
     /**
+     * Run the DECLARED contract for `config.api` — the parse this seam used to
+     * skip. Throws on a configuration `RestApiConfigSchema` rejects.
+     *
+     * [#11637] `RestApiConfigSchema` (`@objectstack/spec/api`) constrains this
+     * object, most load-bearingly:
+     *
+     *     version: z.string().regex(...).default('v1')
+     *
+     * `version` is spliced into `getApiBasePath()` and therefore into the mount
+     * of EVERY route this server registers. Nothing ran that regex on any
+     * deployment path: both hops in are casts (`config.api as any` in
+     * `rest-api-plugin.ts`, then `as Partial<RestApiConfig>` below), and the
+     * kernel's `PluginConfigValidator` could not have covered it either — the
+     * plugin declares no `configSchema`, `PluginLoader` calls its own
+     * `validatePluginConfig(metadata)` with NO config argument and returns
+     * early ("config validation postponed"), and `createRestApiPlugin` closes
+     * over its config so the kernel never receives it to validate. `??` was the
+     * only guard left, and `??` substitutes `null`/`undefined` only: `''`
+     * walked straight past it and mounted the whole API at `/api//`, and
+     * `'v1/beta'` spliced an extra path segment into every route.
+     *
+     * VALIDATION ONLY — the parsed output is deliberately discarded and the
+     * normalization below keeps reading the raw input. Two measured reasons:
+     *
+     *  - `enableSearch` is read below through `as any` and is declared NOWHERE
+     *    in `packages/spec` (zero hits in `packages/spec/src`).
+     *    `RestApiConfigSchema` is not `.strict()`, and a non-strict
+     *    `z.object()` STRIPS keys it does not declare — measured: parsing
+     *    `{ version: 'v1', enableSearch: false }` returns an object with no
+     *    `enableSearch` at all. Consuming the parsed output would therefore
+     *    turn search back ON, silently, for a deployment that turned it off:
+     *    the ADR-0104 silent-strip class that `shared/retired-key.ts` exists to
+     *    prevent. The undeclared key is a defect in its own right, filed
+     *    separately rather than fixed here (`packages/spec` is not this
+     *    change's surface).
+     *
+     *  - the retired `api.requireAuth` key is `.omit()`ed rather than enforced.
+     *    #3963 retired it with a deliberate warn-and-ignore posture
+     *    (`rest-api-plugin.ts`: "is IGNORED"), chosen in a world where nothing
+     *    parsed this config; converting that into a boot failure is that
+     *    decision's to make, not this seam's, and 96 in-repo fixtures still
+     *    pass the key. `.omit()` is typed against the shape, so the day the
+     *    tombstone ages out of `packages/spec` this line fails `tsc` — the
+     *    drift cannot go silent.
+     *
+     *  - `api.projectResolution` is `.omit()`ed for a DIFFERENT reason, and it
+     *    is the one CI caught: the declared enum is
+     *    `z.enum(['required', 'optional', 'auto'])`, and the value this
+     *    platform actually ships is `'none'` — produced by
+     *    `@objectstack/runtime`'s standalone stack, whose
+     *    `StandaloneStackResult.api` DECLARES the literal type
+     *    `{ enableProjectScoping: false; projectResolution: 'none' }`, and
+     *    forwarded by `os serve` straight into this config
+     *    (`apiConfig.projectResolution ?? 'auto'` — `'none'` is not nullish, so
+     *    it passes through). Three packages disagree about this key's
+     *    vocabulary, and they have disagreed silently for exactly as long as
+     *    nothing ran the schema. Parsing it here does not settle that
+     *    disagreement, it just turns every `os serve` boot into a crash.
+     *    ⛔ Which spelling is right — teach the enum `'none'`, or migrate the
+     *    runtime onto `'auto'` — is a contract question about project-scoping
+     *    semantics that this seam cannot answer and this card does not own
+     *    (`packages/spec` is `domain:spec`'s surface). Filed as #11999.
+     *
+     * The sibling sub-objects (`crud`, `metadata`, `batch`, `routes`) are still
+     * cast, not parsed, and carry declared constraints of their own
+     * (`batch.maxBatchSize: z.number().int().min(1).max(1000)`, the
+     * `routes.nameTransform` enum, ...). Same defect class, filed separately:
+     * this change deliberately puts ONE narrowing in front of contract review
+     * rather than five.
+     */
+    private assertDeclaredApiConfig(api: unknown): void {
+        declaredApiConfigSchemaCache ??= buildDeclaredApiConfigSchema();
+        const result = declaredApiConfigSchemaCache.safeParse(api ?? {});
+        if (result.success) return;
+
+        const details = result.error.issues
+            .map((issue) => `  - api.${issue.path.join('.') || '(root)'}: ${issue.message}`)
+            .join('\n');
+        // The `version` rationale is appended only when `version` is what
+        // failed. Measured during this change's own ablation: a
+        // `projectResolution` refusal printed the whole "an empty version
+        // mounts the entire API at /api//" paragraph, which reads as a
+        // diagnosis of a key the operator did not write — worse than no
+        // rationale, because it sends them to the wrong line of their config.
+        const versionFailed = result.error.issues.some((issue) => issue.path[0] === 'version');
+        throw new Error(
+            'REST API configuration is invalid: `api` does not satisfy `RestApiConfigSchema` '
+            + '(@objectstack/spec/api), the schema that declares it.\n'
+            + details
+            + (versionFailed
+                ? '\nThis is refused at construction because `api.version` becomes a path segment in '
+                  + 'EVERY route this server mounts (`getApiBasePath()` = `apiPath ?? '
+                  + '`${basePath}/${version}``) — an empty version mounts the entire API at `/api//`, '
+                  + 'and one carrying `/` splices an extra segment into every route.'
+                : ''),
+        );
+    }
+
+    /**
      * Normalize configuration with defaults
      */
     private normalizeConfig(config: RestServerConfig): NormalizedRestServerConfig {
+        // [#11637] Parse before the cast, not instead of it: the cast below is
+        // what makes the rest of this method type-check, and it is only sound
+        // once the declared contract has actually been run.
+        this.assertDeclaredApiConfig(config.api);
         const api = (config.api ?? {}) as Partial<RestApiConfig>;
         const crud = (config.crud ?? {}) as Partial<CrudEndpointsConfig>;
         const metadata = (config.metadata ?? {}) as Partial<MetadataEndpointsConfig>;
@@ -5683,7 +5807,7 @@ export class RestServer {
                         return;
                     }
                     const p = await this.resolveProtocol(environmentId, req);
-                    if (!(p as any).deleteMetaItem) {
+                    if (!p.deleteMetaItem) {
                         // [#7035] ADR-0112 envelope. This site was the worst of
                         // the three shapes: a BARE STRING `error`, with no code
                         // at all — so neither `err.error.code` nor `err.code`
@@ -5747,7 +5871,23 @@ export class RestServer {
                         // org-scope comment for the measurement.
                         canonicalMetaUrlType(req.params.type), ctx?.tenantId,
                     );
-                    const result = await (p as any).deleteMetaItem({
+                    // [#11679] The `(p as any)` cast this call carried came off
+                    // when `DeleteMetaItemRequestSchema` caught up with the
+                    // eight members this door sends. Unlike the publish door's
+                    // cast (member existence, TS2339), this one was load-bearing
+                    // on REQUEST SHAPE: the member was declared all along, but
+                    // the schema declared only `{ type, name }`, so removing the
+                    // cast surfaced TS2353 on six keys. The literal is now
+                    // compiled against the spec contract through the #9741
+                    // `TransportScopedMetaRequest` wrapper — `environmentId` is
+                    // the transport-level routing key that wrapper layers on,
+                    // ⛔ never a protocol key; every other key here is checked
+                    // against the declared request, so an undeclared member is a
+                    // compile error instead of a payload member no contract has
+                    // ever seen. The 501 guard above stays: the member is
+                    // declared OPTIONAL, and the guard is what narrows it to
+                    // callable here.
+                    const deleteRequest: TransportScopedMetaRequest<DeleteMetaItemRequest> = {
                         type: req.params.type,
                         name: req.params.name,
                         organizationId,
@@ -5756,7 +5896,8 @@ export class RestServer {
                         ...(actor ? { actor } : {}),
                         ...(stateParam ? { state: stateParam } : {}),
                         ...(dropStorage ? { dropStorage: true } : {}),
-                    });
+                    };
+                    const result = await p.deleteMetaItem(deleteRequest);
                     res.json(result);
                 } catch (error: any) {
                     handleRouteError(res, error);
@@ -5830,7 +5971,7 @@ export class RestServer {
                 try {
                     const environmentId = isScoped ? req.params?.environmentId : undefined;
                     const p = await this.resolveProtocol(environmentId, req);
-                    if (typeof (p as any).auditMetaItem !== 'function') {
+                    if (typeof p.auditMetaItem !== 'function') {
                         // [#9426 / ADR-0110 D3] A MISS and a FAULT are different
                         // facts, and this branch is the second one: the resolved
                         // protocol cannot read an audit trail AT ALL, so the
@@ -5855,16 +5996,17 @@ export class RestServer {
                         //
                         // Refusing HERE rather than asserting at assembly is
                         // deliberate, and is the reasoning PR #9425 landed one
-                        // route over. `auditMetaItem` is not a member of
-                        // `RestProtocol` (= `DataProtocol & MetadataProtocol`) and
-                        // is not declared in `packages/spec` at all — it is an
-                        // ADR-0076 D9 server-only extension, which is why it is
-                        // reached through a runtime cast. A host that implements
-                        // the DECLARED contract exactly is therefore a CONFORMING
-                        // deployment that lands here with no type error, and a
-                        // boot-time assertion would promote an undeclared optional
-                        // extension into a required one — a `packages/spec`
-                        // contract decision, not a route one.
+                        // route over. `auditMetaItem` is a declared OPTIONAL
+                        // member of `MetadataProtocol` (the #11006-pattern
+                        // catch-up that retired this door's `(p as any)` casts;
+                        // it was an undeclared ADR-0076 D9 server-only
+                        // extension before that). A host without the verb is
+                        // therefore a CONFORMING deployment that lands here
+                        // with no type error, and a boot-time assertion would
+                        // promote a declared-optional member into a required
+                        // one — a `packages/spec` contract decision, not a
+                        // route one. The guard is also what narrows the member
+                        // to callable below.
                         //
                         // Envelope per #7035: the ADR-0112 NESTED
                         // `{ error: { code, message } }` the sibling `/meta` 501
@@ -5916,12 +6058,24 @@ export class RestServer {
                     // states below — not from the request payload. It is still
                     // read on the two lines that need it.
                     const ctx = await this.resolveExecCtx(environmentId, req).catch(() => undefined);
-                    const result = await (p as any).auditMetaItem({
+                    // The `(p as any)` casts this door carried came off when
+                    // `MetadataProtocol` declared `auditMetaItem` (the #11006
+                    // pattern, same as the publish door below): the literal is
+                    // now compiled against the spec contract, so an undeclared
+                    // key here is a compile error (TS2353) instead of a payload
+                    // member no contract has ever seen. Plain
+                    // `AuditMetaItemRequest` rather than the
+                    // `TransportScopedMetaRequest` wrapper on purpose: this
+                    // door stopped sending `environmentId` when #8747 scoped
+                    // the read (see the note above), so there is no
+                    // transport-level member left to layer on.
+                    const auditRequest: AuditMetaItemRequest = {
                         type: req.params.type,
                         name: req.params.name,
                         organizationId: ctx?.tenantId ?? null,
                         ...(limit !== undefined && Number.isFinite(limit) ? { limit } : {}),
-                    });
+                    };
+                    const result = await p.auditMetaItem(auditRequest);
                     res.json(result);
                 } catch (error: any) {
                     handleRouteError(res, error);

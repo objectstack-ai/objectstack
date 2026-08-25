@@ -28,6 +28,7 @@ import {
 import { judgePlatformAdmin } from './platform-admin-gate';
 import { AuthManager } from './auth-manager';
 import { createMemoryEngine } from './impersonation-bearer-rotation.test';
+import { inviteForAudienceGate } from './audience-gate-test-support';
 
 // ───────────────────────────────────────────────────────────────────────────
 // The pure normalizer
@@ -238,6 +239,9 @@ describe('#10349 — through AuthManager.handleRequest on the real vendor pipeli
       ['padmin.10349@example.com', 'Platform Admin'],
       ['target.10349@example.com', 'Target'],
     ]) {
+      // [#11739] default posture invite_only: users beyond the first enter
+      // through the invitation carve-out (see audience-gate-test-support).
+      await inviteForAudienceGate(engine, email);
       await post(manager, '/sign-up/email', { email, password: PASSWORD, name });
     }
     const rows = (engine.tables.get('sys_user') ?? []) as any[];

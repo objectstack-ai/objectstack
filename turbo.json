@@ -154,6 +154,11 @@
         "$TURBO_ROOT$/packages/types/src/node-isolation.test.ts"
       ]
     },
+    "@objectstack/plugin-auth#typecheck": {
+      "dependsOn": ["build"],
+      "outputs": [],
+      "inputs": ["$TURBO_DEFAULT$", "!dist/**", "!coverage/**", "!.turbo/**"]
+    },
     "@objectstack/trigger-record-change#test": {
       "dependsOn": ["^build"],
       "inputs": [

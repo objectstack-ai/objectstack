@@ -75,6 +75,7 @@ import {
   SysTeamMember,
   SysSsoProvider,
 } from '@objectstack/platform-objects';
+import { inviteForAudienceGate } from './audience-gate-test-support';
 
 const BASE = 'http://localhost:3000';
 const AUTH = `${BASE}/api/v1/auth`;
@@ -160,7 +161,11 @@ const cookiesFrom = (res: Response): string =>
 async function signUp(
   send: (r: Request) => Promise<Response>,
   email: string,
+  engine?: unknown,
 ): Promise<string> {
+  // [#11739] default posture invite_only: fixture users beyond the first
+  // enter through the invitation carve-out (see audience-gate-test-support).
+  if (engine) await inviteForAudienceGate(engine, email);
   const res = await send(
     new Request(`${AUTH}/sign-up/email`, {
       method: 'POST',
@@ -265,7 +270,7 @@ describe('[#10009] direct /sso/register — the ADR-0024 before-hook admits plat
     const send = (r: Request) => manager.handleRequest(r);
 
     const email = 'orgowner@example.com';
-    const cookie = await signUp(send, email);
+    const cookie = await signUp(send, email, engine);
     const orgId = await createOrg(send, cookie, 'probe-org-10009');
 
     // The principal really is an org OWNER — the fixture's claim, verified.
@@ -301,7 +306,7 @@ describe('[#10009] direct /sso/register — the ADR-0024 before-hook admits plat
     const send = (r: Request) => manager.handleRequest(r);
 
     const email = 'platformadmin@example.com';
-    const cookie = await signUp(send, email);
+    const cookie = await signUp(send, email, engine);
     await grantPlatformAdmin(engine, await userIdOf(engine, email));
     await expectLegacyRoleScalarIsNotAdmin(engine, email);
 
@@ -359,7 +364,7 @@ describe('[#10009] the two doors onto SSO registration now answer the same org o
     const manager = makeManager(engine);
     const send = (r: Request) => manager.handleRequest(r);
 
-    const cookie = await signUp(send, 'orgowner@example.com');
+    const cookie = await signUp(send, 'orgowner@example.com', engine);
     await createOrg(send, cookie, 'probe-org-10009-both');
 
     // Door 1 — the #9653 bridge (unchanged by this card).

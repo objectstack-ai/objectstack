@@ -268,6 +268,182 @@ export const EmailVerificationConfigSchema = lazySchema(() => z.object({
 }).optional().describe('Email verification options forwarded to better-auth'));
 
 /**
+ * Audience posture — the ONE declaration answering "who may become a user of
+ * an app built on this environment" (#11739 / epic #11723).
+ *
+ * Before this existed, the answer was an emergent property of
+ * `emailAndPassword.disableSignUp` + `emailVerification` + `ssoOnlyMode` +
+ * plugin-auth's `membershipPolicy` + an implicit fallback permission set —
+ * five uncoordinated switches whose combined default was open
+ * self-registration with no email verification. Nobody chose that combination
+ * and no AI-authored app could declare otherwise. The vocabulary is CLOSED
+ * (maintainer ruling 2026-08-24, epic #11723) and the undeclared default is
+ * the safe end: `invite_only`.
+ *
+ * Follow the `MembershipPolicy` precedent (`@objectstack/plugin-auth`,
+ * reconcile-membership.ts): a runtime value list, an `isX()` entry guard, and
+ * a LOUD refusal of off-vocabulary values — never a silent coercion to a
+ * permissive branch (its docblock records the fail-open typo that made the
+ * precedent exist).
+ */
+export const AUDIENCE_POSTURES = ['invite_only', 'email_domain', 'open'] as const;
+
+export type AudiencePosture = (typeof AUDIENCE_POSTURES)[number];
+
+/** Type guard over {@link AUDIENCE_POSTURES}. */
+export function isAudiencePosture(value: unknown): value is AudiencePosture {
+  return (AUDIENCE_POSTURES as readonly string[]).includes(value as string);
+}
+
+/**
+ * Whether a posture PERMITS self-registration (someone becoming a user by
+ * their own act, with no per-user operator act). `invite_only` does not —
+ * admission there comes only from an explicit operator-side act (a pending
+ * invitation, admin create/import, SCIM provisioning, an operator-registered
+ * identity provider).
+ */
+export function audiencePermitsSelfRegistration(posture: AudiencePosture): boolean {
+  return posture === 'email_domain' || posture === 'open';
+}
+
+/**
+ * One declared email domain: bare lowercase-comparable hostname labels with at
+ * least one dot (`acme.com`, `mail.acme.com`). No scheme, no `@`, no leading
+ * dot, no wildcard — subdomains are NOT implied and need their own entries
+ * (the matching rules are pinned on the enforcement side, plugin-auth's
+ * `audience-posture.ts`).
+ */
+const AUDIENCE_EMAIL_DOMAIN_SHAPE = /^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)+$/;
+
+/**
+ * The audience declaration. Every invariant here is mirrored — and enforced
+ * against the LIVE config — by plugin-auth's entry validation
+ * (`assertAudienceConfig`), because this schema guards the authoring surface
+ * while the runtime receives plain objects; the two must refuse the same
+ * shapes (ADR-0078: a declared-but-inert or open-but-unverified configuration
+ * is refused at declaration, never silently accepted).
+ */
+export const AudienceConfigSchema = lazySchema(() => z.object({
+  /**
+   * Who may become a user of this environment's apps:
+   *
+   * - `invite_only` (default): self-registration is CLOSED. A user comes into
+   *   existence only through an operator-side act — a pending invitation
+   *   (which admits the invitee's own sign-up), admin create-user / bulk
+   *   import, SCIM provisioning, or an operator-registered identity provider.
+   * - `email_domain`: self-registration is open ONLY to addresses whose domain
+   *   is on {@link allowedEmailDomains}. Email verification is forced on.
+   * - `open`: anyone may self-register. Email verification is forced on.
+   */
+  posture: z.enum(AUDIENCE_POSTURES).default('invite_only').describe(
+    'Who may self-register into this environment: invite_only (default — operator acts only), ' +
+    'email_domain (allowlisted email domains), or open (anyone). ' +
+    'Any posture other than invite_only forces email verification on.',
+  ),
+  /**
+   * Required (non-empty) when `posture: 'email_domain'`; refused under any
+   * other posture (a domain list that gates nothing is the ADR-0078
+   * "declared but inert" defect). Matching is case-insensitive and EXACT per
+   * entry — `mail.acme.com` is not admitted by `acme.com`.
+   */
+  allowedEmailDomains: z.array(
+    z.string().regex(
+      AUDIENCE_EMAIL_DOMAIN_SHAPE,
+      'a domain entry is a bare hostname with at least one dot (e.g. "acme.com") — no scheme, no "@", no wildcard',
+    ),
+  ).optional().describe(
+    'Email domains admitted to self-register under posture email_domain (exact, case-insensitive match; ' +
+    'subdomains need their own entries). Required non-empty for email_domain; refused under other postures.',
+  ),
+  /**
+   * The permission set a SELF-REGISTRANT receives, by `sys_permission_set`
+   * name. Required whenever the posture permits self-registration — the
+   * implicit `member_default` fallback is exactly the undeclared grant this
+   * card retires (declaring `member_default` explicitly is fine). Refused for
+   * `invite_only` (inert there: invited/provisioned users receive grants from
+   * their invitation placement or operator assignment, not from this key).
+   * The enforcement side refuses admission when the named set cannot be
+   * resolved (dangling declaration ⇒ nobody is admitted ungranted), and
+   * refuses `admin_full_access` at entry (a self-registrant must never
+   * receive the platform-admin set).
+   */
+  selfRegistrationPermissionSet: z.string().min(1).optional().describe(
+    'sys_permission_set name granted to each self-registrant. Required when posture is email_domain or open; ' +
+    'refused for invite_only. admin_full_access is refused.',
+  ),
+}).superRefine((value, ctx) => {
+  const posture = value.posture ?? 'invite_only';
+  const permitsSelfRegistration = audiencePermitsSelfRegistration(posture);
+  if (posture === 'email_domain') {
+    if (!value.allowedEmailDomains || value.allowedEmailDomains.length === 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['allowedEmailDomains'],
+        message:
+          "posture 'email_domain' requires a non-empty allowedEmailDomains list — " +
+          'an email-domain gate with no domains admits nobody and reads as misconfiguration, not policy. ' +
+          "Declare the domains, or use posture 'invite_only'.",
+      });
+    }
+  } else if (value.allowedEmailDomains !== undefined) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['allowedEmailDomains'],
+      message:
+        `allowedEmailDomains is only read under posture 'email_domain' — under '${posture}' it would be ` +
+        'declared but inert (ADR-0078), and an operator reading it would believe a wall exists that does not. ' +
+        'Remove it, or set posture to email_domain.',
+    });
+  }
+  if (value.allowedEmailDomains) {
+    const seen = new Set<string>();
+    for (let i = 0; i < value.allowedEmailDomains.length; i++) {
+      const lowered = value.allowedEmailDomains[i].toLowerCase();
+      if (seen.has(lowered)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['allowedEmailDomains', i],
+          message: `duplicate domain entry '${value.allowedEmailDomains[i]}' (matching is case-insensitive)`,
+        });
+      }
+      seen.add(lowered);
+    }
+  }
+  if (permitsSelfRegistration) {
+    if (!value.selfRegistrationPermissionSet) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['selfRegistrationPermissionSet'],
+        message:
+          `posture '${posture}' permits self-registration, so the permission set a self-registrant receives ` +
+          'must be DECLARED (selfRegistrationPermissionSet) — the implicit member_default fallback is retired ' +
+          '(#11739; declaring member_default explicitly is allowed).',
+      });
+    } else if (value.selfRegistrationPermissionSet === 'admin_full_access') {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['selfRegistrationPermissionSet'],
+        message:
+          "selfRegistrationPermissionSet must not be 'admin_full_access' — an unscoped platform-admin grant " +
+          'to every self-registrant is never a declarable audience.',
+      });
+    }
+  } else if (value.selfRegistrationPermissionSet !== undefined) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['selfRegistrationPermissionSet'],
+      message:
+        "selfRegistrationPermissionSet is only read under a posture that permits self-registration — under " +
+        "'invite_only' it is declared but inert (ADR-0078). Remove it, or open the posture deliberately.",
+    });
+  }
+}));
+
+export type AudienceConfig = z.input<typeof AudienceConfigSchema>;
+/** Post-parse shape of {@link AudienceConfig} — defaults applied, transforms run (ADR-0122). */
+export type AudienceConfigParsed = z.infer<typeof AudienceConfigSchema>;
+
+/**
  * Advanced / Low-level Better-Auth Options
  */
 export const AdvancedAuthConfigSchema = lazySchema(() => z.object({
@@ -317,6 +493,23 @@ export const AuthConfigSchema = lazySchema(() => z.object({
   oidcProviders: OidcProvidersConfigSchema,
   emailAndPassword: EmailAndPasswordConfigSchema,
   emailVerification: EmailVerificationConfigSchema,
+  /**
+   * Audience posture (#11739) — who may become a user of this environment's
+   * apps. Undeclared ⇒ `invite_only` (the safe default; maintainer ruling
+   * 2026-08-24 on epic #11723 — no legacy/undeclared limbo).
+   *
+   * Cross-field invariant, enforced by plugin-auth at config entry (this
+   * schema cannot see `emailAndPassword` from inside the sub-object, and the
+   * runtime receives plain objects): a posture that permits self-registration
+   * (`email_domain` / `open`) FORCES `emailAndPassword.requireEmailVerification`
+   * on — an explicit `requireEmailVerification: false` beside such a posture
+   * is refused loudly at boot (an unverified allowlisted-domain signup is
+   * colleague impersonation; it makes the domain gate decorative).
+   */
+  audience: AudienceConfigSchema.optional().describe(
+    'Audience posture: who may self-register into this environment ' +
+    '(invite_only — the default — | email_domain | open). See AudienceConfigSchema.',
+  ),
   advanced: AdvancedAuthConfigSchema,
   /**
    * SSO-only ("enforced") login mode. When `true`, the login UI hides the

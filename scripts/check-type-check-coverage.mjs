@@ -233,9 +233,12 @@
 //               instead is make closing one FREE -- `--lower` writes the
 //               measured numbers back into the ledger, so flattening an entry
 //               never requires a human to type a measured number. Whether the
-//               surplus should additionally be enforced is #6376's open
-//               question, not this paragraph's, and the cost of guessing it is
-//               argued there.
+//               surplus should additionally be enforced WAS #6376's open
+//               question; #6376 closed (PR #6510) deciding NOT to -- report
+//               and offer `--lower`, never fail on a surplus by itself -- and
+//               that decision is this paragraph's ruling above, not a pointer
+//               to an issue that is now closed with nothing left to read there
+//               (#11497).
 //
 //               What drifts is not only the NUMBER but the note's COMPOSITION:
 //               service-automation's note named `engine.test.ts:2547/2577` as
@@ -754,9 +757,12 @@ const EXEMPT = {
 // import a test file gains.
 const TEST_DEBT = {
   '@objectstack/plugin-approvals': {
-    errors: 348,
-    note: 'TS2339 x296, TS2550 x20, TS2345 x16, TS18048 x10, plus 6 singletons (TS2554 x2, TS1470, '
-      + 'TS2352, TS2353, TS6133). Was 547 (re-measured at 5ab08428, up from 467; TS2345 x213 then). '
+    errors: 347,
+    note: 'TS2339 x296, TS2550 x20, TS2345 x16, TS18048 x10, plus 5 singletons (TS2554 x2, TS1470, '
+      + 'TS2352, TS6133). Lowered 348 -> 347 at 0e0bf8049 (#11497): tsc against that tree reports the '
+      + 'same seven codes at the same counts as the prior 348 composition, TO THE UNIT, minus the sole '
+      + 'TS2353 -- a fully attributable single-error retirement, not a rescale. '
+      + 'Was 547 (re-measured at 5ab08428, up from 467; TS2345 x213 then). '
       + 'Lowered 547 -> 348 at b5e09b21 (#7888), and the -199 is ONE CLASS COLLAPSING rather than a '
       + 'measured surface shrinking -- the distinction the surplus finding asked to be settled before a '
       + 'gap this size was written in as a floor. Three readings say collapse: (a) TS2339 x296, TS2550 '
@@ -1059,12 +1065,23 @@ const TEST_DEBT = {
   '@objectstack/connector-mcp': { errors: 5, note: 'TS2339 x5. Re-measured 5 at 5ab08428, exact.' },
   '@objectstack/connector-openapi': { errors: 5, note: 'TS2339 x5. Re-measured 5 at 5ab08428, exact.' },
   '@objectstack/http-conformance': {
-    errors: 3,
-    note: 'TS2307 x2, TS2304 x1, TS2740 x1. Re-measured 4 at 5ab08428, up from 1. Worth knowing before '
-      + 'anyone tries to graduate it: 2 of the 4 are reported inside node_modules `.d.ts` files '
-      + '(@better-auth/core, @better-fetch/fetch), so this entry moves with the lockfile and not only with '
-      + 'this package\'s own code. Raw `tsc --noEmit` counts are what every number in these ledgers means, '
-      + 'so they are counted here rather than filtered out -- but they are not this package\'s debt to fix.',
+    errors: 2,
+    note: 'TS2307 x1, TS2304 x1, and BOTH are reported inside node_modules `.d.ts` files '
+      + '(@better-auth/core\'s `bun:sqlite` import, @better-fetch/fetch\'s `Timer`), so this entry now '
+      + 'moves with the lockfile and NOT with this package\'s own code at all -- every file this package '
+      + 'checks in is clean with the test exclusion lifted. Raw `tsc --noEmit` counts are what every '
+      + 'number in these ledgers means, so they are counted here rather than filtered out -- but they are '
+      + 'not this package\'s debt to fix, and this entry cannot graduate by fixing code. Re-measured 2 at '
+      + '3954fb7df, DOWN from 3 (#11788). The retired third diagnostic was a TS2307 on '
+      + '`@objectstack/spec/contracts` in conformance.integration.test.ts, which this package imported '
+      + 'without declaring @objectstack/spec: under pnpm\'s strict layout that specifier reached no '
+      + '@objectstack/spec anywhere on its resolution walk, so the old ceiling was a reading of the '
+      + 'INSTALL LAYOUT rather than of this package\'s types. Measured three ways on one tree at '
+      + '3954fb7df, same sources, same built closure: 3 as installed, 2 with @objectstack/spec merely '
+      + 'symlinked into the root node_modules and nothing else touched, 125 with packages/spec/dist moved '
+      + 'aside. #11788 declared the dependency, so the specifier now resolves through the closure this '
+      + 'gate refreshes and refuses on -- the number dropped because the program became well-defined, '
+      + 'not because anything was suppressed.',
   },
   '@objectstack/platform-objects': { errors: 3, note: 'TS2339 x2, TS7006 x1. Re-measured 3 at 5ab08428, exact.' },
   '@objectstack/plugin-sharing': { errors: 3, note: 'TS6133 x2, TS18048 x1. Re-measured 3 at 5ab08428, exact.' },
@@ -5172,13 +5189,23 @@ if (process.argv.includes('--re-measure')) {
       `in ${elapsed}s, ${measuredTotal} raw tsc error(s) total, none above its recorded number.`,
   );
   // Printed on a GREEN run, on purpose. This is the one number the old summary
-  // could not have told you: how much silence the ledger is currently buying
-  // (#6376). Zero is the goal and `--lower` is one command away from it.
+  // could not have told you: how much silence the ledger is currently buying.
+  // Zero is the goal and `--lower` is one command away from it.
+  //
+  // No issue number belongs in this line. It named #6376 until #11497: #6376
+  // was the design discussion that PRODUCED this very mechanism (the surplus
+  // print plus `--lower`, shipped by PR #6510) and closed once that landed --
+  // it was never a standing tracker for individual surpluses, and treating it
+  // as one routed readers to a closed issue with nothing left to do there
+  // (#11497 measured this happening: a dev read the advisory, followed it to
+  // #6376, and filed nothing). There is no successor tracking issue and none
+  // is needed -- the mechanism IS the successor: a surplus this line reports
+  // is closed by running `--lower`, not by reading a card.
   console.log(
     surplusEntries === 0
       ? `  surplus: none — every entry sits exactly at its measurement, so any new error is red.`
       : `  surplus: ${surplus} raw error(s) across ${surplusEntries} entr(ies) sit BELOW their recorded ` +
         `ceiling — that many regressions can land in layers no other gate reads without this one saying ` +
-        `anything (${SURPLUS_ISSUE}). Close it with \`pnpm check:type-check-debt --lower\`.`,
+        `anything. Close it with \`pnpm check:type-check-debt --lower\`.`,
   );
 }

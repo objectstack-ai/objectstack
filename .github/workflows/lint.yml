@@ -788,6 +788,49 @@ jobs:
           node scripts/check-self-test-wired.mjs --self-test
           node scripts/check-self-test-wired.mjs
 
+      # Self-test output vs. the runner's command parser (#11886). Sibling of
+      # the step above and sharing its population: that one asks whether CI RUNS
+      # each self-test, this one asks what each self-test PRINTS while it does.
+      #
+      # The defect it closes was live on every PR in this repo. A line of
+      # `scripts/pm/ci-failure.mjs`'s self-test prose named a workflow-command
+      # token literally, inside backticks, as documentation of what that tool
+      # anchors on. The runner does not know a token is being quoted: it parsed
+      # it and minted `annotation_level: failure` on a check run whose
+      # conclusion was SUCCESS. On `d63b01436` that artifact was the ONLY
+      # annotation the `Lint & Repo Gates` run carried. A failure-level
+      # annotation on a green required check is a claim that something failed,
+      # and a repo that mints one on every PR is teaching its readers to skim
+      # exactly the surface other gates report findings into.
+      #
+      # ⚠️ INVISIBLE TO EVERY LOCAL RUN, which is the whole reason it is a gate:
+      # the text is ordinary prose on disk and in a terminal, and only a runner
+      # transforms it. It was found by reading one job's annotations through the
+      # API, not by anything in this file.
+      #
+      # Two facts were measured on real runs and the gate's shape follows them:
+      # the legacy `##[...]` form is parsed ANYWHERE in a printed line (the
+      # measured token sat at column 18 and was still consumed), while the
+      # `::...::` form is parsed only at LINE START (two mid-sentence ones print
+      # on every PR from `check-prerelease-pin-watch` and mint nothing). So the
+      # first detector is unanchored and the second is anchored — flagging inert
+      # prose would be a false positive the next author would be right to delete.
+      #
+      # It RUNS the self-tests rather than reasoning about their source, because
+      # "is this token printed?" is only answerable by printing it. A static
+      # prefilter picks which ones to run — over-selecting freely, since the
+      # verdict never comes from it — which is what keeps this step at ~14 s
+      # instead of the ~4 min the whole population costs.
+      #
+      # Invoked as `node scripts/…` rather than through a `pnpm check:*` alias:
+      # see the GATE INVOCATION IDIOM note at the top of this file. Reads
+      # `scripts/` and `.github/workflows/` off disk and spawns the selected
+      # self-tests; no network.
+      - name: Self-test workflow-command gate
+        run: |
+          node scripts/check-self-test-workflow-commands.mjs --self-test
+          node scripts/check-self-test-workflow-commands.mjs
+
       # Verify-lock entry-point self-test (#9661). `scripts/pm/os-verify-lock.sh`
       # is the ONE way an agent takes the container's shared heavy-verify lock,
       # and it is the enforcement of a rule that used to live only in prose: the
@@ -1344,6 +1387,19 @@ jobs:
       # Improvements ratchet the baseline down via --update.
       - name: Reserved-word ("role") docs ratchet
         run: pnpm check:role-word
+
+      # #11671: `os i18n extract --fill=default` fills GAPS only, so revising a
+      # source string rewrites `en` and strands the previous source text in every
+      # other locale. The bundle stays in sync BY KEY, so `check:i18n` reports OK
+      # and `check:i18n-coverage` counts the leaf translated (it tests presence,
+      # not freshness) — measured on PR #11659, three locales serving a 602-char
+      # superseded draft of a 411-char help string under 31 green checks.
+      # This gate reads the committed bundles as TEXT — no workspace build — which
+      # is why it sits here rather than with its two i18n siblings in `typecheck`.
+      # Existing drift is frozen in scripts/i18n-stale-fill-baseline.json with a
+      # reason per entry; NEW drift fails. Improvements ratchet down via --update.
+      - name: Stale translation fills (i18n) ratchet
+        run: pnpm check:i18n-stale-fill
 
       # #6319: content/docs/getting-started/quick-reference.mdx is the protocol
       # index, and each "## <Name> Protocol (N schemas)" heading is a DECLARATION
@@ -2510,6 +2566,28 @@ jobs:
       # reading nothing (#4868's family).
       - name: WHERE-matcher conformance gate
         run: pnpm check:where-matcher
+
+      # ObjectQL double `limit` gate (#11525, from #10978). The third member of
+      # the family above, and the one the other two leave uncovered: a
+      # `find(object, opts)` double that matches `where` correctly and then hands
+      # back EVERY matched row. It cannot tell a read bounded at 200 from the same
+      # read bounded at 1000, or from an unbounded one, so any limit change on
+      # that read is green by construction and the production symptom is a
+      # silently truncated result set rather than an error -- #10978's worked
+      # example truncates an RLS input. PR #11521 converted nine doubles on the
+      # authorization path and measured the population; #11525 is the observation
+      # one level up: nothing held those nine right. This lifts each discovered
+      # double out of its file and asks it a bounded question, encoding all three
+      # shape rules the nine settled -- presence not truthiness, bound after the
+      # filter, bound before any row-touching stage. Behavioural rather than
+      # syntactic on purpose: the bound is applied through inline slices, per-file
+      # helpers and shared helpers alike, and no pattern-match over source spans
+      # them. Pre-existing doubles are in a shrink-only measured baseline. Runs
+      # its own --self-test first: the detector can be broken while every double
+      # is fine, and a scan that quietly stops matching would report OK while
+      # reading nothing (#4868's family).
+      - name: ObjectQL double limit gate
+        run: pnpm check:objectql-double-limit
 
       # Paired kernel-hook pin gate (#5282, from #5170 / #5257 / #5274). The two
       # kernels — ObjectKernel (production) and LiteKernel (vitest / serverless /

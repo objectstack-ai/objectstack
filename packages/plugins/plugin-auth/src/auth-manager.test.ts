@@ -2502,6 +2502,9 @@ describe('AuthManager', () => {
         // A vanilla deployment (no tenancy service wired, no env override) is
         // `single`, matching `multiOrgEnabled: false`.
         tenancyPosture: 'single',
+        // [#11739] Which audience posture is in force. Undeclared ⇒ the safe
+        // default, `invite_only` — no legacy limbo.
+        audiencePosture: 'invite_only',
         degradedTenancy: false,
         privacyUrl: 'https://objectstack.ai/privacy',
         termsUrl: 'https://objectstack.ai/terms',

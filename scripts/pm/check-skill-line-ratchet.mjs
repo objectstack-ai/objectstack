@@ -168,7 +168,13 @@ export const CEILINGS = new Map([
   // state-table rows and the clause-② review-chain bullets sank to the two new
   // references below, and the report-contract JSON is single-sourced from the
   // dev-agent definition. Landed count, headroom 0, same convention.
-  ['.claude/skills/pm-dispatch/SKILL.md', 1008],
+  // Lowered 1008 → 1005 by the run-to-empty triage ruling (maintainer
+  // 2026-08-25): the per-round 3–5-card budget and the `finding` >15
+  // concentrated-round trigger both left the 发现分诊轮 paragraph, and the
+  // ≤5-same-family batch convention that replaces them costs less than they
+  // did. Landed count, headroom 0, same convention (lowering is always
+  // legitimate).
+  ['.claude/skills/pm-dispatch/SKILL.md', 1005],
   // Raised 223 → 244 by the triage reading-cost card (maintainer ruling
   // 2026-08-20, quoted in the raising PR): three mandated conventions land in
   // the runbook's triage sections. Landed count, headroom 0, same convention.
@@ -197,7 +203,7 @@ export const CEILINGS = new Map([
   // operation channel mapping moved out to references/rest-channel.md below.
   // The two right-sized-reads rows the same ruling ordered were paid from that
   // saving in place, and three lines came back. Headroom 0 again.
-  ['.claude/skills/pm-dispatch/references/platform-readings.md', 315],
+  ['.claude/skills/pm-dispatch/references/platform-readings.md', 314],
   // Per-operation REST/GraphQL/git channel mapping — which fleet operation has
   // a REST twin (each row executed in a real session, provenance date carried
   // per row), the handful that are GraphQL-only, and the queue-routing
@@ -218,6 +224,17 @@ export const CEILINGS = new Map([
   // MERGED-tracking line, so that ceiling stays at 82 — no re-wrap, no cut.
   ['.claude/skills/pm-dispatch/references/release-aftercare.md', 58],
   ['.claude/skills/pm-dispatch/references/seat-post-protocol.md', 105],
+  // Per-repo「真绿」跑法索引 — the canonical test invocation, the gates a CI-log
+  // grep cannot see, and the local preflight, one fact per line per repo. Added
+  // by the protocol-text family PR, which could not carry its own ceiling: that
+  // dispatch declared a closed file surface (SKILL.md + os-dev.md + the new page
+  // + one pointer line) with stop-on-breach, and this script sat outside it. A
+  // pm-dispatch references file is read per seat session like every entry above,
+  // so its absence here was a coverage gap, not the header's deliberate omission
+  // (that one is the published `skills/` catalog, and only it). Set at the landed
+  // line count read from this ratchet's own run — headroom 0, same convention as
+  // the entries above.
+  ['.claude/skills/pm-dispatch/references/true-green.md', 34],
   // Lane job descriptions (maintainer ruling 2026-08-19: per-lane PM job
   // descriptions move from seat-post prose into versioned skill references).
   // Set at landed line counts (headroom 0, same convention as above).

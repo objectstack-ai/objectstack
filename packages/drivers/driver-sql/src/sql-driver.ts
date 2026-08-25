@@ -7987,13 +7987,15 @@ export class SqlDriver implements IDataDriver {
           // only, so it is deliberately not tracked.
           if ((funcName === 'min' || funcName === 'max') && agg.field) {
             // [#11249/#11635] A boolean aggregand presents on EVERY dialect,
-            // not only under `readPresentationKind`'s SQLite gate. That gate
-            // mirrors `formatOutput`'s ROW reads, where the native dialects
-            // hand storage back as-is — but on this door the backend answers
-            // `min`/`max` as 1/0 on MySQL (`tinyint(1)`) and on Postgres (the
-            // `cast(?? as int)` above), and the ruled contract is `false` /
-            // `true` in JSON: order statistics return a member of the input
-            // domain, and SQL drivers convert at the driver boundary.
+            // not only under `readPresentationKind`'s dialect gate. That gate
+            // mirrors `formatOutput`'s ROW reads (SQLite + MySQL since #11782;
+            // SQLite-only when this landed), where the storage-form dialects
+            // hand back a number — but on this door the backend ALSO answers
+            // `min`/`max` as 1/0 on Postgres (the `cast(?? as int)` above,
+            // over a column whose row reads need no presentation), and the
+            // ruled contract is `false` / `true` in JSON: order statistics
+            // return a member of the input domain, and SQL drivers convert at
+            // the driver boundary. The `??` fallback is what carries Postgres.
             // `presentReadValue('boolean', …)` leaves `null` (no rows / all
             // NULL) untouched and is idempotent on a value already boolean.
             const kind =
@@ -11590,9 +11592,13 @@ export class SqlDriver implements IDataDriver {
    * row, asked one field at a time so the paths that return raw builder output
    * can ask it too. `null` means the stored form already IS the presented form.
    *
-   * The boolean / numeric rules are SQLite-only because `formatOutput` gates
-   * them that way: SQLite is the dialect without a native boolean, and the
-   * numeric repair only exists for legacy TEXT-affinity columns.
+   * The boolean rule runs on SQLite AND MySQL — the two dialects that store a
+   * declared boolean as a number (INTEGER 0/1, `tinyint(1)`) — because
+   * `formatOutput` gates its row reads that way (#11782; SQLite-only before,
+   * which is how a declared boolean answered `1`/`0` on MySQL). Postgres
+   * stores a real `boolean` node-pg parses, so there the stored form already
+   * IS the presented form. The numeric repair stays SQLite-only: it exists
+   * for legacy TEXT-affinity columns, which no other dialect has.
    */
   protected readPresentationKind(
     table: string | null | undefined,
@@ -11601,8 +11607,10 @@ export class SqlDriver implements IDataDriver {
     if (!table) return null;
     const temporal = this.temporalFieldKind(table, field);
     if (temporal) return temporal;
+    if ((this.isSqlite || this.isMysql) && this.booleanFields[table]?.includes(field)) {
+      return 'boolean';
+    }
     if (!this.isSqlite) return null;
-    if (this.booleanFields[table]?.includes(field)) return 'boolean';
     if (this.numericFields[table]?.includes(field)) return 'number';
     return null;
   }
@@ -11613,10 +11621,11 @@ export class SqlDriver implements IDataDriver {
    * (`aggregate`, `distinct` — #3797 for instants, #3849 for scalars).
    *
    * The dialect gating mirrors `formatOutput`: the `Field.datetime` repair and
-   * the boolean / numeric coercions are SQLite-only (it is the one dialect where
-   * storage ≠ presentation), while the `Field.date` → `YYYY-MM-DD` collapse runs
-   * everywhere. {@link readPresentationKind} does the SQLite gating for the
-   * scalar kinds, so by the time one arrives here the dialect is settled.
+   * the numeric coercion are SQLite-only, the boolean coercion runs on SQLite
+   * and MySQL (#11782 — the two dialects whose stored boolean is a number),
+   * and the `Field.date` → `YYYY-MM-DD` collapse runs everywhere.
+   * {@link readPresentationKind} does the dialect gating for the scalar kinds,
+   * so by the time one arrives here the dialect is settled.
    */
   protected presentReadValue(kind: ReadPresentationKind, value: any): any {
     if (value == null) return value;
@@ -13472,6 +13481,8 @@ export class SqlDriver implements IDataDriver {
       case 'textarea':
       case 'html':
       case 'markdown':
+      case 'richtext':
+      case 'code':
         return keyed ? this.keyableTextLength(field) : null;
       // Virtual — `createColumn` returns without emitting anything.
       case 'formula':
@@ -13766,7 +13777,50 @@ export class SqlDriver implements IDataDriver {
       case 'text':
       case 'textarea':
       case 'html':
-      case 'markdown': {
+      case 'markdown':
+      // #11794: `richtext` and `code` join the text family, and membership is
+      // decided by a MEASURED test rather than by "this type's values look
+      // long".
+      //
+      // ## What makes an unbounded TEXT column correct for a type
+      //
+      // That the WRITE SEAM enforces the type's declared `maxLength` — the
+      // invariant the rest of this driver already rests on, stated in
+      // `schema-drift.ts` in as many words: "A TEXT column refuses nothing a
+      // `maxLength` allows … the bound is enforced at the write seam." So the
+      // question is not whether a value can be long, it is whether the
+      // declaration still binds once the column stops binding.
+      //
+      // objectql's record-validator applies its `max_length` / `min_length`
+      // branch to exactly `text` / `textarea` / `email` / `url` / `phone` /
+      // `password` / `markdown` / `html` / `richtext` / `code`. Both new
+      // members are inside that list — measured, not read off it: a
+      // `maxLength: 64` field of each type refuses a 100-character value with
+      // a field-named ADR-0112 envelope, before any column is reached. So
+      // moving them here RESTORES the declared contract (any string, as
+      // `valueSchemaFor` says) instead of widening past it.
+      //
+      // `richtext` is the headline member: the spec groups `markdown` / `html`
+      // / `richtext` together as "Rich Content" (`field.zod.ts`) and two of
+      // the three already landed here — the third fell through to the
+      // catch-all's `table.string(name)`, knex's varchar(255), so an ordinary
+      // rich-text body over 255 characters was refused by both enforcing
+      // dialects while the same body in a `markdown` field on the same table
+      // was accepted. Measured at 1000 characters on live MySQL 8.0.46
+      // (`ER_DATA_TOO_LONG` under `STRICT_TRANS_TABLES`) and Postgres 16
+      // (`22001`). `code` is the same defect on the same evidence — a code
+      // editor's contents, refused identically on both dialects.
+      //
+      // ⛔ `signature` and `qrcode` are STRING_VALUE_TYPES members whose stored
+      // value is also the author's own and also routinely far past 255
+      // characters (field-zoo writes a data-URI PNG for `signature`), and they
+      // are deliberately NOT here — see the catch-all's note. The validator
+      // branch above does not list them, so nothing enforces their declared
+      // `maxLength` anywhere: for them an unbounded TEXT column would accept
+      // values the declaration forbids, which is a widening of the physical
+      // surface past the contract rather than a restoration of it.
+      case 'richtext':
+      case 'code': {
         // #11374: a text-family column that some declared index KEYS ON is
         // emitted as `varchar(maxLength)` rather than TEXT, whenever the field
         // declared a bound this dialect can key on.
@@ -13915,14 +13969,31 @@ export class SqlDriver implements IDataDriver {
         // (#field-zoo). Everything else is a plain string.
         //
         // ⛔ The third branch #11431 leaves alone. This is the CATCH-ALL, and
-        // what lands in it is precisely the set of types whose stored value is
-        // NOT the declared value: `secret` persists an opaque `sys_secret`
-        // ref rather than the credential it was given (ADR-0100), and
-        // `select` / `radio` / `checkboxes` / `code` / `tree` store option
-        // machine names or ids. Sizing any of those from the author's
-        // `maxLength` would size the wrong string. A type that genuinely wants
-        // the bound belongs in the string-family case above, named — never
-        // acquired by falling through to here.
+        // MOST of what lands in it is the set of types whose stored value is
+        // NOT the declared value, or is short by construction: `secret`
+        // persists an opaque `sys_secret` ref rather than the credential it was
+        // given (ADR-0100), `select` / `radio` / `checkboxes` / `tree` store
+        // option machine names or ids, and `color` holds a color code. Sizing
+        // any of those from the author's `maxLength` would size the wrong
+        // string. (`code` used to be mis-listed here among the option-valued
+        // ones — measured in field-zoo it stores the editor's contents
+        // verbatim, which is why #11794 moved it to the text family above.)
+        //
+        // ⚠️ `signature` and `qrcode` are here for a DIFFERENT reason, and it is
+        // an OPEN DEFECT rather than a design. Their stored value IS the
+        // declared value and it is routinely far past 255 characters — a
+        // data-URI PNG for `signature` — so varchar(255) refuses ordinary
+        // authored values on both enforcing dialects, exactly the way it did
+        // for `richtext`. #11794 measured them and left them here anyway,
+        // because NOTHING enforces their declared `maxLength`: the
+        // record-validator's `max_length` branch does not list them, so an
+        // unbounded TEXT column would trade an under-accepting column for an
+        // over-accepting one — a physical surface wider than the contract.
+        // They need an enforced bound before they can move; see the text-family
+        // case above for the invariant that decides it.
+        //
+        // A type that genuinely wants the bound belongs in the string-family
+        // case above, named — never acquired by falling through to here.
         col = JSON_COLUMN_TYPES.has(type) ? table.json(name) : table.string(name);
     }
 
@@ -14309,15 +14380,6 @@ export class SqlDriver implements IDataDriver {
         }
       }
 
-      const booleanFields = this.booleanFields[object];
-      if (booleanFields && booleanFields.length > 0) {
-        for (const field of booleanFields) {
-          if (data[field] !== undefined && data[field] !== null) {
-            data[field] = Boolean(data[field]);
-          }
-        }
-      }
-
       // Numeric scalars stored on a legacy TEXT-affinity column come back as
       // strings ('4'); coerce numeric-looking strings back to numbers so the
       // declared type wins regardless of when the column was created. Only
@@ -14360,6 +14422,29 @@ export class SqlDriver implements IDataDriver {
         for (const field of datetimeFields) {
           if (data[field] !== undefined) {
             data[field] = normalizeSqliteDatetimeOutput(data[field]);
+          }
+        }
+      }
+    }
+
+    // [#11782] Present a declared `Field.boolean` as a JSON boolean on the
+    // dialects whose STORAGE form is a number: SQLite (INTEGER 0/1) and MySQL
+    // (`tinyint(1)`, which mysql2 hands back as a JS number). Postgres stores a
+    // real `boolean` and node-pg already parses it, so its stored form IS the
+    // presented form and it deliberately stays outside the gate — the same
+    // per-dialect posture {@link readPresentationKind} takes for the read doors
+    // that return raw builder output (`distinct`; `aggregate` tracks its own
+    // result columns per #11635). Before this, the gate was SQLite-only and a
+    // declared boolean answered `1`/`0` on MySQL's row-read door while
+    // answering `true`/`false` on the other two dialects — and, once #11635
+    // presented `min`/`max` everywhere, `find()` and `aggregate()` gave
+    // OPPOSITE answers for the same column on the same MySQL connection.
+    if (this.isSqlite || this.isMysql) {
+      const booleanFields = this.booleanFields[object];
+      if (booleanFields && booleanFields.length > 0) {
+        for (const field of booleanFields) {
+          if (data[field] !== undefined && data[field] !== null) {
+            data[field] = Boolean(data[field]);
           }
         }
       }

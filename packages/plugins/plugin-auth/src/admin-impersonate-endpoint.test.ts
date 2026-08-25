@@ -44,6 +44,7 @@ import { AuthManager } from './auth-manager';
 import { createMemoryEngine } from './impersonation-bearer-rotation.test';
 import { ADMIN_SESSION_RECOVERY_RESPONSE_HEADER } from './impersonation-bearer-rotation';
 import { USER_NOT_FOUND } from './admin-impersonate-endpoint';
+import { inviteForAudienceGate } from './audience-gate-test-support';
 
 const SECRET = 'test-secret-at-least-32-chars-long!!';
 const PASSWORD = 'S3cure!Passw0rd-9968';
@@ -58,14 +59,18 @@ const makeManager = (engine: any) =>
     plugins: { admin: true },
   } as any);
 
-const signUp = (manager: AuthManager, email: string, name: string) =>
-  manager.handleRequest(
+const signUp = (manager: AuthManager, email: string, name: string) => {
+  // [#11739] default posture invite_only: fixture users beyond the first
+  // enter through the invitation carve-out (see audience-gate-test-support).
+  inviteForAudienceGate(manager, email);
+  return manager.handleRequest(
     new Request(`${BASE}/sign-up/email`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, password: PASSWORD, name }),
     }),
   );
+};
 
 const signIn = (manager: AuthManager, email: string) =>
   manager.handleRequest(

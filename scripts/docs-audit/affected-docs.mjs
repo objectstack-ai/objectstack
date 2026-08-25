@@ -1371,11 +1371,47 @@ function bridgeCoverageFrom(ledgers, tails, maximalTails) {
 }
 
 /**
- * Walk `packages/**` for the two declared tables the `sdk` bridge rides on. Split out of
- * PHASE 2 so `--bridge-coverage` can measure the same surface the bridge uses, from the
- * same walk — a second walk here is exactly the drift #4851 billed us for.
+ * The walk itself, split out of `scanRouteSurface` so `--self-test` can pin the one
+ * decision that broke here — WHICH FILES THE WALK ADMITS — against a fake tree.
+ * `readDir` is injectable for exactly the reason `packageRootOf`'s `hasPackageJson` is:
+ * the pin needs no repo state, and a pin that re-asks the predicate instead of walking
+ * would re-pin the half that was already right.
+ *
+ * ⛔ `isTestFile` IS DEFINED OVER A PATH AND MUST BE GIVEN ONE (#11866). This call site
+ * used to pass `e.name` — a BASENAME — so the `__tests__` / `__mocks__` / `__fixtures__`
+ * arm, which requires a `/`, could never match: only the `*.test.*` / `*.spec.*` arm did
+ * any work here, and the directory exclusion the function documents was not happening.
+ * The self-test did not catch it because it pins `isTestFile` with paths, and the
+ * function was never the broken half — its CALLER was. That is why the pin walks a fake
+ * tree through this function rather than calling the predicate a fourth time.
+ *
+ * A STRICT TIGHTENING, measured rather than assumed: on `d63b01436`, of the 4625 `.ts`
+ * files under `packages/**`, exactly 3 were admitted by the basename test and are
+ * excluded by the path test, and ZERO go the other way — the file arms are anchored
+ * `(^|\/)`, so a basename they match is matched inside a path too. Reordering `rel`
+ * ahead of the test therefore cannot admit anything the old order excluded.
+ *
+ * ⭐ AND THE EXCLUSION IS RIGHT FOR THE CEILING TOO, which is the question this walk's
+ * two consumers make live. `sourceFiles` is the #11178 ceiling population and
+ * `registrarFiles` is the bridge's own discovery — one walk, both. It is tempting to
+ * argue the ceiling wants the WIDEST possible population and so should keep test
+ * directories; it does not, because of what the ceiling's verdict MEANS. A row counted
+ * `remediable by discovery` is a claim that widening the FILENAME CONVENTION would reach
+ * it, and no widening of that convention may legitimately admit a test double — so a
+ * witness under `__tests__/` would move a row into `remediable` against a remedy that
+ * cannot be taken, i.e. exactly the misreading `bridgeCoverageFrom`'s split exists to
+ * end ("it aimed a whole card at widening a recognizer that was never the constraint").
+ * The superset invariant survives either way — both populations come off this one walk,
+ * so they narrow together and `reachable` still cannot exceed the ceiling. And no gate
+ * ratchets these counts: `check-affected-docs.mjs` fails on `brokenScan` alone, so
+ * nothing here moves a shrink-only number down.
+ *
+ * @param {string} root  the tree to walk (`packages/**` under it); paths come back
+ *   relative to it, which is what `isTestFile` and both file regexes are defined over.
+ * @param {(dir: string, opts: {withFileTypes: true}) => Array<{name: string, isFile(): boolean, isDirectory(): boolean}>} [readDir]
+ * @returns {{registrarFiles: string[], sourceFiles: string[]}}
  */
-function scanRouteSurface() {
+function walkSourceFiles(root, readDir = readdirSync) {
   const registrarFiles = [];
   // EVERY candidate the convention CHOSE FROM, collected in the same walk (#11178). This
   // is not a second discovery route and nothing downstream of the bridge reads it: it is
@@ -1386,19 +1422,30 @@ function scanRouteSurface() {
   const sourceFiles = [];
   const walkSrc = (dir) => {
     let entries;
-    try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    try { entries = readDir(dir, { withFileTypes: true }); } catch { return; }
     for (const e of entries) {
       if (e.name === 'node_modules' || e.name === 'dist' || e.name === '.turbo') continue;
       const p = join(dir, e.name);
-      if (e.isDirectory()) walkSrc(p);
-      else if (e.isFile() && e.name.endsWith('.ts') && !isTestFile(e.name)) {
-        const rel = relative(repoRoot, p);
-        sourceFiles.push(rel);
-        if (LEDGER_FILE_RE.test(rel) || REGISTRAR_FILE_RE.test(rel)) registrarFiles.push(rel);
-      }
+      if (e.isDirectory()) { walkSrc(p); continue; }
+      if (!e.isFile() || !e.name.endsWith('.ts')) continue;
+      // The PATH, never `e.name` — see above.
+      const rel = relative(root, p);
+      if (isTestFile(rel)) continue;
+      sourceFiles.push(rel);
+      if (LEDGER_FILE_RE.test(rel) || REGISTRAR_FILE_RE.test(rel)) registrarFiles.push(rel);
     }
   };
-  walkSrc(join(repoRoot, 'packages'));
+  walkSrc(join(root, 'packages'));
+  return { registrarFiles, sourceFiles };
+}
+
+/**
+ * Walk `packages/**` for the two declared tables the `sdk` bridge rides on. Split out of
+ * PHASE 2 so `--bridge-coverage` can measure the same surface the bridge uses, from the
+ * same walk — a second walk here is exactly the drift #4851 billed us for.
+ */
+function scanRouteSurface() {
+  const { registrarFiles, sourceFiles } = walkSourceFiles(repoRoot);
 
   const ledgers = [];
   const ledgerRows = [];
@@ -2095,6 +2142,81 @@ function selfTest() {
     ['packages/foo/src/tests-helper.ts', false, 'tests-helper is not __tests__'],
   ];
   for (const [path, want, label] of testFileCases) check('isTestFile', label, path, want, isTestFile(path));
+
+  // ── the WALK's admission decision, against a fake tree (#11866) ──────────────
+  //
+  // The cases above pin the PREDICATE, and the predicate was never wrong: every one of
+  // them passes a full path, which is what `isTestFile` is defined over. What was wrong
+  // was the CALL SITE — `scanRouteSurface`'s walk handed it `e.name`, a basename, so the
+  // three directory arms could not match. A green predicate beside a broken caller is the
+  // shape these cases could not see, so this block walks `walkSourceFiles` itself.
+  //
+  // ⛔ NON-VACUITY IS THE ENTIRE POINT OF THESE FIXTURES, and it is why none of them is a
+  // real repo path. The live population is ZERO — measured on `d63b01436`, the three files
+  // under a test directory that the old walk admitted match neither `REGISTRAR_FILE_RE`
+  // nor `LEDGER_FILE_RE` and declare no `path:`, so `--bridge-coverage` is byte-identical
+  // across this fix. A pin built from real paths would therefore have passed just as
+  // green with the bug in place and pinned NOTHING. Every fixture below is instead a file
+  // the BASENAME test admits and the PATH test excludes: `x-route.ts` carries no `.test.`
+  // / `.spec.` infix, so under the old call site it was walked, matched
+  // `REGISTRAR_FILE_RE`, and a test double contributed production route tails — the exact
+  // failure this is here to keep out. Verified RED against the pre-fix line: 4 registrar
+  // files and 6 source files, against the 1 and 2 asserted here.
+  const fakeSrcTree = [
+    'packages/foo/src/engine.ts',                        // plain implementation
+    'packages/foo/src/real-route.ts',                    // a genuine registrar — must survive
+    'packages/foo/src/engine.test.ts',                   // already excluded by the file arm
+    'packages/foo/src/__tests__/x-route.ts',             // ⭐ registrar-NAMED test double
+    'packages/foo/src/__tests__/helper.ts',              // ceiling population only
+    'packages/foo/src/__mocks__/fake-server.ts',         // the `-server` alternative
+    'packages/foo/src/__fixtures__/stub-route-ledger.ts',// LEDGER_FILE_RE
+    'packages/foo/node_modules/dep/route.ts',            // pruned directory
+    'packages/foo/dist/route.ts',                        // pruned directory
+    'packages/foo/README.md',                            // not a .ts file
+  ];
+  const fakeRoot = '/repo';
+  const fakeDirs = new Map();
+  for (const rel of fakeSrcTree) {
+    const segs = rel.split('/');
+    for (let i = 0; i < segs.length; i++) {
+      const dir = join(fakeRoot, ...segs.slice(0, i));
+      let kids = fakeDirs.get(dir);
+      if (!kids) fakeDirs.set(dir, (kids = new Map()));
+      kids.set(segs[i], i === segs.length - 1);
+    }
+  }
+  // Throws on an unknown directory exactly as `readdirSync` does, so the walk's own
+  // `try`/`catch` is exercised rather than bypassed by a forgiving fake.
+  const fakeReadDir = (dir) => {
+    const kids = fakeDirs.get(dir);
+    if (!kids) throw new Error(`ENOENT: no such fake directory, ${dir}`);
+    return [...kids].map(([name, isFile]) => ({ name, isFile: () => isFile, isDirectory: () => !isFile }));
+  };
+  const walked = walkSourceFiles(fakeRoot, fakeReadDir);
+  const sorted = (a) => [...a].sort().join(' | ');
+  check('walkSourceFiles', 'a registrar-NAMED file under __tests__/ is NOT a registrar — the walk tests the path',
+    'registrarFiles', 'packages/foo/src/real-route.ts', sorted(walked.registrarFiles));
+  check('walkSourceFiles', 'and the three test directories contribute nothing to the CEILING population either',
+    'sourceFiles', 'packages/foo/src/engine.ts | packages/foo/src/real-route.ts', sorted(walked.sourceFiles));
+  // Per-fixture, so a regression NAMES the arm that came back rather than only the totals.
+  const excludedFixtures = [
+    ['packages/foo/src/__tests__/x-route.ts', 'a __tests__/ file matching REGISTRAR_FILE_RE'],
+    ['packages/foo/src/__mocks__/fake-server.ts', 'a __mocks__/ file matching the `-server` alternative'],
+    ['packages/foo/src/__fixtures__/stub-route-ledger.ts', 'a __fixtures__/ file matching LEDGER_FILE_RE'],
+    ['packages/foo/src/__tests__/helper.ts', 'a __tests__/ helper with no registrar name'],
+  ];
+  for (const [rel, label] of excludedFixtures) {
+    check('walkSourceFiles', `${label} is walked at all`, rel, false, walked.sourceFiles.includes(rel));
+    check('walkSourceFiles', `${label} reaches the registrar list`, rel, false, walked.registrarFiles.includes(rel));
+  }
+  check('walkSourceFiles', 'a genuine registrar still survives the walk', 'packages/foo/src/real-route.ts',
+    true, walked.registrarFiles.includes('packages/foo/src/real-route.ts'));
+  check('walkSourceFiles', 'a .test.ts file is still excluded by the FILE arm', 'packages/foo/src/engine.test.ts',
+    false, walked.sourceFiles.includes('packages/foo/src/engine.test.ts'));
+  check('walkSourceFiles', 'node_modules/ and dist/ are still pruned', 'packages/foo/{node_modules,dist}/route.ts',
+    0, walked.sourceFiles.filter((f) => /(^|\/)(node_modules|dist)\//.test(f)).length);
+  check('walkSourceFiles', 'a non-.ts file is not walked', 'packages/foo/README.md',
+    false, walked.sourceFiles.includes('packages/foo/README.md'));
 
   // Package-root derivation, against a fake tree so the self-test stays hermetic.
   // One package.json per shape the repo has: a direct child package plus a nested

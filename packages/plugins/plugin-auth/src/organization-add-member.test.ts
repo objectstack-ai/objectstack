@@ -36,6 +36,7 @@ import { AuthManager } from './auth-manager';
 import { AuthPlugin } from './auth-plugin';
 import { runOrganizationAddMember } from './organization-add-member.js';
 import type { PluginContext } from '@objectstack/core';
+import { inviteForAudienceGate } from './audience-gate-test-support';
 
 const SECRET = 'test-secret-at-least-32-chars-long!!';
 const BASE = 'http://localhost:3000';
@@ -167,6 +168,9 @@ const viaManager = (manager: AuthManager, path: string, init: RequestInit, cooki
   );
 
 const signUp = async (manager: AuthManager, engine: MemoryEngine, email: string) => {
+  // [#11739] default posture invite_only: fixture users beyond the first
+  // enter through the invitation carve-out (see audience-gate-test-support).
+  inviteForAudienceGate(engine, email);
   const res = await viaManager(manager, '/sign-up/email', {
     method: 'POST',
     body: JSON.stringify({ email, password: PASSWORD, name: email }),
