@@ -839,22 +839,18 @@ them right the first time:
    - `{var}` / `{record.title}` — variable / record field
    - `{record.tags.0}` — **array index** (e.g. a `multiple: true` lookup, stored as an array)
    - `{$User.Id}` / `{NOW()}` / `{TODAY() + 30}` — current user / date macros
-   - `{round(x)}` `{floor(x)}` `{ceil(x)}` `{abs(x)}` `{min(a, b)}` `{max(a, b)}`
-     — the numeric six, mirrored **1:1 from the CEL stdlib**: same names and
-     same semantics as in a condition. `round` is **integer-only** (there is no
-     `round(x, 2)`); for N decimals write the CEL idiom `{round(x * 100) / 100}`
-     — also how you land a computed value on a `scale: 2` field.
+   - `{round(x)}` `{floor(x)}` `{ceil(x)}` `{abs(x)}` `{min(a,b)}` `{max(a,b)}` —
+     mirror the CEL stdlib 1:1. `round` is **integer-only** (no `round(x, 2)`);
+     for N decimals write `{round(x * 100) / 100}` (scale 2)
    - anything without `{…}` is a **literal**
 
    ❌ `body: '{{ai_reply}}'` — double-brace is the *formula / template-field* dialect, **not** flow values
    ❌ `ticket: '$source.id'` — a bare `$ref` is a literal string, not interpolated
    ✅ `body: '{ai_reply}'`, `ticket: '{source.id}'`
-   ❌ `total: '{ROUND(x, 2)}'` / `'{Math.round(x)}'` / `'{(x).toFixed(2)}'` — any
-   other name in call position **fails the node** with a named error listing the
-   supported set (and, when one is close, the spelling you meant). Unlike a
-   condition's unknown function, this is **not** caught by the build: it fires at
-   run time, and a `fault` edge does **not** catch it — the expression itself is
-   wrong, so re-running can never succeed.
+   ❌ `'{ROUND(x, 2)}'` / `'{Math.round(x)}'` / `'{(x).toFixed(2)}'` — any other
+   name in call position **fails the node** with a named error naming the
+   supported set. The build does **not** catch these (conditions are checked,
+   value expressions are not) and a `fault` edge cannot route it.
 
 7. **`create_record`'s `outputVariable` holds the created RECORD, not its id.**
    Reference a field explicitly.
