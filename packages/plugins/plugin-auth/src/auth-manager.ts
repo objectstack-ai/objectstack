@@ -3353,6 +3353,21 @@ export class AuthManager {
   }
 
   /**
+   * [#11640] Whether an outbound email transport is wired RIGHT NOW.
+   *
+   * The one public read of the fact every verification link depends on: with
+   * no transport the `sendVerificationEmail` callback has nowhere to send, so
+   * an address can only ever become verified through a federated sign-in. The
+   * boot check in `walled-owner-verification-path.ts` asks this rather than
+   * re-deriving it from config, because the transport can arrive two ways —
+   * host-supplied at construction, or injected on `kernel:ready` once the
+   * kernel `email` service resolves — and only this object sees both.
+   */
+  public hasEmailTransport(): boolean {
+    return !!this.config.emailService;
+  }
+
+  /**
    * #8019 — mail the address a change-email request would move the account
    * AWAY from. Maintainer ruling 2026-08-12: 「notify the OLD address — do not
    * gate on it」.

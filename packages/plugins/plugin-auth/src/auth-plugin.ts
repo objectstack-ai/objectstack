@@ -57,6 +57,11 @@ import {
   authPluginManifestHeader,
 } from './manifest.js';
 import { scheduleLegacySsoSecretMigration } from './sso-client-secret.js';
+import {
+  devSeedAdminEmail,
+  isDevAdminSeedArmed,
+  warnIfWalledOwnerCannotVerify,
+} from './walled-owner-verification-path.js';
 import { judgePlatformAdmin, type PlatformAdminActor } from './platform-admin-gate.js';
 import {
   runAdminBanUser,
@@ -901,6 +906,36 @@ export class AuthPlugin implements Plugin {
       });
     }
 
+    // [#11640] The walled deployment that declares an owner it can never
+    // verify — maintainer ruling 2026-08-25 (option A): warn loudly, by name,
+    // at boot; NEVER refuse. The whole decision (and why it must run here
+    // rather than in `init()`, where no email transport is resolvable yet)
+    // lives in `walled-owner-verification-path.ts`; this hook only supplies
+    // the two live wiring facts. Registered independently of `registerRoutes`
+    // so an embedding that serves no auth routes still gets the diagnosis.
+    //
+    // ⚠️ #11663's re-anchor legs (L2 #11970 / L4 #11974) will rewrite this
+    // elevation surface: move THIS call, not the predicate — the message and
+    // its controls travel with the module.
+    ctx.hook('kernel:ready', async () => {
+      let emailSvc: IEmailService | undefined;
+      try { emailSvc = ctx.getService<IEmailService>('email'); } catch { emailSvc = undefined; }
+      // The auth manager's own view: a host can hand a transport straight to
+      // `AuthManager` without ever registering the kernel `email` service, and
+      // the sibling hook below injects the service into it. Reading BOTH makes
+      // this hook's answer independent of hook registration order.
+      let pub: { socialProviders?: unknown[]; features?: { sso?: boolean } } | undefined;
+      try { pub = this.authManager?.getPublicConfig(); } catch { pub = undefined; }
+      warnIfWalledOwnerCannotVerify(
+        {
+          hasEmailTransport: !!emailSvc || !!this.authManager?.hasEmailTransport(),
+          hasFederatedSignIn:
+            (pub?.socialProviders?.length ?? 0) > 0 || pub?.features?.sso === true,
+        },
+        ctx.logger,
+      );
+    });
+
     // Dev-only: provision a known, loginable platform admin on an empty DB.
     // Registered as its own kernel:ready hook (independent of registerRoutes)
     // so it runs whenever the runtime boots in development.
@@ -1541,11 +1576,15 @@ export class AuthPlugin implements Plugin {
    * OS_SEED_ADMIN=0 (or false/off/no).
    */
   private async maybeSeedDevAdmin(ctx: PluginContext): Promise<void> {
-    if (process.env.NODE_ENV !== 'development') return;
-    const flag = String(process.env.OS_SEED_ADMIN ?? '').trim().toLowerCase();
-    if (['0', 'false', 'off', 'no'].includes(flag)) return;
+    // [#11640] Both clauses (and the seeded address below) are resolved by
+    // `walled-owner-verification-path.ts`, because the boot check there treats
+    // this seed as a verification path — it stamps the seeded account
+    // `email_verified` (#11343). That is only true while the two agree on when
+    // the seed is armed and which address it provisions, so they read one
+    // resolution rather than two copies of the same env parsing.
+    if (!isDevAdminSeedArmed()) return;
 
-    const email = process.env.OS_SEED_ADMIN_EMAIL?.trim() || 'admin@objectos.ai';
+    const email = devSeedAdminEmail();
     const password = process.env.OS_SEED_ADMIN_PASSWORD?.trim() || 'admin123';
     const name = process.env.OS_SEED_ADMIN_NAME?.trim() || 'Dev Admin';
 
