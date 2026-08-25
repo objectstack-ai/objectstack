@@ -97,6 +97,11 @@ import {
   type PhysicalColumn,
   type PendingSchemaWork,
 } from './schema-drift.js';
+import {
+  undeliveredStorageAttributes,
+  formatAttribute,
+  type UndeliveredAttribute,
+} from './builtin-column-collision.js';
 import knex, { Knex } from 'knex';
 import { nanoid } from 'nanoid';
 import { createHash } from 'node:crypto';
@@ -8624,28 +8629,41 @@ export class SqlDriver implements IDataDriver {
   }
 
   /**
-   * [#12015] Say out loud that a declared field was dropped for colliding with
-   * a builtin column.
+   * [#12015] Say out loud which half of a declaration on a builtin column name
+   * was discarded — and say nothing when nothing was.
    *
    * `id`, `created_at` and `updated_at` are emitted by the driver itself, so a
    * field an author DECLARES under one of those names never reaches
-   * {@link createColumn} — its declared type, length and constraints are
-   * discarded. The driver is right to own its primary key and audit stamps;
-   * the defect was that it disagreed with the author in **silence**. Measured
-   * on live PostgreSQL 16.13: an object declaring `id: { type: 'text' }` boots
-   * green and gets `id varchar(255)` — `table.string('id')`, not TEXT — and
-   * nothing anywhere said the declaration had been thrown away. That is the
-   * declared-≠-enforced hazard this repo treats as first-class, and it bites
-   * hardest on AI-authored metadata, where the mismatch surfaces much later as
-   * data behaving oddly.
+   * {@link createColumn}: its declared column shape is dropped. The driver is
+   * right to own its primary key and audit stamps; the defect was that it
+   * disagreed with the author in **silence**. Measured on live PostgreSQL
+   * 16.13: an object declaring `id: { type: 'text' }` boots green and gets
+   * `id varchar(255)` — `table.string('id')`, not TEXT — with nothing anywhere
+   * recording that the declaration had been thrown away. Same substitution
+   * measured here on SQLite, where a declared `maxLength` binds nothing either.
    *
-   * ⛔ This is a diagnostic, NOT a rejection door. Maintainer ruling
-   * 2026-08-25 took the warning and explicitly did **not** take "refuse boot"
-   * (a new rejection door on an existing accept path, whose stock inventory is
-   * unmeasured) nor "make the declaration meaningful" (capability expansion
-   * with no pull — the platform owning its primary key is correct design; the
-   * defect was only the silence). Every object that boots today still boots,
-   * with one more line in the log.
+   * # Why this fires on a SUBSET of collisions, and why that is the point
+   *
+   * Only the STORAGE half is discarded. The rest of the declaration — `label`
+   * and its four generated locales, `readonly`, `searchable`, the ADR-0113
+   * write contract in `required` — is honoured, on the platform's column
+   * exactly as on any other. The first cut of this warning fired on every
+   * collision and told the author "the declaration is NOT applied … remove the
+   * declaration": measured at 116 lines on a stock boot of
+   * `@objectstack/platform-objects` alone, where the dominant shape is
+   * `id: Field.text({ label: 'Presence ID', required: true, readonly: true })`.
+   * That sentence was **false** there, and following it would have deleted an
+   * author-facing label for a column every list view shows.
+   *
+   * So the trigger is "asks for storage the platform's own column does not
+   * deliver" ({@link undeliveredStorageAttributes}), the message names the
+   * attributes rather than the declaration, and a presentation-only
+   * declaration is silent. Maintainer ruling 2026-08-25, narrowing its own
+   * earlier ruling on this card.
+   *
+   * ⛔ Still a diagnostic, NOT a rejection door, and NOT route C: the platform
+   * still owns the column and the declaration still does not take effect. What
+   * changed is what we SAY. Every object that booted before still boots.
    *
    * `phase` is part of the message because all THREE paths that drop such a
    * declaration carry this warning — create, the ADD COLUMN diff, and the
@@ -8659,23 +8677,34 @@ export class SqlDriver implements IDataDriver {
     builtinColumns: ReadonlySet<string>,
     phase: 'create' | 'alter' | 'shard',
   ): string[] {
-    const collisions = Object.keys(fields ?? {}).filter((name) => builtinColumns.has(name));
-    if (collisions.length === 0) return collisions;
     const where = {
       create: `while creating table "${tableName}"`,
       alter: `while syncing existing table "${tableName}"`,
       shard: `while syncing shard "${tableName}"`,
     }[phase];
-    for (const field of collisions) {
-      this.logger.warn(
-        `[sql-driver] ${where}: declared field '${field}' collides with a builtin column the platform ` +
-          `owns (id, created_at, updated_at) — the declaration is NOT applied. Its declared type, ` +
-          `length and constraints are ignored; the platform's own '${field}' column stands. Remove the ` +
-          `declaration, or rename the field if you meant a column of your own.`,
-        { table: tableName, field, phase },
+
+    const warned: string[] = [];
+    for (const [field, declaration] of Object.entries(fields ?? {})) {
+      if (!builtinColumns.has(field)) continue;
+      const undelivered: UndeliveredAttribute[] = undeliveredStorageAttributes(
+        field,
+        declaration as Record<string, unknown>,
       );
+      // Declared, colliding, and yet nothing was lost — the honoured half only.
+      if (undelivered.length === 0) continue;
+
+      this.logger.warn(
+        `[sql-driver] ${where}: declared field '${field}' asks for storage the platform's own ` +
+          `'${field}' column does not provide — ${undelivered.map(formatAttribute).join('; ')}. ` +
+          `The platform emits id/created_at/updated_at itself, so THOSE attributes are not applied; ` +
+          `the rest of the declaration (label, help text, the ADR-0113 write contract, and everything ` +
+          `other layers read) is honoured as written. Drop the storage attribute(s) named above, or ` +
+          `rename the field if you meant a column of your own.`,
+        { table: tableName, field, phase, undelivered: undelivered.map((a) => a.key) },
+      );
+      warned.push(field);
     }
-    return collisions;
+    return warned;
   }
 
   /** Create/column-sync one physical shard table (mirrors the managed-table
