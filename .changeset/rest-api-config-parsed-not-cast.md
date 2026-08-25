@@ -28,14 +28,24 @@ constructed happily and mounted the whole API — `/data`, `/meta`, `/discovery`
 - `api.version` carrying any character outside `[a-zA-Z0-9_-.]` — `'v1/beta'`
   (which spliced an extra path segment into every route), `'v1 beta'`, `'v1%2F'`
   and so on.
-- `api.projectResolution` outside `'required' | 'optional' | 'auto'` — same
-  seam, same cast, equally unenforced until now.
 - A declared key written with the wrong type: `api.enableCrud: 'yes'`,
   `api.basePath: 42`, a malformed `api.documentation` / `api.responseFormat`.
 
 **Deliberately NOT refused** — the narrowing is exactly what the schema
 declares, and no more:
 
+- `api.projectResolution`. The declared enum is
+  `z.enum(['required', 'optional', 'auto'])`, but the value this platform
+  actually ships is **`'none'`**: `@objectstack/runtime`'s
+  `StandaloneStackResult.api` declares the literal type
+  `{ enableProjectScoping: false; projectResolution: 'none' }`, and `os serve`
+  forwards it into this config unchanged (`apiConfig.projectResolution ?? 'auto'`
+  does not fire — `'none'` is not nullish). Three packages disagree about this
+  key's vocabulary and have done so silently for exactly as long as nothing ran
+  the schema. Parsing it here would not settle that disagreement, it would turn
+  every `os serve` boot into a crash, so the key is `.omit()`ed and the
+  divergence is filed as #11999. Which spelling wins is a contract question
+  about project-scoping semantics that this seam cannot answer.
 - `api.requireAuth`. The retired key (#3963) is `.omit()`ed from the
   validation: it keeps the warn-and-ignore posture `rest-api-plugin.ts` gives
   it, and `tsc` still refuses it at any typed authoring site. Converting that
@@ -58,12 +68,23 @@ the declared rule that rejected it, and why an empty version is not survivable.
 A deployment that meant "no version segment" wants `api.apiPath: '/api'`, which
 sets the base outright and is unconstrained.
 
-**In-repo blast radius, measured before shipping:** exactly one in-repo site
-constructed a server this parse refuses — the `rest-openapi-route.test.ts` pin
-for a falsy `api.version`, which carried its own written instruction to retire
-if normalization ever started rejecting it, and is replaced here by a pin on the
-refusal. The 96 fixtures passing the retired `api.requireAuth` are unaffected by
-design, as are `packages/cli`'s `os serve` composition and the `@objectstack/client`
-integration boots. Full `@objectstack/rest` suite: 146 files, 2354 tests, green.
+**In-repo blast radius, measured repo-wide.** The census is mechanical, not a
+reading: 173 files scanned, 316 `api: { … }` blocks brace-matched, every scalar
+literal written at each of the 14 declared keys parsed against the schema this
+seam runs. **Two values are refused, and both are the deliberate `''` cases in
+this change's own pin file.** Every other in-repo literal is accepted, including
+all four `projectResolution` spellings in use and the 96 fixtures carrying the
+retired `api.requireAuth`. Nested `documentation` / `responseFormat` literals
+exist only in `packages/spec`'s own schema tests, which never construct a
+server. Of the 237 construction sites repo-wide, exactly one feeds computed
+values (`os serve`), traced to the typed literal in `@objectstack/runtime`
+above. One in-repo pin had to be retired: `rest-openapi-route.test.ts`'s falsy
+`api.version` case, which carried its own written instruction to retire if
+normalization ever started rejecting it, replaced here by a pin on the refusal.
+
+⚠️ The first version of this census was scoped to `packages/rest` and missed the
+five `packages/cli` e2e boots that go through `os serve`; CI caught it. The
+radius that matters is every package that CONSTRUCTS a REST server, not the
+package the change lives in.
 
 <!-- adr-0087: not-required (no-migration-prescription) Nothing authorable is removed or renamed — no spec key, export or config field changes spelling, and `RestApiConfigSchema` itself is untouched. What changes is that the schema already declaring `api.version` is finally executed at the consumption seam, so `objectstack migrate meta` has no mechanical rewrite to list: a config carrying `version: ''` or `'v1/beta'` states an intent (which path segment did you mean?) that no conversion can decide for the author, and the refusal text names the fix at the call site. -->

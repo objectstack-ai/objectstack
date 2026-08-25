@@ -713,7 +713,7 @@ type NormalizedRestServerConfig = {
  * `RestServer` is constructed per boot (and per test).
  */
 function buildDeclaredApiConfigSchema() {
-    return RestApiConfigSchema.omit({ requireAuth: true });
+    return RestApiConfigSchema.omit({ requireAuth: true, projectResolution: true });
 }
 let declaredApiConfigSchemaCache: ReturnType<typeof buildDeclaredApiConfigSchema> | undefined;
 
@@ -2982,6 +2982,24 @@ export class RestServer {
      *    tombstone ages out of `packages/spec` this line fails `tsc` — the
      *    drift cannot go silent.
      *
+     *  - `api.projectResolution` is `.omit()`ed for a DIFFERENT reason, and it
+     *    is the one CI caught: the declared enum is
+     *    `z.enum(['required', 'optional', 'auto'])`, and the value this
+     *    platform actually ships is `'none'` — produced by
+     *    `@objectstack/runtime`'s standalone stack, whose
+     *    `StandaloneStackResult.api` DECLARES the literal type
+     *    `{ enableProjectScoping: false; projectResolution: 'none' }`, and
+     *    forwarded by `os serve` straight into this config
+     *    (`apiConfig.projectResolution ?? 'auto'` — `'none'` is not nullish, so
+     *    it passes through). Three packages disagree about this key's
+     *    vocabulary, and they have disagreed silently for exactly as long as
+     *    nothing ran the schema. Parsing it here does not settle that
+     *    disagreement, it just turns every `os serve` boot into a crash.
+     *    ⛔ Which spelling is right — teach the enum `'none'`, or migrate the
+     *    runtime onto `'auto'` — is a contract question about project-scoping
+     *    semantics that this seam cannot answer and this card does not own
+     *    (`packages/spec` is `domain:spec`'s surface). Filed as #11999.
+     *
      * The sibling sub-objects (`crud`, `metadata`, `batch`, `routes`) are still
      * cast, not parsed, and carry declared constraints of their own
      * (`batch.maxBatchSize: z.number().int().min(1).max(1000)`, the
@@ -2997,14 +3015,23 @@ export class RestServer {
         const details = result.error.issues
             .map((issue) => `  - api.${issue.path.join('.') || '(root)'}: ${issue.message}`)
             .join('\n');
+        // The `version` rationale is appended only when `version` is what
+        // failed. Measured during this change's own ablation: a
+        // `projectResolution` refusal printed the whole "an empty version
+        // mounts the entire API at /api//" paragraph, which reads as a
+        // diagnosis of a key the operator did not write — worse than no
+        // rationale, because it sends them to the wrong line of their config.
+        const versionFailed = result.error.issues.some((issue) => issue.path[0] === 'version');
         throw new Error(
             'REST API configuration is invalid: `api` does not satisfy `RestApiConfigSchema` '
             + '(@objectstack/spec/api), the schema that declares it.\n'
             + details
-            + '\nThis is refused at construction because `api.version` becomes a path segment in '
-            + 'EVERY route this server mounts (`getApiBasePath()` = `apiPath ?? '
-            + '`${basePath}/${version}``) — an empty version mounts the entire API at `/api//`, '
-            + 'and one carrying `/` splices an extra segment into every route.',
+            + (versionFailed
+                ? '\nThis is refused at construction because `api.version` becomes a path segment in '
+                  + 'EVERY route this server mounts (`getApiBasePath()` = `apiPath ?? '
+                  + '`${basePath}/${version}``) — an empty version mounts the entire API at `/api//`, '
+                  + 'and one carrying `/` splices an extra segment into every route.'
+                : ''),
         );
     }
 

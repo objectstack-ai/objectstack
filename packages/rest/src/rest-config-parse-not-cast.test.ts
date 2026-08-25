@@ -27,6 +27,14 @@
  * §C is explicitly a set of REGRESSION GUARDS: green before this change and
  * green after. They are here to bound the narrowing — to show it refuses
  * exactly what the schema declares and nothing this seam invented.
+ *
+ * ⚠️ §C is also where the first round's census miss is pinned. That census was
+ * scoped to this package; the risk surface is EVERY package that constructs a
+ * REST server, and `packages/cli`'s `os serve` ships
+ * `projectResolution: 'none'` — a value the declared enum does not contain and
+ * `@objectstack/runtime` declares as a literal type. Five `packages/cli` e2e
+ * boots went red in CI. The lesson, written where the next author will hit it:
+ * the search radius belongs where the CONSUMERS live, not where the change does.
  */
 
 import { describe, it, expect, vi } from 'vitest';
@@ -82,9 +90,25 @@ describe('[#11637] §A RestServer construction runs RestApiConfigSchema', () => 
         expect(() => construct({ version: 'v1 beta' })).toThrow(/api\.version/);
     });
 
-    it('refuses a declared-enum violation on the same object (`projectResolution`)', () => {
-        // Same seam, same mechanism: the cast admitted any string here too.
-        expect(() => construct({ projectResolution: 'whenever' })).toThrow(/api\.projectResolution/);
+    it('refuses a declared key written with the wrong type', () => {
+        expect(() => construct({ enableCrud: 'yes' as never })).toThrow(/api\.enableCrud/);
+    });
+
+    it('appends the version rationale ONLY when `version` is what failed', () => {
+        // Caught by this change's own ablation: a `projectResolution` refusal
+        // printed the whole "an empty version mounts the entire API at /api//"
+        // paragraph, sending the operator to a line they never wrote.
+        let message = '';
+        try {
+            construct({ enableCrud: 'yes' as never });
+        } catch (err: any) {
+            message = String(err?.message ?? err);
+        }
+        expect(message).toContain('api.enableCrud');
+        expect(
+            message,
+            'a non-version refusal must not diagnose a key the operator did not write',
+        ).not.toContain('/api//');
     });
 
     it('no constructed server can carry a doubled slash in its mount', () => {
@@ -175,6 +199,22 @@ describe('[#11637] §C regression guards — the narrowing is exactly the declar
         // search back ON for a deployment that turned it off.
         const rest = construct({ version: 'v1', enableSearch: false });
         expect((rest as any).config.api.enableSearch).toBe(false);
+    });
+
+    it('KEEPS `projectResolution: "none"` — the value this platform actually ships', () => {
+        // ⛔ The case CI caught and this file did not. `RestApiConfigSchema`
+        // declares `z.enum(['required', 'optional', 'auto'])`, but the value
+        // `os serve` forwards is `'none'`: `@objectstack/runtime`'s
+        // `StandaloneStackResult.api` DECLARES the literal type
+        // `{ enableProjectScoping: false; projectResolution: 'none' }`, and
+        // `serve.ts` passes it through (`?? 'auto'` does not fire — `'none'` is
+        // not nullish). Parsing this key would turn every `os serve` boot into
+        // a crash; five packages/cli e2e boots did exactly that before the key
+        // was `.omit()`ed. Which spelling is right is a contract question about
+        // project-scoping semantics, filed as #11999 — NOT this seam's to
+        // settle by refusing the value the platform ships.
+        expect(() => construct({ enableProjectScoping: false, projectResolution: 'none' })).not.toThrow();
+        expect(construct({ projectResolution: 'none' as never }).getApiBasePath()).toBe('/api/v1');
     });
 
     it('KEEPS the retired `api.requireAuth` warn-and-ignore posture (#3963)', () => {
