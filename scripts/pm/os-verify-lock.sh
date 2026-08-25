@@ -125,6 +125,81 @@
 # exactly what they were.
 #
 # ---------------------------------------------------------------------------
+# WHAT `command-exit` CERTIFIES, AND WHY A BATCH GETS A DIFFERENT WORD
+#
+# Measured 2026-08-25 (#12288), against this wrapper, in this container:
+#
+#     os-verify-lock.sh -c 'echo one; sh -c "exit 1"; echo three'
+#     → VERDICT command-exit 0
+#
+# A failure in the MIDDLE of that batch is announced as a pass. Nothing is red
+# anywhere: the lock was held, the command ran, the verdict says 0. And
+# `VERDICT command-exit N` is the exact line every dispatch brief tells a dev to
+# quote as proof a suite passed -- so this instrument failed in the GREEN
+# direction, on the one line a reviewer is instructed to trust. Same family as
+# the restore-leg hazards (#11539, #11648, #12204): an instrument that reports
+# success while measuring the wrong thing.
+#
+# The mechanism is not a defect in the acquisition path. `-c '<string>'` runs
+# the string in a shell, and a shell's exit status is its LAST command's. The
+# wrapper reported the wrapped command's own exit code, exactly as the contract
+# at the top of this file says it does. What was wrong was the WORD:
+# `command-exit` reads as a verdict on everything the caller passed, and for a
+# `;`-sequenced string it is a verdict on the tail of it.
+#
+# The card offered three remedies. The two NOT taken are recorded here because
+# both look better than they are:
+#
+#   AGGREGATE THE PER-COMMAND EXITS AND REPORT THE WORST -- rejected twice over.
+#   This wrapper never sees per-command exits: it is handed ONE opaque string
+#   and hands it to a shell, so aggregating means parsing shell, and a partial
+#   shell parser that got `;` inside quotes or a `case` arm wrong would itself
+#   be an instrument answering confidently and wrongly -- this card's own
+#   defect, shipped by the fix for it. And "worst" is undefined: exit codes are
+#   not ordered by severity (is 2 worse than 1? is 143 -- SIGTERM -- worse than
+#   either?), and 99 here is not a failure at all but NOT MEASURED. A max() over
+#   that set is a number with no meaning.
+#
+#   MAKE THE STRING'S EXIT MEAN "ALL OF IT PASSED" -- inject `set -e`, or an ERR
+#   trap, into the caller's string. Rejected: it changes what the caller's
+#   command DOES (`set -e` truncates the batch at the first failure, so the rest
+#   of a deliberate sequence never runs), and `set -e`'s own footguns -- an
+#   arithmetic expression evaluating to 0, an assignment from a failing
+#   substitution -- would turn correct green runs RED. An ERR trap avoids the
+#   truncation but not the holes: a failure inside a pipeline's non-final
+#   element never fires it, so it would certify the `pnpm test | tee log` case
+#   while missing exactly the failure it claimed to catch. This wrapper does not
+#   change the meaning of the command it is given.
+#
+# REFUSING THE BATCH OUTRIGHT (the card's remedy 3) was the closer call, and the
+# reason against it is precedent in this file rather than taste. Where this
+# wrapper cannot deliver its full guarantee, the maintainer's 2026-08-22 ruling
+# on declared unlocked mode chose a LOUD DECLARED DEGRADATION over a refusal
+# that leaves the agent with no route -- and the filter preflight below refuses
+# only what is CERTAINLY worthless (a command that will measure nothing at all),
+# fail-open in every other direction. A batch is not worthless: it runs real
+# verification, and only the one-line summary is uncertifiable. A blanket
+# refusal would also block correct work -- `-c 'export CI=1; pnpm --filter x
+# test'` is sequenced and perfectly answerable -- and this file's doctrine is
+# that a wrong refusal is worse than a miss.
+#
+# So: the run is unchanged, the exit code is unchanged, and the WORD changes.
+# A string whose exit status can only be 0 if every part of it exited 0 keeps
+# `command-exit`. Anything else prints `batch-last-exit`, which says on its own
+# line that it is the last part's exit and not a verdict on the whole, and names
+# the repair (`&&`). Neither line can be misquoted as the other -- which is what
+# makes the `--self-test` pin possible at all: a mid-batch failure must never
+# print `command-exit 0`.
+#
+# WHAT IS CERTIFIED, STATED NARROWLY SO IT CANNOT BE OVER-READ. `command-exit`
+# means: the string is one command, or a chain joined only by `&&`, so bash's
+# documented short-circuit semantics make a 0 impossible unless every element of
+# that chain exited 0. It does NOT mean no failure can hide anywhere. An element
+# that is itself a shell (`bash -c 'a; b'`), a subshell `(a; b)`, or a pipeline
+# inside an element still reports only its own last status, and this wrapper
+# cannot see inside it. That limit is declared here rather than papered over:
+# the whole defect being repaired was a line that claimed more than it measured.
+# ---------------------------------------------------------------------------
 # THE BASH 3.2 FLOOR, AND WHY A MISSING BUILTIN IS THE WORST FAILURE HERE
 #
 # `/usr/bin/env bash` is bash 3.2.57 on macOS. A bash 4+/5+ construct in this
@@ -219,6 +294,10 @@ SLOT_SLUG=""
 ARRIVAL_DEPTH=-1
 LEDGER_WRITTEN=0
 LABEL_FOR_LEDGER="?"
+# Which word this run's verdict may use. Decided once, from the command
+# string, before anything runs -- see the certification block at the top.
+VERDICT_WORD="command-exit"
+CERTIFIABLE_NOTE=""
 
 log() { printf 'os-verify-lock: %s\n' "$*" >&2; }
 
@@ -920,6 +999,131 @@ filter_preflight() {
   return 1
 }
 
+# --- can this exit code certify the whole command? ---------------------------
+#
+# Why this exists: see "WHAT `command-exit` CERTIFIES" at the top of this file.
+# The question here is deliberately small, and it is the only one asked: can the
+# exit status of the string we are about to hand to a shell be 0 ONLY IF every
+# part of it succeeded? True for a single command, and for a chain joined by
+# `&&` -- which short-circuits, so a 0 at the end proves every link ran and
+# passed. False for `;` and for a newline (the exit is the tail's), for `|` (the
+# exit is the right-hand end's, so `pnpm test | tee log` is green when the test
+# is red), for `||` (the exit is the fallback's, which is the point of `||`),
+# and for `&`.
+#
+# It is a SCANNER, not a shell parser, and that difference is what makes it
+# trustworthy rather than clever. It tracks three states of quoting and a
+# parenthesis depth, decides one question, and can only ever err toward
+# `batch-last-exit`: over-labelling costs a warning on a run nobody had to act
+# on, while under-labelling would be the very defect this repairs. So anything
+# it cannot read with confidence -- a backtick substitution, an unbalanced quote
+# -- comes out uncertified by construction rather than by analysis.
+#
+# Operators count only at parenthesis depth 0 and outside quotes, and that is
+# correctness rather than leniency: a `;` inside `$(echo a; echo b)`, or inside
+# a quoted argument, belongs to one ELEMENT of the chain and not to the chain,
+# and the element's own exit status is what the chain sees either way.
+#
+# Sets CERTIFIABLE_NOTE to the reason when it answers no; returns 0 for yes.
+exit_certifiable() {
+  local kind="$1" s="$2" n i ch nx sq=0 dq=0 depth=0
+  CERTIFIABLE_NOTE=""
+
+  # `-- argv` never reaches a shell: one command, its own exit, nothing to scan.
+  [[ "$kind" == argv ]] && return 0
+
+  n=${#s}
+  i=0
+  while ((i < n)); do
+    ch="${s:i:1}"
+
+    # Inside single quotes nothing is special but the closing quote.
+    if ((sq == 1)); then
+      [[ "$ch" == "'" ]] && sq=0
+      i=$((i + 1))
+      continue
+    fi
+    # Inside double quotes a backslash still escapes, so it is honoured here or
+    # a `\"` would be read as the end of the string.
+    if ((dq == 1)); then
+      case "$ch" in
+        '\') i=$((i + 2)) && continue ;;
+        '"') dq=0 ;;
+      esac
+      i=$((i + 1))
+      continue
+    fi
+
+    case "$ch" in
+      "'") sq=1 ;;
+      '"') dq=1 ;;
+      '\') i=$((i + 2)) && continue ;;
+      '`')
+        CERTIFIABLE_NOTE="it contains a backtick substitution, which this scanner does not read"
+        return 1
+        ;;
+      '(') depth=$((depth + 1)) ;;
+      ')') ((depth > 0)) && depth=$((depth - 1)) ;;
+      ';')
+        ((depth == 0)) && {
+          CERTIFIABLE_NOTE="its parts are sequenced with ';'"
+          return 1
+        }
+        ;;
+      $'\n')
+        ((depth == 0)) && {
+          CERTIFIABLE_NOTE="its parts are on separate lines"
+          return 1
+        }
+        ;;
+      '&')
+        # `&&` is the one joiner that certifies, so it is consumed, not flagged.
+        nx="${s:i+1:1}"
+        if [[ "$nx" == '&' ]]; then
+          i=$((i + 2))
+          continue
+        fi
+        ((depth == 0)) && {
+          CERTIFIABLE_NOTE="a part of it is backgrounded with '&'"
+          return 1
+        }
+        ;;
+      '|')
+        if ((depth == 0)); then
+          nx="${s:i+1:1}"
+          if [[ "$nx" == '|' ]]; then
+            CERTIFIABLE_NOTE="its parts are joined with '||', so a 0 can be the fallback's"
+          else
+            CERTIFIABLE_NOTE="it is a pipeline, so the exit is the RIGHT-HAND end's"
+          fi
+          return 1
+        fi
+        ;;
+    esac
+    i=$((i + 1))
+  done
+
+  # A string this scanner did not read to the end is not one it may certify.
+  if ((sq == 1 || dq == 1)); then
+    CERTIFIABLE_NOTE="it has an unbalanced quote, which this scanner does not read"
+    return 1
+  fi
+  return 0
+}
+
+# The ONE place the verdict word and its caveat become text, so the locked and
+# the unlocked verdict lines cannot drift apart -- and so the caveat travels
+# with the number rather than sitting on a line above it that a quote would
+# leave behind.
+verdict_head() {
+  if [[ "$VERDICT_WORD" == command-exit ]]; then
+    printf 'VERDICT command-exit %s' "$1"
+    return 0
+  fi
+  printf "VERDICT batch-last-exit %s · ⚠ NOT A VERDICT ON THE WHOLE COMMAND — %s, so this number is the LAST part's exit and a failure in an earlier part is NOT in it · join the parts with '&&' to get a verdict that covers all of them" \
+    "$1" "$CERTIFIABLE_NOTE"
+}
+
 # --- modes ------------------------------------------------------------------
 
 usage() {
@@ -955,6 +1159,14 @@ inside a green count. If you are mid-ablation, the restore is your own
 A `pnpm --filter <name>` that matches no project is refused BEFORE the lock is
 taken, because pnpm exits 0 on it and the run would measure nothing (#10853).
 OS_VERIFY_LOCK_NO_FILTER_CHECK=1 skips that check for one call.
+
+A verdict says `command-exit` only when the exit status can CERTIFY the command:
+one command, or a chain joined by `&&`. A string sequenced with `;` or newlines,
+a pipeline, `||`, or `&` gets `batch-last-exit` instead — the run, the exit code
+and this wrapper's behaviour are unchanged, but that number is the LAST part's,
+so a failure earlier in the string is not in it and it must not be quoted as
+proof the whole command passed (#12288). Join the parts with `&&` for a verdict
+that covers all of them.
 Exit 99 means this call never acquired the lock; every run prints a VERDICT line
 — including the refusals: `lock-unusable` (this host cannot operate the lock at
 all) and `usage-error`. A run that prints no verdict is a bug in this script.
@@ -1038,7 +1250,7 @@ run_unlocked() {
   ended="$(now_s 2> /dev/null)"
   case "$ended" in '' | *[!0-9]*) ended="$started" ;; esac
   ran=$((ended - started))
-  log "VERDICT command-exit ${rc} · UNLOCKED (declared) · no usable \`${FLOCK_BIN}\` on this host, so the shared verify lock was NEVER taken and NOTHING was serialized · ran $(human_s "$ran") · declare it in the PR body · ${label}"
+  log "$(verdict_head "$rc") · UNLOCKED (declared) · no usable \`${FLOCK_BIN}\` on this host, so the shared verify lock was NEVER taken and NOTHING was serialized · ran $(human_s "$ran") · declare it in the PR body · ${label}"
   ledger_append unlocked 0 "$ran" "$rc" "$label"
   exit "$rc"
 }
@@ -1224,6 +1436,26 @@ mode_run() {
     log "VERDICT filter-matches-nothing (exit 2) · never acquired · refused before waiting · nothing was built or tested · ${label}"
     ledger_append filter-matches-nothing 0 0 2 "$label"
     exit 2
+  fi
+
+
+  # Which word this run's verdict may use, decided from the command string and
+  # said at second zero as well as in the verdict itself. The placement is
+  # chosen twice over: AFTER the refusals above, because a refused run prints a
+  # different verdict entirely and an instrument that predicts the wrong one is
+  # this card's own defect in miniature; and BEFORE the wait, because a dev
+  # about to spend the fleet's lock on a string whose result cannot be quoted
+  # should learn it while the repair still costs nothing.
+  VERDICT_WORD="command-exit"
+  if ! exit_certifiable "$kind" "$label"; then
+    VERDICT_WORD="batch-last-exit"
+    log "⚠ THIS COMMAND'S EXIT CODE CANNOT CERTIFY IT — ${CERTIFIABLE_NOTE}."
+    log "⚠   A shell string's exit status is its LAST part's, so a failure in an earlier"
+    log "⚠   part exits 0 and reads as a pass (#12288). If this run reaches a verdict it"
+    log "⚠   will therefore read batch-last-exit, not command-exit, and that number must"
+    log "⚠   NOT be quoted as proof that the whole command passed."
+    log "⚠   Join the parts with '&&' instead and the verdict certifies every one of them."
+    log "⚠   Nothing here refuses, truncates or alters your command — only the word changes."
   fi
 
   # No usable flock on this host: the declared unlocked run, and it never
@@ -1483,8 +1715,8 @@ mode_run() {
   held=$(($(now_s) - acquired_at))
   HOLDING=0
   rm -f "$HOLDER_FILE" 2> /dev/null || true
-  log "VERDICT command-exit ${rc} · held the lock $(human_s "$held") · waited $(human_s "$waited")"
-  ledger_append command-exit "$waited" "$held" "$rc" "$label"
+  log "$(verdict_head "$rc") · held the lock $(human_s "$held") · waited $(human_s "$waited")"
+  ledger_append "$VERDICT_WORD" "$waited" "$held" "$rc" "$label"
   if ((held >= LONG_HOLD_WARN_S)); then
     log "⚠ THIS RUN held the shared verify lock for $(human_s "$held"). Every sibling agent"
     log "⚠ in this container queued behind it, and a long holder lengthens every cycle for"
@@ -2050,6 +2282,65 @@ mode_self_test() {
   wait
   st_case 'three staggered waiters acquire in arrival order' "$(< "$order")" ABC
 
+  # (g2) the verdict WORD: what an exit code may and may not claim (#12288).
+  #
+  # The defect these pin: a batch whose MIDDLE command failed printed
+  # `VERDICT command-exit 0` — a pass, on the one line every dispatch brief
+  # tells a dev to quote. It failed in the GREEN direction, which is why it
+  # survived: nothing anywhere was red.
+  #
+  # Pinned from BOTH directions on purpose, because only the pair is a pin. The
+  # batch must not print the certified word, AND an ordinary command must still
+  # print it — a "fix" that labelled every run a batch would pass the first
+  # case alone while destroying the meaning of the line for everyone.
+  local batchout batchrc bled
+  bled="${tmp}/batch.ledger"
+  rm -f "$bled"
+  batchout="$(OS_VERIFY_LOCK_LEDGER="$bled" bash "$SELF" -c 'echo one; sh -c "exit 1"; echo three' 2>&1)"
+  batchrc=$?
+  st_case 'a mid-batch failure does NOT print the certified verdict word' \
+    "$(printf '%s' "$batchout" | grep -c 'VERDICT command-exit 0')" 0
+  st_case 'it prints batch-last-exit instead, so the number names what it is' \
+    "$(printf '%s' "$batchout" | grep -c 'VERDICT batch-last-exit 0')" 1
+  st_case 'and the verdict LINE ITSELF says it is not a verdict on the whole command' \
+    "$([[ "$batchout" == *'NOT A VERDICT ON THE WHOLE COMMAND'* ]] && echo yes || echo no)" yes
+  st_case 'and names the repair, so the caller can get a certified verdict instead' \
+    "$([[ "$batchout" == *"join the parts with '&&'"* ]] && echo yes || echo no)" yes
+  st_case 'and warns BEFORE the lock is spent, not only after the run' \
+    "$([[ "$batchout" == *'CANNOT CERTIFY IT'* ]] && echo yes || echo no)" yes
+  # The three invariants that keep this a LABEL and not a behaviour change.
+  st_case 'the batch still ran in full — nothing is refused or truncated' \
+    "$([[ "$batchout" == *one* && "$batchout" == *three* ]] && echo yes || echo no)" yes
+  st_case "and the command's own exit code still passes through untouched" "$batchrc" 0
+  st_case 'and the ledger records the uncertified run as such, so it is findable later' \
+    "$(grep -c 'outcome=batch-last-exit' "$bled" 2> /dev/null || true)" 1
+
+  # The other direction, and the forms in between. Each one is a claim about
+  # what the exit status can prove, not about how the string looks.
+  st_case 'an ordinary single command still gets the certified word' \
+    "$(bash "$SELF" -c true 2>&1 | grep -c 'VERDICT command-exit 0')" 1
+  st_case 'an && chain is certified — short-circuit means a 0 proves every link passed' \
+    "$(bash "$SELF" -c 'true && true' 2>&1 | grep -c 'VERDICT command-exit 0')" 1
+  st_case 'an && chain that fails is certified too, and reports the failing exit' \
+    "$(bash "$SELF" -c 'sh -c "exit 3" && true' 2>&1 | grep -c 'VERDICT command-exit 3')" 1
+  st_case 'a pipeline is NOT certified — a red left-hand side exits 0 through it' \
+    "$(bash "$SELF" -c 'sh -c "exit 1" | cat' 2>&1 | grep -c 'VERDICT batch-last-exit 0')" 1
+  st_case 'nor is a || fallback, whose 0 can be the fallback speaking' \
+    "$(bash "$SELF" -c 'sh -c "exit 1" || true' 2>&1 | grep -c 'VERDICT batch-last-exit 0')" 1
+  st_case 'nor a newline-separated sequence, which is a `;` by another spelling' \
+    "$(bash "$SELF" -c 'sh -c "exit 1"
+true' 2>&1 | grep -c 'VERDICT batch-last-exit 0')" 1
+  # Quoting decides whether an operator belongs to the CHAIN or to one element
+  # of it, and a scanner that got this wrong would refuse to certify ordinary
+  # commands — the over-labelling that would make the word meaningless.
+  st_case 'a ; inside quotes is an ARGUMENT, not a sequence, and stays certified' \
+    "$(bash "$SELF" -c 'printf "%s" "a; b" > /dev/null' 2>&1 | grep -c 'VERDICT command-exit 0')" 1
+  local subcmd='printf "%s" "$(echo x; echo y)" > /dev/null'
+  st_case 'a ; inside a substitution is one element, not a chain, and stays certified' \
+    "$(bash "$SELF" -c "$subcmd" 2>&1 | grep -c 'VERDICT command-exit 0')" 1
+  st_case 'argv mode never reaches a shell, so it is certified by construction' \
+    "$(bash "$SELF" -- true 2>&1 | grep -c 'VERDICT command-exit 0')" 1
+
   # (h) the filter preflight (#10853). BOTH directions, because a guard shown
   # only to red could be a guard that reds on everything -- which here would
   # block the fleet's verification. The commands are `echo`, so what is measured
@@ -2079,7 +2370,10 @@ mode_self_test() {
   # The other direction: a REAL package name must sail straight through, run,
   # and report an ordinary command-exit verdict.
   : > "${fp_ran}.live"
-  out="$(cd "$repo_root" && bash "$SELF" -c "echo pnpm --filter @objectstack/hono test; : > '${fp_ran}.liveran'" 2>&1)"
+  # `&&`, not `;`: this case asserts the CERTIFIED verdict word, and a `;` would
+  # make the fixture itself a batch (#12288). `echo` cannot fail, so the marker
+  # is written either way and what the case tests is unchanged.
+  out="$(cd "$repo_root" && bash "$SELF" -c "echo pnpm --filter @objectstack/hono test && : > '${fp_ran}.liveran'" 2>&1)"
   st_case 'a filter naming a REAL package is not refused' "$?" 0
   st_case 'and its command actually ran' \
     "$([[ -e "${fp_ran}.liveran" ]] && echo ran || echo 'did not run')" ran
