@@ -69,6 +69,7 @@
  */
 
 import os from 'node:os';
+import { isEntrypoint } from './invoked-as.mjs';
 
 /** vitest's own default: `max(availableParallelism() - 1, 1)` (non-watch). */
 export function vitestDefaultWorkers(cores) {
@@ -82,22 +83,27 @@ export function workerCap(cores) {
   return Math.min(vitestDefaultWorkers(cores), WORKER_CEILING);
 }
 
-// An explicit value from the environment wins: a developer profiling one
-// package, or a CI job that knows its own runner, is a better judge of its
-// shard than this file's host-relative guess. Only a positive integer is
-// honoured — anything else falls through to the computed cap rather than
-// reaching vitest as NaN.
-const override = Number.parseInt(process.env.VITEST_MAX_WORKERS ?? '', 10);
-if (Number.isInteger(override) && override > 0) {
-  process.stdout.write(String(override));
-  process.exit(0);
+/**
+ * Resolves the value to print. An explicit value from the environment wins: a
+ * developer profiling one package, or a CI job that knows its own runner, is a
+ * better judge of its shard than this file's host-relative guess. Only a
+ * positive integer is honoured — anything else falls through to the computed
+ * cap rather than reaching vitest as NaN.
+ */
+export function resolveValue(env = process.env) {
+  const override = Number.parseInt(env.VITEST_MAX_WORKERS ?? '', 10);
+  if (Number.isInteger(override) && override > 0) return override;
+  const cores =
+    typeof os.availableParallelism === 'function' ? os.availableParallelism() : os.cpus().length;
+  return workerCap(cores);
 }
 
-const cores =
-  typeof os.availableParallelism === 'function' ? os.availableParallelism() : os.cpus().length;
-
-// A non-integer here would reach vitest as NaN and break the pool, so the
-// output is validated rather than trusted. An empty/absent value is vitest's
-// own "use the default" signal, which is the safe way to fail.
-const value = workerCap(cores);
-process.stdout.write(Number.isInteger(value) && value > 0 ? String(value) : '');
+// Guarded per `check:entry-guard`: this file exports bindings, so its top level
+// must not run inside an importer.
+if (isEntrypoint(import.meta.url)) {
+  // A non-integer here would reach vitest as NaN and break the pool, so the
+  // output is validated rather than trusted. An empty value is vitest's own
+  // "use the default" signal, which is the safe way to fail.
+  const value = resolveValue();
+  process.stdout.write(Number.isInteger(value) && value > 0 ? String(value) : '');
+}
