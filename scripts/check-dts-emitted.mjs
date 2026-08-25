@@ -58,6 +58,8 @@
 import { readFileSync, statSync } from 'node:fs';
 import { resolve, relative } from 'node:path';
 
+import { isEntrypoint } from './invoked-as.mjs';
+
 /**
  * Every declaration path the manifest promises a consumer.
  *
@@ -253,5 +255,12 @@ function selfTest() {
   return 0;
 }
 
-const isSelfTest = process.argv.includes('--self-test');
-process.exit(isSelfTest ? selfTest() : run(process.cwd()));
+// Behind the entrypoint guard: this module exports its two predicates so they
+// can be unit-tested and reused, and an unguarded `process.exit` here would end
+// any importer mid-import -- with status 0 on the healthy path, so the importer
+// would read it as success. That is the same "exit 0 means nothing went wrong"
+// failure this guard exists to catch, one level up.
+if (isEntrypoint(import.meta.url)) {
+  const isSelfTest = process.argv.includes('--self-test');
+  process.exit(isSelfTest ? selfTest() : run(process.cwd()));
+}
