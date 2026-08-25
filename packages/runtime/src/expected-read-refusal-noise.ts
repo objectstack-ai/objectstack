@@ -415,3 +415,73 @@ export function captureExpectedCrossFieldRefusalNoise(
     },
   };
 }
+
+/**
+ * ═══════════════════════════════════════════════════════════════════════════
+ * [#11571] ⛔ There is deliberately NO third, console-level predicate — the
+ *          kernel's ERROR frames never pass through `console` under Node
+ * ═══════════════════════════════════════════════════════════════════════════
+ *
+ * ## The case that asked for one
+ *
+ * Three memory-driver fixtures in `@objectstack/trigger-record-change`
+ * (`bulk-write-per-row-context`, `formula-context`, `multilookup-context`)
+ * boot a kernel with no datasource, so every boot-time fail-soft read refuses.
+ * Measured on this branch by floating each fixture to `level: 'info'`, their
+ * ENTIRE ERROR surface is one invariant trio, repeated once per boot:
+ *
+ *   | fixture                      | ERROR frames  | distinct messages |
+ *   |------------------------------|---------------|-------------------|
+ *   | `bulk-write-per-row-context` | 15 (5 boots)  | 3                 |
+ *   | `formula-context`            |  3 (1 boot)   | 3                 |
+ *   | `multilookup-context`        |  3 (1 boot)   | 3                 |
+ *
+ *   1. `sys_metadata could NOT be read at boot …` (`objectql/src/plugin.ts`);
+ *   2. `[wait] suspended wait-timer re-arm ABORTED …`
+ *      (`service-automation/src/builtin/wait-node.ts`);
+ *   3. `[Automation] sys_automation_run could not be read at startup …`
+ *      (`service-automation/src/plugin.ts`).
+ *
+ * Neither predicate above can reach them: with no SqlDriver there is no
+ * `refused a read on '<table>'` line — so no `pending` entry for the engine
+ * gate to sit above — and no `Find operation failed` frame at all. Those three
+ * fixtures therefore KEEP the blanket `logger: { level: 'silent' }` that the
+ * two SqlDriver-backed fixtures were able to drop.
+ *
+ * ## Why the obvious third mechanism does not exist
+ *
+ * The proposal was a console-level capture: patch `console.error`/`console.warn`
+ * for the file and float the kernel to `level: 'error'` so INFO/WARN stay
+ * suppressed. **Measured: it captures ZERO of the 21 frames.**
+ * `ObjectLogger.write` (`core/src/logger.ts`) prefers the process streams and
+ * reaches console only as a fallback:
+ *
+ *     if (stream) {              // process.stderr for error/fatal
+ *         stream.write(line + '\n');
+ *     } else if (typeof console !== 'undefined') {
+ *         … console.error …     // browsers / bundler shims ONLY
+ *     }
+ *
+ * Under vitest's `environment: 'node'`, `process.stderr` always exists, so the
+ * `console` arm is unreachable there. A probe booting this exact plugin stack
+ * at `level: 'error'` with all four sinks counted scored `console.error: 0,
+ * console.warn: 0, process.stderr.write: 3, process.stdout.write: 0`.
+ *
+ * ⇒ The only variant that DOES intercept them patches `process.stderr.write`,
+ * and it is refused here as disproportionate rather than as unworkable. Both
+ * predicates above patch an OBJECT seam (`driver.logger`, `engine.logger`)
+ * whose blast radius is one instance the fixture itself owns; a stream patch
+ * is process-global and sits in the path of everything the worker writes —
+ * the reporter's own diagnostics included — for as long as it is installed.
+ * Twenty-one invariant per-boot frames that carry no per-test signal do not
+ * buy a third capture mechanism of that reach, and #11569 (this module's
+ * engine pass-through already lands in a silenced logger) means the two
+ * mechanisms here want repairing before a third is stacked on them.
+ *
+ * ⛔ Nor is the repair a predicate pointed at `kernel.logger`: the kernel takes
+ * a logger CONFIG, builds its own and hands it to the plugin loader and the
+ * service context BY REFERENCE (`core/src/kernel.ts`), so a post-construction
+ * swap propagates only partially. That yields a capture which misses frames
+ * while asserting it does not — the exact inversion this module exists to
+ * prevent, and strictly worse than the honest silence of a blanket mute.
+ */
