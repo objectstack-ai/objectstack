@@ -10,7 +10,7 @@
     "dev:crm": "node scripts/check-dev-prereqs.mjs && pnpm check:console-sha && pnpm --filter @objectstack/example-crm dev",
     "dev:todo": "node scripts/check-dev-prereqs.mjs && pnpm check:console-sha && pnpm --filter @objectstack/example-todo dev",
     "spec:rebuild": "turbo run build --filter=...@objectstack/spec",
-    "test": "turbo run test",
+    "test": "turbo run test --concurrency=50%",
     "test:e2e": "turbo run test:e2e",
     "typecheck": "turbo run typecheck",
     "clean": "turbo run clean && rm -rf dist",

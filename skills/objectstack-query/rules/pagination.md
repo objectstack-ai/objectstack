@@ -9,8 +9,8 @@ Guide for implementing pagination in ObjectStack queries.
 | Offset | UI page navigation, small datasets | Simple, random page access | Slow on large offsets, drift on inserts |
 | Keyset (manual `where`) | Infinite scroll, real-time feeds | Consistent results, O(1) performance | No random page access |
 
-> ⛔ **The `cursor` query property was REMOVED in `@objectstack/spec` 17
-> (#4286).** No engine or driver ever read it: a query carrying `cursor`
+> ⛔ **The `cursor` query property was REMOVED in `@objectstack/spec`
+> 17.** No engine or driver ever read it: a query carrying `cursor`
 > silently returned **page 1 forever**. The key is tombstoned — a query
 > carrying it fails to parse with the prescription — and
 > `QueryBuilder.cursor()` is gone. Implement keyset pagination with a
@@ -160,7 +160,7 @@ When building paginated REST endpoints:
 ### ❌ Wrong: Using the removed `cursor` property
 
 ```typescript
-// ❌ cursor was removed in #4286 — the tombstone rejects this query outright
+// ❌ cursor was removed in protocol 17 — the tombstone rejects this query outright
 {
   object: 'post',
   limit: 20,

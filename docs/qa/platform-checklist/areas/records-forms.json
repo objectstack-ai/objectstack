@@ -1120,7 +1120,7 @@
         {
           "clause": "related lists are READ-gated on BOTH ends: a persona WITHOUT read on the child object (showcase_contributor lacks showcase_contact read) sees NO Contacts section on the account detail (UI courtesy — deriveRelatedLists drops children the user cannot read, objectui#2359) AND a direct child query is refused server-side (403); a persona WITH child read (showcase_manager) sees the section AND the query 200s",
           "oracle": "api",
-          "verify": "as showcase_contributor: screenshot confirms the Contacts tab is absent, and the forged GET /api/v1/data/showcase_contact?$filter=[[\"account\",\"=\",\"<northwind id>\"]] returns 403; as showcase_manager: the tab renders and the identical query returns 200 with rows — the server is the authority (ADR-0057 D10, RUNNER rule 4), the UI drop is courtesy",
+          "verify": "as showcase_contributor: screenshot confirms the Contacts tab is absent, and the forged GET /api/v1/data/showcase_contact?$filter=[[\"account\",\"=\",\"<northwind id>\"]] returns 403; as showcase_manager: the tab renders and the identical query returns 200 with rows — the server is the authority (ADR-0124 D1, RUNNER rule 4), the UI drop is courtesy",
           "evidence": "both personas' detail screenshots + the 403 and the 200 child queries"
         }
       ],
@@ -2489,7 +2489,7 @@
         {
           "clause": "the SERVER is the boundary: a forged PUT /api/v1/meta/view/<name> by the non-admin is refused (4xx) — UI absence alone is courtesy",
           "oracle": "api",
-          "verify": "the direct non-admin PUT returns a 403-class refusal and no overlay view is created (RUNNER rule 4, ADR-0057 D10)",
+          "verify": "the direct non-admin PUT returns a 403-class refusal and no overlay view is created (RUNNER rule 4, ADR-0124 D5)",
           "evidence": "the forged-request refusal"
         }
       ],

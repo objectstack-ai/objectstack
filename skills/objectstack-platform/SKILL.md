@@ -1008,7 +1008,7 @@ metadata is read-only and artifact/file backed:
 
 - Do **not** register `sys_metadata` or `sys_metadata_history` from an ObjectStack
   runtime plugin. Those persistence tables belong to the control plane.
-  (Exception, #1826: an *isolated project kernel* may opt into `sys_metadata`
+  (Exception: an *isolated project kernel* may opt into `sys_metadata`
   hydration from its own DB — the general boundary otherwise stands.)
 - Do **not** call `MetadataManager.setDataEngine()` automatically from
   `MetadataPlugin.start()`. Project databases must contain business rows only.
@@ -1113,7 +1113,7 @@ be re-run when commands are added.
 
 ObjectStack metadata mistakes fail **silently at runtime**, not at edit time:
 a bare field ref in a predicate (`done` instead of `record.done`) evaluates to
-`null` and silently hides an action/validation on every record (#2183/#2185); a
+`null` and silently hides an action/validation on every record; a
 dangling dashboard widget binding renders an empty chart (ADR-0021). Both are
 caught at author time by one command:
 

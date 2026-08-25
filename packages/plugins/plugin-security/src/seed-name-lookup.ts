@@ -36,6 +36,8 @@
  *  - a thrown read                        → could not answer
  *  - a response that is neither an array
  *    nor `{ records: [...] }`             → could not answer
+ *  - a page carrying MORE rows than it
+ *    budgeted for (#11518, below)         → could not answer
  *  - `[]`                                 → ANSWERED: none of these names exist
  *
  * "Could not answer" degrades — loudly warned — to the per-item read the loops
@@ -54,6 +56,32 @@
  * None of this is a lenient fallback for off-contract input (AGENTS.md Prime
  * Directive #12): the batched and per-item reads ask the driver the same
  * question, and the answer has one meaning.
+ *
+ * ## The page budget, and why it is measured rather than trusted (#11518)
+ *
+ * A `LIMIT` cannot express "one row per name", so the page needs a cap and no
+ * cap is CORRECT. `limit: names.length` was exact only while one row could exist
+ * per name; #10103 found that and repaired the SCOPED arm, where the honest
+ * bound really is two rows per name. The unscoped arm kept the old cap, and its
+ * bound is not two — it is the number of organizations, because
+ * `sys_capability.name` and `sys_permission_set.name` are unique PER
+ * ORGANIZATION (#8461 / ADR-0120 D1) and ADR-0066 D1 encourages admins to EXTEND
+ * the registry inside their own organization. `names.length * 2` would have been
+ * the same defect with a larger constant.
+ *
+ * So the cap stopped being a promise and became a MEASUREMENT: the read asks for
+ * one row MORE than it is willing to hold, and a page that comes back with that
+ * extra row is a prefix of the answer rather than the answer. It joins the two
+ * causes above — could not answer — and degrades to the same per-item read.
+ *
+ * ⚠️ That is a BEHAVIOUR CHANGE for the two callers that read unscoped
+ * (`bootstrapDeclaredCapabilities`, `permission-set-projection`'s overlay pass),
+ * and the direction is deliberate: in the truncating case they used to get a
+ * SILENT WRONG answer — names reported `absent` whose rows were sitting in the
+ * table, sending each to its insert branch — and now get a LOUD SLOW one, N
+ * round trips and a warning naming the budget. An install that does not truncate
+ * (every stock one: one row per name) reads exactly the same page it read
+ * before, in exactly one round trip.
  *
  * ## Chunking
  *
@@ -150,8 +178,80 @@ export interface ExistingByNameIndex {
 }
 
 /**
- * Read one page of names. Returns `null` — distinct from `[]` — when the driver
- * did not return a result set at all.
+ * [#11518] Rows per requested name an UNSCOPED page is willing to hold before
+ * it stops trying to answer in one read.
+ *
+ * ⚠️ A BUDGET, not a bound — the distinction is the whole of #11518. Nothing
+ * bounds rows-per-name here: `sys_capability.name` and `sys_permission_set.name`
+ * are unique PER ORGANIZATION (#8461 / ADR-0120 D1) and ADR-0066 D1 encourages
+ * admins to EXTEND the registry inside their own organization, so one name
+ * legitimately carries a row per organization plus the platform's. Any constant
+ * multiplier is therefore the same defect with a larger number, which is why
+ * this one buys nothing except SPEED: {@link readNamePage} asks for one row more
+ * than it, so exceeding it is DETECTED rather than silently truncated.
+ *
+ * The shape (`names.length * 4`, floored) matches the sibling generous cap on
+ * the same table in `security-plugin.ts`'s permission-set loader.
+ */
+const UNSCOPED_ROWS_PER_NAME = 4;
+
+/** Floor for the unscoped budget, so a one-name read is not budgeted at four. */
+const UNSCOPED_PAGE_FLOOR = 20;
+
+/**
+ * [#10103] Rows per requested name a SCOPED page must hold — and here the
+ * number IS a proven bound rather than a budget. `applyTenantScope` returns
+ * `organization_id = :tenant OR organization_id IS NULL`, and the declared name
+ * index is unique per organization, so each name has at most this organization's
+ * row plus one organization-less leftover. Kept exact deliberately: a scoped
+ * page that overflows it means the uniqueness the catalog is built on is not
+ * holding, and #11518's probe turns that into a loud degradation instead of a
+ * silent truncation.
+ */
+const SCOPED_ROWS_PER_NAME = 2;
+
+/** How many rows this page is willing to hold. See the two constants above. */
+function pageRowBudget(names: string[], organizationId?: string): number {
+  return organizationId
+    ? names.length * SCOPED_ROWS_PER_NAME
+    : Math.max(names.length * UNSCOPED_ROWS_PER_NAME, UNSCOPED_PAGE_FLOOR);
+}
+
+/**
+ * One page, or WHY there is none — the two `cause`s are different events with
+ * the same consequence (see {@link readNamePage}).
+ */
+type NamePage =
+  | { readonly ok: true; readonly rows: any[] }
+  | { readonly ok: false; readonly cause: 'unreadable' | 'truncated'; readonly budget: number };
+
+/**
+ * Read one page of names — `ok: false`, distinct from an empty page, when this
+ * read cannot answer.
+ *
+ * ## [#11518] Truncation is "could not answer", not "none of them exist"
+ *
+ * A `LIMIT` cannot say "one row per name", so any cap this read picks can be
+ * exceeded by a healthy install (see {@link UNSCOPED_ROWS_PER_NAME}). The rows
+ * that fall off are the highest `id`s under #4363's `ORDER BY id ASC` tie-
+ * breaker, so WHOLE NAMES vanish from the page — and a name missing from the
+ * page reads as `absent`, which routes its caller to the INSERT branch. That is
+ * the same conflation the module header refuses for a failed read, arriving
+ * through a page that succeeded.
+ *
+ * So the cap is turned into a MEASUREMENT: ask for `budget + 1` rows and
+ * compare.
+ *
+ *  - `page.length <= budget` — the driver had no `budget + 1`-th row to give,
+ *    so this page is provably the COMPLETE set for these names;
+ *  - `page.length > budget` — there is at least one more row than this read is
+ *    willing to hold, so the page is a PREFIX of the answer and cannot be read
+ *    as one. `ok: false`, and the caller degrades to the per-item read exactly
+ *    as it does for a driver without `$in`.
+ *
+ * Both directions are exact, which is what makes the budget a free choice: no
+ * legitimate page is ever mistaken for a truncated one, and no truncated page is
+ * ever mistaken for a complete one.
  */
 async function readNamePage(
   ql: any,
@@ -159,7 +259,8 @@ async function readNamePage(
   names: string[],
   organizationId?: string,
   equals?: Readonly<Record<string, unknown>>,
-): Promise<any[] | null> {
+): Promise<NamePage> {
+  const budget = pageRowBudget(names, organizationId);
   let rows: any;
   try {
     rows = await ql.find(
@@ -170,23 +271,26 @@ async function readNamePage(
         // emitted before — not the same keys plus `undefined`-valued ones,
         // which `toEqual` would have quietly accepted.
         where: { name: { $in: names }, ...(equals ?? {}) },
-        // [#10103] `names.length` was exactly right while one row existed per
-        // name. Once the catalog is per organization the driver returns this
-        // organization's rows AND any organization-less ones, so that cap
-        // TRUNCATES — and a truncated page reads as "absent", which inserts.
-        // Bounded, just wide enough to admit both.
-        limit: organizationId ? names.length * 2 : names.length,
+        // [#11518] ONE MORE than the budget, always — the extra row is the
+        // probe, and reading it back is how truncation is told from a page that
+        // merely happens to be full.
+        limit: budget + 1,
       },
       { context: lookupCtx(organizationId) },
     );
   } catch {
-    return null;
+    return { ok: false, cause: 'unreadable', budget };
   }
-  if (Array.isArray(rows)) return rows;
   // Some drivers wrap the page (`{ records }`) — a wrapped array is still an
   // answer. Anything else (undefined/null/a scalar) is not.
-  if (Array.isArray(rows?.records)) return rows.records as any[];
-  return null;
+  const page: any[] | null = Array.isArray(rows)
+    ? rows
+    : Array.isArray(rows?.records)
+      ? (rows.records as any[])
+      : null;
+  if (page === null) return { ok: false, cause: 'unreadable', budget };
+  if (page.length > budget) return { ok: false, cause: 'truncated', budget };
+  return { ok: true, rows: page };
 }
 
 /**
@@ -275,16 +379,23 @@ export async function buildExistingByName(
    * are different questions: `sys_capability.name` is unique per ORGANIZATION,
    * so one name can have a row per organization plus the platform's.
    *
-   * ⚠️ PRECONDITION, and it is the caller's to discharge: the predicate must
-   * keep the result a SINGLETON per name. `readNamePage` caps an unscoped page
-   * at `names.length`, so a question that can return more than one row per name
-   * truncates — and a truncated page reads as `absent`, which INSERTS. The
-   * curated predicate discharges this by construction: the declared unique key
-   * is `(COALESCE(organization_id, '__global__'), name)` (ADR-0120 D3), so the
+   * ⚠️ The predicate should keep the result a SINGLETON per name, and the
+   * curated one discharges that by construction: the declared unique key is
+   * `(COALESCE(organization_id, '__global__'), name)` (ADR-0120 D3), so the
    * NULL-organization bucket admits at most one row per name — "exactly the
    * bucket this key part keeps a singleton", as `sys-capability.object.ts` puts
    * it. Narrowing can only SHRINK a page, so passing a predicate never makes
    * truncation likelier than the unpredicated read it replaces.
+   *
+   * [#11518] That used to be a CORRECTNESS precondition the caller had to
+   * discharge — an unscoped page was capped at `names.length`, so a
+   * non-singleton question truncated, and a truncated page read as `absent`,
+   * which INSERTS. {@link readNamePage} now measures its own truncation, so a
+   * caller that breaks the singleton property gets the per-item read (slower,
+   * and it says so) rather than a wrong answer. What the predicate still buys is
+   * WHICH row answers: unscoped, the first row of the page is the row, so a
+   * question wide enough to match somebody else's copy resolves to it — the
+   * separate harm #11451 exists for, and one no page budget can repair.
    */
   equals?: Readonly<Record<string, unknown>>,
 ): Promise<ExistingByNameIndex> {
@@ -316,17 +427,31 @@ export async function buildExistingByName(
   if (wanted.length === 0) return fromIndex;
 
   for (let i = 0; i < wanted.length; i += NAME_CHUNK_SIZE) {
-    const page = await readNamePage(ql, object, wanted.slice(i, i + NAME_CHUNK_SIZE), organizationId, equals);
-    if (page === null) {
+    const outcome = await readNamePage(ql, object, wanted.slice(i, i + NAME_CHUNK_SIZE), organizationId, equals);
+    if (!outcome.ok) {
       // ⛔ NOT "none of them exist" — see the module header. Fall back to the
       // per-item read so behaviour is exactly what it was before the hoist.
+      //
+      // [#11518] TWO events, ONE consequence. A truncated page is not a broken
+      // driver — the read worked and the answer is simply wider than one page —
+      // so it is named separately, because the remedies differ: an unreadable
+      // database is an outage, while a truncated page is an install whose
+      // catalog carries more rows per name than this read budgets for, and the
+      // only cost is the round trips the batching removed.
       logger?.warn?.(
-        '[security] batched seed existence read failed — falling back to one read per item',
-        { object, names: wanted.length, ...(organizationId ? { organization: organizationId } : {}) },
+        outcome.cause === 'truncated'
+          ? '[security] batched seed existence read TRUNCATED — more rows carry these names than one page holds, so the page cannot answer; falling back to one read per item'
+          : '[security] batched seed existence read failed — falling back to one read per item',
+        {
+          object,
+          names: wanted.length,
+          ...(outcome.cause === 'truncated' ? { rowBudget: outcome.budget } : {}),
+          ...(organizationId ? { organization: organizationId } : {}),
+        },
       );
       return perItemIndex(ql, object, organizationId, equals);
     }
-    for (const row of page) {
+    for (const row of outcome.rows) {
       const name = row?.name;
       if (name == null) continue;
       // [#10103] EVERY row is kept, not just the first. A scoped page can carry

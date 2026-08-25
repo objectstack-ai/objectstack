@@ -1013,27 +1013,34 @@ describe('#11451 — the batched curated read must carry its predicate, not filt
     expect((found as { row: any }).row.managed_by).toBe('admin');
   });
 
-  it('WITHOUT the predicate the page also TRUNCATES, and a truncated page reads as "absent"', async () => {
+  it('WITHOUT the predicate the page hauls every organization\'s copy — and the wrong row answers', async () => {
     const ql = fixture();
-    // 10 rows carry the 8 requested names; the unscoped page is capped at 8, so
-    // the two highest-id rows fall off — and their names are platform rows that
-    // demonstrably exist.
+    // ⚠️ [#11518] THIS TEST USED TO PIN THE OPPOSITE OUTCOME, and the change is
+    // the repair rather than a weakened assertion. The unscoped page was capped
+    // at one row per requested name, so on this same 10-row fixture the two
+    // highest-id platform rows fell off the 8-row page and their names read as
+    // `absent` — which routes the caller to its INSERT branch. That was #11518's
+    // measurement, taken here; the cap is now measured rather than trusted
+    // (`seed-name-lookup.ts`), so the page carries all ten rows and loses nobody.
     const index = await buildExistingByName(ql, 'sys_capability', CURATED_NAMES);
-    const missing: string[] = [];
     for (const name of CURATED_NAMES) {
-      if ((await index.get(name)).status === 'absent') missing.push(name);
-    }
-    expect(missing).toEqual([CURATED_NAMES[6], CURATED_NAMES[7]]);
-    // Their rows are right there. "Absent" would send the curated half to its
-    // insert branch, where the unique key refuses the write and the seeder
-    // reports a `blockedCurated` collision — every boot, on a healthy install.
-    for (const name of missing) {
-      expect(ql.rows.some((r) => r.name === name && r.managed_by === 'platform')).toBe(true);
+      expect((await index.get(name)).status, name).toBe('present');
     }
 
-    // …and the predicated read over the same fixture loses nobody.
+    // What #11518 does NOT repair — and cannot — is WHICH row answers. The
+    // unpredicated read still hauls both organizations' copies into the page,
+    // and unscoped the first row is the row, so an organization's authored copy
+    // answers for the platform's own definition. That is #11451 exactly, and no
+    // page budget reaches it: only the predicate does.
+    const shared = await index.get(SHARED);
+    expect((shared as { row: any }).row.id).toBe('aaa_org_jia');
+    expect((shared as { row: any }).row.managed_by).toBe('admin');
+
+    // …while the predicated read over the same fixture answers with the
+    // platform's row for every name, and never sees the copies at all.
     const scoped = await buildExistingByName(ql, 'sys_capability', CURATED_NAMES, undefined, undefined, CURATED_LOOKUP);
     for (const name of CURATED_NAMES) expect((await scoped.get(name)).status).toBe('present');
+    expect(((await scoped.get(SHARED)) as { row: any }).row.id).toBe('cap_0');
   });
 
   it('the seeder itself is unharmed by the fixture that breaks the unpredicated read', async () => {
@@ -1059,5 +1066,191 @@ describe('#11451 — the batched curated read must carry its predicate, not filt
     expect(out.seeded).toBe(0);
     expect(out.blockedCurated).toBe(0);   // ⛔ never a collision that nobody saw
     expect(warn.mock.calls.map((c) => c[0]).some((m) => String(m).includes('could not be read'))).toBe(true);
+  });
+});
+
+/**
+ * [#11518] THE UNSCOPED PAGE CAP IS A MEASUREMENT, NOT A PROMISE.
+ *
+ * `readNamePage` used to cap an unscoped page at `names.length`, which is exact
+ * only while one row can exist per name. Since #8461 / ADR-0120 D1 the identity
+ * tables are unique PER ORGANIZATION and ADR-0066 D1 encourages admins to EXTEND
+ * the registry inside their own organization, so one name legitimately carries a
+ * row per organization plus the platform's — and the rows that fall off a full
+ * page are the highest `id`s under #4363's `ORDER BY id ASC`, so WHOLE NAMES
+ * vanish. A vanished name reads as `absent`, and `absent` INSERTS.
+ *
+ * ⛔ `names.length * 2` would have been the same defect with a larger constant:
+ * rows-per-name is bounded only by the number of organizations. So the cap is
+ * not widened to a "safe" number — the read asks for ONE ROW MORE than it is
+ * willing to hold, and a page that comes back with that extra row is a PREFIX of
+ * the answer. It joins the module's existing "could not answer" causes and
+ * degrades to the per-item read, which is the fallback that was already there
+ * for a driver without `$in`.
+ *
+ * ⚠️ These tests use the `makeQl` double at the top of this file precisely
+ * because it HONOURS `limit` and orders by `id` ascending — the two shipped
+ * driver behaviours the defect is made of. A double that ignored `limit` could
+ * not express any of this.
+ */
+describe('#11518 — a page that could not fit the answer must not report "absent"', () => {
+  const CURATED_NAMES = KNOWN_CAPABILITIES.map((c) => c.name);
+  /** The name organizations also hold — ADR-0066 D1 "admins EXTEND". */
+  const SHARED = CURATED_NAMES[0];
+
+  /** Record every query the double is asked, in order. */
+  function recordFinds(ql: any): any[] {
+    const seen: any[] = [];
+    const inner = ql.find;
+    ql.find = async (object: string, q: any, ctx?: any) => {
+      seen.push({ object, ...q });
+      return inner(object, q, ctx);
+    };
+    return seen;
+  }
+
+  /** Every curated name in the platform bucket, plus `copies` organizations' rows for one of them. */
+  function fixture(copies = 2) {
+    const ql = makeQl();
+    // Organization ids sort BEFORE the platform's, so they take the head of any
+    // page and it is the PLATFORM rows that fall off the end.
+    for (let i = 0; i < copies; i++) {
+      ql.rows.push({
+        id: `aaa_org_${String(i).padStart(3, '0')}`, organization_id: `org_${i}`, name: SHARED,
+        label: `Copy ${i}`, description: `copy ${i}`, scope: 'org', managed_by: 'admin', active: true,
+      });
+    }
+    KNOWN_CAPABILITIES.forEach((c, i) => ql.rows.push({
+      id: `cap_${i}`, name: c.name, label: c.label, description: c.description,
+      scope: c.scope, managed_by: 'platform', organization_id: null, active: true,
+    }));
+    return ql;
+  }
+
+  it('POSITIVE CONTROL: the cap that was live before this fix truncates on this fixture', async () => {
+    // Harness-level and stable — it pins the DOUBLE, so it holds before and
+    // after the repair, and it is what makes the next test meaningful. Without
+    // it, "no name reads absent" could be green because the trap was never set.
+    const ql = fixture();
+    const page: any[] = await ql.find('sys_capability', {
+      where: { name: { $in: CURATED_NAMES } },
+      limit: CURATED_NAMES.length, // ← the UNSCOPED cap this card repairs
+    });
+    expect(ql.rows).toHaveLength(CURATED_NAMES.length + 2);
+    expect(page).toHaveLength(CURATED_NAMES.length);
+    const namesOnThePage = new Set(page.map((r) => r.name));
+    expect(namesOnThePage.size, 'two names are missing from a page that is full').toBe(CURATED_NAMES.length - 2);
+    for (const lost of [CURATED_NAMES[6], CURATED_NAMES[7]]) {
+      expect(namesOnThePage.has(lost)).toBe(false);
+      expect(ql.rows.some((r: any) => r.name === lost && r.managed_by === 'platform')).toBe(true);
+    }
+  });
+
+  it('reads every name whose row exists, in ONE round trip', async () => {
+    const ql = fixture();
+    const finds = recordFinds(ql);
+    const warn = vi.fn();
+    const index = await buildExistingByName(ql, 'sys_capability', CURATED_NAMES, { warn });
+
+    const absent: string[] = [];
+    for (const name of CURATED_NAMES) {
+      if ((await index.get(name)).status === 'absent') absent.push(name);
+    }
+    // ⛔ The two names the page used to lose. Their rows are right there.
+    expect(absent).toEqual([]);
+    // The whole point of #10946 survives: an install that does not overflow the
+    // budget still pays exactly ONE read, and says nothing.
+    expect(finds).toHaveLength(1);
+    expect(finds[0].limit).toBeGreaterThan(CURATED_NAMES.length);
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('an overflowing page degrades to the per-item read — LOUDLY, and never to "absent"', async () => {
+    // 40 organizations have extended one curated name (ADR-0066 D1). No page
+    // budget covers this, which is the point: the bound is the organization
+    // count, so the read has to notice rather than guess.
+    const ql = fixture(40);
+    const finds = recordFinds(ql);
+    const warn = vi.fn();
+    const index = await buildExistingByName(ql, 'sys_capability', CURATED_NAMES, { warn });
+
+    for (const name of CURATED_NAMES) {
+      expect((await index.get(name)).status, name).toBe('present');
+    }
+
+    // The degradation is structural, not incidental: one batched read that could
+    // not answer, then one read per name — `limit: 1`, exactly the shape the
+    // loops used before the hoist.
+    expect(finds).toHaveLength(1 + CURATED_NAMES.length);
+    expect(finds[0].where).toEqual({ name: { $in: CURATED_NAMES } });
+    expect(finds[0].limit).toBeGreaterThan(CURATED_NAMES.length);
+    expect(finds.slice(1).every((q) => q.limit === 1)).toBe(true);
+
+    // …and the answer is the one the pre-#10946 per-item read gave: unscoped,
+    // the first row by id is the row.
+    expect(((await index.get(CURATED_NAMES[7])) as { row: any }).row.id).toBe('cap_7');
+    expect(((await index.get(SHARED)) as { row: any }).row.id).toBe('aaa_org_000');
+
+    // Loud: ONE line, naming the object and the budget it could not fit inside.
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(String(warn.mock.calls[0][0])).toContain('TRUNCATED');
+    expect(String(warn.mock.calls[0][0])).toContain('falling back to one read per item');
+    expect(warn.mock.calls[0][1]).toMatchObject({ object: 'sys_capability', names: CURATED_NAMES.length });
+    expect(typeof warn.mock.calls[0][1].rowBudget).toBe('number');
+  });
+
+  it('an unreadable page is still reported as a FAILED read, not as a truncated one', async () => {
+    // The two causes share a consequence and must not share a diagnostic: an
+    // outage and a wide catalog take opposite remedies.
+    const ql = Object.assign(fixture(), { async find() { throw new Error('fake driver: read unavailable'); } });
+    const warn = vi.fn();
+    await buildExistingByName(ql, 'sys_capability', CURATED_NAMES, { warn });
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(String(warn.mock.calls[0][0])).toContain('batched seed existence read failed');
+    expect(String(warn.mock.calls[0][0])).not.toContain('TRUNCATED');
+  });
+
+  it('the SCOPED arm keeps #10103\'s exact bound — its probe never fires on a healthy catalog', async () => {
+    // Scoped, the bound is PROVEN rather than budgeted: `applyTenantScope`
+    // returns `organization_id = :tenant OR organization_id IS NULL` and the
+    // declared name index is unique per organization, so two rows per name is
+    // the ceiling. #10103's cap stays exactly that.
+    const ql = makeQl();
+    ql.rows.push(
+      { id: 'a_residue', organization_id: null, name: 'manage_users', label: 'Residue', description: 'pre-fix', scope: 'org', managed_by: 'platform', active: true },
+      { id: 'b_own', organization_id: 'org_jia', name: 'manage_users', label: 'Own', description: 'ours', scope: 'org', managed_by: 'platform', active: true },
+    );
+    const finds = recordFinds(ql);
+    const warn = vi.fn();
+    const index = await buildExistingByName(ql, 'sys_capability', ['manage_users'], { warn }, 'org_jia');
+
+    const found = await index.get('manage_users');
+    expect(found.status).toBe('present');
+    expect((found as { row: any }).row.id).toBe('b_own');
+    expect(finds).toHaveLength(1);
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('a SCOPED page that overflows that bound degrades too — the uniqueness it rests on is not holding', async () => {
+    // Three rows for one name under one organization's scope is only reachable
+    // where the declared unique index is absent or not yet created — the same
+    // deployment the module header calls out as the one the pre-#10946 shape
+    // duplicated rows on. It is now a loud degradation instead of a silent
+    // truncation.
+    const ql = makeQl();
+    ql.rows.push(
+      { id: 'a_residue', organization_id: null, name: 'manage_users', label: 'Residue', description: 'pre-fix', scope: 'org', managed_by: 'platform', active: true },
+      { id: 'b_dup', organization_id: 'org_jia', name: 'manage_users', label: 'Dup', description: 'dup', scope: 'org', managed_by: 'platform', active: true },
+      { id: 'c_own', organization_id: 'org_jia', name: 'manage_users', label: 'Own', description: 'ours', scope: 'org', managed_by: 'platform', active: true },
+    );
+    const warn = vi.fn();
+    const index = await buildExistingByName(ql, 'sys_capability', ['manage_users'], { warn }, 'org_jia');
+
+    const found = await index.get('manage_users');
+    expect(found.status).toBe('present');
+    expect((found as { row: any }).row.organization_id).toBe('org_jia');
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(String(warn.mock.calls[0][0])).toContain('TRUNCATED');
+    expect(warn.mock.calls[0][1]).toMatchObject({ organization: 'org_jia' });
   });
 });

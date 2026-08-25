@@ -21,6 +21,14 @@
 
 `Fits in an agent's context` · `Typed, validated, governed` · `Self-host anywhere` · Apache-2.0
 
+<p align="center">
+  <a href="https://youtu.be/CX_FlOoOtr0">
+    <img src="docs/screenshots/hero-cover-dark.png" width="900" alt="ObjectStack in 90 Seconds — watch the overview on YouTube">
+  </a>
+  <br>
+  <a href="https://youtu.be/CX_FlOoOtr0"><b>▶&nbsp; Watch: ObjectStack in 90 Seconds</b></a>
+</p>
+
 **Everything in this repo is the open stack** — protocol, microkernel, SDK,
 CLI, and the production runtime, Apache-2.0 with no open-core asterisks. The
 workflow here is **build & ask with Claude Code** (or any coding agent): the

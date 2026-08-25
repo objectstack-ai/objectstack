@@ -6,11 +6,11 @@
  * ## The measurement this suite is built from
  *
  * On live PostgreSQL 16.13, `driver-sql` maps a `boolean` field to a real PG
- * `boolean` column and `SQL_AGGREGATE_FUNCTIONS` lowers the arithmetic
- * aggregates to a bare function name with no cast, so the statement reaches the
- * server as `avg("flag")`. Postgres has no `avg`/`sum`/`min`/`max` over
- * `boolean`, and on `origin/main` the failure escaped `SqlDriver.aggregate()`
- * un-enveloped:
+ * `boolean` column, and — until #11635 delivered the cast — the lowering
+ * emitted a bare function name, so the statement reached the server as
+ * `avg("flag")`. Postgres has no `avg`/`sum`/`min`/`max` over `boolean`, and
+ * on the `origin/main` of #11455's day the failure escaped
+ * `SqlDriver.aggregate()` un-enveloped:
  *
  * ```
  * sum(flag) => THREW code=42883 status=undefined
@@ -23,23 +23,27 @@
  *
  * ## ⛔ THE FENCE — this suite is the ENVELOPE half and nothing else
  *
- * Whether the platform should ANSWER A NUMBER here (by casting boolean to int
- * in the lowering) or REFUSE is a contract question, and it belongs to #11152
- * (spec seat) and — for `min`/`max` — #11249. Nothing in this file decides it.
- * What is asserted is the half that holds either way: **when it fails, the
- * failure carries a catalogued code and a status.**
+ * When this suite landed, whether the platform should ANSWER A NUMBER over a
+ * boolean aggregand (by casting boolean to int in the lowering) or REFUSE was
+ * a contract question belonging to #11152 (spec seat) and — for `min`/`max` —
+ * #11249, so this file pinned only the half that held either way: **when it
+ * fails, the failure carries a catalogued code and a status.** The envelope
+ * must still never be `INVALID_QUERY` / 400 — that code would say *"asking
+ * for a mean over a flag column is your mistake"*, a verdict about the
+ * request the exit's signal cannot support.
  *
- * Read the two pins below that exist to keep that fence honest:
- *
- * - the envelope must NOT be `INVALID_QUERY` / 400. That code is the platform
- *   saying *"asking for a mean over a flag column is your mistake"* — which is
- *   precisely one of the two answers #11152 has yet to choose between, and
- *   declaring it here would decide the card from the driver.
- * - the three dialects' ARITHMETIC answers are deliberately NOT pinned. Measured
- *   2026-08-24 while taking this card's readings: SQLite answers (`sum` 3,
- *   `avg` 0.5, `min` false, `max` true), MySQL answers too (`tinyint(1)`:
- *   `sum` 3, `avg` 0.5000, `min` 0, `max` 1), Postgres refuses. Freezing that
- *   divergence in a test is the same pre-emption by another route.
+ * #11249 has since RULED (maintainer 2026-08-23): the face answers — `sum` /
+ * `avg` arithmetically, `min` / `max` with `false` / `true` in JSON — and
+ * [#11635] delivered the Postgres cast, so a boolean aggregand no longer
+ * produces the `42883` this suite's original PG-only block was built from.
+ * That block carried its own retirement clause ("if #11152 / #11249 rule that
+ * the lowering should CAST, these cases stop failing and this block is
+ * RETIRED by that card") and is retired by #11635 accordingly; the ruled
+ * ANSWERS are pinned across all three dialects by
+ * `sql-driver-11635-boolean-aggregand-answers.test.ts`. What this file keeps
+ * is unchanged by the ruling: an error the classifier does not claim — a
+ * missing table, a wording no dialect parser reads — still leaves as the
+ * terminal envelope, on every cell.
  *
  * ## Why `DATABASE_ERROR` / 500, from the code rather than from taste
  *
@@ -94,7 +98,6 @@ import { DIALECT_CELLS, declareDialectCell, type DialectCell } from './live-dial
 
 const TABLE = 'agg_fault_task';
 const MISSING_TABLE = 'agg_fault_never_created';
-const BOOL_TABLE = 'agg_fault_bool';
 
 /**
  * The caller's value, distinctive on purpose, asserted absent from every
@@ -304,106 +307,19 @@ for (const cell of DIALECT_CELLS) {
 }
 
 // ─────────────────────────────────────────────────────────────────
-// POSTGRES-ONLY — the card's own route
+// RETIRED [#11635] — the POSTGRES-ONLY boolean row
 // ─────────────────────────────────────────────────────────────────
-
-/**
- * The boolean aggregate is a fact about POSTGRES' function catalog: it is the
- * only one of the three dialects that stores a `boolean` field as a real
- * `boolean` column with no arithmetic aggregates defined over it. SQLite and
- * MySQL both answer arithmetically (see the head note), so neither cell can
- * show this row at all.
- *
- * ⚠️ If #11152 / #11249 rule that the lowering should CAST, these cases stop
- * failing and this block is RETIRED by that card — it is not weakened here in
- * anticipation of a ruling that has not happened.
- */
-const PG = DIALECT_CELLS.find((c) => c.id === 'pg')!;
-
-declareDialectCell(PG, 'aggregate backend-fault envelope — the boolean row', (cell) => {
-describe('[#11455] postgres — an arithmetic aggregate over a boolean column', () => {
-  let driver: SqlDriver;
-
-  beforeAll(async () => {
-    driver = new SqlDriver(cell.config());
-    await driver.execute(`drop table if exists ${BOOL_TABLE}`).catch(() => {});
-    await driver.initObjects([
-      { name: BOOL_TABLE, fields: { flag: { type: 'boolean' }, note: { type: 'string' } } },
-    ]);
-    for (const [id, flag] of [['b1', true], ['b2', false], ['b3', true]] as const) {
-      await driver.create(BOOL_TABLE, { id, flag, note: SECRET_LITERAL }, { bypassTenantAudit: true });
-    }
-  });
-
-  afterAll(async () => {
-    await driver.execute(`drop table if exists ${BOOL_TABLE}`).catch(() => {});
-    await driver.disconnect();
-  });
-
-  // ⭐ THE CARD. On `origin/main` each of these four left the driver as
-  // Postgres' own error object: `code: '42883'`, `status: undefined`, and
-  // `select avg("flag") as "n" from "…" - function avg(boolean) does not exist`
-  // as the message.
-  it.each(['sum', 'avg', 'min', 'max'] as const)(
-    '%s over a boolean column carries a catalogued code and a status',
-    async (func) => {
-      const err = await caught(() =>
-        driver.aggregate(BOOL_TABLE, { aggregations: [{ function: func, field: 'flag', alias: 'n' }] }),
-      );
-      expect(err.code, `${func}: code`).toBe('DATABASE_ERROR');
-      expect(err.status, `${func}: status`).toBe(500);
-      expect(typeof err.status, `${func}: status is declared, not undefined`).toBe('number');
-      expectNoStatementShape(String(err.message), BOOL_TABLE, func);
-      // The SQLSTATE the card measured, kept where an operator and every
-      // cause-following predicate can still read it.
-      expect((err as { cause?: any }).cause?.code, `${func}: the pg SQLSTATE`).toBe('42883');
-    },
-  );
-
-  // ⛔ THE FENCE, asserted rather than promised. `INVALID_QUERY` / 400 is the
-  // platform saying "a mean over a flag column is YOUR mistake" — one of the
-  // two answers #11152 (and #11249 for min/max) has yet to choose between. The
-  // driver declares no verdict about the request here.
-  it('claims NOTHING about whether a boolean aggregate should answer (#11152 / #11249)', async () => {
-    const err = await caught(() =>
-      driver.aggregate(BOOL_TABLE, { aggregations: [{ function: 'avg', field: 'flag', alias: 'n' }] }),
-    );
-    expect(err.code, 'not a request verdict').not.toBe('INVALID_QUERY');
-    expect(err.status, 'not a request verdict').not.toBe(400);
-    expect(String(err.message), 'no verdict prose about the function or the field')
-      .not.toMatch(/boolean|avg|flag/i);
-  });
-
-  // POSITIVE CONTROL — the table, the column and the rows are real, and the
-  // aggregate door still answers over the very same boolean column for the two
-  // functions Postgres DOES define. Without this the block above could go green
-  // against a table that never existed.
-  it('CONTROL count / count_distinct over the same boolean column still answer', async () => {
-    const counted = await driver.aggregate(BOOL_TABLE, {
-      aggregations: [{ function: 'count', field: 'flag', alias: 'n' }],
-    });
-    expect(Number(counted[0].n), 'count over the boolean column').toBe(3);
-    const distinct = await driver.aggregate(BOOL_TABLE, {
-      aggregations: [{ function: 'count_distinct', field: 'flag', alias: 'n' }],
-    });
-    expect(Number(distinct[0].n), 'count_distinct over the boolean column').toBe(2);
-  });
-
-  // The disclosure half, on the route that carries a caller-authored value: the
-  // dialect text goes to the log, never to the caller.
-  it('the dialect text reaches the SERVER LOG and not the caller', async () => {
-    const { err, logged } = await withLog(driver, () =>
-      driver.aggregate(BOOL_TABLE, { aggregations: [{ function: 'avg', field: 'flag', alias: 'n' }] }),
-    );
-    expect(err.code).toBe('DATABASE_ERROR');
-    expectNoStatementShape(String(err.message), BOOL_TABLE, 'avg');
-    const line = logged.find((l) => l.includes('DATABASE_ERROR'));
-    expect(line, 'the operator must still be able to read the backend diagnostic').toBeDefined();
-    // POSITIVE CONTROL — the words really were in the dialect's text, so their
-    // absence from the caller's message is a withholding, not a statement about
-    // a string that never held them.
-    expect(String(line)).toContain('function avg(boolean) does not exist');
-    expect(String(line)).toContain('42883');
-  });
-});
-});
+//
+// A PG-only block here pinned the four `42883` failures this suite's head
+// note was measured from (`sum`/`avg`/`min`/`max` over a real `boolean`
+// column, each leaving as DATABASE_ERROR/500 with the SQLSTATE in `cause`).
+// It carried its own retirement clause — "if #11152 / #11249 rule that the
+// lowering should CAST, these cases stop failing and this block is RETIRED by
+// that card" — and #11249's ruling (maintainer 2026-08-23) fired it: the
+// lowering now casts on Postgres, the statements answer, and there is no
+// `42883` left on this route to envelope. The ruled answers — and this
+// block's `count`/`count_distinct` controls, which the acceptance criterion
+// keeps unchanged — are pinned on ALL THREE dialects by
+// `sql-driver-11635-boolean-aggregand-answers.test.ts`. The envelope
+// invariant itself did not move: the all-dialect sweep above measures it on a
+// route (a table that was never provisioned) no ruling can reach.

@@ -531,7 +531,7 @@ you must say which you expect:
    ```
    ✗ connectors.0.fieldMappings.0.transform
      invalid_type: `FieldMapping.transform` … was removed in @objectstack/spec
-     17.0.0 (#5552, ADR-0049) … Delete the key. The transform pipeline that IS
+     17.0.0 (ADR-0049) … Delete the key. The transform pipeline that IS
      enforced is the import mapping's … Run `os migrate meta --from 16` to
      rewrite it automatically.
      expected: never

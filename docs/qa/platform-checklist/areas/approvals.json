@@ -280,7 +280,7 @@
           "evidence": "request read"
         },
         {
-          "clause": "the gate is server-side: a forged direct POST of the decision route as the submitter is rejected (ADR-0057 D10 — UI absence alone is a client courtesy)",
+          "clause": "the gate is server-side: a forged direct POST of the decision route as the submitter is rejected (ADR-0124 D1 — UI absence alone is a client courtesy)",
           "oracle": "api",
           "verify": "the forged approve answers FORBIDDEN (403-mapped); test BOTH sides — the entitled approver's decision on the same request succeeds",
           "evidence": "the rejected call + the entitled approver's accepted call"
@@ -298,7 +298,7 @@
       "traps": ["hydration-race", "wrong-persona"],
       "source": [
         "#3358 §1",
-        "ADR-0057 D10 (server is the authoritative visibility gate)",
+        "ADR-0124 D1 (server is the authoritative visibility gate)",
         "examples/app-showcase/src/security/seed-approval-demo.ts (Mei Phone: 'a clean submitter — a requester who is never also one of her own approvers')"
       ],
       "history": [

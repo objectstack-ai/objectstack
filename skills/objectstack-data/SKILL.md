@@ -81,7 +81,7 @@ database table and exposes automatic CRUD APIs.
 | `titleFormat` | — | **Retired (ADR-0079)** — a render-only template the server can't return or query. Use `nameField`; for a composite title, designate a `returnType: 'text'` formula field as `nameField` |
 | `enable` | — | Capability flags (trackHistory, searchable, apiEnabled, etc.) |
 | `fieldGroups` | — | Ordered list of logical field groups for forms/detail pages (see [Field Groups](#field-groups-mvp)) |
-| `lifecycle` | `record` semantics (permanent) | Data retention/rotation/archival contract (ADR-0057). **Required for append-only, high-write-rate objects** — a `telemetry`/`transient`/`event`/`audit` class must declare a bounding policy or parsing fails (see [Data Lifecycle & Retention](./rules/lifecycle.md)) |
+| `lifecycle` | `record` semantics (permanent) | Data retention/rotation/archival contract. **Required for append-only, high-write-rate objects** — a `telemetry`/`transient`/`event`/`audit` class must declare a bounding policy or parsing fails (see [Data Lifecycle & Retention](./rules/lifecycle.md)) |
 
 ### Object Capabilities (`enable`)
 
@@ -142,7 +142,7 @@ also lands in the auto-default set when the object declares no
 driver materializes a column for it, so a `$contains` predicate against one has
 nothing to scan (the SQL driver would emit a `WHERE` over a column that does not
 exist). CEL also only reads this record's own fields (`record.<field>`), so a
-formula cannot fetch the related title in the first place. Since #6674 the
+formula cannot fetch the related title in the first place. The
 mistake is **refused, not silent**: a `formula` entry in any `searchableFields`
 — the object's own set included — is an `os validate` error
 (`searchable-field-unsearchable`), and a request naming one is `400
@@ -172,7 +172,7 @@ hint: 'search' scans this object's own columns, so a related record's column
 cannot be a search target — expand the relation and search the related object,
 or copy the value onto a stored text field here. Clients echo this declaration
 verbatim as the '$searchFields' override, so a stale entry becomes a 400
-INVALID_FIELD on list search (#4254), not just a quietly narrowed one.
+INVALID_FIELD on list search, not just a quietly narrowed one.
 ```
 
 A request carrying the dotted path is `400 INVALID_FIELD`:
@@ -281,7 +281,7 @@ export const Invoice = ObjectSchema.create({
 - **`readonly: true` governs the end-user surface, not trusted system writers.**
   A non-system write (REST/UI, and any `runAs:'user'` flow — the default) has
   the field **silently stripped** from an UPDATE payload; the write reports
-  success but the value never lands (#2948). System-context writes —
+  success but the value never lands. System-context writes —
   `runAs:'system'` flows, system hooks, seeds, imports, migrations — are exempt
   and DO write it. So the pattern "users can't edit this, but automation
   maintains it" is expressed by declaring the field `readonly` **and** running
@@ -379,13 +379,13 @@ export default ObjectSchema.create({
 The metadata→DB sync is **additive-only**: new tables/columns are created on
 boot, but existing columns are **never** altered or dropped. A non-additive
 change to an object that already has data silently diverges from the physical
-schema, and the **database column wins at write time** (#2186):
+schema, and the **database column wins at write time**:
 
 | Change | Existing DB on restart |
 |--------|------------------------|
 | add object / field / index | ✅ applied automatically (additive) |
 | `required: true → false` (relax `NOT NULL`) | dev auto-heals (`autoMigrate:'safe'`); otherwise `os migrate apply` |
-| `unique` re-scoped global → per-tenant (#3696) | dev auto-heals; otherwise `os migrate apply` (`replace_unique_index`) |
+| `unique` re-scoped global → per-tenant | dev auto-heals; otherwise `os migrate apply` (`replace_unique_index`) |
 | type / length change, drop field, rename | `os migrate apply` (`--allow-destructive` for drops / tightenings) |
 | declared index removed, or its columns changed | `os migrate apply` (`--allow-destructive` when it drops, or rebuilds as `UNIQUE`) |
 
@@ -445,7 +445,7 @@ See [rules/relationships.md](./rules/relationships.md) for detailed examples.
 > **array of ids** on the record — reference elements positionally
 > (`{record.tags.0}` in flow values). It is NOT a junction table. Reach for a
 > **junction object** (two lookups) only when the relationship itself carries
-> attributes (role, added_at, …). (#1872)
+> attributes (role, added_at, …).
 
 ### Validation Patterns
 
@@ -453,7 +453,7 @@ See [rules/relationships.md](./rules/relationships.md) for detailed examples.
 
 > On **insert**, an optional field omitted from the payload reads as `null` in a
 > validation predicate — so `record.due_date == null` matches an omitted field the
-> same as an explicit `null` (#1871). (On update, the prior record supplies it.)
+> same as an explicit `null`. (On update, the prior record supplies it.)
 
 The **complete** set of validation types (`ValidationRuleSchema` discriminators):
 - `script` — Formula expression (inverted logic)
@@ -463,7 +463,7 @@ The **complete** set of validation types (`ValidationRuleSchema` discriminators)
 - `json_schema` — Validate a JSON field against a JSON Schema
 - `conditional` — Apply a nested rule only `when` a predicate holds
 
-> **There is NO `unique` validation type** (removed from the spec in #1475).
+> **There is NO `unique` validation type** (removed from the spec).
 > Enforce uniqueness — including composite — with a **unique index**, and state
 > its scope (ADR-0120):
 > `indexes: [{ fields: ['department', 'email'], unique: 'organization' }]`.
@@ -484,7 +484,7 @@ indexes: [
 ]
 ```
 
-> **`type` and `partial` were retired at protocol 17** (#5248, #4943): no driver
+> **`type` and `partial` were retired at protocol 17**: no driver
 > ever read either, so an authored `type` chose no access method and an authored
 > `partial` produced a full index with the predicate discarded. Both are now a
 > `tsc` error and a parse error; `os migrate meta --from 16` strips them. Access
@@ -541,7 +541,7 @@ Mirror these CRM-style patterns when designing enterprise metadata objects:
 | Capability gating | `src/objects/*.object.ts` | Use `enable` flags (`trackHistory`, `apiMethods`, `files`, `feeds`, `activities`) per object |
 | Index + validation pairing | `src/objects/*.object.ts` | Keep `indexes[]` aligned to common filters and enforce invariants with `validations[]` |
 | Relationship constraints | `src/objects/*.object.ts` | Use `lookup` + `lookupFilters` (`[{ field, operator, value }]`) for constrained child selection |
-| Lifecycle automation | `src/objects/*.hook.ts` | Use a lifecycle **hook** (authored with `defineHook()`, registered via `defineStack({ hooks })` or the `*.hook.ts` convention scan) or a top-level `record_change` flow for field updates triggered by record changes. There is **no** object-level `workflows[]` field — authoring one is a build error (#1535). |
+| Lifecycle automation | `src/objects/*.hook.ts` | Use a lifecycle **hook** (authored with `defineHook()`, registered via `defineStack({ hooks })` or the `*.hook.ts` convention scan) or a top-level `record_change` flow for field updates triggered by record changes. There is **no** object-level `workflows[]` field — authoring one is a build error. |
 | State transitions | `src/objects/*.object.ts` | Prefer explicit `state_machine` validation rules (one per state field) — there is **no** separate `stateMachines` map |
 
 For metadata authoring, keep expressions in CEL (`P\`...\``, `F\`...\``,
@@ -720,7 +720,7 @@ A legacy SQL-style `=` / `IN (...)` predicate still compiles via a **deprecated*
 | Placeholder | Resolves to |
 |:--|:--|
 | `current_user.id` | the caller's user id (ownership) |
-| `current_user.email` | the caller's email (ADR-0056 #2054) |
+| `current_user.email` | the caller's email (ADR-0056) |
 | `current_user.organization_id` | the caller's tenant |
 | `current_user.org_user_ids` | ids of users in the same org (for `IN`) |
 | `current_user.positions` | the caller's positions (for `IN`; ADR-0090 D3) |
@@ -789,7 +789,7 @@ tenancy: {
 ```
 
 - The former `shared` / `isolated` / `hybrid` mode key (`tenancy.strategy`) was
-  **retired** (#2763) — an unknown `tenancy` key is now a loud parse error with
+  **retired** — an unknown `tenancy` key is now a loud parse error with
   upgrade guidance, never silently stripped.
 - **Database-per-tenant isolation is not object metadata** — it is an
   environment/deployment choice (each environment carries its own database URL).
@@ -970,11 +970,11 @@ export const SetupApp = defineApp({
 | Feature | When to Consider |
 |:--------|:-----------------|
 | `tenancy` | Multi-tenant SaaS — `{ enabled: true, tenantField: 'tenant_id' }` row-level isolation (DB-per-tenant is an environment/deployment choice, not object metadata) |
-| `lifecycle` | Append-only / high-write-rate objects — retention / rotation / archival contract (ADR-0057); see [rules/lifecycle.md](./rules/lifecycle.md) |
+| `lifecycle` | Append-only / high-write-rate objects — retention / rotation / archival contract; see [rules/lifecycle.md](./rules/lifecycle.md) |
 | per-field `trackHistory` | Render a field's value changes as human-readable activity-timeline entries (pair with `enable.trackHistory`, ADR-0052 §5b) |
 
 > The former `softDelete` / `versioning` object keys were **removed** from the
-> spec (#2377, ADR-0049 enforce-or-remove) — authoring them is now a build
+> spec (ADR-0049 enforce-or-remove) — authoring them is now a build
 > error with upgrade guidance. `partitioning` / `cdc` were never schema keys,
 > and the `encryptionConfig` / `maskingRule` field keys were pruned (see
 > [Sensitive fields](#sensitive-fields--secret-type--requiredpermissions)).
@@ -1064,7 +1064,7 @@ its UUID). The seed runner resolves at load time. Order seeds so parents
 appear before children in the exported array:
 
 > If a lookup value matches no natural key, the loader now falls back to
-> resolving it as the target's `id` (#1814) — so a reference to a real existing
+> resolving it as the target's `id` — so a reference to a real existing
 > record by internal id resolves instead of dangling to null. Natural keys
 > remain the portable default; rely on the id fallback only for records you
 > didn't seed (e.g. a system user).
@@ -1193,7 +1193,7 @@ os validate     # Zod schema + CEL predicates (record.<field> existence) + bindi
 It catches what otherwise fails **silently at runtime**: a bare field ref in a
 `requiredWhen` / `readonlyWhen` / `visibleWhen`, a validation rule, a formula, or
 a row-level-security/sharing predicate (`done` instead of `record.done`) that
-evaluates to `null` and never fires (#2183/#2185). `os lint` is a *separate*
+evaluates to `null` and never fires. `os lint` is a *separate*
 pass that additionally checks the data model against the conventions in this
 skill (relationships, master-detail, roll-ups) — run it too, but it does **not**
 replace `os validate`. (Reminder: two consecutive `os build` runs with no source
