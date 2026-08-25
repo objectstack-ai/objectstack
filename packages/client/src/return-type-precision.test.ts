@@ -48,6 +48,8 @@ import type {
 import type { ActionDescriptor, ExecutionLog, FlowParsed } from '@objectstack/spec/automation';
 import type { ExplainDecision } from '@objectstack/spec/security';
 import type { InstalledPackage } from '@objectstack/spec/kernel';
+import type { PackageRollbackResponse } from '@objectstack/spec/api';
+import type { Environment } from '@objectstack/spec/cloud';
 
 declare const client: ObjectStackClient;
 declare const scoped: ScopedProjectClient;
@@ -177,6 +179,114 @@ export function searchResultIsNotTheGlobalSearchShape(): void {
     void mismatched;
 }
 
+/**
+ * [#11925] The FIFTH erasure spelling: methods with no return annotation at
+ * all, whose published type was inferred from `unwrapResponse< …any… >`.
+ *
+ * Re-measured at `origin/main` the population is **39**, not the 38 the card
+ * recorded — its own single-line reproducer cannot see `projects.get`, whose
+ * type argument spans several lines. Of the 39, exactly **three** had a
+ * verifiable published type to bind to; the other 36 are recorded on the
+ * methods themselves and filed (#12034, #12036, #12038). The bar was not "a
+ * plausible type exists" but "the route this method calls demonstrably sends
+ * this shape", which is what disqualified most of the population.
+ *
+ * These pins are type-level for the reason the header of this file gives: a
+ * runtime test cannot observe a return-type narrowing at all.
+ */
+export async function returnTypePrecisionPins11925(): Promise<void> {
+    // ── bound 1/3: both surfaces agree on this envelope ──────────────────
+    // `runtime`'s `/packages` domain and `rest`'s `GET {base}/packages` both
+    // send `{ packages, total: packages.length }`. The REST rows also carry a
+    // `source` discriminator the dispatcher rows lack, so it stays undeclared
+    // — the same treatment #8140 gave the scoped sibling directly above.
+    expectTypeOf(await client.packages.list()).toEqualTypeOf<{
+        packages: InstalledPackage[];
+        total: number;
+    }>();
+
+    // ── bound 2/3: the BARE row, no envelope ─────────────────────────────
+    // `PATCH /packages/:id` is dispatcher-only and answers `success(pkg)`.
+    // This method declared no envelope before the binding either, so only the
+    // erased `any` moved.
+    expectTypeOf(await client.packages.update('com.acme.crm', { name: 'Acme' }))
+        .toEqualTypeOf<InstalledPackage>();
+
+    // ── bound 3/3: the asymmetry named on the card, closed ───────────────
+    // `scoped.packages.list` was bound by #8140 because it happened to carry
+    // an annotation; its neighbour `get` was not, purely because it lacked
+    // one. Same object literal, same route family. The scoped mount is served
+    // ONLY by the REST registrar, so unlike the global `client.packages.get`
+    // there is one surface and one shape.
+    expectTypeOf(await scoped.packages.get('com.acme.crm')).toEqualTypeOf<{
+        package: InstalledPackage;
+    }>();
+
+    // ── direction 2: a WRONG shape must now be rejected ───────────────────
+    // ⚠️ Only ONE of the three below is red before this change, and the split
+    // is stated here rather than glossed, because a suppression that was
+    // already used is a regression guard and not evidence the binding was
+    // needed. Ablation (revert `index.ts` to `origin/main`, keep this file)
+    // measured it: the ablated run reports TS2578 at `wrongUpdate` ONLY.
+    //
+    // `packages.update` was bare `any` before, and `any` IS assignable to
+    // `string`, so its suppression went unused → TS2578. The other two were
+    // never bare: they declared a real envelope (`{ packages: any[]; total }`
+    // and `{ package: any }`) whose MEMBER was the erased part, and an
+    // envelope is not assignable to a bare row or array in either state. Their
+    // suppressions are used before AND after — regression guards against a
+    // future "narrowing" that flattens the envelope away.
+
+    // GREEN IN BOTH STATES — regression guard, not red-before evidence.
+    // @ts-expect-error the route answers `{ packages, total }`, not a bare array
+    const wrongList: InstalledPackage[] = await client.packages.list();
+
+    // RED BEFORE: `any` is assignable to `string`, so this suppression is
+    // unused (TS2578) until `packages.update` is bound.
+    // @ts-expect-error `packages.update` answers the row, not a string
+    const wrongUpdate: string = await client.packages.update('com.acme.crm', { name: 'Acme' });
+
+    // GREEN IN BOTH STATES — regression guard, not red-before evidence.
+    // @ts-expect-error the scoped detail route answers `{ package }`, not the bare row
+    const wrongScopedGet: InstalledPackage = await scoped.packages.get('com.acme.crm');
+
+    void wrongList;
+    void wrongUpdate;
+    void wrongScopedGet;
+}
+
+/**
+ * ⚠️ GREEN IN BOTH STATES — regression guards, recorded as such rather than
+ * counted as evidence that this card's change was needed. Each pins a
+ * near-miss in a DEPENDENCY that the next sweep would otherwise reach for.
+ *
+ * 1. `PackageRollbackResponse` sits one import away from
+ *    `client.packages.rollback` and is the wrong type for it: it declares the
+ *    VERSION rollback (`{ success, restoredVersion?, message? }`, per its
+ *    file header `POST /api/v1/packages/:packageId/rollback — Rollback a
+ *    package`), while the client method posts `{ commitId }` and the
+ *    dispatcher routes it to `rollbackToPackageCommit` — the ADR-0067 COMMIT
+ *    rollback. Binding it would compile and be false.
+ *
+ * 2. `Environment` is the obvious-looking binding for `client.projects.*` and
+ *    is camelCase, while the `/api/v1/cloud/*` control plane those methods
+ *    call speaks snake_case (measured from this repo's own CLI consumers:
+ *    `p.display_name`, `p.organization_id`, `p.is_default`). Binding it would
+ *    typecheck, be false, and break those callers.
+ */
+declare const versionRollbackPayload: PackageRollbackResponse['data'];
+declare const specEnvironmentRow: Environment;
+
+export function packageRollbackResponseIsNotTheCommitRollbackShape(): void {
+    // @ts-expect-error the VERSION-rollback payload carries no commit identity
+    void versionRollbackPayload.commitId;
+}
+
+export function environmentIsNotTheCloudWireRow(): void {
+    // @ts-expect-error the control plane sends `display_name`; this row declares `displayName`
+    void specEnvironmentRow.display_name;
+}
+
 describe('client SDK return-type precision (#8140)', () => {
     it('exposes the type-level pins to tsc without executing a request', () => {
         // The assertions above are evaluated by `tsc` under
@@ -186,6 +296,9 @@ describe('client SDK return-type precision (#8140)', () => {
         // narrowing at all.
         expect(typeof returnTypePrecisionPins).toBe('function');
         expect(typeof searchResultIsNotTheGlobalSearchShape).toBe('function');
+        expect(typeof returnTypePrecisionPins11925).toBe('function');
+        expect(typeof packageRollbackResponseIsNotTheCommitRollbackShape).toBe('function');
+        expect(typeof environmentIsNotTheCloudWireRow).toBe('function');
     });
 
     it('unwraps exactly one `{ success, data }` envelope — the premise the annotations rest on', async () => {
