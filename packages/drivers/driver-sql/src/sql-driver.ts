@@ -7987,13 +7987,15 @@ export class SqlDriver implements IDataDriver {
           // only, so it is deliberately not tracked.
           if ((funcName === 'min' || funcName === 'max') && agg.field) {
             // [#11249/#11635] A boolean aggregand presents on EVERY dialect,
-            // not only under `readPresentationKind`'s SQLite gate. That gate
-            // mirrors `formatOutput`'s ROW reads, where the native dialects
-            // hand storage back as-is — but on this door the backend answers
-            // `min`/`max` as 1/0 on MySQL (`tinyint(1)`) and on Postgres (the
-            // `cast(?? as int)` above), and the ruled contract is `false` /
-            // `true` in JSON: order statistics return a member of the input
-            // domain, and SQL drivers convert at the driver boundary.
+            // not only under `readPresentationKind`'s dialect gate. That gate
+            // mirrors `formatOutput`'s ROW reads (SQLite + MySQL since #11782;
+            // SQLite-only when this landed), where the storage-form dialects
+            // hand back a number — but on this door the backend ALSO answers
+            // `min`/`max` as 1/0 on Postgres (the `cast(?? as int)` above,
+            // over a column whose row reads need no presentation), and the
+            // ruled contract is `false` / `true` in JSON: order statistics
+            // return a member of the input domain, and SQL drivers convert at
+            // the driver boundary. The `??` fallback is what carries Postgres.
             // `presentReadValue('boolean', …)` leaves `null` (no rows / all
             // NULL) untouched and is idempotent on a value already boolean.
             const kind =
@@ -11590,9 +11592,13 @@ export class SqlDriver implements IDataDriver {
    * row, asked one field at a time so the paths that return raw builder output
    * can ask it too. `null` means the stored form already IS the presented form.
    *
-   * The boolean / numeric rules are SQLite-only because `formatOutput` gates
-   * them that way: SQLite is the dialect without a native boolean, and the
-   * numeric repair only exists for legacy TEXT-affinity columns.
+   * The boolean rule runs on SQLite AND MySQL — the two dialects that store a
+   * declared boolean as a number (INTEGER 0/1, `tinyint(1)`) — because
+   * `formatOutput` gates its row reads that way (#11782; SQLite-only before,
+   * which is how a declared boolean answered `1`/`0` on MySQL). Postgres
+   * stores a real `boolean` node-pg parses, so there the stored form already
+   * IS the presented form. The numeric repair stays SQLite-only: it exists
+   * for legacy TEXT-affinity columns, which no other dialect has.
    */
   protected readPresentationKind(
     table: string | null | undefined,
@@ -11601,8 +11607,10 @@ export class SqlDriver implements IDataDriver {
     if (!table) return null;
     const temporal = this.temporalFieldKind(table, field);
     if (temporal) return temporal;
+    if ((this.isSqlite || this.isMysql) && this.booleanFields[table]?.includes(field)) {
+      return 'boolean';
+    }
     if (!this.isSqlite) return null;
-    if (this.booleanFields[table]?.includes(field)) return 'boolean';
     if (this.numericFields[table]?.includes(field)) return 'number';
     return null;
   }
@@ -11613,10 +11621,11 @@ export class SqlDriver implements IDataDriver {
    * (`aggregate`, `distinct` — #3797 for instants, #3849 for scalars).
    *
    * The dialect gating mirrors `formatOutput`: the `Field.datetime` repair and
-   * the boolean / numeric coercions are SQLite-only (it is the one dialect where
-   * storage ≠ presentation), while the `Field.date` → `YYYY-MM-DD` collapse runs
-   * everywhere. {@link readPresentationKind} does the SQLite gating for the
-   * scalar kinds, so by the time one arrives here the dialect is settled.
+   * the numeric coercion are SQLite-only, the boolean coercion runs on SQLite
+   * and MySQL (#11782 — the two dialects whose stored boolean is a number),
+   * and the `Field.date` → `YYYY-MM-DD` collapse runs everywhere.
+   * {@link readPresentationKind} does the dialect gating for the scalar kinds,
+   * so by the time one arrives here the dialect is settled.
    */
   protected presentReadValue(kind: ReadPresentationKind, value: any): any {
     if (value == null) return value;
@@ -14309,15 +14318,6 @@ export class SqlDriver implements IDataDriver {
         }
       }
 
-      const booleanFields = this.booleanFields[object];
-      if (booleanFields && booleanFields.length > 0) {
-        for (const field of booleanFields) {
-          if (data[field] !== undefined && data[field] !== null) {
-            data[field] = Boolean(data[field]);
-          }
-        }
-      }
-
       // Numeric scalars stored on a legacy TEXT-affinity column come back as
       // strings ('4'); coerce numeric-looking strings back to numbers so the
       // declared type wins regardless of when the column was created. Only
@@ -14360,6 +14360,29 @@ export class SqlDriver implements IDataDriver {
         for (const field of datetimeFields) {
           if (data[field] !== undefined) {
             data[field] = normalizeSqliteDatetimeOutput(data[field]);
+          }
+        }
+      }
+    }
+
+    // [#11782] Present a declared `Field.boolean` as a JSON boolean on the
+    // dialects whose STORAGE form is a number: SQLite (INTEGER 0/1) and MySQL
+    // (`tinyint(1)`, which mysql2 hands back as a JS number). Postgres stores a
+    // real `boolean` and node-pg already parses it, so its stored form IS the
+    // presented form and it deliberately stays outside the gate — the same
+    // per-dialect posture {@link readPresentationKind} takes for the read doors
+    // that return raw builder output (`distinct`; `aggregate` tracks its own
+    // result columns per #11635). Before this, the gate was SQLite-only and a
+    // declared boolean answered `1`/`0` on MySQL's row-read door while
+    // answering `true`/`false` on the other two dialects — and, once #11635
+    // presented `min`/`max` everywhere, `find()` and `aggregate()` gave
+    // OPPOSITE answers for the same column on the same MySQL connection.
+    if (this.isSqlite || this.isMysql) {
+      const booleanFields = this.booleanFields[object];
+      if (booleanFields && booleanFields.length > 0) {
+        for (const field of booleanFields) {
+          if (data[field] !== undefined && data[field] !== null) {
+            data[field] = Boolean(data[field]);
           }
         }
       }
