@@ -1361,9 +1361,11 @@ function report() {
     const suites = dialect.scored.filter((s) => s.driver === driver);
     const w = Math.max(...suites.map((s) => s.file.split('/').pop().length), 5);
     for (const s of suites.sort((a, b) => a.file.localeCompare(b.file))) {
-      const glyph = { matrix: 'matrix', cell: 'cell  ', ledger: 'LEDGER', undeclared: 'UNDECLARED' }[s.stance];
+      // Padded to the widest glyph so the columns hold on a RED run too — the
+      // run where this table is most worth reading.
+      const glyph = { matrix: 'matrix', cell: 'cell', ledger: 'LEDGER', undeclared: 'UNDECLARED' }[s.stance];
       console.log(
-        `  ${glyph}  ${s.file.split('/').pop().padEnd(w)}  ${s.markers.map((m) => m.replace(/_CASES$/, '')).join(', ')}`,
+        `  ${glyph.padEnd(10)}  ${s.file.split('/').pop().padEnd(w)}  ${s.markers.map((m) => m.replace(/_CASES$/, '')).join(', ')}`,
       );
     }
     console.log('');
