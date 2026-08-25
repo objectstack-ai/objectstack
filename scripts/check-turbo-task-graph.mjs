@@ -82,8 +82,8 @@
  * `examples/app-showcase` is spelled `test:smoke`, which turbo.json does not
  * configure at all. Closing that needs an edit to `turbo.json`, which is not
  * this card's file surface, and a gate that ships red is worse than no gate.
- * Filed separately; widen this gate's population to generic keys in the same
- * change that fixes the entry, not before.
+ * Filed as #12373; widen this gate's population to generic keys in the same
+ * change that fixes that entry, not before.
  *
  * ## Refusals, never quiet passes (#4690)
  *
