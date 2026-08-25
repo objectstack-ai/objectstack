@@ -2459,6 +2459,28 @@ jobs:
       - name: WHERE-matcher conformance gate
         run: pnpm check:where-matcher
 
+      # ObjectQL double `limit` gate (#11525, from #10978). The third member of
+      # the family above, and the one the other two leave uncovered: a
+      # `find(object, opts)` double that matches `where` correctly and then hands
+      # back EVERY matched row. It cannot tell a read bounded at 200 from the same
+      # read bounded at 1000, or from an unbounded one, so any limit change on
+      # that read is green by construction and the production symptom is a
+      # silently truncated result set rather than an error -- #10978's worked
+      # example truncates an RLS input. PR #11521 converted nine doubles on the
+      # authorization path and measured the population; #11525 is the observation
+      # one level up: nothing held those nine right. This lifts each discovered
+      # double out of its file and asks it a bounded question, encoding all three
+      # shape rules the nine settled -- presence not truthiness, bound after the
+      # filter, bound before any row-touching stage. Behavioural rather than
+      # syntactic on purpose: the bound is applied through inline slices, per-file
+      # helpers and shared helpers alike, and no pattern-match over source spans
+      # them. Pre-existing doubles are in a shrink-only measured baseline. Runs
+      # its own --self-test first: the detector can be broken while every double
+      # is fine, and a scan that quietly stops matching would report OK while
+      # reading nothing (#4868's family).
+      - name: ObjectQL double limit gate
+        run: pnpm check:objectql-double-limit
+
       # Paired kernel-hook pin gate (#5282, from #5170 / #5257 / #5274). The two
       # kernels — ObjectKernel (production) and LiteKernel (vitest / serverless /
       # edge) — run the same plugin code and the same hook vocabulary, but do NOT
