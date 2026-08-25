@@ -12,6 +12,13 @@
 import {
     shouldDenyAnonymous, ANONYMOUS_DENY_STATUS, ANONYMOUS_DENY_CODE, ANONYMOUS_DENY_MESSAGE,
 } from '@objectstack/core';
+// [ADR-0126 §5] The activation gate's two inputs: the deployment's EFFECTIVE
+// tenancy posture (the same resolver `resolve-execution-context.ts` uses, so
+// admission and this gate can never disagree) and the built-in identity name
+// that means "platform operator, NOT a tenant user role" (ADR-0068 D2).
+import { effectiveTenancyPosture } from '@objectstack/core';
+import { postureEnforcesWall } from '@objectstack/spec/security';
+import { BUILTIN_IDENTITY_PLATFORM_ADMIN } from '@objectstack/spec/identity';
 import { CoreServiceName } from '@objectstack/spec/system';
 import type { IAutomationService, ISecurityService } from '@objectstack/spec/contracts';
 import { isServiceServeable } from '../service-serveable.js';
@@ -400,6 +407,30 @@ function isFlowAuthoringWrite(parts: string[], method: string): boolean {
 }
 
 /**
+ * [ADR-0126 §5] Which routes the ACTIVATION gate covers: the enable/disable
+ * door, and only it.
+ *
+ * A second predicate rather than an arm of {@link isFlowAuthoringWrite}
+ * because the two ask different questions and cover different route sets. That
+ * one asks "is this an authoring write?" (create / update / delete / toggle /
+ * clone → `manage_metadata`); this one asks "does this write an INSTALL-WIDE
+ * activation row?", which is true of the toggle alone. ⛔ `clone` is
+ * deliberately NOT here: a clone creates an ordinary new artifact under a new
+ * name (§7.1) and takes nothing away from any tenant, so gating it on the
+ * platform operator would refuse the very customization path this refusal
+ * message recommends.
+ *
+ * Spelled exactly like the toggle arm of the predicate above — no upper bound
+ * on depth, `parts[0] !== 'trigger'` — for the reasons documented there: a
+ * gate narrower than its route is a bypass, and a gate wider than its route
+ * over-blocks the legacy execution door.
+ */
+function isFlowActivationWrite(parts: string[], method: string): boolean {
+    if (method === 'POST' && parts[1] === 'toggle') return parts[0] !== 'trigger';
+    return false;
+}
+
+/**
  * [#10145] The authoring-write gate: refuse a caller without
  * {@link FLOW_AUTHORING_CAPABILITY}.
  *
@@ -438,6 +469,94 @@ function isFlowAuthoringWrite(parts: string[], method: string): boolean {
  * measured — and (c) the definition contract is not enumerable by probing
  * 422s from outside the authoring cohort.
  */
+/** [ADR-0126 §5] Refusal vocabulary for the activation (enable/disable) gate. */
+const ACTIVATION_DENY_STATUS = 403;
+const ACTIVATION_DENY_CODE = 'PERMISSION_DENIED';
+
+/**
+ * [ADR-0126 §5] THE WRITE-AUTHORITY GATE for the packaged-flow activation
+ * switch — `POST /automation/:name/toggle`.
+ *
+ * ## What it enforces
+ *
+ * The activation row this route writes is **install-level**
+ * (`organization_id NULL`, §5): one row, one environment, every tenant. So the
+ * authority required to write it scales with how many tenants that reach
+ * covers:
+ *
+ *   - **`single` posture** — one logical tenant, so install-level and
+ *     org-level are the SAME scope. The org admin who already passed the
+ *     #10145 `manage_metadata` gate one tier up is the right authority, and
+ *     this gate is inert.
+ *   - **`group` / `isolated`** — a real multi-organization deployment. Here
+ *     the write requires the PLATFORM OPERATOR, because a tenant org admin
+ *     flipping an install-wide switch is precisely #10243: that incident
+ *     measured a tenant org owner switching a shipped flow off
+ *     ENVIRONMENT-WIDE, read back by an unrelated tenant in a different
+ *     organization. ADR-0126 §5 makes that durable in the correct direction —
+ *     and a durable install-wide row writable by tenants would be the same
+ *     leak WITH persistence, which is strictly worse than what was measured.
+ *
+ * ## Why the operator test is a POSITION and not a capability
+ *
+ * ADR-0126 §5 says "the platform-operator capability"; the platform's actual
+ * operator identity is the ADR-0068 D2 built-in `platform_admin` POSITION,
+ * documented verbatim as "Platform operator (SaaS admin). NOT a tenant user
+ * role", unscoped, sourced from the unscoped `admin_full_access` grant. No
+ * capability in `PLATFORM_CAPABILITIES` carries that meaning: `manage_metadata`
+ * is the one the tier above already requires, and a tenant org admin can hold
+ * it — so spelling this gate as a capability check would either re-ask the
+ * question already answered or invent a capability name, which would be a
+ * `packages/spec` change this leg is walled out of. The position IS the
+ * platform's operator concept; this gate reads it rather than minting a
+ * synonym.
+ *
+ * ## Fail-open on an ABSENT posture is deliberate, not a gap
+ *
+ * No `tenancy` service ⇒ no posture ⇒ no posture-conditional refusal, matching
+ * `resolve-execution-context.ts` verbatim. Under ADR-0093 D4/D5 a
+ * requested-but-unenforceable wall resolves to `single` anyway, so an absent
+ * posture and `single` are the same deployment shape — and refusing there
+ * would lock every single-tenant operator out of their own switch.
+ *
+ * Returns a refusal to short-circuit on, `undefined` to proceed — the shape of
+ * this file's other two gates. Engine self-invocation (`isSystem`, never
+ * settable from the wire) bypasses, as it does at every neighbouring gate.
+ */
+async function refuseUngrantedActivationWrite(
+    deps: DomainHandlerDeps,
+    context: HttpProtocolContext,
+): Promise<HttpDispatcherResult | undefined> {
+    const ec: any = context?.executionContext;
+    if (ec?.isSystem) return undefined;
+
+    let posture;
+    try {
+        posture = effectiveTenancyPosture(await deps.resolveService(context, 'tenancy'));
+    } catch {
+        posture = undefined;
+    }
+    if (!posture || !postureEnforcesWall(posture)) return undefined;
+
+    const positions: string[] = Array.isArray(ec?.positions) ? ec.positions : [];
+    if (positions.includes(BUILTIN_IDENTITY_PLATFORM_ADMIN)) return undefined;
+
+    // The message names the posture and the sanctioned path — the loud-refusal
+    // shape ADR-0126 §7 asks for throughout — and says nothing about the
+    // caller's own positions or permission sets (#7450).
+    return {
+        handled: true,
+        response: deps.error(
+            `Enabling or disabling a packaged flow writes an INSTALL-WIDE activation row, and this deployment runs the ` +
+            `'${posture}' tenancy posture, where that reaches every organization. It requires the platform operator ` +
+            `(ADR-0126 §5) — an organization administrator cannot flip an install-wide switch. To customize this flow ` +
+            `for your organization, clone it under a new name instead.`,
+            ACTIVATION_DENY_STATUS,
+            { code: ACTIVATION_DENY_CODE },
+        ),
+    };
+}
+
 function refuseUngrantedFlowWrite(
     deps: DomainHandlerDeps,
     context: HttpProtocolContext,
@@ -921,6 +1040,19 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
     // predicate rather than by adding a check here.
     if (isFlowAuthoringWrite(parts, m)) {
         const refusal = refuseUngrantedFlowWrite(deps, context);
+        if (refusal) return refusal;
+    }
+
+    // [ADR-0126 §5] ACTIVATION-WRITE GATE — the install-wide enable/disable
+    // switch needs the platform operator in a walled posture. Placed directly
+    // AFTER the authoring gate and BEFORE the service probe / body checks, for
+    // the reasons that gate documents: an unentitled caller must not learn
+    // whether automation is mounted here, and must not get a body-validation
+    // answer that maps out the contract. Strictly narrower than the gate
+    // above, never a replacement for it — a caller must hold `manage_metadata`
+    // AND, in `group`/`isolated`, be the platform operator.
+    if (isFlowActivationWrite(parts, m)) {
+        const refusal = await refuseUngrantedActivationWrite(deps, context);
         if (refusal) return refusal;
     }
 

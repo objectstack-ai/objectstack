@@ -3,8 +3,6 @@ title: System Context (isSystem)
 description: The authoritative table of every platform behaviour keyed off `ExecutionContext.isSystem` — what an elevated write gets, what it loses, and what the flag deliberately does NOT do. Built by census over the whole repo, not by recall.
 ---
 
-# System Context (`isSystem`)
-
 `ExecutionContext.isSystem` is the platform's one elevation flag. Setting it on a
 write or read means "this operation is the engine acting on its own behalf" —
 the seed loader replaying package fixtures, a plugin's boot reconciler, a

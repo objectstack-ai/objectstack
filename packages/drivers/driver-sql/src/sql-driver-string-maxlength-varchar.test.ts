@@ -71,7 +71,7 @@ const stringObject = () => ({
     // ── past the varchar ceiling → TEXT, never a clamp ─────────
     huge_url: { type: 'url', maxLength: 100000 },
     // ── the three families deliberately left at 255 ────────────
-    a_lookup: { type: 'lookup', maxLength: 20, reference_to: PARENT },
+    a_lookup: { type: 'lookup', maxLength: 20, reference: PARENT },
     a_user: { type: 'user', maxLength: 30 },
     an_autonumber: { type: 'autonumber', maxLength: 8 },
     a_secret: { type: 'secret', maxLength: 4000 },

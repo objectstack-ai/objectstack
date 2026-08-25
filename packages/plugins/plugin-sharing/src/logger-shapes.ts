@@ -58,14 +58,16 @@
  *   is required because they FORWARD into `bulk-recompute.ts`'s guaranteed sink;
  *   a `warn?` there re-opens the silence one module downstream of where #10556
  *   closed it.
- * - `record-orphan-cleanup.ts` — `{ info?: Function, warn?: Function }`. Bare
- *   `Function` documents nothing, but it cannot be tightened to this shape:
- *   `Function` is NOT assignable to a concrete signature ("Type 'Function'
- *   provides no match for the signature"), and the two loggers handed to it —
- *   `SharingServiceOptions['logger']` and `ShareLinkServiceOptions['logger']` —
- *   are themselves spelled with bare `Function`. Tightening it requires
- *   tightening those producers first, which is a gate-population change, not a
- *   refactor. It stays open on #10692 rather than being done quietly here.
+ * - `record-orphan-cleanup.ts` — `{ info?, warn }`. Its `warn` is required
+ *   because the sweep's every report lands there (#10692, ruled 2026-08-25);
+ *   this type must stay optional-`warn` because its consumers are
+ *   fire-and-forget projections whose reports are advisory. The bare-`Function`
+ *   spelling it once carried could not tighten until the two producers feeding
+ *   it — `SharingServiceOptions['logger']` and `ShareLinkServiceOptions
+ *   ['logger']` — dropped bare `Function` (#10556 limb (c), PR #11856;
+ *   `Function` is assignable to no concrete signature). Requiredness of every
+ *   required `warn` in this package's public options types and in the sweep is
+ *   pinned by `logger-required-warn.pin.ts`.
  */
 export interface OptionalSharingLogger {
   info?: (msg: string, meta?: Record<string, any>) => void;

@@ -3,13 +3,19 @@
 import { randomUUID } from 'node:crypto';
 import type {
     AckResult,
+    ClaimedDeliveryRecord,
     ClaimOptions,
     DeliveryStatus,
     EnqueueDeliveryInput,
     INotificationOutbox,
     NotificationDeliveryRecord,
 } from './outbox.js';
-import { NotificationAckError, notificationAckNotClaimedMessage } from './outbox.js';
+import {
+    NotificationAckError,
+    notificationAckLostClaimMessage,
+    notificationAckNoCredentialMessage,
+    notificationAckNotClaimedMessage,
+} from './outbox.js';
 import { hashPartition } from './backoff.js';
 
 /**
@@ -61,7 +67,7 @@ export class MemoryNotificationOutbox implements INotificationOutbox {
         return id;
     }
 
-    async claim(opts: ClaimOptions): Promise<NotificationDeliveryRecord[]> {
+    async claim(opts: ClaimOptions): Promise<ClaimedDeliveryRecord[]> {
         const now = opts.now ?? this.clock();
         // Reap stale in_flight.
         for (const r of this.rows.values()) {
@@ -72,7 +78,7 @@ export class MemoryNotificationOutbox implements INotificationOutbox {
                 r.updatedAt = now;
             }
         }
-        const out: NotificationDeliveryRecord[] = [];
+        const out: ClaimedDeliveryRecord[] = [];
         for (const r of this.rows.values()) {
             if (out.length >= opts.limit) break;
             if (r.status !== 'pending') continue;
@@ -83,12 +89,14 @@ export class MemoryNotificationOutbox implements INotificationOutbox {
             r.claimedBy = opts.nodeId;
             r.claimedAt = now;
             r.updatedAt = now;
-            out.push({ ...r });
+            // [#11859] The copy handed out carries the claim credential the
+            // two lines above just stamped — the record IS the credential.
+            out.push({ ...r, claimedBy: opts.nodeId, claimedAt: now });
         }
         return out;
     }
 
-    async claimDigest(opts: ClaimOptions): Promise<NotificationDeliveryRecord[]> {
+    async claimDigest(opts: ClaimOptions): Promise<ClaimedDeliveryRecord[]> {
         const now = opts.now ?? this.clock();
         // Reap stale in_flight (same as claim).
         for (const r of this.rows.values()) {
@@ -101,7 +109,7 @@ export class MemoryNotificationOutbox implements INotificationOutbox {
         }
         // Claim every DUE batched row in the partition — a window must be taken
         // whole, so `limit` does not truncate a group here.
-        const out: NotificationDeliveryRecord[] = [];
+        const out: ClaimedDeliveryRecord[] = [];
         for (const r of this.rows.values()) {
             if (r.status !== 'pending') continue;
             if (r.digestKey == null) continue;
@@ -111,12 +119,19 @@ export class MemoryNotificationOutbox implements INotificationOutbox {
             r.claimedBy = opts.nodeId;
             r.claimedAt = now;
             r.updatedAt = now;
-            out.push({ ...r });
+            out.push({ ...r, claimedBy: opts.nodeId, claimedAt: now });
         }
         return out;
     }
 
-    async ack(id: string, result: AckResult): Promise<void> {
+    async ack(claimed: ClaimedDeliveryRecord, result: AckResult): Promise<void> {
+        const id = claimed.id;
+        // [#11859] The runtime half of the ClaimedDeliveryRecord contract, for
+        // JS callers and casts: a record with no claim credential was not
+        // handed out by claim()/claimDigest() and is refused before any read.
+        if (typeof claimed.claimedBy !== 'string' || typeof claimed.claimedAt !== 'number') {
+            throw new NotificationAckError(notificationAckNoCredentialMessage(id), 'DELIVERY_NOT_ELIGIBLE');
+        }
         const r = this.rows.get(id);
         // An id matching no row is not a contract violation: there is no state
         // to corrupt and no claim to lose. Unchanged, and declared on the
@@ -132,6 +147,18 @@ export class MemoryNotificationOutbox implements INotificationOutbox {
         if (r.status !== 'in_flight') {
             throw new NotificationAckError(
                 notificationAckNotClaimedMessage(id, r.status),
+                'DELIVERY_NOT_ELIGIBLE',
+            );
+        }
+        // [#11859] Ownership: the row is claimed, but not by the claim this
+        // record came from — it was reaped and re-claimed while the send ran
+        // (possibly by this same store handing it to this same node again: the
+        // credential is the PAIR, so a later claim's `claimedAt` refuses the
+        // earlier claim's ack). Refused with nothing written, so the live
+        // attempt it would have overwritten stays intact.
+        if (r.claimedBy !== claimed.claimedBy || r.claimedAt !== claimed.claimedAt) {
+            throw new NotificationAckError(
+                notificationAckLostClaimMessage(id, r.status),
                 'DELIVERY_NOT_ELIGIBLE',
             );
         }

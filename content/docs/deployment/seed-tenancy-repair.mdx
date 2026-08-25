@@ -3,8 +3,6 @@ title: Seed Tenancy Repair
 description: The automatic repair that stamps organization_id on untenanted seed rows and merges the __global__ autonumber counter — when it runs, what it changes, what it deliberately leaves alone, and the manual remedy for a multi-organization install.
 ---
 
-# Seed Tenancy Repair
-
 ObjectStack ships one repair that **rewrites stored rows without an operator
 asking it to**. Every other row-rewriting migration on this platform is an
 explicit `os migrate … --apply` with a preview mode; this one is not. It has no

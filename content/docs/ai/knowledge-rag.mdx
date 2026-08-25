@@ -3,8 +3,6 @@ title: Knowledge & RAG
 description: The Knowledge Protocol — permission-aware RAG for agents via pluggable adapter plugins (memory, RAGFlow, custom)
 ---
 
-# Knowledge & RAG
-
 Part of the [AI module](/docs/ai) — how agents retrieve knowledge through the Knowledge Protocol and its adapter plugins.
 
 ObjectStack ships a Knowledge Protocol that lets you retrieve from pluggable backends (RAGFlow, LlamaIndex, Dify, custom pgvector, …) with one call: `KnowledgeService.search(query, { sourceIds?, topK? })`. The framework defines the contract and runs permission-aware filtering; the adapter plugin does the actual retrieval. See [the protocol design](/docs/protocol/knowledge) for the rationale.

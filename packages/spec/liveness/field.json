@@ -193,7 +193,7 @@
     "reference": {
       "status": "live",
       "evidence": "packages/objectql/src/engine.ts:1672",
-      "note": "CAVEAT — $expand/cascade/seed live; FK DDL reads reference_to (unmapped from reference)."
+      "note": "CAVEAT — $expand/cascade/seed live. There is no FK DDL: #11567 retired `createColumn`'s FOREIGN KEY emission, which was gated on the REJECTED alias `reference_to` and so could never fire for a spec-conformant lookup (measured: 0 FK constraints across all 44 exported platform objects on live PG 16.13 + MySQL 8.0.46). Referential integrity is the engine's, via deleteBehavior."
     },
     "referenceVia": {
       "status": "live",

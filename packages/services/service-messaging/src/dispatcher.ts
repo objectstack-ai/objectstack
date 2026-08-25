@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { MessagingChannel, MessagingChannelContext, Notification, SendResult } from './channel.js';
-import type { AckResult, INotificationOutbox, NotificationDeliveryRecord } from './outbox.js';
+import type { AckResult, ClaimedDeliveryRecord, INotificationOutbox, NotificationDeliveryRecord } from './outbox.js';
 import { classifyDeliveryAttempt } from './backoff.js';
 import { renderDigest } from './digest-render.js';
 
@@ -201,7 +201,7 @@ export class NotificationDispatcher {
      * ack every row in it with that one outcome. On failure the whole group
      * re-defers together (each row keeps its own backoff via its `attempts`).
      */
-    private async processDigestGroup(rows: NotificationDeliveryRecord[]): Promise<void> {
+    private async processDigestGroup(rows: ClaimedDeliveryRecord[]): Promise<void> {
         const channelName = rows[0].channel;
         const recipient = rows[0].recipientId;
         const channel = this.opts.channels.getChannel(channelName);
@@ -242,7 +242,7 @@ export class NotificationDispatcher {
         }
     }
 
-    private async processRow(row: NotificationDeliveryRecord): Promise<void> {
+    private async processRow(row: ClaimedDeliveryRecord): Promise<void> {
         const channel = this.opts.channels.getChannel(row.channel);
         if (!channel) {
             // No transport for this channel → terminal, observable on the row.
@@ -307,9 +307,13 @@ export class NotificationDispatcher {
      * Only `DELIVERY_NOT_ELIGIBLE` is absorbed. A store fault is not a lost
      * race and still propagates to `runTick`'s handler.
      */
-    private async ackAttempt(row: NotificationDeliveryRecord, result: AckResult): Promise<void> {
+    private async ackAttempt(row: ClaimedDeliveryRecord, result: AckResult): Promise<void> {
         try {
-            await this.opts.outbox.ack(row.id, result);
+            // [#11859] The record is handed back WHOLE: its (claimedBy,
+            // claimedAt) pair is the claim credential the store stamped, and
+            // the ack's compare-and-set binds it — this loop never needs to
+            // know or repeat its own nodeId.
+            await this.opts.outbox.ack(row, result);
         } catch (err) {
             if ((err as { code?: string })?.code !== 'DELIVERY_NOT_ELIGIBLE') throw err;
             this.opts.logger?.warn?.('notification-dispatcher: ack refused, claim no longer held', {
@@ -322,8 +326,8 @@ export class NotificationDispatcher {
 }
 
 /** Group claimed digest rows by their `digestKey` (insertion order preserved). */
-function groupByDigestKey(rows: NotificationDeliveryRecord[]): NotificationDeliveryRecord[][] {
-    const groups = new Map<string, NotificationDeliveryRecord[]>();
+function groupByDigestKey(rows: ClaimedDeliveryRecord[]): ClaimedDeliveryRecord[][] {
+    const groups = new Map<string, ClaimedDeliveryRecord[]>();
     for (const r of rows) {
         const key = r.digestKey ?? r.id; // defensive — claimDigest only returns keyed rows
         let g = groups.get(key);

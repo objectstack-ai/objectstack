@@ -339,8 +339,15 @@ report_objectui_reachability() {
   # (`enable -n mapfile readarray` via `BASH_ENV`) plus a static scan.
   # Keep this loop bash-3.2-clean: no `mapfile`, no `readarray`, no
   # `declare -A`, no `${x^^}`/`${x,,}`. The `if` (rather than `[[ … ]] &&`) is
-  # load-bearing under `set -e`: a trailing false `&&`-list would make the
-  # whole `while` return 1 and kill the run on an empty ref list.
+  # load-bearing under `set -e` — but NOT on an empty ref list: an all-empty
+  # read leaves the loop body unexecuted and the `while` exits 0 either way
+  # (measured, bash 5.2.21). The real trap is a NON-EMPTY read whose LAST
+  # line fails the `[[ -n … ]]` test, and only once that loop is the LAST
+  # command of a function: the `&&`-list's false status becomes the loop's
+  # exit status, which becomes the function's return, which `set -e` then
+  # kills the caller on. Measured over all four combinations (empty vs.
+  # non-empty-with-failing-last-line × loop-is-fn's-last-command vs. not):
+  # only that one combination dies (exit 1); the other three exit 0.
   local -a local_refs=() remote_refs=()
   local ref_line=''
   while IFS= read -r ref_line; do
