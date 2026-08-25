@@ -1260,7 +1260,7 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       measures: {
         label: "Measures",
-        helpText: "Each: name, aggregate, field (optional for count), display format/currency, and a “certified” governance flag"
+        helpText: "各メジャー：名前、集計関数、フィールド（count の場合は省略可）、表示形式/通貨"
       }
     }
   },
