@@ -1260,7 +1260,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       measures: {
         label: "Measures",
-        helpText: "Each: name, aggregate, field (optional for count), display format/currency, and a “certified” governance flag"
+        helpText: "Cada medida: nombre, agregación, campo (opcional para count) y formato de visualización/moneda"
       }
     }
   },

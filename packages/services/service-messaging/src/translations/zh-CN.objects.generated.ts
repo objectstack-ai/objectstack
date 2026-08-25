@@ -238,7 +238,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       principal: {
         label: "主体",
-        help: "订阅者选择器:'role:x' | 'team:x' | 'user:id' | 裸用户 ID。"
+        help: "订阅者选择器:'role:x' | 'team:x' | 'user:id' | 'owner_of:object:id' | 邮箱地址 | 裸用户 ID。"
       },
       enabled: {
         label: "启用",
@@ -356,7 +356,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       attempts: {
         label: "尝试次数",
-        help: "迄今已尝试的次数"
+        help: "迄今已尝试的次数。终态行上为 0 表示该投递被 PARKED——从未发送,且不可重投(#8069);原因见 `error`。"
       },
       claimed_by: {
         label: "认领节点"

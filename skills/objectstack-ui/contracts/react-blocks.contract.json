@@ -261,7 +261,7 @@
           "type": "string",
           "kind": "binding",
           "required": true,
-          "description": "[DEPRECATED → `data={{ provider: 'object', object }}`] The object this block binds to (server-connected). Converging on the metadata-tier spelling (#11284); this alias is removed after the deprecation window.",
+          "description": "[DEPRECATED → `data={{ provider: 'object', object }}`] The object this block binds to (server-connected). Converging on the metadata-tier spelling; this alias is removed after the deprecation window.",
           "deprecated": {
             "replacedBy": "data",
             "note": "Write the metadata-tier data source instead: data={{ provider: 'object', object: '…' }} — the same spelling a metadata list view authors. objectName keeps working during the deprecation window."
@@ -272,7 +272,7 @@
           "type": "'grid' | 'kanban' | 'gallery' | 'calendar' | 'timeline' | 'gantt' | 'map'",
           "kind": "binding",
           "required": false,
-          "description": "[DEPRECATED → `type`] Which visualization to render (default grid). Converging on the metadata-tier spelling (#11284): write `type`, the same key a metadata list view authors.",
+          "description": "[DEPRECATED → `type`] Which visualization to render (default grid). Converging on the metadata-tier spelling: write `type`, the same key a metadata list view authors.",
           "deprecated": {
             "replacedBy": "type",
             "note": "Write type=\"kanban\" (ListViewSchema's own `type`, the metadata-tier view kind) instead. viewType keeps working during the deprecation window."
@@ -543,7 +543,7 @@
     {
       "tag": "Block",
       "schemaType": "(any)",
-      "summary": "Escape hatch — render any registered component by type. <Block type=\"object-kanban\" objectName=\"task\" /> etc. Not a way back to the record:* family: those need a record page's record context and are rejected here too (#4413).",
+      "summary": "Escape hatch — render any registered component by type. <Block type=\"object-kanban\" objectName=\"task\" /> etc. Not a way back to the record:* family: those need a record page's record context and are rejected here too.",
       "specSchema": false,
       "props": [
         {

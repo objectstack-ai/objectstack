@@ -6,7 +6,7 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
-    "build": "tsup --config ../../../tsup.config.ts",
+    "build": "tsup --config ../../../tsup.config.ts && node ../../../scripts/check-dts-emitted.mjs",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },

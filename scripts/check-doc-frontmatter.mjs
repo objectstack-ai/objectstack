@@ -208,12 +208,14 @@
  *
  * ## Wiring
  *
- * Invoked from `.github/workflows/lint.yml` as `node scripts/...` directly,
- * both legs, rather than through a `pnpm check:*` alias: that alias belongs in
- * root `package.json`, declared territory of the @changesets/cli v3 migration
- * lane (#9465) while it runs. The self-test asserts that wiring against the
- * workflow text -- a gate that exists and is not scheduled is the same dormant
- * shape from the other side.
+ * Invoked from `.github/workflows/lint.yml` as `node scripts/...` directly, both
+ * legs, rather than through a `pnpm check:*` alias: see the GATE INVOCATION
+ * IDIOM note at the top of that file, which states the reasons once. It is NOT
+ * because root `package.json` is off limits -- that reading of the #9465 fence
+ * is false, and the note carries the fence's verbatim scope so this docblock
+ * does not have to: restating it is how the wrong reading spread (#10894).
+ * The self-test asserts that wiring against the workflow text -- a gate that
+ * exists and is not scheduled is the same dormant shape from the other side.
  *
  * Adding the second root needed NO workflow edit: the step already invokes this
  * script, and `ROOTS` is read from here. `lint.yml` is the repo's busiest file
@@ -1220,7 +1222,7 @@ export async function selfTest() {
     failures.push(`cannot read .github/workflows/lint.yml to verify wiring: ${err.code ?? err.message}`);
   }
   if (lint !== null) {
-    assert(lint.includes(`node ${SELF}\n`), `wiring: lint.yml invokes ${SELF} (no root package.json alias -- #9465 fence)`);
+    assert(lint.includes(`node ${SELF}\n`), `wiring: lint.yml invokes ${SELF} directly (lint.yml's GATE INVOCATION IDIOM note, not a package.json fence)`);
     assert(lint.includes(`node ${SELF} --self-test`), 'wiring: lint.yml runs the --self-test leg too');
   }
 

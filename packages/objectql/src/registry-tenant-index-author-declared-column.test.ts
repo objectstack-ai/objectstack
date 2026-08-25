@@ -59,6 +59,8 @@ import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protoco
 // below cannot accept a call ObjectQL refuses.
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import { SchemaRegistry, applySystemFields } from './registry.js';
+import { assertEngineFindOnePredicate } from './engine-findone-predicate.js';
+import type { EngineFindOneQueryInput } from './engine-findone-predicate.js';
 
 /** The platform's own entry — the exact value the seam appends. */
 const PLATFORM_TENANT_INDEX = { fields: ['organization_id'] };
@@ -115,7 +117,15 @@ function metaSurface(multiTenant: boolean, object: any) {
   const engine = {
     registry,
     find: async () => [],
-    findOne: async () => null,
+    findOne: async (table: string, query?: EngineFindOneQueryInput) => {
+      // [#11957] Pinned to ObjectQL.findOne's OWN #4419 predicate: `findOne`
+      // applies limit: 1, so a query naming no record returns an ARBITRARY row
+      // and the engine REFUSES it. A double that answers it anyway is how
+      // #11767 shipped a bootstrap bypass that was inert on every real
+      // deployment while a 641-line unit matrix stayed green.
+      assertEngineFindOnePredicate(table, query);
+      return null;
+    },
     insert: async () => ({ id: 'x' }),
     update: async (_t: string, data: Record<string, unknown>, opts?: Record<string, unknown>) => {
       assertEngineUpdateDispatch(data, opts);

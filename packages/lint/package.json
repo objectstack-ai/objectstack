@@ -19,7 +19,7 @@
     }
   },
   "scripts": {
-    "build": "tsup",
+    "build": "tsup && node ../../scripts/check-dts-emitted.mjs",
     "dev": "tsc -w",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",

@@ -13,7 +13,7 @@ export const LocaleSchema = lazySchema(() => z.string().describe('BCP-47 Languag
 export type Locale = z.input<typeof LocaleSchema>;
 
 /**
- * Shared history sentence for every shape in this file (#4001).
+ * Shared history sentence for every shape in this file.
  *
  * Translation data has the most literal version of the silent-strip failure in
  * the whole spec: a misspelled group or key is dropped, the bundle saves or
