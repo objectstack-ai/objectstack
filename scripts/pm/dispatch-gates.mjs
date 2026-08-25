@@ -182,6 +182,25 @@ export { isExtractConfigPath, isMetadataFormModulePath };
 
 const ROOT = new URL('../..', import.meta.url).pathname;
 
+// ── What a gate that IMPORTS this module inherits (#11556) ─────────────────
+//
+// This module is importable and is NOT a discovered gate file — `check:pm-dispatch-gates`
+// resolves to `check-dispatch-gates.mjs`, which reaches the tool by `spawnSync`, so the
+// follow's "never open a module that is itself a gate file" rule does not cover it. A gate
+// that imports it therefore inherits its module-body literals as watch hints. Measured on
+// c48d46d70a, over 6840 tracked files: nine literals, covering 2660 of them. Exactly ONE is
+// a population this file opens (the workflow directory `discoverFamilies` readdirs, 28
+// files); the other eight are the package-manifest join bases `discoverFamilies` builds
+// paths FROM and the tier globs `MANDATORY_TIER_GLOBS`/`SUSPECT_TIER_GLOBS` declare — 2632
+// pairs of population no caller reads.
+//
+// Until now the only thing standing between that and a dispatch prompt was prose in ONE
+// caller's header (`check-dispatch-gates.mjs`, #8162): a convention held by the caller that
+// remembered, not a property of this module. The line below makes it the module's own
+// declaration, read fresh on every run and held to a subset of what this file really spells
+// — see `declaredInheritedPopulation`.
+// dispatch-gates: inherited-population .github/workflows -- the workflow directory this tool readdirs; every other module-body literal here is a package-manifest join base or a tier glob, not a path this file opens (#11556)
+
 // ---------------------------------------------------------------------------
 // Extraction — pure functions over file contents, self-testable offline.
 // ---------------------------------------------------------------------------
@@ -660,6 +679,84 @@ const NO_PATH_POPULATION_MARKER =
 export function declaredNoPathPopulation(scriptSource) {
   const m = NO_PATH_POPULATION_MARKER.exec(String(scriptSource));
   return m ? m[1].trim() : null;
+}
+
+/**
+ * A FOLLOWED MODULE's own declaration of which of its module-body literals are
+ * a population a gate INHERITS by importing it — a whole-line comment anywhere
+ * in the module's source:
+ *
+ *   // dispatch-gates: inherited-population <path> [<path> ...] -- <reason>
+ *   #  dispatch-gates: inherited-population <path> [<path> ...] -- <reason>
+ *
+ * ## What it is for (#11556)
+ *
+ * `firstPartyImportTargets` opens a gate's first-party imports and appends the
+ * imported module's hints to the gate's own, because a population MOVED out of
+ * a gate and into a shared module must not stop being declared. That is right
+ * for a module whose literals ARE a population. It is wrong for a module whose
+ * literals are join bases it builds paths from, or a declaration table it
+ * exports for some other purpose: the importer never opens those trees, so
+ * every pair they contribute is a fabricated lead in the column a dispatch
+ * prompt pastes.
+ *
+ * The follow already refuses one case of this — a module that is itself a
+ * discovered gate file (firstPartyImportTargets' docblock carries the +4014
+ * measurement that decided it). That refusal keys on a property the derivation
+ * can SEE. This marker is for the case it cannot see: an ordinary module,
+ * followable by construction, whose author knows which of its literals a caller
+ * would be reading and which it would not.
+ *
+ * ## Why a marker IN the module, never a roster in this script
+ *
+ * Same reason as the two markers above: a roster here is a second copy of a
+ * fact that belongs on the thing it describes, and it rots silently — the
+ * module grows a real population, or is renamed, and the roster keeps vouching
+ * for it. It is also the exact failure this card was filed against: the guard
+ * that existed was prose in one CALLER, so it protected that caller and no
+ * other. A declaration the module carries protects every caller, including the
+ * one written next year.
+ *
+ * ## Narrowing only — a declaration can never INVENT a population
+ *
+ * Every declared path must be one the module's own source really spells: the
+ * declaration is checked against `extractWatchHints` of that same source and
+ * REFUSES (throws) on a path that is not there. So the marker can only ever
+ * remove leads a caller would otherwise inherit, never add one — an opt-out
+ * that could also opt IN would be a hand-written path map, which is the drift
+ * this file's whole contract refuses. A marker carrying no path at all does not
+ * parse as a declaration — it reads as no marker, so the module keeps
+ * contributing everything it spells. That is the safe direction: a blanket
+ * "inherit nothing" reads identically to a placeholder nobody will revisit, and
+ * a module with no literals needs no marker to contribute none.
+ *
+ * The reason is REQUIRED, and separated from the path list by a SPACE-delimited
+ * `--`: a bare `--` would split a path that legitimately contains one.
+ *
+ * Returns `{ population, reason }`, or null when the module declares nothing.
+ */
+const INHERITED_POPULATION_MARKER =
+  /^[ \t]*(?:\/\/|#)[ \t]*dispatch-gates:[ \t]*inherited-population[ \t]+(\S.*?)[ \t]+--[ \t]+(\S.*)$/m;
+
+export function declaredInheritedPopulation(moduleSource, hints = null) {
+  const source = String(moduleSource);
+  const m = INHERITED_POPULATION_MARKER.exec(source);
+  if (!m) return null;
+  // The path list is non-empty by construction: the marker pattern requires a
+  // non-space before the ` -- `, so a marker carrying only a reason does not
+  // parse as a declaration at all — it reads as no marker, which is the safe
+  // direction (inherit everything) rather than a silent blanket opt-out.
+  const population = m[1].trim().split(/[ \t]+/).filter(Boolean);
+  const reason = m[2].trim();
+  const spelled = new Set(hints ?? extractWatchHints(source));
+  const invented = population.filter((h) => !spelled.has(h));
+  if (invented.length > 0) {
+    throw new Error(
+      `dispatch-gates: inherited-population declares ${invented.length} path(s) this module does not spell: ` +
+        `${invented.join(', ')} — the declaration may only NARROW what a caller inherits, never invent it`,
+    );
+  }
+  return { population, reason };
 }
 
 /**
@@ -3345,17 +3442,26 @@ export function residueLines(
  * ## One measured side effect of putting a path in a MODULE BODY
  *
  * Comment masking cannot reach a module-body string, so these globs — and the
- * suspect glob below — are watch hints of this file's own source: re-measured
- * after the 2026-08-20 narrowing, `extractWatchHints` yields 8 hints here
- * against 4 on the base, the new ones being the four globs themselves. They are
- * inert today because no check family resolves to THIS file — the gate that
- * covers it is `check:pm-dispatch-gates`, which resolves to
- * `check-dispatch-gates.mjs` and matches this file through that file's one
- * constant. If the tool is ever wired as its own gate (a shape
- * `check-dispatch-gates.mjs`'s header measures and refuses), this hint would
- * start printing that gate as MATCHED for every card editing the PM skill —
- * a fabricated lead. The refusal already recorded there is what keeps it inert;
- * this note is so the next reader knows the cost is known, not unnoticed.
+ * suspect glob below — are watch hints of this file's own source. Re-measured
+ * on c48d46d70a over 6840 tracked files: `extractWatchHints` yields 9 hints
+ * here, and the four globs of these two tables cover 1026 files between them
+ * (1023 of that is the suspect glob's contract surface).
+ *
+ * They stay inert against a gate that RESOLVES to this file, because no check
+ * family does — `check:pm-dispatch-gates` resolves to `check-dispatch-gates.mjs`
+ * and matches this file through that file's one constant. If the tool is ever
+ * wired as its own gate (a shape `check-dispatch-gates.mjs`'s header measures
+ * and refuses), this hint would start printing that gate as MATCHED for every
+ * card editing the PM skill — a fabricated lead the refusal recorded there is
+ * what prevents.
+ *
+ * They are inert against a gate that IMPORTS this module for a second reason
+ * now, and that one is structural rather than remembered: the module's own
+ * `inherited-population` declaration (top of the module body, #11556) names the
+ * single population a follower inherits, and these globs are not in it. That
+ * closes the class rather than these four literals — a tier glob added tomorrow
+ * inherits nothing without someone widening the declaration, and the declaration
+ * cannot be widened to a path this file does not spell.
  *
  * The authority for the policy is the maintainer ruling quoted in the PM
  * dispatch skill (2026-08-10 three-tier ruling, clause ① of its 强制条款, as
@@ -3595,7 +3701,15 @@ export function discoverFamilies() {
   const moduleHints = new Map();
   const hintsOfModule = (rel) => {
     if (!moduleHints.has(rel)) {
-      moduleHints.set(rel, extractWatchHints(readFileSync(join(ROOT, rel), 'utf8')));
+      // ONE read, two answers — the module's literals and its own declaration of
+      // which of them a caller INHERITS — so the pair cannot describe different
+      // revisions of a file, the same discipline the trigger paths take above.
+      // A module that declares nothing contributes everything it spells, which
+      // is the behaviour every followed module had before the marker existed.
+      const source = readFileSync(join(ROOT, rel), 'utf8');
+      const spelled = extractWatchHints(source);
+      const declared = declaredInheritedPopulation(source, spelled);
+      moduleHints.set(rel, declared ? declared.population : spelled);
     }
     return moduleHints.get(rel);
   };
@@ -4445,6 +4559,40 @@ function selfTest() {
   t(
     'a self-test family inherits NONE of them — those literals are join bases and tier globs, the fabrication #8162 already refused by spawning',
     (bareRootEntry?.hints ?? []).length === 0 && (bareRootEntry?.hintOrigin?.size ?? 0) === 0,
+  );
+
+  // The SECOND guard, on the same live specimen (#11556). The narrowing above
+  // is invocation-shaped: it holds for a `--self-test` family and nothing else,
+  // so a `check-` gate importing the same modules was untouched by it. What
+  // covers that caller is the module's OWN inherited-population declaration,
+  // and this measures it through the follow's rule rather than through the raw
+  // extractor the case above uses.
+  const inheritableFromImports = importedByBareRoot.flatMap((m) => {
+    const src = readFileSync(join(ROOT, m), 'utf8');
+    const spelled = extractWatchHints(src);
+    return declaredInheritedPopulation(src, spelled)?.population ?? spelled;
+  });
+  t(
+    `a gate that IMPORTS the same modules inherits ${inheritableFromImports.length} of those ${wouldHaveInherited.length} literal(s)`,
+    inheritableFromImports.length > 0 && inheritableFromImports.length < wouldHaveInherited.length,
+  );
+  const inhSweep = trackedFiles();
+  const inhCovered = (hs) => inhSweep.filter((f) => hs.some((h) => hintCovers(h, f))).length;
+  t(
+    `and the price of that import drops from ${inhCovered(wouldHaveInherited)} tracked files to ${inhCovered(inheritableFromImports)}`,
+    inhCovered(inheritableFromImports) < inhCovered(wouldHaveInherited),
+  );
+  // The direction that could SUBTRACT, asserted rather than argued: a
+  // declaration is a narrowing, and a narrowing that took the real population
+  // with it would read exactly like this one — fewer pairs, every gate green.
+  // The tool DOES readdir the workflow tree, so every file in it must stay
+  // reachable through what a follower inherits.
+  t(
+    'and it is not a coverage cut — every workflow file the tool really readdirs is still reachable through the declaration',
+    inhSweep.filter((f) => f.startsWith('.github/workflows/')).length > 0
+      && inhSweep
+        .filter((f) => f.startsWith('.github/workflows/'))
+        .every((f) => inheritableFromImports.some((h) => hintCovers(h, f))),
   );
 
   // The direction that could SUBTRACT, and the reason it is asserted rather
@@ -6164,6 +6312,133 @@ function selfTest() {
   t(
     'the marker must be its OWN line — a mention inside prose is a discussion of the convention, not a declaration under it',
     declaredNoPathPopulation('// see the dispatch-gates: no-path-population -- marker for how to opt out\n') === null,
+  );
+
+  // ── The followed-module inherited-population declaration (#11556) ─────────
+  //
+  // The two markers above are a GATE's declarations about itself. This one is a
+  // followed MODULE's declaration about what a gate inherits by importing it —
+  // the half that had no mechanism at all, only prose in the one caller that
+  // remembered to spawn instead of import.
+  const inhFixture = [
+    "const WF = '.github/workflows';",
+    "const BASE = 'packages/plugins';",
+    '// dispatch-gates: inherited-population .github/workflows -- the only tree this module opens',
+  ].join('\n');
+  t(
+    'a followed module declares the population a caller inherits, and the reason reads back',
+    (() => {
+      const d = declaredInheritedPopulation(inhFixture);
+      return d.population.length === 1
+        && d.population[0] === '.github/workflows'
+        && d.reason === 'the only tree this module opens';
+    })(),
+  );
+  t(
+    'and the literal it did NOT declare stops being inheritable, while still being a literal it spells',
+    extractWatchHints(inhFixture).includes('packages/plugins')
+      && !declaredInheritedPopulation(inhFixture).population.includes('packages/plugins'),
+  );
+  t(
+    'the shell comment spelling is read too (a followed module can be a shell helper)',
+    declaredInheritedPopulation("X='.github/workflows'\n# dispatch-gates: inherited-population .github/workflows -- shell reason\n")
+      ?.reason === 'shell reason',
+  );
+  t(
+    'several paths may be declared, space separated',
+    (() => {
+      const src = ["const A = '.github/workflows';", "const B = 'packages/spec/src/**';",
+        '// dispatch-gates: inherited-population .github/workflows packages/spec/src/** -- two real reads'].join('\n');
+      return declaredInheritedPopulation(src).population.length === 2;
+    })(),
+  );
+  t('no marker present reads as no declaration — the module contributes everything it spells', declaredInheritedPopulation("const A = '.github/workflows';\n") === null);
+  t(
+    'a marker carrying only a reason does not parse as a declaration (it reads as no marker, so the module keeps contributing — never a silent blanket opt-out)',
+    declaredInheritedPopulation("const A = '.github/workflows';\n// dispatch-gates: inherited-population -- everything here is a join base\n") === null,
+  );
+  t(
+    'the marker must be its OWN line here too — a mention inside prose is a discussion of the convention, not a declaration under it',
+    declaredInheritedPopulation("const A = '.github/workflows';\n// see dispatch-gates: inherited-population .github/workflows -- for how a module opts out\n") === null,
+  );
+  // NARROWING ONLY. This is the load-bearing invariant: an opt-out that could
+  // also opt IN would be the hand-written path map this file's contract exists
+  // to refuse, and it would be invisible — a declared path nothing spells reads
+  // exactly like a real one in the MATCHED column.
+  t(
+    'a declared path the module does not spell is REFUSED, not silently inherited',
+    (() => {
+      try {
+        declaredInheritedPopulation("const A = '.github/workflows';\n// dispatch-gates: inherited-population packages/spec/src/** -- invented\n");
+        return false;
+      } catch (e) {
+        return /may only NARROW/.test(String(e.message));
+      }
+    })(),
+  );
+  t(
+    'and the refusal names every invented path, not just the first',
+    (() => {
+      try {
+        declaredInheritedPopulation("const A = '.github/workflows';\n// dispatch-gates: inherited-population packages/a packages/b -- invented\n");
+        return false;
+      } catch (e) {
+        return /packages\/a, packages\/b/.test(String(e.message));
+      }
+    })(),
+  );
+  // The `--` separator is SPACE-delimited on purpose: a bare `--` would split a
+  // path that legitimately carries one.
+  t(
+    'a declared path containing a double dash survives the reason separator',
+    (() => {
+      const src = ["const A = 'packages/a--b/src';", '// dispatch-gates: inherited-population packages/a--b/src -- a real subtree'].join('\n');
+      const d = declaredInheritedPopulation(src);
+      return d.population.length === 1 && d.population[0] === 'packages/a--b/src' && d.reason === 'a real subtree';
+    })(),
+  );
+  // ── LIVE: this file's own declaration ─────────────────────────────────────
+  //
+  // Pinned against the real source, because the whole value of the marker is
+  // that it holds for THIS module — the one measured specimen. Delete the
+  // marker line and these cases redden instead of 2632 fabricated pairs coming
+  // back silently for the next gate that imports the tool.
+  const ownToolSource = readFileSync(join(ROOT, 'scripts/pm/dispatch-gates.mjs'), 'utf8');
+  const ownDeclared = declaredInheritedPopulation(ownToolSource);
+  t('this module declares what a follower inherits', ownDeclared !== null && ownDeclared.reason.length > 0);
+  t(
+    'it declares exactly the workflow tree it readdirs',
+    ownDeclared.population.length === 1 && ownDeclared.population[0] === '.github/workflows',
+  );
+  t('so a follower still reaches the workflow files this tool really opens', covers(ownDeclared.population, '.github/workflows/lint.yml'));
+  // The four fabricating classes the card measured, each pinned as SPELLED but
+  // NOT INHERITED — the two halves have to be asserted together, because the
+  // literal disappearing from the file would also pass "not inherited" while
+  // silently deleting the tier declaration this table is.
+  for (const fabricated of ['packages/plugins', 'packages/drivers', 'packages/services', 'packages/spec/src/**']) {
+    t(
+      `the module still spells ${fabricated} (join base / tier glob) but no follower inherits it`,
+      ownHints.includes(fabricated) && !ownDeclared.population.includes(fabricated),
+    );
+  }
+  t(
+    'and the tier-table file globs are not inheritable either',
+    !ownDeclared.population.includes('.claude/agents/os-dev.md')
+      && !ownDeclared.population.includes('skills/objectstack-pm-dispatch/SKILL.md'),
+  );
+  // Cost of the mechanism on this tree, pinned so it cannot grow unnoticed: the
+  // marker is an opt-out, and an opt-out that spreads is how a real population
+  // goes quiet. Exactly one module in the scripts tree declares one today.
+  t(
+    'exactly one module in the scripts tree carries the declaration — this one',
+    (() => {
+      const declaring = trackedFiles()
+        .filter((f) => f.startsWith('scripts/') && /\.(mjs|mts|js|sh)$/.test(f))
+        // Read from the MODULE BODY, so the fixture markers above — which live
+        // inside this very self-test — are not counted as live declarations.
+        .filter((f) => INHERITED_POPULATION_MARKER.test(maskSelfTests(readFileSync(join(ROOT, f), 'utf8'))));
+      return declaring.length === 1 && declaring[0] === 'scripts/pm/dispatch-gates.mjs';
+    })(),
   );
   // The residue count that carries it refuses a missing or impossible value in
   // the same shape as every other count in that line: a subset that could go
