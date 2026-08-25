@@ -333,14 +333,14 @@ const TRIAGE = new Map([
   }],
   ['check:runner-env-posture SCANNED_ROOTS packages', {
     verdict: 'REFUSE-UNSPELLABLE',
-    why: 'non-test source beneath a `src` SEGMENT — 1812 of 5240 (35%), re-derived from the gate '
+    why: 'non-test source beneath a `src` SEGMENT — 1812 of 5241 (35%), re-derived from the gate '
       + 'own collectFiles() walk together with every number below, so the row holds ONE tree. What '
       + 'is unspellable here is the file-KIND filter, NOT the segment. Since #12300 a glob in a '
       + 'non-final segment is MATCHED rather than collapsed, so `packages/**/src/**` is a live '
       + 'hint that reaches all 1812 of them; the earlier reading that collapseHint reduced it to '
       + '`packages` described a collapse hintCovers no longer performs for this shape, and the '
-      + 'refusal never rested on it. It covers 4290 tracked files to reach those 1812, and 2465 '
-      + 'of the 2478 it over-names are the test files this gate deliberately skips — the one '
+      + 'refusal never rested on it. It covers 4291 tracked files to reach those 1812, and 2466 '
+      + 'of the 2479 it over-names are the test files this gate deliberately skips — the one '
       + 'filter no glob idiom can spell. So the narrowest LIVE spelling is 42% true where the '
       + 'bare root is 35%: the segment buys seven points, not a precise claim, and both spellings '
       + 'are false about the same non-test filter. Its nearest neighbour check:authz-resolver is '
