@@ -885,7 +885,7 @@ body back to verify when a snippet is load-bearing.
   "open_questions": [
     { "question": "…", "options": ["A …", "B …"], "recommendation": "A, because …" }
   ],
-  "out_of_scope_findings": ["filed as #457: …"]
+  "out_of_scope_findings": ["filed as #<n>: …"]
 }
 ```
 

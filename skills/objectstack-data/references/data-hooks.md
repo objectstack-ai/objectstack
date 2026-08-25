@@ -60,11 +60,11 @@ ObjectStack provides **8 lifecycle events** organized by operation type:
 > covers every read shape — there is no `beforeFindOne`/`afterFindOne`. Likewise the
 > write events fire on bulk `multi:true` operations, so there is no `*Many` event. A
 > bulk write hands hooks **no** row-scoping predicate: it lives on the engine-internal
-> `OperationContext.ast` (#2982), so the RLS / sharing filters composed onto it bind
+> `OperationContext.ast`, so the RLS / sharing filters composed onto it bind
 > the driver call itself, where no handler can widen them — scope a batch through
 > `options.where` at the caller. The `after*` events instead dispatch **once per
 > matched row**, each on a single-record-shaped context whose `input.id` names that
-> row (#5038). And there is no `beforeCount`/`beforeAggregate`: read authorization and
+> row. And there is no `beforeCount`/`beforeAggregate`: read authorization and
 > row filtering belong to **RLS / permission rules**, and field masking to
 > **field-level metadata** — declarative mechanisms that apply everywhere, rather than
 > a hook every author must remember to re-attach.
@@ -88,7 +88,7 @@ preferred over a bare `: Hook` literal (the same rule as `defineDatasource`):
 it validates when the module is imported, so constraint-level mistakes a bare
 annotation can't catch — a non-`snake_case` `name`, a misspelled key routed
 through a spread — fail while you author instead of at deploy, and the export
-carries defaults already materialized (#4269).
+carries defaults already materialized.
 
 ```typescript
 import { P } from '@objectstack/spec';
@@ -236,11 +236,11 @@ condition: P`record.status in ['pending', 'in_review']`
 condition: P`record.type == 'enterprise' && record.region == 'APAC' && record.is_active == true`
 
 // A TRANSITION — fires only on the update that completes the task,
-// not on later updates of an already-done record (#4784)
+// not on later updates of an already-done record
 condition: P`previous.done != true && record.done == true`
 ```
 
-**`record` here is the RECORD, not this write's payload (#4770).** The condition
+**`record` here is the RECORD, not this write's payload.** The condition
 is evaluated against the stored row overlaid with the fields this write carries,
 made total over the object's **declared** fields (`null` when a declared field is
 in neither). So:
@@ -251,7 +251,7 @@ in neither). So:
   Gotcha 1.)
 - `record` describes the record's **state**, not the diff. `record.done == true`
   fires on every update of an already-done record, not only on the update that
-  set it. **For the transition, compare against `previous`** (#4784):
+  set it. **For the transition, compare against `previous`**:
   `previous.done != true && record.done == true`. `previous` is the stored
   pre-write row, made total over the same declared fields, and it is the same
   binding a validation predicate reads.
@@ -264,8 +264,8 @@ in neither). So:
   (`record` is that bare payload there too, so a *declared* field this write does
   not set is unevaluable as well.) Reading `previous` on that dispatch is rejected
   **by name**, and the rejection points you at the after-type event.
-- **`after*` hooks fire PER ROW, so a bulk write needs no special condition
-  (#5038).** A predicate (`multi: true`) update/delete dispatches its `after*`
+- **`after*` hooks fire PER ROW, so a bulk write needs no special
+  condition.** A predicate (`multi: true`) update/delete dispatches its `after*`
   hooks **once per matched row**, each on a single-record-shaped context —
   `previous` is that row's pre-image, `record` is that row's real state (not the
   bare payload), and `input.id` names the row. A transition condition therefore
@@ -278,7 +278,7 @@ in neither). So:
   `null > null`. `has()` answers "is this key declared at all", which is a
   question about your spelling, not about your data.
 
-⚠️ **An unevaluable condition ABORTS the operation (#4775).** A typo'd key
+⚠️ **An unevaluable condition ABORTS the operation.** A typo'd key
 (`record.stauts`), a `previous` reference on an insert, or a comparison CEL has
 no overload for does **not** degrade to "the hook did not fire" — it **fails the
 write**. Until protocol 17 the gate emitted a `logger.warn` and returned `false`,
@@ -365,7 +365,7 @@ The sandbox is handed a **JSON snapshot** of these (built by
 | `ctx.previous` | object \| `undefined` | Pre-write record on update/delete. **`undefined` on insert** → use `!ctx.previous` to detect *create*. |
 | `ctx.result` | object \| `undefined` | `after*` only. ⚠️ **partial** on afterUpdate — see gotcha 1. |
 | `ctx.user` | object \| `undefined` | `{ id, name, email, organizationId }`. `undefined` for system / unauthenticated writes. |
-| `ctx.session` | object \| `undefined` | `{ userId, organizationId, isSystem, … }`. **No role list** — `session.roles` was retired in 17.0.0 (#5050): it was declared but never produced, so every read was `undefined`. |
+| `ctx.session` | object \| `undefined` | `{ userId, organizationId, isSystem, … }`. **No role list** — `session.roles` was retired in 17.0.0: it was declared but never produced, so every read was `undefined`. |
 | `ctx.event` | string | e.g. `'afterUpdate'` — dispatch on it when one hook subscribes to several events. |
 | `ctx.object` | string | The target object name. |
 | `ctx.api` | object | Cross-object CRUD. Gated by `api.read` / `api.write` — see below. |
@@ -415,7 +415,7 @@ await ctx.api.object('task').find({ where: { $and: [{ done: false }, { owner: ui
 absent or empty predicate does not come back as `null` — it comes back as the
 object's **first row**: a real, plausible-looking record with nothing to do with
 what you asked for, which your `if (!row)` cannot catch. So `findOne()`,
-`findOne({})` and `findOne({ where: {} })` **throw** (#4419). Be specific in one
+`findOne({})` and `findOne({ where: {} })` **throw**. Be specific in one
 of three ways:
 
 ```js
@@ -482,7 +482,7 @@ const full = await ctx.api.object('candidate').findOne({ where: { id: ctx.result
 // full.position_id is present even though this PATCH only set `stage`.
 ```
 
-(A declarative `condition` does **not** hit this wall — since #4770 it is
+(A declarative `condition` does **not** hit this wall — it is
 evaluated against the stored record overlaid with the payload, so
 `record.position_id` is readable there even when the PATCH never wrote it. Guard
 optional values with `record.x != null`, not with `has(record.x)`.)
@@ -588,9 +588,9 @@ interface HookContext {
     userId?: string;
     organizationId?: string; // Active org — the single blessed name. Matches the
                              // `organization_id` column + `current_user.organizationId` (RLS).
-                             // The former `tenantId` alias was removed in #3290.
+                             // The former `tenantId` alias was removed in v16.
                              // There is no `roles` here: `session.roles` was declared but
-                             // never produced, and was retired in 17.0.0 (#5050). Privilege
+                             // never produced, and was retired in 17.0.0. Privilege
                              // is judged by the security service (permissions / positions /
                              // posture), never by a role-name string in a hook.
     accessToken?: string;
@@ -625,7 +625,7 @@ predicates, and in seed rows. Read it as **`organizationId`**:
 const org = ctx.user?.organizationId ?? ctx.session?.organizationId;
 ```
 
-> The former `ctx.session.tenantId` alias was removed in v16 (#3290) — read the
+> The former `ctx.session.tenantId` alias was removed in v16 — read the
 > org under `organizationId`. (The generic driver-layer `execCtx.tenantId` /
 > `DriverOptions.tenantId` isolation knob is a separate axis and is unaffected.)
 
@@ -1020,7 +1020,7 @@ const maskSensitiveData = defineHook({
     //
     // ⚠️ Do NOT gate this on a role name. `ctx.session` carries no role list:
     // `session.roles` was declared for years, never produced by any engine
-    // path, and retired in 17.0.0 (#5050) — `ctx.session?.roles?.includes(…)`
+    // path, and retired in 17.0.0 — `ctx.session?.roles?.includes(…)`
     // was always `undefined`, so a mask written that way looked role-aware and
     // was not. A per-role exemption belongs in field-level permissions (the
     // callout above), which the read path applies for you.

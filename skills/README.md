@@ -10,7 +10,7 @@ npx skills add objectstack-ai/objectstack/skills --all
 ```
 
 The `/skills` subpath matters: it is the published catalog boundary — pointing
-the skills CLI at the repo root would also pick up repo-internal skills (#3101).
+the skills CLI at the repo root would also pick up repo-internal skills.
 
 Each **domain** skill is self-contained: a `SKILL.md` with YAML frontmatter, plus a
 `references/_index.md` that points into the authoritative Zod sources in

@@ -236,6 +236,106 @@ const BARE = new RegExp(`^export const \\w+:\\s*${NS}(?:${DOMAINS})(?:Input)?\\s
 const FENCE_OPEN = /^```(?:ts|typescript|tsx)\s*$/;
 const FENCE_CLOSE = /^```\s*$/;
 
+// ── Rule 2: bare internal issue ids on the CUSTOMER-FACING surface ──────────
+//
+// Maintainer ruling 2026-08-23, on the finding that measured this: strip the
+// internal issue-id references from the published catalog and gate their
+// return. It rests on the standing ruling of 2026-08-12, verbatim and
+// untranslated: 「处理 issue 时犯的错应该总结成经验,保留 issue id没有意义」.
+//
+// Why this rule is scoped to `skills/**` alone, and not to the other ROOTS.
+// `.claude/` and `docs/` are read INSIDE this repo, by readers who have the
+// tracker, `git log` and the ADRs — an id there resolves. `skills/**` ships to
+// customer projects: it is loaded WHOLE into customer agent context windows, in
+// codebases that have none of those. To that reader `#4286` is not a citation,
+// it is a citation-SHAPED token that resolves to nothing — and it is billed to
+// their context window every session, forever, which is the cost curve
+// `scripts/check-skills-token-ratchet.mjs` prices. So the ban follows the
+// audience, not the file type, and widening it to the internal roots would be a
+// different decision needing its own ruling.
+//
+// ⚠️ The scan is DELIBERATELY not the `collectFiles()` walk above. That walk
+// skips every `references/` directory (SKIP_DIRS), and the published catalog
+// keeps hand-authored reference companions there —
+// `skills/objectstack-data/references/data-hooks.md` alone carried 15 of these
+// ids when the corpus was measured. Reusing the walk would have produced a gate
+// that runs, passes, and cannot see a ninth of the population it exists to
+// guard: the exact failure this file's header opens with, one rule over.
+const PUBLISHED_SKILLS_ROOT = 'skills';
+
+// Generated artifacts under `skills/**`. Their ids are not authored here — they
+// are projected from `.describe()` / TSDoc in `packages/spec`, so the fix for
+// one is a spec-source edit plus a regeneration, on a surface with its own
+// gates. Flagging them here would red a file no author can legally hand-edit
+// ("do not edit" is in their own headers) and point the remedy at the wrong
+// repo layer. They are exempt from THIS rule, not absolved: the spec-side ids
+// are tracked separately.
+const GENERATED_SKILL_ARTIFACTS = [
+  /\/references\/_index\.md$/,
+  /\/references\/react-blocks\.md$/,
+];
+
+/**
+ * An id-shaped token that is FICTIONAL EXAMPLE DATA in a syntax demonstration,
+ * not a citation of a real internal issue.
+ *
+ * Entries are `path:line-substring` and must clear a deliberately narrow bar:
+ * the number denotes "an issue number you would type here", the passage teaches
+ * the syntax rather than sourcing a claim, and removing it would damage the
+ * lesson. `/pm-dispatch #128 #131` is the invocation grammar of the command the
+ * page documents — `#N` IS the argument — so the ids are instructive AS ids.
+ *
+ * ⛔ This is not a place to park a citation you would rather not rewrite. A
+ * provenance reference ("removed in #4286", "see #3447") is never example data,
+ * however inconvenient; rewrite it to keep the teaching and drop the id, which
+ * is what the ruling asks for. The list is pinned in the self-test so it cannot
+ * grow silently.
+ */
+const EXAMPLE_ID_ALLOWLIST = [
+  {
+    file: 'skills/objectstack-pm-dispatch/SKILL.md',
+    contains: '/pm-dispatch #128 #131',
+    why: 'CLI usage line — the ids are the command\'s own argument syntax, not a citation.',
+  },
+];
+
+/**
+ * A bare internal issue-id reference: `#` followed by 3–5 digits.
+ *
+ * The precision is carried by the TRAILING `(?![0-9A-Za-z])`, and it is load-
+ * bearing rather than decorative — it is what keeps CSS hex colours out. The
+ * catalog really contains `#6366f1`, `#4169E1` and `#3498db` in authored
+ * examples, and a rule anchored only on the leading `#` reports all three. That
+ * is not a hypothetical: the filing count for this cleanup was 92 and the true
+ * population was 90, the difference being exactly the two hex colours in
+ * `objectstack-ui/SKILL.md` that a `#[0-9]{3,5}` scan mistook for issue ids.
+ * A gate that cries wolf on a colour literal is a gate authors route around.
+ *
+ * The same lookahead rejects 6-digit all-numeric colours (`#123456`), since the
+ * sixth digit is a word character.
+ *
+ * `(?<![#&])` drops two more shapes that are not references: a markdown heading
+ * whose text begins with digits (`###4286`), and an HTML numeric entity
+ * (`&#8212;`).
+ *
+ * Deliberately NOT excluded is a leading word character, so the cross-repo
+ * spelling `framework#3582` — which really occurred — is caught too.
+ *
+ * The three shapes named in review as must-not-fire need no special handling
+ * and are pinned in the self-test anyway: version numbers (`v17`, `17.0.0`),
+ * HTTP status codes (`400 INVALID_FIELD`) and array indices (`fields[0]`) carry
+ * no `#` at all, and the ordinal `#1` in "the #1 authoring mistake" is one
+ * digit, below the floor.
+ */
+const INTERNAL_ID_SOURCE = String.raw`(?<![#&])#[0-9]{3,5}(?![0-9A-Za-z])`;
+/**
+ * ⚠️ Carries the `g` flag, so it is STATEFUL: `.test()` / `.exec()` advance
+ * `lastIndex` and the next call resumes mid-string. Only ever hand it to
+ * `String#match`, which ignores `lastIndex` for a global pattern. Anything that
+ * needs a predicate builds its own from {@link INTERNAL_ID_SOURCE}.
+ */
+const INTERNAL_ID = new RegExp(INTERNAL_ID_SOURCE, 'g');
+
 const posix = (p) => p.split(sep).join('/');
 
 function walk(dir, out) {
@@ -333,6 +433,61 @@ function collectFiles() {
   }
   if (empty.length) throw new EmptyRootError(empty, files.length);
   return files;
+}
+
+/**
+ * Every hand-authored Markdown file in the PUBLISHED catalog.
+ *
+ * Its own walk, for the reason argued at {@link PUBLISHED_SKILLS_ROOT}: the
+ * `collectFiles()` walk skips `references/`, where hand-authored companions
+ * live. Generated artifacts are dropped by path.
+ *
+ * Empty is a hard error here for the same reason it is in `collectFiles`
+ * (#4932): "the catalog is clean" and "the catalog was never opened" are the
+ * same output and the same exit code, and this rule's whole job is to speak for
+ * a corpus the author cannot see being read.
+ *
+ * @throws {DeadRootError} `skills/` is not a directory.
+ * @throws {EmptyRootError} `skills/` yielded no Markdown file.
+ */
+function collectPublishedSkillFiles(root = PUBLISHED_SKILLS_ROOT) {
+  assertRootsResolvable([root]);
+  const files = [];
+  // A dedicated walker, NOT the shared `walk()`. That one honours SKIP_DIRS,
+  // whose `references` entry is correct for the bare-literal rule and wrong for
+  // this one: `references/` is where the catalog's hand-authored companions
+  // live. Reusing it green-lit a ninth of this rule's population unseen — the
+  // self-test case above is the reverse proof, and it failed until this walker
+  // existed.
+  (function descend(dir) {
+    for (const e of readdirSync(dir)) {
+      if (e === 'node_modules' || e === '.git' || e === 'dist') continue;
+      const p = join(dir, e);
+      if (statSync(p).isDirectory()) descend(p);
+      else if (/\.mdx?$/.test(e)) files.push(posix(p));
+    }
+  })(root);
+  const kept = files.filter((p) => !GENERATED_SKILL_ARTIFACTS.some((re) => re.test(p)));
+  if (kept.length === 0) throw new EmptyRootError([root], 0);
+  return kept.sort();
+}
+
+/** True when `line` is an allowlisted fictional-example passage in `file`. */
+function isAllowlistedExample(file, line) {
+  return EXAMPLE_ID_ALLOWLIST.some((e) => e.file === file && line.includes(e.contains));
+}
+
+/** Bare internal issue-id references in one published file's source. */
+function findIdViolations(source, file) {
+  const out = [];
+  const lines = source.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    const ln = lines[i];
+    if (isAllowlistedExample(posix(file), ln)) continue;
+    const ids = ln.match(INTERNAL_ID);
+    if (ids) out.push({ file: posix(file), line: i + 1, ids, text: ln.trim() });
+  }
+  return out;
 }
 
 /** Bare metadata literals inside ts/tsx fenced blocks of one file's source. */
@@ -508,6 +663,124 @@ function selfTest() {
     expect('a scan that finds nothing at all is red, not "0 files clean"', allEmptyErr instanceof EmptyRootError, true);
     expect('every empty root is named', allEmptyErr?.roots?.join(',') ?? '<none>', ROOTS.join(','));
     expect('the zero total is reported', allEmptyErr?.total ?? -1, 0);
+
+    // ── Rule 2: internal issue ids on the published surface ──────────────
+    //
+    // The red/green PAIR is the point. "Green on the real corpus" is what a
+    // rule that cannot fire also looks like, so the planted id must be proven
+    // to turn it red, and its removal proven to turn it green again, in the
+    // same run, over the real collector.
+    const idTree = {
+      // The published surface — in scope, including a hand-authored companion
+      // under references/, which the OTHER rule's walk skips entirely.
+      'skills/objectstack-demo/SKILL.md': 'The `cursor` key was removed in protocol 17.',
+      'skills/objectstack-demo/references/data-hooks.md': 'Hooks fire per row.',
+      'skills/objectstack-demo/rules/indexing.md': '`type` was retired.',
+      // Generated artifacts — exempt: their ids come from packages/spec TSDoc.
+      'skills/objectstack-demo/references/_index.md': 'Driver registry (#4410).',
+      'skills/objectstack-ui/references/react-blocks.md': 'Converging on the metadata tier (#11284).',
+      // The internal roots are NOT this rule's business.
+      '.claude/agents/os-dev.md': 'Lesson learned while fixing #4286.',
+      'docs/adr/0049-enforce-or-remove.md': 'Superseded by #5248.',
+      'content/docs/protocol/query.mdx': 'See #4286 for the removal.',
+    };
+    const idDir = mkdtempSync(join(tmpdir(), 'doc-authoring-selftest-ids-'));
+    try {
+      for (const [rel, body] of Object.entries(idTree)) {
+        const full = join(idDir, ...rel.split('/'));
+        mkdirSync(dirname(full), { recursive: true });
+        writeFileSync(full, body);
+      }
+      process.chdir(idDir);
+
+      const scan = () => collectPublishedSkillFiles()
+        .flatMap((f) => findIdViolations(readFileSync(f, 'utf8'), f));
+
+      // GREEN: the corpus as stripped.
+      expect('a clean published corpus is green', scan().length, 0);
+
+      // Scope: the collector reaches references/, and drops the generated files.
+      const seen = collectPublishedSkillFiles();
+      expect('the id scan reaches hand-authored references/ (the other rule\'s walk does not)',
+        seen.includes('skills/objectstack-demo/references/data-hooks.md'), true);
+      expect('generated references/_index.md is exempt',
+        seen.includes('skills/objectstack-demo/references/_index.md'), false);
+      expect('the generated react-blocks contract page is exempt',
+        seen.includes('skills/objectstack-ui/references/react-blocks.md'), false);
+      expect('the id scan does not reach .claude/', seen.some((f) => f.startsWith('.claude/')), false);
+      expect('the id scan does not reach docs/', seen.some((f) => f.startsWith('docs/')), false);
+      expect('the id scan does not reach content/', seen.some((f) => f.startsWith('content/')), false);
+
+      // RED: plant one id in a published file — in prose...
+      const planted = join(idDir, 'skills', 'objectstack-demo', 'SKILL.md');
+      writeFileSync(planted, 'The `cursor` key was removed in protocol 17 (#4286).');
+      let red = scan();
+      expect('a planted id in published prose is RED', red.length, 1);
+      expect('the red names the file', red[0]?.file, 'skills/objectstack-demo/SKILL.md');
+      expect('the red names the id', red[0]?.ids?.join(','), '#4286');
+
+      // ...and in a comment inside a code fence, which is where half the
+      // measured population lived.
+      writeFileSync(planted, ['```ts', "  cursor: 'abc', // removed in #4286", '```'].join('\n'));
+      expect('a planted id in a fenced code comment is RED too', scan().length, 1);
+
+      // ...and in the cross-repo spelling, which carries no space.
+      writeFileSync(planted, 'See framework#3582 for the token resolver.');
+      expect('the `repo#NNNN` spelling is RED', scan().length, 1);
+
+      // GREEN again, from the same collector — so the red above was the id and
+      // nothing else about the tree.
+      writeFileSync(planted, 'The `cursor` key was removed in protocol 17.');
+      expect('removing the id makes it green again', scan().length, 0);
+
+      // ── Precision: the shapes that must NEVER fire ──────────────────────
+      // Each is a real spelling from the catalog. A gate that reds on any of
+      // them is one authors learn to route around, which costs more than the
+      // rule earns.
+      const mustPass = [
+        ['CSS hex colour, lowercase suffix', "color: '#6366f1'"],
+        ['CSS hex colour, uppercase suffix', "color: '#4169E1'"],
+        ['CSS hex colour, mid-string digits', "color: '#3498db'"],
+        ['CSS hex colour, all-numeric', "color: '#123456'"],
+        ['a version number', 'removed in spec 17.0.0, protocol 17, v16'],
+        ['an HTTP status code', 'returns `400 INVALID_FIELD`, not 404'],
+        ['an array index', 'read `searchableFields[0]` and `fields[12]`'],
+        ['the ordinal "#1"', 'The #1 authoring mistake is a bare field ref.'],
+        ['a markdown heading', '### 4286 things to know'],
+        ['an HTML numeric entity', 'an em dash &#8212; here'],
+        ['a two-digit id-shaped token', 'issue #42 is below the floor'],
+        ['a six-digit run', 'the build id is #1234567'],
+      ];
+      for (const [label, body] of mustPass) {
+        writeFileSync(planted, body);
+        expect(`precision — ${label} does not fire`, scan().length, 0);
+      }
+
+      // The allowlist fires as an exemption, and ONLY on its own passage.
+      mkdirSync(join(idDir, 'skills', 'objectstack-pm-dispatch'), { recursive: true });
+      writeFileSync(
+        join(idDir, 'skills', 'objectstack-pm-dispatch', 'SKILL.md'),
+        ['```', '/pm-dispatch #128 #131       # two named issues, nothing else', '```'].join('\n'),
+      );
+      writeFileSync(planted, 'The `cursor` key was removed in protocol 17.');
+      expect('the allowlisted fictional-example line is exempt', scan().length, 0);
+      // ...but the same ids elsewhere are not exempt: the entry is pinned to
+      // its file AND its passage, so it cannot become a blanket file pass.
+      writeFileSync(planted, 'Filed as #128 and #131.');
+      expect('the same ids outside the allowlisted passage are still RED', scan().length, 1);
+      writeFileSync(planted, 'The `cursor` key was removed in protocol 17.');
+
+      // Empty is a hard error, not a pass (#4932), for this rule too.
+      rmSync(join(idDir, 'skills'), { recursive: true, force: true });
+      mkdirSync(join(idDir, 'skills'), { recursive: true });
+      let idEmptyErr = null;
+      try { collectPublishedSkillFiles(); } catch (err) { idEmptyErr = err; }
+      expect('an empty published catalog is red, not "0 files clean"',
+        idEmptyErr instanceof EmptyRootError, true);
+    } finally {
+      process.chdir(dir);
+      rmSync(idDir, { recursive: true, force: true });
+    }
   } finally {
     process.chdir(cwd);
     rmSync(dir, { recursive: true, force: true });
@@ -547,11 +820,30 @@ function selfTest() {
   expect('no exemption swallows a declared root whole',
     [...SKIP_PATHS].some((p) => ROOTS.includes(p)), false);
 
+  // ── The example-id allowlist, pinned so it cannot grow in silence ────────
+  // Enforcement cannot hold this: an entry added for the wrong reason runs
+  // green forever. Pinning the CONTENT is what makes a widening show up as a
+  // failing case here rather than as a citation quietly re-entering the
+  // catalog under an exemption nobody re-read.
+  expect('the example-id allowlist holds exactly the passages it was measured for',
+    EXAMPLE_ID_ALLOWLIST.map((e) => `${e.file}::${e.contains}`).join(' | '),
+    'skills/objectstack-pm-dispatch/SKILL.md::/pm-dispatch #128 #131');
+  expect('every allowlist entry records WHY it is example data and not a citation',
+    EXAMPLE_ID_ALLOWLIST.every((e) => typeof e.why === 'string' && e.why.length > 20), true);
+  expect('every allowlist entry names a file on the published surface',
+    EXAMPLE_ID_ALLOWLIST.every((e) => e.file.startsWith(`${PUBLISHED_SKILLS_ROOT}/`)), true);
+  // An entry must be a PASSAGE, never a bare filename — a `contains` that
+  // matched everything would exempt the whole file.
+  expect('every allowlist entry is pinned to a passage, not a whole file',
+    EXAMPLE_ID_ALLOWLIST.every(
+      (e) => e.contains.length > 8 && new RegExp(INTERNAL_ID_SOURCE).test(e.contains),
+    ), true);
+
   if (failures.length) {
     console.error(`\n✗ check-doc-authoring self-test failed:\n${failures.join('\n')}\n`);
     process.exit(1);
   }
-  console.log('✓ check-doc-authoring self-test: scope wiring (.claude and the live docs/ corpus in, .claude/worktrees and docs/{audits,handoff,plans} out), detection, the dead-root hard error (red when a ROOT is renamed, green when restored), the empty-scan hard error (red when a root yields nothing and when the whole scan does, green when restored) and the dispatch-gates declaration (every separator-less ROOT declared as a subtree, nothing declared this gate does not walk, the over-claim bounded to SKIP_PATHS) all hold.');
+  console.log('✓ check-doc-authoring self-test: scope wiring (.claude and the live docs/ corpus in, .claude/worktrees and docs/{audits,handoff,plans} out), detection, the dead-root hard error (red when a ROOT is renamed, green when restored), the empty-scan hard error (red when a root yields nothing and when the whole scan does, green when restored), the published-catalog internal-id rule (red on a planted id in prose, in a fenced comment and in the repo#NNNN spelling, green when removed; hex colours, version numbers, HTTP codes, array indices and the "#1" ordinal all pass; references/ reached, generated artifacts and the internal roots out; the example allowlist pinned to its passage) and the dispatch-gates declaration (every separator-less ROOT declared as a subtree, nothing declared this gate does not walk, the over-claim bounded to SKIP_PATHS) all hold.');
 }
 
 function main() {
@@ -596,18 +888,58 @@ function main() {
   }
   const violations = files.flatMap((file) => findViolations(readFileSync(file, 'utf8'), file));
 
-  if (violations.length === 0) {
-    console.log(`✓ doc authoring guard: ${files.length} files clean — no bare metadata literals.`);
+  let published;
+  try {
+    published = collectPublishedSkillFiles();
+  } catch (err) {
+    console.error(
+      `\n✗ doc authoring guard: the published catalog (${PUBLISHED_SKILLS_ROOT}/) could not be`
+      + `\nscanned for internal issue-id references, so this run cannot vouch for it:`
+      + `\n\n  ${err.message}\n`,
+    );
+    process.exit(1);
     return;
   }
+  const idViolations = published.flatMap((file) => findIdViolations(readFileSync(file, 'utf8'), file));
 
-  console.error(`\n✗ Bare metadata-literal authoring found in docs/skills (#2035). Use the defineX factory instead:\n`);
-  for (const v of violations) {
-    console.error(`  ${v.file}:${v.line}`);
-    console.error(`    ${v.text}`);
+  let failed = false;
+
+  if (violations.length > 0) {
+    failed = true;
+    console.error(`\n✗ Bare metadata-literal authoring found in docs/skills (#2035). Use the defineX factory instead:\n`);
+    for (const v of violations) {
+      console.error(`  ${v.file}:${v.line}`);
+      console.error(`    ${v.text}`);
+    }
+    console.error(`\n${violations.length} violation(s). Author via e.g. \`definePage({ ... })\` — a value import that fails loudly, validates at parse time, and is the one pattern AI should learn. See ADR-0059.\n`);
   }
-  console.error(`\n${violations.length} violation(s). Author via e.g. \`definePage({ ... })\` — a value import that fails loudly, validates at parse time, and is the one pattern AI should learn. See ADR-0059.\n`);
-  process.exit(1);
+
+  if (idViolations.length > 0) {
+    failed = true;
+    console.error(`\n✗ Internal issue-id reference(s) in the PUBLISHED skill catalog:\n`);
+    for (const v of idViolations) {
+      console.error(`  ${v.file}:${v.line}  ${v.ids.join(' ')}`);
+      console.error(`    ${v.text}`);
+    }
+    console.error(
+      `\n${idViolations.length} line(s). \`skills/**\` ships to customer projects and is loaded WHOLE`
+      + `\ninto customer agent context windows. A reader there has no tracker, no \`git log\` and no`
+      + `\nADRs, so \`#NNNN\` resolves to nothing for the audience actually paying for it — a`
+      + `\ncitation-shaped token billed to every customer session, forever.`
+      + `\n\nKeep the TEACHING, drop the citation. A sentence that exists only to cite an id goes`
+      + `\nentirely; a sentence that teaches something keeps the lesson and loses the number`
+      + `\n("removed in #4286" -> "removed in protocol 17", or just "removed"). Prefer a customer-`
+      + `\nresolvable anchor where one exists — a protocol version, an ADR number, a lint rule id.`
+      + `\n\nMaintainer ruling 2026-08-12, verbatim: 「处理 issue 时犯的错应该总结成经验,保留 issue id没有意义」`
+      + `\n\n⛔ Do NOT silence this by adding an EXAMPLE_ID_ALLOWLIST entry — that list is for`
+      + `\nfictional example data in a syntax demonstration, never for a provenance reference.\n`,
+    );
+  }
+
+  if (failed) process.exit(1);
+
+  console.log(`✓ doc authoring guard: ${files.length} files clean — no bare metadata literals.`);
+  console.log(`✓ doc authoring guard: ${published.length} published skill files clean — no internal issue-id references.`);
 }
 
 main();

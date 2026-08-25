@@ -278,7 +278,7 @@ Sort with `orderBy` — an array of sort nodes:
 
 ### Keyset Pagination (Performant)
 
-> ⛔ **`query.cursor` was REMOVED in `@objectstack/spec` 17 (#4286).** No
+> ⛔ **`query.cursor` was REMOVED in `@objectstack/spec` 17.** No
 > engine or driver ever read it — a query carrying `cursor` silently returned
 > **page 1 forever**. The key is tombstoned (a query carrying it fails to
 > parse with the prescription) and `QueryBuilder.cursor()` is gone. Do keyset
@@ -338,7 +338,7 @@ unique or near-unique column such as `created_at` or `id`) so
 > fallbacks) supports all six functions plus `distinct`. For portable queries,
 > stick to the first five.
 
-> **Removed in 17 (#6188).** `array_agg` and `string_agg` left this vocabulary:
+> **Removed in 17.** `array_agg` and `string_agg` left this vocabulary:
 > declared but lowered by no SQL backend, so whether they worked depended on
 > which driver sat behind the object. Either one is now refused at parse. There
 > is no replacement — read the rows with an ordinary `fields` query and shape
@@ -368,7 +368,7 @@ unique or near-unique column such as `created_at` or `id`) so
 
 ### HAVING Clause
 
-> ✅ **Enforced since #4286.** The engine applies `having` AFTER aggregation,
+> ✅ **Enforced.** The engine applies `having` AFTER aggregation,
 > on both the native-driver path and the in-memory fallback. It references
 > the **aggregated row's columns** — aggregation aliases and groupBy
 > projections — with the ordinary FilterCondition operators plus
@@ -447,7 +447,7 @@ Load related records through lookup/master_detail fields:
 
 ## Joins
 
-> ⛔ **REMOVED in `@objectstack/spec` 17 (#4286, ADR-0049).** `query.joins`
+> ⛔ **REMOVED in `@objectstack/spec` 17 (ADR-0049).** `query.joins`
 > (and the `JoinNode`/`JoinType`/`JoinStrategy` vocabulary) is gone from the
 > `QueryAST` schema — no engine or driver ever consumed it, so it only ever
 > declared a capability that did not run. The key is tombstoned: authoring it
@@ -500,7 +500,7 @@ Omit `fields` to search the object's declared `searchableFields` (or an
 auto-default of name/title + short-text fields), resolved server-side.
 
 `fields` can only **narrow** that set, never widen it: over the REST/protocol
-ingress a name outside it is `400 INVALID_FIELD` (#4254), not a silent
+ingress a name outside it is `400 INVALID_FIELD`, not a silent
 fall-back to the full scan.
 
 ### ⛔ Searching by a related record's title — mirror the value, always
@@ -549,7 +549,7 @@ this (the field, the hooks, the lint wording): **objectstack-data → Search Fie
 axis — use a [nested relation filter](#nested-relation-filters); to *display* it,
 use [`expand`](#expand-related-records).
 
-> ⚠️ **`[EXPERIMENTAL — not enforced]` (#4286):** `fuzzy`, `boost`,
+> ⚠️ **`[EXPERIMENTAL — not enforced]`:** `fuzzy`, `boost`,
 > `operator`, `minScore`, `language`, and `highlight` validate against the
 > schema but are never read — their `.describe()` markers now say so. Terms
 > are always AND-ed; there is no relevance scoring or highlighting.
@@ -558,7 +558,7 @@ use [`expand`](#expand-related-records).
 
 ## Window Functions (Analytics)
 
-> ⛔ **REMOVED from the request surface in `@objectstack/spec` 17 (#4286).**
+> ⛔ **REMOVED from the request surface in `@objectstack/spec` 17.**
 > `query.windowFunctions` is gone from the `QueryAST` schema — the engine
 > never routed it to any driver, so every OVER clause it declared was
 > silently dropped. The key is tombstoned (a query carrying it fails to
@@ -588,7 +588,7 @@ use [`expand`](#expand-related-records).
 | **Keyword-search by a related record's title** | **Mirror the title into a stored field on this object and search that** — `search` never traverses (see **Full-Text Search** above) |
 | Simple parent→child navigation | `expand` |
 | Paginate/sort a parent's related records | Query the related object directly |
-| Analytical queries across objects | Report/dashboard metadata, or separate queries combined in app code (`joins` was removed in #4286 — see above) |
+| Analytical queries across objects | Report/dashboard metadata, or separate queries combined in app code (`joins` was removed — see above) |
 
 ### Pagination Pattern for APIs
 
