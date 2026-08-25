@@ -1442,7 +1442,10 @@ function discoverResponseWriters(receivers, governedElsewhere) {
 
 /** Surface 3: the plugin-mounted Hono routes (#9267). */
 function discoverHonoRoutes() {
-  return discoverResponseWriters(HONO_CONTEXT_RECEIVERS, (rel) => Boolean(MODULES[rel])).writers;
+  return discoverResponseWriters(
+    HONO_CONTEXT_RECEIVERS,
+    (rel) => declarationFor(MODULES, rel) !== undefined,
+  ).writers;
 }
 
 /**
@@ -1454,7 +1457,7 @@ function discoverHonoRoutes() {
 function discoverExpressRoutes() {
   return discoverResponseWriters(
     EXPRESS_RESPONSE_RECEIVERS,
-    (rel) => Boolean(MODULES[rel]) || rel === SHARED_BUILDER.file,
+    (rel) => declarationFor(MODULES, rel) !== undefined || rel === SHARED_BUILDER.file,
   );
 }
 
@@ -1738,12 +1741,85 @@ function auditDialectOnly(file, declared, got, problems) {
   }
 }
 
+/**
+ * ── The declared-vs-discovered correspondence (#11920) ───────────────────────
+ *
+ * Every surface below reconciles what the walk DISCOVERED against what a table
+ * DECLARES, in both directions, and both directions turn on one question: does
+ * this discovered key correspond to that declared key? The answer is EXACT
+ * equality, and these two functions are the only place that is decided.
+ *
+ * They are extracted rather than inlined because a correspondence rule cannot
+ * be watched by the production run. Green here means the finding set is empty;
+ * loosening the correspondence can only SHRINK that set; and the empty set is
+ * the fixed point of shrinking. So on a clean tree — where every discovered
+ * module already has an exact declaration — the live verdict is identical
+ * before and after the rule breaks. Measured on `f7b25c546`, one ablation per
+ * site, each mutation confirmed on disk (anchor 1→0, marker 0→1) before any
+ * reading was taken, every one loosening exact equality to a basename credit:
+ *
+ *   MODULES[file]                    production 0 GREEN   --self-test 0 GREEN
+ *   PLUGIN_ROUTE_MODULES[file]       production 0 GREEN   --self-test 0 GREEN
+ *   EXPRESS_RESPONSE_MODULES[file]   production 0 GREEN   --self-test 0 GREEN
+ *   DISPATCHER_DOMAINS[name]         production 0 GREEN   --self-test 0 GREEN
+ *   the three reverse `includes`     production 0 GREEN   --self-test 0 GREEN
+ *   MODULES[rel] (surface routing)   production 0 GREEN   --self-test 0 GREEN
+ *
+ * Positive control, same harness, same gate, a different mutation: narrowing
+ * `discover()`'s convention so some modules stop being discovered reddens the
+ * production run (exit 1) while `--self-test` stays green. So the double-greens
+ * above are a property of THIS rule, not of a harness that cannot red.
+ *
+ * The future failure they let through is not hypothetical: a route module that
+ * MOVES to another package keeping its file name. Under a loosened
+ * correspondence the old declaration's counts are silently credited to the new
+ * path, and both findings — `NOT DECLARED` for the new path and `declared …
+ * but not found` for the old one — disappear at the same moment, each one
+ * covering for the other's absence. That is #10534's defect class (a census
+ * scoring `/admin/sso/register` accounted-for on the strength of
+ * `/admin/sso/register-saml`) one level up: a correspondence with no right
+ * boundary. `--self-test` supplies the adversarial population a clean tree by
+ * construction cannot contain, and is the only instrument this rule has.
+ */
+
+/**
+ * The declaration a discovered key is credited with — by EXACT key.
+ *
+ * `Object.hasOwn` rather than a bare index read: a table is data, so a key that
+ * happens to name something on `Object.prototype` must answer `undefined` and
+ * not a truthy inherited function. No route path can be spelled `constructor`,
+ * which is precisely why the boundary is pinned in `--self-test` instead of
+ * being left to the shape of today's population.
+ *
+ * @param {Record<string, object>} table  a declaration table
+ * @param {string} key                    repo-relative path, or a basename for the domain table
+ * @returns {object | undefined}
+ */
+export function declarationFor(table, key) {
+  return Object.hasOwn(table, key) ? table[key] : undefined;
+}
+
+/**
+ * The other direction: declared keys the walk did not find, by EXACT key.
+ *
+ * Order follows the table's own key order, so a diagnostic reads in the order
+ * the table is written.
+ *
+ * @param {Record<string, object>} table
+ * @param {string[]} discovered
+ * @returns {string[]}
+ */
+export function unfoundDeclarations(table, discovered) {
+  const found = new Set(discovered);
+  return Object.keys(table).filter((key) => !found.has(key));
+}
+
 function audit() {
   const problems = [];
   const discovered = discover();
 
   for (const file of discovered) {
-    const declared = MODULES[file];
+    const declared = declarationFor(MODULES, file);
     if (!declared) {
       problems.push(
         `${file}\n    NOT DECLARED. Add it to MODULES in scripts/check-route-envelope.mjs.\n` +
@@ -1781,10 +1857,8 @@ function audit() {
     }
   }
 
-  for (const file of Object.keys(MODULES)) {
-    if (!discovered.includes(file)) {
-      problems.push(`${file}\n    declared in MODULES but not found — moved or deleted? Update the table.`);
-    }
+  for (const file of unfoundDeclarations(MODULES, discovered)) {
+    problems.push(`${file}\n    declared in MODULES but not found — moved or deleted? Update the table.`);
   }
 
   // ── The shared builder every zero above depends on ────────────────────────
@@ -1816,7 +1890,7 @@ function audit() {
   const domains = discoverDomains();
 
   for (const name of domains) {
-    const declared = DISPATCHER_DOMAINS[name];
+    const declared = declarationFor(DISPATCHER_DOMAINS, name);
     if (!declared) {
       problems.push(
         `${DISPATCHER_DOMAIN_DIR}/${name}\n    NOT DECLARED. Add it to DISPATCHER_DOMAINS in\n` +
@@ -1848,19 +1922,17 @@ function audit() {
     }
   }
 
-  for (const name of Object.keys(DISPATCHER_DOMAINS)) {
-    if (!domains.includes(name)) {
-      problems.push(
-        `${DISPATCHER_DOMAIN_DIR}/${name}\n    declared in DISPATCHER_DOMAINS but not found — moved or deleted?`,
-      );
-    }
+  for (const name of unfoundDeclarations(DISPATCHER_DOMAINS, domains)) {
+    problems.push(
+      `${DISPATCHER_DOMAIN_DIR}/${name}\n    declared in DISPATCHER_DOMAINS but not found — moved or deleted?`,
+    );
   }
 
   // ── The plugin-mounted Hono routes (#9267) ────────────────────────────────
   const honoRoutes = discoverHonoRoutes();
 
   for (const file of honoRoutes) {
-    const declared = PLUGIN_ROUTE_MODULES[file];
+    const declared = declarationFor(PLUGIN_ROUTE_MODULES, file);
     // An `exempt` module is still SCANNED and still COUNTED — the ruling closed
     // a list of bodies, not a list of files. See the header.
     const got = declared
@@ -1869,13 +1941,11 @@ function audit() {
     problems.push(...auditPluginRouteModule(file, declared, got));
   }
 
-  for (const file of Object.keys(PLUGIN_ROUTE_MODULES)) {
-    if (!honoRoutes.includes(file)) {
-      problems.push(
-        `${file}\n    declared in PLUGIN_ROUTE_MODULES but no longer writes a Hono response —\n` +
-        `    moved, deleted, or converted? Update the table.`,
-      );
-    }
+  for (const file of unfoundDeclarations(PLUGIN_ROUTE_MODULES, honoRoutes)) {
+    problems.push(
+      `${file}\n    declared in PLUGIN_ROUTE_MODULES but no longer writes a Hono response —\n` +
+      `    moved, deleted, or converted? Update the table.`,
+    );
   }
 
   // ── The express-style `res.json(…)` writers (#9813, walked by #9937) ──────
@@ -1884,7 +1954,7 @@ function audit() {
   const expressScans = {};
 
   for (const file of expressRoutes) {
-    const declared = EXPRESS_RESPONSE_MODULES[file];
+    const declared = declarationFor(EXPRESS_RESPONSE_MODULES, file);
     const got = declared
       ? scanHonoRouteSource(readFileSync(join(ROOT, file), 'utf8'), file, EXPRESS_RESPONSE_RECEIVERS)
       : null;
@@ -1892,15 +1962,13 @@ function audit() {
     problems.push(...auditPluginRouteModule(file, declared, got, EXPRESS_SURFACE));
   }
 
-  for (const file of Object.keys(EXPRESS_RESPONSE_MODULES)) {
-    if (!expressRoutes.includes(file)) {
-      problems.push(
-        `${file}\n    declared in EXPRESS_RESPONSE_MODULES but no longer writes an express-style\n` +
-        `    response (\`res.json(…)\` / \`res.status(…).json(…)\`) — moved, deleted, or\n` +
-        `    converted? Update the table. A zero-argument \`res.json()\` is a fetch READ and\n` +
-        `    never counted, so a file that became a client rather than a server lands here.`,
-      );
-    }
+  for (const file of unfoundDeclarations(EXPRESS_RESPONSE_MODULES, expressRoutes)) {
+    problems.push(
+      `${file}\n    declared in EXPRESS_RESPONSE_MODULES but no longer writes an express-style\n` +
+      `    response (\`res.json(…)\` / \`res.status(…).json(…)\`) — moved, deleted, or\n` +
+      `    converted? Update the table. A zero-argument \`res.json()\` is a fetch READ and\n` +
+      `    never counted, so a file that became a client rather than a server lands here.`,
+    );
   }
 
   if (problems.length) {
@@ -2579,6 +2647,109 @@ function selfTest() {
     probs.length === 1 && probs[0].includes('PLUGIN_ROUTE_MODULES') &&
     !probs[0].includes('EXPRESS_RESPONSE_MODULES'),
     `the Hono surface's diagnostic must be unchanged → ${JSON.stringify(probs)}`,
+  );
+
+  // ── The declared-vs-discovered correspondence (#11920) ────────────────────
+  //
+  // Four surfaces reconcile a discovered population against a declaration
+  // table, and every one of them was measured to have NO instrument: loosening
+  // exact equality to a basename credit left both the production run and this
+  // self-test green, at all four forward lookups, all three reverse ones, and
+  // the two `MODULES[rel]` predicates that route a file to its surface. The
+  // reason is structural — green means the finding set is empty, loosening only
+  // shrinks that set, and on a clean tree every discovered module already has
+  // an exact declaration, so the fallback never fires and the verdict cannot
+  // move. The cases below supply the population a clean tree by construction
+  // cannot: they are the only thing watching this rule.
+  //
+  // The fixture is the real future failure — a route module MOVED to another
+  // package keeping its file name. `plugin-b` holds the file; the table still
+  // declares `plugin-a`. Under exact equality that is two findings at once.
+  // Under a basename credit it is silently zero, each missing finding covering
+  // for the other.
+  const movedTo = 'packages/plugins/plugin-b/src/thing-routes.ts';
+  const declaredAt = 'packages/plugins/plugin-a/src/thing-routes.ts';
+  const moveTable = { [declaredAt]: { responses: 0, ok: 0, err: 0 } };
+
+  assert(
+    declarationFor(moveTable, movedTo) === undefined,
+    'a discovered path was credited to a same-named declaration at ANOTHER path — ' +
+    'the basename fallback this gate must not have (#11920)',
+  );
+  // CONTROL: without this the case above would also pass for a lookup that had
+  // simply stopped resolving anything at all.
+  assert(
+    declarationFor(moveTable, declaredAt) === moveTable[declaredAt],
+    'control — the exact path must still resolve to its own declaration',
+  );
+
+  // Both directions of the SAME move, together. A loosened correspondence makes
+  // these two disappear at the same moment, which is why they are asserted as a
+  // pair rather than one at a time.
+  const movedUndeclared = [movedTo].filter((f) => declarationFor(moveTable, f) === undefined);
+  assert(
+    movedUndeclared.length === 1 && movedUndeclared[0] === movedTo,
+    `the moved module must be NOT DECLARED → ${JSON.stringify(movedUndeclared)}`,
+  );
+  assert(
+    JSON.stringify(unfoundDeclarations(moveTable, [movedTo])) === JSON.stringify([declaredAt]),
+    `the abandoned declaration must read as not found → ${JSON.stringify(unfoundDeclarations(moveTable, [movedTo]))}`,
+  );
+
+  // CONTROL: the aligned population — the clean tree's own shape — produces
+  // neither finding. This is the state the live run is always in, and it is
+  // exactly why the live run can never see the rule break.
+  assert(
+    [declaredAt].filter((f) => declarationFor(moveTable, f) === undefined).length === 0 &&
+    unfoundDeclarations(moveTable, [declaredAt]).length === 0,
+    'control — an aligned population must produce neither finding',
+  );
+
+  // Right boundary, the #10534 defect class: a declaration must not be credited
+  // to a path it is merely a PREFIX of, nor to a longer sibling. `register` /
+  // `register-saml` is the census that scored accounted-for this way.
+  const siblings = { 'packages/rest/src/user-routes.ts': { responses: 0, ok: 0, err: 0 } };
+  assert(
+    declarationFor(siblings, 'packages/rest/src/user-routes-v2.ts') === undefined,
+    'a longer sibling path was credited to a declaration it only shares a prefix with (#10534)',
+  );
+  assert(
+    declarationFor(siblings, 'packages/rest/src/user-routes.ts') !== undefined,
+    'control — the exact sibling must still resolve, or the case above tests nothing',
+  );
+  // …and the reverse direction has the same boundary: a declared key is "found"
+  // only by an exactly equal discovered path.
+  assert(
+    unfoundDeclarations(siblings, ['packages/rest/src/user-routes-v2.ts']).length === 1,
+    'a declared key was counted as found on the strength of a longer sibling',
+  );
+
+  // A table is DATA. A key naming something on `Object.prototype` must answer
+  // `undefined`, not a truthy inherited function that would read as a
+  // declaration nobody wrote.
+  assert(
+    declarationFor({}, 'constructor') === undefined && declarationFor({}, 'toString') === undefined,
+    'a declaration table answered from Object.prototype',
+  );
+  assert(
+    unfoundDeclarations({}, []).length === 0,
+    'control — an empty table has no unfound declarations',
+  );
+
+  // The synthetic cases prove nothing about the LIVE run unless the helper is
+  // the one the live run reconciles through. So: the real surface-1 population
+  // must be non-degenerate, and must actually resolve through this function.
+  // Asserted as "some real path resolves", not "every one does" — the latter
+  // would make this self-test red whenever a genuinely undeclared module exists,
+  // duplicating the production verdict instead of instrumenting the rule.
+  const liveDiscovered = discover();
+  assert(
+    liveDiscovered.length > 0 && Object.keys(MODULES).length > 0,
+    `the live surface-1 population is empty — a broken walk, not a clean tree → ${liveDiscovered.length}`,
+  );
+  assert(
+    liveDiscovered.some((f) => declarationFor(MODULES, f) !== undefined),
+    'no real discovered module resolves through declarationFor — the helper is not wired to the live table',
   );
 
   console.log('✓ check-route-envelope self-test passed');
