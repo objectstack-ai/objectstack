@@ -213,8 +213,8 @@ if (cached.notModified) {
 // Get auto-generated view
 const listView = await client.meta.getView('account', 'list');
 
-// Compound names (sub-resources) pass through unencoded
-const view = await client.meta.getItem('object', 'views/all_leads');
+// Sub-resource identity is DOT-qualified — `<object>.<viewKey>`, never a `/`
+const view = await client.meta.getItem('view', 'crm_lead.pipeline');
 
 // Per-item draft lifecycle (ADR-0033)
 await client.meta.publishItem('object', 'account', { message: 'go live' });
