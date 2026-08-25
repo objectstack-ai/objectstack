@@ -12,11 +12,11 @@ from `node_modules` — there is no local copy in the skill bundle.
 - `node_modules/@objectstack/spec/src/data/datasource.zod.ts` — Driver Identifier
 - `node_modules/@objectstack/spec/src/data/seed.zod.ts` — Seed Import Strategy
 - `node_modules/@objectstack/spec/src/kernel/context.zod.ts` — Runtime Mode Enum
-- `node_modules/@objectstack/spec/src/kernel/manifest.zod.ts` — Structured permission grants requested by a plugin (ADR-0025 §3.2).
+- `node_modules/@objectstack/spec/src/kernel/manifest.zod.ts` — Exports: PluginPermissionsSchema, ManifestPermissionsSchema, PluginEnginesSchema, PluginRuntimeSchema, PluginPackagingSchema
 - `node_modules/@objectstack/spec/src/kernel/metadata-plugin.zod.ts` — Metadata Plugin Protocol
 - `node_modules/@objectstack/spec/src/kernel/plugin-capability.zod.ts` — Plugin Capability Protocol
 - `node_modules/@objectstack/spec/src/kernel/plugin-loading.zod.ts` — Plugin Loading Protocol
-- `node_modules/@objectstack/spec/src/kernel/plugin.zod.ts` — Shared Plugin Types
+- `node_modules/@objectstack/spec/src/kernel/plugin.zod.ts` — Exports: PluginContextSchema, CORE_PLUGIN_TYPES, CONSUMER_INSTALLABLE_TYPES, PluginSchema
 - `node_modules/@objectstack/spec/src/kernel/service-registry.zod.ts` — Service Registry Protocol
 
 ## Transitive dependencies
@@ -33,14 +33,14 @@ from `node_modules` — there is no local copy in the skill bundle.
 - `node_modules/@objectstack/spec/src/data/field-value.zod.ts` — Field runtime VALUE-shape contract (ADR-0104 D1).
 - `node_modules/@objectstack/spec/src/data/field.zod.ts` — Field Type Enum
 - `node_modules/@objectstack/spec/src/data/filter.zod.ts` — Unified Query DSL Specification
-- `node_modules/@objectstack/spec/src/data/hook-body.zod.ts` — Capability tokens a script body may request.
+- `node_modules/@objectstack/spec/src/data/hook-body.zod.ts` — Exports: HookBodyCapability, ExpressionBodySchema, ScriptBodySchema, HookBodySchema
 - `node_modules/@objectstack/spec/src/kernel/cluster.zod.ts` — Cluster Protocol
 - `node_modules/@objectstack/spec/src/kernel/metadata-customization.zod.ts` — Metadata Customization Layer Protocol
 - `node_modules/@objectstack/spec/src/kernel/metadata-loader.zod.ts` — Metadata Manager Configuration
 - `node_modules/@objectstack/spec/src/kernel/metadata-protection.zod.ts` — Metadata Protection Model — Phase 1 (ADR-0010)
 - `node_modules/@objectstack/spec/src/shared/expression.zod.ts` — Expression Protocol
 - `node_modules/@objectstack/spec/src/shared/identifiers.zod.ts` — System Identifier Schema
-- `node_modules/@objectstack/spec/src/shared/metadata-types.zod.ts` — Exports: MetadataFormatSchema, BaseMetadataRecordSchema
+- `node_modules/@objectstack/spec/src/shared/metadata-types.zod.ts` — Supported metadata file formats
 - `node_modules/@objectstack/spec/src/shared/protection.zod.ts` — Package-level metadata protection (ADR-0010 §3.7 — Phase 4.3)
 - `node_modules/@objectstack/spec/src/shared/suggestions.zod.ts` — "Did you mean?" Suggestion Utilities
 - `node_modules/@objectstack/spec/src/system/tenant.zod.ts` — Tenant Schema (Multi-Tenant Architecture)
