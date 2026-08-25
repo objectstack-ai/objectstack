@@ -42,6 +42,17 @@ export interface IntrospectedColumn extends SpecIntrospectedColumn {
    * — is the contract sentence; this is the consumer-side copy of the same
    * key and must not drift from it. An absent flag on a composite member
    * means "not single-column unique", never "no constraint".
+   *
+   * A PRIMARY KEY is NOT a unique constraint to this flag (#11654), on any
+   * dialect and for any key type. `isUnique` means a *declared*
+   * single-column UNIQUE constraint; key membership has a lossless face of
+   * its own ({@link IntrospectedTable.primaryKeys} and `primaryKey` below),
+   * so excluding keys keeps the two flags non-overlapping and drops no
+   * fact. Note this is a statement about what KIND of constraint the flag
+   * reports, never a claim that a key column admits duplicates. A key
+   * column that separately carries its own single-column unique constraint
+   * is still flagged — the constraint is what is being reported, not the
+   * column.
    */
   isUnique?: boolean;
   /**
