@@ -83,7 +83,9 @@ const createMemoryEngine = () => {
     async find(name: string, q: any = {}) {
       let out = rows(name).filter((r) => matches(r, q.where));
       if (q.offset) out = out.slice(q.offset);
-      if (q.limit) out = out.slice(0, q.limit);
+      // Presence, not truthiness: `limit: 0` is a request for NOTHING, and `0`
+      // is falsy — `if (q.limit)` answers it with every matched row.
+      if (typeof q.limit === 'number') out = out.slice(0, q.limit);
       return out.map((r) => project(r, q.fields));
     },
     async count(name: string, q: any = {}) {
