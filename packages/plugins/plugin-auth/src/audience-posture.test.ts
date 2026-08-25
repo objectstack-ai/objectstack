@@ -495,12 +495,116 @@ describe('end of the chain: better-auth pipeline over the memory engine (#11739)
     const engine = createMemoryEngine();
     seedExistingUser(engine);
     const manager = makeManager(engine);
-    seedPendingInvitation(engine, 'Bob@Acme.com');
-    const admitted = await signUp(manager, 'bob@acme.com');
+    // better-auth 1.7.1 normalizes BOTH sides before this gate ever runs:
+    // `organization/invite-member` lowercases the address it stores, and
+    // `internalAdapter.createUser` lowercases the registrant's before calling
+    // `validateUserInfo`. So the row holds the normalized form, and the
+    // case-insensitivity the invitee experiences is that the address THEY type
+    // may carry any case at all.
+    seedPendingInvitation(engine, 'bob@acme.com');
+    const admitted = await signUp(manager, 'Bob@Acme.com');
     expect(admitted.status).toBeLessThan(300);
 
     seedPendingInvitation(engine, 'late@acme.com', { expires_at: new Date(Date.now() - 60_000) });
     const refused = await signUp(manager, 'late@acme.com');
+    expect(refused.status).toBe(403);
+    expect((await refused.json()).code).toBe(SELF_REGISTRATION_CLOSED);
+  });
+
+  // ── [#11770] The page boundary of the pending-invitation probe ────────────
+  //
+  // The carve-out's first spelling read `{ status: 'pending' }` with
+  // `limit: 200` and matched the address in JS, so an invitee outside that
+  // first page was refused `SELF_REGISTRATION_CLOSED` under the `invite_only`
+  // default — the invitation lane silently failing for the TAIL of a large
+  // rollout. The suite covered expiry and case-insensitivity but never crossed
+  // a page, which is precisely why the ceiling was invisible.
+
+  it('invite_only: an invitation past the page boundary still admits — a 500-person rollout has no silent tail (#11770)', async () => {
+    const engine = createMemoryEngine();
+    seedExistingUser(engine);
+    const manager = makeManager(engine);
+
+    // A 500-employee onboarding, with the target seeded LAST so it sits far
+    // outside the first page of any read that pages the pending POPULATION.
+    for (let i = 0; i < 500; i++) seedPendingInvitation(engine, `colleague${i}@acme.com`);
+    seedPendingInvitation(engine, 'last.hire@acme.com');
+
+    const pending = engine.tables.get('sys_invitation') ?? [];
+    expect(pending.length).toBe(501);
+    // The fixture really crosses the old boundary — assert the placement
+    // rather than trusting the loop above to have produced it.
+    expect(pending.findIndex((r: any) => r.email === 'last.hire@acme.com')).toBeGreaterThan(200);
+
+    const admitted = await signUp(manager, 'last.hire@acme.com');
+    expect(admitted.status).toBeLessThan(300);
+    expect((engine.tables.get('sys_user') ?? []).some((u: any) => u.email === 'last.hire@acme.com')).toBe(true);
+  });
+
+  it('the probe reads sys_invitation NARROWED by email — the work never depends on how many invitations exist (#11770)', async () => {
+    const readsForPopulation = async (otherPending: number) => {
+      const engine = createMemoryEngine();
+      seedExistingUser(engine);
+      const manager = makeManager(engine);
+      for (let i = 0; i < otherPending; i++) seedPendingInvitation(engine, `colleague${i}@acme.com`);
+      seedPendingInvitation(engine, 'targeted@acme.com');
+
+      const reads: any[] = [];
+      const find = engine.find.bind(engine);
+      engine.find = async (name: string, q: any = {}) => {
+        if (name === 'sys_invitation') reads.push(q);
+        return find(name, q);
+      };
+
+      const admitted = await signUp(manager, 'targeted@acme.com');
+      expect(admitted.status).toBeLessThan(300);
+      return reads;
+    };
+
+    const small = await readsForPopulation(1);
+    const large = await readsForPopulation(400);
+
+    // Every read carries BOTH predicates. Without the email predicate the only
+    // way to stay correct is to walk the whole pending population, which is an
+    // unbounded read on the self-serve sign-up path.
+    expect(small.length).toBeGreaterThan(0);
+    for (const q of [...small, ...large]) {
+      expect(q.where?.status).toBe('pending');
+      expect(q.where?.email).toBe('targeted@acme.com');
+      expect(q.offset ?? 0).toBe(0); // one page settled it, either way
+    }
+    // 2 pending rows or 401 — identical work. (The read count is >1 because
+    // the email sign-up route pre-checks the very decision the
+    // `validateUserInfo` gate then makes; see `validateAudienceAdmission`.)
+    expect(large.length).toBe(small.length);
+  });
+
+  it('a case-folding collation may answer with a differently-cased row (matched) but never a different address (#11770)', async () => {
+    // Some collations answer `email = 'x'` case-insensitively — and MySQL's
+    // default folds accents with it. The JS re-check is what keeps the probe's
+    // answer identical across drivers: a case-only difference still matches,
+    // an accent-only difference must not.
+    const foldingEngine = (stored: string) => {
+      const engine = createMemoryEngine();
+      seedExistingUser(engine);
+      seedPendingInvitation(engine, stored);
+      const find = engine.find.bind(engine);
+      engine.find = async (name: string, q: any = {}) => {
+        if (name !== 'sys_invitation') return find(name, q);
+        // The store ignores the email predicate entirely — the widest a
+        // folding collation could plausibly be.
+        const where: Record<string, unknown> = { ...(q.where ?? {}) };
+        delete where.email;
+        return find(name, { ...q, where });
+      };
+      return engine;
+    };
+
+    const cased = foldingEngine('Bob@Acme.com');
+    expect((await signUp(makeManager(cased), 'bob@acme.com')).status).toBeLessThan(300);
+
+    const accented = foldingEngine('bób@acme.com');
+    const refused = await signUp(makeManager(accented), 'bob@acme.com');
     expect(refused.status).toBe(403);
     expect((await refused.json()).code).toBe(SELF_REGISTRATION_CLOSED);
   });

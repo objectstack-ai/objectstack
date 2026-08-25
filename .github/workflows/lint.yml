@@ -4034,6 +4034,35 @@ jobs:
       - name: Check no exported spec type resolves to `any`
         run: pnpm --filter @objectstack/spec run check:exported-any
 
+      # [#11927] The same question, asked of the SDK boundary instead of the
+      # spec surface — and asked because #8140 bound 51 erased return types
+      # across `packages/client` by hand, which buys a snapshot and not a
+      # property. Nothing stopped the 52nd.
+      #
+      # It reads the built `.d.ts` for the reason the neighbour above does, plus
+      # one this package makes sharper: the largest erasure class here carries NO
+      # return annotation at all, taking its type from `unwrapResponse<any>`
+      # (#11925) or from a bare `res.json()`, which lib.dom declares
+      # `Promise<any>` (#12104). Neither spelling contains the text `Promise` or
+      # `any`, so no grep can see them — only a checker asking what the export
+      # RESOLVES to. So it belongs here with the other dist-reading consumer
+      # gates, after the build steps, and on an unbuilt or stale tree it is a
+      # hard refusal naming the build command rather than a skip (#4690, #7122).
+      #
+      # Baseline, not zero: 65 sites are carried as NAMED, shrink-only ledger
+      # entries with a written reason each (packages/client/exported-any-returns.json),
+      # because four of them keep `any` deliberately — no contract exists to bind
+      # (#11924) — and a gate demanding zero would either block on that work or
+      # invite a false declaration to reach green. Self-tests first, like its
+      # neighbours, and that self-test is load-bearing in a specific direction
+      # here: a caller-supplied `<T = any>` is NOT erasure, and a detector that
+      # cannot tell the two apart produces pressure to replace a correct generic
+      # with a wrong concrete type. Both directions are pinned there.
+      #
+      # Adds no required context — a step in an existing lane (#9325).
+      - name: Check no exported client callable resolves to `any`
+        run: pnpm --filter @objectstack/client run check:exported-any-returns
+
       # Third axis on the same surface: api-surface/ shows a name on two
       # entries but not whether the two are ONE declaration re-exported (fine)
       # or TWO declarations sharing a name — the #4411 trap, where which type a

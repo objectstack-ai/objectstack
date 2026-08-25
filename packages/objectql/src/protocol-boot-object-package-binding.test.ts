@@ -52,6 +52,7 @@ import { SchemaRegistry } from './registry.js';
 // double cannot accept a call `ObjectQL.delete` / `ObjectQL.update` refuses.
 import { assertEngineDeleteDispatch } from './engine-delete-dispatch.js';
 import { assertEngineUpdateDispatch } from './engine-update-dispatch.js';
+import { assertEngineFindOnePredicate } from './engine-findone-predicate.js';
 
 /** A Studio authoring workspace id — writable under ADR-0070. */
 const APP_PKG = 'app.myapp';
@@ -117,6 +118,12 @@ function makeSession(seed: { rows?: Row[]; history?: HistoryRow[] } = {}) {
     const engine: any = {
         registry,
         async findOne(table: string, opts: { where: Record<string, unknown> }) {
+            // [#11957] Pinned to ObjectQL.findOne's OWN #4419 predicate: `findOne`
+            // applies limit: 1, so a query naming no record returns an ARBITRARY row
+            // and the engine REFUSES it. A double that answers it anyway is how
+            // #11767 shipped a bootstrap bypass that was inert on every real
+            // deployment while a 641-line unit matrix stayed green.
+            assertEngineFindOnePredicate(table, opts);
             if (table === 'sys_metadata_history') {
                 return historyRows.find((h) => matches(h as any, opts.where)) ?? null;
             }
