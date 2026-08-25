@@ -2074,6 +2074,24 @@ const ObjectSchemaBase = strictObject(
   stageField: z.union([z.string(), z.literal(false)]).optional().describe('[ADR-0085] Lifecycle stage field (linear/ordered), or false to declare the status field non-linear and suppress stage heuristics. Absent = heuristic detection allowed.'),
 
   /**
+   * Cross-renderer EDIT-INTERACTION intent: whether a record of this object is
+   * edited in a modal dialog over the current view (`'modal'`) or on a
+   * dedicated full-page edit route (`'page'`). Like the other hints in this
+   * block it is an intent about the record, not pixel styling — any renderer
+   * can honour it. Absent = the renderer chooses its own default (objectui's
+   * shipped runtime treats anything but `'page'` as modal:
+   * `recordFormNavigation.ts` branches on `editMode !== 'page'`, and
+   * `AppContent`'s `handleEdit` dispatcher routes on it).
+   *
+   * Declared here by the #11408 maintainer ruling (the measured residue of the
+   * #10144 declare-or-rule-out census): objectui had published the key to
+   * authors (CHANGELOG + live runtime read) while this strict parse rejected
+   * it. objectui's `ObjectSchemaClientExtensions.editMode` mirror retires in a
+   * release-gated follow-up and the spec derivation carries it from then on.
+   */
+  editMode: z.enum(['modal', 'page']).optional().describe("Edit-interaction intent for records of this object: 'modal' opens the edit form as a dialog over the current view; 'page' navigates to a dedicated full-page edit route. Absent = the renderer picks its own default (objectui defaults to modal). Cross-renderer intent, not pixel styling (#11408, #10144 family)."),
+
+  /**
    * Built-in List Views
    *
    * Curated, platform-shipped list views (grid / kanban / calendar / …)
