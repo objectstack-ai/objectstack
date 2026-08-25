@@ -3711,6 +3711,96 @@ export function repoIdentity({ cwd = ROOT } = {}) {
 }
 
 /**
+ * The files a derivation's ANSWER is made of — the ones whose staleness can
+ * change it. The gate inventory is read from the workflow files, `check:*` is
+ * resolved through the manifest, and the checks themselves live under
+ * `scripts/`. Everything else in the tree can be arbitrarily old without moving
+ * a single family, which is what makes this list the right filter and raw
+ * commit distance the wrong one.
+ */
+export const DERIVATION_SURFACE = ['.github/workflows', 'package.json', 'scripts'];
+
+/**
+ * How far behind `DEFAULT_BASE_REF` this checkout is — and whether that matters.
+ *
+ * `bannerLines` already names the commit an answer came from, which is the very
+ * fact that exposes a stale checkout — but it prints it in the same spelling a
+ * current checkout uses, so staleness arrives dressed as ordinary provenance.
+ * The measured failure: a long-lived shared checkout drifted far enough back
+ * that its on-disk copy of a check script predated a PR that had changed that
+ * exact file, and a run from it printed a well-formed verdict, exit 0, about a
+ * tree nobody is on. Nothing in the tool, the output or the workflow said so.
+ *
+ * Commit distance ALONE would be the wrong instrument. A dev worktree falls a
+ * few commits behind within the hour by construction, so a warning keyed on
+ * distance fires on nearly every honest run and stops being read — and a
+ * warning nobody reads reproduces the silence it was added to break. What
+ * decides whether the distance matters is narrower and just as cheap to ask:
+ * did anything in `DERIVATION_SURFACE` change across that range? So both are
+ * measured, and only the second one shouts.
+ *
+ * That second question is asked with a THREE-dot diff, which is the whole
+ * difference between reporting upstream work this tree is missing and
+ * reporting the caller's own edits back to them. A dev worktree that is a few
+ * commits behind AND has edited a check script is the ordinary case, and a
+ * two-dot diff would name that dev's own file as evidence the tree is stale.
+ *
+ * The count is a LOWER BOUND and says so. `DEFAULT_BASE_REF` is a LOCAL
+ * remote-tracking ref that only a fetch moves, so a checkout nobody fetches is
+ * measured against a base that is itself behind. Unfetched staleness can only
+ * make the true number bigger, never smaller — which is what lets this stay
+ * honest without the derivation reaching for the network.
+ *
+ * Every field degrades to null rather than throwing. No base ref, a shallow
+ * clone and no git at all are real states, and none of them is an error here.
+ */
+export function baseDrift({ cwd = ROOT } = {}) {
+  const read = (args) => {
+    try {
+      const r = runGit(args, cwd);
+      return r.status === 0 ? r.stdout.trim() : null;
+    } catch {
+      return null; // git itself unavailable — the banner degrades, it never throws
+    }
+  };
+  const base = read(['rev-parse', '--short', DEFAULT_BASE_REF]);
+  if (base === null) return { base: null, behind: null, changed: [], headDate: null, baseDate: null };
+  const counted = read(['rev-list', '--count', `HEAD..${DEFAULT_BASE_REF}`]);
+  const behind = /^\d+$/.test(counted ?? '') ? Number(counted) : null;
+  const names = behind ? read(['diff', '--name-only', `HEAD...${DEFAULT_BASE_REF}`, '--', ...DERIVATION_SURFACE]) : '';
+  return {
+    base,
+    behind,
+    changed: names ? names.split('\n').filter(Boolean) : [],
+    headDate: read(['log', '-1', '--format=%cI', 'HEAD']),
+    baseDate: read(['log', '-1', '--format=%cI', DEFAULT_BASE_REF]),
+  };
+}
+
+/**
+ * Render the drift. Loud when it can have changed the answer, quiet when it
+ * demonstrably cannot, and SILENT at zero — the last one for the same reason
+ * the banner has no "all paths present" twin: against a base ref nobody
+ * refreshed, a clean bill of health is precisely the reading the measured
+ * failure would have passed.
+ */
+export function driftLines(drift) {
+  if (!drift || !drift.behind) return [];
+  const { behind, base, changed, headDate, baseDate } = drift;
+  const span = `HEAD${headDate ? ` ${headDate}` : ''} vs ${DEFAULT_BASE_REF} ${base}${baseDate ? ` ${baseDate}` : ''}`;
+  if (changed.length === 0) {
+    return [`  At least ${behind} commit(s) behind ${DEFAULT_BASE_REF}, but nothing this answer derives from changed across that range — ${span}.`];
+  }
+  return [
+    `  ⚠️  STALE TREE — this answer is derived from a tree at least ${behind} commit(s) behind ${DEFAULT_BASE_REF}, and ${changed.length} file(s) it derives from CHANGED across that range.`,
+    `    ${span}`,
+    `    Stale here: ${changed.slice(0, 6).join(' ')}${changed.length > 6 ? ` … +${changed.length - 6} more` : ''}`,
+    `    Those files ARE the families printed below, so this run read their old copies and still exited 0 — a well-formed answer about a tree nobody is on.`,
+    `    "At least": ${DEFAULT_BASE_REF} is a LOCAL ref only a fetch moves. Run 'git fetch ${DEFAULT_BASE_REMOTE} ${DEFAULT_BASE_BRANCH}' and derive again from a tree at ${DEFAULT_BASE_REF}.`,
+  ];
+}
+
+/**
  * Split argv into paths, flags and the repo assertion.
  *
  * The assertion's VALUE must not fall through into the path list. The previous
@@ -3810,7 +3900,7 @@ export function repoAssertionVerdict({ asserted, identity }) {
  * read as a clearance, and it is precisely the reading the measured failure
  * would have passed — its two paths exist in every repo in the family.
  */
-export function bannerLines({ identity, paths = [] }) {
+export function bannerLines({ identity, paths = [], drift = null }) {
   const at = identity?.head ? ` at commit ${identity.head}` : '';
   const who = identity?.slug
     ? `'${identity.slug}'${at} (${identity.root})`
@@ -3819,6 +3909,7 @@ export function bannerLines({ identity, paths = [] }) {
     `dispatch-gates: gate list derived from the tree of ${who}.`,
     `  Families are a property of THAT repo. A card landing in another repo derives nothing here — assert with ${REPO_FLAG} to make this checkable.`,
   ];
+  lines.push(...driftLines(drift));
   const missing = paths.filter((p) => !p.includes('*') && !existsSync(join(identity?.root ?? ROOT, p)));
   if (missing.length > 0) {
     lines.push(
@@ -6346,6 +6437,57 @@ function selfTest() {
   const bannerPresent = bannerLines({ identity: { ...hereIdentity, root: ROOT }, paths: ['packages/spec/src/index.ts'] });
   t('all paths present prints NO clearance line — absence and clearance must not share a spelling', !bannerPresent.join('\n').includes('absent from this tree') && bannerPresent.length === 2);
 
+  // ── Base drift (#11540) ───────────────────────────────────────────────────
+  // The banner names the commit an answer came from; on a stale checkout that
+  // reads as ordinary provenance. These pin the loudness, and pin that the
+  // quiet cases stay quiet — a warning on every honest run is a warning nobody
+  // reads.
+  t('no measurable base ref prints nothing rather than guessing', driftLines(null).length === 0 && driftLines({ base: null, behind: null, changed: [] }).length === 0);
+  t('a tree level with the base prints NO clearance — the failure would have passed one', driftLines({ base: 'aaaaaaa', behind: 0, changed: [] }).length === 0);
+  const benign = driftLines({ base: 'aaaaaaa', behind: 7, changed: [], headDate: '2026-01-01T00:00:00Z', baseDate: '2026-01-02T00:00:00Z' });
+  t('behind, but with the derivation surface untouched, states the distance in ONE quiet line', benign.length === 1 && benign[0].includes('7 commit(s) behind'));
+  t('and that quiet line does not cry stale, so the loud spelling stays rare', !benign.join('\n').includes('STALE TREE'));
+  const loud = driftLines({ base: 'aaaaaaa', behind: 120, changed: ['scripts/pm/dispatch-gates.mjs', '.github/workflows/lint.yml'], headDate: '2026-01-01T00:00:00Z', baseDate: '2026-01-08T00:00:00Z' });
+  const loudText = loud.join('\n');
+  t('a changed derivation surface is LOUD, and names what it compared', loudText.includes('STALE TREE') && loudText.includes('HEAD') && loudText.includes(DEFAULT_BASE_REF) && loudText.includes('120 commit(s)'));
+  t('it names the stale files themselves, not just a count', loudText.includes('scripts/pm/dispatch-gates.mjs') && loudText.includes('.github/workflows/lint.yml'));
+  t('it says the exit code is no defence — the measured failure exited 0', loudText.includes('exited 0'));
+  t('the count is a LOWER bound, because the base ref is local and only a fetch moves it', loudText.includes('At least') && loudText.includes(`git fetch ${DEFAULT_BASE_REMOTE} ${DEFAULT_BASE_BRANCH}`));
+  t('drift reaches the banner, and stays behind the repo line that must come first', bannerLines({ identity: hereIdentity, paths: [], drift: { base: 'aaaaaaa', behind: 9, changed: ['scripts/x.mjs'] } })[0].includes('gate list derived from the tree of'));
+  t('and a banner given no drift is byte-identical to before the flag existed', bannerLines({ identity: hereIdentity, paths: [], drift: null }).join('\n') === bannerLines({ identity: hereIdentity, paths: [] }).join('\n'));
+
+  const driftTmp = mkdtempSync(join(tmpdir(), 'dispatch-gates-drift-'));
+  try {
+    const gd = (args, cwd) => spawnSync('git', ['-c', 'user.email=t@t.t', '-c', 'user.name=t', ...args], { cwd, encoding: 'utf8' });
+    const up = join(driftTmp, 'upstream');
+    mkdirSync(up, { recursive: true });
+    gd(['init', '-q', '-b', DEFAULT_BASE_BRANCH], up);
+    writeFileSync(join(up, 'seed.txt'), 'seed\n');
+    gd(['add', '-A'], up); gd(['commit', '-qm', 'seed'], up);
+    const clone = join(driftTmp, 'clone');
+    gd(['clone', '-q', up, clone], driftTmp);
+    // Positive control: a clone level with its base must read zero, or a
+    // non-zero reading below proves nothing.
+    t('a checkout level with its base measures zero drift (positive control)', baseDrift({ cwd: clone }).behind === 0);
+    // Upstream moves in a file the answer is NOT derived from.
+    writeFileSync(join(up, 'seed.txt'), 'seed2\n');
+    gd(['add', '-A'], up); gd(['commit', '-qm', 'unrelated'], up);
+    gd(['fetch', '-q', DEFAULT_BASE_REMOTE], clone);
+    const offSurface = baseDrift({ cwd: clone });
+    t('drift against a real repo is measured from git, never assumed', offSurface.behind === 1 && !!offSurface.base);
+    t('and a commit outside the derivation surface leaves the loud list empty', offSurface.changed.length === 0 && driftLines(offSurface).length === 1);
+    // Now upstream moves a file the answer IS derived from — the measured shape.
+    mkdirSync(join(up, 'scripts'), { recursive: true });
+    writeFileSync(join(up, 'scripts', 'check-thing.mjs'), 'export const a = 1;\n');
+    gd(['add', '-A'], up); gd(['commit', '-qm', 'change a check script'], up);
+    gd(['fetch', '-q', DEFAULT_BASE_REMOTE], clone);
+    const onSurface = baseDrift({ cwd: clone });
+    t('a commit INSIDE the derivation surface is caught and named', onSurface.behind === 2 && onSurface.changed.includes('scripts/check-thing.mjs'));
+    t('and that is the case that goes loud', driftLines(onSurface).join('\n').includes('STALE TREE'));
+  } finally {
+    rmSync(driftTmp, { recursive: true, force: true });
+  }
+
   const idTmp = mkdtempSync(join(tmpdir(), 'dispatch-gates-id-'));
   try {
     const gi = (args, cwd) => spawnSync('git', ['-c', 'user.email=t@t.t', '-c', 'user.name=t', ...args], { cwd, encoding: 'utf8' });
@@ -6590,7 +6732,7 @@ if (invokedDirectly) {
     // which repo it is about — the one thing the silent wrong answer never said.
     const identity = repoIdentity();
     const declaredPaths = argvPaths.map((p) => p.replace(/^\.\//, ''));
-    for (const line of bannerLines({ identity, paths: declaredPaths })) console.error(line);
+    for (const line of bannerLines({ identity, paths: declaredPaths, drift: baseDrift() })) console.error(line);
     if (argv.assertion !== null) {
       // An assertion the tree contradicts is the measured failure, caught. It
       // ends the run: a caller that named the repo it needs has stated a
