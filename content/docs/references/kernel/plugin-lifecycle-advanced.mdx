@@ -67,6 +67,18 @@ const result = DistributedStateConfigSchema.parse(data);
 | **beforeReload** | `string[]` | optional | Hook names to call before reload |
 | **afterReload** | `string[]` | optional | Hook names to call after reload |
 
+### Nested Shape: `HotReloadConfig.distributedConfig`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **provider** | `Enum<'redis' \| 'etcd' \| 'custom'>` | ✅ | Distributed state backend provider |
+| **endpoints** | `string[]` | optional | Backend connection endpoints |
+| **keyPrefix** | `string` | optional | Prefix for all keys (e.g., "plugin:my-plugin:") |
+| **ttl** | `integer` | optional | State expiration time in seconds |
+| **auth** | `{ username?: string; password?: string; token?: string; certificate?: string }` | optional |  |
+| **replication** | `{ enabled: boolean; minReplicas: integer }` | optional |  |
+| **customConfig** | `Record<string, any>` | optional | Provider-specific configuration |
+
 
 ---
 
@@ -101,6 +113,34 @@ const result = DistributedStateConfigSchema.parse(data);
 | **checks** | `{ name: string; status: Enum<'passed' \| 'failed' \| 'warning'>; message?: string; data?: Record<string, any> }[]` | optional |  |
 | **dependencies** | `{ pluginId: string; status: Enum<'healthy' \| 'degraded' \| 'unhealthy' \| 'failed' \| 'recovering' \| 'unknown'>; message?: string }[]` | optional |  |
 
+### Nested Shape: `PluginHealthReport.metrics`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **uptime** | `number` | optional | Plugin uptime in milliseconds |
+| **memoryUsage** | `number` | optional | Memory usage in bytes |
+| **cpuUsage** | `number` | optional | CPU usage percentage |
+| **activeConnections** | `number` | optional | Number of active connections |
+| **errorRate** | `number` | optional | Error rate (errors per minute) |
+| **responseTime** | `number` | optional | Average response time in ms |
+
+### Nested Shape: `PluginHealthReport.checks[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Check name |
+| **status** | `Enum<'passed' \| 'failed' \| 'warning'>` | ✅ |  |
+| **message** | `string` | optional |  |
+| **data** | `Record<string, any>` | optional |  |
+
+### Nested Shape: `PluginHealthReport.dependencies[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **pluginId** | `string` | ✅ |  |
+| **status** | `Enum<'healthy' \| 'degraded' \| 'unhealthy' \| 'failed' \| 'recovering' \| 'unknown'>` | ✅ | Current health status of the plugin |
+| **message** | `string` | optional |  |
+
 
 ---
 
@@ -131,6 +171,14 @@ Current health status of the plugin
 | **timestamp** | `string` | ✅ |  |
 | **state** | `Record<string, any>` | ✅ |  |
 | **metadata** | `{ checksum?: string; compressed: boolean; encryption?: string }` | optional |  |
+
+### Nested Shape: `PluginStateSnapshot.metadata`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **checksum** | `string` | optional | State checksum for verification |
+| **compressed** | `boolean` | optional (default: `false`) |  |
+| **encryption** | `string` | optional | Encryption algorithm if encrypted |
 
 
 ---
