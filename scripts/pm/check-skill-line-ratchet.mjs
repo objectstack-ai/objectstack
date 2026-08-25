@@ -203,7 +203,7 @@ export const CEILINGS = new Map([
   // operation channel mapping moved out to references/rest-channel.md below.
   // The two right-sized-reads rows the same ruling ordered were paid from that
   // saving in place, and three lines came back. Headroom 0 again.
-  ['.claude/skills/pm-dispatch/references/platform-readings.md', 315],
+  ['.claude/skills/pm-dispatch/references/platform-readings.md', 314],
   // Per-operation REST/GraphQL/git channel mapping — which fleet operation has
   // a REST twin (each row executed in a real session, provenance date carried
   // per row), the handful that are GraphQL-only, and the queue-routing
