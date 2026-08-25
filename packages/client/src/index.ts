@@ -601,11 +601,11 @@ export interface SaveMetaItemOptions {
      * empty spelling would pin the write against the empty string and refuse
      * every save with a 409 the caller never asked for.
      *
-     * ✅ REACHES BOTH DOORS — unlike `mode` below. The compound-name twin
-     * `PUT /meta/:type/:section/:name` reads `if-match` and strips ETag-style
-     * quotes exactly as the single-segment door does, so
-     * `saveItem('object', 'views/all_leads', item, { ifMatch })` is
-     * OCC-guarded like any other save.
+     * [#12195] There is ONE door now. The compound-name twin
+     * `PUT /meta/:type/:section/:name` — which this note used to pair with —
+     * is retired, and every name reaches `PUT /meta/:type/:name`
+     * percent-encoded, so `if-match` behaviour no longer varies by how the
+     * name is spelled.
      *
      * Same member name, same header, same truthy guard as the sibling
      * first-party `@object-ui/data-objectstack` `MetadataClient.save`, whose
@@ -645,21 +645,21 @@ export interface SaveMetaItemOptions {
      * on the wire that the server ignores. Same shape the first-party
      * `@object-ui/data-objectstack` `MetadataClient.save` already uses.
      *
-     * ⚠️ COMPOUND NAMES DO NOT STAGE. `mode` reaches only the single-segment
-     * `PUT /meta/:type/:name`. Its compound-name twin
-     * `PUT /meta/:type/:section/:name` — the door a `name` containing a slash
-     * lands on, e.g. `saveItem('object', 'views/all_leads', item)` — never
-     * reads this parameter, so `{ mode: 'draft' }` there is IGNORED and the
-     * write is PUBLISHED LIVE, answered 200. It is not refused; there is no
-     * signal at the call site. Filed as objectstack#11712 and deliberately not
-     * repaired from this side: threading it is the route's decision, and a
-     * client-side guess would be a second place the two doors disagree.
+     * [#12195] REACHES EVERY SAVE — the carve-out this note used to carry is
+     * GONE, and it is worth recording why rather than deleting it silently.
      *
-     * ⛔ Do not "fix" this by rejecting compound names here. `force` and
-     * `packageId` DO reach both doors (measured: the compound handler reads
-     * and threads `?force` since objectstack#11095 and `?package` alongside
-     * it), so refusing the whole bag on a compound name would break the two
-     * parameters that work in order to warn about the one that does not.
+     * `mode` used to reach only the single-segment `PUT /meta/:type/:name`.
+     * A `name` containing a slash landed on the compound-name twin
+     * `PUT /meta/:type/:section/:name`, which never read this parameter — so
+     * `{ mode: 'draft' }` there was IGNORED and the write was PUBLISHED LIVE,
+     * answered 200, with no signal at the call site (objectstack#11712).
+     *
+     * Two changes closed it at the source rather than from this side. Stage 1
+     * (#12194) made a slash-bearing name unwritable at all, and this stage
+     * retired the twin and unified this file on `encodeURIComponent`, so every
+     * save now arrives at the one door that reads `mode`. A name that would
+     * once have forked to the silent-publish door is now refused `400
+     * INVALID_REQUEST` by the grammar — loud, at the door, before any write.
      */
     mode?: 'draft' | 'publish';
 }
@@ -911,7 +911,7 @@ export class ObjectStackClient {
         const params = new URLSearchParams();
         if (options?.packageId) params.set('package', options.packageId);
         const qs = params.toString();
-        const url = `${this.baseUrl}${route}/${type}/${name}${qs ? `?${qs}` : ''}`;
+        const url = `${this.baseUrl}${route}/${encodeURIComponent(type)}/${encodeURIComponent(name)}${qs ? `?${qs}` : ''}`;
         const res = await this.fetch(url);
         return this.unwrapResponse<GetMetaItemResponse>(res);
     },
@@ -953,10 +953,16 @@ export class ObjectStackClient {
         // omits the `headers` key altogether, so a save without `ifMatch`
         // hands `fetch` the same `init` it always did.
         const headers = metaSaveHeaders(options);
-        // `type`/`name` stay UNENCODED — a compound name's slash must survive
-        // so the request reaches `PUT /meta/:type/:section/:name` instead of
-        // collapsing onto the 3-segment route (pinned in client.test.ts).
-        const res = await this.fetch(`${this.baseUrl}${route}/${type}/${name}${query}`, {
+        // [#12195] ENCODED, like every other `/meta` item address in this file.
+        // This site used to leave `type`/`name` RAW so a compound name's slash
+        // would survive into a separate path segment and reach
+        // `PUT /meta/:type/:section/:name`. That door is retired, and encoding
+        // is now the single spelling: a legal name (#12194's grammar — snake
+        // case, optionally dot-qualified) contains nothing `encodeURIComponent`
+        // alters, so this is byte-identical for every name that can be written,
+        // and a pre-grammar residue name reaches the single-segment door with
+        // its slash intact as `%2F` instead of forking the request.
+        const res = await this.fetch(`${this.baseUrl}${route}/${encodeURIComponent(type)}/${encodeURIComponent(name)}${query}`, {
             method: 'PUT',
             body: JSON.stringify(item),
             ...(headers ? { headers } : {}),
@@ -1090,13 +1096,19 @@ export class ObjectStackClient {
      */
 
     /**
-     * ADR-0033: the published version of a metadata item. Compound names are
-     * passed through unencoded (e.g. `getPublished('lead', 'views/all_leads')`),
-     * matching how `getItem` addresses sub-resources.
+     * ADR-0033: the published version of a metadata item.
+     *
+     * [#12195] The name is percent-encoded, like every other `/meta` item
+     * address in this file. This docblock used to promise the opposite — that
+     * a compound name passed through UNENCODED, `getPublished('lead',
+     * 'views/all_leads')`, so its slash would reach the compound arity
+     * `GET /meta/:type/:section/:name/published`. That arity is retired and a
+     * slash-bearing name is refused at the publish door (#12194), so there is
+     * one spelling and one door.
      */
     getPublished: async (type: string, name: string) => {
         const route = this.getRoute('metadata');
-        const res = await this.fetch(`${this.baseUrl}${route}/${type}/${name}/published`);
+        const res = await this.fetch(`${this.baseUrl}${route}/${encodeURIComponent(type)}/${encodeURIComponent(name)}/published`);
         return this.unwrapResponse<any>(res);
     },
 
@@ -1177,7 +1189,7 @@ export class ObjectStackClient {
      */
     getReferences: async (type: string, name: string) => {
         const route = this.getRoute('metadata');
-        const res = await this.fetch(`${this.baseUrl}${route}/${type}/${name}/references`);
+        const res = await this.fetch(`${this.baseUrl}${route}/${encodeURIComponent(type)}/${encodeURIComponent(name)}/references`);
         return this.unwrapResponse<any>(res);
     },
 
@@ -1200,15 +1212,16 @@ export class ObjectStackClient {
     getAudit: async (type: string, name: string, opts?: { limit?: number }) => {
         const route = this.getRoute('metadata');
         const qs = opts?.limit !== undefined ? `?limit=${opts.limit}` : '';
-        const res = await this.fetch(`${this.baseUrl}${route}/${type}/${name}/audit${qs}`);
+        const res = await this.fetch(`${this.baseUrl}${route}/${encodeURIComponent(type)}/${encodeURIComponent(name)}/audit${qs}`);
         return this.unwrapResponse<any>(res);
     },
 
     /**
      * ADR-0033: promote a single item's pending draft overlay to live —
      * the per-item flow beside `packages.publishDrafts`' package-scoped one.
-     * 404 [no_draft] when there is nothing to publish. Compound names pass
-     * through unencoded, like `getItem`.
+     * 404 [no_draft] when there is nothing to publish. [#12195] The name is
+     * percent-encoded, like `getItem` — this line used to promise unencoded
+     * pass-through for compound names, whose arity is now retired.
      *
      * The resolved `version` is the ADR-0008 optimistic-concurrency token, the
      * same carrier `saveItem` returns and with the same job: pass it back as
@@ -1229,7 +1242,7 @@ export class ObjectStackClient {
         opts?: { message?: string },
     ): Promise<PublishMetaItemResponse> => {
         const route = this.getRoute('metadata');
-        const res = await this.fetch(`${this.baseUrl}${route}/${type}/${name}/publish`, {
+        const res = await this.fetch(`${this.baseUrl}${route}/${encodeURIComponent(type)}/${encodeURIComponent(name)}/publish`, {
             method: 'POST',
             body: JSON.stringify(opts?.message ? { message: opts.message } : {}),
         });
@@ -1241,7 +1254,7 @@ export class ObjectStackClient {
      */
     rollbackItem: async (type: string, name: string, toVersion: number, opts?: { message?: string }) => {
         const route = this.getRoute('metadata');
-        const res = await this.fetch(`${this.baseUrl}${route}/${type}/${name}/rollback`, {
+        const res = await this.fetch(`${this.baseUrl}${route}/${encodeURIComponent(type)}/${encodeURIComponent(name)}/rollback`, {
             method: 'POST',
             body: JSON.stringify({ toVersion, ...(opts?.message ? { message: opts.message } : {}) }),
         });
@@ -1258,7 +1271,7 @@ export class ObjectStackClient {
         if (opts?.from !== undefined) params.set('from', String(opts.from));
         if (opts?.to !== undefined) params.set('to', String(opts.to));
         const qs = params.toString();
-        const res = await this.fetch(`${this.baseUrl}${route}/${type}/${name}/diff${qs ? `?${qs}` : ''}`);
+        const res = await this.fetch(`${this.baseUrl}${route}/${encodeURIComponent(type)}/${encodeURIComponent(name)}/diff${qs ? `?${qs}` : ''}`);
         return this.unwrapResponse<any>(res);
     }
   };
@@ -5581,7 +5594,7 @@ export class ScopedProjectClient {
       const params = new URLSearchParams();
       if (options?.packageId) params.set('package', options.packageId);
       const qs = params.toString();
-      const res = await this.parent._fetch(this.url(`/meta/${type}/${name}${qs ? `?${qs}` : ''}`));
+      const res = await this.parent._fetch(this.url(`/meta/${encodeURIComponent(type)}/${encodeURIComponent(name)}${qs ? `?${qs}` : ''}`));
       return this.parent._unwrap<GetMetaItemResponse>(res);
     },
     /**
@@ -5608,7 +5621,7 @@ export class ScopedProjectClient {
       // Header half of the same bag, through the same one builder the twin
       // calls — see {@link metaSaveHeaders}.
       const headers = metaSaveHeaders(options);
-      const res = await this.parent._fetch(this.url(`/meta/${type}/${name}${query}`), {
+      const res = await this.parent._fetch(this.url(`/meta/${encodeURIComponent(type)}/${encodeURIComponent(name)}${query}`), {
         method: 'PUT',
         body: JSON.stringify(item),
         ...(headers ? { headers } : {}),

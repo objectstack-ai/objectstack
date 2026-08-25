@@ -3986,19 +3986,29 @@ export class RestServer {
      * book tree (`/book/:name/tree`) → the per-item read/write
      * (`/:type/:name`) with its sub-resources (`references`, `layers`,
      * `history`, `audit`, `diff`, `publish`, `rollback`, `published`, and the
-     * object FSM read `state/:field`) → the compound-name twins spelled
-     * `/:type/:section/:name`.
+     * object FSM read `state/:field`).
      *
-     * Two ordering facts are load-bearing rather than cosmetic. Matching is
-     * first-match-wins, so a literal-prefixed route must stay ABOVE the
-     * `:type`-parameterised route it shares a SEGMENT COUNT with — the three
+     * [#12195] The compound-name twins spelled `/:type/:section/:name` used to
+     * close that list. They are RETIRED (stage 3 of #12176): every item is
+     * addressed through the single-segment `/:type/:name`, with the name
+     * percent-encoded by the caller.
+     *
+     * One ordering fact is still load-bearing rather than cosmetic. Matching
+     * is first-match-wins, so a literal-prefixed route must stay ABOVE the
+     * `:type`-parameterised route it shares a SEGMENT COUNT with — the
      * collisions that implies are pinned by
      * `meta-route-registration-order.test.ts`, and dropping below the line is
-     * how `/meta/types` once answered as an empty metadata type. And a
-     * compound-name twin is the SAME operation reached by a name spelled in
-     * two segments, so a gate or an org scope added to one door must be added
-     * to its twin — gating one and not the other leaves the twin as the
-     * bypass.
+     * how `/meta/types` once answered as an empty metadata type.
+     *
+     * The SECOND ordering fact retired with the twins, and it is worth knowing
+     * that it is gone rather than merely absent: `/:type/:section/:name` was a
+     * three-segment CATCH-ALL that shadowed every literal three-segment
+     * sibling (`/history`, `/audit`, `/diff`, `/published`, `/layers`), so
+     * those had to be registered above it. Nothing shadows them now. The
+     * twin-parity obligation retired with it too — a gate or an org scope
+     * added to the single door no longer has a second door to be added to,
+     * which is exactly the defect family (#6603/#7019, #8805, #7035, #11095,
+     * #11712) the retirement closes at the source.
      */
     private registerMetadataEndpointsInner(basePath: string): void {
         const { metadata } = this.config;
@@ -4808,9 +4818,10 @@ export class RestServer {
             // [#5882] GET /meta/:type/:name/layers — the three-layer diagnostic
             // projection as its OWN resource. Registered BEFORE
             // /meta/:type/:name for the same first-match reason as
-            // /references above, and before /meta/:type/:section/:name, which
-            // would otherwise capture this path with section=<name>,
-            // name="layers".
+            // /references above. [#12195] It also used to have to precede the
+            // compound `/:type/:section/:name`, which would otherwise capture
+            // this path with section=<name>, name="layers"; that catch-all is
+            // retired, so only the /references-style reason remains.
             //
             // This path exists because the projection used to be reachable only
             // as `GET /meta/:type/:name?layers=true` — the same route answering
@@ -6443,15 +6454,14 @@ export class RestServer {
         // boundary's accept set for `/meta/:type/...` is unchanged, which is
         // what the 2026-08-17 re-weigh (item 3) requires of this step.
         //
-        // Registered BEFORE the compound `/:type/:section/:name/published`
-        // twin below, which it still collides with on exactly one shape:
-        // `/meta/object/x/state/published`. Two literal segments (`object`,
-        // `state`) beat one, so the FSM reading wins that path — a field
-        // literally named `published` is the ambiguity, and answering it as
-        // "the published version of the compound name object/x/state" would
-        // be the less likely of the two by a wide margin. The collision
-        // OUTLIVES the plural, so the order pin keeps its singular arm; only
-        // the plural's own line in it goes away.
+        // [#12195] The four-segment collision this comment used to describe is
+        // GONE with the compound `/:type/:section/:name/published` twin. That
+        // twin captured `/meta/object/x/state/published` as "the published
+        // version of the compound name object/x/state", and only the literal
+        // `object`/`state` segments winning kept the FSM reading — a field
+        // literally named `published` was the ambiguity. With the twin retired
+        // no other route matches four segments, so this mount is now the only
+        // reading of that path rather than the preferred one.
         this.routeManager.register({
             method: 'GET',
             path: `${metaPath}/object/:name/state/:field`,
@@ -6533,27 +6543,34 @@ export class RestServer {
         // after publish, identical for a name that does not exist: a route
         // that structurally could not 404.
         //
-        // Both arities, mirroring the `getItem` / `saveItem` twins: the SDK
-        // documents `getPublished('lead', 'views/all_leads')`, and a compound
-        // name is how every other read on this surface addresses a
-        // sub-resource. REGISTERED BEFORE `/:type/:section/:name` — the
-        // three-segment form collides with it exactly the way `/history` and
-        // `/audit` do, and Hono is first-match-wins.
-        for (const publishedPath of [
-            `${metaPath}/:type/:name/published`,
-            `${metaPath}/:type/:section/:name/published`,
-        ]) {
+        // ONE arity since #12195 (stage 3 of #12176's maintainer-ruled
+        // retirement of compound-name addressing, 2026-08-25). This route used
+        // to be mounted twice — the second registration was
+        // `/:type/:section/:name/published`, folding `section` and `name` back
+        // into one slash-bearing key so the SDK's
+        // `getPublished('lead', 'views/all_leads')` could reach it.
+        //
+        // Stage 1 (#12194) declared the item-name grammar and refuses every
+        // slash-bearing name at the publish door, so no name reachable ONLY
+        // through that arity can exist any more. What remains addressable is a
+        // pre-grammar residue row, and it is reachable HERE: a percent-encoded
+        // `%2F` matches this single-segment pattern and Hono decodes the
+        // parameter back to `views/all_leads` (measured, not assumed), which is
+        // the spelling the SDK now sends for every name. So the compound arity
+        // was removed WITHOUT removing the capability — D1's "any stored junk
+        // name remains listable and clearable" still holds through this door.
+        {
             this.routeManager.register({
                 method: 'GET',
-                path: publishedPath,
+                path: `${metaPath}/:type/:name/published`,
                 handler: async (req: any, res: any) => {
                     try {
                         const environmentId = isScoped ? req.params?.environmentId : undefined;
                         const type = String(req.params?.type ?? '');
-                        const section = req.params?.section;
-                        const name = section
-                            ? `${section}/${req.params?.name ?? ''}`
-                            : String(req.params?.name ?? '');
+                        // [#12195] No `section` fold: this route has one arity.
+                        // A percent-encoded slash arrives already decoded here,
+                        // so a residue name reads exactly as it is stored.
+                        const name = String(req.params?.name ?? '');
                         // [#8278] The AUTHORITATIVE published store is consulted
                         // first: the `state:'active'` `sys_metadata` overlay row.
                         // Mirrors the dispatcher fix (#8031 / PR #8254,
@@ -6724,310 +6741,32 @@ export class RestServer {
             });
         }
 
-        // GET /meta/:type/:section/:name - Get specific item with compound name
-        // Compound names express sub-resources of a type (e.g. a view of an
-        // object, a flow under an automation). The protocol layer treats
-        // `<section>/<name>` as a single opaque key.
-        if (metadata.endpoints.item !== false) {
-            this.routeManager.register({
-                method: 'GET',
-                path: `${metaPath}/:type/:section/:name`,
-                handler: async (req: any, res: any) => {
-                    try {
-                        const environmentId = isScoped ? req.params?.environmentId : undefined;
-                        const p = await this.resolveProtocol(environmentId, req);
-                        const compoundName = `${req.params.section}/${req.params.name}`;
-                        // [#6877] Same single owning package as the single-segment
-                        // read this route mirrors.
-                        if (refuseRepeatedQueryParams(req, res, ['package'])) return;
-                        const packageId = req.query?.package || undefined;
-                        // [#9454] The compound-name door serves EVERY type
-                        // through one generic `getMetaItem` — including the
-                        // org-overridable ones — so it needs the same scope the
-                        // single-segment read it mirrors now states. Left
-                        // org-blind it would be the surviving route that keeps
-                        // answering from the wrong partition after the other
-                        // doors are fixed.
-                        const compoundCtx = await this.resolveExecCtx(environmentId, req)
-                            .catch(() => undefined);
-                        const compoundOrganizationId = organizationIdForMetaRead(
-                            // [#10340] FOLDED, not raw — see the PUT door's
-                            // org-scope comment for the measurement.
-                            canonicalMetaUrlType(req.params.type), compoundCtx?.tenantId,
-                        );
-                        const envelope = await p.getMetaItem({
-                            type: req.params.type,
-                            name: compoundName,
-                            packageId,
-                            ...(compoundOrganizationId ? { organizationId: compoundOrganizationId } : {}),
-                        } as any) as Record<string, any>;
-                        // [ADR-0106 D5(4)] Compound names express sub-resources,
-                        // and no object uses one today — but this route serves
-                        // EVERY type through one generic `getMetaItem`, so the
-                        // question it answers for `object` is the same question
-                        // the single-item route answers. Running the projection
-                        // here costs one predicate on a path that will never
-                        // reach it, and leaves no exit whose coverage depends on
-                        // a naming convention holding.
-                        let compoundDocument: any = envelope?.item;
-                        const compoundType = RestServer.metaTypeSingular(req.params.type);
-                        let compoundPosture: ObjectSchemaMaskPosture;
-                        try {
-                            compoundPosture = await (await this.resolveObjectMasker(environmentId, req, compoundType))(compoundName);
-                        } catch (maskError: any) {
-                            if (maskError instanceof ObjectSchemaMaskEvaluationError) {
-                                sendFieldVisibilityFault(res, compoundName);
-                                return;
-                            }
-                            throw maskError;
-                        }
-                        if (compoundPosture.kind === 'project') {
-                            const masked = this.maskObjectDocument(res, compoundPosture, compoundName, compoundDocument);
-                            if (!masked) return;
-                            compoundDocument = masked.document;
-                        } else if (compoundPosture.kind === 'undetermined') {
-                            res.header('Cache-Control', 'private, no-store');
-                        }
-                        res.header('Vary', 'Accept-Language');
-                        res.json(await this.translateMetaEnvelope(
-                            req, req.params.type, environmentId, envelope, compoundDocument,
-                        ));
-                    } catch (error: any) {
-                        handleRouteError(res, error);
-                    }
-                },
-                metadata: {
-                    summary: 'Get specific metadata item by compound name',
-                    tags: ['metadata'],
-                },
-            });
-        }
-
-        // PUT /meta/:type/:section/:name - Save metadata item with compound name
-        this.routeManager.register({
-            method: 'PUT',
-            path: `${metaPath}/:type/:section/:name`,
-            handler: async (req: any, res: any) => {
-                try {
-                    const environmentId = isScoped ? req.params?.environmentId : undefined;
-                    // [#7019] The compound-name twin of the gate #6603 put on
-                    // `PUT /meta/:type/:name` — WORD FOR WORD the same
-                    // mechanism, because it is word for word the same
-                    // operation: one generic `saveMetaItem`, reached by a name
-                    // spelled in two segments instead of one.
-                    //
-                    // Gating only the single-segment door left this one as a
-                    // bypass of it, and that was measured rather than reasoned:
-                    // with #6603's gate in place, the identical ADR-0106
-                    // GET → edit a label → PUT still round-tripped a MASKED
-                    // object schema back into the store through here, deleting
-                    // the fields the caller was never allowed to see. Same
-                    // caller, same object, same loss, one route over.
-                    //
-                    // Independently of masking, this door also served the older
-                    // hole for EVERY metadata type: any authenticated session
-                    // could clobber any metadata item.
-                    //
-                    // Gate FIRST — before the protocol is resolved — so an
-                    // unauthorized caller cannot use the 501-vs-200 answer to
-                    // probe which kernels implement saving, and so nothing is
-                    // written before the refusal. `isSystem` bypasses, matching
-                    // every other capability gate on the platform.
-                    const ctx = await this.resolveExecCtx(environmentId, req).catch(() => undefined);
-                    const held = new Set<string>(
-                        Array.isArray(ctx?.systemPermissions) ? ctx!.systemPermissions : [],
-                    );
-                    if (!ctx?.isSystem && !held.has('manage_metadata')) {
-                        res.status(403).json({
-                            error: {
-                                code: 'FORBIDDEN',
-                                message: 'Saving a metadata item requires the `manage_metadata` capability.',
-                            },
-                        });
-                        return;
-                    }
-                    const p = await this.resolveProtocol(environmentId, req);
-                    if (!p.saveMetaItem) {
-                        // [#7035] ADR-0112 envelope. Converged together with the
-                        // single-segment `PUT /meta/:type/:name` above, because
-                        // the two refusals were BYTE-IDENTICAL (see the comment
-                        // block on the gate: "WORD FOR WORD the same mechanism").
-                        // Fixing one and leaving its literal twin would leave the
-                        // wrong template in the file next to the right one, which
-                        // is the harm #7035 is about — a copier copies whichever
-                        // line they scrolled to.
-                        res.status(501).json({
-                            error: {
-                                code: 'NOT_IMPLEMENTED',
-                                message: 'Save operation not supported by protocol implementation',
-                            },
-                        });
-                        return;
-                    }
-
-                    const compoundName = `${req.params.section}/${req.params.name}`;
-                    const ifMatchHeader = req.headers?.['if-match'] ?? req.headers?.['If-Match'];
-                    const parentVersion = typeof ifMatchHeader === 'string'
-                        ? ifMatchHeader.replace(/^"|"$/g, '')
-                        : undefined;
-                    // [#7749 producer, #7941 precedence] The request's authenticated
-                    // identity — one producer, shared by every `/meta` write (see
-                    // resolveMetaWriteActor). `X-Actor` is not consulted.
-                    const actor = await this.resolveMetaWriteActor(environmentId, req);
-
-                    // [#6877] The `typeof` guard below dropped a repeated
-                    // `?package=` to `undefined`, i.e. wrote the row as an
-                    // env-local overlay instead of into the package the caller
-                    // named — a silent change of where the save LANDS.
-                    //
-                    // [#11095] `force` joins that list in the SAME stroke as the
-                    // parameter itself, and the order is not cosmetic: #6877's
-                    // sharpest measured case is on this very parameter one route
-                    // over — `?force=false&force=false` reaches the `typeof`
-                    // ternary below as an ARRAY, falls through to `!!forceRaw`,
-                    // and a non-empty array is truthy, so a caller repeating an
-                    // explicit opt-OUT turns the destructive-change guard ON.
-                    // Threading `force` here without also naming it here would
-                    // have re-opened that inversion on a fresh door, on a
-                    // destructive verb, reported as 200.
-                    //
-                    // [#11712] `mode` joins for the same reason and in the same
-                    // stroke as the read below. The single-segment twin has
-                    // listed all three since #6877; this door listed two,
-                    // because it read two. The mechanism is #6877's unchanged:
-                    // a repeated `?mode=draft&mode=draft` arrives as an ARRAY,
-                    // the `typeof req.query?.mode === 'string'` test below is
-                    // FALSE for it, and the save falls silently back to
-                    // publishing live — the very outcome this card is about,
-                    // re-entered through the door the fix opens.
-                    if (refuseRepeatedQueryParams(req, res, ['force', 'package', 'mode'])) return;
-                    // [#11095] Phase 3a-destructive: `?force=true` opts past the
-                    // destructive-change safety check — BYTE-IDENTICAL to the
-                    // single-segment `PUT /meta/:type/:name` above, truthy
-                    // spellings and all, because it is byte-identically the same
-                    // decision.
-                    //
-                    // Until this landed the request below was built field by
-                    // field with no `force` among the fields, so `saveMetaItem`'s
-                    // Phase 3a-destructive gate refused a save through this door
-                    // with `409 DESTRUCTIVE_CHANGE` and the remedy clause
-                    // `— re-submit with ?force=true to proceed.`, and a caller
-                    // who did exactly that got the identical refusal back. The
-                    // clause was true of the single-segment twin and false here.
-                    //
-                    // Threading rather than rewording is #7019's ruling applied
-                    // again, with its reason: this route is "word for word the
-                    // same operation" as its twin — one generic `saveMetaItem`
-                    // reached by a name spelled in two segments — and gating only
-                    // the single-segment door was MEASURED to leave this one a
-                    // bypass of it. #8805 (write-side organization) and #7035
-                    // (the 501 envelope) both cite that same finding. A twin pair
-                    // that disagrees about which risks a caller may acknowledge
-                    // is the same shape, one field along.
-                    //
-                    // ⛔ NOT a licence for every door that reaches this gate: the
-                    // runtime dispatcher's `PUT /meta` was ruled the other way in
-                    // the same stroke (it has no query string at all) and states
-                    // its own `writeFace` so its 409 stops prescribing a
-                    // parameter it does not have. See `destructiveChangeRemedy`.
-                    const forceRaw = req.query?.force;
-                    const force = typeof forceRaw === 'string'
-                        ? ['true', '1', 'yes', 'on'].includes(forceRaw.toLowerCase())
-                        : !!forceRaw;
-                    const packageRaw = req.query?.package;
-                    const packageId = typeof packageRaw === 'string' && packageRaw && packageRaw !== 'all'
-                        ? packageRaw
-                        : undefined;
-
-                    // [#8805] The compound-name twin of the write-side
-                    // organization, for the same reason #7019's gate is
-                    // duplicated here: it is word for word the same operation,
-                    // one generic `saveMetaItem` reached by a name spelled in
-                    // two segments. Gating one door and scoping the other would
-                    // leave this one the bypass — which is exactly how the
-                    // masking round-trip stayed open after #6603. Full rationale
-                    // on the single-segment `PUT` above.
-                    const organizationId = organizationIdForMetaWrite(
-                        // [#10340] FOLDED, not raw — see the PUT door's
-                        // org-scope comment for the measurement.
-                        canonicalMetaUrlType(req.params.type), ctx?.tenantId,
-                    );
-                    const result = await p.saveMetaItem({
-                        type: req.params.type,
-                        name: compoundName,
-                        item: req.body,
-                        organizationId,
-                        // [#10888] This door answers with an ADR-0112 error
-                        // envelope that carries the refusal's `issues[]`
-                        // structurally beside the message (`sendError` threads a
-                        // top-level `issues`), so `saveMetaItem`'s 422 renders
-                        // its findings as a headline here instead of restating
-                        // the per-key prose a console would then show twice.
-                        // Server-stated: this object is built field by field
-                        // from named `req` values and never spreads the body, so
-                        // a client cannot smuggle a face in.
-                        //
-                        // [#11095] The face stays `'meta-envelope'` — the same
-                        // one the single-segment twin states — and that is now
-                        // the whole point rather than an inherited default: the
-                        // 409 clause this face renders prescribes `?force=true`,
-                        // and with the line below this door finally HAS one. The
-                        // alternative repair (a face of its own, saying the
-                        // parameter is unavailable) is the option the ruling
-                        // rejected for this door and adopted for the dispatcher.
-                        writeFace: 'meta-envelope',
-                        ...(environmentId ? { environmentId } : {}),
-                        ...(parentVersion !== undefined ? { parentVersion } : {}),
-                        ...(actor ? { actor } : {}),
-                        ...(force ? { force: true } : {}),
-                        ...(packageId ? { packageId } : {}),
-                        // [#11712] ADR-0005 per-item lifecycle: `?mode=draft`
-                        // stages the write instead of publishing it live.
-                        // BYTE-IDENTICAL to the single-segment
-                        // `PUT /meta/:type/:name` above, spelling test and all,
-                        // because it is byte-identically the same decision —
-                        // #7019's ruling applied a fifth time, with its reason:
-                        // this route is "word for word the same operation" as
-                        // its twin, one generic `saveMetaItem` reached by a name
-                        // spelled in two segments. #6603/#7019 (capability
-                        // gate), #8805 (write-side org), #7035 (the 501
-                        // envelope) and #11095 (`?force`) each closed a
-                        // divergence on this pair on exactly that finding.
-                        //
-                        // The harm was measured, not reasoned. Until this
-                        // landed the request was built field by field with no
-                        // `mode` among the fields, so `saveMetaItem` fell to its
-                        // `'publish'` default: `PUT /meta/object/crm/task
-                        // ?mode=draft` answered `200` with `state: 'active'` and
-                        // OVERWROTE the live row, while the byte-identical
-                        // intent one route over inserted a `state: 'draft'` row
-                        // and left the live one alone. Nothing in the answer
-                        // said the parameter had been ignored — a caller asking
-                        // for a staging buffer got a publish.
-                        //
-                        // ⛔ NOT repaired by refusing the parameter here: the
-                        // draft store keys on `type`/`name`/org/package and is
-                        // indifferent to how the name is spelled, and the
-                        // ADR-0033 read half is ALREADY mounted in both arities
-                        // (`GET /:type/:section/:name/published`, #7526, whose
-                        // own comment cites `getPublished('lead',
-                        // 'views/all_leads')`). A compound draft is a shape this
-                        // surface already serves; only the write door was
-                        // missing.
-                        ...((typeof req.query?.mode === 'string'
-                            && req.query.mode.toLowerCase() === 'draft')
-                            ? { mode: 'draft' } : {}),
-                    } as any);
-                    res.json(result);
-                } catch (error: any) {
-                    handleRouteError(res, error);
-                }
-            },
-            metadata: {
-                summary: 'Save specific metadata item by compound name',
-                tags: ['metadata'],
-            },
-        });
+        // ── RETIRED: the compound `/:type/:section/:name` arities ──────────
+        //
+        // `GET` and `PUT /meta/:type/:section/:name` were mounted here until
+        // #12195 (stage 3 of #12176's maintainer-ruled retirement of
+        // compound-name addressing, 2026-08-25). Both folded `section` and
+        // `name` back into one slash-bearing key (`views/all_leads`) that the
+        // protocol layer then treated as a single opaque string — the section
+        // half was never stored, filtered or enumerated, so it was addressing
+        // syntax and nothing else.
+        //
+        // Stage 1 (#12194) declared the item-name grammar and refuses every
+        // slash-bearing name at the publish door, which is what makes this a
+        // removal of dead addressing rather than of a capability: no name
+        // reachable only through these arities can be created any more.
+        //
+        // Callers address every item through the single-segment twins
+        // (`GET`/`PUT /meta/:type/:name`), percent-encoding the name — which
+        // the SDK now does everywhere. A pre-grammar residue row spelled with
+        // a slash still reads, writes and deletes through those twins, because
+        // `%2F` matches the single-segment pattern and Hono decodes the
+        // parameter back to the stored spelling (measured, not assumed).
+        //
+        // These were also the three-segment CATCH-ALL that shadowed every
+        // literal sibling (`/history`, `/audit`, `/diff`, `/published`), which
+        // is why the registration order below them was load-bearing; with the
+        // catch-all gone that hazard is gone with it.
     }
 
     /**
