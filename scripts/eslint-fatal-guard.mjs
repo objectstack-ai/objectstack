@@ -69,8 +69,9 @@
 // about every gate in GUARDED_GATES by reading their source. That assertion is
 // driven by check-query-options-erasure-ratchet.mjs's `--self-test`, which CI
 // runs ahead of the gate itself (`pnpm check:query-options-erasure`);
-// `pnpm check:slot-lookup` has no self-test hook of its own, so the coverage of
-// ITS call site is the source assertion, not a second wired self-test.
+// `pnpm check:slot-lookup` ships a `--self-test` of its own (#12052) but does
+// not repeat this walk, so the coverage of ITS call site is still the source
+// assertion here, not a second copy of it.
 //
 // ── MEASURED (#10458): reading the source has to mean reading CODE ────────
 //
