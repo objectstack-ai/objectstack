@@ -238,7 +238,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       principal: {
         label: "Principal",
-        help: "Subscriber selector: 'role:x' | 'team:x' | 'user:id' | bare user id."
+        help: "サブスクライバーセレクター: 'role:x' | 'team:x' | 'user:id' | 'owner_of:object:id' | メールアドレス | プレフィックスなしのユーザー ID。"
       },
       enabled: {
         label: "Enabled",
@@ -356,7 +356,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       attempts: {
         label: "Attempts",
-        help: "Number of attempts made so far"
+        help: "これまでの試行回数。終了状態の行で 0 の場合、その配信は PARKED — 一度も送信されず、再配信もできません(#8069);原因は `error` を参照してください。"
       },
       claimed_by: {
         label: "Claimed By"

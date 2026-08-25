@@ -16,6 +16,7 @@
     "build": "tsup --config ../../tsup.config.ts",
     "test": "vitest run",
     "test:integration": "vitest run --config vitest.integration.config.ts",
+    "check:exported-any-returns": "tsx ../../scripts/check-exported-any-returns.mts --self-test && tsx ../../scripts/check-exported-any-returns.mts --package packages/client",
     "check:test-typecheck": "tsx ../../scripts/check-test-typecheck.mts --self-test && tsx ../../scripts/check-test-typecheck.mts --package packages/client --project tsconfig.test.json",
     "gen:test-typecheck-debt": "tsx ../../scripts/check-test-typecheck.mts --update --package packages/client --project tsconfig.test.json",
     "typecheck": "tsc --noEmit && pnpm check:test-typecheck"

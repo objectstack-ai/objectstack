@@ -15,7 +15,7 @@ import {
 import { getTursoConfigJsonSchema, TursoConfigSchema } from './turso.zod';
 
 /**
- * The driver-id → `datasource.config` shape registry (#4410).
+ * The driver-id → `datasource.config` shape registry.
  *
  * ## Why this exists
  *
