@@ -5,10 +5,7 @@ import {
   PluginHealthReportSchema,
   DistributedStateConfigSchema,
   HotReloadConfigSchema,
-  GracefulDegradationSchema,
-  PluginUpdateStrategySchema,
   PluginStateSnapshotSchema,
-  AdvancedPluginLifecycleConfigSchema,
 } from './plugin-lifecycle-advanced.zod';
 
 describe('Plugin Lifecycle Advanced Schemas', () => {
@@ -203,84 +200,6 @@ describe('Plugin Lifecycle Advanced Schemas', () => {
     });
   });
 
-  describe('GracefulDegradationSchema', () => {
-    it('should validate graceful degradation with defaults', () => {
-      const config = GracefulDegradationSchema.parse({});
-      expect(config.enabled).toBe(true);
-      expect(config.fallbackMode).toBe('minimal');
-    });
-
-    it('should validate complete degradation configuration', () => {
-      const config = {
-        enabled: true,
-        fallbackMode: 'readonly' as const,
-        criticalDependencies: ['com.objectstack.driver.postgres'],
-        optionalDependencies: ['com.acme.analytics'],
-        degradedFeatures: [
-          {
-            feature: 'advanced-search',
-            enabled: false,
-            reason: 'Search engine unavailable',
-          },
-        ],
-        autoRecovery: {
-          enabled: true,
-          retryInterval: 120000,
-          maxAttempts: 10,
-        },
-      };
-      const result = GracefulDegradationSchema.parse(config);
-      expect(result.fallbackMode).toBe('readonly');
-      expect(result.criticalDependencies).toHaveLength(1);
-    });
-  });
-
-  describe('PluginUpdateStrategySchema', () => {
-    it('should validate update strategy with defaults', () => {
-      const strategy = PluginUpdateStrategySchema.parse({});
-      expect(strategy.mode).toBe('manual');
-    });
-
-    it('should validate automatic update strategy', () => {
-      const strategy = {
-        mode: 'automatic' as const,
-        autoUpdateConstraints: {
-          major: false,
-          minor: true,
-          patch: true,
-        },
-        rollback: {
-          enabled: true,
-          automatic: true,
-          keepVersions: 5,
-          timeout: 60000,
-        },
-        validation: {
-          checkCompatibility: true,
-          runTests: true,
-          testSuite: 'integration',
-        },
-      };
-      const result = PluginUpdateStrategySchema.parse(strategy);
-      expect(result.mode).toBe('automatic');
-      expect(result.autoUpdateConstraints?.patch).toBe(true);
-    });
-
-    it('should validate scheduled update strategy', () => {
-      const strategy = {
-        mode: 'scheduled' as const,
-        schedule: {
-          cron: '0 2 * * 0',
-          timezone: 'America/New_York',
-          maintenanceWindow: 120,
-        },
-      };
-      const result = PluginUpdateStrategySchema.parse(strategy);
-      expect(result.mode).toBe('scheduled');
-      expect(result.schedule?.timezone).toBe('America/New_York');
-    });
-  });
-
   describe('PluginStateSnapshotSchema', () => {
     it('should validate state snapshot', () => {
       const snapshot = {
@@ -305,90 +224,4 @@ describe('Plugin Lifecycle Advanced Schemas', () => {
     });
   });
 
-  describe('AdvancedPluginLifecycleConfigSchema', () => {
-    it('should validate empty config', () => {
-      const config = AdvancedPluginLifecycleConfigSchema.parse({});
-      expect(config).toBeDefined();
-    });
-
-    it('should validate complete lifecycle configuration', () => {
-      const config = {
-        health: {
-          interval: 60000,
-          timeout: 10000,
-          failureThreshold: 3,
-          autoRestart: true,
-        },
-        hotReload: {
-          enabled: true,
-          watchPatterns: ['src/**/*.ts'],
-          preserveState: true,
-        },
-        degradation: {
-          enabled: true,
-          fallbackMode: 'minimal' as const,
-        },
-        updates: {
-          mode: 'automatic' as const,
-          autoUpdateConstraints: {
-            patch: true,
-          },
-        },
-        resources: {
-          maxMemory: 536870912,
-          maxCpu: 80,
-          maxConnections: 100,
-          timeout: 30000,
-        },
-        observability: {
-          enableMetrics: true,
-          enableTracing: true,
-          enableProfiling: false,
-          metricsInterval: 60000,
-        },
-      };
-      const result = AdvancedPluginLifecycleConfigSchema.parse(config);
-      expect(result.health?.interval).toBe(60000);
-      expect(result.hotReload?.enabled).toBe(true);
-      expect(result.resources?.maxMemory).toBe(536870912);
-      expect(result.observability?.enableMetrics).toBe(true);
-    });
-  });
-
-  describe('Integration scenarios', () => {
-    it('should support plugin with health monitoring and hot reload', () => {
-      const config = AdvancedPluginLifecycleConfigSchema.parse({
-        health: {
-          interval: 30000,
-          autoRestart: true,
-          maxRestartAttempts: 3,
-        },
-        hotReload: {
-          enabled: true,
-          preserveState: true,
-          stateStrategy: 'memory' as const,
-        },
-      });
-      expect(config.health?.autoRestart).toBe(true);
-      expect(config.hotReload?.enabled).toBe(true);
-    });
-
-    it('should support plugin with graceful degradation', () => {
-      const config = AdvancedPluginLifecycleConfigSchema.parse({
-        degradation: {
-          enabled: true,
-          fallbackMode: 'readonly' as const,
-          criticalDependencies: ['database'],
-          optionalDependencies: ['cache', 'analytics'],
-          autoRecovery: {
-            enabled: true,
-            retryInterval: 60000,
-            maxAttempts: 5,
-          },
-        },
-      });
-      expect(config.degradation?.fallbackMode).toBe('readonly');
-      expect(config.degradation?.criticalDependencies).toHaveLength(1);
-    });
-  });
 });

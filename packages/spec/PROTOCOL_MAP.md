@@ -189,6 +189,6 @@ This document serves as the **Grand Map** of the ObjectStack specification. It l
 | [`plugin-structure.zod.ts`](src/kernel/plugin-structure.zod.ts) | | **Structure**. Zod rules for folder layout and file naming. |
 | [`plugin-capability.zod.ts`](src/kernel/plugin-capability.zod.ts) | | **Capabilities**. What a plugin can do. |
 | [`plugin-lifecycle-events.ts`](src/contracts/plugin-lifecycle-events.ts) | | **Lifecycle Events**. Registry of every kernel-bus event that actually fires, with payload tuples; feeds `hook`/`trigger` autocomplete. |
-| [`plugin-lifecycle-advanced.zod.ts`](src/kernel/plugin-lifecycle-advanced.zod.ts) | | **Advanced Lifecycle**. Health monitoring, hot reload state management, graceful degradation, and update strategies. |
+| [`plugin-lifecycle-advanced.zod.ts`](src/kernel/plugin-lifecycle-advanced.zod.ts) | | **Advanced Lifecycle**. Input vocabularies of the host-driven `@objectstack/core` lifecycle classes: health monitoring (`PluginHealthMonitor`) and hot-reload state management (`HotReloadManager`). The authorable config container and the graceful-degradation / update-strategy vocabularies were retired in #11825 (ADR-0049 — zero readers). |
 | [`plugin-security-advanced.zod.ts`](src/kernel/plugin-security-advanced.zod.ts) | | **Advanced Security**. Permission system, sandbox configuration (V8/WASM/container/process), security scanning, and trust levels. |
 | [`startup-orchestrator.zod.ts`](src/kernel/startup-orchestrator.zod.ts) | | **Startup**. Boot sequence orchestration. |

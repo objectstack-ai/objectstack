@@ -5,16 +5,18 @@ description: Plugin Lifecycle Advanced protocol schemas
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
 
-# Advanced Plugin Lifecycle Protocol
+# Advanced Plugin Lifecycle — host-driven library vocabularies
 
-Defines advanced lifecycle management capabilities including:
-- Hot reload and live updates
-- Graceful degradation and fallback mechanisms
-- Health monitoring and auto-recovery
-- State preservation during updates
+Declares the INPUT contracts of the host-driven lifecycle classes exported
+by `@objectstack/core` — `PluginHealthMonitor` (reads `PluginHealthCheck`,
+emits `PluginHealthStatus` / `PluginHealthReport`) and `HotReloadManager`
+(reads `HotReloadConfig`, snapshots via `PluginStateSnapshot`). The kernel
+does not construct either class: a HOST composes them and passes these
+shapes directly (`content/docs/protocol/kernel/lifecycle.mdx`, the #11811
+examples, is the supported usage).
 
-This protocol extends the basic plugin lifecycle with enterprise-grade
-features for production environments.
+This module deliberately declares NO authorable configuration surface — see
+the #11825 retirement record below.
 
 <Callout type="info">
 **Source:** `packages/spec/src/kernel/plugin-lifecycle-advanced.zod.ts`
@@ -23,28 +25,12 @@ features for production environments.
 ## TypeScript Usage
 
 ```typescript
-import { AdvancedPluginLifecycleConfigSchema, DistributedStateConfigSchema, GracefulDegradationSchema, HotReloadConfigSchema, PluginHealthCheckSchema, PluginHealthReportSchema, PluginHealthStatusSchema, PluginStateSnapshotSchema, PluginUpdateStrategySchema } from '@objectstack/spec/kernel';
-import type { AdvancedPluginLifecycleConfig, DistributedStateConfig, GracefulDegradation, HotReloadConfig, PluginHealthCheck, PluginHealthReport, PluginHealthStatus, PluginStateSnapshot, PluginUpdateStrategy } from '@objectstack/spec/kernel';
+import { DistributedStateConfigSchema, HotReloadConfigSchema, PluginHealthCheckSchema, PluginHealthReportSchema, PluginHealthStatusSchema, PluginStateSnapshotSchema } from '@objectstack/spec/kernel';
+import type { DistributedStateConfig, HotReloadConfig, PluginHealthCheck, PluginHealthReport, PluginHealthStatus, PluginStateSnapshot } from '@objectstack/spec/kernel';
 
 // Validate data
-const result = AdvancedPluginLifecycleConfigSchema.parse(data);
+const result = DistributedStateConfigSchema.parse(data);
 ```
-
----
-
-## AdvancedPluginLifecycleConfig
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **health** | `{ interval: integer; timeout: integer; failureThreshold: integer; successThreshold: integer; … }` | optional |  |
-| **hotReload** | `{ enabled: boolean; watchPatterns?: string[]; debounceDelay: integer; preserveState: boolean; … }` | optional |  |
-| **degradation** | `{ enabled: boolean; fallbackMode: Enum<'minimal' \| 'cached' \| 'readonly' \| 'offline' \| 'disabled'>; criticalDependencies?: string[]; optionalDependencies?: string[]; … }` | optional |  |
-| **updates** | `{ mode: Enum<'manual' \| 'automatic' \| 'scheduled' \| 'rolling'>; autoUpdateConstraints?: object; schedule?: object; rollback?: object; … }` | optional |  |
-| **resources** | `{ maxMemory?: integer; maxCpu?: number; maxConnections?: integer; timeout?: integer }` | optional |  |
-| **observability** | `{ enableMetrics: boolean; enableTracing: boolean; enableProfiling: boolean; metricsInterval: integer }` | optional |  |
-
 
 ---
 
@@ -61,22 +47,6 @@ const result = AdvancedPluginLifecycleConfigSchema.parse(data);
 | **auth** | `{ username?: string; password?: string; token?: string; certificate?: string }` | optional |  |
 | **replication** | `{ enabled: boolean; minReplicas: integer }` | optional |  |
 | **customConfig** | `Record<string, any>` | optional | Provider-specific configuration |
-
-
----
-
-## GracefulDegradation
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **enabled** | `boolean` | optional (default: `true`) |  |
-| **fallbackMode** | `Enum<'minimal' \| 'cached' \| 'readonly' \| 'offline' \| 'disabled'>` | optional (default: `"minimal"`) |  |
-| **criticalDependencies** | `string[]` | optional | Plugin IDs that are required for operation |
-| **optionalDependencies** | `string[]` | optional | Plugin IDs that are nice to have but not required |
-| **degradedFeatures** | `{ feature: string; enabled: boolean; reason?: string }[]` | optional |  |
-| **autoRecovery** | `{ enabled: boolean; retryInterval: integer; maxAttempts: integer }` | optional |  |
 
 
 ---
@@ -161,21 +131,6 @@ Current health status of the plugin
 | **timestamp** | `string` | ✅ |  |
 | **state** | `Record<string, any>` | ✅ |  |
 | **metadata** | `{ checksum?: string; compressed: boolean; encryption?: string }` | optional |  |
-
-
----
-
-## PluginUpdateStrategy
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **mode** | `Enum<'manual' \| 'automatic' \| 'scheduled' \| 'rolling'>` | optional (default: `"manual"`) |  |
-| **autoUpdateConstraints** | `{ major: boolean; minor: boolean; patch: boolean }` | optional |  |
-| **schedule** | `{ cron?: string; timezone: string; maintenanceWindow: integer }` | optional |  |
-| **rollback** | `{ enabled: boolean; automatic: boolean; keepVersions: integer; timeout: integer }` | optional |  |
-| **validation** | `{ checkCompatibility: boolean; runTests: boolean; testSuite?: string }` | optional |  |
 
 
 ---

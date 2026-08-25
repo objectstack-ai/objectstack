@@ -3,16 +3,18 @@
 import { z } from 'zod';
 
 /**
- * # Advanced Plugin Lifecycle Protocol
- * 
- * Defines advanced lifecycle management capabilities including:
- * - Hot reload and live updates
- * - Graceful degradation and fallback mechanisms
- * - Health monitoring and auto-recovery
- * - State preservation during updates
- * 
- * This protocol extends the basic plugin lifecycle with enterprise-grade
- * features for production environments.
+ * # Advanced Plugin Lifecycle — host-driven library vocabularies
+ *
+ * Declares the INPUT contracts of the host-driven lifecycle classes exported
+ * by `@objectstack/core` — `PluginHealthMonitor` (reads `PluginHealthCheck`,
+ * emits `PluginHealthStatus` / `PluginHealthReport`) and `HotReloadManager`
+ * (reads `HotReloadConfig`, snapshots via `PluginStateSnapshot`). The kernel
+ * does not construct either class: a HOST composes them and passes these
+ * shapes directly (`content/docs/protocol/kernel/lifecycle.mdx`, the #11811
+ * examples, is the supported usage).
+ *
+ * This module deliberately declares NO authorable configuration surface — see
+ * the #11825 retirement record below.
  */
 
 /**
@@ -248,146 +250,59 @@ export const HotReloadConfigSchema = lazySchema(() => z.object({
     .describe('Hook names to call after reload'),
 }));
 
-/**
- * Graceful Degradation Configuration
- * Defines how plugin degrades when dependencies fail
- */
-export const GracefulDegradationSchema = lazySchema(() => z.object({
-  /**
-   * Enable graceful degradation
-   */
-  enabled: z.boolean().default(true),
-  
-  /**
-   * Fallback mode when dependencies fail
-   */
-  fallbackMode: z.enum([
-    'minimal',      // Provide minimal functionality
-    'cached',       // Use cached data
-    'readonly',     // Allow read-only operations
-    'offline',      // Offline mode with local data
-    'disabled',     // Disable plugin functionality
-  ]).default('minimal'),
-  
-  /**
-   * Critical dependencies that must be available
-   */
-  criticalDependencies: z.array(z.string()).optional()
-    .describe('Plugin IDs that are required for operation'),
-  
-  /**
-   * Optional dependencies that can fail
-   */
-  optionalDependencies: z.array(z.string()).optional()
-    .describe('Plugin IDs that are nice to have but not required'),
-  
-  /**
-   * Feature flags for degraded mode
-   */
-  degradedFeatures: z.array(z.object({
-    feature: z.string().describe('Feature name'),
-    enabled: z.boolean().describe('Whether feature is available in degraded mode'),
-    reason: z.string().optional(),
-  })).optional(),
-  
-  /**
-   * Automatic recovery attempts
-   */
-  autoRecovery: z.object({
-    enabled: z.boolean().default(true),
-    retryInterval: z.number().int().min(1000).default(60000)
-      .describe('Interval between recovery attempts (ms)'),
-    maxAttempts: z.number().int().min(0).default(5)
-      .describe('Maximum recovery attempts before giving up'),
-  }).optional(),
-}));
-
-/**
- * Plugin Update Strategy
- * Defines how plugin handles version updates
- */
-export const PluginUpdateStrategySchema = lazySchema(() => z.object({
-  /**
-   * Update mode
-   */
-  mode: z.enum([
-    'manual',       // Manual updates only
-    'automatic',    // Automatic updates
-    'scheduled',    // Scheduled update windows
-    'rolling',      // Rolling updates with zero downtime
-  ]).default('manual'),
-  
-  /**
-   * Version constraints for automatic updates
-   */
-  autoUpdateConstraints: z.object({
-    major: z.boolean().default(false).describe('Allow major version updates'),
-    minor: z.boolean().default(true).describe('Allow minor version updates'),
-    patch: z.boolean().default(true).describe('Allow patch version updates'),
-  }).optional(),
-  
-  /**
-   * Update schedule (for scheduled mode)
-   */
-  schedule: z.object({
-    /**
-     * Cron expression for update window
-     */
-    cron: z.string().optional(),
-    
-    /**
-     * Timezone for schedule
-     */
-    timezone: z.string().default('UTC'),
-    
-    /**
-     * Maintenance window duration in minutes
-     */
-    maintenanceWindow: z.number().int().min(1).default(60),
-  }).optional(),
-  
-  /**
-   * Rollback configuration
-   */
-  rollback: z.object({
-    enabled: z.boolean().default(true),
-    
-    /**
-     * Automatic rollback on failure
-     */
-    automatic: z.boolean().default(true),
-    
-    /**
-     * Keep N previous versions for rollback
-     */
-    keepVersions: z.number().int().min(1).default(3),
-    
-    /**
-     * Rollback timeout in milliseconds
-     */
-    timeout: z.number().int().min(1000).default(30000),
-  }).optional(),
-  
-  /**
-   * Pre-update validation
-   */
-  validation: z.object({
-    /**
-     * Run compatibility checks before update
-     */
-    checkCompatibility: z.boolean().default(true),
-    
-    /**
-     * Run tests before applying update
-     */
-    runTests: z.boolean().default(false),
-    
-    /**
-     * Test suite to run
-     */
-    testSuite: z.string().optional(),
-  }).optional(),
-}));
+// ─── [#11825] The authorable lifecycle-config surface is RETIRED ────────────
+//
+// ADR-0049 enforce-or-remove; maintainer ruling 2026-08-25 (route 2). This
+// module used to end in `AdvancedPluginLifecycleConfigSchema` — an aggregating
+// `{ health, hotReload, degradation, updates, resources, observability }`
+// config container — plus the `GracefulDegradationSchema` and
+// `PluginUpdateStrategySchema` value schemas two of its keys carried. All
+// three defs are REMOVED.
+//
+// Why: none of it had a runtime reader, re-measured per group at the
+// retirement's base commit with positive controls. The kernel never parses,
+// stores or forwards the container; no manifest, stack collection or
+// metadata-type binding ever embedded it (so no authored document could carry
+// it); and a scan of objectstack + objectui put every reference inside
+// `packages/spec` itself — the declaration, its own unit test and the
+// generated artifacts. Group by group:
+//
+// - `health` — `PluginHealthMonitor` reads `PluginHealthCheck` (control:
+//   `checkMethod`, `core/src/health-monitor.ts`), but no runtime constructs
+//   the monitor; only its unit test and `core/examples/phase2-integration.ts`
+//   do, and both pass the config DIRECTLY to the class, never through this
+//   container.
+// - `hotReload` — same shape: `HotReloadManager` reads `HotReloadConfig`
+//   (control: `debounceDelay` / `stateStrategy`, `core/src/hot-reload.ts`),
+//   and nothing composes the manager at runtime either.
+// - `degradation` / `updates` — zero readers of any key, anywhere: no
+//   implementation body even exists for `fallbackMode`, `criticalDependencies`,
+//   `autoUpdateConstraints`, `rollback` et al. An author declaring a rollback
+//   policy or a degraded-mode contract got a clean parse and NOTHING — the
+//   #3950 shape (an exported schema with no consumer reads as a capability),
+//   sharpened by the vocabulary promising production-safety behaviour.
+// - `resources` / `observability` — inline sub-objects of the container with
+//   zero readers (`maxMemory` / `maxCpu` here were never the
+//   plugin-security-advanced `resourceLimits` that `sandbox-runtime.ts` DOES
+//   read); they leave with it.
+//
+// What SURVIVES, deliberately: the input vocabularies of the host-driven
+// library classes the ruling keeps — `PluginHealthStatus` / `PluginHealthCheck`
+// / `PluginHealthReport`, `HotReloadConfig` (with its embedded
+// `DistributedStateConfig`) and `PluginStateSnapshot`. They are library
+// parameter types, not an authorable config surface: a host constructs the
+// classes and passes these shapes in TypeScript, which is exactly what the
+// #4914 ruling kept `HotReloadConfigSchema` for.
+//
+// Route 3 (no tombstone, no conversion): with no carrier key and no authored
+// document there is nothing to tombstone and no seam for a D2 conversion —
+// `RETIRED_DEFS_BY_MAJOR[18]` (`kernel/AdvancedPluginLifecycleConfig`,
+// `kernel/GracefulDegradation`, `kernel/PluginUpdateStrategy`) plus the D3
+// semantic entry `advanced-plugin-lifecycle-config-retired` ARE the
+// declaration. Degradation / update-strategy vocabularies return only via the
+// ENFORCE route of ADR-0049 through a new ADR: the implementation first, then
+// a declaration of exactly what it honours.
+// ────────────────────────────────────────────────────────────────────────────
 
 /**
  * Plugin State Snapshot
@@ -424,53 +339,6 @@ export const PluginStateSnapshotSchema = lazySchema(() => z.object({
   }).optional(),
 }));
 
-/**
- * Advanced Plugin Lifecycle Configuration
- * Complete configuration for advanced lifecycle management
- */
-export const AdvancedPluginLifecycleConfigSchema = lazySchema(() => z.object({
-  /**
-   * Health monitoring configuration
-   */
-  health: PluginHealthCheckSchema.optional(),
-  
-  /**
-   * Hot reload configuration
-   */
-  hotReload: HotReloadConfigSchema.optional(),
-  
-  /**
-   * Graceful degradation configuration
-   */
-  degradation: GracefulDegradationSchema.optional(),
-  
-  /**
-   * Update strategy
-   */
-  updates: PluginUpdateStrategySchema.optional(),
-  
-  /**
-   * Resource limits
-   */
-  resources: z.object({
-    maxMemory: z.number().int().optional().describe('Maximum memory in bytes'),
-    maxCpu: z.number().min(0).max(100).optional().describe('Maximum CPU percentage'),
-    maxConnections: z.number().int().optional().describe('Maximum concurrent connections'),
-    timeout: z.number().int().optional().describe('Operation timeout in milliseconds'),
-  }).optional(),
-  
-  /**
-   * Monitoring and observability
-   */
-  observability: z.object({
-    enableMetrics: z.boolean().default(true),
-    enableTracing: z.boolean().default(true),
-    enableProfiling: z.boolean().default(false),
-    metricsInterval: z.number().int().min(1000).default(60000)
-      .describe('Metrics collection interval in ms'),
-  }).optional(),
-}));
-
 // Export types
 export type PluginHealthStatus = z.input<typeof PluginHealthStatusSchema>;
 export type PluginHealthCheck = z.input<typeof PluginHealthCheckSchema>;
@@ -483,15 +351,6 @@ export type DistributedStateConfigParsed = z.infer<typeof DistributedStateConfig
 export type HotReloadConfig = z.input<typeof HotReloadConfigSchema>;
 /** Post-parse shape of {@link HotReloadConfig} — defaults applied, transforms run (ADR-0122). */
 export type HotReloadConfigParsed = z.infer<typeof HotReloadConfigSchema>;
-export type GracefulDegradation = z.input<typeof GracefulDegradationSchema>;
-/** Post-parse shape of {@link GracefulDegradation} — defaults applied, transforms run (ADR-0122). */
-export type GracefulDegradationParsed = z.infer<typeof GracefulDegradationSchema>;
-export type PluginUpdateStrategy = z.input<typeof PluginUpdateStrategySchema>;
-/** Post-parse shape of {@link PluginUpdateStrategy} — defaults applied, transforms run (ADR-0122). */
-export type PluginUpdateStrategyParsed = z.infer<typeof PluginUpdateStrategySchema>;
 export type PluginStateSnapshot = z.input<typeof PluginStateSnapshotSchema>;
 /** Post-parse shape of {@link PluginStateSnapshot} — defaults applied, transforms run (ADR-0122). */
 export type PluginStateSnapshotParsed = z.infer<typeof PluginStateSnapshotSchema>;
-export type AdvancedPluginLifecycleConfig = z.input<typeof AdvancedPluginLifecycleConfigSchema>;
-/** Post-parse shape of {@link AdvancedPluginLifecycleConfig} — defaults applied, transforms run (ADR-0122). */
-export type AdvancedPluginLifecycleConfigParsed = z.infer<typeof AdvancedPluginLifecycleConfigSchema>;

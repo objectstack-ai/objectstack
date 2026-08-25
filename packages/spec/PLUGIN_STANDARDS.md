@@ -133,19 +133,23 @@ validation, auto-rollback, connection draining and `maxConcurrentReloads` — an
 none of it was read by anything.
 
 **The surviving vocabulary** is `plugin-lifecycle-advanced.zod.ts` →
-`HotReloadConfigSchema`, carried on `AdvancedPluginLifecycleConfig.hotReload`.
-That is the one with an implementation body behind it: `HotReloadManager` in
-`packages/core/src/hot-reload.ts` reads it.
+`HotReloadConfigSchema`. That is the one with an implementation body behind it:
+`HotReloadManager` in `packages/core/src/hot-reload.ts` reads it — a HOST
+constructs the manager and passes the config directly.
+
+(The `AdvancedPluginLifecycleConfig` container that used to carry it on its
+`hotReload` key was itself retired in #11825, ADR-0049 route 2 — the container
+had zero runtime readers and nothing ever embedded it, so the schema survives
+as the class's standalone input type, not as an authorable config surface.)
 
 ⚠️ **Status, stated honestly: a foundation, not a shipped capability.**
 `HotReloadManager` exists and is unit-tested, but **no runtime composes one** —
 the only constructions are its own test and
-`packages/core/examples/phase2-integration.ts`. So configuring
-`AdvancedPluginLifecycleConfig.hotReload` today does not give a running system
-hot reload either. It is kept, unenforced, as the starting point if hot reload is
-ever built for real; making it enforced is a separate decision (ADR-0049's
-enforce leg) and deliberately **not** part of the #4914 retirement. Treat this
-section as "one honest pointer", not as a feature you can turn on.
+`packages/core/examples/phase2-integration.ts`. It is kept, unenforced, as the
+starting point if hot reload is ever built for real; making it enforced is a
+separate decision (ADR-0049's enforce leg) and deliberately **not** part of
+the #4914 or #11825 retirements. Treat this section as "one honest pointer",
+not as a feature you can turn on.
 
 ### 5.2 Plugin Isolation — ~~`plugin-loading.zod.ts` → `PluginSandboxingSchema`~~ REMOVED in v17
 
@@ -204,7 +208,7 @@ through a new ADR — loader first, vocabulary second.
 | Service Registry | ✅ | `service-registry.zod.ts` — 17 services across 13 plugins via `ctx.registerService()` |
 | Event Bus | ✅ | `events.zod.ts` — Pub/sub with pattern matching |
 | Dependency Resolution | ✅ | `manifest.zod.ts` (`dependencies`) + `packages/core/src/plugin-order.ts` — `resolvePluginOrder` topologically orders plugins from each composed plugin's `dependencies` / `optionalDependencies`, erroring on a cycle or a missing hard dependency. (The `PluginDependencyResolution` *config* schema this row used to cite was inert and went with the `loading` block in #4914 — the capability is real, the configuration surface was not) |
-| Health Checks | ✅ | `plugin-lifecycle-advanced.zod.ts` — Per-plugin health + system aggregation |
+| Health Checks | ✅ | `plugin.zod.ts` `healthCheck()` + kernel `checkPluginHealth()` (kernel-wired); `plugin-lifecycle-advanced.zod.ts` carries the vocabularies of the host-driven `PluginHealthMonitor` library (`@objectstack/core`), which no runtime composes — a host constructs it and passes `PluginHealthCheck` directly. (The `AdvancedPluginLifecycleConfig` container this row used to imply was retired in #11825 — zero readers) |
 | Hot Reload | ⚠️ | **Foundation only, not enforced.** `plugin-lifecycle-advanced.zod.ts` → `HotReloadConfigSchema` is the surviving vocabulary and `HotReloadManager` (`packages/core/src/hot-reload.ts`) reads it — but no runtime composes one, so configuring it changes nothing today. The rival `PluginHotReloadSchema` was removed in v17 (#4914, ADR-0049): it had no reader at all. See §5.1 |
 | Plugin Isolation | ❌ | **Not built.** The `PluginSandboxingSchema` vocabulary that declared it (scope, `process`/`vm`/`iframe`/`web-worker` isolation, IPC, `allowedServices` ACL) was removed in v17 (#4914, ADR-0049) — it had no runtime reader, so it isolated nothing while appearing to. Trust tiers (`manifest.runtime`) and permission declarations are the real surfaces. See §5.2 |
 | Dynamic Loading | ❌ | **Not built.** The `plugin-runtime.zod.ts` vocabulary that declared it was removed in v17 (#4834, ADR-0049) — it had no runtime reader in any repo. Plugins are composed at boot; the set is fixed until restart |
