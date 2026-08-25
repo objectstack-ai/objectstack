@@ -122,7 +122,11 @@ export const objectForm = defineForm({
             { field: 'placeholder', type: 'text', helpText: 'Hint text shown inside the empty input; disappears once a value is entered' },
 
             // Text constraints
-            { field: 'maxLength', type: 'number', helpText: 'Max characters', visibleWhen: "data.type in ['text','textarea','email','url','phone','password','markdown','html','richtext']" },
+            // #11566 — aligned to the ten bounded-string types the schema
+            // accepts `maxLength` on (BOUNDED_STRING_FIELD_TYPES — the
+            // write-time validator's list; maintainer ruling 2026-08-24).
+            // `code` was the one this list was missing.
+            { field: 'maxLength', type: 'number', helpText: 'Max characters', visibleWhen: "data.type in ['text','textarea','email','url','phone','password','markdown','html','richtext','code']" },
             { field: 'minLength', type: 'number', helpText: 'Min characters', visibleWhen: "data.type in ['text','textarea','email','url','phone','password','markdown','html','richtext']" },
 
             // Numeric constraints

@@ -865,3 +865,203 @@ describe('pointer-pair adoption per object (#11386)', () => {
     expect(store.sys_automation_run[0].trigger_record_id).toBe('Lisa Thompson');
   });
 });
+
+/**
+ * The load-time EARLY SIGNAL for a deferral on a `required` column — #11674's
+ * B half, ruled by triage on 2026-08-24 as "warn (loud) by default", scoped to
+ * the required subset, and ⛔ NOT allowed to change the accept set.
+ *
+ * The failure it announces was already loud: PR #11830 measured against the
+ * REAL engine (`packages/objectql/src/engine-seed-required-deferral.test.ts`)
+ * that pass 1 defers by DELETING the column, so a `required: true` id half is
+ * rejected at insert and pass-2 write-back can never reach the row. What this
+ * signal changes is WHEN the author learns — the loader now says it before the
+ * write that provokes the rejection, instead of leaving the author to read a
+ * driver-level error after the fact.
+ *
+ * Two failure modes are pinned against, because both look green:
+ *  - a signal that NEVER fires  → the FIRES cases below;
+ *  - a signal that fires on EVERYTHING → the DOES-NOT-FIRE cases, which are
+ *    the ones that give it meaning: an optional id half (`sys_audit_log`,
+ *    genuinely order-independent since #11830), a pointer that resolves in
+ *    pass 1, and the UPDATE arm, where the deleted column is an omitted field
+ *    the write contract never checks.
+ *
+ * The message wording is pinned in ONE case only; the rest match on the
+ * signal's identifying parts (`required`, the field, the target object) so a
+ * reworded line does not fail six tests for one change.
+ */
+describe('required-deferral early signal (#11674)', () => {
+  /** The load-time signal, isolated from every other line the loader logs. */
+  function requiredDeferralWarnings(logger: ReturnType<typeof createLogger>): string[] {
+    return logger.warn.mock.calls
+      .map((call) => String(call[0]))
+      .filter((message) => /is `required: true`, but record #/.test(message));
+  }
+
+  /**
+   * Non-vacuity probe: how many pass-2 back-fill writes landed for `field`.
+   *
+   * ⛔ NOT `referencesDeferred` — a successful back-fill GIVES THAT COUNTER
+   * BACK (the loader decrements it when pass 2 heals the row), so a healed
+   * deferral reads as zero and a case asserting `> 0` on it would be asserting
+   * that healing FAILED. The pass-2 write itself is the durable evidence that
+   * the deferral was taken: pass 1 deleted the column, so only pass 2 can put
+   * it back, and its payload is the only `update` carrying that field.
+   */
+  function passTwoBackfills(engine: ReturnType<typeof newService>['engine'], object: string, field: string): number {
+    // Same `as any` reach into the mock the rest of this file uses — the
+    // engine is typed as `IDataEngine`, whose `update` carries no mock.
+    return (engine.update as any).mock.calls.filter(
+      (call: any[]) => call[0] === object && Object.prototype.hasOwnProperty.call(call[1] ?? {}, field),
+    ).length;
+  }
+
+  it('FIRES when a keyless required id half defers — before the row is written, naming the fix', async () => {
+    const { service, logger, engine, store } = newService(ADOPTER_SCHEMAS);
+
+    const result = await service.load({
+      seeds: [
+        // Approval request BEFORE its target: `record_id` cannot resolve in
+        // pass 1, so the loader defers it by deleting the required column.
+        insertSeed('sys_approval_request', [
+          { process_name: 'flow:discount', object_name: 'crm_lead', record_id: 'Lisa Thompson', status: 'pending' },
+        ]),
+        LEAD_SEED,
+      ] as any,
+      config: CONFIG,
+    });
+
+    // The scenario really deferred — without this the assertion below could
+    // pass against a load that never took the deferral branch at all.
+    const approvalResult = result.results.find((r) => r.object === 'sys_approval_request')!;
+    expect(passTwoBackfills(engine, 'sys_approval_request', 'record_id'), 'no deferral was taken — the signal case is vacuous').toBe(1);
+
+    const warnings = requiredDeferralWarnings(logger);
+    expect(warnings).toHaveLength(1);
+    // The line owes the author three things: WHICH declaration makes this
+    // order-dependent, WHAT the deferral did to the row, and the fix.
+    expect(warnings[0]).toContain('sys_approval_request.record_id is `required: true`');
+    expect(warnings[0]).toContain('REMOVES the column from the pass-1 insert');
+    expect(warnings[0]).toContain('Order the `crm_lead` dataset BEFORE `sys_approval_request`');
+
+    // ⛔ ACCEPT SET UNCHANGED. This engine double does not validate, so the
+    // deferred insert lands and #11830's write-back heals it — exactly as it
+    // did before this signal existed. The warning is a log line and nothing
+    // more: no counter moved, nothing reached `errors`, `success` is untouched.
+    expect(result.success).toBe(true);
+    expect(result.errors).toHaveLength(0);
+    expect(approvalResult.errored).toBe(0);
+    expect(approvalResult.referencesDropped).toBe(0);
+    expect(store.sys_approval_request[0].record_id).toBe(store.crm_lead[0].id);
+  });
+
+  it('DOES NOT FIRE for an OPTIONAL id half deferring the very same way — sys_audit_log stays order-independent', async () => {
+    const { service, logger, store, engine } = newService(ADOPTER_SCHEMAS);
+
+    const result = await service.load({
+      seeds: [
+        insertSeed('sys_audit_log', [
+          { action: 'view', actor: 'admin', object_name: 'crm_lead', record_id: 'Lisa Thompson' },
+        ]),
+        LEAD_SEED,
+      ] as any,
+      config: CONFIG,
+    });
+
+    // Same shape, same order, same deferral — the ONLY difference from the
+    // case above is that this id half is not `required`.
+    expect(passTwoBackfills(engine, 'sys_audit_log', 'record_id'), 'no deferral was taken — the control is vacuous').toBe(1);
+    expect(requiredDeferralWarnings(logger)).toHaveLength(0);
+
+    // …and it heals, which is why warning here would be a false alarm.
+    expect(result.success).toBe(true);
+    const leadId = store.crm_lead.find((r) => r.name === 'Lisa Thompson')!.id;
+    expect(store.sys_audit_log[0].record_id).toBe(leadId);
+  });
+
+  it('DOES NOT FIRE when the target is seeded first — the constraint is the deferral, not the declaration', async () => {
+    const { service, logger } = newService(ADOPTER_SCHEMAS);
+
+    const result = await service.load({
+      seeds: [
+        LEAD_SEED,
+        insertSeed('sys_approval_request', [
+          { process_name: 'flow:discount', object_name: 'crm_lead', record_id: 'Lisa Thompson', status: 'pending' },
+        ]),
+      ] as any,
+      config: CONFIG,
+    });
+
+    // Resolved in pass 1: nothing was deferred, so there is nothing to warn
+    // about. A signal keyed on the `required` DECLARATION rather than on the
+    // deferral would fire here — and then fire on every correctly ordered
+    // seed in the repo.
+    const approvalResult = result.results.find((r) => r.object === 'sys_approval_request')!;
+    expect(approvalResult.referencesDeferred).toBe(0);
+    expect(approvalResult.referencesResolved).toBeGreaterThan(0);
+    expect(requiredDeferralWarnings(logger)).toHaveLength(0);
+    expect(result.success).toBe(true);
+  });
+
+  it('DOES NOT FIRE on the UPDATE arm: an omitted column is not a cleared one, so the replay succeeds today', async () => {
+    const { service, logger, store, engine } = newService(ADOPTER_SCHEMAS);
+    // A row this dataset will MATCH on replay — the dev-server-restart shape.
+    store.sys_approval_request = [
+      { id: 'ar-existing', process_name: 'flow:discount', object_name: 'crm_lead', record_id: 'lead-from-a-previous-run', status: 'pending' },
+    ];
+
+    const result = await service.load({
+      seeds: [
+        {
+          object: 'sys_approval_request',
+          externalId: 'process_name',
+          mode: 'upsert',
+          env: ['prod', 'dev', 'test'],
+          records: [
+            { process_name: 'flow:discount', object_name: 'crm_lead', record_id: 'Lisa Thompson', status: 'approved' },
+          ],
+        },
+        LEAD_SEED,
+      ] as any,
+      config: CONFIG,
+    });
+
+    // The deferral IS taken (the target is not seeded yet) …
+    const approvalResult = result.results.find((r) => r.object === 'sys_approval_request')!;
+    expect(passTwoBackfills(engine, 'sys_approval_request', 'record_id'), 'no deferral was taken — the control is vacuous').toBe(1);
+    expect(approvalResult.updated).toBe(1);
+    // … but it lands on an UPDATE, where the deleted column is simply omitted
+    // and the write contract never checks it. Warning here would announce a
+    // rejection that does not happen — measured on the REAL engine in
+    // `packages/objectql/src/engine-seed-required-deferral.test.ts`.
+    expect(requiredDeferralWarnings(logger)).toHaveLength(0);
+    expect(result.success).toBe(true);
+    const leadId = store.crm_lead.find((r) => r.name === 'Lisa Thompson')!.id;
+    expect(store.sys_approval_request[0].record_id).toBe(leadId);
+  });
+
+  it('says it ONCE per dataset and field, not once per row', async () => {
+    const { service, logger, engine } = newService(ADOPTER_SCHEMAS);
+
+    const result = await service.load({
+      seeds: [
+        insertSeed('sys_approval_request', [
+          { process_name: 'flow:a', object_name: 'crm_lead', record_id: 'Lisa Thompson', status: 'pending' },
+          { process_name: 'flow:b', object_name: 'crm_lead', record_id: 'Lisa Thompson', status: 'pending' },
+          { process_name: 'flow:c', object_name: 'crm_lead', record_id: 'Lisa Thompson', status: 'pending' },
+        ]),
+        LEAD_SEED,
+      ] as any,
+      config: CONFIG,
+    });
+
+    expect(result.success).toBe(true);
+    expect(passTwoBackfills(engine, 'sys_approval_request', 'record_id')).toBe(3);
+    // Three rows, one ordering mistake, one line. The author's fix is the same
+    // single change for all three — repeating it per row is the noise that
+    // trains readers to skim `warn`.
+    expect(requiredDeferralWarnings(logger)).toHaveLength(1);
+  });
+
+});

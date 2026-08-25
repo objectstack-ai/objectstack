@@ -1,10 +1,10 @@
 # Data Lifecycle & Retention
 
 Guide for declaring how long an object's data lives and how its space is
-reclaimed (ADR-0057). Not to be confused with **lifecycle hooks**
-(`beforeInsert` / `afterUpdate` …) — those run business logic on data
-operations; *this* page is about retention, rotation, and archival of the
-rows themselves.
+reclaimed (ADR-0057 — system data lifecycle & retention). Not to be
+confused with **lifecycle hooks** (`beforeInsert` / `afterUpdate` …) —
+those run business logic on data operations; *this* page is about
+retention, rotation, and archival of the rows themselves.
 
 ## Why This Exists
 

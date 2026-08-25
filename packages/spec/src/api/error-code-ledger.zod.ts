@@ -339,6 +339,7 @@ export const ERROR_CODE_LEDGER = {
     'CREATE_FAILED',
     'DOMAIN_VERIFICATION_DISABLED', // domain verification is off on this deployment
     'DOMAIN_VERIFICATION_FAILED', // pass-through from better-auth
+    'EMAIL_DOMAIN_NOT_ALLOWED',   // [#11739] audience posture email_domain: the address's domain is off the allowlist
     'EMAIL_SERVICE_REQUIRED',
     'ENV_ACCESS_DENIED',
     'INVALID_EMAIL',
@@ -358,6 +359,7 @@ export const ERROR_CODE_LEDGER = {
     'OAUTH_REGISTER_FAILED',       // better-auth rejected the client registration
     'PHONE_NOT_ENABLED',
     'SAML_REGISTER_FAILED',
+    'SELF_REGISTRATION_CLOSED',   // [#11739] audience posture invite_only: self-registration is closed (no pending invitation for this address)
     'SSO_REGISTER_FAILED',
     'SSO_REGISTER_FORBIDDEN',
     'USER_ALREADY_EXISTS',        // pass-through from better-auth

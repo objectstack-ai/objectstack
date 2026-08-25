@@ -302,6 +302,32 @@ export class SeedLoaderService implements ISeedLoaderService {
    * target. Reset per `load`.
    */
   private seedExternalIdByObject = new Map<string, string | string[]>();
+  /**
+   * [#11674] Per seeded object, the fields the WRITE CONTRACT requires a value
+   * for **on insert** — the subset a pass-1 deferral cannot survive.
+   *
+   * Pass 1 defers an unresolvable reference by DELETING the column from the
+   * row (see the deferral branch in {@link loadDataset}). On a `required: true`
+   * column that turns the insert into one ADR-0113 rejects, so the row never
+   * lands and pass 2 has nothing to write back onto — a second, independent
+   * road to the same loud failure that pass-2 write-back cannot clear. This
+   * map is what lets the loader say so BEFORE the engine does, at the moment
+   * the deferral is taken (the early signal, this card's B half).
+   *
+   * The set MIRRORS the write contract's own insert-time predicate rather than
+   * approximating it: `required && !readonly && !system`. A `readonly`/`system`
+   * field is skipped by required-validation on insert, so a deferral on one is
+   * accepted today — signalling there would be a false alarm, and a warning
+   * that fires where nothing fails is how readers are trained to skim `warn`
+   * (AGENTS.md → "Degradation log levels", "Do not over-apply it").
+   *
+   * An instance field for the same reason {@link pointerRefsByObject} is one:
+   * the consumer sits several parameters deep and the map is a per-load
+   * constant. Built in {@link load} step 4.5; reset per `load`. An object whose
+   * definition cannot be resolved gets NO entry — the loader then knows
+   * nothing about `required` there and stays silent rather than guessing.
+   */
+  private requiredOnInsertByObject = new Map<string, Set<string>>();
 
   constructor(engine: IDataEngine, metadata: IMetadataService, logger: Logger) {
     this.engine = engine;
@@ -384,20 +410,40 @@ export class SeedLoaderService implements ISeedLoaderService {
     // is per record anyway. Only `text` fields participate: the spec refuses
     // `referenceVia` on other types at authoring, and metadata at rest that
     // predates that check must not have non-text columns resolved as ids.
+    //
+    // [#11674] The same pass also records which fields the write contract
+    // requires on insert — the subset a deferral cannot survive. One
+    // definition read answers both questions, so the early signal costs no
+    // extra metadata round-trip. See {@link requiredOnInsertByObject}.
     this.pointerRefsByObject.clear();
+    this.requiredOnInsertByObject.clear();
     this.seedExternalIdByObject = externalIdByObject;
+    const definitionScanned = new Set<string>();
     for (const dataset of orderedDatasets) {
-      if (this.pointerRefsByObject.has(dataset.object)) continue;
+      if (definitionScanned.has(dataset.object)) continue;
+      definitionScanned.add(dataset.object);
       const objDef = await this.resolveObjectDefinition(dataset.object);
-      const fields = objDef?.fields as Record<string, { type?: string; referenceVia?: unknown }> | undefined;
+      const fields = objDef?.fields as
+        | Record<string, { type?: string; referenceVia?: unknown; required?: unknown; readonly?: unknown; system?: unknown }>
+        | undefined;
       if (!fields) continue;
       const pairs: Array<{ field: string; objectField: string }> = [];
+      const requiredOnInsert = new Set<string>();
       for (const [fieldName, fieldDef] of Object.entries(fields)) {
         if (fieldDef?.type === 'text' && typeof fieldDef.referenceVia === 'string' && fieldDef.referenceVia.length > 0) {
           pairs.push({ field: fieldName, objectField: fieldDef.referenceVia });
         }
+        // Mirror of the write contract's insert-time predicate, not an
+        // approximation of it — see `requiredOnInsertByObject`.
+        if (fieldDef?.required === true && fieldDef.readonly !== true && fieldDef.system !== true) {
+          requiredOnInsert.add(fieldName);
+        }
       }
       if (pairs.length > 0) this.pointerRefsByObject.set(dataset.object, pairs);
+      // Set unconditionally (even empty): "this object declares no required
+      // field" and "this object's definition never resolved" are different
+      // facts, and only the second may make the loader stay silent.
+      this.requiredOnInsertByObject.set(dataset.object, requiredOnInsert);
     }
 
     // 5. Pass 1: Insert/upsert records, resolving references
@@ -559,6 +605,21 @@ export class SeedLoaderService implements ISeedLoaderService {
      */
     const summariesStaleAtStart = this.summariesStale;
     const errors: ReferenceResolutionError[] = [];
+    /**
+     * [#11674] The early signal's state, for this dataset only.
+     *
+     * `requiredOnInsert` is what the write contract requires a value for on
+     * insert (see {@link SeedLoaderService.requiredOnInsertByObject}); an
+     * object whose definition never resolved has NO entry, and an absent entry
+     * means "unknown", which stays silent. `earlySignalledFields` keeps the
+     * warning to ONE line per dataset+field: a 500-row dataset deferring the
+     * same column defers it for the same reason 500 times, and the author's
+     * fix is the same single ordering change — repeating it per row is the
+     * noise AGENTS.md → "Degradation log levels" says to say once, at the
+     * first degradation.
+     */
+    const requiredOnInsert = this.requiredOnInsertByObject.get(objectName);
+    const earlySignalledFields = new Set<string>();
 
     // Ensure the object's record map exists
     if (!insertedRecords.has(objectName)) {
@@ -789,6 +850,14 @@ export class SeedLoaderService implements ISeedLoaderService {
         continue;
       }
       const record = { ...(seedResult.value as Record<string, unknown>) };
+      /**
+       * [#11674] Deferrals this row took on a column the write contract
+       * requires on insert. Collected during resolution, reported once the
+       * write ACTION for this row is known (below) — the deferral itself is
+       * harmless on an update, where the deleted column is simply an omitted
+       * field the contract never checks.
+       */
+      const requiredDeferrals: Array<{ field: string; targetObject: string; attemptedValue: unknown }> = [];
 
       // Per-tenant tagging: stamp every seeded row with the target org — the
       // caller's explicit `config.organizationId`, or (when none was pinned) the
@@ -1056,6 +1125,16 @@ export class SeedLoaderService implements ISeedLoaderService {
               recordIndex: i,
             });
             referencesDeferred++;
+            // [#11674] Deferring DELETED a column the write contract requires
+            // on insert. Note it now; the signal is emitted once this row's
+            // write action is known — see `signalRequiredDeferrals` below.
+            if (requiredOnInsert?.has(ref.field)) {
+              requiredDeferrals.push({
+                field: ref.field,
+                targetObject: ref.targetObject,
+                attemptedValue: unresolvedItem,
+              });
+            }
           } else {
             // Cannot resolve and no pass 2 will run — skip the whole record.
             // Writing it anyway would either carry the raw natural-key string
@@ -1109,6 +1188,49 @@ export class SeedLoaderService implements ISeedLoaderService {
       if (unresolvedRefError && !config.dryRun) {
         errored++;
         continue;
+      }
+
+      // [#11674] EARLY SIGNAL — emitted here, before this row reaches the
+      // engine, for the deferrals it took on columns the write contract
+      // requires on INSERT.
+      //
+      // Why the row's write ACTION gates it: `decideWriteAction` mirrors
+      // `writeRecord`'s mode/existing logic exactly and is side-effect free,
+      // so it answers "is this an insert?" without writing. On an UPDATE the
+      // deferral's deleted column is an omitted field, which required-
+      // validation never checks (ADR-0113: "a PATCH may not null OUT a
+      // required field", but an omission is not a clear-out) — so an upsert
+      // replay over an existing row succeeds today and must not be warned
+      // about. On a SKIP nothing is written at all.
+      //
+      // ⛔ This changes NO accept behaviour: nothing is counted, nothing
+      // reaches `errors`, `success` is untouched. The load proceeds exactly as
+      // before and the existing loud failure (the engine's write error naming
+      // the column, plus pass 2's dropped-deferral error) is preserved
+      // verbatim — this line only moves WHEN the author learns, from after the
+      // engine's rejection to before the write that provokes it.
+      if (!config.dryRun && requiredDeferrals.length > 0) {
+        if (this.decideWriteAction(record, mode, externalId, existingRecords).action === 'insert') {
+          for (const deferral of requiredDeferrals) {
+            if (earlySignalledFields.has(deferral.field)) continue;
+            earlySignalledFields.add(deferral.field);
+            this.logger.warn(
+              `[SeedLoader] ${objectName}.${deferral.field} is \`required: true\`, but record #${i} defers it to ` +
+                `pass 2: '${String(deferral.attemptedValue)}' names no ${deferral.targetObject} that exists yet. ` +
+                `Deferring REMOVES the column from the pass-1 insert, so an engine that enforces \`required\` ` +
+                `rejects this row and pass 2 has no row left to back-fill — a failure that is reported loudly ` +
+                `either way, just later. Order the \`${deferral.targetObject}\` dataset BEFORE \`${objectName}\` ` +
+                `so the reference resolves in pass 1 (a \`required\` id half is order-dependent; pass-2 healing ` +
+                `only covers optional ones). Reported once per field per dataset.`,
+              {
+                object: objectName,
+                field: deferral.field,
+                target: deferral.targetObject,
+                recordIndex: i,
+              },
+            );
+          }
+        }
       }
 
       // Insert/upsert the record

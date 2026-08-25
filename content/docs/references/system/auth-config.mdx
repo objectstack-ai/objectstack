@@ -17,8 +17,8 @@ Used in server-side configuration injection.
 ## TypeScript Usage
 
 ```typescript
-import { AdvancedAuthConfigSchema, AuthConfigSchema, AuthPluginConfigSchema, AuthProviderConfigSchema, EmailAndPasswordConfigSchema, EmailVerificationConfigSchema, MutualTLSConfigSchema, OidcProviderConfigSchema, OidcProvidersConfigSchema, SocialProviderConfigSchema } from '@objectstack/spec/system';
-import type { AdvancedAuthConfig, AuthConfig, AuthPluginConfig, AuthProviderConfig, EmailAndPasswordConfig, EmailVerificationConfig, MutualTLSConfig, OidcProviderConfig, OidcProvidersConfig, SocialProviderConfig } from '@objectstack/spec/system';
+import { AdvancedAuthConfigSchema, AudienceConfigSchema, AuthConfigSchema, AuthPluginConfigSchema, AuthProviderConfigSchema, EmailAndPasswordConfigSchema, EmailVerificationConfigSchema, MutualTLSConfigSchema, OidcProviderConfigSchema, OidcProvidersConfigSchema, SocialProviderConfigSchema } from '@objectstack/spec/system';
+import type { AdvancedAuthConfig, AudienceConfig, AuthConfig, AuthPluginConfig, AuthProviderConfig, EmailAndPasswordConfig, EmailVerificationConfig, MutualTLSConfig, OidcProviderConfig, OidcProvidersConfig, SocialProviderConfig } from '@objectstack/spec/system';
 
 // Validate data
 const result = AdvancedAuthConfigSchema.parse(data);
@@ -42,6 +42,19 @@ Advanced / low-level Better-Auth options
 
 ---
 
+## AudienceConfig
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **posture** | `Enum<'invite_only' \| 'email_domain' \| 'open'>` | optional (default: `"invite_only"`) | Who may self-register into this environment: invite_only (default — operator acts only), email_domain (allowlisted email domains), or open (anyone). Any posture other than invite_only forces email verification on. |
+| **allowedEmailDomains** | `string[]` | optional | Email domains admitted to self-register under posture email_domain (exact, case-insensitive match; subdomains need their own entries). Required non-empty for email_domain; refused under other postures. |
+| **selfRegistrationPermissionSet** | `string` | optional | sys_permission_set name granted to each self-registrant. Required when posture is email_domain or open; refused for invite_only. admin_full_access is refused. |
+
+
+---
+
 ## AuthConfig
 
 ### Properties
@@ -60,6 +73,7 @@ Advanced / low-level Better-Auth options
 | **oidcProviders** | `{ providerId: string; name?: string; discoveryUrl?: string; issuer?: string; … }[]` | optional | List of OIDC/OAuth2 providers for enterprise SSO. Product or enterprise packages can pass this directly or contribute it through auth:configure. |
 | **emailAndPassword** | `{ enabled: boolean; disableSignUp?: boolean; requireEmailVerification?: boolean; minPasswordLength?: number; … }` | optional | Email and password authentication options forwarded to better-auth |
 | **emailVerification** | `{ sendOnSignUp?: boolean; sendOnSignIn?: boolean; autoSignInAfterVerification?: boolean; expiresIn?: number }` | optional | Email verification options forwarded to better-auth |
+| **audience** | `{ posture: Enum<'invite_only' \| 'email_domain' \| 'open'>; allowedEmailDomains?: string[]; selfRegistrationPermissionSet?: string }` | optional | Audience posture: who may self-register into this environment (invite_only — the default — \| email_domain \| open). See AudienceConfigSchema. |
 | **advanced** | `{ crossSubDomainCookies?: object; useSecureCookies?: boolean; disableCSRFCheck?: boolean; cookiePrefix?: string }` | optional | Advanced / low-level Better-Auth options |
 | **ssoOnlyMode** | `boolean` | optional | SSO-only login: hide the local password form + self-registration (the break-glass password endpoint stays enabled) |
 | **mutualTls** | `{ enabled: boolean; clientCertRequired: boolean; trustedCAs: string[]; crlUrl?: string; … }` | optional | Mutual TLS (mTLS) configuration |

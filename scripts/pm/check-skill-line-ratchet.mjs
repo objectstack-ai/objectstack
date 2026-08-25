@@ -168,7 +168,13 @@ export const CEILINGS = new Map([
   // state-table rows and the clause-② review-chain bullets sank to the two new
   // references below, and the report-contract JSON is single-sourced from the
   // dev-agent definition. Landed count, headroom 0, same convention.
-  ['.claude/skills/pm-dispatch/SKILL.md', 1008],
+  // Lowered 1008 → 1005 by the run-to-empty triage ruling (maintainer
+  // 2026-08-25): the per-round 3–5-card budget and the `finding` >15
+  // concentrated-round trigger both left the 发现分诊轮 paragraph, and the
+  // ≤5-same-family batch convention that replaces them costs less than they
+  // did. Landed count, headroom 0, same convention (lowering is always
+  // legitimate).
+  ['.claude/skills/pm-dispatch/SKILL.md', 1005],
   // Raised 223 → 244 by the triage reading-cost card (maintainer ruling
   // 2026-08-20, quoted in the raising PR): three mandated conventions land in
   // the runbook's triage sections. Landed count, headroom 0, same convention.

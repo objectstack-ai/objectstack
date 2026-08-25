@@ -28,6 +28,7 @@ import {
   adminMayRevokeUserSessions,
   anySessionCarriesToken,
 } from './admin-revoke-user-session-match-guard';
+import { inviteForAudienceGate } from './audience-gate-test-support';
 
 /**
  * In-memory IDataEngine — the `session-tombstone.test.ts` harness, unchanged,
@@ -142,8 +143,12 @@ const post = (manager: AuthManager, path: string, cookie?: string, body?: unknow
     }),
   );
 
-const signUp = (manager: AuthManager, email: string) =>
-  post(manager, 'sign-up/email', undefined, { email, password: PASSWORD, name: 'AdminRevoke' });
+const signUp = (manager: AuthManager, email: string) => {
+  // [#11739] default posture invite_only: fixture users beyond the first
+  // enter through the invitation carve-out (see audience-gate-test-support).
+  inviteForAudienceGate(manager, email);
+  return post(manager, 'sign-up/email', undefined, { email, password: PASSWORD, name: 'AdminRevoke' });
+};
 
 const signIn = (manager: AuthManager, email: string) =>
   post(manager, 'sign-in/email', undefined, { email, password: PASSWORD });

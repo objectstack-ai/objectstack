@@ -35,6 +35,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/objectql';
 import type { IEmailService, SendEmailResult, SendTemplateInput } from '@objectstack/spec/contracts';
 import { AuthManager } from './auth-manager';
+import { inviteForAudienceGate } from './audience-gate-test-support';
 
 // ───────────────────────────────────────────────────────────────────────────
 // Harness
@@ -174,14 +175,18 @@ function makeManager(engine: MemoryEngine, emailService?: IEmailService): AuthMa
   } as never);
 }
 
-const signUp = (manager: AuthManager, email: string) =>
-  manager.handleRequest(
+const signUp = (manager: AuthManager, email: string) => {
+  // [#11739] default posture invite_only: fixture users beyond the first
+  // enter through the invitation carve-out (see audience-gate-test-support).
+  inviteForAudienceGate(manager, email);
+  return manager.handleRequest(
     new Request(`${AUTH}/sign-up/email`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ email, password: PASSWORD, name: 'Change Email Subject' }),
     }),
   );
+};
 
 const cookieFrom = (response: Response): string =>
   (response.headers.getSetCookie?.() ?? [response.headers.get('set-cookie') ?? ''])

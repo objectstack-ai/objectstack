@@ -299,9 +299,372 @@ jobs:
       - name: Verify Changesets "fixed" group covers every public package
         run: node scripts/check-changeset-fixed.mjs
 
+      # ══════════════════════════════════════════════════════════════════════
+      # POST-VERSION VALIDATION — THE ONLY GATE THE RELEASE COMMIT EVER PASSES
+      # (#11945)
+      # ══════════════════════════════════════════════════════════════════════
+      # The "chore: version packages" PR runs NO CI and cannot be made to.
+      # GitHub does not start workflow runs from events raised by the default
+      # `GITHUB_TOKEN`, and the step below opens and force-pushes that PR with
+      # exactly that token — so it gets no `pull_request` build, and because the
+      # branch is force-pushed there is not even a stable head for a human to
+      # re-run checks against. Two files in this repository already state the
+      # mechanism in their own words rather than inheriting it from a sibling:
+      #
+      #   lint.yml, on check:docs-image-tag — "`changeset version` bumps
+      #   packages/cli on a release PR that (per sync-template-versions.mjs's
+      #   own header) gets NO CI because changesets/action opens it with the
+      #   default GITHUB_TOKEN — so the bump merged green and the gate reddened
+      #   on the NEXT ordinary PR, naming files that author never touched."
+      #
+      #   scripts/sync-protocol-version.mjs — "the lockstep guard
+      #   (protocol-version.test.ts) exists, but release PRs opened by
+      #   changesets/action with the default GITHUB_TOKEN do not trigger CI
+      #   (GitHub's anti-recursion rule), so the guard only fired AFTER the
+      #   merge. Fixing the value at version time is the only spot that cannot
+      #   be skipped."
+      #
+      # That last sentence is the treadmill. Every version-time output has so
+      # far had to buy its own correctness with its own rewriter and its own
+      # self-test — sync-protocol-version.mjs (#2769), sync-template-versions.mjs,
+      # sync-docs-image-tags.mjs (#9064) — because nothing validated the tree as
+      # a whole. Maintainer ruling on the sibling card (objectui#5397,
+      # 2026-08-22, 「接受所有」) chose option A: validate the POST-VERSION tree
+      # HERE, after the version step and before the action opens or updates the
+      # PR. NOT by handing the PR a PAT / GitHub App token (widens the
+      # supply-chain trust surface, adds rotation obligations), and NOT one
+      # artifact at a time — per-artifact guarantees do not generalise, which is
+      # the half this repository has already paid for three times.
+      #
+      # THE SURFACE IS MEASURED HERE, NOT INHERITED (2026-08-25, at 3689991d2)
+      # ---------------------------------------------------------------------
+      # The sibling's scope conclusion does NOT transfer. There the version step
+      # moves no source byte at all. Here `pnpm run version` is FOUR rewriters
+      # and one of them writes TypeScript. Rendered against this repository's
+      # real tree — 158 pending changesets, @objectstack/cli 17.2.0 -> 17.3.0 —
+      # `pnpm run version` moved 313 paths, in four classes and no others:
+      #
+      #     158  .changeset/*.md      deleted (consumed by the version)
+      #      76  */package.json       152 changed lines, every one `"version":`
+      #                               — not one dependency range moved
+      #      76  */CHANGELOG.md       generated from the changeset bodies
+      #       3  doc surfaces         8 concrete image-tag / npm-pin lines, in
+      #                               content/docs/deployment/self-hosting.mdx,
+      #                               content/docs/upgrading.mdx, docker/README.md
+      #
+      # Two more classes exist and did NOT move on that train, because both are
+      # major-boundary only: packages/spec/src/kernel/protocol-version.ts, and
+      # per bundled template objectstack.config.ts / objectstack.manifest.json.
+      # A major cannot reach this lane while check-changeset-no-major.mjs holds
+      # (pr-automation.yml refuses a PR that introduces one), so they are dormant
+      # rather than covered — and the shape assertion below says so out loud on
+      # the first train that wakes them, instead of validating a surface with no
+      # gate behind it. cut-rc.yml's allowlist block carries the same
+      # measurement for the RC lane and agrees path-for-path.
+      #
+      # WHAT IS CHECKED, AND WHY EACH ONE (7 s total, measured on the rendered
+      # tree in this job's own state: install, NO build)
+      # ---------------------------------------------------------------------
+      # Two halves, because the classes above fail in two different ways.
+      #
+      #   SHAPE — every moved path must fall inside the reviewed surface, and
+      #   the doc and template halves of that surface are RESOLVED AT RUN TIME
+      #   from the very declarations the rewriters read (`SURFACES` in
+      #   check-docs-image-tag.mjs, `stampedPaths()` in
+      #   sync-template-versions.mjs), on the principle cut-rc.yml states for
+      #   the same two lists: one list, N consumers, because "a fourth literal
+      #   is a fourth contract". This is the half that ends the treadmill: a
+      #   fifth rewriter, or an existing one growing an output, reddens this
+      #   lane on the day it lands instead of shipping unvalidated.
+      #
+      #   CONTENT — the gates whose corpus is what the version step actually
+      #   writes:
+      #     check:docs-image-tag        the 3 doc surfaces against packages/cli's
+      #                                 NEW version. #9064's gate, and the one
+      #                                 that structurally could not fire here.
+      #     check:docs-image-tag-sync   that rewriter's self-test — it just ran
+      #                                 on this tree and a rewriter that has
+      #                                 nothing to do cannot be observed working.
+      #     check:template-version-sync the template stamper's, for the same
+      #                                 reason.
+      #     check:nul-bytes             lint.yml's one UNCONDITIONAL gate whose
+      #                                 corpus is every byte in the tree. The 76
+      #                                 generated CHANGELOGs are the only prose
+      #                                 the version step writes that it did not
+      #                                 author, and this commit never runs
+      #                                 lint.yml at all.
+      #     check:release-notes, check:release-page-status,
+      #     check-release-section-coverage.mjs, check:published-readme-links
+      #                                 the four gates that READ CHANGELOG.md.
+      #
+      # ⛔ WHAT IS DELIBERATELY NOT RUN, AND WHY IT IS NOT AN OMISSION.
+      #   The whole derived farm. Fed this 313-path change set,
+      #   scripts/pm/dispatch-gates.mjs names 49 families; 44 of them run
+      #   without a build, in 113 s, and every one is green on the post-version
+      #   tree. The control that makes that number mean something: the identical
+      #   sweep on the PRE-version tree returns the identical verdicts, so the
+      #   version step changes no gate's mind. It is mostly restatement — a
+      #   family is derived because a package's `package.json` moved, and what
+      #   moved inside it was the `"version"` key, while the gate reads that
+      #   package's SOURCE, which ci.yml judged on this very commit minutes ago.
+      #   Running the selector here was drafted and withdrawn: it needs
+      #   `scripts/check-self-test-wired.mjs` to grow a new ledger shape, and
+      #   check-dispatch-gates.mjs's header already records the reviewed
+      #   position that "there is no verdict in [the live derivation] for CI to
+      #   hold". That is a maintainer's call, not a rider on this card.
+      #   The five build-requiring families in that farm (check:i18n,
+      #   check:i18n-coverage, check:dev-prereqs, check:doc-formula-expressions,
+      #   check:doc-security-posture) would in any case re-add to this lane the
+      #   ~9 minutes of build the comment below records as deliberately moved to
+      #   the publish job, to gate a manifest's `"version"` key. What they read
+      #   is not what the version step wrote: the two doc gates judge formula
+      #   fences and security-posture prose, and the only content/** lines this
+      #   step can move are the 8 concrete pins above.
+      #
+      # FAILURE SEMANTICS. A red validation fails the job, so the step below
+      # never runs and the standing PR keeps its last VALIDATED content instead
+      # of being force-pushed to a broken one. If the tree stays broken the PR
+      # goes stale — but loudly, on a red run every six hours, which is the
+      # opposite of this card's defect. Nothing here can reach the publish lane:
+      # this whole job is `schedule` / `workflow_dispatch` only.
+      - name: Render the post-version tree
+        id: post_version
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+
+          # `/^README\.md$/i` is how `@changesets/read` spells its exclusion, so
+          # the count is case-folded rather than matching one spelling.
+          count_pending() {
+            local n=0 file
+            for file in .changeset/*.md .changeset/pre/*.md; do
+              if [ "$(printf '%s' "${file##*/}" | tr '[:upper:]' '[:lower:]')" = 'readme.md' ]; then
+                continue
+              fi
+              n=$((n + 1))
+            done
+            printf '%s' "$n"
+          }
+
+          pending_before=$(count_pending)
+          echo "pending_before=${pending_before}" >> "$GITHUB_OUTPUT"
+
+          # The version PR was just merged, or nothing has landed since. The
+          # action will take its no-changesets branch and do nothing, so there is
+          # no post-version tree to render. Said out loud, because a validation
+          # that silently does nothing is this card's own failure class.
+          if [ "${pending_before}" -eq 0 ]; then
+            echo 'No pending changesets — the version step would move nothing. Nothing to render, nothing to validate.'
+            {
+              echo '### Post-version validation'
+              echo
+              echo '- pending changesets: `0` — nothing to render, nothing to validate.'
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          # Everything below reads the tree as the version step's OUTPUT, and
+          # that reading is only true while nothing else is dirty first.
+          # Asserted rather than assumed: measured locally, a single unrelated
+          # edit left in the tree turned 313 moved paths into 314 and would have
+          # been validated as though the version pass had written it.
+          dirty_before=$(git status --porcelain | wc -l | tr -d ' ')
+          if [ "${dirty_before}" -ne 0 ]; then
+            git status --porcelain
+            echo "::error::the working tree is already dirty before the version step (${dirty_before} path(s), listed above). The post-version change set is read as everything dirty, so a pre-existing change would be validated as though the version pass had written it."
+            exit 1
+          fi
+
+          pnpm run version
+
+          # Tracked moves (deletions included) plus new untracked files. Read
+          # this way rather than by classifying `git status --porcelain` letters:
+          # a rename arrives as a delete/add pair whose halves are both named
+          # here, so no status code has to be interpreted.
+          {
+            git diff --name-only HEAD
+            git ls-files --others --exclude-standard
+          } | sort -u > "${RUNNER_TEMP}/post-version-paths.txt"
+          moved=$(wc -l < "${RUNNER_TEMP}/post-version-paths.txt" | tr -d ' ')
+
+          {
+            echo '### Post-version validation'
+            echo
+            echo "- rendered from \`${GITHUB_SHA}\`"
+            echo "- pending changesets consumed: \`${pending_before}\`"
+            echo "- paths the version step moved: \`${moved}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Validate the post-version tree
+        if: steps.post_version.outputs.pending_before != '0'
+        run: |
+          set -euo pipefail
+
+          MOVED_FILE="${RUNNER_TEMP}/post-version-paths.txt"
+          moved=$(wc -l < "${MOVED_FILE}" | tr -d ' ')
+          if [ "${moved}" -eq 0 ]; then
+            echo "::error::changesets were pending but the version step moved no path. Either the version script did nothing, or it wrote outside the working tree — both are a broken version lane, never an empty diff."
+            exit 1
+          fi
+
+          # ── SHAPE ────────────────────────────────────────────────────────
+          # The doc surfaces the rewriter writes, read from the same declaration
+          # the rewriter itself reads. Import-safe by construction: that module
+          # carries an entry-point guard added for exactly this kind of consumer.
+          SURFACE_LIST="${RUNNER_TEMP}/post-version-doc-surfaces.txt"
+          if ! node --input-type=module \
+                 -e 'import { SURFACES } from "./scripts/check-docs-image-tag.mjs"; for (const s of SURFACES) console.log(s.file);' \
+                 > "${SURFACE_LIST}"; then
+            echo "::error::could not resolve SURFACES from scripts/check-docs-image-tag.mjs, so the doc half of the post-version surface is unknown. Refusing to call this tree validated."
+            exit 1
+          fi
+          # Unknown is a failure, never an empty allowlist: an empty list would
+          # make every doc the version pass rewrites read as an unexpected path.
+          if [ ! -s "${SURFACE_LIST}" ]; then
+            echo "::error::SURFACES in scripts/check-docs-image-tag.mjs resolved EMPTY, so the doc surfaces the version pass rewrites would read as unexpected paths. Refusing to call this tree validated."
+            exit 1
+          fi
+
+          # The template surfaces the stamper writes, on the same terms, from the
+          # same walk and table its own main() uses.
+          TEMPLATE_LIST="${RUNNER_TEMP}/post-version-template-surfaces.txt"
+          if ! node --input-type=module \
+                 -e 'import { stampedPaths } from "./scripts/sync-template-versions.mjs"; for (const p of stampedPaths()) console.log(p);' \
+                 > "${TEMPLATE_LIST}"; then
+            echo "::error::could not resolve stampedPaths() from scripts/sync-template-versions.mjs, so the template half of the post-version surface is unknown. Refusing to call this tree validated."
+            exit 1
+          fi
+          if [ ! -s "${TEMPLATE_LIST}" ]; then
+            echo "::error::stampedPaths() in scripts/sync-template-versions.mjs resolved EMPTY. It THROWS on a moved or empty template directory, so an empty file here is a resolution that reported nothing while still exiting 0. Refusing to call this tree validated."
+            exit 1
+          fi
+
+          # Same three filters cut-rc.yml applies to the same surface: the fixed
+          # release paths by pattern, then the two declared lists by WHOLE-LINE
+          # EXACT match, so neither derived filter can accept a path its
+          # declaration does not name and neither needs regex-escaping.
+          UNEXPECTED="$(grep -vE '(^|/)package\.json$|(^|/)CHANGELOG\.md$|^\.changeset/|^packages/spec/src/kernel/protocol-version\.ts$' "${MOVED_FILE}" \
+            | grep -vxF -f "${TEMPLATE_LIST}" \
+            | grep -vxF -f "${SURFACE_LIST}" || true)"
+          if [ -n "${UNEXPECTED}" ]; then
+            printf '%s\n' "${UNEXPECTED}" | sed 's/^/::error::  unexpected: /'
+            echo "::error::the version pass wrote outside the reviewed post-version surface (paths above). This is the treadmill guard: a new version-time output must arrive together with the gate that judges it. Add the surface to the declaration its rewriter reads, and its gate to the content half below — deliberately, in one reviewed diff."
+            exit 1
+          fi
+
+          # The two MAJOR-boundary classes. Both are INSIDE the surface above —
+          # protocol-version.ts by the pattern, the template stamps by
+          # `stampedPaths()` — so the assertion accepts them and they reach this
+          # check with a diagnosis of their own. Measured: with the pattern
+          # missing, protocol-version.ts fell into the "wrote outside the
+          # reviewed surface" branch instead, which is red for the right reason
+          # and wrong about why. What this lane does not have is a gate for
+          # either. protocol-version.ts is judged by
+          # packages/spec/src/kernel/protocol-version.test.ts, reachable only
+          # through the whole @objectstack/spec suite (measured: 424 files,
+          # 11273 tests, 5m26s — not a per-refresh cost), and the template stamps
+          # by a full template render. Unreachable while
+          # check-changeset-no-major.mjs holds; loud, not silent, the day it
+          # stops holding.
+          MAJOR_ONLY="$(grep -xF -f "${TEMPLATE_LIST}" "${MOVED_FILE}" || true)"
+          if grep -qxF 'packages/spec/src/kernel/protocol-version.ts' "${MOVED_FILE}"; then
+            MAJOR_ONLY="${MAJOR_ONLY}"$'\n'"packages/spec/src/kernel/protocol-version.ts"
+          fi
+          if [ -n "${MAJOR_ONLY//[[:space:]]/}" ]; then
+            printf '%s\n' "${MAJOR_ONLY}" | sed '/^$/d; s/^/::error::  unvalidated: /'
+            echo "::error::this version pass crossed a MAJOR boundary and wrote the surfaces above, which this lane has no gate for. A major was not reachable here when this step was written (pr-automation.yml refuses a PR introducing one), so the gates were left out rather than guessed at. Wire them in before letting this refresh through."
+            exit 1
+          fi
+
+          # ── CONTENT ──────────────────────────────────────────────────────
+          failed=()
+          run_gate() {
+            echo "::group::$*"
+            if "$@"; then
+              echo "green: $*"
+            else
+              failed+=("$*")
+            fi
+            echo "::endgroup::"
+          }
+
+          run_gate pnpm check:docs-image-tag
+          run_gate pnpm check:docs-image-tag-sync
+          run_gate pnpm check:template-version-sync
+          run_gate pnpm check:nul-bytes
+          run_gate pnpm check:release-notes
+          run_gate pnpm check:release-page-status
+          run_gate node scripts/check-release-section-coverage.mjs
+          run_gate pnpm check:published-readme-links
+
+          {
+            echo "- post-version surface: \`${moved}\` path(s), all inside the reviewed shape"
+            echo "- content gates failed: \`${#failed[@]}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "${#failed[@]}" -ne 0 ]; then
+            printf '::error::the post-version tree fails %s gate(s) that no CI run would ever have judged: %s\n' \
+              "${#failed[@]}" "$(printf '%s; ' "${failed[@]}")"
+            exit 1
+          fi
+          echo 'Post-version tree validated.'
+
+      # ⚠️ LOAD-BEARING — DO NOT DROP THIS STEP. The steps above render the
+      # version into the runner's working tree, and changesets/action picks its
+      # branch from that tree. With `.changeset/` already consumed it finds
+      # `hasChangesets` false, and this lane deliberately passes no `publish:`
+      # input, so `hasPublishScript` is false too — v1 then takes
+      # `case !hasChangesets && !hasPublishScript` (src/index.ts), logs "No
+      # changesets present or were removed by merging release PR" and RETURNS.
+      # The refresh becomes a permanent no-op and #4935 fossilises with nothing
+      # red anywhere: this file's own failure class, one lane over. So the tree
+      # is put back, and the restoration is ASSERTED rather than assumed.
+      - name: Restore the pre-version tree
+        if: always()
+        env:
+          PENDING_BEFORE: ${{ steps.post_version.outputs.pending_before }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+
+          if [ -z "${PENDING_BEFORE}" ] || [ "${PENDING_BEFORE}" = '0' ]; then
+            echo 'Nothing was rendered, so there is nothing to restore.'
+            exit 0
+          fi
+
+          git checkout -- .
+          # Narrow on purpose, and measured: those are the only roots the version
+          # pass writes into. A `git clean` on a lane that can force-push a
+          # branch should never be able to reach further than the thing it undoes.
+          git clean -fdq -- .changeset packages examples content docker
+
+          count_pending() {
+            local n=0 file
+            for file in .changeset/*.md .changeset/pre/*.md; do
+              if [ "$(printf '%s' "${file##*/}" | tr '[:upper:]' '[:lower:]')" = 'readme.md' ]; then
+                continue
+              fi
+              n=$((n + 1))
+            done
+            printf '%s' "$n"
+          }
+
+          pending_after=$(count_pending)
+          dirty=$(git status --porcelain --untracked-files=no | wc -l | tr -d ' ')
+
+          if [ "${pending_after}" != "${PENDING_BEFORE}" ] || [ "${dirty}" -ne 0 ]; then
+            echo "::error::the pre-version tree was NOT restored (${PENDING_BEFORE} pending changeset(s) before, ${pending_after} after; ${dirty} tracked path(s) still modified). changesets/action would read this tree, find nothing pending and no publish script, and return without refreshing the PR — a silent permanent no-op (#11945)."
+            exit 1
+          fi
+          echo "Pre-version tree restored: ${pending_after} pending changeset(s), working tree clean."
+
       # `pnpm run version` = changeset version + sync-protocol-version +
-      # sync-template-versions. All three are pure file rewrites; none reads a
-      # built artifact. The workspace build, the vendored Console build and the
+      # sync-template-versions + sync-docs-image-tags — FOUR rewriters, read
+      # from the root `version` script, not three. The fourth joined it in #9064
+      # and this comment did not follow. Corrected here because the block above
+      # prices what that script moves, and a stale count of the rewriters is a
+      # stale statement of the surface being priced. All four are pure file
+      # rewrites; none reads a built artifact. The workspace build, the vendored Console build and the
       # live hotcrm smoke that used to run here were PRE-PUBLISH gates — they
       # moved to the `publish` job below, where the publish they gate now lives.
       # Leaving them here would gate nothing and cost ~9 minutes of every main

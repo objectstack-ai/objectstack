@@ -3745,11 +3745,14 @@ export class SchemaRegistry {
   // Kind Helpers
   // ==========================================
 
-  registerKind(kind: { id: string, globs: string[] }) {
+  // #11169: `globs` left the kind shape — nothing ever read the value here or
+  // downstream (the two type positions below were its only non-schema
+  // occurrences); a kind entry is `{ id, description? }`, keyed on `id`.
+  registerKind(kind: { id: string; description?: string }) {
     this.registerItem('kind', kind, 'id');
   }
-  
-  getAllKinds(): { id: string, globs: string[] }[] {
+
+  getAllKinds(): { id: string; description?: string }[] {
     return this.listItems('kind');
   }
 

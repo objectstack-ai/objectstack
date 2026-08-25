@@ -211,7 +211,7 @@
           "evidence": "the screenshot set"
         },
         {
-          "clause": "a disabled method is refused SERVER-SIDE, not merely hidden — UI absence is a client courtesy; the server is the authority (ADR-0057 D10)",
+          "clause": "a disabled method is refused SERVER-SIDE, not merely hidden — UI absence is a client courtesy; the server is the authority (ADR-0124 D1)",
           "oracle": "api",
           "verify": "firing each disabled method's endpoint returns a non-2xx (the plugin's routes are absent or refuse)",
           "evidence": "the forged-request responses"
@@ -347,7 +347,7 @@
       ],
       "negative": [
         "an admin-role invitation that returns success, or that leaves ANY row behind, is a FAIL of privilege-escalation severity — file immediately, P0-verify per RUNNER rule 7",
-        "UI-only enforcement (affordance hidden but the forged request succeeds) is a FAIL — the server is the authority (ADR-0057 D10)",
+        "UI-only enforcement (affordance hidden but the forged request succeeds) is a FAIL — the server is the authority (ADR-0124 D1)",
         "my-delegable-scope OVER-reporting is a FAIL — a position, permission set or BU subtree the caller cannot actually delegate, or (were the shape ever to grow one) a role the caller cannot mint: a client that trusts the scope would offer what the endpoint then refuses. UNDER-reporting is NOT a FAIL and must not be filed as one: the endpoint answering an empty scope while the delegate can still mint a member invitation is the safe direction and the expected state on stock fixtures (run #7663 — DelegableScope has no invitation-role field at all)"
       ],
       "automated": { "kind": "e2e", "ref": "packages/qa/dogfood/test/delegated-admin-invite.dogfood.test.ts" },
@@ -814,7 +814,7 @@
         }
       ],
       "negative": [
-        "an org management surface where the affordance is hidden but the forged endpoint succeeds for a non-admin is a FAIL — the server is the authority (ADR-0057 D10)",
+        "an org management surface where the affordance is hidden but the forged endpoint succeeds for a non-admin is a FAIL — the server is the authority (ADR-0124 D1)",
         "remove-member that drops the roster row but leaves the ex-member's org-scoped access intact is a FAIL — removal must change authorization",
         "a role written outside the {owner, admin, delegated_admin, member} vocabulary is a FAIL — including a stored 'guest': the closed list is the write-side guardrail that makes an ungoverned capability grant unrepresentable (ADR-0108), so a 2xx that persists 'guest' is a regression of the closure, not a vocabulary difference. A role change that does not flip any gate is equally a FAIL",
         "the Organization nav landing on the raw sys_organization list because {current_org_id} did not resolve (when an active org exists) is a FAIL of the ADR-0081 wiring"

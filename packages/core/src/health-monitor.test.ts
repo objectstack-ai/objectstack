@@ -430,4 +430,239 @@ describe('PluginHealthMonitor', () => {
       monitor.stopMonitoring('strict-plugin');
     });
   });
+
+  // `successThreshold` is declared as "Consecutive successes needed to mark
+  // healthy", and was read only while status was `unhealthy` or `degraded`.
+  // The first success wrote `recovering` — a status the gate did not name — so
+  // the second success took the outer `else` and reached `healthy` without the
+  // counter being consulted at all; `failed` was in neither set either, so a
+  // plugin that threw recovered on its FIRST success. A declared 5 was
+  // indistinguishable from 2, and from 1 when recovery started at `failed`.
+  //
+  // Every case below declares `successThreshold: 3`, never the default `1` —
+  // 1 is exactly the value at which the defect is invisible.
+  //
+  // These read `getHealthStatus` only. Asserting that some status set is
+  // consulted would be a tautology any refactor could satisfy; what the
+  // declaration promises is the number of consecutive successes a plugin needs
+  // before it is called healthy, so that is what is counted.
+  describe('`successThreshold` binds from every status that records a failure (#11955)', () => {
+    const THRESHOLD = 3;
+    const INTERVAL_MS = 10_000;
+    /** `calculateBackoff(0, 'fixed')` — the delay before the first restart. */
+    const FIRST_RESTART_BACKOFF_MS = 1_000;
+
+    const thresholdConfig = (
+      overrides: Partial<PluginHealthCheckParsed> = {}
+    ): PluginHealthCheckParsed => ({
+      interval: INTERVAL_MS,
+      timeout: 100,
+      failureThreshold: 2,
+      successThreshold: THRESHOLD,
+      autoRestart: false,
+      maxRestartAttempts: 3,
+      restartBackoff: 'fixed',
+      checkMethod: 'healthCheck',
+      ...overrides,
+    });
+
+    type CheckMode = 'pass' | 'return-failure' | 'throw';
+
+    /** A plugin whose check outcome is switched between rounds. */
+    const switchable = (name: string, initial: CheckMode) => {
+      const mode = { current: initial };
+      const destroyed = { count: 0 };
+      const plugin = {
+        name,
+        version: '1.0.0',
+        init: () => {},
+        destroy: async () => {
+          destroyed.count++;
+        },
+        healthCheck: async () => {
+          if (mode.current === 'throw') throw new Error('check exploded');
+          if (mode.current === 'return-failure') return false;
+          return true;
+        },
+      } as unknown as Plugin;
+      return { plugin, mode, destroyed };
+    };
+
+    /** Advance to the next scheduled round and let its check settle. */
+    const nextRound = async () => {
+      await vi.advanceTimersByTimeAsync(INTERVAL_MS);
+      await vi.advanceTimersByTimeAsync(0);
+    };
+
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('requires all three successes to leave `unhealthy`', async () => {
+      const config = thresholdConfig();
+      const { plugin, mode } = switchable('unhealthy-plugin', 'return-failure');
+
+      monitor.registerPlugin('unhealthy-plugin', config);
+      monitor.startMonitoring('unhealthy-plugin', plugin);
+
+      await vi.advanceTimersByTimeAsync(0);
+      expect(monitor.getHealthStatus('unhealthy-plugin')).toBe('degraded');
+      await nextRound();
+      expect(monitor.getHealthStatus('unhealthy-plugin')).toBe('unhealthy');
+
+      mode.current = 'pass';
+      await nextRound();
+      expect(monitor.getHealthStatus('unhealthy-plugin')).toBe('recovering');
+      // The round that used to promote: status is `recovering` going in, which
+      // the old gate did not name, so the counter went unread and 2 of 3
+      // successes was enough.
+      await nextRound();
+      expect(monitor.getHealthStatus('unhealthy-plugin')).toBe('recovering');
+
+      await nextRound();
+      expect(monitor.getHealthStatus('unhealthy-plugin')).toBe('healthy');
+
+      monitor.stopMonitoring('unhealthy-plugin');
+    });
+
+    it('requires all three successes to leave `degraded`', async () => {
+      // `failureThreshold: 5` keeps the single failure below `unhealthy`, so
+      // the successes start from `degraded` itself.
+      const config = thresholdConfig({ failureThreshold: 5 });
+      const { plugin, mode } = switchable('degraded-plugin', 'return-failure');
+
+      monitor.registerPlugin('degraded-plugin', config);
+      monitor.startMonitoring('degraded-plugin', plugin);
+
+      await vi.advanceTimersByTimeAsync(0);
+      expect(monitor.getHealthStatus('degraded-plugin')).toBe('degraded');
+
+      mode.current = 'pass';
+      await nextRound();
+      expect(monitor.getHealthStatus('degraded-plugin')).toBe('recovering');
+      await nextRound();
+      expect(monitor.getHealthStatus('degraded-plugin')).toBe('recovering');
+      await nextRound();
+      expect(monitor.getHealthStatus('degraded-plugin')).toBe('healthy');
+
+      monitor.stopMonitoring('degraded-plugin');
+    });
+
+    it('requires all three successes to leave `failed` — not one', async () => {
+      // `failed` was in neither set the gate named, so the first success after
+      // a throw went straight to `healthy` whatever the declared count said.
+      const config = thresholdConfig({ failureThreshold: 5 });
+      const { plugin, mode } = switchable('thrown-plugin', 'throw');
+
+      monitor.registerPlugin('thrown-plugin', config);
+      monitor.startMonitoring('thrown-plugin', plugin);
+
+      await vi.advanceTimersByTimeAsync(0);
+      expect(monitor.getHealthStatus('thrown-plugin')).toBe('failed');
+
+      mode.current = 'pass';
+      await nextRound();
+      expect(monitor.getHealthStatus('thrown-plugin')).toBe('recovering');
+      await nextRound();
+      expect(monitor.getHealthStatus('thrown-plugin')).toBe('recovering');
+      await nextRound();
+      expect(monitor.getHealthStatus('thrown-plugin')).toBe('healthy');
+
+      monitor.stopMonitoring('thrown-plugin');
+    });
+
+    it('requires all three successes to leave the `recovering` a restart wrote', async () => {
+      // `recovering` reached from the restart path rather than from the
+      // success branch: `attemptRestart` writes it with both counters zeroed,
+      // so this is the status as a genuine STARTING point, not as a value the
+      // gate under test just produced.
+      const config = thresholdConfig({ failureThreshold: 1, autoRestart: true });
+      const { plugin, mode, destroyed } = switchable('restarted-plugin', 'throw');
+
+      monitor.registerPlugin('restarted-plugin', config);
+      monitor.startMonitoring('restarted-plugin', plugin);
+
+      await vi.advanceTimersByTimeAsync(0);
+      // The restart waits out `restartBackoff` before it destroys.
+      expect(destroyed.count).toBe(0);
+      await vi.advanceTimersByTimeAsync(FIRST_RESTART_BACKOFF_MS);
+      expect(destroyed.count).toBe(1);
+      expect(monitor.getHealthStatus('restarted-plugin')).toBe('recovering');
+
+      mode.current = 'pass';
+      await nextRound();
+      expect(monitor.getHealthStatus('restarted-plugin')).toBe('recovering');
+      await nextRound();
+      expect(monitor.getHealthStatus('restarted-plugin')).toBe('recovering');
+      await nextRound();
+      expect(monitor.getHealthStatus('restarted-plugin')).toBe('healthy');
+
+      monitor.stopMonitoring('restarted-plugin');
+    });
+
+    it('starts the count over after a throw interrupts a recovery (#11852)', async () => {
+      // The pin #11852 correctly declined to fake. That card fixed the `catch`
+      // path's missing `successCounters` reset and could not test it: the
+      // counter's only read site was unreachable with a stale non-zero value,
+      // so any test would have passed for the wrong reason. Gating `failed` on
+      // the counter is what makes the reset observable — and load-bearing.
+      //
+      // Two successes accumulate, then the check throws. With the reset, the
+      // recovery restarts from zero and three more successes are needed; with
+      // the stale counter the third success below would carry the count to 3
+      // and promote immediately.
+      const config = thresholdConfig({ failureThreshold: 5 });
+      const { plugin, mode } = switchable('interrupted-plugin', 'return-failure');
+
+      monitor.registerPlugin('interrupted-plugin', config);
+      monitor.startMonitoring('interrupted-plugin', plugin);
+
+      await vi.advanceTimersByTimeAsync(0);
+      expect(monitor.getHealthStatus('interrupted-plugin')).toBe('degraded');
+
+      mode.current = 'pass';
+      await nextRound();
+      await nextRound();
+      expect(monitor.getHealthStatus('interrupted-plugin')).toBe('recovering');
+
+      mode.current = 'throw';
+      await nextRound();
+      expect(monitor.getHealthStatus('interrupted-plugin')).toBe('failed');
+
+      mode.current = 'pass';
+      await nextRound();
+      // Success #1 of a fresh three, not #3 of a carried-over count.
+      expect(monitor.getHealthStatus('interrupted-plugin')).toBe('recovering');
+      await nextRound();
+      expect(monitor.getHealthStatus('interrupted-plugin')).toBe('recovering');
+      await nextRound();
+      expect(monitor.getHealthStatus('interrupted-plugin')).toBe('healthy');
+
+      monitor.stopMonitoring('interrupted-plugin');
+    });
+
+    it('marks a never-checked plugin healthy on its first success', async () => {
+      // The boundary of the chosen semantics, pinned so it cannot drift: the
+      // count is a RECOVERY criterion ("Number of consecutive successes to
+      // recover from unhealthy state"), and `unknown` — declared "Health
+      // status cannot be determined", the status `registerPlugin` writes —
+      // records no failure to recover from. A fresh plugin is healthy on its
+      // first passing check however high `successThreshold` is declared.
+      const config = thresholdConfig();
+      const { plugin } = switchable('fresh-plugin', 'pass');
+
+      monitor.registerPlugin('fresh-plugin', config);
+      expect(monitor.getHealthStatus('fresh-plugin')).toBe('unknown');
+
+      monitor.startMonitoring('fresh-plugin', plugin);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(monitor.getHealthStatus('fresh-plugin')).toBe('healthy');
+
+      monitor.stopMonitoring('fresh-plugin');
+    });
+  });
 });

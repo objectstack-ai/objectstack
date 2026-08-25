@@ -1059,12 +1059,23 @@ const TEST_DEBT = {
   '@objectstack/connector-mcp': { errors: 5, note: 'TS2339 x5. Re-measured 5 at 5ab08428, exact.' },
   '@objectstack/connector-openapi': { errors: 5, note: 'TS2339 x5. Re-measured 5 at 5ab08428, exact.' },
   '@objectstack/http-conformance': {
-    errors: 3,
-    note: 'TS2307 x2, TS2304 x1, TS2740 x1. Re-measured 4 at 5ab08428, up from 1. Worth knowing before '
-      + 'anyone tries to graduate it: 2 of the 4 are reported inside node_modules `.d.ts` files '
-      + '(@better-auth/core, @better-fetch/fetch), so this entry moves with the lockfile and not only with '
-      + 'this package\'s own code. Raw `tsc --noEmit` counts are what every number in these ledgers means, '
-      + 'so they are counted here rather than filtered out -- but they are not this package\'s debt to fix.',
+    errors: 2,
+    note: 'TS2307 x1, TS2304 x1, and BOTH are reported inside node_modules `.d.ts` files '
+      + '(@better-auth/core\'s `bun:sqlite` import, @better-fetch/fetch\'s `Timer`), so this entry now '
+      + 'moves with the lockfile and NOT with this package\'s own code at all -- every file this package '
+      + 'checks in is clean with the test exclusion lifted. Raw `tsc --noEmit` counts are what every '
+      + 'number in these ledgers means, so they are counted here rather than filtered out -- but they are '
+      + 'not this package\'s debt to fix, and this entry cannot graduate by fixing code. Re-measured 2 at '
+      + '3954fb7df, DOWN from 3 (#11788). The retired third diagnostic was a TS2307 on '
+      + '`@objectstack/spec/contracts` in conformance.integration.test.ts, which this package imported '
+      + 'without declaring @objectstack/spec: under pnpm\'s strict layout that specifier reached no '
+      + '@objectstack/spec anywhere on its resolution walk, so the old ceiling was a reading of the '
+      + 'INSTALL LAYOUT rather than of this package\'s types. Measured three ways on one tree at '
+      + '3954fb7df, same sources, same built closure: 3 as installed, 2 with @objectstack/spec merely '
+      + 'symlinked into the root node_modules and nothing else touched, 125 with packages/spec/dist moved '
+      + 'aside. #11788 declared the dependency, so the specifier now resolves through the closure this '
+      + 'gate refreshes and refuses on -- the number dropped because the program became well-defined, '
+      + 'not because anything was suppressed.',
   },
   '@objectstack/platform-objects': { errors: 3, note: 'TS2339 x2, TS7006 x1. Re-measured 3 at 5ab08428, exact.' },
   '@objectstack/plugin-sharing': { errors: 3, note: 'TS6133 x2, TS18048 x1. Re-measured 3 at 5ab08428, exact.' },

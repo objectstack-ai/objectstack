@@ -4606,7 +4606,8 @@ export class ObjectQL implements IObjectQLEngine {
           for (const kind of manifest.contributes.kinds) {
             this._registry.registerKind(kind);
             // [#10729] Name the kind by its declared `id`. `contributes.kinds`
-            // items are `{ id, globs, description? }` (`manifest.zod.ts`) and
+            // items are `{ id, description? }` (`manifest.zod.ts`; `globs` was
+            // retired unread, #11169) and
             // `registerKind` keys the item on `id` (`registerItem('kind', kind, 'id')`),
             // so `id` is BOTH the only identifying field the schema declares and the
             // exact key the item is stored under — a reader of this line can look the
@@ -5436,9 +5437,8 @@ export class ObjectQL implements IObjectQLEngine {
    * `readonlyWhen` reads, or `null` when this write cannot resolve one.
    *
    * `readonlyWhen: parent.status == 'paid'` is a documented **server**
-   * guarantee (the rule this repo cites as ADR-0057 D10 puts enforcement here;
-   * the client grid is courtesy — an attribution, not a resolvable anchor,
-   * #9628), but the strip is a pure function over the payload and the prior
+   * guarantee (ADR-0124 D1 puts enforcement here; the client grid is
+   * courtesy), but the strip is a pure function over the payload and the prior
    * row — it has no driver and cannot fetch a header. So the engine resolves it
    * and passes it in.
    *

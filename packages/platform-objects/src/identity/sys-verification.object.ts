@@ -68,6 +68,14 @@ export const SysVerification = ObjectSchema.create({
     identifier: Field.text({
       label: 'Identifier',
       required: true,
+      // [#11374] Bound from better-auth 1.7.1's own MySQL schema: the
+      // verification model declares `identifier` with `index: true`, and the
+      // upstream migration emits an indexed string column as varchar(255)
+      // (get-migration.mjs) — every better-auth flow that writes this table,
+      // oauth-provider included, already lives inside 255 on upstream MySQL.
+      // `value` deliberately declares NO bound: better-auth stores JSON blobs
+      // there (see the index comment below), so no defensible bound exists.
+      maxLength: 255,
       description: 'Email address or phone number',
     }),
   },
