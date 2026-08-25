@@ -259,7 +259,47 @@ jobs:
             if (crossCutting.length) limits.push(`**${crossCutting.length}** cross-cutting symbol(s) contributed no route anchor: \`${crossCutting.join('`, `')}\``);
             if (overbroad.length) limits.push(`**${overbroad.length}** anchor(s) matched too much of the corpus to be a work list: \`${overbroad.join('`, `')}\``);
             if (weak.length) limits.push(`**${weak.length}** name(s) were too generic to anchor anything (single lowercase words)`);
-            if (bridge && bridge.measured && bridge.unreachable > 0) limits.push(`the SDK route bridge reached **${bridge.reachable}** of **${bridge.clientRows}** client-bound route-ledger rows — the other **${bridge.unreachable}** have no registrar \`path:\` tail to select them, so pages documenting THEIR client methods cannot appear above, on this or any run: \`node scripts/docs-audit/affected-docs.mjs --bridge-coverage\``);
+            // ── WHY THOSE ROWS ARE UNREACHABLE, NOT JUST HOW MANY (#11867) ────────
+            //
+            // The line above used to end at the count, and a count is one population.
+            // The census says there are three, and the difference is the whole reason
+            // the split exists: the auth ledger's `56 of 56` and the rest ledger's
+            // `46 of 87` print identically and are NOT the same finding — the first has
+            // no in-repo registration site at all, so the discovery widening the second
+            // one wants moves it by zero rows. That conflation already aimed one card
+            // (#11178) at widening a recognizer that was never the constraint, and this
+            // comment is the surface where a human meets the number.
+            //
+            // ⛔ SAME NAMES, ONE DERIVATION — the rule stated three lines up for the
+            // `anchorless` pair, and it binds here for the same reason. `bridge.causes`
+            // is a PARTITION of `bridge.unreachable`, computed ONCE inside
+            // `bridgeCoverageFrom` and published whole; the parts are READ off the same
+            // object as the total and never recomputed here. Re-deriving them from
+            // `bridge.ledgers` would be a second derivation that agrees today, drifts
+            // silently tomorrow, and renders a breakdown that sums to something the
+            // headline beside it denies.
+            //
+            // And on numbers that do NOT partition that total, the split is WITHHELD and
+            // the run says the census is broken, rather than printing three figures
+            // beside a fourth they contradict. That state cannot arise from
+            // `bridgeCoverageFrom` — `affected-docs.mjs --self-test` pins the partition
+            // — which is what makes it a verdict here and not a fallback.
+            //
+            // `measured: false` keeps its honest arm: a run that supplied no ceiling
+            // reports that WHY was not measured. It says so in words rather than
+            // rendering three nulls or, worse, three zeroes — "nobody looked" is not
+            // "none found", the same distinction `computedOn.dirty`'s null arm draws.
+            const causes = (bridge && bridge.causes) || null;
+            let bridgeCauses = '';
+            if (causes && causes.measured === true) {
+              const parts = causes.remediable + causes.structural + causes.undecided;
+              bridgeCauses = parts === bridge.unreachable
+                ? ` Of those **${bridge.unreachable}**: **${causes.remediable}** are remediable by widening that discovery convention (an in-repo file declares the path; the convention did not scan it); **${causes.structural}** are structural — on a ledger where NOT ONE row is declared in-repo, so no discovery change reaches them at any price; **${causes.undecided}** are undecided (no in-repo declaration, on a ledger that has other in-repo registrars — absence and an unreadable spelling are not distinguishable here).`
+                : ` ⛔ Its cause census is BROKEN — **${causes.remediable}** + **${causes.structural}** + **${causes.undecided}** is not the **${bridge.unreachable}** it claims to break down, so the split is withheld.`;
+            } else if (causes && causes.measured === false) {
+              bridgeCauses = ` WHY those rows are unreachable was NOT measured on this run — ${causes.reason} — so no cause may be read into the count above.`;
+            }
+            if (bridge && bridge.measured && bridge.unreachable > 0) limits.push(`the SDK route bridge reached **${bridge.reachable}** of **${bridge.clientRows}** client-bound route-ledger rows — the other **${bridge.unreachable}** have no registrar \`path:\` tail to select them, so pages documenting THEIR client methods cannot appear above, on this or any run.${bridgeCauses} The rows themselves: \`node scripts/docs-audit/affected-docs.mjs --bridge-coverage\``);
             // ── THE RULE-CARRYING PAGE AN EMITTER DIFF CANNOT REACH (#11434) ──────
             //
             // Every line above is a REPORT about this run: a count this run produced, a
