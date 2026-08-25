@@ -2748,9 +2748,9 @@ export function reachesMetadataFormModule(path, modulePaths) {
  *
  *     ⚠ "A literal naming their POPULATION" is the whole of that criterion,
  *     and one gate in this kind now fails it while READING as satisfied.
- *     Measured on this tree (#11199, the day PR #12300 landed): of the 2771
+ *     Measured on this tree (#11199, the day PR #12300 landed): of the 2773
  *     tracked test files, the hint route names `check:cross-package-test-
- *     inputs` for 2758 of them — 99.5%, against 0–3.3% for its five siblings
+ *     inputs` for 2760 of them — 99.5%, against 0–3.3% for its five siblings
  *     in this same kind — because #12300 taught `hintCovers` to read a glob in
  *     a non-final segment and the deep `packages` glob for TypeScript files
  *     came back to life. (That glob is not spelled here: its own wildcard
