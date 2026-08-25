@@ -58,6 +58,52 @@
  * JS ISO-8601 string with millis, so neither has anything to truncate — and the
  * emitted SQL on both is asserted UNCHANGED by §5.
  *
+ * ## [#11572] §3's instrument is driven, not raced
+ *
+ * §3 originally fired {@link ROUNDS} updates back to back and required that at
+ * least two of them landed on different values. That needs the wall clock to
+ * tick at least once during the run — a property of the MACHINE, not of the
+ * code — so on a fast enough runner it went red with entirely correct stamping,
+ * which is what happened to PR #11570 (a diff touching no file under
+ * `packages/drivers/`).
+ *
+ * What made that expensive rather than merely annoying: **its failure output
+ * was byte-identical to the defect it exists to catch.** Truncation collapsing
+ * every update in one second onto one value produces exactly one distinct
+ * stamp — the same observation a fast runner produces. The discrimination
+ * existed only as folklore: a genuine regression reds §1, §2 and §3, a fast run
+ * reds only §3, and a reader had to know that and go compare.
+ *
+ * Measured before rebuilding it, because the frequency was never counted:
+ * {@link ROUNDS} sqlite round-trips complete in a MEDIAN of 0.63 ms on the
+ * container this was rebuilt on, and back to back on a warm path 41.9% of 2000
+ * trials produced a single distinct stamp. Across 40 runs of this file as it
+ * actually executes, the cell never went red — but its entire margin was ONE
+ * clock tick, with 30% of runs observing exactly two distinct stamps spanning
+ * exactly 1 ms. A guard whose margin is one tick is a guard that reds on
+ * somebody else's faster machine, which is precisely what CI reported.
+ *
+ * So the gap is now FORCED and, more importantly, VERIFIED — see
+ * {@link awaitClockAdvance}, which re-reads the clock rather than trusting a
+ * timer, and {@link MIN_GAP_MS}, which is five times the declared column
+ * resolution and three orders of magnitude below the second truncation would
+ * need. §3 keeps every part of the real path (the real update door, the real
+ * dialect stamp, a real read-back out of storage) and loses only the race. Two
+ * consequences worth stating plainly:
+ *
+ *  - The assertion got STRONGER, not weaker: `ROUNDS` spaced updates must yield
+ *    `ROUNDS` distinct stamps, where the old cell asked for two out of six.
+ *  - What was traded away is the back-to-back WRITE RATE — §3 no longer fires
+ *    its updates as fast as the machine allows. That coverage did not leave the
+ *    file: §1, §1b and §2 still create and update with no sleep between them
+ *    ("No sleep and no backdating", §1), so the same-millisecond path stays
+ *    measured where it belongs. Resolution, §3's actual subject, is not a rate
+ *    property.
+ *
+ * And the folklore is gone: §3's failure message now carries the measured gaps,
+ * the measured span and the arithmetic that rules a fast runner out, so the red
+ * discriminates itself instead of requiring a reader to check §1 and §2 first.
+ *
  * ## Reverse verification (direction predicted before running)
  *
  * Restoring `main`'s `updatedAtStamp()` body turns §1, §2 and §3 red on the
@@ -66,6 +112,15 @@
  * on that cell too (`CURRENT_TIMESTAMP` vs `CURRENT_TIMESTAMP(3)`). The SQLite
  * and Postgres cells stay green throughout: the asymmetry, observed rather than
  * argued.
+ *
+ * ⚠️ [#11572] That ablation says nothing about a runner without a live MySQL.
+ * #11224 changed only the NON-sqlite branch, so restoring `main`'s body is a
+ * no-op on the SQLite cell — and a green there is not evidence this file
+ * guards anything. The ablation that discriminates on the SQLite cell is the
+ * defect class written into the branch that cell executes: truncating
+ * `new Date().toISOString()` to `.000Z`. Run on the rebuilt file, it reds §1,
+ * §2 and §3 and leaves §4/§5 green (the `ISO_Z` shape admits `.000Z`), which is
+ * the same three-section signature the MySQL ablation produces.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -84,6 +139,50 @@ const OPTS = { bypassTenantAudit: true } as any;
  * passing vacuously.
  */
 const ROUNDS = 6;
+
+/**
+ * [#11572] The real-clock gap §3 forces between two consecutive updates.
+ *
+ * Sized against the two bounds §3 sits between — and both bounds are ASSERTED
+ * in the cell rather than assumed here:
+ *
+ *  - five times ABOVE the millisecond the audit columns are declared at
+ *    (`DATETIME(3)` on MySQL, an ISO string carrying millis on SQLite), so a
+ *    stamp that KEPT its resolution cannot put two of these updates on one
+ *    value;
+ *  - far BELOW the second a truncated stamp would need to tell any two of them
+ *    apart. `ROUNDS - 1` gaps of this size span ~25 ms, against the 5 whole
+ *    SECONDS second-precision stamps would need to yield `ROUNDS` distinct
+ *    values — which is what makes §3's distinctness unreachable by truncation
+ *    instead of merely unlikely under it.
+ */
+const MIN_GAP_MS = 5;
+
+/**
+ * [#11572] Block until the process clock has ADVANCED by at least `ms`, and
+ * return the advance actually observed.
+ *
+ * The difference from `await sleep(ms)` is the entire subject of #11572: a
+ * timer is a request, and what §3 needs is a fact. This re-reads the clock and
+ * keeps waiting until the clock itself agrees, so §3 never assumes a tick
+ * happened — it measures the ones it got and quotes them in its own failure
+ * message. That is what lets a §3 red be read as a regression without anyone
+ * consulting a docblock or comparing which other sections failed.
+ *
+ * On the live cells the stamp is read from the SERVER's clock rather than this
+ * process's. Waiting here still spaces those stamps: the two clocks may sit at
+ * different offsets — the matrix insists they do — but they advance through the
+ * same real time, so `ms` of elapsed wall time here is `ms` of elapsed wall
+ * time there.
+ */
+async function awaitClockAdvance(ms: number): Promise<number> {
+  const start = Date.now();
+  for (;;) {
+    const observed = Date.now() - start;
+    if (observed >= ms) return observed;
+    await new Promise((resolve) => setTimeout(resolve, ms - observed));
+  }
+}
 
 const MANAGED = 'os11224_stamp';
 const BULK = 'os11224_bulk';
@@ -233,13 +332,45 @@ function measure(cell: DialectCell): void {
     it('§3 keeps sub-second resolution, so same-second updates are ordered', async () => {
       // Truncation collapses every update inside one second onto one value, so
       // an `order by updated_at` over them is unstable exactly where it matters.
+      //
+      // [#11572] The clock is DRIVEN here, not raced. This cell used to fire
+      // `ROUNDS` updates back to back and require that at least two of them
+      // landed on different values — which needs the wall clock to tick at
+      // least once during the run, a property of the MACHINE rather than of the
+      // code. Measured on the container this was rebuilt on: `ROUNDS` sqlite
+      // round-trips complete in a median of 0.63 ms, and over 40 runs of this
+      // file the cell's whole margin was ONE tick — 30% of runs observed
+      // exactly two distinct stamps spanning exactly 1 ms. It had already gone
+      // red on CI (PR #11570, a diff touching nothing under `packages/drivers/`)
+      // with entirely correct stamping.
+      //
+      // Forcing a VERIFIED sub-second gap removes the race without removing the
+      // measurement: the write still goes through the real door, the real
+      // dialect stamp and a real read-back out of storage. What changes is that
+      // the distinctness below is now ENTAILED by the gaps rather than hoped
+      // for — so a red is a statement about the code, and says so in its own
+      // message instead of leaving the reader to compare which sections failed.
       const id = 'd1';
       await driver.create(MANAGED, { id, title: 'one', status: 'seq' }, OPTS);
       const stamps: number[] = [];
+      const gaps: number[] = [];
       for (let i = 0; i < ROUNDS; i++) {
+        if (i > 0) gaps.push(await awaitClockAdvance(MIN_GAP_MS));
         await driver.update(MANAGED, id, { title: `t${i}` }, OPTS);
         stamps.push((await readAudit(driver, MANAGED, id)).updatedAt);
       }
+
+      // The INSTRUMENT's own validity, settled before anything is concluded
+      // from it: these are the gaps the clock reported back, not the ones the
+      // timer was asked for. Nothing below is readable until this holds — an
+      // unspaced run is exactly the probabilistic instrument this replaced.
+      expect(
+        Math.min(...gaps),
+        `[#11572] §3 could not space its updates: it required ${MIN_GAP_MS} ms of real clock ` +
+          `between each of the ${ROUNDS} updates and the clock reported ${gaps.join('/')} ms. ` +
+          `Until this holds the distinctness assertion below is racing the machine again.`,
+      ).toBeGreaterThanOrEqual(MIN_GAP_MS);
+
       // Monotone regardless (the invariant), and — the point — the run spans
       // less than the full second a truncated stamp would need to distinguish
       // any two of these at all.
@@ -248,7 +379,22 @@ function measure(cell: DialectCell): void {
       expect(span, 'this run took over a second, so second-precision stamps could have differed too').toBeLessThan(
         1_000,
       );
-      expect(new Set(stamps).size, 'every update in this second stamped the SAME instant').toBeGreaterThan(1);
+
+      // The property, now entailed rather than raced: with every update spaced
+      // by a measured gap five times the declared resolution, a stamp that kept
+      // that resolution has to produce one value per update.
+      const distinct = new Set(stamps).size;
+      expect(
+        distinct,
+        `[#11572] the ${ROUNDS} updates collapsed onto ${distinct} instant(s) — and a fast ` +
+          `runner CANNOT explain it. Each update was spaced by a clock-verified gap ` +
+          `(${gaps.join('/')} ms, every one at or above ${MIN_GAP_MS} ms) across a total span of ` +
+          `${span} ms, so a stamp holding the millisecond resolution its audit column is declared ` +
+          `at must produce ${ROUNDS} distinct values here; second-precision truncation produces 1 ` +
+          `and would need whole SECONDS, not ${span} ms, to produce more. Stamps: ` +
+          `${stamps.join(', ')}. Read this as a resolution regression in updatedAtStamp() — not ` +
+          `as a timing artifact, and without comparing which other sections failed.`,
+      ).toBe(ROUNDS);
     });
 
     // ── §4 The two stamp helpers collapsed into one ──────────────────────────
