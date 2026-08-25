@@ -135,6 +135,27 @@ export default class Compile extends Command {
       ...unknownKeyWarnings,
       ...capProviderWarnings,
     ];
+    // [#12125] The ADR-0087 D2 conversion notices, hoisted for the SAME reason
+    // and under the SAME ruling as the four lists above — one field over. The
+    // notices were computed at step 2 (below) and reached the terminal SUCCESS
+    // payload alone, so all nine failure exits dropped a list already in hand.
+    // #12079 added `warnings` to those nine and deliberately left this field
+    // untouched, which is why closing that card did not close this one.
+    //
+    // ⛔ CARRYING, NOT COMPUTING — and here that is a pure SCOPE change. This is
+    // the same `const` array the `onConversionNotice` sink pushes into, moved
+    // above the `try` only so the catch-all exit can read it. `normalizeStackInput`
+    // still runs at exactly step 2, so a run that throws in `loadConfig` — above
+    // it — reports `[]` honestly, exactly as `warningsSoFar()` does there.
+    //
+    // ⛔ NOT FOLDED INTO `warningsSoFar()`, in either direction. The success
+    // payload keeps these separate deliberately (see its note at `conversions:`
+    // below), and this field is the one advisory class carrying an EXPIRY —
+    // `retiresIn` names the protocol major where the source stops loading, which
+    // is structure a flattened warning string cannot carry. Whether the two
+    // should become one field is an open question this change was explicitly not
+    // given the authority to settle, so the shape is mirrored, not merged.
+    const conversionNotices: ConversionNotice[] = [];
 
     try {
       // 1. Load Configuration
@@ -157,7 +178,8 @@ export default class Compile extends Command {
       //    stops loading. Five conversions are live today (protocol 11 and 15),
       //    so the gap is real, not hypothetical.
       if (!flags.json) printStep('Normalizing stack definition...');
-      const conversionNotices: ConversionNotice[] = [];
+      // The sink is declared above the `try` (see its note there); the CALL that
+      // fills it stays right here, at the step that owns it.
       const normalized = normalizeStackInput(config as Record<string, unknown>, {
         onConversionNotice: (n) => conversionNotices.push(n),
       });
@@ -194,7 +216,7 @@ export default class Compile extends Command {
         ];
         if (issues.length > 0) {
           if (flags.json) {
-            await emitJson({ success: false, error: 'strict-body: missing body', issues, warnings: warningsSoFar() }, 0, { compact: true });
+            await emitJson({ success: false, error: 'strict-body: missing body', issues, warnings: warningsSoFar(), conversions: conversionNotices }, 0, { compact: true });
             this.exit(1);
           }
           console.log('');
@@ -249,7 +271,7 @@ export default class Compile extends Command {
 
       if (!result.success) {
         if (flags.json) {
-          await emitJson({ success: false, errors: (result.error as unknown as ZodError).issues, warnings: warningsSoFar() }, 0, { compact: true });
+          await emitJson({ success: false, errors: (result.error as unknown as ZodError).issues, warnings: warningsSoFar(), conversions: conversionNotices }, 0, { compact: true });
           this.exit(1);
         }
         console.log('');
@@ -291,7 +313,7 @@ export default class Compile extends Command {
         // Every failing rule reports at once — see the note in `validate.ts`.
         if (flags.json) {
           await emitJson(
-            { success: false, error: 'author-time rules failed', issues: ruleErrors, warnings: warningsSoFar() },
+            { success: false, error: 'author-time rules failed', issues: ruleErrors, warnings: warningsSoFar(), conversions: conversionNotices },
             0,
             { compact: true },
           );
@@ -342,6 +364,7 @@ export default class Compile extends Command {
             error: 'capability provider preflight failed',
             issues: capPreflight.errors.map((c) => ({ token: c.token, message: renderCapabilityMessage(c) })),
             warnings: warningsSoFar(),
+            conversions: conversionNotices,
           }, 0, { compact: true });
           this.exit(1);
         }
@@ -437,7 +460,7 @@ export default class Compile extends Command {
             const drift = diffAccessMatrix(committed, currentMatrix);
             if (drift.length > 0) {
               if (flags.json) {
-                await emitJson({ success: false, error: 'access matrix drift', changes: drift, warnings: warningsSoFar() }, 0, { compact: true });
+                await emitJson({ success: false, error: 'access matrix drift', changes: drift, warnings: warningsSoFar(), conversions: conversionNotices }, 0, { compact: true });
                 this.exit(1);
               }
               console.log('');
@@ -481,7 +504,7 @@ export default class Compile extends Command {
       docWarnings = docsResult.issues.filter((i) => i.severity === 'warning');
       if (docErrors.length > 0) {
         if (flags.json) {
-          await emitJson({ success: false, error: 'docs validation failed', issues: docErrors, warnings: warningsSoFar() }, 0, { compact: true });
+          await emitJson({ success: false, error: 'docs validation failed', issues: docErrors, warnings: warningsSoFar(), conversions: conversionNotices }, 0, { compact: true });
           this.exit(1);
         }
         console.log('');
@@ -535,7 +558,7 @@ export default class Compile extends Command {
           // pipelines can guard against accidental regressions.
           const msg = `--no-runtime-bundle requires every callable to have a metadata body (${stillNeeded} missing, ${lowering.bodyExtractionWarnings.length} extraction warning(s)). Re-run with --strict-body to see details, or omit --no-runtime-bundle.`;
           if (flags.json) {
-            await emitJson({ success: false, error: msg, warnings: warningsSoFar() }, 0, { compact: true });
+            await emitJson({ success: false, error: msg, warnings: warningsSoFar(), conversions: conversionNotices }, 0, { compact: true });
             this.exit(1);
           }
           console.log('');
@@ -559,7 +582,7 @@ export default class Compile extends Command {
             cleanupOldRuntimeBundles(artifactDir, runtimeBundle.outputFileName);
           } catch (err: any) {
             if (flags.json) {
-              await emitJson({ success: false, error: `runtime bundle failed: ${err.message}`, warnings: warningsSoFar() }, 0, { compact: true });
+              await emitJson({ success: false, error: `runtime bundle failed: ${err.message}`, warnings: warningsSoFar(), conversions: conversionNotices }, 0, { compact: true });
               this.exit(1);
             }
             console.log('');
@@ -697,7 +720,7 @@ export default class Compile extends Command {
     } catch (error: any) {
       if (isExitSignal(error)) throw error;
       if (flags.json) {
-        await emitJson({ success: false, error: error.message, warnings: warningsSoFar() }, 0, { compact: true });
+        await emitJson({ success: false, error: error.message, warnings: warningsSoFar(), conversions: conversionNotices }, 0, { compact: true });
         this.exit(1);
       }
       console.log('');
