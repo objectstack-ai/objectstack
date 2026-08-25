@@ -54,8 +54,11 @@
  *     nobody edited a file is not a ratchet.
  *   - NO DEPENDENCY. The workspace carries no tokenizer today (checked at
  *     landing: no `tiktoken` / `gpt-tokenizer` / `gpt-3-encoder` in any
- *     manifest), and root dependencies are fenced (#9465). Adding one to make a
- *     lint gate's numbers prettier is not a trade this gate needs.
+ *     manifest). Adding one to make a lint gate's numbers prettier is not a
+ *     trade this gate needs. Refused on that merit alone, not by a fence: root
+ *     dependencies as a CLASS are not #9465 territory -- the GATE INVOCATION
+ *     IDIOM note at the top of `.github/workflows/lint.yml` carries that lane's
+ *     verbatim scope, and it is pointed at rather than restated here.
  *   - INDEPENDENTLY REPRODUCIBLE. Anyone can audit a ceiling without running
  *     this script: `ceil($(wc -c < file) / 4)`. A tokenizer's count can only be
  *     checked by re-running the tokenizer.
