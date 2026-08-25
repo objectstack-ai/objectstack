@@ -49,10 +49,53 @@
  * turns red. Both legs also assert `Test Files  1 passed (1)`, because a run
  * that collected NOTHING exits 0 too and would read as a pass.
  *
- * ⚠️ The ablation is a race, not a certainty: measured 8/10, 10/12 and 9/12 on
- * an idle 4-vCPU container across three fixture shapes. It is therefore
- * retried, and only the exhaustion of every attempt is a failure — reported as
- * "the instrument stopped reproducing", never as "the guard broke".
+ * ⚠️ The ablation is a race, not a certainty, and the rate is a function of the
+ * BOX, not of the fixture. Measured on this container, 4 vCPU / 17 GB, each
+ * arm carrying its own control in the same run:
+ *
+ *     idle, ablation config      20/20 reproduced, every child exit 1
+ *     idle, this app's config     0/6  reproduced, every child exit 0   (control)
+ *     4 concurrent node procs     0/20 reproduced, every child exit 0
+ *     those 4 procs themselves   82/579 reproduced (~14%), same window
+ *
+ * The load arm is the one that matters and it is NOT a starvation effect: load
+ * average held at 2.8 on 4 CPUs with 15 GB free, so nothing was starved — yet
+ * reproduction fell from 100% to ~14%. The card's own control had already ruled
+ * starvation out from the other side (the file alone under 8 synthetic CPU
+ * burners, load ~7, stayed green). What suppresses the window is CONCURRENT
+ * NODE PROCESSES, which is what a full-repo `turbo run test` is made of.
+ *
+ * WHY THAT MAKES A RETRY BUDGET THE WRONG INSTRUMENT (#11939). At ~14% per
+ * attempt, eight attempts miss 1 - (1 - 0.14)^8 ≈ 31% of the time — and the
+ * measured arm went 0/20, so the rate under a real full-repo run may be lower
+ * still. No budget that finishes in a test's lifetime makes a race with an
+ * environment-dependent rate reliable; it only moves the red further out.
+ *
+ * WHAT THIS FILE ACTUALLY CLOSES, then. "The instrument did not fire this time"
+ * and "the instrument is permanently dead" are different facts with different
+ * responses, and a race that only ever reports "did not reproduce" cannot tell
+ * them apart. So the dynamic race is no longer the only evidence: the PREMISE
+ * probe below reads the installed vitest and asserts, DETERMINISTICALLY and
+ * independently of load, that the shape this pin exploits is still there —
+ * mechanising the very instruction the old assertion message gave a human
+ * ("check sendLog/rpcDone in its dist chunks"). The two are then graded
+ * together:
+ *
+ *     premise intact + race fired   → pass
+ *     premise intact + race silent  → SKIP, loudly and countably: the window
+ *                                     did not open on this box this time
+ *     premise BROKEN + race silent  → FAIL: vitest changed underneath us; this
+ *                                     pin's defect may be fixed upstream
+ *     premise BROKEN + race fired   → FAIL: the probe is stale, not vitest
+ *
+ * ⛔ A skip is NOT a pass and must never be able to become one quietly. Two
+ * things stop that: it is reported as skipped (so `Tests N passed | 1 skipped`
+ * counts it, and the marker below greps out of a job log), and the premise
+ * probe is a SEPARATE, always-run, deterministic assertion — the leg's floor is
+ * never "measured nothing", it is "measured the mechanism statically".
+ *
+ * ⛔ And none of it relaxes the GUARDED leg, which is the one that protects the
+ * merge queue. It still requires exit 0 on every repetition, unconditionally.
  *
  * ⚠️ WHY THE CHILD'S OUTPUT IS NORMALISED BEFORE ANYTHING READS IT. Every
  * predicate below is a substring of a REPORTER line, and vitest 4 decides both
@@ -71,7 +114,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { stripVTControlCharacters } from 'node:util';
 
 // `process.cwd()` is this package's established seed for its own files
@@ -86,13 +129,44 @@ const APP_CONFIG = `${PACKAGE_ROOT}/vitest.config.ts`;
 const FIXTURE_ROOT = `${PACKAGE_ROOT}/test/fixtures/late-console-teardown`;
 const ABLATION_CONFIG = `${FIXTURE_ROOT}/vitest.unguarded.config.ts`;
 
-/** The exact message vitest 4.1.10 rejects a pending console RPC with. */
-const TEARDOWN_ERROR = 'Closing rpc while "onUserConsoleLog" was pending';
+// The premise probe reads the SAME vitest the child runs — reached through this
+// package's own `node_modules`, the way `VITEST_BIN` above is, so the two can
+// never end up describing different installs. rollup content-hashes the chunk
+// names, so each is found by prefix rather than named.
+const VITEST_CHUNKS = `${PACKAGE_ROOT}/node_modules/vitest/dist/chunks`;
 
-/** Attempts allowed to the ablation leg before it is declared broken. */
+/**
+ * vitest's rejection wording, verbatim from `init.*.js`, with its interpolation
+ * left as source text so the probe can look for the template itself.
+ *
+ * `TEARDOWN_ERROR` is DERIVED from it rather than written out a second time: it
+ * is the string the ablation greps for in the child's output, and the whole
+ * failure mode this file guards against is those two drifting apart silently.
+ */
+const TEARDOWN_MESSAGE_TEMPLATE = 'Closing rpc while "${method}" was pending';
+const FORWARDED_METHOD = 'onUserConsoleLog';
+
+/** The exact message vitest rejects a pending console RPC with. */
+const TEARDOWN_ERROR = TEARDOWN_MESSAGE_TEMPLATE.replace('${method}', FORWARDED_METHOD);
+
+/** The forwarding call whose returned promise `sendLog` throws away. */
+const FORWARDING_CALL = `state().rpc.${FORWARDED_METHOD}(`;
+
+/**
+ * Attempts allowed to the ablation leg before the run is declared DEGRADED.
+ *
+ * Deliberately unchanged at 8 (#11939). With the premise probe carrying the
+ * "is the instrument alive" question, more attempts buy only a lower skip rate
+ * — and they are paid on every loaded run, which is precisely the run that
+ * cannot afford them. The measurement in this file's docblock prices it: no
+ * budget makes an environment-dependent race reliable.
+ */
 const ABLATION_ATTEMPTS = 8;
 /** Repetitions of the guarded leg. A removed guard reproduces ~80% per run. */
 const GUARDED_REPETITIONS = 4;
+
+/** Greppable, so a chronically degraded leg is countable out of a job log. */
+const DEGRADED_MARKER = 'ABLATION-DEGRADED [#11939]';
 
 interface Leg {
   readonly status: number | null;
@@ -154,6 +228,177 @@ function runFixture(config: string): Leg {
 }
 
 /**
+ * THE PREMISE PROBE (#11939).
+ *
+ * Four facts about the installed vitest, each one a link in the chain the
+ * ablation's race walks at run time, each readable without running anything.
+ * Together they answer the question the race answers only probabilistically:
+ * is the mechanism still there? A broken link is not a flake and no retry
+ * budget touches it.
+ *
+ * The chunks are UNMINIFIED in a published vitest, which is why the markers can
+ * be this specific. Each is a statement about SHAPE, not formatting: what
+ * `sendLog` does with the promise, what `rpcDone` awaits, what runs after it,
+ * and how the rejection is worded.
+ */
+interface ChunkSources {
+  readonly consoleFile: string;
+  readonly consoleSource: string;
+  readonly rpcFile: string;
+  readonly rpcSource: string;
+  readonly initFile: string;
+  readonly initSource: string;
+}
+
+interface PremiseMarker {
+  readonly name: string;
+  readonly chunk: string;
+  readonly holds: boolean;
+  /** What its absence would MEAN — the sentence a failing run needs. */
+  readonly meaning: string;
+}
+
+interface Premise {
+  readonly intact: boolean;
+  readonly markers: readonly PremiseMarker[];
+}
+
+/** The one `<prefix>.<hash>.js` chunk, or a failure that names what it saw. */
+function readChunk(prefix: string): { file: string; source: string } {
+  const matches = readdirSync(VITEST_CHUNKS, { withFileTypes: true })
+    .filter((entry) => !entry.isDirectory())
+    .map((entry) => entry.name)
+    .filter((name) => name.startsWith(`${prefix}.`) && name.endsWith('.js'));
+
+  if (matches.length !== 1) {
+    throw new Error(
+      `expected exactly one "${prefix}.*.js" chunk under ${VITEST_CHUNKS}, found ` +
+        `${matches.length} (${matches.join(', ') || 'none'}). vitest's dist layout moved, so ` +
+        `this pin can no longer read the mechanism it guards — repoint the probe, do NOT ` +
+        `relax either leg.`,
+    );
+  }
+
+  return { file: matches[0], source: readFileSync(`${VITEST_CHUNKS}/${matches[0]}`, 'utf8') };
+}
+
+function readChunks(): ChunkSources {
+  const consoleChunk = readChunk('console');
+  const rpcChunk = readChunk('rpc');
+  const initChunk = readChunk('init');
+  return {
+    consoleFile: consoleChunk.file,
+    consoleSource: consoleChunk.source,
+    rpcFile: rpcChunk.file,
+    rpcSource: rpcChunk.source,
+    initFile: initChunk.file,
+    initSource: initChunk.source,
+  };
+}
+
+/**
+ * Pure, so the control test below can feed it a MUTATED copy of the real chunks
+ * and prove each marker reports BROKEN when the shape it names is fixed. A
+ * probe whose only observed value is "intact" is green three ways — the shape
+ * is there, the predicate matches nothing, or the file it reads moved — and
+ * this one is not allowed to be.
+ */
+function evaluatePremise(chunks: ChunkSources): Premise {
+  // 1. `sendLog` calls the forwarder as a BARE STATEMENT: nothing on the line
+  //    before it (no `await`, no `return`, no assignment) and no `.then`/
+  //    `.catch` on the statement. That is what leaves the rejection unhandled;
+  //    handle it anywhere and the defect is gone.
+  const callAt = chunks.consoleSource.indexOf(FORWARDING_CALL);
+  const lineStart = callAt < 0 ? 0 : chunks.consoleSource.lastIndexOf('\n', callAt) + 1;
+  const beforeCall = callAt < 0 ? '' : chunks.consoleSource.slice(lineStart, callAt);
+  const statementEnd = callAt < 0 ? -1 : chunks.consoleSource.indexOf(';', callAt);
+  const statement =
+    callAt < 0
+      ? ''
+      : chunks.consoleSource.slice(
+          callAt,
+          statementEnd < 0 ? chunks.consoleSource.length : statementEnd,
+        );
+  const discardsForwardingPromise =
+    callAt >= 0 && /^\s*$/.test(beforeCall) && !/\.(then|catch|finally)\s*\(/.test(statement);
+
+  // 2. `rpcDone()` awaits a SNAPSHOT rather than draining until empty. This is
+  //    the link that lets a call created a moment later be missed entirely.
+  const rpcDoneAt = chunks.rpcSource.indexOf('async function rpcDone()');
+  const rpcDoneEnd = rpcDoneAt < 0 ? -1 : chunks.rpcSource.indexOf('\n}', rpcDoneAt);
+  const rpcDoneBody =
+    rpcDoneAt < 0
+      ? ''
+      : chunks.rpcSource.slice(rpcDoneAt, rpcDoneEnd < 0 ? chunks.rpcSource.length : rpcDoneEnd);
+  const drainsASnapshot = rpcDoneAt >= 0 && rpcDoneBody.includes('Array.from(promises)');
+
+  // 3. The teardown still drains and THEN runs its cleanups — the ordering that
+  //    puts the rejection sweep after the snapshot was taken.
+  const drainAt = chunks.initSource.indexOf('await rpcDone()');
+  const afterDrain = drainAt < 0 ? '' : chunks.initSource.slice(drainAt, drainAt + 200);
+  const sweepFollowsDrain = drainAt >= 0 && afterDrain.includes('cleanups.map(');
+
+  // 4. The sweep REJECTS what is still pending, rather than settling it.
+  const sweepRejectsPendingCalls = chunks.initSource.includes('$rejectPendingCalls(');
+
+  // 5. And it words the rejection the way the ablation's grep expects. If this
+  //    is the only broken marker, the defect is untouched and only the string
+  //    moved — a one-line repair, and one that is invisible without this check.
+  const rejectionWordingUnchanged = chunks.initSource.includes(TEARDOWN_MESSAGE_TEMPLATE);
+
+  const markers: readonly PremiseMarker[] = [
+    {
+      name: 'sendLog discards the forwarding promise',
+      chunk: chunks.consoleFile,
+      holds: discardsForwardingPromise,
+      meaning:
+        'vitest now holds, awaits or catches the console-forwarding promise, so a rejected ' +
+        'console RPC can no longer surface as an unhandled error',
+    },
+    {
+      name: 'rpcDone awaits a snapshot of pending calls',
+      chunk: chunks.rpcFile,
+      holds: drainsASnapshot,
+      meaning:
+        'vitest no longer drains a snapshot, so a call created after the drain began is no ' +
+        'longer missed',
+    },
+    {
+      name: 'the cleanup sweep runs after the drain',
+      chunk: chunks.initFile,
+      holds: sweepFollowsDrain,
+      meaning: 'teardown no longer drains the RPC and then runs its cleanups in that order',
+    },
+    {
+      name: 'the sweep rejects still-pending calls',
+      chunk: chunks.initFile,
+      holds: sweepRejectsPendingCalls,
+      meaning: 'teardown no longer rejects what is still pending when it closes the channel',
+    },
+    {
+      name: 'the rejection wording still yields the grepped string',
+      chunk: chunks.initFile,
+      holds: rejectionWordingUnchanged,
+      meaning:
+        `vitest reworded the rejection, so the ablation's grep for "${TEARDOWN_ERROR}" can ` +
+        'never match again — the mechanism may be entirely intact',
+    },
+  ];
+
+  return { intact: markers.every((marker) => marker.holds), markers };
+}
+
+function describePremise(premise: Premise): string {
+  return premise.markers
+    .map(
+      (marker) =>
+        `\n  ${marker.holds ? 'intact' : 'BROKEN'}  ${marker.name} [${marker.chunk}]` +
+        (marker.holds ? '' : `\n          ⇒ ${marker.meaning}`),
+    )
+    .join('');
+}
+
+/**
  * The anti-vacuity guards below grade the CHILD, whose output is captured and
  * therefore never reaches the job log on its own. Saying only "measured
  * nothing" leaves a CI-only failure undiagnosable from the log it fails in —
@@ -187,10 +432,124 @@ describe('[#10293] vitest console-forwarding teardown race', () => {
     expect(existsSync(ABLATION_CONFIG)).toBe(true);
   });
 
+  it('PREMISE: the installed vitest still has the shape this pin exploits', () => {
+    const premise = evaluatePremise(readChunks());
+
+    expect(
+      premise.intact,
+      `vitest's console-forwarding teardown shape CHANGED. This is deterministic, not a ` +
+        `flake, and no retry budget touches it:${describePremise(premise)}\n\n` +
+        `If the mechanism really is gone upstream, this pin's defect is fixed and the whole ` +
+        `file — including \`disableConsoleIntercept\` in vitest.config.ts — should be retired ` +
+        `deliberately, in one considered change. Until then, do NOT relax the GUARDED leg: it ` +
+        `is what keeps the merge queue safe, and a changed premise is not evidence about it.`,
+    ).toBe(true);
+  });
+
+  it('PREMISE CONTROL: the probe reports BROKEN when the shape it pins is fixed', () => {
+    const real = readChunks();
+    expect(evaluatePremise(real).intact, 'the control needs an intact baseline to mutate').toBe(
+      true,
+    );
+
+    // Each case is a MINIMAL edit modelling the upstream fix that would kill
+    // one link, applied to the real chunk text. `mutate` returning an unchanged
+    // string is the failure this whole file exists to notice, so it is asserted
+    // rather than assumed: a no-op edit would make every case below pass while
+    // measuring nothing at all.
+    const cases: ReadonlyArray<{
+      readonly marker: string;
+      readonly mutate: (chunks: ChunkSources) => ChunkSources;
+    }> = [
+      {
+        marker: 'sendLog discards the forwarding promise',
+        mutate: (chunks) => ({
+          ...chunks,
+          consoleSource: chunks.consoleSource.replace(
+            FORWARDING_CALL,
+            `await ${FORWARDING_CALL}`,
+          ),
+        }),
+      },
+      {
+        marker: 'sendLog discards the forwarding promise',
+        mutate: (chunks) => {
+          // `...onUserConsoleLog({ … }).catch(() => {});` — the other shape the
+          // fix takes, and the one a line-anchored check would miss.
+          const at = chunks.consoleSource.indexOf(FORWARDING_CALL);
+          const end = chunks.consoleSource.indexOf(';', at);
+          return {
+            ...chunks,
+            consoleSource:
+              chunks.consoleSource.slice(0, end) +
+              '.catch(() => {})' +
+              chunks.consoleSource.slice(end),
+          };
+        },
+      },
+      {
+        marker: 'rpcDone awaits a snapshot of pending calls',
+        mutate: (chunks) => ({
+          ...chunks,
+          rpcSource: chunks.rpcSource.replace('Array.from(promises)', 'drainUntilEmpty(promises)'),
+        }),
+      },
+      {
+        marker: 'the cleanup sweep runs after the drain',
+        mutate: (chunks) => ({
+          ...chunks,
+          initSource: chunks.initSource.replace('await rpcDone()', 'await Promise.resolve()'),
+        }),
+      },
+      {
+        marker: 'the sweep rejects still-pending calls',
+        mutate: (chunks) => ({
+          ...chunks,
+          initSource: chunks.initSource.replace('$rejectPendingCalls(', '$settlePendingCalls('),
+        }),
+      },
+      {
+        marker: 'the rejection wording still yields the grepped string',
+        mutate: (chunks) => ({
+          ...chunks,
+          initSource: chunks.initSource.replace(
+            TEARDOWN_MESSAGE_TEMPLATE,
+            'Closing rpc while "${method}" was in flight',
+          ),
+        }),
+      },
+    ];
+
+    for (const [index, testCase] of cases.entries()) {
+      const mutated = testCase.mutate(real);
+
+      const changed =
+        mutated.consoleSource !== real.consoleSource ||
+        mutated.rpcSource !== real.rpcSource ||
+        mutated.initSource !== real.initSource;
+      expect(
+        changed,
+        `case ${index} ("${testCase.marker}") edited nothing — its anchor no longer occurs in ` +
+          `the installed vitest, so this case has been measuring a probe against an unmodified ` +
+          `input and passing for the wrong reason.`,
+      ).toBe(true);
+
+      const premise = evaluatePremise(mutated);
+      const broken = premise.markers.filter((marker) => !marker.holds).map((marker) => marker.name);
+      expect(
+        broken,
+        `case ${index} should break exactly "${testCase.marker}" and nothing else`,
+      ).toEqual([testCase.marker]);
+      expect(premise.intact).toBe(false);
+    }
+  });
+
   it(
     'ABLATION: the fixture still reddens a green run under vitest defaults',
     { timeout: 240_000 },
-    () => {
+    (ctx) => {
+      const premise = evaluatePremise(readChunks());
+
       const attempts: Leg[] = [];
       for (let i = 0; i < ABLATION_ATTEMPTS; i++) {
         const leg = runFixture(ABLATION_CONFIG);
@@ -207,18 +566,46 @@ describe('[#10293] vitest console-forwarding teardown race', () => {
       ).toBe(true);
 
       const reproduced = attempts.find((leg) => leg.reproduced);
+
+      // The grading matrix (#11939). The race alone cannot separate "did not
+      // fire" from "cannot fire ever again"; the premise probe can, so it is
+      // the axis that decides whether a silent race is a failure at all.
       expect(
-        reproduced,
-        `the instrument stopped reproducing: ${attempts.length} attempts under vitest ` +
-          `defaults produced no "${TEARDOWN_ERROR}". Either vitest changed its console ` +
-          `forwarding (check sendLog/rpcDone in its dist chunks) or the fixture stopped ` +
-          `leaking. Do NOT relax the guarded leg on the strength of this.`,
-      ).toBeDefined();
+        premise.intact,
+        reproduced
+          ? `the PREMISE PROBE IS STALE, not vitest: the race still reproduces — the child ` +
+              `printed "${TEARDOWN_ERROR}" — while the probe reads the mechanism as ` +
+              `changed:${describePremise(premise)}\n\nRepair the probe to match the installed ` +
+              `vitest. Nothing about either leg's assertion is in question here.`
+          : `the INSTRUMENT IS DEAD, and this is not the load flake: ${attempts.length} ` +
+              `attempts produced no "${TEARDOWN_ERROR}" AND the mechanism itself no longer ` +
+              `reads as present in the installed vitest:${describePremise(premise)}\n\n` +
+              `Treat it as an upstream change, not as a retry budget to raise. Do NOT relax ` +
+              `the GUARDED leg on the strength of this.`,
+      ).toBe(true);
+
+      if (!reproduced) {
+        // Premise intact, race silent: the window did not open on this box.
+        // Loud (it is written straight to the worker's stdout — this app turns
+        // console interception off) and countable (reported as SKIPPED, and the
+        // marker greps out of a job log), because a leg that quietly stops
+        // measuring is the failure mode this file was built to make impossible.
+        const degraded =
+          `${DEGRADED_MARKER} the teardown race did not open in ${attempts.length} attempts, ` +
+          `and the premise probe reads all ${premise.markers.length} markers of the mechanism ` +
+          `as INTACT in the installed vitest. So the instrument is alive and this run simply ` +
+          `did not catch the window — measured cause: concurrent node processes suppress it ` +
+          `(~14% per attempt under load versus 20/20 idle; see this file's docblock). This ` +
+          `leg is SKIPPED, never passed. The GUARDED leg is unaffected and still ran.`;
+        console.warn(degraded);
+        ctx.skip(degraded);
+        return;
+      }
 
       // Every assertion in the fixture passed, and the run still failed. That
       // conjunction is the whole defect.
-      expect(reproduced?.status).not.toBe(0);
-      expect(reproduced?.output).toContain('Tests  1 passed (1)');
+      expect(reproduced.status).not.toBe(0);
+      expect(reproduced.output).toContain('Tests  1 passed (1)');
     },
   );
 
