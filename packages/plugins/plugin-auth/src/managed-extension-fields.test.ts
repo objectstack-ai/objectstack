@@ -315,19 +315,50 @@ const COVERED_OBJECTS: readonly string[] = [
  *    This file's walk of `PACKAGES_DIR` below is what holds the
  *    `packages/**\/*.object.ts` half of plugin-auth's declared radius and the
  *    matching `turbo.json` inputs: it is the only escaping read in this package
- *    that reaches an object file anywhere in the tree. Deriving the root any
- *    other way — the `findUp` walk from `process.cwd()` that
- *    `member-role-canonical.test.ts` uses — makes this radius INVISIBLE to
- *    that gate, and note what that does NOT do any more: since #10161 gave
- *    plugin-auth a second visible escaping test
- *    (`rate-limit-storage-isolation.test.ts`, whose roster is the two consumer
- *    directories, not this glob), the package no longer goes stale-empty, so
- *    the gate stays GREEN and this glob is simply held by nothing. Measured on
- *    ceb33a9f12 by reseeding this file from `process.cwd()`: `--list-escapes`
- *    dropped this file and `--verify` still exited 0. Losing the seed would put
- *    this sweep back in #7802's blind spot with no gate reporting it: turbo
- *    would replay a cached green for a diff that changed another package's
- *    object file.
+ *    that reaches an object file anywhere in the tree.
+ *
+ *    ⛔ So this file keeps its `__dirname` seed. The reason that prohibition
+ *    used to give has been RESTATED rather than repeated, because the gate moved
+ *    under it twice and the sentence did not — re-derive from the three
+ *    measurements below rather than trusting any prose version of them. Each was
+ *    taken on b706af987 by reseeding this file and re-running the gate:
+ *
+ *      · WHAT HOLDS THE GLOB is a declaration, not the roster. The walk below
+ *        descends on a loop variable, so no `*.object.ts` path is ever NAMED;
+ *        the holder is the `heldBy` witness in that gate's plugin-auth entry,
+ *        which names this file and is satisfied only while this file is still
+ *        one of the package's ESCAPING tests. `packages/core/src/security/**`
+ *        rides on the same condition — its only holder is the api-key path
+ *        quoted in this file's prose above, and a quoted path enters the roster
+ *        only from a file that escapes.
+ *      · A SEED THE DETECTOR CANNOT RESOLVE — a bare `process.cwd()`, or a
+ *        `findUp` keyed on `turbo.json` — drops this file out of
+ *        `--list-escapes`, and `--verify` then exits 1 naming both globs, the
+ *        first annotated `witness no longer escaping`. That is the other half of
+ *        this note that had rotted: it used to say the gate "stays GREEN and
+ *        this glob is simply held by nothing", which was true before #10566 gave
+ *        the gate its unheld-glob limb and is false now. The remaining route
+ *        back into #7802's blind spot is one step further on — reading that red
+ *        as the gate's disposition 3 and DELETING the glob, which its own
+ *        failure text lists LAST for exactly this reason.
+ *      · A `findUp` WALK NO LONGER ABLATES THIS. Reseeded through the
+ *        workspace-root anchor (`pnpm-workspace.yaml`), this file stays in
+ *        `--list-escapes` and `--verify` exits 0: the radius stays visible and
+ *        named. So the clause this note used to carry — that deriving the root
+ *        via the `findUp` walk `member-role-canonical.test.ts` uses makes the
+ *        radius INVISIBLE — is false since #10852, which taught the detector
+ *        two ANCHOR predicates (this package's own manifest `name`; a
+ *        `WORKSPACE_ROOT_MARKERS` file). ⛔ Do not re-derive the seed choice
+ *        from that clause: it now argues for nothing.
+ *
+ *    What the prohibition rests on instead is the part that did not move.
+ *    `import.meta` is a TS1470 here (above), and of what is left `__dirname` is
+ *    the only spelling that both type-checks under this package's own config and
+ *    resolves from the FILE alone — no `findUp` helper to carry, no repo context,
+ *    no predicate the detector has to special-case. A reseed buys this file
+ *    nothing and narrows its correctness to the two predicates that gate
+ *    recognises today; the near miss is measured above, one marker filename
+ *    apart.
  */
 const HERE = __dirname;
 /** …/packages/plugins/plugin-auth/src → repo root */

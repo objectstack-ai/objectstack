@@ -99,6 +99,7 @@
 // shipped, and the two corrected ones that replaced them.
 import { execFileSync } from 'node:child_process';
 import { readFileSync, existsSync } from 'node:fs';
+import { isEntrypoint } from './invoked-as.mjs';
 
 const SPEC_CHANGELOG = 'packages/spec/CHANGELOG.md';
 const SPEC_PKG = 'packages/spec/package.json';
@@ -837,51 +838,61 @@ function renderOk(checked, tagCorroborations) {
 
 // ── Run ──────────────────────────────────────────────────────────────────────
 
-if (process.argv.includes('--self-test')) selfTest();
+function main() {
 
-const changelogText = readFileSync(SPEC_CHANGELOG, 'utf8');
-const gaMajorList = gaMajors(changelogText);
-const specVersion = JSON.parse(readFileSync(SPEC_PKG, 'utf8')).version;
-const tagMajorList = readGaTagMajors();
+  const changelogText = readFileSync(SPEC_CHANGELOG, 'utf8');
+  const gaMajorList = gaMajors(changelogText);
+  const specVersion = JSON.parse(readFileSync(SPEC_PKG, 'utf8')).version;
+  const tagMajorList = readGaTagMajors();
 
-const problems = instrumentProblems({ gaMajorList, specVersion, tagMajorList });
+  const problems = instrumentProblems({ gaMajorList, specVersion, tagMajorList });
 
-const checked = gaMajorList.filter(inScope);
-if (problems.length === 0 && checked.length === 0) {
-  problems.push(
-    `no GA major at or above v${SCOPE_FLOOR_MAJOR} was found in ${SPEC_CHANGELOG}, so this gate `
-    + 'checked ZERO pages. v16 and v17 have both shipped and majors only go up, so this cannot be a '
-    + 'true reading — a gate that silently checks nothing is worse than no gate. Fix the parse.',
-  );
-}
-
-if (problems.length === 0) {
-  const indexText = existsSync(INDEX_PATH) ? readFileSync(INDEX_PATH, 'utf8') : null;
-  if (indexText === null) {
-    problems.push(`${INDEX_PATH} is missing — there is no releases index to check entries against.`);
-  }
-  for (const major of checked) {
-    const pagePath = `${RELEASES_DIR}/v${major}.mdx`;
-    if (!existsSync(pagePath)) {
-      problems.push(
-        `${pagePath} is missing — @objectstack/spec ${major}.x is GA but there is no release page to `
-        + 'check. (check:release-notes is the gate that owns page existence; this one owns what the '
-        + 'page SAYS.)',
-      );
-      continue;
-    }
+  const checked = gaMajorList.filter(inScope);
+  if (problems.length === 0 && checked.length === 0) {
     problems.push(
-      ...pageStatusProblems(major, pagePath, statusBlockquote(readFileSync(pagePath, 'utf8'))),
+      `no GA major at or above v${SCOPE_FLOOR_MAJOR} was found in ${SPEC_CHANGELOG}, so this gate `
+      + 'checked ZERO pages. v16 and v17 have both shipped and majors only go up, so this cannot be a '
+      + 'true reading — a gate that silently checks nothing is worse than no gate. Fix the parse.',
     );
-    if (indexText !== null) {
-      problems.push(...indexStatusProblems(major, indexEntryLine(indexText, major)));
+  }
+
+  if (problems.length === 0) {
+    const indexText = existsSync(INDEX_PATH) ? readFileSync(INDEX_PATH, 'utf8') : null;
+    if (indexText === null) {
+      problems.push(`${INDEX_PATH} is missing — there is no releases index to check entries against.`);
+    }
+    for (const major of checked) {
+      const pagePath = `${RELEASES_DIR}/v${major}.mdx`;
+      if (!existsSync(pagePath)) {
+        problems.push(
+          `${pagePath} is missing — @objectstack/spec ${major}.x is GA but there is no release page to `
+          + 'check. (check:release-notes is the gate that owns page existence; this one owns what the '
+          + 'page SAYS.)',
+        );
+        continue;
+      }
+      problems.push(
+        ...pageStatusProblems(major, pagePath, statusBlockquote(readFileSync(pagePath, 'utf8'))),
+      );
+      if (indexText !== null) {
+        problems.push(...indexStatusProblems(major, indexEntryLine(indexText, major)));
+      }
     }
   }
+
+  if (problems.length > 0) {
+    console.error(renderFailure(problems));
+    process.exit(1);
+  }
+
+  console.log(renderOk(checked, tagMajorList.filter(inScope).length));
 }
 
-if (problems.length > 0) {
-  console.error(renderFailure(problems));
-  process.exit(1);
+// Guarded: this module exports its predicates (`gaMajors`, `pageStatusProblems`,
+// `indexStatusProblems` — check-release-section-coverage.mjs inherits the same
+// scope floor from it), and unguarded the whole gate ran inside any importer,
+// printing its verdict over theirs.
+if (isEntrypoint(import.meta.url)) {
+  if (process.argv.includes('--self-test')) selfTest();
+  main();
 }
-
-console.log(renderOk(checked, tagMajorList.filter(inScope).length));

@@ -560,6 +560,32 @@
  *       pushed one commit and then died (its branch moved after the claim), for
  *       the same reason — that is precisely the card the protocol protects.
  *
+ * ## H28 — the STALE BODY LINE that shadowed the live blocker
+ *
+ *   H28 an open `pm:blocked` card whose BODY names a `Blocked-by:` target that
+ *       has CLOSED while a COMMENT names one that is still OPEN. The body is
+ *       the canonical home for the line, so this is the re-park written half:
+ *       a seat found the body's upstream closed, carded the real prerequisite,
+ *       wrote the NEW blocker into a comment — and left the spent one in the
+ *       body. Measured: one card sat in exactly this shape while its real
+ *       blocker was open and `pm:dispatched`, and it was RELEASED to `pm:queue`
+ *       on the strength of the stale line.
+ *       ⚠️ The mechanism half is the gate that used to sit in front of the
+ *       liveness read. `needsBlockedByComments` skips a card whose body already
+ *       carries a line — correct for H4, which only asks whether the line
+ *       EXISTS — but H19/H26 borrowed that gathering and so resolved ONLY the
+ *       stale body target, found it closed, and published "the block has
+ *       outlived its blocker": a FALSE unlock candidate, on three consecutive
+ *       sweeps. The liveness read is therefore UNGATED now
+ *       (`needsBlockerLivenessComments`), and H4's cheap question stays cheap.
+ *       Ungating alone would only turn the false candidate into a PARTIAL one,
+ *       so this row is its pair: it names the stale body line as the thing to
+ *       fix and asks for the live blocker to be MIGRATED to the body, enforcing
+ *       the canonical-home doctrine at the moment the wrong shape is written
+ *       rather than trusting a seat to remember it mid-re-park.
+ *       FREE: the same resolutions H19 and H26 already hold, asked a third
+ *       question — which CHANNEL each target arrived in.
+ *
  * ## The close mechanism, measured (#8293)
  *
  * A half-delivered card (#8131) was closed `completed` two seconds after its
@@ -2924,16 +2950,21 @@ export function blockerTargetKey(ref, ownerRepo = OWNER_REPO) {
  * open listing by construction) — a permanent no-op that costs a row of noise
  * in every explanation of what H19 read.
  *
- * ## The comment channel's stated boundary
+ * ## The comment channel is UNGATED here (#11747)
  *
- * `commentBodies` is whatever the sweep's gated fallback read, and that gate
- * (`needsBlockedByComments`) skips a card whose BODY already carries a line.
- * So a card with a body line AND a second, different blocker parked in a
- * comment has its comment-borne target invisible to H19 — a bound inherited
- * from the gate, not a decision taken here. `undefined` (unconsulted) and
- * `null` (consulted, unreadable) both contribute nothing; the `null` case is
- * a card H4 is already firing on with a sentence that says the thread could
- * not be read, which is the louder and more accurate place for it.
+ * `commentBodies` is what `needsBlockerLivenessComments` gathered, and that
+ * gate is the label alone — it does NOT skip a card whose body already carries
+ * a line, which is where `needsBlockedByComments` (H4's gate, correctly) stops.
+ * The bound this note used to record was a real defect: a card with a body line
+ * AND a second, different blocker parked in a comment had its comment-borne
+ * target invisible here, so a RE-PARK — body line spent, new blocker in a
+ * comment — resolved only the closed target and published a false unlock
+ * candidate. Both channels now, unconditionally, for every `pm:blocked` card.
+ *
+ * `undefined` (unconsulted) and `null` (consulted, unreadable) still contribute
+ * nothing; the `null` case is a card H4 is already firing on with a sentence
+ * that says the thread could not be read, which is the louder and more accurate
+ * place for it.
  *
  * @param {object} issue
  * @param {string[]|null|undefined} commentBodies
@@ -2972,6 +3003,36 @@ export function blockerTargetsFor(issue, commentBodies, ownerRepo = OWNER_REPO) 
  */
 export function needsBlockerLiveness(issue) {
   return labelNames(issue ?? {}).includes('pm:blocked');
+}
+
+/**
+ * Which cards buy a comment fetch FOR THE LIVENESS READ — deliberately NOT
+ * `needsBlockedByComments`, and the difference is the defect this gate exists
+ * to end (#11747).
+ *
+ * That gate skips any card whose BODY already carries a `Blocked-by:` line,
+ * which is exactly right for the question IT serves: H4 asks whether the author
+ * left the machine anything at all, and a body line answers that without the
+ * network. H19 and H26 ask a different question — is what the line names still
+ * RUNNING — and for that question a body line is not an answer, it is one
+ * channel's worth of targets. Borrowing H4's gate made the liveness read resolve
+ * ONLY the body target on precisely the cards where the body is most likely to
+ * be spent: a RE-PARK. A seat that finds the body's upstream closed, cards the
+ * real prerequisite and writes the new blocker into a comment leaves a card
+ * whose body names a closed issue and whose comment names an open one — and the
+ * gated read saw only the closed one, published "the block has outlived its
+ * blocker", and a card was released into an open blocker on the strength of it.
+ *
+ * So the liveness read is ungated: every `pm:blocked` card contributes both
+ * channels, always. The cost is the gate's own complement — one comment fetch
+ * per blocked card that HAS a body line (15 of 33 in the 2026-08-24 census),
+ * bounded by an inventory the sweep already pages and paid once per sweep off
+ * the SHARED comment cache, so a card H2/H4/H17 already fetched costs nothing.
+ * ⛔ H4's gate is deliberately left alone: making the cheap question expensive
+ * would buy nothing — a body line really does discharge the duty H4 audits.
+ */
+export function needsBlockerLivenessComments(issue) {
+  return needsBlockerLiveness(issue);
 }
 
 /**
@@ -4002,6 +4063,337 @@ export function h25AwaitingMaintainerExclusivity(issue) {
 }
 
 // ---------------------------------------------------------------------------
+// H29 — the pm state labels are ONE-OF, GENERALLY (#11179).
+//
+// H3 and H25 are both this invariant, each pinned to the carrier that was
+// measured drifting: H3 to the one pair (`pm:queue` + `pm:dispatched`), H25 to
+// the one label (`pm:awaiting-maintainer`, written while its population was
+// still zero). Between them the vocabulary has six members and fifteen pairs,
+// and eleven of those pairs had no reader at all — including the two this card
+// was filed on:
+//
+//   • `pm:queue` + `needs-user-decision` — the state model defines `pm:queue`
+//     as 「无可问之事」, so the pair is a card that is simultaneously ready to
+//     dispatch and waiting on a ruling. The measured seat behaviour was exactly
+//     that: the analysis was posted, the decision label went on, and the queue
+//     label was never taken off — 「判断做了(有分析产出),状态写入没做」.
+//   • `pm:queue` + `pm:blocked` — the unlock/park transitions are two
+//     INDEPENDENT label writes with no exclusivity invariant between them, so a
+//     half-finished park leaves both. The measured specimen sat dual-hung for
+//     three days.
+//
+// LIVE at the time of writing (2026-08-24 board read): #11534 carries
+// `needs-user-decision` + `pm:blocked` — a third pair, in a third direction,
+// which is the point: pinning pairs one at a time is how the family kept
+// producing a new unreported shape. This row asks the invariant itself.
+//
+// ## It reports the pairs no other row owns, and only those
+//
+// A breach must be reported ONCE. H3 owns `pm:queue` + `pm:dispatched` (with
+// its own measured specimen and its own sentence) and H25 owns every pair
+// containing `pm:awaiting-maintainer` (with a per-label clause naming the
+// specific lie). So this row skips exactly those and reports the remainder —
+// and on a card carrying THREE states it still reports the pairs the others do
+// not, rather than going silent because one of them fired. Both exclusions are
+// pinned in the self-test, in both directions: the excluded pair is silent
+// HERE and the owning row does fire on it.
+//
+// ## Free, and report-only
+//
+// Two label reads on a card the sweep already holds — no request. ⛔ Never a
+// label written from this script: which state is TRUE is a judgement about the
+// card (is it waiting on a ruling, or on a blocker, or on nothing?), and the
+// same half-written transition that produced the pair would be reproduced by a
+// sweeper guessing at it. The row names both claims and asks for ONE write.
+// ---------------------------------------------------------------------------
+
+/**
+ * The ONE-OF vocabulary, in ONE place: the awaiting state plus the five it
+ * excludes. Derived from H25's list rather than re-typed, so the two rows can
+ * never disagree about what a "pm state" is — the same single-constant
+ * discipline `AWAITING_MAINTAINER_LABEL` itself was introduced with, and the
+ * failure family this whole file belongs to.
+ *
+ * ⚠️ This is the THIRD `pm:*` label set in this file, and the three are
+ * deliberately different questions with deliberately different answers. Do not
+ * unify them on the strength of the similar names — the self-test pins all
+ * three pairwise:
+ *
+ *   `PM_STATE_LABELS`      (H13) "does any label make this card VISIBLE to a
+ *                          named reader?" — so it carries `finding`, `pm:epic`
+ *                          and `pm:seat`, none of which is a position on the
+ *                          work state machine.
+ *   `PM_RESIDUE_LABELS`    (H22) "does this label CLAIM work is in flight?" —
+ *                          so it carries `pm:blocking` (a derived priority
+ *                          cache, not a state) and drops `needs-user-decision`
+ *                          (a fine state to close in).
+ *   `PM_EXCLUSIVE_STATE_LABELS` (H25/H29) "is this a position the card can be
+ *                          IN, such that two of them contradict?" — identity
+ *                          stickers (`pm:seat`, `pm:epic`) legally coexist
+ *                          with any state and are out; `pm:blocking` and
+ *                          `pm:retriage` are annotations ON a state and are
+ *                          out; `finding` is a card KIND rather than a
+ *                          position and is out. `needs-user-decision` is IN,
+ *                          because a card awaiting a ruling is somewhere, and
+ *                          somewhere else is a contradiction.
+ */
+export const PM_EXCLUSIVE_STATE_LABELS = [
+  AWAITING_MAINTAINER_LABEL,
+  ...AWAITING_MAINTAINER_EXCLUSIVE_LABELS,
+];
+
+/**
+ * What each state claims ON ITS OWN — one clause, so a row names the two
+ * contradicting claims rather than complaining that two labels are present.
+ *
+ * Deliberately NOT merged with H25's `AWAITING_MAINTAINER_CONFLICT_REASON`:
+ * that map says what a pairing WITH THE AWAITING STATE specifically lies about
+ * (it reads as the second half of one sentence), while this one says what the
+ * label asserts by itself, which is what a general pair needs on both sides.
+ * The self-test pins that every `PM_EXCLUSIVE_STATE_LABELS` member has an entry, so the
+ * vocabulary cannot be half-extended the way four string literals would be.
+ */
+export const PM_STATE_CLAIM = {
+  'pm:queue': 'dispatchable NOW, with nothing left to ask',
+  'pm:dispatched': 'an agent is working it under a live claim',
+  'pm:blocked': 'it cannot start until a `Blocked-by:` target closes',
+  'pm:on-hold': 'it is parked behind a machine-fireable `Restart-when:`',
+  [AWAITING_MAINTAINER_LABEL]: 'its remaining work is a manual maintainer action',
+  'needs-user-decision': 'a maintainer RULING is owed before anything can move',
+};
+
+/** A pair as an order-independent key, so the exclusions cannot depend on label order. */
+const pmStatePairKey = (a, b) => [a, b].sort().join('|');
+
+/**
+ * The pairs another row already reports, by key. `pm:queue` + `pm:dispatched`
+ * is H3's; every pair containing the awaiting label is H25's (handled by the
+ * label test below rather than enumerated, so a future member added to
+ * `AWAITING_MAINTAINER_EXCLUSIVE_LABELS` is covered without a second edit).
+ */
+const H3_PAIR_KEY = pmStatePairKey('pm:queue', 'pm:dispatched');
+
+/** H29 — null when at most one state claim stands, else the finding sentence. */
+export function h29PmStateExclusivity(issue) {
+  if (issue?.state === 'closed') return null;
+  const labels = labelNames(issue ?? {});
+  const present = PM_EXCLUSIVE_STATE_LABELS.filter((l) => labels.includes(l));
+  if (present.length < 2) return null;
+  const pairs = [];
+  for (let i = 0; i < present.length; i++) {
+    for (let j = i + 1; j < present.length; j++) {
+      const a = present[i];
+      const b = present[j];
+      if (a === AWAITING_MAINTAINER_LABEL || b === AWAITING_MAINTAINER_LABEL) continue; // H25's
+      if (pmStatePairKey(a, b) === H3_PAIR_KEY) continue; // H3's
+      pairs.push([a, b]);
+    }
+  }
+  if (pairs.length === 0) return null;
+  const named = pairs
+    .map(([a, b]) => `\`${a}\` (${PM_STATE_CLAIM[a]}) + \`${b}\` (${PM_STATE_CLAIM[b]})`)
+    .join('; ');
+  return (
+    `two pm STATE labels on one card — ${named} — and the state labels are ONE-OF: each is a ` +
+    'claim about where the card IS, so two of them leave the queue view, the lane view, the ' +
+    'unlock scan and the decision inbox to pick which one they believe, and every one of them ' +
+    'picks differently. The measured origin is never a disagreement about the card: it is a ' +
+    'TRANSITION written as an ADD instead of a REPLACE — the judgement was made and posted, and ' +
+    'the half of the write that costs nothing but bookkeeping (dropping the state being left) ' +
+    'was skipped. `pm:queue` in particular is defined as 「无可问之事」, so pairing it with any ' +
+    'other state contradicts its own definition rather than merely competing with it. Remedy: ' +
+    'decide which ONE state is true and drop the rest in a single write — and write every ' +
+    'transition as replace-not-add so the pair cannot recur. Report-only: ⛔ never a label ' +
+    'written from this script, because which state is true is a judgement about the card and a ' +
+    'sweeper guessing at it would reproduce the very half-write that made the pair.'
+  );
+}
+
+// ---------------------------------------------------------------------------
+// H30 — a `pm:queue` card rotting unclaimed (#11179).
+//
+// `pm:queue` is the one ACTIVE state on the board: it asserts the card is
+// dispatchable now, with nothing left to ask. Every other aged row here
+// (H10/H11/H12/H13/H18) watches a state where waiting is legal and asks whether
+// the wait has gone too long. This one watches the state where waiting is not a
+// state at all, and asks why nothing happened.
+//
+// The measured incident: three cards left in `pm:queue` while the seat that
+// owned them had already produced the analysis that should have moved them
+// (「判断做了(有分析产出),状态写入没做(纯开销的那半)」). Nothing on the
+// board said so, because a queued card looks exactly like a queued card no
+// matter how long it has been one — the queue view's ordinary contents and a
+// forgotten card are the same rows.
+//
+// ## The horizon, and why it is NOT H11's 7 days
+//
+// The aging SHAPE is H11's — `updated_at`, report-only, threshold named in the
+// row, an unreadable stamp flagging rather than reading as fresh. The NUMBER is
+// not, and reusing it would have been the mistake: 7 days is calibrated for a
+// PARKED state, where a legitimate short park has cleared by then. Measured
+// against all 40 open `pm:queue` cards on 2026-08-24:
+//
+//   >1d 17 · >2d 10 · >3d 8 · >4d 4 · >5d 3 · >7d 0
+//
+// At 7 days the row cannot fire on today's board at all — a check that cannot
+// fail is the shape this file exists to catch, not to add. At 1 day it reports
+// 43% of the queue, which is queue DEPTH rather than rot. 3 days is the
+// smallest horizon that clears the ordinary depth while still exceeding the
+// measured dual-hang this card was filed on (3 days), and it names 8 of 40 —
+// a minority a human can actually walk.
+//
+// ## What the row asks for, and what it refuses to judge
+//
+// It does NOT say the card is wrong, and it does not rank it. It forces ONE
+// explicit transition — dispatch it, convert it to `needs-user-decision`,
+// withdraw it, or rewrite it — because the failure this closes is a decision
+// that was made and never written down. Report-only, and pointedly: a sweeper
+// that re-labelled here would be choosing the transition, which is the whole
+// judgement. ⛔ Never a label written from this script.
+// ---------------------------------------------------------------------------
+
+/**
+ * H30 threshold — 3 days, derived above from the live distribution rather than
+ * inherited from H11's parked horizon. Days rather than hours because the queue
+ * is legitimately deep: the unit has to be one a reader would call "sat there".
+ */
+export const QUEUE_ROT_STALE_DAYS = 3;
+
+/** H30 — null when clean, else the finding sentence. */
+export function h30QueueRotting(issue, nowMs = Date.now()) {
+  if (issue?.state === 'closed') return null;
+  if (!labelNames(issue ?? {}).includes('pm:queue')) return null;
+  const updated = Date.parse(issue?.updated_at ?? '');
+  const ageDays = Number.isFinite(updated) ? (nowMs - updated) / 86_400_000 : null;
+  if (ageDays !== null && ageDays <= QUEUE_ROT_STALE_DAYS) return null;
+  const reading =
+    ageDays === null
+      ? 'an unreadable `updated_at` (which must not read as fresh)'
+      : `~${Math.round(ageDays)}d with no activity of any kind (threshold ${QUEUE_ROT_STALE_DAYS}d)`;
+  return (
+    `\`pm:queue\` with ${reading} — the queue is the one state that asserts the card is ` +
+    'dispatchable NOW with nothing left to ask, so a card sitting in it is not inventory the ' +
+    'way a parked card is: it is a card the lane keeps passing over. The measured shape is a ' +
+    'judgement that WAS made and never written (「判断做了(有分析产出),状态写入没做」) — the ' +
+    'analysis lands in a comment and the state stays where it was, which is indistinguishable ' +
+    'from an ordinary queued card at every glance. This row does not judge the card and does ' +
+    'not rank it: it asks for ONE explicit transition — dispatch it, convert it to ' +
+    '`needs-user-decision` if it turns out to carry an unanswered question (the queue means ' +
+    '「无可问之事」), park it with a machine-fireable exit, withdraw it, or rewrite a premise ' +
+    'that no longer holds. Report-only: ⛔ never a label written from this script — choosing ' +
+    'which of those transitions applies is the whole judgement.'
+  );
+}
+
+// ---------------------------------------------------------------------------
+// H31 — the contract-review gate carried on ONE of its two carriers (#11179).
+//
+// `needs:contract-review` is a DUAL-carrier gate: the ruling
+// (maintainer 2026-08-22, 「简化一点是否可以直接挂 PR 侧」「两边都挂好」) puts it
+// on the card AND on the PR, hung in one stroke and — the half that failed —
+// cleared in one stroke, each carrier written through the label discipline's
+// read-modify-write + read-back (SKILL.md 2026-08-18: 「承载闸门语义的标签……挂与
+// 清两向同此四步,闸门被剥不是红灯是放行」).
+//
+// Two writes, one postcondition, and nothing ever checked the pair. The
+// measured miss: a PASS verdict was posted, the PR carrier was cleared, and the
+// card carrier was not — so the card stayed gated behind a review that had
+// already passed, and the only evidence that anything was wrong was the label
+// itself, on a card nobody was looking at.
+//
+// The other direction is the dangerous one and the same row catches it: a gate
+// stripped from the card while the PR still carries it reads, to the enqueue
+// path, as a card that was never gated. 「闸门被剥不是红灯是放行」 — a stripped
+// gate is a GREEN light, and 「被剥」 and 「从未挂过」 are indistinguishable in
+// the evidence. A row comparing the two carriers is the only reader that can
+// tell them apart.
+//
+// LIVE at the time of writing (2026-08-24): card #11427 carries the gate while
+// its delivering open PR #11844 does not.
+//
+// ## The silence that is NOT a bug: a card with no delivering open PR
+//
+// `references/contract-review.md` makes card-side-FIRST legal and expected:
+// 「PR 一存在即挂,报告先于 PR 到达则先挂卡侧、ACCEPT 时补齐 PR 侧」. So a gated
+// card with no PR yet is a correct intermediate state, not a premature hang,
+// and this row stays silent on it — deliberately declining the "gate label on a
+// card with no PR carrier is premature" shape, which would report the protocol's
+// own prescribed sequence as a defect. The comparison begins when a delivering
+// PR exists, which is exactly when the pair becomes checkable.
+//
+// ## Free, and bounded
+//
+// The open-PR listing is already in hand (H7/H12/H21 list it, H8 already passes
+// it around for the same delivery question), and the delivery relation is
+// `prDeliversCard` — the same body-first/branch-fallback relation H8 reads, so
+// this row can never disagree with H8 about which PR delivers which card. No
+// request, no new parser. MERGED PRs are deliberately out of scope: the gate
+// governs enqueue and landing while the PR is open, and a merged carrier is a
+// closed-out stroke rather than a live half-write.
+//
+// Report-only, and emphatically: this is a GATE. ⛔ Never a label written from
+// this script — a sweeper that hung or cleared a review gate would be issuing
+// the review verdict, and the one thing the whole clause-② chain forbids is
+// 自查放行.
+// ---------------------------------------------------------------------------
+
+/** The clause-② gate label — one constant, both carriers. */
+export const CONTRACT_REVIEW_LABEL = 'needs:contract-review';
+
+/**
+ * H31 — null when the two carriers agree (or the comparison is not yet
+ * possible), else the finding sentence.
+ *
+ * A PR row whose `labels` is not an array is one this sweep could not read, and
+ * it is EXCLUDED from the comparison rather than counted as unlabelled: reading
+ * an unreadable carrier as a bare one would manufacture a finding out of a read
+ * failure, which is the #4690 direction this file keeps in the one place it
+ * actually matters — the direction that invents evidence.
+ *
+ * @param {object} issue — an OPEN issue.
+ * @param {object[]} openPrs — the open-PR listing the sweep already holds.
+ */
+export function h31ContractReviewCarrierSplit(issue, openPrs) {
+  if (issue?.state === 'closed') return null;
+  const n = String(issue?.number ?? '');
+  if (!n || n === '0') return null;
+  const delivering = (openPrs ?? []).filter(
+    (pr) => pr && !pr.merged_at && Array.isArray(pr.labels) && prDeliversCard(pr, n),
+  );
+  if (delivering.length === 0) return null; // card-side-first is legal — see the header note.
+  const cardGated = labelNames(issue ?? {}).includes(CONTRACT_REVIEW_LABEL);
+  const gatedPrs = delivering.filter((pr) => labelNames(pr).includes(CONTRACT_REVIEW_LABEL));
+  const barePrs = delivering.filter((pr) => !labelNames(pr).includes(CONTRACT_REVIEW_LABEL));
+  const list = (prs) => prs.map((p) => `#${p.number}${p.draft ? ' (draft)' : ''}`).join(', ');
+  const contract =
+    'The gate is a DUAL carrier — 「两边都挂好」, hung in one stroke and cleared in one ' +
+    'stroke, each carrier written read-modify-write with a READ-BACK ' +
+    '(「闸门被剥不是红灯是放行」: a stripped gate is a GREEN light, and 「被剥」 and 「从未挂过」 are ' +
+    'indistinguishable in the evidence, so the read-back is the only way either is ever ' +
+    'noticed). Report-only: ⛔ never a label written from this script — hanging or clearing a ' +
+    'review gate from a sweeper would be issuing the verdict, which is 自查放行.';
+  if (cardGated && barePrs.length > 0) {
+    return (
+      `\`${CONTRACT_REVIEW_LABEL}\` on the CARD while its delivering open PR ${list(barePrs)} ` +
+      'does NOT carry it — the two carriers of one gate disagree, so the pair was written half ' +
+      'way: either the hang never reached the PR side (「PR 一存在即挂」, and the PR exists), or ' +
+      'a PASS cleared the PR side and stopped there, leaving the card gated behind a review that ' +
+      `has already passed. ${contract}`
+    );
+  }
+  if (!cardGated && gatedPrs.length > 0) {
+    return (
+      `\`${CONTRACT_REVIEW_LABEL}\` on the delivering open PR ${list(gatedPrs)} while the CARD ` +
+      'does NOT carry it — the more dangerous half of the same split: to the enqueue path an ' +
+      'ungated card is a card that was never gated, so the review chain this PR is still waiting ' +
+      'on is invisible to the queue, and the card can be enqueued straight past a gate that is ' +
+      `demonstrably still live one carrier over. ${contract}`
+    );
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------------
 // H26 — a block whose target can never CLOSE, and the stale chain (#11219).
 //
 // The unlock predicate is "the `Blocked-by:` target CLOSED". `pm:on-hold` and
@@ -4356,6 +4748,135 @@ export function h27DeadClaimNoProgress(issue, claim, refStates, delivery, nowMs 
     'whose branch was never deleted can reach this row — check the card for a merged delivery ' +
     'before treating it as a death.' +
     recovery
+  );
+}
+
+// ---------------------------------------------------------------------------
+// H28 — the STALE BODY LINE that shadowed the live blocker (#11747).
+//
+// The body is the canonical home for `Blocked-by:`; a comment is a legal second
+// channel, deliberately, because rewriting a body through the MCP escaping
+// hazard is the riskier write. Those two facts are consistent right up to the
+// moment a card is RE-PARKED, and then they collide: the seat that finds the
+// body's upstream closed cards the real prerequisite, writes the NEW blocker
+// into a comment — the cheap, safe write — and leaves the SPENT one in the
+// body. The card is now stating two blockers, one of them a fact about the
+// past, and the machinery cannot tell which is current from the line alone.
+//
+// ## Why ungating the liveness read is necessary and NOT sufficient
+//
+// Before `needsBlockerLivenessComments`, the liveness read borrowed H4's gate
+// and so read only the body on exactly these cards: it resolved the closed
+// target, found nothing else, and published "every target it names is closed:
+// nothing this card declared a wait on is still running" — a false unlock
+// candidate, three sweeps running, acted on once. Ungating fixes the falsehood:
+// the same card now resolves both targets and H19 reports 1 of 2 closed, a
+// PARTIAL discharge that says the card may still be legitimately blocked.
+//
+// But PARTIAL is where H19's duty ends. It reports the block, not the WRITE
+// that produced the ambiguity, and it says nothing about which channel is
+// carrying the live blocker — so the stale body line survives, and the next
+// re-park writes the same shape again. This row is the pair: it names the body
+// line as spent, names the live blocker sitting in a comment, and asks for the
+// migration. That is what makes the canonical-home doctrine enforced rather
+// than merely written down — the failure this whole card measured is a doctrine
+// that existed in prose and was not complied with, and prose is what failed.
+//
+// ## The exact shape, and what it deliberately does NOT fire on
+//
+// Fires only on the CONJUNCTION: a body-named target that is CLOSED **and** a
+// comment-named target, absent from the body, that is OPEN. Each half alone is
+// a different, healthy-or-already-reported state:
+//
+//   - body closed, no live comment target -> H19's ordinary expired block. The
+//     line is spent and so is the wait; there is nothing to migrate.
+//   - body open + comment open -> two live blockers stated in two channels.
+//     Untidy, not wrong, and no row: both are current, and demanding a body
+//     rewrite for tidiness would push seats at the very write the comment
+//     channel exists to avoid.
+//   - a target named in BOTH channels -> not a migration candidate at all; the
+//     body already carries it. Only a comment-ONLY live target can be missing
+//     from the canonical home.
+//   - an UNRESOLVED target on either side is silent here. H19 already fires the
+//     unjudged sentence on that card (#4690), and a migration instruction built
+//     on a target this sweep could not read would be a guess.
+//
+// ## Quota
+//
+// Free. H19 and H26 already hold these resolutions; this row asks the same rows
+// a third question — which CHANNEL each target arrived in — which the sweep can
+// answer from bodies it has already read.
+//
+// Report-only. The remedy is a body rewrite by the owning seat; ⛔ never a
+// label or a body written from this script.
+// ---------------------------------------------------------------------------
+
+/**
+ * The canonical keys a card names in ONE channel — the split H28 needs and the
+ * only thing it adds to what H19 already computed.
+ *
+ * Deliberately built from the same `blockedByTargets` + `blockerTargetKey` pair
+ * the union uses, rather than a second parser: a channel split that recognised
+ * a different set of spellings than the union would report migrations for
+ * targets the union never resolved.
+ *
+ * @returns {Set<string>} canonical `owner/repo#N` keys.
+ */
+export function blockerChannelKeys(text, issue, ownerRepo = OWNER_REPO) {
+  const keys = new Set();
+  for (const ref of blockedByTargets(text)) {
+    const target = blockerTargetKey(ref, ownerRepo);
+    if (!Number.isFinite(target.number)) continue;
+    if (target.local && target.number === issue?.number) continue;
+    keys.add(target.key);
+  }
+  return keys;
+}
+
+/**
+ * H28 — null when the body's line is not shadowing a live comment-borne
+ * blocker, else the finding sentence.
+ *
+ * @param {object} issue — an OPEN issue.
+ * @param {{ key: string, number: number, local: boolean,
+ *   state: 'open'|'closed'|'unresolved', closedAt?: string|null }[]} resolutions
+ * @param {string[]|null|undefined} commentBodies — as gathered for the liveness
+ *   read. `undefined`/`null` contribute no comment channel, so no row.
+ */
+export function h28StaleBodyBlockerLine(issue, resolutions, commentBodies, ownerRepo = OWNER_REPO) {
+  if (!needsBlockerLiveness(issue)) return null;
+  const rows = resolutions ?? [];
+  if (rows.length === 0) return null;
+
+  const bodyKeys = blockerChannelKeys(issue?.body, issue, ownerRepo);
+  const commentKeys = new Set();
+  for (const body of commentBodies ?? []) {
+    for (const key of blockerChannelKeys(body, issue, ownerRepo)) commentKeys.add(key);
+  }
+  if (bodyKeys.size === 0 || commentKeys.size === 0) return null;
+
+  const spent = rows.filter((r) => r.state === 'closed' && bodyKeys.has(r.key));
+  const live = rows.filter(
+    (r) => r.state === 'open' && commentKeys.has(r.key) && !bodyKeys.has(r.key),
+  );
+  if (spent.length === 0 || live.length === 0) return null;
+
+  return (
+    `\`pm:blocked\` whose BODY names ${spent.length} CLOSED \`Blocked-by:\` target(s) ` +
+    `(${namedTargets(spent)}) while a COMMENT names ${live.length} that ${live.length === 1 ? 'is' : 'are'} ` +
+    `still OPEN (${namedTargets(live)}) and appear(s) nowhere in the body — so the body line is ` +
+    'STALE: it states a wait that is over, and the wait that is actually running is parked in the ' +
+    'channel the body is supposed to be the canonical home for. This is the written half of a ' +
+    'RE-PARK: a seat found the body\'s upstream closed, carded the real prerequisite, and wrote ' +
+    'the new blocker into a comment (the cheaper, safer write) without spending the body line. ' +
+    '⚠️ Read what that costs before the migration: until the liveness read was ungated this card ' +
+    'resolved ONLY the closed body target and was published as a card whose every blocker had ' +
+    'closed — a FALSE unlock candidate, and one such card was released to `pm:queue` while its ' +
+    'real blocker was open and dispatched. The row now fires alongside H19\'s PARTIAL discharge ' +
+    'rather than instead of it: H19 says the block is half-expired, this says WHICH half is ' +
+    'documentation. Remedy: rewrite the body line to name the live blocker (the comment stays as ' +
+    'history), so the next reader — human or sweep — finds the current wait in the canonical ' +
+    'home. ⛔ Report-only: never a body or a label written from this script.'
   );
 }
 
@@ -5671,6 +6192,15 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
     if (queuedAndTaken) findings.push([issue, 'H24', queuedAndTaken]);
     const doubleState = h25AwaitingMaintainerExclusivity(issue);
     if (doubleState) findings.push([issue, 'H25', doubleState]);
+    // H29 + H30 — the same free reads, one label-set and one timestamp. Their
+    // populations are covered here BY CONSTRUCTION: every H29 pair contains at
+    // least one label this loop lists (the ONE-OF vocabulary is the label pages
+    // plus `needs-user-decision`, which can only pair WITH one of them), and
+    // H30's population is the `pm:queue` page itself.
+    const twoStates = h29PmStateExclusivity(issue);
+    if (twoStates) findings.push([issue, 'H29', twoStates]);
+    const rotting = h30QueueRotting(issue);
+    if (rotting) findings.push([issue, 'H30', rotting]);
     // H4 — judged across BOTH channels. The fetch is gated by
     // `needsBlockedByComments`, so it costs a request only for the body-clean
     // cards whose verdict it can actually change (~2/3 of the blocked
@@ -5679,6 +6209,17 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
     if (needsBlockedByComments(issue)) await gatherBlockedByComments(issue);
     const unblockedByNothing = h4BlockedNoBlockedBy(issue, fallbackFor(issue));
     if (unblockedByNothing) findings.push([issue, 'H4', unblockedByNothing]);
+    // …and the LIVENESS read's own gathering, UNGATED (#11747). H19/H26/H28 ask
+    // whether what the line names is still RUNNING, and for that a body line is
+    // one channel's targets rather than an answer — so a card whose body line is
+    // spent and whose live blocker sits in a comment must contribute both. It
+    // rides the same cache as the H4 fetch above (a card gathered there is a
+    // no-op here), so the union of the two gates still costs at most one request
+    // per card; the delta is the gate's complement — the blocked cards that DO
+    // carry a body line. Gathered here rather than in the H19 loop below on
+    // purpose: the total-shortfall rethrow reads these stats, so every fetch this
+    // sweep makes must be counted before that check runs.
+    if (needsBlockerLivenessComments(issue)) await gatherBlockedByComments(issue);
     // H9 — judged across BOTH channels since #10403, on the same gated-fetch
     // trade as H4: a hold whose body already carries a fireable line is
     // answered without the network; a body-clean one buys (at most) the one
@@ -5865,6 +6406,15 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
     // all, so only the unscoped listing is guaranteed to see every carrier.
     const retriageAged = h18RetriageAged(issue);
     if (retriageAged) findings.push([issue, 'H18', retriageAged]);
+    // H31 — the contract-review gate's two carriers, compared. This listing
+    // rather than the label loop for the same reason H18 is here:
+    // `needs:contract-review` is not one of the labels that loop pages, so a
+    // gated card carrying no `pm:*` state at all is first visible HERE. The
+    // open-PR side is `openWindow`, already assembled above for H8 — no
+    // request, and the same `prDeliversCard` relation, so the two rows can
+    // never disagree about which PR delivers which card.
+    const gateSplit = h31ContractReviewCarrierSplit(issue, openWindow);
+    if (gateSplit) findings.push([issue, 'H31', gateSplit]);
   }
 
   // H14 + H15 — the same unscoped listing, read a second way. It is the right
@@ -6081,6 +6631,12 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
     // different reads.
     const indefinite = h26BlockOnIndefiniteTarget(issue, resolutions);
     if (indefinite) findings.push([issue, 'H26', indefinite]);
+    // H28 — the same resolutions, asked a THIRD question: which CHANNEL each
+    // target arrived in. H19 reports that the block is half-expired; this
+    // reports that the expired half is the one sitting in the canonical home,
+    // which is the write to fix. Both fire on one card, deliberately.
+    const staleBody = h28StaleBodyBlockerLine(issue, resolutions, fallbackFor(issue));
+    if (staleBody) findings.push([issue, 'H28', staleBody]);
   }
   // Distinct targets, which is the unit the cache and the request count are
   // in — and the word is in the summary sentence so the number cannot be read
@@ -8832,6 +9388,187 @@ function selfTest() {
   t('vocabulary: a fresh awaiting park is still clean', h11ImportantParked(parkedCard(['bug', AWAITING_MAINTAINER_LABEL], { created: daysAgo(2) }), NOW), null);
   t('vocabulary: an UNimportant awaiting card is not inventory', h11ImportantParked(parkedCard([AWAITING_MAINTAINER_LABEL]), NOW), null);
 
+  // -- H29 / H30 / H31: the half-state rule families of #11179 ---------------
+  //
+  // ⚠️ ASSERTION SHAPE. Every message assertion below goes through a helper
+  // that checks `typeof` FIRST and returns a describing STRING when the
+  // predicate has gone null. The neighbouring blocks assert
+  // `predicate(...).includes(...)` directly, which turns a regression that
+  // makes a row go silent into a `TypeError` crash at the first assertion
+  // instead of a named failing case — recorded as an observation on the
+  // sibling PR that landed H28, and honoured here for the new blocks rather
+  // than by restructuring the existing ones (that restructuring is a diff of
+  // its own, and this card must merge cleanly onto that PR).
+  const says = (msg, needle) =>
+    typeof msg === 'string' ? msg.includes(needle) : `NO MESSAGE (${msg === null ? 'null' : typeof msg})`;
+
+  // -- H29: the pm state labels are ONE-OF, generally -------------------------
+  const h29 = (labels, extra = {}) => h29PmStateExclusivity(queued(labels, [], extra));
+  // The vocabulary itself, pinned in both halves so it cannot be half-extended.
+  t('H29: the ONE-OF vocabulary is the awaiting state plus everything it excludes', PM_EXCLUSIVE_STATE_LABELS.length, 6);
+  t('H29: …and needs-user-decision is one of the states, not a side label', PM_EXCLUSIVE_STATE_LABELS.includes('needs-user-decision'), true);
+  t('H29: every state in the vocabulary has a claim clause', PM_EXCLUSIVE_STATE_LABELS.every((l) => typeof PM_STATE_CLAIM[l] === 'string' && PM_STATE_CLAIM[l].length > 0), true);
+  t('H29: …and the claim map declares nothing the vocabulary does not carry', Object.keys(PM_STATE_CLAIM).every((l) => PM_EXCLUSIVE_STATE_LABELS.includes(l)), true);
+  // The three `pm:*` sets are three different questions. Pinned pairwise so a
+  // later reader cannot unify them on the strength of the similar names —
+  // exactly the guard H22 already keeps against H13's set.
+  t('H29: the exclusivity set is NOT H13\'s visibility set', PM_EXCLUSIVE_STATE_LABELS.join(',') === PM_STATE_LABELS.join(','), false);
+  t('H29: …H13\'s carries `finding`, which is a card KIND, not a position', PM_STATE_LABELS.includes('finding') && !PM_EXCLUSIVE_STATE_LABELS.includes('finding'), true);
+  t('H29: …and the identity stickers legally coexist with a state', PM_EXCLUSIVE_STATE_LABELS.includes('pm:seat') || PM_EXCLUSIVE_STATE_LABELS.includes('pm:epic'), false);
+  t('H29: the exclusivity set is NOT H22\'s residue set', PM_EXCLUSIVE_STATE_LABELS.join(',') === PM_RESIDUE_LABELS.join(','), false);
+  t('H29: …pm:blocking is an annotation ON a state, so it is not exclusive', PM_RESIDUE_LABELS.includes('pm:blocking') && !PM_EXCLUSIVE_STATE_LABELS.includes('pm:blocking'), true);
+  t('H29: …while needs-user-decision is a position, so it IS exclusive', PM_EXCLUSIVE_STATE_LABELS.includes('needs-user-decision') && !PM_RESIDUE_LABELS.includes('needs-user-decision'), true);
+  // The two pairs this card was filed on.
+  t('H29: pm:queue + needs-user-decision -> finding', typeof h29(['pm:queue', 'needs-user-decision']), 'string');
+  t('H29: …and it names BOTH claims, not just the labels', says(h29(['pm:queue', 'needs-user-decision']), 'a maintainer RULING is owed'), true);
+  t('H29: …and quotes the queue definition the pair contradicts', says(h29(['pm:queue', 'needs-user-decision']), '无可问之事'), true);
+  t('H29: pm:queue + pm:blocked -> finding', typeof h29(['pm:queue', 'pm:blocked']), 'string');
+  t('H29: …and names the transition defect, not a tidiness complaint', says(h29(['pm:queue', 'pm:blocked']), 'ADD instead of a REPLACE'), true);
+  t('H29: …and prescribes ONE write', says(h29(['pm:queue', 'pm:blocked']), 'in a single write'), true);
+  t('H29: report-only — never a label from this script', says(h29(['pm:queue', 'pm:blocked']), 'never a label written from this script'), true);
+  t('H29: not a loud finding', isLoudFinding(h29(['pm:queue', 'pm:blocked'])), false);
+  // The live-board specimen, 2026-08-24: a THIRD pair, in a third direction.
+  t('H29 live: #11534 (needs-user-decision + pm:blocked) -> finding', typeof h29(['documentation', 'needs-user-decision', 'domain:devx', 'pm:blocked']), 'string');
+  t('H29 live: …and names both live states', says(h29(['documentation', 'needs-user-decision', 'domain:devx', 'pm:blocked']), '`pm:blocked`') === true && says(h29(['documentation', 'needs-user-decision', 'domain:devx', 'pm:blocked']), '`needs-user-decision`') === true, true);
+  // Clean shapes.
+  t('H29: one state alone -> clean', h29(['pm:queue']), null);
+  t('H29: no state at all -> clean', h29(['domain:skills', 'bug']), null);
+  t('H29: non-state pm:* labels are not states', h29(['pm:queue', 'pm:blocking', 'pm:retriage', 'priority:p0', 'domain:spec']), null);
+  t('H29: a CLOSED card is H22 residue, not a live exclusivity breach', h29(['pm:queue', 'pm:blocked'], { state: 'closed' }), null);
+  t('H29: a missing issue does not crash', h29PmStateExclusivity(undefined), null);
+  t('H29: an absent state field is judged, not exempted', typeof h29(['pm:queue', 'pm:blocked'], { state: undefined }), 'string');
+  // The two exclusions, each pinned in BOTH directions: silent here, and the
+  // owning row does fire on the same card. One breach, one row.
+  t('H29: pm:queue + pm:dispatched is H3\'s pair, not this row', h29(['pm:queue', 'pm:dispatched']), null);
+  t('H29: …and H3 does fire on it', h3QueueAndDispatched(queued(['pm:queue', 'pm:dispatched'])), true);
+  t('H29: any pair containing the awaiting state is H25\'s', h29([AWAITING_MAINTAINER_LABEL, 'pm:blocked']), null);
+  t('H29: …and H25 does fire on it', typeof h25AwaitingMaintainerExclusivity(queued([AWAITING_MAINTAINER_LABEL, 'pm:blocked'])), 'string');
+  for (const other of AWAITING_MAINTAINER_EXCLUSIVE_LABELS) {
+    t(`H29: awaiting + \`${other}\` stays H25's row`, h29([AWAITING_MAINTAINER_LABEL, other]), null);
+  }
+  // …and an excluded pair does not silence the pairs no one else owns.
+  const three29 = h29(['pm:queue', 'pm:dispatched', 'pm:blocked']);
+  t('H29: three states -> the two pairs H3 does not own are still reported', typeof three29, 'string');
+  t('H29: …naming queue + blocked', says(three29, '`pm:queue` (dispatchable NOW, with nothing left to ask) + `pm:blocked`'), true);
+  t('H29: …and dispatched + blocked', says(three29, '`pm:dispatched` (an agent is working it under a live claim) + `pm:blocked`'), true);
+  const awaitingPlusTwo = h29([AWAITING_MAINTAINER_LABEL, 'pm:queue', 'pm:blocked']);
+  t('H29: awaiting alongside two others still reports the pair H25 cannot', typeof awaitingPlusTwo, 'string');
+  t('H29: …and does not re-report the awaiting pairs', says(awaitingPlusTwo, AWAITING_MAINTAINER_LABEL), false);
+
+  // -- H30: a `pm:queue` card rotting unclaimed --------------------------------
+  const queueCard = (labels, updatedAt, extra = {}) => ({
+    number: 10534,
+    state: 'open',
+    labels: labels.map((name) => ({ name })),
+    assignees: [],
+    body: '',
+    title: '',
+    updated_at: updatedAt,
+    ...extra,
+  });
+  const h30 = (labels, updatedAt, extra = {}) => h30QueueRotting(queueCard(labels, updatedAt, extra), NOW);
+  t('H30: queued and idle past the horizon -> finding', typeof h30(['pm:queue'], daysAgo(5)), 'string');
+  t('H30: …and the row states the threshold it used', says(h30(['pm:queue'], daysAgo(5)), `threshold ${QUEUE_ROT_STALE_DAYS}d`), true);
+  t('H30: …and the measured age', says(h30(['pm:queue'], daysAgo(5)), '~5d'), true);
+  t('H30: …and asks for ONE explicit transition rather than a grade', says(h30(['pm:queue'], daysAgo(5)), 'ONE explicit transition'), true);
+  t('H30: …naming the decision route the queue definition implies', says(h30(['pm:queue'], daysAgo(5)), '无可问之事'), true);
+  t('H30: …and quotes the measured failure shape', says(h30(['pm:queue'], daysAgo(5)), '判断做了'), true);
+  t('H30: report-only — never a label from this script', says(h30(['pm:queue'], daysAgo(5)), 'never a label written from this script'), true);
+  t('H30: not a loud finding', isLoudFinding(h30(['pm:queue'], daysAgo(5))), false);
+  // The horizon's edges.
+  t('H30: under the horizon -> clean', h30(['pm:queue'], daysAgo(2)), null);
+  t('H30: exactly at the horizon -> clean (strictly beyond fires)', h30(['pm:queue'], daysAgo(QUEUE_ROT_STALE_DAYS)), null);
+  t('H30: just past it -> finding', typeof h30(['pm:queue'], daysAgo(QUEUE_ROT_STALE_DAYS + 0.5)), 'string');
+  // #4690 direction: an unreadable stamp flags, never reads as fresh.
+  t('H30: unreadable updated_at -> finding, not fresh', typeof h30(['pm:queue'], 'not-a-date'), 'string');
+  t('H30: absent updated_at -> finding, not fresh', typeof h30(['pm:queue'], undefined), 'string');
+  t('H30: …and the row says the stamp is what it could not read', says(h30(['pm:queue'], undefined), 'unreadable `updated_at`'), true);
+  // Out of scope.
+  t('H30: not queued -> out of scope however old', h30(['pm:blocked'], daysAgo(200)), null);
+  t('H30: a CLOSED queued card is H22 residue', h30(['pm:queue'], daysAgo(200), { state: 'closed' }), null);
+  t('H30: a missing issue does not crash', h30QueueRotting(undefined, NOW), null);
+  // The live distribution the horizon was cut from (2026-08-24 board read):
+  // the three oldest fire, the ordinary queue depth stays quiet.
+  const NOW_11179 = Date.parse('2026-08-24T22:40:00Z');
+  const live30 = (n, updatedAt) => h30QueueRotting({ ...queueCard(['pm:queue'], updatedAt), number: n }, NOW_11179);
+  t('H30 live: #9997, idle since 08-19 -> finding', typeof live30(9997, '2026-08-19T15:24:06Z'), 'string');
+  t('H30 live: #7251, idle since 08-19 -> finding', typeof live30(7251, '2026-08-19T20:35:45Z'), 'string');
+  t('H30 live: #10735, idle ~3.4d -> finding', typeof live30(10735, '2026-08-21T13:10:51Z'), 'string');
+  t('H30 live: #11150, idle ~1.9d -> clean (queue depth is not rot)', live30(11150, '2026-08-23T00:52:13Z'), null);
+  t('H30 live: #11852, worked today -> clean', live30(11852, '2026-08-24T22:19:56Z'), null);
+  // Adjacency: the aged rows next door decline this shape, which is why it
+  // needed a row rather than a widening.
+  t('H30 adjacency: H24 is silent (the card has no assignee)', h24QueuedWithAssignee(queueCard(['pm:queue'], daysAgo(5))), null);
+  t('H30 adjacency: H18 is silent (no pm:retriage)', h18RetriageAged(queueCard(['pm:queue'], daysAgo(5)), NOW), null);
+  t('H30 adjacency: H11 is silent (pm:queue is not a PARKED state)', h11ImportantParked({ ...queueCard(['bug', 'pm:queue'], daysAgo(5)), created_at: daysAgo(30) }, NOW), null);
+
+  // -- H31: the contract-review gate's two carriers ---------------------------
+  const gateCard = (labels, extra = {}) => ({
+    number: 11427,
+    state: 'open',
+    labels: labels.map((name) => ({ name })),
+    assignees: [],
+    body: '',
+    title: '',
+    ...extra,
+  });
+  const gatePr = (number, labels, extra = {}) => ({
+    number,
+    merged_at: null,
+    draft: true,
+    body: 'Fixes #11427',
+    head: { ref: `claude/issue-11427-x` },
+    labels: labels.map((name) => ({ name })),
+    ...extra,
+  });
+  const bare = gatePr(11844, ['documentation', 'size/l', 'tests']);
+  const gated = gatePr(11844, ['documentation', 'size/l', CONTRACT_REVIEW_LABEL]);
+  t('H31: gated card + a bare delivering PR -> finding', typeof h31ContractReviewCarrierSplit(gateCard([CONTRACT_REVIEW_LABEL, 'pm:dispatched']), [bare]), 'string');
+  t('H31: …and it names the PR that is missing the carrier', says(h31ContractReviewCarrierSplit(gateCard([CONTRACT_REVIEW_LABEL]), [bare]), '#11844 (draft)'), true);
+  t('H31: …and names both failure routes (hang never reached / PASS stopped half way)', says(h31ContractReviewCarrierSplit(gateCard([CONTRACT_REVIEW_LABEL]), [bare]), 'already passed'), true);
+  t('H31: bare card + a gated delivering PR -> finding', typeof h31ContractReviewCarrierSplit(gateCard(['pm:dispatched']), [gated]), 'string');
+  t('H31: …and calls that the more dangerous half', says(h31ContractReviewCarrierSplit(gateCard([]), [gated]), 'more dangerous half'), true);
+  t('H31: …because a stripped gate reads as a green light', says(h31ContractReviewCarrierSplit(gateCard([]), [gated]), '闸门被剥不是红灯是放行'), true);
+  t('H31: both directions carry the read-back contract', says(h31ContractReviewCarrierSplit(gateCard([CONTRACT_REVIEW_LABEL]), [bare]), 'READ-BACK'), true);
+  t('H31: report-only — never a label from this script', says(h31ContractReviewCarrierSplit(gateCard([CONTRACT_REVIEW_LABEL]), [bare]), 'never a label written from this script'), true);
+  t('H31: …naming the rule that forbids it', says(h31ContractReviewCarrierSplit(gateCard([CONTRACT_REVIEW_LABEL]), [bare]), '自查放行'), true);
+  t('H31: not a loud finding', isLoudFinding(h31ContractReviewCarrierSplit(gateCard([CONTRACT_REVIEW_LABEL]), [bare])), false);
+  // Agreement, both ways, is clean.
+  t('H31: both carriers gated -> clean', h31ContractReviewCarrierSplit(gateCard([CONTRACT_REVIEW_LABEL]), [gated]), null);
+  t('H31: neither carrier gated -> clean', h31ContractReviewCarrierSplit(gateCard(['pm:dispatched']), [bare]), null);
+  t('H31: one gated + one bare delivering PR still fires and names the bare one', says(h31ContractReviewCarrierSplit(gateCard([CONTRACT_REVIEW_LABEL]), [gated, gatePr(11845, [])]), '#11845'), true);
+  // The protocol's own intermediate state, NOT a finding: card-side first.
+  t('H31: gated card with NO delivering open PR -> clean (card-side-first is legal)', h31ContractReviewCarrierSplit(gateCard([CONTRACT_REVIEW_LABEL, 'pm:blocked']), []), null);
+  t('H31: …and a PR that delivers some OTHER card does not start the comparison', h31ContractReviewCarrierSplit(gateCard([CONTRACT_REVIEW_LABEL]), [{ ...bare, body: 'Fixes #9999', head: { ref: 'claude/issue-9999-x' } }]), null);
+  // A merged carrier is a closed-out stroke, not a live half-write.
+  t('H31: a MERGED delivering PR is out of scope', h31ContractReviewCarrierSplit(gateCard([CONTRACT_REVIEW_LABEL]), [{ ...bare, merged_at: '2026-08-24T01:00:00Z' }]), null);
+  // #4690, in the direction that matters here: an unreadable carrier must not
+  // be read as a bare one, or a read failure manufactures a gate finding.
+  t('H31: a PR row whose labels could not be read is not judged as bare', h31ContractReviewCarrierSplit(gateCard([CONTRACT_REVIEW_LABEL]), [{ ...bare, labels: undefined }]), null);
+  t('H31: …and one readable bare PR alongside it still fires', typeof h31ContractReviewCarrierSplit(gateCard([CONTRACT_REVIEW_LABEL]), [{ ...bare, labels: undefined }, gatePr(11845, [])]), 'string');
+  // The delivery relation is H8's, shared rather than re-derived.
+  t('H31: the branch-name fallback delivers a body-silent PR', typeof h31ContractReviewCarrierSplit(gateCard([CONTRACT_REVIEW_LABEL]), [{ ...bare, body: '' }]), 'string');
+  t('H31: …and H8 reads the same PR as delivering the same card', prDeliversCard({ ...bare, body: '' }, '11427'), true);
+  t('H31: a CLOSED card is out of scope', h31ContractReviewCarrierSplit(gateCard([CONTRACT_REVIEW_LABEL], { state: 'closed' }), [bare]), null);
+  t('H31: a missing issue does not crash', h31ContractReviewCarrierSplit(undefined, [bare]), null);
+  t('H31: an absent PR listing does not crash', h31ContractReviewCarrierSplit(gateCard([CONTRACT_REVIEW_LABEL]), undefined), null);
+  // The live specimen, 2026-08-24, byte-shaped: card #11427 gated, its
+  // delivering draft PR #11844 carrying every label EXCEPT the gate.
+  const live11427 = gateCard(['bug', 'pm:dispatched', 'domain:services', CONTRACT_REVIEW_LABEL]);
+  const live11844 = {
+    number: 11844,
+    merged_at: null,
+    draft: true,
+    body: 'Fixes #11427\n\nhydrate a tombstoned sys_file that still has a live holder',
+    head: { ref: 'claude/issue-11427-file-hydration-tombstone' },
+    labels: ['documentation', 'size/l', 'dependencies', 'tests', 'tooling'].map((name) => ({ name })),
+  };
+  t('H31 live: #11427 gated while its delivering PR #11844 is not -> finding', typeof h31ContractReviewCarrierSplit(live11427, [live11844]), 'string');
+  t('H31 live: …and the row names the PR', says(h31ContractReviewCarrierSplit(live11427, [live11844]), '#11844 (draft)'), true);
+  // …and #10025, the other live carrier: gated, `pm:blocked`, no open PR at
+  // all — the shape this row deliberately does NOT report.
+  t('H31 live: #10025 (gated, no PR carrier yet) -> clean', h31ContractReviewCarrierSplit({ ...gateCard(['domain:services', 'pm:blocked', CONTRACT_REVIEW_LABEL]), number: 10025 }, [live11844]), null);
+
   // -- The window arithmetic (#11118) ----------------------------------------
   // The derivation is executable so that a cap and the sentence justifying it
   // cannot drift apart again: H8's docblock quoted `~18 merges/day` while the
@@ -8923,6 +9660,98 @@ function selfTest() {
   // Both rows can fire on ONE card — different halves of one wait.
   const expiredAndIndefinite = [{ ...tgt(900, ['pm:queue']), state: 'closed' }, tgt(987, ['pm:on-hold'])];
   t('H26 + H19: a partially expired, partially indefinite block fires both', Boolean(h19BlockOutlivedBlocker(waiting(), expiredAndIndefinite)) && Boolean(h26BlockOnIndefiniteTarget(waiting(), expiredAndIndefinite)), true);
+
+  // -- The UNGATED liveness read + H28: the stale body line (#11747) ----------
+  //
+  // The fixture is the measured card's RECORDED BYTE SHAPE, not a sketch: body
+  // `Blocked-by: #9255` (closed 2026-08-19) plus the re-park's comment, which
+  // states the new blocker in the backticked-key spelling the census recorded
+  // (`Blocked-by:` #11501, open and dispatched). Both legs of the reverse
+  // verification run over these same bytes.
+  const REPARK_BODY = 'Blocked-by: #9255\n\nSome further prose about the card.';
+  const REPARK_COMMENT =
+    'PM re-park 2026-08-24: #9255 discharged, but the real prerequisite is carded.\n' +
+    '`Blocked-by:` #11501';
+  const reparked = { ...issue(['pm:blocked'], [], REPARK_BODY), number: 9592, state: 'open' };
+  const reparkKeys = (comments) =>
+    blockerTargetsFor(reparked, comments, 'objectstack-ai/objectstack').map((t2) => t2.key).join(' ');
+
+  // The GATE — the whole defect in two lines. H4's gate skips this card because
+  // its body carries a line; the liveness gate must NOT, or the live blocker is
+  // invisible to the only item that asks whether the wait is still running.
+  t('H28 gate: H4\'s gate skips a blocked card that HAS a body line', needsBlockedByComments(reparked), false);
+  t('H28 gate: …while the liveness gate reads it anyway', needsBlockerLivenessComments(reparked), true);
+  t('H28 gate: the liveness gate is the label alone, body-clean or not', needsBlockerLivenessComments(blockedCard(1, 'no line here')), true);
+  t('H28 gate: a card without the label buys no liveness fetch', needsBlockerLivenessComments(blockedCard(1, 'Blocked-by: #2', ['pm:queue'])), false);
+  t('H28 gate: a pm:blocking card is out of scope here too', needsBlockerLivenessComments(blockedCard(1, '', ['pm:blocking'])), false);
+  t('H28 gate: a missing issue does not crash', needsBlockerLivenessComments(undefined), false);
+
+  // REVERSE VERIFICATION, both legs, over the recorded bytes.
+  // OLD behaviour = what the gate produced: the comment channel never reached
+  // the liveness read, so the card resolved ONE target and it was closed.
+  const asSwept = reparkKeys(undefined);
+  t('H28 repro (OLD, gated): only the stale body target is resolved', asSwept, 'objectstack-ai/objectstack#9255');
+  const falseCandidate = h19BlockOutlivedBlocker(reparked, [target(9255, 'closed', { closedAt: '2026-08-19T11:28:26Z' })]);
+  t('H28 repro (OLD, gated): H19 publishes 1 of 1 CLOSED', falseCandidate.includes('1 of 1 `Blocked-by:` target(s)'), true);
+  t('H28 repro (OLD, gated): …as a FULL discharge — the false unlock candidate', falseCandidate.includes('Every target it names is closed'), true);
+  t('H28 repro (OLD, gated): …and never says PARTIAL', falseCandidate.includes('PARTIAL'), false);
+  // NEW behaviour = ungated: both channels, so the live blocker is resolved too.
+  const ungated = [target(9255, 'closed', { closedAt: '2026-08-19T11:28:26Z' }), target(11501, 'open')];
+  t('H28 repro (NEW, ungated): both channels are unioned', reparkKeys([REPARK_COMMENT]), 'objectstack-ai/objectstack#9255 objectstack-ai/objectstack#11501');
+  const partialNow = h19BlockOutlivedBlocker(reparked, ungated);
+  t('H28 repro (NEW, ungated): H19 reads 1 of 2', partialNow.includes('1 of 2 `Blocked-by:` target(s)'), true);
+  t('H28 repro (NEW, ungated): …and calls it a PARTIAL discharge', partialNow.includes('PARTIAL'), true);
+  t('H28 repro (NEW, ungated): …naming the live blocker as still open', partialNow.includes('`#11501`'), true);
+  t('H28 repro (NEW, ungated): …and no longer claims every target closed', partialNow.includes('Every target it names is closed'), false);
+
+  // The PAIRED row — what ungating alone does not say.
+  const stale9592 = h28StaleBodyBlockerLine(reparked, ungated, [REPARK_COMMENT], 'objectstack-ai/objectstack');
+  t('H28: the re-park shape fires', typeof stale9592, 'string');
+  t('H28: …naming the spent BODY target', stale9592.includes('`#9255` (closed 2026-08-19T11:28:26Z)'), true);
+  t('H28: …and the live COMMENT target', stale9592.includes('`#11501`'), true);
+  t('H28: …calling the body line STALE', stale9592.includes('the body line is ') && stale9592.includes('STALE'), true);
+  t('H28: …and asking for the migration to the canonical home', stale9592.includes('rewrite the body line to name the live blocker'), true);
+  t('H28: …naming the re-park as the write that produced it', stale9592.includes('RE-PARK'), true);
+  t('H28: …and recording the false unlock candidate the gate used to publish', stale9592.includes('FALSE unlock candidate'), true);
+  t('H28: report-only, never a body written from this script', stale9592.includes('never a body or a label written from this script'), true);
+  // H19 and H28 fire TOGETHER on this card — different halves of one wait.
+  t('H28 + H19: both rows fire on the re-parked card', Boolean(partialNow) && Boolean(stale9592), true);
+
+  // NEGATIVES — each half of the conjunction alone is a different state.
+  t('H28: a closed body target with NO live comment target is H19\'s row alone', h28StaleBodyBlockerLine(reparked, [target(9255, 'closed')], ['no line in this comment'], 'objectstack-ai/objectstack'), null);
+  t('H28: …and H19 does fire on it', typeof h19BlockOutlivedBlocker(reparked, [target(9255, 'closed')]), 'string');
+  t('H28: an OPEN body target beside an open comment target -> no row', h28StaleBodyBlockerLine(reparked, [target(9255, 'open'), target(11501, 'open')], [REPARK_COMMENT], 'objectstack-ai/objectstack'), null);
+  // A target named in BOTH channels is already in the canonical home: there is
+  // nothing to migrate, so the closed-body half alone must not fire.
+  const bothChannels = { ...issue(['pm:blocked'], [], 'Blocked-by: #9255'), number: 9592 };
+  t('H28: a target stated in both channels is not a migration candidate', h28StaleBodyBlockerLine(bothChannels, [target(9255, 'closed'), target(11501, 'open')], ['Blocked-by: #9255'], 'objectstack-ai/objectstack'), null);
+  // Unresolved targets are H19's unjudged sentence, never a migration order.
+  t('H28: an UNRESOLVED comment target is silent (a migration built on a guess)', h28StaleBodyBlockerLine(reparked, [target(9255, 'closed'), { ...target(11501, 'unresolved'), detail: 'HTTP 404' }], [REPARK_COMMENT], 'objectstack-ai/objectstack'), null);
+  t('H28: an UNRESOLVED body target is silent too', h28StaleBodyBlockerLine(reparked, [{ ...target(9255, 'unresolved'), detail: 'HTTP 404' }, target(11501, 'open')], [REPARK_COMMENT], 'objectstack-ai/objectstack'), null);
+  // The channel inputs the sweep can hand it, and the label gate.
+  t('H28: an unconsulted comment thread -> no row', h28StaleBodyBlockerLine(reparked, ungated, undefined, 'objectstack-ai/objectstack'), null);
+  t('H28: an unreadable comment thread -> no row (H4 owns that sentence)', h28StaleBodyBlockerLine(reparked, ungated, null, 'objectstack-ai/objectstack'), null);
+  t('H28: a body with no line at all -> no row (the comment IS the only home)', h28StaleBodyBlockerLine({ ...reparked, body: 'no line here' }, [target(11501, 'open')], [REPARK_COMMENT], 'objectstack-ai/objectstack'), null);
+  t('H28: no resolutions -> no row', h28StaleBodyBlockerLine(reparked, [], [REPARK_COMMENT], 'objectstack-ai/objectstack'), null);
+  t('H28: absent resolutions -> no row', h28StaleBodyBlockerLine(reparked, undefined, [REPARK_COMMENT], 'objectstack-ai/objectstack'), null);
+  t('H28: the label gate outranks the shape', h28StaleBodyBlockerLine({ ...reparked, labels: [{ name: 'pm:queue' }] }, ungated, [REPARK_COMMENT], 'objectstack-ai/objectstack'), null);
+  // The channel split reads the SAME spellings the union does — a split that
+  // recognised fewer would report migrations for targets nothing resolved.
+  t('H28 split: the plain body spelling', [...blockerChannelKeys('Blocked-by: #9255', reparked, 'objectstack-ai/objectstack')].join(' '), 'objectstack-ai/objectstack#9255');
+  t('H28 split: the backticked-key comment spelling', [...blockerChannelKeys('`Blocked-by:` #11501', reparked, 'objectstack-ai/objectstack')].join(' '), 'objectstack-ai/objectstack#11501');
+  t('H28 split: a cross-repo ref keeps its full key', [...blockerChannelKeys('Blocked-by: objectui#4356', reparked, 'objectstack-ai/objectstack')].join(' '), 'objectstack-ai/objectui#4356');
+  t('H28 split: a self-reference is dropped, as in the union', [...blockerChannelKeys('Blocked-by: #9592', reparked, 'objectstack-ai/objectstack')].join(' '), '');
+  t('H28 split: a mid-sentence prose mention is NOT a directive', [...blockerChannelKeys('the stated **Blocked-by: #9255** is discharged', reparked, 'objectstack-ai/objectstack')].join(' '), '');
+  t('H28 split: no text at all is an empty set', blockerChannelKeys(undefined, reparked, 'objectstack-ai/objectstack').size, 0);
+  // Multiple stale/live targets are counted and capped like every other row.
+  const manyStale = h28StaleBodyBlockerLine(
+    { ...issue(['pm:blocked'], [], 'Blocked-by: #1\nBlocked-by: #2'), number: 9592 },
+    [target(1, 'closed'), target(2, 'closed'), target(11501, 'open')],
+    [REPARK_COMMENT],
+    'objectstack-ai/objectstack',
+  );
+  t('H28: two stale body targets are counted', manyStale.includes('names 2 CLOSED'), true);
+  t('H28: …and the live one is still named', manyStale.includes('`#11501`'), true);
 
   // -- resolveSweepRepo: the parameterisation that makes a verbatim sibling
   // -- install correct rather than a green report about the wrong board (#11217)

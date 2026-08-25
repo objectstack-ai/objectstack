@@ -60,6 +60,51 @@ describe('EmailService.sendTemplate', () => {
     expect(msg.text).toContain('reset: https://x.com/r/abc');
   });
 
+  it('threads organizationId through to the sys_email row — sendTemplate is a producer of send() (#11741)', async () => {
+    const transport = new CaptureTransport();
+    const rows = new Map<string, Record<string, any>>();
+    const svc = new EmailService({
+      transport,
+      defaultFrom: { address: 'no-reply@x.com' },
+      templateLoader: makeLoader([sampleTemplate]),
+      persistence: {
+        async insert(row) { rows.set(row.id, { ...row }); return { id: row.id }; },
+        async update(id, patch) {
+          const cur = rows.get(id);
+          if (cur) rows.set(id, { ...cur, ...patch });
+        },
+      },
+    });
+    const res = await svc.sendTemplate({
+      template: 'auth.password_reset',
+      to: 'alice@x.com',
+      data: { user: { name: 'Alice' }, resetUrl: 'https://x.com/r/abc' },
+      organizationId: 'org_apex',
+    });
+    expect(res.status).toBe('sent');
+    expect(rows.get(res.id)?.organization_id).toBe('org_apex');
+  });
+
+  it('an org-less sendTemplate writes NO organization_id (over-denial control, #11741)', async () => {
+    const transport = new CaptureTransport();
+    const rows = new Map<string, Record<string, any>>();
+    const svc = new EmailService({
+      transport,
+      defaultFrom: { address: 'no-reply@x.com' },
+      templateLoader: makeLoader([sampleTemplate]),
+      persistence: {
+        async insert(row) { rows.set(row.id, { ...row }); return { id: row.id }; },
+      },
+    });
+    const res = await svc.sendTemplate({
+      template: 'auth.password_reset',
+      to: 'alice@x.com',
+      data: { user: { name: 'Alice' }, resetUrl: 'https://x.com/r/abc' },
+    });
+    expect(res.status).toBe('sent');
+    expect(rows.get(res.id)).not.toHaveProperty('organization_id');
+  });
+
   it('renders a datetime hole in the input reference timezone (ADR-0053 Phase 2)', async () => {
     const transport = new CaptureTransport();
     const tpl: EmailTemplateRow = {

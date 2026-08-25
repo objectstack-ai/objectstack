@@ -290,6 +290,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       clone_permission_set: {
         label: "Clonar",
+        description: "Copia los permisos de este conjunto en un nuevo conjunto propiedad de la organización que puedes editar. El alcance de administración delegada no se copia: concédelo deliberadamente en el nuevo conjunto si lo necesita.",
         successMessage: "Conjunto de permisos clonado",
         params: {
           label: {

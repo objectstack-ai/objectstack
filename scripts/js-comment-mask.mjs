@@ -131,12 +131,14 @@ const REGEX_AFTER_KEYWORD = new Set([
  * regex and comment branches -- and its bytes are flagged literal at the end.
  *
  * @param {string} source
- * @returns {{ comment: Uint8Array, literal: Uint8Array }}
+ * @returns {{ comment: Uint8Array, literal: Uint8Array, interpolation: Uint8Array }}
  */
 export function scanSource(source) {
   const n = source.length;
   const comment = new Uint8Array(n);
   const literal = new Uint8Array(n);
+  // The code bytes INSIDE `${...}` — see the closing block of this function.
+  const interpolation = new Uint8Array(n);
   let i = 0;
   let prev = ''; // last significant CODE character
   let word = ''; // ...and the identifier it is the tail of, if any
@@ -263,7 +265,7 @@ export function scanSource(source) {
     if (frame && frame.braces > 0) {
       if (c === '{') frame.braces++;
       else if (c === '}' && --frame.braces === 0) {
-        interpolations.push([frame.start, i + 1]);
+        interpolations.push([frame.start, i + 1, true]);
         frame.start = -1;
       }
     }
@@ -281,9 +283,68 @@ export function scanSource(source) {
   // is only known once its closing brace is found. An unterminated one (EOF
   // inside `${`) still gets flagged, so truncated source cannot leak code
   // bytes into a caller's "this is not a literal" test.
-  for (const frame of templates) if (frame.braces > 0 && frame.start >= 0) interpolations.push([frame.start, n]);
+  for (const frame of templates) if (frame.braces > 0 && frame.start >= 0) interpolations.push([frame.start, n, false]);
+  // Snapshot BEFORE the blanket flush below: a byte the scan already called a
+  // literal (a nested template's body, a quoted string inside the expression)
+  // is content wherever it sits, and must not come back as code.
+  const wasLiteral = literal.slice();
   for (const [start, end] of interpolations) for (let k = start; k < end; k++) literal[k] = 1;
-  return { comment, literal };
+
+  // ── `interpolation`: the third array, and why it is not just `!literal` ──
+  //
+  // Ported from objectui (objectui#6092, landed there as PR objectui#6133) for
+  // #11838. `literal` above is the DOCUMENTED answer and does not move: an
+  // interpolation's bytes are the enclosing template's literal content, and
+  // every existing caller keeps exactly the mask it had.
+  //
+  // But that answer is wrong for one question, and the question is load-bearing
+  // enough to have forced the array's existence downstream. A guard written
+  //
+  //   import.meta.url === `file://${process.argv[1]}`
+  //
+  // is the spelling `invoked-as.mjs`'s header singles out as the worst of the
+  // family — it goes inert with NO SYMLINK AT ALL, percent-encoding apart from
+  // `argv[1]` in any directory whose name needs encoding. Under
+  // `comment || literal` those bytes are prose, so a gate scanning for
+  // hand-typed guards reads that line as a string and reports clean. Measured
+  // here on 644ad5043 (#11838): 0 findings for the template spelling, 1 for the
+  // plain one; measured downstream: objectui's first cut of `check-entry-guard`
+  // listed 28 of that tree's 29 hand-typed guards and silently omitted exactly
+  // this one. This tree does not write the spelling today, which is precisely
+  // why the gate has to see it before the first author does.
+  //
+  // So this array marks the bytes an interpolation contributes as CODE, which
+  // a caller can subtract from `literal` to get a view the language would
+  // execute. It is NOT `!literal`: the `${` and its closing `}` stay masked, so
+  // a caller counting brackets over the subtracted view stays balanced, and a
+  // NESTED template's body inside the interpolation stays masked too, because
+  // those bytes really are content. Both exclusions are pinned in the
+  // self-test; without them the subtracted view either desyncs a bracket
+  // counter or hands back string content as code, which is the fabrication
+  // direction this module's header calls the worse one.
+  for (const [start, end, terminated] of interpolations) {
+    // `[start, end)` spans `${` … `}`; the interior is what the language runs.
+    // An unterminated span (EOF inside `${`) has no closing brace to skip.
+    const stop = terminated ? end - 1 : end;
+    for (let k = start + 2; k < stop; k++) if (!wasLiteral[k]) interpolation[k] = 1;
+  }
+  // ── the delimiters of EVERY span, including a nested one ────────────────
+  //
+  // A second pass, and it is not tidiness. `${a ${b} c}` cannot happen, but
+  // `${xs.map((v) => `n${v}`)}` does: the INNER `${` is flagged literal inline
+  // by its own template frame, while the inner `}` is only reached by the
+  // blanket flush — so the inner `}` looked like interior code of the OUTER
+  // span and came back as a brace with no opener. Measured while porting to
+  // objectui: it desynced `check-entry-guard.mjs`'s top-level statement slicer
+  // badly enough that four files whose dispatch really is guarded were reported
+  // as running on import. A delimiter is a delimiter no matter whose interior
+  // it sits in.
+  for (const [start, end, terminated] of interpolations) {
+    interpolation[start] = 0;
+    if (start + 1 < n) interpolation[start + 1] = 0;
+    if (terminated) interpolation[end - 1] = 0;
+  }
+  return { comment, literal, interpolation };
 }
 
 /** Replace every flagged character with a space, keeping newlines and offsets. */
@@ -441,11 +502,73 @@ export function selfTest() {
     console.log(`  ${problems.length ? '\u2717' : '\u2713'} ${name}${problems.length ? ' -- ' + problems.join('; ') : ''}`);
   }
 
+  // \u2500\u2500 the `interpolation` array (ported from objectui#6092; #11838) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+  //
+  // Driven directly rather than through the GHOST/REAL corpus above, because
+  // the property is about a SUBTRACTED view (`literal` minus `interpolation`)
+  // that no existing caller asks for. Every case states what the view must
+  // contain and what it must NOT \u2014 a one-sided assertion here would pass on an
+  // array that flags everything.
+  const codeView = (src) => {
+    const { comment, literal, interpolation } = scanSource(src);
+    const flags = new Uint8Array(src.length);
+    for (let k = 0; k < flags.length; k++) flags[k] = comment[k] || (literal[k] && !interpolation[k]);
+    return blank(src, flags);
+  };
+  const extra = [];
+  const x = (name, ok, detail) => extra.push([name, Boolean(ok), detail]);
+
+  const guard = 'if (import.meta.url === ' + BT + 'file://${process.argv[1]}' + BT + ') {}';
+  x('the percent-encoding guard is CODE in the subtracted view', codeView(guard).includes('process.argv[1]'), codeView(guard));
+  // The documented `comment || literal` view \u2014 what every existing caller
+  // computes, and the reason the third array had to exist at all.
+  const documentedView = (src) => {
+    const { comment, literal } = scanSource(src);
+    const flags = new Uint8Array(src.length);
+    for (let k = 0; k < flags.length; k++) flags[k] = comment[k] || literal[k];
+    return blank(src, flags);
+  };
+  x('...and still a LITERAL under the documented comment||literal view, which is unchanged',
+    !documentedView(guard).includes('process.argv[1]'), documentedView(guard));
+  x('the template body around it stays masked', !codeView(guard).includes('file://'), codeView(guard));
+
+  const delim = 'const s = ' + BT + 'a${ b }c' + BT + ';';
+  const dv = codeView(delim);
+  x('the ${ and } delimiters stay masked, so a bracket counter stays balanced',
+    (dv.match(/[{}]/g) || []).length === 0, dv);
+  x('...while the expression inside them is code', dv.includes('b'), dv);
+
+  const nested = 'const t = ' + BT + '${xs.map((v) => ' + BT + 'x${v}y' + BT + ').join("")}' + BT + ';';
+  const nv = codeView(nested);
+  x('a NESTED template body inside an interpolation stays masked', !nv.includes('x') || !/x\$?\{?v/.test(nv), nv);
+  x('...while the interpolation expression around it is code', nv.includes('xs.map'), nv);
+
+  const inner = 'const t = ' + BT + '${xs.map((v) => ' + BT + 'n${v}' + BT + ')}' + BT + ';';
+  const iv = codeView(inner);
+  x('a NESTED interpolation contributes NO unbalanced brace to the code view',
+    (iv.match(/\{/g) || []).length === (iv.match(/\}/g) || []).length, iv);
+  x('...and the outer interpolation expression is still code', iv.includes('xs.map'), iv);
+
+  const quoted = 'const q = ' + BT + '${f("process.argv[1]")}' + BT + ';';
+  x('a STRING quoted inside an interpolation is not code', !codeView(quoted).includes('process.argv[1]'), codeView(quoted));
+
+  const plain = "const s = 'process.argv[1]';";
+  x('an ordinary string literal is untouched by any of this', !codeView(plain).includes('process.argv[1]'), codeView(plain));
+
+  const unterminated = 'const u = ' + BT + '${ g(';
+  x('an unterminated interpolation does not throw and yields its code', codeView(unterminated).includes('g('), codeView(unterminated));
+
+  for (const [name, ok, detail] of extra) {
+    if (!ok) failed++;
+    console.log(`  ${ok ? '\u2713' : '\u2717'} ${name}${ok ? '' : ' -- ' + JSON.stringify(detail)}`);
+  }
+  const total = cases.length + extra.length;
+
   if (failed) {
-    console.error(`\u2717 js-comment-mask self-test: ${failed} of ${cases.length} case(s) failed.`);
+    console.error(`\u2717 js-comment-mask self-test: ${failed} of ${total} case(s) failed.`);
     process.exit(1);
   }
-  console.log(`\u2713 js-comment-mask self-test: ${cases.length} cases pass.`);
+  console.log(`\u2713 js-comment-mask self-test: ${total} cases pass (${cases.length} mask/strip corpus, ${extra.length} interpolation view).`);
 }
 
 // Executed only as a CLI. Importing this module must have NO side effect: the

@@ -9,6 +9,7 @@ import type {
     INotificationOutbox,
     NotificationDeliveryRecord,
 } from './outbox.js';
+import { NotificationAckError, notificationAckNotClaimedMessage } from './outbox.js';
 import { hashPartition } from './backoff.js';
 
 /**
@@ -117,8 +118,26 @@ export class MemoryNotificationOutbox implements INotificationOutbox {
 
     async ack(id: string, result: AckResult): Promise<void> {
         const r = this.rows.get(id);
+        // An id matching no row is not a contract violation: there is no state
+        // to corrupt and no claim to lose. Unchanged, and declared on the
+        // interface so the two backends agree about it.
         if (!r) return;
+        // [#11453] The status precondition. `ack` completes a delivery this
+        // caller CLAIMED; an unclaimed `pending` row (the ack-as-cancel trap)
+        // or an already-terminal one is refused, and nothing below runs — so a
+        // refused ack leaves status, attempts and error exactly as they were.
+        // Single-threaded, so this test and the mutation are already one atomic
+        // step; `SqlNotificationOutbox` spells the same guard as a conditional
+        // UPDATE because it is not.
+        if (r.status !== 'in_flight') {
+            throw new NotificationAckError(
+                notificationAckNotClaimedMessage(id, r.status),
+                'DELIVERY_NOT_ELIGIBLE',
+            );
+        }
         const now = this.clock();
+        // Reached only for a genuinely claimed row, so this counts a real
+        // dispatch attempt and nothing else (#11453).
         r.attempts += 1;
         r.lastAttemptedAt = now;
         r.claimedBy = undefined;

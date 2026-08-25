@@ -229,6 +229,11 @@ function declareJoinCorrelationSuite(cell: DialectCell): void {
     it('returns a foreign key whose target lives in ANOTHER schema', async () => {
       const foreignKeys = await driver.foreignKeys(CROSS_CHILD);
 
+      // `referencedSchema` is #11377's half of this answer: the parent is off
+      // the session's `search_path`, so the (still bare) name arrives
+      // qualified. Presence/absence semantics and their own controls are
+      // pinned in `sql-driver-11377-introspect-fk-cross-schema-qualification`;
+      // this file keeps owning the #11324 fact — the key is RETURNED at all.
       expect(
         foreignKeys,
         `${cell.label}: ${CROSS_CHILD} has a declared foreign key into ${far} and must not be ` +
@@ -239,6 +244,7 @@ function declareJoinCorrelationSuite(cell: DialectCell): void {
           referencedTable: REMOTE_PARENT,
           referencedColumn: 'id',
           constraintName: FK_CROSS,
+          referencedSchema: far,
         },
       ]);
     });
@@ -256,6 +262,8 @@ function declareJoinCorrelationSuite(cell: DialectCell): void {
           referencedTable: REMOTE_PARENT,
           referencedColumn: 'id',
           constraintName: FK_CROSS,
+          // #11377: the off-path parent arrives qualified — see above.
+          referencedSchema: far,
         },
       ]);
     });

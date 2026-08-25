@@ -373,6 +373,223 @@ describe('validateTranslationReferences — apps, dashboards, global actions', (
   });
 });
 
+describe('validateTranslationReferences — flows (#7646 / #11287)', () => {
+  /**
+   * One stack, shared by every case below — the clean run and the three
+   * orphan runs differ ONLY in the bundle, so "no findings" is a verdict about
+   * this metadata rather than a rule that never reached it.
+   */
+  const flowStack = {
+    objects: [{ name: 'crm_lead', fields: { name: { type: 'text' }, owner: { type: 'lookup' } } }],
+    flows: [
+      {
+        name: 'lead_conversion',
+        type: 'screen',
+        nodes: [
+          { id: 'start', type: 'start', label: 'Start' },
+          { id: 'gate', type: 'decision', label: 'Qualified?' },
+          {
+            id: 'details',
+            type: 'screen',
+            label: 'Details',
+            config: {
+              title: 'Conversion Details',
+              fields: [
+                { name: 'opportunity_name', label: 'Opportunity Name' },
+                { name: 'close_date', label: 'Close Date' },
+              ],
+            },
+          },
+        ],
+        edges: [
+          { id: 'e1', source: 'start', target: 'gate' },
+          { id: 'e2', source: 'gate', target: 'details' },
+        ],
+      },
+    ],
+  };
+
+  const bundle = (flows: unknown) => ({ ...flowStack, translations: [{ 'zh-CN': { flows } }] });
+
+  /**
+   * The universe the collector actually reached, read back out of the rule's
+   * OWN hint — the tail `listNames()` prints.
+   *
+   * This is the assertion the leg exists for. A universe collector that
+   * silently reaches nothing reports nothing, which is indistinguishable from
+   * a leg that looked and found no orphans; here the collected names come back
+   * through the production code path, so a collector that reached nothing
+   * prints an empty tail and fails.
+   */
+  const enumeratedUniverse = (hint: string, lead: string): string[] => {
+    const matched = new RegExp(`${lead}: ([^.]*)\\.`).exec(hint);
+    return matched ? matched[1].split(', ').filter(Boolean) : [];
+  };
+
+  it('reports nothing when the flow, the screen node and the field all resolve', () => {
+    const findings = validateTranslationReferences(
+      bundle({
+        lead_conversion: {
+          label: '线索转换',
+          screens: {
+            details: {
+              title: '转换详情',
+              fields: {
+                opportunity_name: { label: '商机名称', placeholder: '请输入' },
+                close_date: { label: '预计成交日期' },
+              },
+            },
+          },
+        },
+      }),
+    );
+    expect(findings).toEqual([]);
+  });
+
+  it('fires on an orphan at level 1 — the flow name — and enumerates a non-empty flow universe', () => {
+    const findings = validateTranslationReferences(
+      bundle({ lead_conversions: { label: 'x', screens: { details: { title: 'y' } } } }),
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0].severity).toBe('warning');
+    expect(findings[0].rule).toBe(TRANSLATION_TARGET_UNKNOWN);
+    expect(findings[0].path).toBe('translations[0]["zh-CN"].flows.lead_conversions');
+    expect(findings[0].message).toContain('Did you mean "lead_conversion"?');
+    // ⭐ the collector reached a real flow, so the zero above is a reading.
+    expect(enumeratedUniverse(findings[0].hint, 'Defined flows')).toEqual(['lead_conversion']);
+  });
+
+  it('fires on an orphan at level 2 — the screen node id — and enumerates a non-empty screen universe', () => {
+    const findings = validateTranslationReferences(
+      bundle({ lead_conversion: { label: '线索转换', screens: { detail: { title: 'y' } } } }),
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0].severity).toBe('warning');
+    expect(findings[0].path).toBe('translations[0]["zh-CN"].flows.lead_conversion.screens.detail');
+    expect(findings[0].message).toContain('Did you mean "details"?');
+    expect(findings[0].hint).toContain('ScreenSpec.nodeId');
+    expect(enumeratedUniverse(findings[0].hint, 'Declared screen node ids')).toEqual(['details']);
+  });
+
+  it('fires on an orphan at level 3 — the screen field name — and enumerates a non-empty field universe', () => {
+    const findings = validateTranslationReferences(
+      bundle({
+        lead_conversion: {
+          screens: { details: { title: '转换详情', fields: { opportunity: { label: 'x' } } } },
+        },
+      }),
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0].severity).toBe('warning');
+    expect(findings[0].path).toBe(
+      'translations[0]["zh-CN"].flows.lead_conversion.screens.details.fields.opportunity',
+    );
+    expect(findings[0].message).toContain('Did you mean "opportunity_name"?');
+    expect(enumeratedUniverse(findings[0].hint, 'Declared screen field names')).toEqual([
+      'close_date',
+      'opportunity_name',
+    ]);
+  });
+
+  it('diagnoses a key on a real node of the wrong type as such, not as a missing node', () => {
+    const findings = validateTranslationReferences(
+      bundle({ lead_conversion: { screens: { gate: { title: 'x' } } } }),
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0].message).toContain('declares as a `decision` node, not a `screen`');
+  });
+
+  it('resolves a screen nested in an ADR-0031 region — the runner pauses on it, so its keys are not orphans', () => {
+    const nestedStack = {
+      flows: [
+        {
+          name: 'lead_conversion',
+          type: 'screen',
+          nodes: [
+            {
+              id: 'per_lead',
+              type: 'loop',
+              label: 'Each Lead',
+              config: {
+                collection: '{leads}',
+                body: {
+                  nodes: [
+                    {
+                      id: 'nested_screen',
+                      type: 'screen',
+                      label: 'Confirm',
+                      config: { fields: [{ name: 'confirmed', label: 'Confirmed' }] },
+                    },
+                  ],
+                },
+              },
+            },
+          ],
+        },
+      ],
+    };
+    const nestedBundle = (screens: unknown) => ({
+      ...nestedStack,
+      translations: [{ 'zh-CN': { flows: { lead_conversion: { screens } } } }],
+    });
+
+    expect(
+      validateTranslationReferences(
+        nestedBundle({ nested_screen: { title: '确认', fields: { confirmed: { label: '已确认' } } } }),
+      ),
+    ).toEqual([]);
+
+    // …and the same nested universe still judges: one letter off and it fires,
+    // so the green above is a resolution rather than an unreached subtree.
+    const findings = validateTranslationReferences(
+      nestedBundle({ nested_screen: { fields: { confirme: { label: '已确认' } } } }),
+    );
+    expect(findings).toHaveLength(1);
+    expect(enumeratedUniverse(findings[0].hint, 'Declared screen field names')).toEqual(['confirmed']);
+  });
+
+  it('redirects a field key on an object-form screen to the objects group', () => {
+    const findings = validateTranslationReferences({
+      ...flowStack,
+      flows: [
+        {
+          name: 'lead_conversion',
+          type: 'screen',
+          nodes: [
+            { id: 'edit_lead', type: 'screen', label: 'Edit', config: { objectName: 'crm_lead', mode: 'edit' } },
+          ],
+        },
+      ],
+      translations: [
+        {
+          'zh-CN': {
+            flows: { lead_conversion: { screens: { edit_lead: { title: '编辑', fields: { owner: { label: '负责人' } } } } } },
+          },
+        },
+      ],
+    });
+    expect(findings).toHaveLength(1);
+    expect(findings[0].severity).toBe('warning');
+    expect(findings[0].message).toContain('OBJECT-FORM screen');
+    expect(findings[0].hint).toContain('objects.crm_lead.fields.owner');
+  });
+
+  it('accepts a flow map keyed by name, the normalized stack shape', () => {
+    const findings = validateTranslationReferences({
+      flows: {
+        lead_conversion: {
+          type: 'screen',
+          nodes: [{ id: 'details', type: 'screen', label: 'D', config: { fields: [{ name: 'opportunity_name' }] } }],
+        },
+      },
+      translations: [
+        { 'zh-CN': { flows: { lead_conversion: { screens: { details: { fields: { opportunity_name: { label: 'x' } } } } } } } },
+      ],
+    });
+    expect(findings).toEqual([]);
+  });
+});
+
 describe('validateTranslationReferences — namespaces deliberately not judged', () => {
   it('ignores messages, validationMessages, settings, metadataForms and settingsCommon', () => {
     const findings = validateTranslationReferences({

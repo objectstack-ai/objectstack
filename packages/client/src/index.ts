@@ -484,6 +484,123 @@ function normalizeActionResult<T>(payload: any): { success: boolean; data?: T; e
   return { success: true, data: payload as T };
 }
 
+/**
+ * Query-string options for `meta.saveItem` on BOTH clients — the unscoped
+ * `ObjectStackClient.meta` and {@link ScopedProjectClient.meta}.
+ *
+ * ONE exported type deliberately shared by the two declarations, rather than
+ * an inline literal copied into each. The two `saveItem`s are the same method
+ * on two clients reaching one pair of routes; every divergence measured
+ * between them so far has been closed as a defect (#7019 and the cards citing
+ * it), and a bag spelled twice is a divergence waiting to be introduced by
+ * whoever next extends only the copy they happened to open.
+ *
+ * ## Why these three, and why they are the ones that exist
+ *
+ * `PUT /api/v1/meta/:type/:name` reads exactly these three query parameters,
+ * and until this type existed the SDK sent NONE of them — `saveItem` built a
+ * bare path and a body. The sharpest consequence is `force`: `saveMetaItem`'s
+ * Phase 3a-destructive gate refuses with `409 DESTRUCTIVE_CHANGE` and ends the
+ * message `— re-submit with ?force=true to proceed.`, so a first-party SDK
+ * caller was told to set a parameter their client had no way to set. Doing
+ * literally what the refusal said returned the identical refusal, forever; the
+ * only way out was to abandon the SDK for raw `fetch`. That is not a
+ * hypothetical — the platform QA checklist instructs its own authors to issue
+ * these steps "as raw HTTP with the query string appended" for exactly this
+ * reason, and `@object-ui/data-objectstack` carries a hand-rolled
+ * `MetadataClient.save` that composes these same three parameters itself.
+ *
+ * ⛔ The remedy clause is the contract here, not a nicety: it is a
+ * risk-acknowledgement refusal, and `destructiveChangeRemedy` renders it per
+ * write FACE precisely so that no caller is ever prescribed a mechanism their
+ * door does not have. Both REST `PUT` doors state face `'meta-envelope'`,
+ * whose clause names `?force=true` — so the clause is only true of an SDK
+ * caller while this bag exists. Removing it re-breaks the prose, not just the
+ * feature.
+ *
+ * The face is stated by the SERVER and is not derivable from the caller's
+ * identity: an SDK save and a raw `fetch` save arrive at the same door as the
+ * same request. There is therefore no "SDK-flavoured" wording available to
+ * repair this from the message side — the parameter had to become reachable.
+ */
+export interface SaveMetaItemOptions {
+    /**
+     * `?force=true` — acknowledge and proceed past the Phase 3a
+     * destructive-change refusal (`409 DESTRUCTIVE_CHANGE`), whose message
+     * names this parameter as the remedy.
+     *
+     * Only `true` reaches the wire. `false` and `undefined` both OMIT the
+     * parameter rather than sending `?force=false`, which is not merely
+     * tidier: the door refuses a REPEATED `?force` (#6877) because a repeated
+     * value arrives as an array and a non-empty array is truthy — so a
+     * spelled-out opt-OUT could turn the guard ON. Never emitting the
+     * opt-out spelling keeps this client clear of that edge entirely.
+     */
+    force?: boolean;
+    /**
+     * `?package=<id>` — bind the saved row to that software package
+     * (`sys_metadata.package_id`). Omit for an environment-local overlay.
+     * Named `packageId` rather than `package` to match the sibling
+     * `getItem`/`getItems` options on this same object (`package` is also a
+     * reserved word).
+     */
+    packageId?: string;
+    /**
+     * `?mode=draft` — stage the write as a pending draft instead of
+     * publishing it to the active overlay.
+     *
+     * `'publish'` is the explicit spelling of the default and deliberately
+     * sends NOTHING: the door acts on `mode=draft` alone and treats every
+     * other value as publish, so emitting `?mode=publish` would put a value
+     * on the wire that the server ignores. Same shape the first-party
+     * `@object-ui/data-objectstack` `MetadataClient.save` already uses.
+     *
+     * ⚠️ COMPOUND NAMES DO NOT STAGE. `mode` reaches only the single-segment
+     * `PUT /meta/:type/:name`. Its compound-name twin
+     * `PUT /meta/:type/:section/:name` — the door a `name` containing a slash
+     * lands on, e.g. `saveItem('object', 'views/all_leads', item)` — never
+     * reads this parameter, so `{ mode: 'draft' }` there is IGNORED and the
+     * write is PUBLISHED LIVE, answered 200. It is not refused; there is no
+     * signal at the call site. Filed as objectstack#11712 and deliberately not
+     * repaired from this side: threading it is the route's decision, and a
+     * client-side guess would be a second place the two doors disagree.
+     *
+     * ⛔ Do not "fix" this by rejecting compound names here. `force` and
+     * `packageId` DO reach both doors (measured: the compound handler reads
+     * and threads `?force` since objectstack#11095 and `?package` alongside
+     * it), so refusing the whole bag on a compound name would break the two
+     * parameters that work in order to warn about the one that does not.
+     */
+    mode?: 'draft' | 'publish';
+}
+
+/**
+ * Compose the `meta.saveItem` query string — the ONE builder both `saveItem`
+ * declarations call, for the same reason {@link SaveMetaItemOptions} is one
+ * type: the twins must not be able to drift in what they put on the wire.
+ *
+ * Returns `''` (not `'?'`) when nothing is set, so an options-less call is
+ * BYTE-IDENTICAL to what this method sent before the bag existed. That is the
+ * backward-compatibility guarantee, and it is what the pre-existing URL pins
+ * measure.
+ *
+ * `URLSearchParams.set` (never `append`) is load-bearing: the door REFUSES a
+ * repeated `force` / `package` / `mode`, so a builder that could emit a key
+ * twice would turn a caller's option into a 400.
+ */
+function metaSaveQuery(options?: SaveMetaItemOptions): string {
+    if (!options) return '';
+    const params = new URLSearchParams();
+    // Only the opt-IN is spelled on the wire — see `force`'s doc comment.
+    if (options.force) params.set('force', 'true');
+    if (options.packageId) params.set('package', options.packageId);
+    // Only `'draft'` is actionable server-side; `'publish'` is the default
+    // said out loud and sends nothing.
+    if (options.mode === 'draft') params.set('mode', 'draft');
+    const qs = params.toString();
+    return qs ? `?${qs}` : '';
+}
+
 export class ObjectStackClient {
   private baseUrl: string;
   private token?: string;
@@ -700,9 +817,26 @@ export class ObjectStackClient {
      * declaration used to stop at `{ success, message }`, and annotating
      * against that subset would have hidden the OCC carrier (#5545).
      */
-    saveItem: async (type: string, name: string, item: any): Promise<SaveMetaItemResponse> => {
+    saveItem: async (
+        type: string,
+        name: string,
+        item: any,
+        options?: SaveMetaItemOptions,
+    ): Promise<SaveMetaItemResponse> => {
         const route = this.getRoute('metadata');
-        const res = await this.fetch(`${this.baseUrl}${route}/${type}/${name}`, {
+        // Named `query`, not `qs`. Measured on this file: of 37 `const qs =`
+        // bindings, 27 hold a BARE `params.toString()` (the `?` is added at
+        // the interpolation site), 8 hold a string that CARRIES its own `?`,
+        // and 2 hold a `URLSearchParams` object. One name, three meanings —
+        // so a reader cannot tell from `${qs}` whether a `?` is already
+        // there, and picking the wrong one builds `…name??force=true` or
+        // `…nameforce=true`. This value carries its `?`; the distinct name
+        // says so without the reader having to go and look.
+        const query = metaSaveQuery(options);
+        // `type`/`name` stay UNENCODED — a compound name's slash must survive
+        // so the request reaches `PUT /meta/:type/:section/:name` instead of
+        // collapsing onto the 3-segment route (pinned in client.test.ts).
+        const res = await this.fetch(`${this.baseUrl}${route}/${type}/${name}${query}`, {
             method: 'PUT',
             body: JSON.stringify(item)
         });
@@ -5169,9 +5303,26 @@ export class ScopedProjectClient {
       const res = await this.parent._fetch(this.url(`/meta/${type}/${name}${qs ? `?${qs}` : ''}`));
       return this.parent._unwrap<GetMetaItemResponse>(res);
     },
-    /** Carries the ADR-0008 OCC token in `version` — see the unscoped twin. */
-    saveItem: async (type: string, name: string, item: any): Promise<SaveMetaItemResponse> => {
-      const res = await this.parent._fetch(this.url(`/meta/${type}/${name}`), {
+    /**
+     * Carries the ADR-0008 OCC token in `version` — see the unscoped twin.
+     *
+     * `options` is the SAME {@link SaveMetaItemOptions} bag the unscoped twin
+     * takes, and reaches the SAME handler: the scoped mount is not a second
+     * implementation, it is one `registerForBase` call replayed against
+     * `/environments/:environmentId` (see `RestServer`), so this door reads
+     * `?force` / `?package` / `?mode` byte-identically. A bag on only one of
+     * the two clients would be a fresh divergence of the kind #7019 rules
+     * against, not half a fix.
+     */
+    saveItem: async (
+      type: string,
+      name: string,
+      item: any,
+      options?: SaveMetaItemOptions,
+    ): Promise<SaveMetaItemResponse> => {
+      // `query`, not `qs` — it carries its own `?`; see the unscoped twin.
+      const query = metaSaveQuery(options);
+      const res = await this.parent._fetch(this.url(`/meta/${type}/${name}${query}`), {
         method: 'PUT',
         body: JSON.stringify(item),
       });

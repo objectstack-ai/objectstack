@@ -43,14 +43,16 @@ JSON,所以终报消息就是 JSON 本身,别无其它。
    「纠正」**:共享身份让所有人的写入都像你写的;被改写的 body 只是关于 body 的证据,不证
    明别的;回退他人的操作——尤其是 ready 翻转——永远轮不到你(把 ready PR 翻回 draft 会
    一步无声毁掉 auto-merge 与合并队列成员资格)。把意外写进 `summary`,交给 PM 裁决。
-3. **范围 = 这张 issue,别无其它。** 顺路撞见的无关缺陷立成新的**无 assignee** issue,列
-   进 `out_of_scope_findings` —— 永不在本 PR 里修。立单纪律:**先搜再立**(关键词 + 文件
-   路径扫 open issues;并行 dev 看不见彼此同一小时立的卡,这一搜只能靠你);**归挂,不散
-   落**(落在某张已排队 issue 完成范围之内的发现,立成它的 sub-issue;只是*依赖*它的,独
-   立立单带一行 `Blocked-by:` —— 已排队父单的 sub-issue 自动进派发池);**立在修复落地的
-   仓**,带回链。观察类发现(死代码、未演练漂移、外观抛光)打 `finding` 标签且不打
-   `pm:queue`;具体缺陷不打标签,留给 PM 分诊。永不因为「看着小」把发现揣着不报 —— 立单
-   时点判的严重度两个方向都不可靠;平实立单,分诊轮定级。
+3. **范围 = 这张 issue,别无其它。** 顺路撞见的无关缺陷立成新的**无 assignee** issue,列进
+   `out_of_scope_findings` —— 永不在本 PR 里修。立单纪律:**先搜再立**(关键词 + 文件路径扫 open
+   issues;并行 dev 看不见彼此同一小时立的卡,这一搜只能靠你)—— 这一搜与列卡读走 **REST 列
+   表端点 + 本地 grep**,⛔ 不用 MCP `list_issues`/`search_issues`(GraphQL 池是舰队最紧的桶;通道对照
+   `.claude/skills/pm-dispatch/references/rest-channel.md`),且**PM 的去重读数随派发词下发 ⇒ 当既有事实
+   用,只复核其后的增量,⛔ 不重跑**;**归挂,不散落**(落在某张已排队 issue 完成范围之内的发
+   现,立成它的 sub-issue;只是*依赖*它的,独立立单带一行 `Blocked-by:` —— 已排队父单的 sub-issue
+   自动进派发池);**立在修复落地的仓**,带回链。观察类发现(死代码、未演练漂移、外观抛光)
+   打 `finding` 标签且不打 `pm:queue`;具体缺陷不打标签,留给 PM 分诊。永不因为「看着小」把发
+   现揣着不报 —— 立单时点判的严重度两个方向都不可靠;平实立单,分诊轮定级。
    **有界就地修豁免** —— 仅当**四条全部成立**才就地修:① 与本卡同一缺陷类;② 机械修,正
    确形态已被既有证据钉死(权威源、兄弟声明、已落地裁决);③ 该文件无其他认领持有;④ 同
    一批门禁族,不新增验证面。它欠下默认路径所保护的两样:认领申报的文件面**同轮增补**
@@ -187,9 +189,7 @@ dispatch prompt 只携带每单增量(裁决引文、裁决 / PM-机制假设分
   它。作数的断言是 `check:authorable-surface` 绿;`baseRev` 允许滞后(一行信息,不是错
   误)。⛔ 永不在 MERGE 态跑 `gen:schema`:HEAD 还是 merge 前的 tip,锚点会静默回滚到旧
   分叉点 —— 依然真实、门禁全绿、一次已落地的推进被吞掉。先 commit merge 再重生成(已机
-  械化:`bash scripts/pm/os-regen-merge.sh`)。姊妹陷阱:`gen:schema` 的清理会抹掉
-  `gen:openapi` 的产物(rest 里冒出假 5xx 失败);用
-  `pnpm --filter @objectstack/spec gen:openapi` 恢复。
+  械化:`bash scripts/pm/os-regen-merge.sh`)。
 - **家族规则:`git worktree` 只隔离工作树与 HEAD;`.git/` 下其余一切 —— refs(含
   `refs/remotes/*`)、stash 栈、config、hooks —— 全 worktree 共享;配方只有不点名共享态
   才 worktree-safe。家族同签名:操作看着本地、报成功,唯一症状是 `git status` 里出现他

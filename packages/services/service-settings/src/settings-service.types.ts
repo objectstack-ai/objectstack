@@ -289,6 +289,20 @@ export type SettingsActionHandler = (input: {
  * assignment fails contravariantly. Declaring only what is actually called
  * keeps `Logger`, `ctx.logger`, `console.error` and a one-line spy all
  * assignable.
+ *
+ * ## Why `warn` is OPTIONAL here, on the record (#10556, maintainer 2026-08-24)
+ *
+ * #9754 rules that a sink declaring an optional `error` must declare a
+ * NON-optional `warn`. This sink is the ruled EXCEPTION to that, not an
+ * oversight and not a repair anyone still owes: the assignability argument
+ * above is the reason of record, and it is load-bearing in a way the rule
+ * cannot see. Requiring `warn` costs 10 single-member `{ error }` spies across
+ * 6 test files their assignability and buys nothing, because this module does
+ * not depend on the TYPE for its fallback — every report site is written
+ * `if (this.logger?.error) … else console.error(…)`, so the guaranteed channel
+ * is in the CODE. The exception is recorded, with that reasoning, in
+ * `scripts/optional-error-sink-contract.baseline.json`; read that row before
+ * treating this `?` as debt.
  */
 export interface SettingsDiagnosticsLogger {
   error?: (message: string) => void;

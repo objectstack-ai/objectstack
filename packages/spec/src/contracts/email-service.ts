@@ -67,6 +67,22 @@ export interface SendEmailInput {
   relatedId?: string;
   /** User id for `sent_by` audit linkage. */
   sentBy?: string;
+  /**
+   * Organization (tenant) id stamped verbatim onto the persisted
+   * `sys_email.organization_id` (#11741, Decision 2 of #11303).
+   *
+   * Pass-through only: the email service's writer runs under a constant
+   * system context and MUST NOT resolve or fabricate an organization — a
+   * wrong `organization_id` is silently authoritative to every report,
+   * export and cleanup script that filters by organization, which is worse
+   * than a null. Producers that already hold one (e.g. the messaging email
+   * channel's `delivery.notification.organizationId`) thread it here; omit
+   * it when the caller genuinely has none (auth verification /
+   * password-reset mail) — absent stays legal and the row is simply
+   * unstamped. Forward-stamping only; pre-existing org-less rows are not
+   * backfilled.
+   */
+  organizationId?: string;
 }
 
 /**
@@ -184,6 +200,16 @@ export interface SendTemplateInput {
   relatedId?: string;
   /** User id for `sent_by` audit linkage. */
   sentBy?: string;
+  /**
+   * Organization (tenant) id forwarded into the {@link SendEmailInput} this
+   * template send performs, and stamped from there onto
+   * `sys_email.organization_id` (#11741). Same contract as
+   * {@link SendEmailInput.organizationId}: pass-through only, optional,
+   * absent stays legal. Distinct from {@link SendTemplateInput.org}, which
+   * addresses template org-overlay *resolution*, not the delivery row's
+   * tenant stamp.
+   */
+  organizationId?: string;
 }
 
 /**

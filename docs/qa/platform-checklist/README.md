@@ -199,14 +199,27 @@ the exact qualified spelling to write. This is option C on #7716's open question
 deferred at #7720 while the recipe shape lived in a single area and landed at #10593
 once it had spread to three areas and six references.
 
-One thing the resolve deliberately does **not** do:
+The resolve runs in **both directions** (#11506). As well as every `use` naming a real
+recipe, **every recipe must be named by some `use`** — a recipe nobody opts into is dead
+text a runner may still replay, and it fails the gate against the area file that owns it.
+The reverse direction was deferred while cross-area reuse had no spelling (redding it
+then would have answered that question by accident, in the direction of "recipes are
+area-local"); the 2026-08-22 ruling above discharged that reason, because every
+legitimate consumer can now express itself as a `use` from any area.
 
-- **It does not flag a recipe no item references.** It was left out while cross-area
-  reuse had no spelling, because redding it would have answered that question by
-  accident in the direction of "recipes are area-local". With the qualified spelling
-  ruled, that reason has expired and an unreferenced recipe is unambiguously dead text —
-  but turning the direction on is its own change with its own blast radius, tracked at
-  #11506 rather than folded in here.
+Three things worth knowing before you meet it:
+
+- **A reference from a `retired` item still counts.** "Referenced" means referenced by
+  any item, not by an active one — a retired item's `use` must still resolve, so its
+  recipe must still exist. The two directions would otherwise be mutually unsatisfiable
+  the moment a recipe's last consumer retired.
+- **It stays quiet while any `use` dangles.** A misspelt reference means the consumer
+  graph is incomplete, so the run reports the dangling reference only — a typo must not
+  also accuse the correct recipe it was aiming at.
+- **There is no waiver.** The two answers are: give the recipe a consumer (from this area
+  or, qualified, from any other), or delete it. If you ever have a recipe that genuinely
+  should be kept with no consumer, that case is the moment to decide the spelling — file
+  it rather than working around the gate (#10885 may answer it as a retired recipe).
 
 ⚠️ Remember the cadence: this gate is **not** CI-wired (above), so it catches a typo'd
 `use` at the next manual run, not on the PR that introduced it. Copy the key, don't retype it.

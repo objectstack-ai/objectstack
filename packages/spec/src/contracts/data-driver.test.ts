@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import type { DriverQuery, IDataDriver } from './data-driver';
+import type { IntrospectedSchema } from './schema-diff-service';
 import type { QueryAST } from '../data/query.zod';
 import type { DriverOptions } from '../data/driver.zod';
 
@@ -268,6 +269,133 @@ describe('IDataDriver', () => {
       // was not in the protocol.
       const unknownOperator: DriverQuery = { where: { name: { $sounds_like: 'acme%' } } };
       expect(unknownOperator.where).toBeTruthy();
+    });
+  });
+
+  // ===========================================================================
+  // introspectSchema — the engine-registration road meets the compiler (#11493)
+  // ===========================================================================
+  //
+  // #11381 typed the host-factory road (`DatasourceDriverHandle.introspectSchema`,
+  // option C of the #11123 ruling). This block pins the OTHER documented road: a
+  // driver implementing `IDataDriver` and handed to `IDataEngine.registerDriver()`.
+  // Reverse-verified against the pre-#11493 contract (measured 2026-08-24): with
+  // the interface silent about `introspectSchema`, the mis-shapes below compiled
+  // GREEN — an extra member rides along unchecked — which is the gap #11493
+  // closes. As with the DriverQuery pins above, every directive here is resolved
+  // by tsc: reverting the member makes each `@ts-expect-error` unused, and an
+  // unused directive is itself an error, so `pnpm --filter @objectstack/spec
+  // typecheck` goes red on regression in either direction.
+
+  describe('introspectSchema (#11493)', () => {
+    /** The declared return type, read off the CONTRACT rather than re-spelled. */
+    type DriverIntrospection = Awaited<ReturnType<NonNullable<IDataDriver['introspectSchema']>>>;
+
+    const base: IDataDriver = {
+      name: 'introspecting',
+      version: '1.0.0',
+      supports: {},
+      connect: async () => {},
+      disconnect: async () => {},
+      checkHealth: async () => true,
+      execute: async () => ({}),
+      find: async () => [],
+      findOne: async () => null,
+      create: async () => ({ id: '1' }),
+      update: async () => ({ id: '1' }),
+      upsert: async () => ({ id: '1' }),
+      delete: async () => true,
+      count: async () => 0,
+      bulkCreate: async () => [],
+      bulkUpdate: async () => [],
+      bulkDelete: async () => {},
+      beginTransaction: async () => ({}),
+      commit: async () => {},
+      rollback: async () => {},
+      syncSchema: async () => {},
+      dropTable: async () => {},
+    };
+
+    it('is optional — a driver without introspection stays conformant', () => {
+      // `base` above declares no `introspectSchema` and satisfies `IDataDriver`
+      // at its declaration; introspection is a capability, not an obligation.
+      expect(base.introspectSchema).toBeUndefined();
+    });
+
+    it('declares exactly the spec introspection shape, not a lookalike', () => {
+      // Mutual extends: the member's return IS `IntrospectedSchema` — a revert
+      // to `unknown` (or a drift to a private re-spelling) resolves `Exact` to
+      // `never` and this line goes red naming the contract.
+      type Exact = DriverIntrospection extends IntrospectedSchema
+        ? (IntrospectedSchema extends DriverIntrospection ? 'exact' : never)
+        : never;
+      const exact: Exact = 'exact';
+      expect(exact).toBe('exact');
+    });
+
+    it('accepts the spec shape, and a shape that EXTENDS it (the driver-sql pattern)', () => {
+      const conforming: IDataDriver = {
+        ...base,
+        introspectSchema: async () => ({
+          dialect: 'postgres',
+          introspectedAt: '2026-08-24T00:00:00.000Z',
+          tables: {
+            wh_order: {
+              name: 'wh_order',
+              columns: [{ name: 'id', type: 'uuid', nullable: false, primaryKey: true }],
+            },
+          },
+        }),
+      };
+      // Extra facts ride along: driver-sql's table-level `primaryKeys` /
+      // `foreignKeys` and per-column `isUnique` / `maxLength` live on declared
+      // types that EXTEND the spec contract, and assignability admits them on
+      // any non-literal value. What the contract refuses is a wrong spelling
+      // of a DECLARED key, never a richer driver.
+      const extendedResult = {
+        dialect: 'postgres',
+        introspectedAt: '2026-08-24T00:00:00.000Z',
+        tables: {
+          wh_order: {
+            name: 'wh_order',
+            columns: [{ name: 'id', type: 'uuid', nullable: false, primaryKey: true, isUnique: true, maxLength: 36 }],
+            primaryKeys: ['id'],
+            foreignKeys: [],
+          },
+        },
+      };
+      const extended: IDataDriver = { ...base, introspectSchema: async () => extendedResult };
+      expect(typeof conforming.introspectSchema).toBe('function');
+      expect(typeof extended.introspectSchema).toBe('function');
+    });
+
+    it('refuses the retired isPrimary spelling at the offending field', () => {
+      // The defect class this seam actually shipped: primary-key membership
+      // spelled `isPrimary`, which no consumer reads — the federated table's
+      // records silently could not be located or updated.
+      // @ts-expect-error - primary-key membership is spelled `primaryKey`, never `isPrimary`
+      const misSpelled: DriverIntrospection = { dialect: 'postgres', introspectedAt: 'now', tables: { t: { name: 't', columns: [{ name: 'id', type: 'uuid', nullable: false, isPrimary: true }] } } };
+      expect(misSpelled).toBeTruthy();
+    });
+
+    it('refuses a bare { tables } with no dialect / introspectedAt envelope', () => {
+      // @ts-expect-error - `dialect` and `introspectedAt` are REQUIRED on the spec schema
+      const bareTables: DriverIntrospection = { tables: {} };
+      expect(bareTables).toBeTruthy();
+    });
+
+    it('refuses a mis-shaped implementation where it is OFFERED, on the registerDriver road', () => {
+      // Exactly what a pre-#11493 driver author shipped: the whole driver value,
+      // with an `introspectSchema` answering the pre-spec shape. Against the
+      // silent contract this assignment compiled green (the measured gap);
+      // declared, tsc refuses it at the member.
+      const preFixResult = { tables: { t: { name: 't', columns: [{ name: 'id', type: 'uuid', nullable: false, isPrimary: true }] } } };
+      const author: IDataDriver = {
+        ...base,
+        // @ts-expect-error - the pre-spec result shape no longer satisfies the declared member
+        introspectSchema: async () => preFixResult,
+      };
+      expect(author).toBeTruthy();
     });
   });
 });

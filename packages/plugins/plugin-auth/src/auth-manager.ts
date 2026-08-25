@@ -2685,6 +2685,12 @@ export class AuthManager {
               },
               relatedObject: 'sys_invitation',
               relatedId: invitation.id,
+              // #11741 — the invitation HOLDS its organization; thread it so
+              // the sys_email row is stamped. Org-less auth mail (reset /
+              // verification / magic link) deliberately threads nothing.
+              ...(invitation.organizationId
+                ? { organizationId: String(invitation.organizationId) }
+                : {}),
             });
           } catch (err: any) {
             // Do NOT rethrow: the invitation row was already persisted by

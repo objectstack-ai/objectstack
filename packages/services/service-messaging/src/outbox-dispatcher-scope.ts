@@ -50,9 +50,10 @@ import type { EngineUpdateOptions } from '@objectstack/spec/data';
  * `multi: true` so they cannot, deliberately. The single-record writes on
  * these same objects are audited under a DIFFERENT op (`update`, not
  * `updateMany`) and they do **not** share one classification:
- * {@link dispatcherAckOptions} carries the sweep warrant to the two `ack`
- * sites, and `SqlHttpOutbox.redeliver` — request-reachable — carries a
- * threaded tenant and no bypass at all.
+ * {@link dispatcherAckOptions} carries the sweep warrant to `SqlHttpOutbox.ack`
+ * and {@link dispatcherAckCasOptions} carries it to `SqlNotificationOutbox.ack`
+ * (a `multi: true` compare-and-set since #11453), while `SqlHttpOutbox.redeliver`
+ * — request-reachable — carries a threaded tenant and no bypass at all.
  *
  * ⛔ [#11009] `redeliver` is now ALSO a `multi: true` write (its terminal-
  * status compare-and-set must ride the predicate path to be evaluated at
@@ -73,8 +74,12 @@ export function dispatcherSweepOptions(
 
 /**
  * The write options for a dispatcher **`ack`** — the single-record
- * (`multi: false`) write that records one delivery attempt's outcome, on
- * `SqlNotificationOutbox.ack` and `SqlHttpOutbox.ack`.
+ * (`multi: false`) write that records one delivery attempt's outcome on
+ * `SqlHttpOutbox.ack`.
+ *
+ * [#11453] `SqlNotificationOutbox.ack` no longer uses this helper: its ack
+ * grew a status precondition, and a precondition on the by-id path is silently
+ * discarded (#11009), so it rides {@link dispatcherAckCasOptions} instead.
  *
  * ## Why a second helper instead of {@link dispatcherSweepOptions}
  * These are audited under the driver's **`update`** op, not `updateMany`, and
@@ -122,4 +127,48 @@ export function dispatcherAckOptions(
     id: string,
 ): EngineUpdateOptions & { multi: false; bypassTenantAudit: true } {
     return { where: { id }, multi: false, bypassTenantAudit: true };
+}
+
+
+/**
+ * [#11453] The write options for **`SqlNotificationOutbox.ack`** — the same
+ * warrant as {@link dispatcherAckOptions} above, spelled as a PREDICATE write
+ * because that ack is now a compare-and-set.
+ *
+ * ## Why `multi: true` for a write that still targets ONE row
+ *
+ * ⛔ [#11009] Not a preference — a requirement. `ack` re-states its
+ * precondition IN the write (`where: { id, status: 'in_flight' }`) so a row
+ * that stopped being claimed underneath is not written. On the by-id path
+ * (`multi: false`) `driver.update` binds only the primary key and the extra
+ * predicate is SILENTLY DISCARDED — the identical defect `redeliver` carried:
+ * the guard evaluates to nothing and the write lands unconditionally. The
+ * engine now REFUSES that spelling outright, so the predicate path
+ * (`driver.updateMany`, which compiles every `where` key) is the only spelling
+ * in which this compare-and-set exists at all.
+ *
+ * ## Why not {@link dispatcherSweepOptions}, now that both are `multi: true`
+ *
+ * Because that helper's warrant is the CLAIM path's, and this file's own rule
+ * is that a classification made for one site says nothing about another. The
+ * warrant here is re-derived and identical in substance to
+ * {@link dispatcherAckOptions}': `ack`'s only caller is
+ * `NotificationDispatcher` inside `runPartition()`, a `setInterval` tick under
+ * the `notify.dispatcher.partition.<n>` cluster lock — no HTTP request, no
+ * session and no active organization exists to thread, and the row being acked
+ * was claimed by a deliberately environment-wide sweep. `redeliver` remains
+ * the one write on these objects that must never reach for a bypass: it is
+ * request-reachable and threads the caller's tenant instead.
+ *
+ * ⚠️ Diagnostics only, exactly as above: `bypassTenantAudit` never changes
+ * what the write touches.
+ *
+ * @param id Primary key of the delivery row this attempt outcome belongs to.
+ * @param expectedStatus The status the row MUST still hold for the write to land.
+ */
+export function dispatcherAckCasOptions(
+    id: string,
+    expectedStatus: 'in_flight',
+): EngineUpdateOptions & { multi: true; bypassTenantAudit: true } {
+    return { where: { id, status: expectedStatus }, multi: true, bypassTenantAudit: true };
 }

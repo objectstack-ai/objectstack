@@ -98,9 +98,65 @@ describe('renderReport', () => {
     expect(JSON.parse(out)).toEqual([{ a: 1 }]);
   });
 
-  it('auto-detects fields from first 50 rows when none specified', () => {
+  it('auto-detects fields from the rows when none specified', () => {
     const out = renderReport([{ a: 1 }, { b: 2 }], 'csv');
-    expect(out.split('\r\n')[0]).toMatch(/a|b/);
+    expect(out.split('\r\n')[0].split(',')).toEqual(['a', 'b']);
+  });
+
+  // [#11774] Column inference sampled only `rows.slice(0, 50)` while the
+  // projection was applied to ALL rows, so a key whose first occurrence was at
+  // row 51+ never reached the header and its values were dropped from every
+  // row that carried it - a well-formed CSV of uniform arity with nothing
+  // marking the loss. Sparse columns are the normal shape of report output,
+  // and the first 50 rows are the query's first page IN ITS SORT ORDER, so
+  // the sample is precisely the correlated case.
+  describe('a column whose first row is past the old 50-row sample boundary', () => {
+    const LATE_ROW = 55;
+    const LATE_COL = 'escalation_note';
+    const LATE_VALUE = 'breached SLA';
+
+    /** 60 rows sharing `id` + `status`; only row 55 carries LATE_COL. */
+    function sparseRows(): Array<Record<string, unknown>> {
+      return Array.from({ length: 60 }, (_v, i) => ({
+        id: `l${String(i).padStart(2, '0')}`,
+        status: 'open',
+        ...(i === LATE_ROW ? { [LATE_COL]: LATE_VALUE } : {}),
+      }));
+    }
+
+    it('csv: reaches the header, and its value reaches the row that carries it', () => {
+      const out = renderReport(sparseRows(), 'csv');
+      const lines = out.split('\r\n');
+      const header = lines[0].split(',');
+
+      expect(header).toContain(LATE_COL);
+      // Identity and order, not arity: already-inferred columns keep their
+      // position and the late one is appended.
+      expect(header).toEqual(['id', 'status', LATE_COL]);
+
+      // The value arrives, under its own column - `toContain(LATE_COL)` alone
+      // would pass on an all-empty column.
+      const col = header.indexOf(LATE_COL);
+      expect(lines[1 + LATE_ROW].split(',')[col]).toBe(LATE_VALUE);
+      // ...and only in that row.
+      expect(lines[1].split(',')[col]).toBe('');
+    });
+
+    it('html_table: reaches the header, and its value reaches the row that carries it', () => {
+      const out = renderReport(sparseRows(), 'html_table');
+      // `<th[^>]*>` would also match `<thead>` and swallow the first cell —
+      // require a space or the closing angle right after the tag name.
+      const header = [...out.matchAll(/<th(?:\s[^>]*)?>(.*?)<\/th>/g)].map(m => m[1]);
+      const body = [...out.matchAll(/<tr>((?:<td[^>]*>.*?<\/td>)+)<\/tr>/g)]
+        .map(m => [...m[1].matchAll(/<td[^>]*>(.*?)<\/td>/g)].map(c => c[1]));
+
+      expect(header).toContain(LATE_COL);
+      expect(header).toEqual(['id', 'status', LATE_COL]);
+
+      const col = header.indexOf(LATE_COL);
+      expect(body[LATE_ROW][col]).toBe(LATE_VALUE);
+      expect(body[0][col]).toBe('');
+    });
   });
 });
 
@@ -208,6 +264,27 @@ describe('ReportService', () => {
     const stored = engine._tables['sys_saved_report'][0];
     expect(stored.last_row_count).toBe(2);
     expect(stored.last_run_at).toBe(now.toISOString());
+  });
+
+  it('run: a field first appearing past row 50 still reaches the export body', async () => {
+    // [#11774] The scheduled-attachment path end to end: the saved report
+    // declares no `query.fields`, so the header is inferred from the result
+    // set. Only row 55 carries `escalation_note`.
+    engine._tables['lead'] = Array.from({ length: 60 }, (_v, i) => ({
+      id: `l${String(i).padStart(2, '0')}`,
+      status: 'open',
+      ...(i === 55 ? { escalation_note: 'breached SLA' } : {}),
+    }));
+    const r = await svc.saveReport({
+      name: 'Open', object: 'lead', query: { filter: { status: 'open' } }, format: 'csv',
+    }, CTX);
+    const result = await svc.run(r.id, CTX);
+
+    expect(result.rowCount).toBe(60);
+    const lines = result.body.split('\r\n');
+    const header = lines[0].split(',');
+    expect(header).toContain('escalation_note');
+    expect(lines[1 + 55].split(',')[header.indexOf('escalation_note')]).toBe('breached SLA');
   });
 
   it('run: throws REPORT_NOT_FOUND for unknown id', async () => {

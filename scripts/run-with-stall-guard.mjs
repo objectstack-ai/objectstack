@@ -26,6 +26,84 @@
 // child's real exit status is propagated by construction, so there is no pipe
 // to guard. Do not reintroduce `| tee`.
 //
+// ## The instrument's one precondition: the wrapped command must STREAM
+//
+// The guard measures output FLUSHES, so it is only a liveness instrument when
+// the wrapped pipeline flushes while work is running. Turbo's default log
+// order in CI is GROUPED — a task's output is buffered and flushed only when
+// the task ENDS — which turns "one task still running" into "zero bytes", and
+// a shard whose tail is a single task longer than --stall-minutes into a
+// guaranteed kill of a HEALTHY suite (measured twice in one day: exit 75 with
+// `Test Files 173 passed (173)` arriving in the very flush the kill forced,
+// stamped ~40ms after it). That red reproduces on rerun, so it reads as "not
+// a flake, therefore the diff" — the exact false trail #4250's triage line
+// warns against. So the precondition is ENFORCED, not documented: a wrapped
+// command that invokes turbo without `--log-order=stream` is refused at
+// startup (exit 1, before anything runs). pnpm's recursive runner streams
+// with per-package prefixes (measured), so non-turbo callers are untouched.
+//
+// ## The second signal: source-side write progress (the liveness probe)
+//
+// Output flushes are the primary instrument and they are measured at the WRONG
+// END of the pipeline: what the guard sees is whatever the last buffering layer
+// chose to release. `--log-order=stream` closes one spelling of that; any future
+// layer -- a reporter change, a new runner, a pnpm output-mode change --
+// re-opens it, and the result is a healthy suite killed deterministically on an
+// innocent diff.
+//
+// So there is a second, independent signal: the bytes every process in the
+// wrapped group has passed to write(), read from /proc/<pid>/io (wchar). That is
+// the SAME quantity the guard already trusts, sampled at the SOURCE -- before
+// any buffering layer can hide it.
+//
+// ### What a genuinely frozen suite looks like to this probe
+//
+// Zero bytes written by ANY process in the group for the whole stall window.
+// Not "no CPU" -- CPU is precisely the signal that does not work here. Measured
+// on this repo (node 22, 2.5s sample, one process per shape):
+//
+//     shape                        state  dCPU(ticks)  dwchar(bytes)
+//     idle hang (self-test #4)     S                0              0
+//     sync-spinning hang (#5)      R              251              0
+//     GC-thrash hang               R              272              0
+//     HEALTHY silent-but-working   S                1         25,542
+//
+// Read the CPU column before designing anything on it: the two genuine hangs peg
+// a core, while the healthy suite the probe exists to protect is nearly IDLE --
+// it is I/O-bound, it is busy WRITING. A naive "burning CPU therefore alive,
+// therefore do not kill" probe would have protected the hangs and killed the
+// healthy suite. CPU does not merely fail to separate these shapes, it separates
+// them BACKWARDS. wchar separates all four correctly.
+//
+// ### The probe may only ever DELAY a kill, and only to a hard cap
+//
+// A hang that writes while wedged (a retry loop, a poller, a log spin) would
+// look alive to this probe forever, so it is a CONFIRMING signal in exactly one
+// direction:
+//
+//   * no output AND no source-side bytes -> stall, killed at --stall-minutes,
+//     exactly as before. Idle and spinning hangs take this path with no added
+//     latency, because they write nothing.
+//   * no output BUT source-side bytes still moving -> the kill is DEFERRED, and
+//     the deferral is announced loudly: it means a buffering layer is hiding a
+//     live suite from this guard, and that layer should be FIXED, not tolerated.
+//   * ...until --stall-cap-minutes, when the group is killed anyway under a
+//     DISTINCT verdict (STALL-CAP). That cap is what stops the probe from
+//     converting "kills healthy suites" into "never fires on spin hangs", which
+//     is strictly worse: a job sitting in_progress until the job timeout is the
+//     state this guard exists to abolish, and no green run can distinguish that
+//     regression from success.
+//
+// The cap's ceiling is not a matter of taste. Every guard-wrapped job in ci.yml
+// runs `timeout-minutes: 30` against `--stall-minutes 10`, so a cap set "far
+// above" the window would just hand the verdict back to the job timeout. Default
+// is 2x the window; a cap <= the window is REFUSED, because it would disable the
+// probe silently.
+//
+// If /proc/<pid>/io cannot be read (not Linux, hardened permissions), the probe
+// reports itself UNAVAILABLE and the guard behaves exactly as it did before this
+// signal existed. An unreadable probe must never read as liveness.
+//
 // ## Stall forensics (before the kill)
 //
 // A declared stall triages itself instead of leaving a mystery for a human:
@@ -98,6 +176,15 @@ import { fileURLToPath } from 'node:url';
 const STALL_EXIT_CODE = 75; // EX_TEMPFAIL
 const CHECK_INTERVAL_MS = 5_000;
 const SIGKILL_GRACE_MS = 10_000;
+// How far above --stall-minutes the liveness probe may defer a kill, when it is
+// not given an explicit --stall-cap-minutes. Deliberately small: the guard-wrapped
+// jobs run `timeout-minutes: 30` against a 10-minute window, so a larger multiple
+// would return the verdict to the job timeout -- the outcome the guard abolishes.
+const DEFAULT_CAP_MULTIPLE = 2;
+// Announce a deferral every N watchdog ticks (the first one always prints). A
+// deferral is a bug report about the pipeline, not routine noise -- but repeating
+// it every 5s would bury the suite's own output.
+const DEFER_NOTE_EVERY = 12;
 
 const argv = process.argv.slice(2);
 
@@ -107,12 +194,16 @@ if (argv.includes('--self-test')) await selfTest();
 
 let logPath = '';
 let stallMinutes = 10;
+let stallCapMinutes = 0; // 0 = derive from stallMinutes
+let livenessProbe = true;
 let reportDir = '';
 let command = [];
 
 for (let i = 0; i < argv.length; i++) {
   if (argv[i] === '--log') logPath = argv[++i] ?? '';
   else if (argv[i] === '--stall-minutes') stallMinutes = Number(argv[++i]);
+  else if (argv[i] === '--stall-cap-minutes') stallCapMinutes = Number(argv[++i]);
+  else if (argv[i] === '--no-liveness-probe') livenessProbe = false;
   else if (argv[i] === '--report-dir') reportDir = argv[++i] ?? '';
   else if (argv[i] === '--') {
     command = argv.slice(i + 1);
@@ -125,12 +216,57 @@ for (let i = 0; i < argv.length; i++) {
 
 if (!logPath || command.length === 0 || !Number.isFinite(stallMinutes) || stallMinutes <= 0) {
   console.error(
-    'run-with-stall-guard: usage: run-with-stall-guard.mjs --log <file> [--stall-minutes N] -- <command...>',
+    'run-with-stall-guard: usage: run-with-stall-guard.mjs --log <file> [--stall-minutes N]\n' +
+      '  [--stall-cap-minutes N] [--no-liveness-probe] [--report-dir <dir>] -- <command...>',
+  );
+  process.exit(1);
+}
+
+if (stallCapMinutes === 0) stallCapMinutes = stallMinutes * DEFAULT_CAP_MULTIPLE;
+if (!Number.isFinite(stallCapMinutes) || stallCapMinutes <= stallMinutes) {
+  console.error(
+    `run-with-stall-guard: --stall-cap-minutes (${stallCapMinutes}) must be GREATER than ` +
+      `--stall-minutes (${stallMinutes}).\n` +
+      '  The cap bounds how long the liveness probe may defer a kill while the wrapped group\n' +
+      '  is still writing bytes at the source. A cap at or below the stall window disables\n' +
+      '  the probe silently, and a probe that is silently off is indistinguishable from one\n' +
+      '  that works -- so this is refused instead.',
+  );
+  process.exit(1);
+}
+
+// The precondition check from the header: a turbo invocation under this guard
+// must pin `--log-order=stream`, or the guard's instrument (output flushes)
+// measures buffering artifacts instead of liveness and kills healthy suites by
+// construction. Deliberately NOT exported — importing this file would execute
+// it (it is an entrypoint, not a library); the self-test pins both directions
+// through real subprocess invocations instead.
+function turboLogOrderViolation(argv) {
+  const runsTurbo = argv.some(
+    (tok) => !tok.startsWith('-') && (tok === 'turbo' || tok.endsWith('/turbo')),
+  );
+  if (!runsTurbo) return false;
+  const streams = argv.some(
+    (tok, i) =>
+      tok === '--log-order=stream' || (tok === '--log-order' && argv[i + 1] === 'stream'),
+  );
+  return !streams;
+}
+
+if (turboLogOrderViolation(command)) {
+  console.error(
+    'run-with-stall-guard: REFUSING to wrap a turbo invocation without --log-order=stream.\n' +
+      "  This guard measures output flushes. Turbo's default log order in CI is grouped —\n" +
+      '  a task flushes only when it ENDS — so a task running longer than --stall-minutes\n' +
+      '  emits zero bytes and is killed as a stall while perfectly healthy (a deterministic\n' +
+      '  red on an innocent diff; it happened, twice in one day, with every test passing).\n' +
+      '  Add --log-order=stream to the turbo command so the guard observes real liveness.',
   );
   process.exit(1);
 }
 
 const stallMs = stallMinutes * 60_000;
+const capMs = stallCapMinutes * 60_000;
 const log = createWriteStream(logPath, { flags: 'w' });
 
 // detached: own process group, so a stall verdict can kill pnpm -> turbo -> the
@@ -215,6 +351,83 @@ function sampleGroup() {
     } catch { /* process vanished between readdir and read */ }
   }
   return procs;
+}
+
+// ---------------------------------------------------------------------------
+// The liveness probe: source-side write progress
+// ---------------------------------------------------------------------------
+
+/** Per-pid wchar counters observed on the previous poll. */
+let probeSeen = new Map();
+/** True once ANY group member's /proc/<pid>/io was read successfully. While
+ *  this is false the probe is UNAVAILABLE and can never postpone a kill: an
+ *  unreadable counter must not be mistaken for liveness. */
+let probeEverRead = false;
+/** The first poll only records counters. Without this, every pid's whole
+ *  lifetime total would be booked as "progress just now" on the first tick,
+ *  which is a stall's worth of free credit handed to a suite that is already
+ *  frozen. */
+let probeBaselined = false;
+/** Bytes the group has written since the baseline -- quoted in the verdict. */
+let probeBytes = 0;
+let lastProgressAt = Date.now();
+
+/** One poll of /proc/<pid>/io across the wrapped process group.
+ *
+ *  Only POSITIVE per-pid deltas count, and a pid seen for the first time
+ *  contributes its whole counter (new work starting IS progress), so a process
+ *  exiting can never move the accumulator backwards -- an exit must read as
+ *  neither a stall nor liveness. Every read is try/caught; the probe is
+ *  best-effort and fails CLOSED. */
+function pollWriteProgress() {
+  let grew = 0;
+  const next = new Map();
+  let entries;
+  try {
+    entries = readdirSync('/proc');
+  } catch {
+    return false; // not Linux: probeEverRead stays false, probe stays unavailable
+  }
+  for (const entry of entries) {
+    if (!/^\d+$/.test(entry)) continue;
+    const pid = Number(entry);
+    let wchar;
+    try {
+      const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
+      // f[2] = pgrp. Scoping to the detached child's group excludes this guard
+      // and every other agent's processes on a shared machine.
+      if (Number(stat.slice(stat.lastIndexOf(')') + 2).split(' ')[2]) !== child.pid) continue;
+      const m = /^wchar:\s*(\d+)/m.exec(readFileSync(`/proc/${pid}/io`, 'utf8'));
+      if (!m) continue;
+      wchar = Number(m[1]);
+    } catch {
+      continue; // vanished mid-read, or io is not readable for this uid
+    }
+    probeEverRead = true;
+    next.set(pid, wchar);
+    const prev = probeSeen.get(pid);
+    grew += prev === undefined ? wchar : Math.max(0, wchar - prev);
+  }
+  probeSeen = next;
+  if (!probeBaselined) {
+    probeBaselined = true;
+    return false;
+  }
+  if (grew > 0) {
+    probeBytes += grew;
+    lastProgressAt = Date.now();
+  }
+  return grew > 0;
+}
+
+/** One line for the verdict banner: what the second signal saw. */
+function probeVerdictLine(now) {
+  if (!livenessProbe) return 'disabled (--no-liveness-probe) -- output flushes were the only signal';
+  if (!probeEverRead) {
+    return 'UNAVAILABLE (/proc/<pid>/io unreadable here) -- output flushes were the only signal';
+  }
+  const quietM = ((now - lastProgressAt) / 60_000).toFixed(1);
+  return `no byte written by ANY process in the group for ${quietM}m -- FROZEN at the source, not merely buffered`;
 }
 
 /** Classify every group member from two /proc samples and, when report-dir
@@ -318,18 +531,75 @@ async function reapGroup(graceMs) {
   return survivors;
 }
 
+let probeDeferrals = 0;
+
 const watchdog = setInterval(() => {
+  if (livenessProbe) pollWriteProgress();
   const silentMs = Date.now() - lastOutputAt;
   if (silentMs < stallMs) return;
 
+  // The second signal, in the ONE direction it is safe in. It may postpone a
+  // kill while the group is demonstrably still producing bytes -- never past the
+  // cap, and never at all when the counters could not be read. An idle or a
+  // sync-spinning hang writes nothing, so neither is ever postponed by this.
+  const sourceAlive =
+    livenessProbe && probeEverRead && Date.now() - lastProgressAt < stallMs;
+  const capped = silentMs >= capMs;
+
+  if (sourceAlive && !capped) {
+    if (probeDeferrals % DEFER_NOTE_EVERY === 0) {
+      const note =
+        `\n⚠ stall guard: no output reached this guard for ${(silentMs / 60_000).toFixed(1)}m, but the wrapped\n` +
+        `  group has written ${probeBytes} bytes at the source since then -- deferring the kill\n` +
+        `  until the cap (${stallCapMinutes}m). A live suite is being hidden from this guard by a\n` +
+        '  buffering layer: FIX THE LAYER (every turbo under this guard must pin\n' +
+        '  --log-order=stream), do not rely on this deferral.\n';
+      process.stdout.write(note);
+      log.write(note);
+    }
+    probeDeferrals++;
+    return;
+  }
+
   stalled = true;
   clearInterval(watchdog);
-  const banner = `
+  const now = Date.now();
+  const banner = sourceAlive
+    ? `
+${'═'.repeat(72)}
+⛔ STALL-CAP: nothing reached this guard for ${(silentMs / 60_000).toFixed(1)} minutes (cap: ${stallCapMinutes}m),
+   but the wrapped group kept WRITING the whole time.
+
+   frozen since : ${new Date(lastOutputAt).toISOString()}  (as this guard sees it)
+   last written : ${new Date(lastProgressAt).toISOString()}  (as /proc/<pid>/io sees it)
+   bytes written: ${probeBytes} since the probe's baseline
+   last line    : ${lastLine}
+
+   This group is NOT frozen -- it is producing output that never arrives here.
+   Two things look exactly like this, and both are bugs to fix rather than
+   wait out:
+
+     1. A BUFFERING LAYER between the suite and this guard -- the class turbo's
+        grouped log order was one spelling of. Check that every turbo under this
+        guard pins --log-order=stream and that no reporter or runner in the
+        pipeline groups its output.
+     2. A hang that WRITES while wedged -- a retry loop, a poller, a log spin.
+        The forensics below name which processes were burning the bytes.
+
+   Killing at the cap instead of deferring forever: a guard that never fires
+   leaves the job in_progress until the job timeout, which is the state this
+   guard exists to abolish.
+
+   Collecting forensics before the kill (process states + JS stacks)...
+${'═'.repeat(72)}
+`
+    : `
 ${'═'.repeat(72)}
 ⛔ STALL: no test output for ${(silentMs / 60_000).toFixed(1)} minutes (limit: ${stallMinutes}m).
 
    frozen since : ${new Date(lastOutputAt).toISOString()}
    last line    : ${lastLine}
+   liveness probe: ${probeVerdictLine(now)}
 
    This is the #4250 failure mode -- the suite is STOPPED, not slow. A
    healthy run prints continuously; only a hang goes silent this long.
@@ -525,6 +795,58 @@ async function selfTest() {
         code === 0 && !out.includes('STALL'), `exit ${code}`);
     }
 
+    // -- 3b. The turbo log-order precondition, both directions. --
+    //    Grouped log order flushes a task's output only when the task ends, so
+    //    a guard-wrapped turbo without --log-order=stream kills a healthy solo
+    //    tail task BY CONSTRUCTION (the 2026-08-24 healthy-kill pair: exit 75
+    //    with 173/173 files passing in the flush the kill forced). The wrap is
+    //    refused before anything spawns. Refusal shapes use a bare `turbo`
+    //    that never runs; accepted turbo-shapes use a nonexistent path so the
+    //    verdict is "failed to start", never a real turbo against this repo.
+    {
+      const refused = await runGuard(
+        ['--log', join(dir, 'lo1.log'), ...WINDOW, '--', 'turbo', 'run', 'test'],
+        {}, { marker: dir },
+      );
+      check('a guard-wrapped turbo without --log-order=stream is refused',
+        refused.code === 1 && refused.out.includes('REFUSING'), `exit ${refused.code}`);
+      check('the refusal happens before anything runs (no stall verdict, no spawn)',
+        !refused.out.includes('STALL') && !refused.out.includes('failed to start'));
+
+      const viaPnpm = await runGuard(
+        ['--log', join(dir, 'lo2.log'), ...WINDOW, '--',
+          'pnpm', 'turbo', 'run', 'test', '--concurrency=4', '--log-order=grouped'],
+        {}, { marker: dir },
+      );
+      check('an explicit --log-order=grouped is refused too',
+        viaPnpm.code === 1 && viaPnpm.out.includes('REFUSING'), `exit ${viaPnpm.code}`);
+
+      const streamed = await runGuard(
+        ['--log', join(dir, 'lo3.log'), ...WINDOW, '--',
+          '/nonexistent/turbo', 'run', 'test', '--log-order=stream'],
+        {}, { marker: dir },
+      );
+      check('--log-order=stream lifts the refusal (reaches spawn)',
+        !streamed.out.includes('REFUSING') && streamed.out.includes('failed to start'),
+        streamed.out.trim().split('\n')[0]);
+
+      const spaced = await runGuard(
+        ['--log', join(dir, 'lo4.log'), ...WINDOW, '--',
+          '/nonexistent/turbo', 'run', 'test', '--log-order', 'stream'],
+        {}, { marker: dir },
+      );
+      check('the split `--log-order stream` spelling is accepted as well',
+        !spaced.out.includes('REFUSING') && spaced.out.includes('failed to start'));
+
+      const flagValue = await runGuard(
+        ['--log', join(dir, 'lo5.log'), ...WINDOW, '--',
+          'sh', '-c', 'echo turbo-adjacent ok', 'sh', '--tag=turbo'],
+        {}, { marker: dir },
+      );
+      check('`turbo` inside a flag value does not trip the refusal',
+        flagValue.code === 0 && !flagValue.out.includes('REFUSING'), `exit ${flagValue.code}`);
+    }
+
     // -- 4. Idle hang: event loop alive, nothing will ever settle. --
     //    The "await-type" stall — a promise that never resolves.
     {
@@ -543,6 +865,8 @@ async function selfTest() {
       check('idle hang is declared a stall', code === STALL_EXIT_CODE, `exit ${code}`);
       check('the verdict quotes the last line seen',
         out.includes('last line    : RUN beta.test.ts'));
+      check('idle hang is not rescued by the liveness probe (plain verdict, no deferral)',
+        !out.includes('STALL-CAP') && !out.includes('deferring the kill'));
       if (linux) {
         check('idle hang is classified idle, not on-CPU',
           out.includes('idle -- waiting on something that never settles'));
@@ -573,6 +897,14 @@ async function selfTest() {
         out.includes('ON-CPU -- sync-spinning or GC-thrashing'));
       check('a blocked event loop is diagnosed by its SILENCE',
         out.includes('NO report -- its event loop is BLOCKED'));
+      // The inversion this card exists to design out. A spinning hang pegs a
+      // core, so any probe that reads CPU as liveness stops firing here -- and
+      // "never fires on spin hangs" is strictly worse than the defect it would
+      // be fixing, because no green run can tell it apart from success.
+      check('sync-spinning hang is NOT rescued by the probe — burning CPU is not liveness',
+        !out.includes('STALL-CAP') && !out.includes('deferring the kill'));
+      check('the verdict names the source-side probe as the reason it fired',
+        out.includes('FROZEN at the source'));
     }
 
     // -- 6. A hang that never prints a first line. --
@@ -642,6 +974,79 @@ async function selfTest() {
       if (alive) {
         try { process.kill(pid, 'SIGKILL'); } catch { /* already gone */ }
       }
+    }
+    // -- 8. HEALTHY silent-but-working: the shape the probe exists to protect. --
+    //    The child writes real bytes the entire time, but none of them reach the
+    //    guard -- which is what ANY buffering layer between the suite and this
+    //    wrapper looks like from here (turbo's grouped log order was one
+    //    spelling of it). Output flushes alone call this a stall and kill a
+    //    healthy suite; the source-side probe is what tells them apart.
+    if (linux) {
+      const sink = join(dir, 'buffered-output.txt');
+      const shape = [
+        process.execPath, '-e',
+        "const fs = require('fs'); const fd = fs.openSync(process.argv[1], 'a'); let n = 0;" +
+          "const t = setInterval(() => { fs.writeSync(fd, 'work '.repeat(80) + '\\n');" +
+          "if (++n > 45) { clearInterval(t); fs.closeSync(fd); console.log('suite passed'); } }, 100);",
+        sink, dir,
+      ];
+      const saved = await runGuard(
+        ['--log', join(dir, 'buffered.log'), ...WINDOW, '--stall-cap-minutes', '0.5', '--', ...shape],
+        {}, { marker: dir },
+      );
+      check('a healthy silent-but-working run is NOT killed', saved.code === 0, `exit ${saved.code}`);
+      check('...and is never called a stall', !saved.out.includes('STALL'));
+      check('...and the deferral is announced, not silent',
+        saved.out.includes('deferring the kill'), saved.out.trim().split('\n')[0]);
+
+      // Positive control, and the reason case 8 is evidence rather than a
+      // coincidence: the SAME child, probe off, must die. Without this a probe
+      // that did nothing at all would score exactly like one that works.
+      const killed = await runGuard(
+        ['--log', join(dir, 'buffered-noprobe.log'), ...WINDOW, '--no-liveness-probe', '--', ...shape],
+        {}, { marker: dir },
+      );
+      check('positive control: the same run IS killed with --no-liveness-probe',
+        killed.code === STALL_EXIT_CODE, `exit ${killed.code}`);
+      check('positive control: and the verdict says the probe was off',
+        killed.out.includes('disabled (--no-liveness-probe)'));
+    }
+
+    // -- 9. A hang that WRITES while wedged is still killed -- at the cap. --
+    //    The probe's own residual failure mode: a retry loop or a log spin looks
+    //    alive to it forever. The cap is what keeps that from becoming "never
+    //    fires", and the distinct verdict word is what keeps it diagnosable.
+    if (linux) {
+      const res = await runGuard(
+        ['--log', join(dir, 'writing-hang.log'), ...WINDOW, '--stall-cap-minutes', '0.15', '--',
+          process.execPath, '-e',
+          "const fs = require('fs'); const fd = fs.openSync(process.argv[1], 'a');" +
+            "console.log('RUN delta.test.ts');" +
+            "setInterval(() => { fs.writeSync(fd, 'still retrying\\n'); }, 50);",
+          join(dir, 'retry-loop.txt'), dir],
+        {}, { marker: dir },
+      );
+      const { code, out } = res;
+      check('a writing hang: the guard still exits on its own', !res.timedOut,
+        'the guard never exited — the probe inverted the defect');
+      check('a hang that keeps writing is still killed', code === STALL_EXIT_CODE, `exit ${code}`);
+      check('...at the cap, under its own distinct STALL-CAP verdict',
+        out.includes('STALL-CAP'), out.trim().split('\n').slice(-2).join(' | '));
+      check('...having first announced the deferral it was granted',
+        out.includes('deferring the kill'));
+    }
+
+    // -- 10. A cap that would silently disable the probe is refused. --
+    {
+      const bad = await runGuard(
+        ['--log', join(dir, 'badcap.log'), ...WINDOW, '--stall-cap-minutes', '0.05', '--',
+          process.execPath, '-e', "console.log('this child must never run');", dir],
+        {}, { marker: dir },
+      );
+      check('a --stall-cap-minutes at or below --stall-minutes is refused',
+        bad.code === 1 && bad.out.includes('must be GREATER than'), `exit ${bad.code}`);
+      check('the cap refusal happens before anything spawns',
+        !bad.out.includes('this child must never run'));
     }
   } finally {
     // Every synthetic child hangs by construction, so the sweep is not optional

@@ -12,13 +12,11 @@
 
 四步序已机械化:`bash scripts/pm/os-regen-merge.sh` —— ① `git merge origin/main`
 (⛔ 禁 rebase / force-push);② 生成物 `git checkout origin/main -- <路径>`;③
-**先 commit 掉 merge**;④ 整链重生成 + 生成物门禁全绿。顺序防两个陷阱:
+**先 commit 掉 merge**;④ 整链重生成 + 生成物门禁全绿。顺序防的陷阱:
 
 - **MERGE 状态下跑 `gen:schema` 会把 authorable-surface 锚点静默倒退回旧分叉点**
   (HEAD 仍是合并前分支 tip),倒退后的锚点**依然 authentic**、全部门放行 ——「先
   commit 再重生成」的由来。
-- **`gen:schema` 的清场会抹掉 `gen:openapi` 的产物**(rest 包成串 `expected 503
-  to be 200` 假红);补跑 `pnpm --filter @objectstack/spec gen:openapi` 即复原。
 
 重生成后**断言所有兄弟单的条目都还在**;更硬的旁证是查**上一单的实现体**完好(带
 引号精确名 `git grep … origin/main -- <实现文件>`)—— 条目是索引,实现体才是被吞

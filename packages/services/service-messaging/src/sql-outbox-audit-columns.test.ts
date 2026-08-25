@@ -30,11 +30,24 @@ interface RecordedUpdate {
  * Minimal recording `IDataEngine`. `find` replays a scripted queue of result
  * sets so a claim can be driven all the way through candidate-select →
  * atomic-claim → read-back; everything else is inert.
+ *
+ * [#11453] `SqlNotificationOutbox.ack` is a compare-and-set now — it reads the
+ * row's STATUS as well as its attempts, writes conditionally, then reads back
+ * to confirm the write landed. So the fake keeps one row's state and applies
+ * writes to it, rather than answering a bare `{ attempts }` forever:
+ *
+ *  - the row starts `in_flight`, because acking a row is something a
+ *    dispatcher does to a row IT CLAIMED, and a fixture that left it `pending`
+ *    would be asserting audit columns on a call the contract now refuses;
+ *  - `update` applies the payload, so the read-back sees what was written and
+ *    the ack completes. A fake that could never report the write would make
+ *    every ack look like a lost claim.
  */
 function makeEngine(findResults: Array<Array<Record<string, unknown>>> = []) {
     const updates: RecordedUpdate[] = [];
     const inserts: Array<{ object: string; data: Record<string, unknown> }> = [];
     let findCall = 0;
+    const row: Record<string, unknown> = { status: 'in_flight', attempts: 2 };
 
     const engine = {
         async insert(object: string, data: Record<string, unknown>) {
@@ -43,21 +56,22 @@ function makeEngine(findResults: Array<Array<Record<string, unknown>>> = []) {
         },
         async update(object: string, data: Record<string, unknown>) {
             updates.push({ object, data });
-            return { matched: 0, modified: 0 };
+            Object.assign(row, data);
+            return { matched: 1, modified: 1 };
         },
         async find(_object: string) {
             return findResults[findCall++] ?? [];
         },
         async findOne(_object: string, opts?: { fields?: string[] }) {
-            // `ack()` reads the current attempt count; `enqueue()` probes for a
+            // `ack()` reads the row it is completing; `enqueue()` probes for a
             // dedup winner and must miss so the insert path runs.
-            if (opts?.fields?.includes('attempts')) return { attempts: 2 };
+            if (opts?.fields?.includes('attempts')) return { ...row };
             return null;
         },
         async delete() { return { matched: 0, modified: 0 }; },
     } as unknown as IDataEngine;
 
-    return { engine, updates, inserts };
+    return { engine, updates, inserts, row };
 }
 
 /** Every audit column an UPDATE payload must leave to the platform. */

@@ -6,30 +6,30 @@ import type { IDataEngine, IMetadataService } from '@objectstack/spec/contracts'
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 
 /**
- * #5127 — pass 2 RESOLVES the target and then has no record to write it onto.
+ * #5127 / #11674 — pass 2 RESOLVES the target; does it have a record to write
+ * it onto?
  *
- * `resolveDeferredUpdates()` looked the source record's internal id up in
- * `insertedRecords` and, when it wasn't there, ran off the end of an `if`
- * with no `else`: no write, no `errors`/`allErrors` entry (so `success` stayed
- * `true`), no `errored`, not one log line. The single trace left behind was the
- * `referencesDeferred` the record booked in pass 1 and never gave back — only a
- * SUCCESSFUL back-fill decrements it — i.e. a result object carrying a dangling
- * number with nothing in it that explains the number.
+ * #5127's finding: `resolveDeferredUpdates()` looked the source record's
+ * internal id up in `insertedRecords` (a natural-key map) and, when it wasn't
+ * there, ran off the end of an `if` with no `else`: no write, no error entry
+ * (so `success` stayed `true`), not one log line — only a dangling
+ * `referencesDeferred` nothing explained. #5127 made both roads to that state
+ * loud.
  *
- * It is the deeper cousin of the two branches on either side of it: #4729 fixed
- * "counted, but logged at `warn`"; #4997 fixed "counted, never logged"; this one
- * was "never counted, never logged".
+ * #11674 then removed one of the roads at the root. Pass 2 now writes back
+ * through the internal id CAPTURED AT INSERT TIME, so a row this load actually
+ * wrote can always be written back to — a natural key is no longer required.
+ * What used to be the "PURE SILENT LOSS" (row written fine, composite
+ * externalId evaluated to `''`, so the natural-key map had no handle) is not a
+ * loss at all any more: it HEALS, and the first describe below pins that.
  *
- * The two ways to reach it are NOT the same failure and are pinned separately:
- *
- *  - PURE SILENT LOSS — the row wrote perfectly, but its natural key was never
- *    registered because `externalIdKey` returned `''` (any component of a
- *    composite externalId absent or blank). NOTHING else in the load reports
- *    anything: this is the only signal that will ever exist. Mandatory coverage.
- *  - SOURCE ROW NEVER LANDED — its pass-1 write failed, which the write site
- *    already reported at `error` (#4729). Still recorded here under the same
- *    objective criterion, but as exactly ONE line that points AT that error
- *    rather than a second flood over the same root cause.
+ * The road that remains — and stays pinned loud — is SOURCE ROW NEVER LANDED:
+ * the pass-1 write failed (already reported at `error` by the write site,
+ * #4729) or returned no id, so there is genuinely nothing to write onto. It is
+ * recorded under the same objective criterion, as exactly ONE line that points
+ * AT the pass-1 error rather than a second flood over the same root cause —
+ * spelled by natural key when the record has one, by record index when it does
+ * not (the keyless / empty-key spelling, pinned in the last describe).
  */
 
 function createLogger() {
@@ -149,18 +149,23 @@ const compositeSeeds = (region: string) => [
 const deferredDropLines = (logger: ReturnType<typeof createLogger>) =>
   logger.error.mock.calls.filter((c: unknown[]) => String(c[0]).includes('Deferred reference DROPPED'));
 
-describe('pass 2 resolves the target but the source record has no id (#5127)', () => {
+describe('pass 2 heals a row whose natural key evaluated empty (#5127 → #11674)', () => {
   /**
-   * (c) THE PURE SILENT LOSS — the case that must be covered.
+   * What #5127 pinned here as "THE PURE SILENT LOSS" — row written fine,
+   * composite externalId ['name', 'region'] evaluating to `''` because
+   * `region` is blank, pass 2 resolving 'Alice' perfectly and then having no
+   * handle to write her id onto — is exactly the structural defect #11674
+   * removed: pass 2 no longer re-resolves the source row through its
+   * externalId at all. The id the row got when it was INSERTED is captured
+   * then and written back through now, so the empty key costs nothing.
    *
-   * The department row is written successfully and sits in the database. Its
-   * composite externalId ['name', 'region'] evaluates to `''` because `region`
-   * is blank, so `externalIdKey` returns the empty key and nothing registers it
-   * in `insertedRecords`. Pass 2 then resolves 'Alice' perfectly and finds no id
-   * to write onto. No other site in the loader says a word about this: before
-   * the fix the entire outcome was one un-explained `referencesDeferred: 1`.
+   * These pins flip #5127's loud-drop pins into healing pins on the SAME
+   * scenario, so the two fixes cannot regress each other: if the write-back
+   * handle is ever lost again, this load either drops loudly (#5127's
+   * branches, still live for a row that never landed) or heals — silence over
+   * a written row with a missing link has no branch left to come back through.
    */
-  it('reports the back-fill it had to drop, with the row itself seeded fine', async () => {
+  it('back-fills the reference by the internal id captured at insert — the empty key costs nothing', async () => {
     const { engine, store } = createFaithfulEngine();
     const logger = createLogger();
 
@@ -169,35 +174,27 @@ describe('pass 2 resolves the target but the source record has no id (#5127)', (
       config: CONFIG,
     });
 
-    // The row IS there — this is not a write failure. That is the whole point:
-    // every row counter reads healthy.
+    // The row is there AND carries its association.
     const engineering = store.drop_department.find((r) => r.name === 'Engineering');
     expect(engineering, 'the department row was not seeded — wrong scenario').toBeDefined();
-    const deptResult = result.results.find((r: { object: string }) => r.object === 'drop_department')!;
-    expect(deptResult.inserted).toBe(1);
-    expect(deptResult.errored).toBe(1);
-
-    // …while the association it declared is permanently absent.
-    expect(engineering!.head_id == null).toBe(true);
-    // Nothing was even attempted against the department (no id to update).
+    const aliceId = store.drop_worker.find((r) => r.name === 'Alice')!.id;
+    expect(engineering!.head_id).toBe(aliceId);
+    // It went through the pass-2 back-fill write, by a REAL record id.
     expect(
       (engine.update as any).mock.calls.some(([obj]: [string]) => obj === 'drop_department'),
-      'a back-fill write was attempted without a record id',
-    ).toBe(false);
+      'no back-fill write reached the department',
+    ).toBe(true);
 
-    // So the load must NOT report clean success — it used to.
-    expect(result.success).toBe(false);
-    expect(result.summary.totalErrored).toBe(1);
-    const dropped = result.errors.find((e: { field: string }) => e.field === 'head_id')!;
-    expect(dropped, 'the dropped back-fill was not recorded as an error').toBeDefined();
-    expect(dropped.sourceObject).toBe('drop_department');
-    expect(dropped.targetObject).toBe('drop_worker');
-    expect(dropped.recordIndex).toBe(0);
-    expect(dropped.message).toContain('Deferred reference dropped');
-    expect(dropped.message).toContain('name+region');
+    // A healed load is a clean load.
+    const deptResult = result.results.find((r: { object: string }) => r.object === 'drop_department')!;
+    expect(deptResult.inserted).toBe(1);
+    expect(deptResult.errored).toBe(0);
+    expect(result.success).toBe(true);
+    expect(result.summary.totalErrored).toBe(0);
+    expect(result.errors).toHaveLength(0);
   });
 
-  it('logs it exactly once at ERROR, naming the empty key, the consequence and the fix (#4632)', async () => {
+  it('says nothing at error OR warn — a healed deferral is not a degradation (#4632)', async () => {
     const { engine } = createFaithfulEngine();
     const logger = createLogger();
 
@@ -206,49 +203,19 @@ describe('pass 2 resolves the target but the source record has no id (#5127)', (
       config: CONFIG,
     });
 
-    // ONE line — and, since nothing else in this load fails, the ONLY error line.
-    const lines = deferredDropLines(logger);
-    expect(lines.length, 'the dropped back-fill was not logged exactly once at error').toBe(1);
-    expect(logger.error.mock.calls.length).toBe(1);
-
-    const [message, err, meta] = lines[0];
-    // Locating info: object, field, target, and which record.
-    expect(String(message)).toContain('drop_department.head_id');
-    expect(String(message)).toContain('drop_worker.name');
-    // The consequence, concretely.
-    expect(String(message)).toContain('stays NULL');
-    expect(String(message)).toContain('The row itself WAS seeded');
-    // WHY there is no id — the empty composite key, named.
-    expect(String(message)).toContain('`name+region`');
-    expect(String(message)).toContain('EMPTY key');
-    // The fix.
-    expect(String(message)).toMatch(/non-empty value/);
-    expect(String(message)).toMatch(/re-run the seed/);
-    // Logger contract is `(message, error, meta)`; there is no thrown error here.
-    expect(err).toBeUndefined();
-    expect(meta).toMatchObject({
-      object: 'drop_department',
-      field: 'head_id',
-      target: 'drop_worker.name',
-      recordIndex: 0,
-      recordExternalId: '',
-    });
-
-    // NOT downgraded to warn — the level the count has to agree with.
-    expect(
-      logger.warn.mock.calls.some((c: unknown[]) => String(c[0]).includes('DROPPED')),
-      'the dropped back-fill is being reported at warn',
-    ).toBe(false);
+    expect(logger.error).not.toHaveBeenCalled();
+    expect(logger.warn).not.toHaveBeenCalled();
   });
 
   /**
-   * The result object may no longer carry a `referencesDeferred` that nothing
-   * explains. The counter itself keeps its meaning — "deferred references that
-   * never landed", decremented only by a SUCCESSFUL back-fill, exactly as the
-   * two sibling failure branches leave it — so what this pins is the pairing:
-   * a leftover count now always has a matching entry in `errors`.
+   * #5127's pairing invariant, unchanged in meaning: `referencesDeferred`
+   * means "deferred references that never landed", only a SUCCESSFUL
+   * back-fill decrements it, and a leftover count must have a matching entry
+   * in `errors`. Here the back-fill SUCCEEDS, so the counter is given back —
+   * zero left over, zero to explain — and the invariant loop still holds for
+   * every result entry.
    */
-  it('leaves no dangling referencesDeferred without an error explaining it', async () => {
+  it('gives referencesDeferred back on the successful back-fill, leaving nothing dangling', async () => {
     const { engine } = createFaithfulEngine();
 
     const result = await new SeedLoaderService(engine, createMetadata(), createLogger()).load({
@@ -257,9 +224,9 @@ describe('pass 2 resolves the target but the source record has no id (#5127)', (
     });
 
     const deptResult = result.results.find((r: { object: string }) => r.object === 'drop_department')!;
-    expect(deptResult.referencesDeferred).toBe(1); // booked in pass 1, never landed
-    expect(deptResult.errors.length).toBe(1); // …and now explained
-    expect(deptResult.errors[0].field).toBe('head_id');
+    expect(deptResult.referencesDeferred).toBe(0); // booked in pass 1, given back in pass 2
+    expect(deptResult.referencesResolved).toBe(1);
+    expect(deptResult.errors).toHaveLength(0);
 
     for (const entry of result.results) {
       if (entry.referencesDeferred > 0) {
@@ -269,13 +236,15 @@ describe('pass 2 resolves the target but the source record has no id (#5127)', (
         ).toBeGreaterThan(0);
       }
     }
-    expect(result.summary.totalReferencesDeferred).toBe(1);
+    expect(result.summary.totalReferencesDeferred).toBe(0);
   });
 
   /**
-   * (b) The control: same composite key, `region` filled in. The key registers,
-   * pass 2 back-fills normally, and the new branch stays out of the way — which
-   * proves the failure above is caused by the EMPTY key, not by composite keys.
+   * The keyed sibling: same composite key, `region` filled in. The key
+   * registers AND the internal id is captured, and the outcome is identical to
+   * the empty-key case above — which is the point of #11674: keyedness no
+   * longer decides whether a deferral can land, so the two paths are pinned to
+   * the same healed outcome and cannot drift apart.
    */
   it('a composite key whose components are all present back-fills normally and says nothing', async () => {
     const { engine, store } = createFaithfulEngine();
@@ -393,5 +362,77 @@ describe('pass 2 finds no id because the source row failed in pass 1 (#5127)', (
     const [message] = deferredDropLines(logger)[0];
     expect(String(message)).not.toContain('EMPTY key');
     expect(String(message)).not.toContain('stays NULL');
+  });
+});
+
+/**
+ * The same "source row never landed" failure on a record with NO usable
+ * natural key (#11674) — the composite key evaluates to `''` AND the pass-1
+ * insert fails, so neither the captured-internal-id channel nor the
+ * natural-key fallback can name a row. This is the one way left to reach the
+ * empty-key drop branch: before #11674 that branch claimed "The row itself WAS
+ * seeded" and prescribed fixing the externalId components, both of which would
+ * be lies now (a row that seeds heals; the key is not the problem). The
+ * rewritten line names the record by INDEX — the only handle a keyless record
+ * has — and points at the pass-1 write error, exactly like its keyed sibling
+ * above.
+ */
+describe('pass 2 finds no id because a KEYLESS record failed in pass 1 (#11674)', () => {
+  function loadWithFailingKeylessDepartment() {
+    const { engine, store } = createFaithfulEngine();
+    const logger = createLogger();
+    const realInsert = (engine.insert as any).getMockImplementation();
+    (engine.insert as any).mockImplementation(async (obj: string, data: any, opts: any) => {
+      if (obj === 'drop_department') throw new Error('CHECK constraint failed: drop_department');
+      return realInsert(obj, data, opts);
+    });
+    return { engine, store, logger };
+  }
+
+  it('records the drop, naming the record by index and pointing at the pass-1 error', async () => {
+    const { engine, store, logger } = loadWithFailingKeylessDepartment();
+
+    const result = await new SeedLoaderService(engine, createMetadata(), logger).load({
+      seeds: compositeSeeds(''), // region '' → externalIdKey '' → no natural key
+      config: CONFIG,
+    });
+
+    // The row really is absent — nothing to back-fill onto.
+    expect(store.drop_department ?? []).toHaveLength(0);
+    expect(result.success).toBe(false);
+
+    // Recorded: the row loss (pass 1) AND the link it would have carried.
+    const dropped = result.errors.find(
+      (e: { field: string; message?: string }) => e.field === 'head_id' && String(e.message).includes('Deferred reference dropped'),
+    )!;
+    expect(dropped, 'the dropped back-fill was not recorded as an error').toBeDefined();
+    expect(dropped.message).toContain('no internal id was captured for drop_department record #0');
+    expect(result.errors.length).toBeGreaterThan(1); // the pass-1 write error is still there too
+
+    // Exactly ONE extra line, spelled by index (the only handle), pointing at
+    // the pass-1 failure — not the old "fix your externalId" prescription.
+    const lines = deferredDropLines(logger);
+    expect(lines.length).toBe(1);
+    const [message, err, meta] = lines[0];
+    expect(String(message)).toContain('drop_department.head_id');
+    expect(String(message)).toContain('record #0');
+    expect(String(message)).toContain('pass-1 write FAILED');
+    expect(String(message)).not.toContain('The row itself WAS seeded');
+    expect(String(message)).not.toMatch(/non-empty value/);
+    expect(String(message)).toMatch(/re-run the seed/);
+    expect(err).toBeUndefined();
+    expect(meta).toMatchObject({
+      object: 'drop_department',
+      field: 'head_id',
+      target: 'drop_worker.name',
+      recordIndex: 0,
+      recordExternalId: '',
+    });
+
+    // The pass-1 write error is untouched — one line each, no flood.
+    expect(
+      logger.error.mock.calls.some((c: unknown[]) => String(c[0]).includes('CHECK constraint failed')),
+      'the pass-1 write error stopped being reported',
+    ).toBe(true);
   });
 });

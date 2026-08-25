@@ -522,15 +522,34 @@ if (args.includes('--self-test')) {
 // a complete read) is broken rather than clean, and no such verdict can fire on a tree
 // where the scan works at all.
 if (args.includes('--bridge-coverage')) {
-  const { registrarFiles, ledgers, registrarByTail } = scanRouteSurface();
-  const coverage = bridgeCoverageFrom(ledgers, registrarByTail.keys());
+  const { registrarFiles, sourceFiles, ledgers, registrarByTail } = scanRouteSurface();
+  // THE CEILING (#11178) — read lazily off the walk this scan already did, so the census
+  // holds one file's source at a time rather than the tree's. Only this mode pays for it:
+  // the advisory path calls `bridgeCoverageFrom` with no ceiling and gets `unmeasured`.
+  const ceiling = maximalTailsFrom((function* () {
+    for (const rel of sourceFiles) {
+      try { yield { file: rel, text: readFileSync(join(repoRoot, rel), 'utf8') }; } catch { /* unreadable file contributes no tail */ }
+    }
+  })());
+  const coverage = bridgeCoverageFrom(ledgers, registrarByTail.keys(), ceiling.keys());
   const selects = selectsFrom(registrarByTail.keys());
+  const causeOf = new Map(coverage.ledgers.map((l) => [l.file, l.cause]));
+  // Through the one definition, per tail, so naming a witness cannot drift from the rule
+  // that decided the row was remediable in the first place (⛔ never restate the suffix test).
+  const witnessesFor = (route) => [...ceiling.keys()].filter((t) => selectsFrom([t])(route)).flatMap((t) => ceiling.get(t));
   if (asJson) {
     process.stdout.write(JSON.stringify({
       ...coverage,
       registrarFiles: registrarFiles.filter((f) => !LEDGER_FILE_RE.test(f)),
       unreachableRows: ledgers.flatMap(({ file, rows }) =>
-        rows.filter((r) => r.client && !selects(r.route)).map((r) => ({ file, route: r.route, client: r.client }))),
+        rows.filter((r) => r.client && !selects(r.route)).map((r) => {
+          const witnesses = witnessesFor(r.route);
+          // The row-level half of the same partition: a row with a witness is remediable
+          // whatever its ledger looks like; a row without one inherits its ledger's verdict,
+          // because "no registration site anywhere on this surface" is a claim only the
+          // whole ledger can support (see `bridgeCoverageFrom`).
+          return { file, route: r.route, client: r.client, cause: witnesses.length ? 'discovery-gap' : causeOf.get(file), witnesses };
+        })),
     }, null, 2) + '\n');
   } else {
     console.log(`sdk route bridge — reach over the declared client-bound surface`);
@@ -553,8 +572,35 @@ if (args.includes('--bridge-coverage')) {
     }
     console.log(`    reachable ................ ${coverage.reachable}`);
     console.log(`    UNREACHABLE .............. ${coverage.unreachable}`);
+    // WHY, beside the number, on every line (#11178). `56 of 56` and `46 of 87` printed in
+    // the same words read as one remediable cause, and they are not: the first surface has
+    // no in-repo registration site at all, so the discovery change the second one wants
+    // moves it by zero rows. That misreading is the reason this split exists — it aimed a
+    // whole card at widening a recognizer that was never the constraint.
+    const CAUSE_NOTE = {
+      'no-in-repo-registrar': () => 'NO in-repo registrar for ANY row — discovery cannot reach this surface',
+      'discovery-gap': (l) => `all ${l.remediable} remediable by discovery`,
+      'undecided': (l) => `${l.remediable} remediable by discovery, ${l.unwitnessed} undecided`,
+      'no-client-surface': () => 'no client-bound rows to reach',
+      'fully-reachable': () => 'every client-bound row is reachable',
+      'unmeasured': () => 'cause not measured on this run',
+    };
     for (const l of coverage.ledgers) {
-      console.log(`      ${String(l.unreachable).padStart(4)} of ${String(l.clientRows).padEnd(4)} unreachable  ${l.file}`);
+      const note = CAUSE_NOTE[l.cause];
+      console.log(`      ${String(l.unreachable).padStart(4)} of ${String(l.clientRows).padEnd(4)} unreachable  ${l.file}`
+        + (note ? `   ← ${note(l)}` : ''));
+    }
+    // A PARTITION of the number above, printed whole for the reason the declared/read
+    // fraction is: remediable + structural + undecided === UNREACHABLE, so a reader can see
+    // it stay whole, and a bucket that starts absorbing another cannot do it quietly.
+    if (coverage.causes.measured) {
+      console.log(`    why — against every \`path:\` any packages/** file declares (${coverage.causes.ceilingTails}-tail ceiling vs the ${coverage.tails} the filename convention yields):`);
+      const n = (v) => String(v).padStart(4);
+      console.log(`        remediable by discovery ..${n(coverage.causes.remediable)}   an in-repo file declares the row's path; the convention did not scan that file`);
+      console.log(`        NO in-repo registrar .....${n(coverage.causes.structural)}   on a ledger where not ONE row is declared in-repo — declared upstream and catch-all-mounted, so no discovery change reaches it`);
+      console.log(`        undecided ................${n(coverage.causes.undecided)}   no in-repo declaration, on a ledger that HAS in-repo registrars — absence and an unreadable spelling are not distinguishable here`);
+    } else {
+      console.log(`    why ........................ ${coverage.causes.reason}`);
     }
     // The 176 rows themselves are one flag away, never printed by default: this mode is
     // a CI gate step (`check-affected-docs.mjs`), and 176 lines of known blind spot in
@@ -1109,6 +1155,55 @@ function parseRegistrarSource(text) {
 }
 
 /**
+ * Every route tail ANY file under `packages/**` could yield, with the filename convention
+ * ignored entirely — the CEILING on what a widened discovery could ever reach (#11178).
+ *
+ * ⛔ THIS IS NOT A SECOND DISCOVERY ROUTE, and nothing downstream of it selects a row.
+ * `REGISTRAR_FILE_RE` is untouched, the bridge still rides on `registrarByTail` alone, and
+ * the published `reachable` figure is computed exactly where it was. This function exists
+ * only so the REPORT can name WHY a row is unreachable, which the report could not do
+ * while it had one number for two causes:
+ *
+ *   - a row the convention missed but SOME in-repo file declares — the recognizer is
+ *     narrower than the repo, and widening discovery would reach it;
+ *   - a row NO in-repo file declares at all — the surface is declared upstream and mounted
+ *     through a catch-all, so no discovery change reaches it at any price.
+ *
+ * Measured on `589758d22`, that is the difference between 14 rows and 163: the auth
+ * ledger's `56 of 56` and the rest ledger's `46 of 87` print identically today and are not
+ * the same finding. That conflation is not hypothetical — it is what aimed #11178 at
+ * discovery, whose own remedy was then measured to move the auth ledger by ZERO rows.
+ *
+ * SUPERSET BY CONSTRUCTION, which is what makes the comparison legitimate: the same
+ * `parseRegistrarSource`, over the same walk's files, minus the convention test. So every
+ * tail discovery yields appears here too, and `reachable` can never exceed this ceiling —
+ * an invariant `bridgeCoverageFrom` turns into a broken-scan verdict rather than trusting.
+ *
+ * The `includes('path')` prefilter is a SOUND superset, not a heuristic: `parseRegistrarSource`
+ * yields a tail only from a line matching `path\s*:` in the MASKED source, and masking
+ * replaces bytes with spaces rather than inserting any, so those four bytes must be present
+ * in the raw text for any tail to exist. Positive control on `589758d22`: masking all 1930
+ * files instead of the 1093 the prefilter keeps produces a byte-identical census — the same
+ * 82 tails and the same 14/163 split — for 1.76s instead of 1.47s.
+ *
+ * @param {Iterable<{file: string, text: string}>} sources  candidate files and their source
+ * @returns {Map<string, string[]>} tail ⟶ the files that declare it, so a "discovery could
+ *   reach this" claim can always NAME the witness rather than asserting one exists.
+ */
+function maximalTailsFrom(sources) {
+  const byTail = new Map();
+  for (const { file, text } of sources) {
+    if (!text.includes('path')) continue;
+    for (const [tail] of parseRegistrarSource(text)) {
+      let owners = byTail.get(tail);
+      if (!owners) byTail.set(tail, (owners = []));
+      owners.push(file);
+    }
+  }
+  return byTail;
+}
+
+/**
  * How much of the DECLARED client-bound route surface the `sdk` bridge can actually
  * reach — pure, so `--self-test` pins it with fixtures and no repo state (#9572).
  *
@@ -1137,13 +1232,32 @@ function parseRegistrarSource(text) {
  *   whole verdict exists to prevent. A caller that omits them throws here instead — and
  *   `outsideCode` (#10683) is read on the same terms, for the same reason.
  * @param {Iterable<string>} tails  every route tail the registrar scan produced
+ * @param {Iterable<string>} [maximalTails]  the CEILING — every tail any `packages/**` file
+ *   could yield with the filename convention ignored (`maximalTailsFrom`). Supplying it is
+ *   what lets each ledger's cause be DERIVED. ⛔ Omitting it is not an empty ceiling: every
+ *   cause reports `unmeasured` and the three counts are `null`, on the same terms as the
+ *   declared counts above — an absent reading must never render as a reading.
  */
-function bridgeCoverageFrom(ledgers, tails) {
+function bridgeCoverageFrom(ledgers, tails, maximalTails) {
   const tailList = [...tails];
   // The same suffix test PHASE 2 bridges with and the same one `--bridge-coverage --json`
   // enumerates with, taken from the single definition beside `LEDGER_FILE_RE` so this
   // cannot drift from either what it measures or the row list it is the count of.
   const selects = selectsFrom(tailList);
+  // WHY a row is unreachable, and `undefined` is not an empty census (#11178). A caller
+  // that measured no ceiling gets `unmeasured` spelled out on every ledger — never a
+  // default into one of the two buckets, which is the whole failure this split exists to
+  // end. Same rule as `measured: false` on the advisory path and `computedOn.dirty`'s null
+  // arm: an ABSENT reading must not render as a reading.
+  const censusMeasured = maximalTails !== undefined;
+  // Materialised ONCE, exactly like `tailList` above and for the same reason: callers pass
+  // a `Map.keys()` iterator, and a second spread of a spent iterator reads as an EMPTY
+  // ceiling — which renders as a clean `0-tail` census rather than as an error.
+  const ceilingList = censusMeasured ? [...maximalTails] : null;
+  // Through `selectsFrom`, never a second copy of the suffix test — the cause counts are a
+  // partition of `unreachable`, so a restatement here lets the split disagree with the
+  // total it is the breakdown of.
+  const reaches = censusMeasured ? selectsFrom(ceilingList) : null;
   const byLedger = [];
   let clientRows = 0;
   let reachable = 0;
@@ -1151,16 +1265,53 @@ function bridgeCoverageFrom(ledgers, tails) {
   let routesDeclaredAll = 0;
   let clientsDeclaredAll = 0;
   let leadsOutsideCode = 0;
+  let remediableRows = 0;
+  let structuralRows = 0;
+  let undecidedRows = 0;
+  let censusBroken = null;
   for (const { file, rows, declined, routesDeclared, clientsDeclared, outsideCode } of ledgers) {
     const bound = rows.filter((r) => r.client);
     const hit = bound.filter((r) => selects(r.route));
+    const miss = bound.filter((r) => !selects(r.route));
     clientRows += bound.length;
     reachable += hit.length;
     rowsParsed += rows.length;
     routesDeclaredAll += routesDeclared;
     clientsDeclaredAll += clientsDeclared;
     leadsOutsideCode += outsideCode.length;
-    byLedger.push({ file, clientRows: bound.length, reachable: hit.length, unreachable: bound.length - hit.length, rowsParsed: rows.length, routesDeclared, clientsDeclared, declined, outsideCode });
+    // THE SPLIT. `witnessed` = some in-repo file declares this exact path and the filename
+    // convention simply did not scan it, so widening discovery reaches the row and the
+    // witness can be NAMED. `unwitnessed` = no in-repo file declares it at all.
+    const witnessed = censusMeasured ? miss.filter((r) => reaches(r.route)) : [];
+    const unwitnessed = censusMeasured ? miss.filter((r) => !reaches(r.route)) : [];
+    // THE CEILING CANNOT BE BELOW THE FLOOR. `maximalTails` is built from the same parser
+    // over a superset of the same files, so a reachable row it cannot reach is a broken
+    // census, not a finding — it cannot fire on a census built the way this one is.
+    if (censusMeasured && !censusBroken) {
+      const below = hit.find((r) => !reaches(r.route));
+      if (below) censusBroken = `${file}: \`${below.route}\` is reachable by the ${tailList.length}-tail discovery scan but not by the ${ceilingList.length}-tail ceiling it is measured against — the ceiling is not the superset it is built to be, so every cause below is unsound`;
+    }
+    let cause;
+    if (!censusMeasured) cause = 'unmeasured';
+    else if (bound.length === 0) cause = 'no-client-surface';
+    else if (miss.length === 0) cause = 'fully-reachable';
+    // STRUCTURAL, and the test is a property of the SURFACE rather than a list of ledger
+    // names: not one client-bound row of this ledger is declared by any file in this repo.
+    // That is the auth surface — better-auth declares those routes inside `node_modules`
+    // and the plugin mounts them with a single catch-all — and it is derived here rather
+    // than asserted, so a ledger that grows an in-repo registrar leaves this bucket by
+    // itself. Measured on `589758d22`: exactly one ledger of the seven.
+    else if (hit.length === 0 && witnessed.length === 0) cause = 'no-in-repo-registrar';
+    else if (unwitnessed.length === 0) cause = 'discovery-gap';
+    // ⛔ NOT defaulted into either bucket. This ledger HAS in-repo registrars, so its
+    // unwitnessed rows are not the auth shape — but nothing here can tell "no registration
+    // site" apart from "a registration site whose path this recognizer cannot read", and
+    // rendering that ignorance as either verdict is exactly the #9747 false green.
+    else cause = 'undecided';
+    if (cause === 'no-in-repo-registrar') structuralRows += unwitnessed.length;
+    else undecidedRows += unwitnessed.length;
+    remediableRows += witnessed.length;
+    byLedger.push({ file, clientRows: bound.length, reachable: hit.length, unreachable: bound.length - hit.length, rowsParsed: rows.length, routesDeclared, clientsDeclared, declined, outsideCode, cause, remediable: censusMeasured ? witnessed.length : null, unwitnessed: censusMeasured ? unwitnessed.length : null });
   }
   // ZERO IS NOT A CLEAN REPO, IT IS A BROKEN SCAN — `check-engine-double-contract`'s
   // invariant, applied to this population (#9747 quotes it as the germ worth
@@ -1175,6 +1326,7 @@ function bridgeCoverageFrom(ledgers, tails) {
   const brokenScan = [];
   if (!ledgers.length) brokenScan.push('no route-ledger file was found at all — the ledger walk selected nothing, so every `sdk` anchor is silently unavailable');
   if (!tailList.length) brokenScan.push('the registrar scan produced no route tail at all — the symbol → route → sdk bridge cannot fire for any change');
+  if (censusBroken) brokenScan.push(censusBroken);
   for (const l of byLedger) {
     if (l.rowsParsed === 0) brokenScan.push(`${l.file} matched the ledger convention but parsed 0 rows — the row recognizer no longer reads this file's shape`);
     // ONE LEVEL DOWN, AND THE LIKELIER SHAPE: a PARTIAL read. The guard above is the
@@ -1208,7 +1360,14 @@ function bridgeCoverageFrom(ledgers, tails) {
   // number here that describes the ledger's PROSE rather than its route surface, and a
   // comment that quotes a retired path is not a broken scan — before #10683 it was a
   // phantom ROW, which is what makes counting it worth doing and gating it wrong.
-  return { measured: true, clientRows, reachable, unreachable: clientRows - reachable, tails: tailList.length, rowsParsed, routesDeclared: routesDeclaredAll, clientsDeclared: clientsDeclaredAll, leadsOutsideCode, ledgers: byLedger, brokenScan };
+  // The cause split is published as a PARTITION of `unreachable` — 14 + 56 + 107 = 177 on
+  // `589758d22` — so a reader (or a ratchet) can see it stay whole. `causesMeasured: false`
+  // is the honest shape for a caller that passed no ceiling, and the three counts are
+  // `null` there rather than `0`: nobody may read "no structural rows" out of "nobody looked".
+  const causes = censusMeasured
+    ? { measured: true, ceilingTails: ceilingList.length, remediable: remediableRows, structural: structuralRows, undecided: undecidedRows }
+    : { measured: false, reason: 'no in-repo ceiling was supplied — why a row is unreachable was not measured on this run', ceilingTails: null, remediable: null, structural: null, undecided: null };
+  return { measured: true, clientRows, reachable, unreachable: clientRows - reachable, tails: tailList.length, rowsParsed, routesDeclared: routesDeclaredAll, clientsDeclared: clientsDeclaredAll, leadsOutsideCode, causes, ledgers: byLedger, brokenScan };
 }
 
 /**
@@ -1218,6 +1377,13 @@ function bridgeCoverageFrom(ledgers, tails) {
  */
 function scanRouteSurface() {
   const registrarFiles = [];
+  // EVERY candidate the convention CHOSE FROM, collected in the same walk (#11178). This
+  // is not a second discovery route and nothing downstream of the bridge reads it: it is
+  // the population `maximalTailsFrom` measures the convention against, so that "the
+  // recognizer missed a registrar" can be told apart from "there is no registrar". Filled
+  // here rather than by a second walk for the reason `scanRouteSurface` exists at all —
+  // two walks of `packages/**` is the drift #4851 billed us for.
+  const sourceFiles = [];
   const walkSrc = (dir) => {
     let entries;
     try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return; }
@@ -1227,6 +1393,7 @@ function scanRouteSurface() {
       if (e.isDirectory()) walkSrc(p);
       else if (e.isFile() && e.name.endsWith('.ts') && !isTestFile(e.name)) {
         const rel = relative(repoRoot, p);
+        sourceFiles.push(rel);
         if (LEDGER_FILE_RE.test(rel) || REGISTRAR_FILE_RE.test(rel)) registrarFiles.push(rel);
       }
     }
@@ -1252,7 +1419,7 @@ function scanRouteSurface() {
       }
     }
   }
-  return { registrarFiles, ledgers, ledgerRows, registrarByTail };
+  return { registrarFiles, sourceFiles, ledgers, ledgerRows, registrarByTail };
 }
 
 /**
@@ -1404,42 +1571,61 @@ function typeDeclRegions(code) {
  *   • `dottedRe`      `(?<![\w$])`    a DOTTED token, which must tolerate its own dots
  *   • `rulePatternFor`/`commandPatternFor` `(?<![\w$.-])`  a doc-side PROSE span, where `-`
  *     glues tokens in English
- * `declLead`'s key is a BARE token, so `symbolRe`'s set is the analogue: `$` continues an
- * identifier (`$route`), and `.` makes the token a MEMBER ACCESS whose colon belongs to a
- * ternary and never to a key (`cond ? obj.route : x`). Both mint the same phantom, and a
- * character class closes the class rather than enumerating the escapees.
+ * ⛔ AND THAT TABLE IS WHY THIS IS NOW AN ALLOWLIST (#11717). Every idiom above names a class
+ * it EXCLUDES, so every one of them has a residue — and this key's residue was worked through
+ * one card at a time: #11494 the colon run, #11542 the word boundary (`subroute:`), #11630 `$`
+ * and `.` (`$route:`, `cond ? obj.route : x`), #11711 queued for Unicode because `\w` is
+ * ASCII-only. Each card was small, provably free and honestly priced, and each named the next
+ * residue as a pin for the next card to flip. That is a good discipline for an open-ended
+ * defect and the wrong one for a BOUNDED defect: over code points 0..0x2FFF the `\b` anchor
+ * admitted 12225 characters and `(?<![\w$.])` admitted 12223, so the whole family was arguing
+ * about a handful at the edge of a set of twelve thousand.
  *
- * ⛔ `-` IS DELIBERATELY NOT IN THE SET, which is the one place this departs from
- * `rulePatternFor`. `a-route` is two tokens (`a - route`), so the `route` there IS the whole
- * token `route` — it is not a declaration for a DIFFERENT reason (expression position), and
- * that reason is shared with the bare `cond ? route : x` that NO lookbehind can exclude.
- * Excluding `-` would close one spelling of that class while leaving its plainest spelling
- * open, which is enumerating escapees wearing a character class.
+ * SO THE ANCHOR IS INVERTED rather than shrunk a fifth time. It no longer enumerates what may
+ * not PRECEDE the key; it names the positions where an object-literal property key may BEGIN —
+ * start of input, whitespace, `{`, `,` — and rejects everything else. Spelled as a negative
+ * lookbehind over the COMPLEMENT of that allowlist, `(?<![^\s{,])`, which also gives
+ * start-of-input for free rather than as a second alternative. The set is bounded at three
+ * characters where a blocklist is not bounded at all, and it closes `$`, `.`, `-`, Unicode and
+ * every future escapee of that shape in ONE move instead of one per card.
  *
- * ⛔ THE RESIDUE THIS STILL DOES NOT CLOSE, named rather than left to be discovered. `\w` is
- * ASCII-only, so a Unicode identifier character still passes: `éroute:` is admitted by the
- * lookbehind exactly as it was by `\b` (measured — both admit it). Closing it means a
- * `\p{L}`-class lookbehind under the `u` flag, which changes the escape semantics of every
- * source these leads are COMPOSED with at the eight call sites. 0 occurrences across the
- * seven live ledgers, and pinned in `--self-test` as deliberately unmoved so the next card
- * of this shape MOVES a pin rather than finding none.
+ * ⛔ AND IT NEEDS NO `u` FLAG, which is the concrete cost the blocklist route was carrying:
+ * closing the Unicode residue as a class meant `\p{L}` under `u`, which changes the escape
+ * semantics of every source these leads are COMPOSED with at the eight call sites. An
+ * allowlist of ASCII positions needs none, so #11711 is subsumed at no cost at all.
  *
- * ⛔ THIS IS THE SECOND POPULATION MOVE, and unlike #11542's it moves `declarationsIn` too —
- * the one scan #11542's before/after was priced to leave byte-identical. It is priced with
- * its OWN before/after against the header of `--bridge-coverage`, at ROW IDENTITY rather
- * than counter equality: `--bridge-coverage --json` carries all 177 `unreachableRows` by
- * `{file, route, client}`, and it hashes `d04a5cedfb613370e5b46ac4725db1d941e5dc88` on the
- * base tree, on the ablated tree and on the fixed tree alike. Counters agreeing is consistent
- * with two rows swapping places; row identity is not. Provably free for the direct reason:
- * across the seven live ledgers, all 499 `route:`/`client:` leads are preceded by a SPACE —
- * 0 preceded by `$`, 0 by `.`, 0 by any non-word character at all (positive control: the same
- * scan reports both classes when a fixture carries them).
+ * ⛔ THE RESIDUE THIS LEAVES — and it is the end of what ANY left-anchor can reach, so it is a
+ * BOUNDARY rather than the next link in the chain. A key in EXPRESSION position preceded by
+ * whitespace, `cond ? route : 'GET /api/v1/x'`, is byte-for-byte what a property key looks
+ * like, so the allowlist admits it — correctly, by its own rule. #11630 named this same class
+ * as the one no lookbehind can reach, and that is exactly why it left `-` admitted: `a-route`
+ * really is the whole token `route`. The allowlist closes every spelling of the class that
+ * WEARS a character (`$route`, `.route`, `-route`, `éroute`) and leaves the plainest one.
+ * Closing THAT needs the colon's enclosing expression, not its left neighbour — a parser
+ * question, not an anchor question, and a different card if a puller ever appears. Pinned in
+ * `--self-test` as deliberately unmoved.
  *
- * ⛔ AND IT CAN ONLY EVER REMOVE. The key alternation always opens with a word character, so
- * `\b` there fails exactly when the previous character is a word character — making
- * `(?<![\w$.])` a STRICT SUBSET of `\b`. Swept over code points 0..0x2FFF: `\b` admits 12225,
- * the lookbehind admits 12223, and the lookbehind admits 0 that `\b` does not. The move is
- * exactly the 2 characters named above.
+ * ⛔ THIS IS THE THIRD POPULATION MOVE, and like #11630's it moves BOTH the ledger rows and
+ * `declarationsIn`. Priced with its own before/after against the header of `--bridge-coverage`,
+ * at ROW IDENTITY rather than counter equality, and re-derived against THIS base rather than
+ * inherited from #11630: `--bridge-coverage --json` carries all 177 `unreachableRows` by
+ * `{file, route, client}` and still hashes `d04a5cedfb613370e5b46ac4725db1d941e5dc88`, and the
+ * `declarationsIn` population is byte-identical across the change. Counters agreeing is
+ * consistent with two rows swapping places; row identity is not. Provably free for the direct
+ * reason: across the seven live ledgers all 499 `route:`/`client:` leads are preceded by a
+ * SPACE — 0 by `$`, 0 by `.`, 0 by `-`, 0 by `{`, 0 by `,`, 0 by anything outside the
+ * allowlist at all (positive control: the same scan reports every one of those classes the
+ * moment a fixture carries them, so the zeros are readings and not a blind scan).
+ *
+ * ⛔ AND IT CAN ONLY EVER REMOVE, swept rather than argued — against the anchor it actually
+ * replaces, not against the one two cards ago. Over code points 0..0x2FFF `(?<![\w$.])` admits
+ * 12223 and this allowlist admits 25, and the allowlist admits 0 that `(?<![\w$.])` does not.
+ * Both numbers and the zero are pinned in `--self-test`.
+ *
+ * WHY THERE IS NO RIGHT-HAND ANCHOR, since every idiom above carries one: the `\s*:` that
+ * follows IS the right anchor, exactly. `routes:` cannot match — after `route` the `\s*` takes
+ * nothing and the `:` meets `s` — while `route :` legitimately does. A trailing class would be
+ * a second spelling of a constraint the colon already makes exact.
  *
  * @param {string} keys  the key alternation ONLY — `(route|client)`, `route`,
  *   `(?:route|client)`. The capture groups are the call site's question; the ANCHOR, the
@@ -1449,7 +1635,7 @@ function typeDeclRegions(code) {
  *   no argument carries either form.
  */
 function declLead(keys) {
-  return String.raw`(?<![\w$.])${keys}\s*:\s*`;
+  return String.raw`(?<![^\s{,])${keys}\s*:\s*`;
 }
 
 /**
@@ -3092,33 +3278,59 @@ function selfTest() {
     '1 route / 1 client / 0 declined',
     `${dottedKey.routesDeclared} route / ${dottedKey.clientsDeclared} client / ${dottedKey.declined.length} declined`);
 
-  // ⛔ THE BOUNDARY THIS CARD DOES NOT CROSS, in its turn — both halves pinned so the next
-  // card of this shape MOVES a pin rather than finding none, exactly as this one did.
+  // ⛔ BOTH OF #11630'S BOUNDARY PINS ARE FLIPPED HERE (#11717), not deleted — the allowlist
+  // crosses both, and a green reached by removing an assertion is the one thing this gate
+  // cannot afford.
   //
-  // (a) `-` is NOT in the set. `a-route` is two tokens, so that `route` IS the whole token —
-  // not a declaration for a DIFFERENT reason (expression position), one it shares with the
-  // bare `cond ? route : x` no lookbehind can reach. Excluding `-` would close one spelling of
-  // that class and leave its plainest spelling open.
+  // (a) `-`. #11630 left it admitted on the reasoning that `a-route` is two tokens, so that
+  // `route` IS the whole token and is a non-declaration for a DIFFERENT reason (expression
+  // position) — a reason it shares with the bare `cond ? route : x` no lookbehind can reach.
+  // The allowlist moves it, and for a reason that reads the same fact the other way round:
+  // whole token or not, `-` is not a place an object-literal KEY may begin. What #11630 called
+  // the shared class is now pinned directly, in its plainest spelling, at the end of this
+  // block — so the class is pinned rather than approximated by one of its spellings.
   const minusKey = parseLedgerSource([
     'export const L = [',
     "  { route: 'GET /api/v1/meta', family: 'metadata', disposition: 'sdk', client: 'meta.getTypes' },",
     '];',
     "const n = cond ? a-route : 'GET /api/v1/gone';",
   ].join('\n'));
-  check('parseLedgerSource', 'a `-`-prefixed lead still mints a row — deliberately outside the set (#11630)',
-    'row count', 2, minusKey.rows.length);
-  // (b) `\w` is ASCII-only, so a UNICODE identifier character still passes — `éroute:` is
-  // admitted by the lookbehind exactly as it was by `\b`. Closing it means a `\p{L}` class
-  // under the `u` flag, which changes escape semantics for every source these leads are
-  // COMPOSED with at the eight call sites. 0 occurrences across the seven live ledgers.
+  check('parseLedgerSource', 'a `-`-prefixed lead mints NO row — the pin #11630 left is FLIPPED by the allowlist (#11717)',
+    'row count', 1, minusKey.rows.length);
+  // (b) UNICODE, which is #11711's whole card, subsumed. `\w` is ASCII-only, so `éroute:` was
+  // admitted by the lookbehind exactly as it was by `\b`. As a BLOCKLIST closing it meant a
+  // `\p{L}` class under the `u` flag, which changes escape semantics for every source these
+  // leads are COMPOSED with at the eight call sites — the concrete cost that kept it open. An
+  // allowlist of ASCII positions needs no flag, so it closes for free. 0 occurrences across
+  // the seven live ledgers either way.
   const unicodeKey = parseLedgerSource([
     'export const L = [',
     "  { éroute: 'GET /api/v1/gone', family: 'metadata', disposition: 'sdk' },",
     "  { route: 'GET /api/v1/meta', family: 'metadata', disposition: 'sdk', client: 'meta.getTypes' },",
     '];',
   ].join('\n'));
-  check('parseLedgerSource', 'a UNICODE-prefixed lead still mints a phantom row — residue, deliberately unmoved',
-    'row count', 2, unicodeKey.rows.length);
+  check('parseLedgerSource', 'a UNICODE-prefixed lead mints NO row — #11711 subsumed, and with NO `u` flag (#11717)',
+    'row count', 1, unicodeKey.rows.length);
+
+  // ⛔ (c) THE RESIDUE THIS LEAVES, and it is the END of what any left-anchor can reach — a
+  // boundary, not the next link in the chain. A key in EXPRESSION position preceded by
+  // WHITESPACE is byte-for-byte what a property key looks like, so the allowlist admits it,
+  // correctly by its own rule. This is the class #11630 named as unreachable by any
+  // lookbehind and used to justify leaving `-` open; the allowlist closes every spelling of it
+  // that WEARS a character and leaves this one. Closing it needs the colon's enclosing
+  // EXPRESSION, not its left neighbour — a parser question. Pinned deliberately unmoved so a
+  // card that ever takes it MOVES a pin rather than finding none.
+  const bareExprKey = parseLedgerSource([
+    'export const L = [',
+    "  { route: 'GET /api/v1/meta', family: 'metadata', disposition: 'sdk', client: 'meta.getTypes' },",
+    '];',
+    "const n = cond ? route : 'GET /api/v1/gone';",
+  ].join('\n'));
+  check('parseLedgerSource', 'a bare `? route :` in EXPRESSION position still mints a phantom — deliberately unmoved',
+    'row count', 2, bareExprKey.rows.length);
+  check('parseLedgerSource', 'and it is still SILENT — all eight scans agree on it, so both terms move together',
+    'declared', '2 route / 1 client / 0 declined',
+    `${bareExprKey.routesDeclared} route / ${bareExprKey.clientsDeclared} client / ${bareExprKey.declined.length} declined`);
 
   // ⛔ REPORTED, NEVER A VERDICT. A comment explaining a retired row by quoting its old path
   // is legitimate prose; reddening CI over it is the false red the #9747 family declines.
@@ -3710,6 +3922,93 @@ function selfTest() {
   const serverOnly = bridgeCoverageFrom([covLedger('c-route-ledger.ts', [{ route: 'GET /api/v1/datasources', client: null }])], ['/x/:y']);
   check('bridgeCoverageFrom', 'an all-server-only ledger is accurate, not broken', 'brokenScan', 0, serverOnly.brokenScan.length);
 
+  // --- #11178: WHY a row is unreachable, and the two causes that printed as one --------
+  // `56 of 56` (auth) and `46 of 87` (rest) render identically today and are not the same
+  // finding: the first surface has NO in-repo registration site, so the discovery widening
+  // the second one wants moves it by zero rows — measured, before this split existed.
+  const ceilSrc = [
+    ['r-registers.ts', "app.get({ path: '/api/v1/storage/upload/presigned' }, handler);"],
+    ['r-comments.ts', "// path: '/api/v1/never/registered' — an illustration, not a registration\n"],
+    ['r-silent.ts', 'export const answer = 1;\n'],
+  ];
+  const ceil = maximalTailsFrom(ceilSrc.map(([file, text]) => ({ file, text })));
+  check('maximalTailsFrom', 'a real `path:` reaches the ceiling', 'tails',
+    true, ceil.has('/api/v1/storage/upload/presigned'));
+  check('maximalTailsFrom', 'and NAMES its file, so "discovery could reach this" can point at the witness',
+    'witness', 'r-registers.ts', (ceil.get('/api/v1/storage/upload/presigned') || [])[0]);
+  // The ceiling reads CODE, exactly like the scan it bounds — a ceiling built off prose
+  // would invent remediable rows and empty the structural bucket without moving a byte.
+  check('maximalTailsFrom', 'a `path:` in a COMMENT is not a registration', 'tails',
+    false, ceil.has('/api/v1/never/registered'));
+  check('maximalTailsFrom', 'and a file with no `path` at all contributes nothing', 'tails', 1, ceil.size);
+
+  // The four shapes today's seven ledgers actually take, each derived from the ceiling
+  // rather than from a list of ledger names — a hand-kept list is the defect this card
+  // family keeps hitting, one level up.
+  const causeLedgers = [
+    covLedger('structural-route-ledger.ts', [
+      { route: 'POST /api/v1/auth/sign-in/email', client: 'auth.login' },
+      { route: 'POST /api/v1/auth/sign-out', client: 'auth.logout' },
+    ]),
+    covLedger('gap-route-ledger.ts', [{ route: 'POST /api/v1/storage/upload/presigned', client: 'storage.presign' }]),
+    covLedger('mixed-route-ledger.ts', [
+      { route: 'GET /api/v1/data/import/jobs', client: 'data.listImportJobs' },
+      { route: 'GET /api/v1/meta/:type', client: 'meta.getItems' },
+    ]),
+    covLedger('serveronly-route-ledger.ts', [{ route: 'GET /health', client: null }]),
+  ];
+  const causeCov = bridgeCoverageFrom(causeLedgers, ['/x/:y'],
+    ['/api/v1/storage/upload/presigned', '/api/v1/data/import/jobs']);
+  const causeOf = (f) => causeCov.ledgers.find((l) => l.file === f).cause;
+  const causeCases = [
+    // THE ONE THIS CARD IS ABOUT: not one row of the surface is declared anywhere in-repo.
+    ['a ledger no in-repo file declares ANY row of is structural', 'no-in-repo-registrar', causeOf('structural-route-ledger.ts')],
+    ['a ledger whose every unreachable row has an in-repo witness is a discovery gap', 'discovery-gap', causeOf('gap-route-ledger.ts')],
+    // ⛔ NOT defaulted into either bucket — the #9747 rule this whole split is an
+    // application of: a recognizer narrower than the repo reports "unrecognised".
+    ['a ledger with witnesses for SOME rows is undecided, not quietly structural', 'undecided', causeOf('mixed-route-ledger.ts')],
+    ['a wholly server-only ledger has no client surface to reach, which is not a cause', 'no-client-surface', causeOf('serveronly-route-ledger.ts')],
+    ['the structural verdict counts only the ledger that earned it', 2, causeCov.causes.structural],
+    ['a witnessed row is remediable whichever ledger carries it', 2, causeCov.causes.remediable],
+    ['and the undecided rows are neither', 1, causeCov.causes.undecided],
+    // A PARTITION, pinned as one: a bucket that starts absorbing another keeps every count
+    // above green while this fails.
+    ['remediable + structural + undecided IS the unreachable population', causeCov.unreachable,
+      causeCov.causes.remediable + causeCov.causes.structural + causeCov.causes.undecided],
+    ['a working census carries no broken-scan verdict', 0, causeCov.brokenScan.length],
+  ];
+  for (const [label, want, got] of causeCases) check('bridgeCoverageFrom', label, 'cause', want, got);
+
+  // ⛔ THE FIGURE THIS MAY NOT MOVE. Other cards cite `45 reachable` (#10534, #9572), and
+  // the split explains that number rather than participating in it: same ledgers, same
+  // discovery tails, a ceiling bolted on — the reach is identical or this is a widening.
+  check('bridgeCoverageFrom', 'supplying a ceiling explains the reach without moving it', 'reachable',
+    cov.reachable, bridgeCoverageFrom(covLedgers, ['/:type/:name/audit', '/:type/:name/history'], ['/api/v1/auth/sign-in/email']).reachable);
+
+  // ABSENT IS NOT EMPTY. A caller that measured no ceiling must not read as "no structural
+  // rows" — the same rule the declared counts above are read under.
+  const noCeiling = bridgeCoverageFrom(covLedgers, ['/:type/:name/audit', '/:type/:name/history']);
+  const absentCases = [
+    ['a run with no ceiling says so', false, noCeiling.causes.measured],
+    ['and says it on every ledger rather than picking a bucket', true, noCeiling.ledgers.every((l) => l.cause === 'unmeasured')],
+    ['and the counts are null, not 0 — "nobody looked" is not "none found"', null, noCeiling.causes.structural],
+    ['and the reach it could not explain is still reported whole', 2, noCeiling.unreachable],
+  ];
+  for (const [label, want, got] of absentCases) check('bridgeCoverageFrom', label, 'unmeasured', want, got);
+
+  // THE CEILING CANNOT SIT BELOW THE FLOOR. Built as a superset by construction, so this
+  // cannot fire on a census built the way `maximalTailsFrom` builds one — which is exactly
+  // what makes it a verdict rather than a number, on the `brokenScan` terms above.
+  const sunkCeiling = bridgeCoverageFrom(
+    [covLedger('t-route-ledger.ts', [{ route: 'GET /api/v1/meta/:type/:name/audit', client: 'meta.getAudit' }])],
+    ['/:type/:name/audit'], []);
+  check('bridgeCoverageFrom', 'a ceiling that misses a REACHABLE row is a broken census, not a finding', 'brokenScan',
+    true, sunkCeiling.brokenScan.some((v) => v.includes('ceiling')));
+  check('bridgeCoverageFrom', 'and a ceiling that contains it carries no verdict', 'brokenScan', 0,
+    bridgeCoverageFrom(
+      [covLedger('t-route-ledger.ts', [{ route: 'GET /api/v1/meta/:type/:name/audit', client: 'meta.getAudit' }])],
+      ['/:type/:name/audit'], ['/:type/:name/audit']).brokenScan.length);
+
   // The selection rule itself, pinned once — both the count and the row list read it, so a
   // change here moves them together or fails here.
   const selects1 = selectsFrom(['/:type/:name/audit', '/:type/:name/history']);
@@ -3754,7 +4053,7 @@ function selfTest() {
   // copy is the same hole re-opening, and only a source pin can see it: every behavioural
   // fixture above would keep passing while the new scan drifted on its own.
   check('declLead', 'the run between a `route:`/`client:` colon and its value is spelled ONCE', 'affected-docs.mjs',
-    1, (ownSource.match(/String\.raw`\(\?<!\[\\w\$\.\]\)\$\{keys\}\\s\*:\\s\*`/g) || []).length);
+    1, (ownSource.match(/String\.raw`\(\?<!\[\^\\s\{,\]\)\$\{keys\}\\s\*:\\s\*`/g) || []).length);
   check('declLead', 'and all eight lead scans are built from it, none inline', 'affected-docs.mjs',
     8, (ownSource.match(/new RegExp\(declLead\(/g) || []).length);
   // …AND THE KEY ANCHOR IS SPELLED ONCE TOO (#11542), which is the same pin one field over.
@@ -3769,19 +4068,46 @@ function selfTest() {
   // from would leave the pin watching a door nobody uses any more.
   check('declLead', 'and the KEY anchor is spelled once too — no call site restates it', 'affected-docs.mjs',
     0, (ownSource.match(/declLead\([^\n]*?(?:\\b|\(\?<!)/g) || []).length);
-  // BEHAVIOURAL, not merely textual: the three key spellings the eight call sites pass all
-  // come back anchored, from the one place that spells the anchor. This is what "all eight
-  // read the same anchored spelling" means when checked rather than asserted.
+  // BEHAVIOURAL, not merely textual: every key spelling the eight call sites pass comes back
+  // anchored, from the one place that spells the anchor. This is what "all eight read the same
+  // anchored spelling" means when checked rather than asserted.
+  //
+  // The spellings are READ FROM THE SOURCE, never restated here (#11737). A hand-kept list
+  // carried three of the FOUR the call sites actually pass — `client`, the one `windowClientRe`
+  // passes, was missing — so a pin labelled "every key spelling" checked three quarters of
+  // them, and nothing else could see the gap: this pin compares STRINGS, so `(route|client)`
+  // never exercises `client`, and the three pins above count call sites and spellings by TEXT
+  // without ever calling the function. A corrected list re-rots the same way the moment a
+  // ninth call site arrives, which is why it is derived rather than corrected.
+  //
+  // Measured rather than argued: a `client`-only TIGHTENING of the allowlist — `(?<![^\s{,])`
+  // narrowed to `(?<![^\s])` for that one key — leaves all of `--self-test` green against the
+  // hand-kept list and fails HERE against the derived one. No fixture defends the `{` and `,`
+  // members, and none can: the sweep below measured 0 leads preceded by either across all
+  // seven live ledgers, so they are exactly the part of the allowlist that only a string pin
+  // can hold. Widening drifts are caught either way (the #11542/#11630 `myclient:`/`$client:`
+  // fixtures see those), so tightening is the whole of what this pin adds — and it is the
+  // direction a `simplification` takes.
+  //
+  // ⛔ Only the INPUT population is derived; the EXPECTED stays a literal. Deriving both ends
+  // is what would make the comparison vacuous, for the reason the sweep below spells out.
+  const passedKeys = [...ownSource.matchAll(/new RegExp\(declLead\((['"])([^'"]*)\1\)/g)].map((m) => m[2]);
+  check('declLead', 'and all eight pass their key as a LITERAL — a computed one drops out of the list below unseen', 'affected-docs.mjs',
+    8, passedKeys.length);
   check('declLead', 'every key spelling a call site passes comes back ANCHORED', 'declLead',
-    String.raw`(?<![\w$.])(route|client)\s*:\s* | (?<![\w$.])route\s*:\s* | (?<![\w$.])(?:route|client)\s*:\s*`,
-    ['(route|client)', 'route', '(?:route|client)'].map((k) => declLead(k)).join(' | '));
-  // …and BEHAVIOURALLY the anchor is a strict TIGHTENING of the `\b` it replaced, which is the
-  // invariant the population pricing rests on: the key alternation always opens with a word
-  // character, so `\b` there fails exactly when the previous character is a word character,
-  // making `(?<![\w$.])` a strict SUBSET. Swept rather than argued — over code points
-  // 0..0x2FFF the lookbehind admits nothing `\b` does not, and exactly 2 characters move.
+    String.raw`(?<![^\s{,])(?:route|client)\s*:\s* | (?<![^\s{,])(route|client)\s*:\s* | (?<![^\s{,])client\s*:\s* | (?<![^\s{,])route\s*:\s*`,
+    [...new Set(passedKeys)].sort().map((k) => declLead(k)).join(' | '));
+  // …and BEHAVIOURALLY the allowlist is a strict TIGHTENING of BOTH anchors it has replaced,
+  // which is the invariant the population pricing rests on. Swept rather than argued, and
+  // swept against the anchor it ACTUALLY replaces (#11710's lookbehind) as well as against the
+  // `\b` two cards back: a sweep that only ever compares with the oldest spelling stops being
+  // evidence the moment two cards land in a row.
   {
     const bAnchor = new RegExp(String.raw`\b(route|client)\s*:\s*`);
+    // The lookbehind this card replaces, spelled here as a LITERAL rather than taken from
+    // `declLead` — it is the BEFORE state, so reading it from the function under test would
+    // make the comparison vacuous the moment the function changes.
+    const prevAnchor = new RegExp(String.raw`(?<![\w$.])(route|client)\s*:\s*`);
     // Built through a NAMED intermediate on purpose: the pin above counts the eight
     // production lead SCANS by the way each one compiles `declLead` directly, and this probe
     // is a behavioural check rather than a ninth scan. Inflating that count to 9 would blunt
@@ -3791,19 +4117,28 @@ function selfTest() {
     // quoted, for the same reason.
     const leadSource = declLead('(route|client)');
     const lead = new RegExp(leadSource);
-    let admitsMore = 0;
-    let moved = 0;
+    let admitsMoreThanB = 0;
+    let admitsMoreThanPrev = 0;
+    let admitsB = 0;
+    let admitsPrev = 0;
+    let admitsLead = 0;
     for (let c = 0; c < 0x3000; c++) {
       const s = String.fromCodePoint(c) + "route: 'x'";
       const b = bAnchor.test(s);
+      const q = prevAnchor.test(s);
       const l = lead.test(s);
-      if (l && !b) admitsMore++;
-      if (b && !l) moved++;
+      if (b) admitsB++;
+      if (q) admitsPrev++;
+      if (l) admitsLead++;
+      if (l && !b) admitsMoreThanB++;
+      if (l && !q) admitsMoreThanPrev++;
     }
     check('declLead', 'the anchor only ever REMOVES — it admits nothing `\\b` did not', 'code points 0..0x2FFF',
-      0, admitsMore);
-    check('declLead', 'and the characters it moves are exactly `$` and `.`', 'code points 0..0x2FFF',
-      2, moved);
+      0, admitsMoreThanB);
+    check('declLead', 'and nothing the LOOKBEHIND it replaces did not — the invariant against the real before-state',
+      'code points 0..0x2FFF', 0, admitsMoreThanPrev);
+    check('declLead', 'and the allowlist is the far smaller set, by the margin the sweep measures',
+      'code points 0..0x2FFF', '12225 / 12223 / 25', `${admitsB} / ${admitsPrev} / ${admitsLead}`);
   }
 
 

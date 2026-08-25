@@ -29,7 +29,11 @@
  *  3. the clone path works end to end — org-owned row, no upgrade linkage —
  *     and the package-declared base is untouched by it;
  *  5. fail-closed on ambiguity: a provenance read that cannot ANSWER refuses,
- *     never accepts.
+ *     never accepts;
+ *  6. ⭐ what the clone ACTION SENDS (#11703) — pin 3 drives the door with a
+ *     hand-written payload, so it could not see that the ACTION ITSELF listed
+ *     only two of the row's six definition facets. Pin 6 reads the payload out
+ *     of the action definition, so editing that params list is what moves it.
  *
  * (Pin 4 — the detection reading for overlays that already exist — lives in its
  * own suite at the bottom of this file, because it reads rather than writes.)
@@ -62,6 +66,7 @@
 import { describe, it, expect } from 'vitest';
 import { PermissionSetSchema } from '@objectstack/spec/security';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
+import { SysPermissionSet } from './objects/sys-permission-set.object.js';
 import {
   createPermissionSetWriteThrough,
   permissionSetRowFields,
@@ -496,6 +501,251 @@ describe('pin 3 — the clone path yields an org-owned set with no upgrade linka
     });
     expect(nextCalled).toBe(false);
     expect(JSON.parse(ql.permRows.find((r: any) => r.id === clone.id).system_permissions)).toEqual(['local.only']);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PIN 6 — what the CLONE ACTION SENDS: every copied facet, by identity (#11703)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Pin 3 above drives the data door with a HAND-WRITTEN clone payload. That is
+ * precisely why it stayed green while this defect was live: it pins what the
+ * SERVER does with a payload, never what the ACTION DEFINITION chooses to put
+ * in one. `clone_permission_set` listed two of the row's six definition facets
+ * on its `params`, so cloning a set carrying system permissions, row-level
+ * security or tab permissions produced a clone with NONE of them — no error, a
+ * success toast, and the loss discoverable only by diffing the two records
+ * (#11703). Fail-closed (fewer grants), and therefore quiet.
+ *
+ * It matters more since the ruling one commit above this one: the save door now
+ * refuses an in-place edit of a package-declared set AND its refusal names the
+ * clone path, so this action is the platform's own recommended remedy.
+ *
+ * So this suite reads the payload OUT OF THE ACTION instead of restating it.
+ * {@link clonePayload} is the clone dialog in miniature — the admin types the
+ * two inline params, every `defaultFromRow` param is seeded from the source row
+ * as objectui's `ActionParamDialog` seeds it, and `bodyExtra` rides along — so
+ * editing the params list is what moves this suite. That is the whole point:
+ * the class reopens the next time someone edits that list, unless a test is
+ * reading the list rather than a copy of it.
+ *
+ * ⭐ IDENTITIES, NOT COUNTS. "Five facets came across" holds constant while two
+ * of them swap, and asserting a facet is merely PRESENT passes on the empty
+ * default (`[]` / `{}`) that IS the bug. Every facet below is asserted against
+ * a NAMED, NON-EMPTY expected value.
+ */
+
+/** The shipped `clone_permission_set` action — read, never restated. */
+const cloneAction = (): any => {
+  const action = (SysPermissionSet.actions ?? []).find((a: any) => a.name === 'clone_permission_set');
+  if (!action) throw new Error('clone_permission_set is missing from SysPermissionSet.actions');
+  return action;
+};
+
+/**
+ * The body the clone dialog POSTs to `/api/v1/data/sys_permission_set`,
+ * assembled from the ACTION DEFINITION the way the dialog assembles it: a
+ * `defaultFromRow` param is seeded from the source row under its resolved field
+ * name and submitted verbatim when the admin does not touch it; an inline param
+ * carries what the admin typed; `bodyExtra` is merged in.
+ */
+function clonePayload(row: any, typed: Record<string, any>): Record<string, any> {
+  const action = cloneAction();
+  const body: Record<string, any> = { ...(action.bodyExtra ?? {}) };
+  for (const p of action.params ?? []) {
+    const key = p.field ?? p.name;
+    if (p.defaultFromRow) {
+      if (row[key] !== undefined) body[key] = row[key];
+    } else if (key in typed) {
+      body[key] = typed[key];
+    }
+  }
+  return body;
+}
+
+/**
+ * The base an admin clones: EVERY definition facet populated, so no assertion
+ * below can be satisfied by the empty default the defect produced.
+ *
+ * ⚠️ The card's repro sketch named `member_default` as "a set whose
+ * `system_permissions` is non-empty". Measured on this tree that is not so —
+ * the platform `member_default` carries a large `rowLevelSecurity` and NO
+ * system permissions, and `showcase_member_default` carries neither (the D7
+ * lint hard-blocks system permissions on an everyone-suggested set). The defect
+ * is real either way; the example was not. A fixture carrying all six facets at
+ * once is the shape that actually measures all three of the added ones, which a
+ * single real set would not.
+ */
+const richSet = (over: Record<string, any> = {}) => ({
+  name: 'ops_console',
+  label: 'Ops Console',
+  description: 'Runs the operations console.',
+  objects: {
+    showcase_task: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: false },
+    showcase_project: { allowRead: true },
+  },
+  fields: { 'showcase_project.budget': { readable: true, editable: false } },
+  // The three facets #11703 dropped, each non-empty and each named below.
+  systemPermissions: ['setup.access', 'ops.export_data'],
+  rowLevelSecurity: [
+    {
+      name: 'ops_own_rows',
+      label: 'Own Tasks Only',
+      description: 'Operators only select tasks assigned to them.',
+      object: 'showcase_task',
+      operation: 'select' as const,
+      using: 'assignee == current_user.email',
+      positions: ['ops'],
+      enabled: true,
+    },
+  ],
+  tabPermissions: { app_ops: 'default_on' as const, app_admin: 'hidden' as const },
+  // The RULED exclusion's positive control — see the last test.
+  adminScope: {
+    businessUnit: 'field_ops',
+    includeSubtree: true,
+    manageAssignments: true,
+    manageBindings: false,
+    authorEnvironmentSets: false,
+    assignablePermissionSets: ['ops_console'],
+  },
+  ...over,
+});
+
+/**
+ * The row the package door materializes for {@link richSet}.
+ *
+ * The return annotation is load-bearing, not decoration: without it tsc infers
+ * the object-literal type and DROPS the index signature that
+ * `permissionSetRowFields()` spreads in, so reading `.admin_scope` off the
+ * result — which the exclusion control below does directly, rather than through
+ * the `any[]` of `ql.permRows` — is a TS2339. It costs no precision: every
+ * facet column arrives through that spread already typed `any`.
+ */
+const richRow = (over: Record<string, any> = {}): Record<string, any> => ({
+  id: 'ps_rich',
+  name: 'ops_console',
+  managed_by: 'package',
+  package_id: 'com.example.ops',
+  active: true,
+  ...permissionSetRowFields(richSet()),
+  ...over,
+});
+
+describe('pin 6 — the clone action SENDS every facet it copies, and says what it deliberately does not (#11703)', () => {
+  it('declares a defaultFromRow param for every copied facet — the identities, not a count', () => {
+    const carried = (cloneAction().params ?? [])
+      .filter((p: any) => p.defaultFromRow)
+      .map((p: any) => p.field ?? p.name)
+      .sort();
+
+    // ⭐ A COUNT here (`toHaveLength(6)`) would hold while `system_permissions`
+    // was swapped for something else. The set is spelled out.
+    expect(carried, 'the params list is what the dialog sends — these are the facets it carries').toEqual([
+      'description',
+      'field_permissions',
+      'object_permissions',
+      'row_level_security',
+      'system_permissions',
+      'tab_permissions',
+    ]);
+    // `admin_scope` is the sixth definition column and is RULED out — pinned in
+    // its own test below so a future reader sees a decision, not an oversight.
+    expect(carried, 'admin_scope is excluded by ruling, not by accident').not.toContain('admin_scope');
+  });
+
+  it('cloning a fully-populated set carries all five copied facets end to end, by name', async () => {
+    const ql = makeQl([richSet()]);
+    const protocol = makeHatchOpenProtocol(ql, { ops_console: richSet() });
+    registerPermissionSetProjection(protocol, { ql });
+    ql.permRows.push(richRow());
+    const mw = makeMiddleware(ql, protocol);
+
+    // The payload comes from the ACTION, not from this test.
+    const payload = clonePayload(ql.permRows[0], {
+      label: 'Ops Console (local)',
+      name: 'ops_console_local',
+    });
+    await run(mw, {
+      object: 'sys_permission_set', operation: 'insert', context: userCtx, data: payload,
+    });
+
+    // (a) the DEFINITION that will be enforced — what `saveMetaItem` stored.
+    const body = protocol.saves.find((s: any) => s.name === 'ops_console_local')?.item;
+    expect(body, 'the clone was authored into the metadata store').toBeTruthy();
+    expect(body.name).toBe('ops_console_local');
+    expect(body.label, 'the admin-typed display name, not the base label').toBe('Ops Console (local)');
+    expect(body.description).toBe(richSet().description);
+    expect(body.objects, 'object permissions').toEqual(richSet().objects);
+    expect(body.fields, 'field permissions').toEqual(richSet().fields);
+    // ⭐ The three #11703 dropped. `[]` / `{}` here is the defect itself.
+    expect(body.systemPermissions, 'system permissions — [] here IS the #11703 silent drop').toEqual(
+      ['setup.access', 'ops.export_data'],
+    );
+    expect(
+      (body.rowLevelSecurity ?? []).map((p: any) => p.name),
+      'row-level security policies, by policy name',
+    ).toEqual(['ops_own_rows']);
+    expect(body.rowLevelSecurity, 'the RLS policy arrived whole, not as a name-only husk').toEqual(
+      richSet().rowLevelSecurity,
+    );
+    expect(body.tabPermissions, 'tab permissions, per tab').toEqual({
+      app_ops: 'default_on', app_admin: 'hidden',
+    });
+
+    // (b) the ROW the admin actually diffs the two records through.
+    const clone = ql.permRows.find((r: any) => r.name === 'ops_console_local');
+    expect(clone, 'the clone record exists').toBeTruthy();
+    expect(clone.managed_by, "this org's row").toBe('admin');
+    expect(clone.package_id ?? null, 'no upgrade linkage').toBeNull();
+    expect(JSON.parse(clone.system_permissions)).toEqual(['setup.access', 'ops.export_data']);
+    expect(JSON.parse(clone.row_level_security).map((p: any) => p.name)).toEqual(['ops_own_rows']);
+    expect(JSON.parse(clone.tab_permissions)).toEqual({ app_ops: 'default_on', app_admin: 'hidden' });
+
+    // The base is untouched by all of this (pin 3's invariant, re-checked on
+    // the richer shape — a payload that now carries five facets is a payload
+    // with five more chances to write to the wrong row).
+    const base = ql.permRows.find((r: any) => r.id === 'ps_rich');
+    expect(JSON.parse(base.system_permissions), 'the package-declared base still declares its own').toEqual(
+      ['setup.access', 'ops.export_data'],
+    );
+    expect(base.name).toBe('ops_console');
+  });
+
+  it('CONTROL — admin_scope is deliberately NOT carried (ADR-0090 D12), and the dialog says so', async () => {
+    // ⭐ POSITIVE CONTROL FIRST. Without it "the clone has no admin_scope" is
+    // satisfied by a base that never had one, and this test would pin nothing.
+    const baseRow = richRow();
+    expect(baseRow.admin_scope, 'the base carries a delegated-admin scope to lose').toBeTruthy();
+    expect(JSON.parse(baseRow.admin_scope).businessUnit).toBe('field_ops');
+
+    // It is not on the wire…
+    const payload = clonePayload(baseRow, { label: 'Ops Console (local)', name: 'ops_console_local' });
+    expect(Object.keys(payload), 'the clone dialog never sends admin_scope').not.toContain('admin_scope');
+
+    // …and it is not on the clone.
+    const ql = makeQl([richSet()]);
+    const protocol = makeHatchOpenProtocol(ql, { ops_console: richSet() });
+    registerPermissionSetProjection(protocol, { ql });
+    ql.permRows.push(baseRow);
+    const mw = makeMiddleware(ql, protocol);
+    await run(mw, {
+      object: 'sys_permission_set', operation: 'insert', context: userCtx, data: payload,
+    });
+
+    const body = protocol.saves.find((s: any) => s.name === 'ops_console_local')?.item;
+    expect(body, 'the clone was authored').toBeTruthy();
+    expect(body.adminScope, 'a delegated-admin authority is a privilege decision, never a field copy').toBeUndefined();
+    const clone = ql.permRows.find((r: any) => r.name === 'ops_console_local');
+    expect(clone.admin_scope ?? null, 'and the column stays empty on the clone').toBeNull();
+
+    // ⭐ The exclusion has to READ as a decision to the admin standing in the
+    // dialog — otherwise it is the same silent drop #11703 reports, merely
+    // ruled. The dialog's own explanatory line carries it.
+    const description = String(cloneAction().description ?? '');
+    expect(description, 'the clone dialog states the exclusion').toMatch(/delegated-admin scope/i);
+    expect(description, 'and states that it is not copied').toMatch(/not copied/i);
   });
 });
 

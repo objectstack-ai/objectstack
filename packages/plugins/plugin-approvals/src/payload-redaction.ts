@@ -44,8 +44,22 @@
  *   it. Making it govern serialization here alone would make the approval path
  *   stricter than a direct read of the very same row (so it would close no
  *   leak — the approver can just read the record), while breaking every drawer
- *   that renders a `hidden` business column. That is a `packages/spec`
- *   semantics question, and it is left open rather than decided here.
+ *   that renders a `hidden` business column.
+ *
+ *   That `packages/spec` semantics question was left open here when this seam
+ *   landed. **It has since been ruled** (maintainer, 2026-08-24, applying the
+ *   2026-08-12 lineage rather than making a new rule): **`hidden: true` stays
+ *   UI-only; `internal: true` is the serialization primitive.** `hidden`
+ *   gains no serialization semantic — it says "Hidden from default UI" and
+ *   nothing more. The read-side omission primitive is `internal: true`
+ *   (#7728, ADR-0049): the engine OMITS the key from `find`/`findOne` results,
+ *   the 201 create body and the by-id update body, on the default projection
+ *   AND when a client names the field in `?select=`. `internal` exists
+ *   PRECISELY BECAUSE `hidden` is not that, so an author who needs a field
+ *   kept out of read results declares `internal: true`; declaring `hidden`
+ *   and expecting omission is the mistake this paragraph exists to stop.
+ *   Per-caller field visibility — what this seam applies — remains
+ *   `requiredPermissions` / permission sets / `maskingRule`.
  */
 
 /** The slice of the security service this seam consumes. */

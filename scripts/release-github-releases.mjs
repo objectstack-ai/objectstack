@@ -74,10 +74,11 @@
  *                     standard Actions context.
  */
 
-import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isEntrypoint } from './invoked-as.mjs';
+import { workspacePackages } from './workspace-enumerator.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, '..');
@@ -303,71 +304,6 @@ export function buildReleaseBody({ entry, tagName, changelogLabel, changelogHref
 // dispatch-gates: no-path-population -- check:release-body runs this renderer's --self-test against fixtures only; the workspace and CHANGELOG reads belong to the release run, which no pull request schedules
 
 /**
- * Minimal pnpm-workspace.yaml `packages:` reader. Same approach as
- * scripts/check-changeset-fixed.mjs — no YAML dependency.
- *
- * @param {string} root
- * @returns {string[]}
- */
-function readWorkspacePatterns(root) {
-  const text = readFileSync(resolve(root, 'pnpm-workspace.yaml'), 'utf8');
-  const patterns = [];
-  let inPackages = false;
-  for (const raw of text.split(/\r?\n/)) {
-    const line = raw.replace(/#.*$/, '').replace(/\s+$/, '');
-    if (!line.trim()) continue;
-    if (/^packages\s*:\s*$/.test(line)) {
-      inPackages = true;
-      continue;
-    }
-    if (!inPackages) continue;
-    const m = /^\s+-\s+["']?([^"'\s]+)["']?\s*$/.exec(line);
-    if (m) {
-      patterns.push(m[1]);
-      continue;
-    }
-    if (/^\S/.test(line)) inPackages = false;
-  }
-  return patterns;
-}
-
-/**
- * Expand a `packages/*`-style pattern (single `*` per segment).
- *
- * @param {string} root
- * @param {string} pattern
- * @returns {string[]}
- */
-function expandPattern(root, pattern) {
-  let dirs = [root];
-  for (const seg of pattern.split('/')) {
-    const next = [];
-    for (const dir of dirs) {
-      if (seg === '*') {
-        let entries;
-        try {
-          entries = readdirSync(dir, { withFileTypes: true });
-        } catch {
-          continue;
-        }
-        for (const entry of entries) {
-          if (entry.isDirectory() && !entry.name.startsWith('.')) next.push(join(dir, entry.name));
-        }
-      } else {
-        const candidate = join(dir, seg);
-        try {
-          if (statSync(candidate).isDirectory()) next.push(candidate);
-        } catch {
-          /* missing — skip */
-        }
-      }
-    }
-    dirs = next;
-  }
-  return dirs;
-}
-
-/**
  * Every non-private workspace package, by name.
  *
  * @param {string} [root]
@@ -376,18 +312,19 @@ function expandPattern(root, pattern) {
 export function listWorkspacePackages(root = REPO_ROOT) {
   /** @type {Map<string, { name: string; version: string; dir: string }>} */
   const byName = new Map();
-  for (const pattern of readWorkspacePatterns(root)) {
-    for (const dir of expandPattern(root, pattern)) {
-      let pkg;
-      try {
-        pkg = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8'));
-      } catch {
-        continue;
-      }
-      if (!pkg.name || pkg.private === true) continue;
-      if (byName.has(pkg.name)) continue;
-      byName.set(pkg.name, { name: pkg.name, version: pkg.version, dir });
-    }
+  // Membership comes from scripts/workspace-enumerator.mjs (#11510) — this
+  // repo's one parse of `pnpm-workspace.yaml`, and one of nine private copies
+  // before it. That module declares NO path population of its own, which is
+  // load-bearing HERE specifically: this file carries a `no-path-population`
+  // marker a few lines up, and dispatch-gates' self-test fails any family that
+  // both declares one and names paths anyway. An enumerator that spelled the
+  // workspace globs as literals would have handed this gate 5395 inherited
+  // pairs and turned check:release-body red. Measured after this change:
+  // zero hints inherited, marker intact.
+  for (const { dir, manifest } of workspacePackages(root)) {
+    if (!manifest.name || manifest.private === true) continue;
+    if (byName.has(manifest.name)) continue;
+    byName.set(manifest.name, { name: manifest.name, version: manifest.version, dir: join(root, dir) });
   }
   return byName;
 }

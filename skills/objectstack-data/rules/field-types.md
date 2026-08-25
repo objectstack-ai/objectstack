@@ -68,8 +68,8 @@ options: [
 
 | Type | When to Use | Key Config |
 |:-----|:------------|:-----------|
-| `lookup` | Reference another object (independent) | `reference`, `lookupFilters`, `multiple` |
-| `master_detail` | Parent–child with lifecycle control | `reference`, `deleteBehavior` (cascade/restrict/set_null) |
+| `lookup` | Reference another object (independent) | `reference`, `lookupFilters`, `multiple`, `deleteBehavior` |
+| `master_detail` | Parent–child with lifecycle control | `reference`, `deleteBehavior` (`cascade`/`restrict` — `set_null` is refused) |
 | `tree` | Hierarchical self-reference | `reference` |
 | `user` | Person picker — a lookup specialized to `sys_user` (assignee, watchers). Stored identically to `lookup` | `multiple` (collaborators), `defaultValue: 'current_user'` |
 

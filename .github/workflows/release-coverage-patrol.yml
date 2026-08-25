@@ -1,0 +1,286 @@
+name: Release-Coverage Patrol
+
+# The standing caller for `scripts/check-release-section-coverage.mjs` (#10803).
+#
+# ## Why a workflow, when the gate ALREADY runs on every PR
+#
+# Unlike `half-state-patrol.yml` and `required-set-patrol.yml`, this check does
+# not need a runner for TRANSPORT reasons. It is fully offline — it reads
+# `packages/spec/CHANGELOG.md` and `content/docs/releases/**` straight out of the
+# tree, opens no socket, and runs inside `lint.yml` on every pull request today.
+# Measured, not assumed: a network-shaped scan of the script (`fetch(`, `http`,
+# `api.github.com`, `execSync`, `child_process`, `octokit`, `GITHUB_TOKEN`)
+# matches ZERO lines, against 4 matches each in those two patrols' workflows.
+#
+# So the reason for a standing caller here is AUDIENCE, not reachability, and it
+# was measured on a live gap rather than argued (#10803):
+#
+#   17.2.0's CHANGELOG heading landed 2026-08-23T06:29:35Z. Over the next 40
+#   hours, 262 pull requests landed on `main`. Every one of their `lint.yml`
+#   runs emitted the two advisory `::warning::` annotations. Commits touching
+#   `content/docs/releases/` in that window: ZERO. Open PRs authoring the
+#   section: ZERO. #10268's acceptance criterion is "visible within a day of a
+#   minor publishing" — already exceeded, with the advisory in place and firing.
+#
+# Three structural reasons that reading is not bad luck, all verified against a
+# real PR head sha through the check-runs API:
+#
+#   1. The annotation is registered at `path=.github`, line 19/20 — the WORKFLOW
+#      file, because the gate emits `::warning::` with no `file=` parameter. It
+#      therefore cannot appear on `content/docs/releases/v17.mdx` in the
+#      Files-changed tab, which is the only place a reviewer reads by default.
+#   2. It rides a GREEN required check. That PR head carried 31 check runs, 0 of
+#      them failing, which GitHub collapses to "All checks have passed". It is
+#      step 74 of 106 in that job.
+#   3. It is addressed to whoever opened the next PR. That author did not create
+#      the debt and does not own the remedy. A finding every PR author sees and
+#      no PR author owns is the shape that stays unfixed for 25 days.
+#
+# Volume is NOT the problem and this file does not pretend otherwise: those two
+# annotations were the only `##[warning]` lines in a 4004-line job log, and 2 of
+# only 5 annotations across all 31 checks. The advisory is quiet and correct. It
+# is simply pointed at the wrong reader, and no amount of shouting on a PR fixes
+# that. This workflow adds the reader; it does not replace the advisory.
+#
+# ## Why this calls `--strict`, and why it still cannot go red
+#
+# `--strict` promotes findings to exit 1 "for a caller that OWNS the remedy". It
+# had no standing caller at all, which is the defect #10803 records. It has one
+# here — as a PREDICATE, never as a verdict.
+#
+# The two runs below are not redundant, and the order is load-bearing. The gate
+# deliberately returns 1 for BOTH "findings, under --strict" and "the instrument
+# is broken", so `--strict` alone is ambiguous and could not be branched on:
+#
+#   run 1, ADVISORY  — exit 0 means the instrument READ the corpus (findings or
+#                      not); non-zero means it could not, and that is fatal in
+#                      every mode by the gate's own design. This run also
+#                      produces the authored, human-readable finding text.
+#   run 2, --STRICT  — with the instrument already proven healthy by run 1,
+#                      exit 1 now means exactly one thing: findings exist.
+#
+# That is what lets the patrol branch on a machine-readable boolean instead of
+# grepping prose, while the JOB stays green whenever findings exist. A `--strict`
+# run stays red for as long as the prose is unwritten — 25 days, in the 16.1.0
+# case — and a chronically red scheduled job is how people learn to skim red,
+# which `prerelease-pin-watch.yml`'s header warns about directly. Findings land
+# in the anchor issue; they never colour this job.
+#
+# ## What lands where
+#
+# One pinned ANCHOR ISSUE, rewritten in place every run (`ANCHOR_ISSUE` below) —
+# `half-state-patrol.yml`'s shape and its argument, which applies verbatim here:
+# never a comment per run, because a per-run comment stream is a second tracker
+# nobody prunes and GitHub's edit history is already the archive this needs.
+#
+# It fits this finding particularly well. The population is tiny — 5 in-scope GA
+# minors exist in total (16.0.0, 16.1.0, 17.0.0, 17.1.0, 17.2.0) — so the anchor
+# is quiet almost always, and the remedy is owner-shaped: one person writes one
+# curated section. An issue can be assigned. An annotation cannot.
+#
+# The `Swept` timestamp is the patrol's heartbeat and is refreshed even when the
+# findings are unchanged: a timestamp that stops advancing is how a reader learns
+# the standing caller died. The run must not "optimize away" that no-op edit.
+#
+# ## Report-only, and the one thing that is NOT report-only
+#
+# Findings never fail anything. This job never writes release prose — it cannot,
+# and the gate's header argues why at length: a curated section is a judgement
+# about what is user-facing, read out of 69 package changelogs, and this gate
+# GENERATES NOTHING.
+#
+# The job DOES fail when the sweep could not run, or when its report could not be
+# delivered. That is not a gate on the release pages; it is the patrol reporting
+# its own death. Silent non-delivery would leave a stale anchor body that reads
+# exactly like a clean corpus — "could not read the input" must never look like
+# "input is clean" (#4690), with a heartbeat on it. Failing costs nobody a PR:
+# this workflow gates no branch and blocks no queue.
+
+on:
+  # Nightly. #10268's acceptance criterion is "visible within a day of a minor
+  # publishing", so the cadence is a day, not a week. Offset from
+  # half-state-patrol.yml's `37 1,7,13,19` so two patrols never contend for the
+  # same runner minute.
+  schedule:
+    - cron: '19 4 * * *'
+  workflow_dispatch: {}
+  # Changes to the patrol itself get exercised before they merge — the same
+  # posture half-state-patrol.yml keeps. On a pull_request run the sweep still
+  # executes (that is the point: the flags, the exit-code split and the rendering
+  # are proven on a real runner), but the anchor write is skipped and the
+  # rendered body goes to the run's step summary instead. A PR must never rewrite
+  # the board's pinned view.
+  pull_request:
+    paths:
+      - 'scripts/check-release-section-coverage.mjs'
+      - '.github/workflows/release-coverage-patrol.yml'
+
+# Least privilege: this job reads the repo and writes exactly one issue BODY.
+# `issues: write` is the narrowest scope GitHub offers for that edit; the job
+# never uses it for labels, comments, assignees or state, and the gate it calls
+# is read-only against the filesystem by construction.
+permissions:
+  contents: read
+  issues: write
+
+# One patrol at a time. A scheduled run overlapping a manual dispatch would have
+# two runs racing to rewrite the same body, and the loser's findings would vanish
+# with no trace but an edit-history entry.
+concurrency:
+  group: release-coverage-patrol
+  cancel-in-progress: false
+
+env:
+  # The pinned anchor issue whose body this workflow owns.
+  #
+  # Resolution: the repository variable `RELEASE_COVERAGE_ANCHOR_ISSUE` if set,
+  # else this repo's own pinned number, else EMPTY — and empty makes the job
+  # refuse to write rather than guess. The literal is guarded by the repository
+  # name on purpose: an unguarded fallback would let a verbatim copy in a sibling
+  # repo rewrite ITS #11879 — some unrelated card — with this repo's findings,
+  # silently, every night. A number is only meaningful in the repo it was minted
+  # in.
+  #
+  # TO ROTATE (here): open a new `tracking`-labeled issue, put its number below,
+  # and note the handover in the OLD issue's body before closing it (its edit
+  # history is the archive and does not travel).
+  # TO ADOPT (a sibling repo): change NOTHING here — set the repository variable.
+  #
+  # ⚠️ Folded scalar, and every continuation line sits at the SAME indent on
+  # purpose: a more-indented line in a `>-` block keeps its newline literally,
+  # which would hand the expression parser a multi-line string instead of one
+  # expression.
+  ANCHOR_ISSUE: >-
+    ${{ vars.RELEASE_COVERAGE_ANCHOR_ISSUE
+    || (github.repository == 'objectstack-ai/objectstack' && '11879')
+    || '' }}
+
+jobs:
+  patrol:
+    name: Release section-coverage sweep
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      # No `pnpm install`: the gate imports `node:fs` and one local module.
+      # Installing the workspace here would buy nothing and would give a
+      # scheduled patrol a lockfile it could fail on.
+      #
+      # No `--self-test` either. lint.yml runs it on every pull request, so this
+      # job would be re-proving a property already proven on the commit it just
+      # checked out — and two node invocations in one `run:` block is precisely
+      # the shape `check:step-collector` exists to refuse, because the first
+      # one's failure is masked by the second.
+      - name: Sweep the corpus
+        id: sweep
+        run: |
+          # ── run 1: ADVISORY. Exit code answers "did the instrument READ the
+          # corpus", which is the only thing that may colour this job.
+          set +e
+          node scripts/check-release-section-coverage.mjs \
+            > "$RUNNER_TEMP/report.txt" 2> "$RUNNER_TEMP/report.err"
+          advisory_code=$?
+          set -e
+          # Captured with NO pipe in between. `cmd | tail` would report the
+          # PIPE's status — `tail` essentially never fails, so a healthy and a
+          # broken instrument would both read as 0.
+          echo "advisory_code=$advisory_code" >> "$GITHUB_OUTPUT"
+          echo "advisory run exited $advisory_code"
+
+          # ── run 2: --STRICT, used ONLY as a findings predicate. Meaningful
+          # solely because run 1 has already established the instrument is
+          # healthy; the gate returns 1 for a broken instrument too.
+          strict_code=0
+          if [ "$advisory_code" -eq 0 ]; then
+            set +e
+            node scripts/check-release-section-coverage.mjs --strict \
+              > "$RUNNER_TEMP/strict.txt" 2> "$RUNNER_TEMP/strict.err"
+            strict_code=$?
+            set -e
+            echo "strict run exited $strict_code"
+          else
+            echo "instrument is broken — skipping the --strict predicate"
+          fi
+          echo "strict_code=$strict_code" >> "$GITHUB_OUTPUT"
+
+          cat "$RUNNER_TEMP/report.err" >&2 || true
+
+      - name: Resolve the anchor issue
+        # An install with no anchor configured has nowhere to land its report,
+        # and the ONLY safe behaviour is to say so loudly. The two alternatives
+        # are both the failure this file exists to prevent: guessing a number
+        # would rewrite an unrelated card in this repo, and skipping the write
+        # quietly would leave a patrol that runs, finds, and tells nobody —
+        # indistinguishable from a clean corpus.
+        #
+        # Placed AFTER the sweep so the run summary still carries the findings,
+        # and skipped on a pull_request run, which never writes an anchor.
+        if: github.event_name != 'pull_request'
+        run: |
+          if [ -z "${ANCHOR_ISSUE//[[:space:]]/}" ]; then
+            echo "::error::No anchor issue configured for ${{ github.repository }}. The sweep RAN (see the run summary) but has nowhere to land. Open a \`tracking\`-labeled anchor issue in this repo and set the repository variable RELEASE_COVERAGE_ANCHOR_ISSUE to its number (Settings -> Secrets and variables -> Actions -> Variables)."
+            exit 1
+          fi
+          case "$ANCHOR_ISSUE" in
+            *[!0-9]*|'') echo "::error::RELEASE_COVERAGE_ANCHOR_ISSUE is '$ANCHOR_ISSUE', which is not an issue number."; exit 1 ;;
+          esac
+          echo "anchor: #$ANCHOR_ISSUE in ${{ github.repository }}"
+
+      - name: Render the report
+        id: render
+        env:
+          ADVISORY_CODE: ${{ steps.sweep.outputs.advisory_code }}
+          STRICT_CODE: ${{ steps.sweep.outputs.strict_code }}
+          PROVENANCE: >-
+            run [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+            · commit `${{ github.sha }}` · trigger `${{ github.event_name }}`
+        run: node scripts/render-release-coverage-anchor.mjs > "$RUNNER_TEMP/body.md"
+
+      # The rendered body is the product of the run, so it goes to the step
+      # summary on EVERY trigger — including the pull_request runs that must not
+      # touch the anchor. A reader of this workflow's own PR sees exactly what
+      # would have landed.
+      - name: Publish the report to the run summary
+        run: cat "$RUNNER_TEMP/body.md" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Update the pinned anchor issue
+        # A pull_request run proves the sweep; it must not touch the board.
+        if: github.event_name != 'pull_request'
+        uses: actions/github-script@v9
+        with:
+          # Delivery is retried, never assumed: this single PATCH is the entire
+          # product of the run, and a transient answer from the issues endpoint
+          # would otherwise discard a completed sweep.
+          retries: 3
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+            const anchor = Number(process.env.ANCHOR_ISSUE);
+            const body = fs.readFileSync(path.join(process.env.RUNNER_TEMP, 'body.md'), 'utf8');
+            if (!body.trim()) {
+              throw new Error('the renderer produced an empty body — refusing to blank the anchor');
+            }
+            await github.rest.issues.update({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: anchor,
+              body,
+            });
+            core.info(`anchor #${anchor} updated (${body.length} chars)`);
+
+      # LAST, so a completed sweep always lands its report before the patrol
+      # raises the alarm about itself — "land the truth, then raise the alarm".
+      # This is the ONLY step that may redden the job, and findings can never
+      # reach it: it reads the instrument's verdict, not the corpus's.
+      - name: Fail if the sweep could not run
+        if: steps.sweep.outputs.advisory_code != '0'
+        run: |
+          echo "::error::check-release-section-coverage could not read the corpus (exit ${{ steps.sweep.outputs.advisory_code }}). The patrol is DOWN — findings, if any, were NOT judged this run. A sweep that could not run must never read as a clean corpus."
+          exit 1

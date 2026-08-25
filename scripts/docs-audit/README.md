@@ -27,7 +27,7 @@ node scripts/docs-audit/affected-docs.mjs --self-test
 
 # how much of the DECLARED client-bound route surface the `sdk` bridge can reach (diff-free)
 node scripts/docs-audit/affected-docs.mjs --bridge-coverage
-node scripts/docs-audit/affected-docs.mjs --bridge-coverage --json   # + the unreachable rows themselves
+node scripts/docs-audit/affected-docs.mjs --bridge-coverage --json   # + the unreachable rows themselves, each with WHY and its witness
 ```
 
 **Derivation (#9192): a doc is *affected* when it NAMES something the change touched.**
@@ -105,17 +105,45 @@ Two things it deliberately is **not**:
   section). Those cannot fire on a tree where the scan works at all, and each of them
   otherwise reports `0 of 0 unreachable`, which is arithmetically true and reads exactly
   like a healthy bridge.
-- **Not a fix for the 176.** The card measured the causes and they are unrelated: ~97 rows
-  have no static registration of any shape in `packages/**` (better-auth mounts the auth
-  table; the runtime dispatcher matches `cleanPath` with `===`), ~50 have a `path:` literal
-  in a scanned registrar whose static remainder `routeTailOf` declines once the
-  `${basePath}` interpolation is stripped, and the rest are method-call registrations in
-  files outside `REGISTRAR_FILE_RE`. Each needs its own before/after measurement per
-  #9432's standard.
+- **Not a fix for the 176.** The causes are unrelated to each other and each needs its own
+  before/after measurement per #9432's standard. They are no longer estimated: the run
+  splits them (next section).
 
 Half the blind spot is load-bearing: **88 of the 176** unreachable rows name a client
 method that at least one hand-written page carries (31 distinct pages, `api/client-sdk.mdx`
 among them), so the silence is not an empty region.
+
+### Why a row is unreachable is measured, not one column (#11178)
+
+`56 of 56` and `46 of 87` used to print in the same words, and they are not the same
+finding. Every unreachable row is now attributed against a **ceiling** — every `path:` any
+`packages/**` file declares, with `REGISTRAR_FILE_RE` ignored entirely, built by
+`maximalTailsFrom` from the same `parseRegistrarSource` over the same walk. Measured on
+`589758d22`, the 177 unreachable rows partition as:
+
+| cause | rows | what it means |
+| --- | --- | --- |
+| `discovery-gap` | 14 | an in-repo file declares this exact path; the filename convention did not scan that file. The JSON **names the witness**. |
+| `no-in-repo-registrar` | 56 | on a ledger where **not one** row is declared in-repo — declared upstream and catch-all-mounted. No discovery change reaches it. |
+| `undecided` | 107 | no in-repo declaration for the row, on a ledger that *has* in-repo registrars. Absence and an unreadable spelling are not distinguishable here, so neither is claimed. |
+
+Exactly **one** of the seven ledgers is `no-in-repo-registrar` today: `auth-route-ledger.ts`,
+whose own header has said so since #3656 — better-auth declares those routes inside
+`node_modules` and the plugin mounts them with a single ``rawApp.all(`${basePath}/*`)``,
+which `routeTailOf` cannot and should not turn into a tail. That is why widening
+`REGISTRAR_FILE_RE` to admit `auth-plugin.ts` was measured to move `registrar files
+scanned` 12 → 13 and **nothing else**.
+
+⛔ **This changes no discovery and moves no reach.** `REGISTRAR_FILE_RE` is byte-identical,
+the bridge still rides on `registrarByTail` alone, and `reachable` is 45 before and after —
+pinned in `--self-test`. The ceiling only explains the number; it never participates in it,
+and because it is a superset by construction a ceiling that misses a *reachable* row is a
+`brokenScan` verdict rather than a quieter result.
+
+The classification is **derived, never listed**. Control on `589758d22`: adding one
+in-repo file that declares one auth route — under a filename the convention does not match
+— moves the auth ledger out of `no-in-repo-registrar` on its own (structural 56 → 0,
+`reachable` still 45), and removing it restores 56.
 
 ### A PARTIAL ledger read is a verdict too (#9896)
 
@@ -203,9 +231,14 @@ means the list is incomplete **by a known amount**, and an empty `docs` beside i
 never be read as "no page documents this change". The superseded coarse set is still
 computed and emitted as `packageMentionDocs`, labelled — an audit that deliberately wants
 the wide net can still ask for it, and keeping it visible is how a reader tells a *narrow*
-list from a *blind* one. The PR comment renders all of this in a collapsed section, because
-the failure #9192 records was never the tool lying — it was the tool never signalling its
-own limits at the point of use.
+list from a *blind* one. The PR comment renders all of this in a collapsed section — and,
+since #11357, renders the anchorless count in the **headline** as well, because a limit a
+reader has to expand a fold to find is one a reader does not find. The failure #9192
+records was never the tool lying; it was the tool never signalling its own limits at the
+point of use.
+
+Since #11356 the same posture reaches the ✅ itself — see **The verdict when nothing names
+the anchors** below.
 
 ### Measured, before and after
 
@@ -238,6 +271,33 @@ The two zeroes are the honest shape of the trade, not a bug: `07ad42463` derives
 run says so and points at the coarse set — where the old tool's 22 rows were every page
 mentioning `@objectstack/cli`. A CLI **command name** (`os meta resync`) is exactly the
 recall class the shape guard costs us: it is a lowercase word, so it cannot anchor.
+
+### The verdict when nothing names the anchors
+
+That state — anchors derived, nothing left unanchored, no page naming any of them — used
+to end the headline in a ✅. It no longer does (#11356). The sentence reports the **naming
+relation**, and the relation only ever lists a page that ALREADY names a changed token, so
+a PR that **widens an enumerable vocabulary** is invisible to it by construction: the new
+members' absence from the page is precisely the defect, and an absence names nothing.
+
+Measured on #11347 — six new flow-expression functions (`round`/`floor`/`ceil`/`abs`/
+`min`/`max`) — the run derived 9 anchors, matched 0 pages, and rendered the ✅, while
+`content/docs/automation/flows.mdx` carried a table enumerating the available bindings
+that the same PR had just made incomplete. A reviewing seat almost passed the PR on that
+tick.
+
+⚠️ **The narrowing does not catch that class.** Nothing in the anchor model can: anchoring
+the new members is impossible by construction, the siblings live in carriers the diff
+never touches, and the container symbol is named by no page. The authoring-mark route
+that would catch it is escalated as #11817. What the narrowing changes is that the run no
+longer **claims** it did — the verdict states only what it measured, and the clean-bill
+glyph is left to a run that earned one. The rendering is pinned in both directions by
+`check-drift-comment.mjs`, which asserts the verdict byte-exact on that state and asserts
+it ABSENT on all four neighbouring states.
+
+How often it renders, re-derived over the 40 first-parent commits ending at `e43b18fd9`:
+3 of the 17 package-touching runs (18%) — `20a452e664`, `f213793ddb`, `dd4113ec0b` — so it
+is a rare notice rather than a per-PR banner, which is what keeps it readable.
 
 **Cost** (the card's open question): the anchor derivation reads the same 178-page corpus
 the old one did, plus the 18 route-registrar/ledger sources (~875 KB) and one `git show`
@@ -418,10 +478,82 @@ to re-verify.
 
 The comment also carries a collapsed **"What this run could not see"** section:
 anchorless files, cross-cutting symbols, over-broad anchors, the coarse package-mention
-count, and the `sdk` bridge's reach over the client-bound ledger rows (#9572). That is
-the point-of-use half of #9192 — every one of the three derived-list failures in that
-shift was caught only because a dev widened the probe past what the tool offered, never
-because the tool signalled its own limits where it was read.
+count, the `sdk` bridge's reach over the client-bound ledger rows (#9572), and the
+rule-carrying pairing no run can reach (#11434, below). That is the point-of-use half of
+#9192 — every one of the three derived-list failures in that shift was caught only because
+a dev widened the probe past what the tool offered, never because the tool signalled its
+own limits where it was read.
+
+### The rule stated by its inputs, the diff touching its emitter (#11434)
+
+Every other entry in that fold is a **report about the run** — a count it produced, a set
+it derived. One is not, and renders on every run:
+
+> a page that states a rule by its **inputs** shares no identifier with the **emitter**
+> that implements the rule, so an emitter-only diff cannot list it — not on this run and
+> not on any run.
+
+A page can document a rule in the rule's own **vocabulary** — the values it maps *from* —
+while the code carrying the rule is named for what it *does*. The two share no token, so
+precision-first anchoring has nothing to join them with. This is not a tuning miss with a
+threshold behind it: the absence of a shared identifier **is** the defect, and an absence
+anchors nothing, so no per-run signal exists to compute. It is reported because it cannot
+be detected — the same posture as the `sdk` bridge line above.
+
+Measured on the specimen (#11434, from PR #11430 / card #11374), re-run through today's
+mapper:
+
+| | |
+|---|---|
+| the diff | `packages/drivers/driver-sql/src/sql-driver.ts` — `createColumn`, the text family's column mapping |
+| derived | 9 anchors (`SqlDriver`, `createColumn`, `keyableTextLength`, …) |
+| listed | 7 pages, every one via a `SqlDriver`-family symbol it merely mentions |
+| **not listed** | `content/docs/protocol/objectql/types.mdx` — **the page that diff falsified, in four places** |
+| coarse fallback | misses it too: the page never mentions the changed package |
+| existing limit lines | all silent — `anchorlessChanges`, `crossCuttingSymbols`, `overbroadAnchors`, `weakAnchorsDropped` all empty |
+
+The last row is the reason this is stated rather than left to the reader: with every limit
+line silent, the run reads as *narrow*, not *blind*. Positive control on the same page and
+the same tree — a change to `FieldSchema`, which the page **does** name, lists it via
+`FieldSchema (symbol)`. The page is reachable; that pairing is not.
+
+⛔ **This states the gap; it does not close it.** Buying real coverage would take a curated
+code↔page ledger, a per-type anchor vocabulary, or authored enumeration marks — the open
+question escalated as **#11817**, whose ruling also owns the population question (how wide
+this class is is deliberately **not measured here**; the sentence's truth does not depend
+on the count). `check-drift-comment.mjs` pins the line byte-exact on **every** fixture
+case, which is the only meaningful pin for a statement whose contract is that it is always
+true — making it conditional, moving it to the headline, or dropping it all go red.
+
+### The headline says what the run did not cover (#11357)
+
+A README carries no `@docs-rule` block, exports no symbol, mounts no route and declares
+no SDK method, so a README-only diff derives **nothing** — and the comment answered it
+with *"this run has no opinion about the docs"*, which a reviewer reads as *"nothing to
+check"*. The file it could not anchor **was** named, honestly, in the collapsed section
+above; GitHub renders that section shut. Two real README defects landed inside that gap
+on one day: #11180 (`packages/cli/README.md` advertising `os studio`, a command the CLI
+does not ship) and #11262 (`packages/console/README.md` asserting a `@object-ui/console`
+fallback the code no longer performs). Neither was detectable by this check on any run.
+
+So whenever `anchorlessChanges` is non-empty the headline itself now names the count and
+the files, says those pages are **not covered by this run**, and **withholds the ✅** —
+a green tick is the clean-bill glyph and a partial look is not a clean bill. Anchor
+derivation is untouched: with nothing unanchored, every headline is byte-identical to
+what it was, and no run's verdict moves either way (this check never fails a build).
+
+⚠️ This is #9282's **option 4**, not its option 3. Falling back to the coarse
+package-mention set for an anchorless file was measured 0-for-3 on recall on its own
+specimen (see [§1](#1-affected-docsmjs--change--docs-mapping-the-linchpin)), and would
+regrow the ~106–112-row lists #6893 / #7009 measured and readers learned to skip.
+Reporting the gap costs nothing and hides nothing; buying coverage with noise does both.
+
+`check-drift-comment.mjs` pins it **in both directions** — a fixture diff touching only a
+README must produce the not-covered wording, and one touching an anchorable source file
+must not. It runs the workflow's own inline `github-script` block against real
+`affected-docs.mjs` output from throwaway git repos, because a source grep passes just as
+happily on text that never renders and on text that renders unconditionally, and neither
+is a report. Zero dependencies, like the mapper: this job never runs `pnpm install`.
 
 ### The comment forks release-owned pages into a read-only section (#6893)
 

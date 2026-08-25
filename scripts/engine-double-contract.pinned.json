@@ -937,6 +937,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata/src/loaders/database-loader-update-id-fold-wins.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata/src/migrations/migrate-sys-notification-to-event.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -1879,6 +1884,11 @@
     {
       "file": "packages/services/service-queue/src/job-queue-retention.test.ts",
       "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-settings/src/settings-engine-id-fold-wins.test.ts",
+      "verb": "update",
       "pinned": 1
     },
     {

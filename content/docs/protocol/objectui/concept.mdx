@@ -474,7 +474,7 @@ type FormView = z.infer<typeof FormViewSchema>;
 const config = FormViewSchema.parse({
   type: 'simple',
   sections: [
-    { label: 'Info', columns: 2, fields: ['name', 'email'] }
+    { name: 'info', label: 'Info', columns: 2, fields: ['name', 'email'] }
   ]
 });
 

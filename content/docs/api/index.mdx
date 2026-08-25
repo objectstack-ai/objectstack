@@ -100,7 +100,7 @@ Schema reference: [API](/docs/references/api)
 
 ## Discovery
 
-The discovery endpoint is the entry point for all clients. It returns the API version, available routes, service capabilities, and per-service status.
+The discovery endpoint is the entry point for all clients. It returns the serving artifact's version, available routes, service capabilities, and per-service status.
 
 ### `GET /api/v1` (and `GET /api/v1/discovery`)
 
@@ -114,7 +114,7 @@ the dispatcher cedes the route to it, so a single owner answers it (ADR-0076 D11
 **Response**:
 ```json
 {
-  "version": "v1",
+  "version": "<the serving artifact's version>",
   "apiName": "ObjectStack API",
   "routes": {
     "data": "/api/v1/data",
@@ -139,6 +139,8 @@ the dispatcher cedes the route to it, so a single owner answers it (ADR-0076 D11
   }
 }
 ```
+
+`version` is the **serving artifact's** version, not the API version: the `OS_RUNTIME_VERSION` stamp when a deployment injects one, otherwise the resolved version of the package that built the response. It carried the configured `api.version` (the `v1` path segment) until #11292 removed that override — the API version is still readable here, as the base path every `routes` entry is prefixed with.
 
 Disabled/uninstalled route keys (e.g. `auth`, `analytics`, `workflow`) are omitted from `routes` entirely rather than set to `null`; check `services` to tell "not installed" apart from "installed but not yet mounted here." The sample above shows a minimal install: `analytics` reports `unavailable` and advertises no route until `@objectstack/service-analytics` registers the engine — the dispatcher then also mounts `/api/v1/analytics/*` (the routes are capability-conditional; an uninstalled capability answers 404 for every method).
 

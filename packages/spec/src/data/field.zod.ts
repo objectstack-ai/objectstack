@@ -288,7 +288,7 @@ export const CurrencyConfigSchema = lazySchema(() => strictObject({
   if (contradiction !== undefined) {
     ctx.addIssue({ code: 'custom', path: ['precision'], message: contradiction });
   }
-}).overwrite((config) => ({
+}).overwrite((config) => {
   // #7918 — the relocated `.default(2)`, applied AFTER the check above.
   // `.overwrite()` rather than `.transform()` per the measured #6926 precedent
   // (view.zod.ts `foldFormGroupsIntoSections`): it keeps this schema a
@@ -296,15 +296,44 @@ export const CurrencyConfigSchema = lazySchema(() => strictObject({
   // an empty set), and checks run in attachment order, so the superRefine
   // above always sees the pre-materialized value. Rebuilt in shape order so
   // the output is byte-identical to the `.default(2)` era:
-  // `{precision, currencyMode, defaultCurrency}`, `precision` always a number.
-  // The one accepted cost, same as #6926's: the INFERRED output type still
-  // declares `precision?` even though a parsed config always carries it
-  // (ADR-0122 forbids hand-narrowing `CurrencyConfigParsed`); the runtime
-  // contract is the enforced one.
-  precision: config.precision ?? 2,
-  currencyMode: config.currencyMode,
-  defaultCurrency: config.defaultCurrency,
-})));
+  // `{precision, currencyMode, defaultCurrency}`, `precision` always a number
+  // — except on the guarded combination below. The one accepted cost, same as
+  // #6926's: the INFERRED output type still declares `precision?` even though
+  // a parsed config normally carries it (ADR-0122 forbids hand-narrowing
+  // `CurrencyConfigParsed`); the runtime contract is the enforced one.
+  //
+  // #11423 (maintainer ruling on #9689, 2026-08-24, routed to this twin —
+  // 「The same principle prescribes the fix for the #7918 currency twin
+  // (#11423) — the spec seat should route it under this ruling.」): NEVER
+  // materialize a default the schema itself would refuse as authored. The
+  // superRefine above rejects an AUTHORED `precision: 2` on a fixed
+  // zero-/three-fraction-digit currency (JPY/KRW/KWD class), and the two
+  // spellings are indistinguishable to any later parse BY DESIGN — so baking
+  // `2` onto a bare fixed-JPY config made parse output self-rejecting on
+  // re-parse, and `ObjectSchema.create()` → `defineStack` re-parses on the
+  // MAINLINE app-build path (measured: `parse(parse(x))` threw at
+  // `currencyConfig.precision` for accepted x). A bare fixed config whose
+  // currency contradicts the default 2 therefore parses to output that OMITS
+  // `precision`: renderers already derive display width from the currency
+  // when the key is absent, and built artifacts stop carrying a value the
+  // schema itself refuses. Every other combination keeps byte-identity —
+  // `dynamic` mode and unknown codes (fail-open table) can never be refused,
+  // so they keep materializing. The #9689 master_detail `deleteBehavior`
+  // conditional in `FieldSchema`'s `.overwrite()` below is the worked
+  // precedent; #11423 is its recorded currency twin.
+  if (
+    config.precision === undefined &&
+    config.currencyMode === 'fixed' &&
+    currencyPrecisionContradiction(config.defaultCurrency, 2) !== undefined
+  ) {
+    return config;
+  }
+  return {
+    precision: config.precision ?? 2,
+    currencyMode: config.currencyMode,
+    defaultCurrency: config.defaultCurrency,
+  };
+}));
 
 /**
  * Currency Value Schema
@@ -973,6 +1002,16 @@ export const FieldSchema = lazySchema(() => {
    * `.default('set_null')` era. The `default` annotation states the contract
    * default to schema consumers without touching parse order — the
    * `autonumberFormat` pattern below.
+   *
+   * #9784 — the `.overwrite` materializes the default ONLY on the reference
+   * types where the key has meaning (`lookup` / `tree`; `master_detail` omits
+   * it per the #9689 idempotent-materialization ruling). On every other type
+   * the key was inert by construction — the engine reads it exclusively
+   * behind a `master_detail`/`lookup` + `reference` guard — yet the
+   * materialized value shipped in every built artifact as an apparent
+   * explicit declaration (the #4447 shadowing mechanism). A bare `text` /
+   * `datetime` / `number` field now parses to output WITHOUT the key; an
+   * authored value on any type is preserved verbatim (accept-set unchanged).
    */
   deleteBehavior: z.enum(['set_null', 'cascade', 'restrict']).optional().meta({
     description: 'What happens if referenced record is deleted',
@@ -1679,11 +1718,13 @@ export const FieldSchema = lazySchema(() => {
     // the superRefine above always sees the pre-materialized value. The key is
     // re-inserted at its SHAPE position (Zod emits parse output in shape
     // order), so output is byte-identical to the `.default('set_null')` era on
-    // every field type EXCEPT `master_detail` — see the ruling below. The one
-    // accepted cost, same as the currency precedent's: the INFERRED output
-    // type now declares `deleteBehavior?` even though a parsed non-
-    // `master_detail` field always carries it (ADR-0122 forbids hand-narrowing
-    // the inferred type); the runtime contract is the enforced one.
+    // the reference types that still materialize it (`lookup` / `tree`) — see
+    // the two rulings below for why `master_detail` and every non-reference
+    // type omit it instead. The one accepted cost, same as the currency
+    // precedent's: the INFERRED output type declares `deleteBehavior?` even
+    // though a parsed `lookup`/`tree` field always carries it (ADR-0122
+    // forbids hand-narrowing the inferred type); the runtime contract is the
+    // enforced one.
     if (field.deleteBehavior !== undefined) return field;
     // #9689 (maintainer ruling 2026-08-24, idempotent materialization —
     // 「四维分析一致的，接手你的建议。」): NEVER materialize a default the
@@ -1702,6 +1743,27 @@ export const FieldSchema = lazySchema(() => {
     // byte-identity, and the #7918 currency `precision` twin of this landmine
     // is #11423 — same principle, its own card.
     if (field.type === 'master_detail') return field;
+    // #9784 — materialize the default ONLY on reference types. `deleteBehavior`
+    // has no meaning on a non-reference field: the engine's
+    // `cascadeDeleteRelations` reaches the key exclusively on
+    // `master_detail`/`lookup` fields carrying a `reference`
+    // (`packages/objectql/src/engine.ts`, the type + `fdef.reference` guards),
+    // so on a `text`/`datetime`/`number` field the materialized value was
+    // inert by construction — yet it shipped in every built app artifact,
+    // where a default materialized at parse becomes an EXPLICIT declaration
+    // downstream (the #4447 shadowing mechanism), and where an AI author
+    // reading the artifact reasonably concludes the key is meaningful there
+    // (ADR-0033 direction). Non-reference fields therefore parse to output
+    // that OMITS the key. The accept-set is untouched: an AUTHORED
+    // `deleteBehavior` on any type still parses exactly as before (the
+    // `!== undefined` early return above), so stored artifacts from the
+    // materializing era stay legal. `tree` (hierarchical reference) keeps
+    // materializing with `lookup`: it is in the relational family, where the
+    // key states delete semantics — the conservative byte-identity side of
+    // the line. `user` is stored identically to `lookup` but sits outside
+    // today's cascade guard exactly like `text` does, so it takes the
+    // non-reference side; an authored value there still round-trips.
+    if (field.type !== 'lookup' && field.type !== 'tree') return field;
     const withDefault: Record<string, unknown> = { ...field, deleteBehavior: 'set_null' };
     const out: Record<string, unknown> = {};
     for (const key of shapeOrder) {

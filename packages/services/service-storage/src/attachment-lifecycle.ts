@@ -366,6 +366,54 @@ export async function findFileHolder(
 }
 
 /**
+ * The BATCHED form of {@link findFileHolder} — "which of these files is still
+ * held?" — for callers holding many rows at once (#11427).
+ *
+ * Record file-field hydration is such a caller: it must reach the same verdict
+ * the download path reaches (#10246) or one `sys_file` row gets two answers,
+ * but it runs over many rows per read, so asking {@link findFileHolder} per
+ * file would be N queries per read. This asks the SAME union in at most one
+ * extra query for the whole batch.
+ *
+ * ⚠️ Same union, same limbs, deliberately in the cheaper order. {@link
+ * findFileHolder} asks the join-row limb first because it must NAME the
+ * surface; this one only needs "held or not", so it takes the free limb first:
+ * {@link hasFieldReferenceOwner} is a pure column test on rows the caller has
+ * already read, and every id it settles is an id the join-row query never has
+ * to carry. `||` commutes, so the verdict is identical either way — pinned as
+ * an equivalence in `tombstone-hydration-download-agreement.test.ts` rather
+ * than asserted here.
+ *
+ * Cost, stated rather than assumed:
+ *   - no rows, or every row settled by the columns → ZERO queries;
+ *   - otherwise → exactly ONE `$in` read of `sys_attachment`, whatever the
+ *     number of files or records involved.
+ */
+export async function findHeldFiles(
+  engine: Pick<AttachmentLifecycleEngine, 'find'>,
+  rows: Array<Record<string, unknown>>,
+): Promise<Set<string>> {
+  const held = new Set<string>();
+  const needJoinCheck: string[] = [];
+  for (const row of rows) {
+    if (row?.id == null) continue;
+    const id = String(row.id);
+    // The free limb first — a pure test on a row already in hand.
+    if (hasFieldReferenceOwner(row)) held.add(id);
+    else needJoinCheck.push(id);
+  }
+  if (needJoinCheck.length === 0) return held;
+  const refs = await engine.find('sys_attachment', {
+    where: { file_id: { $in: needJoinCheck } },
+    context: { ...SYSTEM_CTX },
+  });
+  for (const ref of refs ?? []) {
+    if (ref?.file_id != null) held.add(String(ref.file_id));
+  }
+  return held;
+}
+
+/**
  * The `sys_file` reap guard ({@link LifecycleReapGuard} shape from
  * `@objectstack/objectql`, duck-typed here to avoid the dependency).
  * Candidates arrive from the two declared policies — tombstones past the

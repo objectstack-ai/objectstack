@@ -76,6 +76,7 @@ export {
   isSyncReproducibleIndex,
   legacyUniqueIndexNames,
   legacyUniqueReplacements,
+  manualJsonConversionSql,
   normalizeDeclaredIndex,
   parseIndexDdl,
   uniqueIndexesFromFields,

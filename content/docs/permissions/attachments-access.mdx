@@ -109,13 +109,17 @@ can be shared across records). Reclamation is handled by the platform LifecycleS
   attachments-scope file is deleted, the file is tombstoned; a reap guard
   re-verifies zero references at sweep time and deletes the storage bytes
   before the row is reaped (abandoned `pending` uploads are reaped too).
-  **A tombstone is recoverable state, not a delete — and downloads treat it that
-  way.** Re-attaching the file, or re-claiming it through a record field, makes
-  it downloadable again *immediately*, with no sweep in between: the download
-  endpoints ask the same "is anything still holding this file?" question the
-  reap guard asks before it reclaims anything. The row itself stays tombstoned
-  until a sweep tidies it, and a file with no holder left still answers
-  `FILE_NOT_FOUND` (404).
+  **A tombstone is recoverable state, not a delete — and every reader treats it
+  that way.** Re-attaching the file, or re-claiming it through a record field,
+  makes it readable again *immediately*, with no sweep in between: the download
+  endpoints **and record file-field hydration** ask the same "is anything still
+  holding this file?" question the reap guard asks before it reclaims anything.
+  Both reach it through that one predicate rather than each deciding for itself,
+  which is what stops the two surfaces answering differently about one row — a
+  file `GET /storage/files/:id` serves is a file a record read expands into
+  `{ id, name, size, mimeType, url }`. The row itself stays tombstoned until a
+  sweep tidies it, and a file with no holder left still answers
+  `FILE_NOT_FOUND` (404) and keeps its bare id in a record payload.
 - **`sys_upload_session`** — abandoned/terminal chunked-upload sessions are
   reaped, and a reap guard aborts the underlying backend multipart upload
   (S3 `AbortMultipartUpload` / local parts dir) first, so already-uploaded

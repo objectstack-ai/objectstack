@@ -29,6 +29,10 @@ import {
   printStep,
   printWarning,
   printAuthoringAdvisories,
+  printAuthoringRuleErrors,
+  printDocIssueErrors,
+  printBulletList,
+  JSON_FULL_LIST_REMEDY,
   createTimer,
   formatZodErrors,
   collectMetadataStats,
@@ -142,9 +146,17 @@ export default class Compile extends Command {
           }
           console.log('');
           printError(`--strict-body: ${issues.length} callable(s) lack a metadata body`);
-          for (const w of issues.slice(0, 20)) {
-            console.log(`  • ${w.origin}: ${w.reason}`);
-          }
+          // [#11642] Caps at 20, not 50, which is the only reason a sweep
+          // anchored on the literal `slice(0, 50)` could not see this one. The
+          // shape is the defect either way: the header states the true total
+          // and the body shows 20, with nothing saying the rest exist. The cap
+          // stays; the silence does not. The pointer is honest here — the
+          // `--json` branch immediately above this block publishes the whole
+          // list as `issues`.
+          printBulletList(
+            issues.map((w) => `${w.origin}: ${w.reason}`),
+            { noun: 'callable(s)', limit: 20, remedy: JSON_FULL_LIST_REMEDY },
+          );
           this.exit(1);
         }
       }
@@ -233,11 +245,9 @@ export default class Compile extends Command {
         }
         console.log('');
         printError(`Author-time rules failed (${ruleErrors.length} issue${ruleErrors.length > 1 ? 's' : ''})`);
-        for (const f of ruleErrors.slice(0, 50)) {
-          console.log(`  • ${f.where}: ${f.message}`);
-          console.log(chalk.dim(`      ${f.hint}`));
-          console.log(chalk.dim(`      rule: ${f.rule}  at ${f.path}`));
-        }
+        // [#11642] `--json` on this same exit publishes every one of them as
+        // `issues`, so the pointer resolves to a complete view of THIS list.
+        printAuthoringRuleErrors(ruleErrors, { remedy: JSON_FULL_LIST_REMEDY });
         this.exit(1);
       }
 
@@ -256,6 +266,21 @@ export default class Compile extends Command {
           : [],
         projectDir: path.dirname(absolutePath),
       });
+      // [#11727] MAPPED HERE, once, and consumed by BOTH faces — the text block
+      //     just below and the `--json` payload at the end of this command. The
+      //     hints used to be rendered inside that print block, i.e. under
+      //     `!flags.json`, so the payload could not reach them: computed, then
+      //     discarded, for the one audience `--json` exists to serve. This is
+      //     the same defect #11643 fixed one list over, and the same fix —
+      //     hoist the formatting to the computation site so one list feeds both
+      //     faces. `os validate --json` already maps to exactly this
+      //     `{ token, message }` record beside its own preflight call, so
+      //     mirroring it is what keeps the two commands from reporting
+      //     different sets. One list cannot drift from itself.
+      const capProviderWarnings = capPreflight.warnings.map((c) => ({
+        token: c.token,
+        message: renderCapabilityMessage(c),
+      }));
       if (capPreflight.errors.length > 0) {
         if (flags.json) {
           await emitJson({
@@ -272,10 +297,10 @@ export default class Compile extends Command {
         }
         this.exit(1);
       }
-      if (capPreflight.warnings.length > 0 && !flags.json) {
+      if (capProviderWarnings.length > 0 && !flags.json) {
         console.log('');
-        for (const c of capPreflight.warnings) {
-          printWarning(renderCapabilityMessage(c));
+        for (const w of capProviderWarnings) {
+          printWarning(w.message);
         }
       }
 
@@ -303,9 +328,28 @@ export default class Compile extends Command {
       ].map(formatUnknownAuthoringKey);
       if (unknownKeyWarnings.length > 0 && !flags.json) {
         printWarning(`Undeclared authoring keys (${unknownKeyWarnings.length}) — dropped at load (#3786)`);
-        for (const w of unknownKeyWarnings.slice(0, 50)) {
-          console.log(`  • ${w}`);
-        }
+        // [#11642] The header already states the true total, so before this
+        // notice the block printed two numbers that disagreed and explained
+        // neither. The pointer resolves because #11643 put this exact list
+        // into the `--json` payload (`warnings`) a few lines below; it would
+        // have been a dead end before that landed.
+        //
+        // ⚠️ …and it resolves ON THE SUCCESS EXIT ONLY — the one conditional
+        // pointer of the nine. `warnings` lives in the terminal payload, so a
+        // build that fails at a LATER gate (access matrix 3e, package docs 3f,
+        // the runtime bundle) emits that gate's failure payload instead, and
+        // none of those carries this list: the author is told to re-run with
+        // `--json` and gets a payload without the withheld keys in it. The six
+        // error-path notices have no such gap — their `--json` branch sits in
+        // the same block as the text face. Filed as #11772; closing it means
+        // changing a `--json` payload shape, which is a machine-contract
+        // decision and not this card's. ⛔ Do not read the line above as
+        // unconditional — an unqualified claim that holds in one branch is the
+        // same shape as the silence this whole change is about.
+        printBulletList(unknownKeyWarnings, {
+          noun: 'undeclared authoring key(s)',
+          remedy: JSON_FULL_LIST_REMEDY,
+        });
       }
 
       // 3e. [ADR-0090 D6] Access-matrix snapshot gate. Opt-in per app: when
@@ -343,7 +387,12 @@ export default class Compile extends Command {
               }
               console.log('');
               printError(`Access matrix drift (${drift.length} change${drift.length > 1 ? 's' : ''}) — capability changes must be reviewed`);
-              for (const line of drift.slice(0, 50)) console.log(`  • ${line}`);
+              // [#11642] `--json` on this same exit publishes the whole diff
+              // as `changes`, so the pointer resolves for this list too.
+              printBulletList(drift, {
+                noun: 'access-matrix change(s)',
+                remedy: JSON_FULL_LIST_REMEDY,
+              });
               console.log(chalk.dim('  If intended, re-run with --update-access-matrix and commit the snapshot — its diff IS the review artifact.'));
               this.exit(1);
             }
@@ -362,6 +411,18 @@ export default class Compile extends Command {
       if (!flags.json) printStep('Collecting package docs (ADR-0046)...');
       const docsResult = collectAndLintDocs(absolutePath, result.data as Record<string, unknown>);
       const docErrors = docsResult.issues.filter((i) => i.severity === 'error');
+      // [#11727] Consumed by BOTH faces — the text block below and the `--json`
+      //     payload. Only the text block read it before, so the advisories were
+      //     computed and then dropped for `--json`, exactly as the #3366 hints
+      //     above were. Carried into the payload as the ISSUE RECORDS
+      //     themselves, unmapped, because that is what `os validate --json`
+      //     ships (`warnings: [..., ...docWarnings, ...]` over the same
+      //     `collectAndLintDocs` output) — the text face's `path: message`
+      //     rendering is a text-face concern and stays here.
+      //
+      //     `severity === 'warning'` and validate's `severity !== 'error'`
+      //     select the same set: `DocIssue.severity` is `'error' | 'warning'`,
+      //     so there is no third value for the two spellings to disagree about.
       const docWarnings = docsResult.issues.filter((i) => i.severity === 'warning');
       if (docErrors.length > 0) {
         if (flags.json) {
@@ -370,10 +431,8 @@ export default class Compile extends Command {
         }
         console.log('');
         printError(`Package docs validation failed (${docErrors.length} issue${docErrors.length > 1 ? 's' : ''})`);
-        for (const i of docErrors.slice(0, 50)) {
-          console.log(`  • ${i.path}: ${i.message}`);
-          console.log(chalk.dim(`      rule: ${i.rule}`));
-        }
+        // [#11642] `--json` on this same exit publishes them all as `issues`.
+        printDocIssueErrors(docErrors, { remedy: JSON_FULL_LIST_REMEDY });
         this.exit(1);
       }
       if (docWarnings.length > 0 && !flags.json) {
@@ -496,7 +555,36 @@ export default class Compile extends Command {
           // ...unknownKeyWarnings, …]`, likewise a heterogeneous list). The
           // homogeneity this key used to have was not a contract; it was the
           // symptom of the omission.
-          warnings: [...ruleAdvisories, ...unknownKeyWarnings],
+          //
+          // [#11727] …and then, still, two lists short of parity: the #3366
+          // capability-provider hints and the ADR-0046 package-docs advisories
+          // were computed above and dropped under the same `!flags.json` guard
+          // the undeclared-key findings used to sit behind. Same defect, same
+          // audience, fourth instance in these two files. A CI consumer reading
+          // `warnings` off `os build --json` saw `[]` for a stack whose
+          // `requires` names an unknown capability token and whose shipped doc
+          // has unreadable frontmatter — while the same consumer reading
+          // `os validate --json` on that same tree saw both.
+          //
+          // ORDER AND SHAPE MIRROR `os validate --json` rather than being
+          // chosen here: that payload reads `[...ruleAdvisories, ...docWarnings,
+          // ...unknownKeyWarnings, ...capProviderWarnings, ...structuralWarnings]`,
+          // and this is that list minus its last member. Doc advisories ride as
+          // ISSUE RECORDS and capability hints as `{ token, message }` records,
+          // which is what validate ships for each — so a consumer reads one
+          // shape per class from either command rather than learning two.
+          //
+          // `structuralWarnings` is ABSENT ON PURPOSE, and it is not this
+          // omission's fourth sibling: `os validate` computes those four from
+          // `collectMetadataStats`, and `os compile` never computes them at all
+          // (this file has no "No objects defined" / "may not do much" string,
+          // in any face). That makes it a MISSING COMPUTATION rather than a
+          // dropped list — and whether a command that writes an artifact should
+          // advise "No apps or plugins defined" is a judgment, not a mechanical
+          // port. Measured on #11727 (this change) and split out as #11896,
+          // which is where that judgment is made — deliberately NOT this card,
+          // which #11727 closes.
+          warnings: [...ruleAdvisories, ...docWarnings, ...unknownKeyWarnings, ...capProviderWarnings],
           // [#10678] Body-extraction failures that made a callable fall back to
           // the legacy .mjs bundle. A SEPARATE key on purpose, and the reason is
           // parity too — the opposite way round from `unknownKeyWarnings` just

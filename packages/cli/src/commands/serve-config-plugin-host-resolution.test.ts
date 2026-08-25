@@ -157,10 +157,24 @@ describe('os serve → the branches that must NOT move (#10908 supersedes nothin
     //
     // ⚠️ This assertion is why #11157 had to land BEFORE the branch collapse and
     // not after. It used to be kept true by a local `import()` here; it is now
-    // kept true by `importFromHost` carrying this file's base. Take the base
-    // away and this line goes red — measured, and pinned again from the other
-    // side (with the no-base control beside it) in
-    // `serve-host-fallback-base.test.ts`.
+    // kept true by `importFromHost` carrying this file's base.
+    //
+    // ⛔ IT IS NOT THE MEASUREMENT OF THAT BASE, and this comment used to claim
+    // it was ("take the base away and this line goes red"). #11412 ablated it:
+    // with `fallbackImport` removed from `importFromHost` — the #11157 fix gone,
+    // everything else identical — this case stayed GREEN, while the spawned-child
+    // pin of the same claim in `test/serve-host-fallback-base.e2e.test.ts` went
+    // RED. Under vitest `@objectstack/types` is inlined and its `import()` is
+    // rewritten to resolve from the vitest root, so the caller's base and the
+    // callee's base are the same base and no in-process assertion can tell them
+    // apart. The anti-vacuity control written beside such an assertion is vacuous
+    // for the same reason, which is why this note replaces one rather than adding
+    // one. `test/vitest-resolution-base-collapse.e2e.test.ts` holds the mechanism
+    // with its controls; the resolution pins live in the `.e2e.` file above.
+    //
+    // What this line still honestly says: an app that declares nothing can load a
+    // CLI-declared package at all. That is a real behaviour and worth keeping —
+    // it is just not evidence about WHICH package resolved it.
     const root = makeApp(APP_ONLY, { declare: false, install: false });
 
     const mod = await Serve.importConfigPlugin('chalk', root);
