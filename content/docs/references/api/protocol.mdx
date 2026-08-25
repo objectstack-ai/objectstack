@@ -1257,7 +1257,7 @@ List packages response
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **type** | `string` | ✅ | Metadata type name |
-| **name** | `string` | ✅ | Item name |
+| **name** | `string` | ✅ | Item name — lowercase snake_case segments, optionally dot-qualified (`crm_lead`, `crm_lead.pipeline`). The promotion door enforces the same grammar as `saveMetaItem` (#12194). |
 | **organizationId** | `string` | optional | Organization (tenant) scope for the promotion. The implementation resolves the draft through the org partition (ADR-0005, #8805), so a draft authored org-scoped must be published under the same scope or the lookup answers 404 `[no_draft]`. Absent = environment-wide. |
 | **actor** | `string` | optional | Identity recorded on the `op='publish'` history event. On the REST door this is the request's authenticated identity (one producer, #7749) — never a caller-supplied header. |
 | **message** | `string` | optional | Optional human-readable note recorded with the publish history event. |
@@ -1463,7 +1463,7 @@ List packages response
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **type** | `string` | ✅ | Metadata type name |
-| **name** | `string` | ✅ | Item name |
+| **name** | `string` | ✅ | Item name — lowercase snake_case segments, optionally dot-qualified (`crm_lead`, `crm_lead.pipeline`). Slash-compound names are refused at the publish door (#12176). |
 | **item** | `any` | ✅ | Metadata item definition |
 
 
