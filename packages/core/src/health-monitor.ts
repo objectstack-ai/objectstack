@@ -9,6 +9,40 @@ import type { ObjectLogger } from './logger.js';
 import type { Plugin } from './types.js';
 
 /**
+ * Is a success from `status` still subject to `successThreshold`?
+ *
+ * `successThreshold` is declared as "Consecutive successes needed to mark
+ * healthy" (`PluginHealthCheckSchema`, `@objectstack/spec/kernel`), so the
+ * counter stays in force on the way out of every status that records an
+ * OBSERVED failure — `recovering` included. `recovering` is declared "Plugin
+ * is in recovery process": recovery under way, not finished, and the count is
+ * exactly its completion criterion. Consulting the counter only from
+ * `unhealthy`/`degraded` capped the declared value at 2, because the first
+ * success moved the plugin to `recovering` — a status the gate did not name —
+ * so the second success bypassed the counter entirely and went straight to
+ * `healthy`. `failed` was skipped for the same reason and recovered on its
+ * first success (#11955).
+ *
+ * `healthy` and `unknown` promote on the first success: neither records a
+ * failure to recover from. `unknown` is declared "Health status cannot be
+ * determined" — the status a plugin is registered in before any check has run,
+ * so there is nothing for the recovery count to count back from.
+ *
+ * Exhaustive over `PluginHealthStatus` deliberately: a status added to
+ * `PluginHealthStatusSchema` fails to compile here until this map says which
+ * side it falls on, so the gate cannot quietly acquire a second bypass the way
+ * `recovering` did.
+ */
+const RECOVERY_IS_THRESHOLD_GATED: Record<PluginHealthStatus, boolean> = {
+  degraded: true,
+  unhealthy: true,
+  failed: true,
+  recovering: true,
+  healthy: false,
+  unknown: false,
+};
+
+/**
  * Plugin Health Monitor
  * 
  * Monitors plugin health status and performs automatic recovery actions.
@@ -134,9 +168,11 @@ export class PluginHealthMonitor {
         this.successCounters.set(pluginName, (this.successCounters.get(pluginName) || 0) + 1);
         this.failureCounters.set(pluginName, 0);
 
-        // Recover from unhealthy state if we have enough successes
-        const currentStatus = this.healthStatus.get(pluginName);
-        if (currentStatus === 'unhealthy' || currentStatus === 'degraded') {
+        // Recover only once `successThreshold` consecutive successes have
+        // accumulated — from every status that records an observed failure,
+        // not just the two the gate used to name (#11955).
+        const currentStatus = this.healthStatus.get(pluginName) ?? 'unknown';
+        if (RECOVERY_IS_THRESHOLD_GATED[currentStatus]) {
           const successCount = this.successCounters.get(pluginName) || 0;
           if (successCount >= config.successThreshold) {
             this.healthStatus.set(pluginName, 'healthy');
