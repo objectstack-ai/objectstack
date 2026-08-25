@@ -30,8 +30,8 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import { RestServer } from './rest-server';
-import { createRestApiPlugin } from './rest-api-plugin';
+import { RestServer } from './rest-server.js';
+import { createRestApiPlugin } from './rest-api-plugin.js';
 
 function makeServer() {
     return {
