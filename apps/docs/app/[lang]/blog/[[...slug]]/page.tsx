@@ -5,6 +5,14 @@ import { getMDXComponents } from '@/mdx-components';
 import { HomeLayout } from 'fumadocs-ui/layouts/home';
 import { baseOptions } from '@/lib/layout.shared';
 import { absoluteUrl } from '@/lib/site';
+import {
+  compact,
+  JsonLd,
+  type JsonLdNode,
+  ORGANIZATION,
+  ORGANIZATION_REF,
+  sitemapLastModified,
+} from '@/lib/structured-data';
 import Link from 'next/link';
 import { ArrowLeft } from 'lucide-react';
 
@@ -19,6 +27,62 @@ interface BlogPostData {
 }
 
 const components = getMDXComponents() as any;
+
+/**
+ * `frontmatter.date` as an ISO 8601 instant, or `undefined`.
+ *
+ * ⚠️ The value arriving here is **not** the `2026-07-17` written in the MDX. YAML
+ * parses an unquoted date into a `Date`, and `source.config.ts` declares the field
+ * as `z.coerce.string()`, so what reaches this component is that `Date` run through
+ * `String()` — a locale-and-timezone-dependent spelling. The page renders it
+ * unchanged into `<time dateTime={...}>`, which is a separate pre-existing defect;
+ * this function does not paper over it, it just refuses to put a string schema.org
+ * cannot parse into `datePublished`. An unparseable date yields no property at all.
+ */
+function isoDate(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? undefined : parsed.toISOString();
+}
+
+/**
+ * `BlogPosting` for one post, built from the same `page` object
+ * `generateMetadata()` reads — same title, same description, same canonical URL,
+ * same shared card as the Open Graph image.
+ *
+ * `dateModified` comes from `app/sitemap.ts`'s own output, so a post's date in the
+ * JSON-LD and its `<lastmod>` in `/sitemap.xml` are the same value by construction
+ * rather than by two derivations agreeing.
+ *
+ * ⚠️ `author` is emitted as an `Organization`. The frontmatter field is a bare
+ * string with nothing distinguishing a person from a team, and every value in
+ * `content/blog` today is `ObjectStack Team` — a team. Guessing `Person` would be
+ * wrong for all three current posts; a field that can say which is a content-schema
+ * change, not a JSON-LD one.
+ */
+function postGraph(url: string, data: BlogPostData): JsonLdNode[] {
+  const canonical = absoluteUrl(url);
+
+  return [
+    ORGANIZATION,
+    compact({
+      '@type': 'BlogPosting',
+      '@id': `${canonical}#article`,
+      headline: data.title,
+      name: data.title,
+      description: data.description,
+      url: canonical,
+      mainEntityOfPage: canonical,
+      inLanguage: 'en',
+      image: absoluteUrl(BLOG_CARD.url),
+      datePublished: isoDate(data.date),
+      dateModified: sitemapLastModified(url),
+      keywords: data.tags,
+      author: data.author ? { '@type': 'Organization', name: data.author } : ORGANIZATION_REF,
+      publisher: ORGANIZATION_REF,
+    }),
+  ];
+}
 
 export default async function BlogPage({
   params,
@@ -122,7 +186,8 @@ export default async function BlogPage({
   return (
     <HomeLayout {...baseOptions()}>
       <main className="container max-w-4xl mx-auto px-4 py-16">
-        <Link 
+        <JsonLd graph={postGraph(page.url, pageData)} />
+        <Link
           href="/blog"
           className="inline-flex items-center gap-2 text-sm text-fd-foreground/70 hover:text-fd-foreground mb-8 transition-colors"
         >

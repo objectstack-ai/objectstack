@@ -1,6 +1,7 @@
 import { getPageImage, source } from '@/lib/source';
 import type { Metadata } from 'next';
 import { DocsBody, DocsDescription, DocsPage, DocsTitle } from 'fumadocs-ui/layouts/docs/page';
+import { getBreadcrumbItems } from 'fumadocs-core/breadcrumb';
 import { notFound } from 'next/navigation';
 import { getMDXComponents } from '@/mdx-components';
 import { createRelativeLink } from 'fumadocs-ui/mdx';
@@ -10,6 +11,115 @@ import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
 import { LLMCopyButton, ViewOptions } from '@/components/ai/page-actions';
 import { gitConfig } from '@/lib/layout.shared';
 import { absoluteUrl } from '@/lib/site';
+import {
+  breadcrumbList,
+  compact,
+  type Crumb,
+  JsonLd,
+  type JsonLdNode,
+  ORGANIZATION,
+  ORGANIZATION_REF,
+  sitemapLastModified,
+} from '@/lib/structured-data';
+
+/** The site root, first crumb of every trail. */
+const SITE_CRUMB: Crumb = { name: 'ObjectStack', url: absoluteUrl('/') };
+
+/** A page the loader actually resolved — `source.getPage()` minus its `undefined`. */
+type DocPage = NonNullable<ReturnType<typeof source.getPage>>;
+
+/**
+ * Ancestor chain for a doc page, read out of `source.pageTree` — the same tree
+ * `app/[lang]/docs/layout.tsx` hands to the sidebar, so a crumb and its sidebar
+ * entry are the same node with the same label.
+ *
+ * `getBreadcrumbItems()` is fumadocs' own tree walk (`fumadocs-core/breadcrumb`),
+ * not a path split: it locates the page node and returns the folders above it,
+ * each labelled from that folder's `meta.json` title and linked to its `index`
+ * page. ⛔ Nothing here splits `page.url` on `/`. A slug segment with no node
+ * behind it contributes no crumb, which is the correct answer — a folder whose
+ * `meta.json` does not list the page has no browsable URL to point a crumb at,
+ * and inventing one would advertise a trail a user cannot walk.
+ *
+ * Two things the tree cannot supply are added around it, both from data this
+ * page already holds:
+ *
+ * - the site root and the docs root, which sit above the tree rather than in it
+ *   (`getBreadcrumbItems`' own `includeRoot` fires only for folders marked
+ *   `root: true` in `meta.json`, which this tree has none of);
+ * - the page itself as the final crumb, if the walk did not end there — the leaf
+ *   is the one entry a `BreadcrumbList` must not be missing, and `page.data.title`
+ *   with the page's canonical URL is the same pair the `<title>` and the canonical
+ *   link are built from.
+ *
+ * Names are `ReactNode` in fumadocs' type; anything that is not a plain string is
+ * dropped rather than stringified, because `[object Object]` in a crumb is worse
+ * than a shorter trail.
+ */
+function docsTrail(
+  page: DocPage,
+  lang: string,
+  canonical: string,
+): Crumb[] {
+  const tree = source.pageTree[lang];
+  const rootName = typeof tree?.name === 'string' ? tree.name : 'Documentation';
+
+  const trail: Crumb[] = [SITE_CRUMB, { name: rootName, url: absoluteUrl('/docs') }];
+
+  if (tree) {
+    for (const item of getBreadcrumbItems(page.url, tree, { includePage: true })) {
+      if (typeof item.name !== 'string' || !item.url) continue;
+      const url = absoluteUrl(item.url);
+      // The docs root is already the second crumb; the tree's own entry for
+      // `/docs` (the collection's `index.mdx`) must not repeat it.
+      if (trail.some((crumb) => crumb.url === url)) continue;
+      trail.push({ name: item.name, url });
+    }
+  }
+
+  if (trail[trail.length - 1]?.url !== canonical) {
+    trail.push({ name: page.data.title, url: canonical });
+  }
+
+  return trail;
+}
+
+/**
+ * `TechArticle` + `BreadcrumbList` for one doc page.
+ *
+ * Every value comes from the same `page` object `generateMetadata()` below reads,
+ * so the two layers describe one page rather than two: same title, same
+ * description, same canonical URL, same Open Graph card as the article `image`.
+ *
+ * `dateModified` is read from `app/sitemap.ts`'s own output rather than derived a
+ * second time — see `sitemapLastModified()`. Pages the sitemap ships without a
+ * `<lastmod>` get no `dateModified` here either.
+ */
+function docsGraph(
+  page: DocPage,
+  lang: string,
+): JsonLdNode[] {
+  const canonical = absoluteUrl(page.url);
+
+  return [
+    ORGANIZATION,
+    compact({
+      '@type': 'TechArticle',
+      '@id': `${canonical}#article`,
+      headline: page.data.title,
+      name: page.data.title,
+      description: page.data.description,
+      url: canonical,
+      mainEntityOfPage: canonical,
+      inLanguage: lang,
+      image: absoluteUrl(getPageImage(page).url),
+      dateModified: sitemapLastModified(page.url),
+      author: ORGANIZATION_REF,
+      publisher: ORGANIZATION_REF,
+    }),
+    breadcrumbList(`${canonical}#breadcrumb`, docsTrail(page, lang, canonical)),
+  ];
+}
 
 export default async function Page(props: {
   params: Promise<{ lang: string; slug?: string[] }>;
@@ -22,6 +132,7 @@ export default async function Page(props: {
 
   return (
     <DocsPage toc={page.data.toc} full={page.data.full}>
+      <JsonLd graph={docsGraph(page, params.lang)} />
       <DocsTitle>{page.data.title}</DocsTitle>
       <DocsDescription className="mb-0">{page.data.description}</DocsDescription>
       <div className="flex flex-row gap-2 items-center border-b pb-6">
