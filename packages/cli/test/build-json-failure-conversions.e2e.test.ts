@@ -118,7 +118,7 @@ function stack(ns: string, opts: { pageKind?: string; requires?: string[]; extra
 export default {
   manifest: { id: 'com.example.${ns}', name: '${ns}', version: '1.0.0', type: 'app', namespace: '${ns}' },
   requires: [${requires.map((r) => `'${r}'`).join(', ')}],
-  pages: [{ name: 'landing', label: 'Landing', kind: '${pageKind}', source: 'hi' }],
+  pages: [{ name: 'landing', label: 'Landing', kind: '${pageKind}', source: '<div>hi</div>' }],
   objects: [
     {
       name: '${ns}_ticket',
