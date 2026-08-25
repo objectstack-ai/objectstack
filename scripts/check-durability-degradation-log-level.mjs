@@ -967,6 +967,92 @@ const FAILURE_PROPAGATION_SITES = new Map([
 // and after. Only the seam count moves, and ⛔ no baseline entry was added: an
 // entry there says a human read the seam, not that a rule guessed wrong.
 
+// ── THE WRAPPER RECURSION'S CALLBACK REFUSAL — MEASURED, NOT CHANGED (#12138) ─
+//
+// `isReadCall`'s wrapper recursion walks a same-file wrapper's body with
+// `walkSameTickInclusive`, so a driver read sitting inside a nested function
+// body is not seen. The top of this file states the reason the `try` side
+// refuses the same descent ("a callback registered inside a try runs later and
+// is not guarded by that catch"). That reason is about the TRY. #12138 asked
+// whether it is also the right answer for a WRAPPER body, where it is not
+// obviously right: a wrapper whose read sits in a SYNCHRONOUSLY invoked
+// callback does perform that read on its caller's behalf, inside the caller's
+// try. The narrowness was recorded here for the try side only and nowhere for
+// the wrapper side; this block is that missing record.
+//
+// RE-MEASURED on one named tree — `origin/main` @ 3ddad51b5c, and reproduced
+// byte-identically (both counts AND all 8 delta seams) after merging
+// `origin/main` @ c312a562e3 — because the filing's own table (64 → 72) was
+// attributed to a tree that predates #12137 and reported 66 there:
+//
+//   | recognizer                                       | read seams |
+//   |--------------------------------------------------|-----------:|
+//   | today — `walkSameTickInclusive`, depth 2          |         64 |
+//   | probe — `walkAll`, depth 2                        |         72 |
+//
+// The delta is still 8. What the per-seam reading found is that the wrapper
+// recursion's callback refusal explains only THREE of those 8.
+//
+// THE DISCRIMINATING RUN. Raising `MAX_READ_WRAPPER_DEPTH` from 2 to 6 while
+// leaving `walkSameTickInclusive` in place admits 5 of the same 8 (70 seams: +8
+// / -2, where the 2 are the SAME try lines re-attributed to a different
+// first-matching callee, engine.ts:9407 and :10572). Saturation checked at
+// depth 50: 70 and 75, i.e. unchanged. So for those 5 the miss is the DEPTH
+// BOUND, not the callback boundary — `walkAll` merely masks the bound by
+// descending lexically through nested DECLARATIONS instead of counting call
+// hops, which reaches the read at depth 1 no matter how many awaits are between.
+//
+// THE 8 DELTA SEAMS, each read at its call site:
+//
+//   | # | seam (try line → wrapper)                                      | why today misses it | invoked now? |
+//   |--:|----------------------------------------------------------------|---------------------|--------------|
+//   | 1 | metadata-protocol protocol.ts:10243 getMetaItemCached→getMetaItem | depth bound       | yes — real   |
+//   | 2 | metadata-protocol protocol.ts:13559 saveMetaItem→getMetaItem      | depth bound       | yes — real   |
+//   | 3 | metadata-protocol protocol.ts:14535 migrateStoredMetadata→saveMetaItem | depth bound   | yes — real   |
+//   | 4 | metadata-protocol protocol.ts:17213 duplicatePackage→saveMetaItem  | depth bound       | yes — real   |
+//   | 5 | metadata-protocol sys-metadata-repository.ts:883 promoteDraft→dropPromotedDraftRow | CALLBACK | yes — real |
+//   | 6 | metadata-protocol sys-metadata-repository.ts:1353 close→terminate  | CALLBACK          | NO — FAKE    |
+//   | 7 | objectql engine.ts:9237 insert→applyAutonumbers                    | CALLBACK          | yes — real   |
+//   | 8 | objectql lifecycle-service.ts:625 sweep→reapObject                 | depth bound       | yes — real   |
+//
+// All 8 were decidable from the call site; none needed provenance. Seams 1-5,
+// 7 and 8 are genuine members the census does not count: every hop is an
+// `await` on the caller's own tick (`getMetaItem` → `findOverlay`/`findDraft` →
+// `lookup` → `engine.findOne`; `delete` → `withTxn(cb)`, which is
+// `engine.transaction(cb)` or `cb(undefined)` and is awaited either way;
+// `seedAutonumber` → `keysetWalk(cb)` driven by the `for await` on the next
+// line; `archiveObject` → `archivePass`, an awaited local const).
+//
+// ⚠️ SEAM 6 IS A FAKE SEAM, AND IT IS THE REASON `walkAll` IS NOT THE FIX.
+// `close()`'s try calls `w.terminate()`. `terminate` resolves BY NAME to the
+// local const arrow at sys-metadata-repository.ts:1246 — a synchronous, void,
+// in-memory routine whose only call is `self.watchers.delete(subscription)` on
+// `private readonly watchers = new Set<...>()`. `calleeName` reads that as
+// `delete`, and the wrapper recursion resolves `delete` to THIS FILE'S
+// `async delete(ref, opts)` method, whose `findOne` lives inside a `withTxn`
+// callback. Ablation: refusing the `delete` wrapper hop drops the probe from 72
+// to exactly 70, removing seams 5 and 6 and nothing else.
+//
+// That is #11921's defect — a callee NAME matched with no shape check — one
+// level up, on the WRAPPER name instead of the vocabulary name.
+// `contradictsDriverReadShape` guards only the `DRIVER_READ_CALLEES` hit above;
+// the wrapper hop has no equivalent. Today it is harmless because the callback
+// refusal stops the walk before the fake read is reached. Widening the walk is
+// what arms it, and a fake seam is the UNSAFE direction: an invented member of
+// the denominator #5186 / #6451 / #9165 / #8845 / #8901 are all quoted against.
+//
+// ⛔ NOTHING WAS CHANGED, and the reason is a measurement rather than caution.
+// The sanctioned cheap fix for this card was an `Array.prototype.map` /
+// `Promise.all` allowlist. NOT ONE of the 8 goes through `map` or
+// `Promise.all`: the real shapes are `withTxn(cb)`, `keysetWalk(cb)` (imported
+// from `@objectstack/types`, so its body is not even in this file's index) and
+// locally-bound const arrows. That allowlist would admit zero of them while
+// still not excluding seam 6. Telling the four real callback seams from the
+// fake one needs to know what the receiving method does with its argument —
+// which is #11921's provenance problem, deliberately out of this card's scope.
+// The census is therefore UNMOVED at 64, and #8901's restart conjunct (b) is
+// not triggered by this reading.
+
 /**
  * Where the read-seam rule looks. Narrowed on purpose — see above.
  *
