@@ -89,6 +89,10 @@ export const esES: TranslationData = {
           title: 'Pertenencia',
           description: 'A qué se une un usuario recién creado. Complementa el registro de autoservicio anterior.',
         },
+        audience: {
+          title: 'Audiencia',
+          description: 'Quién puede convertirse en usuario de las aplicaciones de este entorno. Las posturas distintas de «solo por invitación» fuerzan la verificación de correo. Las invitaciones, los usuarios creados por administradores, el aprovisionamiento SCIM y el SSO empresarial se admiten bajo cualquier postura.',
+        },
         password_policy: {
           title: 'Política de contraseñas',
           description: 'Límites de longitud que el proveedor de autenticación exige en el registro y el restablecimiento de contraseña.',
@@ -126,6 +130,23 @@ export const esES: TranslationData = {
             auto: 'Unirse automáticamente a la organización predeterminada',
             'invite-only': 'Solo por invitación: nunca se une automáticamente',
           },
+        },
+        audience_posture: {
+          label: 'Audiencia de autorregistro',
+          help: '«Solo por invitación» cierra el autorregistro: los usuarios solo se crean mediante un acto del operador (invitación, creación/importación por un administrador, SCIM o SSO empresarial). «Dominios de correo» lo abre solo a los dominios de la lista inferior; «Abierto» admite a cualquiera. Cualquier postura distinta de «solo por invitación» fuerza la verificación de correo y requiere el conjunto de permisos de autorregistro inferior.',
+          options: {
+            invite_only: 'Solo por invitación — sin autorregistro (predeterminado)',
+            email_domain: 'Solo dominios de correo permitidos',
+            open: 'Abierto — cualquiera puede registrarse',
+          },
+        },
+        audience_allowed_email_domains: {
+          label: 'Dominios de correo permitidos',
+          help: 'Dominios simples, uno por línea o separados por comas (p. ej. acme.com). Coincidencia exacta sin distinguir mayúsculas; los subdominios necesitan su propia entrada; sin comodines.',
+        },
+        audience_self_registration_permission_set: {
+          label: 'Conjunto de permisos de autorregistro',
+          help: 'Nombre del sys_permission_set que recibe cada usuario autorregistrado (declarar member_default explícitamente es válido; admin_full_access se rechaza).',
         },
         password_min_length: { label: 'Longitud mínima de contraseña' },
         password_max_length: { label: 'Longitud máxima de contraseña', help: 'Un límite superior protege frente a la denegación de servicio por el hasheo de contraseñas muy largas.' },
