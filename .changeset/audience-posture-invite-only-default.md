@@ -1,6 +1,7 @@
 ---
 '@objectstack/spec': minor
 '@objectstack/plugin-auth': minor
+'@objectstack/verify': patch
 ---
 
 feat(spec,plugin-auth)!: one declared audience posture — `invite_only | email_domain | open`, default `invite_only`
@@ -12,5 +13,7 @@ feat(spec,plugin-auth)!: one declared audience posture — `invite_only | email_
 - `email_domain` admits only allowlisted domains (`403 EMAIL_DOMAIN_NOT_ALLOWED` otherwise; exact case-insensitive match, subdomains not implied, `+tag` local parts irrelevant). Any self-registration-permitting posture FORCES `requireEmailVerification` on (an explicit `false` beside it is refused at boot) and grants each self-registrant the DECLARED permission set (`sys_user_permission_set`); a declaration that cannot be resolved refuses admission (`403 AUTH_CONFIG_ERROR`) rather than admitting ungranted.
 - Operator-driven creation is never posture-gated: admin create-user / bulk import, SCIM provisioning, and JIT through operator-registered identity providers (`oidcProviders`, `@better-auth/sso`) keep working under every posture.
 - `/api/v1/auth/config` now serves `features.audiencePosture` and mirrors the forced verification flag; `SELF_REGISTRATION_CLOSED` and `EMAIL_DOMAIN_NOT_ALLOWED` are registered in the ADR-0112 ledger.
+- The BOOTSTRAP bypass counts non-system HUMANS, not `sys_user` rows, so a database still carrying the legacy `usr_system` service row is still a fresh install; the same predicate now backs the dev-admin seed's own precondition. The `emailAndPassword.disableSignUp` bootstrap bypass reads it too.
+- `@objectstack/verify`: `stack.signUp(...)` seeds a pending `sys_invitation` for the address before signing up, so harness fixtures that mint a second/third identity enter through the invitation carve-out under the new default. Fixtures asserting on their environment's pending invitations should filter by their own `organization_id` (the harness rows carry `org_verify_audience_gate`).
 
 <!-- adr-0087: registered audience-posture-default-invite-only -->
