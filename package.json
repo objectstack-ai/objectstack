@@ -73,6 +73,7 @@
     "check:org-identifier": "node scripts/check-org-identifier.mjs --self-test && node scripts/check-org-identifier.mjs",
     "check:runner-env-posture": "node scripts/check-runner-env-posture.mjs --self-test && node scripts/check-runner-env-posture.mjs",
     "check:cli-test-child-env": "node scripts/check-cli-test-child-env.mjs --self-test && node scripts/check-cli-test-child-env.mjs",
+    "check:cli-command-ids": "node scripts/check-cli-command-ids.mjs --self-test && node scripts/check-cli-command-ids.mjs",
     "check:authz-resolver": "node scripts/check-single-authz-resolver.mjs --self-test && node scripts/check-single-authz-resolver.mjs",
     "check:slot-lookup": "node scripts/check-slot-lookup-ratchet.mjs",
     "check:query-options-erasure": "node scripts/check-query-options-erasure-ratchet.mjs --self-test && node scripts/check-query-options-erasure-ratchet.mjs",
