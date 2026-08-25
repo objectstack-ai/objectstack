@@ -206,6 +206,7 @@ import {
     mapDataError,
     sandboxBusinessMessage,
     classifiedRefusalAnswer,
+    declaredServerFaultAnswer,
     sendThrownError,
     sendDeclaredFault,
     sendFieldVisibilityFault,
@@ -9487,6 +9488,57 @@ export class RestServer {
                     // the same two fields ① derives `envelopeStatus`/`envelopeCode`
                     // from.
                     logError('[REST] Analytics dataset query error:', error);
+                    // ── [#11718] ③a A DECLARED 5xx is RELAYED, not collapsed ──
+                    // Measured door-to-door: one producer-declared
+                    // `{ status: 503, code: 'SERVICE_UNAVAILABLE' }` answered
+                    // `503 SERVICE_UNAVAILABLE` on `POST /data/:object` and
+                    // `500 ANALYTICS_QUERY_FAILED` here. #5582's argument is
+                    // that `502`/`503` are `isExpectedDataStatus` LIFECYCLE
+                    // outcomes — a proxy retries them and alerts differently —
+                    // so collapsing them onto `500` destroys the declaration.
+                    // That ruling landed one door over and never reached this
+                    // one, because this arm built its 5xx body by hand.
+                    //
+                    // ⛔ This does NOT re-open #5352/#5367/#5811. Those rule the
+                    // PROSE, and the prose is still withheld — byte-identical,
+                    // `INTERNAL_ERROR_MESSAGE`, from the same shared arm — and
+                    // the full text still reaches the operator through the
+                    // `logError` line ABOVE this branch, which is deliberately
+                    // placed first so a relayed status cannot buy a producer its
+                    // way past the log. What moves is the CLASSIFICATION the
+                    // producer declared and this route was overwriting.
+                    //
+                    // {@link declaredServerFaultAnswer} is `/data`'s own arm,
+                    // imported for the reason {@link classifiedRefusalAnswer}
+                    // above it is: a third local opinion at this boundary is how
+                    // the two faces came to disagree in the first place. The
+                    // SIBLING analytics face already agreed with `/data` —
+                    // `/analytics/query` relays both halves through
+                    // `dispatcher-plugin.errorResponseBase` (measured: a
+                    // read-scope refusal reaches the client as `500`
+                    // `READ_SCOPE_COMPILE_FAILED`, pinned in
+                    // `analytics-query-read-scope-withhold.test.ts`) — so this
+                    // face was the only one of three collapsing the declaration.
+                    //
+                    // ⚠️ Consequence, deliberate and named: a declared 5xx now
+                    // carries the PRODUCER's code, so `read-scope-sql`'s ten
+                    // fail-closed refusals answer `500 READ_SCOPE_COMPILE_FAILED`
+                    // here instead of `500 ANALYTICS_QUERY_FAILED`. Their
+                    // 2026-08-06 ruling is untouched in substance — a SERVER
+                    // fault, `500`, policy content withheld — and the code they
+                    // now carry is the one they declare and the one the sibling
+                    // face has always shipped. `ANALYTICS_QUERY_FAILED` remains
+                    // this route's answer for an UNDECLARED fault, below.
+                    const declaredFault = declaredServerFaultAnswer(error);
+                    if (declaredFault) {
+                        return res.status(declaredFault.status).json(declaredFault.body);
+                    }
+                    // ── ③b The generic 500, for a fault nobody declared ──────
+                    // `declaresServerFault` is kept in the withhold test rather
+                    // than dropped as dead: it reads `error.status` alone and is
+                    // not bounded above, so a nonsense `status: 700` with a code
+                    // still reaches here (`declaredHttpStatus` requires < 600)
+                    // and must keep the withhold it has had since #5367.
                     const outward = declaresServerFault(error) || looksLikeInternalErrorLeak(msg)
                         ? INTERNAL_ERROR_MESSAGE
                         : clientMsg.slice(0, 500);
