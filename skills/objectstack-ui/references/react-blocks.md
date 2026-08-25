@@ -58,8 +58,8 @@ Server-connected object table with toolbar and switchable visualizations (grid/k
 
 | prop | type | kind | required | description |
 |------|------|------|:--------:|-------------|
-| `objectName` | `string` | binding | ✓ | [DEPRECATED → `data={{ provider: 'object', object }}`] The object this block binds to (server-connected). Converging on the metadata-tier spelling (#11284); this alias is removed after the deprecation window. |
-| `viewType` | `'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map'` | binding |  | [DEPRECATED → `type`] Which visualization to render (default grid). Converging on the metadata-tier spelling (#11284): write `type`, the same key a metadata list view authors. |
+| `objectName` | `string` | binding | ✓ | [DEPRECATED → `data={{ provider: 'object', object }}`] The object this block binds to (server-connected). Converging on the metadata-tier spelling; this alias is removed after the deprecation window. |
+| `viewType` | `'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map'` | binding |  | [DEPRECATED → `type`] Which visualization to render (default grid). Converging on the metadata-tier spelling: write `type`, the same key a metadata list view authors. |
 | `navigation` | `{ mode: 'page' \| 'drawer' \| 'modal' \| 'split' \| 'none' }` | binding |  | What a row click does. Use { mode: "none" } when you handle clicks via onRowClick. |
 | `fields` | `string[]` | binding |  | Limit/order the columns shown (defaults to the object list fields). |
 | `options` | `Record<string, any>` | binding |  | View-type-specific options bag (kanban/calendar/gantt extras); prefer the typed spec props where they exist. |
@@ -106,7 +106,7 @@ Chart over an object’s aggregated data. Bind objectName + aggregate; the axes 
 
 ## `<Block>` — `(any)` *(no spec schema — overlay only)*
 
-Escape hatch — render any registered component by type. <Block type="object-kanban" objectName="task" /> etc. Not a way back to the record:* family: those need a record page's record context and are rejected here too (#4413).
+Escape hatch — render any registered component by type. <Block type="object-kanban" objectName="task" /> etc. Not a way back to the record:* family: those need a record page's record context and are rejected here too.
 
 | prop | type | kind | required | description |
 |------|------|------|:--------:|-------------|
