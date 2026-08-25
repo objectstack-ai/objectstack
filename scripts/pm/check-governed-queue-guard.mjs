@@ -919,11 +919,21 @@ export async function selfTest() {
     apiTouched += 1;
     throw new Error('the API must not be reached for a diff that touches nothing governed');
   };
-  const orderedClear = await runGuard({ event: 'merge_group', rows: clearRows, fetchReviews: explode });
+  // The spy THROWS, so a regression here would reject rather than return.
+  // Catching it keeps the failure a named assertion instead of an unhandled
+  // rejection that aborts the remaining cases — the collector reasoning from
+  // lint.yml's shallow-history step, one level down.
+  let orderedClear = null;
+  let orderedThrow = null;
+  try {
+    orderedClear = await runGuard({ event: 'merge_group', rows: clearRows, fetchReviews: explode });
+  } catch (error) {
+    orderedThrow = String(error?.message ?? error);
+  }
   assert(
     'a-clear-diff-NEVER-constructs-a-review-request',
-    apiTouched === 0 && orderedClear.exitCode === EXIT_CLEAR && orderedClear.conclusion === 'clear',
-    `apiTouched=${apiTouched}`,
+    apiTouched === 0 && orderedThrow === null && orderedClear?.exitCode === EXIT_CLEAR && orderedClear?.conclusion === 'clear',
+    `apiTouched=${apiTouched} threw=${orderedThrow ?? 'no'}`,
   );
   // ...and the other half: a governed diff DOES reach it, so the case above is
   // proving an ordering rather than a dead code path.
