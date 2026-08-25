@@ -93,6 +93,34 @@ const tooWideObject = () => ({
   indexes: [{ fields: ['token'], unique: true }],
 });
 
+/**
+ * The same two shapes with a NON-UNIQUE index, which is what still lands in the
+ * named refusal after #11627.
+ *
+ * ⚠️ Why this file grew these: the two objects above declare UNIQUE indexes, and
+ * #11627 made a UNIQUE index over an unkeyable column expressible — it is now
+ * carried on a hash-shadow column instead of being refused. That is a ruled
+ * behaviour change (maintainer, 2026-08-24 on #11374), so the assertions that
+ * pinned "unkeyable ⇒ refused" for those objects were pinning a branch that no
+ * longer exists for them, and were rewritten rather than deleted or silenced.
+ * The refusal itself is NOT gone — it is the disposition for a NON-UNIQUE
+ * unkeyable index, where a digest would serve no lookup — so the half of this
+ * file that proves the driver never weakens a constraint keeps a live subject.
+ */
+const UNBOUNDED_NONUNIQUE_TABLE = 'os11374_unbounded_nonuniq';
+const unboundedNonUniqueObject = () => ({
+  name: UNBOUNDED_NONUNIQUE_TABLE,
+  fields: { token: { type: 'text' } },
+  indexes: [{ fields: ['token'], unique: false }],
+});
+
+const TOO_WIDE_NONUNIQUE_TABLE = 'os11374_too_wide_nonuniq';
+const tooWideNonUniqueObject = () => ({
+  name: TOO_WIDE_NONUNIQUE_TABLE,
+  fields: { token: { type: 'text', maxLength: 1024 } },
+  indexes: [{ fields: ['token'], unique: false }],
+});
+
 // ── The emission rule, on a dialect every runner has ────────────────────────
 
 describe('keyed text columns take their declared maxLength (#11374)', () => {
@@ -140,7 +168,8 @@ declareDialectCell(MYSQL_CELL, 'keyed text columns (#11374)', (cell) => {
     let driver: SqlDriver;
 
     afterEach(async () => {
-      for (const t of [BOUNDED_TABLE, UNBOUNDED_TABLE, TOO_WIDE_TABLE, 'os11374_prefix']) {
+      for (const t of [BOUNDED_TABLE, UNBOUNDED_TABLE, TOO_WIDE_TABLE, 'os11374_prefix',
+        UNBOUNDED_NONUNIQUE_TABLE, TOO_WIDE_NONUNIQUE_TABLE]) {
         await driver?.execute(`drop table if exists ${t}`).catch(() => {});
       }
       await driver?.disconnect().catch(() => {});
@@ -177,30 +206,68 @@ declareDialectCell(MYSQL_CELL, 'keyed text columns (#11374)', (cell) => {
       expect(subPart ?? null).toBeNull();
     });
 
-    it('refuses an unkeyable column by name instead of weakening the constraint', async () => {
+    it('refuses a NON-UNIQUE unkeyable column by name instead of weakening it', async () => {
       driver = new SqlDriver(cell.config());
-      await driver.execute(`drop table if exists ${UNBOUNDED_TABLE}`).catch(() => {});
+      await driver.execute(`drop table if exists ${UNBOUNDED_NONUNIQUE_TABLE}`).catch(() => {});
 
       // Loud, and specifically loud: the raw server error names a column in a
       // table that was just created successfully, which reads as an index
-      // quirk rather than an object whose declared uniqueness is now absent.
-      await expect(driver.initObjects([unboundedObject()])).rejects.toThrow(
-        /cannot create index 'uniq_os11374_unbounded_token'.*declares no `maxLength`/s,
+      // quirk rather than an object whose declared index is now absent.
+      await expect(driver.initObjects([unboundedNonUniqueObject()])).rejects.toThrow(
+        /cannot create index 'idx_os11374_unbounded_nonuniq_token'.*declares no `maxLength`/s,
       );
 
       // ⛔ The negative half, and the point of the whole disposition: no index
       // was substituted. A prefix index here would have made `initObjects`
-      // resolve and left a constraint that means something else.
-      expect(await indexNames(driver, UNBOUNDED_TABLE)).toEqual([]);
+      // resolve and left an index that means something else. #11627 did NOT
+      // relax this — a hash shadow is offered only to a UNIQUE index, because
+      // a digest serves no lookup an ordinary index exists to accelerate.
+      expect(await indexNames(driver, UNBOUNDED_NONUNIQUE_TABLE)).toEqual([]);
     });
 
-    it('gives a bound past the key ceiling the same named refusal', async () => {
+    it('gives a NON-UNIQUE bound past the key ceiling the same named refusal', async () => {
       driver = new SqlDriver(cell.config());
-      await driver.execute(`drop table if exists ${TOO_WIDE_TABLE}`).catch(() => {});
-      await expect(driver.initObjects([tooWideObject()])).rejects.toThrow(
-        /cannot create index 'uniq_os11374_too_wide_token'.*wider than 768 characters/s,
+      await driver.execute(`drop table if exists ${TOO_WIDE_NONUNIQUE_TABLE}`).catch(() => {});
+      await expect(driver.initObjects([tooWideNonUniqueObject()])).rejects.toThrow(
+        /cannot create index 'idx_os11374_too_wide_nonuniq_token'.*wider than 768 characters/s,
       );
-      expect(await indexNames(driver, TOO_WIDE_TABLE)).toEqual([]);
+      expect(await indexNames(driver, TOO_WIDE_NONUNIQUE_TABLE)).toEqual([]);
+    });
+
+    /**
+     * The UNIQUE half of the same two shapes, after #11627: expressible, and
+     * expressed WITHOUT the prefix index this file exists to rule out.
+     *
+     * This is the assertion that replaced the two refusal pins above for the
+     * unique case. It deliberately re-checks `sub_part`, the same discriminator
+     * the bounded case uses: the constraint moving onto a shadow column must
+     * not quietly become the prefix constraint the ruling rejected.
+     */
+    it('carries the UNIQUE cases on a hash shadow, still never a prefix index', async () => {
+      driver = new SqlDriver(cell.config());
+      await driver.execute(`drop table if exists ${UNBOUNDED_TABLE}`).catch(() => {});
+      await driver.execute(`drop table if exists ${TOO_WIDE_TABLE}`).catch(() => {});
+
+      await driver.initObjects([unboundedObject(), tooWideObject()]);
+
+      for (const [table, index] of [
+        [UNBOUNDED_TABLE, 'uniq_os11374_unbounded_token'],
+        [TOO_WIDE_TABLE, 'uniq_os11374_too_wide_token'],
+      ] as const) {
+        expect(await indexNames(driver, table)).toContain(index);
+        const rows = (await rowsOf(
+          driver,
+          `select sub_part as SUB_PART, column_name as COLUMN_NAME, non_unique as NON_UNIQUE
+             from information_schema.statistics
+            where table_schema = database() and table_name = ? and index_name = ?`,
+          [table, index],
+        )) as any[];
+        expect(rows.length).toBe(1);
+        // Whole key part, not a prefix — the rejected route reports a sub_part.
+        expect(rows[0].SUB_PART ?? null).toBeNull();
+        expect(Number(rows[0].NON_UNIQUE)).toBe(0);
+        expect(String(rows[0].COLUMN_NAME)).toContain('__hash');
+      }
     });
 
     /**
