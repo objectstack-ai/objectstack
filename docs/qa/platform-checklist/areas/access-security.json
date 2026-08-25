@@ -51,7 +51,7 @@
           "evidence": "PATCH response + admin re-read"
         },
         {
-          "clause": "admin (platform posture) reads the full set — the entitled side of the same gate (both sides, RUNNER rule 4 / ADR-0057 D10)",
+          "clause": "admin (platform posture) reads the full set — the entitled side of the same gate (both sides, RUNNER rule 4 / ADR-0124 D5)",
           "oracle": "api",
           "verify": "admin GET list contains every id created in this run",
           "evidence": "admin listing"
@@ -83,7 +83,7 @@
       },
       "source": [
         "packages/verify/src/rls.ts",
-        "ADR-0057 D10",
+        "ADR-0124 D1",
         "packages/qa/dogfood/test/showcase-private-owd.dogfood.test.ts",
         "authz-conformance.matrix.ts rows rls-read / rls-by-id-write",
         "#7637 (run record) — the by-id spot-check on a skipped object is where the private D11 defect surfaced",
@@ -335,7 +335,7 @@
           "evidence": "screenshot + disabled-state DOM read"
         },
         {
-          "clause": "the SERVER refuses the same write: direct PUT /api/v1/meta/object/<name> on the read-only package answers 4xx with a ledgered metadata-protocol code (WRITABLE_PACKAGE_REQUIRED, or ITEM_LOCKED for _lock'd items) — UI absence never suffices (ADR-0057 D10)",
+          "clause": "the SERVER refuses the same write: direct PUT /api/v1/meta/object/<name> on the read-only package answers 4xx with a ledgered metadata-protocol code (WRITABLE_PACKAGE_REQUIRED, or ITEM_LOCKED for _lock'd items) — UI absence never suffices (ADR-0124 D1)",
           "oracle": "api",
           "verify": "PUT response status >=400 and error.code ∈ {WRITABLE_PACKAGE_REQUIRED, ITEM_LOCKED} (packages/spec/src/api/error-code-ledger.zod.ts, @objectstack/metadata-protocol entry)",
           "evidence": "PUT trace"
@@ -421,7 +421,7 @@
           "evidence": "the verdict matrix + spot re-reads"
         },
         {
-          "clause": "every withheld cell is DENIED SERVER-SIDE with the ledgered code: verbs marked false answer 403 with error.code PERMISSION_DENIED (rest-server maps explicit security denials to 403 PERMISSION_DENIED) — UI absence never counts (ADR-0057 D10)",
+          "clause": "every withheld cell is DENIED SERVER-SIDE with the ledgered code: verbs marked false answer 403 with error.code PERMISSION_DENIED (rest-server maps explicit security denials to 403 PERMISSION_DENIED) — UI absence never counts (ADR-0124 D1)",
           "oracle": "api",
           "verify": "per-cell status 403 and body code PERMISSION_DENIED; capture any cell answering a different code for triage",
           "evidence": "the verdict matrix"
@@ -1293,7 +1293,7 @@
         }
       ],
       "negative": [
-        "a Studio panel that greys the save while a direct meta PUT widens is a FAIL — the server gate is the authority (ADR-0057 D10 both-sides)",
+        "a Studio panel that greys the save while a direct meta PUT widens is a FAIL — the server gate is the authority (ADR-0124 D1 both-sides)",
         "a stock-deploy packaged-object widening PUT that answers 2xx (or leaves the object widened) is a FAIL",
         "do NOT tick external-principal read/write enforcement: that evaluation is liveness `planned` (#2696) — this item is the save/authoring gate only"
       ],
@@ -1310,7 +1310,7 @@
         "packages/lint/src/validate-security-posture.ts (OWD_WIDTH + SECURITY_EXTERNAL_WIDER lint parity)",
         "objectui packages/app-shell/src/views/studio-design/owd-sharing.ts (isExternalWider) + PackageOwdOverviewPanel.tsx + ObjectSettingsPanel.tsx",
         "examples/app-showcase/src/data/objects/announcement.object.ts + account.object.ts (externalSharingModel declarations)",
-        "ADR-0090 D11, ADR-0086 D1, ADR-0057 D10, #3050, objectui#2508"
+        "ADR-0090 D11, ADR-0086 D1, ADR-0124 D1, #3050, objectui#2508"
       ],
       "history": [
         {

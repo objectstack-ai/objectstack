@@ -5436,9 +5436,8 @@ export class ObjectQL implements IObjectQLEngine {
    * `readonlyWhen` reads, or `null` when this write cannot resolve one.
    *
    * `readonlyWhen: parent.status == 'paid'` is a documented **server**
-   * guarantee (the rule this repo cites as ADR-0057 D10 puts enforcement here;
-   * the client grid is courtesy — an attribution, not a resolvable anchor,
-   * #9628), but the strip is a pure function over the payload and the prior
+   * guarantee (ADR-0124 D1 puts enforcement here; the client grid is
+   * courtesy), but the strip is a pure function over the payload and the prior
    * row — it has no driver and cannot fetch a header. So the engine resolves it
    * and passes it in.
    *

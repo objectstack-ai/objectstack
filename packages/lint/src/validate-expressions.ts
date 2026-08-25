@@ -563,8 +563,7 @@ function rulePredicates(rule: AnyRec, path: string): Array<{ label: string; raw:
  *    payload and lets the rest of the write through. Client:
  *    `resolveFieldRuleState` passes `fallback: false`, so the form renders the
  *    field editable. The standing "server enforces, client is courtesy" rule
- *    — cited in this repo as ADR-0057 D10, an attribution rather than a
- *    resolvable anchor (#9628) — resolves the disagreement: the author edits
+ *    — ADR-0124 D1 — resolves the disagreement: the author edits
  *    the field, the save reports
  *    success, and the value silently never lands. The old sentence told this
  *    author the field would be VISIBLE TO EVERYONE — the opposite failure, and
