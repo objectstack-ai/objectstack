@@ -103,6 +103,10 @@ export class PluginHealthMonitor {
     let status: PluginHealthStatus = 'healthy';
     let message: string | undefined;
     const checks: Array<{ name: string; status: 'passed' | 'failed' | 'warning'; message?: string }> = [];
+    // Which failure route this round took, if any. A round can fail two
+    // disjoint ways and both settle here, so that the counters, the threshold
+    // and `autoRestart` are consulted in exactly one place below.
+    let failureRoute: 'returned' | 'thrown' | undefined;
 
     try {
       // Check if plugin has a custom health check method
@@ -144,31 +148,12 @@ export class PluginHealthMonitor {
           this.healthStatus.set(pluginName, 'healthy');
         }
       } else {
-        this.failureCounters.set(pluginName, (this.failureCounters.get(pluginName) || 0) + 1);
-        this.successCounters.set(pluginName, 0);
-
-        const failureCount = this.failureCounters.get(pluginName) || 0;
-        if (failureCount >= config.failureThreshold) {
-          this.healthStatus.set(pluginName, 'unhealthy');
-          this.logger.warn('Plugin marked as unhealthy', { 
-            plugin: pluginName, 
-            failures: failureCount 
-          });
-
-          // Attempt auto-restart if configured
-          if (config.autoRestart) {
-            await this.attemptRestart(pluginName, plugin, config);
-          }
-        } else {
-          this.healthStatus.set(pluginName, 'degraded');
-        }
+        failureRoute = 'returned';
       }
     } catch (error) {
       status = 'failed';
       message = error instanceof Error ? error.message : 'Unknown error';
-      this.failureCounters.set(pluginName, (this.failureCounters.get(pluginName) || 0) + 1);
-      this.healthStatus.set(pluginName, 'failed');
-      
+
       checks.push({ 
         name: 'health-check', 
         status: 'failed', 
@@ -179,6 +164,16 @@ export class PluginHealthMonitor {
         plugin: pluginName, 
         error 
       });
+
+      failureRoute = 'thrown';
+    }
+
+    // Both failure routes land here, and only here. Deliberately outside the
+    // `try`: `recordFailedRound` may await a restart, and a fault raised by the
+    // restart is not a health-check exception — catching it above would relabel
+    // it as one and push a second `health-check` entry for a check that ran.
+    if (failureRoute) {
+      await this.recordFailedRound(pluginName, plugin, config, failureRoute);
     }
 
     // Create health report
@@ -193,6 +188,55 @@ export class PluginHealthMonitor {
     };
 
     this.healthReports.set(pluginName, report);
+  }
+
+  /**
+   * Handle one failed round — the single path BOTH failure routes take.
+   *
+   * `performHealthCheck` can fail two disjoint ways: the check *returns* a
+   * failure (`false` or `{ status: 'unhealthy' }`), or it *throws* — which by
+   * `raceCheckTimeout` includes every `timeout` overrun, the severest case of
+   * the two. The routes used to be handled in separate blocks, and only the
+   * returned one cleared `successCounters` or consulted `autoRestart`, so a
+   * plugin that hung until its timeout was marked `failed` and never restarted
+   * however `autoRestart` was set: the declared key covered only the milder
+   * half of the failures it names.
+   *
+   * What stays route-specific is the *status label*, deliberately. A throw is
+   * the separate `failed` status applied immediately with no threshold — that
+   * is the documented contract (`content/docs/protocol/kernel/lifecycle.mdx`,
+   * "Custom Health Checks") and is pinned by the timeout test. Only the
+   * counters and the restart decision are shared, because those are what
+   * `failureThreshold` and `autoRestart` declare, and neither names a route.
+   */
+  private async recordFailedRound(
+    pluginName: string,
+    plugin: Plugin,
+    config: PluginHealthCheckParsed,
+    route: 'returned' | 'thrown'
+  ): Promise<void> {
+    const failureCount = (this.failureCounters.get(pluginName) || 0) + 1;
+    this.failureCounters.set(pluginName, failureCount);
+    this.successCounters.set(pluginName, 0);
+
+    const thresholdReached = failureCount >= config.failureThreshold;
+
+    if (route === 'thrown') {
+      this.healthStatus.set(pluginName, 'failed');
+    } else if (thresholdReached) {
+      this.healthStatus.set(pluginName, 'unhealthy');
+      this.logger.warn('Plugin marked as unhealthy', { 
+        plugin: pluginName, 
+        failures: failureCount 
+      });
+    } else {
+      this.healthStatus.set(pluginName, 'degraded');
+    }
+
+    // Attempt auto-restart if configured — route-blind, by the same threshold.
+    if (thresholdReached && config.autoRestart) {
+      await this.attemptRestart(pluginName, plugin, config);
+    }
   }
 
   /**
