@@ -267,7 +267,7 @@ Top-level groups alongside `objects`: `apps` (label, description, navigation),
 `metadataForms`, `settingsCommon`.
 
 > **Validation messages are not a translation group.** `validationMessages` was
-> removed in spec 17.0.0 (#4667) — nothing ever read it, so a translated rule
+> removed in spec 17.0.0 — nothing ever read it, so a translated rule
 > message was stored and never shown. Author the message on the rule itself
 > (`object.validations[].message`), which the engine returns on every rejected
 > write.
@@ -359,7 +359,7 @@ A second object-first shape keyed on `o.{object_name}` (with `app`, `nav`,
 `dashboard`, `reports`, `notifications`, `errors`, `_globalOptions`, `_meta`,
 `namespace`, and `_actions.confirmMessage`) was once documented for
 Studio-authored translations. **No resolver ever read it**, so items authored
-that way saved successfully and rendered nothing. It was removed in #3778 —
+that way saved successfully and rendered nothing. It was removed —
 those keys are now rejected at save time with a message naming the group to
 use instead. Never author them, in files or at runtime.
 
@@ -393,7 +393,7 @@ i18n.t('messages.welcome', 'en', { userName: 'Alice' });
 
 There is no ICU MessageFormat engine — interpolation is always simple
 `{{variable}}` substitution (the aspirational `messageFormat` config knob was
-removed in #3494). Author messages for simple substitution; ICU plural/select
+removed). Author messages for simple substitution; ICU plural/select
 strings like `{count, plural, one {1 message} other {# messages}}` will not be
 evaluated. To pluralize, select the form in application code before calling `t()`.
 
@@ -506,7 +506,7 @@ The in-memory fallback additionally resolves locale codes
 The contract also declares optional methods — `getCoverage`,
 `suggestTranslations` — that **no shipped implementation provides**. Treat them
 as extension points for a custom workbench or TMS adapter. (`getAppBundle` /
-`loadAppBundle` were removed in #3778 along with the `o.*` shape they returned.)
+`loadAppBundle` were removed along with the `o.*` shape they returned.)
 
 ### Plugin Setup
 
@@ -595,7 +595,7 @@ before release.
 
 ### ❌ The Retired `o.*` Shape
 
-Everything reads `objects.*`. The `o.*` dialect was removed in #3778 — it is
+Everything reads `objects.*`. The `o.*` dialect was removed — it is
 not a "Studio format", not a secondary format, just gone. Files registered in
 that shape resolve to nothing; runtime items in that shape are rejected at
 save time.

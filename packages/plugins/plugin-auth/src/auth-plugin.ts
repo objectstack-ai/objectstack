@@ -8,8 +8,10 @@ import {
   type SettingsChangeHandler,
   type SettingsUnsubscribe,
   SystemObjectName,
-  SystemUserId,
 } from '@objectstack/spec/system';
+// [#11767] The shared bootstrap population predicate — the dev-admin seed and
+// the audience gate's bootstrap bypass must answer the same question.
+import { isHumanUserRow } from './audience-posture.js';
 import {
   // ADR-0048 — the Setup/Studio/Account apps moved to their own packages
   // (@objectstack/{setup,studio,account}); plugin-auth no longer registers them.
@@ -57,6 +59,11 @@ import {
   authPluginManifestHeader,
 } from './manifest.js';
 import { scheduleLegacySsoSecretMigration } from './sso-client-secret.js';
+import {
+  devSeedAdminEmail,
+  isDevAdminSeedArmed,
+  warnIfWalledOwnerCannotVerify,
+} from './walled-owner-verification-path.js';
 import { judgePlatformAdmin, type PlatformAdminActor } from './platform-admin-gate.js';
 import {
   runAdminBanUser,
@@ -901,6 +908,36 @@ export class AuthPlugin implements Plugin {
       });
     }
 
+    // [#11640] The walled deployment that declares an owner it can never
+    // verify — maintainer ruling 2026-08-25 (option A): warn loudly, by name,
+    // at boot; NEVER refuse. The whole decision (and why it must run here
+    // rather than in `init()`, where no email transport is resolvable yet)
+    // lives in `walled-owner-verification-path.ts`; this hook only supplies
+    // the two live wiring facts. Registered independently of `registerRoutes`
+    // so an embedding that serves no auth routes still gets the diagnosis.
+    //
+    // ⚠️ #11663's re-anchor legs (L2 #11970 / L4 #11974) will rewrite this
+    // elevation surface: move THIS call, not the predicate — the message and
+    // its controls travel with the module.
+    ctx.hook('kernel:ready', async () => {
+      let emailSvc: IEmailService | undefined;
+      try { emailSvc = ctx.getService<IEmailService>('email'); } catch { emailSvc = undefined; }
+      // The auth manager's own view: a host can hand a transport straight to
+      // `AuthManager` without ever registering the kernel `email` service, and
+      // the sibling hook below injects the service into it. Reading BOTH makes
+      // this hook's answer independent of hook registration order.
+      let pub: { socialProviders?: unknown[]; features?: { sso?: boolean } } | undefined;
+      try { pub = this.authManager?.getPublicConfig(); } catch { pub = undefined; }
+      warnIfWalledOwnerCannotVerify(
+        {
+          hasEmailTransport: !!emailSvc || !!this.authManager?.hasEmailTransport(),
+          hasFederatedSignIn:
+            (pub?.socialProviders?.length ?? 0) > 0 || pub?.features?.sso === true,
+        },
+        ctx.logger,
+      );
+    });
+
     // Dev-only: provision a known, loginable platform admin on an empty DB.
     // Registered as its own kernel:ready hook (independent of registerRoutes)
     // so it runs whenever the runtime boots in development.
@@ -1541,11 +1578,15 @@ export class AuthPlugin implements Plugin {
    * OS_SEED_ADMIN=0 (or false/off/no).
    */
   private async maybeSeedDevAdmin(ctx: PluginContext): Promise<void> {
-    if (process.env.NODE_ENV !== 'development') return;
-    const flag = String(process.env.OS_SEED_ADMIN ?? '').trim().toLowerCase();
-    if (['0', 'false', 'off', 'no'].includes(flag)) return;
+    // [#11640] Both clauses (and the seeded address below) are resolved by
+    // `walled-owner-verification-path.ts`, because the boot check there treats
+    // this seed as a verification path — it stamps the seeded account
+    // `email_verified` (#11343). That is only true while the two agree on when
+    // the seed is armed and which address it provisions, so they read one
+    // resolution rather than two copies of the same env parsing.
+    if (!isDevAdminSeedArmed()) return;
 
-    const email = process.env.OS_SEED_ADMIN_EMAIL?.trim() || 'admin@objectos.ai';
+    const email = devSeedAdminEmail();
     const password = process.env.OS_SEED_ADMIN_PASSWORD?.trim() || 'admin123';
     const name = process.env.OS_SEED_ADMIN_NAME?.trim() || 'Dev Admin';
 
@@ -1554,17 +1595,23 @@ export class AuthPlugin implements Plugin {
     if (!ql || typeof ql.find !== 'function') return;
 
     try {
-      // Only seed when no HUMAN user exists yet. A fresh DB still contains
-      // the system service account (SystemUserId.SYSTEM, role='system'),
-      // which must NOT count — mirror plugin-security's first-user detection
-      // so the seed fires on a genuinely empty DB. Any real human user (or a
-      // prior sign-up) disables the seed for good; we never touch or
-      // overwrite an existing account.
+      // Only seed when no HUMAN user exists yet. A DB created by an older
+      // runtime may still contain the system service account
+      // (SystemUserId.SYSTEM, role='system'), which must NOT count — mirror
+      // plugin-security's first-user detection so the seed fires on a
+      // genuinely empty DB. Any real human user (or a prior sign-up) disables
+      // the seed for good; we never touch or overwrite an existing account.
+      //
+      // [#11767] The predicate itself is `isHumanUserRow`, shared with the
+      // audience gate's bootstrap bypass (`AuthManager.isBootstrapCreation`)
+      // — this seed's `signUpEmail` call passes through that gate, so the two
+      // MUST answer the same question. Two hand-spelled copies is how they
+      // drift, and a drift there means a seed that decides to run and a gate
+      // that then refuses it.
       const rows = await ql
         .find(SystemObjectName.USER, { where: {}, limit: 50 }, { context: { isSystem: true } })
         .catch(() => []);
-      const humans = (Array.isArray(rows) ? rows : [])
-        .filter((u: any) => u && u.id !== SystemUserId.SYSTEM && u.role !== 'system');
+      const humans = (Array.isArray(rows) ? rows : []).filter(isHumanUserRow);
       if (humans.length > 0) {
         ctx.logger.debug('[auth] dev admin seed skipped — a user already exists');
         // `os dev` defaults to a persistent DB, so the seed fires exactly
@@ -2134,6 +2181,73 @@ export class AuthPlugin implements Plugin {
         } catch (error) {
           const err = error instanceof Error ? error : new Error(String(error));
           ctx.logger.error('[AuthPlugin] admin/unban-user failed', err);
+          return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: err.message } }, 500);
+        }
+      });
+
+      // ── #11477: /admin/remove-user — AUTHORIZATION BEFORE THE GUARD ──────
+      //
+      // The break-glass last-local-credential guard is a global
+      // `hooks.before` in auth-manager.ts keyed on `ctx.path`. A better-auth
+      // `before` hook runs ahead of the endpoint's own `use: [adminMiddleware]`
+      // — and on this route that middleware is only a SESSION check, with the
+      // role decision landing later still, inside the vendor's handler. So on
+      // the unshaded route the guard's lookup and its distinctive refusal were
+      // reached by any AUTHENTICATED caller, admin or not, before either
+      // authorization layer had run.
+      //
+      // MEASURED on the installed better-auth 1.7.1 before this mount existed,
+      // one authenticated non-admin, two targets: naming the break-glass
+      // holder answered `409 LAST_LOCAL_CREDENTIAL` while naming an ordinary
+      // user answered `403 YOU_ARE_NOT_ALLOWED_TO_DELETE_USERS`. Two different
+      // answers to the same caller IS the finding — the refusal itself carried
+      // a per-record fact about a user the caller was never entitled to ask
+      // about. The same measurement on `/admin/ban-user` answered
+      // `403 PERMISSION_DENIED` for BOTH targets, because #9652 already shades
+      // that path and `gateAdmin` runs first there.
+      //
+      // Maintainer ruling 2026-08-25 (decision-inbox batch 5, accepted
+      // verbatim 「全部同意」): option A — give this route the same raw-mount
+      // shading `/admin/ban-user` has, converging the whole `/admin/*` family
+      // on authorization before the guard. No new mechanism.
+      //
+      // ⚠️ This mount DELEGATES; it does not re-implement. That is the whole
+      // difference from the ban/unban mounts above, and it is deliberate:
+      //
+      //   • #9969 (closed `not_planned`) ruled that the consumer-less vendor
+      //     routes — this one included — are NOT re-implemented; their 403 to
+      //     a platform admin is a recorded, intended state. Re-implementing
+      //     removal here would quietly overturn that ruling.
+      //   • Delegating keeps the request inside better-auth's router, so the
+      //     path-keyed `hooks.before` still fires and the guard KEEPS working.
+      //     Shadowing normally DETACHES such hooks (the trap written up in
+      //     last-local-credential.ts, which is why ban-user must re-run the
+      //     guard by hand); re-dispatching through `handleRequest` is what
+      //     avoids paying that cost twice. The `/admin/sso/*` bridges use this
+      //     exact gate-then-delegate shape (#9653).
+      //
+      // ⇒ WHAT CHANGES is only WHEN the guard decides, never WHAT it decides:
+      //   anonymous            → 401 UNAUTHENTICATED   (unchanged)
+      //   authenticated member → 403 PERMISSION_DENIED for EVERY target — the
+      //                          guard is now unreachable before authorization
+      //   platform admin       → unchanged in every respect, including the
+      //                          vendor's own 403 (#9969) and the guard's 409
+      //                          when the target really is the last holder
+      //
+      // The vendor Response is returned VERBATIM so the delegated answer —
+      // status, body and the #10349 ADR-0112 envelope `handleRequest` applies
+      // to vendor `/admin/` refusals — is byte-identical to the unshaded route.
+      //
+      // Pinned by `admin-remove-user-gate-ordering.test.ts`, which fails if
+      // this mount is removed.
+      rawApp.post(`${basePath}/admin/remove-user`, async (c: any) => {
+        try {
+          const gated = await gateAdmin(c);
+          if (gated instanceof Response) return gated;
+          return await this.authManager!.handleRequest(c.req.raw);
+        } catch (error) {
+          const err = error instanceof Error ? error : new Error(String(error));
+          ctx.logger.error('[AuthPlugin] admin/remove-user failed', err);
           return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: err.message } }, 500);
         }
       });

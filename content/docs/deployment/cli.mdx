@@ -543,6 +543,7 @@ diverges from the live schema, and the physical column wins at write time.
 |---------|-------------|
 | `os migrate plan` | Dry-run: show how the database has drifted from metadata, categorised safe / needs-confirm / destructive (no changes applied) |
 | `os migrate apply` | Reconcile the database to metadata. Applies loosening changes; destructive ones require `--allow-destructive` |
+| `os migrate multi-value-columns` | Migrate a stale `varchar`/`text` column to `json` where the field declares `multiple: true` — the one drift op `apply` never reconciles for you. Dry run by default; `--apply` runs the statement the finding prints |
 
 ```bash
 os migrate plan                              # Preview drift (no changes)
@@ -663,6 +664,79 @@ every change is shown by `os migrate plan` before you apply it deliberately.
 first. It never drops a table that is absent from your metadata, and on SQLite
 it reconciles via a table rebuild (copy → swap) that preserves your data.
 </Callout>
+
+#### `os migrate multi-value-columns`
+
+The one drift op `os migrate apply` will **never** apply for you.
+
+A field that gains `multiple: true` over a database that already exists keeps
+its old `varchar` / `text` column: the additive sync adds columns, and never
+changes the type of one that is already there. The write path then stores an
+array as the **stringified literal** `'["a","b"]'` and reads it back as a
+string, so whatever consumes the value receives one opaque id instead of a
+list — a hook copying it into a child record's single-value lookup writes the
+whole string as one id. `os migrate plan` reports it as
+`manual_column_type_change`, at severity `error` and category `needs-confirm`,
+which is why it neither refuses your boot nor is ever reconciled automatically:
+changing a column's type on a serving production database, unattended, is not
+something the platform will do while you are not watching.
+
+```bash
+os migrate multi-value-columns                        # Dry run: the exact statements, executed NOT AT ALL
+os migrate multi-value-columns --json                 # The same, machine-readable
+os migrate multi-value-columns --apply                # Run them (prompts)
+os migrate multi-value-columns --apply --yes --json   # CI / scripts
+os migrate multi-value-columns --table crm_case       # Restrict to one physical table (repeatable)
+os migrate multi-value-columns --database-url postgres://…
+```
+
+**Take a backup first.** The dry run is the default and writes nothing at all —
+not a probe, not a temporary table — so run it, read the statements it prints,
+and only then re-run with `--apply`.
+
+The statement is the one the drift finding itself prints, per dialect, and the
+command refuses to run anything else: if the finding no longer contains a
+statement the command recognises, it says so and tells you to apply the
+finding's statement by hand rather than falling back to SQL of its own.
+
+| Dialect | What runs |
+|---------|-----------|
+| PostgreSQL | One `ALTER TABLE … ALTER COLUMN … TYPE json USING (CASE …)`. Legacy single values become one-element arrays (`json_build_array`, **not** `to_json`, which would produce a JSON *scalar* that is still not an array); an already-stringified array is cast through; `NULL` and `''` both become `NULL` |
+| MySQL | Three statements in order: `UPDATE … JSON_ARRAY(…)` over the legacy single values, `UPDATE … SET … = NULL` over the empty strings, then `ALTER TABLE … MODIFY … json`. MySQL will not cast text to json implicitly, so the rows have to move first or the `ALTER` dies on the first legacy value |
+| SQLite | Nothing — and nothing is needed. SQLite's read path parses the value regardless of what the column calls itself, so the same stale column round-trips a real array. The finding is never raised there |
+
+After a successful run the command re-runs detection and requires the finding to
+be **gone**; a run whose statements succeeded while the column is still reported
+exits non-zero rather than telling you it migrated something it did not.
+
+<Callout type="warn">
+**Rollback.** The conversion is not information-preserving: both `NULL` and the
+empty string become `NULL`, so once it succeeds those two states cannot be told
+apart again — **restoring your backup is the only faithful rollback**, which is
+why there is no `--undo`.
+
+Reverting only the column *type* (Postgres: `ALTER TABLE … ALTER COLUMN … TYPE
+text USING …::text`) leaves JSON text in a text column; metadata still declares
+the field multi-value, so the finding returns on the next boot and the
+corruption resumes on the next write. Treat it as an incident stopgap, not a
+rollback.
+
+On **PostgreSQL** the whole remedy is one statement: if it fails, the column is
+untouched and there is nothing to roll back. On **MySQL** it is three, and DDL
+there commits implicitly — a failure midway leaves the table partly converted.
+Re-run the command: each statement skips the rows a previous run already moved,
+so finishing an interrupted run is safe.
+
+If the `ALTER` fails naming an **index**, drop the index on that column first (a
+json column cannot carry a plain btree) and re-run, then recreate it in a shape
+your dialect supports for json.
+</Callout>
+
+**Rows corrupted before you migrate the column are yours to repair.** This
+command converts the column and the values *in* it. A stringified array that a
+hook or an integration already copied into some *other* single-value column is
+not something it looks for, and it is deliberately not something it will grow
+into: that repair is specific to what your automations did with the value.
 
 #### Data migrations
 

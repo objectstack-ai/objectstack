@@ -36,7 +36,8 @@ metadata:
    路由与运行时 / 内置应用 / 文档声称)。每个拿到:当前 item-id 清单、已知的 waiver
    与 blocked 项(不重复上报),以及输出契约 `surface | evidence path | coverage
    verdict | proposed id | sketch | fixture?`。hunter 不写任何文件。
-3. **去重并入一个草稿登记表**(落地前删掉)。跨角度的重复命中是高优先级信号,不是噪音。
+3. **去重并入一个草稿登记表**(落地前删掉)。跨角度的重复命中是高优先级信号,不是噪
+   音。
 4. **按区 writer agent** —— 每个 `areas/*.json` 文件一个 agent,writer 之间永不相
    撞;除编排者外谁都不碰 `coverage.json` 与 `scripts/`。每个测试项都遵守 README.md
    的 deep-test 契约;缺 fixture 就记 `blocked`/`knownGaps`,永不伪造覆盖。writer

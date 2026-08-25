@@ -2502,12 +2502,66 @@ export const ObjectFormPropsSchema = lazySchema(() => strictObject({
 /** Author state (ADR-0122: the bare name is the author state). */
 export type ObjectFormProps = z.input<typeof ObjectFormPropsSchema>;
 
+// `formType` old-vocabulary prescriptions (#11873; the objectui#5939
+// measurement). Declared with `//` on purpose — the `LIST_VIEW_EXPORT_PDF_RETIRED`
+// placement note applies here too: build-docs takes a file's first JSDoc per
+// exported symbol, and these need no doc page. This is an enum-VALUE
+// narrowing, so there is no `retiredKey()` tombstone to hang the prescription
+// on — the enum's own error map carries it, keyed on `issue.input` so only
+// the four sibling-block spellings an author would plausibly carry over from
+// `object-form` get a prescription (the `record:chatter` `position`
+// precedent, #8762). A never-vocabulary string (`'wizzard'`) gets zod's own
+// enum refusal — which is the fix's whole point: under the old `z.string()`
+// it parsed clean, matched no renderer branch, and rendered a silently
+// sectionless parent form. No ADR-0087 conversion is registered here: unlike
+// #8762 (whose old set was the schema's own declared vocabulary and default),
+// these four names were never this block's declared vocabulary — the key was
+// a bare `z.string()` — and the authored-value census on both repos (this
+// repo + objectui#5939's) found zero occurrences to rewrite.
+const MASTER_DETAIL_FORM_TYPE_RETIRED: ReadonlyMap<string, string> = new Map([
+  ['wizard', "'wizard' is not part of `object-master-detail-form` `formType` (#11873 — objectui#5939 "
+    + 'measured the renderer): only the current wizard step\'s fields mount and the block\'s single '
+    + "Save bar acts as the wizard's Next, so parent + details never save through the atomic batch "
+    + "(ADR-0001, the block's whole contract). Write 'simple' (sections render stacked) or 'tabbed'; "
+    + "for a wizard without inline details author an `object-form`, where 'wizard' is honoured."],
+  ['split', "'split' is not part of `object-master-detail-form` `formType` (#11873 — objectui#5939 "
+    + 'measured the renderer): the parent half renders inline but persists via `dataSource.create`, '
+    + "bypassing the atomic parent+details batch (ADR-0001, the block's whole contract). Write "
+    + "'simple' or 'tabbed'; for a split presentation without inline details author an "
+    + "`object-form`, where 'split' is honoured."],
+  ['drawer', "'drawer' is not part of `object-master-detail-form` `formType` (#11873 — objectui#5939 "
+    + 'measured the renderer): the parent half renders in a portal dialog outside the master-detail '
+    + "container, so the block's Save bar has no form to submit. Write 'simple' or 'tabbed'; for a "
+    + "drawer overlay without inline details author an `object-form`, where 'drawer' is honoured."],
+  ['modal', "'modal' is not part of `object-master-detail-form` `formType` (#11873 — objectui#5939 "
+    + 'measured the renderer): the parent half renders in a portal dialog outside the master-detail '
+    + "container (the same portal shape as 'drawer'), so the block's Save bar has no form to "
+    + "submit. Write 'simple' or 'tabbed'; for a modal overlay without inline details author an "
+    + "`object-form`, where 'modal' is honoured."],
+]);
+
 /**
  * `object-master-detail-form` (objectui `plugin-form/src/MasterDetailForm.tsx`
  * @ `eb7f586b`). Parent + child line items entered together (ADR-0001). The
  * child collections come from `details` — the FK and editable-grid columns
  * are auto-derived from the child object's metadata (`deriveMasterDetail.ts`),
  * so `details[].columns` is an override, not a requirement.
+ *
+ * `formType` speaks the MEASURED vocabulary — `simple` / `tabbed` — since
+ * #11873 (the spec half of objectui#5939, which tightened the objectui
+ * registry declaration to the same pair on the same measurement, corroborated
+ * by objectui's own two declarations: `MasterDetailFormSchema.formType?:
+ * 'simple' | 'tabbed'` and the `formType === 'tabbed' ? 'tabbed' : 'simple'`
+ * coercion). The key was a bare `z.string()`, so a value outside the
+ * renderer's vocabulary (`'wizzard'`) parsed clean, matched no branch, and
+ * the parent half fell through to a flat field list — authored sections
+ * silently disappeared with no diagnostic (the objectui#3840 probe read GREEN
+ * through a real crash this way). The four `object-form` spellings that do
+ * name renderer branches (`wizard`/`split`/`drawer`/`modal`) each break the
+ * block's atomic parent+details contract and refuse with a per-value
+ * prescription ({@link MASTER_DETAIL_FORM_TYPE_RETIRED}). objectui#6176
+ * (`tabbed` presentationally honoured but escaping the atomic batch) is a
+ * renderer defect tracked there — it does not change this vocabulary.
  */
 export const ObjectMasterDetailFormPropsSchema = lazySchema(() => strictObject({
   surface: 'this `object-master-detail-form`',
@@ -2518,7 +2572,10 @@ export const ObjectMasterDetailFormPropsSchema = lazySchema(() => strictObject({
     .describe('PARENT object. Optional because the component-level `dataSource` binding can supply the object instead (#7121)'),
   recordId: z.union([z.string(), z.number()]).optional().describe('Parent record to load (edit mode)'),
   mode: z.enum(['create', 'edit']).optional().describe('Form mode'),
-  formType: z.string().optional().describe('Parent form presentation'),
+  formType: z.enum(['simple', 'tabbed'], {
+    error: (issue) =>
+      typeof issue.input === 'string' ? MASTER_DETAIL_FORM_TYPE_RETIRED.get(issue.input) : undefined,
+  }).optional().describe("Parent form presentation — the two variants the renderer honours for the parent half (#11873, objectui#5939)"),
   sections: z.array(z.unknown()).optional().describe('Parent form sections'),
   fields: z.array(z.unknown()).optional().describe('Parent fields shown'),
   details: z.array(z.unknown()).optional()

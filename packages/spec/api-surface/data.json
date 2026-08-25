@@ -43,6 +43,7 @@
     "AutonumberFormatSource (interface)",
     "AutonumberToken (type)",
     "BOOLEAN_VALUE_TYPES (const)",
+    "BOUNDED_STRING_FIELD_TYPES (const)",
     "BUILTIN_DRIVER_IDS (const)",
     "BULK_PER_ROW_HOOK_LIMIT_ERROR_CODE (const)",
     "BULK_WRITE_HOOK_DISPATCH_CONTRACT (const)",

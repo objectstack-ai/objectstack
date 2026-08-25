@@ -177,14 +177,14 @@ describe('ManifestSchema', () => {
         type: 'plugin',
         name: 'Business Intelligence',
         contributes: {
+            // `globs` retired (#11169) — a kind entry is `{ id, description? }`.
             kinds: [
                 {
                     id: 'bi.dataset',
-                    globs: ['**/*.dataset.json']
+                    description: 'BI dataset kind'
                 },
                 {
-                    id: 'bi.dashboard',
-                    globs: ['**/*.bi-dash.json']
+                    id: 'bi.dashboard'
                 }
             ]
         }
@@ -193,49 +193,10 @@ describe('ManifestSchema', () => {
       expect(() => ManifestSchema.parse(biPlugin)).not.toThrow();
     });
 
-    it('should accept plugin with CLI command contributions', () => {
-      const marketplacePlugin: ObjectStackManifest = {
-        id: 'com.acme.marketplace',
-        version: '1.0.0',
-        type: 'plugin',
-        name: 'Marketplace CLI',
-        contributes: {
-          commands: [
-            {
-              name: 'marketplace',
-              description: 'Manage marketplace applications',
-              module: './dist/cli.js',
-            },
-            {
-              name: 'deploy',
-              description: 'Deploy to cloud',
-            },
-          ],
-        },
-      };
-
-      expect(() => ManifestSchema.parse(marketplacePlugin)).not.toThrow();
-      const parsed = ManifestSchema.parse(marketplacePlugin);
-      expect(parsed.contributes!.commands).toHaveLength(2);
-      expect(parsed.contributes!.commands![0].name).toBe('marketplace');
-      expect(parsed.contributes!.commands![1].module).toBeUndefined();
-    });
-
-    it('should reject CLI command with invalid name format', () => {
-      const invalidPlugin = {
-        id: 'com.acme.bad',
-        version: '1.0.0',
-        type: 'plugin' as const,
-        name: 'Bad Plugin',
-        contributes: {
-          commands: [
-            { name: 'Invalid_Name' },
-          ],
-        },
-      };
-
-      expect(() => ManifestSchema.parse(invalidPlugin)).toThrow();
-    });
+    // `contributes.commands` acceptance pins removed with the key (#10724):
+    // the CLI never resolved commands from the declaration (oclif
+    // auto-discovery is the enforced channel — `cli-extension.zod.ts`). The
+    // rejection is pinned with its eight retired siblings below.
 
     it('should accept authentication plugin manifest', () => {
       const authPlugin: ObjectStackManifest = {
@@ -454,5 +415,97 @@ describe('ManifestSchema', () => {
         expect(() => ManifestSchema.parse(manifest)).not.toThrow();
       });
     });
+  });
+});
+
+describe('contributes dead-member retirement (#10724, ADR-0049 — tombstoned, not deleted)', () => {
+  // Nine members had zero readers monorepo-wide (#10627's controlled census,
+  // completed on cloud 2026-08-24). `ManifestSchema` and the `contributes`
+  // object are NOT `.strict()`, so a plain deletion would have silently
+  // stripped the keys — `retiredKey()` is what makes each rejection carry the
+  // prescription, and the prescription is what these pins assert (the specific
+  // zod issue, never just "it threw").
+  const base = { id: 'com.example.retired', version: '1.0.0', type: 'plugin', name: 'Retired' };
+  const authored: Array<[member: string, value: unknown]> = [
+    ['events', ['kernel:ready']],
+    ['menus', { toolbar: [{ id: 'm', label: 'M' }] }],
+    ['themes', [{ id: 't', label: 'T', path: './theme.css' }]],
+    ['translations', [{ locale: 'en', path: 'i18n/en.json' }]],
+    ['actions', [{ name: 'do_thing' }]],
+    ['drivers', [{ id: 'memory', label: 'In-Memory' }]],
+    ['fieldTypes', [{ name: 'vector', label: 'Vector' }]],
+    ['functions', [{ name: 'distance' }]],
+    ['commands', [{ name: 'marketplace' }]],
+  ];
+
+  it.each(authored)('REJECTS an authored `contributes.%s` with the prescription as the issue', (member, value) => {
+    const result = ManifestSchema.safeParse({ ...base, contributes: { [member]: value } });
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    // The SPECIFIC zod issue: located at the retired key, carrying the
+    // fully-qualified key, the removal record, and the imperative fix.
+    const issue = result.error.issues.find(
+      (i) => i.path[0] === 'contributes' && i.path[1] === member,
+    );
+    expect(issue).toBeDefined();
+    expect(issue!.message).toMatch(
+      new RegExp(`manifest\\.contributes\\.${member}.*removed in @objectstack/spec 17.*#10724.*Delete the key`, 's'),
+    );
+  });
+
+  it('still parses the two survivors — `kinds` registers, `routes` is untouched (#10726 fork)', () => {
+    const parsed = ManifestSchema.parse({
+      ...base,
+      contributes: {
+        kinds: [{ id: 'sys.bi.report', description: 'BI report kind' }],
+        routes: [{ prefix: '/api/v1/example', service: 'example' }],
+      },
+    });
+    expect(parsed.contributes!.kinds).toHaveLength(1);
+    expect(parsed.contributes!.routes).toHaveLength(1);
+  });
+
+  it('parses cleanly with the retired keys simply absent', () => {
+    const parsed = ManifestSchema.parse({ ...base, contributes: {} });
+    expect(parsed.contributes).toEqual({});
+    expect(parsed.contributes).not.toHaveProperty('commands');
+  });
+});
+
+describe('contributes.kinds[].globs retirement (#11169, ADR-0049 — maintainer-ruled 2026-08-24)', () => {
+  // The sub-field promised glob-driven file-type discovery that actually runs
+  // off the metadata type registry's `filePatterns` — which `contributes.kinds`
+  // does not extend — so an authored `globs` was stored, served back, and never
+  // consulted. The kinds item object is not `.strict()`, so the removal is a
+  // `retiredKey()` tombstone; the pin asserts the SPECIFIC zod issue.
+  const base = { id: 'com.example.kinds', version: '1.0.0', type: 'plugin', name: 'Kinds' };
+
+  it('REJECTS an authored kinds[].globs with the prescription as the issue', () => {
+    const result = ManifestSchema.safeParse({
+      ...base,
+      contributes: { kinds: [{ id: 'sys.bi.report', globs: ['**/*.report.ts'] }] },
+    });
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    const issue = result.error.issues.find(
+      (i) =>
+        i.path[0] === 'contributes' && i.path[1] === 'kinds' &&
+        i.path[2] === 0 && i.path[3] === 'globs',
+    );
+    expect(issue).toBeDefined();
+    expect(issue!.message).toMatch(
+      /manifest\.contributes\.kinds\[\]\.globs.*removed in @objectstack\/spec 17.*#11169.*filePatterns.*Delete the key/s,
+    );
+  });
+
+  it('still parses and keeps a kind entry of `{ id, description? }` — the bucket and `id` are untouched', () => {
+    const parsed = ManifestSchema.parse({
+      ...base,
+      contributes: { kinds: [{ id: 'sys.bi.report', description: 'BI report kind' }] },
+    });
+    expect(parsed.contributes!.kinds).toEqual([
+      { id: 'sys.bi.report', description: 'BI report kind' },
+    ]);
+    expect(parsed.contributes!.kinds![0]).not.toHaveProperty('globs');
   });
 });

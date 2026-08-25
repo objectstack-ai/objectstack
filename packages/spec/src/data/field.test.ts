@@ -357,6 +357,93 @@ describe('FieldSchema', () => {
         if (result.success) expect(result.data.currencyConfig?.precision).toBe(10);
       });
     });
+
+    /**
+     * #11566 (maintainer ruling 2026-08-24) — `maxLength` tightens on both
+     * axes. Shape: a character length is a positive integer, so `0` / `-5` /
+     * `12.5` are refused at the producer (`z.number().int().min(1)` — the
+     * #8321 house pattern one field below; `maxLength: 0` measurably sent
+     * schema-drift planning `varchar(0)` DDL, at severity error/destructive,
+     * before #11431 taught the consumer to defend itself). Applicability: the
+     * key was on the BASE schema — authorable on `boolean`/`lookup`/
+     * `autonumber` where nothing bounded is stored — and now converges to the
+     * write-time validator's bounded-string types
+     * (BOUNDED_STRING_FIELD_TYPES; ten at #11566, `signature`/`qrcode`
+     * joined in #11875 when the write seam gained their bound).
+     */
+    describe('malformed or misplaced maxLength declarations are refused at authoring (#11566)', () => {
+      const shapeCases: Array<[value: number, code: string]> = [
+        [0, 'too_small'],     // the issue repro: varchar(0) is not a bound
+        [-5, 'too_small'],
+        [12.5, 'invalid_type'], // non-integer count — the varchar(12.5) repro
+      ];
+      for (const [value, code] of shapeCases) {
+        it(`refuses maxLength: ${value} on a text field with a ${code} issue at [maxLength]`, () => {
+          const result = FieldSchema.safeParse({
+            name: 'title', label: 'Title', type: 'text', maxLength: value,
+          });
+          expect(result.success).toBe(false);
+          if (!result.success) {
+            const issue = result.error.issues.find((i) => i.path[0] === 'maxLength');
+            expect(issue?.code).toBe(code);
+            // Message substance, not just a throw: the refusal names what a
+            // legal value looks like (int / >=1), so an AI author can fix it.
+            expect(issue?.message).toMatch(code === 'invalid_type' ? /expected int/ : />=1/);
+          }
+        });
+      }
+
+      // One representative per family the base-schema placement wrongly
+      // accepted: logic, numeric, temporal, selection, relational,
+      // runtime-owned, derived, structured — plus `secret` and `color`, the
+      // near-misses the #11875 ruling explicitly left OUT of the set (`secret`
+      // stores a ciphertext handle per ADR-0100; `color` is short by
+      // construction).
+      const wrongTypes = [
+        'boolean', 'number', 'date', 'select', 'lookup', 'autonumber',
+        'formula', 'json', 'secret', 'color',
+      ] as const;
+      for (const type of wrongTypes) {
+        it(`refuses maxLength on type: '${type}' with a custom issue at [maxLength]`, () => {
+          const result = FieldSchema.safeParse({
+            name: 'f', label: 'F', type, maxLength: 50,
+          });
+          expect(result.success).toBe(false);
+          if (!result.success) {
+            const issue = result.error.issues.find((i) => i.path[0] === 'maxLength');
+            expect(issue?.code).toBe('custom');
+            // The refusal names the legal set and the offending type, so an
+            // AI author can fix the declaration without leaving the message.
+            expect(issue?.message).toMatch(/bounded string/);
+            expect(issue?.message).toContain(`\`${type}\``);
+          }
+        });
+      }
+
+      it('accepts a positive-integer maxLength on every bounded-string type (the validator\'s twelve)', () => {
+        // Ten at #11566; `signature` / `qrcode` joined in #11875 (maintainer
+        // ruling 2026-08-25, option 1) — the write seam enforces their bound,
+        // so the declaration is no longer inert and the authoring seam admits it.
+        const twelve = [
+          'text', 'textarea', 'email', 'url', 'phone', 'password',
+          'markdown', 'html', 'richtext', 'code', 'signature', 'qrcode',
+        ] as const;
+        for (const type of twelve) {
+          const result = FieldSchema.safeParse({
+            name: 'f', label: 'F', type, maxLength: 255,
+          });
+          expect(result.success).toBe(true);
+          if (result.success) expect(result.data.maxLength).toBe(255);
+        }
+      });
+
+      it('absent maxLength stays absent — no default materializes, on any type', () => {
+        for (const type of ['text', 'boolean', 'lookup'] as const) {
+          const result = FieldSchema.parse({ name: 'f', label: 'F', type }) as Record<string, unknown>;
+          expect('maxLength' in result).toBe(false);
+        }
+      });
+    });
   });
 
   describe('useGrouping — number-field digit-grouping presentation hint (#7768)', () => {

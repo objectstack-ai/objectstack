@@ -36,7 +36,14 @@ export const fieldForm = defineForm({
         { field: 'placeholder', helpText: 'Hint text shown inside the empty input (disappears once a value is entered); use inlineHelpText for always-visible help' },
         // Text field options
         { field: 'minLength', visibleWhen: "data.type == 'text' || data.type == 'textarea' || data.type == 'email'", helpText: 'Minimum character length' },
-        { field: 'maxLength', visibleWhen: "data.type == 'text' || data.type == 'textarea' || data.type == 'email'", helpText: 'Maximum character length' },
+        // #11566 — `maxLength` is shown for exactly the bounded-string types
+        // the schema accepts it on and the write-time validator enforces it
+        // for (BOUNDED_STRING_FIELD_TYPES; maintainer ruling 2026-08-24).
+        // This list used to be a third opinion (3 types here, 9 in
+        // object.form, 10 at the validator); it converged to the validator's.
+        // #11875 added `signature`/`qrcode` to the set (the write seam now
+        // enforces their declared bound); this visibleWhen moves with it.
+        { field: 'maxLength', visibleWhen: "data.type in ['text','textarea','email','url','phone','password','markdown','html','richtext','code','signature','qrcode']", helpText: 'Maximum character length' },
         // Number field options
         { field: 'min', visibleWhen: "data.type == 'number' || data.type == 'currency'", helpText: 'Minimum value' },
         { field: 'max', visibleWhen: "data.type == 'number' || data.type == 'currency'", helpText: 'Maximum value' },

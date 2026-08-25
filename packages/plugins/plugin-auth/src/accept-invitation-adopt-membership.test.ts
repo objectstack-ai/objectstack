@@ -23,6 +23,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/objectql';
 import { AuthManager } from './auth-manager';
+import { inviteForAudienceGate } from './audience-gate-test-support';
 
 const SECRET = 'test-secret-at-least-32-chars-long!!';
 const BASE = 'http://localhost:3000';
@@ -178,6 +179,9 @@ const post = (manager: AuthManager, path: string, body: unknown, cookie?: string
 
 /** Sign a user up and return their session cookie + user id. */
 const signUp = async (manager: AuthManager, engine: MemoryEngine, email: string) => {
+  // [#11739] default posture invite_only: fixture users beyond the first
+  // enter through the invitation carve-out (see audience-gate-test-support).
+  inviteForAudienceGate(engine, email);
   const res = await post(manager, '/sign-up/email', { email, password: PASSWORD, name: email });
   expect(res.status, await res.clone().text()).toBe(200);
   const user = (engine.tables.get('sys_user') ?? []).find((u) => u.email === email);

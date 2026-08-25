@@ -74,6 +74,12 @@ export const SysDeviceCode = ObjectSchema.create({
     device_code: Field.text({
       label: 'Device Code',
       required: true,
+      // [#11374] Upstream hard cap: better-auth 1.7.1's device-authorization
+      // plugin refuses ANY generated code — custom generators included — longer
+      // than 191 chars at runtime (`validateGeneratedCode`), and its
+      // `deviceCodeLength` option schema is `max(191)` (default 40). Nothing
+      // the plugin can ever write exceeds this bound.
+      maxLength: 191,
       description: 'High-entropy token returned to the polling device',
     }),
 
@@ -81,6 +87,9 @@ export const SysDeviceCode = ObjectSchema.create({
     user_code: Field.text({
       label: 'User Code',
       required: true,
+      // [#11374] Same upstream hard cap as device_code: `validateGeneratedCode`
+      // refuses > 191 chars and `userCodeLength` is `max(191)` (default 8).
+      maxLength: 191,
       description: 'Short user-facing code (e.g. ABCD-EFGH)',
     }),
 
@@ -101,6 +110,12 @@ export const SysDeviceCode = ObjectSchema.create({
     status: Field.text({
       label: 'Status',
       required: true,
+      // [#11374] The value domain is the closed literal set the plugin's own
+      // routes write — 'pending' | 'approved' | 'denied', 8 chars at the
+      // widest. 64 follows the landed machine-vocabulary precedent
+      // (sys_session.revoke_reason, maxLength: 64) so a future status word can
+      // never be refused by the column.
+      maxLength: 64,
       description: "Current status: 'pending' | 'approved' | 'denied'",
     }),
 

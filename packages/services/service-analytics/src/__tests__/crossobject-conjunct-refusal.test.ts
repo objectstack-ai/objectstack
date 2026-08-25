@@ -45,7 +45,49 @@
  * leaves into the same one member view. Both producers are now judged by one
  * check, which is why they are pinned in one file.
  *
- * ## Why this file pins SIX directions, not one
+ * ## [#11461] The third producer, and the door it left open on BOTH doors
+ *
+ * #10413 phase 2 added a THIRD route to `engine.aggregate`'s predicate: a
+ * compiled MEASURE's own `filter`, lowered onto that measure's
+ * `aggregations[].filter` entry (#10576). `filterMemberView` enumerated exactly
+ * two origins, and `planCrossObject`'s `query.measures` arm reads only each
+ * measure's resolved FIELD — so this producer was outside every check.
+ *
+ * The card was CODE-READ, not executed, so it was reproduced before it was
+ * fixed, over one fixture with an honest in-memory engine (one that applies
+ * `aggregations[].filter` as a property match on the base row, which is all
+ * `engine.aggregate` can do — it cannot join):
+ *
+ * ```
+ * BEFORE   execute()     ACCEPTED  -> engine.aggregate reached once with
+ *                                     {field:"*",method:"count",alias:"west_count",
+ *                                      filter:{"account.region":"West"}}
+ *                                  -> rows [{stage:"won",total_count:3,west_count:0},
+ *                                           {stage:"lost",total_count:1,west_count:0}]
+ *                                     THE SILENT 0 — the truthful west_count for
+ *                                     stage "won" is 2, and total_count 3 is
+ *                                     RIGHT, so the wrong number came back inside
+ *                                     the same response shape as the right one
+ *          generateSql() ACCEPTED  -> SELECT stage AS "stage", COUNT(*) AS
+ *                                     "total_count", COUNT(CASE WHEN
+ *                                     account.region = $1 THEN 1 END) AS
+ *                                     "west_count" FROM "opportunity" GROUP BY
+ *                                     stage        — a conditional aggregate over
+ *                                     a column no FROM in that statement joins
+ * AFTER    both doors    REFUSED   INVALID_FIELD / 400, member "account.region",
+ *                                  cube "…", engine never reached (0 calls)
+ * ```
+ *
+ * There is a published promise behind this beyond the internal inconsistency.
+ * `content/docs/api/data-api.mdx` documents a Request|Result table in which
+ * `aggregations: [{function:"sum", field:"no_such_field", …}]` answers
+ * `400 INVALID_FIELD`. The same `aggregations` object kept that promise in the
+ * `field` position and broke it in the `filter` position — `200` with a silent
+ * 0 — which is precisely the failure class that page's preamble names as its
+ * reason for existing ("answer `200` with something that looked exactly like a
+ * served query"). This block is what makes the page true again.
+ *
+ * ## Why this file pins EIGHT directions, not one
  *
  * Pinning only the new refusals would go green on an implementation that
  * refuses every combinator, or every dataset scope — which would break every
@@ -67,8 +109,15 @@
  *   ⑥ an ORDINARY dataset-level `filter` still reaches the engine CARRYING its
  *      predicate — the load-bearing half of ⑤, and the pin a
  *      "refuse every dataset scope" implementation fails
+ *   ⑦ a CROSS-OBJECT per-measure `filter` is REFUSED on both doors, naming the
+ *      measure whose declaration holds the leaf (#11461)
+ *   ⑧ an ORDINARY per-measure `filter` still reaches the engine CARRYING its
+ *      own `aggregations[].filter`, and a cross-object one on a measure the
+ *      query does NOT ask for changes nothing — the two load-bearing halves of
+ *      ⑦, and the pins a "refuse every measure filter" and a "refuse on the
+ *      dataset's whole `measureFilters` map" implementation each fail
  *
- * ①–④ are #10759's and are re-run unchanged here; ⑤–⑥ are #10861's.
+ * ①–④ are #10759's, re-run unchanged; ⑤–⑥ are #10861's; ⑦–⑧ are #11461's.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -80,7 +129,15 @@ import { AnalyticsService } from '../analytics-service.js';
 const ctxA = { tenantId: 'org_A', userId: 'u_a' } as ExecutionContext;
 
 interface Refusal extends Error { code?: string; status?: number; member?: string; param?: string; cube?: string }
-interface AggCall { object: string; filter?: unknown }
+interface AggSpec { field: string; method: string; alias: string; filter?: Record<string, unknown> }
+/**
+ * [#11461] `aggregations` is captured too, not just the whole-call `filter`.
+ * The third producer never lands in the whole-call filter — it lands on ONE
+ * aggregation's own `filter` — so a harness that only watched `options.filter`
+ * could not have seen this card's defect at all, and ⑧'s "still carries its
+ * predicate" half would have had nothing to read.
+ */
+interface AggCall { object: string; filter?: unknown; aggregations?: AggSpec[] }
 
 /** A cube with one base dimension, one cross-object dimension, one base measure. */
 const SALES_BY_ACCOUNT: Dataset = DatasetSchema.parse({
@@ -138,6 +195,36 @@ const MIXED_SCOPED_SALES: Dataset = DatasetSchema.parse({
 }) as Dataset;
 
 /**
+ * [#11461] ONE dataset carrying all three of ⑦/⑧'s directions, so the
+ * distinctions are structural rather than three fixtures that happen to differ.
+ *
+ *   `revenue`       no filter at all — the neighbour every other measure is
+ *                   read against
+ *   `won_revenue`   an ORDINARY per-measure filter — must still be SERVED, and
+ *                   must still reach the engine carrying its own predicate
+ *   `west_revenue`  a CROSS-OBJECT per-measure filter — must be REFUSED
+ *
+ * `won_revenue` and `west_revenue` are one character apart in shape and travel
+ * the identical `measureFilters` → `aggregations[].filter` route, which is what
+ * makes ⑧ a pin on this refusal rather than a restatement of it. And because
+ * `west_revenue` is declared on the SAME dataset as `won_revenue`, a query that
+ * asks only for `won_revenue` is the pin that the check reads
+ * `query.measures`, not the dataset's whole `measureFilters` map.
+ */
+const MEASURE_FILTER_SALES: Dataset = DatasetSchema.parse({
+  name: 'measure_filter_sales',
+  label: 'Measure-filtered sales',
+  object: 'opportunity',
+  include: ['account'],
+  dimensions: [{ name: 'stage', field: 'stage', type: 'string' }],
+  measures: [
+    { name: 'revenue', aggregate: 'sum', field: 'amount' },
+    { name: 'won_revenue', aggregate: 'sum', field: 'amount', filter: { stage: 'won' } },
+    { name: 'west_revenue', aggregate: 'sum', field: 'amount', filter: { 'account.region': 'West' } },
+  ],
+}) as Dataset;
+
+/**
  * `nativeSql: false` makes `NativeSQLStrategy` decline, so every query below
  * routes to `ObjectQLStrategy` — the door this card is about.
  *
@@ -149,8 +236,8 @@ function serviceFor(defs: Dataset[]) {
   const calls: AggCall[] = [];
   const svc = new AnalyticsService({
     queryCapabilities: () => ({ nativeSql: false, objectqlAggregate: true, inMemory: false }),
-    executeAggregate: async (object: string, options: { filter?: unknown }) => {
-      calls.push({ object, filter: options.filter });
+    executeAggregate: async (object: string, options: { filter?: unknown; aggregations?: AggSpec[] }) => {
+      calls.push({ object, filter: options.filter, aggregations: options.aggregations });
       return [{ stage: 'won', revenue: 42 }];
     },
   });
@@ -188,6 +275,17 @@ const CROSS_OBJECT_MESSAGE = /cannot evaluate a cross-object filter \("account\.
  */
 const DATASET_SCOPE_MESSAGE =
   /cannot evaluate the cross-object filter \("account\.region"\) that dataset "[^"]+" declares at its definition level/;
+
+/**
+ * [#11461] A THIRD distinct message. The two above name where the member came
+ * from; this one has to name something neither can — WHICH MEASURE's own
+ * declaration holds the leaf. A dataset can declare two measures filtering the
+ * same field and mean two different edits, so a rewording that dropped the
+ * measure name would leave the refusal pointing at a document without saying
+ * where in it to look. Matched on exactly that substring.
+ */
+const MEASURE_FILTER_MESSAGE =
+  /cannot evaluate the cross-object filter \("account\.region"\) that dataset "[^"]+" declares on its measure "west_revenue"/;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ① the refusal that was missing on the execution door
@@ -461,6 +559,153 @@ describe('[#10861] a CROSS-OBJECT definition-level filter is refused on BOTH doo
     }, [SALES_BY_ACCOUNT]);
     expect(String(execute?.message)).toMatch(CROSS_OBJECT_MESSAGE);
     expect(String(generateSql?.message)).toMatch(CROSS_OBJECT_MESSAGE);
+    expect(execute?.param).toBe('where');
+  });
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+// ⑦ + ⑧ [#11461] the CROSS-OBJECT per-measure filter — the third producer
+// ────────────────────────────────────────────────────────────────────────────
+
+/**
+ * THE REFUSAL IS INTENDED, on the same ruling ⑤ cites (maintainer, 2026-08-22,
+ * Option A — refuse at query time, folding the leaves into the one member
+ * view). Same hazard class, same physical verdict, one more producer.
+ *
+ * The BEFORE numbers are in this file's header block: `west_count` came back
+ * `0` where the truth was `2`, beside a `total_count` of `3` that was correct —
+ * so nothing about the response said anything had gone wrong. The echo door
+ * rendered `COUNT(CASE WHEN account.region = $1 THEN 1 END)` over a `FROM` with
+ * no join in it. Neither door refused.
+ *
+ * ⑧ below is load-bearing twice over. "Refuse a cross-object measure filter"
+ * has two trivially green wrong implementations — refuse EVERY measure filter,
+ * which breaks every conditional aggregate shipping today, and judge the
+ * dataset's whole `measureFilters` map rather than the measures the query
+ * actually asks for, which refuses a query on the strength of a declaration it
+ * was never going to evaluate. Both are pinned against, on the same fixture,
+ * one measure name away from the refused case.
+ */
+describe('[#11461] a CROSS-OBJECT per-measure filter is refused on BOTH doors', () => {
+  it('execute() refuses with the ADR-0112 envelope, before the engine is asked', async () => {
+    const { execute, calls } = await bothDoors('measure_filter_sales', {
+      dimensions: ['stage'], measures: ['revenue', 'west_revenue'],
+    }, [MEASURE_FILTER_SALES]);
+
+    expect(execute, 'accepted — the measure’s own filter was invisible to the envelope check')
+      .toBeInstanceOf(Error);
+    // Read exactly as `rest-server.ts`'s catch reads them: a 4xx status AND a
+    // code, or the route falls through to 500 ANALYTICS_QUERY_FAILED. Asserting
+    // only that it throws would pass on a bare `Error` and report the platform
+    // broken for what is a dataset-authoring mistake on this deployment.
+    expect(execute?.code, 'no `code` ⇒ 500 ANALYTICS_QUERY_FAILED').toBe('INVALID_FIELD');
+    expect(execute?.status, 'no `status` ⇒ 500 ANALYTICS_QUERY_FAILED').toBe(400);
+    // The member as the MEASURE'S FILTER spelled it, and the dataset named as
+    // the document to open — plus the measure inside it, in the message, which
+    // is the locator neither of the other two refusals has an equivalent of.
+    expect(execute?.member).toBe('account.region');
+    expect(execute?.cube).toBe('measure_filter_sales');
+    expect(String(execute?.message)).toMatch(MEASURE_FILTER_MESSAGE);
+    // `param` ABSENT, and this assertion is the pin on that choice. `measures`
+    // IS a request key and the caller did name `west_revenue` — but `member`
+    // here is `account.region`, and the pair `member: 'account.region'` +
+    // `param: 'measures'` would send a reader to look for that field inside
+    // `measures`, where it is not and cannot be. What is wrong is the dataset's
+    // DECLARATION of the measure; `cube` plus the message carry that.
+    expect(execute?.param, '`param` must not name a key the member cannot be found under')
+      .toBeUndefined();
+    // The assertion this whole card is about: the BEFORE run reached the engine
+    // once and got a wrong number back that looked exactly like a right one.
+    expect(calls, 'engine.aggregate was reached — it cannot join').toEqual([]);
+  });
+
+  it('both doors agree', async () => {
+    const { execute, generateSql } = await bothDoors('measure_filter_sales', {
+      dimensions: ['stage'], measures: ['revenue', 'west_revenue'],
+    }, [MEASURE_FILTER_SALES]);
+    // One fact about one query, not two independent expectations — the same
+    // shape ① and ⑤ use. The echo door had its OWN lowering of this producer
+    // (`conditionalAggregateSql`), so "the preview accepts/rejects the same
+    // set" is exactly the sentence that was false here.
+    expect(
+      [execute === undefined, generateSql === undefined],
+      'the preview and the execution door accept/reject the same set',
+    ).toEqual([false, false]);
+    expect(generateSql?.code).toBe('INVALID_FIELD');
+    expect(generateSql?.status).toBe(400);
+    expect(String(generateSql?.message)).toMatch(MEASURE_FILTER_MESSAGE);
+  });
+
+  it('the still-served neighbour: an ORDINARY per-measure filter still reaches the engine CARRYING its own predicate', async () => {
+    // LOAD-BEARING. An implementation that refused every per-measure filter
+    // would go green on the two tests above and break every conditional
+    // aggregate shipping today (#10413 phase 2 / #10576). `stage` is one
+    // measure away from `account.region` in the same fixture and travels the
+    // identical `measureFilters` → `aggregations[].filter` route.
+    const { execute, generateSql, calls } = await bothDoors('measure_filter_sales', {
+      dimensions: ['stage'], measures: ['revenue', 'won_revenue'],
+    }, [MEASURE_FILTER_SALES]);
+    expect(
+      [execute === undefined, generateSql === undefined],
+      'both doors must still SERVE an ordinary per-measure filter',
+    ).toEqual([true, true]);
+    expect(calls, 'the engine was not reached at all — the measure filter was refused, not served')
+      .toHaveLength(1);
+    // Dropping the predicate is as wrong as refusing it, and silently wider:
+    // `won_revenue` would come back equal to `revenue` and read as a real
+    // number. The pin is on the AGGREGATION's own filter, which is where this
+    // producer lands — it never touches the whole-call filter.
+    const won = calls[0].aggregations?.find((a) => a.alias === 'won_revenue');
+    expect(won?.filter, 'reached the engine with the measure filter DROPPED — silently wider').toEqual({ stage: 'won' });
+    // …and its unfiltered neighbour in the same call must NOT have acquired one.
+    expect(calls[0].aggregations?.find((a) => a.alias === 'revenue')?.filter).toBeUndefined();
+  });
+
+  it('a cross-object filter on a measure the query does NOT ask for changes nothing', async () => {
+    // LOAD-BEARING, and the counter-shape for the test above: `west_revenue` is
+    // declared on THIS dataset, with the same cross-object leaf that is refused
+    // at the top of this block — but this query never asks for it, so neither
+    // door's aggregation loop ever reads its filter and no predicate the engine
+    // cannot join is ever built. Judging the dataset's whole `measureFilters`
+    // map instead of `query.measures` would refuse this query for a member that
+    // was never going to be evaluated, and would take every other measure on a
+    // dataset down with one unserveable one.
+    const { execute, generateSql, calls } = await bothDoors('measure_filter_sales', {
+      dimensions: ['stage'], measures: ['revenue'],
+    }, [MEASURE_FILTER_SALES]);
+    expect([execute === undefined, generateSql === undefined]).toEqual([true, true]);
+    expect(calls).toHaveLength(1);
+    expect(
+      JSON.stringify(calls[0].aggregations),
+      'a filter for an unrequested measure was lowered anyway',
+    ).not.toContain('account.region');
+  });
+
+  it('the KNOWN-PRESENT control: a cross-object member in the CALLER’s where keeps its own diagnostic on this fixture too', async () => {
+    // The counter-check for every "refused" above, on the SAME cube — so the
+    // refusal ⑦ adds cannot be mistaken for the fixture simply being unable to
+    // serve anything, and #11461 is shown not to have repainted the refusal
+    // #10759 restored. Refused before this card and after it, with the OTHER
+    // message and with `param: 'where'`.
+    const { execute, generateSql, calls } = await bothDoors('measure_filter_sales', {
+      dimensions: ['stage'], measures: ['revenue'], where: { 'account.region': 'West' },
+    }, [MEASURE_FILTER_SALES]);
+    expect(String(execute?.message)).toMatch(CROSS_OBJECT_MESSAGE);
+    expect(String(generateSql?.message)).toMatch(CROSS_OBJECT_MESSAGE);
+    expect(execute?.param).toBe('where');
+    expect(calls).toEqual([]);
+  });
+
+  it('the caller’s own where wins the diagnostic when BOTH name the same member', async () => {
+    // The ordering pin. `filterMemberView` inserts measure-filter leaves FIRST
+    // and `where` last, last write wins — so a member named by the request too
+    // keeps the provenance the caller can act on directly, and every shape
+    // refused before #11461 keeps the exact message it had.
+    const { execute } = await bothDoors('measure_filter_sales', {
+      dimensions: ['stage'], measures: ['revenue', 'west_revenue'],
+      where: { 'account.region': 'West' },
+    }, [MEASURE_FILTER_SALES]);
+    expect(String(execute?.message)).toMatch(CROSS_OBJECT_MESSAGE);
     expect(execute?.param).toBe('where');
   });
 });

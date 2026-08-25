@@ -130,8 +130,10 @@
  *
  * With `OS_TOOLING_PARSE_CENSUS` set, this module prints how many parses ran,
  * over how many distinct file names, and how many refused, when the process
- * exits. It only ADDS observation. There is deliberately no env var that turns
- * the refusal off: a guard with a documented bypass is a guard that will be
+ * exits. It only ADDS observation. The report is armed by the FIRST PARSE, not
+ * by the import -- see `armCensusReport` for why the entry-point guard is the
+ * wrong shape for a library. There is deliberately no env var that turns the
+ * refusal off: a guard with a documented bypass is a guard that will be
  * bypassed.
  */
 
@@ -170,6 +172,45 @@ export function parseCensus() {
     files: census.files.size,
     refusals: census.refusals,
   };
+}
+
+let censusReportArmed = false;
+
+/**
+ * Arm the exit report ONCE, on the first parse rather than on the import.
+ *
+ * This module is a LIBRARY -- eleven gates in `scripts/` import it for its
+ * exports -- and the report used to be registered by a top-level
+ * `if (process.env.OS_TOOLING_PARSE_CENSUS)`. That ran inside every one of
+ * those importers: a module wrote to a process whose only involvement was
+ * having loaded it.
+ *
+ * The entry-point guard is NOT the fix here, and this is the interesting half.
+ * As an entrypoint this module parses nothing at all, so
+ * `if (isEntrypoint(...))` would arm the census on the one run that has
+ * nothing to count and leave it silent on every run that does -- a report that
+ * is now import-safe and also permanently empty. The condition had to move,
+ * not acquire a guard.
+ *
+ * So the trigger becomes "this module was USED" instead of "this module was
+ * LOADED", which is the event the number is about anyway. One measurable
+ * consequence, stated here rather than left to be discovered: a process that
+ * imports this module and never parses now prints nothing where it used to
+ * print `0 parse(s)`. Nothing read that line -- `OS_TOOLING_PARSE_CENSUS`
+ * appears in no other file in the tree -- and a census whose numerator is zero
+ * is the case with nothing to report. The self-test pins BOTH directions, so
+ * neither the leak nor the over-correction can come back unnoticed.
+ */
+function armCensusReport() {
+  if (censusReportArmed || !process.env.OS_TOOLING_PARSE_CENSUS) return;
+  censusReportArmed = true;
+  process.on('exit', () => {
+    const c = parseCensus();
+    process.stderr.write(
+      `[ts-parse census] ${c.parses} parse(s) over ${c.files} distinct file name(s) `
+        + `(${c.programs} program(s), ${c.transpiles} transpile(s)); ${c.refusals} refusal(s)\n`,
+    );
+  });
 }
 
 /**
@@ -310,6 +351,7 @@ export function refusalReport(fileName, scriptKind, diagnostics) {
  *   return: an unparseable source ends the process with {@link EXIT_UNPARSEABLE}.
  */
 export function parseSourceFile(fileName, text, scriptKind) {
+  armCensusReport();
   census.parses += 1;
   census.files.add(fileName);
 
@@ -401,6 +443,7 @@ export function transpileRefusalReport(fileName, rows) {
  *   return: unparseable sources end the process with {@link EXIT_UNPARSEABLE}.
  */
 export function createProgramChecked(rootNames, options, host) {
+  armCensusReport();
   const roots = [...rootNames];
   census.programs += 1;
   census.parses += roots.length;
@@ -441,6 +484,7 @@ export function createProgramChecked(rootNames, options, host) {
  * @returns {ts.TranspileOutput} Output emitted from a source that parsed.
  */
 export function transpileChecked(fileName, text, transpileOptions = {}) {
+  armCensusReport();
   census.transpiles += 1;
   census.parses += 1;
   census.files.add(fileName);
@@ -458,16 +502,6 @@ export function transpileChecked(fileName, text, transpileOptions = {}) {
     process.exit(EXIT_UNPARSEABLE);
   }
   return result;
-}
-
-if (process.env.OS_TOOLING_PARSE_CENSUS) {
-  process.on('exit', () => {
-    const c = parseCensus();
-    process.stderr.write(
-      `[ts-parse census] ${c.parses} parse(s) over ${c.files} distinct file name(s) `
-        + `(${c.programs} program(s), ${c.transpiles} transpile(s)); ${c.refusals} refusal(s)\n`,
-    );
-  });
 }
 
 // ---------------------------------------------------------------------------
@@ -508,7 +542,7 @@ export function selfTest() {
     // exercises the real export through the real module graph rather than a
     // re-implementation of it.
     const TS_URL = import.meta.resolve('typescript');
-    const run = (body) => {
+    const run = (body, env) => {
       const probe = join(dir, `probe-${cases.length}-${Math.random().toString(36).slice(2)}.mjs`);
       writeFileSync(
         probe,
@@ -516,7 +550,10 @@ export function selfTest() {
           + `import { parseSourceFile, parseCensus } from ${JSON.stringify(pathToFileURL(SELF).href)};\n`
           + `void ts;\n${body}\n`,
       );
-      const r = spawnSync(process.execPath, [probe], { encoding: 'utf8' });
+      const r = spawnSync(process.execPath, [probe], {
+        encoding: 'utf8',
+        env: env === undefined ? process.env : { ...process.env, ...env },
+      });
       rmSync(probe, { force: true });
       return { status: r.status, out: (r.stdout || '').trim(), err: r.stderr || '' };
     };
@@ -586,6 +623,23 @@ export function selfTest() {
       counted.status === 0
         && counted.out === '{"parses":3,"programs":0,"transpiles":0,"files":2,"refusals":0}',
       JSON.stringify(counted));
+
+    // -- and the report is armed by the first PARSE, not by the IMPORT. Both
+    //    directions, because only the pair is a claim: a library that writes
+    //    to your stderr because you imported it is the defect, and a census
+    //    that can no longer report is the over-correction. -------------------
+    const reported = run(
+      `parseSourceFile('a.ts', 'const a = 1;');\n`,
+      { OS_TOOLING_PARSE_CENSUS: '1' },
+    );
+    t('with the census env set, a run that PARSED still reports at exit',
+      reported.status === 0
+        && /\[ts-parse census\] 1 parse\(s\) over 1 distinct file name\(s\)/.test(reported.err),
+      JSON.stringify(reported));
+    const importedOnly = run(`void parseCensus();\n`, { OS_TOOLING_PARSE_CENSUS: '1' });
+    t('…and a run that only IMPORTED this module writes no census line at all',
+      importedOnly.status === 0 && !importedOnly.err.includes('[ts-parse census]'),
+      JSON.stringify(importedOnly));
 
     // -- ts.createProgram: the syntax lives behind a SECOND call -------------
     const PROGRAM_OPTIONS =

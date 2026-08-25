@@ -43,6 +43,7 @@
     "AutonumberFormatSource": "src/data/autonumber-format.ts#AutonumberFormatSource (interface)",
     "AutonumberToken": "src/data/autonumber-format.ts#AutonumberToken (type)",
     "BOOLEAN_VALUE_TYPES": "src/data/field-value.zod.ts#BOOLEAN_VALUE_TYPES (const)",
+    "BOUNDED_STRING_FIELD_TYPES": "src/data/field.zod.ts#BOUNDED_STRING_FIELD_TYPES (const)",
     "BUILTIN_DRIVER_IDS": "src/data/driver/config-registry.zod.ts#BUILTIN_DRIVER_IDS (const)",
     "BULK_PER_ROW_HOOK_LIMIT_ERROR_CODE": "src/data/bulk-write-hook-conformance.ts#BULK_PER_ROW_HOOK_LIMIT_ERROR_CODE (const)",
     "BULK_WRITE_HOOK_DISPATCH_CONTRACT": "src/data/bulk-write-hook-conformance.ts#BULK_WRITE_HOOK_DISPATCH_CONTRACT (const)",

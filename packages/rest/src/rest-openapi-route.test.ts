@@ -426,27 +426,20 @@ describe('GET /openapi.json — what `info.version` carries (#11546)', () => {
     }
   });
 
-  it('serves a falsy `api.version` as itself rather than falling back to the artifact', async () => {
-    // The removed `|| enriched.info.version` was reachable, not dead — though
-    // not because the contract permits `''`. `RestApiConfigSchema` refuses it
-    // (`z.string().regex(/^[a-zA-Z0-9_\-\.]+$/)`); nothing parses this config
-    // against that schema, so `??` is the only guard and `''` walks past it.
-    // Measured on the pre-fix code this served the spec package's compile-time
-    // version — the exact value the old comment said the line existed to keep
-    // off the wire.
+  it('refuses a falsy `api.version` at construction — there is no such server to ask [#11637]', () => {
+    // RETIRED AND REPLACED, on this pin's own instruction ("if normalization
+    // starts rejecting it, retire the pin"). It used to assert that a server
+    // built with `version: ''` mounted at `/api/` and published
+    // `info.version: ''` — observable only because nothing ran
+    // `RestApiConfigSchema` against this config. #11637 made the seam parse
+    // instead of cast, so `RestServer` refuses the construction and the
+    // doubled-slash mount is unreachable.
     //
-    // An empty version is a broken deployment either way (the mount doubles its
-    // slash, below). The point of the pin is that it stays visibly broken
-    // instead of quietly publishing a different kind of fact.
-    const rest = makeRest(makeProtocol({ object: [], api: [] }).protocol, { version: '' });
-    expect(
-      (rest as any).getApiBasePath(),
-      'this pin describes the empty-version mount — if normalization starts rejecting it, retire the pin',
-    ).toBe('/api/');
-
-    const artifact = await (rest as any).loadOpenApiSpec();
-    const { body } = await serveOpenApiFrom(rest, '/api/');
-    expect(body.info.version).toBe('');
-    expect(body.info.version).not.toBe(artifact.info.version);
+    // The fact the old pin protected is unchanged and still covered above:
+    // there is still NO `|| enriched.info.version` fallback, so a configured
+    // version is served as itself. What changed is that `''` is no longer a
+    // configurable version.
+    expect(() => makeRest(makeProtocol({ object: [], api: [] }).protocol, { version: '' }))
+      .toThrow(/api\.version/);
   });
 });

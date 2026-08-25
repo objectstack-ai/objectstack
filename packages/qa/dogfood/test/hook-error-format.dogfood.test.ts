@@ -9,8 +9,8 @@
 // 阻断"). The console shows the REST body's `error` string verbatim in its
 // toast, so that string must be ONLY the author's message — not the sandbox
 // debug wrapper (`hook 'x' threw: Error: …`, which belongs in server logs)
-// and not a `code` field an older bundled @objectstack/client would prepend
-// as `[ObjectStack] CODE: …`.
+// and not a `code` field: `throw new Error(...)` declares no code, and
+// ADR-0112 invents nothing for a producer that declared none.
 //
 // [#7543] Non-default error names (`TypeError: …`) are the OPPOSITE case, and
 // this file used to assert they were KEPT on the wire "as useful context". They
@@ -115,7 +115,8 @@ describe('objectstack verify: sandboxed hook error message format (#hef)', () =>
     // The console toast renders this string verbatim — it must be exactly
     // what the hook author threw.
     expect(body.error).toBe(BUSINESS_MSG);
-    // No sandbox debug wrapper, no branding, no code for old clients to prepend.
+    // No sandbox debug wrapper, no branding, and no `code` — the hook threw
+    // no code, and ADR-0112 invents nothing for a producer that declared none.
     expect(JSON.stringify(body)).not.toMatch(/threw:|hook '|\[ObjectStack\]/);
     expect(body.code).toBeUndefined();
   });

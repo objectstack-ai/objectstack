@@ -25,6 +25,41 @@ The `@objectstack/client` is the official TypeScript client for ObjectStack. It 
 pnpm add @objectstack/client
 ```
 
+{/*
+  CONTRIBUTOR NOTE — none of this page's TypeScript fences carries an
+  `os:check` marker, and that is a recorded decision rather than an omission.
+
+  `check:skill-examples` compiles marked blocks per SURFACE. `content/docs/**`
+  belongs to the "skills + docs" surface, whose resolution dir and `paths` map
+  are derived from `@objectstack/spec` alone — and `@objectstack/spec` does not
+  depend on `@objectstack/client`. So a marker on any fence that imports the SDK
+  reds with TS2307 "Cannot find module '@objectstack/client'" — a
+  surface-resolution gap, not doc-vs-SDK drift.
+
+  Every other fence is a deliberate continuation fragment: Quick Start
+  establishes `client` once and each later block continues that implied context,
+  so a marker there reds with TS2304 "Cannot find name 'client'". Making either
+  class compile would mean hand-declaring the SDK's own types, or injecting
+  casts into prose whose subject IS the real API — pinning each example to
+  itself and teaching worse code than the page teaches now.
+
+  Measured on this page (all 13 fences marked, then reverted): 128 diagnostics,
+  every one TS2307 / TS2304 / TS18004 / TS18046 / TS2591 / TS7006 / TS7026 /
+  TS2875. Not one was a doc-vs-SDK divergence.
+
+  The React Hooks block near the end is fenced tsx, not typescript, because it
+  IS JSX: the gate writes every block out with its fence's own extension, and
+  JSX in a .ts file is a syntax error. That reaches past this page — tsc stops
+  at syntax errors and never runs the semantic pass, so one such block would
+  suppress type-checking for every marked block across skills/ and
+  content/docs/ (measured here: 128 semantic diagnostics collapse to 0). Please
+  do not retag it back.
+
+  The marker becomes worth adding here the day the docs surface can resolve
+  `@objectstack/client` — the same condition recorded in
+  content/docs/kernel/runtime-services/data-service.mdx.
+*/}
+
 ## Quick Start
 
 ```typescript
@@ -400,7 +435,9 @@ try {
 // `{ status: 'paused', runId, screen }`; render the screen, then resume the run
 // with the collected values. A wizard pauses again for each further step.
 const run = await client.automation.execute('convert_lead', { params: { recordId } });
-if (run.status === 'paused') {
+// `execute` returns `AutomationResult`, on which `runId` and `screen` are
+// OPTIONAL — a run that COMPLETED carries neither — so narrow before resuming.
+if (run.status === 'paused' && run.runId) {
   await client.automation.resume('convert_lead', run.runId, {
     inputs: { account_name: 'Radium Labs' },
   });
@@ -438,7 +475,10 @@ await client.shareLinks.revoke(link.token);
 
 // Security (admin) — resolve package audience-binding suggestions (ADR-0090)
 const { suggestions } = await client.security.suggestedBindings.list({ status: 'pending' });
-await client.security.suggestedBindings.confirm(suggestions[0].id);
+// A suggestion ROW is deliberately open (`Record<string, unknown>`) — its column
+// set belongs to the backing object, not the contract. Read the fields you know
+// (`id`, `status`, `package_id`) and narrow them at the point of use.
+await client.security.suggestedBindings.confirm(String(suggestions[0].id));
 
 // Storage — File upload and management
 await client.storage.upload(fileData, 'user');
@@ -631,7 +671,7 @@ For React applications, use `@objectstack/client-react`:
 pnpm add @objectstack/client-react
 ```
 
-```typescript
+```tsx
 import { ObjectStackProvider, useClient, useQuery } from '@objectstack/client-react';
 import { ObjectStackClient } from '@objectstack/client';
 

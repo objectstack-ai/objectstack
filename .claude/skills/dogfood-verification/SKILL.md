@@ -69,9 +69,11 @@ dev 工作树、dev-server 端口、preview 浏览器全是**共享的**:并行�
       把 specifier 拉回源码)的测试都中招,普通单元套件一样(这批 pair 的台账是
       `scripts/check-test-source-alias.mjs` 的 `KNOWN_UNALIASED_TEST_IMPORTS`)。忘记重
       建*修复*是假红:费一圈,但会被发现。忘记重建**消融**跑的是突变前的构建,套件保持
-      **绿**,而这份绿会被记成「测试已被证明有区分度」—— 给一条可能根本红不了的断言发了
+      **绿**,而这份绿会被记成「测试已被证明有区分度」—— 给一条可能根本红不了的断言
+      发了
       证书,之后任何 CI 都暴露不了它(CI 构建正确,在那边永远绿);消融本就为证明**新门
-      禁能失败**时更毒 —— 那份绿读作「门禁没触发」,指向门禁坏了而不是夹具坏了,会诱人
+      禁能失败**时更毒 —— 那份绿读作「门禁没触发」,指向门禁坏了而不是夹具坏了,会诱
+      人
       去弱化一条本来正常的门禁(实测:plugin-auth → core;plugin-email →
       platform-objects 则是消融后 375 试假绿、重建后 4 红)。每一腿(mutate **与**
       restore)都是:改动 → `pnpm --filter <pkg> build` → **证明它到达了 `dist/`** → 才
@@ -110,7 +112,7 @@ dev 工作树、dev-server 端口、preview 浏览器全是**共享的**:并行�
 - [ ] 确认页面渲染完成*之后*(先截图,再查 selector),DOM dump 没问题。
 - [ ] **门的两侧都要测**:`requiresService`/`requiresObject`/权限门要在依赖存在*与*
       缺席两种状态下各验一次。
-- [ ] 服务端是权威可见性门(ADR-0057 D10)—— 客户端过滤只是「礼貌」。元数据开关不改
+- [ ] 服务端是权威可见性门(ADR-0124 D1)—— 客户端过滤只是「礼貌」。元数据开关不改
       UI 时,先查强制在服务端(框架,可在本仓修)还是客户端(objectui console,另一
       个仓)。
 - [ ] 用 `preview_screenshot`(API 改动用 `preview_network`)向用户证明;loading

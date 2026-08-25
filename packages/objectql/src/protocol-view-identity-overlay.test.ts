@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { assertEngineDeleteDispatch } from './engine-delete-dispatch.js';
 import { assertEngineUpdateDispatch } from './engine-update-dispatch.js';
+import { assertEngineFindOnePredicate } from './engine-findone-predicate.js';
 
 /**
  * #2555 — a console personalization PUT (grid column sort, inline edit, …)
@@ -65,6 +66,12 @@ function makeStubEngine(registryViews: Record<string, unknown> = {}) {
     };
     const engine: any = {
         async findOne(_t: string, opts: { where: Record<string, unknown> }) {
+            // [#11957] Pinned to ObjectQL.findOne's OWN #4419 predicate: `findOne`
+            // applies limit: 1, so a query naming no record returns an ARBITRARY row
+            // and the engine REFUSES it. A double that answers it anyway is how
+            // #11767 shipped a bootstrap bypass that was inert on every real
+            // deployment while a 641-line unit matrix stayed green.
+            assertEngineFindOnePredicate(_t, opts);
             return findRow(opts.where)?.row ?? null;
         },
         async find(_t: string, opts: { where: Record<string, unknown> }) {

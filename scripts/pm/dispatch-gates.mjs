@@ -2503,6 +2503,10 @@ export const CHANGE_KIND_GATES = [
         name: 'check:i18n',
         why: "it re-extracts every owning package's translation bundles and fails on drift, so any edit that changes what the extractor emits (an object definition, a label, the config itself) moves it — regenerate with `node scripts/check-i18n-bundles.mjs --write`",
       },
+      {
+        name: 'check:i18n-stale-fill',
+        why: "REVISING an existing source string (a label, description or help text) is the move `check:i18n` cannot see: the extractor's merge fills gaps only, so the regeneration rewrites `en` and LEAVES the previous source text in every translated locale — in sync by key, green gate, superseded draft served forever (#11671). This ratchet fails when a NEW leaf goes stale that way. It needs no build. If your revision stranded a leaf, re-translate it and commit the bundle; regenerating does NOT fix it, because a present-but-stale string is not a gap",
+      },
     ],
   },
   {
@@ -5037,8 +5041,16 @@ function selfTest() {
   // stayed green through it — every prefix-preserving rename is invisible to a
   // substring, which is the one class of rot the STALE branch exists to catch.
   const i18nHit = changeKindLines(['packages/services/service-messaging/src/objects/http-delivery.object.ts'], resolved);
-  t('an owning-package path emits the i18n convention section', i18nHit.length === 2 && i18nHit[0].includes('owns an i18n-extract.config.ts'));
+  // One kind line plus one line per gate in the entry — TWO gates since #11671
+  // added the stale-fill ratchet to the same file surface. The count is pinned
+  // (not `>= 1`) so a gate silently dropped from the entry fails here.
+  t('an owning-package path emits the i18n convention section', i18nHit.length === 3 && i18nHit[0].includes('owns an i18n-extract.config.ts'));
   t('the i18n section names check:i18n exactly, runnably', i18nHit.some((l) => l.includes('- pnpm check:i18n   —')));
+  // #11671: the two gates answer DIFFERENT moves on the same surface — check:i18n
+  // sees a key set change, this one sees a source string REVISED under a stale
+  // translated leaf. The delimiter anchor keeps the check:i18n pin above from
+  // matching this line by prefix, and vice versa.
+  t('the i18n section also names check:i18n-stale-fill, runnably', i18nHit.some((l) => l.includes('- pnpm check:i18n-stale-fill   —')));
   t('a path outside every owning package emits no i18n section', !changeKindLines(['packages/objectql/src/engine.ts'], resolved).some((l) => l.includes('check:i18n')));
 
   // ── The metadata-form edge (#9116) ────────────────────────────────────────
