@@ -519,8 +519,14 @@ function normalizeActionResult<T>(payload: any): { success: boolean; data?: T; e
 }
 
 /**
- * Query-string options for `meta.saveItem` on BOTH clients — the unscoped
+ * Write options for `meta.saveItem` on BOTH clients — the unscoped
  * `ObjectStackClient.meta` and {@link ScopedProjectClient.meta}.
+ *
+ * Named for the WRITE, not for the query string: three members ride the query
+ * string and `ifMatch` rides a request HEADER (#11713). One bag per write
+ * whatever carrier each member takes — the same shape the other first-party
+ * client's `MetadataClientSaveOptions`
+ * (`@object-ui/data-objectstack`) already carries, and for the same reason.
  *
  * ONE exported type deliberately shared by the two declarations, rather than
  * an inline literal copied into each. The two `saveItem`s are the same method
@@ -529,7 +535,7 @@ function normalizeActionResult<T>(payload: any): { success: boolean; data?: T; e
  * it), and a bag spelled twice is a divergence waiting to be introduced by
  * whoever next extends only the copy they happened to open.
  *
- * ## Why these three, and why they are the ones that exist
+ * ## Why these three QUERY parameters, and why they are the ones that exist
  *
  * `PUT /api/v1/meta/:type/:name` reads exactly these three query parameters,
  * and until this type existed the SDK sent NONE of them — `saveItem` built a
@@ -558,6 +564,39 @@ function normalizeActionResult<T>(payload: any): { success: boolean; data?: T; e
  * repair this from the message side — the parameter had to become reachable.
  */
 export interface SaveMetaItemOptions {
+    /**
+     * `If-Match: <version>` — the ADR-0008 optimistic-concurrency token, and
+     * the one member here that is NOT a query parameter.
+     *
+     * Echo back the `version` a previous `saveItem` (or `publishItem`)
+     * resolved, and a concurrent edit is refused with `409
+     * metadata_conflict` instead of silently overwriting the other author's
+     * write. Omit for the last-write-wins behaviour every call had before
+     * this member existed — the pin is opt-in on the door too.
+     *
+     * Opaque: echo it verbatim, never parse it. `SaveMetaItemResponse.version`
+     * says so in the contract itself — currently `sha256:<64 hex chars>`, with
+     * the format explicitly not promised.
+     *
+     * Only a non-empty token reaches the wire. `undefined` and `''` both OMIT
+     * the header rather than sending an empty `If-Match`, which is not merely
+     * tidier: the door reads the header's PRESENCE as "pin this write", so an
+     * empty spelling would pin the write against the empty string and refuse
+     * every save with a 409 the caller never asked for.
+     *
+     * ✅ REACHES BOTH DOORS — unlike `mode` below. The compound-name twin
+     * `PUT /meta/:type/:section/:name` reads `if-match` and strips ETag-style
+     * quotes exactly as the single-segment door does, so
+     * `saveItem('object', 'views/all_leads', item, { ifMatch })` is
+     * OCC-guarded like any other save.
+     *
+     * Same member name, same header, same truthy guard as the sibling
+     * first-party `@object-ui/data-objectstack` `MetadataClient.save`, whose
+     * read surface names this token `checksum` — one content hash, one
+     * behaviour, two clients. `data.update` / `data.delete` on this same
+     * client carry it under the same name too.
+     */
+    ifMatch?: string;
     /**
      * `?force=true` — acknowledge and proceed past the Phase 3a
      * destructive-change refusal (`409 DESTRUCTIVE_CHANGE`), whose message
@@ -633,6 +672,29 @@ function metaSaveQuery(options?: SaveMetaItemOptions): string {
     if (options.mode === 'draft') params.set('mode', 'draft');
     const qs = params.toString();
     return qs ? `?${qs}` : '';
+}
+
+/**
+ * Compose the `meta.saveItem` request headers — the ONE builder both
+ * `saveItem` declarations call, for the same reason {@link metaSaveQuery} is
+ * one function: the twins must not be able to drift in what they put on the
+ * wire.
+ *
+ * Returns `undefined` (never `{}`) when nothing is set, so the call site can
+ * omit the `headers` key entirely and an options-less save stays
+ * BYTE-IDENTICAL to what it sent before this existed.
+ *
+ * ⛔ `ifMatch` must never be added to {@link metaSaveQuery}. It is a header;
+ * neither PUT door reads an `?ifMatch=` parameter, so a query spelling would
+ * look set at the call site and protect nothing — the exact failure #11713
+ * exists to close, one carrier over.
+ */
+function metaSaveHeaders(options?: SaveMetaItemOptions): Record<string, string> | undefined {
+    if (!options?.ifMatch) return undefined;
+    // Verbatim and UNQUOTED. The door tolerates ETag-style quotes by stripping
+    // them, but the token a save resolves carries none, and wrapping it here
+    // would put bytes on the wire the sibling first-party client does not send.
+    return { 'If-Match': String(options.ifMatch) };
 }
 
 export class ObjectStackClient {
@@ -844,9 +906,11 @@ export class ObjectStackClient {
      * @param item - The metadata content to save
      *
      * The resolved `version` is the ADR-0008 optimistic-concurrency token:
-     * echo it back as the `If-Match` request header on the next write to the
-     * same item and a concurrent edit is reported as 409 `metadata_conflict`
-     * instead of silently overwriting. It is nameable here only because
+     * pass it back as `options.ifMatch` on the next write to the same item —
+     * this method sends it as the `If-Match` request header — and a concurrent
+     * edit is reported as 409 `metadata_conflict` instead of silently
+     * overwriting. Until #11713 that instruction named a header the SDK had no
+     * argument for, so a first-party caller who followed it overwrote anyway. It is nameable here only because
      * `SaveMetaItemResponseSchema` declares the full body since #5745 — the
      * declaration used to stop at `{ success, message }`, and annotating
      * against that subset would have hidden the OCC carrier (#5545).
@@ -867,12 +931,18 @@ export class ObjectStackClient {
         // `…nameforce=true`. This value carries its `?`; the distinct name
         // says so without the reader having to go and look.
         const query = metaSaveQuery(options);
+        // The OCC token rides a HEADER, not the query string — see
+        // {@link metaSaveHeaders}. `undefined` when unset, and the spread then
+        // omits the `headers` key altogether, so a save without `ifMatch`
+        // hands `fetch` the same `init` it always did.
+        const headers = metaSaveHeaders(options);
         // `type`/`name` stay UNENCODED — a compound name's slash must survive
         // so the request reaches `PUT /meta/:type/:section/:name` instead of
         // collapsing onto the 3-segment route (pinned in client.test.ts).
         const res = await this.fetch(`${this.baseUrl}${route}/${type}/${name}${query}`, {
             method: 'PUT',
-            body: JSON.stringify(item)
+            body: JSON.stringify(item),
+            ...(headers ? { headers } : {}),
         });
         return this.unwrapResponse<SaveMetaItemResponse>(res);
     },
@@ -1124,8 +1194,9 @@ export class ObjectStackClient {
      * through unencoded, like `getItem`.
      *
      * The resolved `version` is the ADR-0008 optimistic-concurrency token, the
-     * same carrier `saveItem` returns and with the same job: echo it back as
-     * `If-Match` on the next write to the item. It is nameable here only since
+     * same carrier `saveItem` returns and with the same job: pass it back as
+     * `saveItem`'s `options.ifMatch`, which sends it as `If-Match` on the next
+     * write to the item. It is nameable here only since
      * #7294, which declared `PublishMetaItemResponseSchema` — this method
      * resolved to `any` before that, because the publish door had no
      * declaration at all for a return type to point at.
@@ -1540,7 +1611,8 @@ export class ObjectStackClient {
      * single-item declaration; this method resolved to `any` before that.
      * The batch is all-or-nothing (ADR-0067 D2): `success: false` on a 200
      * means NOTHING landed — read `failed[]`. Each `published[]` element's
-     * `version` is the ADR-0008 OCC token (echo as `If-Match`), and the
+     * `version` is the ADR-0008 OCC token (pass to `saveItem` as
+     * `options.ifMatch`, which sends it as `If-Match`), and the
      * conditional receipts (`seedApplied` / `materializeApplied` /
      * `unhiddenApps` / `unhideError` / `rebindError`) each report their own
      * outcome: a 200 does not mean the data plane or the visibility flip
@@ -5495,13 +5567,15 @@ export class ScopedProjectClient {
       return this.parent._unwrap<GetMetaItemResponse>(res);
     },
     /**
-     * Carries the ADR-0008 OCC token in `version` — see the unscoped twin.
+     * Carries the ADR-0008 OCC token in `version` — see the unscoped twin,
+     * and send it back here as `options.ifMatch`.
      *
      * `options` is the SAME {@link SaveMetaItemOptions} bag the unscoped twin
      * takes, and reaches the SAME handler: the scoped mount is not a second
      * implementation, it is one `registerForBase` call replayed against
      * `/environments/:environmentId` (see `RestServer`), so this door reads
-     * `?force` / `?package` / `?mode` byte-identically. A bag on only one of
+     * `?force` / `?package` / `?mode` — and the `If-Match` header —
+     * byte-identically. A bag on only one of
      * the two clients would be a fresh divergence of the kind #7019 rules
      * against, not half a fix.
      */
@@ -5513,9 +5587,13 @@ export class ScopedProjectClient {
     ): Promise<SaveMetaItemResponse> => {
       // `query`, not `qs` — it carries its own `?`; see the unscoped twin.
       const query = metaSaveQuery(options);
+      // Header half of the same bag, through the same one builder the twin
+      // calls — see {@link metaSaveHeaders}.
+      const headers = metaSaveHeaders(options);
       const res = await this.parent._fetch(this.url(`/meta/${type}/${name}${query}`), {
         method: 'PUT',
         body: JSON.stringify(item),
+        ...(headers ? { headers } : {}),
       });
       return this.parent._unwrap<SaveMetaItemResponse>(res);
     },

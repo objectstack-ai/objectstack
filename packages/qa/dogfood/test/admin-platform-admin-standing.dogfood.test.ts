@@ -31,7 +31,13 @@
 //     `/admin/stop-impersonating` and silently detach the #8243 bearer-rotation
 //     hook. It is a better-auth PLUGIN endpoint with only the authorization
 //     predicate replaced, and since #11686 that predicate is the consolidated
-//     authority `hasPlatformAdminStanding`.
+//     authority `hasPlatformAdminStanding`. `has-permission` (#11900, ruled
+//     2026-08-25) is a third shape: a permission QUERY, raw-mounted WITHOUT
+//     the refusing judge — the platform admin's query is answered from the
+//     vendor's own access-control statements with only the identity signal
+//     replaced, and every other caller and body is delegated so the plain
+//     member's negative answer and the vendor's validation bytes stand
+//     (`admin-has-permission-endpoint.ts`).
 //
 //   ⭐ REFUSED BY DESIGN — the eight routes below answer a platform admin
 //     `403 YOU_ARE_NOT_ALLOWED_TO_*`, and that is a RULED OUTCOME, not a gap
@@ -209,6 +215,12 @@ function refusedByDesignFor(targetUserId: string): Record<string, RefusalSpec> {
 const ADMITTED = [
   'POST /api/v1/auth/admin/ban-user',
   'POST /api/v1/auth/admin/unban-user',
+  // #11900 — a permission QUERY, not an operation: the mount answers a
+  // platform admin from the ADR-0068 predicate over the vendor's own
+  // statements and never refuses anyone (non-admins are delegated to the
+  // vendor's own negative answer, which the sibling file pins). Its "answer,
+  // not refusal" contrast is pinned individually below.
+  'POST /api/v1/auth/admin/has-permission',
   'POST /api/v1/auth/admin/create-user',
   'POST /api/v1/auth/admin/set-user-password',
   'POST /api/v1/auth/admin/unlock-user',
@@ -227,8 +239,9 @@ const ADMITTED = [
  * with WHY, so this is a classification and not a mute button.
  */
 const NOT_AN_AUTHORIZATION_ANSWER: Record<string, string> = {
-  'POST /api/v1/auth/admin/has-permission':
-    'a permission QUERY, not an operation. It answers 200 {success:false} to the platform admin too, because the vendor evaluates it against the legacy role scalar — the same mismatch, but the shape is an answer, not a refusal',
+  // (`has-permission` moved OUT of this classification by #11900: the mount
+  // now answers the platform admin from the ADR-0068 predicate, so its 200 IS
+  // an authorization answer and it lives in ADMITTED, pinned both ways below.)
   'POST /api/v1/auth/admin/stop-impersonating':
     'self-scoped: it ends the CALLER\'s own impersonation. A non-impersonating caller — admin or not — gets 400',
   'GET /api/v1/auth/admin/oauth2/resources': 'oidcProvider plugin not enabled at this boot — 404 to everyone',
@@ -478,6 +491,37 @@ describe('#9482: what an ObjectStack platform admin gets from every /admin/ rout
       ),
     );
     expect(client.disabled, 'toggle-disabled answered 200 but the stored row did not move').toBeTruthy();
+  }, 300_000);
+
+  it('C-11900 — has-permission gives the platform admin a REAL authorization answer, both directions', async () => {
+    // ⭐ Before #11900 this exact query answered the platform admin
+    // `200 {"error":null,"success":false}` — byte-identical to a plain
+    // member, because the vendor evaluated the legacy role scalar ADR-0068 D2
+    // retired. The identity control above has already proven the subject
+    // carries NO scalar, so a `true` here can only be the ADR-0068 mount.
+    const granted = await expectAdmitted(
+      'POST /api/v1/auth/admin/has-permission',
+      { permissions: { user: ['list'] } },
+      'has-permission moved onto an ObjectStack raw mount answering from the ADR-0068 predicate by #11900',
+    );
+    expect(granted.json.error, `has-permission granted-query error slot: ${granted.body}`).toBeNull();
+
+    // ⛔ The query contrast — the predicate decides WHO is an admin; the
+    // vendor's own statements still decide WHAT an admin may do. An UNGRANTED
+    // action must stay `false` for the very same admin, or the mount is an
+    // unconditional echo of the predicate — a new wrong-200 pointing the
+    // other way. (The CALLER contrast — the plain member's own
+    // `success:false` on the granted query — is the sibling non-admin file's
+    // standing pin and must stay green beside this one.)
+    const ungranted = await fire('POST /api/v1/auth/admin/has-permission', {
+      permissions: { user: ['impersonate-admins'] },
+    });
+    expect(ungranted.status, `has-permission ungranted-query: ${ungranted.body}`).toBe(200);
+    expect(
+      ungranted.json.success,
+      'an action the vendor admin role does not grant must still answer the platform admin false — ' +
+        `a true here means the answer stopped being an evaluation: ${ungranted.body}`,
+    ).toBe(false);
   }, 300_000);
 
   // ── 2. THE BY-DESIGN REFUSALS ─────────────────────────────────────────────

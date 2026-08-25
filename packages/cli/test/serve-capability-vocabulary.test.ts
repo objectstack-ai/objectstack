@@ -92,6 +92,29 @@ describe('PLATFORM_PLUGIN_WIRED_RUNTIMES vs providers + serve resolver (#11263)'
     expect(row.edition).toBe('enterprise');
   });
 
+  // #11614 — the other half of the pin above, and the half that was missing.
+  // That one reads the roster with a literal spelled HERE, so it proves the
+  // roster has a row; it says nothing about the name `serve` actually resolves.
+  // Until this pin, that name was a bare literal in serve.ts under no check at
+  // all: rename the roster key, or mistype the literal, and both sides stay
+  // green while boot reaches for a package that does not exist and the fatal
+  // message tells operators to install it.
+  it('the package name serve resolves IS a roster key — not a second, unchecked copy of it (#11614)', () => {
+    expect(
+      Object.keys(PLATFORM_PLUGIN_WIRED_RUNTIMES),
+      `serve loads '${Serve.ORGANIZATIONS_RUNTIME_PKG}', which PLATFORM_PLUGIN_WIRED_RUNTIMES does not declare. ` +
+        'The roster is the single source for whether an out-of-repo @objectstack/* package is real and where ' +
+        'it ships from (#10921); a runtime that prints a package name at operators must name a row in it.',
+    ).toContain(Serve.ORGANIZATIONS_RUNTIME_PKG);
+
+    // Provenance, read through serve's own spelling rather than a literal: the
+    // row this command's remedy text describes is the enterprise one.
+    const row = PLATFORM_PLUGIN_WIRED_RUNTIMES[Serve.ORGANIZATIONS_RUNTIME_PKG];
+    expect(row.edition, `edition drift for the runtime serve loads ('${Serve.ORGANIZATIONS_RUNTIME_PKG}')`).toBe(
+      'enterprise',
+    );
+  });
+
   it('every enterprise-edition provider package has a roster row — enterprise means plugins[]-wired, by definition', () => {
     // CapabilityEdition's own definition: `enterprise` = "a separately-licensed
     // enterprise package the app installs and wires in via `plugins[]`". So an
