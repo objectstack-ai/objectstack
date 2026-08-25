@@ -28,6 +28,14 @@ unrecognised `mode=`, an empty `mode=` and no `mode` at all are all unchanged:
 they publish, exactly as before. The spelling test is the twin's, `draft`
 case-insensitive.
 
+⚠️ **The draft you can now stage has no per-item REST promotion door in this
+arity.** `POST /meta/:type/:name/publish` is mounted for single-segment names
+only, while its read twin `GET /meta/:type/:section/:name/published` is mounted
+for both — so a compound-named draft is writable and readable over REST and not
+promotable there. Until that route exists, promote through
+`POST /packages/:id/publish-drafts` (whole-package) or the runtime dispatcher's
+own `meta.publish` verb. Tracked in #11932; this release does not change it.
+
 **2. A repeated `?mode` is now REFUSED where it was accepted.** This narrows
 what the door takes. `?mode=draft&mode=draft` arrives as an array; the
 `typeof === 'string'` test is false for it, so before this change it fell back
