@@ -383,6 +383,18 @@ export const ROUTE_LEDGER: readonly RouteLedgerEntry[] = [
   // what was wrong was that no ledger said it existed.
   { route: 'POST /actions//:action', domain: '/actions', disposition: 'sdk', client: 'actions.invokeGlobal',
     note: 'the object-less spelling of the global-action call (#3913) — same handler and same `global` key as the row above, reached without naming an object' },
+  { route: 'POST /actions/_activation/:object/:action', domain: '/actions', disposition: 'server-only',
+    note: '[#12160] ADR-0126 §8 item 2 — enable/disable ONE packaged action, the only non-invocation shape this domain serves. '
+      + 'Body `{ enabled?: boolean }`; it writes a `sys_metadata_activation` row and nothing else (⛔ no definition write, ⛔ no clone: '
+      + 'the action-clone half is unchartered). Two authority tiers, the same pair `POST /automation/:name/toggle` carries: '
+      + '`manage_metadata`, then the ADR-0126 §5 posture rule requiring the platform operator in `group`/`isolated` — one shared '
+      + 'implementation in `domains/activation-gate.ts`, not a second copy. The `_activation` segment is RESERVED rather than a deeper '
+      + 'path segment because machine names cannot begin with `_` (`SnakeCaseIdentifierSchema`), so it can collide with no object, action '
+      + 'or record id. NOT JS-SDK surface on this leg, and that is stated rather than left as an open gap: the operational driver '
+      + 'ADR-0126 §7.4 charters is the Setup page for packaged metadata — a console surface that calls the platform API directly, the '
+      + 'posture `GET /meta/types` already carries. ⚠️ Read it as scope, not as a closed question: this card declares no client method '
+      + 'and implies none (`automation.toggle` is the flow analog, so a later card may well want one); adding one reclassifies this row '
+      + 'to `sdk`. Pinned in `domains/action-activation-posture-gate.test.ts`' },
 
   // ── apps (declarative endpoints — the mount seam, NOT a dispatch() route) ──
   // Read this row literally; it describes what is WIRED, not what is planned.

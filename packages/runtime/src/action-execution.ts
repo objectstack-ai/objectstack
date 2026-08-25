@@ -408,6 +408,90 @@ export function actionPermissionError(_deps: ActionExecutionDeps, actionDef: any
 }
 
 /**
+ * [ADR-0126 §8 item 2] The activation refusal a DISABLED packaged action is
+ * answered with — `409 ACTION_DISABLED`.
+ *
+ * ## Why 409, and why its own code
+ *
+ * The artifact exists and is well-formed; only its current STATE conflicts with
+ * running it, and flipping the switch makes the identical request succeed —
+ * 409's meaning, and the same reading `FLOW_DISABLED` got in the #9378 table.
+ * The code is the action's own rather than a borrowed `FLOW_DISABLED`: a
+ * `script` action refused under a code naming a flow would send an operator
+ * looking for a flow that does not exist, and a machine-readable surface must
+ * not lie about which artifact it is talking about (Route & surface ownership
+ * rule 4). It joins the `*_DISABLED` family already registered in the ADR-0112
+ * ledger (`FLOW_DISABLED`, `OBJECT_API_DISABLED`, `OBJECT_PACKAGE_DISABLED`) —
+ * one census row, no new condition class.
+ */
+export const ACTION_DISABLED_CODE = 'ACTION_DISABLED';
+export const ACTION_DISABLED_STATUS = 409;
+
+/** The shape both doors serve — the wire envelope's three fields (ADR-0112). */
+export interface DisabledActionRefusal {
+    code: typeof ACTION_DISABLED_CODE;
+    status: typeof ACTION_DISABLED_STATUS;
+    message: string;
+}
+
+/**
+ * [ADR-0126 §8 item 2] THE CONSULT POINT for the action activation ledger —
+ * asked by every door that dispatches a DECLARED action.
+ *
+ * ## Where this sits, and why it is not one seam deeper
+ *
+ * The flow leg could put its consult at `execute()`, "the one seam every entry
+ * path crosses". Actions have no such seam that can answer the question: the
+ * two per-type primitives below it (`executeRegisteredAction` →
+ * `ql.executeAction`, and `dispatchFlowAction`) are addressed by HANDLER KEY
+ * and by target flow name respectively, and ADR-0110 D2 is explicit that a
+ * registration key is NOT an action's identity ("`AppPlugin` auto-registers
+ * body actions under `name`, while user code registers a target-bound script
+ * action under `target`"). The ledger addresses the declarative NAME, so the
+ * consult belongs exactly where a resolved DECLARATION exists: the REST
+ * `/actions` door and the MCP `run_action` bridge, each pinned by its own test.
+ * Placing it lower would silently miss every target-bound action — a gate that
+ * looks present and is not.
+ *
+ * ⚠️ ObjectQL's `ScopedRepo.execute()` — a hook/action BODY reaching another
+ * handler in-process via `ctx.api.object(x).execute(...)` — is the third
+ * `executeAction` caller and is deliberately NOT a consult point: it dispatches
+ * by key with no declaration, carries no caller identity, and is package code
+ * calling package code (the class ADR-0126 §2 keeps outside the model for
+ * `hook`). Recorded rather than left to be discovered.
+ *
+ * ## Ordering: authorization first, activation second
+ *
+ * Both doors call this AFTER the ADR-0066 D4 capability gate. An unentitled
+ * caller therefore learns nothing about which packaged actions this
+ * installation has switched off — the same reason `/automation`'s gates run
+ * ahead of its service probe (a 403 must not become an oracle).
+ *
+ * Returns `undefined` when the action may run. An engine that cannot answer
+ * (no `isActionEnabled` — a host on an older engine, or a test double) yields
+ * `undefined` too: absence of a ledger means the packaged default, ACTIVE
+ * (ADR-0126 §4), which is what a stock boot has always done.
+ */
+export function disabledActionRefusal(
+    _deps: ActionExecutionDeps,
+    ql: any,
+    actionDef: any,
+): DisabledActionRefusal | undefined {
+    const name = actionDef?.name;
+    if (typeof name !== 'string' || name === '') return undefined;
+    if (typeof ql?.isActionEnabled !== 'function') return undefined;
+    if (ql.isActionEnabled(name) !== false) return undefined;
+
+    // The SENTENCE is the engine's (`describeDisabledAction`), so both doors
+    // state one refusal instead of two that agree today; the fallback covers an
+    // engine that answers the boolean but not the prose.
+    const message = typeof ql.describeDisabledAction === 'function'
+        ? String(ql.describeDisabledAction(name))
+        : `Action '${name}' is disabled for this installation (ADR-0126 §8).`;
+    return { code: ACTION_DISABLED_CODE, status: ACTION_DISABLED_STATUS, message };
+}
+
+/**
  * [#2849 / ADR-0011] AI-exposure gate for the MCP action surface. Returns a
  * human-readable error string unless the action's author explicitly opted it
  * into the AI surface with `ai.exposed: true`, or `null` when exposed.
@@ -1159,6 +1243,28 @@ export async function invokeBusinessAction(deps: ActionExecutionDeps,
     // ADR-0066 D4 capability gate — same declaration the REST route enforces.
     const gateError = actionPermissionError(deps, action, ec, objectName);
     if (gateError) throw new Error(gateError);
+
+    // [ADR-0126 §8 item 2] ACTIVATION CONSULT — door 2 of 2. A packaged action
+    // the installation switched off is refused here, before the param contract
+    // and before the subject record is read: nothing about a disabled action
+    // should run, and an agent must not be able to probe its param shape.
+    //
+    // The engine is resolved for this — the same `getObjectQL` the script
+    // branch below uses — because the projection lives on it (ADR-0110 D5's
+    // "the engine plugin is the component unconditionally present wherever
+    // actions execute"). A flow-type action is refused here too: the switch is
+    // the ACTION's, independent of whatever its target flow's own ledger row
+    // says, so this must sit AHEAD of the type branch.
+    {
+        const activationEngine: any = await deps.getObjectQL(requestContext, envId).catch(() => undefined);
+        const refusal = disabledActionRefusal(deps, activationEngine, action);
+        // Thrown with `code` + `status` so the ADR-0112 envelope survives the
+        // bridge: `resolveThrownHttpError` reads both, and the MCP tool surface
+        // gets a clean tool-error instead of a 500 (the #7535/#8055 shape).
+        if (refusal) {
+            throw Object.assign(new Error(refusal.message), { code: refusal.code, status: refusal.status });
+        }
+    }
 
     // [ADR-0104 D2] Declared param contract — same enforcement as the REST
     // route. AI/MCP is the caller most likely to send a plausible-but-wrong

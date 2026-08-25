@@ -251,6 +251,22 @@ export const ERROR_CODE_LEDGER = {
     'VALIDATION_FAILED',          // record-level validation; carries `fields[]` (#3977)
   ],
   '@objectstack/runtime': [
+    // [ADR-0126 §8 item 2] a packaged ACTION this installation switched off,
+    // refused at dispatch — the activation-ledger consult in
+    // `action-execution.ts`, answered 409 by BOTH action doors (the REST
+    // `/actions/:object/:action` route and the MCP `run_action` bridge, which
+    // throws it with `status`/`code` declared so `resolveThrownHttpError`
+    // serves the same envelope). Never carries `status: 'failed'`: nothing
+    // dispatched.
+    //
+    // ⛔ NOT a re-spelling of `FLOW_DISABLED`, and the distinction is the point
+    // of registering it: a `script` action refused under a code naming a flow
+    // sends an operator hunting a flow that does not exist. It joins the
+    // `*_DISABLED` family (`OBJECT_API_DISABLED`, `OBJECT_PACKAGE_DISABLED`,
+    // `FLOW_DISABLED`) — each names WHICH thing is off, which is what an
+    // operator acts on, and none of them is a synonym of `RESOURCE_CONFLICT`
+    // in the detector's sense or in meaning.
+    'ACTION_DISABLED',
     'EXPIRED_OR_REVOKED',         // share link
     // [#9415] the trigger door refused to dispatch a flow that is switched off
     // — `respondToFlowTrigger` (`domains/automation.ts`) reads the engine's

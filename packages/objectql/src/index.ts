@@ -15,6 +15,22 @@ export {
 } from './action-governance.js';
 export type { GovernanceLogger } from './action-governance.js';
 
+// [ADR-0126 §8] Packaged-action activation ledger — the row contract, the two
+// stores and the engine-held projection. The dispatch doors in
+// @objectstack/runtime consult the projection through the engine; the plugin
+// below attaches the durable store.
+export {
+  ACTION_ACTIVATION_TABLE,
+  InMemoryActionActivationStore,
+  ObjectStoreActionActivationStore,
+  ActionActivationProjection,
+} from './action-activation.js';
+export type {
+  ActionActivationRow,
+  ActionActivationStore,
+  ActionActivationStoreEngine,
+} from './action-activation.js';
+
 // Export Registry
 export { 
   SchemaRegistry,

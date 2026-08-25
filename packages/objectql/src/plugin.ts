@@ -10,6 +10,14 @@ import { LifecycleService } from './lifecycle/lifecycle-service.js';
 import { lifecycleSettingsManifest } from './lifecycle/lifecycle-settings.js';
 import type { DanglingReferenceAuditOptions } from './integrity/dangling-reference-audit.js';
 import { runActionGovernanceInventory } from './action-governance.js';
+// [ADR-0126 §8] The packaged-action activation ledger's durable store. The
+// engine holds the projection; this plugin is what attaches the store and
+// hydrates it once the deployment has finished registering objects.
+import {
+  ObjectStoreActionActivationStore,
+  ACTION_ACTIVATION_TABLE,
+  type ActionActivationStoreEngine,
+} from './action-activation.js';
 import type { IMetadataService } from '@objectstack/spec/contracts';
 import type { ServiceObject } from '@objectstack/spec/data';
 
@@ -496,6 +504,17 @@ export class ObjectQLPlugin implements Plugin {
         await this.reconcileFederatedBindings(ctx);
         await this.resyncAuthoredHooks(ctx);
         await this.resyncAuthoredActions(ctx);
+        // [ADR-0126 §8] Apply the packaged-ACTION activation ledger to the
+        // registry that re-sync just finalized.
+        //
+        // Ordering is load-bearing, and for the same reason the inventory below
+        // runs here: after `resyncAuthoredActions` the set of dispatchable
+        // actions is final for this boot, so the audit line names the actions
+        // this process will actually refuse. Running at `kernel:ready` (not in
+        // `start()`) is what lets the ledger's own object — registered by
+        // whichever composition uses it, and schema-synced by its own start —
+        // exist before the table is read.
+        await this.hydrateActionActivations(ctx);
         // [ADR-0110 D5] Governance inventory — AFTER the authored-action
         // re-sync, so the registry it audits is final for this boot. It lived
         // in AppPlugin first, which is registered conditionally; on the `os
@@ -525,6 +544,12 @@ export class ObjectQLPlugin implements Plugin {
     ctx.hook('metadata:reloaded', async (payload?: unknown) => {
         await this.resyncAuthoredHooks(ctx);
         await this.resyncAuthoredActions(ctx);
+        // [ADR-0126 §8] Re-attempt the ledger attach — a no-op once attached.
+        // A reload is exactly when an object that was not registered at
+        // `kernel:ready` becomes visible, so this is what keeps that earlier
+        // "not there" from hardening into a recorded verdict nothing revisits
+        // (AGENTS.md, startup registry reads).
+        await this.hydrateActionActivations(ctx);
         // 15.1 third-party eval: an object added while `os dev` runs was
         // invisible until a manual restart. Two gaps compounded:
         //   1. MetadataPlugin's artifact reload ingests through
@@ -2248,6 +2273,116 @@ export class ObjectQLPlugin implements Plugin {
    * the same warning verbatim.
    */
   private lastGovernanceFingerprint = '';
+
+  /**
+   * [ADR-0126 §8] Whether the packaged-action activation ledger is attached to
+   * the engine yet. `false` is NOT a verdict — it means "not yet", and the
+   * attempt is repeated on every `metadata:reloaded`, which is when an object
+   * registered after `kernel:ready` becomes visible.
+   */
+  private actionActivationAttached = false;
+
+  /**
+   * [ADR-0126 §8 item 2] Attach the packaged-action activation ledger and load
+   * it into the engine's projection.
+   *
+   * ## The two failure modes are DIFFERENT facts and are logged differently
+   *
+   * 1. **The ledger table cannot be read at all** (`probe()` throws). The store
+   *    is NOT attached, so nothing can claim a durable flip: the write door
+   *    refuses loudly (503) at the moment an administrator tries one, instead
+   *    of reporting a switch that silently reverts on restart. That is a
+   *    FUNCTIONAL degradation — a capability this deployment does not have —
+   *    so it is `warn` per the AGENTS.md degradation-log-level rule. It is
+   *    deliberately not `error`: `sys_metadata_activation` is registered by
+   *    whichever composition consumes it (the automation service registers it
+   *    today), so an ObjectQL host without that composition is a legitimate
+   *    deployment, and an `error` on every one of them is exactly the
+   *    over-application that trains operators to skim `error`.
+   *
+   * 2. **The table reads, but the hydrate read fails.** Now rows may exist and
+   *    the projection is empty, so every action is ARMED — including any an
+   *    administrator switched off. Persisted state and runtime state disagree
+   *    while everything looks healthy, which is the durability arm of the same
+   *    rule: `error`, naming the consequence. The flow twin logs its identical
+   *    case identically.
+   *
+   * Never fatal either way: a boot that cannot read the ledger still serves,
+   * and says what it lost.
+   */
+  private async hydrateActionActivations(ctx: PluginContext): Promise<void> {
+    const ql: any = this.ql;
+    if (!ql || typeof ql.hydrateActionActivations !== 'function') return;
+    // Idempotent: once a ledger is attached, the projection IS the ledger and a
+    // later reload has nothing to redo.
+    if (this.actionActivationAttached) return;
+
+    // ── Is the ledger even part of this composition? ────────────────────────
+    // Asked of the object registry BEFORE any read, for two reasons:
+    //
+    //   1. `find` on a table that does not exist is a driver FAULT, and the
+    //      engine logs it at `error` on its way out. A composition that simply
+    //      does not register `sys_metadata_activation` (no automation service
+    //      — that plugin is the object's registrant today) would print that
+    //      error on every single boot, for a capability it never asked for.
+    //      An unregistered object is a fact this can read without touching the
+    //      datasource at all.
+    //   2. It splits the two cases the log levels below distinguish: absent
+    //      from this composition (ordinary, `debug`) versus registered but
+    //      unreadable (a real misconfiguration, `warn`).
+    //
+    // ⚠️ The absence is NOT recorded as a verdict (AGENTS.md "startup registry
+    // reads"): nothing is cached, and `metadata:reloaded` calls this again, so
+    // a ledger object registered later in the process is picked up then rather
+    // than being permanently written off by a read taken too early.
+    let registered = false;
+    try {
+      registered = Boolean(ql.registry?.getObject?.(ACTION_ACTIVATION_TABLE));
+    } catch {
+      registered = false; // a registry that cannot answer is not an answer
+    }
+    if (!registered) {
+      ctx.logger.debug?.(
+        `[ObjectQLPlugin] no ${ACTION_ACTIVATION_TABLE} object in this composition — packaged-action enable/disable ` +
+          'is not available here (ADR-0126 §8). Nothing was read; this is re-checked on the next metadata reload.',
+      );
+      return;
+    }
+
+    const store = new ObjectStoreActionActivationStore(ql as ActionActivationStoreEngine);
+    try {
+      await store.probe();
+      ql.setActionActivationStore(store);
+      this.actionActivationAttached = true;
+    } catch (e: unknown) {
+      ctx.logger.warn(
+        `[ObjectQLPlugin] ${ACTION_ACTIVATION_TABLE} is registered but could not be read — packaged-ACTION ` +
+          'enable/disable is UNAVAILABLE on this deployment (ADR-0126 §8): no action can be switched off, and an ' +
+          'attempt to flip one is refused rather than kept in process. Check that schema sync ran for its datasource; ' +
+          "the driver's own failure is in this record's meta.",
+        { error: e instanceof Error ? e.message : String(e) },
+      );
+      return;
+    }
+
+    try {
+      const off = await ql.hydrateActionActivations();
+      if (Array.isArray(off) && off.length > 0) {
+        ctx.logger.info(
+          `[ObjectQLPlugin] Activation ledger: ${off.length} packaged action(s) are switched off for this ` +
+            `installation and will be refused at dispatch — ${off.map((n: string) => `'${n}'`).join(', ')}.`,
+        );
+      }
+    } catch (e: unknown) {
+      ctx.logger.error(
+        '[ObjectQLPlugin] the packaged-action activation ledger could not be read — every declared action is ARMED, ' +
+          'including any an administrator switched off, and dispatch will look completely normal. The ledger read ' +
+          "failure is in this record's meta.",
+        undefined,
+        { error: e instanceof Error ? e.message : String(e) },
+      );
+    }
+  }
 
   /**
    * [ADR-0110 D5] Audit the engine's action-handler registry against the
