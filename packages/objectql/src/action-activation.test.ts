@@ -44,6 +44,42 @@ import {
 const TABLE = 'sys_metadata_activation';
 
 /**
+ * The double's WHERE predicate, at MODULE scope on purpose.
+ *
+ * `pnpm check:where-matcher` judges a matcher by LIFTING it — transpiling it
+ * with the same-file declarations it references and running a combinator
+ * battery against it. Declared inside the factory below, the lift has to carry
+ * that factory's scope with it, which reaches `vi` and fails to evaluate: the
+ * gate then reports the matcher UNJUDGED, and unjudged is never treated as
+ * passing. At module scope it lifts cleanly and is judged on its behaviour,
+ * which is the point of the gate.
+ */
+function matches(row: any, where: any): boolean {
+    return Object.entries(where ?? {}).every(([k, v]) => {
+        // This double implements EQUALITY ONLY, and REFUSES anything else
+        // rather than quietly mismatching it. A matcher with no combinator
+        // branch reads `$or` / `$in` as a FIELD NAME, compares
+        // `row.$or` (undefined) against the operand, matches nothing, and
+        // leaves the suite asserting on an empty result set with nothing
+        // erroring — the silent-wrong class `pnpm check:where-matcher`
+        // exists to catch, and the worse of its two shapes because it is
+        // an ABSENCE no syntactic guard can see. Refusing is the
+        // conformance shape most discovered matchers already take (187 of the
+        // 300 that predate this one), and it is the cheap answer for a double that only
+        // ever sees scalar equality: the store's two reads are
+        // `{ metadata_type }` and `{ metadata_type, name }`. Same refusal
+        // the flow twin's fake carries, and the branch belongs HERE, in
+        // the predicate, not in the enclosing `find`.
+        if (k.startsWith('$') || (v !== null && typeof v === 'object')) {
+            throw new Error(
+                `makeStoreEngine: unsupported WHERE combinator '${k}' — this double implements equality only`,
+            );
+        }
+        return row?.[k] === v;
+    });
+}
+
+/**
  * A store engine that records what it was asked, and answers `find` from a
  * fixed row set filtered by the WHERE it was given.
  *
@@ -54,8 +90,6 @@ const TABLE = 'sys_metadata_activation';
  */
 function makeStoreEngine(rows: any[] = []) {
     const calls: Array<{ op: string; object: string; data?: any; options?: any }> = [];
-    const matches = (row: any, where: any): boolean =>
-        Object.entries(where ?? {}).every(([k, v]) => row?.[k] === v);
     const engine = {
         find: vi.fn(async (object: string, options?: any) => {
             calls.push({ op: 'find', object, options });
