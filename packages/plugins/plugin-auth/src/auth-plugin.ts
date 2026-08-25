@@ -2185,6 +2185,73 @@ export class AuthPlugin implements Plugin {
         }
       });
 
+      // ── #11477: /admin/remove-user — AUTHORIZATION BEFORE THE GUARD ──────
+      //
+      // The break-glass last-local-credential guard is a global
+      // `hooks.before` in auth-manager.ts keyed on `ctx.path`. A better-auth
+      // `before` hook runs ahead of the endpoint's own `use: [adminMiddleware]`
+      // — and on this route that middleware is only a SESSION check, with the
+      // role decision landing later still, inside the vendor's handler. So on
+      // the unshaded route the guard's lookup and its distinctive refusal were
+      // reached by any AUTHENTICATED caller, admin or not, before either
+      // authorization layer had run.
+      //
+      // MEASURED on the installed better-auth 1.7.1 before this mount existed,
+      // one authenticated non-admin, two targets: naming the break-glass
+      // holder answered `409 LAST_LOCAL_CREDENTIAL` while naming an ordinary
+      // user answered `403 YOU_ARE_NOT_ALLOWED_TO_DELETE_USERS`. Two different
+      // answers to the same caller IS the finding — the refusal itself carried
+      // a per-record fact about a user the caller was never entitled to ask
+      // about. The same measurement on `/admin/ban-user` answered
+      // `403 PERMISSION_DENIED` for BOTH targets, because #9652 already shades
+      // that path and `gateAdmin` runs first there.
+      //
+      // Maintainer ruling 2026-08-25 (decision-inbox batch 5, accepted
+      // verbatim 「全部同意」): option A — give this route the same raw-mount
+      // shading `/admin/ban-user` has, converging the whole `/admin/*` family
+      // on authorization before the guard. No new mechanism.
+      //
+      // ⚠️ This mount DELEGATES; it does not re-implement. That is the whole
+      // difference from the ban/unban mounts above, and it is deliberate:
+      //
+      //   • #9969 (closed `not_planned`) ruled that the consumer-less vendor
+      //     routes — this one included — are NOT re-implemented; their 403 to
+      //     a platform admin is a recorded, intended state. Re-implementing
+      //     removal here would quietly overturn that ruling.
+      //   • Delegating keeps the request inside better-auth's router, so the
+      //     path-keyed `hooks.before` still fires and the guard KEEPS working.
+      //     Shadowing normally DETACHES such hooks (the trap written up in
+      //     last-local-credential.ts, which is why ban-user must re-run the
+      //     guard by hand); re-dispatching through `handleRequest` is what
+      //     avoids paying that cost twice. The `/admin/sso/*` bridges use this
+      //     exact gate-then-delegate shape (#9653).
+      //
+      // ⇒ WHAT CHANGES is only WHEN the guard decides, never WHAT it decides:
+      //   anonymous            → 401 UNAUTHENTICATED   (unchanged)
+      //   authenticated member → 403 PERMISSION_DENIED for EVERY target — the
+      //                          guard is now unreachable before authorization
+      //   platform admin       → unchanged in every respect, including the
+      //                          vendor's own 403 (#9969) and the guard's 409
+      //                          when the target really is the last holder
+      //
+      // The vendor Response is returned VERBATIM so the delegated answer —
+      // status, body and the #10349 ADR-0112 envelope `handleRequest` applies
+      // to vendor `/admin/` refusals — is byte-identical to the unshaded route.
+      //
+      // Pinned by `admin-remove-user-gate-ordering.test.ts`, which fails if
+      // this mount is removed.
+      rawApp.post(`${basePath}/admin/remove-user`, async (c: any) => {
+        try {
+          const gated = await gateAdmin(c);
+          if (gated instanceof Response) return gated;
+          return await this.authManager!.handleRequest(c.req.raw);
+        } catch (error) {
+          const err = error instanceof Error ? error : new Error(String(error));
+          ctx.logger.error('[AuthPlugin] admin/remove-user failed', err);
+          return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: err.message } }, 500);
+        }
+      });
+
       rawApp.post(`${basePath}/admin/set-user-password`, async (c: any) => {
         try {
           const actor = await gateAdmin(c);
