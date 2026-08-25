@@ -97,6 +97,11 @@ import {
   type PhysicalColumn,
   type PendingSchemaWork,
 } from './schema-drift.js';
+import {
+  undeliveredStorageAttributes,
+  formatAttribute,
+  type UndeliveredAttribute,
+} from './builtin-column-collision.js';
 import knex, { Knex } from 'knex';
 import { nanoid } from 'nanoid';
 import { createHash } from 'node:crypto';
@@ -5490,9 +5495,22 @@ export class SqlDriver implements IDataDriver {
         const result = await builder.insert(formatted).returning('*');
         return this.formatOutput(object, result[0]);
       } catch (error) {
-        if (!mayRetry || attempt >= AUTONUMBER_COLLISION_RETRIES) throw error;
+        // #11627: on a table whose UNIQUE index is carried by a hash shadow,
+        // `ER_DUP_ENTRY` quotes a binary digest and names the shadow index, so
+        // neither the operator nor this driver can read WHICH value conflicted
+        // — and a genuine duplicate is indistinguishable from a (near-
+        // impossible) digest collision. Resolve it by reading the source
+        // columns back, on the failure path only, and re-throw the SAME error
+        // carrying whichever answer is true. Returns the error untouched when
+        // this is not a shadow conflict.
+        const shadowed = await this.decorateHashShadowDuplicate(
+          this.rotationWriteTarget(object) ?? object,
+          formatted,
+          error,
+        );
+        if (!mayRetry || attempt >= AUTONUMBER_COLLISION_RETRIES) throw shadowed;
         const colliding = await this.collidingAutoNumberReservations(error, reservations, options);
-        if (colliding.length === 0) throw error;
+        if (colliding.length === 0) throw shadowed;
         for (const reservation of colliding) {
           await this.resyncSequenceToDataMax(reservation);
           // Clear only what collided, so the next pass regenerates exactly
@@ -8623,10 +8641,94 @@ export class SqlDriver implements IDataDriver {
     return { object: tableName, current, shards: retained, dropped };
   }
 
+  /**
+   * [#12015] Say out loud which half of a declaration on a builtin column name
+   * was discarded — and say nothing when nothing was.
+   *
+   * `id`, `created_at` and `updated_at` are emitted by the driver itself, so a
+   * field an author DECLARES under one of those names never reaches
+   * {@link createColumn}: its declared column shape is dropped. The driver is
+   * right to own its primary key and audit stamps; the defect was that it
+   * disagreed with the author in **silence**. Measured on live PostgreSQL
+   * 16.13: an object declaring `id: { type: 'text' }` boots green and gets
+   * `id varchar(255)` — `table.string('id')`, not TEXT — with nothing anywhere
+   * recording that the declaration had been thrown away. Same substitution
+   * measured here on SQLite, where a declared `maxLength` binds nothing either.
+   *
+   * # Why this fires on a SUBSET of collisions, and why that is the point
+   *
+   * Only the STORAGE half is discarded. The rest of the declaration — `label`
+   * and its four generated locales, `readonly`, `searchable`, the ADR-0113
+   * write contract in `required` — is honoured, on the platform's column
+   * exactly as on any other. The first cut of this warning fired on every
+   * collision and told the author "the declaration is NOT applied … remove the
+   * declaration": measured at 116 lines on a stock boot of
+   * `@objectstack/platform-objects` alone, where the dominant shape is
+   * `id: Field.text({ label: 'Presence ID', required: true, readonly: true })`.
+   * That sentence was **false** there, and following it would have deleted an
+   * author-facing label for a column every list view shows.
+   *
+   * So the trigger is "asks for storage the platform's own column does not
+   * deliver" ({@link undeliveredStorageAttributes}), the message names the
+   * attributes rather than the declaration, and a presentation-only
+   * declaration is silent. Maintainer ruling 2026-08-25, narrowing its own
+   * earlier ruling on this card.
+   *
+   * ⛔ Still a diagnostic, NOT a rejection door, and NOT route C: the platform
+   * still owns the column and the declaration still does not take effect. What
+   * changed is what we SAY. Every object that booted before still boots.
+   *
+   * `phase` is part of the message because all THREE paths that drop such a
+   * declaration carry this warning — create, the ADD COLUMN diff, and the
+   * shard path — and a warning on one path with silence on the others just
+   * moves the trap. Each phase is pinned separately, so a regression to a
+   * silent `continue` on ONE path fails by name.
+   */
+  protected warnBuiltinColumnCollisions(
+    tableName: string,
+    fields: Record<string, any> | undefined,
+    builtinColumns: ReadonlySet<string>,
+    phase: 'create' | 'alter' | 'shard',
+  ): string[] {
+    const where = {
+      create: `while creating table "${tableName}"`,
+      alter: `while syncing existing table "${tableName}"`,
+      shard: `while syncing shard "${tableName}"`,
+    }[phase];
+
+    const warned: string[] = [];
+    for (const [field, declaration] of Object.entries(fields ?? {})) {
+      if (!builtinColumns.has(field)) continue;
+      const undelivered: UndeliveredAttribute[] = undeliveredStorageAttributes(
+        field,
+        declaration as Record<string, unknown>,
+      );
+      // Declared, colliding, and yet nothing was lost — the honoured half only.
+      if (undelivered.length === 0) continue;
+
+      this.logger.warn(
+        `[sql-driver] ${where}: declared field '${field}' asks for storage the platform's own ` +
+          `'${field}' column does not provide — ${undelivered.map(formatAttribute).join('; ')}. ` +
+          `The platform emits id/created_at/updated_at itself, so THOSE attributes are not applied; ` +
+          `the rest of the declaration (label, help text, the ADR-0113 write contract, and everything ` +
+          `other layers read) is honoured as written. Drop the storage attribute(s) named above, or ` +
+          `rename the field if you meant a column of your own.`,
+        { table: tableName, field, phase, undelivered: undelivered.map((a) => a.key) },
+      );
+      warned.push(field);
+    }
+    return warned;
+  }
+
   /** Create/column-sync one physical shard table (mirrors the managed-table
    * branch of {@link initObjects}, scoped to a shard). */
   protected async ensureShardTable(shardName: string, obj: { fields?: Record<string, any>; tenancy?: any }): Promise<void> {
     const builtinColumns = new Set(['id', 'created_at', 'updated_at']);
+    // [#12015] Both branches below drop a declared field named after a builtin
+    // column — the create branch skips it explicitly, the column-sync branch
+    // finds the column already present — so the shard path warns once here,
+    // ahead of either.
+    this.warnBuiltinColumnCollisions(shardName, obj.fields, builtinColumns, 'shard');
     const exists = await this.knex.schema.hasTable(shardName);
     // #11374: a shard carries the base table's declared indexes (below), so its
     // columns need the same keyable-text decision the managed path makes.
@@ -9090,6 +9192,10 @@ export class SqlDriver implements IDataDriver {
       });
 
       if (!exists) {
+        // [#12015] The `continue` below drops a declared field that collides
+        // with a builtin column. Said BEFORE the DDL runs, so the author hears
+        // it even when the CREATE goes on to fail for an unrelated reason.
+        this.warnBuiltinColumnCollisions(tableName, obj.fields, builtinColumns, 'create');
         try {
           await this.knex.schema.createTable(tableName, (table) => {
             table.string('id').primary();
@@ -9118,6 +9224,13 @@ export class SqlDriver implements IDataDriver {
         if (existingColumns.includes('updated_at')) {
           this.tablesWithTimestamps.add(tableName);
         }
+
+        // [#12015] The ADD COLUMN diff is keyed on "column not already there",
+        // so a declared `id`/`created_at`/`updated_at` is dropped on this path
+        // too — the builtin is already in `existingColumns`, so the diff below
+        // never proposes it and `addedColumns` excludes it by name. Silent on
+        // every boot of an existing table until now.
+        this.warnBuiltinColumnCollisions(tableName, obj.fields, builtinColumns, 'alter');
 
         // #11565: the row budget is a property of the WHOLE row, so adding one
         // ordinary column to a wide table is refused by the width of columns
@@ -10928,6 +11041,48 @@ export class SqlDriver implements IDataDriver {
         // field-level fix; the boot still fails loudly, it just says why.
         const unkeyable = await this.explainUnkeyableTextColumn(tableName, name, columns, e);
         if (unkeyable) {
+          // #11627: a UNIQUE index MySQL cannot key directly is expressible
+          // after all — over a SHA-256 shadow of the same values. Attempted
+          // only AFTER the server has refused the direct index, deliberately:
+          // the same reasoning `explainRowSizeOverflow` records for the row
+          // budget. A pre-flight would have to reproduce MySQL's 3072-byte key
+          // arithmetic and, wrong in the strict direction, would move an object
+          // to a shadow key on a server that would have taken the real index —
+          // a physical schema decided by our arithmetic rather than by the
+          // server's. Reacting to the refusal cannot over-apply, and it is what
+          // keeps Postgres and SQLite (which never refuse) byte-identical to
+          // before: the dialect divergence is selected BY THE ERROR CODE, never
+          // by a dialect getter.
+          //
+          // ⛔ UNIQUE only. A non-unique index exists for an ACCESS PATH, and an
+          // index over a hash serves no lookup the planner can find on its own
+          // — `WHERE col = ?` cannot use it without rewriting the read side to
+          // filter on the digest too. Silently creating one would turn a loud
+          // refusal into a table that syncs, costs writes, and accelerates
+          // nothing. Those cases stay refused below, and stay tracked.
+          if (unique) {
+            try {
+              if (await this.createHashShadowUniqueIndex(tableName, name, columns)) {
+                existing.add(name);
+                continue;
+              }
+            } catch (shadowErr: any) {
+              const shadowMsg = String(shadowErr?.message ?? shadowErr);
+              if (/already exists|duplicate key name/i.test(shadowMsg)) {
+                existing.add(name);
+                continue;
+              }
+              // Fall through to the named refusal, which is still the honest
+              // outcome — but say that the shadow route was tried and why it
+              // did not land, so this does not read as never having been
+              // attempted.
+              (this.logger.error ?? this.logger.warn)(
+                `[sql-driver] hash-shadow UNIQUE index '${name}' on "${tableName}" could not be created ` +
+                  `(#11627); falling back to the refusal below.`,
+                shadowMsg,
+              );
+            }
+          }
           (this.logger.error ?? this.logger.warn)(unkeyable, msg);
           throw Object.assign(new Error(`${unkeyable} (server said: ${msg})`), {
             code: (e as { code?: string }).code,
@@ -13436,6 +13591,269 @@ export class SqlDriver implements IDataDriver {
       `unenforced. A prefix index is deliberately not substituted: on a UNIQUE index it constrains the ` +
       `prefix rather than the value, and rejects two different values that share one.`
     );
+  }
+
+  /**
+   * Suffix of the driver-owned HASH-SHADOW column (#11627). Mirrored by
+   * `schema-drift.ts`'s {@link isHashShadowColumn}, which must recognise the
+   * same column as driver-owned rather than orphaned.
+   */
+  protected static readonly HASH_SHADOW_SUFFIX = '__hash';
+
+  /**
+   * The shadow column that carries `indexName`, capped to MySQL's 64-character
+   * identifier limit.
+   *
+   * Derived from the INDEX name rather than from the column list, deliberately:
+   * one shadow serves one declared index, a composite index has no single
+   * column to name it after, and the index name is already the differ's
+   * identity for the constraint ({@link normalizeDeclaredIndex}) — so re-sync
+   * finds the existing index by the same name and skips, and the shadow cannot
+   * drift away from the index it belongs to.
+   *
+   * The overflow branch keeps a truncated prefix for readability and appends a
+   * digest of the FULL name, so two long index names that share a prefix still
+   * get different shadows.
+   */
+  protected static hashShadowColumnFor(indexName: string): string {
+    const direct = `${indexName}${SqlDriver.HASH_SHADOW_SUFFIX}`;
+    if (direct.length <= 64) return direct;
+    const digest = createHash('sha256').update(indexName).digest('hex').slice(0, 8);
+    const keep = 64 - SqlDriver.HASH_SHADOW_SUFFIX.length - digest.length - 1;
+    return `${indexName.slice(0, keep)}_${digest}${SqlDriver.HASH_SHADOW_SUFFIX}`;
+  }
+
+  /**
+   * Carry a declared UNIQUE index on a SHADOW column holding a SHA-256 of its
+   * key values, for the case MySQL cannot express directly (#11627).
+   *
+   * ## Why this exists
+   *
+   * On utf8mb4 InnoDB a key part may hold at most 3072 bytes — 768 characters
+   * — so a full-value UNIQUE index over a longer column is INEXPRESSIBLE, not
+   * merely expensive. An OAuth access token may legitimately be a multi-KB JWT.
+   * Before this, `syncSchema` refused such an object outright (measured: 7 of
+   * 44 platform objects on MySQL 8.0.46, Postgres 0/44), leaving it registered
+   * with its declared uniqueness absent. {@link explainUnkeyableTextColumn}
+   * names that refusal; this method removes the cause for the UNIQUE case.
+   *
+   * ## Why a GENERATED column, and not application-computed like the precedent
+   *
+   * `_objectstack_sequences.key_hash` ({@link createSequencesTable}) hashes in
+   * application code because it is a cross-dialect PRIMARY KEY the driver
+   * writes on every counter bump. This shadow is different in the one way that
+   * matters: it exists ONLY on the dialect that refused the direct index, and
+   * only to carry a constraint. A `STORED GENERATED` column lets the SERVER
+   * compute it, which buys three properties application hashing cannot:
+   *
+   *   - **No write path changes at all.** Every INSERT and UPDATE — including
+   *     ones this driver never sees, from `os migrate`, a DBA, or replication —
+   *     maintains the shadow. An app-computed shadow is only as correct as the
+   *     set of writers that remember it.
+   *   - **Existing rows are hashed by the ALTER itself**, so there is no
+   *     backfill step that could partially complete.
+   *   - **The constraint cannot be bypassed**, because nothing can write a
+   *     shadow that disagrees with its source columns.
+   *
+   * ## Semantics, measured on live MySQL 8.0.46 (utf8mb4 / InnoDB)
+   *
+   * `UNHEX(SHA2(v, 256))` is the FULL 256-bit digest stored as `VARBINARY(32)`
+   * — 32 bytes, two orders of magnitude inside the 3072-byte ceiling, and
+   * ⚠️ deliberately NOT truncated: a truncated digest would be the number the
+   * collision bound is computed over, and there is no reason to pay that.
+   *
+   *   - **Distinct values that share a long prefix both insert.** This is the
+   *     property that rules OUT the prefix-index alternative and the reason
+   *     this route was chosen over it (maintainer ruling on #11374,
+   *     2026-08-24): measured, two distinct tokens sharing their first 191
+   *     characters are BOTH accepted here, where `UNIQUE KEY (token(191))`
+   *     rejected the second as `ER_DUP_ENTRY` — a valid sign-in refused as a
+   *     duplicate.
+   *   - **A genuine duplicate is still rejected** (`ER_DUP_ENTRY`).
+   *   - **NULL stays distinct.** `SHA2(NULL, 256)` is NULL, so a NULL-valued
+   *     row has a NULL shadow and a UNIQUE index does not collide NULLs —
+   *     matching what a direct UNIQUE over the column would have done.
+   *   - **Composites use `CONCAT` with a `0x1f` separator**, and `CONCAT`
+   *     returning NULL when ANY argument is NULL is exactly MySQL's
+   *     composite-UNIQUE semantics (a tuple with any NULL conflicts with
+   *     nothing). The separator keeps the encoding injective, so ('xy','')
+   *     and ('x','y') do not alias.
+   *
+   * ## The collision bound, and what a collision would look like
+   *
+   * Uniqueness now holds over SHA-256 of the value rather than the value. With
+   * a full 256-bit digest and n rows in one index, the birthday bound is
+   * n^2 / 2^257. At n = 10^9 rows that is under 10^-59 — below any rate the
+   * storage layer itself is trusted at. ⚠️ But the failure MODE is what
+   * matters, not only its probability: a collision surfaces as `ER_DUP_ENTRY`
+   * on the shadow, which is the SAME error a real duplicate raises, and MySQL
+   * quotes the raw binary digest rather than the offending value. Left alone
+   * that is an operator seeing an unexplainable duplicate — a wrong answer, not
+   * a crash. {@link explainHashShadowDuplicate} exists so the driver can tell
+   * the two apart by reading the source columns back, and name whichever it is.
+   *
+   * Returns `true` when the shadow index now exists.
+   */
+  protected async createHashShadowUniqueIndex(
+    tableName: string,
+    indexName: string,
+    columns: string[],
+  ): Promise<boolean> {
+    if (!this.isMysql) return false;
+    const shadow = SqlDriver.hashShadowColumnFor(indexName);
+    const ref = (c: string) => `\`${c.replace(/`/g, '``')}\``;
+    // ONE argument needs no separator, and CONCAT of one value would only add
+    // a chance to get the encoding wrong.
+    const expr =
+      columns.length === 1
+        ? ref(columns[0]!)
+        : `CONCAT(${columns.map((c) => ref(c)).join(', 0x1f, ')})`;
+    const sql =
+      `ALTER TABLE ${ref(tableName)} ` +
+      `ADD COLUMN ${ref(shadow)} VARBINARY(32) GENERATED ALWAYS AS (UNHEX(SHA2(${expr}, 256))) STORED, ` +
+      `ADD UNIQUE KEY ${ref(indexName)} (${ref(shadow)})`;
+    await this.knex.raw(sql);
+    this.logger.warn(
+      `[sql-driver] UNIQUE index '${indexName}' on "${tableName}" is carried by the hash-shadow column ` +
+        `"${shadow}" (SHA-256 of ${columns.join(', ')}), because MySQL cannot key ${columns.length > 1 ? 'this column set' : 'a column'} ` +
+        `longer than ${SqlDriver.MAX_KEYABLE_VARCHAR_CHARS} characters directly (#11627). The declared ` +
+        `constraint is enforced over the full value; only the physical key differs.`,
+      { tableName, indexName, columns, shadow },
+    );
+    return true;
+  }
+
+  /**
+   * Tell a genuine uniqueness violation apart from a hash COLLISION on a
+   * shadow-carried UNIQUE index (#11627), and name which one happened.
+   *
+   * ⚠️ Why this is not optional. Once uniqueness is enforced over SHA-256 of
+   * the value, `ER_DUP_ENTRY` has two possible causes that MySQL reports
+   * IDENTICALLY — it quotes the raw binary digest and the index name, and the
+   * digest tells an operator nothing about which row conflicted. The likely
+   * cause is the ordinary one (a real duplicate); the astronomically unlikely
+   * one is a collision, and it would present as the platform refusing a write
+   * that is, in fact, unique. That is a user-visible WRONG ANSWER rather than a
+   * crash, so "vanishingly unlikely" is not on its own an adequate answer to
+   * it.
+   *
+   * The disambiguation is one read on the failure path only (the same trade
+   * {@link explainUnkeyableTextColumn} makes): re-select by the SOURCE columns.
+   * A row that matches them is a real duplicate. NO row matching them, with the
+   * shadow index nevertheless reporting a conflict, is a collision — and the
+   * message says so, with the values, so it is reportable rather than baffling.
+   *
+   * Returns `null` when this failure is not a shadow-index conflict at all, so
+   * the caller's existing handling is unchanged.
+   */
+  protected async explainHashShadowDuplicate(
+    tableName: string,
+    values: Record<string, unknown>,
+    cause: unknown,
+  ): Promise<string | null> {
+    if (!this.isMysql) return null;
+    if ((cause as { code?: string } | undefined)?.code !== 'ER_DUP_ENTRY') return null;
+    const message = String((cause as { message?: string } | undefined)?.message ?? '');
+    // MySQL names the key as `table.index` (8.0) or `index` (5.7) — take the
+    // last path segment either way.
+    const keyed = /for key '([^']+)'/.exec(message);
+    if (!keyed) return null;
+    const indexName = keyed[1]!.split('.').pop()!;
+    const shadow = SqlDriver.hashShadowColumnFor(indexName);
+    let shadowExists = false;
+    try {
+      shadowExists = await this.knex.schema.hasColumn(tableName, shadow);
+    } catch {
+      return null;
+    }
+    if (!shadowExists) return null;
+    const sources = await this.hashShadowSourceColumns(tableName, indexName);
+    if (sources.length === 0) return null;
+    // Only the source columns the failing write actually supplied; a partial
+    // update cannot be re-selected on columns it never mentioned.
+    if (!sources.every((c) => Object.prototype.hasOwnProperty.call(values, c))) return null;
+    let existing = 0;
+    try {
+      const rows = await this.knex(tableName)
+        .where(Object.fromEntries(sources.map((c) => [c, values[c]])))
+        .limit(1);
+      existing = rows.length;
+    } catch {
+      return null;
+    }
+    if (existing > 0) {
+      // The ordinary case: a real duplicate. Say so in the declared terms
+      // rather than leaving MySQL's binary digest as the only explanation.
+      return (
+        `[sql-driver] duplicate value for the UNIQUE constraint '${indexName}' on "${tableName}" ` +
+        `(${sources.join(', ')}). The constraint is physically carried by a hash-shadow column, so the ` +
+        `server's own message quotes a binary digest instead of the value (#11627).`
+      );
+    }
+    return (
+      `[sql-driver] HASH COLLISION on the shadow-carried UNIQUE index '${indexName}' on "${tableName}" ` +
+      `(${sources.join(', ')}): the write was rejected as a duplicate, but NO existing row carries these ` +
+      `values. Uniqueness on this index is enforced over a SHA-256 of them (#11627), so two different ` +
+      `values produced the same digest. This is expected at a rate near 10^-59 for a billion rows — if ` +
+      `you are reading this, please report it with the values above; the write itself is legitimate and ` +
+      `is being refused.`
+    );
+  }
+
+  /**
+   * The declared key columns a shadow-carried index hashes, read back from the
+   * registered metadata so the disambiguating select above filters on the same
+   * columns the shadow was generated from.
+   */
+  /**
+   * Attach {@link explainHashShadowDuplicate}'s verdict to a failing write, or
+   * return the error untouched (#11627).
+   *
+   * ⚠️ Wired into {@link create} only. `update` issues its statement through
+   * three paths with no shared catch, and a duplicate on the columns this
+   * route covers — an OAuth token, an issuer/account pair, a metadata identity
+   * — arrives on INSERT in every flow this repo has. An UPDATE that collides
+   * still fails correctly; it just still reports MySQL's binary digest. That
+   * gap is deliberate and named rather than left to be discovered.
+   */
+  protected async decorateHashShadowDuplicate(
+    tableName: string,
+    values: Record<string, unknown>,
+    error: unknown,
+  ): Promise<unknown> {
+    let explanation: string | null = null;
+    try {
+      explanation = await this.explainHashShadowDuplicate(tableName, values, error);
+    } catch {
+      // The disambiguation is a diagnostic. If it cannot be made, the original
+      // failure is still the failure — never mask it with this one.
+      return error;
+    }
+    if (!explanation) return error;
+    (this.logger.error ?? this.logger.warn)(explanation);
+    return Object.assign(new Error(`${explanation} (server said: ${String((error as { message?: string })?.message ?? error)})`), {
+      code: (error as { code?: string })?.code,
+      cause: error,
+    });
+  }
+
+  protected async hashShadowSourceColumns(tableName: string, indexName: string): Promise<string[]> {
+    try {
+      const rows: Array<{ GENERATION_EXPRESSION?: string; generation_expression?: string }> =
+        await this.knex
+          .select('GENERATION_EXPRESSION')
+          .from('information_schema.COLUMNS')
+          .where({
+            TABLE_SCHEMA: this.knex.client.database(),
+            TABLE_NAME: tableName,
+            COLUMN_NAME: SqlDriver.hashShadowColumnFor(indexName),
+          });
+      const expr = String(rows[0]?.GENERATION_EXPRESSION ?? rows[0]?.generation_expression ?? '');
+      // `unhex(sha2(`a`,256))` or `unhex(sha2(concat(`a`,0x1f,`b`),256))`
+      return [...expr.matchAll(/`((?:[^`]|``)+)`/g)].map((m) => m[1]!.replace(/``/g, '`'));
+    } catch {
+      return [];
+    }
   }
 
   /**

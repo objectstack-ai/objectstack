@@ -671,7 +671,30 @@ mkdir -p "$DEV_TMPDIR"
 # `\x1b[31m…ERROR…` line the negative test produced).
 # TMPDIR: see the collision-safety block — it is what makes the runtime state
 # file this run reads back provably its own.
-mapfile -t DEV_ARGV < <(smoke_dev_server_argv)
+# READ LOOP, NOT `mapfile` — THE BASH 3.2 FLOOR. `mapfile`/`readarray` are
+# bash 4 builtins and `/usr/bin/env bash` is bash 3.2.57 on macOS (Apple ships
+# no bash 4+, for licensing reasons). Unlike its two siblings in this sweep
+# this line IS reached by CI — `publish-smoke.yml` runs this script on Linux
+# with bash 5, where the builtin exists — so CI is green over it in both
+# directions and says nothing at all about the defect or this repair. What CI
+# does not cover is the OTHER way this script is run: by hand, to reproduce a
+# publish-smoke failure locally, which on a Mac died here. Measured with the
+# builtin disabled (`enable -n mapfile readarray` via `BASH_ENV`, which
+# reproduces the macOS symptom byte for byte): `mapfile: command not found`,
+# status 127 under `set -e`.
+#
+# Keep this loop bash-3.2-clean: no `mapfile`, no `readarray`, no `declare -A`,
+# no `${x^^}`/`${x,,}`. Two details are load-bearing: `DEV_ARGV=()` before the
+# loop (under `set -u` a loop that appends nothing never creates the array, and
+# the expansion below would abort with `unbound variable`), and the `if` rather
+# than a trailing `[[ … ]] &&` (with the `&&` form the `while` takes status 1
+# whenever the last line read fails the test, which under `set -e` kills the
+# caller as soon as such a loop sits last in a function).
+DEV_ARGV=()
+dev_argv_line=''
+while IFS= read -r dev_argv_line; do
+  if [[ -n "$dev_argv_line" ]]; then DEV_ARGV+=("$dev_argv_line"); fi
+done < <(smoke_dev_server_argv)
 (cd "$APP_DIR" && exec "${DEV_ARGV[@]}") \
   > "$SERVER_LOG" 2>&1 &
 SERVER_PID=$!

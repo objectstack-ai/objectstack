@@ -9,10 +9,22 @@
  * The defect this closes was six generators writing `NAME.ts` while
  * `DEFAULT_METADATA_TYPE_REGISTRY` declared `NAME.TYPE.ts` for their types,
  * so `MetadataPlugin._loadFromFileSystem` — which globs EVERY registered type
- * by that type's own `filePatterns`, and is the default `eager` bootstrap
- * whenever no compiled artifact is configured — never saw the scaffolds the
- * CLI had just written. They type-check, they pass `os validate`, they
- * publish, and nothing at any step says they were skipped.
+ * by that type's own `filePatterns` — never saw the scaffolds the CLI had
+ * just written. They type-check, they pass `os validate`, they publish, and
+ * nothing at any step says they were skipped.
+ *
+ * ⚠️ THAT LOAD PATH HAS A PRECONDITION, and nothing this repo boots meets it
+ * (#12075). `_loadFromFileSystem` is reached only when `bootstrap` is `eager`
+ * (the default) AND no `artifactSource` is configured; every non-test
+ * `MetadataPlugin` construction site here configures one, so `os dev` /
+ * `os serve` / `os start` all load the compiled artifact and the barrel's
+ * module specifier is the whole load path. `metadata-file-name.ts` carries
+ * the measurement, including the discriminator: a file spelled exactly as the
+ * registry declares does not reach the artifact when the barrel omits it.
+ * So what this file pins is a CONSISTENCY property — generator spelling
+ * equals registry spelling — and NOT the discoverability property the
+ * paragraph above reads as on its own. The narrower rationale does not weaken
+ * the pin: both halves stay derived, for the reason below.
  *
  * A pin written as `expect(name).toBe('customer.object.ts')` six times is
  * green the day a SEVENTH generator is added with no registry entry and no
@@ -69,7 +81,8 @@ describe('[#11071] every generator writes a name its own type declares', () => {
       expect(
         entry,
         `\`os g ${type}\` scaffolds a type absent from DEFAULT_METADATA_TYPE_REGISTRY — `
-        + 'nothing globs it, so whatever it writes is invisible to the loader',
+        + 'no entry declares a pattern for it, so whatever it writes matches no contract '
+        + 'anything can check',
       ).toBeDefined();
 
       const written = metadataFileName(type, STEM);
@@ -85,7 +98,8 @@ describe('[#11071] every generator writes a name its own type declares', () => {
       expect(
         matched.length,
         `generated "${relPath}" matches none of ${JSON.stringify(entry!.filePatterns)} — `
-        + 'it would validate, publish and never load',
+        + 'the CLI would be teaching a name its own registry entry does not declare '
+        + '(and under an eager, artifact-less bootstrap it would never load)',
       ).toBeGreaterThan(0);
     },
   );

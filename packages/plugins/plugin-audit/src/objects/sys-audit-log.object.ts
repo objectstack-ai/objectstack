@@ -226,11 +226,25 @@ export const SysAuditLog = ObjectSchema.create({
       group: 'Target',
     }),
 
+    // [#11374 route A] The bound is derived by referenced-column transitivity
+    // from the id this column holds, never guessed: `driver-sql` creates every
+    // table's primary key as `table.string('id').primary()` — knex's
+    // `varchar(255)`, which the driver spells out as
+    // `DEFAULT_STRING_VARCHAR_CHARS = 255` and names in its own error text as
+    // "built-in `id` (a varchar(255))". The writers enumerated below all stamp
+    // a real record id of a stored row, so none of them can produce a value
+    // wider than the column that id lives in. 255 is also <= the 768-character
+    // utf8mb4 key ceiling, so the `(object_name, record_id)` index below is
+    // expressible on MySQL — which is the whole point: unbounded, this column
+    // was emitted TEXT, MySQL refused the index with
+    // `ER_BLOB_KEY_WITHOUT_LENGTH`, and the object landed registered-but-broken
+    // with the lookup its own `record_views` list view depends on absent.
     record_id: Field.text({
       label: 'Record ID',
       required: false,
       readonly: true,
       searchable: true,
+      maxLength: 255,
       description: 'ID of the affected record',
       // [#11386] The id half of this object's ActivityPointer pair (ADR-0052
       // §5), adopting the #11339 carrier. VERIFIED for THIS object rather than

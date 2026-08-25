@@ -492,6 +492,33 @@ export default class Serve extends Command {
   static readonly ALWAYS_ON_CAPABILITIES: readonly string[] = PLATFORM_ALWAYS_ON_CAPABILITIES;
 
   /**
+   * The `plugins[]`-wired multi-org runtime this command loads when the
+   * resolved tenancy posture is walled (ADR-0105 D12) — declared ONCE, here.
+   *
+   * `serve` is the only runtime that prints this package name AT OPERATORS (the
+   * install remedy, the fatal refusal, the degraded-boot warning), and the
+   * spec-owned provenance roster `PLATFORM_PLUGIN_WIRED_RUNTIMES` is what makes
+   * the name answerable as real rather than fabricated — #10921 is the case
+   * where a fabricated `@objectstack/framework` sat next to the real
+   * `@objectstack/organizations` in published docs for months, indistinguishable.
+   * Spelled inline at the resolution site, the name was a second copy under no
+   * check at all: the roster's own header calls that "a second description
+   * nobody checks", and a roster cannot pin a spelling it cannot see. Read from
+   * here, it is one declaration with a drift pin over it —
+   * `serve-capability-vocabulary.test.ts` asserts this value is a roster KEY
+   * (#11614), so a rename on either side fails a test instead of silently
+   * pointing operators at a package that does not exist.
+   *
+   * Exposed as a static for the same reason ALWAYS_ON_CAPABILITIES above is:
+   * one declaration, two readers — the boot path and the pin.
+   *
+   * This single-sources the SPELLING and nothing else. Which postures load the
+   * runtime, and what each of the two failure stages means, stay exactly where
+   * they are; the roster is deliberately not a resolution registry.
+   */
+  static readonly ORGANIZATIONS_RUNTIME_PKG = '@objectstack/organizations';
+
+  /**
    * Auto-registered plugin tiers. Plugins explicitly listed in
    * `config.plugins` are always loaded — tiers only gate the optional
    * auto-registration blocks below (AIService, I18n, UI portals, etc.).
@@ -2794,7 +2821,9 @@ export default class Serve extends Command {
               // instances: `instanceof` and named `code` checks are both
               // fragile here. Stage is the only classifier that needs to know
               // nothing about the plugin's internals.
-              const organizationsPkg = '@objectstack/organizations';
+              // #11614 — the spelling comes from the class-level declaration the
+              // spec roster pins, not from a fresh literal at the resolution site.
+              const organizationsPkg = Serve.ORGANIZATIONS_RUNTIME_PKG;
               let orgMod: any;
               // ── Stage 1: import. Failure here = the package is ABSENT. ──
               try {
@@ -2830,7 +2859,7 @@ export default class Serve extends Command {
                   // and whose install was pruned, that sent them to re-read a
                   // file that was already correct. The importer now says which
                   // one it is, so this text can too.
-                  const declaration = readHostDeclaration('@objectstack/organizations', hostRoot);
+                  const declaration = readHostDeclaration(organizationsPkg, hostRoot);
                   const remedy =
                     hostImportFailureKind(orgErr) === 'declared-unresolvable'
                       ? '      • this app DECLARES @objectstack/organizations ' +

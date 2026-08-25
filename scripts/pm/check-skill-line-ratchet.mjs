@@ -289,7 +289,22 @@ export const CEILINGS = new Map([
   // rewrap headroom, so the correction costs one line. Maintainer ruling
   // 2026-08-25, verbatim and untranslated, accepting the measured +1/D1 option:
   // 「我看到了,你分析过了,接受你的建议」. Headroom is 0 again by construction.
-  ['AGENTS.md', 1150],
+  //
+  // 1150 → 1158 (#10855 / PR #11908): the published-spellings mirror re-sync.
+  // AGENTS.md's copy of check-cross-package-test-inputs' RECOGNISED_PATH_SPELLINGS
+  // had drifted — the two findUp ANCHOR seeds and the ⛔ manifest-name prohibition
+  // qualifying them were missing. Twice before, the stale line over there was the
+  // stated REASON FOR A PROHIBITION (#10163, #10854), so a rotting mirror does not
+  // merely misinform: it launders an obsolete rule into a live one. The honest
+  // re-sync measures +8 on the reflowed (#11948) layout — published block 11 → 17
+  // lines, prose paragraph 4 → 6 — and lossless rewrap headroom across that
+  // section measures 0, so it cannot be paid in place. From here the mirror is
+  // mechanically enforced by check-published-list-mirrors.mjs, which prices any
+  // later drift at the moment it is incurred rather than letting it accrue.
+  // Maintainer ruling 2026-08-25 (option C1), verbatim and untranslated:
+  // 「我看到了,你分析过了,接受你的建议」 — recorded on PR #11908. Headroom is 0
+  // again by construction.
+  ['AGENTS.md', 1158],
   // #9965: root CLAUDE.md is the other repo-root instruction file — same read
   // path (every seat session), same governance (Prime Directive #14). It is
   // structurally growth-prone in the way the ratchet is built for: it exists to

@@ -1604,6 +1604,18 @@ jobs:
       - name: CLI test child-env guard
         run: pnpm check:cli-test-child-env
 
+      # #12016. A CLI command id spelled as a string literal OUTSIDE the CLI
+      # package has nothing tying it to the command file it names: rename the
+      # command, update the CLI and the docs, and the engine's own drift warning
+      # keeps printing a route that no longer exists — a stale hint inside an
+      # otherwise-correct message, which no suite reads as wrong because
+      # driver-sql's pin asserts the message contains the constant and the
+      # constant still matches itself. 274 such literals across 98 files were
+      # measured before the gate was written; the sibling sweep INSIDE
+      # packages/cli is #11465 / #12177, and the two populations do not overlap.
+      - name: CLI command-id literals resolve
+        run: pnpm check:cli-command-ids
+
       # #4093 follow-up. Discovery tells a consumer an absent capability is
       # absent AND what to install. The first half has been carefully honest
       # since #2462/#4000; the second was invented from the slot name, so ten
@@ -2405,6 +2417,27 @@ jobs:
         run: |
           node scripts/check-declaration-mirrors.mjs --self-test
           node scripts/check-declaration-mirrors.mjs
+
+      # Published list mirrors (#10855). The cross-package gate above is a SOURCE
+      # SCAN: a path spelling it does not know yields no flag, so the escaping read
+      # goes undeclared SILENTLY. That is why its recognised set is published in
+      # AGENTS.md instead of living only in the implementation — and nothing held the
+      # two copies in step. It drifted three times (#10163, #10854, #10855); measured
+      # on 1a47a5368 the published block was short by 13 of the 24 lines, the two
+      # findUp ANCHOR seeds among them. ⭐ Twice the stale line was the stated REASON
+      # FOR A PROHIBITION, so a rotting mirror does not merely misinform — it launders
+      # an obsolete rule into a live one, and the fix has to derive a new true reason.
+      # This asserts line-for-line EQUALITY (not containment: a comment-only drift is
+      # invisible to containment, and the comments are where the prohibitions live),
+      # locates the block by heading + fence rather than line number, and REFUSES
+      # rather than passing empty when it cannot find it. ⛔ It can only ever go RED:
+      # AGENTS.md is governed (human-merge-only), so it prints the block to paste and
+      # never repairs. Invoked as `node` rather than a `pnpm check:*` alias for the
+      # same reason as the step above (#9465). Reads two files; milliseconds.
+      - name: Published list mirrors
+        run: |
+          node scripts/check-published-list-mirrors.mjs --self-test
+          node scripts/check-published-list-mirrors.mjs
 
       # The inventory of `packages/**` tests coupled to `examples/**` (#8754).
       # Sibling of the cross-package gate above, on the axis that gate does not

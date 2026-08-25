@@ -203,6 +203,51 @@ export interface ScriptContext {
    */
   session?: ScriptSession;
   /**
+   * The engine's dispatch marker, marshalled for the HOOK face (#11552) — how
+   * this hook call relates to the caller's write. `'per-row'` means one of N
+   * dispatches for one predicate (`multi: true`) write; `'record'` means the
+   * call stands for the caller's whole write. Mirrors
+   * `HookContextSchema.dispatch` (#6966) MINUS `scope`, and the omission is
+   * deliberate rather than an oversight: `scope`'s whole contract is SHARED
+   * OBJECT IDENTITY across every dispatch of one write, and a JSON copy into
+   * the VM heap cannot keep it — a body writing to the copy would see its
+   * stash silently never arrive, which is exactly the inert-guard family this
+   * key exists to close (ADR-0058 Addendum II D3: without the marker, a shipped
+   * body could not scope a guard to the batch path at all).
+   *
+   * Read-only in effect AND in the VM: `installCtx` grafts it frozen, so a body
+   * assigning `ctx.dispatch.mode` gets no local drift either. Absent on the
+   * action face and on hook reads (`beforeFind`/`afterFind`) — read it as
+   * `ctx.dispatch?.mode === 'per-row'`, the same back-compatible direction the
+   * spec prescribes for the engine face.
+   */
+  dispatch?: { mode: 'record' | 'per-row'; index: number };
+  /**
+   * The caller's options bag, PROJECTED to the two members ADR-0058's D2
+   * declares visible to the `before*` phase — `multi` and `where` — for the
+   * HOOK face (#11552). `installCtx` grafts it onto the VM's `ctx.input` as a
+   * NON-ENUMERABLE, frozen `options` key, which buys three things at once:
+   *
+   *  - the declared spelling works (`ctx.input.options.multi` / `.where`),
+   *    closing the D2 declared≠observable drift for shipped bodies;
+   *  - enumeration stays clean — `Object.keys(ctx.input)` still lists record
+   *    fields only, the same contract `installFlatInput`'s `ownKeys` trap keeps
+   *    on the in-process face (and the #7254 witness pins for bodies);
+   *  - the write-back channel cannot carry it: `readCtxInputJson` reads the
+   *    post-run `ctx.input` via `JSON.stringify`, which walks enumerable keys
+   *    only, so `applyMutationsToInput` can never smuggle a JSON-mangled copy
+   *    of the bag back over the engine's live `input.options`.
+   *
+   * A PROJECTION, not the whole bag, on the same reasoning as the host-error
+   * allowlist below (`SANDBOX_ERROR_PASSTHROUGH`): everything marshalled here
+   * becomes readable by untrusted sandboxed code, and the raw bag can carry
+   * the caller's execution context and driver-facing state. `multi` and
+   * `where` are what D2 declares, what the platform's own guards read, and
+   * what crosses; widening the projection is a declared decision, never a
+   * consumer-side accretion (PD #12).
+   */
+  inputOptions?: { multi?: unknown; where?: unknown };
+  /**
    * The lifecycle event name the hook is firing for (e.g. `beforeInsert`,
    * `afterUpdate`). Required for hooks that subscribe to multiple events
    * and dispatch on event name.

@@ -1337,6 +1337,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/plugins/plugin-auth/src/member-role-canonical.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/plugins/plugin-auth/src/org-create-posture-gate.test.ts",
       "verb": "delete",
       "pinned": 1

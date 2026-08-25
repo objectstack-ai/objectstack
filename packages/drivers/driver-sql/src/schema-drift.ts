@@ -327,6 +327,36 @@ export interface ManagedDriftEntry extends SchemaDiffEntry {
 /** Columns the driver creates unconditionally — never metadata fields. */
 export const BUILTIN_COLUMNS = new Set(['id', 'created_at', 'updated_at']);
 
+/**
+ * Suffix of a HASH-SHADOW column — the driver-owned column that carries a
+ * declared UNIQUE index MySQL cannot express over the values themselves
+ * (#11627). See `SqlDriver.createHashShadowUniqueIndex` for why it exists and
+ * what it stores.
+ */
+export const HASH_SHADOW_SUFFIX = '__hash';
+
+/**
+ * Is this physical column a driver-owned hash shadow (#11627)?
+ *
+ * ⚠️ Load-bearing for the ORPHAN differ below, and the reason this predicate
+ * is exported rather than inlined. A hash-shadow column exists in the database
+ * and — by construction — in no metadata field, which is the exact shape the
+ * orphan pass reports as `unmapped_column` with a `drop_column` op. Dropping it
+ * would take the UNIQUE index it carries with it, silently returning the object
+ * to "registered but its declared uniqueness unenforced" — the very state
+ * #11374/#11627 exist to end, reached this time through the migration tool
+ * rather than through a refused DDL.
+ *
+ * Matched by SUFFIX rather than by a registry of known names, deliberately: the
+ * differ runs against a database whose metadata it is comparing to, and a
+ * shadow whose declared index has since been removed must still be recognised
+ * as driver-owned (it is then cleaned up by the index's own removal path, not
+ * by a blind column drop).
+ */
+export function isHashShadowColumn(name: string): boolean {
+  return name.endsWith(HASH_SHADOW_SUFFIX);
+}
+
 /** Minimal shape of an introspected physical column (see SqlDriver.introspectColumns). */
 export interface PhysicalColumn {
   name: string;
@@ -838,6 +868,10 @@ export function diffManagedTable(args: {
   // ── orphaned columns (physical column, no metadata field) ──────────
   for (const col of columns) {
     if (BUILTIN_COLUMNS.has(col.name)) continue;
+    // Driver-owned hash shadow (#11627), never a metadata field — see
+    // {@link isHashShadowColumn} for why dropping it as an orphan would
+    // silently disable the UNIQUE constraint it carries.
+    if (isHashShadowColumn(col.name)) continue;
     if (expectedColumns.has(col.name)) continue;
     out.push({
       kind: 'unmapped_column',

@@ -67,6 +67,12 @@ function makeDriver(): any {
 
 describe('record-change context hydrates read-time formula fields (#3426)', () => {
   it('resolves a formula field ({record.full_name}) in a seeded flow record', async () => {
+    // [#11571] The blanket mute is kept here deliberately. With no datasource
+    // this boot emits one invariant 3-frame ERROR trio that neither predicate
+    // in `runtime/src/expected-read-refusal-noise.ts` can recognise, and the
+    // console-level capture proposed to reach it intercepts ZERO: ObjectLogger
+    // writes ERROR to `process.stderr`, never through `console`, under Node.
+    // See that module's closing section for the measurement.
     const kernel = new ObjectKernel({ logger: { level: 'silent' } });
     await kernel.use(new ObjectQLPlugin());
     await kernel.use(new AutomationServicePlugin());
