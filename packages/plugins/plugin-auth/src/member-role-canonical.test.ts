@@ -52,6 +52,7 @@ import {
   callerCarriesCreatorRole,
 } from './remove-member-permission-guard.js';
 import { BUILTIN_MEMBERSHIP_ROLES } from '@objectstack/spec/identity';
+import type { IDataEngine } from '@objectstack/spec/contracts';
 
 // ---------------------------------------------------------------------------
 // The vendor's three owner-tests, extracted from the installed package
@@ -383,13 +384,29 @@ describe('#8317 — write-path canonicalisation hooks', () => {
 // The one-off pass
 // ---------------------------------------------------------------------------
 
+/** The test-only handles this double hangs off the contract it implements. */
+type MemoryEngineHandles = {
+  rows: Array<Record<string, unknown>>;
+  calls: Array<{ object: string; patch: any; options: any }>;
+};
+
 /**
  * Memory engine for the migration. `update` is pinned to ObjectQL's own
  * dispatch predicate (#4550/#5480): a fake looser than the real engine turns a
  * green suite into no suite at all on exactly the write this pass performs.
+ *
+ * It DECLARES `IDataEngine` so `check:engine-double-contract` can see that pin
+ * and ratchet it (#11626's declaration route). The double spells one engine
+ * sibling (`find`), which is below the inference threshold, so before the
+ * declaration the `assertEngineUpdateDispatch` call above was real protection
+ * that no ledger row named — drop it tomorrow and nothing reddens. The
+ * intersection is what keeps this honest rather than padded: the contract is
+ * asserted, and `rows`/`calls` stay declared as what they are, test handles.
  */
-function makeMemoryEngine(rows: Array<Record<string, unknown>>) {
-  const calls: Array<{ object: string; patch: any; options: any }> = [];
+function makeMemoryEngine(
+  rows: MemoryEngineHandles['rows'],
+): IDataEngine & MemoryEngineHandles {
+  const calls: MemoryEngineHandles['calls'] = [];
   return {
     rows,
     calls,
@@ -406,7 +423,7 @@ function makeMemoryEngine(rows: Array<Record<string, unknown>>) {
       Object.assign(row, patch);
       return { ...row };
     },
-  };
+  } as unknown as IDataEngine & MemoryEngineHandles;
 }
 
 describe('#8317 — the one-off convergent pass', () => {
