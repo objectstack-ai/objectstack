@@ -297,7 +297,7 @@ jobs:
                 ? ` Of those **${bridge.unreachable}**: **${causes.remediable}** are remediable by widening that discovery convention (an in-repo file declares the path; the convention did not scan it); **${causes.structural}** are structural — on a ledger where NOT ONE row is declared in-repo, so no discovery change reaches them at any price; **${causes.undecided}** are undecided (no in-repo declaration, on a ledger that has other in-repo registrars — absence and an unreadable spelling are not distinguishable here).`
                 : ` ⛔ Its cause census is BROKEN — **${causes.remediable}** + **${causes.structural}** + **${causes.undecided}** is not the **${bridge.unreachable}** it claims to break down, so the split is withheld.`;
             } else if (causes && causes.measured === false) {
-              bridgeCauses = ` WHY those rows are unreachable was NOT measured on this run — ${causes.reason} — so no cause may be read into the count above.`;
+              bridgeCauses = ` ⚠️ Cause NOT measured on this run: ${causes.reason}. No cause may be read into the count above — "nobody looked" is not "none found".`;
             }
             if (bridge && bridge.measured && bridge.unreachable > 0) limits.push(`the SDK route bridge reached **${bridge.reachable}** of **${bridge.clientRows}** client-bound route-ledger rows — the other **${bridge.unreachable}** have no registrar \`path:\` tail to select them, so pages documenting THEIR client methods cannot appear above, on this or any run.${bridgeCauses} The rows themselves: \`node scripts/docs-audit/affected-docs.mjs --bridge-coverage\``);
             // ── THE RULE-CARRYING PAGE AN EMITTER DIFF CANNOT REACH (#11434) ──────
