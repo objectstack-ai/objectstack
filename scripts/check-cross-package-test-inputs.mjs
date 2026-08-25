@@ -579,6 +579,27 @@ function readablePathLiteral(arg) {
 }
 
 /**
+ * `NEW_URL_LITERAL` has the identical character-class shape as `PATH_LITERAL`
+ * above, and the identical blind spot: a BACKTICK-delimited argument holding no
+ * quotes matches it even when it is an interpolating template, so
+ * `` new URL(`${someVar}`, import.meta.url) `` would read `${someVar}` as the
+ * literal segment text and walk it as one ordinary descent (#12085). Unlike
+ * `readablePathLiteral()`'s call site, this one has no "cannot read, keep
+ * depth" fallback to route into — `pathExpression()` just returns `undefined`
+ * for the whole `new URL(...)` seed when this returns `null`, the same outcome
+ * as any other unrecognised seed shape. A single- or double-quoted literal is
+ * unaffected — `${` inside one of those is ordinary text, never interpolation.
+ * This is the ONE call site `NEW_URL_LITERAL` has in this file, so narrowing it
+ * here does not move any other consumer's verdict.
+ */
+function readableNewUrlLiteral(expr) {
+  const lit = expr.match(NEW_URL_LITERAL);
+  if (!lit) return null;
+  if (lit[1] === '`' && lit[2].includes('${')) return null;
+  return lit;
+}
+
+/**
  * A formatter's TRAILING COMMA, dropped from an argument list before it is read.
  *
  * The other half of the line-spanning spelling (#11093), and the half that would
@@ -659,7 +680,7 @@ function pathExpression(expr, hereDepth, known, fileSegs = null) {
   // seeds above. This is the ASCENT-RELATIVE spelling of #9763: one string, but
   // it starts at `..`, so the flat literal regex below never saw it while the
   // walk here has always resolved it — the name was thrown away, not the path.
-  const url = expr.match(NEW_URL_LITERAL);
+  const url = readableNewUrlLiteral(expr);
   if (url) return walkLiteral(hereDepth, url[2], dirSegs);
 
   if (/^[A-Za-z_$][\w$]*$/.test(expr)) return known.get(expr);
@@ -1989,6 +2010,40 @@ function selfTest() {
     (() => {
       const src = TEMPLATE_SEED + "const P = join(HERE, `../../other-pkg/src/y.ts`);";
       return at(src, 1) && named(src, 1, CO).includes('packages/other-pkg/src/y.ts');
+    })(),
+  );
+  // ── the INTERPOLATING TEMPLATE argument, `NEW_URL_LITERAL` sibling (#12085) ─
+  //
+  // `NEW_URL_LITERAL` has the identical character-class shape as `PATH_LITERAL`
+  // above and the identical blind spot — `` new URL(`${someVar}`, import.meta.url) ``
+  // reads `${someVar}` as the literal segment text and walks it as one ordinary
+  // descent. But this call site has no "cannot read, keep depth" fallback to
+  // fall into: `readableNewUrlLiteral()` rejecting the argument makes
+  // `pathExpression()` return `undefined` for the WHOLE `new URL(...)` seed —
+  // the same outcome as any other unrecognised seed shape, NOT the depth-kept
+  // outcome `PATH_LITERAL`'s pair above pins. So this case must assert
+  // "does not flag, no name" rather than "flags at the unreadable depth".
+  const URL_TEMPLATE_INTERP = 'const P = new URL(`../../other-pkg/${someVar}`, import.meta.url);';
+  ok(
+    "(control) the same climb spelled with a real segment instead of interpolation still flags and is named — proves the case above isn't vacuous",
+    (() => {
+      const src = 'const P = new URL(`../../other-pkg/src/y.ts`, import.meta.url);';
+      return at(src, 1) && named(src, 1, CO).includes('packages/other-pkg/src/y.ts');
+    })(),
+  );
+  ok(
+    'an interpolating new URL() template does NOT flag — the whole seed is unrecognised, not depth-kept (#12085)',
+    !at(URL_TEMPLATE_INTERP, 1),
+  );
+  ok(
+    'and — like any unrecognised seed — yields no name at all (never a fabricated NAME)',
+    named(URL_TEMPLATE_INTERP, 1, CO).length === 0,
+  );
+  ok(
+    'a quoted (non-backtick) new URL() literal containing literal `${` text is unaffected — `${` outside a backtick is ordinary text, never interpolation',
+    (() => {
+      const src = "const P = new URL('../../other-pkg/${literalText}', import.meta.url);";
+      return at(src, 1) && named(src, 1, CO).includes('packages/other-pkg/${literalText}');
     })(),
   );
   ok(
