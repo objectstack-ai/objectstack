@@ -260,6 +260,26 @@ declareDialectCell(MYSQL_CELL, 'hash-shadow key (#11627)', (cell) => {
     });
 
     /**
+     * The clause-② half: once uniqueness is enforced over a DIGEST, MySQL's
+     * `ER_DUP_ENTRY` quotes raw binary and names the shadow index, so a real
+     * duplicate and a digest collision are indistinguishable from the error
+     * alone — measured: `Duplicate entry '\xA0\x02\x13...' for key
+     * 'proto.uniq_token'`. An operator reading that has been told nothing.
+     *
+     * The driver resolves it with one read on the failure path. This asserts
+     * the ORDINARY branch: a genuine duplicate is named in the DECLARED terms
+     * (the constraint and its source columns), not left as a digest.
+     */
+    it('names the declared columns on a duplicate instead of MySQL binary digest', async () => {
+      driver = new SqlDriver(cell.config());
+      await driver.initObjects([uniqueOn('os11627_dup', 1024)]);
+      await driver.create('os11627_dup', { v: 'T'.repeat(900) });
+      await expect(driver.create('os11627_dup', { v: 'T'.repeat(900) })).rejects.toThrow(
+        /duplicate value for the UNIQUE constraint 'uniq_os11627_dup_v'.*\(v\)/s,
+      );
+    });
+
+    /**
      * ⛔ NON-UNIQUE indexes are deliberately NOT shadowed. An index over a
      * digest serves no lookup the planner can reach for `WHERE col = ?`, so
      * creating one would trade a loud refusal for a table that syncs, costs

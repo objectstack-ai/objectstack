@@ -5490,9 +5490,22 @@ export class SqlDriver implements IDataDriver {
         const result = await builder.insert(formatted).returning('*');
         return this.formatOutput(object, result[0]);
       } catch (error) {
-        if (!mayRetry || attempt >= AUTONUMBER_COLLISION_RETRIES) throw error;
+        // #11627: on a table whose UNIQUE index is carried by a hash shadow,
+        // `ER_DUP_ENTRY` quotes a binary digest and names the shadow index, so
+        // neither the operator nor this driver can read WHICH value conflicted
+        // — and a genuine duplicate is indistinguishable from a (near-
+        // impossible) digest collision. Resolve it by reading the source
+        // columns back, on the failure path only, and re-throw the SAME error
+        // carrying whichever answer is true. Returns the error untouched when
+        // this is not a shadow conflict.
+        const shadowed = await this.decorateHashShadowDuplicate(
+          this.rotationWriteTarget(object) ?? object,
+          formatted,
+          error,
+        );
+        if (!mayRetry || attempt >= AUTONUMBER_COLLISION_RETRIES) throw shadowed;
         const colliding = await this.collidingAutoNumberReservations(error, reservations, options);
-        if (colliding.length === 0) throw error;
+        if (colliding.length === 0) throw shadowed;
         for (const reservation of colliding) {
           await this.resyncSequenceToDataMax(reservation);
           // Clear only what collided, so the next pass regenerates exactly
@@ -13692,6 +13705,38 @@ export class SqlDriver implements IDataDriver {
    * registered metadata so the disambiguating select above filters on the same
    * columns the shadow was generated from.
    */
+  /**
+   * Attach {@link explainHashShadowDuplicate}'s verdict to a failing write, or
+   * return the error untouched (#11627).
+   *
+   * ⚠️ Wired into {@link create} only. `update` issues its statement through
+   * three paths with no shared catch, and a duplicate on the columns this
+   * route covers — an OAuth token, an issuer/account pair, a metadata identity
+   * — arrives on INSERT in every flow this repo has. An UPDATE that collides
+   * still fails correctly; it just still reports MySQL's binary digest. That
+   * gap is deliberate and named rather than left to be discovered.
+   */
+  protected async decorateHashShadowDuplicate(
+    tableName: string,
+    values: Record<string, unknown>,
+    error: unknown,
+  ): Promise<unknown> {
+    let explanation: string | null = null;
+    try {
+      explanation = await this.explainHashShadowDuplicate(tableName, values, error);
+    } catch {
+      // The disambiguation is a diagnostic. If it cannot be made, the original
+      // failure is still the failure — never mask it with this one.
+      return error;
+    }
+    if (!explanation) return error;
+    (this.logger.error ?? this.logger.warn)(explanation);
+    return Object.assign(new Error(`${explanation} (server said: ${String((error as { message?: string })?.message ?? error)})`), {
+      code: (error as { code?: string })?.code,
+      cause: error,
+    });
+  }
+
   protected async hashShadowSourceColumns(tableName: string, indexName: string): Promise<string[]> {
     try {
       const rows: Array<{ GENERATION_EXPRESSION?: string; generation_expression?: string }> =
