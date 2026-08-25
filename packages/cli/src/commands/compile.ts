@@ -16,7 +16,7 @@ import {
 import { loadConfig } from '../utils/config.js';
 import { lowerCallables } from '../utils/lower-callables.js';
 import { buildAccessMatrix, diffAccessMatrix } from '@objectstack/lint';
-import { runAuthoringRules, splitBySeverity, authoringRulesFor, type AuthoringFinding } from '@objectstack/lint';
+import { runAuthoringRules, splitBySeverity, authoringRulesFor } from '@objectstack/lint';
 import { resolveSduiManifest } from '../utils/sdui-manifest.js';
 import { preflightRequiredCapabilities, renderCapabilityMessage } from '../utils/capability-preflight.js';
 import { collectAndLintDocs, type DocIssue } from '../utils/collect-docs.js';
@@ -119,7 +119,13 @@ export default class Compile extends Command {
     // #11727 applied one list over. The spread used to be written out at the
     // payload, so a tenth exit could have been added with a different order and
     // nothing would have caught it.
-    let ruleAdvisories: AuthoringFinding[] = [];
+    // Typed off `splitBySeverity` and not by naming `AuthoringFinding`: the #4409
+    // import scan (packages/lint/src/authoring-rule-wiring.test.ts) reads every
+    // symbol this file names from `@objectstack/lint` and strips `type ` rather
+    // than exempting it, and `splitBySeverity` — which produces this list — is
+    // already ratcheted there. Binding the annotation to the producer is also the
+    // tighter statement: the list cannot disagree with the function that fills it.
+    let ruleAdvisories: ReturnType<typeof splitBySeverity>['advisories'] = [];
     let capProviderWarnings: Array<{ token: string; message: string }> = [];
     let unknownKeyWarnings: string[] = [];
     let docWarnings: DocIssue[] = [];
