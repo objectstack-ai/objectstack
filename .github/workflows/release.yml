@@ -543,7 +543,7 @@ jobs:
           # release paths by pattern, then the two declared lists by WHOLE-LINE
           # EXACT match, so neither derived filter can accept a path its
           # declaration does not name and neither needs regex-escaping.
-          UNEXPECTED="$(grep -vE '(^|/)package\.json$|(^|/)CHANGELOG\.md$|^\.changeset/' "${MOVED_FILE}" \
+          UNEXPECTED="$(grep -vE '(^|/)package\.json$|(^|/)CHANGELOG\.md$|^\.changeset/|^packages/spec/src/kernel/protocol-version\.ts$' "${MOVED_FILE}" \
             | grep -vxF -f "${TEMPLATE_LIST}" \
             | grep -vxF -f "${SURFACE_LIST}" || true)"
           if [ -n "${UNEXPECTED}" ]; then
@@ -552,9 +552,14 @@ jobs:
             exit 1
           fi
 
-          # The two MAJOR-boundary classes. They are inside the surface above,
-          # so the assertion accepted them; what this lane does not have is a
-          # gate for either. protocol-version.ts is judged by
+          # The two MAJOR-boundary classes. Both are INSIDE the surface above —
+          # protocol-version.ts by the pattern, the template stamps by
+          # `stampedPaths()` — so the assertion accepts them and they reach this
+          # check with a diagnosis of their own. Measured: with the pattern
+          # missing, protocol-version.ts fell into the "wrote outside the
+          # reviewed surface" branch instead, which is red for the right reason
+          # and wrong about why. What this lane does not have is a gate for
+          # either. protocol-version.ts is judged by
           # packages/spec/src/kernel/protocol-version.test.ts, reachable only
           # through the whole @objectstack/spec suite (measured: 424 files,
           # 11273 tests, 5m26s — not a per-refresh cost), and the template stamps
