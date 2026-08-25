@@ -50,26 +50,31 @@
  * that collected NOTHING exits 0 too and would read as a pass.
  *
  * ⚠️ The ablation is a race, not a certainty, and the rate is a function of the
- * BOX, not of the fixture. Measured on this container, 4 vCPU / 17 GB, each
- * arm carrying its own control in the same run:
+ * BOX, not of the fixture. Measured on this container — 4 vCPU / 17 GB, every
+ * arm serialized under the shared verify lock, each carrying its own control in
+ * the same run:
  *
- *     idle, ablation config      20/20 reproduced, every child exit 1
- *     idle, this app's config     0/6  reproduced, every child exit 0   (control)
- *     4 concurrent node procs     0/20 reproduced, every child exit 0
- *     those 4 procs themselves   82/579 reproduced (~14%), same window
+ *     idle, ablation config          20/20 reproduced, every child exit 1
+ *     idle, this app's config         0/6  reproduced, every child exit 0  (control)
+ *     under 4 concurrent vitest       3/40 reproduced in the measured arm
+ *     those concurrent runs        248/1913 reproduced (~13%) in the same windows
  *
- * The load arm is the one that matters and it is NOT a starvation effect: load
- * average held at 2.8 on 4 CPUs with 15 GB free, so nothing was starved — yet
- * reproduction fell from 100% to ~14%. The card's own control had already ruled
- * starvation out from the other side (the file alone under 8 synthetic CPU
- * burners, load ~7, stayed green). What suppresses the window is CONCURRENT
- * NODE PROCESSES, which is what a full-repo `turbo run test` is made of.
+ * It is NOT a starvation effect. Load average held between 2.8 and 3.4 on 4
+ * CPUs with 15 GB free throughout, so nothing was starved — and reproduction
+ * still fell from 100% to ~13%. The card's own control had ruled starvation out
+ * from the other side (the file alone under 8 synthetic CPU burners, load ~7,
+ * stayed green). Nor is it contention on the fixture directory: repeated with
+ * every concurrent process on its OWN copy of the fixture root, the suppression
+ * survives (3/20). What closes the window is CONCURRENT NODE PROCESSES, which
+ * is exactly what a full-repo `turbo run test` is made of — and what a lane
+ * inside THIS package therefore cannot isolate the file from.
  *
- * WHY THAT MAKES A RETRY BUDGET THE WRONG INSTRUMENT (#11939). At ~14% per
- * attempt, eight attempts miss 1 - (1 - 0.14)^8 ≈ 31% of the time — and the
- * measured arm went 0/20, so the rate under a real full-repo run may be lower
- * still. No budget that finishes in a test's lifetime makes a race with an
- * environment-dependent rate reliable; it only moves the red further out.
+ * WHY THAT MAKES A RETRY BUDGET THE WRONG INSTRUMENT (#11939). At ~13% per
+ * attempt, eight attempts miss (1 - 0.13)^8 ≈ 33% of the time — and the
+ * sequentially measured arms came in lower still (3/40), so the rate under a
+ * real full-repo run may be worse than that. No budget that finishes inside a
+ * test's lifetime makes a race with an environment-dependent rate reliable; it
+ * only moves the red further out and pays for the move on every loaded run.
  *
  * WHAT THIS FILE ACTUALLY CLOSES, then. "The instrument did not fire this time"
  * and "the instrument is permanently dead" are different facts with different
@@ -595,7 +600,7 @@ describe('[#10293] vitest console-forwarding teardown race', () => {
           `and the premise probe reads all ${premise.markers.length} markers of the mechanism ` +
           `as INTACT in the installed vitest. So the instrument is alive and this run simply ` +
           `did not catch the window — measured cause: concurrent node processes suppress it ` +
-          `(~14% per attempt under load versus 20/20 idle; see this file's docblock). This ` +
+          `(~13% per attempt under load versus 20/20 idle; see this file's docblock). This ` +
           `leg is SKIPPED, never passed. The GUARDED leg is unaffected and still ran.`;
         console.warn(degraded);
         ctx.skip(degraded);
