@@ -55,6 +55,24 @@ const result = HealthStatusSchema.parse(data);
 | **error** | `{ name: string; message: string; stack?: string; code?: string }` | optional | Serializable error representation if startup failed |
 | **health** | `{ healthy: boolean; timestamp: integer; details?: Record<string, any>; message?: string }` | optional | Health status after startup if health check was enabled |
 
+### Nested Shape: `PluginStartupResult.error`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Error class name |
+| **message** | `string` | ✅ | Error message |
+| **stack** | `string` | optional | Stack trace |
+| **code** | `string` | optional | Error code |
+
+### Nested Shape: `PluginStartupResult.health`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **healthy** | `boolean` | ✅ | Whether the plugin is healthy |
+| **timestamp** | `integer` | ✅ | Unix timestamp in milliseconds when health check was performed |
+| **details** | `Record<string, any>` | optional | Optional plugin-specific health details |
+| **message** | `string` | optional | Error message if plugin is unhealthy |
+
 
 ---
 
@@ -83,6 +101,16 @@ const result = HealthStatusSchema.parse(data);
 | **totalDuration** | `number` | ✅ | Total time taken for all plugins in milliseconds |
 | **allSuccessful** | `boolean` | ✅ | Whether all plugins started successfully |
 | **rolledBack** | `string[]` | optional | Names of plugins that were rolled back |
+
+### Nested Shape: `StartupOrchestrationResult.results[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **plugin** | `{ name: string; version?: string } & Record<string, any>` | ✅ | Plugin metadata |
+| **success** | `boolean` | ✅ | Whether the plugin started successfully |
+| **duration** | `number` | ✅ | Time taken to start the plugin in milliseconds |
+| **error** | `{ name: string; message: string; stack?: string; code?: string }` | optional | Serializable error representation if startup failed |
+| **health** | `{ healthy: boolean; timestamp: integer; details?: Record<string, any>; message?: string }` | optional | Health status after startup if health check was enabled |
 
 
 ---

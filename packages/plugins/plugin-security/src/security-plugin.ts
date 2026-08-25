@@ -39,6 +39,7 @@ import { runPermissionSetDriftDiagnostics } from './permission-set-drift.js';
 import { reportPackagedPermissionSetOverlays } from './packaged-permission-set-overlay-detection.js';
 import { discardPermissionSetOverlay, type PermissionSetOverlayDiscardDeps } from './permission-set-overlay-discard.js';
 import { registerObjectPostureGate } from './object-posture-gate.js';
+import { registerPackagedPermissionSetLockGate } from './packaged-permission-set-lock-gate.js';
 import {
   reconcileAudienceBindingSuggestions,
   listAudienceBindingSuggestions,
@@ -3245,6 +3246,17 @@ export class SecurityPlugin implements Plugin {
           // Feature-detected; protocols predating registerAuthoringGate keep
           // the legacy (CLI-lint-only) behavior.
           registerObjectPostureGate(protocol);
+          // [#11843 — maintainer ruling 2026-08-25, option B] The packaged-
+          // permission-set lock's METADATA-door registration: the same
+          // classifier and error classes the data door runs
+          // (`packaged-permission-set-lock.ts`), now consulted on the
+          // pre-persistence seam for `permission` bodies too — so an
+          // `OS_METADATA_WRITABLE=permission` hatch write targeting a
+          // package-declared set is refused before persistence instead of
+          // minting the overlay the lock exists to prevent, while writes to
+          // non-packaged names keep the documented hatch behavior. One
+          // spelling of "package-declared", two doors, one refusal.
+          registerPackagedPermissionSetLockGate(protocol, ql);
           // [ADR-0094 D4] Converge record ↔ metadata: project env overlays
           // onto records (creating missing ones), backfill legacy data-door
           // creations into the metadata store once, and heal drifted records

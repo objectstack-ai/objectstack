@@ -81,6 +81,33 @@ const result = BatchProgressSchema.parse(data);
 | **priority** | `integer` | optional (default: `0`) | Queue priority (lower = higher priority) |
 | **autoScale** | `{ enabled: boolean; minWorkers: integer; maxWorkers: integer; scaleUpThreshold: integer; … }` | optional | Auto-scaling configuration |
 
+### Nested Shape: `QueueConfig.rateLimit`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **max** | `integer` | ✅ | Maximum tasks per duration |
+| **duration** | `integer` | ✅ | Duration in milliseconds |
+
+### Nested Shape: `QueueConfig.defaultRetryPolicy`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **maxRetries** | `integer` | optional (default: `3`) | Maximum retry attempts |
+| **backoffStrategy** | `Enum<'fixed' \| 'linear' \| 'exponential'>` | optional (default: `"exponential"`) | Backoff strategy between retries |
+| **initialDelayMs** | `integer` | optional (default: `1000`) | Initial retry delay in milliseconds |
+| **maxDelayMs** | `integer` | optional (default: `60000`) | Maximum retry delay in milliseconds |
+| **backoffMultiplier** | `number` | optional (default: `2`) | Multiplier for exponential backoff |
+
+### Nested Shape: `QueueConfig.autoScale`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **enabled** | `boolean` | optional (default: `false`) | Enable auto-scaling |
+| **minWorkers** | `integer` | optional (default: `1`) | Minimum workers |
+| **maxWorkers** | `integer` | optional (default: `10`) | Maximum workers |
+| **scaleUpThreshold** | `integer` | optional (default: `100`) | Queue size to scale up |
+| **scaleDownThreshold** | `integer` | optional (default: `10`) | Queue size to scale down |
+
 
 ---
 
@@ -102,6 +129,25 @@ const result = BatchProgressSchema.parse(data);
 | **status** | `Enum<'pending' \| 'queued' \| 'processing' \| 'completed' \| 'failed' \| 'cancelled' \| 'timeout' \| 'dead'>` | optional (default: `"pending"`) | Current task status |
 | **metadata** | `{ createdAt?: string; updatedAt?: string; createdBy?: string; tags?: string[] }` | optional | Task metadata |
 
+### Nested Shape: `Task.retryPolicy`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **maxRetries** | `integer` | optional (default: `3`) | Maximum retry attempts |
+| **backoffStrategy** | `Enum<'fixed' \| 'linear' \| 'exponential'>` | optional (default: `"exponential"`) | Backoff strategy between retries |
+| **initialDelayMs** | `integer` | optional (default: `1000`) | Initial retry delay in milliseconds |
+| **maxDelayMs** | `integer` | optional (default: `60000`) | Maximum retry delay in milliseconds |
+| **backoffMultiplier** | `number` | optional (default: `2`) | Multiplier for exponential backoff |
+
+### Nested Shape: `Task.metadata`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **createdAt** | `string` | optional | When task was created |
+| **updatedAt** | `string` | optional | Last update time |
+| **createdBy** | `string` | optional | User who created task |
+| **tags** | `string[]` | optional | Task tags for filtering |
+
 
 ---
 
@@ -120,6 +166,14 @@ const result = BatchProgressSchema.parse(data);
 | **completedAt** | `string` | optional | When execution completed |
 | **attempt** | `integer` | ✅ | Attempt number (1-indexed) |
 | **willRetry** | `boolean` | ✅ | Whether task will be retried |
+
+### Nested Shape: `TaskExecutionResult.error`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **message** | `string` | ✅ | Error message |
+| **stack** | `string` | optional | Error stack trace |
+| **code** | `string` | optional | Error code |
 
 
 ---
@@ -182,6 +236,15 @@ const result = BatchProgressSchema.parse(data);
 | **avgExecutionMs** | `number` | optional | Average execution time in milliseconds |
 | **uptimeMs** | `integer` | ✅ | Worker uptime in milliseconds |
 | **queues** | `Record<string, { pending: integer; active: integer; completed: integer; failed: integer }>` | optional | Per-queue statistics |
+
+### Nested Shape: `WorkerStats.queues[string]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **pending** | `integer` | ✅ | Pending tasks |
+| **active** | `integer` | ✅ | Active tasks |
+| **completed** | `integer` | ✅ | Completed tasks |
+| **failed** | `integer` | ✅ | Failed tasks |
 
 
 ---

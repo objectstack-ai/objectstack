@@ -58,6 +58,44 @@ const result = DocumentSchema.parse(data);
 | **access** | `{ isPublic: boolean; sharedWith?: string[]; expiresAt?: number }` | optional | Access control |
 | **metadata** | `Record<string, any>` | optional | Custom metadata |
 
+### Nested Shape: `Document.versioning`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **enabled** | `boolean` | ✅ | Versioning enabled |
+| **versions** | `{ versionNumber: number; createdAt: number; createdBy: string; size: number; … }[]` | ✅ | Version history |
+| **majorVersion** | `number` | ✅ | Major version |
+| **minorVersion** | `number` | ✅ | Minor version |
+
+### Nested Shape: `Document.template`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ | Template ID |
+| **name** | `string` | ✅ | Template name |
+| **description** | `string` | optional | Template description |
+| **fileUrl** | `string` | ✅ | Template file URL |
+| **fileType** | `string` | ✅ | File MIME type |
+| **placeholders** | `{ key: string; label: string; type: Enum<'text' \| 'number' \| 'date' \| 'image'>; required: boolean }[]` | ✅ | Template placeholders |
+
+### Nested Shape: `Document.eSignature`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **provider** | `Enum<'docusign' \| 'adobe-sign' \| 'hellosign' \| 'custom'>` | ✅ | E-signature provider |
+| **enabled** | `boolean` | optional (default: `false`) | E-signature enabled |
+| **signers** | `{ email: string; name: string; role: string; order: number }[]` | ✅ | Document signers |
+| **expirationDays** | `number` | optional (default: `30`) | Expiration days |
+| **reminderDays** | `number` | optional (default: `7`) | Reminder interval days |
+
+### Nested Shape: `Document.access`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **isPublic** | `boolean` | optional (default: `false`) | Public access |
+| **sharedWith** | `string[]` | optional | Shared with |
+| **expiresAt** | `number` | optional | Access expiration |
+
 
 ---
 
@@ -73,6 +111,15 @@ const result = DocumentSchema.parse(data);
 | **fileUrl** | `string` | ✅ | Template file URL |
 | **fileType** | `string` | ✅ | File MIME type |
 | **placeholders** | `{ key: string; label: string; type: Enum<'text' \| 'number' \| 'date' \| 'image'>; required: boolean }[]` | ✅ | Template placeholders |
+
+### Nested Shape: `DocumentTemplate.placeholders[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **key** | `string` | ✅ | Placeholder key |
+| **label** | `string` | ✅ | Placeholder label |
+| **type** | `Enum<'text' \| 'number' \| 'date' \| 'image'>` | ✅ | Placeholder type |
+| **required** | `boolean` | optional (default: `false`) | Is required |
 
 
 ---
@@ -105,6 +152,15 @@ const result = DocumentSchema.parse(data);
 | **signers** | `{ email: string; name: string; role: string; order: number }[]` | ✅ | Document signers |
 | **expirationDays** | `number` | optional (default: `30`) | Expiration days |
 | **reminderDays** | `number` | optional (default: `7`) | Reminder interval days |
+
+### Nested Shape: `ESignatureConfig.signers[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **email** | `string` | ✅ | Signer email |
+| **name** | `string` | ✅ | Signer name |
+| **role** | `string` | ✅ | Signer role |
+| **order** | `number` | ✅ | Signing order |
 
 
 ---

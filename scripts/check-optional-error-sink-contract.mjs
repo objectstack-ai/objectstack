@@ -57,8 +57,8 @@
  * misses a type someone names differently, and this repo has `LoggerLike`,
  * `MinimalLogger`, `OptionalLogger`, `FakeLogSink` and eight anonymous inline
  * literals — a name rule would have missed most of the population. Structural
- * costs false positives instead, so both narrowings below are measured and
- * their cost is printed on every run rather than argued in prose.
+ * costs false positives instead, so every narrowing below is measured and
+ * its cost is printed on every run rather than argued in prose.
  *
  * A SINK is: an interface, a type alias to a type literal, or an inline type
  * literal, all of whose members are function-typed and named from
@@ -786,7 +786,7 @@ function run({ list = false } = {}) {
 // ── Self-test ───────────────────────────────────────────────────────────────
 
 /**
- * Every limb observed FAILING and observed SILENT, plus the two narrowings
+ * Every limb observed FAILING and observed SILENT, plus the narrowings
  * pinned as positive counts.
  *
  * The reject side is pinned deliberately: a matcher that stopped matching

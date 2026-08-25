@@ -52,13 +52,21 @@
  *
  * ## Fail direction
  *
- * Every uncertainty delegates: an unreadable body, a shape outside the set
- * the vendor evaluates, an unreadable live-options object. Delegation can
- * only reproduce the vendor's measured native behaviour — it can never mint
- * a `true` for a caller the predicate did not admit. The only path to
- * `success: true` runs through `isPlatformAdminUser` (or the vendor's own
- * `adminUserIds` short-circuit, mirrored below for option fidelity; this
- * repo configures none).
+ * Two of the three uncertainties delegate: an unreadable body and a shape
+ * outside the set the vendor evaluates. Delegation can only reproduce the
+ * vendor's measured native behaviour — it can never mint a `true` for a
+ * caller the predicate did not admit. The only path to `success: true` runs
+ * through `isPlatformAdminUser` (or the vendor's own `adminUserIds`
+ * short-circuit, mirrored below for option fidelity; this repo configures
+ * none).
+ *
+ * The third — an unreadable live-options object — does NOT delegate. It is
+ * caught in {@link answerPermissionQueryAsAdmin}, `adminOptions` becomes
+ * `undefined`, and the evaluation answers from the vendor's exported
+ * `defaultRoles` with `adminRoles = ['admin']`: on that path the
+ * deployment's own `roles` / `adminRoles` are not the ones read. It is
+ * reached only after `isPlatformAdminUser` has already admitted the caller,
+ * so it still cannot answer for a caller the predicate refused.
  *
  * ## Why the evaluated-body set is spelled out here
  *
@@ -158,8 +166,10 @@ export async function answerPermissionQueryAsAdmin(
       (p) => p?.id === 'admin',
     )?.options;
   } catch {
-    // Unreadable live options → run on the vendor's own defaults, exactly as
-    // the vendor itself would with an unconfigured plugin.
+    // Unreadable live options → evaluate on the vendor's exported defaults
+    // (`defaultRoles`, `adminRoles = ['admin']`) instead of this deployment's
+    // configured ones. This path answers; it does not delegate (see the
+    // header's "Fail direction").
     adminOptions = undefined;
   }
   const opts = (adminOptions ?? {}) as {

@@ -18,11 +18,12 @@ type YouTubeEmbedProps = {
  * A facade, not a bare `<iframe>`: nothing is requested from YouTube until the
  * viewer actually clicks play, so the homepage costs no third-party frame,
  * script or cookie on load. The cover is the same one the README links from
- * (`docs/screenshots/hero-cover-dark.png`, copied into `public/`), which is 2:1
- * rather than the video's 16:9 — hence the fixed 2:1 frame with the player
- * centred inside it at its own aspect ratio. Cropping the cover to 16:9 would
- * cut through the logo on the left edge, and letting the frame change shape on
- * click would shove the rest of the page down mid-interaction.
+ * (`docs/screenshots/hero-cover-dark.png`, re-encoded to WebP into `public/` —
+ * `HERO_COVER` in `lib/site.ts` owns the path and the re-encode recipe), which
+ * is 2:1 rather than the video's 16:9 — hence the fixed 2:1 frame with the
+ * player centred inside it at its own aspect ratio. Cropping the cover to 16:9
+ * would cut through the logo on the left edge, and letting the frame change
+ * shape on click would shove the rest of the page down mid-interaction.
  */
 export function YouTubeEmbed({ videoId, title, poster }: YouTubeEmbedProps) {
   const [playing, setPlaying] = useState(false);

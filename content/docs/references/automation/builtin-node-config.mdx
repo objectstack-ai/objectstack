@@ -164,6 +164,19 @@ const result = CreateRecordConfigSchema.parse(data);
 | **recordId** | `string` | optional | Object form only: id of the record to edit (required for mode: 'edit' to be useful) |
 | **defaults** | `Record<string, any>` | optional | Object form only: prefilled values |
 
+### Nested Shape: `ScreenConfig.fields[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Field name (the flow variable the value binds to) |
+| **label** | `string` | optional | Display label |
+| **type** | `string` | optional | Input type |
+| **required** | `boolean` | optional | Whether a value is required to submit |
+| **options** | `{ value: any; label: string }[]` | optional | Choices for a select-style field |
+| **defaultValue** | `any` | optional | Prefilled value (interpolates `{token}` templates) |
+| **placeholder** | `string` | optional | Input placeholder text |
+| **visibleWhen** | `string` | optional | CEL predicate controlling visibility, evaluated client-side |
+
 
 ---
 
@@ -181,6 +194,13 @@ const result = CreateRecordConfigSchema.parse(data);
 | **defaultValue** | `any` | optional | Prefilled value (interpolates `{token}` templates) |
 | **placeholder** | `string` | optional | Input placeholder text |
 | **visibleWhen** | `string` | optional | CEL predicate controlling visibility, evaluated client-side |
+
+### Nested Shape: `ScreenFieldConfig.options[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **value** | `any` | ✅ | Stored value |
+| **label** | `string` | ✅ | Display label |
 
 
 ---

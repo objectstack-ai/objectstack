@@ -42,6 +42,26 @@ const result = RegistryConfigSchema.parse(data);
 | **cache** | `{ enabled: boolean; ttl: integer; maxSize?: integer }` | optional |  |
 | **mirrors** | `{ url: string; priority: integer }[]` | optional | Mirror registries for redundancy |
 
+### Nested Shape: `RegistryConfig.upstream[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **url** | `string` | ✅ | Upstream registry endpoint |
+| **syncPolicy** | `Enum<'manual' \| 'auto' \| 'proxy'>` | optional (default: `"auto"`) | Registry synchronization strategy |
+| **syncInterval** | `integer` | optional | Auto-sync interval in seconds |
+| **auth** | `{ type: Enum<'none' \| 'basic' \| 'bearer' \| 'api-key' \| 'oauth2'>; username?: string; password?: string; token?: string; … }` | optional |  |
+| **tls** | `{ enabled: boolean; verifyCertificate: boolean; certificate?: string; privateKey?: string }` | optional |  |
+| **timeout** | `integer` | optional (default: `30000`) | Request timeout in milliseconds |
+| **retry** | `{ maxAttempts: integer; backoff: Enum<'fixed' \| 'linear' \| 'exponential'> }` | optional |  |
+
+### Nested Shape: `RegistryConfig.cache`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **enabled** | `boolean` | optional (default: `true`) |  |
+| **ttl** | `integer` | optional (default: `3600`) | Cache TTL in seconds |
+| **maxSize** | `integer` | optional | Maximum cache size in bytes |
+
 
 ---
 

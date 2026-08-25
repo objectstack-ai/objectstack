@@ -117,6 +117,49 @@ A complete test scenario with setup, execution steps, and teardown
 | **teardown** | `{ name: string; description?: string; action: object; assertions?: object[]; … }[]` | optional | Steps to cleanup after test execution |
 | **requires** | `{ params?: string[]; plugins?: string[] }` | optional | Environment requirements for this scenario |
 
+### Nested Shape: `TestScenario.setup[number]`
+
+A single step in a test scenario, consisting of an action and optional assertions
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Step name for identification in test reports |
+| **description** | `string` | optional | Human-readable description of what this step tests |
+| **action** | `{ type: Enum<'create_record' \| 'update_record' \| 'delete_record' \| 'read_record' \| …>; target: string; payload?: Record<string, any>; user?: string }` | ✅ | The action to execute in this step |
+| **assertions** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'is_null' \| 'not_null' \| …>; expectedValue: any }[]` | optional | Assertions to validate after the action completes |
+| **capture** | `Record<string, string>` | optional | Map result fields to context variables, paths resolved against the response body root (e.g. `{ "newId": "data.id" }`) |
+
+### Nested Shape: `TestScenario.steps[number]`
+
+A single step in a test scenario, consisting of an action and optional assertions
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Step name for identification in test reports |
+| **description** | `string` | optional | Human-readable description of what this step tests |
+| **action** | `{ type: Enum<'create_record' \| 'update_record' \| 'delete_record' \| 'read_record' \| …>; target: string; payload?: Record<string, any>; user?: string }` | ✅ | The action to execute in this step |
+| **assertions** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'is_null' \| 'not_null' \| …>; expectedValue: any }[]` | optional | Assertions to validate after the action completes |
+| **capture** | `Record<string, string>` | optional | Map result fields to context variables, paths resolved against the response body root (e.g. `{ "newId": "data.id" }`) |
+
+### Nested Shape: `TestScenario.teardown[number]`
+
+A single step in a test scenario, consisting of an action and optional assertions
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Step name for identification in test reports |
+| **description** | `string` | optional | Human-readable description of what this step tests |
+| **action** | `{ type: Enum<'create_record' \| 'update_record' \| 'delete_record' \| 'read_record' \| …>; target: string; payload?: Record<string, any>; user?: string }` | ✅ | The action to execute in this step |
+| **assertions** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'is_null' \| 'not_null' \| …>; expectedValue: any }[]` | optional | Assertions to validate after the action completes |
+| **capture** | `Record<string, string>` | optional | Map result fields to context variables, paths resolved against the response body root (e.g. `{ "newId": "data.id" }`) |
+
+### Nested Shape: `TestScenario.requires`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **params** | `string[]` | optional | Required environment variables or parameters |
+| **plugins** | `string[]` | optional | Required plugins that must be loaded |
+
 
 ---
 
@@ -134,6 +177,25 @@ A single step in a test scenario, consisting of an action and optional assertion
 | **assertions** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'is_null' \| 'not_null' \| …>; expectedValue: any }[]` | optional | Assertions to validate after the action completes |
 | **capture** | `Record<string, string>` | optional | Map result fields to context variables, paths resolved against the response body root (e.g. `{ "newId": "data.id" }`) |
 
+### Nested Shape: `TestStep.action`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `Enum<'create_record' \| 'update_record' \| 'delete_record' \| 'read_record' \| …>` | ✅ | The action type to execute |
+| **target** | `string` | ✅ | Target Object, API Endpoint, or Function Name |
+| **payload** | `Record<string, any>` | optional | Data to send or use |
+| **user** | `string` | optional | Run as specific user/role for impersonation testing |
+
+### Nested Shape: `TestStep.assertions[number]`
+
+A test assertion that validates the result of a test action
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **field** | `string` | ✅ | Field path in the result to check, resolved against the parsed response body root — no "body." prefix (e.g. "data.0.status") |
+| **operator** | `Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'is_null' \| 'not_null' \| …>` | ✅ | Comparison operator to use |
+| **expectedValue** | `any` | ✅ | Expected value to compare against |
+
 
 ---
 
@@ -147,6 +209,21 @@ A collection of test scenarios grouped into a test suite
 | :--- | :--- | :--- | :--- |
 | **name** | `string` | ✅ | Test suite name |
 | **scenarios** | `{ id: string; name: string; description?: string; tags?: string[]; … }[]` | ✅ | List of test scenarios in this suite |
+
+### Nested Shape: `TestSuite.scenarios[number]`
+
+A complete test scenario with setup, execution steps, and teardown
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ | Unique scenario identifier |
+| **name** | `string` | ✅ | Scenario name for test reports |
+| **description** | `string` | optional | Detailed description of the test scenario |
+| **tags** | `string[]` | optional | Tags for filtering and categorization (e.g. "critical", "regression", "crm") |
+| **setup** | `{ name: string; description?: string; action: object; assertions?: object[]; … }[]` | optional | Steps to run before main test (preconditions) |
+| **steps** | `{ name: string; description?: string; action: object; assertions?: object[]; … }[]` | ✅ | Main test sequence to execute |
+| **teardown** | `{ name: string; description?: string; action: object; assertions?: object[]; … }[]` | optional | Steps to cleanup after test execution |
+| **requires** | `{ params?: string[]; plugins?: string[] }` | optional | Environment requirements for this scenario |
 
 
 ---

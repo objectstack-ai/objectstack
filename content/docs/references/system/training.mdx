@@ -112,6 +112,23 @@ Organizational training plan per ISO 27001:2022 A.6.3
 | **sendReminders** | `boolean` | optional (default: `true`) | Send reminders for upcoming training deadlines |
 | **reminderDaysBefore** | `number` | optional (default: `14`) | Days before deadline to send first reminder |
 
+### Nested Shape: `TrainingPlan.courses[number]`
+
+Security training course definition
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ | Unique course identifier |
+| **title** | `string` | ✅ | Course title |
+| **description** | `string` | ✅ | Course description and learning objectives |
+| **category** | `Enum<'security_awareness' \| 'data_protection' \| 'incident_response' \| …>` | ✅ | Training category |
+| **durationMinutes** | `number` | ✅ | Estimated course duration in minutes |
+| **mandatory** | `boolean` | optional (default: `false`) | Whether training is mandatory |
+| **targetRoles** | `string[]` | ✅ | Target roles or groups |
+| **validityDays** | `number` | optional | Certification validity period in days |
+| **passingScore** | `number` | optional | Minimum passing score percentage |
+| **version** | `string` | optional | Course content version |
+
 
 ---
 

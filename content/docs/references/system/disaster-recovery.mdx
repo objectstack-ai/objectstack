@@ -55,6 +55,38 @@ Backup configuration
 | **compression** | `{ enabled?: boolean; algorithm?: Enum<'gzip' \| 'zstd' \| 'lz4' \| 'snappy'> }` | optional | Backup compression settings |
 | **verifyAfterBackup** | `boolean` | optional (default: `true`) | Verify backup integrity after creation |
 
+### Nested Shape: `BackupConfig.retention`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **days** | `number` | ✅ | Retention period in days |
+| **minCopies** | `number` | optional (default: `3`) | Minimum backup copies to retain |
+| **maxCopies** | `number` | optional | Maximum backup copies to store |
+
+### Nested Shape: `BackupConfig.destination`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `Enum<'s3' \| 'gcs' \| 'azure_blob' \| 'local'>` | ✅ | Storage backend type |
+| **bucket** | `string` | optional | Cloud storage bucket/container name |
+| **path** | `string` | optional | Storage path prefix |
+| **region** | `string` | optional | Cloud storage region |
+
+### Nested Shape: `BackupConfig.encryption`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **enabled** | `boolean` | optional (default: `true`) | Enable backup encryption |
+| **algorithm** | `Enum<'AES-256-GCM' \| 'AES-256-CBC' \| 'ChaCha20-Poly1305'>` | optional (default: `"AES-256-GCM"`) | Encryption algorithm |
+| **keyId** | `string` | optional | KMS key ID for encryption |
+
+### Nested Shape: `BackupConfig.compression`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **enabled** | `boolean` | optional (default: `true`) | Enable backup compression |
+| **algorithm** | `Enum<'gzip' \| 'zstd' \| 'lz4' \| 'snappy'>` | optional (default: `"zstd"`) | Compression algorithm |
+
 
 ---
 
@@ -104,6 +136,69 @@ Complete disaster recovery plan configuration
 | **runbookUrl** | `string` | optional | URL to disaster recovery runbook/playbook |
 | **contacts** | `{ name: string; role: string; email?: string; phone?: string }[]` | optional | Emergency contact list for DR incidents |
 
+### Nested Shape: `DisasterRecoveryPlan.rpo`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **value** | `number` | ✅ | RPO value |
+| **unit** | `Enum<'seconds' \| 'minutes' \| 'hours'>` | optional (default: `"minutes"`) | RPO time unit |
+
+### Nested Shape: `DisasterRecoveryPlan.rto`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **value** | `number` | ✅ | RTO value |
+| **unit** | `Enum<'seconds' \| 'minutes' \| 'hours'>` | optional (default: `"minutes"`) | RTO time unit |
+
+### Nested Shape: `DisasterRecoveryPlan.backup`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **strategy** | `Enum<'full' \| 'incremental' \| 'differential'>` | optional (default: `"incremental"`) | Backup strategy |
+| **schedule** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Cron expression for backup schedule — cron`0 2 * * *` |
+| **retention** | `{ days: number; minCopies?: number; maxCopies?: number }` | ✅ | Backup retention policy |
+| **destination** | `{ type: Enum<'s3' \| 'gcs' \| 'azure_blob' \| 'local'>; bucket?: string; path?: string; region?: string }` | ✅ | Backup storage destination |
+| **encryption** | `{ enabled?: boolean; algorithm?: Enum<'AES-256-GCM' \| 'AES-256-CBC' \| 'ChaCha20-Poly1305'>; keyId?: string }` | optional | Backup encryption settings |
+| **compression** | `{ enabled?: boolean; algorithm?: Enum<'gzip' \| 'zstd' \| 'lz4' \| 'snappy'> }` | optional | Backup compression settings |
+| **verifyAfterBackup** | `boolean` | optional (default: `true`) | Verify backup integrity after creation |
+
+### Nested Shape: `DisasterRecoveryPlan.failover`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **mode** | `Enum<'active_passive' \| 'active_active' \| 'pilot_light' \| 'warm_standby'>` | optional (default: `"active_passive"`) | Failover mode |
+| **autoFailover** | `boolean` | optional (default: `true`) | Enable automatic failover |
+| **healthCheckInterval** | `number` | optional (default: `30`) | Health check interval in seconds |
+| **failureThreshold** | `number` | optional (default: `3`) | Consecutive failures before failover |
+| **regions** | `{ name: string; role: Enum<'primary' \| 'secondary' \| 'witness'>; endpoint?: string; priority?: number }[]` | ✅ | Multi-region configuration (minimum 2 regions) |
+| **dns** | `{ ttl?: number; provider?: Enum<'route53' \| 'cloudflare' \| 'azure_dns' \| 'custom'> }` | optional | DNS failover settings |
+
+### Nested Shape: `DisasterRecoveryPlan.replication`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **mode** | `Enum<'synchronous' \| 'asynchronous' \| 'semi_synchronous'>` | optional (default: `"asynchronous"`) | Data replication mode |
+| **maxLagSeconds** | `number` | optional | Maximum acceptable replication lag in seconds |
+| **includeObjects** | `string[]` | optional | Objects to replicate (empty = all) |
+| **excludeObjects** | `string[]` | optional | Objects to exclude from replication |
+
+### Nested Shape: `DisasterRecoveryPlan.testing`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **enabled** | `boolean` | optional (default: `false`) | Enable automated DR testing |
+| **schedule** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Cron expression for DR test schedule |
+| **notificationChannel** | `string` | optional | Notification channel for DR test results |
+
+### Nested Shape: `DisasterRecoveryPlan.contacts[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Contact name |
+| **role** | `string` | ✅ | Contact role (e.g., "DBA", "SRE Lead") |
+| **email** | `string` | optional | Contact email |
+| **phone** | `string` | optional | Contact phone |
+
 
 ---
 
@@ -121,6 +216,22 @@ Failover configuration
 | **failureThreshold** | `number` | optional (default: `3`) | Consecutive failures before failover |
 | **regions** | `{ name: string; role: Enum<'primary' \| 'secondary' \| 'witness'>; endpoint?: string; priority?: number }[]` | ✅ | Multi-region configuration (minimum 2 regions) |
 | **dns** | `{ ttl: number; provider?: Enum<'route53' \| 'cloudflare' \| 'azure_dns' \| 'custom'> }` | optional | DNS failover settings |
+
+### Nested Shape: `FailoverConfig.regions[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Region identifier (e.g., "us-east-1", "eu-west-1") |
+| **role** | `Enum<'primary' \| 'secondary' \| 'witness'>` | ✅ | Region role |
+| **endpoint** | `string` | optional | Region endpoint URL |
+| **priority** | `number` | optional | Failover priority (lower = higher priority) |
+
+### Nested Shape: `FailoverConfig.dns`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **ttl** | `number` | optional (default: `60`) | DNS TTL in seconds for failover |
+| **provider** | `Enum<'route53' \| 'cloudflare' \| 'azure_dns' \| 'custom'>` | optional | DNS provider for automatic failover |
 
 
 ---

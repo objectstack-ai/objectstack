@@ -217,6 +217,36 @@ Column footer summary configuration
 * `tags`
 * `vector`
 
+### Nested Shape: `FormField.options[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **label** | `string` | ✅ | Display label (human-readable, any case allowed) |
+| **value** | `string` | ✅ | Stored value (lowercase machine identifier) |
+| **color** | `string` | optional | Color code for badges/charts |
+| **default** | `boolean` | optional | Is default option |
+| **visibleWhen** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Per-option visibility predicate (CEL) — option is offered only when TRUE (else omitted). Env: the live `record` plus the host predicate scope, which binds `current_user` — wider than field-level visibleWhen, which has no `current_user`. e.g. P`record.country == 'cn'` or P`'admin' in current_user.positions` |
+
+### Nested Shape: `FormField.publicPicker`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **displayFields** | `string[]` | optional | Fields projected into each picker result (with `id`); the visitor's search matches `contains` on the first entry. At most 5 (the route projects no more); omitted → ['name']. |
+| **maxResults** | `integer` | optional | Maximum rows a lookup returns (default 20, hard ceiling 50 — the route clamps; anonymous visitors cannot paginate past it). |
+| **filter** | `{ field: string; operator?: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Static pre-filter rows ANDed ahead of the visitor's search (e.g. only active records are searchable). Same `{ field, operator, value }` dialect as list-view filters. |
+| **object** | `string` | optional | Referenced-object override for the picker search; omitted → resolved from the field definition (`referenceTo`). |
+
+### Nested Shape: `FormField.keyField`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **field** | `string` | optional (default: `"name"`) | Property name that holds the key inside each item (defaults to "name") |
+| **label** | `string \| Record<string, string>` | optional | Display label for the key column |
+| **placeholder** | `string \| Record<string, string>` | optional | Placeholder when entering a new key |
+| **helpText** | `string \| Record<string, string>` | optional | Help text under the key input |
+| **regex** | `string` | optional | JS regex source string the key must match (no flags) |
+| **immutable** | `boolean` | optional (default: `true`) | If true, the key is read-only after creation |
+
 
 ---
 
@@ -232,6 +262,16 @@ Public-lookup opt-in: enables GET /forms/:slug/lookup/:field for this field on a
 | **maxResults** | `integer` | optional | Maximum rows a lookup returns (default 20, hard ceiling 50 — the route clamps; anonymous visitors cannot paginate past it). |
 | **filter** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Static pre-filter rows ANDed ahead of the visitor's search (e.g. only active records are searchable). Same `{ field, operator, value }` dialect as list-view filters. |
 | **object** | `string` | optional | Referenced-object override for the picker search; omitted → resolved from the field definition (`referenceTo`). |
+
+### Nested Shape: `FormFieldPublicPicker.filter[number]`
+
+View filter rule
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **field** | `string` | ✅ | Field name to filter on |
+| **operator** | `Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>` | ✅ | Filter operator |
+| **value** | `string \| number \| boolean \| null \| (string \| number)[]` | optional | Filter value. The accepted SHAPE depends on the operator: `in` / `not_in` take an array (any length, including []), `between` takes exactly [min, max], every other operator takes a scalar. The unary operators (is_empty / is_not_empty / is_null / is_not_null) take their direction from the operator name and ignore this key. |
 
 
 ---
@@ -252,6 +292,40 @@ Public-lookup opt-in: enables GET /forms/:slug/lookup/:field for this field on a
 | **columns** | `Enum<'1' \| '2' \| '3' \| '4'> \| 1 \| 2 \| 3 \| 4` | optional (default: `1`) |  |
 | **pane** | `Enum<'primary' \| 'secondary'>` | optional | Split pane this section renders in (split forms only; a parse error elsewhere). Omitted → first section 'primary', others 'secondary'. |
 | **fields** | `(string \| { field: string; type?: Enum<'text' \| 'textarea' \| 'email' \| 'url' \| 'phone' \| 'password' \| 'secret' \| …>; options?: object[]; reference?: string; … })[]` | ✅ |  |
+
+### Nested Shape: `FormSection.fields[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **field** | `string` | ✅ | Field name (snake_case) |
+| **type** | `Enum<'text' \| 'textarea' \| 'email' \| 'url' \| 'phone' \| 'password' \| 'secret' \| …>` | optional | Field type (auto-infers widget if omitted) |
+| **options** | `{ label: string; value: string; color?: string; default?: boolean; … }[]` | optional | Options for select/multiselect/radio/checkboxes fields |
+| **reference** | `string` | optional | Target object name for lookup/master_detail fields |
+| **publicPicker** | `{ displayFields?: string[]; maxResults?: integer; filter?: object[]; object?: string }` | optional | Opt this field into the anonymous public-form lookup picker (GET /forms/:slug/lookup/:field). Without it the route answers 403 LOOKUP_NOT_PUBLIC and the field is stripped from the rendered public form. |
+| **maxLength** | `number` | optional | Maximum character length (for text/textarea/email/url/phone) |
+| **minLength** | `number` | optional | Minimum character length |
+| **min** | `number` | optional | Minimum value (for number/currency/percent/slider) |
+| **max** | `number` | optional | Maximum value |
+| **precision** | `number` | optional | Total digits (for number/currency) |
+| **scale** | `number` | optional | Decimal places |
+| **multiple** | `boolean` | optional | Allow multiple values (for select/lookup/file/image) |
+| **label** | `string \| Record<string, string>` | optional | Display label override |
+| **placeholder** | `string \| Record<string, string>` | optional | Placeholder text |
+| **helpText** | `string \| Record<string, string>` | optional | Help/hint text |
+| **readonly** | `boolean` | optional | Read-only override |
+| **immutable** | `boolean` | optional | Editable on create, locked once the record exists (e.g. machine names). |
+| **required** | `boolean` | optional | Required override |
+| **hidden** | `boolean` | optional | Hidden override |
+| **colSpan** | `integer` | optional | [legacy — prefer `span`] Absolute column span (1-4). Fragile when the column count is derived per surface (mobile 1 / modal 2 / page 3-4): a fixed span only lines up at the width the author imagined. The renderer clamps it to the current column count. Prefer `span`. |
+| **span** | `Enum<'auto' \| 'full'>` | optional (default: `"auto"`) | Relative field width. 'auto' (default — omit it): the renderer sizes the field from its widget type × the current column count (wide widgets like textarea/richtext/json/file/subform take the whole row). 'full': whole row at any column count. Prefer this over the absolute `colSpan`. |
+| **widget** | `string` | optional | Custom widget/component name (overrides type-based inference) |
+| **language** | `string` | optional | Code editor language (for type=code) |
+| **keyField** | `{ field?: string; label?: string \| Record<string, string>; placeholder?: string \| Record<string, string>; helpText?: string \| Record<string, string>; … }` | optional | Key column config for record-typed fields |
+| **dependsOn** | `string` | optional | Parent field name for cascading |
+| **visibleWhen** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL) — field shown only when TRUE. Root: `record` (+ `previous`, `parent`) in runtime forms, or `data` in metadata forms. No `current_user` at field level — it is unbound here and the predicate would fault open (per-option `visibleWhen` is the surface that binds it). Inside a repeater `data` is the ROW, but it is still spelled `data` — a bare identifier is unbound and faults open too. e.g. P`record.priority == 'urgent'` |
+| **visibleOn** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | [DEPRECATED → `visibleWhen`] Visibility predicate (CEL). Normalized to `visibleWhen` at parse. |
+| **disclosure** | `Enum<'inline' \| 'popover'>` | optional | Composite rendering: inline bordered box (default) or a summary line + gear popover (progressive disclosure). |
+| **fields** | `{ field: string; type?: Enum<'text' \| 'textarea' \| 'email' \| 'url' \| 'phone' \| 'password' \| 'secret' \| …>; options?: object[]; reference?: string; … }[]` | optional | Sub-fields for composite/repeater/record types |
 
 
 ---
@@ -287,6 +361,69 @@ Public-lookup opt-in: enables GET /forms/:slug/lookup/:field for this field on a
 | **buttons** | `{ submit?: object; cancel?: object; reset?: object }` | optional | Form action-button visibility & labels; folded onto the flat renderer props by ObjectUI ObjectForm (framework#1894 / #2998). |
 | **defaults** | `Record<string, any>` | optional | Initial field values for create-mode forms (folded into ObjectUI ObjectForm initial values; framework#1894 / #2998). |
 | **aria** | `never` | optional | [REMOVED] `form.aria` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — no form renderer ever applied it, so declared ARIA attributes silently did not reach the DOM. Delete the key. The form renderer emits its own semantic markup; report gaps as renderer issues rather than per-view attribute overrides. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
+
+### Nested Shape: `FormView.sections[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | optional | Stable section identifier for i18n lookup (snake_case) |
+| **label** | `string \| Record<string, string>` | optional | Display label — the default-language string, or an inline locale map (`{ en, "zh-CN" }`) resolved at render time |
+| **description** | `string` | optional | Optional description rendered under the section header. |
+| **collapsible** | `boolean` | optional (default: `false`) |  |
+| **collapsed** | `boolean` | optional (default: `false`) |  |
+| **visibleWhen** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL) — section shown only when TRUE. Root: `record` (+ `previous`, `parent`) in runtime forms, or `data` in metadata forms. No `current_user` at section level — it is unbound here and the predicate would fault open. |
+| **visibleOn** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | [DEPRECATED → `visibleWhen`] Visibility predicate (CEL). Hides the whole section when false. Normalized to `visibleWhen` at parse. |
+| **columns** | `Enum<'1' \| '2' \| '3' \| '4'> \| 1 \| 2 \| 3 \| 4` | optional (default: `1`) |  |
+| **pane** | `Enum<'primary' \| 'secondary'>` | optional | Split pane this section renders in (split forms only; a parse error elsewhere). Omitted → first section 'primary', others 'secondary'. |
+| **fields** | `(string \| { field: string; type?: Enum<'text' \| 'textarea' \| 'email' \| 'url' \| 'phone' \| 'password' \| 'secret' \| …>; options?: object[]; reference?: string; … })[]` | ✅ |  |
+
+### Nested Shape: `FormView.groups[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | optional | Stable section identifier for i18n lookup (snake_case) |
+| **label** | `string \| Record<string, string>` | optional | Display label — the default-language string, or an inline locale map (`{ en, "zh-CN" }`) resolved at render time |
+| **description** | `string` | optional | Optional description rendered under the section header. |
+| **collapsible** | `boolean` | optional (default: `false`) |  |
+| **collapsed** | `boolean` | optional (default: `false`) |  |
+| **visibleWhen** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL) — section shown only when TRUE. Root: `record` (+ `previous`, `parent`) in runtime forms, or `data` in metadata forms. No `current_user` at section level — it is unbound here and the predicate would fault open. |
+| **visibleOn** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | [DEPRECATED → `visibleWhen`] Visibility predicate (CEL). Hides the whole section when false. Normalized to `visibleWhen` at parse. |
+| **columns** | `Enum<'1' \| '2' \| '3' \| '4'> \| 1 \| 2 \| 3 \| 4` | optional (default: `1`) |  |
+| **pane** | `Enum<'primary' \| 'secondary'>` | optional | Split pane this section renders in (split forms only; a parse error elsewhere). Omitted → first section 'primary', others 'secondary'. |
+| **fields** | `(string \| { field: string; type?: Enum<'text' \| 'textarea' \| 'email' \| 'url' \| 'phone' \| 'password' \| 'secret' \| …>; options?: object[]; reference?: string; … })[]` | ✅ |  |
+
+### Nested Shape: `FormView.subforms[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **childObject** | `string` | ✅ | Child object whose records are entered inline |
+| **relationshipField** | `string` | optional | FK on the child pointing back to the parent (auto-detected when omitted) |
+| **columns** | `any[]` | optional | Editable grid columns (derived from the child object when omitted) |
+| **amountField** | `string` | optional | Numeric child column summed for the running total |
+| **totalField** | `string` | optional | Parent field to receive the rolled-up sum |
+| **title** | `string` | optional | Section title |
+| **addLabel** | `string` | optional | Add-row button label |
+| **minRows** | `number` | optional |  |
+| **maxRows** | `number` | optional |  |
+
+### Nested Shape: `FormView.sharing`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **enabled** | `boolean` | optional (default: `false`) | Enable public sharing |
+| **publicLink** | `string` | optional | Generated public share URL |
+| **password** | `string` | optional | Password required to access shared link |
+| **allowedDomains** | `string[]` | optional | Restrict access to specific email domains (e.g. ["example.com"]) |
+| **expiresAt** | `string` | optional | Expiration date/time in ISO 8601 format |
+| **allowAnonymous** | `boolean` | optional (default: `false`) | Allow access without authentication |
+
+### Nested Shape: `FormView.buttons`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **submit** | `{ show?: boolean; label?: string \| Record<string, string> }` | optional | Submit button |
+| **cancel** | `{ show?: boolean; label?: string \| Record<string, string> }` | optional | Cancel button |
+| **reset** | `{ show?: boolean; label?: string \| Record<string, string> }` | optional | Reset button |
 
 
 ---
@@ -334,6 +471,14 @@ Gallery/card view configuration
 | **autoZoomToFilter** | `boolean` | optional | When true (default), filtering zooms the range to the filtered tasks |
 | **viewMode** | `Enum<'day' \| 'week' \| 'month' \| 'quarter' \| 'year'>` | optional | Timeline granularity — one column per day/week/month/quarter/year (also the resource-view column granularity; renderer default 'day') |
 
+### Nested Shape: `GanttConfig.quickFilters[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **field** | `string` | ✅ | Record field / dot-path the dimension filters on |
+| **label** | `string` | optional | Trigger label (falls back to the field label) |
+| **options** | `(string \| { value: string \| number; label?: string })[]` | optional | Explicit option override for fixed enums |
+
 
 ---
 
@@ -359,6 +504,14 @@ Record grouping configuration
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **fields** | `{ field: string; order: Enum<'asc' \| 'desc'>; collapsed: boolean }[]` | ✅ | Fields to group by, in nesting order — the first entry is the outermost group and each later entry nests one level deeper (at least one field) |
+
+### Nested Shape: `GroupingConfig.fields[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **field** | `string` | ✅ | Field name to group by |
+| **order** | `Enum<'asc' \| 'desc'>` | optional (default: `"asc"`) | Group sort order |
+| **collapsed** | `boolean` | optional (default: `false`) | Collapse groups by default |
 
 
 ---
@@ -456,6 +609,22 @@ List chart view configuration
 | **link** | `boolean` | optional | Functions as the primary navigation link (triggers View navigation) |
 | **action** | `string` | optional | Registered Action ID to execute when clicked |
 
+### Nested Shape: `ListColumn.summary`
+
+Column footer summary configuration
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `Enum<'none' \| 'count' \| 'count_empty' \| 'count_filled' \| 'count_unique' \| …>` | ✅ | Aggregation function |
+| **field** | `string` | optional | Field to aggregate (defaults to the column field) |
+
+### Nested Shape: `ListColumn.prefix`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **field** | `string` | ✅ | Field whose value renders before the cell value |
+| **type** | `Enum<'badge' \| 'text'>` | optional (default: `"text"`) | How the prefix value is rendered |
+
 
 ---
 
@@ -533,6 +702,281 @@ Map view configuration
 | **striped** | `never` | optional | [REMOVED] `view.striped` was removed in @objectstack/spec 17.0.0 (#7176, ADR-0049 enforce-or-remove) — every measured reader only copied it forward and no renderer ever applied it, so authoring it was a parse-clean no-op. There is no authorable striped-rows switch; delete the key. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
 | **bordered** | `never` | optional | [REMOVED] `view.bordered` was removed in @objectstack/spec 17.0.0 (#7176, ADR-0049 enforce-or-remove) — every measured reader only copied it forward and no renderer ever applied it (the grid frame is the renderer's own constant, not authorable). Delete the key. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
 | **virtualScroll** | `never` | optional | [REMOVED] `view.virtualScroll` was removed in @objectstack/spec 17.0.0 (#7176, ADR-0049 enforce-or-remove) — every measured reader only copied it forward and no grid ever virtualized off it; authoring it was a parse-clean no-op. Delete the key; large datasets page via `pagination`. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
+
+### Nested Shape: `ListView.columns[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **field** | `string` | ✅ | Field name (snake_case) |
+| **label** | `string \| Record<string, string>` | optional | Display label override |
+| **width** | `number` | optional | Column width in pixels |
+| **align** | `Enum<'left' \| 'center' \| 'right'>` | optional | Text alignment |
+| **hidden** | `boolean` | optional | Hide column by default |
+| **sortable** | `boolean` | optional | Allow sorting by this column |
+| **resizable** | `boolean` | optional | Allow resizing this column |
+| **wrap** | `boolean` | optional | Allow text wrapping |
+| **type** | `string` | optional | Renderer type override (e.g., "currency", "date") |
+| **pinned** | `Enum<'left' \| 'right'>` | optional | Pin/freeze column to left or right side |
+| **summary** | `Enum<'none' \| 'count' \| 'count_empty' \| 'count_filled' \| 'count_unique' \| …> \| { type: Enum<'none' \| 'count' \| 'count_empty' \| 'count_filled' \| 'count_unique' \| …>; field?: string }` | optional | Footer aggregation for this column — the function alone, or `{ type, field }` to aggregate another field |
+| **prefix** | `{ field: string; type?: Enum<'badge' \| 'text'> }` | optional | Field rendered inline before this cell value |
+| **link** | `boolean` | optional | Functions as the primary navigation link (triggers View navigation) |
+| **action** | `string` | optional | Registered Action ID to execute when clicked |
+
+### Nested Shape: `ListView.filter[number]`
+
+View filter rule
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **field** | `string` | ✅ | Field name to filter on |
+| **operator** | `Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>` | optional | Filter operator |
+| **value** | `string \| number \| boolean \| null \| (string \| number)[]` | optional | Filter value. The accepted SHAPE depends on the operator: `in` / `not_in` take an array (any length, including []), `between` takes exactly [min, max], every other operator takes a scalar. The unary operators (is_empty / is_not_empty / is_null / is_not_null) take their direction from the operator name and ignore this key. |
+
+### Nested Shape: `ListView.userFilters`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **element** | `Enum<'dropdown' \| 'tabs' \| 'toggle'>` | optional (default: `"dropdown"`) | Filter control style: "dropdown" (per-field value selectors) or "tabs" (named presets). "toggle" is deprecated. |
+| **fields** | `{ field: string; label?: string \| Record<string, string>; type?: Enum<'select' \| 'multi-select' \| 'boolean' \| 'date-range' \| 'text'>; options?: object[]; … }[]` | optional | Fields exposed as quick filters (dropdown/toggle elements) |
+| **tabs** | `{ name: string; label?: string \| Record<string, string>; icon?: string; view?: string; … }[]` | optional | Named filter presets rendered as tabs (tabs element). Reuses ViewTabSchema |
+| **showAllRecords** | `boolean` | optional | Show an "All records" tab before the presets (tabs element) |
+| **allowAddTab** | `boolean` | optional | Let end users add their own tab after the presets (tabs element): the affordance asks for a name and snapshots the filters currently applied as a new tab. SESSION-SCOPED — an added tab lives only for the current mount, is never written back as metadata (ADR-0047), and carries a remove control the authored presets do not. Page lists only — object views use `listViews` for named presets |
+
+### Nested Shape: `ListView.selection`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `Enum<'none' \| 'single' \| 'multiple'>` | optional (default: `"none"`) | Selection mode |
+
+### Nested Shape: `ListView.navigation`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **mode** | `Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>` | optional (default: `"page"`) |  |
+| **view** | `string` | optional | Name of the form view to use for details (e.g. "summary_view", "edit_form") |
+| **preventNavigation** | `boolean` | optional (default: `false`) | Disable standard navigation entirely |
+| **openNewTab** | `boolean` | optional (default: `false`) | Force open in new tab (applies to page mode) |
+| **size** | `Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>` | optional (default: `"auto"`) | [#2578] Overlay size bucket for drawer/modal detail: 'auto' (default — renderer derives from field count + viewport; AI writes nothing) or a coarse override sm/md/lg/xl/full. Prefer this over the pixel `width`; page mode ignores it. |
+| **width** | `string \| number` | optional | [DEPRECATED → size] Pixel/percent width of the drawer/modal (e.g. "600px"). A pixel width cannot be chosen at authoring time without knowing the client viewport — use the `size` bucket. |
+
+### Nested Shape: `ListView.pagination`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **pageSize** | `integer` | optional (default: `25`) | Number of records per page |
+| **pageSizeOptions** | `integer[]` | optional | Available page size options |
+
+### Nested Shape: `ListView.kanban`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **groupByField** | `string` | ✅ | Field to group columns by (usually status/select) |
+| **summarizeField** | `string` | optional | Field to sum at top of column (e.g. amount) |
+| **columns** | `string[]` | ✅ | Fields to show on cards |
+
+### Nested Shape: `ListView.calendar`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **startDateField** | `string` | ✅ | Field providing the event start date/time |
+| **endDateField** | `string` | optional | Field providing the event end date/time (defaults to a single-day event) |
+| **titleField** | `string` | ✅ | Field displayed as the event title |
+| **colorField** | `string` | optional | Field whose value determines the event color |
+
+### Nested Shape: `ListView.gantt`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **startDateField** | `string` | ✅ | Field providing the task start date |
+| **endDateField** | `string` | ✅ | Field providing the task end date |
+| **titleField** | `string` | ✅ | Field displayed as the task title |
+| **progressField** | `string` | optional | Field providing the task completion percentage |
+| **dependenciesField** | `string` | optional | Field listing the task's predecessor (dependency) record ids |
+| **colorField** | `string` | optional | Field that drives the bar color |
+| **parentField** | `string` | optional | Field holding the parent task id (builds the summary → step tree) |
+| **typeField** | `string` | optional | Field whose value maps to task/summary/milestone |
+| **baselineStartField** | `string` | optional | Baseline (planned) start field |
+| **baselineEndField** | `string` | optional | Baseline (planned) end field |
+| **groupByField** | `string` | optional | Field to group leaf tasks by (synthesized summary rows) |
+| **resourceView** | `boolean` | optional | Render a per-resource workload histogram instead of the timeline |
+| **assigneeField** | `string` | optional | Resource field to bucket load by (resource view) |
+| **effortField** | `string` | optional | Per-task load units (resource view; default 1) |
+| **capacity** | `number` | optional | Per-resource capacity ceiling; loads above this flag overload |
+| **tooltipFields** | `(string \| { field: string; label?: string })[]` | optional | Fields to surface in the hover tooltip, in display order |
+| **quickFilters** | `{ field: string; label?: string; options?: (string \| object)[] }[]` | optional | Multi-select filter dropdowns rendered above the chart |
+| **autoZoomToFilter** | `boolean` | optional | When true (default), filtering zooms the range to the filtered tasks |
+| **viewMode** | `Enum<'day' \| 'week' \| 'month' \| 'quarter' \| 'year'>` | optional | Timeline granularity — one column per day/week/month/quarter/year (also the resource-view column granularity; renderer default 'day') |
+
+### Nested Shape: `ListView.gallery`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **coverField** | `string` | optional | Attachment/image field to display as card cover |
+| **coverFit** | `Enum<'cover' \| 'contain'>` | optional (default: `"cover"`) | Image fit mode for card cover |
+| **cardSize** | `Enum<'small' \| 'medium' \| 'large'>` | optional (default: `"medium"`) | Card size in gallery view |
+| **titleField** | `string` | optional | Field to display as card title |
+| **visibleFields** | `string[]` | optional | Fields to display on card body |
+
+### Nested Shape: `ListView.timeline`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **startDateField** | `string` | ✅ | Field for timeline item start date |
+| **endDateField** | `string` | optional | Field for timeline item end date |
+| **titleField** | `string` | ✅ | Field to display as timeline item title |
+| **groupByField** | `string` | optional | Field to group timeline rows |
+| **colorField** | `string` | optional | Field to determine item color |
+| **scale** | `Enum<'hour' \| 'day' \| 'week' \| 'month' \| 'quarter' \| 'year'>` | optional (default: `"week"`) | Default timeline scale |
+
+### Nested Shape: `ListView.chart`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **chartType** | `Enum<'bar' \| 'line' \| 'pie' \| 'area' \| 'scatter'>` | optional (default: `"bar"`) | Chart visualisation type |
+| **dataset** | `string` | ✅ | Dataset name to bind (ADR-0021) |
+| **dimensions** | `string[]` | optional | Dimension names — X/group/split |
+| **values** | `string[]` | ✅ | Measure names — Y (at least one) |
+
+### Nested Shape: `ListView.map`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **latitudeField** | `string` | optional | Field providing the marker latitude (used with longitudeField) |
+| **longitudeField** | `string` | optional | Field providing the marker longitude (used with latitudeField) |
+| **locationField** | `string` | optional | Field providing a combined location — a "lat,lng" string or a `{ lat, lng }` object — as the alternative to the latitudeField/longitudeField pair |
+| **titleField** | `string` | optional | Field displayed as the marker title (popup heading, mobile record card, and what the map search box matches on) |
+| **descriptionField** | `string` | optional | Field displayed as the marker description |
+| **zoom** | `number` | optional | Initial zoom level (1-20). Omit to let the renderer fit the camera to the queried records |
+| **center** | `any[]` | optional | Initial camera center as [latitude, longitude]. Omit to let the renderer fit the camera to the queried records |
+
+### Nested Shape: `ListView.tree`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **parentField** | `string` | optional | Single-parent pointer field (auto-detected from the object schema when omitted) |
+| **labelField** | `string` | optional | Field rendered indented in the first column (defaults to "name") |
+| **fields** | `string[]` | optional | Additional fields rendered as flat columns alongside the label |
+| **defaultExpandedDepth** | `integer` | optional | Initial expansion depth (0 = roots only; omit = expand all) |
+
+### Nested Shape: `ListView.sharing`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `Enum<'personal' \| 'collaborative'>` | optional (default: `"collaborative"`) | View ownership type |
+| **lockedBy** | `string` | optional | User who locked the view configuration |
+
+### Nested Shape: `ListView.grouping`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **fields** | `{ field: string; order?: Enum<'asc' \| 'desc'>; collapsed?: boolean }[]` | ✅ | Fields to group by, in nesting order — the first entry is the outermost group and each later entry nests one level deeper (at least one field) |
+
+### Nested Shape: `ListView.rowColor`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **field** | `string` | ✅ | Field to derive color from (typically a select/status field) |
+| **colors** | `Record<string, string>` | optional | Map of field value to color (hex/token) |
+
+### Nested Shape: `ListView.bulkActionDefs[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Stable identifier — the audit-log action key, and (for an aggregate def) the name of the object action to dispatch. |
+| **label** | `string` | optional | Button + dialog-header text. Plain string: an authored def is not i18n-resolved (declare a real action and name it in `bulkActions` to get localization). |
+| **icon** | `string` | optional | Lucide icon name (e.g. "user-check", "trash-2"). |
+| **variant** | `Enum<'primary' \| 'secondary' \| 'danger' \| 'ghost' \| 'outline'>` | optional | Visual treatment of the button. |
+| **operation** | `Enum<'update' \| 'delete' \| 'custom'>` | ✅ | What the executor does: 'update'/'delete' are data-plane mass mutations; 'custom' dispatches an object action (see `execution`). |
+| **execution** | `Enum<'perRecord' \| 'aggregate'>` | optional | For `operation: 'custom'` — 'aggregate' dispatches the named action ONCE for the whole selection, carrying every id in `params._selectedIds` (objectui#3139). Required on a custom def: the per-record form is declared as `bulkActions: ['<name>']` instead. |
+| **patch** | `Record<string, any>` | optional | For `operation: 'update'` — static field values applied to every selected record, merged UNDER the user-supplied params so a fixed value can be declared without exposing it in the dialog. |
+| **params** | `({ name: string; label?: string; help?: string; type: Enum<'text' \| 'textarea' \| 'email' \| 'url' \| 'phone' \| 'password' \| 'secret' \| …>; … } & Record<string, any>)[]` | optional | Inputs collected once before the run. Omit to skip the params step and go straight to confirm. |
+| **confirmText** | `string` | optional | Confirmation text shown above the affected-record summary. |
+| **confirmLabel** | `string` | optional | Custom Confirm button label (default: "Run"). |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Eligibility predicate (CEL) — a string or a `{dialect, source}` envelope, i.e. `action.visible` without its boolean-literal arm (#5970): a per-record predicate has nothing to say as a constant. Evaluated once PER SELECTED RECORD with that record bound: the button is offered when at least one passes, the run covers only those, and the rest are reported as skipped. A record-free predicate (`features.x`, `current_user.y`) therefore behaves as a plain button-level gate. Fail-closed — a predicate that faults excludes the record. |
+| **requiredPermissions** | `string[]` | optional | [ADR-0066 D4] Capability gate on the button, `action.requiredPermissions` semantics verbatim: absent or empty always passes, several are AND-ed, and a client that cannot resolve the caller's capabilities fails OPEN (the server stays the authority). This key exists for INLINE defs — notably the `update`/`delete` data-plane forms, which dispatch no action and so have nothing to inherit a gate from; a def promoted from `bulkActions: ['<name>']` (or an aggregate def naming a declared action) inherits the action's own declaration instead. On a data-plane def the gate governs visibility only — the write itself is still authorized by the data API's object permissions and server hooks. |
+| **maxRecords** | `integer` | optional | Selection size above which the run is blocked. Set it on defs whose server work is expensive — an aggregate def carries every selected id in one request. |
+| **batchSize** | `integer` | optional | Records per executor batch (default 200). Data-plane operations only — an aggregate run is a single call by definition. |
+
+### Nested Shape: `ListView.conditionalFormatting[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **condition** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | ✅ | Predicate (CEL) to evaluate. |
+| **style** | `Record<string, string>` | ✅ | CSS styles to apply when condition is true |
+
+### Nested Shape: `ListView.exportOptions`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **formats** | `Enum<'csv' \| 'xlsx' \| 'json'>[]` | optional | Formats offered in the export menu (default: ['csv', 'json']). XLSX is delivered by the server stream only. |
+| **maxRecords** | `integer` | optional | Maximum number of records to export; 0 or absent = unlimited |
+| **includeHeaders** | `boolean` | optional | Include column headers in the exported file (default true) |
+| **fileNamePrefix** | `string` | optional | Download file name prefix — replaces the object label and suppresses the view label in the generated file name |
+| **streaming** | `boolean` | optional | Set false to force the client-side export path (csv/json only) instead of the server stream |
+
+### Nested Shape: `ListView.userActions`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **sort** | `boolean` | optional (default: `true`) | Allow users to sort records |
+| **search** | `boolean` | optional (default: `true`) | Allow users to search records |
+| **filter** | `boolean` | optional (default: `true`) | Allow users to filter records |
+| **refresh** | `boolean` | optional (default: `true`) | Allow users to reload the view data from the backend without a full page reload |
+| **rowHeight** | `boolean` | optional (default: `true`) | Allow users to toggle row height/density |
+| **group** | `boolean` | optional (default: `true`) | Allow users to change record grouping from the toolbar. Toggle only — the grouping itself is configured in the view-level `grouping` block. |
+| **addRecordForm** | `boolean` | optional (default: `false`) | Add records through a form instead of inline |
+| **editInline** | `boolean` | optional (default: `false`) | Allow users to edit records inline — click a cell to edit it with the field's type-aware widget (the same control the form uses). Off by default: the list is read-only unless the author opts in. |
+| **hideFields** | `boolean` | optional (default: `false`) | Allow users to hide/show fields from the toolbar (the affordance behind the view-level `hiddenFields` list). Boolean toggle — distinct from the record-details component's `hideFields`, which is an array of field names to omit. Off by default: column hiding is opt-in. |
+| **rowColor** | `boolean` | optional (default: `false`) | Allow users to configure row colouring from the toolbar. Boolean toggle — the colour rules themselves live in the view-level `rowColor` block. Off by default: row colouring is opt-in. |
+| **buttons** | `string[]` | optional | Custom action button IDs to show in the toolbar |
+
+### Nested Shape: `ListView.appearance`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **showDescription** | `boolean` | optional (default: `true`) | Show the view description text |
+| **allowedVisualizations** | `Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>[]` | optional | Whitelist of visualization types users can switch between (e.g. ["grid", "gallery", "kanban"]) |
+
+### Nested Shape: `ListView.tabs[number]`
+
+Tab configuration for multi-tab view interface
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Tab identifier (snake_case) |
+| **label** | `string \| Record<string, string>` | optional | Display label |
+| **icon** | `string` | optional | Tab icon name |
+| **view** | `string` | optional | Referenced list view name from listViews |
+| **filter** | `{ field: string; operator?: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Tab-specific filter criteria |
+| **order** | `integer` | optional | Tab display order |
+| **pinned** | `boolean` | optional (default: `false`) | Pin tab (cannot be removed by users) |
+| **isDefault** | `boolean` | optional (default: `false`) | Set as the default active tab |
+| **visible** | `boolean` | optional (default: `true`) | Tab visibility |
+
+### Nested Shape: `ListView.addRecord`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **enabled** | `boolean` | optional (default: `true`) | Show the add record entry point |
+| **position** | `Enum<'top' \| 'bottom' \| 'both'>` | optional (default: `"bottom"`) | Position of the add record button |
+| **mode** | `Enum<'inline' \| 'form' \| 'modal'>` | optional (default: `"inline"`) | How to add a new record |
+| **formView** | `string` | optional | Named form view to use when mode is "form" or "modal" |
+
+### Nested Shape: `ListView.emptyState`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **title** | `string \| Record<string, string>` | optional | Display label — the default-language string, or an inline locale map (`{ en, "zh-CN" }`) resolved at render time |
+| **message** | `string \| Record<string, string>` | optional | Display label — the default-language string, or an inline locale map (`{ en, "zh-CN" }`) resolved at render time |
+| **icon** | `string` | optional |  |
+
+### Nested Shape: `ListView.aria`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **ariaLabel** | `string \| Record<string, string>` | optional | Accessible label for screen readers (WAI-ARIA aria-label). Plain string, or an inline locale map — no translation-bundle slot addresses this key, so a plain string is announced in the source language. |
+| **ariaDescribedBy** | `string` | optional | ID of element providing additional description (WAI-ARIA aria-describedby) |
+| **role** | `string` | optional | WAI-ARIA role attribute (e.g., "dialog", "navigation", "alert") |
 
 
 ---
@@ -624,6 +1068,278 @@ Map view configuration
 | **virtualScroll** | `never` | optional | [REMOVED] `view.virtualScroll` was removed in @objectstack/spec 17.0.0 (#7176, ADR-0049 enforce-or-remove) — every measured reader only copied it forward and no grid ever virtualized off it; authoring it was a parse-clean no-op. Delete the key; large datasets page via `pagination`. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
 | **userFilters** | `{ element?: Enum<'dropdown' \| 'toggle'>; fields?: object[] }` | optional |  |
 
+### Nested Shape: `ObjectListView.columns[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **field** | `string` | ✅ | Field name (snake_case) |
+| **label** | `string \| Record<string, string>` | optional | Display label override |
+| **width** | `number` | optional | Column width in pixels |
+| **align** | `Enum<'left' \| 'center' \| 'right'>` | optional | Text alignment |
+| **hidden** | `boolean` | optional | Hide column by default |
+| **sortable** | `boolean` | optional | Allow sorting by this column |
+| **resizable** | `boolean` | optional | Allow resizing this column |
+| **wrap** | `boolean` | optional | Allow text wrapping |
+| **type** | `string` | optional | Renderer type override (e.g., "currency", "date") |
+| **pinned** | `Enum<'left' \| 'right'>` | optional | Pin/freeze column to left or right side |
+| **summary** | `Enum<'none' \| 'count' \| 'count_empty' \| 'count_filled' \| 'count_unique' \| …> \| { type: Enum<'none' \| 'count' \| 'count_empty' \| 'count_filled' \| 'count_unique' \| …>; field?: string }` | optional | Footer aggregation for this column — the function alone, or `{ type, field }` to aggregate another field |
+| **prefix** | `{ field: string; type?: Enum<'badge' \| 'text'> }` | optional | Field rendered inline before this cell value |
+| **link** | `boolean` | optional | Functions as the primary navigation link (triggers View navigation) |
+| **action** | `string` | optional | Registered Action ID to execute when clicked |
+
+### Nested Shape: `ObjectListView.filter[number]`
+
+View filter rule
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **field** | `string` | ✅ | Field name to filter on |
+| **operator** | `Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>` | optional | Filter operator |
+| **value** | `string \| number \| boolean \| null \| (string \| number)[]` | optional | Filter value. The accepted SHAPE depends on the operator: `in` / `not_in` take an array (any length, including []), `between` takes exactly [min, max], every other operator takes a scalar. The unary operators (is_empty / is_not_empty / is_null / is_not_null) take their direction from the operator name and ignore this key. |
+
+### Nested Shape: `ObjectListView.selection`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `Enum<'none' \| 'single' \| 'multiple'>` | optional (default: `"none"`) | Selection mode |
+
+### Nested Shape: `ObjectListView.navigation`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **mode** | `Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>` | optional (default: `"page"`) |  |
+| **view** | `string` | optional | Name of the form view to use for details (e.g. "summary_view", "edit_form") |
+| **preventNavigation** | `boolean` | optional (default: `false`) | Disable standard navigation entirely |
+| **openNewTab** | `boolean` | optional (default: `false`) | Force open in new tab (applies to page mode) |
+| **size** | `Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>` | optional (default: `"auto"`) | [#2578] Overlay size bucket for drawer/modal detail: 'auto' (default — renderer derives from field count + viewport; AI writes nothing) or a coarse override sm/md/lg/xl/full. Prefer this over the pixel `width`; page mode ignores it. |
+| **width** | `string \| number` | optional | [DEPRECATED → size] Pixel/percent width of the drawer/modal (e.g. "600px"). A pixel width cannot be chosen at authoring time without knowing the client viewport — use the `size` bucket. |
+
+### Nested Shape: `ObjectListView.pagination`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **pageSize** | `integer` | optional (default: `25`) | Number of records per page |
+| **pageSizeOptions** | `integer[]` | optional | Available page size options |
+
+### Nested Shape: `ObjectListView.kanban`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **groupByField** | `string` | ✅ | Field to group columns by (usually status/select) |
+| **summarizeField** | `string` | optional | Field to sum at top of column (e.g. amount) |
+| **columns** | `string[]` | ✅ | Fields to show on cards |
+
+### Nested Shape: `ObjectListView.calendar`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **startDateField** | `string` | ✅ | Field providing the event start date/time |
+| **endDateField** | `string` | optional | Field providing the event end date/time (defaults to a single-day event) |
+| **titleField** | `string` | ✅ | Field displayed as the event title |
+| **colorField** | `string` | optional | Field whose value determines the event color |
+
+### Nested Shape: `ObjectListView.gantt`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **startDateField** | `string` | ✅ | Field providing the task start date |
+| **endDateField** | `string` | ✅ | Field providing the task end date |
+| **titleField** | `string` | ✅ | Field displayed as the task title |
+| **progressField** | `string` | optional | Field providing the task completion percentage |
+| **dependenciesField** | `string` | optional | Field listing the task's predecessor (dependency) record ids |
+| **colorField** | `string` | optional | Field that drives the bar color |
+| **parentField** | `string` | optional | Field holding the parent task id (builds the summary → step tree) |
+| **typeField** | `string` | optional | Field whose value maps to task/summary/milestone |
+| **baselineStartField** | `string` | optional | Baseline (planned) start field |
+| **baselineEndField** | `string` | optional | Baseline (planned) end field |
+| **groupByField** | `string` | optional | Field to group leaf tasks by (synthesized summary rows) |
+| **resourceView** | `boolean` | optional | Render a per-resource workload histogram instead of the timeline |
+| **assigneeField** | `string` | optional | Resource field to bucket load by (resource view) |
+| **effortField** | `string` | optional | Per-task load units (resource view; default 1) |
+| **capacity** | `number` | optional | Per-resource capacity ceiling; loads above this flag overload |
+| **tooltipFields** | `(string \| { field: string; label?: string })[]` | optional | Fields to surface in the hover tooltip, in display order |
+| **quickFilters** | `{ field: string; label?: string; options?: (string \| object)[] }[]` | optional | Multi-select filter dropdowns rendered above the chart |
+| **autoZoomToFilter** | `boolean` | optional | When true (default), filtering zooms the range to the filtered tasks |
+| **viewMode** | `Enum<'day' \| 'week' \| 'month' \| 'quarter' \| 'year'>` | optional | Timeline granularity — one column per day/week/month/quarter/year (also the resource-view column granularity; renderer default 'day') |
+
+### Nested Shape: `ObjectListView.gallery`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **coverField** | `string` | optional | Attachment/image field to display as card cover |
+| **coverFit** | `Enum<'cover' \| 'contain'>` | optional (default: `"cover"`) | Image fit mode for card cover |
+| **cardSize** | `Enum<'small' \| 'medium' \| 'large'>` | optional (default: `"medium"`) | Card size in gallery view |
+| **titleField** | `string` | optional | Field to display as card title |
+| **visibleFields** | `string[]` | optional | Fields to display on card body |
+
+### Nested Shape: `ObjectListView.timeline`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **startDateField** | `string` | ✅ | Field for timeline item start date |
+| **endDateField** | `string` | optional | Field for timeline item end date |
+| **titleField** | `string` | ✅ | Field to display as timeline item title |
+| **groupByField** | `string` | optional | Field to group timeline rows |
+| **colorField** | `string` | optional | Field to determine item color |
+| **scale** | `Enum<'hour' \| 'day' \| 'week' \| 'month' \| 'quarter' \| 'year'>` | optional (default: `"week"`) | Default timeline scale |
+
+### Nested Shape: `ObjectListView.chart`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **chartType** | `Enum<'bar' \| 'line' \| 'pie' \| 'area' \| 'scatter'>` | optional (default: `"bar"`) | Chart visualisation type |
+| **dataset** | `string` | ✅ | Dataset name to bind (ADR-0021) |
+| **dimensions** | `string[]` | optional | Dimension names — X/group/split |
+| **values** | `string[]` | ✅ | Measure names — Y (at least one) |
+
+### Nested Shape: `ObjectListView.map`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **latitudeField** | `string` | optional | Field providing the marker latitude (used with longitudeField) |
+| **longitudeField** | `string` | optional | Field providing the marker longitude (used with latitudeField) |
+| **locationField** | `string` | optional | Field providing a combined location — a "lat,lng" string or a `{ lat, lng }` object — as the alternative to the latitudeField/longitudeField pair |
+| **titleField** | `string` | optional | Field displayed as the marker title (popup heading, mobile record card, and what the map search box matches on) |
+| **descriptionField** | `string` | optional | Field displayed as the marker description |
+| **zoom** | `number` | optional | Initial zoom level (1-20). Omit to let the renderer fit the camera to the queried records |
+| **center** | `any[]` | optional | Initial camera center as [latitude, longitude]. Omit to let the renderer fit the camera to the queried records |
+
+### Nested Shape: `ObjectListView.tree`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **parentField** | `string` | optional | Single-parent pointer field (auto-detected from the object schema when omitted) |
+| **labelField** | `string` | optional | Field rendered indented in the first column (defaults to "name") |
+| **fields** | `string[]` | optional | Additional fields rendered as flat columns alongside the label |
+| **defaultExpandedDepth** | `integer` | optional | Initial expansion depth (0 = roots only; omit = expand all) |
+
+### Nested Shape: `ObjectListView.sharing`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `Enum<'personal' \| 'collaborative'>` | optional (default: `"collaborative"`) | View ownership type |
+| **lockedBy** | `string` | optional | User who locked the view configuration |
+
+### Nested Shape: `ObjectListView.grouping`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **fields** | `{ field: string; order?: Enum<'asc' \| 'desc'>; collapsed?: boolean }[]` | ✅ | Fields to group by, in nesting order — the first entry is the outermost group and each later entry nests one level deeper (at least one field) |
+
+### Nested Shape: `ObjectListView.rowColor`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **field** | `string` | ✅ | Field to derive color from (typically a select/status field) |
+| **colors** | `Record<string, string>` | optional | Map of field value to color (hex/token) |
+
+### Nested Shape: `ObjectListView.bulkActionDefs[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Stable identifier — the audit-log action key, and (for an aggregate def) the name of the object action to dispatch. |
+| **label** | `string` | optional | Button + dialog-header text. Plain string: an authored def is not i18n-resolved (declare a real action and name it in `bulkActions` to get localization). |
+| **icon** | `string` | optional | Lucide icon name (e.g. "user-check", "trash-2"). |
+| **variant** | `Enum<'primary' \| 'secondary' \| 'danger' \| 'ghost' \| 'outline'>` | optional | Visual treatment of the button. |
+| **operation** | `Enum<'update' \| 'delete' \| 'custom'>` | ✅ | What the executor does: 'update'/'delete' are data-plane mass mutations; 'custom' dispatches an object action (see `execution`). |
+| **execution** | `Enum<'perRecord' \| 'aggregate'>` | optional | For `operation: 'custom'` — 'aggregate' dispatches the named action ONCE for the whole selection, carrying every id in `params._selectedIds` (objectui#3139). Required on a custom def: the per-record form is declared as `bulkActions: ['<name>']` instead. |
+| **patch** | `Record<string, any>` | optional | For `operation: 'update'` — static field values applied to every selected record, merged UNDER the user-supplied params so a fixed value can be declared without exposing it in the dialog. |
+| **params** | `({ name: string; label?: string; help?: string; type: Enum<'text' \| 'textarea' \| 'email' \| 'url' \| 'phone' \| 'password' \| 'secret' \| …>; … } & Record<string, any>)[]` | optional | Inputs collected once before the run. Omit to skip the params step and go straight to confirm. |
+| **confirmText** | `string` | optional | Confirmation text shown above the affected-record summary. |
+| **confirmLabel** | `string` | optional | Custom Confirm button label (default: "Run"). |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Eligibility predicate (CEL) — a string or a `{dialect, source}` envelope, i.e. `action.visible` without its boolean-literal arm (#5970): a per-record predicate has nothing to say as a constant. Evaluated once PER SELECTED RECORD with that record bound: the button is offered when at least one passes, the run covers only those, and the rest are reported as skipped. A record-free predicate (`features.x`, `current_user.y`) therefore behaves as a plain button-level gate. Fail-closed — a predicate that faults excludes the record. |
+| **requiredPermissions** | `string[]` | optional | [ADR-0066 D4] Capability gate on the button, `action.requiredPermissions` semantics verbatim: absent or empty always passes, several are AND-ed, and a client that cannot resolve the caller's capabilities fails OPEN (the server stays the authority). This key exists for INLINE defs — notably the `update`/`delete` data-plane forms, which dispatch no action and so have nothing to inherit a gate from; a def promoted from `bulkActions: ['<name>']` (or an aggregate def naming a declared action) inherits the action's own declaration instead. On a data-plane def the gate governs visibility only — the write itself is still authorized by the data API's object permissions and server hooks. |
+| **maxRecords** | `integer` | optional | Selection size above which the run is blocked. Set it on defs whose server work is expensive — an aggregate def carries every selected id in one request. |
+| **batchSize** | `integer` | optional | Records per executor batch (default 200). Data-plane operations only — an aggregate run is a single call by definition. |
+
+### Nested Shape: `ObjectListView.conditionalFormatting[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **condition** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | ✅ | Predicate (CEL) to evaluate. |
+| **style** | `Record<string, string>` | ✅ | CSS styles to apply when condition is true |
+
+### Nested Shape: `ObjectListView.exportOptions`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **formats** | `Enum<'csv' \| 'xlsx' \| 'json'>[]` | optional | Formats offered in the export menu (default: ['csv', 'json']). XLSX is delivered by the server stream only. |
+| **maxRecords** | `integer` | optional | Maximum number of records to export; 0 or absent = unlimited |
+| **includeHeaders** | `boolean` | optional | Include column headers in the exported file (default true) |
+| **fileNamePrefix** | `string` | optional | Download file name prefix — replaces the object label and suppresses the view label in the generated file name |
+| **streaming** | `boolean` | optional | Set false to force the client-side export path (csv/json only) instead of the server stream |
+
+### Nested Shape: `ObjectListView.userActions`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **sort** | `boolean` | optional (default: `true`) | Allow users to sort records |
+| **search** | `boolean` | optional (default: `true`) | Allow users to search records |
+| **filter** | `boolean` | optional (default: `true`) | Allow users to filter records |
+| **refresh** | `boolean` | optional (default: `true`) | Allow users to reload the view data from the backend without a full page reload |
+| **rowHeight** | `boolean` | optional (default: `true`) | Allow users to toggle row height/density |
+| **group** | `boolean` | optional (default: `true`) | Allow users to change record grouping from the toolbar. Toggle only — the grouping itself is configured in the view-level `grouping` block. |
+| **addRecordForm** | `boolean` | optional (default: `false`) | Add records through a form instead of inline |
+| **editInline** | `boolean` | optional (default: `false`) | Allow users to edit records inline — click a cell to edit it with the field's type-aware widget (the same control the form uses). Off by default: the list is read-only unless the author opts in. |
+| **hideFields** | `boolean` | optional (default: `false`) | Allow users to hide/show fields from the toolbar (the affordance behind the view-level `hiddenFields` list). Boolean toggle — distinct from the record-details component's `hideFields`, which is an array of field names to omit. Off by default: column hiding is opt-in. |
+| **rowColor** | `boolean` | optional (default: `false`) | Allow users to configure row colouring from the toolbar. Boolean toggle — the colour rules themselves live in the view-level `rowColor` block. Off by default: row colouring is opt-in. |
+| **buttons** | `string[]` | optional | Custom action button IDs to show in the toolbar |
+
+### Nested Shape: `ObjectListView.appearance`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **showDescription** | `boolean` | optional (default: `true`) | Show the view description text |
+| **allowedVisualizations** | `Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>[]` | optional | Whitelist of visualization types users can switch between (e.g. ["grid", "gallery", "kanban"]) |
+
+### Nested Shape: `ObjectListView.tabs[number]`
+
+Tab configuration for multi-tab view interface
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Tab identifier (snake_case) |
+| **label** | `string \| Record<string, string>` | optional | Display label |
+| **icon** | `string` | optional | Tab icon name |
+| **view** | `string` | optional | Referenced list view name from listViews |
+| **filter** | `{ field: string; operator?: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Tab-specific filter criteria |
+| **order** | `integer` | optional | Tab display order |
+| **pinned** | `boolean` | optional (default: `false`) | Pin tab (cannot be removed by users) |
+| **isDefault** | `boolean` | optional (default: `false`) | Set as the default active tab |
+| **visible** | `boolean` | optional (default: `true`) | Tab visibility |
+
+### Nested Shape: `ObjectListView.addRecord`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **enabled** | `boolean` | optional (default: `true`) | Show the add record entry point |
+| **position** | `Enum<'top' \| 'bottom' \| 'both'>` | optional (default: `"bottom"`) | Position of the add record button |
+| **mode** | `Enum<'inline' \| 'form' \| 'modal'>` | optional (default: `"inline"`) | How to add a new record |
+| **formView** | `string` | optional | Named form view to use when mode is "form" or "modal" |
+
+### Nested Shape: `ObjectListView.emptyState`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **title** | `string \| Record<string, string>` | optional | Display label — the default-language string, or an inline locale map (`{ en, "zh-CN" }`) resolved at render time |
+| **message** | `string \| Record<string, string>` | optional | Display label — the default-language string, or an inline locale map (`{ en, "zh-CN" }`) resolved at render time |
+| **icon** | `string` | optional |  |
+
+### Nested Shape: `ObjectListView.aria`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **ariaLabel** | `string \| Record<string, string>` | optional | Accessible label for screen readers (WAI-ARIA aria-label). Plain string, or an inline locale map — no translation-bundle slot addresses this key, so a plain string is announced in the source language. |
+| **ariaDescribedBy** | `string` | optional | ID of element providing additional description (WAI-ARIA aria-describedby) |
+| **role** | `string` | optional | WAI-ARIA role attribute (e.g., "dialog", "navigation", "alert") |
+
+### Nested Shape: `ObjectListView.userFilters`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **element** | `Enum<'dropdown' \| 'toggle'>` | optional (default: `"dropdown"`) | Filter control style on object views: "dropdown" (per-field value chips). "toggle" is deprecated. "tabs" is page-only — use `listViews` for named presets. |
+| **fields** | `{ field: string; label?: string \| Record<string, string>; type?: Enum<'select' \| 'multi-select' \| 'boolean' \| 'date-range' \| 'text'>; options?: object[]; … }[]` | optional | Fields exposed as quick filters (dropdown/toggle elements) |
+
 
 ---
 
@@ -635,6 +1351,19 @@ Map view configuration
 | :--- | :--- | :--- | :--- |
 | **element** | `Enum<'dropdown' \| 'toggle'>` | optional (default: `"dropdown"`) | Filter control style on object views: "dropdown" (per-field value chips). "toggle" is deprecated. "tabs" is page-only — use `listViews` for named presets. |
 | **fields** | `{ field: string; label?: string \| Record<string, string>; type?: Enum<'select' \| 'multi-select' \| 'boolean' \| 'date-range' \| 'text'>; options?: object[]; … }[]` | optional | Fields exposed as quick filters (dropdown/toggle elements) |
+
+### Nested Shape: `ObjectUserFilters.fields[number]`
+
+Quick-filter field configuration
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **field** | `string` | ✅ | Field name on the source object (must exist — checked by reference diagnostics) |
+| **label** | `string \| Record<string, string>` | optional | Display label override (defaults to the field label) |
+| **type** | `Enum<'select' \| 'multi-select' \| 'boolean' \| 'date-range' \| 'text'>` | optional | Filter control type. Omit to infer from the field definition |
+| **options** | `{ value: string \| number \| boolean; label: string \| Record<string, string>; color?: string }[]` | optional | Static options. Omit to derive from the field definition (select options / lookup records) |
+| **showCount** | `boolean` | optional | Show per-option record counts |
+| **defaultValues** | `(string \| number \| boolean)[]` | optional | Pre-selected values when the view loads |
 
 
 ---
@@ -761,6 +1490,14 @@ Quick-filter field configuration
 | **showCount** | `boolean` | optional | Show per-option record counts |
 | **defaultValues** | `(string \| number \| boolean)[]` | optional | Pre-selected values when the view loads |
 
+### Nested Shape: `UserFilterField.options[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **value** | `string \| number \| boolean` | ✅ | Option value |
+| **label** | `string \| Record<string, string>` | ✅ | Option label |
+| **color** | `string` | optional | Option color token/hex |
+
 
 ---
 
@@ -777,6 +1514,35 @@ End-user quick-filter configuration (Airtable "User filters" parity)
 | **tabs** | `{ name: string; label?: string \| Record<string, string>; icon?: string; view?: string; … }[]` | optional | Named filter presets rendered as tabs (tabs element). Reuses ViewTabSchema |
 | **showAllRecords** | `boolean` | optional | Show an "All records" tab before the presets (tabs element) |
 | **allowAddTab** | `boolean` | optional | Let end users add their own tab after the presets (tabs element): the affordance asks for a name and snapshots the filters currently applied as a new tab. SESSION-SCOPED — an added tab lives only for the current mount, is never written back as metadata (ADR-0047), and carries a remove control the authored presets do not. Page lists only — object views use `listViews` for named presets |
+
+### Nested Shape: `UserFilters.fields[number]`
+
+Quick-filter field configuration
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **field** | `string` | ✅ | Field name on the source object (must exist — checked by reference diagnostics) |
+| **label** | `string \| Record<string, string>` | optional | Display label override (defaults to the field label) |
+| **type** | `Enum<'select' \| 'multi-select' \| 'boolean' \| 'date-range' \| 'text'>` | optional | Filter control type. Omit to infer from the field definition |
+| **options** | `{ value: string \| number \| boolean; label: string \| Record<string, string>; color?: string }[]` | optional | Static options. Omit to derive from the field definition (select options / lookup records) |
+| **showCount** | `boolean` | optional | Show per-option record counts |
+| **defaultValues** | `(string \| number \| boolean)[]` | optional | Pre-selected values when the view loads |
+
+### Nested Shape: `UserFilters.tabs[number]`
+
+Tab configuration for multi-tab view interface
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Tab identifier (snake_case) |
+| **label** | `string \| Record<string, string>` | optional | Display label |
+| **icon** | `string` | optional | Tab icon name |
+| **view** | `string` | optional | Referenced list view name from listViews |
+| **filter** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Tab-specific filter criteria |
+| **order** | `integer` | optional | Tab display order |
+| **pinned** | `boolean` | optional (default: `false`) | Pin tab (cannot be removed by users) |
+| **isDefault** | `boolean` | optional (default: `false`) | Set as the default active tab |
+| **visible** | `boolean` | optional (default: `true`) | Tab visibility |
 
 
 ---
@@ -802,6 +1568,182 @@ End-user quick-filter configuration (Airtable "User filters" parity)
 | **_packageId** | `string` | optional | Owning package machine id. |
 | **_packageVersion** | `string` | optional | Owning package version. |
 | **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
+
+### Nested Shape: `View.list`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | optional | Internal view name (lowercase snake_case) |
+| **label** | `string \| Record<string, string>` | optional | Display label — the default-language string, or an inline locale map (`{ en, "zh-CN" }`) resolved at render time |
+| **type** | `Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>` | optional (default: `"grid"`) |  |
+| **data** | `{ provider: 'object'; object: string } \| { provider: 'api'; read?: object; write?: object } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }` | optional | Data source configuration (defaults to "object" provider) |
+| **columns** | `string[] \| { field: string; label?: string \| Record<string, string>; width?: number; align?: Enum<'left' \| 'center' \| 'right'>; … }[]` | ✅ | Fields to display as columns |
+| **filter** | `{ field: string; operator?: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Filter criteria (JSON Rules) |
+| **sort** | `string \| { field: string; order: Enum<'asc' \| 'desc'> }[]` | optional |  |
+| **searchableFields** | `string[]` | optional | Fields enabled for search |
+| **filterableFields** | `string[]` | optional | Legacy shorthand for userFilters.fields — bare field names enabled for end-user filtering. Prefer userFilters |
+| **resizable** | `boolean` | optional | Enable column resizing |
+| **compactToolbar** | `boolean` | optional | Collapse Group/Color/Density/Hide-fields into a single View settings popover |
+| **selection** | `{ type?: Enum<'none' \| 'single' \| 'multiple'> }` | optional | Row selection configuration |
+| **navigation** | `{ mode?: Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>; view?: string; preventNavigation?: boolean; openNewTab?: boolean; … }` | optional | Configuration for item click navigation (page, drawer, modal, etc.) |
+| **pagination** | `{ pageSize?: integer; pageSizeOptions?: integer[] }` | optional | Pagination configuration |
+| **kanban** | `{ groupByField: string; summarizeField?: string; columns: string[] }` | optional | Kanban-board configuration — applies when the view renders as a kanban layout |
+| **calendar** | `{ startDateField: string; endDateField?: string; titleField: string; colorField?: string }` | optional | Calendar configuration — applies when the view renders as a calendar layout |
+| **gantt** | `{ startDateField: string; endDateField: string; titleField: string; progressField?: string; … } & Record<string, any>` | optional | Gantt-timeline configuration — applies when the view renders as a gantt layout |
+| **gallery** | `{ coverField?: string; coverFit?: Enum<'cover' \| 'contain'>; cardSize?: Enum<'small' \| 'medium' \| 'large'>; titleField?: string; … }` | optional | Gallery/card view configuration |
+| **timeline** | `{ startDateField: string; endDateField?: string; titleField: string; groupByField?: string; … }` | optional | Timeline view configuration |
+| **chart** | `{ chartType?: Enum<'bar' \| 'line' \| 'pie' \| 'area' \| 'scatter'>; dataset: string; dimensions?: string[]; values: string[] }` | optional | List chart view configuration |
+| **map** | `{ latitudeField?: string; longitudeField?: string; locationField?: string; titleField?: string; … }` | optional | Map configuration — applies when the view renders as a map layout |
+| **tree** | `{ parentField?: string; labelField?: string; fields?: string[]; defaultExpandedDepth?: integer } & Record<string, any>` | optional | Tree/hierarchy configuration — applies when the view renders as a tree layout |
+| **description** | `string \| Record<string, string>` | optional | View description for documentation/tooltips |
+| **sharing** | `{ type?: Enum<'personal' \| 'collaborative'>; lockedBy?: string }` | optional | View sharing and access configuration |
+| **rowHeight** | `Enum<'compact' \| 'short' \| 'medium' \| 'tall' \| 'extra_tall'>` | optional | Row height / density setting |
+| **grouping** | `{ fields: object[] }` | optional | Group records by one or more fields |
+| **rowColor** | `{ field: string; colors?: Record<string, string> }` | optional | Color rows based on field value |
+| **hiddenFields** | `string[]` | optional | Fields to hide in this specific view |
+| **fieldOrder** | `string[]` | optional | Explicit field display order for this view |
+| **rowActions** | `string[]` | optional | Actions available for individual row items |
+| **bulkActions** | `string[]` | optional | Actions available when multiple rows are selected |
+| **bulkActionDefs** | `{ name: string; label?: string; icon?: string; variant?: Enum<'primary' \| 'secondary' \| 'danger' \| 'ghost' \| 'outline'>; … }[]` | optional | Rich bulk action definitions (schema-driven, executed via BulkActionDialog). Use a def for a mass data-plane mutation ('update' with a `patch` / 'delete') that no action expresses, or for an `operation: 'custom'` + `execution: 'aggregate'` entry (objectui#3139) that dispatches the action it NAMES once for the whole selection — the renderer injects `params._selectedIds: string[]` (read that on the server, not `recordId`) so a single call can produce one aggregate artifact (zip of QR codes, merged PDF, batch print). Aggregate results are all-or-nothing: a handler that cannot cover the whole selection must reject, and per-row retry is replaced by re-running the action. `batchSize` does not apply (the call is never chunked); set `maxRecords` on defs whose server work is expensive. For the PER-RECORD dispatch use `bulkActions: ['<name>']` instead — the bare-string form, promoted with the action's own label, params and `visible`; a 'custom' def without `execution: 'aggregate'` has no dispatcher and is refused at parse time (#4457). Toolbar url/api actions can also interpolate the current selection via `${ctx.selection.ids}` / `${ctx.selection.count}`. |
+| **conditionalFormatting** | `{ condition: string \| object; style: Record<string, string> }[]` | optional | Conditional formatting rules for list rows |
+| **inlineEdit** | `boolean` | optional | Allow inline editing of records directly in the list view |
+| **exportOptions** | `Enum<'csv' \| 'xlsx' \| 'json'>[] \| { formats?: Enum<'csv' \| 'xlsx' \| 'json'>[]; maxRecords?: integer; includeHeaders?: boolean; fileNamePrefix?: string; … }` | optional | Export configuration for the list toolbar export menu: `{ formats?, maxRecords?, includeHeaders?, fileNamePrefix?, streaming? }`. A bare format array is the legacy spelling and lifts to `{ formats: [...] }` at parse. |
+| **userActions** | `{ sort?: boolean; search?: boolean; filter?: boolean; refresh?: boolean; … }` | optional | User action toggles for the view toolbar |
+| **appearance** | `{ showDescription?: boolean; allowedVisualizations?: Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>[] }` | optional | Appearance and visualization configuration |
+| **tabs** | `{ name: string; label?: string \| Record<string, string>; icon?: string; view?: string; … }[]` | optional | Tab definitions for multi-tab view interface |
+| **addRecord** | `{ enabled?: boolean; position?: Enum<'top' \| 'bottom' \| 'both'>; mode?: Enum<'inline' \| 'form' \| 'modal'>; formView?: string }` | optional | Add record entry point configuration |
+| **showRecordCount** | `boolean` | optional | Show record count at the bottom of the list |
+| **allowPrinting** | `boolean` | optional | Allow users to print the view |
+| **emptyState** | `{ title?: string \| Record<string, string>; message?: string \| Record<string, string>; icon?: string }` | optional | Empty state configuration when no records found |
+| **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes for the list view |
+| **responsive** | `never` | optional | [REMOVED] `view.responsive` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — no renderer ever read it; the grid is responsive by its own layout rules. Delete the key. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
+| **performance** | `never` | optional | [REMOVED] `view.performance` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — no renderer or runtime read it; list-view performance tuning was never implemented. Delete the key. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
+| **striped** | `never` | optional | [REMOVED] `view.striped` was removed in @objectstack/spec 17.0.0 (#7176, ADR-0049 enforce-or-remove) — every measured reader only copied it forward and no renderer ever applied it, so authoring it was a parse-clean no-op. There is no authorable striped-rows switch; delete the key. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
+| **bordered** | `never` | optional | [REMOVED] `view.bordered` was removed in @objectstack/spec 17.0.0 (#7176, ADR-0049 enforce-or-remove) — every measured reader only copied it forward and no renderer ever applied it (the grid frame is the renderer's own constant, not authorable). Delete the key. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
+| **virtualScroll** | `never` | optional | [REMOVED] `view.virtualScroll` was removed in @objectstack/spec 17.0.0 (#7176, ADR-0049 enforce-or-remove) — every measured reader only copied it forward and no grid ever virtualized off it; authoring it was a parse-clean no-op. Delete the key; large datasets page via `pagination`. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
+| **userFilters** | `{ element?: Enum<'dropdown' \| 'toggle'>; fields?: object[] }` | optional |  |
+
+### Nested Shape: `View.form`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `Enum<'simple' \| 'tabbed' \| 'wizard' \| 'split' \| 'drawer' \| 'modal'>` | optional (default: `"simple"`) |  |
+| **layout** | `Enum<'vertical' \| 'horizontal' \| 'inline' \| 'grid'>` | optional | Field layout direction |
+| **columns** | `integer` | optional | Number of columns for the form body |
+| **title** | `string` | optional | Form title |
+| **description** | `string` | optional | Form description |
+| **defaultTab** | `string` | optional | Initially active tab (tabbed forms) |
+| **tabPosition** | `Enum<'top' \| 'bottom' \| 'left' \| 'right'>` | optional | Tab strip position (tabbed forms) |
+| **allowSkip** | `boolean` | optional | Allow skipping steps (wizard forms) |
+| **showStepIndicator** | `boolean` | optional | Show the step indicator (wizard forms) |
+| **splitDirection** | `Enum<'horizontal' \| 'vertical'>` | optional | Split orientation (split forms) |
+| **splitSize** | `number` | optional | Primary split panel size, % (split forms) |
+| **splitResizable** | `boolean` | optional | Whether the split is resizable (split forms) |
+| **drawerSide** | `Enum<'top' \| 'bottom' \| 'left' \| 'right'>` | optional | Drawer side (drawer forms) |
+| **drawerWidth** | `string` | optional | [DEPRECATED → size buckets] Drawer width, e.g. "480px". A pixel width cannot be chosen without knowing the client viewport — the renderer derives it. |
+| **modalSize** | `Enum<'sm' \| 'default' \| 'lg' \| 'xl' \| 'full'>` | optional | Modal size (modal forms) |
+| **data** | `{ provider: 'object'; object: string } \| { provider: 'api'; read?: object; write?: object } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }` | optional | Data source configuration (defaults to "object" provider) |
+| **sections** | `{ name?: string; label?: string \| Record<string, string>; description?: string; collapsible?: boolean; … }[]` | optional |  |
+| **groups** | `{ name?: string; label?: string \| Record<string, string>; description?: string; collapsible?: boolean; … }[]` | optional | [LEGACY ALIAS → `sections`] Accepted for back-compat and folded onto `sections` at parse; `sections` wins when both are present. Prefer `sections`. |
+| **subforms** | `{ childObject: string; relationshipField?: string; columns?: any[]; amountField?: string; … }[]` | optional | Inline master-detail child collections |
+| **defaultSort** | `never` | optional | [REMOVED] `form.defaultSort` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — nothing read it: a related list inside a form sorts by its own list view's `sort`. Delete the key and set the sort on the related list view instead. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
+| **sharing** | `{ enabled?: boolean; publicLink?: string; password?: string; allowedDomains?: string[]; … }` | optional | Public sharing configuration for this form |
+| **submitBehavior** | `{ kind: 'thank-you'; title?: string; message?: string } \| { kind: 'redirect'; url: string; delayMs?: integer } \| { kind: 'continue' } \| { kind: 'next-record' }` | optional | Post-submit behavior. On the `redirect` arm, `url` is relative-only and interpolates only declared record fields as `{{record.field_name}}`, URL-escaped (ruled 2026-08-11, #7496). |
+| **buttons** | `{ submit?: object; cancel?: object; reset?: object }` | optional | Form action-button visibility & labels; folded onto the flat renderer props by ObjectUI ObjectForm (framework#1894 / #2998). |
+| **defaults** | `Record<string, any>` | optional | Initial field values for create-mode forms (folded into ObjectUI ObjectForm initial values; framework#1894 / #2998). |
+| **aria** | `never` | optional | [REMOVED] `form.aria` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — no form renderer ever applied it, so declared ARIA attributes silently did not reach the DOM. Delete the key. The form renderer emits its own semantic markup; report gaps as renderer issues rather than per-view attribute overrides. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
+
+### Nested Shape: `View.listViews[string]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | optional | Internal view name (lowercase snake_case) |
+| **label** | `string \| Record<string, string>` | optional | Display label — the default-language string, or an inline locale map (`{ en, "zh-CN" }`) resolved at render time |
+| **type** | `Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>` | optional (default: `"grid"`) |  |
+| **data** | `{ provider: 'object'; object: string } \| { provider: 'api'; read?: object; write?: object } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }` | optional | Data source configuration (defaults to "object" provider) |
+| **columns** | `string[] \| { field: string; label?: string \| Record<string, string>; width?: number; align?: Enum<'left' \| 'center' \| 'right'>; … }[]` | ✅ | Fields to display as columns |
+| **filter** | `{ field: string; operator?: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Filter criteria (JSON Rules) |
+| **sort** | `string \| { field: string; order: Enum<'asc' \| 'desc'> }[]` | optional |  |
+| **searchableFields** | `string[]` | optional | Fields enabled for search |
+| **filterableFields** | `string[]` | optional | Legacy shorthand for userFilters.fields — bare field names enabled for end-user filtering. Prefer userFilters |
+| **resizable** | `boolean` | optional | Enable column resizing |
+| **compactToolbar** | `boolean` | optional | Collapse Group/Color/Density/Hide-fields into a single View settings popover |
+| **selection** | `{ type?: Enum<'none' \| 'single' \| 'multiple'> }` | optional | Row selection configuration |
+| **navigation** | `{ mode?: Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>; view?: string; preventNavigation?: boolean; openNewTab?: boolean; … }` | optional | Configuration for item click navigation (page, drawer, modal, etc.) |
+| **pagination** | `{ pageSize?: integer; pageSizeOptions?: integer[] }` | optional | Pagination configuration |
+| **kanban** | `{ groupByField: string; summarizeField?: string; columns: string[] }` | optional | Kanban-board configuration — applies when the view renders as a kanban layout |
+| **calendar** | `{ startDateField: string; endDateField?: string; titleField: string; colorField?: string }` | optional | Calendar configuration — applies when the view renders as a calendar layout |
+| **gantt** | `{ startDateField: string; endDateField: string; titleField: string; progressField?: string; … } & Record<string, any>` | optional | Gantt-timeline configuration — applies when the view renders as a gantt layout |
+| **gallery** | `{ coverField?: string; coverFit?: Enum<'cover' \| 'contain'>; cardSize?: Enum<'small' \| 'medium' \| 'large'>; titleField?: string; … }` | optional | Gallery/card view configuration |
+| **timeline** | `{ startDateField: string; endDateField?: string; titleField: string; groupByField?: string; … }` | optional | Timeline view configuration |
+| **chart** | `{ chartType?: Enum<'bar' \| 'line' \| 'pie' \| 'area' \| 'scatter'>; dataset: string; dimensions?: string[]; values: string[] }` | optional | List chart view configuration |
+| **map** | `{ latitudeField?: string; longitudeField?: string; locationField?: string; titleField?: string; … }` | optional | Map configuration — applies when the view renders as a map layout |
+| **tree** | `{ parentField?: string; labelField?: string; fields?: string[]; defaultExpandedDepth?: integer } & Record<string, any>` | optional | Tree/hierarchy configuration — applies when the view renders as a tree layout |
+| **description** | `string \| Record<string, string>` | optional | View description for documentation/tooltips |
+| **sharing** | `{ type?: Enum<'personal' \| 'collaborative'>; lockedBy?: string }` | optional | View sharing and access configuration |
+| **rowHeight** | `Enum<'compact' \| 'short' \| 'medium' \| 'tall' \| 'extra_tall'>` | optional | Row height / density setting |
+| **grouping** | `{ fields: object[] }` | optional | Group records by one or more fields |
+| **rowColor** | `{ field: string; colors?: Record<string, string> }` | optional | Color rows based on field value |
+| **hiddenFields** | `string[]` | optional | Fields to hide in this specific view |
+| **fieldOrder** | `string[]` | optional | Explicit field display order for this view |
+| **rowActions** | `string[]` | optional | Actions available for individual row items |
+| **bulkActions** | `string[]` | optional | Actions available when multiple rows are selected |
+| **bulkActionDefs** | `{ name: string; label?: string; icon?: string; variant?: Enum<'primary' \| 'secondary' \| 'danger' \| 'ghost' \| 'outline'>; … }[]` | optional | Rich bulk action definitions (schema-driven, executed via BulkActionDialog). Use a def for a mass data-plane mutation ('update' with a `patch` / 'delete') that no action expresses, or for an `operation: 'custom'` + `execution: 'aggregate'` entry (objectui#3139) that dispatches the action it NAMES once for the whole selection — the renderer injects `params._selectedIds: string[]` (read that on the server, not `recordId`) so a single call can produce one aggregate artifact (zip of QR codes, merged PDF, batch print). Aggregate results are all-or-nothing: a handler that cannot cover the whole selection must reject, and per-row retry is replaced by re-running the action. `batchSize` does not apply (the call is never chunked); set `maxRecords` on defs whose server work is expensive. For the PER-RECORD dispatch use `bulkActions: ['<name>']` instead — the bare-string form, promoted with the action's own label, params and `visible`; a 'custom' def without `execution: 'aggregate'` has no dispatcher and is refused at parse time (#4457). Toolbar url/api actions can also interpolate the current selection via `${ctx.selection.ids}` / `${ctx.selection.count}`. |
+| **conditionalFormatting** | `{ condition: string \| object; style: Record<string, string> }[]` | optional | Conditional formatting rules for list rows |
+| **inlineEdit** | `boolean` | optional | Allow inline editing of records directly in the list view |
+| **exportOptions** | `Enum<'csv' \| 'xlsx' \| 'json'>[] \| { formats?: Enum<'csv' \| 'xlsx' \| 'json'>[]; maxRecords?: integer; includeHeaders?: boolean; fileNamePrefix?: string; … }` | optional | Export configuration for the list toolbar export menu: `{ formats?, maxRecords?, includeHeaders?, fileNamePrefix?, streaming? }`. A bare format array is the legacy spelling and lifts to `{ formats: [...] }` at parse. |
+| **userActions** | `{ sort?: boolean; search?: boolean; filter?: boolean; refresh?: boolean; … }` | optional | User action toggles for the view toolbar |
+| **appearance** | `{ showDescription?: boolean; allowedVisualizations?: Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>[] }` | optional | Appearance and visualization configuration |
+| **tabs** | `{ name: string; label?: string \| Record<string, string>; icon?: string; view?: string; … }[]` | optional | Tab definitions for multi-tab view interface |
+| **addRecord** | `{ enabled?: boolean; position?: Enum<'top' \| 'bottom' \| 'both'>; mode?: Enum<'inline' \| 'form' \| 'modal'>; formView?: string }` | optional | Add record entry point configuration |
+| **showRecordCount** | `boolean` | optional | Show record count at the bottom of the list |
+| **allowPrinting** | `boolean` | optional | Allow users to print the view |
+| **emptyState** | `{ title?: string \| Record<string, string>; message?: string \| Record<string, string>; icon?: string }` | optional | Empty state configuration when no records found |
+| **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes for the list view |
+| **responsive** | `never` | optional | [REMOVED] `view.responsive` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — no renderer ever read it; the grid is responsive by its own layout rules. Delete the key. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
+| **performance** | `never` | optional | [REMOVED] `view.performance` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — no renderer or runtime read it; list-view performance tuning was never implemented. Delete the key. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
+| **striped** | `never` | optional | [REMOVED] `view.striped` was removed in @objectstack/spec 17.0.0 (#7176, ADR-0049 enforce-or-remove) — every measured reader only copied it forward and no renderer ever applied it, so authoring it was a parse-clean no-op. There is no authorable striped-rows switch; delete the key. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
+| **bordered** | `never` | optional | [REMOVED] `view.bordered` was removed in @objectstack/spec 17.0.0 (#7176, ADR-0049 enforce-or-remove) — every measured reader only copied it forward and no renderer ever applied it (the grid frame is the renderer's own constant, not authorable). Delete the key. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
+| **virtualScroll** | `never` | optional | [REMOVED] `view.virtualScroll` was removed in @objectstack/spec 17.0.0 (#7176, ADR-0049 enforce-or-remove) — every measured reader only copied it forward and no grid ever virtualized off it; authoring it was a parse-clean no-op. Delete the key; large datasets page via `pagination`. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
+| **userFilters** | `{ element?: Enum<'dropdown' \| 'toggle'>; fields?: object[] }` | optional |  |
+
+### Nested Shape: `View.formViews[string]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `Enum<'simple' \| 'tabbed' \| 'wizard' \| 'split' \| 'drawer' \| 'modal'>` | optional (default: `"simple"`) |  |
+| **layout** | `Enum<'vertical' \| 'horizontal' \| 'inline' \| 'grid'>` | optional | Field layout direction |
+| **columns** | `integer` | optional | Number of columns for the form body |
+| **title** | `string` | optional | Form title |
+| **description** | `string` | optional | Form description |
+| **defaultTab** | `string` | optional | Initially active tab (tabbed forms) |
+| **tabPosition** | `Enum<'top' \| 'bottom' \| 'left' \| 'right'>` | optional | Tab strip position (tabbed forms) |
+| **allowSkip** | `boolean` | optional | Allow skipping steps (wizard forms) |
+| **showStepIndicator** | `boolean` | optional | Show the step indicator (wizard forms) |
+| **splitDirection** | `Enum<'horizontal' \| 'vertical'>` | optional | Split orientation (split forms) |
+| **splitSize** | `number` | optional | Primary split panel size, % (split forms) |
+| **splitResizable** | `boolean` | optional | Whether the split is resizable (split forms) |
+| **drawerSide** | `Enum<'top' \| 'bottom' \| 'left' \| 'right'>` | optional | Drawer side (drawer forms) |
+| **drawerWidth** | `string` | optional | [DEPRECATED → size buckets] Drawer width, e.g. "480px". A pixel width cannot be chosen without knowing the client viewport — the renderer derives it. |
+| **modalSize** | `Enum<'sm' \| 'default' \| 'lg' \| 'xl' \| 'full'>` | optional | Modal size (modal forms) |
+| **data** | `{ provider: 'object'; object: string } \| { provider: 'api'; read?: object; write?: object } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }` | optional | Data source configuration (defaults to "object" provider) |
+| **sections** | `{ name?: string; label?: string \| Record<string, string>; description?: string; collapsible?: boolean; … }[]` | optional |  |
+| **groups** | `{ name?: string; label?: string \| Record<string, string>; description?: string; collapsible?: boolean; … }[]` | optional | [LEGACY ALIAS → `sections`] Accepted for back-compat and folded onto `sections` at parse; `sections` wins when both are present. Prefer `sections`. |
+| **subforms** | `{ childObject: string; relationshipField?: string; columns?: any[]; amountField?: string; … }[]` | optional | Inline master-detail child collections |
+| **defaultSort** | `never` | optional | [REMOVED] `form.defaultSort` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — nothing read it: a related list inside a form sorts by its own list view's `sort`. Delete the key and set the sort on the related list view instead. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
+| **sharing** | `{ enabled?: boolean; publicLink?: string; password?: string; allowedDomains?: string[]; … }` | optional | Public sharing configuration for this form |
+| **submitBehavior** | `{ kind: 'thank-you'; title?: string; message?: string } \| { kind: 'redirect'; url: string; delayMs?: integer } \| { kind: 'continue' } \| { kind: 'next-record' }` | optional | Post-submit behavior. On the `redirect` arm, `url` is relative-only and interpolates only declared record fields as `{{record.field_name}}`, URL-escaped (ruled 2026-08-11, #7496). |
+| **buttons** | `{ submit?: object; cancel?: object; reset?: object }` | optional | Form action-button visibility & labels; folded onto the flat renderer props by ObjectUI ObjectForm (framework#1894 / #2998). |
+| **defaults** | `Record<string, any>` | optional | Initial field values for create-mode forms (folded into ObjectUI ObjectForm initial values; framework#1894 / #2998). |
+| **aria** | `never` | optional | [REMOVED] `form.aria` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — no form renderer ever applied it, so declared ARIA attributes silently did not reach the DOM. Delete the key. The form renderer emits its own semantic markup; report gaps as renderer issues rather than per-view attribute overrides. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
+
+### Nested Shape: `View.protection`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | ✅ | Lock policy — none \| no-overlay \| no-delete \| full. |
+| **reason** | `string` | ✅ | User-visible reason shown when the lock blocks an action. |
+| **docsUrl** | `string` | optional | Optional URL the Studio banner links to for more context. |
 
 
 ---
@@ -832,6 +1774,26 @@ This schema accepts one of the following structures:
 | **provider** | `'api'` | ✅ |  |
 | **read** | `{ url: string; method: Enum<'GET' \| 'POST' \| 'PUT' \| 'PATCH' \| 'DELETE'>; headers?: Record<string, string>; params?: Record<string, any>; … }` | optional | Configuration for fetching data |
 | **write** | `{ url: string; method: Enum<'GET' \| 'POST' \| 'PUT' \| 'PATCH' \| 'DELETE'>; headers?: Record<string, string>; params?: Record<string, any>; … }` | optional | Configuration for submitting data (for forms/editable tables) |
+
+### Nested Shape: `ViewData.read`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **url** | `string` | ✅ | API endpoint URL |
+| **method** | `Enum<'GET' \| 'POST' \| 'PUT' \| 'PATCH' \| 'DELETE'>` | optional (default: `"GET"`) | HTTP method |
+| **headers** | `Record<string, string>` | optional | Custom HTTP headers |
+| **params** | `Record<string, any>` | optional | Query parameters |
+| **body** | `any` | optional | Request body for POST/PUT/PATCH |
+
+### Nested Shape: `ViewData.write`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **url** | `string` | ✅ | API endpoint URL |
+| **method** | `Enum<'GET' \| 'POST' \| 'PUT' \| 'PATCH' \| 'DELETE'>` | optional (default: `"GET"`) | HTTP method |
+| **headers** | `Record<string, string>` | optional | Custom HTTP headers |
+| **params** | `Record<string, any>` | optional | Query parameters |
+| **body** | `any` | optional | Request body for POST/PUT/PATCH |
 
 ---
 
@@ -930,6 +1892,68 @@ This schema accepts one of the following structures:
 | **_packageVersion** | `string` | optional | Owning package version. |
 | **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
 
+### Nested Shape: `ViewItem.config`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | optional | Internal view name (lowercase snake_case) |
+| **label** | `string \| Record<string, string>` | optional | Display label — the default-language string, or an inline locale map (`{ en, "zh-CN" }`) resolved at render time |
+| **type** | `Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>` | optional (default: `"grid"`) |  |
+| **data** | `{ provider: 'object'; object: string } \| { provider: 'api'; read?: object; write?: object } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }` | optional | Data source configuration (defaults to "object" provider) |
+| **columns** | `string[] \| { field: string; label?: string \| Record<string, string>; width?: number; align?: Enum<'left' \| 'center' \| 'right'>; … }[]` | ✅ | Fields to display as columns |
+| **filter** | `{ field: string; operator?: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Filter criteria (JSON Rules) |
+| **sort** | `string \| { field: string; order: Enum<'asc' \| 'desc'> }[]` | optional |  |
+| **searchableFields** | `string[]` | optional | Fields enabled for search |
+| **filterableFields** | `string[]` | optional | Legacy shorthand for userFilters.fields — bare field names enabled for end-user filtering. Prefer userFilters |
+| **userFilters** | `{ element?: Enum<'dropdown' \| 'tabs' \| 'toggle'>; fields?: object[]; tabs?: object[]; showAllRecords?: boolean; … }` | optional | End-user quick-filter bar: dropdown/toggle fields or tab presets. Omit to let the renderer derive filters from select/boolean fields |
+| **resizable** | `boolean` | optional | Enable column resizing |
+| **compactToolbar** | `boolean` | optional | Collapse Group/Color/Density/Hide-fields into a single View settings popover |
+| **selection** | `{ type?: Enum<'none' \| 'single' \| 'multiple'> }` | optional | Row selection configuration |
+| **navigation** | `{ mode?: Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>; view?: string; preventNavigation?: boolean; openNewTab?: boolean; … }` | optional | Configuration for item click navigation (page, drawer, modal, etc.) |
+| **pagination** | `{ pageSize?: integer; pageSizeOptions?: integer[] }` | optional | Pagination configuration |
+| **kanban** | `{ groupByField: string; summarizeField?: string; columns: string[] }` | optional | Kanban-board configuration — applies when the view renders as a kanban layout |
+| **calendar** | `{ startDateField: string; endDateField?: string; titleField: string; colorField?: string }` | optional | Calendar configuration — applies when the view renders as a calendar layout |
+| **gantt** | `{ startDateField: string; endDateField: string; titleField: string; progressField?: string; … } & Record<string, any>` | optional | Gantt-timeline configuration — applies when the view renders as a gantt layout |
+| **gallery** | `{ coverField?: string; coverFit?: Enum<'cover' \| 'contain'>; cardSize?: Enum<'small' \| 'medium' \| 'large'>; titleField?: string; … }` | optional | Gallery/card view configuration |
+| **timeline** | `{ startDateField: string; endDateField?: string; titleField: string; groupByField?: string; … }` | optional | Timeline view configuration |
+| **chart** | `{ chartType?: Enum<'bar' \| 'line' \| 'pie' \| 'area' \| 'scatter'>; dataset: string; dimensions?: string[]; values: string[] }` | optional | List chart view configuration |
+| **map** | `{ latitudeField?: string; longitudeField?: string; locationField?: string; titleField?: string; … }` | optional | Map configuration — applies when the view renders as a map layout |
+| **tree** | `{ parentField?: string; labelField?: string; fields?: string[]; defaultExpandedDepth?: integer } & Record<string, any>` | optional | Tree/hierarchy configuration — applies when the view renders as a tree layout |
+| **description** | `string \| Record<string, string>` | optional | View description for documentation/tooltips |
+| **sharing** | `{ type?: Enum<'personal' \| 'collaborative'>; lockedBy?: string }` | optional | View sharing and access configuration |
+| **rowHeight** | `Enum<'compact' \| 'short' \| 'medium' \| 'tall' \| 'extra_tall'>` | optional | Row height / density setting |
+| **grouping** | `{ fields: object[] }` | optional | Group records by one or more fields |
+| **rowColor** | `{ field: string; colors?: Record<string, string> }` | optional | Color rows based on field value |
+| **hiddenFields** | `string[]` | optional | Fields to hide in this specific view |
+| **fieldOrder** | `string[]` | optional | Explicit field display order for this view |
+| **rowActions** | `string[]` | optional | Actions available for individual row items |
+| **bulkActions** | `string[]` | optional | Actions available when multiple rows are selected |
+| **bulkActionDefs** | `{ name: string; label?: string; icon?: string; variant?: Enum<'primary' \| 'secondary' \| 'danger' \| 'ghost' \| 'outline'>; … }[]` | optional | Rich bulk action definitions (schema-driven, executed via BulkActionDialog). Use a def for a mass data-plane mutation ('update' with a `patch` / 'delete') that no action expresses, or for an `operation: 'custom'` + `execution: 'aggregate'` entry (objectui#3139) that dispatches the action it NAMES once for the whole selection — the renderer injects `params._selectedIds: string[]` (read that on the server, not `recordId`) so a single call can produce one aggregate artifact (zip of QR codes, merged PDF, batch print). Aggregate results are all-or-nothing: a handler that cannot cover the whole selection must reject, and per-row retry is replaced by re-running the action. `batchSize` does not apply (the call is never chunked); set `maxRecords` on defs whose server work is expensive. For the PER-RECORD dispatch use `bulkActions: ['<name>']` instead — the bare-string form, promoted with the action's own label, params and `visible`; a 'custom' def without `execution: 'aggregate'` has no dispatcher and is refused at parse time (#4457). Toolbar url/api actions can also interpolate the current selection via `${ctx.selection.ids}` / `${ctx.selection.count}`. |
+| **conditionalFormatting** | `{ condition: string \| object; style: Record<string, string> }[]` | optional | Conditional formatting rules for list rows |
+| **inlineEdit** | `boolean` | optional | Allow inline editing of records directly in the list view |
+| **exportOptions** | `Enum<'csv' \| 'xlsx' \| 'json'>[] \| { formats?: Enum<'csv' \| 'xlsx' \| 'json'>[]; maxRecords?: integer; includeHeaders?: boolean; fileNamePrefix?: string; … }` | optional | Export configuration for the list toolbar export menu: `{ formats?, maxRecords?, includeHeaders?, fileNamePrefix?, streaming? }`. A bare format array is the legacy spelling and lifts to `{ formats: [...] }` at parse. |
+| **userActions** | `{ sort?: boolean; search?: boolean; filter?: boolean; refresh?: boolean; … }` | optional | User action toggles for the view toolbar |
+| **appearance** | `{ showDescription?: boolean; allowedVisualizations?: Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>[] }` | optional | Appearance and visualization configuration |
+| **tabs** | `{ name: string; label?: string \| Record<string, string>; icon?: string; view?: string; … }[]` | optional | Tab definitions for multi-tab view interface |
+| **addRecord** | `{ enabled?: boolean; position?: Enum<'top' \| 'bottom' \| 'both'>; mode?: Enum<'inline' \| 'form' \| 'modal'>; formView?: string }` | optional | Add record entry point configuration |
+| **showRecordCount** | `boolean` | optional | Show record count at the bottom of the list |
+| **allowPrinting** | `boolean` | optional | Allow users to print the view |
+| **emptyState** | `{ title?: string \| Record<string, string>; message?: string \| Record<string, string>; icon?: string }` | optional | Empty state configuration when no records found |
+| **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes for the list view |
+| **responsive** | `never` | optional | [REMOVED] `view.responsive` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — no renderer ever read it; the grid is responsive by its own layout rules. Delete the key. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
+| **performance** | `never` | optional | [REMOVED] `view.performance` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — no renderer or runtime read it; list-view performance tuning was never implemented. Delete the key. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
+| **striped** | `never` | optional | [REMOVED] `view.striped` was removed in @objectstack/spec 17.0.0 (#7176, ADR-0049 enforce-or-remove) — every measured reader only copied it forward and no renderer ever applied it, so authoring it was a parse-clean no-op. There is no authorable striped-rows switch; delete the key. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
+| **bordered** | `never` | optional | [REMOVED] `view.bordered` was removed in @objectstack/spec 17.0.0 (#7176, ADR-0049 enforce-or-remove) — every measured reader only copied it forward and no renderer ever applied it (the grid frame is the renderer's own constant, not authorable). Delete the key. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
+| **virtualScroll** | `never` | optional | [REMOVED] `view.virtualScroll` was removed in @objectstack/spec 17.0.0 (#7176, ADR-0049 enforce-or-remove) — every measured reader only copied it forward and no grid ever virtualized off it; authoring it was a parse-clean no-op. Delete the key; large datasets page via `pagination`. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
+
+### Nested Shape: `ViewItem.protection`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | ✅ | Lock policy — none \| no-overlay \| no-delete \| full. |
+| **reason** | `string` | ✅ | User-visible reason shown when the lock blocks an action. |
+| **docsUrl** | `string` | optional | Optional URL the Studio banner links to for more context. |
+
 ---
 
 #### Option 2
@@ -956,6 +1980,44 @@ This schema accepts one of the following structures:
 | **_packageId** | `string` | optional | Owning package machine id. |
 | **_packageVersion** | `string` | optional | Owning package version. |
 | **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
+
+### Nested Shape: `ViewItem.config`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `Enum<'simple' \| 'tabbed' \| 'wizard' \| 'split' \| 'drawer' \| 'modal'>` | optional (default: `"simple"`) |  |
+| **layout** | `Enum<'vertical' \| 'horizontal' \| 'inline' \| 'grid'>` | optional | Field layout direction |
+| **columns** | `integer` | optional | Number of columns for the form body |
+| **title** | `string` | optional | Form title |
+| **description** | `string` | optional | Form description |
+| **defaultTab** | `string` | optional | Initially active tab (tabbed forms) |
+| **tabPosition** | `Enum<'top' \| 'bottom' \| 'left' \| 'right'>` | optional | Tab strip position (tabbed forms) |
+| **allowSkip** | `boolean` | optional | Allow skipping steps (wizard forms) |
+| **showStepIndicator** | `boolean` | optional | Show the step indicator (wizard forms) |
+| **splitDirection** | `Enum<'horizontal' \| 'vertical'>` | optional | Split orientation (split forms) |
+| **splitSize** | `number` | optional | Primary split panel size, % (split forms) |
+| **splitResizable** | `boolean` | optional | Whether the split is resizable (split forms) |
+| **drawerSide** | `Enum<'top' \| 'bottom' \| 'left' \| 'right'>` | optional | Drawer side (drawer forms) |
+| **drawerWidth** | `string` | optional | [DEPRECATED → size buckets] Drawer width, e.g. "480px". A pixel width cannot be chosen without knowing the client viewport — the renderer derives it. |
+| **modalSize** | `Enum<'sm' \| 'default' \| 'lg' \| 'xl' \| 'full'>` | optional | Modal size (modal forms) |
+| **data** | `{ provider: 'object'; object: string } \| { provider: 'api'; read?: object; write?: object } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }` | optional | Data source configuration (defaults to "object" provider) |
+| **sections** | `{ name?: string; label?: string \| Record<string, string>; description?: string; collapsible?: boolean; … }[]` | optional |  |
+| **groups** | `{ name?: string; label?: string \| Record<string, string>; description?: string; collapsible?: boolean; … }[]` | optional | [LEGACY ALIAS → `sections`] Accepted for back-compat and folded onto `sections` at parse; `sections` wins when both are present. Prefer `sections`. |
+| **subforms** | `{ childObject: string; relationshipField?: string; columns?: any[]; amountField?: string; … }[]` | optional | Inline master-detail child collections |
+| **defaultSort** | `never` | optional | [REMOVED] `form.defaultSort` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — nothing read it: a related list inside a form sorts by its own list view's `sort`. Delete the key and set the sort on the related list view instead. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
+| **sharing** | `{ enabled?: boolean; publicLink?: string; password?: string; allowedDomains?: string[]; … }` | optional | Public sharing configuration for this form |
+| **submitBehavior** | `{ kind: 'thank-you'; title?: string; message?: string } \| { kind: 'redirect'; url: string; delayMs?: integer } \| { kind: 'continue' } \| { kind: 'next-record' }` | optional | Post-submit behavior. On the `redirect` arm, `url` is relative-only and interpolates only declared record fields as `{{record.field_name}}`, URL-escaped (ruled 2026-08-11, #7496). |
+| **buttons** | `{ submit?: object; cancel?: object; reset?: object }` | optional | Form action-button visibility & labels; folded onto the flat renderer props by ObjectUI ObjectForm (framework#1894 / #2998). |
+| **defaults** | `Record<string, any>` | optional | Initial field values for create-mode forms (folded into ObjectUI ObjectForm initial values; framework#1894 / #2998). |
+| **aria** | `never` | optional | [REMOVED] `form.aria` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — no form renderer ever applied it, so declared ARIA attributes silently did not reach the DOM. Delete the key. The form renderer emits its own semantic markup; report gaps as renderer issues rather than per-view attribute overrides. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
+
+### Nested Shape: `ViewItem.protection`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | ✅ | Lock policy — none \| no-overlay \| no-delete \| full. |
+| **reason** | `string` | ✅ | User-visible reason shown when the lock blocks an action. |
+| **docsUrl** | `string` | optional | Optional URL the Studio banner links to for more context. |
 
 ---
 
@@ -1005,6 +2067,75 @@ This schema accepts one of the following structures:
 | **sortOrder** | `integer` | optional | Studio round-trip: position within the switcher (per-user state, written by the console — not authored). |
 | **columnState** | `{ order?: string[]; widths?: Record<string, number> }` | optional | Studio round-trip: per-user column order/widths (runtime-only state, written by the console grid — not authored). #9933 |
 
+### Nested Shape: `ViewItemWire.config`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | optional | Internal view name (lowercase snake_case) |
+| **label** | `string \| Record<string, string>` | optional | Display label — the default-language string, or an inline locale map (`{ en, "zh-CN" }`) resolved at render time |
+| **type** | `Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>` | optional (default: `"grid"`) |  |
+| **data** | `{ provider: 'object'; object: string } \| { provider: 'api'; read?: object; write?: object } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }` | optional | Data source configuration (defaults to "object" provider) |
+| **columns** | `string[] \| { field: string; label?: string \| Record<string, string>; width?: number; align?: Enum<'left' \| 'center' \| 'right'>; … }[]` | ✅ | Fields to display as columns |
+| **filter** | `{ field: string; operator?: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Filter criteria (JSON Rules) |
+| **sort** | `string \| { field: string; order: Enum<'asc' \| 'desc'> }[]` | optional |  |
+| **searchableFields** | `string[]` | optional | Fields enabled for search |
+| **filterableFields** | `string[]` | optional | Legacy shorthand for userFilters.fields — bare field names enabled for end-user filtering. Prefer userFilters |
+| **userFilters** | `{ element?: Enum<'dropdown' \| 'tabs' \| 'toggle'>; fields?: object[]; tabs?: object[]; showAllRecords?: boolean; … }` | optional | End-user quick-filter bar: dropdown/toggle fields or tab presets. Omit to let the renderer derive filters from select/boolean fields |
+| **resizable** | `boolean` | optional | Enable column resizing |
+| **compactToolbar** | `boolean` | optional | Collapse Group/Color/Density/Hide-fields into a single View settings popover |
+| **selection** | `{ type?: Enum<'none' \| 'single' \| 'multiple'> }` | optional | Row selection configuration |
+| **navigation** | `{ mode?: Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>; view?: string; preventNavigation?: boolean; openNewTab?: boolean; … }` | optional | Configuration for item click navigation (page, drawer, modal, etc.) |
+| **pagination** | `{ pageSize?: integer; pageSizeOptions?: integer[] }` | optional | Pagination configuration |
+| **kanban** | `{ groupByField: string; summarizeField?: string; columns: string[] }` | optional | Kanban-board configuration — applies when the view renders as a kanban layout |
+| **calendar** | `{ startDateField: string; endDateField?: string; titleField: string; colorField?: string }` | optional | Calendar configuration — applies when the view renders as a calendar layout |
+| **gantt** | `{ startDateField: string; endDateField: string; titleField: string; progressField?: string; … } & Record<string, any>` | optional | Gantt-timeline configuration — applies when the view renders as a gantt layout |
+| **gallery** | `{ coverField?: string; coverFit?: Enum<'cover' \| 'contain'>; cardSize?: Enum<'small' \| 'medium' \| 'large'>; titleField?: string; … }` | optional | Gallery/card view configuration |
+| **timeline** | `{ startDateField: string; endDateField?: string; titleField: string; groupByField?: string; … }` | optional | Timeline view configuration |
+| **chart** | `{ chartType?: Enum<'bar' \| 'line' \| 'pie' \| 'area' \| 'scatter'>; dataset: string; dimensions?: string[]; values: string[] }` | optional | List chart view configuration |
+| **map** | `{ latitudeField?: string; longitudeField?: string; locationField?: string; titleField?: string; … }` | optional | Map configuration — applies when the view renders as a map layout |
+| **tree** | `{ parentField?: string; labelField?: string; fields?: string[]; defaultExpandedDepth?: integer } & Record<string, any>` | optional | Tree/hierarchy configuration — applies when the view renders as a tree layout |
+| **description** | `string \| Record<string, string>` | optional | View description for documentation/tooltips |
+| **sharing** | `{ type?: Enum<'personal' \| 'collaborative'>; lockedBy?: string }` | optional | View sharing and access configuration |
+| **rowHeight** | `Enum<'compact' \| 'short' \| 'medium' \| 'tall' \| 'extra_tall'>` | optional | Row height / density setting |
+| **grouping** | `{ fields: object[] }` | optional | Group records by one or more fields |
+| **rowColor** | `{ field: string; colors?: Record<string, string> }` | optional | Color rows based on field value |
+| **hiddenFields** | `string[]` | optional | Fields to hide in this specific view |
+| **fieldOrder** | `string[]` | optional | Explicit field display order for this view |
+| **rowActions** | `string[]` | optional | Actions available for individual row items |
+| **bulkActions** | `string[]` | optional | Actions available when multiple rows are selected |
+| **bulkActionDefs** | `{ name: string; label?: string; icon?: string; variant?: Enum<'primary' \| 'secondary' \| 'danger' \| 'ghost' \| 'outline'>; … }[]` | optional | Rich bulk action definitions (schema-driven, executed via BulkActionDialog). Use a def for a mass data-plane mutation ('update' with a `patch` / 'delete') that no action expresses, or for an `operation: 'custom'` + `execution: 'aggregate'` entry (objectui#3139) that dispatches the action it NAMES once for the whole selection — the renderer injects `params._selectedIds: string[]` (read that on the server, not `recordId`) so a single call can produce one aggregate artifact (zip of QR codes, merged PDF, batch print). Aggregate results are all-or-nothing: a handler that cannot cover the whole selection must reject, and per-row retry is replaced by re-running the action. `batchSize` does not apply (the call is never chunked); set `maxRecords` on defs whose server work is expensive. For the PER-RECORD dispatch use `bulkActions: ['<name>']` instead — the bare-string form, promoted with the action's own label, params and `visible`; a 'custom' def without `execution: 'aggregate'` has no dispatcher and is refused at parse time (#4457). Toolbar url/api actions can also interpolate the current selection via `${ctx.selection.ids}` / `${ctx.selection.count}`. |
+| **conditionalFormatting** | `{ condition: string \| object; style: Record<string, string> }[]` | optional | Conditional formatting rules for list rows |
+| **inlineEdit** | `boolean` | optional | Allow inline editing of records directly in the list view |
+| **exportOptions** | `Enum<'csv' \| 'xlsx' \| 'json'>[] \| { formats?: Enum<'csv' \| 'xlsx' \| 'json'>[]; maxRecords?: integer; includeHeaders?: boolean; fileNamePrefix?: string; … }` | optional | Export configuration for the list toolbar export menu: `{ formats?, maxRecords?, includeHeaders?, fileNamePrefix?, streaming? }`. A bare format array is the legacy spelling and lifts to `{ formats: [...] }` at parse. |
+| **userActions** | `{ sort?: boolean; search?: boolean; filter?: boolean; refresh?: boolean; … }` | optional | User action toggles for the view toolbar |
+| **appearance** | `{ showDescription?: boolean; allowedVisualizations?: Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>[] }` | optional | Appearance and visualization configuration |
+| **tabs** | `{ name: string; label?: string \| Record<string, string>; icon?: string; view?: string; … }[]` | optional | Tab definitions for multi-tab view interface |
+| **addRecord** | `{ enabled?: boolean; position?: Enum<'top' \| 'bottom' \| 'both'>; mode?: Enum<'inline' \| 'form' \| 'modal'>; formView?: string }` | optional | Add record entry point configuration |
+| **showRecordCount** | `boolean` | optional | Show record count at the bottom of the list |
+| **allowPrinting** | `boolean` | optional | Allow users to print the view |
+| **emptyState** | `{ title?: string \| Record<string, string>; message?: string \| Record<string, string>; icon?: string }` | optional | Empty state configuration when no records found |
+| **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes for the list view |
+| **responsive** | `never` | optional | [REMOVED] `view.responsive` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — no renderer ever read it; the grid is responsive by its own layout rules. Delete the key. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
+| **performance** | `never` | optional | [REMOVED] `view.performance` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — no renderer or runtime read it; list-view performance tuning was never implemented. Delete the key. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
+| **striped** | `never` | optional | [REMOVED] `view.striped` was removed in @objectstack/spec 17.0.0 (#7176, ADR-0049 enforce-or-remove) — every measured reader only copied it forward and no renderer ever applied it, so authoring it was a parse-clean no-op. There is no authorable striped-rows switch; delete the key. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
+| **bordered** | `never` | optional | [REMOVED] `view.bordered` was removed in @objectstack/spec 17.0.0 (#7176, ADR-0049 enforce-or-remove) — every measured reader only copied it forward and no renderer ever applied it (the grid frame is the renderer's own constant, not authorable). Delete the key. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
+| **virtualScroll** | `never` | optional | [REMOVED] `view.virtualScroll` was removed in @objectstack/spec 17.0.0 (#7176, ADR-0049 enforce-or-remove) — every measured reader only copied it forward and no grid ever virtualized off it; authoring it was a parse-clean no-op. Delete the key; large datasets page via `pagination`. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
+
+### Nested Shape: `ViewItemWire.protection`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | ✅ | Lock policy — none \| no-overlay \| no-delete \| full. |
+| **reason** | `string` | ✅ | User-visible reason shown when the lock blocks an action. |
+| **docsUrl** | `string` | optional | Optional URL the Studio banner links to for more context. |
+
+### Nested Shape: `ViewItemWire.columnState`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **order** | `string[]` | optional | Column order as field names, leftmost first (runtime-only per-user state — written by the console grid, never authored). |
+| **widths** | `Record<string, number>` | optional | Column widths in pixels, keyed by field name (runtime-only per-user state — written by the console grid, never authored). |
+
 ---
 
 #### Option 2
@@ -1034,6 +2165,51 @@ This schema accepts one of the following structures:
 | **isPinned** | `boolean` | optional | Studio round-trip: view pinned in the switcher (per-user state, written by the console — not authored). |
 | **sortOrder** | `integer` | optional | Studio round-trip: position within the switcher (per-user state, written by the console — not authored). |
 | **columnState** | `{ order?: string[]; widths?: Record<string, number> }` | optional | Studio round-trip: per-user column order/widths (runtime-only state, written by the console grid — not authored). #9933 |
+
+### Nested Shape: `ViewItemWire.config`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `Enum<'simple' \| 'tabbed' \| 'wizard' \| 'split' \| 'drawer' \| 'modal'>` | optional (default: `"simple"`) |  |
+| **layout** | `Enum<'vertical' \| 'horizontal' \| 'inline' \| 'grid'>` | optional | Field layout direction |
+| **columns** | `integer` | optional | Number of columns for the form body |
+| **title** | `string` | optional | Form title |
+| **description** | `string` | optional | Form description |
+| **defaultTab** | `string` | optional | Initially active tab (tabbed forms) |
+| **tabPosition** | `Enum<'top' \| 'bottom' \| 'left' \| 'right'>` | optional | Tab strip position (tabbed forms) |
+| **allowSkip** | `boolean` | optional | Allow skipping steps (wizard forms) |
+| **showStepIndicator** | `boolean` | optional | Show the step indicator (wizard forms) |
+| **splitDirection** | `Enum<'horizontal' \| 'vertical'>` | optional | Split orientation (split forms) |
+| **splitSize** | `number` | optional | Primary split panel size, % (split forms) |
+| **splitResizable** | `boolean` | optional | Whether the split is resizable (split forms) |
+| **drawerSide** | `Enum<'top' \| 'bottom' \| 'left' \| 'right'>` | optional | Drawer side (drawer forms) |
+| **drawerWidth** | `string` | optional | [DEPRECATED → size buckets] Drawer width, e.g. "480px". A pixel width cannot be chosen without knowing the client viewport — the renderer derives it. |
+| **modalSize** | `Enum<'sm' \| 'default' \| 'lg' \| 'xl' \| 'full'>` | optional | Modal size (modal forms) |
+| **data** | `{ provider: 'object'; object: string } \| { provider: 'api'; read?: object; write?: object } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }` | optional | Data source configuration (defaults to "object" provider) |
+| **sections** | `{ name?: string; label?: string \| Record<string, string>; description?: string; collapsible?: boolean; … }[]` | optional |  |
+| **groups** | `{ name?: string; label?: string \| Record<string, string>; description?: string; collapsible?: boolean; … }[]` | optional | [LEGACY ALIAS → `sections`] Accepted for back-compat and folded onto `sections` at parse; `sections` wins when both are present. Prefer `sections`. |
+| **subforms** | `{ childObject: string; relationshipField?: string; columns?: any[]; amountField?: string; … }[]` | optional | Inline master-detail child collections |
+| **defaultSort** | `never` | optional | [REMOVED] `form.defaultSort` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — nothing read it: a related list inside a form sorts by its own list view's `sort`. Delete the key and set the sort on the related list view instead. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
+| **sharing** | `{ enabled?: boolean; publicLink?: string; password?: string; allowedDomains?: string[]; … }` | optional | Public sharing configuration for this form |
+| **submitBehavior** | `{ kind: 'thank-you'; title?: string; message?: string } \| { kind: 'redirect'; url: string; delayMs?: integer } \| { kind: 'continue' } \| { kind: 'next-record' }` | optional | Post-submit behavior. On the `redirect` arm, `url` is relative-only and interpolates only declared record fields as `{{record.field_name}}`, URL-escaped (ruled 2026-08-11, #7496). |
+| **buttons** | `{ submit?: object; cancel?: object; reset?: object }` | optional | Form action-button visibility & labels; folded onto the flat renderer props by ObjectUI ObjectForm (framework#1894 / #2998). |
+| **defaults** | `Record<string, any>` | optional | Initial field values for create-mode forms (folded into ObjectUI ObjectForm initial values; framework#1894 / #2998). |
+| **aria** | `never` | optional | [REMOVED] `form.aria` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — no form renderer ever applied it, so declared ARIA attributes silently did not reach the DOM. Delete the key. The form renderer emits its own semantic markup; report gaps as renderer issues rather than per-view attribute overrides. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
+
+### Nested Shape: `ViewItemWire.protection`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | ✅ | Lock policy — none \| no-overlay \| no-delete \| full. |
+| **reason** | `string` | ✅ | User-visible reason shown when the lock blocks an action. |
+| **docsUrl** | `string` | optional | Optional URL the Studio banner links to for more context. |
+
+### Nested Shape: `ViewItemWire.columnState`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **order** | `string[]` | optional | Column order as field names, leftmost first (runtime-only per-user state — written by the console grid, never authored). |
+| **widths** | `Record<string, number>` | optional | Column widths in pixels, keyed by field name (runtime-only per-user state — written by the console grid, never authored). |
 
 ---
 
@@ -1096,6 +2272,16 @@ Tab configuration for multi-tab view interface
 | **pinned** | `boolean` | optional (default: `false`) | Pin tab (cannot be removed by users) |
 | **isDefault** | `boolean` | optional (default: `false`) | Set as the default active tab |
 | **visible** | `boolean` | optional (default: `true`) | Tab visibility |
+
+### Nested Shape: `ViewTab.filter[number]`
+
+View filter rule
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **field** | `string` | ✅ | Field name to filter on |
+| **operator** | `Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>` | ✅ | Filter operator |
+| **value** | `string \| number \| boolean \| null \| (string \| number)[]` | optional | Filter value. The accepted SHAPE depends on the operator: `in` / `not_in` take an array (any length, including []), `between` takes exactly [min, max], every other operator takes a scalar. The unary operators (is_empty / is_not_empty / is_null / is_not_null) take their direction from the operator name and ignore this key. |
 
 
 ---

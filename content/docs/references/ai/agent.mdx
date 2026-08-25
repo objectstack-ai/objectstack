@@ -71,6 +71,68 @@ const result = AIModelConfigSchema.parse(data);
 | **_packageVersion** | `string` | optional | Owning package version. |
 | **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
 
+### Nested Shape: `Agent.model`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **provider** | `Enum<'openai' \| 'azure_openai' \| 'anthropic' \| 'local'>` | optional (default: `"openai"`) |  |
+| **model** | `string` | ✅ | Model name (e.g. gpt-4, claude-3-opus) |
+| **temperature** | `number` | optional (default: `0.7`) |  |
+| **maxTokens** | `number` | optional |  |
+| **topP** | `number` | optional |  |
+
+### Nested Shape: `Agent.lifecycle`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ | Unique Machine ID |
+| **description** | `string` | optional |  |
+| **contextSchema** | `Record<string, any>` | optional | Zod Schema for the machine context/memory |
+| **initial** | `string` | ✅ | Initial State ID |
+| **states** | `Record<string, { type: Enum<'atomic' \| 'compound' \| 'parallel' \| 'final' \| 'history'>; entry?: (string \| object)[]; exit?: (string \| object)[]; on?: Record<string, string \| object \| object[]>; … }>` | ✅ | State Nodes |
+| **on** | `Record<string, string \| { target?: string; cond?: string \| object; actions?: (string \| object)[]; description?: string } \| { target?: string; cond?: string \| object; actions?: (string \| object)[]; description?: string }[]>` | optional |  |
+
+### Nested Shape: `Agent.planning`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **maxIterations** | `integer` | optional (default: `10`) | Maximum planning loop iterations |
+
+### Nested Shape: `Agent.memory`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **longTerm** | `{ enabled: boolean; store: Enum<'vector' \| 'database' \| 'redis'>; maxEntries?: integer }` | optional | Long-term / persistent memory |
+| **reflectionInterval** | `integer` | optional | Reflect every N interactions to improve behavior |
+
+### Nested Shape: `Agent.guardrails`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **maxTokensPerInvocation** | `integer` | optional | Token budget per single invocation |
+| **maxExecutionTimeSec** | `integer` | optional | Max execution time in seconds |
+| **blockedTopics** | `string[]` | optional | Forbidden topics or action names |
+
+### Nested Shape: `Agent.structuredOutput`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **format** | `Enum<'json_object' \| 'json_schema' \| 'regex' \| 'grammar' \| 'xml'>` | ✅ | Expected output format |
+| **schema** | `Record<string, any>` | optional | JSON Schema definition for output |
+| **strict** | `boolean` | optional (default: `false`) | Enforce exact schema compliance |
+| **retryOnValidationFailure** | `boolean` | optional (default: `true`) | Retry generation when output fails validation |
+| **maxRetries** | `integer` | optional (default: `3`) | Maximum retries on validation failure |
+| **fallbackFormat** | `Enum<'json_object' \| 'json_schema' \| 'regex' \| 'grammar' \| 'xml'>` | optional | Fallback format if primary format fails |
+| **transformPipeline** | `Enum<'trim' \| 'parse_json' \| 'validate' \| 'coerce_types'>[]` | optional | Post-processing steps applied to output |
+
+### Nested Shape: `Agent.protection`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | ✅ | Lock policy — none \| no-overlay \| no-delete \| full. |
+| **reason** | `string` | ✅ | User-visible reason shown when the lock blocks an action. |
+| **docsUrl** | `string` | optional | Optional URL the Studio banner links to for more context. |
+
 
 ---
 

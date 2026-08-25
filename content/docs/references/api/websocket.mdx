@@ -61,6 +61,19 @@ const result = AckMessageSchema.parse(data);
 | **timestamp** | `string` | ✅ | ISO 8601 datetime when message was sent |
 | **cursor** | `{ userId: string; sessionId: string; documentId: string; position?: object; … }` | ✅ | Cursor position |
 
+### Nested Shape: `CursorMessage.cursor`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **userId** | `string` | ✅ | User identifier |
+| **sessionId** | `string` | ✅ | Session identifier |
+| **documentId** | `string` | ✅ | Document identifier being edited |
+| **position** | `{ line: integer; column: integer }` | optional | Cursor position in document |
+| **selection** | `{ start: object; end: object }` | optional | Selection range (if text is selected) |
+| **color** | `string` | optional | Cursor color for visual representation |
+| **userName** | `string` | optional | Display name of user |
+| **lastUpdate** | `string` | ✅ | ISO 8601 datetime of last cursor update |
+
 
 ---
 
@@ -78,6 +91,13 @@ const result = AckMessageSchema.parse(data);
 | **color** | `string` | optional | Cursor color for visual representation |
 | **userName** | `string` | optional | Display name of user |
 | **lastUpdate** | `string` | ✅ | ISO 8601 datetime of last cursor update |
+
+### Nested Shape: `CursorPosition.position`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **line** | `integer` | ✅ | Line number (0-indexed) |
+| **column** | `integer` | ✅ | Column number (0-indexed) |
 
 
 ---
@@ -109,6 +129,22 @@ const result = AckMessageSchema.parse(data);
 | **timestamp** | `string` | ✅ | ISO 8601 datetime when message was sent |
 | **operation** | `{ operationId: string; documentId: string; userId: string; sessionId: string; … }` | ✅ | Edit operation |
 
+### Nested Shape: `EditMessage.operation`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **operationId** | `string` | ✅ | Unique operation identifier |
+| **documentId** | `string` | ✅ | Document identifier |
+| **userId** | `string` | ✅ | User who performed the edit |
+| **sessionId** | `string` | ✅ | Session identifier |
+| **type** | `Enum<'insert' \| 'delete' \| 'replace'>` | ✅ | Type of edit operation |
+| **position** | `{ line: integer; column: integer }` | ✅ | Starting position of the operation |
+| **endPosition** | `{ line: integer; column: integer }` | optional | Ending position (for delete/replace operations) |
+| **content** | `string` | optional | Content to insert/replace |
+| **version** | `integer` | ✅ | Document version before this operation |
+| **timestamp** | `string` | ✅ | ISO 8601 datetime when operation was created |
+| **baseOperationId** | `string` | optional | Previous operation ID this builds upon (for OT) |
+
 
 ---
 
@@ -129,6 +165,13 @@ const result = AckMessageSchema.parse(data);
 | **version** | `integer` | ✅ | Document version before this operation |
 | **timestamp** | `string` | ✅ | ISO 8601 datetime when operation was created |
 | **baseOperationId** | `string` | optional | Previous operation ID this builds upon (for OT) |
+
+### Nested Shape: `EditOperation.position`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **line** | `integer` | ✅ | Line number (0-indexed) |
+| **column** | `integer` | ✅ | Column number (0-indexed) |
 
 
 ---
@@ -240,6 +283,19 @@ Event pattern (supports wildcards like "record.*" or "*.created")
 | **timestamp** | `string` | ✅ | ISO 8601 datetime when message was sent |
 | **presence** | `{ userId: string; sessionId: string; status: Enum<'online' \| 'away' \| 'busy' \| 'offline'>; lastSeen: string; … }` | ✅ | Presence state |
 
+### Nested Shape: `PresenceMessage.presence`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **userId** | `string` | ✅ | User identifier |
+| **sessionId** | `string` | ✅ | Unique session identifier |
+| **status** | `Enum<'online' \| 'away' \| 'busy' \| 'offline'>` | ✅ | Current presence status |
+| **lastSeen** | `string` | ✅ | ISO 8601 datetime of last activity |
+| **currentLocation** | `string` | optional | Current page/route user is viewing |
+| **device** | `Enum<'desktop' \| 'mobile' \| 'tablet' \| 'other'>` | optional | Device type |
+| **customStatus** | `string` | optional | Custom user status message |
+| **metadata** | `Record<string, any>` | optional | Additional custom presence data |
+
 
 ---
 
@@ -287,6 +343,13 @@ Event pattern (supports wildcards like "record.*" or "*.created")
 | **position** | `number` | ✅ | Cursor position (character offset from start) |
 | **selection** | `{ start: number; end: number }` | optional | Text selection range (if text is selected) |
 
+### Nested Shape: `SimpleCursorPosition.selection`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **start** | `number` | ✅ | Selection start position |
+| **end** | `number` | ✅ | Selection end position |
+
 
 ---
 
@@ -316,6 +379,16 @@ Event pattern (supports wildcards like "record.*" or "*.created")
 | **timestamp** | `string` | ✅ | ISO 8601 datetime when message was sent |
 | **subscription** | `{ subscriptionId: string; events: string[]; objects?: string[]; filters?: any; … }` | ✅ | Subscription configuration |
 
+### Nested Shape: `SubscribeMessage.subscription`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **subscriptionId** | `string` | ✅ | Unique subscription identifier |
+| **events** | `string[]` | ✅ | Event patterns to subscribe to (supports wildcards, e.g., "record.*", "user.created") |
+| **objects** | `string[]` | optional | Object names to filter events by (e.g., ["account", "contact"]) |
+| **filters** | `any` | optional | Filter conditions for event payloads (not yet enforced — the runtime filters by object name and event type only) |
+| **channels** | `string[]` | optional | Channel names for scoped subscriptions |
+
 
 ---
 
@@ -329,6 +402,12 @@ Event pattern (supports wildcards like "record.*" or "*.created")
 | **type** | `'unsubscribe'` | ✅ |  |
 | **timestamp** | `string` | ✅ | ISO 8601 datetime when message was sent |
 | **request** | `{ subscriptionId: string }` | ✅ | Unsubscribe request |
+
+### Nested Shape: `UnsubscribeMessage.request`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **subscriptionId** | `string` | ✅ | Subscription ID to unsubscribe from |
 
 
 ---
@@ -395,6 +474,16 @@ This schema accepts one of the following structures:
 | **timestamp** | `string` | ✅ | ISO 8601 datetime when message was sent |
 | **subscription** | `{ subscriptionId: string; events: string[]; objects?: string[]; filters?: any; … }` | ✅ | Subscription configuration |
 
+### Nested Shape: `WebSocketMessage.subscription`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **subscriptionId** | `string` | ✅ | Unique subscription identifier |
+| **events** | `string[]` | ✅ | Event patterns to subscribe to (supports wildcards, e.g., "record.*", "user.created") |
+| **objects** | `string[]` | optional | Object names to filter events by (e.g., ["account", "contact"]) |
+| **filters** | `any` | optional | Filter conditions for event payloads (not yet enforced — the runtime filters by object name and event type only) |
+| **channels** | `string[]` | optional | Channel names for scoped subscriptions |
+
 ---
 
 #### Option 2
@@ -409,6 +498,12 @@ This schema accepts one of the following structures:
 | **type** | `'unsubscribe'` | ✅ |  |
 | **timestamp** | `string` | ✅ | ISO 8601 datetime when message was sent |
 | **request** | `{ subscriptionId: string }` | ✅ | Unsubscribe request |
+
+### Nested Shape: `WebSocketMessage.request`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **subscriptionId** | `string` | ✅ | Subscription ID to unsubscribe from |
 
 ---
 
@@ -444,6 +539,19 @@ This schema accepts one of the following structures:
 | **timestamp** | `string` | ✅ | ISO 8601 datetime when message was sent |
 | **presence** | `{ userId: string; sessionId: string; status: Enum<'online' \| 'away' \| 'busy' \| 'offline'>; lastSeen: string; … }` | ✅ | Presence state |
 
+### Nested Shape: `WebSocketMessage.presence`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **userId** | `string` | ✅ | User identifier |
+| **sessionId** | `string` | ✅ | Unique session identifier |
+| **status** | `Enum<'online' \| 'away' \| 'busy' \| 'offline'>` | ✅ | Current presence status |
+| **lastSeen** | `string` | ✅ | ISO 8601 datetime of last activity |
+| **currentLocation** | `string` | optional | Current page/route user is viewing |
+| **device** | `Enum<'desktop' \| 'mobile' \| 'tablet' \| 'other'>` | optional | Device type |
+| **customStatus** | `string` | optional | Custom user status message |
+| **metadata** | `Record<string, any>` | optional | Additional custom presence data |
+
 ---
 
 #### Option 5
@@ -459,6 +567,19 @@ This schema accepts one of the following structures:
 | **timestamp** | `string` | ✅ | ISO 8601 datetime when message was sent |
 | **cursor** | `{ userId: string; sessionId: string; documentId: string; position?: object; … }` | ✅ | Cursor position |
 
+### Nested Shape: `WebSocketMessage.cursor`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **userId** | `string` | ✅ | User identifier |
+| **sessionId** | `string` | ✅ | Session identifier |
+| **documentId** | `string` | ✅ | Document identifier being edited |
+| **position** | `{ line: integer; column: integer }` | optional | Cursor position in document |
+| **selection** | `{ start: object; end: object }` | optional | Selection range (if text is selected) |
+| **color** | `string` | optional | Cursor color for visual representation |
+| **userName** | `string` | optional | Display name of user |
+| **lastUpdate** | `string` | ✅ | ISO 8601 datetime of last cursor update |
+
 ---
 
 #### Option 6
@@ -473,6 +594,22 @@ This schema accepts one of the following structures:
 | **type** | `'edit'` | ✅ |  |
 | **timestamp** | `string` | ✅ | ISO 8601 datetime when message was sent |
 | **operation** | `{ operationId: string; documentId: string; userId: string; sessionId: string; … }` | ✅ | Edit operation |
+
+### Nested Shape: `WebSocketMessage.operation`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **operationId** | `string` | ✅ | Unique operation identifier |
+| **documentId** | `string` | ✅ | Document identifier |
+| **userId** | `string` | ✅ | User who performed the edit |
+| **sessionId** | `string` | ✅ | Session identifier |
+| **type** | `Enum<'insert' \| 'delete' \| 'replace'>` | ✅ | Type of edit operation |
+| **position** | `{ line: integer; column: integer }` | ✅ | Starting position of the operation |
+| **endPosition** | `{ line: integer; column: integer }` | optional | Ending position (for delete/replace operations) |
+| **content** | `string` | optional | Content to insert/replace |
+| **version** | `integer` | ✅ | Document version before this operation |
+| **timestamp** | `string` | ✅ | ISO 8601 datetime when operation was created |
+| **baseOperationId** | `string` | optional | Previous operation ID this builds upon (for OT) |
 
 ---
 

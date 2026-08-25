@@ -52,6 +52,14 @@ Field-level encryption configuration
 | **deterministicEncryption** | `boolean` | optional (default: `false`) | Allows equality queries on encrypted data |
 | **searchableEncryption** | `boolean` | optional (default: `false`) | Allows search on encrypted data |
 
+### Nested Shape: `EncryptionConfig.keyManagement`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **provider** | `Enum<'local' \| 'aws-kms' \| 'azure-key-vault' \| 'gcp-kms' \| 'hashicorp-vault'>` | ✅ | Key management service provider |
+| **keyId** | `string` | optional | Key identifier in the provider |
+| **rotationPolicy** | `{ enabled: boolean; frequencyDays: number; retainOldVersions: number; autoRotate: boolean }` | optional | Key rotation policy |
+
 
 ---
 
@@ -66,6 +74,17 @@ Per-field encryption assignment
 | **fieldName** | `string` | ✅ | Name of the field to encrypt |
 | **encryptionConfig** | `{ enabled: boolean; algorithm: Enum<'aes-256-gcm' \| 'aes-256-cbc' \| 'chacha20-poly1305'>; keyManagement: object; scope: Enum<'field' \| 'record' \| 'table' \| 'database'>; … }` | ✅ | Encryption settings for this field |
 | **indexable** | `boolean` | optional (default: `false`) | Allow indexing on encrypted field |
+
+### Nested Shape: `FieldEncryption.encryptionConfig`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **enabled** | `boolean` | optional (default: `false`) | Enable field-level encryption |
+| **algorithm** | `Enum<'aes-256-gcm' \| 'aes-256-cbc' \| 'chacha20-poly1305'>` | optional (default: `"aes-256-gcm"`) | Encryption algorithm |
+| **keyManagement** | `{ provider: Enum<'local' \| 'aws-kms' \| 'azure-key-vault' \| 'gcp-kms' \| 'hashicorp-vault'>; keyId?: string; rotationPolicy?: object }` | ✅ | Key management configuration |
+| **scope** | `Enum<'field' \| 'record' \| 'table' \| 'database'>` | ✅ | Encryption scope level |
+| **deterministicEncryption** | `boolean` | optional (default: `false`) | Allows equality queries on encrypted data |
+| **searchableEncryption** | `boolean` | optional (default: `false`) | Allows search on encrypted data |
 
 
 ---

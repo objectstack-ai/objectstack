@@ -64,6 +64,17 @@ const result = ApiChangelogEntrySchema.parse(data);
 | **changes** | `{ added: string[]; changed: string[]; deprecated: string[]; removed: string[]; … }` | ✅ | Version changes |
 | **migrationGuide** | `string` | optional | Migration guide URL or text |
 
+### Nested Shape: `ApiChangelogEntry.changes`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **added** | `string[]` | optional (default: `[]`) | New features |
+| **changed** | `string[]` | optional (default: `[]`) | Changes |
+| **deprecated** | `string[]` | optional (default: `[]`) | Deprecations |
+| **removed** | `string[]` | optional (default: `[]`) | Removed features |
+| **fixed** | `string[]` | optional (default: `[]`) | Bug fixes |
+| **security** | `string[]` | optional (default: `[]`) | Security fixes |
+
 
 ---
 
@@ -91,6 +102,72 @@ const result = ApiChangelogEntrySchema.parse(data);
 | **securitySchemes** | `Record<string, { type: Enum<'apiKey' \| 'http' \| 'oauth2' \| 'openIdConnect'>; scheme?: string; bearerFormat?: string; name?: string; … }>` | optional | Security scheme definitions |
 | **tags** | `{ name: string; description?: string; externalDocs?: object }[]` | optional | Global tag definitions |
 
+### Nested Shape: `ApiDocumentationConfig.servers[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **url** | `string` | ✅ | Server base URL |
+| **description** | `string` | optional | Server description |
+| **variables** | `Record<string, { default: string; description?: string; enum?: string[] }>` | optional | URL template variables |
+
+### Nested Shape: `ApiDocumentationConfig.ui`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `Enum<'swagger-ui' \| 'redoc' \| 'rapidoc' \| 'stoplight' \| 'scalar' \| 'graphiql' \| 'postman' \| 'custom'>` | ✅ | Testing UI implementation |
+| **path** | `string` | optional (default: `"/api-docs"`) | URL path for documentation UI |
+| **theme** | `Enum<'light' \| 'dark' \| 'auto'>` | optional (default: `"light"`) | UI color theme |
+| **enableTryItOut** | `boolean` | optional (default: `true`) | Enable interactive API testing |
+| **enableFilter** | `boolean` | optional (default: `true`) | Enable endpoint filtering |
+| **enableCors** | `boolean` | optional (default: `true`) | Enable CORS for browser testing |
+| **defaultModelsExpandDepth** | `integer` | optional (default: `1`) | Default expand depth for schemas (-1 = fully expand) |
+| **displayRequestDuration** | `boolean` | optional (default: `true`) | Show request duration |
+| **syntaxHighlighting** | `boolean` | optional (default: `true`) | Enable syntax highlighting |
+| **customCssUrl** | `string` | optional | Custom CSS stylesheet URL |
+| **customJsUrl** | `string` | optional | Custom JavaScript URL |
+| **layout** | `{ showExtensions: boolean; showCommonExtensions: boolean; deepLinking: boolean; displayOperationId: boolean; … }` | optional | Layout configuration |
+
+### Nested Shape: `ApiDocumentationConfig.testCollections[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Collection name |
+| **description** | `string` | optional | Collection description |
+| **variables** | `Record<string, any>` | optional (default: `{}`) | Shared variables |
+| **requests** | `{ name: string; description?: string; method: Enum<'GET' \| 'POST' \| 'PUT' \| 'PATCH' \| 'DELETE' \| 'HEAD' \| 'OPTIONS'>; url: string; … }[]` | ✅ | Test requests in this collection |
+| **folders** | `{ name: string; description?: string; requests: object[] }[]` | optional | Request folders for organization |
+
+### Nested Shape: `ApiDocumentationConfig.changelog[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **version** | `string` | ✅ | API version |
+| **date** | `string` | ✅ | Release date |
+| **changes** | `{ added: string[]; changed: string[]; deprecated: string[]; removed: string[]; … }` | ✅ | Version changes |
+| **migrationGuide** | `string` | optional | Migration guide URL or text |
+
+### Nested Shape: `ApiDocumentationConfig.codeTemplates[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **language** | `string` | ✅ | Target language/framework (e.g., typescript, python, curl) |
+| **name** | `string` | ✅ | Template name |
+| **template** | `string` | ✅ | Code template with placeholders |
+| **variables** | `string[]` | optional | Required template variables |
+
+### Nested Shape: `ApiDocumentationConfig.securitySchemes[string]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `Enum<'apiKey' \| 'http' \| 'oauth2' \| 'openIdConnect'>` | ✅ | Security type |
+| **scheme** | `string` | optional | HTTP auth scheme (bearer, basic, etc.) |
+| **bearerFormat** | `string` | optional | Bearer token format (e.g., JWT) |
+| **name** | `string` | optional | API key parameter name |
+| **in** | `Enum<'header' \| 'query' \| 'cookie'>` | optional | API key location |
+| **flows** | `{ implicit?: any; password?: any; clientCredentials?: any; authorizationCode?: any }` | optional | OAuth2 flows |
+| **openIdConnectUrl** | `string` | optional | OpenID Connect discovery URL |
+| **description** | `string` | optional | Security scheme description |
+
 
 ---
 
@@ -105,6 +182,20 @@ const result = ApiChangelogEntrySchema.parse(data);
 | **variables** | `Record<string, any>` | optional (default: `{}`) | Shared variables |
 | **requests** | `{ name: string; description?: string; method: Enum<'GET' \| 'POST' \| 'PUT' \| 'PATCH' \| 'DELETE' \| 'HEAD' \| 'OPTIONS'>; url: string; … }[]` | ✅ | Test requests in this collection |
 | **folders** | `{ name: string; description?: string; requests: object[] }[]` | optional | Request folders for organization |
+
+### Nested Shape: `ApiTestCollection.requests[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Test request name |
+| **description** | `string` | optional | Request description |
+| **method** | `Enum<'GET' \| 'POST' \| 'PUT' \| 'PATCH' \| 'DELETE' \| 'HEAD' \| 'OPTIONS'>` | ✅ | HTTP method |
+| **url** | `string` | ✅ | Request URL (can include variables) |
+| **headers** | `Record<string, string>` | optional (default: `{}`) | Request headers |
+| **queryParams** | `Record<string, string \| number \| boolean>` | optional (default: `{}`) | Query parameters |
+| **body** | `any` | optional | Request body |
+| **variables** | `Record<string, any>` | optional (default: `{}`) | Template variables |
+| **expectedResponse** | `{ statusCode: integer; body?: any }` | optional | Expected response for validation |
 
 
 ---
@@ -146,6 +237,19 @@ const result = ApiChangelogEntrySchema.parse(data);
 | **customCssUrl** | `string` | optional | Custom CSS stylesheet URL |
 | **customJsUrl** | `string` | optional | Custom JavaScript URL |
 | **layout** | `{ showExtensions: boolean; showCommonExtensions: boolean; deepLinking: boolean; displayOperationId: boolean; … }` | optional | Layout configuration |
+
+### Nested Shape: `ApiTestingUiConfig.layout`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **showExtensions** | `boolean` | optional (default: `false`) | Show vendor extensions |
+| **showCommonExtensions** | `boolean` | optional (default: `false`) | Show common extensions |
+| **deepLinking** | `boolean` | optional (default: `true`) | Enable deep linking |
+| **displayOperationId** | `boolean` | optional (default: `false`) | Display operation IDs |
+| **defaultModelRendering** | `Enum<'example' \| 'model'>` | optional (default: `"example"`) | Default model rendering mode |
+| **defaultModelsExpandDepth** | `integer` | optional (default: `1`) | Models expand depth |
+| **defaultModelExpandDepth** | `integer` | optional (default: `1`) | Single model expand depth |
+| **docExpansion** | `Enum<'list' \| 'full' \| 'none'>` | optional (default: `"list"`) | Documentation expansion mode |
 
 
 ---
@@ -192,6 +296,29 @@ const result = ApiChangelogEntrySchema.parse(data);
 | **html** | `string` | optional | Generated HTML documentation |
 | **generatedAt** | `string` | ✅ | Generation timestamp |
 | **sourceApis** | `string[]` | ✅ | Source API IDs used for generation |
+
+### Nested Shape: `GeneratedApiDocumentation.openApiSpec`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **openapi** | `string` | optional (default: `"3.0.0"`) | OpenAPI specification version |
+| **info** | `{ title: string; version: string; description?: string; termsOfService?: string; … }` | ✅ | API metadata |
+| **servers** | `{ url: string; description?: string; variables?: Record<string, object> }[]` | optional (default: `[]`) | API servers |
+| **paths** | `Record<string, any>` | ✅ | API paths and operations |
+| **components** | `{ schemas?: Record<string, any>; responses?: Record<string, any>; parameters?: Record<string, any>; examples?: Record<string, any>; … }` | optional | Reusable components |
+| **security** | `Record<string, string[]>[]` | optional | Global security requirements |
+| **tags** | `{ name: string; description?: string; externalDocs?: object }[]` | optional | Tag definitions |
+| **externalDocs** | `{ description?: string; url: string }` | optional | External documentation |
+
+### Nested Shape: `GeneratedApiDocumentation.testCollections[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Collection name |
+| **description** | `string` | optional | Collection description |
+| **variables** | `Record<string, any>` | optional (default: `{}`) | Shared variables |
+| **requests** | `{ name: string; description?: string; method: Enum<'GET' \| 'POST' \| 'PUT' \| 'PATCH' \| 'DELETE' \| 'HEAD' \| 'OPTIONS'>; url: string; … }[]` | ✅ | Test requests in this collection |
+| **folders** | `{ name: string; description?: string; requests: object[] }[]` | optional | Request folders for organization |
 
 
 ---
@@ -241,6 +368,25 @@ const result = ApiChangelogEntrySchema.parse(data);
 | **security** | `Record<string, string[]>[]` | optional | Global security requirements |
 | **tags** | `{ name: string; description?: string; externalDocs?: object }[]` | optional | Tag definitions |
 | **externalDocs** | `{ description?: string; url: string }` | optional | External documentation |
+
+### Nested Shape: `OpenApiSpec.info`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **title** | `string` | ✅ | API title |
+| **version** | `string` | ✅ | API version |
+| **description** | `string` | optional | API description |
+| **termsOfService** | `string` | optional | Terms of service URL |
+| **contact** | `{ name?: string; url?: string; email?: string }` | optional |  |
+| **license** | `{ name: string; url?: string }` | optional |  |
+
+### Nested Shape: `OpenApiSpec.servers[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **url** | `string` | ✅ | Server base URL |
+| **description** | `string` | optional | Server description |
+| **variables** | `Record<string, { default: string; description?: string; enum?: string[] }>` | optional | URL template variables |
 
 
 ---

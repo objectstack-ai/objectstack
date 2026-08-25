@@ -227,6 +227,51 @@ Public exposure of this environment artifacts (private | unlisted | public).
 | **warnings** | `string[]` | optional | Non-fatal warnings emitted during provisioning |
 | **hostnameAssignment** | `{ requestedHostname: string; assignedHostname: string }` | optional | Populated ONLY when the control plane auto-renamed the requested hostname to avoid a collision. Absent means the requested hostname was assigned unchanged — never read absence as "unknown". |
 
+### Nested Shape: `ProvisionEnvironmentResponse.environment`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ | UUID of the environment (stable, never reused) |
+| **organizationId** | `string` | ✅ | Organization that owns this environment |
+| **displayName** | `string` | ✅ | Display name shown in Studio and APIs |
+| **isDefault** | `boolean` | optional (default: `false`) | Whether this is the default environment for the organization |
+| **isSystem** | `boolean` | optional (default: `false`) | Whether this is a system environment (platform infrastructure, not user data) |
+| **plan** | `string` | optional (default: `"free"`) | Plan tier for this environment |
+| **status** | `Enum<'provisioning' \| 'active' \| 'suspended' \| 'archived' \| 'failed' \| 'migrating'>` | optional (default: `"provisioning"`) | Environment lifecycle status |
+| **createdBy** | `string` | ✅ | User ID that created the environment |
+| **createdAt** | `string` | ✅ | Creation timestamp (ISO-8601) |
+| **updatedAt** | `string` | ✅ | Last update timestamp (ISO-8601) |
+| **databaseUrl** | `string` | optional | Full connection URL for the environment database |
+| **databaseDriver** | `string` | optional | Data-plane driver key (turso, libsql, sqlite, memory, postgres) |
+| **storageLimitMb** | `integer` | optional | Storage quota in megabytes |
+| **provisionedAt** | `string` | optional | Provisioning timestamp (ISO-8601) |
+| **metadata** | `Record<string, any>` | optional | Free-form metadata |
+| **hostname** | `string` | optional | Canonical hostname for this environment. UNIQUE. Auto-set on creation; can be overridden for custom domains. |
+| **consoleUrl** | `string` | optional | Pre-computed admin Console URL for this environment |
+| **apiBaseUrl** | `string` | optional | Pre-computed REST API base URL for this environment |
+| **visibility** | `Enum<'private' \| 'unlisted' \| 'public'>` | optional (default: `"private"`) | Public exposure of this environment artifacts (private \| unlisted \| public). |
+
+### Nested Shape: `ProvisionEnvironmentResponse.credential`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ | UUID of the credential |
+| **environmentId** | `string` | ✅ | Environment this credential authorizes |
+| **secretCiphertext** | `string` | ✅ | Encrypted auth token or secret (ciphertext) |
+| **encryptionKeyId** | `string` | ✅ | Encryption key ID used to encrypt the secret |
+| **authorization** | `Enum<'full_access' \| 'read_only'>` | optional (default: `"full_access"`) | Authorization scope for this credential |
+| **status** | `Enum<'active' \| 'rotating' \| 'revoked'>` | optional (default: `"active"`) | Credential lifecycle status |
+| **createdAt** | `string` | ✅ | Creation timestamp (ISO-8601) |
+| **expiresAt** | `string` | optional | Optional expiry timestamp |
+| **revokedAt** | `string` | optional | Revocation timestamp (if revoked) |
+
+### Nested Shape: `ProvisionEnvironmentResponse.hostnameAssignment`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **requestedHostname** | `string` | ✅ | Hostname the caller asked for (explicitly, or as auto-derived from displayName) |
+| **assignedHostname** | `string` | ✅ | Hostname actually assigned after the collision-avoiding rename; equals `environment.hostname` |
+
 
 ---
 
@@ -256,6 +301,16 @@ Public exposure of this environment artifacts (private | unlisted | public).
 | **defaultEnvironment** | `{ environment: object; credential: object; durationMs: number; warnings?: string[]; … }` | ✅ | Default environment that was created |
 | **durationMs** | `number` | ✅ | Total bootstrap duration in milliseconds |
 | **warnings** | `string[]` | optional | Non-fatal warnings |
+
+### Nested Shape: `ProvisionOrganizationResponse.defaultEnvironment`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **environment** | `{ id: string; organizationId: string; displayName: string; isDefault: boolean; … }` | ✅ | Provisioned environment (includes database addressing) |
+| **credential** | `{ id: string; environmentId: string; secretCiphertext: string; encryptionKeyId: string; … }` | ✅ | Freshly-minted credential for the environment DB |
+| **durationMs** | `number` | ✅ | Total provisioning duration in milliseconds |
+| **warnings** | `string[]` | optional | Non-fatal warnings emitted during provisioning |
+| **hostnameAssignment** | `{ requestedHostname: string; assignedHostname: string }` | optional | Populated ONLY when the control plane auto-renamed the requested hostname to avoid a collision. Absent means the requested hostname was assigned unchanged — never read absence as "unknown". |
 
 
 ---

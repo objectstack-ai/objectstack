@@ -104,6 +104,14 @@ oclif plugin configuration section
 | **commands** | `{ strategy?: Enum<'pattern' \| 'explicit' \| 'single'>; target?: string; glob?: string }` | optional | Command discovery configuration |
 | **topicSeparator** | `string` | optional | Character separating topic and command names |
 
+### Nested Shape: `OclifPluginConfig.commands`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **strategy** | `Enum<'pattern' \| 'explicit' \| 'single'>` | optional | Command discovery strategy |
+| **target** | `string` | optional | Target directory for command files |
+| **glob** | `string` | optional | Glob pattern for command file matching |
+
 
 ---
 

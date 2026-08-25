@@ -108,6 +108,23 @@
  * three bare `any` annotations, all in one block, so the wider scope cost nothing
  * to adopt and there is no ratchet file: the baseline is zero and stays zero.
  *
+ * ── The fourth assertion: REFUSE when a marked block does not PARSE (#12051) ─
+ * Trap 1 above is written as advice to whoever sweeps the corpus by hand. It is
+ * also a property of this gate's own run, and arrives through the gate's front
+ * door: the build-file extension is taken from the FENCE LANGUAGE, so a marked
+ * block whose body is JSX under a ` ```ts ` fence lands in a `.ts` file, where
+ * JSX is a syntax error — and one syntactic diagnostic anywhere in the program
+ * means the semantic pass never runs, for any file in it.
+ *
+ * The run went red before this landed (measured — the "Parse-level refusal"
+ * section records the ablation and corrects #12051's claim that it stayed
+ * green), but it went red in the vocabulary of a semantic result, over a surface
+ * whose semantic pass had not run. Two guards now separate those states: marked
+ * blocks that do not parse produce a REFUSE verdict naming the surface and the
+ * count of blocks left unchecked, and the unmarked JSX-under-a-ts-fence
+ * population is swept before anyone arms it. The green line says which of the
+ * two happened, and is printed only when every surface reached `tsc`.
+ *
  * ── SURFACES (#10969) ─────────────────────────────────────────────────────
  * Until #10969 the only prose scanned was `skills/**` + `content/docs/**`, and
  * the only thing marked blocks were checked against was `@objectstack/spec`.
@@ -165,6 +182,53 @@
  * `import { useQuery } from '@objectstack/client-react'` the same way a
  * real consumer would, rather than relying on a same-package self-import
  * trick that may or may not resolve.
+ *
+ * ── PAGE-SCOPED ROOTS: one tree, two surfaces (#12048) ────────────────────
+ * A surface is a resolution environment, and until #12048 a ROOT was always a
+ * whole subtree — which made "which packages can this page import?" a property
+ * of the tree a page happens to live in. `content/docs/**` is one tree, so
+ * every page in it resolved `@objectstack/spec` and nothing else. The SDK
+ * reference page (`api/client-sdk.mdx`) and the data-service page both import
+ * `@objectstack/client`; spec does not depend on the client, so a marker on
+ * either page red with `TS2307: Cannot find module '@objectstack/client'` on
+ * correct code. Both pages recorded that in prose and left their SDK blocks
+ * deliberately unmarked — two pages structurally unverifiable, for one
+ * resolution gap, while #8140's narrowing of 51 client return types falsified
+ * two examples on the SDK page with CI silent throughout.
+ *
+ * The fix is a root whose scope is a PAGE SET rather than a tree
+ * (`SourceRoot.pages`), on the client-SDK surface that already resolves those
+ * packages for its 19 TSDoc blocks. No new resolution environment, no new
+ * extraction code — the same file/marker/tsc pipeline, pointed at two named
+ * pages. The alternative (teaching the spec surface to resolve the SDK) was
+ * rejected: it inverts the dependency direction that surface exists to model,
+ * and would let any docs page silently acquire the SDK.
+ *
+ * Two roots over ONE tree brings its own failure mode, and both halves are
+ * asserted rather than trusted:
+ *
+ *   - **Partition, not overlap.** A page scanned by two surfaces is compiled
+ *     twice in two environments, and the one that cannot resolve its imports
+ *     reds against a page the other just proved correct — unfixable from the
+ *     page. The scoped root's `pages` and the broad root's `excludePages` read
+ *     ONE shared constant (`SDK_DOCS_PAGES`), and
+ *     `assertDisjointSourceFiles()` proves per run that no file is claimed
+ *     twice — an invariant that held by accident while every root owned its
+ *     own tree.
+ *   - **A page list that stops resolving fails BOTH ways at once.** Rename the
+ *     page and the scoped root loses it while the broad root's subtraction
+ *     stops matching, so it lands back on the surface that cannot resolve it —
+ *     the original defect, restored silently by an unrelated edit.
+ *     `assertScopedPagesExist()` makes that a hard error.
+ *   - **But "this tree has no such corpus" is not "this corpus lost a page".**
+ *     This script is run against repo-SHAPED sandbox trees too (the #7181
+ *     dist-freshness pins build one with no `content/docs` at all), so the
+ *     missing-page guard skips a root whose `dir` is absent — the same
+ *     presence rule `sourceFiles()` already applies. When the two predicates
+ *     disagreed on that, the guard reported both SDK pages missing in the
+ *     sandbox and, being an assert that runs first, spoke ahead of the three
+ *     verdicts those tests pin. `content/docs` always exists in a real
+ *     checkout, so the rename protection above is untouched.
  *
  * ── Fence-awareness, in BOTH of extractFromFile's loops ───────────────────
  * `fenceOwners()` tracks every top-level fence of ANY language (lifted from
@@ -240,6 +304,35 @@ interface SourceRoot {
   /** Skip individual files by basename — e.g. test files, which are not the
    *  documented SDK surface even though they share the source root's `ext`. */
   excludeFile?: (name: string) => boolean;
+  /**
+   * PAGE-SCOPED root (#12048): an explicit file list, relative to `dir`,
+   * INSTEAD of walking the tree. A root with `pages` is a page SET, not a
+   * subtree — which is what lets one page of a shared prose tree belong to a
+   * different surface (a different module-resolution environment) from the
+   * tree around it, without moving the file or forking the extractor.
+   *
+   * `dir` still matters: it is what `buildFileName` takes each page's path
+   * relative to, so two roots over the same tree produce stable, distinct
+   * build-file names as long as their `label`s differ.
+   *
+   * `exclude` / `excludeFile` are not consulted for a `pages` root — the list
+   * IS the scope. Every entry must exist (`assertScopedPagesExist()`): a
+   * renamed page would otherwise drop out of its scoped root silently and be
+   * picked back up by the broad root it was carved out of, quietly restoring
+   * the very resolution gap the carve-out exists to close.
+   */
+  pages?: string[];
+  /**
+   * The complement of another root's `pages` (#12048): files under `dir`
+   * (relative paths) this root does NOT scan because a page-scoped root on
+   * another surface owns them. Both sides read ONE shared constant, so the
+   * partition cannot drift — and `assertDisjointSourceFiles()` fails the run
+   * if it ever does. Overlap is not cosmetic: a page scanned by two surfaces
+   * has every marked block on it compiled twice, in two different resolution
+   * environments, and the surface that cannot resolve its imports reports
+   * TS2307 against a page the other surface just proved correct.
+   */
+  excludePages?: string[];
   /** True when this root's prose lives inside a JSDoc/TSDoc block comment
    *  rather than free-standing markdown — every line then carries a leading
    *  JSDoc gutter (` * `) that must be stripped before the fence/marker
@@ -263,10 +356,48 @@ interface SourceRoot {
  * `content/docs/references/` is excluded: `build-docs.ts` regenerates it from the
  * schemas, so its snippets cannot drift independently of their source.
  */
+const DOCS_DIR = path.resolve(REPO_ROOT, 'content/docs');
+
+/**
+ * The docs pages whose examples import the CLIENT SDK, and so belong to the
+ * client-SDK surface's resolution environment rather than the spec surface's
+ * (#12048). Paths are relative to `content/docs`.
+ *
+ * ONE constant, read from both sides of the partition: the spec surface's
+ * broad docs root subtracts it (`excludePages`), the client-SDK surface's
+ * page-scoped docs root is exactly it (`pages`). Declaring it twice by hand is
+ * what would let the two drift into overlap or into a gap; declaring it once
+ * makes the partition true by construction, and `assertDisjointSourceFiles()`
+ * proves it every run rather than trusting this comment.
+ *
+ * WHY these two pages and not the whole tree. `content/docs/**` is resolved
+ * against `@objectstack/spec` alone, and spec does not depend on
+ * `@objectstack/client` — so before this list existed, a marker on ANY fence
+ * importing the SDK red with `TS2307: Cannot find module '@objectstack/client'`,
+ * and both pages below recorded that in prose and left their SDK blocks
+ * deliberately unmarked. Two pages structurally unverifiable, for one
+ * resolution gap, while #8140's narrowing of 51 client return types falsified
+ * two examples on `api/client-sdk.mdx` with CI silent throughout.
+ *
+ * The alternative — teaching the spec surface to resolve the SDK — was
+ * rejected: it inverts the dependency direction that surface exists to model
+ * (spec knows nothing of its consumers) and would let ANY docs page silently
+ * acquire the SDK. This list is the opposite posture: a page opts IN, by name,
+ * to a resolution environment that already exists and is already exercised by
+ * the 19 TSDoc blocks in `packages/client{,-react}/src`.
+ *
+ * Adding a page here moves the WHOLE file between surfaces, so add one only
+ * when its examples' imports are SDK-shaped. A page needing both `@objectstack/spec`
+ * and the SDK is fine — client-react depends on spec, so spec resolves through
+ * this surface's `node_modules` too; a page needing something NEITHER surface
+ * carries is a new surface question, not a new entry here.
+ */
+const SDK_DOCS_PAGES = ['api/client-sdk.mdx', 'kernel/runtime-services/data-service.mdx'];
+
 const SKILLS_DOCS_ROOTS: SourceRoot[] = [
   { dir: path.resolve(REPO_ROOT, 'skills'), ext: '.md', label: 'skills', marker: '<!-- os:check -->' },
   {
-    dir: path.resolve(REPO_ROOT, 'content/docs'),
+    dir: DOCS_DIR,
     ext: '.mdx',
     label: 'docs',
     // MDX has no HTML comments — fumadocs-mdx fails the build outright on
@@ -274,6 +405,8 @@ const SKILLS_DOCS_ROOTS: SourceRoot[] = [
     // `{/* text */}`"). The marker must follow each format's own comment syntax.
     marker: '{/* os:check */}',
     exclude: [path.resolve(REPO_ROOT, 'content/docs/references')],
+    // Carved out to the client-SDK surface (#12048) — see `SDK_DOCS_PAGES`.
+    excludePages: SDK_DOCS_PAGES,
   },
 ];
 
@@ -335,6 +468,25 @@ const CLIENT_SDK_ROOTS: SourceRoot[] = [
     marker: '<!-- os:check -->',
     commentPrefixed: true,
     excludeFile: isTestFile,
+  },
+  /**
+   * The SDK's PROSE pages (#12048) — free-standing MDX, not TSDoc, so no
+   * `commentPrefixed` gutter and the MDX marker spelling, exactly like the
+   * broad docs root it is carved out of. What differs is the surface it sits
+   * on, and that is the whole point: these pages resolve `@objectstack/client`
+   * (and `client-react`, and react's real types) because this surface's
+   * throwaway build dir lives inside `packages/client-react/`.
+   *
+   * A distinct `label` from the broad docs root is load-bearing, not cosmetic:
+   * `buildFileName` is `<label>__<path>__<n>`, and both roots take their paths
+   * relative to the SAME `content/docs` tree.
+   */
+  {
+    dir: DOCS_DIR,
+    ext: '.mdx',
+    label: 'docs-sdk',
+    marker: '{/* os:check */}',
+    pages: SDK_DOCS_PAGES,
   },
 ];
 
@@ -424,18 +576,60 @@ interface Example {
   fileName: string;
 }
 
+/**
+ * One top-level `ts` / `tsx` / `typescript` fenced block — MARKED OR NOT (#12051).
+ *
+ * `Example` is the opt-in compile claim; this is the raw population the fence
+ * language itself is judged over. The distinction matters in one direction only:
+ * an unmarked block is never compiled, so it cannot break a build today — but
+ * its fence language is what will decide its build-file extension the moment
+ * anyone marks it, and JSX under a `ts` fence stops the whole surface's semantic
+ * pass at that moment. Recording unmarked fences is what lets the gate refuse
+ * the tripwire before it is armed rather than after.
+ */
+interface FencedBlock {
+  /** Source file (absolute). */
+  source: string;
+  /** The fence's info string: `ts`, `tsx` or `typescript`. */
+  lang: string;
+  /** 1-based line of the fence-OPEN line itself. */
+  fenceLine: number;
+  /** 1-based line in the source of the FIRST code line inside the fence. */
+  bodyStartLine: number;
+  /** Raw fence body. */
+  code: string;
+  /** Is an `os:check` marker directly above this fence? */
+  marked: boolean;
+}
+
+/** The absolute paths a root's `pages` / `excludePages` list names. */
+function scopedPaths(root: SourceRoot, list: string[] | undefined): string[] {
+  return (list ?? []).map((p) => path.resolve(root.dir, p));
+}
+
 /** Every candidate prose/source file across a surface's roots, with the root that owns it. */
 function sourceFiles(roots: SourceRoot[]): Array<{ file: string; root: SourceRoot }> {
   const out: Array<{ file: string; root: SourceRoot }> = [];
   for (const root of roots) {
     if (!fs.existsSync(root.dir)) continue;
+    // A PAGE-SCOPED root (#12048) is an explicit list, not a walk. A listed
+    // page that does not exist is dropped here and reported by
+    // `assertScopedPagesExist()` — never silently, because the broad root this
+    // page was carved out of would pick it straight back up.
+    if (root.pages) {
+      for (const abs of scopedPaths(root, root.pages)) {
+        if (fs.existsSync(abs)) out.push({ file: abs, root });
+      }
+      continue;
+    }
     const exts = Array.isArray(root.ext) ? root.ext : [root.ext];
+    const excluded = new Set(scopedPaths(root, root.excludePages));
     const walk = (dir: string) => {
       if (root.exclude?.some((x) => dir === x || dir.startsWith(x + path.sep))) return;
       for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
         const full = path.join(dir, e.name);
         if (e.isDirectory()) walk(full);
-        else if (exts.some((ext) => e.name.endsWith(ext)) && !root.excludeFile?.(e.name)) {
+        else if (exts.some((ext) => e.name.endsWith(ext)) && !root.excludeFile?.(e.name) && !excluded.has(full)) {
           out.push({ file: full, root });
         }
       }
@@ -597,11 +791,15 @@ function logicalLines(rawLines: string[], root: SourceRoot): string[] {
  * failure mode this gate exists to prevent — so the caller treats an orphan
  * as an error, not a no-op.
  */
-function extractFromFile(source: string, root: SourceRoot): { examples: Example[]; orphans: number[] } {
+function extractFromFile(
+  source: string,
+  root: SourceRoot,
+): { examples: Example[]; orphans: number[]; fences: FencedBlock[] } {
   const rawLines = fs.readFileSync(source, 'utf-8').split('\n');
   const lines = logicalLines(rawLines, root);
   const { owners, closeLine } = fenceOwners(lines);
   const examples: Example[] = [];
+  const fences: FencedBlock[] = [];
   const claimed = new Set<number>(); // MARKER line indices that opened a real block
   let n = 0;
 
@@ -617,9 +815,23 @@ function extractFromFile(source: string, root: SourceRoot): { examples: Example[
     // Body end is the SAME line the walk above closed this fence on (#11690) —
     // never re-derived with a second, looser regex that could disagree with it.
     const close = closeLine[i];
+    const body = lines.slice(i + 1, close);
+    // EVERY top-level ts/tsx/typescript fence, marked or not (#12051). Marking
+    // is what makes a block a compile CLAIM, but the fence language is a
+    // property of the block itself, and an unmarked JSX block wearing a `ts`
+    // fence is a loaded tripwire rather than a non-issue: the day someone marks
+    // it, it stops the whole surface's semantic pass. The same walk answers both
+    // questions, so there is no second notion of "which fences exist" to drift.
+    fences.push({
+      source,
+      lang: open[1],
+      fenceLine: i + 1, // 1-based line of the fence-OPEN line
+      bodyStartLine: i + 2, // 1-based line of body[0]
+      code: body.join('\n'),
+      marked,
+    });
     if (marked) {
       claimed.add(i - 1);
-      const body = lines.slice(i + 1, close);
       n += 1;
       examples.push({
         source,
@@ -641,7 +853,7 @@ function extractFromFile(source: string, root: SourceRoot): { examples: Example[
     // checks nothing, which is precisely what this guard exists to catch.
     if (ALL_MARKERS.includes(lines[i].trim()) && !claimed.has(i)) orphans.push(i + 1); // 1-based
   }
-  return { examples, orphans };
+  return { examples, orphans, fences };
 }
 
 // ── Bare-`any` guard (#5943) ─────────────────────────────────────────────────
@@ -788,6 +1000,253 @@ function surfacePaths(pkgDirs: string[]): { paths: Record<string, string[]>; mis
   return { paths, missing };
 }
 
+// ── Parse-level refusal: a block that does not PARSE checks nothing (#12051) ─
+
+/**
+ * `tsc` reports syntactic diagnostics and then STOPS — the semantic pass never
+ * runs, for ANY file in the program. That is documented at the top of this file
+ * as a trap for whoever SWEEPS the corpus by hand; #12051 is the same mechanism
+ * arriving through the gate's own front door, because the build-file extension
+ * is derived from the FENCE LANGUAGE (`buildFileName`): a marked block whose
+ * body is JSX but whose fence says ` ```ts ` / ` ```typescript ` is written to a
+ * `.ts` file, where JSX is a syntax error, and every semantic diagnostic on that
+ * surface — 227 blocks on the skills+docs surface at the time of writing —
+ * vanishes with it.
+ *
+ * ⚠️ MEASURED CORRECTION to #12051's own headline. The card states the gate
+ * "still prints a green verdict" under this condition and that the answer to
+ * "would this gate still be green if its semantic pass never ran?" is *yes*.
+ * Ablated on the real corpus before this change (one JSX line forced into a
+ * marked ` ```ts ` block in `content/docs/permissions/sso.mdx`), the pre-fix
+ * gate printed `✗ … examples do not compile` and exited 1 — the verdict line
+ * DID change. The green path was never reachable: `tsc` exits non-zero on a
+ * syntactic diagnostic and prints it, and the surface loop only skips a surface
+ * on `code === 0 && diags.length === 0`.
+ *
+ * What was real, and is what this section closes, is the DEGRADATION either
+ * side of that red:
+ *
+ *   - the failure text read as ordinary type drift ("Fix the example to match
+ *     the current declarations"), while the truth was that the surface had not
+ *     been type-checked at all;
+ *   - the 226 other blocks' semantic pass had silently not run, and nothing in
+ *     the output said so — an author who fixes the five reported syntax errors
+ *     is *then* meeting the surface's real diagnostics for the first time;
+ *   - and nothing enumerated the unmarked JSX-in-`ts`-fence blocks that become
+ *     this failure the moment anyone marks them.
+ *
+ * So the refusal below is not "make a green run red". It is: make the gate say
+ * WHICH of the two things happened, and never let a surface's un-run semantic
+ * pass be reported in the vocabulary of a semantic result.
+ */
+
+/**
+ * The exact bytes a block is written to disk as.
+ *
+ * Shared by `writeBuildDir()` and every parse guard here on purpose: a guard
+ * that clears a *different* string than the compiler reads is the dormant-checker
+ * shape this file keeps closing. The one transformation (`export {}` for a
+ * non-module block) is appended at the END so it never shifts the line of a real
+ * diagnostic.
+ */
+function buildFileText(code: string): string {
+  const isModule = /^\s*(import|export)\b/m.test(code);
+  return code + (isModule ? '' : '\nexport {};\n');
+}
+
+interface ParseUnit {
+  /** Unique within one call; the extension decides TS vs TSX parsing. */
+  name: string;
+  text: string;
+}
+
+/**
+ * Syntactic diagnostics per file, from TypeScript's OWN parser.
+ *
+ * `program.getSyntacticDiagnostics()` is precisely the predicate `tsc` itself
+ * uses to decide whether to run the semantic pass, so this guard cannot drift
+ * from the compiler's behaviour the way a "TS1xxx means syntax" code-range
+ * heuristic would (several 1xxx codes are grammar errors the CHECKER reports,
+ * which do NOT suppress the semantic pass — reading them as refusal-worthy
+ * would manufacture a REFUSE over a surface that was in fact fully checked).
+ *
+ * ONE program for the whole population, not one per block: the population scan
+ * below runs over every ts fence in every root (~1k blocks), and a program per
+ * block is the same answer at a thousand times the cost.
+ *
+ * `noLib` + `noResolve` are load-bearing, not tuning. This guard runs BEFORE the
+ * dist-freshness refusal, so it must not read `dist` at all: resolving
+ * `@objectstack/spec` here would make a parse-level verdict depend on build
+ * state, which is exactly the coupling that makes a guard unrunnable in the
+ * situations it matters most. Parsing needs neither.
+ */
+function syntacticErrorsByFile(units: ParseUnit[]): Map<string, readonly ts.Diagnostic[]> {
+  const texts = new Map(units.map((u) => [u.name, u.text]));
+  const sources = new Map<string, ts.SourceFile>(
+    units.map((u) => [
+      u.name,
+      ts.createSourceFile(
+        u.name,
+        u.text,
+        ts.ScriptTarget.ES2020,
+        /* setParentNodes */ false,
+        u.name.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
+      ),
+    ]),
+  );
+
+  const host: ts.CompilerHost = {
+    getSourceFile: (name) => sources.get(name),
+    getDefaultLibFileName: () => 'lib.d.ts',
+    writeFile: () => {},
+    getCurrentDirectory: () => '',
+    getCanonicalFileName: (name) => name,
+    useCaseSensitiveFileNames: () => true,
+    getNewLine: () => '\n',
+    fileExists: (name) => texts.has(name),
+    readFile: (name) => texts.get(name),
+    resolveModuleNames: (names) => names.map(() => undefined),
+  };
+
+  const program = ts.createProgram({
+    rootNames: units.map((u) => u.name),
+    options: {
+      noLib: true,
+      noResolve: true,
+      target: ts.ScriptTarget.ES2020,
+      // Matches `writeBuildDir`'s tsconfig, so a `.tsx` unit parses JSX here the
+      // same way it will there.
+      jsx: ts.JsxEmit.ReactJSX,
+    },
+    host,
+  });
+
+  const out = new Map<string, readonly ts.Diagnostic[]>();
+  for (const u of units) {
+    const sf = program.getSourceFile(u.name);
+    out.set(u.name, sf ? program.getSyntacticDiagnostics(sf) : []);
+  }
+  return out;
+}
+
+/** A parse diagnostic rendered against the block body: 1-based line/col + text. */
+function formatParseError(d: ts.Diagnostic): { line: number; col: number; text: string } {
+  const message = ts.flattenDiagnosticMessageText(d.messageText, ' ');
+  if (d.file && d.start !== undefined) {
+    const { line, character } = d.file.getLineAndCharacterOfPosition(d.start);
+    return { line: line + 1, col: character + 1, text: `error TS${d.code}: ${message}` };
+  }
+  return { line: 1, col: 1, text: `error TS${d.code}: ${message}` };
+}
+
+/**
+ * Does this body contain a real JSX node when parsed as TSX?
+ *
+ * The second half of the zero-false-positive predicate. "Fails to parse as `.ts`
+ * but parses clean as `.tsx`" is nearly sufficient on its own, but *nearly* is
+ * how a guard acquires a false positive that costs someone a corpus rewrite —
+ * so the JSX node is required to actually be there before this gate tells an
+ * author their block is JSX.
+ */
+function containsJsx(code: string): boolean {
+  const sf = ts.createSourceFile('probe.tsx', code, ts.ScriptTarget.ES2020, false, ts.ScriptKind.TSX);
+  let found = false;
+  const visit = (node: ts.Node): void => {
+    if (found) return;
+    if (ts.isJsxElement(node) || ts.isJsxSelfClosingElement(node) || ts.isJsxFragment(node)) {
+      found = true;
+      return;
+    }
+    ts.forEachChild(node, visit);
+  };
+  ts.forEachChild(sf, visit);
+  return found;
+}
+
+/** A block whose body is JSX while its fence claims plain TypeScript. */
+interface FenceLanguageMismatch {
+  source: string;
+  fenceLine: number;
+  lang: string;
+  marked: boolean;
+}
+
+/**
+ * The POPULATION half (#12051): every `ts`/`typescript`-fenced block whose body
+ * is JSX, marked or not, across every root this gate already reads.
+ *
+ * The predicate is deliberately three-part and each part removes a class of
+ * false positive:
+ *
+ *   1. does NOT parse as `.ts` — a body that parses fine either way has no
+ *      fence-language defect to report;
+ *   2. parses CLEAN as `.tsx` — this is what separates JSX from the corpus's
+ *      ordinary prose fragments. `defineStack({ ... })` and a `columns: [...]`
+ *      subtree fail to parse BOTH ways (TS1109), and are correct as prose;
+ *   3. contains an actual JSX node.
+ *
+ * Measured over the real corpus, 1 and 2 together already selected exactly the
+ * JSX blocks; 3 is kept because the cost is one extra parse of an already-broken
+ * block and the alternative is a guard whose zero-false-positive claim rests on
+ * "nothing else happened to qualify today".
+ *
+ * ⚠️ Why this cannot live in `check:doc-authoring`'s `FENCE_OPEN` instead
+ * (#12051's third open question, answered here rather than forked to devx): that
+ * scanner is line-wise — `FENCE_OPEN` matches the fence-open LINE and the body
+ * is then tested one line at a time against a literal regex. It never parses a
+ * block, so it cannot distinguish JSX from any other text, and widening it to
+ * carry this check would mean giving a devx-owned lint its own TypeScript
+ * parser. The check belongs where the fence language is *consumed* — here, where
+ * it decides a build-file extension — not where fences are merely recognised.
+ */
+function findJsxInTsFence(fences: FencedBlock[]): FenceLanguageMismatch[] {
+  const candidates = fences.filter((f) => f.lang === 'ts' || f.lang === 'typescript');
+  if (candidates.length === 0) return [];
+
+  const tsErrors = syntacticErrorsByFile(candidates.map((f, i) => ({ name: `fence-${i}.ts`, text: f.code })));
+  const broken = candidates.filter((_, i) => (tsErrors.get(`fence-${i}.ts`) ?? []).length > 0);
+  if (broken.length === 0) return [];
+
+  const tsxErrors = syntacticErrorsByFile(broken.map((f, i) => ({ name: `fence-${i}.tsx`, text: f.code })));
+  return broken
+    .filter((f, i) => (tsxErrors.get(`fence-${i}.tsx`) ?? []).length === 0 && containsJsx(f.code))
+    .map((f) => ({ source: f.source, fenceLine: f.fenceLine, lang: f.lang, marked: f.marked }));
+}
+
+/** A MARKED block that does not parse — so nothing on its surface got checked. */
+interface UnparsedExample {
+  example: Example;
+  errors: { line: number; col: number; text: string }[];
+  /** True when the body would parse clean as `.tsx` and really is JSX. */
+  jsxUnderTsFence: boolean;
+}
+
+/**
+ * The REFUSAL half (#12051): marked blocks on one surface that do not PARSE.
+ *
+ * Runs over the EXACT text `writeBuildDir` will write (`buildFileText`), so the
+ * verdict is about the file `tsc` reads, not about a near-copy of it.
+ */
+function findUnparsedExamples(examples: Example[]): UnparsedExample[] {
+  const errors = syntacticErrorsByFile(examples.map((ex) => ({ name: ex.fileName, text: buildFileText(ex.code) })));
+  const out: UnparsedExample[] = [];
+  for (const ex of examples) {
+    const diags = errors.get(ex.fileName) ?? [];
+    if (diags.length === 0) continue;
+    const asTsx = ex.fileName.endsWith('.tsx')
+      ? diags
+      : (syntacticErrorsByFile([{ name: 'probe.tsx', text: buildFileText(ex.code) }]).get('probe.tsx') ?? []);
+    out.push({
+      example: ex,
+      // Three is enough to recognise the shape; a JSX body in a `.ts` file
+      // produces a cascade, and printing all of it buries the prescription.
+      errors: diags.slice(0, 3).map(formatParseError),
+      jsxUnderTsFence: !ex.fileName.endsWith('.tsx') && asTsx.length === 0 && containsJsx(ex.code),
+    });
+  }
+  return out;
+}
+
 // ── tsc harness ──────────────────────────────────────────────────────────────
 
 function writeBuildDir(buildDir: string, examples: Example[], paths: Record<string, string[]>): void {
@@ -797,14 +1256,11 @@ function writeBuildDir(buildDir: string, examples: Example[], paths: Record<stri
   for (const ex of examples) {
     // Written verbatim (no prepended wrapper) so a tsc line N maps to source
     // line (bodyStartLine + N - 1) with zero arithmetic guesswork. A block with
-    // no import/export is a script, not a module; append `export {}` so two such
-    // files can't collide on a global — appended at the end, it never shifts the
-    // line of any real diagnostic.
-    const isModule = /^\s*(import|export)\b/m.test(ex.code);
-    fs.writeFileSync(
-      path.join(buildDir, ex.fileName),
-      ex.code + (isModule ? '' : '\nexport {};\n'),
-    );
+    // no import/export is a script, not a module; `buildFileText` appends
+    // `export {}` so two such files can't collide on a global — appended at the
+    // end, it never shifts the line of any real diagnostic. That helper is
+    // shared with the parse guards (#12051) so both read the same bytes.
+    fs.writeFileSync(path.join(buildDir, ex.fileName), buildFileText(ex.code));
   }
 
   const tsconfig = {
@@ -878,6 +1334,22 @@ function runTsc(buildDir: string): { code: number; output: string } {
 
 function fail(message: string): never {
   console.error(`\n✗ ${message}\n`);
+  process.exit(1);
+}
+
+/**
+ * REFUSE — "this gate produced no result", as distinct from `fail()`'s "this
+ * gate produced a result and it is bad" (#12051).
+ *
+ * Deliberately NOT `fail()` with a different string: the two states need two
+ * verdict tokens a reader can grep for and tell apart at a glance, and stacking
+ * the prefixes (`✗ ⛔ REFUSE`) reads as one emphatic failure rather than as a
+ * different KIND of failure. Same exit code — a refusal is still a red build,
+ * because a gate that cannot check its surface must never look like one that
+ * did.
+ */
+function refuse(message: string): never {
+  console.error(`\n⛔ REFUSE — ${message}\n`);
   process.exit(1);
 }
 
@@ -1634,8 +2106,286 @@ function selfTest(): never {
       'build-dir fixture: a distinct `buildDirName` on a shared resolution dir was reported as a clash — ' +
         'sharing a resolution dir is legitimate and must stay legal',
     );
+
+    // ── Fence language vs body language, and refusal (#12051) ─────────────
+    //
+    // Both directions, because both failures are silent. A false NEGATIVE here
+    // is the defect itself: the guard passes, someone marks a JSX block under a
+    // `ts` fence, and the surface's semantic pass stops running while the gate
+    // reports in the vocabulary of a compile result. A false POSITIVE is just
+    // as costly the other way — the corpus is full of prose fragments that
+    // parse as neither TS nor TSX, and flagging those would force a rewrite of
+    // documentation that is correct as written.
+    const JSX_BODY = ['function Card() {', '  return <div className="card">hi</div>;', '}'].join('\n');
+    const FRAGMENT_BODY = 'defineStack({ ... })';
+
+    const jsxFences = path.join(dir, 'jsx-fences.md');
+    fs.writeFileSync(
+      jsxFences,
+      [
+        '<!-- os:check -->', // 1
+        '```ts', // 2  ← MARKED JSX under a plain-ts fence: the live defect
+        ...JSX_BODY.split('\n'), // 3-5
+        '```', // 6
+        '', // 7
+        '```typescript', // 8  ← UNMARKED JSX: the loaded tripwire
+        ...JSX_BODY.split('\n'), // 9-11
+        '```', // 12
+        '', // 13
+        '<!-- os:check -->', // 14
+        '```tsx', // 15  ← the SAME body, correctly fenced: must NOT be flagged
+        ...JSX_BODY.split('\n'), // 16-18
+        '```', // 19
+        '', // 20
+        '```ts', // 21  ← UNMARKED prose fragment: parses as NEITHER, not a fence defect
+        FRAGMENT_BODY, // 22
+        '```', // 23
+        '',
+      ].join('\n'),
+      'utf8',
+    );
+    const fenced = extractFromFile(jsxFences, skillsRoot);
+    check(
+      fenced.fences.length === 4,
+      `fence-language fixture: collected ${fenced.fences.length} fence(s), expected 4 — unmarked fences must be ` +
+        'collected too, or the tripwire half of the guard cannot see anything',
+    );
+    check(
+      fenced.examples.length === 2,
+      `fence-language fixture: extracted ${fenced.examples.length} marked block(s), expected 2`,
+    );
+    const mismatches = findJsxInTsFence(fenced.fences);
+    check(
+      mismatches.length === 2,
+      `fence-language fixture: flagged ${mismatches.length} JSX-under-ts fence(s), expected 2 — got ` +
+        JSON.stringify(mismatches.map((m) => `${m.fenceLine}:${m.lang}:${m.marked ? 'marked' : 'unmarked'}`)),
+    );
+    check(
+      JSON.stringify(mismatches.map((m) => m.fenceLine)) === JSON.stringify([2, 8]),
+      `fence-language fixture: flagged lines ${JSON.stringify(mismatches.map((m) => m.fenceLine))}, expected [2,8] — ` +
+        'line 15 is the same body under a ```tsx fence (correct, must not be flagged) and line 21 is a prose ' +
+        'fragment that parses as neither TS nor TSX (not a fence-language defect)',
+    );
+    check(
+      JSON.stringify(mismatches.map((m) => m.marked)) === JSON.stringify([true, false]),
+      `fence-language fixture: marked flags ${JSON.stringify(mismatches.map((m) => m.marked))}, expected [true,false] — ` +
+        'an UNMARKED JSX block must still be reported; it is the tripwire, not a non-issue',
+    );
+
+    // The refusal half, over the marked blocks of the same fixture. The JSX one
+    // must refuse AND be diagnosed as a fence-language defect; the correctly
+    // fenced one must parse clean, or the guard is flagging JSX rather than the
+    // mismatch.
+    const unparsed = findUnparsedExamples(fenced.examples);
+    check(
+      unparsed.length === 1,
+      `refusal fixture: ${unparsed.length} marked block(s) failed to parse, expected 1 — the tsx-fenced block ` +
+        'carries the identical body and must parse clean',
+    );
+    if (unparsed.length === 1) {
+      check(
+        unparsed[0].example.fileName.endsWith('.ts') && !unparsed[0].example.fileName.endsWith('.tsx'),
+        `refusal fixture: the failing block was written as ${unparsed[0].example.fileName} — the plain-ts fence ` +
+          'is what puts a JSX body in a .ts file, and that is the whole mechanism',
+      );
+      check(
+        unparsed[0].jsxUnderTsFence,
+        'refusal fixture: the failing block was NOT diagnosed as JSX-under-a-ts-fence — without that the author ' +
+          'reads a cascade of TS1005s and has no way to reach the one-word fix',
+      );
+      check(
+        unparsed[0].errors.length > 0 && /TS\d+/.test(unparsed[0].errors[0].text),
+        `refusal fixture: reported no parse diagnostic text (got ${JSON.stringify(unparsed[0].errors)})`,
+      );
+      const pageLine = unparsed[0].example.bodyStartLine + unparsed[0].errors[0].line - 1;
+      check(
+        pageLine >= 3 && pageLine <= 5,
+        `refusal fixture: mapped the first parse error to page line ${pageLine}, expected 3-5 (the JSX body) — ` +
+          'a refusal pointing at the wrong line is worse than none',
+      );
+    }
+
+    // A marked ellipsis fragment refuses too. Refusal is about PARSING, not
+    // about JSX: this is the shape the file header records as having suppressed
+    // a whole sweep's semantic pass (#10924's three TS1109 blocks), and it must
+    // reach the same verdict by the same route — with `jsxUnderTsFence` false,
+    // so the JSX prescription is not offered for a defect that is not JSX.
+    const markedFragment = path.join(dir, 'marked-fragment.md');
+    fs.writeFileSync(
+      markedFragment,
+      ['<!-- os:check -->', '```ts', FRAGMENT_BODY, '```', ''].join('\n'),
+      'utf8',
+    );
+    const fragmentExtract = extractFromFile(markedFragment, skillsRoot);
+    const fragmentUnparsed = findUnparsedExamples(fragmentExtract.examples);
+    check(
+      fragmentUnparsed.length === 1 && !fragmentUnparsed[0].jsxUnderTsFence,
+      `marked-fragment fixture: expected 1 refusal with jsxUnderTsFence=false, got ${JSON.stringify(
+        fragmentUnparsed.map((u) => u.jsxUnderTsFence),
+      )} — a non-JSX parse failure must refuse without recommending a tsx retag`,
+    );
+    check(
+      findJsxInTsFence(fragmentExtract.fences).length === 0,
+      'marked-fragment fixture: a prose ellipsis fragment was reported as JSX under a ts fence — that is the ' +
+        'false positive that would force a corpus-wide rewrite of correct documentation',
+    );
+
+    // The bytes the refusal guard parses ARE the bytes `writeBuildDir` writes.
+    // Pinned directly, because the two drifting apart is how a guard ends up
+    // clearing a string the compiler never reads.
+    check(
+      buildFileText('const a = 1;') === 'const a = 1;\nexport {};\n',
+      `buildFileText fixture: a non-module block was not given its \`export {}\` (got ${JSON.stringify(buildFileText('const a = 1;'))})`,
+    );
+    check(
+      buildFileText("import { z } from 'zod';") === "import { z } from 'zod';",
+      'buildFileText fixture: a block that is already a module was given an extra `export {}`',
+    );
+
+    // ── Page-scoped roots: one tree, two surfaces (#12048) ────────────────
+    //
+    // Three assertions, and the CONTROL is the load-bearing one. A scoped root
+    // that returned its page list and a broad root that had simply failed to
+    // find the page would satisfy the first two identically — the same
+    // "prove the green comes from the mechanism, not from an empty corpus"
+    // shape the nested-illustration fixture above is built around.
+    const tree = path.join(dir, 'pagetree');
+    fs.mkdirSync(path.join(tree, 'sub'), { recursive: true });
+    const pageA = path.join(tree, 'a.mdx');
+    const pageB = path.join(tree, 'b.mdx');
+    const pageC = path.join(tree, 'sub', 'c.mdx');
+    for (const p of [pageA, pageB, pageC]) fs.writeFileSync(p, '# page\n', 'utf8');
+
+    const broadUnpartitioned: SourceRoot = { dir: tree, ext: '.mdx', label: 'docs', marker: '{/* os:check */}' };
+    const broadRoot: SourceRoot = { ...broadUnpartitioned, excludePages: ['b.mdx'] };
+    const scopedRoot: SourceRoot = { ...broadUnpartitioned, label: 'docs-sdk', pages: ['b.mdx'] };
+
+    // CONTROL: without the subtraction the broad root really does reach page B.
+    check(
+      sourceFiles([broadUnpartitioned]).some((f) => f.file === pageB),
+      'page-scope control: the un-partitioned broad root did not reach the page at all — every assertion below ' +
+        'would then pass over an empty corpus rather than over a working carve-out',
+    );
+    check(
+      JSON.stringify(sourceFiles([broadRoot]).map((f) => f.file)) === JSON.stringify([pageA, pageC]),
+      `page-scope fixture: broad root scanned ${JSON.stringify(sourceFiles([broadRoot]).map((f) => path.basename(f.file)))}, ` +
+        'expected a.mdx and sub/c.mdx — `excludePages` must remove exactly the carved-out page, and nothing else',
+    );
+    check(
+      JSON.stringify(sourceFiles([scopedRoot]).map((f) => f.file)) === JSON.stringify([pageB]),
+      `page-scope fixture: scoped root scanned ${JSON.stringify(sourceFiles([scopedRoot]).map((f) => path.basename(f.file)))}, ` +
+        'expected exactly b.mdx — a `pages` root is a file list, never a walk',
+    );
+    // The two roots address the same tree, so only `label` keeps their
+    // build-file names apart. A collision would have one root's extracted block
+    // overwrite the other's inside a shared build dir.
+    check(
+      buildFileName(pageB, broadUnpartitioned, 1, '.ts') !== buildFileName(pageB, scopedRoot, 1, '.ts'),
+      `page-scope fixture: both roots produce the build-file name ${buildFileName(pageB, scopedRoot, 1, '.ts')} for the ` +
+        'same page — two roots over one tree must differ in `label`',
+    );
+
+    // Overlap detection, both directions. The partitioned pair must be clean;
+    // the un-partitioned pair must be caught — that is the state in which one
+    // page gets two verdicts from two resolution environments.
+    const stubSurface = (name: string, roots: SourceRoot[]): Surface => ({
+      name,
+      roots,
+      resolutionDir: dir,
+      selfPackages: [],
+    });
+    const partitioned = [stubSurface('broad', [broadRoot]), stubSurface('scoped', [scopedRoot])].map((surface) => ({
+      surface,
+      files: sourceFiles(surface.roots),
+    }));
+    check(
+      findOverlappingSourceFile(partitioned) === null,
+      `page-scope fixture: a correct partition was reported as overlapping (${JSON.stringify(findOverlappingSourceFile(partitioned))})`,
+    );
+    const overlapping = [stubSurface('broad', [broadUnpartitioned]), stubSurface('scoped', [scopedRoot])].map(
+      (surface) => ({ surface, files: sourceFiles(surface.roots) }),
+    );
+    const overlap = findOverlappingSourceFile(overlapping);
+    check(
+      overlap !== null && overlap.file === pageB,
+      `page-scope fixture: a page claimed by TWO surfaces was not flagged (got ${JSON.stringify(overlap)}) — this is ` +
+        'the state where one page is compiled in two resolution environments and the failing verdict cannot be fixed',
+    );
+
+    // A `pages` entry that names a file which is not there. Both halves of the
+    // partition fail together and silently when this happens, so it is pinned
+    // in both directions like every other guard here.
+    check(
+      findMissingScopedPages([stubSurface('scoped', [scopedRoot])]).length === 0,
+      'page-scope fixture: an existing scoped page was reported missing',
+    );
+    const stale = findMissingScopedPages([
+      stubSurface('scoped', [{ ...scopedRoot, pages: ['b.mdx', 'renamed-away.mdx'] }]),
+    ]);
+    check(
+      stale.length === 1 && stale[0].page === 'renamed-away.mdx',
+      `page-scope fixture: a scoped page list naming a non-existent file was not flagged (got ${JSON.stringify(stale)}) — ` +
+        'the page would return to the surface that cannot resolve its imports, restoring the gap silently',
+    );
+
+    // ── Absent-dir root: present in this checkout at all? (#12048) ─────────
+    //
+    // This script runs against repo-SHAPED sandbox trees as well as the repo —
+    // `dist-freshness-adoption.test.ts` builds one with `skills/`,
+    // `packages/spec/src` and the two client packages but NO `content/docs`.
+    // `sourceFiles()` skips a root whose `dir` is absent; `findMissingScopedPages`
+    // must answer the same way, or it reports every scoped page "missing" there
+    // and — running as an assert before everything else — speaks ahead of the
+    // verdicts those tests pin.
+    //
+    // BOTH directions, and the control is what separates them: an absent `dir`
+    // must be silent, while the SAME page list under a `dir` that DOES exist
+    // must still be flagged. Without the control, a predicate that had simply
+    // stopped finding anything would pass the first assertion.
+    const absentDirRoot: SourceRoot = {
+      ...scopedRoot,
+      dir: path.join(dir, 'no-such-tree'),
+      pages: ['b.mdx', 'renamed-away.mdx'],
+    };
+    check(
+      findMissingScopedPages([stubSurface('sandboxed', [absentDirRoot])]).length === 0,
+      'page-scope fixture: a scoped root whose `dir` does not exist in this checkout was reported as having missing ' +
+        'pages — that is a tree which does not carry this corpus at all, not a corpus that lost a page, and the ' +
+        'sandbox trees this script is run against by dist-freshness-adoption.test.ts are exactly that',
+    );
+    check(
+      sourceFiles([absentDirRoot]).length === 0,
+      'page-scope fixture: a scoped root with an absent `dir` scanned files — `sourceFiles()` and ' +
+        '`findMissingScopedPages()` must agree about whether a root is present at all',
+    );
+    check(
+      findMissingScopedPages([stubSurface('present', [{ ...absentDirRoot, dir: tree }])]).length === 1,
+      'page-scope CONTROL: the identical page list under a `dir` that DOES exist was not flagged — the absent-dir ' +
+        'exemption must be about the dir, not about the predicate having gone quiet, or a real rename stops reding',
+    );
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
+  }
+
+  // ── The same two invariants over the REAL corpus, not a fixture. Same
+  //    reasoning as the `findUnignoredBuildDir(SURFACES)` pin below: the
+  //    fixtures prove the predicates work, and these prove today's SURFACES
+  //    actually satisfy them — a scoped page that was renamed away, or a
+  //    carve-out whose `excludePages` was dropped, is a live defect rather
+  //    than a hypothetical one, and neither shows up as anything but a
+  //    resolution error on one page.
+  check(
+    findMissingScopedPages(SURFACES).length === 0,
+    `real-corpus fixture: page-scoped root(s) name file(s) that do not exist — ` +
+      JSON.stringify(findMissingScopedPages(SURFACES)),
+  );
+  {
+    const realFiles = SURFACES.map((surface) => ({ surface, files: sourceFiles(surface.roots) }));
+    const realOverlap = findOverlappingSourceFile(realFiles);
+    check(
+      realOverlap === null,
+      `real-corpus fixture: a source file is scanned by two surfaces — ${JSON.stringify(realOverlap)}`,
+    );
   }
 
   // ── Gitignore coverage (#11440). `assertGitignoredBuildDirs()` runs against
@@ -1748,7 +2498,19 @@ function selfTest(): never {
       '    cwd reads as indeterminate rather than as a false violation; an indented, an over-long,\n' +
       '    and a combined indent+over-long closing fence all extract identically to the walk\'s own\n' +
       '    span, and a CR-trailing closer reads as unclosed the SAME way for both loops instead of\n' +
-      '    disagreeing about where the fence ends.',
+      '    disagreeing about where the fence ends; a JSX body under a ```ts fence is flagged whether\n' +
+      '    it is marked or not, the identical body under a ```tsx fence is not, a prose ellipsis\n' +
+      '    fragment (parses as neither) is not, a marked block that does not parse REFUSES with its\n' +
+      '    first error mapped to the right page line — recommending a tsx retag only when the body\n' +
+      '    really is JSX — and the bytes the refusal parses are the bytes the build dir is written\n' +
+      '    with; a page-scoped root scans exactly its list while the broad root over the same tree\n' +
+      '    scans everything BUT it (with the un-partitioned control proving the page was reachable),\n' +
+      '    the two roots produce distinct build-file names, a page claimed by two surfaces is caught\n' +
+      '    and a correct partition is not, a `pages` entry naming a file that is not there is caught\n' +
+      '    and an existing one is not, while a scoped root whose `dir` is absent from this checkout\n' +
+      '    entirely is silent in BOTH predicates (with the same list under an existing dir still\n' +
+      '    flagged, so the exemption is the dir and not a predicate gone quiet) — and the real\n' +
+      '    SURFACES satisfy both invariants today.',
   );
   process.exit(0);
 }
@@ -1862,6 +2624,118 @@ function assertGitignoredBuildDirs(): void {
   }
 }
 
+/**
+ * Every `pages` entry that names a file which is not there (#12048).
+ *
+ * A page-scoped root is a carve-out from a broad root over the same tree, and
+ * the two read one shared list — so a path that stops resolving does not merely
+ * shrink the scoped root: the broad root's `excludePages` stops matching in the
+ * same instant, the page returns to the surface that cannot resolve its imports,
+ * and the next marked block on it reds with the exact TS2307 the carve-out
+ * exists to end. Both halves fail in the same direction, silently, from one
+ * edit — which is why this is a hard error and not a warning.
+ *
+ * ⚠️ A ROOT WHOSE `dir` IS ABSENT IS NOT A FINDING, and this is the same
+ * presence rule `sourceFiles()` already applies one function up (it `continue`s
+ * past a root whose `dir` does not exist). The two must agree about whether a
+ * root is present in this checkout at all: this script is executed against
+ * repo-SHAPED sandbox trees as well as against the repo — the `#7181`
+ * dist-freshness pins in `dist-freshness-adoption.test.ts` build one that seeds
+ * `skills/`, `packages/spec/src` and the two client packages but has no
+ * `content/docs` at all. When the two predicates disagreed, this one reported
+ * both SDK pages "missing" in that sandbox and, being an assert that runs before
+ * everything, spoke *ahead of* the three verdicts those tests pin — hijacking a
+ * positive control, a staleness refusal and an orphan-marker finding alike. Same
+ * shape as the two-closers (#11690) and the two fence-ownership notions
+ * (#11355) this file has already collapsed: one predicate, not two that can
+ * drift apart.
+ *
+ * The rename protection is untouched by that carve-out, because it is a
+ * different question: `content/docs` always exists in a real checkout, so a page
+ * renamed *inside* it is still judged, and still reds. Absent-dir means "this
+ * tree does not carry this corpus", never "this corpus lost a page".
+ *
+ * Judged over `SURFACES` rather than a hand-listed set, so a fifth root with
+ * `pages` is covered without an edit here.
+ */
+function findMissingScopedPages(surfaces: Surface[]): Array<{ surface: string; label: string; page: string }> {
+  const missing: Array<{ surface: string; label: string; page: string }> = [];
+  for (const surface of surfaces) {
+    for (const root of surface.roots) {
+      if (!root.pages) continue;
+      // The `sourceFiles()` presence rule, restated — see the docblock above.
+      if (!fs.existsSync(root.dir)) continue;
+      for (const page of root.pages) {
+        if (!fs.existsSync(path.resolve(root.dir, page))) {
+          missing.push({ surface: surface.name, label: root.label, page });
+        }
+      }
+    }
+  }
+  return missing;
+}
+
+function assertScopedPagesExist(): void {
+  const missing = findMissingScopedPages(SURFACES);
+  if (missing.length > 0) {
+    fail(
+      `Page-scoped root(s) name ${missing.length} file(s) that do not exist:\n\n` +
+        missing.map((m) => `  - ${m.page}   (root "${m.label}", surface "${m.surface}")`).join('\n') +
+        `\n\n  A scoped page list is one half of a partition — the broad root over the same\n` +
+        `  tree subtracts the SAME list. A path that no longer resolves therefore removes\n` +
+        `  the page from its scoped root AND hands it back to the broad one, restoring the\n` +
+        `  resolution gap the carve-out closed. Fix the path, or drop the entry (and the\n` +
+        `  page's markers with it) if the page is really gone.`,
+    );
+  }
+}
+
+/**
+ * The first file two different surfaces both scan, or null (#12048).
+ *
+ * Until page-scoped roots existed, every root addressed a tree no other root
+ * addressed, and the invariant held by accident. It is load-bearing: a file
+ * scanned by two surfaces has each of its marked blocks extracted twice and
+ * compiled in two different module-resolution environments, so the surface
+ * that cannot resolve the block's imports reports TS2307 against a page the
+ * other surface just proved correct — one page, two verdicts, and the failing
+ * one is the one with no way to be fixed.
+ *
+ * Takes pre-computed per-surface file lists rather than walking again: the
+ * caller has already paid for that walk, and asserting over a SECOND walk
+ * would be asserting about a corpus the run does not use.
+ */
+function findOverlappingSourceFile(
+  entries: Array<{ surface: Surface; files: Array<{ file: string; root: SourceRoot }> }>,
+): { file: string; first: string; second: string } | null {
+  const seen = new Map<string, string>();
+  for (const { surface, files } of entries) {
+    for (const { file } of files) {
+      const first = seen.get(file);
+      if (first && first !== surface.name) return { file, first, second: surface.name };
+      seen.set(file, surface.name);
+    }
+  }
+  return null;
+}
+
+function assertDisjointSourceFiles(
+  entries: Array<{ surface: Surface; files: Array<{ file: string; root: SourceRoot }> }>,
+): void {
+  const clash = findOverlappingSourceFile(entries);
+  if (clash) {
+    fail(
+      `${rel(clash.file)} is scanned by two surfaces — "${clash.first}" and "${clash.second}".\n\n` +
+        `  Each surface resolves modules in its own environment, so every marked block on\n` +
+        `  this file would be compiled twice against different declarations. Whichever\n` +
+        `  surface cannot resolve the block's imports reds with TS2307 on a page the other\n` +
+        `  surface just type-checked clean, and no edit to the page can satisfy both.\n\n` +
+        `  A page-scoped root (\`pages\`) and the broad root it is carved out of must read\n` +
+        `  ONE shared list — the broad root subtracting it via \`excludePages\`.`,
+    );
+  }
+}
+
 /** A package.json's own `name` field — used to look its self-entry up in the
  *  `paths` map `surfacePaths()` derived from it. */
 function pkgName(pkgDir: string): string {
@@ -1873,18 +2747,30 @@ function main() {
 
   assertDistinctBuildDirs();
   assertGitignoredBuildDirs();
+  // Before the corpus is read (#12048): a scoped page list that has stopped
+  // resolving would otherwise show up as a page quietly back on the surface
+  // that cannot resolve its imports, not as an error.
+  assertScopedPagesExist();
 
   console.log(`🧪 Type-checking prose TypeScript examples (${SURFACES.map((s) => s.name).join(' · ')})...\n`);
 
-  const bySurface = SURFACES.map((surface) => {
+  // One walk, read twice: the disjointness assertion below and the extraction
+  // loop must be talking about the SAME corpus, or the assertion is about a
+  // set this run does not use.
+  const filesBySurface = SURFACES.map((surface) => ({ surface, files: sourceFiles(surface.roots) }));
+  assertDisjointSourceFiles(filesBySurface);
+
+  const bySurface = filesBySurface.map(({ surface, files }) => {
     const examples: Example[] = [];
     const orphans: string[] = [];
-    for (const { file, root } of sourceFiles(surface.roots)) {
-      const { examples: found, orphans: bad } = extractFromFile(file, root);
+    const fences: FencedBlock[] = [];
+    for (const { file, root } of files) {
+      const { examples: found, orphans: bad, fences: all } = extractFromFile(file, root);
       examples.push(...found);
+      fences.push(...all);
       for (const line of bad) orphans.push(`${rel(file)}:${line}`);
     }
-    return { surface, examples, orphans };
+    return { surface, examples, orphans, fences };
   });
 
   // A marker that is not directly above a ```ts/```tsx fence checks nothing.
@@ -1927,6 +2813,66 @@ function main() {
 
   const allExamples = bySurface.flatMap((s) => s.examples);
 
+  // ── REFUSE, rather than degrade (#12051) ──────────────────────────────────
+  //
+  // A marked block that does not PARSE does not produce a type-checking result
+  // that is merely wrong — it produces NO type-checking result for its entire
+  // surface, because tsc reports syntactic diagnostics and then stops before the
+  // semantic pass, for every file in the program. Before this guard the run
+  // still went red (measured — see the "Parse-level refusal" section), but it
+  // went red saying "examples do not compile … fix the example to match the
+  // current declarations": the vocabulary of a semantic result, over a surface
+  // where the semantic pass had not run. The reader's next move — fix these
+  // diagnostics, trust the rest — is wrong in a way the output gave them no way
+  // to see.
+  //
+  // So the verdict is separated from the diagnosis. REFUSE says: this surface
+  // was not checked, here is what stopped it, and here is how many blocks that
+  // leaves unchecked. It runs BEFORE the dist-freshness refusal and before any
+  // build dir is written, because parsing depends on neither — and before the
+  // bare-`any` guard below, which walks a `createSourceFile` tree: that call
+  // degrades silently on input it cannot parse (it never throws), so running it
+  // over an unparseable block is the dormant-checker shape its own docblock
+  // warns about. Refusing first means every guard after this line is looking at
+  // a tree TypeScript actually built.
+  const refusals = bySurface
+    .map(({ surface, examples }) => ({ surface, examples, unparsed: findUnparsedExamples(examples) }))
+    .filter((r) => r.unparsed.length > 0);
+  if (refusals.length > 0) {
+    const lines: string[] = [];
+    for (const { surface, examples, unparsed } of refusals) {
+      lines.push(
+        `[${surface.name}] was NOT type-checked.\n\n` +
+          `   ${unparsed.length} marked block(s) do not parse. TypeScript reports syntactic errors and\n` +
+          `   then STOPS: the semantic pass never runs, for any file in the program. So the other\n` +
+          `   ${examples.length - unparsed.length} marked block(s) on this surface were not type-checked either — this run\n` +
+          `   proves nothing about them, in either direction.\n`,
+      );
+      for (const u of unparsed) {
+        lines.push(`   ${rel(u.example.source)}  (block written as ${u.example.fileName})`);
+        for (const e of u.errors) {
+          lines.push(`     ${rel(u.example.source)}:${u.example.bodyStartLine + e.line - 1}:${e.col}  ${e.text}`);
+        }
+        if (u.jsxUnderTsFence) {
+          lines.push(
+            `     ↳ This body is JSX and parses clean as .tsx. Its fence says \`\`\`ts / \`\`\`typescript,\n` +
+              `       which is what put it in a .ts file. Retag the fence \`\`\`tsx.`,
+          );
+        }
+        lines.push('');
+      }
+    }
+    refuse(
+      lines.join('\n') +
+        `  Fix the parse errors, or drop the os:check marker from a block that is an\n` +
+        `  illustrative fragment rather than a compile claim (an ellipsis placeholder like\n` +
+        `  \`defineStack({ ... })\` is correct as prose and can never parse).\n\n` +
+        `  ⚠️ Do NOT read the diagnostics above as this surface's problem list. They are the\n` +
+        `     reason there IS no problem list yet. Re-run once they are gone — that run is the\n` +
+        `     first one whose result means anything.`,
+    );
+  }
+
   // Third anti-idle assertion (#5943): a marked block that annotates anything
   // `any` compiles by definition and proves nothing about it. Runs BEFORE any
   // build dir is written, so the author reads one crisp verdict instead of a
@@ -1956,6 +2902,38 @@ function main() {
     );
   }
 
+  // The UNMARKED population (#12051): JSX bodies under a ` ```ts ` /
+  // ` ```typescript ` fence, across every root this gate reads.
+  //
+  // The build-file extension is derived from the fence language, so a JSX body
+  // under a plain-ts fence is written to a `.ts` file where JSX cannot parse,
+  // and a program carrying one syntactic error never reaches its semantic pass
+  // — for ANY file in it. An unmarked block of that shape breaks nothing today,
+  // because nothing compiles it; it is a tripwire, and marking it is a one-line
+  // edit. So it is swept here rather than left to be discovered by the surface
+  // -wide loss of type-checking it causes on the day someone arms it.
+  //
+  // MARKED blocks are deliberately NOT reported here — the REFUSE guard above
+  // owns every marked block that fails to parse, JSX or otherwise, and says the
+  // one thing this message cannot: that the surface has no result at all. One
+  // block, one verdict; a defect that appears in two of them teaches the reader
+  // to skim both.
+  const fenceMismatches = bySurface.flatMap((s) => findJsxInTsFence(s.fences)).filter((m) => !m.marked);
+  if (fenceMismatches.length > 0) {
+    fail(
+      `JSX inside a \`\`\`ts / \`\`\`typescript fence — the fence language decides the build-file\n` +
+        `extension, and JSX is a SYNTAX error in a .ts file:\n\n` +
+        fenceMismatches.map((m) => `  - ${rel(m.source)}:${m.fenceLine}  (\`\`\`${m.lang}, unmarked)`).join('\n') +
+        `\n\n  Retag each fence \`\`\`tsx. Nothing else about the block changes: \`tsx\` is already\n` +
+        `  accepted by this gate and by check:doc-authoring's fence scanner.\n\n` +
+        `  None of these is marked, so none breaks a build today — that is why they are worth\n` +
+        `  reporting now. Marking one is a one-line edit, and what it buys is a surface-wide\n` +
+        `  loss of type-checking (${allExamples.length} marked blocks across ${bySurface.length} surfaces at present) delivered as an\n` +
+        `  ordinary-looking compile error. The fence language is also what every reader and\n` +
+        `  every syntax highlighter goes by, so the retag is right on its own terms.`,
+    );
+  }
+
   console.log(`   ${allExamples.length} marked example(s) across ${new Set(allExamples.map((e) => e.source)).size} file(s), ${bySurface.length} surface(s):`);
   for (const { surface, examples } of bySurface) {
     console.log(`     • ${surface.name}: ${examples.length} block(s)`);
@@ -1971,6 +2949,13 @@ function main() {
   const buildDirs: string[] = [];
   let anyDiags = false;
   const diagBlocks: string[] = [];
+  // Which surfaces actually reached `tsc` (#12051). The green line below is a
+  // claim about the SEMANTIC pass, so it is printed only when every surface got
+  // one — and "every surface" is asserted from a set built inside the loop
+  // rather than assumed from the loop existing. The refusal above makes the
+  // syntactic half of that claim true; this makes the "for all surfaces" half
+  // true against the next edit that adds a skip or an early `continue` up here.
+  const compiled = new Set<string>();
 
   for (const { surface, examples } of bySurface) {
     // BEFORE any declaration is resolved (#7181, adopting #7122's primitive).
@@ -2019,6 +3004,10 @@ function main() {
     buildDirs.push(buildDir);
     writeBuildDir(buildDir, examples, paths);
     const { code, output } = runTsc(buildDir);
+    // Every marked block on this surface parsed (the refusal above proved it),
+    // so tsc's syntactic pass was clean and its semantic pass ran. Record that
+    // this surface has a real result — clean or not.
+    compiled.add(surface.name);
 
     const byFile = new Map(examples.map((e) => [e.fileName, e]));
     const diags = parseDiagnostics(output);
@@ -2048,7 +3037,20 @@ function main() {
   }
 
   if (!anyDiags) {
-    console.log(`✅ ${allExamples.length} prose examples type-check across ${bySurface.length} surface(s)`);
+    if (compiled.size !== bySurface.length) {
+      const skipped = bySurface.map((s) => s.surface.name).filter((n) => !compiled.has(n));
+      refuse(
+        `${skipped.length} surface(s) never reached tsc: ${skipped.join(', ')}.\n\n` +
+          `  Nothing below this line may report success: a green verdict here would be a claim\n` +
+          `  about a semantic pass that did not run. This is an internal invariant (#12051) — if\n` +
+          `  you just added a skip or an early \`continue\` to the compile loop, that is the cause,\n` +
+          `  and the fix is to give the skipped surface its own verdict rather than to relax this.`,
+      );
+    }
+    console.log(
+      `✅ ${allExamples.length} prose examples type-check across ${bySurface.length} surface(s)` +
+        ` — every marked block parsed, so tsc ran the SEMANTIC pass on all of them`,
+    );
     if (!KEEP) for (const d of buildDirs) fs.rmSync(d, { recursive: true, force: true });
     return;
   }

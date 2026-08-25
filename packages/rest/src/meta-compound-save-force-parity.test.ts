@@ -1,40 +1,46 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#11095] `?force=true` on the compound-name `PUT /api/v1/meta/:type/:section/:name`
- * — the third row of the destructive-409 face inventory, closed by threading
- * the parameter rather than by rewording the sentence.
+ * [#11095 → #12195] `?force=true` on the `/meta` save doors — a two-door parity
+ * suite whose SECOND DOOR NO LONGER EXISTS.
  *
- * ## The defect
+ * ## What this file is now, and why it was not deleted
  *
  * `saveMetaItem`'s Phase 3a-destructive gate raises ONE `409
  * DESTRUCTIVE_CHANGE`, and its remedy clause ends `— re-submit with
  * ?force=true to proceed.` That clause was true of the single-segment
  * `PUT /meta/:type/:name`, which reads `?force` and threads it. It was FALSE
- * here: this route built its `saveMetaItem` request field by field and `force`
- * was not one of the fields, so a caller refused at this door, doing exactly
- * what the refusal told them to do, got the identical refusal back — and
- * nothing in the second answer said the parameter had been ignored.
+ * at the compound-name twin `PUT /meta/:type/:section/:name`, which built its
+ * `saveMetaItem` request field by field with `force` not among the fields — so
+ * a caller refused at that door, doing exactly what the refusal told them to
+ * do, got the identical refusal back, with nothing saying the parameter had
+ * been ignored. #11095 closed it by threading the parameter.
  *
- * ## Why threading, and not a face of its own
+ * #12176's maintainer ruling (2026-08-25) then retired compound metadata item
+ * names outright. Stage 1 (#12194) declared the item-name grammar and refuses
+ * every slash-bearing name at the publish door — BEFORE the destructive gate
+ * this file was written about — and stage 3 (#12195) un-mounts the arity.
  *
- * The maintainer ruled a SPLIT (2026-08-23) over the two doors #11015 left
- * open, and this is the half that gains the parameter. The argument is #7019's,
- * inherited with its reason rather than re-derived: the compound route is
- * "word for word the same operation" as its single-segment twin — one generic
- * `saveMetaItem`, reached by a name spelled in two segments instead of one —
- * and gating only the twin was MEASURED to leave this door a bypass of the
- * gate, not a narrower version of it. Every divergence found between the pair
- * since has been closed on that same finding: #6603/#7019's `manage_metadata`
- * gate, #8805's write-side organization, #7035's 501 envelope. A pair that
- * disagrees about which risks a caller may acknowledge is that shape once more.
+ * ⛔ REWORKED rather than deleted. The guard worth keeping is against the arity
+ * coming BACK: a re-mounted compound door is a door that reads neither `?force`
+ * nor `?mode` until someone re-threads them, which is the whole divergence
+ * family this file and its `mode` sibling document (#6603/#7019's
+ * `manage_metadata` gate, #8805's write-side organization, #7035's 501
+ * envelope, #11095's `?force`, #11712's `?mode`). So:
  *
- * ⛔ The other half of the ruling went the other way, and this file is not a
- * precedent for it: `@objectstack/runtime`'s dispatcher `PUT /meta` does NOT
- * gain `force` — it is reached with a path, a method and a body, so there is no
- * query string for an acknowledgement to arrive on, and it states its own
- * `writeFace` so the clause stops naming a parameter it does not have. See
- * `packages/runtime/src/domains/meta-save-destructive-remedy.test.ts`.
+ *  1. the compound arity is pinned ABSENT (§1) — the removal's own pin;
+ *  2. the surviving door keeps the FULL #11095 contract — destructive 409 with
+ *     the remedy, honoured `?force=true`, the truthy table (§2);
+ *  3. #6877's repeated-parameter guard is re-pinned on the surviving door (§3);
+ *  4. the slash-bearing name a caller would once have spelled compound is
+ *     pinned answering #12194's `400 INVALID_REQUEST` at the surviving door,
+ *     with `?force` unable to acknowledge past it (§4).
+ *
+ * ⛔ Still not a precedent for the dispatcher: `@objectstack/runtime`'s
+ * `PUT /meta` does NOT gain `force` — it is reached with a path, a method and a
+ * body, so there is no query string for an acknowledgement to arrive on, and it
+ * states its own `writeFace` so the clause stops naming a parameter it does not
+ * have. See `packages/runtime/src/domains/meta-save-destructive-remedy.test.ts`.
  *
  * ## Why the REAL protocol and not a double
  *
@@ -57,21 +63,18 @@
  *
  * ## What the cases assert
  *
- * `status` AND `code` (the ADR-0112 envelope) on every refusal, in BOTH
- * directions, on BOTH doors. These handlers *send* rather than throw, so a
- * `toThrow`-shaped assertion could not separate "refused with the wrong
- * envelope" from "did not refuse at all" — and on the unfixed code the second
- * answer is a 409 that looks exactly like the first.
+ * `status` AND `code` (the ADR-0112 envelope) on every refusal. These handlers
+ * *send* rather than throw, so a `toThrow`-shaped assertion could not separate
+ * "refused with the wrong envelope" from "did not refuse at all" — and on the
+ * unfixed code the second answer is a 409 that looks exactly like the first.
  *
  * ⚠️ TWO body shapes appear below, and they are the file's, not a typo. The
- * refusals this card is about come out of `handleRouteError`, whose body is
- * FLAT — `{ error: <message string>, code, issues }`, with the `code` at top
- * level and `issues` beside it (row 2 of the face inventory calls that "a
- * top-level `issues`", and this is what it means). The `400` from
- * `refuseRepeatedQueryParams` is hand-built by the route and NESTED —
- * `{ error: { code, message } }` — as are this file's sibling `403`/`501`
- * refusals. Reading `body.error.code` off a `handleRouteError` answer yields
- * `undefined`, and next to a status-only assertion that reads as a pass.
+ * destructive and grammar refusals come out of `handleRouteError`, whose body
+ * is FLAT — `{ error: <message string>, code, issues }`, with the `code` at top
+ * level. The `400` from `refuseRepeatedQueryParams` is hand-built by the route
+ * and NESTED — `{ error: { code, message } }`. Reading `body.error.code` off a
+ * `handleRouteError` answer yields `undefined`, and next to a status-only
+ * assertion that reads as a pass.
  */
 
 import { describe, it, expect, vi } from 'vitest';
@@ -269,230 +272,200 @@ function boot() {
         fieldsOf: (id: string) => Object.keys(JSON.parse(rows.get(id)!.metadata).fields ?? {}).sort(),
         compoundFields: () => Object.keys(JSON.parse(rows.get('row_compound')!.metadata).fields ?? {}).sort(),
         singleFields: () => Object.keys(JSON.parse(rows.get('row_single')!.metadata).fields ?? {}).sort(),
-        /** The door under test. */
-        compoundPut: (query: Record<string, unknown> = {}) =>
-            call(COMPOUND_PATH, { type: 'object', section: 'crm', name: 'task' }, query),
-        /** Its single-segment twin — the control, already correct before this card. */
+        /**
+         * [#12195] The compound door's REGISTRATION, not a call to it. This
+         * used to be `compoundPut()`; the arity is retired, so what is
+         * assertable now is that nothing is mounted there.
+         */
+        compoundRoute: () => route('PUT', COMPOUND_PATH),
+        /** Every `/meta` route key this server mounted, for absence sweeps. */
+        metaRouteKeys: () => (rest as any).getRoutes()
+            .map((r: any) => `${String(r.method).toUpperCase()} ${r.path}`)
+            .filter((k: string) => k.includes(META)),
+        /** The surviving door. */
         singlePut: (query: Record<string, unknown> = {}) =>
             call(SINGLE_PATH, { type: 'object', name: SINGLE_NAME }, query),
+        /**
+         * [#12195] The surviving door addressed with an ARBITRARY name — the
+         * shape a caller now uses for a slash-bearing one (percent-encoded on
+         * the wire, decoded by Hono before the handler runs).
+         */
+        singlePutNamed: (name: string, query: Record<string, unknown> = {}) =>
+            call(SINGLE_PATH, { type: 'object', name }, query),
     };
 }
 
-/** The sentence the 409 ends with, and the thing this card had to make true. */
+/** The sentence the 409 ends with, and the thing #11095 had to make true. */
 const PUT_REMEDY = 're-submit with ?force=true to proceed.';
 
 // ═══════════════════════════════════════════════════════════════════════════
-// 1. The compound door, REFUSED — and the refusal tells the truth now
+// 1. ⭐ [#12195] The compound door is GONE — the pin the removal owes
 // ═══════════════════════════════════════════════════════════════════════════
 
-describe('[#11095] compound-name PUT — the destructive refusal', () => {
-    it('refuses a data-dropping save with the ADR-0112 envelope, and writes NOTHING', async () => {
-        const stack = boot();
-
-        const answer = await stack.compoundPut();
-
-        expect(answer.status).toBe(409);
-        expect(answer.body?.code).toBe('DESTRUCTIVE_CHANGE');
-        // THE POINT of a refusal case: "refused after writing" satisfies both
-        // assertions above and is still the bug.
-        expect(stack.compoundFields()).toEqual(STORED_FIELDS);
+describe('[#11095 / #12195] the compound-name `PUT` arity is retired', () => {
+    /**
+     * ⛔ REWORKED, not deleted — same reasoning as the `mode` suite next door.
+     * #11095 threaded `?force` onto the compound door to close the fourth
+     * divergence on the pair; #12176 then retired the pair itself. The guard
+     * worth keeping is against the arity coming BACK, because a re-mounted
+     * compound door is a door that reads neither `?force` nor `?mode` unless
+     * someone re-threads them — the divergence family this file documents.
+     */
+    it('⭐ mounts no `PUT /meta/:type/:section/:name` at all', () => {
+        expect(
+            boot().compoundRoute(),
+            'the compound PUT arity is mounted again — #12176 retired compound '
+            + 'metadata item names and #12194 refuses every slash-bearing name at the '
+            + 'publish door, so it can only be reached by a name that cannot be created',
+        ).toBeUndefined();
     });
 
-    it('the findings reach the caller structurally as well as in the prose (#10886 non-effect)', async () => {
-        const stack = boot();
-
-        const answer = await stack.compoundPut();
-
-        // `handleRouteError` threads `error.issues` onto a top-level `issues`.
-        // Row 2 of the face inventory says this door is NOT a sole carrier, and
-        // that claim is about THIS body.
-        expect(Array.isArray(answer.body?.issues)).toBe(true);
-        expect(answer.body.issues).toEqual(expect.arrayContaining([
-            expect.objectContaining({ code: 'field_removed', field: 'b' }),
-        ]));
-        expect(answer.body?.error).toContain("Field 'b' removed");
-    });
-
-    it('⭐ prescribes `?force=true` — the sentence this card had to make true', async () => {
-        const stack = boot();
-
-        const answer = await stack.compoundPut();
-
-        // Pre-fix this assertion ALSO passed: the clause was rendered on every
-        // face. What it could not do was survive the next case.
-        expect(answer.body?.error).toContain(PUT_REMEDY);
+    it('⭐ mounts no compound `:section` arity of any method', () => {
+        expect(boot().metaRouteKeys().filter((k: string) => k.includes(':section'))).toEqual([]);
     });
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
-// 2. ⭐ The compound door, ACCEPTED — the case that fails without the fix
+// 2. The surviving door keeps the FULL #11095 contract
 // ═══════════════════════════════════════════════════════════════════════════
 
-describe('[#11095] compound-name PUT — `?force=true` is honoured', () => {
-    it('⭐ doing what the refusal says WORKS: 200, and the store actually changed', async () => {
+describe('[#11095] the single-segment `PUT` — destructive refusal and its remedy', () => {
+    it('⭐ refuses a destructive change 409 with the remedy, and writes NOTHING', async () => {
         const stack = boot();
 
-        // 1. Refused, and told to re-submit with the parameter.
-        const refused = await stack.compoundPut();
-        expect(refused.status).toBe(409);
-        expect(refused.body?.code).toBe('DESTRUCTIVE_CHANGE');
-        expect(refused.body?.error).toContain(PUT_REMEDY);
+        const answer = await stack.singlePut();
 
-        // 2. The caller does exactly that. Before this card the answer here was
-        //    a byte-identical 409 — the whole defect, in one line.
-        const forced = await stack.compoundPut({ force: 'true' });
+        expect(answer.status).toBe(409);
+        expect(answer.body?.code).toBe('DESTRUCTIVE_CHANGE');
+        expect(answer.body?.error).toContain(PUT_REMEDY);
+        expect(stack.singleFields()).toEqual(STORED_FIELDS);
+    });
 
-        expect(forced.status).toBe(200);
-        expect(forced.body?.error).toBeUndefined();
-        // 3. …and the acknowledged change LANDED. A 200 that wrote nothing
-        //    would pass a status-only assertion and be a different bug.
-        expect(stack.compoundFields()).toEqual(SHRUNK_FIELDS);
+    it('⭐ honours `?force=true` — acknowledged, 200, landed', async () => {
+        const stack = boot();
+
+        const answer = await stack.singlePut({ force: 'true' });
+
+        expect(answer.status).toBe(200);
+        expect(stack.singleFields()).toEqual(SHRUNK_FIELDS);
     });
 
     it('threads `force: true` into the protocol request, and only when asked', async () => {
-        const stack = boot();
+        const forced = boot();
+        const plain = boot();
 
-        await stack.compoundPut();
-        await stack.compoundPut({ force: 'true' });
+        await forced.singlePut({ force: 'true' });
+        await plain.singlePut();
 
-        // The seam itself. The pre-fix door reached `saveMetaItem` on BOTH of
-        // these calls — it simply never named `force` in either request, which
-        // is why a store-only assertion could not localise the defect.
-        expect(stack.seen).toHaveLength(2);
-        expect(stack.seen[0].force).toBeUndefined();
-        expect(stack.seen[1].force).toBe(true);
-        // The rest of the request is untouched by this card — same face, same
-        // compound name assembled from the two segments.
-        expect(stack.seen[1].name).toBe(COMPOUND_NAME);
-        expect(stack.seen[1].writeFace).toBe('meta-envelope');
+        expect(forced.seen).toHaveLength(1);
+        expect(forced.seen[0]).toMatchObject({
+            type: 'object', name: SINGLE_NAME, force: true, writeFace: 'meta-envelope',
+        });
+        // The default is the ABSENCE of the flag, never `force: false`.
+        expect(plain.seen).toHaveLength(1);
+        expect(plain.seen[0].force).toBeFalsy();
     });
 
-    it.each([
-        { spelling: 'true' }, { spelling: '1' }, { spelling: 'yes' }, { spelling: 'on' }, { spelling: 'TRUE' },
-    ])('accepts the `$spelling` spelling, byte-identically to the twin', async ({ spelling }) => {
+    it.each(['true', '1', 'yes', 'on', 'TRUE'])(
+        'the `%s` spelling acknowledges the same way — the truthy table is unchanged',
+        async (spelling) => {
+            const stack = boot();
+
+            const answer = await stack.singlePut({ force: spelling });
+
+            expect(answer.status).toBe(200);
+            expect(stack.singleFields()).toEqual(SHRUNK_FIELDS);
+        },
+    );
+
+    it('`?force=false` does NOT acknowledge — the destructive refusal stands', async () => {
         const stack = boot();
 
-        const answer = await stack.compoundPut({ force: spelling });
+        const answer = await stack.singlePut({ force: 'false' });
 
-        expect(answer.status).toBe(200);
-        expect(stack.compoundFields()).toEqual(SHRUNK_FIELDS);
-    });
-
-    it('an explicit opt-OUT is still an opt-out — `?force=false` refuses', async () => {
-        const stack = boot();
-
-        const answer = await stack.compoundPut({ force: 'false' });
-
-        // Not "any value present means force": the truthy table is a table.
         expect(answer.status).toBe(409);
         expect(answer.body?.code).toBe('DESTRUCTIVE_CHANGE');
-        expect(stack.compoundFields()).toEqual(STORED_FIELDS);
+        expect(stack.singleFields()).toEqual(STORED_FIELDS);
     });
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
-// 3. [#6877] ⛔ The inversion this card had to avoid re-opening on a new door
+// 3. [#6877] The repeated-parameter guard. GREEN BOTH SIDES of this card.
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe('[#11095 / #6877] a REPEATED `?force` is refused, never read as force-ON', () => {
     /**
-     * #6877's sharpest measured case is on this exact parameter one route over:
-     * `?force=false&force=false` arrives as an ARRAY, the `typeof` ternary falls
-     * through to `!!forceRaw`, and a non-empty array is truthy — so a caller
-     * repeating an explicit opt-OUT turned the destructive guard ON, on a
-     * destructive verb, answered 200.
-     *
-     * Threading `force` here without adding it to this door's
-     * `refuseRepeatedQueryParams` list would have re-opened that inversion on a
-     * door that never had it. The parameter and the guard landed in one stroke;
-     * this is the case that says so.
+     * #6877's inversion: a repeated `?force=false&force=false` arrives as an
+     * ARRAY, and a non-empty array is truthy — so a spelled-out opt-OUT would
+     * turn the guard ON. The route refuses multiplicity before reading intent.
      */
     it('⛔ `?force=false&force=false` is a 400 — NOT a silent force-ON', async () => {
         const stack = boot();
 
-        const answer = await stack.compoundPut({ force: ['false', 'false'] });
+        const answer = await stack.singlePut({ force: ['false', 'false'] });
 
         expect(answer.status).toBe(400);
         expect(answer.body?.error?.code).toBe('VALIDATION_ERROR');
-        // The inversion, stated as the assertion that would have caught it: the
-        // save must not have happened at all, let alone succeeded.
         expect(stack.seen).toHaveLength(0);
-        expect(stack.compoundFields()).toEqual(STORED_FIELDS);
+        expect(stack.singleFields()).toEqual(STORED_FIELDS);
     });
 
     it('⛔ `?force=true&force=true` is refused too — multiplicity, not intent', async () => {
         const stack = boot();
 
-        const answer = await stack.compoundPut({ force: ['true', 'true'] });
+        const answer = await stack.singlePut({ force: ['true', 'true'] });
 
         expect(answer.status).toBe(400);
         expect(answer.body?.error?.code).toBe('VALIDATION_ERROR');
-        expect(stack.compoundFields()).toEqual(STORED_FIELDS);
+        expect(stack.seen).toHaveLength(0);
+        expect(stack.singleFields()).toEqual(STORED_FIELDS);
     });
 
-    it('one occurrence encoded as an array still works — the guard unwraps, it does not blanket-refuse', async () => {
+    it('one occurrence encoded as an array still REACHES the door — the guard unwraps, it does not blanket-refuse', async () => {
         const stack = boot();
 
-        const answer = await stack.compoundPut({ force: ['true'] });
+        const answer = await stack.singlePut({ force: ['true'] });
 
         expect(answer.status).toBe(200);
-        expect(stack.compoundFields()).toEqual(SHRUNK_FIELDS);
+        expect(stack.seen).toHaveLength(1);
+        expect(stack.seen[0].force).toBe(true);
+        expect(stack.singleFields()).toEqual(SHRUNK_FIELDS);
     });
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
-// 4. ⭐ [#7019] The twins agree — the ruling this card inherits, executable
+// 4. ⭐ [#12194] A slash-bearing name is refused at the GRAMMAR gate, before
+//    the destructive gate — and `?force` cannot acknowledge past it.
 // ═══════════════════════════════════════════════════════════════════════════
 
-describe('[#11095 / #7019] the two `PUT` doors answer the same question the same way', () => {
-    /**
-     * The single-segment door is UNTOUCHED by this card and is the control. Its
-     * behaviour is asserted here rather than assumed, so this pair of cases
-     * fails if either door moves — which is the only shape in which "the twins
-     * agree" is a pin rather than a comment.
-     */
-    it('refused identically at both doors, with the same code and status', async () => {
+describe('[#12194 / #12195] a slash-bearing name is refused at the surviving door', () => {
+    it('⭐ answers 400 INVALID_REQUEST and stores NOTHING', async () => {
         const stack = boot();
 
-        const compound = await stack.compoundPut();
-        const single = await stack.singlePut();
+        const answer = await stack.singlePutNamed(COMPOUND_NAME);
 
-        expect(compound.status).toBe(single.status);
-        expect(compound.status).toBe(409);
-        expect(compound.body?.code).toBe(single.body?.code);
-        expect(compound.body?.code).toBe('DESTRUCTIVE_CHANGE');
-        // Both refusals prescribe the parameter, and now both mean it.
-        expect(compound.body?.error).toContain(PUT_REMEDY);
-        expect(single.body?.error).toContain(PUT_REMEDY);
+        expect(answer.status).toBe(400);
+        expect(answer.body?.code).toBe('INVALID_REQUEST');
         expect(stack.compoundFields()).toEqual(STORED_FIELDS);
-        expect(stack.singleFields()).toEqual(STORED_FIELDS);
     });
 
-    it('⭐ ACCEPTED identically at both doors — the divergence this card closed', async () => {
+    it('⭐ `?force=true` changes NOTHING — force cannot acknowledge a grammar violation', async () => {
         const stack = boot();
 
-        const compound = await stack.compoundPut({ force: 'true' });
-        const single = await stack.singlePut({ force: 'true' });
+        const refused = await stack.singlePutNamed(COMPOUND_NAME);
+        const forced = await stack.singlePutNamed(COMPOUND_NAME, { force: 'true' });
 
-        // The one assertion that was FALSE before this card: these two statuses
-        // were 409 and 200. One name, spelled two ways, two different answers
-        // to "may I acknowledge this risk".
-        expect(compound.status).toBe(single.status);
-        expect(compound.status).toBe(200);
-        expect(stack.compoundFields()).toEqual(SHRUNK_FIELDS);
-        expect(stack.singleFields()).toEqual(SHRUNK_FIELDS);
+        expect(refused.status).toBe(400);
+        expect(forced.status).toBe(400);
+        expect(forced.body?.code).toBe('INVALID_REQUEST');
+        expect(stack.compoundFields()).toEqual(STORED_FIELDS);
     });
 
-    it('and the twin is UNTOUCHED — its request shape is what it always was', async () => {
+    it('and does NOT prescribe `?force=true` — the remedy belongs to the destructive gate alone', async () => {
         const stack = boot();
 
-        await stack.singlePut({ force: 'true' });
+        const answer = await stack.singlePutNamed(COMPOUND_NAME);
 
-        // The fence. This card threads a parameter on the compound door; it must
-        // not have edited the door that was already right.
-        expect(stack.seen).toHaveLength(1);
-        expect(stack.seen[0]).toMatchObject({
-            type: 'object', name: SINGLE_NAME, force: true, writeFace: 'meta-envelope',
-        });
+        expect(String(answer.body?.error ?? answer.body?.message ?? '')).not.toContain(PUT_REMEDY);
     });
 });

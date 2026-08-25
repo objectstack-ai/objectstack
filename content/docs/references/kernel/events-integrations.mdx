@@ -68,6 +68,22 @@ const result = EventMessageQueueConfigSchema.parse(data);
 | **transform** | `any` | optional | Transform event before sending |
 | **enabled** | `boolean` | optional (default: `true`) | Whether webhook is enabled |
 
+### Nested Shape: `EventWebhookConfig.authentication`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `Enum<'none' \| 'bearer' \| 'basic' \| 'api-key'>` | ✅ | Auth type |
+| **credentials** | `Record<string, string>` | optional | Auth credentials |
+
+### Nested Shape: `EventWebhookConfig.retryPolicy`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **maxRetries** | `integer` | optional (default: `3`) | Max retry attempts |
+| **backoffStrategy** | `Enum<'fixed' \| 'linear' \| 'exponential'>` | optional (default: `"exponential"`) |  |
+| **initialDelayMs** | `integer` | optional (default: `1000`) | Initial retry delay |
+| **maxDelayMs** | `integer` | optional (default: `60000`) | Max retry delay |
+
 
 ---
 
@@ -84,6 +100,21 @@ const result = EventMessageQueueConfigSchema.parse(data);
 | **tenantFilter** | `boolean` | optional (default: `true`) | Filter events by tenant |
 | **channels** | `{ name: string; eventPattern: string; filter?: any }[]` | optional | Named channels for event broadcasting |
 | **rateLimit** | `{ maxEventsPerSecond: integer; windowMs: integer }` | optional | Rate limiting configuration |
+
+### Nested Shape: `RealTimeNotificationConfig.channels[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Channel name |
+| **eventPattern** | `string` | ✅ | Event pattern for channel |
+| **filter** | `any` | optional | Additional filter function |
+
+### Nested Shape: `RealTimeNotificationConfig.rateLimit`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **maxEventsPerSecond** | `integer` | ✅ | Max events per second per client |
+| **windowMs** | `integer` | optional (default: `1000`) | Rate limit window |
 
 
 ---

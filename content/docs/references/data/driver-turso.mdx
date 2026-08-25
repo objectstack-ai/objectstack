@@ -74,6 +74,13 @@ Turso / libSQL Connection Configuration
 | **timeout** | `integer` | optional | Operation timeout in milliseconds for remote operations |
 | **mode** | `Enum<'local' \| 'replica' \| 'remote'>` | optional | Force a transport mode instead of inferring it from `url` |
 
+### Nested Shape: `TursoConfig.sync`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **intervalSeconds** | `integer` | optional | Periodic sync interval in seconds (0 = manual only) |
+| **onConnect** | `boolean` | optional | Sync immediately on connect |
+
 
 ---
 

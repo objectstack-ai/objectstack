@@ -4,12 +4,21 @@ import { ArrowRight, Check } from 'lucide-react';
 import { Bricolage_Grotesque, IBM_Plex_Mono } from 'next/font/google';
 import { HomeLayout } from 'fumadocs-ui/layouts/home';
 import { baseOptions, gitConfig } from '@/lib/layout.shared';
-import { absoluteUrl } from '@/lib/site';
+import { absoluteUrl, HERO_COVER } from '@/lib/site';
+import {
+  APACHE_2_0_URL,
+  GITHUB_REPO_URL,
+  JsonLd,
+  ORGANIZATION,
+  ORGANIZATION_REF,
+  SOFTWARE_ID,
+  YOUTUBE_CHANNEL_URL,
+  type JsonLdNode,
+} from '@/lib/structured-data';
 import { YouTubeEmbed } from '@/components/youtube-embed';
 
 /** The 90-second overview — the same video the README's hero cover links to. */
 const OVERVIEW_VIDEO_ID = 'CX_FlOoOtr0';
-const YOUTUBE_CHANNEL_URL = 'https://www.youtube.com/@objectstack';
 
 const display = Bricolage_Grotesque({
   subsets: ['latin'],
@@ -22,10 +31,30 @@ const mono = IBM_Plex_Mono({
   variable: '--font-l-mono',
 });
 
+const HOME_TITLE = 'Metadata framework for AI-written apps';
+const HOME_DESCRIPTION =
+  'ObjectStack turns the whole app — data model, UI, workflows, permissions — into typed metadata: a complete CRM in under 150k tokens, one context window.';
+
+/**
+ * The homepage's metadata. Its social card is the shared hero cover,
+ * `HERO_COVER` from `lib/site.ts` — the same image the video poster below uses.
+ *
+ * ⚠️ Deliberately NOT the docs card generator. `app/og/docs/[...slug]/route.tsx`
+ * renders from a `source.getPage()` result, and the homepage has no MDX file
+ * behind it — there is no slug to hand it. It reuses the hero cover instead,
+ * which is already shipped and already the video poster on this page, so the
+ * shared card costs no extra bytes and no extra route.
+ *
+ * The path used to be spelled as a literal here, again in the blog's card, and a
+ * third time as the `poster` further down this file — with a note asking whoever
+ * added a third consumer to hoist it. That happened; it lives in `lib/site.ts`
+ * now, and the reasons a re-encode has to be careful live with it.
+ *
+ * Left site-relative: `metadataBase` in `app/layout.tsx` absolutises it.
+ */
 export const metadata: Metadata = {
-  title: 'Metadata framework for AI-written apps',
-  description:
-    'ObjectStack turns the whole app — data model, UI, workflows, permissions — into typed metadata: a complete CRM in under 150k tokens, one context window.',
+  title: HOME_TITLE,
+  description: HOME_DESCRIPTION,
   /**
    * `/` is the one indexable spelling of the homepage: `proxy.ts` rewrites `/` to
    * this route internally, and the prefixed form `/en` 307s back to `/`. Every
@@ -33,7 +62,65 @@ export const metadata: Metadata = {
    * points here.
    */
   alternates: { canonical: absoluteUrl('/') },
+  openGraph: {
+    type: 'website',
+    title: HOME_TITLE,
+    description: HOME_DESCRIPTION,
+    // Same absolute URL as the canonical link — see the docs route for why the
+    // two must not drift.
+    url: absoluteUrl('/'),
+    images: [HERO_COVER],
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: HOME_TITLE,
+    description: HOME_DESCRIPTION,
+    images: [HERO_COVER.url],
+  },
 };
+
+/**
+ * The homepage's structured data.
+ *
+ * ⚠️ **`SoftwareSourceCode`, not `SoftwareApplication`.** Both are `CreativeWork`
+ * subtypes that carry `license`, so either satisfies the card; the choice is
+ * about what the validator does with it. Google's Software App rich result
+ * *requires* `offers`, `aggregateRating` or `review` — ObjectStack is an
+ * Apache-2.0 runtime with no price, no store listing and no ratings, so a
+ * `SoftwareApplication` node here would report missing-required-property errors
+ * in the very test this card is accepted against, in exchange for a rich result
+ * it can never be eligible for. `SoftwareSourceCode` has no Google rich-result
+ * feature and therefore no required properties, and `codeRepository` /
+ * `programmingLanguage` / `runtimePlatform` describe what this project actually
+ * is.
+ *
+ * Every field is drawn from something already on this page or in `lib/`: the
+ * title and description are the same constants `metadata` uses, the image is
+ * `HERO_COVER`, the licence is the repo's own, and the two `sameAs` links are the
+ * GitHub organisation and the YouTube channel this page links to in its hero.
+ */
+function homeGraph(): JsonLdNode[] {
+  return [
+    ORGANIZATION,
+    {
+      '@type': 'SoftwareSourceCode',
+      '@id': SOFTWARE_ID,
+      name: 'ObjectStack',
+      url: absoluteUrl('/'),
+      // Same two strings `metadata` above emits, so the page cannot describe
+      // itself one way to a crawler and another way to a social card.
+      headline: HOME_TITLE,
+      description: HOME_DESCRIPTION,
+      image: absoluteUrl(HERO_COVER.url),
+      codeRepository: GITHUB_REPO_URL,
+      programmingLanguage: 'TypeScript',
+      runtimePlatform: 'Node.js',
+      license: APACHE_2_0_URL,
+      author: ORGANIZATION_REF,
+      maintainer: ORGANIZATION_REF,
+    },
+  ];
+}
 
 const VOCABULARY: { tag: string; title: string; copy: string }[] = [
   { tag: 'object', title: 'Objects & fields', copy: 'Typed schemas with relations, validation, formulas, and files.' },
@@ -92,6 +179,7 @@ function DiffLine({ children, plain }: { children: React.ReactNode; plain?: bool
 export default function HomePage() {
   return (
     <HomeLayout {...baseOptions()}>
+      <JsonLd graph={homeGraph()} />
       <div
         className={`${display.variable} ${mono.variable} relative overflow-hidden`}
         style={{
@@ -183,7 +271,7 @@ export default function HomePage() {
             <YouTubeEmbed
               videoId={OVERVIEW_VIDEO_ID}
               title="ObjectStack in 90 Seconds"
-              poster="/hero-cover-dark.png"
+              poster={HERO_COVER.url}
             />
             <figcaption
               className="mt-3 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-[12px] text-fd-muted-foreground"

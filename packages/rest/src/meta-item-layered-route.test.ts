@@ -119,22 +119,28 @@ describe('#5882 GET /meta/:type/:name/layers — the declared layered resource',
         expect(routeFor(rest, LAYERS_PATH)).toBeDefined();
     });
 
-    it('is registered BEFORE the routes that would otherwise capture its path', async () => {
-        // `/:type/:name` cannot match a 3-segment path, but
-        // `/:type/:section/:name` CAN — it would bind section=<name>,
-        // name="layers" and answer an ordinary metadata read for an item called
-        // "layers". Under a first-match router, registration order is the only
-        // thing preventing that, so the order is the assertion.
+    it('has no three-segment catch-all left to capture its path', async () => {
+        // [#12195] This used to be an ORDER pin. `/:type/:name` cannot match a
+        // 3-segment path, but `/:type/:section/:name` COULD — it would bind
+        // section=<name>, name="layers" and answer an ordinary metadata read
+        // for an item called "layers". Under a first-match router, registration
+        // order was the only thing preventing that.
+        //
+        // The compound arity is retired, so the hazard is gone rather than
+        // ordered around. The pin inverts: what must stay true is that no
+        // three-segment catch-all is mounted at all — which is both the fact
+        // that holds now and the thing a re-mount would break.
         const rest = new RestServer(mockServer() as any, baseProtocol() as any, ANON_API as any);
         rest.registerRoutes();
         const paths = (rest as any).getRoutes()
             .filter((r: any) => r.method === 'GET')
             .map((r: any) => r.path);
-        const layers = paths.indexOf(LAYERS_PATH);
-        const compound = paths.indexOf('/api/v1/meta/:type/:section/:name');
-        expect(layers).toBeGreaterThanOrEqual(0);
-        expect(compound).toBeGreaterThanOrEqual(0);
-        expect(layers).toBeLessThan(compound);
+        expect(paths.indexOf(LAYERS_PATH)).toBeGreaterThanOrEqual(0);
+        expect(
+            paths.filter((p: string) => p.includes(':section')),
+            'a compound `:section` arity is mounted again — it captures '
+            + `${LAYERS_PATH} as an item read for a metadata item called "layers"`,
+        ).toEqual([]);
     });
 
     it('answers the three-layer projection, with the layers SEPARATE', async () => {

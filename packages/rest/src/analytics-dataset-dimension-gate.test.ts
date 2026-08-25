@@ -325,7 +325,9 @@ describe('[#5520] the 500 body no longer ships driver internals', () => {
     // messages name RLS policy fields — the 5xx branch withholds the text. So
     // what this half now guards is that #5520's `looksLikeInternalErrorLeak`
     // withhold and #5367's declared-server-fault withhold COMPOSE rather than
-    // fight: same 500 code, message withheld, log intact.
+    // fight: same 500, message withheld, log intact. [#11718] The CODE on the
+    // wire is now the producer's own `READ_SCOPE_COMPILE_FAILED`; the status
+    // and the withhold — this half's actual subject — do not move.
     const c = await post(
       buildRoute(async () =>
         throwingAnalytics(
@@ -338,7 +340,12 @@ describe('[#5520] the 500 body no longer ships driver internals', () => {
       { dataset, selection: { measures: ['account_count'], dimensions: ['industry'] } },
     );
     expect(c.statusCode).toBe(500);
-    expect(c.body.code).toBe('ANALYTICS_QUERY_FAILED');
+    // [#11718] The declared code is RELAYED rather than overwritten with
+    // `ANALYTICS_QUERY_FAILED`. What this half guards is unchanged and is
+    // asserted on the next two lines: #5520's `looksLikeInternalErrorLeak`
+    // withhold and #5367's declared-server-fault withhold still COMPOSE rather
+    // than fight — same 500, message withheld, no policy field in the body.
+    expect(c.body.code).toBe('READ_SCOPE_COMPILE_FAILED');
     expect(c.body.error).toBe(INTERNAL_ERROR_MESSAGE);
     expect(String(c.body.error)).not.toMatch(/owner_email/);
   });

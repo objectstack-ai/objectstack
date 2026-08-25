@@ -12,6 +12,7 @@ import {
 import { MetadataCacheRequestSchema, MetadataCacheResponseSchema } from './http-cache.zod';
 import { QuerySchema, QUERY_DISTINCT_REMOVED } from '../data/query.zod';
 import { retiredKey } from '../shared/retired-key';
+import { MetadataItemNameSchema } from '../shared/identifiers.zod';
 import { DroppedFieldsEventSchema } from '../data/data-engine.zod';
 import { 
   AnalyticsQueryRequestSchema,  
@@ -566,10 +567,21 @@ export const RuntimeAuthoringIssueSchema = lazySchema(() => z.object({
 /**
  * Save Metadata Item Request
  * Create or update a metadata item
+ *
+ * `name` carries the enforced item-name grammar (#12194 — lowercase
+ * snake_case segments, optionally dot-qualified; `shared/identifiers.zod.ts`
+ * is the single source). The implementation refuses an off-grammar name at
+ * the door with `400 INVALID_REQUEST`, so declared = enforced. The read and
+ * delete request shapes deliberately stay `z.string()`: pre-grammar residue
+ * rows must remain listable and clearable.
  */
 export const SaveMetaItemRequestSchema = lazySchema(() => z.object({
   type: z.string().describe('Metadata type name'),
-  name: z.string().describe('Item name'),
+  name: MetadataItemNameSchema.describe(
+    'Item name — lowercase snake_case segments, optionally dot-qualified '
+    + '(`crm_lead`, `crm_lead.pipeline`). Slash-compound names are refused at '
+    + 'the publish door (#12176).',
+  ),
   item: z.unknown().describe('Metadata item definition'),
 }));
 
@@ -679,7 +691,11 @@ export const SaveMetaItemResponseSchema = lazySchema(() => z.object({
  */
 export const PublishMetaItemRequestSchema = lazySchema(() => z.object({
   type: z.string().describe('Metadata type name'),
-  name: z.string().describe('Item name'),
+  name: MetadataItemNameSchema.describe(
+    'Item name — lowercase snake_case segments, optionally dot-qualified '
+    + '(`crm_lead`, `crm_lead.pipeline`). The promotion door enforces the '
+    + 'same grammar as `saveMetaItem` (#12194).',
+  ),
   organizationId: z.string().optional().describe(
     'Organization (tenant) scope for the promotion. The implementation resolves '
     + 'the draft through the org partition (ADR-0005, #8805), so a draft '

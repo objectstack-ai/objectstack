@@ -183,12 +183,6 @@ describe('#10340 the /meta doors decide org scope on the FOLDED type, not the ra
                 });
                 expect(requestFrom(b2.getMetaItemLayered).organizationId).toBe(ORG);
 
-                const b3 = boot(AUTHORIZED);
-                await b3.drive('GET', `${META}/:type/:section/:name`, {
-                    params: { type: plural, section: 'core', name: 'greeting' },
-                });
-                expect(requestFrom(b3.getMetaItem).organizationId).toBe(ORG);
-
                 const b4 = boot(AUTHORIZED);
                 await b4.drive('DELETE', `${META}/:type/:name`, {
                     params: { type: plural, name: 'greeting' },
@@ -208,12 +202,11 @@ describe('#10340 the /meta doors decide org scope on the FOLDED type, not the ra
                 });
                 expect(requestFrom(b6.rollbackMetaItem).organizationId).toBe(ORG);
 
-                const b7 = boot(AUTHORIZED);
-                await b7.drive('PUT', `${META}/:type/:section/:name`, {
-                    params: { type: plural, section: 'core', name: 'greeting' },
-                    body: { label: 'Greeting' },
-                });
-                expect(requestFrom(b7.saveMetaItem).organizationId).toBe(ORG);
+                // [#12195] The compound-name GET and PUT were driven here too,
+                // as the doors most likely to be left org-BLIND while their
+                // twins were fixed (#9454). Their arity is retired, so the
+                // spelling map is exercised through the single-segment doors
+                // above — the same fold, the same scope decision.
             });
         }
     });

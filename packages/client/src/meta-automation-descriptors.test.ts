@@ -25,11 +25,27 @@ function createMockClient(body: any, status = 200) {
 }
 
 describe('client.meta (#3563 PR-5)', () => {
-    it('getPublished passes compound names through unencoded', async () => {
+    it('[#12195] getPublished ENCODES the name — one spelling, one door', async () => {
+        // ⚠️ Inverted by #12195. This required the slash to pass through RAW so
+        // the request reached the compound arity
+        // `GET /meta/:type/:section/:name/published`. #12176 retired
+        // compound-name addressing and that arity is un-mounted, so `%2F` —
+        // which Hono decodes back to `views/all_leads` on the surviving
+        // `/:type/:name/published` route — is the correct spelling now.
         const { client, fetchMock } = createMockClient({ success: true, data: { name: 'all_leads' } });
         await client.meta.getPublished('lead', 'views/all_leads');
         expect(String(fetchMock.mock.calls[0][0])).toBe(
-            'http://localhost:3000/api/v1/meta/lead/views/all_leads/published',
+            'http://localhost:3000/api/v1/meta/lead/views%2Fall_leads/published',
+        );
+    });
+
+    it('[#12195] a LEGAL name reaches getPublished byte-identically', async () => {
+        // The control: encoding must be a no-op for every name #12194's
+        // grammar admits, so no working caller moved.
+        const { client, fetchMock } = createMockClient({ success: true, data: {} });
+        await client.meta.getPublished('lead', 'all_leads');
+        expect(String(fetchMock.mock.calls[0][0])).toBe(
+            'http://localhost:3000/api/v1/meta/lead/all_leads/published',
         );
     });
 

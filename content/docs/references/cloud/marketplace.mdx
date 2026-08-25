@@ -149,6 +149,16 @@ Install from marketplace request
 | **artifactRef** | `{ url: string; sha256: string; size: integer; format: Enum<'tgz' \| 'zip'>; … }` | optional | Artifact reference for direct installation |
 | **tenantId** | `string` | optional | Tenant identifier |
 
+### Nested Shape: `MarketplaceInstallRequest.artifactRef`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **url** | `string` | ✅ | Artifact download URL |
+| **sha256** | `string` | ✅ | SHA256 checksum |
+| **size** | `integer` | ✅ | Artifact size in bytes |
+| **format** | `Enum<'tgz' \| 'zip'>` | optional (default: `"tgz"`) | Artifact format |
+| **uploadedAt** | `string` | ✅ | Upload timestamp |
+
 
 ---
 
@@ -201,6 +211,39 @@ Public-facing package listing on the marketplace
 | **updatedAt** | `string` | optional | Last updated timestamp |
 | **translations** | `Record<string, { displayName?: string; description?: string; readme?: string; tagline?: string; … }>` | optional | Locale-keyed overrides for name / tagline / description / screenshot captions |
 
+### Nested Shape: `MarketplaceListing.versions[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **version** | `string` | ✅ | Version string |
+| **releaseDate** | `string` | ✅ | Release date |
+| **releaseNotes** | `string` | optional | Release notes |
+| **minPlatformVersion** | `string` | optional | Minimum platform version |
+| **deprecated** | `boolean` | optional (default: `false`) | Whether this version is deprecated |
+| **artifact** | `{ url: string; sha256: string; size: integer; format: Enum<'tgz' \| 'zip'>; … }` | optional | Downloadable artifact for this version |
+
+### Nested Shape: `MarketplaceListing.stats`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **totalInstalls** | `integer` | optional (default: `0`) | Total installs |
+| **activeInstalls** | `integer` | optional (default: `0`) | Active installs |
+| **averageRating** | `number` | optional | Average user rating (0-5) |
+| **totalRatings** | `integer` | optional (default: `0`) | Total ratings count |
+| **totalReviews** | `integer` | optional (default: `0`) | Total reviews count |
+
+### Nested Shape: `MarketplaceListing.translations[string]`
+
+Per-locale overrides for a package listing
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **displayName** | `string` | optional | Localized display name |
+| **description** | `string` | optional | Localized short description |
+| **readme** | `string` | optional | Localized long-form readme (markdown) |
+| **tagline** | `string` | optional | Localized short tagline (marketplace listing only) |
+| **screenshotCaptions** | `Record<string, string>` | optional | Per-index screenshot caption overrides |
+
 
 ---
 
@@ -239,6 +282,37 @@ Marketplace search response
 | **page** | `integer` | ✅ | Current page number |
 | **pageSize** | `integer` | ✅ | Items per page |
 | **facets** | `{ categories?: object[]; pricing?: object[] }` | optional | Aggregation facets for refining search |
+
+### Nested Shape: `MarketplaceSearchResponse.items[number]`
+
+Public-facing package listing on the marketplace
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ | Listing ID (matches package manifest ID) |
+| **packageId** | `string` | ✅ | Package identifier |
+| **packageType** | `Enum<'app'>` | optional (default: `"app"`) | Consumer-installable package type (ADR-0019: only `app` is listable) |
+| **publisherId** | `string` | ✅ | Publisher ID |
+| **status** | `Enum<'draft' \| 'submitted' \| 'in-review' \| 'approved' \| 'published' \| 'rejected' \| …>` | optional (default: `"draft"`) | Publication state: draft, published, under-review, suspended, deprecated, or unlisted |
+| **name** | `string` | ✅ | Display name |
+| **tagline** | `string` | optional | Short tagline (max 120 chars) |
+| **description** | `string` | optional | Full description (Markdown) |
+| **category** | `Enum<'crm' \| 'erp' \| 'hr' \| 'finance' \| 'project' \| 'collaboration' \| 'analytics' \| …>` | ✅ | Package category |
+| **tags** | `string[]` | optional | Search tags |
+| **iconUrl** | `string` | optional | Package icon URL |
+| **screenshots** | `{ url: string; caption?: string }[]` | optional | Screenshots |
+| **documentationUrl** | `string` | optional | Documentation URL |
+| **supportUrl** | `string` | optional | Support URL |
+| **repositoryUrl** | `string` | optional | Source repository URL |
+| **pricing** | `Enum<'free' \| 'freemium' \| 'paid' \| 'subscription' \| 'usage-based' \| 'contact-sales'>` | optional (default: `"free"`) | Pricing model |
+| **priceInCents** | `integer` | optional | Price in cents (e.g. 999 = $9.99) |
+| **latestVersion** | `string` | ✅ | Latest published version |
+| **minPlatformVersion** | `string` | optional | Minimum ObjectStack platform version |
+| **versions** | `{ version: string; releaseDate: string; releaseNotes?: string; minPlatformVersion?: string; … }[]` | optional | Published versions |
+| **stats** | `{ totalInstalls: integer; activeInstalls: integer; averageRating?: number; totalRatings: integer; … }` | optional | Aggregate marketplace statistics |
+| **publishedAt** | `string` | optional | First published timestamp |
+| **updatedAt** | `string` | optional | Last updated timestamp |
+| **translations** | `Record<string, { displayName?: string; description?: string; readme?: string; tagline?: string; … }>` | optional | Locale-keyed overrides for name / tagline / description / screenshot captions |
 
 
 ---

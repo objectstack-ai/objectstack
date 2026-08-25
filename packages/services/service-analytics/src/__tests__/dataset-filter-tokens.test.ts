@@ -81,6 +81,12 @@ describe('dataset filter placeholders (framework#3582)', () => {
     );
 
     expect(captured[0].params).toContain('usr_1');
+    // [#12230] The absence half is the load-bearing assertion: the #10298
+    // dataset-scope conjunct used to AND the REGISTRY's unresolved copy in
+    // beside the executor's resolved one — `owner = $viewer AND
+    // owner = '{current_user_id}'` binds both params and selects nothing,
+    // and `toContain('usr_1')` alone stayed green through it.
+    expect(captured[0].params).not.toContain('{current_user_id}');
   });
 
   it('expands a measure-scoped filter', async () => {
@@ -104,6 +110,11 @@ describe('dataset filter placeholders (framework#3582)', () => {
     );
 
     expect(captured.some((c) => c.params.includes(THIS_YEAR_START))).toBe(true);
+    // [#12230] Same absence pin for the measure-filter channel: the strategy's
+    // conditional aggregate (`CASE WHEN`) used to compile the registry's
+    // unresolved measure filter, zeroing the measure while the resolved copy
+    // in `where` kept this presence assertion green.
+    expect(captured.every((c) => !c.params.includes('{current_year_start}'))).toBe(true);
   });
 
   it('never mutates the registered dataset — it is reused across requests', async () => {
@@ -125,6 +136,7 @@ describe('dataset filter placeholders (framework#3582)', () => {
     // Second render must scope to the SECOND user, not a baked-in first one.
     expect(captured[1].params).toContain('usr_2');
     expect(captured[1].params).not.toContain('usr_1');
+    expect(captured[1].params).not.toContain('{current_user_id}');
     expect(scoped.filter).toEqual({ owner: '{current_user_id}' });
   });
 

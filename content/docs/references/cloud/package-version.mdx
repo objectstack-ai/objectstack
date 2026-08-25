@@ -88,6 +88,16 @@ Package manifest snapshot embedded in a package version
 | **configurationSchema** | `Record<string, any>` | optional | JSON Schema for per-installation configuration properties |
 | **metadata** | `Record<string, any>` | optional | Extension metadata |
 
+### Nested Shape: `PackageManifest.dependencies[number]`
+
+Package dependency declaration
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **packageId** | `string` | ✅ | Manifest ID of the dependency |
+| **versionRange** | `string` | ✅ | Semver version range (e.g. ^1.0.0) |
+| **optional** | `boolean` | optional (default: `false`) | Whether this dependency is optional |
+
 
 ---
 

@@ -59,6 +59,18 @@ Register a new package in the Control Plane
 | **translations** | `Record<string, { displayName?: string; description?: string; readme?: string; tagline?: string; … }>` | optional | Locale-keyed overrides; missing keys fall back to base columns |
 | **createdBy** | `string` | ✅ | User ID creating the package |
 
+### Nested Shape: `CreatePackageRequest.translations[string]`
+
+Per-locale overrides for a package listing
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **displayName** | `string` | optional | Localized display name |
+| **description** | `string` | optional | Localized short description |
+| **readme** | `string` | optional | Localized long-form readme (markdown) |
+| **tagline** | `string` | optional | Localized short tagline (marketplace listing only) |
+| **screenshotCaptions** | `Record<string, string>` | optional | Per-index screenshot caption overrides |
+
 
 ---
 
@@ -87,6 +99,18 @@ Register a new package in the Control Plane
 | **createdAt** | `string` | ✅ | Creation timestamp (ISO-8601) |
 | **updatedAt** | `string` | ✅ | Last update timestamp (ISO-8601) |
 | **createdBy** | `string` | ✅ | User ID that created the package |
+
+### Nested Shape: `Package.translations[string]`
+
+Per-locale overrides for a package listing
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **displayName** | `string` | optional | Localized display name |
+| **description** | `string` | optional | Localized short description |
+| **readme** | `string` | optional | Localized long-form readme (markdown) |
+| **tagline** | `string` | optional | Localized short tagline (marketplace listing only) |
+| **screenshotCaptions** | `Record<string, string>` | optional | Per-index screenshot caption overrides |
 
 
 ---
@@ -182,6 +206,18 @@ Update mutable package metadata
 | **publisher** | `Enum<'objectstack' \| 'partner' \| 'community' \| 'private'>` | optional | Package publisher provenance tier |
 | **isStarter** | `boolean` | optional |  |
 | **translations** | `Record<string, { displayName?: string; description?: string; readme?: string; tagline?: string; … }>` | optional | Locale-keyed overrides; missing keys fall back to base columns |
+
+### Nested Shape: `UpdatePackageRequest.translations[string]`
+
+Per-locale overrides for a package listing
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **displayName** | `string` | optional | Localized display name |
+| **description** | `string` | optional | Localized short description |
+| **readme** | `string` | optional | Localized long-form readme (markdown) |
+| **tagline** | `string` | optional | Localized short tagline (marketplace listing only) |
+| **screenshotCaptions** | `Record<string, string>` | optional | Per-index screenshot caption overrides |
 
 
 ---

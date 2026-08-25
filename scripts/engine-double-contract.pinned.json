@@ -372,6 +372,16 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/protocol.item-name-grammar.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.item-name-grammar.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol.legacy-overlay-delete.test.ts",
       "verb": "delete",
       "pinned": 2
@@ -952,6 +962,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/objectql/src/action-activation.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/objectql/src/layered-overlay-integration.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -1458,6 +1473,16 @@
     },
     {
       "file": "packages/plugins/plugin-security/src/claim-seed-ownership.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-security/src/packaged-permission-set-lock-gate.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-security/src/packaged-permission-set-lock-gate.test.ts",
       "verb": "update",
       "pinned": 1
     },

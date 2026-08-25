@@ -48,7 +48,6 @@ import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protoco
 import { RestServer } from './rest-server.js';
 
 const PUBLISHED = '/api/v1/meta/:type/:name/published';
-const PUBLISHED_COMPOUND = '/api/v1/meta/:type/:section/:name/published';
 
 interface Row {
     id: string;
@@ -351,31 +350,53 @@ describe('[#8278] REST `/meta/:type/:name/published` resolves from the published
         expect(res.body).toEqual({ error: { code: 'NOT_FOUND', message: 'Not found' } });
     }, 60_000);
 
-    it('§6 the COMPOUND arity resolves the runtime-published sub-resource', async () => {
+    it('§6 the COMPOUND arity resolves a STORED sub-resource row — reads stay open for residue', async () => {
         // `getPublished('lead', 'views/all_leads')` is the shape the SDK
         // documents and the shape this route's own comment names
         // (`lead/views/all_leads/published`). It reaches a DIFFERENT route
         // registration than §1, so the overlay consult has to be on both or
         // the fix covers only one of the two doors this card puts in scope.
+        //
+        // [#12194] The fixture used to be authored through `runtimePublish` —
+        // the item-name grammar now refuses a slash name at that door, and the
+        // READ door deliberately stays open for pre-grammar residue rows. So
+        // the row is seeded directly in the store, which is exactly what such
+        // a row now is: residue this route must keep serving until D2/D3
+        // dispose of it.
         const { engine, rows } = makeStubEngine();
         const metadata = new MetadataManager({});
         const protocol = makeProtocol(engine, metadata);
 
         const viewBody = { name: 'all_leads', label: 'All Leads', columns: ['name'] };
-        await runtimePublish(protocol, 'views/all_leads', viewBody, 'lead');
+        await engine.insert('sys_metadata', {
+            type: 'lead', name: 'views/all_leads',
+            organization_id: null, package_id: 'app.projects', state: 'active',
+            metadata: JSON.stringify(viewBody), checksum: 'sha256:residue', version: 1,
+        });
 
         expect(Array.from(rows.values()).filter((r) => r.state === 'active')).toHaveLength(1);
 
+        // [#12195] Read through the SINGLE-SEGMENT door, which is where a
+        // pre-grammar residue row is addressed now. This used to drive the
+        // compound arity `GET /:type/:section/:name/published` with
+        // `{ section: 'views', name: 'all_leads' }`, which the handler folded
+        // back into `views/all_leads`. That arity is retired.
+        //
+        // The capability is NOT lost, and this case is the pin for it: a caller
+        // percent-encodes the name, `%2F` matches `/:type/:name/published`
+        // (Hono does not split on an encoded slash — measured), and Hono decodes
+        // the parameter back to `views/all_leads` before the handler runs. So
+        // the handler receives exactly the value passed below, and #12194's
+        // "any stored junk name remains listable and clearable" still holds.
         const res = await callPublished(
             setup(protocol, metadata),
-            { type: 'lead', section: 'views', name: 'all_leads' },
-            PUBLISHED_COMPOUND,
+            { type: 'lead', name: 'views/all_leads' },
         );
 
         expect(res.statusCode).toBe(200);
         expect(res.body).toMatchObject({ label: 'All Leads' });
-        // The compound name was reassembled and used as ONE key — not split,
-        // and not truncated to its last segment.
+        // The name was used as ONE key — not split, and not truncated to its
+        // last segment.
         expect(Array.from(rows.values())[0]!.name).toBe('views/all_leads');
     }, 60_000);
 });

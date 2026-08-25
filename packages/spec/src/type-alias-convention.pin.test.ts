@@ -267,7 +267,7 @@ import type * as M170 from './ui/component.zod.js';
 import type * as M183 from './api/sortability.zod.js';
 
 // ---------------------------------------------------------------------------
-// 837 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
+// 838 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
 //
 // That number is machine-checked, not hand-kept. The runtime companion at the
 // bottom of this file recomputes the pin count from the source and asserts that
@@ -1033,6 +1033,7 @@ export type Iso496 = Assert<Eq< z.input< typeof M112.StaticMountSchema >, z.infe
 export type Iso497 = Assert<Eq< z.input< typeof M113.SystemIdentifierSchema >, z.infer< typeof M113.SystemIdentifierSchema > >>;
 export type Iso498 = Assert<Eq< z.input< typeof M113.SnakeCaseIdentifierSchema >, z.infer< typeof M113.SnakeCaseIdentifierSchema > >>;
 export type Iso499 = Assert<Eq< z.input< typeof M113.EventNameSchema >, z.infer< typeof M113.EventNameSchema > >>;
+export type Iso862 = Assert<Eq< z.input< typeof M113.MetadataItemNameSchema >, z.infer< typeof M113.MetadataItemNameSchema > >>;
 
 // shared/mapping.zod.ts
 // Graduated INTO the isomorphic set at protocol 17: #5552 retired `transform` and the
@@ -1675,7 +1676,7 @@ describe('ADR-0122 type-alias convention', () => {
   // this title and the section header above the pin list — are now asserted
   // against the recomputed count below, so neither can go stale without a red
   // test naming it.
-  it('still declares all 837 isomorphic pins', () => {
+  it('still declares all 838 isomorphic pins', () => {
     // The truth of each pin is proved by tsc, not here — an `Assert<Eq<...>>`
     // that stops holding is a compile error with the alias named. What tsc
     // cannot notice is a pin that was DELETED: removing the assertion removes
@@ -1995,9 +1996,19 @@ describe('ADR-0122 type-alias convention', () => {
     // anywhere, so the two shapes coincide and ADR-0122 gives each a pin
     // rather than an `XParsed`. Ids `Iso859`/`Iso860`/`Iso861`, the next
     // free ones — ids are claims about pins, not positions.
+    //
+    // 837 -> 838 is #12194's `MetadataItemNameSchema` — the item-name grammar
+    // (shared/identifiers.zod.ts). A bare `z.string().regex()` with no
+    // `.default()`, `.transform()`, `.catch()` or `.pipe()`, so `z.input` and
+    // `z.infer` are both `string` and ADR-0122 gives it a pin rather than an
+    // `XParsed`, exactly like its three identifier siblings on the lines
+    // above it. (Authored as 834 -> 835 with id `Iso859`; restated from the
+    // post-merge base after #11924's +3 landed first and took 859-861 — the
+    // pin was renumbered to `Iso862`, the next free one, because ids are
+    // claims about pins, not positions.)
     const self = readFileSync(fileURLToPath(import.meta.url), 'utf8');
     const pins = self.match(/^export type Iso\d+ = Assert</gm) ?? [];
-    expect(pins).toHaveLength(837);
+    expect(pins).toHaveLength(838);
 
     // The count is stated in PROSE twice as well — this case's title and the
     // section header above the pin list — and until #6605 nothing read either

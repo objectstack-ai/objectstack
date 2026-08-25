@@ -104,6 +104,30 @@ const result = CodeContentSchema.parse(data);
 | **embedding** | `number[]` | optional | Vector embedding for semantic search |
 | **metadata** | `Record<string, any>` | optional |  |
 
+### Nested Shape: `ConversationMessage.functionCall`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Function name |
+| **arguments** | `string` | ✅ | JSON string of function arguments |
+| **result** | `string` | optional | Function execution result |
+
+### Nested Shape: `ConversationMessage.toolCalls[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ | Tool call ID |
+| **type** | `Enum<'function'>` | optional (default: `"function"`) |  |
+| **function** | `{ name: string; arguments: string; result?: string }` | ✅ |  |
+
+### Nested Shape: `ConversationMessage.tokens`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **promptTokens** | `integer` | ✅ | Tokens consumed by the prompt |
+| **completionTokens** | `integer` | ✅ | Tokens generated in the completion |
+| **totalTokens** | `integer` | ✅ | Total tokens (prompt + completion) |
+
 
 ---
 
@@ -127,6 +151,79 @@ const result = CodeContentSchema.parse(data);
 | **updatedAt** | `string` | ✅ | ISO 8601 timestamp |
 | **expiresAt** | `string` | optional | ISO 8601 timestamp |
 | **metadata** | `Record<string, any>` | optional |  |
+
+### Nested Shape: `ConversationSession.context`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **sessionId** | `string` | ✅ | Conversation session ID |
+| **userId** | `string` | optional | User identifier |
+| **agentId** | `string` | optional | AI agent identifier |
+| **object** | `string` | optional | Related object (e.g., "case", "project") |
+| **recordId** | `string` | optional | Related record ID |
+| **scope** | `Record<string, any>` | optional | Additional context scope |
+| **systemMessage** | `string` | optional | System prompt/instructions |
+| **metadata** | `Record<string, any>` | optional |  |
+
+### Nested Shape: `ConversationSession.tokenBudget`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **maxTokens** | `integer` | ✅ | Maximum total tokens |
+| **maxPromptTokens** | `integer` | optional | Max tokens for prompt |
+| **maxCompletionTokens** | `integer` | optional | Max tokens for completion |
+| **reserveTokens** | `integer` | optional (default: `500`) | Reserve tokens for system messages |
+| **bufferPercentage** | `number` | optional (default: `0.1`) | Buffer percentage (0.1 = 10%) |
+| **strategy** | `Enum<'fifo' \| 'importance' \| 'semantic' \| 'sliding_window' \| 'summary'>` | optional (default: `"sliding_window"`) |  |
+| **slidingWindowSize** | `integer` | optional | Number of recent messages to keep |
+| **minImportanceScore** | `number` | optional | Minimum importance to keep |
+| **semanticThreshold** | `number` | optional | Semantic similarity threshold |
+| **enableSummarization** | `boolean` | optional (default: `false`) | Enable context summarization |
+| **summarizationThreshold** | `integer` | optional | Trigger summarization at N tokens |
+| **summaryModel** | `string` | optional | Model ID for summarization |
+| **warnThreshold** | `number` | optional (default: `0.8`) | Warn at % of budget (0.8 = 80%) |
+
+### Nested Shape: `ConversationSession.messages[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ | Unique message ID |
+| **timestamp** | `string` | ✅ | ISO 8601 timestamp |
+| **role** | `Enum<'system' \| 'user' \| 'assistant' \| 'function' \| 'tool'>` | ✅ |  |
+| **content** | `({ type: 'text'; text: string; metadata?: Record<string, any> } \| { type: 'image'; imageUrl: string; detail: Enum<'low' \| 'high' \| 'auto'>; metadata?: Record<string, any> } \| { type: 'file'; fileUrl: string; mimeType: string; fileName?: string; … } \| { type: 'code'; text: string; language: string; metadata?: Record<string, any> })[]` | ✅ | Message content (multimodal array) |
+| **functionCall** | `{ name: string; arguments: string; result?: string }` | optional | Legacy function call |
+| **toolCalls** | `{ id: string; type: Enum<'function'>; function: object }[]` | optional | Tool calls |
+| **toolCallId** | `string` | optional | Tool call ID this message responds to |
+| **name** | `string` | optional | Name of the function/user |
+| **tokens** | `{ promptTokens: integer; completionTokens: integer; totalTokens: integer }` | optional | Token usage for this message |
+| **cost** | `number` | optional | Cost for this message in USD |
+| **pinned** | `boolean` | optional (default: `false`) | Prevent removal during pruning |
+| **importance** | `number` | optional | Importance score for pruning |
+| **embedding** | `number[]` | optional | Vector embedding for semantic search |
+| **metadata** | `Record<string, any>` | optional |  |
+
+### Nested Shape: `ConversationSession.tokens`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **promptTokens** | `integer` | optional (default: `0`) |  |
+| **completionTokens** | `integer` | optional (default: `0`) |  |
+| **totalTokens** | `integer` | optional (default: `0`) |  |
+| **budgetLimit** | `integer` | ✅ |  |
+| **budgetUsed** | `integer` | optional (default: `0`) |  |
+| **budgetRemaining** | `integer` | ✅ |  |
+| **budgetPercentage** | `number` | ✅ | Usage as percentage of budget |
+| **messageCount** | `integer` | optional (default: `0`) |  |
+| **prunedMessageCount** | `integer` | optional (default: `0`) |  |
+| **summarizedMessageCount** | `integer` | optional (default: `0`) |  |
+
+### Nested Shape: `ConversationSession.totalTokens`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **promptTokens** | `integer` | ✅ | Tokens consumed by the prompt |
+| **completionTokens** | `integer` | ✅ | Tokens generated in the completion |
+| **totalTokens** | `integer` | ✅ | Total tokens (prompt + completion) |
 
 
 ---
@@ -380,6 +477,14 @@ This schema accepts one of the following structures:
 | **id** | `string` | ✅ | Tool call ID |
 | **type** | `Enum<'function'>` | optional (default: `"function"`) |  |
 | **function** | `{ name: string; arguments: string; result?: string }` | ✅ |  |
+
+### Nested Shape: `ToolCall.function`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Function name |
+| **arguments** | `string` | ✅ | JSON string of function arguments |
+| **result** | `string` | optional | Function execution result |
 
 
 ---

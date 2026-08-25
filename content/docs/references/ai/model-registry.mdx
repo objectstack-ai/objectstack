@@ -65,6 +65,36 @@ const result = ModelCapabilitySchema.parse(data);
 | **deprecated** | `boolean` | optional (default: `false`) |  |
 | **recommendedFor** | `string[]` | optional | Use case recommendations |
 
+### Nested Shape: `ModelConfig.capabilities`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **textGeneration** | `boolean` | optional (default: `true`) | Supports text generation |
+| **textEmbedding** | `boolean` | optional (default: `false`) | Supports text embedding |
+| **imageGeneration** | `boolean` | optional (default: `false`) | Supports image generation |
+| **imageUnderstanding** | `boolean` | optional (default: `false`) | Supports image understanding |
+| **functionCalling** | `boolean` | optional (default: `false`) | Supports function calling |
+| **codeGeneration** | `boolean` | optional (default: `false`) | Supports code generation |
+| **reasoning** | `boolean` | optional (default: `false`) | Supports advanced reasoning |
+
+### Nested Shape: `ModelConfig.limits`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **maxTokens** | `integer` | ✅ | Maximum tokens per request |
+| **contextWindow** | `integer` | ✅ | Context window size |
+| **maxOutputTokens** | `integer` | optional | Maximum output tokens |
+| **rateLimit** | `{ requestsPerMinute?: integer; tokensPerMinute?: integer }` | optional |  |
+
+### Nested Shape: `ModelConfig.pricing`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **currency** | `string` | optional (default: `"USD"`) |  |
+| **inputCostPer1kTokens** | `number` | optional | Cost per 1K input tokens |
+| **outputCostPer1kTokens** | `number` | optional | Cost per 1K output tokens |
+| **embeddingCostPer1kTokens** | `number` | optional | Cost per 1K embedding tokens |
+
 
 ---
 
@@ -124,6 +154,40 @@ const result = ModelCapabilitySchema.parse(data);
 | **defaultModel** | `string` | optional | Default model ID |
 | **enableAutoFallback** | `boolean` | optional (default: `true`) | Auto-fallback on errors |
 
+### Nested Shape: `ModelRegistry.models[string]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **model** | `{ id: string; name: string; version: string; provider: Enum<'openai' \| 'azure_openai' \| 'anthropic' \| 'google' \| 'cohere' \| 'huggingface' \| 'local' \| 'custom'>; … }` | ✅ |  |
+| **status** | `Enum<'active' \| 'deprecated' \| 'experimental' \| 'disabled'>` | optional (default: `"active"`) |  |
+| **priority** | `integer` | optional (default: `0`) | Priority for model selection |
+| **fallbackModels** | `string[]` | optional | Fallback model IDs |
+| **healthCheck** | `{ enabled?: boolean; intervalSeconds?: integer; lastChecked?: string; status?: Enum<'healthy' \| 'unhealthy' \| 'unknown'> }` | optional |  |
+
+### Nested Shape: `ModelRegistry.promptTemplates[string]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ | Unique template identifier |
+| **name** | `string` | ✅ | Template name (snake_case) |
+| **label** | `string` | ✅ | Display name |
+| **system** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | System prompt — supports `{{var}}` interpolation |
+| **user** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | ✅ | User prompt template — supports `{{var}}` interpolation |
+| **assistant** | `string` | optional | Assistant message prefix |
+| **variables** | `{ name: string; type?: Enum<'string' \| 'number' \| 'boolean' \| 'object' \| 'array'>; required?: boolean; defaultValue?: any; … }[]` | optional | Template variables |
+| **modelId** | `string` | optional | Recommended model ID |
+| **temperature** | `number` | optional |  |
+| **maxTokens** | `number` | optional |  |
+| **topP** | `number` | optional |  |
+| **frequencyPenalty** | `number` | optional |  |
+| **presencePenalty** | `number` | optional |  |
+| **stopSequences** | `string[]` | optional |  |
+| **version** | `string` | optional (default: `"1.0.0"`) |  |
+| **description** | `string` | optional |  |
+| **category** | `string` | optional | Template category (e.g., "code_generation", "support") |
+| **tags** | `string[]` | optional |  |
+| **examples** | `{ input: Record<string, any>; output: string }[]` | optional |  |
+
 
 ---
 
@@ -138,6 +202,35 @@ const result = ModelCapabilitySchema.parse(data);
 | **priority** | `integer` | optional (default: `0`) | Priority for model selection |
 | **fallbackModels** | `string[]` | optional | Fallback model IDs |
 | **healthCheck** | `{ enabled: boolean; intervalSeconds: integer; lastChecked?: string; status: Enum<'healthy' \| 'unhealthy' \| 'unknown'> }` | optional |  |
+
+### Nested Shape: `ModelRegistryEntry.model`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ | Unique model identifier |
+| **name** | `string` | ✅ | Model display name |
+| **version** | `string` | ✅ | Model version (e.g., "gpt-4-turbo-2024-04-09") |
+| **provider** | `Enum<'openai' \| 'azure_openai' \| 'anthropic' \| 'google' \| 'cohere' \| 'huggingface' \| 'local' \| 'custom'>` | ✅ |  |
+| **capabilities** | `{ textGeneration: boolean; textEmbedding: boolean; imageGeneration: boolean; imageUnderstanding: boolean; … }` | ✅ |  |
+| **limits** | `{ maxTokens: integer; contextWindow: integer; maxOutputTokens?: integer; rateLimit?: object }` | ✅ |  |
+| **pricing** | `{ currency: string; inputCostPer1kTokens?: number; outputCostPer1kTokens?: number; embeddingCostPer1kTokens?: number }` | optional |  |
+| **endpoint** | `string` | optional | Custom API endpoint |
+| **apiKey** | `string` | optional | API key (Warning: Prefer secretRef) |
+| **secretRef** | `string` | optional | Reference to stored secret (e.g. system:openai_api_key) |
+| **region** | `string` | optional | Deployment region (e.g., "us-east-1") |
+| **description** | `string` | optional |  |
+| **tags** | `string[]` | optional | Tags for categorization |
+| **deprecated** | `boolean` | optional (default: `false`) |  |
+| **recommendedFor** | `string[]` | optional | Use case recommendations |
+
+### Nested Shape: `ModelRegistryEntry.healthCheck`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **enabled** | `boolean` | optional (default: `true`) |  |
+| **intervalSeconds** | `integer` | optional (default: `300`) |  |
+| **lastChecked** | `string` | optional | ISO timestamp |
+| **status** | `Enum<'healthy' \| 'unhealthy' \| 'unknown'>` | optional (default: `"unknown"`) |  |
 
 
 ---
@@ -183,6 +276,24 @@ const result = ModelCapabilitySchema.parse(data);
 | **category** | `string` | optional | Template category (e.g., "code_generation", "support") |
 | **tags** | `string[]` | optional |  |
 | **examples** | `{ input: Record<string, any>; output: string }[]` | optional |  |
+
+### Nested Shape: `PromptTemplate.variables[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Variable name (e.g., "user_name", "context") |
+| **type** | `Enum<'string' \| 'number' \| 'boolean' \| 'object' \| 'array'>` | optional (default: `"string"`) |  |
+| **required** | `boolean` | optional (default: `false`) |  |
+| **defaultValue** | `any` | optional |  |
+| **description** | `string` | optional |  |
+| **validation** | `{ minLength?: number; maxLength?: number; pattern?: string; enum?: any[] }` | optional |  |
+
+### Nested Shape: `PromptTemplate.examples[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **input** | `Record<string, any>` | ✅ | Example variable values |
+| **output** | `string` | ✅ | Expected output |
 
 
 ---

@@ -55,6 +55,54 @@ const result = AppDefinitionResponseSchema.parse(data);
 | **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
 | **data** | `{ name: string; label: string \| Record<string, string>; description?: string \| Record<string, string>; icon?: string; … }` | ✅ | Full App Configuration |
 
+### Nested Shape: `AppDefinitionResponse.error`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>` | ✅ | Error code (e.g. VALIDATION_ERROR; StandardErrorCode ∪ the ledger the serving side registers — ERROR_CODE_LEDGER for framework packages) |
+| **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112, #9106) |
+| **message** | `string` | ✅ | Readable error message |
+| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim (#9934). Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution (#3821) for anything unmarked. Status-agnostic; never replaces `message`. |
+| **category** | `string` | optional | Error category (e.g. validation, authorization) |
+| **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
+| **details** | `any` | optional | Additional error context (e.g. field validation errors) |
+| **requestId** | `string` | optional | Request ID for tracking |
+
+### Nested Shape: `AppDefinitionResponse.data`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | App unique machine name (lowercase snake_case) |
+| **label** | `string \| Record<string, string>` | ✅ | App display label |
+| **version** | `never` | optional | [REMOVED] `App.version` was removed in @objectstack/spec 17.0.0 (2026-06 liveness audit — no consumer in framework or objectui). An app is versioned by its owning package: use `manifest.version`. Delete the key. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
+| **description** | `string \| Record<string, string>` | optional | App description |
+| **icon** | `string` | optional | App icon used in the App Launcher |
+| **branding** | `{ primaryColor?: string; accentColor?: string; logo?: string; favicon?: string }` | optional | App-specific branding |
+| **active** | `boolean` | optional (default: `true`) | Whether the app is enabled |
+| **isDefault** | `boolean` | optional (default: `false`) | Is default app |
+| **hidden** | `boolean` | optional | Hide from the App Switcher; the shell surfaces hidden apps via the avatar menu instead (navigation only — never an access gate) |
+| **_unpublished** | `boolean` | optional | Machine-managed publish gate (ADR-0045 §3) — true = unpublished, externally unobservable. Written by AI materialization, cleared by publish-drafts. Never authored. |
+| **navigation** | `({ id: string; label: string \| Record<string, string>; icon?: string; order?: number; … } \| { type: 'separator'; id?: string; order?: number } \| … +7 more)[]` | optional | Full navigation tree for the app sidebar |
+| **areas** | `{ id: string; label: string \| Record<string, string>; icon?: string; description?: string \| Record<string, string>; … }[]` | optional | Navigation areas for partitioning navigation by business domain |
+| **contextSelectors** | `{ id: string; label: string \| Record<string, string>; icon?: string; optionsSource: object; … }[]` | optional | App-level scope dropdowns whose value is injected into nav items as `{<id>}` template vars |
+| **homePageId** | `never` | optional | [REMOVED] `app.homePageId` was removed in @objectstack/spec 17.0.0 (#4667, #4709, ADR-0049). objectui's console did read it before v17 (`resolveLandingRoute`), so this key had a consumer — it was retired because the capability is better expressed on the navigation item itself than as an ID cross-reference that silently falls back when it dangles. An app's landing page IS its first navigation item (by `order`), and the root landing follows `isDefault` routing. Delete the key; to change where an app opens, reorder `navigation` so the intended entry is first, and set `isDefault` on the app that should own the root landing. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
+| **requiredPermissions** | `string[]` | optional | Permissions required to access this app |
+| **objects** | `never` | optional | [REMOVED] `App.objects` was removed in @objectstack/spec 17.0.0 (2026-06 liveness audit — never read; the spec itself labelled it "config file convenience"). Objects belong to the stack (`defineStack({ objects })`); an app reaches them through its navigation items. Delete the key. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
+| **apis** | `never` | optional | [REMOVED] `App.apis` was removed in @objectstack/spec 17.0.0 (2026-06 liveness audit — never read). Delete the key and declare the endpoint one level up, on the STACK: `defineStack({ apis })`. That surface EXECUTES from protocol 17 (#5040). Between #4936 and the executor landing it was refused wholesale — nothing mounted a declared path, so every key including `authRequired` parsed and gated nothing — and that blanket refusal is now narrowed to five per-endpoint publish gates (namespace, supported target, mapping, policy, uniqueness): an endpoint that passes them is mounted and serves traffic as soon as the stack is published. Two things to get right when you move it: the path must sit inside your own carve-out, `/api/v1/apps/<manifest.namespace>/<subpath>` with an explicit `manifest.namespace` (ADR-0121 D1/D2), and `authRequired` defaults to `true` — an explicit `false` is the only thing that opens anonymous access, and ADR-0121 D6 then requires an armed `rateLimit: { enabled: true, windowMs, maxRequests }`. Read the `declarative-apis-endpoints-live` entry of the protocol upgrade guide first; it is a security review, not a rename. A route that genuinely needs handler CODE is mounted imperatively instead: resolve the `http.server` service from your plugin context and register the route on `kernel:ready` (NOT the manifest `contributes.routes` key — nothing reads it, so an entry there parses cleanly and serves nothing). Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
+| **sharing** | `never` | optional | [REMOVED] `App.sharing` was removed in @objectstack/spec 17.0.0 (2026-06 liveness audit / ADR-0049 enforce-or-remove) — no public-app route ever read it, so it declared sharing that did not exist. Public access is granted per FORM VIEW (`FormView.sharing`, the public-data-collection surface). Delete the key. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
+| **embed** | `never` | optional | [REMOVED] `App.embed` was removed in @objectstack/spec 17.0.0 (2026-06 liveness audit / ADR-0049) — no iframe route ever read it. Embedding is a per-form-view surface (`FormView.sharing`), not an app-level switch. Delete the key. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
+| **mobileNavigation** | `never` | optional | [REMOVED] `App.mobileNavigation` was removed in @objectstack/spec 17.0.0 (2026-06 liveness audit — fully unimplemented; no renderer, including packages/mobile, ever read it). Delete the key; the block returns if/when a real mobile navigation ships. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
+| **defaultAgent** | `string` | optional | Platform agent bound to this app's ambient chat ('ask' is the implicit default; 'build' for authoring surfaces) — ADR-0063 §1 |
+| **aria** | `never` | optional | [REMOVED] `App.aria` was removed in @objectstack/spec 17.0.0 (2026-06 liveness audit — no renderer read app-level ARIA attributes). Declare `aria` on the page component that renders the DOM node instead (`page.components[].aria`; `page.aria` and the list view `aria` are live too). Delete the key. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
+| **protection** | `{ lock: Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>; reason: string; docsUrl?: string }` | optional | Package author protection block — lock policy for this app. |
+| **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
+| **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
+| **_lockSource** | `Enum<'artifact' \| 'package' \| 'env-forced'>` | optional | Layer that set _lock (artifact \| package \| env-forced). |
+| **_provenance** | `Enum<'package' \| 'org' \| 'env-forced'>` | optional | Origin of the item (package \| org \| env-forced). |
+| **_packageId** | `string` | optional | Owning package machine id. |
+| **_packageVersion** | `string` | optional | Owning package version. |
+| **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
+
 
 ---
 
@@ -69,6 +117,19 @@ const result = AppDefinitionResponseSchema.parse(data);
 | **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
 | **data** | `{ name: string; label: string; icon?: string; description?: string }[]` | ✅ | List of available concepts (Objects, Apps, Flows) |
 
+### Nested Shape: `ConceptListResponse.error`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>` | ✅ | Error code (e.g. VALIDATION_ERROR; StandardErrorCode ∪ the ledger the serving side registers — ERROR_CODE_LEDGER for framework packages) |
+| **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112, #9106) |
+| **message** | `string` | ✅ | Readable error message |
+| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim (#9934). Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution (#3821) for anything unmarked. Status-agnostic; never replaces `message`. |
+| **category** | `string` | optional | Error category (e.g. validation, authorization) |
+| **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
+| **details** | `any` | optional | Additional error context (e.g. field validation errors) |
+| **requestId** | `string` | optional | Request ID for tracking |
+
 
 ---
 
@@ -81,6 +142,14 @@ const result = AppDefinitionResponseSchema.parse(data);
 | **items** | `{ type: string; name: string; data: Record<string, any> }[]` | ✅ | Items to register |
 | **continueOnError** | `boolean` | optional (default: `false`) | Continue on individual failure |
 | **validate** | `boolean` | optional (default: `true`) | Validate before registering |
+
+### Nested Shape: `MetadataBulkRegisterRequest.items[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `string` | ✅ | Metadata type |
+| **name** | `string` | ✅ | Item name |
+| **data** | `Record<string, any>` | ✅ | Metadata payload |
 
 
 ---
@@ -96,6 +165,28 @@ const result = AppDefinitionResponseSchema.parse(data);
 | **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
 | **data** | `{ total: integer; succeeded: integer; failed: integer; errors?: object[] }` | ✅ | Bulk operation result |
 
+### Nested Shape: `MetadataBulkResponse.error`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>` | ✅ | Error code (e.g. VALIDATION_ERROR; StandardErrorCode ∪ the ledger the serving side registers — ERROR_CODE_LEDGER for framework packages) |
+| **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112, #9106) |
+| **message** | `string` | ✅ | Readable error message |
+| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim (#9934). Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution (#3821) for anything unmarked. Status-agnostic; never replaces `message`. |
+| **category** | `string` | optional | Error category (e.g. validation, authorization) |
+| **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
+| **details** | `any` | optional | Additional error context (e.g. field validation errors) |
+| **requestId** | `string` | optional | Request ID for tracking |
+
+### Nested Shape: `MetadataBulkResponse.data`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **total** | `integer` | ✅ | Total items processed |
+| **succeeded** | `integer` | ✅ | Successfully processed |
+| **failed** | `integer` | ✅ | Failed items |
+| **errors** | `{ type: string; name: string; error: string }[]` | optional | Per-item errors |
+
 
 ---
 
@@ -106,6 +197,13 @@ const result = AppDefinitionResponseSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **items** | `{ type: string; name: string }[]` | ✅ | Items to unregister |
+
+### Nested Shape: `MetadataBulkUnregisterRequest.items[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `string` | ✅ | Metadata type |
+| **name** | `string` | ✅ | Item name |
 
 
 ---
@@ -121,6 +219,26 @@ const result = AppDefinitionResponseSchema.parse(data);
 | **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
 | **data** | `{ type: string; name: string }` | ✅ |  |
 
+### Nested Shape: `MetadataDeleteResponse.error`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>` | ✅ | Error code (e.g. VALIDATION_ERROR; StandardErrorCode ∪ the ledger the serving side registers — ERROR_CODE_LEDGER for framework packages) |
+| **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112, #9106) |
+| **message** | `string` | ✅ | Readable error message |
+| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim (#9934). Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution (#3821) for anything unmarked. Status-agnostic; never replaces `message`. |
+| **category** | `string` | optional | Error category (e.g. validation, authorization) |
+| **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
+| **details** | `any` | optional | Additional error context (e.g. field validation errors) |
+| **requestId** | `string` | optional | Request ID for tracking |
+
+### Nested Shape: `MetadataDeleteResponse.data`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `string` | ✅ | Metadata type |
+| **name** | `string` | ✅ | Deleted item name |
+
 
 ---
 
@@ -134,6 +252,29 @@ const result = AppDefinitionResponseSchema.parse(data);
 | **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>; declaredCode?: string; message: string; userMessage?: string; … }` | optional | Error details if success is false |
 | **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
 | **data** | `{ sourceType: string; sourceName: string; targetType: string; targetName: string; … }[]` | ✅ | Items this item depends on |
+
+### Nested Shape: `MetadataDependenciesResponse.error`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>` | ✅ | Error code (e.g. VALIDATION_ERROR; StandardErrorCode ∪ the ledger the serving side registers — ERROR_CODE_LEDGER for framework packages) |
+| **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112, #9106) |
+| **message** | `string` | ✅ | Readable error message |
+| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim (#9934). Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution (#3821) for anything unmarked. Status-agnostic; never replaces `message`. |
+| **category** | `string` | optional | Error category (e.g. validation, authorization) |
+| **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
+| **details** | `any` | optional | Additional error context (e.g. field validation errors) |
+| **requestId** | `string` | optional | Request ID for tracking |
+
+### Nested Shape: `MetadataDependenciesResponse.data[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **sourceType** | `string` | ✅ | Dependent metadata type |
+| **sourceName** | `string` | ✅ | Dependent metadata name |
+| **targetType** | `string` | ✅ | Referenced metadata type |
+| **targetName** | `string` | ✅ | Referenced metadata name |
+| **kind** | `Enum<'reference' \| 'extends' \| 'includes' \| 'triggers'>` | ✅ | How the dependency is formed |
 
 
 ---
@@ -149,6 +290,29 @@ const result = AppDefinitionResponseSchema.parse(data);
 | **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
 | **data** | `{ sourceType: string; sourceName: string; targetType: string; targetName: string; … }[]` | ✅ | Items that depend on this item |
 
+### Nested Shape: `MetadataDependentsResponse.error`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>` | ✅ | Error code (e.g. VALIDATION_ERROR; StandardErrorCode ∪ the ledger the serving side registers — ERROR_CODE_LEDGER for framework packages) |
+| **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112, #9106) |
+| **message** | `string` | ✅ | Readable error message |
+| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim (#9934). Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution (#3821) for anything unmarked. Status-agnostic; never replaces `message`. |
+| **category** | `string` | optional | Error category (e.g. validation, authorization) |
+| **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
+| **details** | `any` | optional | Additional error context (e.g. field validation errors) |
+| **requestId** | `string` | optional | Request ID for tracking |
+
+### Nested Shape: `MetadataDependentsResponse.data[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **sourceType** | `string` | ✅ | Dependent metadata type |
+| **sourceName** | `string` | ✅ | Dependent metadata name |
+| **targetType** | `string` | ✅ | Referenced metadata type |
+| **targetName** | `string` | ✅ | Referenced metadata name |
+| **kind** | `Enum<'reference' \| 'extends' \| 'includes' \| 'triggers'>` | ✅ | How the dependency is formed |
+
 
 ---
 
@@ -163,6 +327,19 @@ const result = AppDefinitionResponseSchema.parse(data);
 | **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
 | **data** | `Record<string, any>` | optional | Effective metadata with all overlays applied |
 
+### Nested Shape: `MetadataEffectiveResponse.error`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>` | ✅ | Error code (e.g. VALIDATION_ERROR; StandardErrorCode ∪ the ledger the serving side registers — ERROR_CODE_LEDGER for framework packages) |
+| **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112, #9106) |
+| **message** | `string` | ✅ | Readable error message |
+| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim (#9934). Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution (#3821) for anything unmarked. Status-agnostic; never replaces `message`. |
+| **category** | `string` | optional | Error category (e.g. validation, authorization) |
+| **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
+| **details** | `any` | optional | Additional error context (e.g. field validation errors) |
+| **requestId** | `string` | optional | Request ID for tracking |
+
 
 ---
 
@@ -176,6 +353,25 @@ const result = AppDefinitionResponseSchema.parse(data);
 | **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>; declaredCode?: string; message: string; userMessage?: string; … }` | optional | Error details if success is false |
 | **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
 | **data** | `{ exists: boolean }` | ✅ |  |
+
+### Nested Shape: `MetadataExistsResponse.error`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>` | ✅ | Error code (e.g. VALIDATION_ERROR; StandardErrorCode ∪ the ledger the serving side registers — ERROR_CODE_LEDGER for framework packages) |
+| **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112, #9106) |
+| **message** | `string` | ✅ | Readable error message |
+| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim (#9934). Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution (#3821) for anything unmarked. Status-agnostic; never replaces `message`. |
+| **category** | `string` | optional | Error category (e.g. validation, authorization) |
+| **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
+| **details** | `any` | optional | Additional error context (e.g. field validation errors) |
+| **requestId** | `string` | optional | Request ID for tracking |
+
+### Nested Shape: `MetadataExistsResponse.data`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **exists** | `boolean` | ✅ | Whether the item exists |
 
 
 ---
@@ -203,6 +399,19 @@ const result = AppDefinitionResponseSchema.parse(data);
 | **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>; declaredCode?: string; message: string; userMessage?: string; … }` | optional | Error details if success is false |
 | **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
 | **data** | `any` | ✅ | Exported metadata bundle |
+
+### Nested Shape: `MetadataExportResponse.error`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>` | ✅ | Error code (e.g. VALIDATION_ERROR; StandardErrorCode ∪ the ledger the serving side registers — ERROR_CODE_LEDGER for framework packages) |
+| **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112, #9106) |
+| **message** | `string` | ✅ | Readable error message |
+| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim (#9934). Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution (#3821) for anything unmarked. Status-agnostic; never replaces `message`. |
+| **category** | `string` | optional | Error category (e.g. validation, authorization) |
+| **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
+| **details** | `any` | optional | Additional error context (e.g. field validation errors) |
+| **requestId** | `string` | optional | Request ID for tracking |
 
 
 ---
@@ -232,6 +441,19 @@ const result = AppDefinitionResponseSchema.parse(data);
 | **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
 | **data** | `{ total: integer; imported: integer; skipped: integer; failed: integer; … }` | ✅ | Import result |
 
+### Nested Shape: `MetadataImportResponse.error`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>` | ✅ | Error code (e.g. VALIDATION_ERROR; StandardErrorCode ∪ the ledger the serving side registers — ERROR_CODE_LEDGER for framework packages) |
+| **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112, #9106) |
+| **message** | `string` | ✅ | Readable error message |
+| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim (#9934). Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution (#3821) for anything unmarked. Status-agnostic; never replaces `message`. |
+| **category** | `string` | optional | Error category (e.g. validation, authorization) |
+| **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
+| **details** | `any` | optional | Additional error context (e.g. field validation errors) |
+| **requestId** | `string` | optional | Request ID for tracking |
+
 
 ---
 
@@ -245,6 +467,27 @@ const result = AppDefinitionResponseSchema.parse(data);
 | **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>; declaredCode?: string; message: string; userMessage?: string; … }` | optional | Error details if success is false |
 | **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
 | **data** | `{ type: string; name: string; definition: Record<string, any> }` | ✅ | Metadata item |
+
+### Nested Shape: `MetadataItemResponse.error`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>` | ✅ | Error code (e.g. VALIDATION_ERROR; StandardErrorCode ∪ the ledger the serving side registers — ERROR_CODE_LEDGER for framework packages) |
+| **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112, #9106) |
+| **message** | `string` | ✅ | Readable error message |
+| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim (#9934). Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution (#3821) for anything unmarked. Status-agnostic; never replaces `message`. |
+| **category** | `string` | optional | Error category (e.g. validation, authorization) |
+| **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
+| **details** | `any` | optional | Additional error context (e.g. field validation errors) |
+| **requestId** | `string` | optional | Request ID for tracking |
+
+### Nested Shape: `MetadataItemResponse.data`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `string` | ✅ | Metadata type |
+| **name** | `string` | ✅ | Item name |
+| **definition** | `Record<string, any>` | ✅ | Metadata definition payload |
 
 
 ---
@@ -260,6 +503,19 @@ const result = AppDefinitionResponseSchema.parse(data);
 | **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
 | **data** | `Record<string, any>[]` | ✅ | Array of metadata definitions |
 
+### Nested Shape: `MetadataListResponse.error`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>` | ✅ | Error code (e.g. VALIDATION_ERROR; StandardErrorCode ∪ the ledger the serving side registers — ERROR_CODE_LEDGER for framework packages) |
+| **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112, #9106) |
+| **message** | `string` | ✅ | Readable error message |
+| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim (#9934). Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution (#3821) for anything unmarked. Status-agnostic; never replaces `message`. |
+| **category** | `string` | optional | Error category (e.g. validation, authorization) |
+| **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
+| **details** | `any` | optional | Additional error context (e.g. field validation errors) |
+| **requestId** | `string` | optional | Request ID for tracking |
+
 
 ---
 
@@ -274,6 +530,19 @@ const result = AppDefinitionResponseSchema.parse(data);
 | **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
 | **data** | `string[]` | ✅ | Array of metadata item names |
 
+### Nested Shape: `MetadataNamesResponse.error`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>` | ✅ | Error code (e.g. VALIDATION_ERROR; StandardErrorCode ∪ the ledger the serving side registers — ERROR_CODE_LEDGER for framework packages) |
+| **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112, #9106) |
+| **message** | `string` | ✅ | Readable error message |
+| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim (#9934). Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution (#3821) for anything unmarked. Status-agnostic; never replaces `message`. |
+| **category** | `string` | optional | Error category (e.g. validation, authorization) |
+| **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
+| **details** | `any` | optional | Additional error context (e.g. field validation errors) |
+| **requestId** | `string` | optional | Request ID for tracking |
+
 
 ---
 
@@ -287,6 +556,39 @@ const result = AppDefinitionResponseSchema.parse(data);
 | **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>; declaredCode?: string; message: string; userMessage?: string; … }` | optional | Error details if success is false |
 | **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
 | **data** | `{ id: string; baseType: string; baseName: string; packageId?: string; … }` | optional | Overlay definition, undefined if none |
+
+### Nested Shape: `MetadataOverlayResponse.error`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>` | ✅ | Error code (e.g. VALIDATION_ERROR; StandardErrorCode ∪ the ledger the serving side registers — ERROR_CODE_LEDGER for framework packages) |
+| **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112, #9106) |
+| **message** | `string` | ✅ | Readable error message |
+| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim (#9934). Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution (#3821) for anything unmarked. Status-agnostic; never replaces `message`. |
+| **category** | `string` | optional | Error category (e.g. validation, authorization) |
+| **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
+| **details** | `any` | optional | Additional error context (e.g. field validation errors) |
+| **requestId** | `string` | optional | Request ID for tracking |
+
+### Nested Shape: `MetadataOverlayResponse.data`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ | Overlay record ID (UUID) |
+| **baseType** | `string` | ✅ | Metadata type being customized |
+| **baseName** | `string` | ✅ | Metadata name being customized |
+| **packageId** | `string` | optional | Package ID that delivered the base metadata |
+| **packageVersion** | `string` | optional | Package version when overlay was created |
+| **scope** | `Enum<'platform' \| 'user'>` | optional (default: `"platform"`) | Customization scope (platform=admin, user=personal) |
+| **tenantId** | `string` | optional | Tenant identifier |
+| **owner** | `string` | optional | Owner user ID for user-scope overlays |
+| **patch** | `Record<string, any>` | ✅ | JSON Merge Patch payload (changed fields only) |
+| **changes** | `{ path: string; originalValue?: any; currentValue: any; changedBy?: string; … }[]` | optional | Field-level change tracking for conflict detection |
+| **active** | `boolean` | optional (default: `true`) | Whether this overlay is active |
+| **createdAt** | `string` | optional |  |
+| **createdBy** | `string` | optional |  |
+| **updatedAt** | `string` | optional |  |
+| **updatedBy** | `string` | optional |  |
 
 
 ---
@@ -314,6 +616,16 @@ Overlay to save
 | **createdBy** | `string` | optional |  |
 | **updatedAt** | `string` | optional |  |
 | **updatedBy** | `string` | optional |  |
+
+### Nested Shape: `MetadataOverlaySaveRequest.changes[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **path** | `string` | ✅ | JSON path to the changed field |
+| **originalValue** | `any` | optional | Original value from the package |
+| **currentValue** | `any` | ✅ | Current customized value |
+| **changedBy** | `string` | optional | User or admin who made this change |
+| **changedAt** | `string` | optional | Timestamp of the change |
 
 
 ---
@@ -351,6 +663,28 @@ Metadata query with filtering, sorting, and pagination
 | **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>; declaredCode?: string; message: string; userMessage?: string; … }` | optional | Error details if success is false |
 | **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
 | **data** | `{ items: object[]; total: integer; page: integer; pageSize: integer }` | ✅ | Paginated query result |
+
+### Nested Shape: `MetadataQueryResponse.error`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>` | ✅ | Error code (e.g. VALIDATION_ERROR; StandardErrorCode ∪ the ledger the serving side registers — ERROR_CODE_LEDGER for framework packages) |
+| **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112, #9106) |
+| **message** | `string` | ✅ | Readable error message |
+| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim (#9934). Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution (#3821) for anything unmarked. Status-agnostic; never replaces `message`. |
+| **category** | `string` | optional | Error category (e.g. validation, authorization) |
+| **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
+| **details** | `any` | optional | Additional error context (e.g. field validation errors) |
+| **requestId** | `string` | optional | Request ID for tracking |
+
+### Nested Shape: `MetadataQueryResponse.data`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **items** | `{ type: string; name: string; namespace?: string; label?: string; … }[]` | ✅ | Matched metadata items |
+| **total** | `integer` | ✅ | Total matching items |
+| **page** | `integer` | ✅ | Current page |
+| **pageSize** | `integer` | ✅ | Page size |
 
 
 ---
@@ -410,6 +744,31 @@ Metadata query with filtering, sorting, and pagination
 | **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
 | **data** | `{ type: string; label: string; description?: string; filePatterns: string[]; … }` | optional | Type info |
 
+### Nested Shape: `MetadataTypeInfoResponse.error`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>` | ✅ | Error code (e.g. VALIDATION_ERROR; StandardErrorCode ∪ the ledger the serving side registers — ERROR_CODE_LEDGER for framework packages) |
+| **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112, #9106) |
+| **message** | `string` | ✅ | Readable error message |
+| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim (#9934). Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution (#3821) for anything unmarked. Status-agnostic; never replaces `message`. |
+| **category** | `string` | optional | Error category (e.g. validation, authorization) |
+| **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
+| **details** | `any` | optional | Additional error context (e.g. field validation errors) |
+| **requestId** | `string` | optional | Request ID for tracking |
+
+### Nested Shape: `MetadataTypeInfoResponse.data`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `string` | ✅ | Metadata type identifier |
+| **label** | `string` | ✅ | Display label |
+| **description** | `string` | optional | Description |
+| **filePatterns** | `string[]` | ✅ | File glob patterns |
+| **supportsOverlay** | `boolean` | ✅ | Overlay support |
+| **domain** | `string` | ✅ | Protocol domain |
+| **actions** | `{ name: string; label: string \| Record<string, string>; description?: string \| Record<string, string>; objectName?: string; … }[]` | optional | Declarative type-level actions (buttons) the metadata-admin UI renders for this type |
+
 
 ---
 
@@ -423,6 +782,19 @@ Metadata query with filtering, sorting, and pagination
 | **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>; declaredCode?: string; message: string; userMessage?: string; … }` | optional | Error details if success is false |
 | **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
 | **data** | `string[]` | ✅ | Registered metadata type identifiers |
+
+### Nested Shape: `MetadataTypesResponse.error`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>` | ✅ | Error code (e.g. VALIDATION_ERROR; StandardErrorCode ∪ the ledger the serving side registers — ERROR_CODE_LEDGER for framework packages) |
+| **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112, #9106) |
+| **message** | `string` | ✅ | Readable error message |
+| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim (#9934). Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution (#3821) for anything unmarked. Status-agnostic; never replaces `message`. |
+| **category** | `string` | optional | Error category (e.g. validation, authorization) |
+| **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
+| **details** | `any` | optional | Additional error context (e.g. field validation errors) |
+| **requestId** | `string` | optional | Request ID for tracking |
 
 
 ---
@@ -450,6 +822,27 @@ Metadata query with filtering, sorting, and pagination
 | **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
 | **data** | `{ valid: boolean; errors?: object[]; warnings?: object[] }` | ✅ | Validation result |
 
+### Nested Shape: `MetadataValidateResponse.error`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>` | ✅ | Error code (e.g. VALIDATION_ERROR; StandardErrorCode ∪ the ledger the serving side registers — ERROR_CODE_LEDGER for framework packages) |
+| **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112, #9106) |
+| **message** | `string` | ✅ | Readable error message |
+| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim (#9934). Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution (#3821) for anything unmarked. Status-agnostic; never replaces `message`. |
+| **category** | `string` | optional | Error category (e.g. validation, authorization) |
+| **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
+| **details** | `any` | optional | Additional error context (e.g. field validation errors) |
+| **requestId** | `string` | optional | Request ID for tracking |
+
+### Nested Shape: `MetadataValidateResponse.data`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **valid** | `boolean` | ✅ | Whether the metadata is valid |
+| **errors** | `{ path: string; message: string; code?: string }[]` | optional | Validation errors |
+| **warnings** | `{ path: string; message: string }[]` | optional | Validation warnings |
+
 
 ---
 
@@ -463,6 +856,67 @@ Metadata query with filtering, sorting, and pagination
 | **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>; declaredCode?: string; message: string; userMessage?: string; … }` | optional | Error details if success is false |
 | **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
 | **data** | `{ name: string; label?: string; pluralLabel?: string; description?: string; … }` | ✅ | Full Object Schema |
+
+### Nested Shape: `ObjectDefinitionResponse.error`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>` | ✅ | Error code (e.g. VALIDATION_ERROR; StandardErrorCode ∪ the ledger the serving side registers — ERROR_CODE_LEDGER for framework packages) |
+| **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112, #9106) |
+| **message** | `string` | ✅ | Readable error message |
+| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim (#9934). Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution (#3821) for anything unmarked. Status-agnostic; never replaces `message`. |
+| **category** | `string` | optional | Error category (e.g. validation, authorization) |
+| **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
+| **details** | `any` | optional | Additional error context (e.g. field validation errors) |
+| **requestId** | `string` | optional | Request ID for tracking |
+
+### Nested Shape: `ObjectDefinitionResponse.data`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Machine unique key (snake_case). Immutable. |
+| **label** | `string` | optional | Human readable singular label (e.g. "Account") |
+| **pluralLabel** | `string` | optional | Human readable plural label (e.g. "Accounts") |
+| **description** | `string` | optional | Developer documentation / description |
+| **icon** | `string` | optional | Icon name (Lucide/Material) for UI representation |
+| **isSystem** | `boolean` | optional (default: `false`) | Is system object (protected from deletion; defaults its org-wide sharing to public when no sharingModel is set — plugin-sharing) |
+| **managedBy** | `Enum<'platform' \| 'config' \| 'system-data' \| 'engine-owned' \| 'append-only' \| 'better-auth'>` | optional | Lifecycle bucket — platform (user CRUD) \| config (admin authored) \| system-data (platform-defined schema, admin/user-writable data) \| engine-owned (engine owns the lifecycle, no user writes) \| append-only (audit) \| better-auth (identity). UI clients honour the resolved affordance matrix. |
+| **ownership** | `Enum<'user' \| 'business_unit' \| 'org' \| 'none'>` | optional | Record-ownership model: user (default — injects reassignable owner_id plus owning_business_unit_id) \| business_unit (unit-owned: owning_business_unit_id only, no owner_id) \| org \| none (no per-record owner, neither anchor). Distinct from the package own/extend contribution kind. |
+| **userActions** | `{ create?: boolean \| object; import?: boolean \| object; edit?: boolean \| object; delete?: boolean \| object; … }` | optional | Per-object override of the resolved CRUD affordance matrix. |
+| **systemFields** | `false \| { tenant?: boolean; audit?: boolean }` | optional | Opt out of, or selectively disable, registry-level system-field auto-injection. |
+| **datasource** | `string` | optional (default: `"default"`) | Target Datasource ID. "default" is the primary DB. |
+| **external** | `{ remoteName?: string; remoteSchema?: string; writable?: boolean; columnMap?: Record<string, string>; … }` | optional | Remote table binding for federated (external) objects. |
+| **fields** | `Record<string, { name?: string; label?: string; type: Enum<'text' \| 'textarea' \| 'email' \| 'url' \| 'phone' \| 'password' \| 'secret' \| …>; description?: string; … }>` | ✅ | Field definitions map. Keys must be snake_case identifiers. |
+| **indexes** | `{ name?: string; fields: string[]; unique?: boolean \| 'global' \| 'organization' }[]` | optional | Database performance indexes |
+| **fieldGroups** | `{ key: string; label: string; icon?: string; description?: string; … }[]` | optional | Ordered list of field groups (array order = display order). See ObjectFieldGroupSchema. |
+| **tenancy** | `{ enabled: boolean; tenantField?: string; organizationField?: string }` | optional | Multi-tenancy configuration for SaaS applications |
+| **access** | `{ default?: Enum<'public' \| 'private'> }` | optional | [ADR-0066 D2] Object exposure posture (public-by-default vs private secure-by-default). |
+| **requiredPermissions** | `string[] \| { read?: string[]; create?: string[]; update?: string[]; delete?: string[] }` | optional | [ADR-0066 D3/⑤] Capabilities required to access this object (AND-gate) — `string[]` gates all CRUD, or a `{read,create,update,delete}` map gates per operation. |
+| **lifecycle** | `{ class: Enum<'record' \| 'audit' \| 'telemetry' \| 'transient' \| 'event'>; retention?: object; ttl?: object; storage?: object; … }` | optional | Data lifecycle contract (ADR-0057): class + retention/ttl/rotation/archive policies enforced by the platform LifecycleService. |
+| **fileAccessDelegate** | `string` | optional | Kernel service that authorizes downloads of files owned by this object's media fields, instead of testing whether the caller can read the owning row. For objects whose access is mediated by a service (e.g. sys_approval_action → approvals). Fails closed. |
+| **validations** | `any[]` | optional | Object-level validation rules |
+| **activityMilestones** | `{ field: string; value: string; summary: string; type?: string }[]` | optional | Declarative semantic activity milestones — emit a templated timeline row when a field transitions into a value, no hook code (ADR-0052 §5b.2). |
+| **nameField** | `string` | optional | [ADR-0079] Canonical primary title field — the stored field used as the record display name (e.g. "name", "title"). |
+| **displayNameField** | `string` | optional | [DEPRECATED → nameField] Field to use as the record display name (e.g., "name", "title"). Accepted as an alias for nameField. |
+| **titleFormat** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | [DEPRECATED → nameField (ADR-0079)] Render-only title template; the server cannot return or query it, and an explicit nameField now takes precedence. Migrate a single-field title to nameField, a composite to a formula field designated as nameField. |
+| **highlightFields** | `string[]` | optional | [ADR-0085] Ordered most-important fields; first entry wins where only one fits. Drives default columns, cards, previews, detail highlight strip. Renamed from compactLayout. |
+| **stageField** | `string \| false` | optional | [ADR-0085] Lifecycle stage field (linear/ordered), or false to declare the status field non-linear and suppress stage heuristics. Absent = heuristic detection allowed. |
+| **editMode** | `Enum<'modal' \| 'page'>` | optional | Edit-interaction intent for records of this object: 'modal' opens the edit form as a dialog over the current view; 'page' navigates to a dedicated full-page edit route. Absent = the renderer picks its own default (objectui defaults to modal). Cross-renderer intent, not pixel styling (#11408, #10144 family). |
+| **listViews** | `Record<string, { name?: string; label?: string \| Record<string, string>; type?: Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>; data?: object \| … +3 more; … }>` | optional | Built-in named list views (segmented tabs) shipped with the object schema — "views" mode, dropdown userFilters allowed, no page-only tabs (ADR-0047) |
+| **searchableFields** | `string[]` | optional | Fields the `$search` query matches against (ADR-0061). Canonical default for the record picker, list quick-search and global search; views may narrow it. When unset, search auto-defaults to the name/title field plus short-text fields. Entries must name a STORED column: a virtual `formula` field is computed on read and materializes no column, so searching it can never match and it is refused (#6674) — mirror the value onto a stored text field and declare that. |
+| **enable** | `{ trackHistory?: boolean; searchable?: boolean; apiEnabled?: boolean; apiMethods?: Enum<'get' \| 'list' \| 'create' \| 'update' \| 'delete' \| 'bulk'>[]; … }` | optional | Enabled system features modules |
+| **sharingModel** | `Enum<'private' \| 'public_read' \| 'public_read_write' \| 'controlled_by_parent'>` | optional | Org-Wide Default record visibility (OWD) for INTERNAL users. Canonical four only (legacy aliases removed, ADR-0090 D4): private (owner-only) \| public_read (everyone reads, owner writes) \| public_read_write (everyone reads+writes) \| controlled_by_parent (derived from the master record). A CUSTOM object that omits this resolves to private at runtime (ADR-0090 D1). |
+| **externalSharingModel** | `Enum<'private' \| 'public_read' \| 'public_read_write' \| 'controlled_by_parent'>` | optional | [ADR-0090 D11] OWD for external (portal/partner) principals. Defaults to private; must be &lt;= sharingModel in openness. |
+| **publicSharing** | `{ enabled?: boolean; allowedAudiences?: Enum<'public' \| 'link_only' \| 'signed_in' \| 'email'>[]; allowedPermissions?: Enum<'view' \| 'comment' \| 'edit'>[]; maxExpiryDays?: integer; … }` | optional | Public share-link policy (Notion/Figma-style link sharing) |
+| **actions** | `{ name: string; label: string \| Record<string, string>; description?: string \| Record<string, string>; objectName?: string; … }[]` | optional | Actions associated with this object (auto-populated from top-level actions via objectName) |
+| **protection** | `{ lock: Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>; reason: string; docsUrl?: string }` | optional | Package author protection block — lock policy for this object. |
+| **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
+| **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
+| **_lockSource** | `Enum<'artifact' \| 'package' \| 'env-forced'>` | optional | Layer that set _lock (artifact \| package \| env-forced). |
+| **_provenance** | `Enum<'package' \| 'org' \| 'env-forced'>` | optional | Origin of the item (package \| org \| env-forced). |
+| **_packageId** | `string` | optional | Owning package machine id. |
+| **_packageVersion** | `string` | optional | Owning package version. |
+| **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
 
 
 ---

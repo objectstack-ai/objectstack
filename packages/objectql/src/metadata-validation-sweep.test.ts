@@ -135,8 +135,13 @@ const FIXTURES: Record<string, Fixture> = {
     },
     app: {
         valid: { name: 'sweep_app', label: 'Sweep' },
-        invalid: { name: 'BadCaseApp', label: 'Bad' },
-        invalidatedField: 'name',
+        // The invalid probe breaks `label`, not `name`: an ungrammatical item
+        // name is refused by the #12194 grammar door (INVALID_REQUEST 400)
+        // BEFORE the central Zod registry runs, so a bad name can no longer
+        // prove the schema gate this sweep exists to prove. The name-grammar
+        // refusal has its own pins in metadata-protocol.
+        invalid: { name: 'sweep_app_bad', label: 123 },
+        invalidatedField: 'label',
     },
     action: {
         valid: { name: 'sweep_action', label: 'Do it', type: 'script', target: 'do_it' },

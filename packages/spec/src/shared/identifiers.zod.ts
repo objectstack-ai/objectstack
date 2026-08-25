@@ -80,8 +80,82 @@ export const SnakeCaseIdentifierSchema = lazySchema(() => z
   .describe('Snake case identifier (lowercase with underscores only)'));
 
 /**
+ * Metadata item-name grammar — the ONE segment source (#12194, stage 1 of the
+ * #12176 maintainer-ruled retirement of compound `<section>/<name>` addressing,
+ * 2026-08-25).
+ *
+ * Both patterns below are built from this segment so the item-name grammar has
+ * a single declaration: {@link METADATA_ITEM_NAME_PATTERN} makes the dot
+ * qualifier OPTIONAL (a flat `crm_lead` and a qualified `crm_lead.pipeline`
+ * are both item names), while `QUALIFIED_ITEM_NAME_PATTERN` REQUIRES it (the
+ * `ViewItemNameSchema` identity in `ui/view.zod.ts`, where the prefix must
+ * recover the owning object). Extend the segment here, never by minting a
+ * sibling regex — two spellings of one grammar is how the `/meta` door ended
+ * up accepting `''`, `//` and `'Views/All Leads'` while spec declared a strict
+ * dotted identity nothing enforced.
+ */
+const ITEM_NAME_SEGMENT = '[a-z][a-z0-9_]*';
+
+/**
+ * The enforced metadata item-name grammar: lowercase snake_case segments,
+ * optionally dot-qualified — `/^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*$/`.
+ *
+ * Decided by the declaration, not ad hoc: no `/`, no empty string, no
+ * whitespace, no uppercase, no leading/trailing/double dots. Enforced at the
+ * metadata publish door (`@objectstack/metadata-protocol` `saveMetaItem` /
+ * `publishMetaItem`); `deleteMetaItem` and the read doors deliberately stay
+ * open so pre-grammar residue rows remain listable and clearable.
+ */
+export const METADATA_ITEM_NAME_PATTERN = new RegExp(
+  `^${ITEM_NAME_SEGMENT}(\\.${ITEM_NAME_SEGMENT})*$`,
+);
+
+/**
+ * The dot-REQUIRED variant of {@link METADATA_ITEM_NAME_PATTERN}: at least one
+ * qualifier segment. `ViewItemNameSchema` (`ui/view.zod.ts`) pins independent
+ * view-item identity on it (`<object>.<viewKey>` — the object is recovered
+ * from the prefix). Same segment source; only the arity differs.
+ */
+export const QUALIFIED_ITEM_NAME_PATTERN = new RegExp(
+  `^${ITEM_NAME_SEGMENT}(\\.${ITEM_NAME_SEGMENT})+$`,
+);
+
+/**
+ * Metadata Item Name
+ *
+ * The addressing identity of a metadata item — the `name` half of the
+ * `type`/`name` pair that keys `sys_metadata` and the `/api/v1/meta` URL
+ * space. Lowercase snake_case segments, optionally dot-qualified
+ * (`crm_lead`, `crm_lead.pipeline`).
+ *
+ * A slash never belongs in an item name: the compound `<section>/<name>`
+ * convention is retired (#12176 — sub-resource identity is spelled with a
+ * dot; containment is expressed by structure, never by a separator inside
+ * the identity string).
+ *
+ * @example Valid
+ * - 'crm_lead'
+ * - 'crm_lead.pipeline'
+ * - 'sys_user'
+ * @example Invalid (refused at the publish door)
+ * - 'views/all_leads' (slash — retired compound addressing; write `views_all_leads` or a dotted qualified name)
+ * - '' (empty)
+ * - 'Views/All Leads' (uppercase, whitespace, slash)
+ * - '.a', 'a.', 'a..b' (leading/trailing/double dots)
+ */
+export const MetadataItemNameSchema = lazySchema(() => z
+  .string()
+  .regex(METADATA_ITEM_NAME_PATTERN, {
+    message:
+      'Metadata item name must be lowercase snake_case segments, optionally dot-qualified '
+      + '(e.g. "crm_lead" or "crm_lead.pipeline"). No slashes, spaces, uppercase, empty '
+      + 'segments, or leading/trailing dots.',
+  })
+  .describe('Metadata item name (lowercase snake_case segments, optionally dot-qualified)'));
+
+/**
  * Event Name Identifier
- * 
+ *
  * Specialized identifier for event names that encourages dot notation.
  * Used in event-driven systems, message queues, and webhooks.
  * 
@@ -111,4 +185,5 @@ export const EventNameSchema = lazySchema(() => z
  */
 export type SystemIdentifier = z.input<typeof SystemIdentifierSchema>;
 export type SnakeCaseIdentifier = z.input<typeof SnakeCaseIdentifierSchema>;
+export type MetadataItemName = z.input<typeof MetadataItemNameSchema>;
 export type EventName = z.input<typeof EventNameSchema>;

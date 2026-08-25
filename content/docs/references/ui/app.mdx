@@ -55,6 +55,13 @@ const result = ActionNavItemSchema.parse(data);
 | **type** | `'action'` | ✅ |  |
 | **actionDef** | `{ actionName: string; params?: Record<string, any> }` | ✅ | Action definition to execute when clicked |
 
+### Nested Shape: `ActionNavItem.actionDef`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **actionName** | `string` | ✅ | Action machine name to execute |
+| **params** | `Record<string, any>` | optional | Parameters passed to the action |
+
 
 ---
 
@@ -95,6 +102,44 @@ const result = ActionNavItemSchema.parse(data);
 | **_packageVersion** | `string` | optional | Owning package version. |
 | **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
 
+### Nested Shape: `App.branding`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **primaryColor** | `string` | optional | Primary theme color hex code |
+| **accentColor** | `string` | optional | Accent color hex code (highlights, active states). Declared to match the objectui ConsoleLayout read of branding.accentColor (inverse-drift fix, liveness audit #1878/#1891/#1894). |
+| **logo** | `string` | optional | Custom logo URL for this app |
+| **favicon** | `string` | optional | Custom favicon URL for this app |
+
+### Nested Shape: `App.areas[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ | Unique area identifier (lowercase snake_case) |
+| **label** | `string \| Record<string, string>` | ✅ | Area display label |
+| **icon** | `string` | optional | Area icon name |
+| **description** | `string \| Record<string, string>` | optional | Area description |
+| **navigation** | `({ id: string; label: string \| Record<string, string>; icon?: string; order?: number; … } \| { type: 'separator'; id?: string; order?: number } \| … +7 more)[]` | ✅ | Navigation items within this area |
+
+### Nested Shape: `App.contextSelectors[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ | Selector id; selected value is exposed as the nav template var `{<id>}` |
+| **label** | `string \| Record<string, string>` | ✅ | Dropdown label |
+| **icon** | `string` | optional | Icon name |
+| **optionsSource** | `{ endpoint: string; valueKey?: string; labelKey?: string; filter?: object[] }` | ✅ | Option data source |
+| **allValue** | `string` | optional (default: `""`) | Sentinel value meaning "no concrete selection yet" (empty string is almost always right) |
+| **persist** | `Enum<'query' \| 'session' \| 'none'>` | optional (default: `"query"`) | Persist selection via URL query, sessionStorage, or not at all |
+
+### Nested Shape: `App.protection`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | ✅ | Lock policy — none \| no-overlay \| no-delete \| full. |
+| **reason** | `string` | ✅ | User-visible reason shown when the lock blocks an action. |
+| **docsUrl** | `string` | optional | Optional URL the Studio banner links to for more context. |
+
 
 ---
 
@@ -124,6 +169,15 @@ const result = ActionNavItemSchema.parse(data);
 | **optionsSource** | `{ endpoint: string; valueKey: string; labelKey: string; filter?: object[] }` | ✅ | Option data source |
 | **allValue** | `string` | optional (default: `""`) | Sentinel value meaning "no concrete selection yet" (empty string is almost always right) |
 | **persist** | `Enum<'query' \| 'session' \| 'none'>` | optional (default: `"query"`) | Persist selection via URL query, sessionStorage, or not at all |
+
+### Nested Shape: `AppContextSelector.optionsSource`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **endpoint** | `string` | ✅ | REST endpoint returning the option rows (e.g. /api/v1/packages) |
+| **valueKey** | `string` | optional (default: `"id"`) | Row property used as the option value (dotted path allowed, e.g. "manifest.id") |
+| **labelKey** | `string` | optional (default: `"name"`) | Row property used as the option label (dotted path allowed, e.g. "manifest.name") |
+| **filter** | `{ key: string; op: Enum<'eq' \| 'ne' \| 'in' \| 'nin'>; value: string \| string[] }[]` | optional | Predicates (AND) each option row must satisfy |
 
 
 ---
@@ -375,6 +429,13 @@ This schema accepts one of the following structures:
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
 | **type** | `'action'` | ✅ |  |
 | **actionDef** | `{ actionName: string; params?: Record<string, any> }` | ✅ | Action definition to execute when clicked |
+
+### Nested Shape: `NavigationItem.actionDef`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **actionName** | `string` | ✅ | Action machine name to execute |
+| **params** | `Record<string, any>` | optional | Parameters passed to the action |
 
 ---
 

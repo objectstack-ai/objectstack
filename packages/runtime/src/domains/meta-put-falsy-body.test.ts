@@ -175,11 +175,17 @@ describe('#8842 — dispatcher PUT /meta/:type/:name with a falsy body', () => {
             expect(stack.getMetaItem).not.toHaveBeenCalled();
         });
 
-        it('the compound-name form too — a name in two segments is the same operation', async () => {
+        it('[#12195] the ENCODED spelling too — one two-segment name, same operation', async () => {
             const stack = boot();
 
+            // This drove `/lead/views/all_leads` — the compound arity, which
+            // folded the trailing segments into `views/all_leads`. That arity
+            // is retired (#12176 stage 3), so the same name is addressed
+            // percent-encoded, which keeps the path at two segments and lands
+            // on the same `saveMetaItem`. The #8842 falsy-body hole this file
+            // exists for is a property of that handler, not of the spelling.
             const res = await stack.dispatcher.handleMetadata(
-                '/lead/views/all_leads',
+                '/lead/views%2Fall_leads',
                 ctx(AUTHOR),
                 'PUT',
                 null,
@@ -190,6 +196,20 @@ describe('#8842 — dispatcher PUT /meta/:type/:name with a falsy body', () => {
             expect(stack.saveMetaItem.mock.calls[0][0]).toMatchObject({
                 type: 'lead', name: 'views/all_leads', item: {},
             });
+        });
+
+        it('[#12195] and the retired compound spelling is a located ROUTE_NOT_FOUND', async () => {
+            const stack = boot();
+
+            const res = await stack.dispatcher.handleMetadata(
+                '/lead/views/all_leads', ctx(AUTHOR), 'PUT', null,
+            );
+
+            // ADR-0112: code AND status. The falsy-body hole cannot hide behind
+            // the retired arity — nothing reaches `saveMetaItem` at all.
+            expect(res.response?.status).toBe(404);
+            expect(res.response?.body?.error?.code).toBe('ROUTE_NOT_FOUND');
+            expect(stack.saveMetaItem).not.toHaveBeenCalled();
         });
     });
 

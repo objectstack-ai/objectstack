@@ -95,6 +95,49 @@ Translation data for a single object
 | **_sections** | `Record<string, { label?: string; description?: string }>` | optional | Section translations keyed by section name |
 | **_tabs** | `Record<string, { label?: string }>` | optional | Filter-preset tab translations keyed by tab name |
 
+### Nested Shape: `ObjectTranslationData.fields[string]`
+
+Translation data for a single field
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **label** | `string` | optional | Translated field label |
+| **help** | `string` | optional | Translated help text |
+| **placeholder** | `string` | optional | Translated placeholder text for form inputs |
+| **options** | `Record<string, string>` | optional | Option value to translated label map |
+
+### Nested Shape: `ObjectTranslationData._views[string]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **label** | `string` | optional | Translated view label |
+| **description** | `string` | optional | Translated view description |
+| **emptyState** | `{ title?: string; message?: string }` | optional | Translated empty-state copy shown when the view has no rows |
+
+### Nested Shape: `ObjectTranslationData._actions[string]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **label** | `string` | optional | Translated action label |
+| **description** | `string` | optional | Translated action description — the explanatory line under the title in the action's param dialog |
+| **confirmText** | `string` | optional | Translated confirmation prompt |
+| **successMessage** | `string` | optional | Translated success toast/message |
+| **params** | `Record<string, { label?: string; helpText?: string; placeholder?: string; options?: Record<string, string> }>` | optional | Action parameter translations keyed by parameter name |
+| **resultDialog** | `{ title?: string; description?: string; acknowledge?: string; fields?: Record<string, string> }` | optional | Translations for the action result dialog |
+
+### Nested Shape: `ObjectTranslationData._sections[string]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **label** | `string` | optional | Translated section label |
+| **description** | `string` | optional | Translated section description |
+
+### Nested Shape: `ObjectTranslationData._tabs[string]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **label** | `string` | optional | Translated tab label |
+
 
 ---
 
@@ -141,6 +184,31 @@ Aggregated translation coverage result
 | **items** | `{ key: string; status: Enum<'missing' \| 'redundant' \| 'stale'>; objectName?: string; locale: string; … }[]` | ✅ | Detailed diff items |
 | **breakdown** | `{ group: string; totalKeys: integer; translatedKeys: integer; coveragePercent: number }[]` | optional | Per-group coverage breakdown |
 
+### Nested Shape: `TranslationCoverageResult.items[number]`
+
+A single translation diff item
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **key** | `string` | ✅ | Dot-path translation key |
+| **status** | `Enum<'missing' \| 'redundant' \| 'stale'>` | ✅ | Diff status of this translation key |
+| **objectName** | `string` | optional | Associated object name (snake_case) |
+| **locale** | `string` | ✅ | BCP-47 locale code |
+| **sourceHash** | `string` | optional | Hash of source metadata for precise stale detection |
+| **aiSuggested** | `string` | optional | AI-suggested translation for this key |
+| **aiConfidence** | `number` | optional | AI suggestion confidence score (0–1) |
+
+### Nested Shape: `TranslationCoverageResult.breakdown[number]`
+
+Coverage breakdown for a single translation group
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **group** | `string` | ✅ | Translation group category |
+| **totalKeys** | `integer` | ✅ | Total keys in this group |
+| **translatedKeys** | `integer` | ✅ | Translated keys in this group |
+| **coveragePercent** | `number` | ✅ | Coverage percentage for this group |
+
 
 ---
 
@@ -162,6 +230,91 @@ Translation data for objects, apps, and UI messages
 | **settings** | `Record<string, { title?: string; description?: string; groups?: Record<string, object>; keys?: Record<string, object>; … }>` | optional | Settings manifest translations keyed by namespace |
 | **metadataForms** | `Record<string, { label?: string; description?: string; sections?: Record<string, object>; fields?: Record<string, object> }>` | optional | Translations for metadata-type configuration forms keyed by metadata type |
 | **settingsCommon** | `{ sourceLabels?: object }` | optional | Cross-namespace Settings UI strings |
+
+### Nested Shape: `TranslationData.objects[string]`
+
+Translation data for a single object
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **label** | `string` | optional | Translated singular label |
+| **pluralLabel** | `string` | optional | Translated plural label |
+| **description** | `string` | optional | Translated object description |
+| **fields** | `Record<string, { label?: string; help?: string; placeholder?: string; options?: Record<string, string> }>` | optional | Field-level translations |
+| **_views** | `Record<string, { label?: string; description?: string; emptyState?: object }>` | optional | View translations keyed by view name |
+| **_actions** | `Record<string, { label?: string; description?: string; confirmText?: string; successMessage?: string; … }>` | optional | Action translations keyed by action name |
+| **_sections** | `Record<string, { label?: string; description?: string }>` | optional | Section translations keyed by section name |
+| **_tabs** | `Record<string, { label?: string }>` | optional | Filter-preset tab translations keyed by tab name |
+
+### Nested Shape: `TranslationData.apps[string]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **label** | `string` | ✅ | Translated app label |
+| **description** | `string` | optional | Translated app description |
+| **navigation** | `Record<string, { label: string }>` | optional | Navigation group translations keyed by group ID |
+
+### Nested Shape: `TranslationData.globalActions[string]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **label** | `string` | optional | Translated action label |
+| **description** | `string` | optional | Translated action description — the explanatory line under the title in the action's param dialog |
+| **confirmText** | `string` | optional | Translated confirmation prompt |
+| **successMessage** | `string` | optional | Translated success toast/message |
+| **params** | `Record<string, { label?: string; helpText?: string; placeholder?: string; options?: Record<string, string> }>` | optional | Action parameter translations keyed by parameter name |
+| **resultDialog** | `{ title?: string; description?: string; acknowledge?: string; fields?: Record<string, string> }` | optional | Translations for the action result dialog |
+
+### Nested Shape: `TranslationData.dashboards[string]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **label** | `string` | optional | Translated dashboard title |
+| **description** | `string` | optional | Translated dashboard description |
+| **actions** | `Record<string, { label?: string }>` | optional | Header action label translations keyed by action url/key |
+| **widgets** | `Record<string, { title?: string; description?: string; subCaption?: string }>` | optional | Widget translations keyed by widget id |
+
+### Nested Shape: `TranslationData.pages[string]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **label** | `string` | optional | Translated page label (nav / breadcrumb) |
+| **description** | `string` | optional | Translated page description |
+| **title** | `string` | optional | Translated `page:header` title (defaults to `label`) |
+| **subtitle** | `string` | optional | Translated `page:header` subtitle |
+| **components** | `Record<string, { title?: string; description?: string; label?: string; placeholder?: string; … }>` | optional | Per-component copy keyed by component id (`PageComponentSchema.id`) |
+
+### Nested Shape: `TranslationData.flows[string]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **label** | `string` | optional | Translated flow label |
+| **screens** | `Record<string, { title?: string; fields?: Record<string, object> }>` | optional | Screen translations keyed by screen node id (`FlowNode.id`, the client's `ScreenSpec.nodeId`) |
+
+### Nested Shape: `TranslationData.settings[string]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **title** | `string` | optional | Translated settings manifest title |
+| **description** | `string` | optional | Translated settings manifest description |
+| **groups** | `Record<string, { title?: string; description?: string }>` | optional | Group translations keyed by group key |
+| **keys** | `Record<string, { label?: string; help?: string; placeholder?: string; options?: Record<string, string> }>` | optional | Per-setting field translations keyed by setting key |
+| **actions** | `Record<string, { label?: string; confirmText?: string; successMessage?: string }>` | optional | Action button translations keyed by action id |
+
+### Nested Shape: `TranslationData.metadataForms[string]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **label** | `string` | optional | Translated metadata-type display label (overrides registry label) |
+| **description** | `string` | optional | Translated metadata-type description |
+| **sections** | `Record<string, { label?: string; description?: string }>` | optional | Section translations keyed by section.name |
+| **fields** | `Record<string, { label?: string; helpText?: string; placeholder?: string }>` | optional | Field translations keyed by field path (dot-notation for nested fields) |
+
+### Nested Shape: `TranslationData.settingsCommon`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **sourceLabels** | `{ env?: string; global?: string; tenant?: string; user?: string; … }` | optional | Source badge labels by resolution layer |
 
 
 ---
@@ -226,6 +379,91 @@ One locale of translations — the `translation` metadata type
 | **_packageId** | `string` | optional | Owning package machine id. |
 | **_packageVersion** | `string` | optional | Owning package version. |
 | **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
+
+### Nested Shape: `TranslationItem.objects[string]`
+
+Translation data for a single object
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **label** | `string` | optional | Translated singular label |
+| **pluralLabel** | `string` | optional | Translated plural label |
+| **description** | `string` | optional | Translated object description |
+| **fields** | `Record<string, { label?: string; help?: string; placeholder?: string; options?: Record<string, string> }>` | optional | Field-level translations |
+| **_views** | `Record<string, { label?: string; description?: string; emptyState?: object }>` | optional | View translations keyed by view name |
+| **_actions** | `Record<string, { label?: string; description?: string; confirmText?: string; successMessage?: string; … }>` | optional | Action translations keyed by action name |
+| **_sections** | `Record<string, { label?: string; description?: string }>` | optional | Section translations keyed by section name |
+| **_tabs** | `Record<string, { label?: string }>` | optional | Filter-preset tab translations keyed by tab name |
+
+### Nested Shape: `TranslationItem.apps[string]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **label** | `string` | ✅ | Translated app label |
+| **description** | `string` | optional | Translated app description |
+| **navigation** | `Record<string, { label: string }>` | optional | Navigation group translations keyed by group ID |
+
+### Nested Shape: `TranslationItem.globalActions[string]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **label** | `string` | optional | Translated action label |
+| **description** | `string` | optional | Translated action description — the explanatory line under the title in the action's param dialog |
+| **confirmText** | `string` | optional | Translated confirmation prompt |
+| **successMessage** | `string` | optional | Translated success toast/message |
+| **params** | `Record<string, { label?: string; helpText?: string; placeholder?: string; options?: Record<string, string> }>` | optional | Action parameter translations keyed by parameter name |
+| **resultDialog** | `{ title?: string; description?: string; acknowledge?: string; fields?: Record<string, string> }` | optional | Translations for the action result dialog |
+
+### Nested Shape: `TranslationItem.dashboards[string]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **label** | `string` | optional | Translated dashboard title |
+| **description** | `string` | optional | Translated dashboard description |
+| **actions** | `Record<string, { label?: string }>` | optional | Header action label translations keyed by action url/key |
+| **widgets** | `Record<string, { title?: string; description?: string; subCaption?: string }>` | optional | Widget translations keyed by widget id |
+
+### Nested Shape: `TranslationItem.pages[string]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **label** | `string` | optional | Translated page label (nav / breadcrumb) |
+| **description** | `string` | optional | Translated page description |
+| **title** | `string` | optional | Translated `page:header` title (defaults to `label`) |
+| **subtitle** | `string` | optional | Translated `page:header` subtitle |
+| **components** | `Record<string, { title?: string; description?: string; label?: string; placeholder?: string; … }>` | optional | Per-component copy keyed by component id (`PageComponentSchema.id`) |
+
+### Nested Shape: `TranslationItem.flows[string]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **label** | `string` | optional | Translated flow label |
+| **screens** | `Record<string, { title?: string; fields?: Record<string, object> }>` | optional | Screen translations keyed by screen node id (`FlowNode.id`, the client's `ScreenSpec.nodeId`) |
+
+### Nested Shape: `TranslationItem.settings[string]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **title** | `string` | optional | Translated settings manifest title |
+| **description** | `string` | optional | Translated settings manifest description |
+| **groups** | `Record<string, { title?: string; description?: string }>` | optional | Group translations keyed by group key |
+| **keys** | `Record<string, { label?: string; help?: string; placeholder?: string; options?: Record<string, string> }>` | optional | Per-setting field translations keyed by setting key |
+| **actions** | `Record<string, { label?: string; confirmText?: string; successMessage?: string }>` | optional | Action button translations keyed by action id |
+
+### Nested Shape: `TranslationItem.metadataForms[string]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **label** | `string` | optional | Translated metadata-type display label (overrides registry label) |
+| **description** | `string` | optional | Translated metadata-type description |
+| **sections** | `Record<string, { label?: string; description?: string }>` | optional | Section translations keyed by section.name |
+| **fields** | `Record<string, { label?: string; helpText?: string; placeholder?: string }>` | optional | Field translations keyed by field path (dot-notation for nested fields) |
+
+### Nested Shape: `TranslationItem.settingsCommon`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **sourceLabels** | `{ env?: string; global?: string; tenant?: string; user?: string; … }` | optional | Source badge labels by resolution layer |
 
 
 ---

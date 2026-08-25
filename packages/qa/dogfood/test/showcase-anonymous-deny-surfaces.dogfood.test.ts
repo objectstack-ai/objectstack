@@ -22,10 +22,11 @@
 // the shape the leak it was built for had. objectui#5828 then asked the other
 // half — a guest / previewMode boot writes an `@anon` metadata seed, so does the
 // server refuse an anonymous WRITE? — and no artifact in this repo answered it
-// end-to-end. The six mutating routes are now driven here as real HTTP. The
-// reading is recorded in full at the door table below; the short version is that
-// the umbrella already refused all six, so #11373 is a measurement plus its pin,
-// not a fix.
+// end-to-end. The mutating routes are now driven here as real HTTP (six when
+// #11373 measured; five since #12176 D3 retired the compound save — see the
+// retired-door case beside the table). The reading is recorded in full at the
+// door table below; the short version is that the umbrella already refused all
+// of them, so #11373 is a measurement plus its pin, not a fix.
 //
 // ── Why `/actions` and `/automation` are here (#5570) ────────────────────────
 //
@@ -91,7 +92,7 @@ const FLOW = 'showcase_reassign_wizard';
 //
 // It was not that the refusal was unpinned — it was pinned in the WRONG LAYER.
 // `packages/rest/src/meta-write-door-capability-enumeration.test.ts` already
-// asserts a 401 on all six doors, but it constructs a `RestServer` over a
+// asserts a 401 on the mutating doors, but it constructs a `RestServer` over a
 // `vi.fn()` transport and invokes `route.handler(req, res)` directly. That
 // proves the handler wrapper refuses a context it was handed; it cannot prove
 // the composed app routes a real `PUT /api/v1/meta/...` into that wrapper at
@@ -99,7 +100,7 @@ const FLOW = 'showcase_reassign_wizard';
 // browser actually meets.
 //
 // So these cases drive the doors as HTTP, on the same booted showcase the rest
-// of this file uses. Measured 2026-08-23 on this stack, all six doors:
+// of this file uses. Measured 2026-08-23 on this stack, all doors then mounted:
 //   anonymous                      → 401 UNAUTHENTICATED, rest-flat envelope
 //   member (no manage_metadata)    → 403 FORBIDDEN  ← a DIFFERENT gate
 //   dev admin, same URL/method/body→ the door runs; `PUT` persisted and the
@@ -123,7 +124,17 @@ interface MetaWriteDoor {
   readonly body?: unknown;
 }
 
-/** The six mutating `/meta` routes `registerMetadataEndpoints` composes. */
+/**
+ * The five mutating `/meta` routes `registerMetadataEndpoints` composes.
+ *
+ * There were six when #11373 measured: `PUT /meta/:type/:section/:name` (the
+ * compound save) was retired by #12176 D3 — the item-name grammar (#12194)
+ * refuses every slash-bearing name, so the arity addressed only names that can
+ * no longer exist. A retired door cannot sit in this table: the registered-door
+ * anti-vacuity leg below asserts `.not.toBe(404)`, which is exactly what a
+ * retired route answers. Its own case lives beside these — the compound
+ * spelling must now 404 for EVERYONE, anonymous or not.
+ */
 const META_WRITE_DOORS: readonly MetaWriteDoor[] = [
   { seam: 'POST /meta/_migrate-stored', method: 'POST', path: '/meta/_migrate-stored', body: {} },
   {
@@ -135,8 +146,10 @@ const META_WRITE_DOORS: readonly MetaWriteDoor[] = [
   { seam: 'DELETE /meta/:type/:name (reset)', method: 'DELETE', path: `/meta/object/${META_PROBE_OBJECT}` },
   { seam: 'POST /meta/:type/:name/publish', method: 'POST', path: `/meta/object/${META_PROBE_OBJECT}/publish`, body: {} },
   { seam: 'POST /meta/:type/:name/rollback', method: 'POST', path: `/meta/object/${META_PROBE_OBJECT}/rollback`, body: { toVersion: 1 } },
-  { seam: 'PUT /meta/:type/:section/:name (compound save)', method: 'PUT', path: `/meta/object/views/${META_PROBE_VIEW}`, body: { name: META_PROBE_VIEW } },
 ];
+
+/** The retired compound-save spelling (#12176 D3) — routed nowhere, for anyone. */
+const RETIRED_COMPOUND_PATH = `/meta/object/views/${META_PROBE_VIEW}`;
 
 // ── #5632 — the TWO declared anonymous-401 envelopes, as executable rules ───
 //
@@ -300,6 +313,20 @@ describe('showcase: anonymous posture is uniform across surfaces (#2567)', () =>
     expect(r.status, 'the object the anonymous PUT tried to author must not exist').toBe(404);
     const body = (await r.json()) as Record<string, unknown>;
     expect(body.code).toBe('RESOURCE_NOT_FOUND');
+  });
+
+  it('[#12176 D3] the retired compound save routes NOWHERE — 404 for everyone, not a 401', async () => {
+    // The compound arity used to be the sixth row of the table above. Retired,
+    // it must answer the same 404 to an anonymous caller and to a member: a
+    // 401 here would mean the route is BACK (an auth floor only speaks for a
+    // door that exists), and #6603's history says a re-mounted compound door
+    // arrives ungated. The composed-app leg of that statement lives here; the
+    // registrar-level absence pins live in
+    // `rest/src/meta-compound-save-and-reset-capability-gate.test.ts`.
+    const anonRes = await anon('PUT', RETIRED_COMPOUND_PATH, { name: META_PROBE_VIEW });
+    expect(anonRes.status, 'retired compound save must be unrouted, not auth-refused').toBe(404);
+    const memberRes = await stack.apiAs(memberToken, 'PUT', RETIRED_COMPOUND_PATH, { name: META_PROBE_VIEW });
+    expect(memberRes.status, 'a session must not change the answer on a route that is gone').toBe(404);
   });
 
   // ── /data (surface-level; served by @objectstack/rest, its sole owner) ──

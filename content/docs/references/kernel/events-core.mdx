@@ -36,6 +36,19 @@ const result = EventSchema.parse(data);
 | **payload** | `any` | ✅ | Event payload schema |
 | **metadata** | `{ source: string; timestamp: string; userId?: string; tenantId?: string; … }` | ✅ | Event metadata |
 
+### Nested Shape: `Event.metadata`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **source** | `string` | ✅ | Event source (e.g., plugin name, system component) |
+| **timestamp** | `string` | ✅ | ISO 8601 datetime when event was created |
+| **userId** | `string` | optional | User who triggered the event |
+| **tenantId** | `string` | optional | Tenant identifier for multi-tenant systems |
+| **correlationId** | `string` | optional | Correlation ID for event tracing |
+| **causationId** | `string` | optional | ID of the event that caused this event |
+| **priority** | `Enum<'critical' \| 'high' \| 'normal' \| 'low' \| 'background'>` | optional (default: `"normal"`) | Event priority |
+| **cluster** | `{ scope: Enum<'local' \| 'cluster' \| 'tenant'>; deliverySemantics?: Enum<'best-effort' \| 'at-least-once' \| 'exactly-once'>; partitionKey?: string }` | optional | Per-emit cluster routing & delivery options. See cluster-semantics.mdx §4. |
+
 
 ---
 
@@ -53,6 +66,14 @@ const result = EventSchema.parse(data);
 | **causationId** | `string` | optional | ID of the event that caused this event |
 | **priority** | `Enum<'critical' \| 'high' \| 'normal' \| 'low' \| 'background'>` | optional (default: `"normal"`) | Event priority |
 | **cluster** | `{ scope: Enum<'local' \| 'cluster' \| 'tenant'>; deliverySemantics?: Enum<'best-effort' \| 'at-least-once' \| 'exactly-once'>; partitionKey?: string }` | optional | Per-emit cluster routing & delivery options. See cluster-semantics.mdx §4. |
+
+### Nested Shape: `EventMetadata.cluster`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **scope** | `Enum<'local' \| 'cluster' \| 'tenant'>` | optional (default: `"local"`) | Delivery scope. Default `local` for backward compatibility. |
+| **deliverySemantics** | `Enum<'best-effort' \| 'at-least-once' \| 'exactly-once'>` | optional | Delivery guarantee. Default depends on scope. |
+| **partitionKey** | `string` | optional | Stable key that guarantees emit-order delivery for same-key events. |
 
 
 ---

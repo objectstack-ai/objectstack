@@ -129,6 +129,14 @@ const result = FieldSortabilitySchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **fields** | `Record<string, { sortable: boolean; reason?: 'virtual-type'; caveat?: 'unprovisioned-anchor' }>` | ✅ | Verdict per sortable-addressable column, keyed by field name. The domain is the served field map plus the always-provisioned `id`; a name absent from this map (an unknown field, a dotted path, an unprovisioned audit column) has no platform sort behind it and must get no sort affordance. |
 
+### Nested Shape: `ObjectSortability.fields[string]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **sortable** | `boolean` | ✅ | Whether the platform honors an ORDER BY over this field. `false` means the runtime REFUSES the sort (`400 INVALID_SORT`) — render no sort affordance. `true` means the sort is accepted; see `caveat` for the one accepted-but-degradable case. A derived verdict: do not recompute it from field `type` client-side. |
+| **reason** | `'virtual-type'` | optional | Present exactly when `sortable` is false: the field's type is virtual (computed on read, no stored column), so no driver materialises anything to ORDER BY. |
+| **caveat** | `'unprovisioned-anchor'` | optional | Present only with `sortable: true`: the field is a platform-injected anchor on an ADR-0015 `external` object with no storage provisioned behind it. The runtime accepts the sort, but when the remote table carries no such column the ORDER BY is silently dropped (asc === desc under a 200). Consumers may choose a conservative affordance for these entries. |
+
 
 ---
 

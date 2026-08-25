@@ -136,6 +136,35 @@ Upgrade package request
 | **dryRun** | `boolean` | optional (default: `false`) | Preview upgrade without making changes |
 | **skipValidation** | `boolean` | optional (default: `false`) | Skip pre-upgrade compatibility checks |
 
+### Nested Shape: `UpgradePackageRequest.manifest`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ | Unique package identifier (reverse domain style) |
+| **namespace** | `string` | optional | Short namespace identifier; also the mandatory prefix of every object name (e.g. "todo" → object names "todo_task", "todo_project") |
+| **defaultDatasource** | `string` | optional (default: `"default"`) | Default datasource for all objects in this package |
+| **version** | `string` | ✅ | Package version (semantic versioning) |
+| **type** | `Enum<'plugin' \| 'ui' \| 'driver' \| 'server' \| 'app' \| 'theme' \| 'agent' \| 'objectql' \| …>` | ✅ | Type of package |
+| **scope** | `Enum<'cloud' \| 'system' \| 'project'>` | optional (default: `"project"`) | Deployment scope: cloud \| system \| project |
+| **name** | `string` | ✅ | Human-readable package name |
+| **description** | `string` | optional | Package description |
+| **permissions** | `string[] \| { services?: string[]; hooks?: string[]; network?: string[]; fs?: string[] }` | optional | Required permissions: legacy string[] or structured plugin block (ADR-0025 §3.2) |
+| **objects** | `string[]` | optional | Glob patterns for ObjectQL schemas files |
+| **datasources** | `string[]` | optional | Glob patterns for Datasource definitions |
+| **dependencies** | `Record<string, string>` | optional | Package dependencies |
+| **configuration** | `{ title?: string; properties: Record<string, object> }` | optional | Plugin configuration settings |
+| **contributes** | `{ kinds?: object[]; routes?: object[] }` | optional | Platform contributions |
+| **data** | `{ object: string; externalId?: string \| string[]; mode?: Enum<'insert' \| 'update' \| 'upsert' \| 'replace' \| 'ignore'>; env?: Enum<'prod' \| 'dev' \| 'test'>[]; … }[]` | optional | Initial seed data (prefer top-level data field) |
+| **capabilities** | `{ implements?: object[]; provides?: object[]; requires?: object[]; extensionPoints?: object[]; … }` | optional | Plugin capability declarations for interoperability |
+| **extensions** | `Record<string, any>` | optional | Extension points and contributions |
+| **navigationContributions** | `{ app: string; group?: string; priority?: integer; items: (object \| … +8 more)[] }[]` | optional | Navigation items this package contributes into apps owned by other packages |
+| **loading** | `never` | optional | [REMOVED] `manifest.loading` was removed in @objectstack/spec 17.0.0 (#4914, ADR-0049 enforce-or-remove) — the entire block (`strategy`, `preload`, `codeSplitting`, `dynamicImport`, `initialization`, `dependencyResolution`, `hotReload`, `caching`, `sandboxing`, `monitoring`) had no runtime reader in any repo, so authoring it configured nothing. Delete the key. Plugins are composed at boot — `defineStack` registers them and the kernel runs `init` then `start` in an order topologically resolved from each composed plugin's own `dependencies` / `optionalDependencies` (`resolvePluginOrder`); the set is fixed until the process restarts. ⚠️ `loading.sandboxing` in particular never isolated anything: it did not run plugins in a process, vm, iframe or web-worker, and `allowedServices` gated no call. If you were relying on it for isolation, you had none — use the plugin trust tier (`manifest.runtime`) and the permission declarations, which are enforced. |
+| **engine** | `{ objectstack: string }` | optional | Platform compatibility requirements (legacy; superseded by `engines`) |
+| **engines** | `{ platform?: string; protocol?: string }` | optional | Plugin compatibility ranges (ADR-0025 §3.2; supersedes `engine`) |
+| **runtime** | `Enum<'node' \| 'sandbox' \| 'worker'>` | optional | Plugin trust tier (ADR-0025 §3.6) |
+| **packaging** | `Enum<'bundled' \| 'manifest-deps'>` | optional | Dependency packaging strategy (ADR-0025 §3.3) |
+| **integrity** | `Record<string, string>` | optional | Per-file content digests of the plugin artifact (ADR-0025 §3.2) |
+
 
 ---
 
@@ -154,6 +183,22 @@ Upgrade package response
 | **conflicts** | `{ path: string; baseValue: any; incomingValue: any; customValue: any }[]` | optional | Unresolved merge conflicts |
 | **errorMessage** | `string` | optional | Error message if upgrade failed |
 | **message** | `string` | optional | Human-readable status message |
+
+### Nested Shape: `UpgradePackageResponse.plan`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **packageId** | `string` | ✅ | Package identifier |
+| **fromVersion** | `string` | ✅ | Currently installed version |
+| **toVersion** | `string` | ✅ | Target upgrade version |
+| **impactLevel** | `Enum<'none' \| 'low' \| 'medium' \| 'high' \| 'critical'>` | ✅ | Severity assessment from none (seamless) to critical (breaking changes) |
+| **changes** | `{ type: string; name: string; changeType: Enum<'added' \| 'modified' \| 'removed' \| 'renamed'>; hasConflict: boolean; … }[]` | ✅ | All metadata changes |
+| **affectedCustomizations** | `integer` | optional (default: `0`) | Count of customizations that may be affected |
+| **requiresMigration** | `boolean` | optional (default: `false`) | Whether data migration scripts are needed |
+| **migrationScripts** | `string[]` | optional | Paths to migration scripts |
+| **dependencyUpgrades** | `{ packageId: string; fromVersion: string; toVersion: string }[]` | optional | Dependent packages that also need upgrading |
+| **estimatedDuration** | `integer` | optional | Estimated upgrade duration in seconds |
+| **summary** | `string` | optional | Human-readable upgrade summary |
 
 
 ---
@@ -198,6 +243,19 @@ Upgrade analysis plan generated before execution
 | **estimatedDuration** | `integer` | optional | Estimated upgrade duration in seconds |
 | **summary** | `string` | optional | Human-readable upgrade summary |
 
+### Nested Shape: `UpgradePlan.changes[number]`
+
+Single metadata change between package versions
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `string` | ✅ | Metadata type |
+| **name** | `string` | ✅ | Metadata name |
+| **changeType** | `Enum<'added' \| 'modified' \| 'removed' \| 'renamed'>` | ✅ | Category of metadata modification (added, modified, removed, or renamed) |
+| **hasConflict** | `boolean` | optional (default: `false`) | Whether this change may conflict with customizations |
+| **summary** | `string` | optional | Human-readable change summary |
+| **previousName** | `string` | optional | Previous name if renamed |
+
 
 ---
 
@@ -219,6 +277,35 @@ Pre-upgrade state snapshot for rollback capability
 | **customizationSnapshot** | `Record<string, any>[]` | optional | Snapshot of customer customizations |
 | **createdAt** | `string` | ✅ | Snapshot creation timestamp |
 | **expiresAt** | `string` | optional | Snapshot expiry timestamp |
+
+### Nested Shape: `UpgradeSnapshot.previousManifest`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ | Unique package identifier (reverse domain style) |
+| **namespace** | `string` | optional | Short namespace identifier; also the mandatory prefix of every object name (e.g. "todo" → object names "todo_task", "todo_project") |
+| **defaultDatasource** | `string` | optional (default: `"default"`) | Default datasource for all objects in this package |
+| **version** | `string` | ✅ | Package version (semantic versioning) |
+| **type** | `Enum<'plugin' \| 'ui' \| 'driver' \| 'server' \| 'app' \| 'theme' \| 'agent' \| 'objectql' \| …>` | ✅ | Type of package |
+| **scope** | `Enum<'cloud' \| 'system' \| 'project'>` | optional (default: `"project"`) | Deployment scope: cloud \| system \| project |
+| **name** | `string` | ✅ | Human-readable package name |
+| **description** | `string` | optional | Package description |
+| **permissions** | `string[] \| { services?: string[]; hooks?: string[]; network?: string[]; fs?: string[] }` | optional | Required permissions: legacy string[] or structured plugin block (ADR-0025 §3.2) |
+| **objects** | `string[]` | optional | Glob patterns for ObjectQL schemas files |
+| **datasources** | `string[]` | optional | Glob patterns for Datasource definitions |
+| **dependencies** | `Record<string, string>` | optional | Package dependencies |
+| **configuration** | `{ title?: string; properties: Record<string, object> }` | optional | Plugin configuration settings |
+| **contributes** | `{ kinds?: object[]; routes?: object[] }` | optional | Platform contributions |
+| **data** | `{ object: string; externalId?: string \| string[]; mode?: Enum<'insert' \| 'update' \| 'upsert' \| 'replace' \| 'ignore'>; env?: Enum<'prod' \| 'dev' \| 'test'>[]; … }[]` | optional | Initial seed data (prefer top-level data field) |
+| **capabilities** | `{ implements?: object[]; provides?: object[]; requires?: object[]; extensionPoints?: object[]; … }` | optional | Plugin capability declarations for interoperability |
+| **extensions** | `Record<string, any>` | optional | Extension points and contributions |
+| **navigationContributions** | `{ app: string; group?: string; priority?: integer; items: (object \| … +8 more)[] }[]` | optional | Navigation items this package contributes into apps owned by other packages |
+| **loading** | `never` | optional | [REMOVED] `manifest.loading` was removed in @objectstack/spec 17.0.0 (#4914, ADR-0049 enforce-or-remove) — the entire block (`strategy`, `preload`, `codeSplitting`, `dynamicImport`, `initialization`, `dependencyResolution`, `hotReload`, `caching`, `sandboxing`, `monitoring`) had no runtime reader in any repo, so authoring it configured nothing. Delete the key. Plugins are composed at boot — `defineStack` registers them and the kernel runs `init` then `start` in an order topologically resolved from each composed plugin's own `dependencies` / `optionalDependencies` (`resolvePluginOrder`); the set is fixed until the process restarts. ⚠️ `loading.sandboxing` in particular never isolated anything: it did not run plugins in a process, vm, iframe or web-worker, and `allowedServices` gated no call. If you were relying on it for isolation, you had none — use the plugin trust tier (`manifest.runtime`) and the permission declarations, which are enforced. |
+| **engine** | `{ objectstack: string }` | optional | Platform compatibility requirements (legacy; superseded by `engines`) |
+| **engines** | `{ platform?: string; protocol?: string }` | optional | Plugin compatibility ranges (ADR-0025 §3.2; supersedes `engine`) |
+| **runtime** | `Enum<'node' \| 'sandbox' \| 'worker'>` | optional | Plugin trust tier (ADR-0025 §3.6) |
+| **packaging** | `Enum<'bundled' \| 'manifest-deps'>` | optional | Dependency packaging strategy (ADR-0025 §3.3) |
+| **integrity** | `Record<string, string>` | optional | Per-file content digests of the plugin artifact (ADR-0025 §3.2) |
 
 
 ---

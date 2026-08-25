@@ -36,6 +36,13 @@ const result = CompleteChunkedUploadRequestSchema.parse(data);
 | **uploadId** | `string` | ✅ | Multipart upload session ID |
 | **parts** | `{ chunkIndex: integer; eTag: string }[]` | ✅ | Ordered list of uploaded parts for assembly |
 
+### Nested Shape: `CompleteChunkedUploadRequest.parts[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **chunkIndex** | `integer` | ✅ | Chunk index |
+| **eTag** | `string` | ✅ | ETag returned from chunk upload |
+
 
 ---
 
@@ -49,6 +56,30 @@ const result = CompleteChunkedUploadRequestSchema.parse(data);
 | **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>; declaredCode?: string; message: string; userMessage?: string; … }` | optional | Error details if success is false |
 | **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
 | **data** | `{ fileId: string; key: string; size: integer; mimeType: string; … }` | ✅ |  |
+
+### Nested Shape: `CompleteChunkedUploadResponse.error`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>` | ✅ | Error code (e.g. VALIDATION_ERROR; StandardErrorCode ∪ the ledger the serving side registers — ERROR_CODE_LEDGER for framework packages) |
+| **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112, #9106) |
+| **message** | `string` | ✅ | Readable error message |
+| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim (#9934). Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution (#3821) for anything unmarked. Status-agnostic; never replaces `message`. |
+| **category** | `string` | optional | Error category (e.g. validation, authorization) |
+| **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
+| **details** | `any` | optional | Additional error context (e.g. field validation errors) |
+| **requestId** | `string` | optional | Request ID for tracking |
+
+### Nested Shape: `CompleteChunkedUploadResponse.data`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **fileId** | `string` | ✅ | Final file ID |
+| **key** | `string` | ✅ | Storage key/path of the assembled file |
+| **size** | `integer` | ✅ | Total file size in bytes |
+| **mimeType** | `string` | ✅ | File MIME type |
+| **eTag** | `string` | optional | Final ETag of the assembled file |
+| **url** | `string` | optional | Download URL for the assembled file |
 
 
 ---
@@ -75,6 +106,25 @@ const result = CompleteChunkedUploadRequestSchema.parse(data);
 | **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>; declaredCode?: string; message: string; userMessage?: string; … }` | optional | Error details if success is false |
 | **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
 | **data** | `{ url: string }` | ✅ |  |
+
+### Nested Shape: `FileDownloadUrlResponse.error`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>` | ✅ | Error code (e.g. VALIDATION_ERROR; StandardErrorCode ∪ the ledger the serving side registers — ERROR_CODE_LEDGER for framework packages) |
+| **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112, #9106) |
+| **message** | `string` | ✅ | Readable error message |
+| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim (#9934). Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution (#3821) for anything unmarked. Status-agnostic; never replaces `message`. |
+| **category** | `string` | optional | Error category (e.g. validation, authorization) |
+| **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
+| **details** | `any` | optional | Additional error context (e.g. field validation errors) |
+| **requestId** | `string` | optional | Request ID for tracking |
+
+### Nested Shape: `FileDownloadUrlResponse.data`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **url** | `string` | ✅ | Short-lived signed download URL; may be server-relative |
 
 
 ---
@@ -104,6 +154,32 @@ const result = CompleteChunkedUploadRequestSchema.parse(data);
 | **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>; declaredCode?: string; message: string; userMessage?: string; … }` | optional | Error details if success is false |
 | **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
 | **data** | `{ path: string; name: string; size: integer; mimeType: string; … }` | ✅ | Uploaded file metadata |
+
+### Nested Shape: `FileUploadResponse.error`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>` | ✅ | Error code (e.g. VALIDATION_ERROR; StandardErrorCode ∪ the ledger the serving side registers — ERROR_CODE_LEDGER for framework packages) |
+| **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112, #9106) |
+| **message** | `string` | ✅ | Readable error message |
+| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim (#9934). Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution (#3821) for anything unmarked. Status-agnostic; never replaces `message`. |
+| **category** | `string` | optional | Error category (e.g. validation, authorization) |
+| **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
+| **details** | `any` | optional | Additional error context (e.g. field validation errors) |
+| **requestId** | `string` | optional | Request ID for tracking |
+
+### Nested Shape: `FileUploadResponse.data`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **path** | `string` | ✅ | File path |
+| **name** | `string` | ✅ | File name |
+| **size** | `integer` | ✅ | File size in bytes |
+| **mimeType** | `string` | ✅ | MIME type |
+| **lastModified** | `string` | ✅ | Last modified timestamp |
+| **created** | `string` | ✅ | Creation timestamp |
+| **etag** | `string` | optional | Entity tag |
+| **fileId** | `string` | optional | Opaque sys_file id (ADR-0104 D3 file-as-reference) |
 
 
 ---
@@ -151,6 +227,30 @@ const result = CompleteChunkedUploadRequestSchema.parse(data);
 | **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
 | **data** | `{ uploadId: string; resumeToken: string; fileId: string; totalChunks: integer; … }` | ✅ |  |
 
+### Nested Shape: `InitiateChunkedUploadResponse.error`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>` | ✅ | Error code (e.g. VALIDATION_ERROR; StandardErrorCode ∪ the ledger the serving side registers — ERROR_CODE_LEDGER for framework packages) |
+| **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112, #9106) |
+| **message** | `string` | ✅ | Readable error message |
+| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim (#9934). Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution (#3821) for anything unmarked. Status-agnostic; never replaces `message`. |
+| **category** | `string` | optional | Error category (e.g. validation, authorization) |
+| **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
+| **details** | `any` | optional | Additional error context (e.g. field validation errors) |
+| **requestId** | `string` | optional | Request ID for tracking |
+
+### Nested Shape: `InitiateChunkedUploadResponse.data`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **uploadId** | `string` | ✅ | Multipart upload session ID |
+| **resumeToken** | `string` | ✅ | Opaque token for resuming interrupted uploads |
+| **fileId** | `string` | ✅ | Assigned file ID |
+| **totalChunks** | `integer` | ✅ | Expected number of chunks |
+| **chunkSize** | `integer` | ✅ | Chunk size in bytes |
+| **expiresAt** | `string` | ✅ | Upload session expiration timestamp |
+
 
 ---
 
@@ -165,6 +265,30 @@ const result = CompleteChunkedUploadRequestSchema.parse(data);
 | **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
 | **data** | `{ uploadUrl: string; downloadUrl?: string; fileId: string; method: Enum<'PUT' \| 'POST'>; … }` | ✅ |  |
 
+### Nested Shape: `PresignedUrlResponse.error`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>` | ✅ | Error code (e.g. VALIDATION_ERROR; StandardErrorCode ∪ the ledger the serving side registers — ERROR_CODE_LEDGER for framework packages) |
+| **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112, #9106) |
+| **message** | `string` | ✅ | Readable error message |
+| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim (#9934). Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution (#3821) for anything unmarked. Status-agnostic; never replaces `message`. |
+| **category** | `string` | optional | Error category (e.g. validation, authorization) |
+| **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
+| **details** | `any` | optional | Additional error context (e.g. field validation errors) |
+| **requestId** | `string` | optional | Request ID for tracking |
+
+### Nested Shape: `PresignedUrlResponse.data`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **uploadUrl** | `string` | ✅ | PUT/POST URL for direct upload |
+| **downloadUrl** | `string` | optional | Public/Private preview URL |
+| **fileId** | `string` | ✅ | Temporary File ID |
+| **method** | `Enum<'PUT' \| 'POST'>` | ✅ | HTTP Method to use |
+| **headers** | `Record<string, string>` | optional | Required headers for upload |
+| **expiresIn** | `number` | ✅ | URL expiry in seconds |
+
 
 ---
 
@@ -178,6 +302,25 @@ const result = CompleteChunkedUploadRequestSchema.parse(data);
 | **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>; declaredCode?: string; message: string; userMessage?: string; … }` | optional | Error details if success is false |
 | **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
 | **data** | `{ key: string }` | ✅ |  |
+
+### Nested Shape: `RawUploadResponse.error`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>` | ✅ | Error code (e.g. VALIDATION_ERROR; StandardErrorCode ∪ the ledger the serving side registers — ERROR_CODE_LEDGER for framework packages) |
+| **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112, #9106) |
+| **message** | `string` | ✅ | Readable error message |
+| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim (#9934). Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution (#3821) for anything unmarked. Status-agnostic; never replaces `message`. |
+| **category** | `string` | optional | Error category (e.g. validation, authorization) |
+| **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
+| **details** | `any` | optional | Additional error context (e.g. field validation errors) |
+| **requestId** | `string` | optional | Request ID for tracking |
+
+### Nested Shape: `RawUploadResponse.data`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **key** | `string` | ✅ | Storage key the bytes were written to |
 
 
 ---
@@ -206,6 +349,27 @@ const result = CompleteChunkedUploadRequestSchema.parse(data);
 | **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
 | **data** | `{ chunkIndex: integer; eTag: string; bytesReceived: integer }` | ✅ |  |
 
+### Nested Shape: `UploadChunkResponse.error`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>` | ✅ | Error code (e.g. VALIDATION_ERROR; StandardErrorCode ∪ the ledger the serving side registers — ERROR_CODE_LEDGER for framework packages) |
+| **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112, #9106) |
+| **message** | `string` | ✅ | Readable error message |
+| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim (#9934). Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution (#3821) for anything unmarked. Status-agnostic; never replaces `message`. |
+| **category** | `string` | optional | Error category (e.g. validation, authorization) |
+| **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
+| **details** | `any` | optional | Additional error context (e.g. field validation errors) |
+| **requestId** | `string` | optional | Request ID for tracking |
+
+### Nested Shape: `UploadChunkResponse.data`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **chunkIndex** | `integer` | ✅ | Chunk index that was uploaded |
+| **eTag** | `string` | ✅ | Chunk ETag for multipart completion |
+| **bytesReceived** | `integer` | ✅ | Bytes received for this chunk |
+
 
 ---
 
@@ -219,6 +383,35 @@ const result = CompleteChunkedUploadRequestSchema.parse(data);
 | **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>; declaredCode?: string; message: string; userMessage?: string; … }` | optional | Error details if success is false |
 | **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
 | **data** | `{ uploadId: string; fileId: string; filename: string; totalSize: integer; … }` | ✅ |  |
+
+### Nested Shape: `UploadProgress.error`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>` | ✅ | Error code (e.g. VALIDATION_ERROR; StandardErrorCode ∪ the ledger the serving side registers — ERROR_CODE_LEDGER for framework packages) |
+| **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112, #9106) |
+| **message** | `string` | ✅ | Readable error message |
+| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim (#9934). Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution (#3821) for anything unmarked. Status-agnostic; never replaces `message`. |
+| **category** | `string` | optional | Error category (e.g. validation, authorization) |
+| **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
+| **details** | `any` | optional | Additional error context (e.g. field validation errors) |
+| **requestId** | `string` | optional | Request ID for tracking |
+
+### Nested Shape: `UploadProgress.data`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **uploadId** | `string` | ✅ | Multipart upload session ID |
+| **fileId** | `string` | ✅ | Assigned file ID |
+| **filename** | `string` | ✅ | Original filename |
+| **totalSize** | `integer` | ✅ | Total file size in bytes |
+| **uploadedSize** | `integer` | ✅ | Bytes uploaded so far |
+| **totalChunks** | `integer` | ✅ | Total expected chunks |
+| **uploadedChunks** | `integer` | ✅ | Number of chunks uploaded |
+| **percentComplete** | `number` | ✅ | Upload progress percentage |
+| **status** | `Enum<'in_progress' \| 'completing' \| 'completed' \| 'failed' \| 'expired'>` | ✅ | Current upload session status |
+| **startedAt** | `string` | ✅ | Upload session start timestamp |
+| **expiresAt** | `string` | ✅ | Session expiration timestamp |
 
 
 ---

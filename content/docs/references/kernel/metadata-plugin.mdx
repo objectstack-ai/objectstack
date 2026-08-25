@@ -68,6 +68,14 @@ const result = MetadataBulkResultSchema.parse(data);
 | **failed** | `integer` | ✅ | Failed items |
 | **errors** | `{ type: string; name: string; error: string }[]` | optional | Per-item errors |
 
+### Nested Shape: `MetadataBulkResult.errors[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `string` | ✅ | Metadata type |
+| **name** | `string` | ✅ | Item name |
+| **error** | `string` | ✅ | Error message |
+
 
 ---
 
@@ -102,6 +110,42 @@ const result = MetadataBulkResultSchema.parse(data);
 | **cacheMaxItems** | `integer` | optional (default: `10000`) | Max items in memory cache |
 | **bootstrap** | `Enum<'eager' \| 'lazy' \| 'artifact-only'>` | optional (default: `"eager"`) | How metadata is primed at plugin start (eager / lazy / artifact-only) |
 
+### Nested Shape: `MetadataPluginConfig.storage`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **datasource** | `string` | optional | Datasource name reference for database persistence |
+| **tableName** | `string` | optional (default: `"sys_metadata"`) | Database table name for metadata storage |
+| **fallback** | `Enum<'filesystem' \| 'memory' \| 'none'>` | optional (default: `"none"`) | Fallback strategy when datasource is unavailable |
+| **rootDir** | `string` | optional | Root directory path |
+| **formats** | `Enum<'yaml' \| 'json' \| 'typescript' \| 'javascript'>[]` | optional (default: `["typescript","json","yaml"]`) | Enabled formats |
+| **cache** | `{ enabled: boolean; ttl: integer; maxSize?: integer; databaseLoader?: object }` | optional | Cache settings |
+| **watch** | `boolean` | optional (default: `false`) | Enable file watching |
+| **watchOptions** | `{ ignored?: string[]; persistent: boolean; ignoreInitial: boolean }` | optional | File watcher options |
+| **validation** | `{ strict: boolean; throwOnError: boolean }` | optional | Validation settings |
+| **loaderOptions** | `Record<string, any>` | optional | Loader-specific configuration |
+| **persistence** | `{ writable: boolean; overlayWritable: boolean }` | optional | Persistence write gates |
+
+### Nested Shape: `MetadataPluginConfig.customizationPolicies[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **metadataType** | `string` | ✅ | Metadata type (e.g. "object", "view") |
+| **allowCustomization** | `boolean` | optional (default: `true`) |  |
+| **lockedFields** | `string[]` | optional | Field paths that cannot be customized |
+| **customizableFields** | `string[]` | optional | Field paths that can be customized (whitelist) |
+| **allowAddFields** | `boolean` | optional (default: `true`) | Whether admins can add new fields to package objects |
+| **allowDeleteFields** | `boolean` | optional (default: `false`) | Whether admins can delete package-delivered fields |
+
+### Nested Shape: `MetadataPluginConfig.mergeStrategy`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **defaultStrategy** | `Enum<'keep-custom' \| 'accept-incoming' \| 'three-way-merge'>` | optional (default: `"three-way-merge"`) | Default merge strategy |
+| **alwaysAcceptIncoming** | `string[]` | optional | Field paths that always accept package updates |
+| **alwaysKeepCustom** | `string[]` | optional | Field paths where customer customizations always win |
+| **autoResolveNonConflicting** | `boolean` | optional (default: `true`) | Auto-resolve changes that do not conflict |
+
 
 ---
 
@@ -118,6 +162,33 @@ const result = MetadataBulkResultSchema.parse(data);
 | **description** | `string` | optional (default: `"Core metadata management service for ObjectStack platform"`) | Plugin description |
 | **capabilities** | `{ crud: boolean; query: boolean; overlay: boolean; watch: boolean; … }` | ✅ | Plugin capabilities |
 | **config** | `{ storage: object; customizationPolicies?: object[]; mergeStrategy?: object; enableEvents: boolean; … }` | optional | Plugin configuration |
+
+### Nested Shape: `MetadataPluginManifest.capabilities`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **crud** | `boolean` | optional (default: `true`) | Supports metadata CRUD |
+| **query** | `boolean` | optional (default: `true`) | Supports metadata query |
+| **overlay** | `boolean` | optional (default: `true`) | Supports customization overlays |
+| **watch** | `boolean` | optional (default: `false`) | Supports file watching |
+| **importExport** | `boolean` | optional (default: `true`) | Supports import/export |
+| **validation** | `boolean` | optional (default: `true`) | Supports schema validation |
+| **versioning** | `boolean` | optional (default: `false`) | Supports version history |
+| **events** | `boolean` | optional (default: `true`) | Emits metadata events |
+
+### Nested Shape: `MetadataPluginManifest.config`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **storage** | `{ datasource?: string; tableName: string; fallback: Enum<'filesystem' \| 'memory' \| 'none'>; rootDir?: string; … }` | ✅ | Storage backend configuration |
+| **customizationPolicies** | `{ metadataType: string; allowCustomization: boolean; lockedFields?: string[]; customizableFields?: string[]; … }[]` | optional | Default customization policies per type |
+| **mergeStrategy** | `{ defaultStrategy: Enum<'keep-custom' \| 'accept-incoming' \| 'three-way-merge'>; alwaysAcceptIncoming?: string[]; alwaysKeepCustom?: string[]; autoResolveNonConflicting: boolean }` | optional | Merge strategy for package upgrades |
+| **additionalTypes** | `never` | optional | [REMOVED] `config.additionalTypes` was removed from `MetadataPluginConfig` in @objectstack/spec 17 (#8586, ADR-0049 enforce-or-remove) — it never had an effect: the only production writer of the metadata type registry is `setTypeRegistry(DEFAULT_METADATA_TYPE_REGISTRY)`, which replaces the array outright, so nothing ever merged these entries and the live type set was exactly the built-in registry whatever you declared here. Delete the key. There is no declared-kind channel: a kind enters the live metadata-type set as a side effect of registering an ITEM of that kind (`SchemaRegistry.registerItem` during app/manifest registration, or `MetadataManager.register` at runtime); bind its schema with `registerMetadataTypeSchema(type, schema)` from your plugin's `init(ctx)` so `GET /api/v1/meta` serves a real JSON Schema for it. |
+| **enableEvents** | `boolean` | optional (default: `true`) | Emit metadata change events |
+| **validateOnWrite** | `boolean` | optional (default: `true`) | Validate metadata on write |
+| **enableVersioning** | `boolean` | optional (default: `false`) | Track metadata version history |
+| **cacheMaxItems** | `integer` | optional (default: `10000`) | Max items in memory cache |
+| **bootstrap** | `Enum<'eager' \| 'lazy' \| 'artifact-only'>` | optional (default: `"eager"`) | How metadata is primed at plugin start (eager / lazy / artifact-only) |
 
 
 ---
@@ -153,6 +224,19 @@ const result = MetadataBulkResultSchema.parse(data);
 | **total** | `integer` | ✅ | Total matching items |
 | **page** | `integer` | ✅ | Current page |
 | **pageSize** | `integer` | ✅ | Page size |
+
+### Nested Shape: `MetadataQueryResult.items[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `string` | ✅ | Metadata type |
+| **name** | `string` | ✅ | Item name |
+| **namespace** | `string` | optional | Namespace |
+| **label** | `string` | optional | Display label |
+| **scope** | `Enum<'system' \| 'platform' \| 'user'>` | optional |  |
+| **state** | `Enum<'draft' \| 'active' \| 'archived' \| 'deprecated'>` | optional |  |
+| **packageId** | `string` | optional |  |
+| **updatedAt** | `string` | optional |  |
 
 
 ---
@@ -241,6 +325,56 @@ const result = MetadataBulkResultSchema.parse(data);
 * `tool`
 * `skill`
 
+### Nested Shape: `MetadataTypeRegistryEntry.actions[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Machine name (lowercase snake_case) |
+| **label** | `string \| Record<string, string>` | ✅ | Display label |
+| **description** | `string \| Record<string, string>` | optional | Explanatory line shown under the title in the action's param dialog. Carries the confirm question for an action that collects params (one dialog, not two — #7278). Not the LLM-facing `ai.description`. |
+| **objectName** | `string` | optional | Target object this action belongs to. When set, the action is auto-merged into the object's actions array by defineStack(). |
+| **icon** | `string` | optional | Icon name |
+| **locations** | `Enum<'list_toolbar' \| 'list_item' \| 'record_header' \| 'record_more' \| …>[]` | optional | Locations where this action is visible |
+| **component** | `Enum<'action:button' \| 'action:icon' \| 'action:menu' \| 'action:group'>` | optional | Visual component override |
+| **type** | `Enum<'script' \| 'url' \| 'modal' \| 'flow' \| 'api' \| 'form'>` | optional (default: `"script"`) | Action functionality type |
+| **target** | `string` | optional | URL, Script Name, Flow ID, or API Endpoint. Supports $`{param.X}` and $`{ctx.X}` interpolation. |
+| **openIn** | `Enum<'self' \| 'new-tab'>` | optional | For type:'url' — where to open `target`. 'new-tab' opens a new browser tab; 'self' navigates in place. When omitted, external/absolute URLs open in a new tab and relative URLs navigate in place. Static execution option — keep it OUT of `params` (which is user-input-collection only). |
+| **body** | `{ language: 'expression'; source: string } \| { language: 'js'; source: string; capabilities?: Enum<'api.read' \| 'api.write' \| 'api.transaction' \| 'crypto.uuid' \| 'log'>[]; timeoutMs?: integer; … }` | optional | Action body — expression (L1) or sandboxed JS (L2). Only used when type is `script`. |
+| **execute** | `never` | optional | [REMOVED] `execute` was removed in @objectstack/spec 17 (#3855) — use `target`. Rename the key; the value (a handler / flow / URL ref) is unchanged. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
+| **params** | `{ name?: string; field?: string; objectOverride?: string; label?: string \| Record<string, string>; … }[]` | optional | Input parameters required from user — an ActionParam[] DEFINITION array, never a payload map (a static request body goes in `bodyExtra`). |
+| **variant** | `Enum<'primary' \| 'secondary' \| 'danger' \| 'ghost' \| 'link'>` | optional | Button visual variant for styling (primary = highlighted, danger = destructive, ghost = transparent) |
+| **order** | `number` | optional | Sort order within a location group (lower = higher). Promotes/demotes an action toward the record_header primary button; stable, so actions without `order` keep their registration order. |
+| **confirmText** | `string \| Record<string, string>` | optional | Confirmation message before execution. On a registered action, pairing this with a non-empty `params` is refused (#7428) — that opens a second dialog for one decision; put the question on `description` instead. Correct on a param-LESS action, where the confirm is the only dialog there is. |
+| **successMessage** | `string \| Record<string, string>` | optional | Success message to show after execution |
+| **errorMessage** | `string \| Record<string, string>` | optional | Error message to show when the action fails (overrides the raw error). |
+| **refreshAfter** | `boolean` | optional (default: `false`) | Refresh view after execution |
+| **undoable** | `boolean` | optional | Offer an Undo affordance after this single-record update action succeeds. |
+| **resultDialog** | `{ title?: string \| Record<string, string>; description?: string \| Record<string, string>; acknowledge?: string \| Record<string, string>; format?: Enum<'qrcode' \| 'code-list' \| 'secret' \| 'text' \| 'json'>; … }` | optional | Render API response in a one-shot reveal dialog (suppresses successMessage when set). |
+| **visible** | `boolean \| string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate — `true`/`false` literal, CEL string, or `{dialect, source}` envelope. The action is offered when it evaluates TRUE. Omit = always visible. |
+| **requiresFeature** | `Enum<'twoFactor' \| 'organization' \| 'multiOrgEnabled' \| 'degradedTenancy' \| …>` | optional | Public auth feature flag gating this action; lowered into `visible` at parse time. |
+| **disabled** | `boolean \| string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Disabled predicate — `true`/`false` literal, CEL string, or `{dialect, source}` envelope. The action is shown but refused when it evaluates TRUE. Omit = never disabled. |
+| **requiredPermissions** | `string[]` | optional | [ADR-0066 D4] Capabilities required to invoke this action. Enforced with 403 on the platform action route (script/flow/modal + MCP) and mirrored as a UI hide; a `type: api` action pointed at a custom endpoint must re-check it there. |
+| **shortcut** | `never` | optional | [REMOVED] `action.shortcut` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — it never triggered anything: no keydown listener feeds ActionEngine.getShortcuts(), and objectui's keyboard stack (useKeyboardShortcuts) is hand-registered and never consults action metadata. Delete the key. For a real shortcut, register the key in the Console keyboard stack and have its handler invoke the action by name. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
+| **bulkEnabled** | `never` | optional | [REMOVED] `action.bulkEnabled` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — the multi-select toolbar is driven by the LIST VIEW's `bulkActions` / `bulkActionDefs`, never by this flag, so setting it changed nothing. Delete the key and declare the action in the view's `bulkActions` instead. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
+| **ai** | `{ exposed?: boolean; description?: string; category?: Enum<'data' \| 'action' \| 'flow' \| 'integration' \| 'vector_search' \| 'analytics' \| 'utility'>; paramHints?: Record<string, object>; … }` | optional | AI exposure (opt-in). Set ai.exposed=true + ai.description to make this callable by agents. |
+| **recordIdParam** | `string` | optional | Body key to inject the row id into when running from a list_item context. |
+| **recordIdField** | `string` | optional | Row field whose value seeds recordIdParam. Defaults to "id". |
+| **bodyShape** | `'flat' \| { wrap: string }` | optional | Body wrapping: flat (default) or `{ wrap: key }` to nest user-collected params under a key. |
+| **method** | `Enum<'POST' \| 'PATCH' \| 'PUT' \| 'DELETE'>` | optional | HTTP method for type:"api" actions. Defaults to POST. |
+| **bodyExtra** | `Record<string, any>` | optional | Static request-body fields for a type:"api" action, merged last (overrides user params). `{{page.<var>}}` tokens are resolved by the runtime. This — not `params` — is where a payload goes. |
+| **mode** | `Enum<'create' \| 'edit' \| 'delete' \| 'custom'>` | optional | Semantic mode of the action. |
+| **opensInNewTab** | `boolean` | optional | Open the action result in a new tab. The renderer pre-opens the tab synchronously on click (popup-blocker-safe) and navigates it to the handler's redirectUrl. |
+| **newTabUrl** | `string` | optional | Direct new-tab URL template (`{recordId}` placeholder). When set with opensInNewTab, the renderer navigates the pre-opened tab here immediately — no action POST. The endpoint must enforce auth itself. |
+| **onSuccess** | `{ navigate: string; openIn?: Enum<'self' \| 'newTab'> }` | optional | Post-success navigation for type:'api' and type:'script' actions (#9566/#9474). `navigate` is a route/URL template interpolating $`{param.*}`, $`{ctx.*}` and $`{result.*}` (the server response); `openIn` defaults 'self'. The handler-return convention (`{ redirectUrl }` without openIn) keeps its 17.0.0 new-tab behavior. |
+| **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
+| **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
+| **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
+| **_lockSource** | `Enum<'artifact' \| 'package' \| 'env-forced'>` | optional | Layer that set _lock (artifact \| package \| env-forced). |
+| **_provenance** | `Enum<'package' \| 'org' \| 'env-forced'>` | optional | Origin of the item (package \| org \| env-forced). |
+| **_packageId** | `string` | optional | Owning package machine id. |
+| **_packageVersion** | `string` | optional | Owning package version. |
+| **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
+
 
 ---
 
@@ -253,6 +387,21 @@ const result = MetadataBulkResultSchema.parse(data);
 | **valid** | `boolean` | ✅ | Whether the metadata is valid |
 | **errors** | `{ path: string; message: string; code?: string }[]` | optional | Validation errors |
 | **warnings** | `{ path: string; message: string }[]` | optional | Validation warnings |
+
+### Nested Shape: `MetadataValidationResult.errors[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **path** | `string` | ✅ | JSON path to the invalid field |
+| **message** | `string` | ✅ | Error description |
+| **code** | `string` | optional | Error code |
+
+### Nested Shape: `MetadataValidationResult.warnings[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **path** | `string` | ✅ | JSON path to the field |
+| **message** | `string` | ✅ | Warning description |
 
 
 ---

@@ -54,6 +54,16 @@ const result = PluginInstallConfigSchema.parse(data);
 | **securityScan** | `{ lastScanDate?: string; vulnerabilities?: object; passed: boolean }` | optional |  |
 | **conformanceTests** | `{ protocolId: string; passed: boolean; totalTests: integer; passedTests: integer; … }[]` | optional |  |
 
+### Nested Shape: `PluginQualityMetrics.conformanceTests[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **protocolId** | `string` | ✅ | Protocol being tested |
+| **passed** | `boolean` | ✅ |  |
+| **totalTests** | `integer` | ✅ |  |
+| **passedTests** | `integer` | ✅ |  |
+| **lastRunDate** | `string` | optional |  |
+
 
 ---
 
@@ -85,6 +95,27 @@ const result = PluginInstallConfigSchema.parse(data);
 | **deprecationMessage** | `string` | optional |  |
 | **replacedBy** | `string` | optional | Plugin ID that replaces this one |
 | **flags** | `{ experimental: boolean; beta: boolean; featured: boolean; verified: boolean }` | optional |  |
+
+### Nested Shape: `PluginRegistryEntry.vendor`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ | Vendor identifier (reverse domain) |
+| **name** | `string` | ✅ |  |
+| **website** | `string` | optional |  |
+| **email** | `string` | optional |  |
+| **verified** | `boolean` | optional (default: `false`) | Whether vendor is verified by ObjectStack |
+| **trustLevel** | `Enum<'official' \| 'verified' \| 'community' \| 'unverified'>` | optional (default: `"unverified"`) |  |
+
+### Nested Shape: `PluginRegistryEntry.capabilities`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **implements** | `{ protocol: object; conformance: Enum<'full' \| 'partial' \| 'experimental' \| 'deprecated'>; implementedFeatures?: string[]; features?: object[]; … }[]` | optional | List of protocols this plugin conforms to |
+| **provides** | `{ id: string; name: string; description?: string; version: object; … }[]` | optional | Services/APIs this plugin offers to others |
+| **requires** | `{ pluginId: string; version: string; optional: boolean; reason?: string; … }[]` | optional | Required plugins and their capabilities |
+| **extensionPoints** | `{ id: string; name: string; description?: string; type: Enum<'action' \| 'hook' \| 'widget' \| 'provider' \| 'transformer' \| 'validator' \| 'decorator'>; … }[]` | optional | Points where other plugins can extend this plugin |
+| **extensions** | `{ targetPluginId: string; extensionPointId: string; implementation: string; priority: integer }[]` | optional | Extensions contributed to other plugins |
 
 
 ---

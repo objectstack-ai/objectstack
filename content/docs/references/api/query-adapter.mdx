@@ -47,6 +47,13 @@ const result = ODataQueryAdapterSchema.parse(data);
 | **stringFunctions** | `Enum<'contains' \| 'startswith' \| 'endswith' \| 'tolower' \| 'toupper' \| 'trim' \| 'concat' \| 'substring' \| 'length'>[]` | optional | Supported OData string functions |
 | **expand** | `{ enabled: boolean; maxDepth: integer }` | optional | $expand configuration |
 
+### Nested Shape: `ODataQueryAdapter.expand`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **enabled** | `boolean` | optional (default: `true`) | Enable $expand support |
+| **maxDepth** | `integer` | optional (default: `3`) | Maximum expand depth |
+
 
 ---
 
@@ -73,6 +80,32 @@ const result = ODataQueryAdapterSchema.parse(data);
 | **rest** | `{ filterStyle: Enum<'bracket' \| 'dot' \| 'flat' \| 'rsql'>; pagination?: object; sorting?: object; fieldsParam: string }` | optional | REST query adapter configuration |
 | **odata** | `{ version: Enum<'v2' \| 'v4'>; usePrefix: boolean; stringFunctions?: Enum<'contains' \| 'startswith' \| 'endswith' \| 'tolower' \| 'toupper' \| 'trim' \| …>[]; expand?: object }` | optional | OData query adapter configuration |
 
+### Nested Shape: `QueryAdapterConfig.operatorMappings[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **operator** | `string` | ✅ | Unified DSL operator |
+| **rest** | `string` | optional | REST query parameter template |
+| **odata** | `string` | optional | OData $filter expression template |
+
+### Nested Shape: `QueryAdapterConfig.rest`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **filterStyle** | `Enum<'bracket' \| 'dot' \| 'flat' \| 'rsql'>` | optional (default: `"bracket"`) | REST filter parameter encoding style |
+| **pagination** | `{ limitParam: string; offsetParam: string; cursorParam: string; pageParam: string }` | optional | Pagination parameter name mappings |
+| **sorting** | `{ param: string; format: Enum<'comma' \| 'array' \| 'pipe'> }` | optional | Sort parameter mapping |
+| **fieldsParam** | `string` | optional (default: `"fields"`) | Field selection parameter name |
+
+### Nested Shape: `QueryAdapterConfig.odata`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **version** | `Enum<'v2' \| 'v4'>` | optional (default: `"v4"`) | OData version |
+| **usePrefix** | `boolean` | optional (default: `true`) | Use $ prefix for system query options ($filter vs filter) |
+| **stringFunctions** | `Enum<'contains' \| 'startswith' \| 'endswith' \| 'tolower' \| 'toupper' \| 'trim' \| …>[]` | optional | Supported OData string functions |
+| **expand** | `{ enabled: boolean; maxDepth: integer }` | optional | $expand configuration |
+
 
 ---
 
@@ -96,6 +129,22 @@ const result = ODataQueryAdapterSchema.parse(data);
 | **pagination** | `{ limitParam: string; offsetParam: string; cursorParam: string; pageParam: string }` | optional | Pagination parameter name mappings |
 | **sorting** | `{ param: string; format: Enum<'comma' \| 'array' \| 'pipe'> }` | optional | Sort parameter mapping |
 | **fieldsParam** | `string` | optional (default: `"fields"`) | Field selection parameter name |
+
+### Nested Shape: `RestQueryAdapter.pagination`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **limitParam** | `string` | optional (default: `"limit"`) | Page size parameter name |
+| **offsetParam** | `string` | optional (default: `"offset"`) | Offset parameter name |
+| **cursorParam** | `string` | optional (default: `"cursor"`) | Cursor parameter name |
+| **pageParam** | `string` | optional (default: `"page"`) | Page number parameter name |
+
+### Nested Shape: `RestQueryAdapter.sorting`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **param** | `string` | optional (default: `"sort"`) | Sort parameter name |
+| **format** | `Enum<'comma' \| 'array' \| 'pipe'>` | optional (default: `"comma"`) | Sort parameter encoding format |
 
 
 ---

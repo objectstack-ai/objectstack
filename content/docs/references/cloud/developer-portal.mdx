@@ -148,6 +148,18 @@ const result = AnalyticsTimeRangeSchema.parse(data);
 | **timeSeries** | `Record<string, { date: string; value: number }[]>` | optional | Time series keyed by metric name |
 | **ratingDistribution** | `{ 1: integer; 2: integer; 3: integer; 4: integer; … }` | optional |  |
 
+### Nested Shape: `PublishingAnalyticsResponse.summary`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **totalInstalls** | `integer` | ✅ |  |
+| **activeInstalls** | `integer` | ✅ |  |
+| **totalUninstalls** | `integer` | ✅ |  |
+| **averageRating** | `number` | optional |  |
+| **totalRatings** | `integer` | ✅ |  |
+| **totalRevenue** | `number` | optional | Revenue in cents |
+| **pageViews** | `integer` | ✅ |  |
+
 
 ---
 

@@ -177,6 +177,41 @@ async function maskObjectSchemaList(
 }
 
 /**
+ * Percent-decode the `:name` path segment. [#12195]
+ *
+ * This dispatcher splits the RAW path (`path.split('/')`) and, unlike the
+ * `packages/rest` Hono routes, nothing decodes its parameters for it —
+ * measured, not assumed: Hono's `c.req.path`, which the adapter's catch-all
+ * hands to `dispatch()`, returns `/meta/lead/views%2Fall_leads` verbatim while
+ * `c.req.param('name')` on the same request yields `views/all_leads`.
+ *
+ * That difference is load-bearing here. Until #12195 the compound fold
+ * (`parts.slice(1).join('/')`) is what let a slash-bearing name be addressed
+ * on this transport at all — unencoded, across segments. Retiring the fold
+ * without decoding would leave a pre-grammar residue row addressable through
+ * `packages/rest` and NOT through the dispatcher, breaking #12194's landed
+ * acceptance criterion that "reads and `deleteMetaItem` still answer for
+ * pre-grammar residue rows, so any stored junk name remains listable and
+ * clearable". Decoding makes ONE spelling — percent-encoded, the spelling the
+ * SDK now sends everywhere — correct on both transports.
+ *
+ * `decodeURIComponent` throws `URIError` on a malformed escape (a literal `%`
+ * that starts no valid sequence). A name is a store key, so the right answer
+ * to un-decodable input is the RAW segment: it simply will not match a stored
+ * row, and the caller gets the ordinary 404 rather than a 500 from the split.
+ *
+ * The sibling `domains/packages.ts` already decodes its own id segments the
+ * same way; this domain was the outlier.
+ */
+function decodeMetaNameSegment(segment: string): string {
+    try {
+        return decodeURIComponent(segment);
+    } catch {
+        return segment;
+    }
+}
+
+/**
  * Handles Metadata requests
  * Standard: /metadata/:type/:name
  * Fallback for backward compat: /metadata (all objects), /metadata/:objectName (get object)
@@ -253,11 +288,18 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
         return { handled: true, response: deps.success({ object: name, field, from: from ?? null, next }) };
     }
 
-    // GET /metadata/:type/:name(/:subname...)/published → get published version
-    // Supports compound names like `lead/views/all_leads/published`.
-    if (parts.length >= 3 && parts[parts.length - 1] === 'published' && (!method || method === 'GET')) {
+    // GET /metadata/:type/:name/published → get published version
+    //
+    // [#12195] EXACTLY three segments, and no fold. This used to be
+    // `parts.length >= 3` with `parts.slice(1, -1).join('/')`, which re-joined
+    // every middle segment into one slash-bearing key so
+    // `lead/views/all_leads/published` resolved as name `views/all_leads`.
+    // Stage 1 (#12194) refuses every slash-bearing name at the publish door,
+    // so that fold could only ever address a name that can no longer be
+    // written.
+    if (parts.length === 3 && parts[2] === 'published' && (!method || method === 'GET')) {
         const type = parts[0];
-        const name = parts.slice(1, -1).join('/');
+        const name = decodeMetaNameSegment(parts[1]);
 
         // [#8031] The AUTHORITATIVE published store is consulted first: the
         // `state:'active'` `sys_metadata` overlay row.
@@ -332,14 +374,27 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
         return { handled: true, response: deps.error('Not found', 404) };
     }
 
-    // /metadata/:type/:name where :name may itself contain slashes
-    // (e.g. /metadata/lead/views/all_leads → type='lead', name='views/all_leads').
-    // Compound names are how the client expresses sub-resources of a type
-    // (a view of an object, a flow under an automation, etc.) and the
-    // metadata service treats the full string as the lookup key.
-    if (parts.length >= 2) {
+    // /metadata/:type/:name — EXACTLY two segments. [#12195]
+    //
+    // This used to be `parts.length >= 2` with `parts.slice(1).join('/')`: every
+    // segment after the type was re-joined into one slash-bearing lookup key,
+    // so `/metadata/lead/views/all_leads` resolved as name `views/all_leads`.
+    // That fold WAS compound-name addressing on this transport, and stage 1
+    // (#12194) made every name it could reach unwritable at the publish door.
+    //
+    // ⚠️ The `>=` also swallowed three-segment paths that were never compound
+    // names at all — `/metadata/object/foo/references` folded to name
+    // `foo/references` — so a sub-resource verb this dispatcher does not
+    // implement was answered as a metadata READ of a name nothing stores,
+    // rather than as the ROUTE_NOT_FOUND it is. Requiring exactly two segments
+    // ends that silently-wrong reading too.
+    //
+    // A pre-grammar residue row stays addressable: the caller percent-encodes
+    // the name, which keeps the segment count at two, and
+    // `decodeMetaNameSegment` restores the stored spelling.
+    if (parts.length === 2) {
         const type = parts[0];
-        const name = parts.slice(1).join('/');
+        const name = decodeMetaNameSegment(parts[1]);
         // Extract optional package filter from query string
         const packageId = query?.package || undefined;
 
@@ -909,6 +964,22 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
         }
         return { handled: true, response: deps.success({ types: ['object', 'app', 'plugin'] }) };
     }
-    
-    return { handled: false };
+
+    // [#12195] A LOCATED refusal, not a bare `{ handled: false }`.
+    //
+    // This tail was unreachable until this card: the branches above covered
+    // zero segments, one segment, and — through the compound fold — every path
+    // with two or MORE. Retiring the fold makes it reachable for the first
+    // time, and what reaches it is a `/meta` path with no route: three or more
+    // segments that is not `/published` or the four-segment FSM `/state/:field`.
+    //
+    // `{ handled: false }` would leave the answer to the adapter, which turns
+    // an unhandled result into a generic `404 'Not Found'` — losing both the
+    // path and the ADR-0112 code, on the very shape this retirement newly
+    // produces. "Absence must be loud" (AGENTS.md, Route & surface ownership
+    // §3): the caller most likely to land here is one still spelling a
+    // compound name, and they should be told the route does not exist rather
+    // than be handed an anonymous 404. Same shape `domains/ai.ts` and
+    // `domains/share-links.ts` already use for their own unmatched sub-paths.
+    return { handled: true, response: deps.routeNotFound(`/meta${path.startsWith('/') ? '' : '/'}${path}`) };
 }

@@ -39,6 +39,9 @@ import {
 // `packages/spec/src/data/bulk-write-hook-conformance.ts` so BOTH phases and
 // both verbs enforce one definition; the engine raises, the contract decides.
 import { MAX_BULK_PER_ROW_HOOK_ROWS, resolveBulkPerRowHookBudget } from '@objectstack/spec/data';
+// [ADR-0126 §8] The packaged-action activation ledger: its row contract, its
+// stores and the engine-held projection the dispatch doors consult.
+import { ActionActivationProjection, type ActionActivationRow, type ActionActivationStore } from './action-activation.js';
 import { assertListComparandShapes, assertFilterIsMaterializable } from './filter-comparand-shape.js';
 import { assertTemporalComparandsInterpretable } from './temporal-comparand-door.js';
 // Seek pagination for the walks that must read EVERY row — the autonumber seed
@@ -2270,6 +2273,20 @@ export class ObjectQL implements IObjectQLEngine {
   // Action registry: key = "objectName:actionName"
   private actions = new Map<string, { handler: (ctx: any) => Promise<any> | any; package?: string }>();
 
+  /**
+   * [ADR-0126 §8] The packaged-ACTION activation ledger's local projection —
+   * which declared actions this installation has switched OFF.
+   *
+   * It sits beside the handler registry above deliberately: the ledger governs
+   * what that map is allowed to dispatch, and ADR-0110 D5 already settled that
+   * action-adjacent boot work belongs to the engine plugin (the one component
+   * unconditionally present wherever actions execute). Hydrated at boot by
+   * `ObjectQLPlugin`; consulted by the dispatch doors through
+   * {@link isActionEnabled}. See `./action-activation.ts` for the row contract
+   * and for why identity is the declarative action NAME.
+   */
+  private readonly actionActivation = new ActionActivationProjection();
+
   // Function registry: name → handler. Used by `bindHooksToEngine` to
   // resolve string-named hook handlers (the JSON-safe form). Populated by
   // `defineStack({ functions })` via `AppPlugin`, or directly via
@@ -3088,6 +3105,78 @@ export class ObjectQL implements IObjectQLEngine {
         this.actions.delete(key);
       }
     }
+  }
+
+  // ========================================
+  // [ADR-0126 §8] Packaged-action activation
+  // ========================================
+  //
+  // Five thin members over {@link ActionActivationProjection}. They are on the
+  // engine — rather than reached as a free-standing service — because the
+  // dispatch doors already hold `ql` and nothing else they hold is
+  // per-environment, unconditional and alive at boot at the same time.
+  //
+  // ⛔ None of them is a consult POINT. `executeAction` above deliberately does
+  // not call `isActionEnabled`: it receives a HANDLER KEY (ADR-0110 D2 — the
+  // key may be the declaration's `target`, not its `name`), and the ledger
+  // addresses an action by its declarative name, so a check there would ask a
+  // question the arguments cannot answer and would miss every target-bound
+  // action. The consult lives where a resolved DECLARATION exists — the two
+  // dispatch doors in `@objectstack/runtime` — and each one is pinned.
+
+  /**
+   * Attach the durable activation ledger (ADR-0126 §4). Hosts call this at
+   * start(), once the datasource behind `sys_metadata_activation` is reachable
+   * — see `ObjectQLPlugin`, which probes the table before attaching so a
+   * missing ledger degrades visibly instead of at the first flip.
+   */
+  setActionActivationStore(store: ActionActivationStore): void {
+    this.actionActivation.attach(store);
+  }
+
+  /**
+   * [ADR-0126 §8] Load the ledger into the engine's projection, returning the
+   * names it switched off so the host can report them in its boot audit.
+   *
+   * Called once per boot AFTER the authored-action re-sync, for the reason the
+   * governance inventory runs there: the registry is final for the boot, so the
+   * audit line describes the deployment that will actually serve requests.
+   */
+  async hydrateActionActivations(): Promise<string[]> {
+    return this.actionActivation.hydrate();
+  }
+
+  /**
+   * Is this DECLARED action armed for this installation (ADR-0126 §8)?
+   * Absence of a ledger row means the packaged default — active — so a stock
+   * boot answers `true` for everything, exactly as it always has.
+   */
+  isActionEnabled(actionName: string): boolean {
+    return this.actionActivation.isEnabled(actionName);
+  }
+
+  /** Every action name the ledger currently switches off (operability reads). */
+  listDisabledActions(): string[] {
+    return this.actionActivation.disabledNames();
+  }
+
+  /**
+   * The `ACTION_DISABLED` refusal SENTENCE, produced by the projection so both
+   * dispatch doors state one refusal rather than two that agree today.
+   */
+  describeDisabledAction(actionName: string): string {
+    return this.actionActivation.describeDisabled(actionName);
+  }
+
+  /**
+   * [ADR-0126 §8] Flip a packaged action's activation — the durable row FIRST,
+   * the projection only after that write returns. Throws (503
+   * `SERVICE_UNAVAILABLE`) when no ledger is attached rather than reporting a
+   * durable switch that did not persist; the write AUTHORITY (§5) is enforced
+   * one tier up, at the route, because it needs the caller.
+   */
+  async setActionActive(row: ActionActivationRow): Promise<void> {
+    await this.actionActivation.setActive(row);
   }
 
   /**

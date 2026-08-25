@@ -172,34 +172,43 @@ describe('HttpDispatcher', () => {
             });
         });
 
-        it('should handle PUT with compound name (3+ path segments)', async () => {
+        it('[#12195] should NOT handle a compound name — the 3+ segment fold is retired', async () => {
             const context = METADATA_AUTHOR();
             const body = { density: 'compact' };
-            // /metadata/lead/views/all_leads → type='lead', name='views/all_leads'
+            // `/metadata/lead/views/all_leads` used to resolve as type='lead',
+            // name='views/all_leads' — the dispatcher's own compound arity,
+            // folding every trailing segment into one slash-bearing key.
+            //
+            // #12176 retired compound metadata item names (maintainer ruling
+            // 2026-08-25); #12194 refuses every slash-bearing name at the
+            // publish door, so the fold could only address names that can no
+            // longer be created; #12195 removes it. The domain now DECLINES,
+            // and nothing is written.
             const path = '/lead/views/all_leads';
 
             const result = await dispatcher.handleMetadata(path, context, 'PUT', body);
 
+            // A LOCATED refusal: ADR-0112 code AND status, never a bare 404.
             expect(result.handled).toBe(true);
-            expect(result.response?.status).toBe(200);
-            expect(mockProtocol.saveMetaItem).toHaveBeenCalledWith({
-                type: 'lead',
-                name: 'views/all_leads',
-                item: body,
-                // [#10888] The compound-name door states the same face — it is
-                // the same handler and the same envelope.
-                //
-                // ⚠️ [#11095] "The compound-name door" here means the
-                // DISPATCHER's own compound arity (`/lead/views/all_leads`),
-                // which is the same `if (method === 'PUT')` branch as the case
-                // above — not `@objectstack/rest`'s `PUT /meta/:type/:a/:b`,
-                // which is a different file, a different transport, and the one
-                // that GAINED `?force` under this card. Two unrelated things
-                // called "the compound-name door" one paragraph apart is exactly
-                // how a later reader talks themselves into threading `force`
-                // here too, so: this arity has no query string either.
-                writeFace: 'meta-dispatch',
-            });
+            expect(result.response?.status).toBe(404);
+            expect(result.response?.body?.error?.code).toBe('ROUTE_NOT_FOUND');
+            expect(mockProtocol.saveMetaItem).not.toHaveBeenCalled();
+        });
+
+        it('[#12195] still handles the ENCODED spelling as ONE two-segment name', async () => {
+            const context = METADATA_AUTHOR();
+            const body = { density: 'compact' };
+            // The replacement spelling. This dispatcher splits the RAW path and
+            // nothing decodes for it, so `%2F` keeps the path at two segments
+            // and `decodeMetaNameSegment` restores the stored key — which is
+            // what keeps a pre-grammar residue row addressable here, per
+            // #12194's "any stored junk name remains listable and clearable".
+            const result = await dispatcher.handleMetadata('/lead/views%2Fall_leads', context, 'PUT', body);
+
+            expect(result.handled).toBe(true);
+            expect(mockProtocol.saveMetaItem).toHaveBeenCalledWith(
+                expect.objectContaining({ type: 'lead', name: 'views/all_leads' }),
+            );
         });
 
         it('should fallback to MetadataService when protocol is missing saveMetaItem', async () => {

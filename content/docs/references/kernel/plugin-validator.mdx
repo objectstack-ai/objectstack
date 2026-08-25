@@ -71,6 +71,22 @@ Plugin metadata for validation
 | **errors** | `{ field: string; message: string; code?: string }[]` | optional | Validation errors |
 | **warnings** | `{ field: string; message: string; code?: string }[]` | optional | Validation warnings |
 
+### Nested Shape: `ValidationResult.errors[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **field** | `string` | ✅ | Field name that failed validation |
+| **message** | `string` | ✅ | Human-readable error message |
+| **code** | `string` | optional | Machine-readable error code |
+
+### Nested Shape: `ValidationResult.warnings[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **field** | `string` | ✅ | Field name with warning |
+| **message** | `string` | ✅ | Human-readable warning message |
+| **code** | `string` | optional | Machine-readable warning code |
+
 
 ---
 
