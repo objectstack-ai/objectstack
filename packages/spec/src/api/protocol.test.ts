@@ -1782,3 +1782,153 @@ describe('MetadataProtocol declares publishMetaItem (#11006)', () => {
     expect(misspelt.name).toBe('account_list');
   });
 });
+
+import { AuditMetaItemRequestSchema, AuditMetaItemResponseSchema } from './protocol.zod';
+import type { AuditMetaItemRequest, AuditMetaItemResponse } from './protocol.zod';
+
+describe('AuditMetaItemRequestSchema mirrors the implementation parameter type (#11678)', () => {
+  // The audit door was a step BEHIND the half-declared publish door #11006
+  // adjudicated: NEITHER side was declared, and the REST call site reached the
+  // verb through `(p as any)` twice (guard + call). The measure is the
+  // implementation's parameter type in `@objectstack/metadata-protocol` —
+  // `{ type, name, organizationId?: string | null, limit?: number }` — and the
+  // REST door's actual sends; nothing else is declared because nothing else is
+  // enforced. As in the #9726/#9741/#11006 blocks above, accept-pins assert
+  // the parsed VALUE: this is a non-strict object, so `success` alone is
+  // exactly the silent-strip state this family of cards closes.
+
+  const base = { type: 'view', name: 'account_list' } as const;
+
+  it('accepts the full request and PRESERVES every member through parse', () => {
+    const full = { ...base, organizationId: 'org_alpha', limit: 50 };
+    const result = AuditMetaItemRequestSchema.safeParse(full);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data).toEqual(full);
+    }
+  });
+
+  it('requires type AND name — the trail is per item', () => {
+    expect(AuditMetaItemRequestSchema.safeParse(base).success).toBe(true);
+    expect(AuditMetaItemRequestSchema.safeParse({ type: 'view' }).success).toBe(false);
+    expect(AuditMetaItemRequestSchema.safeParse({ name: 'account_list' }).success).toBe(false);
+  });
+
+  it('organizationId accepts null AND preserves it — the REST door always sends it, possibly null', () => {
+    // The door sends `ctx?.tenantId ?? null` unconditionally (#8747's
+    // fail-closed scoping), so `null` must be a declared spelling for the
+    // literal to compile at all. Semantically `null` and absent are the same
+    // env-wide read; the pin is that the parse neither refuses nor strips it.
+    const withNull = AuditMetaItemRequestSchema.safeParse({ ...base, organizationId: null });
+    expect(withNull.success).toBe(true);
+    if (withNull.success) {
+      expect('organizationId' in (withNull.data as object)).toBe(true);
+      expect((withNull.data as { organizationId?: string | null }).organizationId).toBeNull();
+    }
+    expect(AuditMetaItemRequestSchema.safeParse({ ...base, organizationId: 42 }).success).toBe(false);
+  });
+
+  it('limit is an optional number — values, not bags', () => {
+    expect(AuditMetaItemRequestSchema.safeParse(base).success).toBe(true);
+    expect(AuditMetaItemRequestSchema.safeParse({ ...base, limit: '50' }).success).toBe(false);
+    // The implementation CLAMPS to [1, 500] rather than refusing, so the
+    // schema deliberately declares no bounds — declaring `.max(500)` here
+    // would refuse a value the shipped verb accepts (clamped), which is the
+    // accept/reject drift a declared-surface catch-up must not introduce.
+    const clampedNotRefused = AuditMetaItemRequestSchema.safeParse({ ...base, limit: 9999 });
+    expect(clampedNotRefused.success).toBe(true);
+  });
+
+  it('does not declare environmentId — transport-level by the #9741 ruling, stripped and shape-absent', () => {
+    // Same regression guard as the meta-read and publish blocks above. On THIS
+    // door the exclusion is even stronger than the ruling: #8747 removed
+    // `environmentId` from the door's payload entirely (the implementation
+    // never read it), so declaring it would resurrect a dead wire member.
+    const result = AuditMetaItemRequestSchema.safeParse({ ...base, environmentId: 'env_alpha' });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect('environmentId' in (result.data as object)).toBe(false);
+    }
+    const shape = (AuditMetaItemRequestSchema as unknown as { shape: Record<string, unknown> }).shape;
+    expect(Object.keys(shape)).not.toContain('environmentId');
+  });
+});
+
+describe('AuditMetaItemResponseSchema declares the compliance-trail body (#11678)', () => {
+  /** A verbatim-shaped capture of a real `auditMetaItem` return (one denied save). */
+  const realResponse = {
+    events: [
+      {
+        id: 'evt_01',
+        occurredAt: '2026-08-25T02:11:09.000Z',
+        actor: 'admin@objectos.ai',
+        source: 'protocol.saveMetaItem',
+        operation: 'save',
+        outcome: 'denied',
+        code: 'item_locked',
+        lockState: 'full',
+        lockOverridden: false,
+        requestId: null,
+        note: null,
+      },
+    ],
+  };
+
+  it('parses the real event shape and PRESERVES every member', () => {
+    const result = AuditMetaItemResponseSchema.safeParse(realResponse);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data).toEqual(realResponse);
+    }
+  });
+
+  it('the honest-empty answer parses — {events: []} is a declared, legal body (#9426)', () => {
+    // `[]` is the honest MISS shape (clean trail / no `find` on the host
+    // engine / unprovisioned table). The capability gap is NOT in this body:
+    // a protocol without the verb is refused 501 before the call.
+    const result = AuditMetaItemResponseSchema.safeParse({ events: [] });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect((result.data as { events: unknown[] }).events).toEqual([]);
+    }
+  });
+
+  it('keeps the operation and outcome vocabularies closed', () => {
+    const bad = (patch: Record<string, unknown>) =>
+      AuditMetaItemResponseSchema.safeParse({ events: [{ ...realResponse.events[0], ...patch }] });
+    expect(bad({ operation: 'diff' }).success).toBe(false);
+    expect(bad({ outcome: 'skipped' }).success).toBe(false);
+  });
+});
+
+describe('MetadataProtocol declares auditMetaItem (#11678)', () => {
+  // Type-level pins (compiled by the spec test typecheck, the
+  // translation-typegen.test.ts pattern — same as the #9740 and #11006 blocks
+  // above). Before this declaration the casts at the REST call site carried
+  // MEMBER-EXISTENCE weight (TS2339, not TS2353), so the request literal
+  // there was typed by nothing. These pins are what turns red if the member
+  // is dropped again or drifts off the audit schemas.
+
+  it('declares the member optional, against the audit request/response schemas', () => {
+    // Optional like its `deleteMetaItem` / `getMetaItemLayered` siblings:
+    // additive to a shipped contract, implementation predating declaration.
+    expectTypeOf<MetadataProtocol['auditMetaItem']>().toEqualTypeOf<
+      ((request: AuditMetaItemRequest) => Promise<AuditMetaItemResponse>) | undefined
+    >();
+    // An implementation without the verb still type-checks against the
+    // interface — the CONFORMING-deployment half of #9426's 501 refusal.
+    const absent: Pick<MetadataProtocol, 'auditMetaItem'> = {};
+    expect('auditMetaItem' in absent).toBe(false);
+  });
+
+  it('refuses an undeclared key at the member call shape', () => {
+    const good: AuditMetaItemRequest = { type: 'view', name: 'account_list', organizationId: null };
+    expect(good.type).toBe('view');
+    // @ts-expect-error `environmentId` is transport-level (#9741) — not a declared request member (and #8747 removed it from this door's wire payload entirely).
+    const withEnv: AuditMetaItemRequest = { type: 'view', name: 'account_list', environmentId: 'env_a' };
+    expect(withEnv.name).toBe('account_list');
+    // @ts-expect-error an undeclared (here: misspelt) key is refused at the call shape.
+    const misspelt: AuditMetaItemRequest = { type: 'view', name: 'account_list', limits: 50 };
+    expect(misspelt.name).toBe('account_list');
+  });
+});

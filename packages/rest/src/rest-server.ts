@@ -74,6 +74,7 @@ import type {
     GetMetaItemCachedRequest,
     GetMetaItemLayeredRequest,
     PublishMetaItemRequest,
+    AuditMetaItemRequest,
 } from '@objectstack/spec/api';
 // [#8073] The closed ADR-0112 error vocabulary, so the explain family's single
 // refusal emitter types its `code` parameter as the vocabulary rather than as
@@ -5830,7 +5831,7 @@ export class RestServer {
                 try {
                     const environmentId = isScoped ? req.params?.environmentId : undefined;
                     const p = await this.resolveProtocol(environmentId, req);
-                    if (typeof (p as any).auditMetaItem !== 'function') {
+                    if (typeof p.auditMetaItem !== 'function') {
                         // [#9426 / ADR-0110 D3] A MISS and a FAULT are different
                         // facts, and this branch is the second one: the resolved
                         // protocol cannot read an audit trail AT ALL, so the
@@ -5855,16 +5856,17 @@ export class RestServer {
                         //
                         // Refusing HERE rather than asserting at assembly is
                         // deliberate, and is the reasoning PR #9425 landed one
-                        // route over. `auditMetaItem` is not a member of
-                        // `RestProtocol` (= `DataProtocol & MetadataProtocol`) and
-                        // is not declared in `packages/spec` at all — it is an
-                        // ADR-0076 D9 server-only extension, which is why it is
-                        // reached through a runtime cast. A host that implements
-                        // the DECLARED contract exactly is therefore a CONFORMING
-                        // deployment that lands here with no type error, and a
-                        // boot-time assertion would promote an undeclared optional
-                        // extension into a required one — a `packages/spec`
-                        // contract decision, not a route one.
+                        // route over. `auditMetaItem` is a declared OPTIONAL
+                        // member of `MetadataProtocol` (the #11006-pattern
+                        // catch-up that retired this door's `(p as any)` casts;
+                        // it was an undeclared ADR-0076 D9 server-only
+                        // extension before that). A host without the verb is
+                        // therefore a CONFORMING deployment that lands here
+                        // with no type error, and a boot-time assertion would
+                        // promote a declared-optional member into a required
+                        // one — a `packages/spec` contract decision, not a
+                        // route one. The guard is also what narrows the member
+                        // to callable below.
                         //
                         // Envelope per #7035: the ADR-0112 NESTED
                         // `{ error: { code, message } }` the sibling `/meta` 501
@@ -5916,12 +5918,24 @@ export class RestServer {
                     // states below — not from the request payload. It is still
                     // read on the two lines that need it.
                     const ctx = await this.resolveExecCtx(environmentId, req).catch(() => undefined);
-                    const result = await (p as any).auditMetaItem({
+                    // The `(p as any)` casts this door carried came off when
+                    // `MetadataProtocol` declared `auditMetaItem` (the #11006
+                    // pattern, same as the publish door below): the literal is
+                    // now compiled against the spec contract, so an undeclared
+                    // key here is a compile error (TS2353) instead of a payload
+                    // member no contract has ever seen. Plain
+                    // `AuditMetaItemRequest` rather than the
+                    // `TransportScopedMetaRequest` wrapper on purpose: this
+                    // door stopped sending `environmentId` when #8747 scoped
+                    // the read (see the note above), so there is no
+                    // transport-level member left to layer on.
+                    const auditRequest: AuditMetaItemRequest = {
                         type: req.params.type,
                         name: req.params.name,
                         organizationId: ctx?.tenantId ?? null,
                         ...(limit !== undefined && Number.isFinite(limit) ? { limit } : {}),
-                    });
+                    };
+                    const result = await p.auditMetaItem(auditRequest);
                     res.json(result);
                 } catch (error: any) {
                     handleRouteError(res, error);
