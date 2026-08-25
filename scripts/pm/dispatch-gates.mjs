@@ -6405,12 +6405,17 @@ function selfTest() {
   // back silently for the next gate that imports the tool.
   const ownToolSource = readFileSync(join(ROOT, 'scripts/pm/dispatch-gates.mjs'), 'utf8');
   const ownDeclared = declaredInheritedPopulation(ownToolSource);
-  t('this module declares what a follower inherits', ownDeclared !== null && ownDeclared.reason.length > 0);
+  // Read through `?.` on purpose: deleting the marker line must render as a
+  // NAMED failing case, not as a TypeError that aborts the run and takes every
+  // case after this one with it — a self-test that crashes reports one defect
+  // where the tree may hold several.
+  const ownPopulation = ownDeclared?.population ?? [];
+  t('this module declares what a follower inherits', (ownDeclared?.reason ?? '').length > 0);
   t(
     'it declares exactly the workflow tree it readdirs',
-    ownDeclared.population.length === 1 && ownDeclared.population[0] === '.github/workflows',
+    ownPopulation.length === 1 && ownPopulation[0] === '.github/workflows',
   );
-  t('so a follower still reaches the workflow files this tool really opens', covers(ownDeclared.population, '.github/workflows/lint.yml'));
+  t('so a follower still reaches the workflow files this tool really opens', covers(ownPopulation, '.github/workflows/lint.yml'));
   // The four fabricating classes the card measured, each pinned as SPELLED but
   // NOT INHERITED — the two halves have to be asserted together, because the
   // literal disappearing from the file would also pass "not inherited" while
@@ -6418,13 +6423,14 @@ function selfTest() {
   for (const fabricated of ['packages/plugins', 'packages/drivers', 'packages/services', 'packages/spec/src/**']) {
     t(
       `the module still spells ${fabricated} (join base / tier glob) but no follower inherits it`,
-      ownHints.includes(fabricated) && !ownDeclared.population.includes(fabricated),
+      ownHints.includes(fabricated) && !ownPopulation.includes(fabricated),
     );
   }
   t(
     'and the tier-table file globs are not inheritable either',
-    !ownDeclared.population.includes('.claude/agents/os-dev.md')
-      && !ownDeclared.population.includes('skills/objectstack-pm-dispatch/SKILL.md'),
+    ownPopulation.length > 0
+      && !ownPopulation.includes('.claude/agents/os-dev.md')
+      && !ownPopulation.includes('skills/objectstack-pm-dispatch/SKILL.md'),
   );
   // Cost of the mechanism on this tree, pinned so it cannot grow unnoticed: the
   // marker is an opt-out, and an opt-out that spreads is how a real population
