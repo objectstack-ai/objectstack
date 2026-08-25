@@ -7,10 +7,12 @@
  *
  * ## Why the map is generated instead of derived at module load
  *
- * The map's two sources are heavy on purpose-unrelated weight:
+ * The map's two sources were heavy on purpose-unrelated weight:
  * `DEFAULT_METADATA_TYPE_REGISTRY` lives in the kernel zod graph, and
- * `PLURAL_TO_SINGULAR` sits in a module that reaches the ADR-0087 conversion
- * layer. Deriving at module load therefore made ONE string fold cost a
+ * `PLURAL_TO_SINGULAR` sat in a module that reaches the ADR-0087 conversion
+ * layer (it has since moved to the schema-free
+ * `meta-spelling/manifest-collection-spelling`, #11503 — the registry input
+ * still makes build time the right place). Deriving at module load made ONE string fold cost a
  * browser consumer +60.1 KB gzipped (#10096's measurement). The 2026-08-20
  * maintainer ruling minted the standing principle 「浏览器可达的 spec 导出面必
  * 须 schema-free」 and approved moving the derivation to build time: this
@@ -40,7 +42,10 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { DEFAULT_METADATA_TYPE_REGISTRY } from '../src/kernel/metadata-plugin.zod';
-import { PLURAL_TO_SINGULAR } from '../src/shared/metadata-collection.zod';
+// [#11503] `PLURAL_TO_SINGULAR`'s declaration moved to the schema-free
+// manifest-collection module (the doc above still describes where it USED to
+// sit); the derivation input is the same one owner, read at its new home.
+import { PLURAL_TO_SINGULAR } from '../src/meta-spelling/manifest-collection-spelling';
 import { restPluralOfMetaType, camelCaseOf } from '../src/meta-spelling/metadata-url-spelling';
 
 const OUT = join(
