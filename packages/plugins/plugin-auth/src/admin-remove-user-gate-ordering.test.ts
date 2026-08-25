@@ -57,6 +57,7 @@ import { Hono } from 'hono';
 import { AuthManager } from './auth-manager';
 import { AuthPlugin } from './auth-plugin';
 import { createMemoryEngine } from './impersonation-bearer-rotation.test';
+import { inviteForAudienceGate } from './audience-gate-test-support';
 import { LAST_LOCAL_CREDENTIAL_CODE } from './last-local-credential';
 import type { PluginContext } from '@objectstack/core';
 
@@ -129,6 +130,11 @@ async function stage() {
     ['member.11477@example.com', 'Plain Member'],
     ['ordinary.11477@example.com', 'Ordinary User'],
   ]) {
+    // [#11767] the default audience posture is now invite_only, so fixture
+    // users beyond the first enter through the invitation carve-out — the
+    // house lane (see audience-gate-test-support; `open` would force email
+    // verification on and stop sign-up from minting the bearers below).
+    await inviteForAudienceGate(manager, email);
     const res = await direct('/sign-up/email', { email, password: PASSWORD, name });
     expect(res.status, `sign-up ${email}: ${await res.clone().text()}`).toBe(200);
   }
