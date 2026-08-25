@@ -86,13 +86,30 @@ export interface OrphanShareSweepResult {
 }
 
 /**
- * Structural and loose on purpose — it has to accept both owning services'
- * option shapes (`SharingServiceOptions['logger']`, `ShareLinkServiceOptions`)
+ * Structural on purpose — it accepts both owning services' option shapes
+ * (`SharingServiceOptions['logger']`, `ShareLinkServiceOptions['logger']`)
  * and a bare `{ warn }` stub in a test.
+ *
+ * `warn` is REQUIRED, and the members carry the same real signatures as the
+ * producers that feed this parameter (#10692, ruled 2026-08-25). Every report
+ * this module emits lands on `warn` — the "could not check", "stopped early"
+ * and "revoked N rows" lines — so a logger without a guaranteed `warn` is one
+ * this sweep can lose its ONLY output into: #9754's silence rule, one module
+ * downstream of the producers #10556 tightened. Both owning services' `logger`
+ * members require `warn` since PR #11856, so they stay assignable; what stops
+ * compiling is a logger with no `warn`, which was never a useful argument
+ * here. The bare-`Function` spelling this replaces documented no call shape
+ * and could not tighten until those producers dropped bare `Function`
+ * (`Function` is assignable to no concrete signature).
+ *
+ * Deliberately NO `error` member — adding one would enrol this sink in
+ * `check:optional-error-sink`'s population (see `logger-shapes.ts`, "Why this
+ * shape declares no `error`"). Requiredness is pinned in
+ * `logger-required-warn.pin.ts`.
  */
 interface MinimalLogger {
-  info?: Function;
-  warn?: Function;
+  info?: (msg: any, ...rest: any[]) => void;
+  warn: (msg: any, ...rest: any[]) => void;
 }
 
 /** How one caller's rows are named in this module's log lines. */
