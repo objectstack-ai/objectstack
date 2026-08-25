@@ -160,15 +160,35 @@ export function dispatcherAckOptions(
  * the one write on these objects that must never reach for a bypass: it is
  * request-reachable and threads the caller's tenant instead.
  *
+ * ## [#11859] Ownership joined the predicate
+ *
+ * `status = 'in_flight'` can prove a claim EXISTS but not WHOSE: after a
+ * visibility-timeout reap plus a re-claim, the row is `in_flight` again under
+ * another claim, and the reaped node's late ack still matched — writing its
+ * outcome over the live attempt. The predicate therefore also binds the claim
+ * credential (`claimed_by`, `claimed_at`) round-tripped from the record
+ * `claim()` returned, so the compare-and-set asks "is this row still held by
+ * the claim being completed", and a late ack matches nothing. The PAIR is the
+ * credential, not `claimed_by` alone: `claimed_at` distinguishes two claims by
+ * the SAME node, so a node's stale ack cannot land on its own later re-claim.
+ *
  * ⚠️ Diagnostics only, exactly as above: `bypassTenantAudit` never changes
  * what the write touches.
  *
  * @param id Primary key of the delivery row this attempt outcome belongs to.
  * @param expectedStatus The status the row MUST still hold for the write to land.
+ * @param claimedBy The node id stamped by the claim this ack completes.
+ * @param claimedAt The claim instant (ms) stamped by that same claim.
  */
 export function dispatcherAckCasOptions(
     id: string,
     expectedStatus: 'in_flight',
+    claimedBy: string,
+    claimedAt: number,
 ): EngineUpdateOptions & { multi: true; bypassTenantAudit: true } {
-    return { where: { id, status: expectedStatus }, multi: true, bypassTenantAudit: true };
+    return {
+        where: { id, status: expectedStatus, claimed_by: claimedBy, claimed_at: claimedAt },
+        multi: true,
+        bypassTenantAudit: true,
+    };
 }

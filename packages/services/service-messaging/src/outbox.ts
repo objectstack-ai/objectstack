@@ -54,6 +54,23 @@ export interface NotificationDeliveryRecord {
     digestKey?: string;
 }
 
+/**
+ * [#11859] A delivery row as handed out by {@link INotificationOutbox.claim} /
+ * {@link INotificationOutbox.claimDigest}: the **claim credential** — the
+ * (`claimedBy`, `claimedAt`) pair the store stamped when it took the row — is
+ * guaranteed present. {@link INotificationOutbox.ack} takes this record back,
+ * and the credential joins the compare-and-set predicate, so ownership is
+ * proven by ROUND-TRIPPING what `claim()` returned rather than by the caller
+ * supplying an identity it had to know (the option-A shape the #11859 ruling
+ * refused). The pair identifies one CLAIM, not one node: `claimedAt` is what
+ * refuses a late ack even when the SAME node re-claimed its own reaped row —
+ * the outcome belongs to the attempt, and a re-claim is a new attempt.
+ */
+export interface ClaimedDeliveryRecord extends NotificationDeliveryRecord {
+    claimedBy: string;
+    claimedAt: number;
+}
+
 export interface EnqueueDeliveryInput {
     notificationId: string;
     recipientId: string;
@@ -144,9 +161,11 @@ export function notificationAckNotClaimedMessage(id: string, status: DeliverySta
 
 /**
  * The refusal message for the OTHER half of the precondition: the row WAS
- * `in_flight` when ack() read it and had stopped being so by the time the
- * conditional write ran — a claim lost to the visibility-timeout reap plus a
- * re-claim by another node.
+ * claimed by this caller and had stopped being so by the time the outcome was
+ * recorded — a claim lost to the visibility-timeout reap. [#11859] Covers BOTH
+ * post-reap states: the row moved out of `in_flight`, and the row re-claimed
+ * (still `in_flight`, but under a different claim credential — possibly the
+ * same node's LATER claim, which is still not the claim this ack completes).
  *
  * Distinguished from {@link notificationAckNotClaimedMessage} because the two
  * say different things to whoever reads the log: the first is a CALLER using
@@ -155,10 +174,30 @@ export function notificationAckNotClaimedMessage(id: string, status: DeliverySta
  */
 export function notificationAckLostClaimMessage(id: string, status: DeliveryStatus | 'unknown'): string {
     return (
-        `Delivery row '${id}' stopped being 'in_flight' while ack() was recording its outcome `
-        + `(it now reads '${status}'), so the conditional update matched no row and NOTHING was `
+        `Delivery row '${id}' is no longer held by the claim this ack completes (it now reads `
+        + `'${status}'), so the ownership-checked conditional update matched no row and NOTHING was `
         + 'written — this attempt was not recorded and the row belongs to whoever holds it now. '
-        + 'Expected when a slow send outruns `claimTtlMs` and the row is reaped and re-claimed (#11453).'
+        + 'Expected when a slow send outruns `claimTtlMs` and the row is reaped and re-claimed '
+        + '(#11453, #11859).'
+    );
+}
+
+/**
+ * [#11859] The refusal message for a record that carries no claim credential
+ * at all. `ack()` takes back the exact record {@link INotificationOutbox.claim}
+ * / {@link INotificationOutbox.claimDigest} returned; a row read via `list()`
+ * while unclaimed, or a hand-built record, has no (`claimedBy`, `claimedAt`)
+ * pair and is refused before any read or write — possession of a row's id was
+ * never evidence of a claim, and the compile-time contract
+ * ({@link ClaimedDeliveryRecord}) is enforced here at runtime for JS callers
+ * and casts.
+ */
+export function notificationAckNoCredentialMessage(id: string): string {
+    return (
+        `Delivery row '${id}': the record passed to ack() carries no claim credential `
+        + '(claimedBy + claimedAt). ack() records the outcome of a delivery the caller CLAIMED, '
+        + 'and proves the claim by handing back the record claim()/claimDigest() returned. '
+        + 'Nothing was written.'
     );
 }
 
@@ -170,24 +209,36 @@ export function notificationAckLostClaimMessage(id: string, status: DeliveryStat
  */
 export interface INotificationOutbox {
     enqueue(input: EnqueueDeliveryInput): Promise<string>;
-    claim(opts: ClaimOptions): Promise<NotificationDeliveryRecord[]>;
+    claim(opts: ClaimOptions): Promise<ClaimedDeliveryRecord[]>;
     /**
-     * Record the outcome of ONE dispatch attempt on a row this caller claimed.
+     * Record the outcome of ONE dispatch attempt on a row this caller claimed,
+     * by handing back the record {@link claim} / {@link claimDigest} returned.
      *
-     * ⛔ **Precondition: the row MUST be `in_flight`** (i.e. claimed). Acking a
-     * row in any other status — an unclaimed `pending` row, or one already
-     * terminal — throws {@link NotificationAckError}, writes nothing, and
-     * leaves `attempts` untouched. `ack` is the dispatcher's completion
-     * callback, NOT a cancellation primitive: using it to flip a `pending` row
-     * to `suppressed` raced the dispatcher and recorded an attempt that never
-     * happened (#11453). An id that matches no row is not a contract
-     * violation and stays a silent no-op — an absent row has no state to
-     * corrupt and no claim to lose.
+     * ⛔ **Precondition: the row MUST still be held by the claim `claimed`
+     * came from.** That is two tests, both re-stated IN the conditional write:
+     * the row is `in_flight`, AND its (`claimed_by`, `claimed_at`) pair equals
+     * the credential on the record handed back. Acking a row in any other
+     * status — an unclaimed `pending` row, or one already terminal — throws
+     * {@link NotificationAckError}, writes nothing, and leaves `attempts`
+     * untouched; so does a late ack whose claim was reaped and re-claimed
+     * (#11859): `status = 'in_flight'` alone could not tell "claimed" from
+     * "claimed by the caller", so a node whose send outran `claimTtlMs` wrote
+     * its outcome over the re-claiming node's live attempt. `ack` is the
+     * dispatcher's completion callback, NOT a cancellation primitive: using it
+     * to flip a `pending` row to `suppressed` raced the dispatcher and
+     * recorded an attempt that never happened (#11453). A record whose id
+     * matches no row is not a contract violation and stays a silent no-op —
+     * an absent row has no state to corrupt and no claim to lose.
+     *
+     * Only `claimed.id` and the credential are trusted; every other field on
+     * the record may be stale by the time the ack runs, and implementations
+     * MUST re-read what they need (e.g. `attempts`) from the store.
      *
      * Implementations MUST make the transition atomic against {@link claim}:
-     * the status test and the write are one operation, never a read-then-write.
+     * the ownership test and the write are one operation, never a
+     * read-then-write.
      */
-    ack(id: string, result: AckResult): Promise<void>;
+    ack(claimed: ClaimedDeliveryRecord, result: AckResult): Promise<void>;
     list(filter?: { status?: DeliveryStatus; notificationId?: string }): Promise<NotificationDeliveryRecord[]>;
     /**
      * P3b-2: atomically claim **all** due batched rows (those with a `digestKey`)
@@ -197,5 +248,5 @@ export interface INotificationOutbox {
      * `limit`-bounded per group (a window must be claimed whole). Normal `claim`
      * MUST exclude digest rows so they are never sent individually.
      */
-    claimDigest(opts: ClaimOptions): Promise<NotificationDeliveryRecord[]>;
+    claimDigest(opts: ClaimOptions): Promise<ClaimedDeliveryRecord[]>;
 }
