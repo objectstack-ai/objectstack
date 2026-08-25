@@ -68,6 +68,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import { assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import { PermissionSetSchema } from '@objectstack/spec/security';
 import {
   createPermissionSetWriteThrough,
@@ -126,17 +127,33 @@ function makeQl(rows: any[], declared: any[]) {
     async find(object: string, q: any) {
       if (object !== 'sys_permission_set') return [];
       const where = q?.where ?? {};
+      // REFUSES what it does not implement, rather than quietly matching
+      // nothing: a double that answered `[]` for an operator it never learned
+      // would report "no such row", and every case here would still pass while
+      // measuring the double instead of the middleware.
       return permRows.filter((r) =>
-        Object.entries(where).every(([k, v]) => r[k] === v),
+        Object.entries(where).every(([k, v]) => {
+          if (k.startsWith('$')) throw new Error(`fake engine: unsupported operator ${k}`);
+          if (v && typeof v === 'object') throw new Error(`fake engine: unsupported operand for ${k}`);
+          return r[k] === v;
+        }),
       );
     },
     async findOne(object: string, q: any) {
       return (await this.find(object, q))[0] ?? null;
     },
-    async update(_object: string, data: any) {
-      const r = permRows.find((x) => x.id === data.id);
-      if (r) Object.assign(r, data);
-      return r;
+    // Opens with the PRODUCER's own dispatch predicate, never a hand-mirrored
+    // guard: a fixture that drifts to a call shape `ObjectQL` would refuse must
+    // fail loudly here rather than collect a green the real engine would not
+    // have given. `tryUpdate` in the subject SWALLOWS a throw, so a double
+    // looser than the engine would be invisible twice over.
+    async update(object: string, data: any, options?: any) {
+      const dispatch = assertEngineUpdateDispatch(data, options);
+      const targets = dispatch.kind === 'by-id'
+        ? permRows.filter((r) => r.id === dispatch.id)
+        : await this.find(object, options);
+      for (const r of targets) Object.assign(r, data);
+      return dispatch.kind === 'by-id' ? (targets[0] ?? null) : targets.length;
     },
     async insert(_object: string, data: any) {
       permRows.push({ ...data });
