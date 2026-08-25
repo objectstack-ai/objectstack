@@ -4,8 +4,8 @@
 
 ## 范围
 
-- 两个技能根:`.claude/skills/**`(含 pm-dispatch 本体)+ `skills/**`(发布目录,
-  恒英文);`scripts/pm/**` PM 循环工具;指令架构文件:根 `AGENTS.md` + 根
+- 两个技能根:`.claude/skills/**`(含 pm-dispatch 本体)+ `skills/**`(发布目录,恒英文);`scripts/pm/**` PM
+  循环工具;指令架构文件:根 `AGENTS.md` + 根
   `CLAUDE.md`;governed 面的治理执行文件(`.github/CODEOWNERS` 治理路由半边 +
   SUBJECT 是 governed 面本身的门禁/审计)。全量判据与裁决引文在 SKILL.md 域车道
   表;governed 面统一定义见 SKILL.md「ACCEPT 之后的路径分叉」。

@@ -38,8 +38,8 @@ preview renderer 不算消费者)与 AGENTS.md §"Touched `packages/spec`?"(八�
 
 - [ ] **它是安全/能力形状的吗?** 那么 ADR-0049 约束成立,惰性是缺陷不是债。
       `rls.enabled` 曾是「证据错误的 live」而实际**无人读取** —— disabled 的
-      policy 仍在贡献它的授权。那个键最后是**被强制执行**,不是被删除。功能存在时,
-      强制执行赢。
+      policy 仍在贡献它的授权。那个键最后是**被强制执行**,不是被删除。功能存在时,强制
+      执行赢。
 - [ ] **它是文档形状的吗?** `hook.label`、`hook.description`、`flow.description`
       没有运行时消费者,但被**有意保留** —— 它们为下一个读者(按 ADR-0033,常是模
       型)记录意图。把豁免写进台账 `note`,下次审计不再重审。良性展示元数据
@@ -131,8 +131,8 @@ walk 看不见的属性就是 ratchet 管不到的属性。
 
 所以验收顺序是:**先确定路线,再决定该期待什么读数**,不要反过来用读数去猜路线。
 整 def 删除还有一条自证信号:`json-schema.manifest/`(#5837 起按 category 分片)的
-ratchet(#2978)会先开火,
-要求你**有意删除**对应的 manifest key;删完重跑,per-key ratchet 会自行判定为 #4650
+ratchet(#2978)会先开火,要求你**有意删除**对应的 manifest key;删完重跑,per-key ratchet 会自行判定
+为 #4650
 路径 3(`def no longer emitted by this build`)。这串输出本身就是路线的证据,留在 PR 里。
 
 枚举值收窄既然对四张 ratchet 不可见,它的处方就只能挂在**枚举自己的 `error` map**
@@ -188,8 +188,8 @@ conversion 是消费者跟的。两个都要写。
       注册中了 `ui/FormView:aria`,protocol 11 的 `flow.node.type` 注册中了任意
       `.type`(#4658)。对每个常见叶名,保证早已失效。
       *条目同时启动老化时钟(#5898):* 门 (c) 读同一张表来决定这个墓碑的
-      `authorable-surface/` 行何时可删(~两个 major),所以你把它写在哪个 major 下,
-      时钟就从那个 release 数起。比这张表更老的退役是**未申报的、因此不可删的** ——
+      `authorable-surface/` 行何时可删(~两个 major),所以你把它写在哪个 major 下,时钟就从那个
+      release 数起。比这张表更老的退役是**未申报的、因此不可删的** ——
       没有东西能诚实地给它们定日期(叶匹配曾把 `data/Index:type` 的日期从一个不相干
       的 `flow.node.type` 定到 major 11,而 baseline 文件自己的 git 历史始于
       17.0.0-rc.0)。要删那类行,先考证它真实的 major、补条目、在 PR 里写明。
@@ -197,8 +197,8 @@ conversion 是消费者跟的。两个都要写。
 - [ ] **`surface` 保持散文 —— 它不再被匹配。** 按作者写元数据的方式写
       (`flow.nodes[].outputSchema`),那也是 upgrade guide 打印的。多键 conversion
       仍用恰好 `' / '` 连接子句(tool 清扫以来的 house style)。下游不再有任何东西
-      从它解析归属 —— 那个职责移给了上面的条目。#5898 起这对**每个**消费者都成立:
-      门 (c) 的 *aged-out tombstone* 证明曾是最后一个叶匹配者,现在也读同一张精确键
+      从它解析归属 —— 那个职责移给了上面的条目。#5898 起这对**每个**消费者都成立:门
+      (c) 的 *aged-out tombstone* 证明曾是最后一个叶匹配者,现在也读同一张精确键
       表,再没有任何规则从 `surface` 解析归属。
 - [ ] **`retiredFromLoadPath: true`** —— 退役恒真。两种论证,不可互换:对*改名*它意
       味着「没有 alias 窗口,故意的」(拒绝由墓碑负责;条目存在是为了
@@ -271,8 +271,8 @@ conversion 是消费者跟的。两个都要写。
       —— 由 `check:skill-examples` 与 `check:skill-refs` 把门。
 - [ ] **Docs** —— `content/docs/**` 的散文、表格与代码块 —— **除了
       `content/docs/releases/`,代码 PR 永不碰它**(AGENTS.md Documentation
-      Guardrails)。release notes 在发布时从 changesets + D2/D3 registry 集中编写;
-      本清单曾要求的逐 PR 加行,把 `releases/v<major>.mdx` 变成了全仓最热的冲突磁
+      Guardrails)。release notes 在发布时从 changesets + D2/D3 registry 集中编写;本清单曾要求的逐 PR
+      加行,把 `releases/v<major>.mdx` 变成了全仓最热的冲突磁
       铁。你的 changeset(下一项)才是通往它们的输入。`content/docs/**` 的其余部
       分:先 grep 键名,再读周边文件 —— 被删的键会藏在离参考表三节远的一个
       `defineFlow` 示例里。
