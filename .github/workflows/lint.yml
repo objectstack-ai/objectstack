@@ -1720,9 +1720,11 @@ jobs:
       # it enforced nothing, while reading in `package.json` exactly like the
       # gates that do. That is #10574's defect one file over, and it is the only
       # thing this change repairs; the gate itself is untouched.
-      # Runs its own --self-test FIRST (13 cases, both directions, both
-      # narrowings pinned as counts), then the scan — 36 sink types, 15
-      # baselined shrink-only. AST over packages/**, no spawns; ~3.5 s.
+      # Runs its own --self-test FIRST (both directions, every narrowing pinned
+      # as a count), then the scan. Deliberately carries NO counts: the run
+      # prints its own census — self-test cases, sink-type population, and the
+      # baselined shrink-only total — so a copy here could only ever be a stale
+      # one, and was. AST over packages/**, no spawns; ~3.5 s.
       # No `paths:` filter, for the standard reason: a filter on `packages/**`
       # would go dormant on the PR that edits the baseline.
       - name: Optional-`error` sink contract
