@@ -224,6 +224,17 @@ export const CEILINGS = new Map([
   // MERGED-tracking line, so that ceiling stays at 82 — no re-wrap, no cut.
   ['.claude/skills/pm-dispatch/references/release-aftercare.md', 58],
   ['.claude/skills/pm-dispatch/references/seat-post-protocol.md', 105],
+  // Per-repo「真绿」跑法索引 — the canonical test invocation, the gates a CI-log
+  // grep cannot see, and the local preflight, one fact per line per repo. Added
+  // by the protocol-text family PR, which could not carry its own ceiling: that
+  // dispatch declared a closed file surface (SKILL.md + os-dev.md + the new page
+  // + one pointer line) with stop-on-breach, and this script sat outside it. A
+  // pm-dispatch references file is read per seat session like every entry above,
+  // so its absence here was a coverage gap, not the header's deliberate omission
+  // (that one is the published `skills/` catalog, and only it). Set at the landed
+  // line count read from this ratchet's own run — headroom 0, same convention as
+  // the entries above.
+  ['.claude/skills/pm-dispatch/references/true-green.md', 34],
   // Lane job descriptions (maintainer ruling 2026-08-19: per-lane PM job
   // descriptions move from seat-post prose into versioned skill references).
   // Set at landed line counts (headroom 0, same convention as above).
@@ -270,7 +281,15 @@ export const CEILINGS = new Map([
   // 2026-08-20, verbatim and untranslated: 「A — 抬上限到 961 (Recommended)」
   // (issue #10126, comment 5353111732). Headroom is 0 again by construction, and
   // the next author needing a line is back to compressing.
-  ['AGENTS.md', 1149],
+  //
+  // 1149 → 1150 (#11819): Prime Directive #15's warrant sentence described the
+  // Version Packages PR as regenerated "on every push to main" — false since the
+  // #11233 trigger split. The correct sentence (six-hourly schedule; push drives
+  // the publish lane) is longer, and the whole paragraph measures zero lossless
+  // rewrap headroom, so the correction costs one line. Maintainer ruling
+  // 2026-08-25, verbatim and untranslated, accepting the measured +1/D1 option:
+  // 「我看到了,你分析过了,接受你的建议」. Headroom is 0 again by construction.
+  ['AGENTS.md', 1150],
   // #9965: root CLAUDE.md is the other repo-root instruction file — same read
   // path (every seat session), same governance (Prime Directive #14). It is
   // structurally growth-prone in the way the ratchet is built for: it exists to

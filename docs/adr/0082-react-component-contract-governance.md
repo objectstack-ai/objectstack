@@ -93,10 +93,10 @@ spec zod schema  ──gen──►  react-blocks.md      (AI reads it — decis
                                 │
                                 ▼
                            prop gate                  (os validate — decision 5)
-                           (hard: missing-required / typo)
+                           (missing-required → error / typo → warning)
 ```
 
-`examples/app-showcase/src/pages/renewals-pipeline.page.ts` is the **golden page**: authored straight from the contract (five server-connected blocks), it passes `os validate`; injecting a missing required `objectName` and an `onSucces` typo makes the gate fail with an error + a warning (captured in `docs/audits/2026-06-react-tier-authoring-dogfood.md`). The chain demonstrably closes.
+`examples/app-showcase/src/ui/pages/renewals-pipeline.page.ts` is the **golden page**: authored straight from the contract (five server-connected blocks), it passes `os validate`; injecting a missing required `objectName` makes the gate fail, and an `onSucces` typo is a separate, non-fatal advisory — the error gate exits before advisories are printed, so no one run shows both (each output is captured in `docs/audits/2026-06-react-tier-authoring-dogfood.md`). The chain demonstrably closes. *(#10808: this cited the page's pre-move path — it sits one directory deeper now — and said the two mistakes make the gate fail "with an error + a warning", which reads as one run rendering both. The severity split is real; the single run showing both never was.)*
 
 ---
 

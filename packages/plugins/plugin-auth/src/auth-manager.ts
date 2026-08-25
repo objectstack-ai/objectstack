@@ -1694,6 +1694,19 @@ export class AuthManager {
             // the mount is conditional on the admin plugin, and because the
             // guard itself now lives in ONE module both call sites share —
             // `last-local-credential.ts`, whose header records this trap.
+            //
+            // ⚠️ `/admin/remove-user` IS ALSO SHADED NOW (#11477) — and it DOES
+            // still reach this hook, which is the opposite of the line above
+            // and is the point. Its mount only runs `gateAdmin` and then
+            // RE-DISPATCHES the request through `handleRequest`, so it re-enters
+            // better-auth's router and this hook fires exactly as before —
+            // just AFTER authorization instead of before it. That is the whole
+            // fix: an authenticated non-admin is now refused by the mount and
+            // never reaches the lookup below, while an admitted platform admin
+            // reaches the identical lookup and the identical `CONFLICT`.
+            // ⛔ Do not "reconcile" the two notes by deleting this path from
+            // the list — that would silently drop the guard on the one route
+            // that still depends on this hook to run it.
             // ── [#10776] AUTHENTICATE FIRST ────────────────────────────
             // A `hooks.before` runs AHEAD of the endpoint's own
             // `use: [adminMiddleware]`, and that middleware is the only layer

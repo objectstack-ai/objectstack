@@ -111,18 +111,31 @@ export type FieldType = z.input<typeof FieldType>;
  * three lists used to disagree (field.form showed the key for 3 types,
  * object.form for 9, the validator enforced 10), and the validator's ten is
  * the only one with a measured reader. `FieldSchema` refuses `maxLength`
- * outside this set (see the superRefine below), and the two authoring forms
- * show the key for exactly this set — declared converges to enforced
- * (ADR-0078).
+ * outside this set (see the superRefine below) — and, per the #11949 ruling
+ * (2026-08-25), `minLength` too: the twin defect pair converges on the same
+ * template — and the two authoring forms show both keys for exactly this
+ * set — declared converges to enforced (ADR-0078).
+ *
+ * `signature` / `qrcode` joined in #11875 (maintainer ruling 2026-08-25,
+ * option 1): their stored value IS the author's own string and routinely far
+ * past 255 characters (a data-URI PNG for `signature`), and the write-time
+ * validator now enforces their declared bound — declared = enforced holds in
+ * both directions, which is also what licenses their unbounded TEXT column in
+ * `driver-sql` (the #11794 invariant: TEXT is permitted exactly because the
+ * write seam enforces the declared `maxLength`).
  *
  * Deliberately NOT here: `secret` (stored ciphertext handle — the authored
- * value's length is not what the column holds), `select`/`multiselect`
- * (bounded by their options, not by a character count), `json`/`code`-adjacent
- * structured types other than `code` itself, and every non-string type.
+ * value's length is not what the column holds; ADR-0100 — explicitly outside
+ * the #11875 ruling), `color` (short by construction — same ruling),
+ * `select`/`multiselect` (bounded by their options, not by a character count),
+ * `json`/`code`-adjacent structured types other than `code` itself, and every
+ * non-string type.
  */
 export const BOUNDED_STRING_FIELD_TYPES: ReadonlySet<string> = new Set([
   'text', 'textarea', 'email', 'url', 'phone', 'password',
   'markdown', 'html', 'richtext', 'code',
+  // #11875 — the write seam enforces these two's declared bound (see above).
+  'signature', 'qrcode',
 ] as const satisfies readonly FieldType[]);
 
 /**
@@ -884,8 +897,15 @@ export const FieldSchema = lazySchema(() => {
   // server accepts, at severity error/destructive, before #11431 taught the
   // consumer to defend itself). Which TYPES may author the key is the
   // superRefine below (BOUNDED_STRING_FIELD_TYPES).
-  maxLength: z.number().int().min(1).optional().describe('Max character length (positive integer). Only authorable on types that store a bounded string: text, textarea, email, url, phone, password, markdown, html, richtext, code.'),
-  minLength: z.number().optional().describe('Min character length'),
+  maxLength: z.number().int().min(1).optional().describe('Max character length (positive integer). Only authorable on types that store a bounded string: text, textarea, email, url, phone, password, markdown, html, richtext, code, signature, qrcode.'),
+  // #11949 (maintainer ruling 2026-08-25) — `minLength` converges on the
+  // #11566 template above, `maxLength`'s twin defect pair: same shape, same
+  // applicability set, same forms convergence. The lower bound is deliberately
+  // 1, not 0: "no minimum" is expressed by OMITTING the key, so `minLength: 0`
+  // is a permanently-true declaration — exactly the vacuous noise an AI
+  // metadata author mass-produces — and is refused loudly at authoring instead
+  // of parsing cleanly and asserting nothing.
+  minLength: z.number().int().min(1).optional().describe('Min character length (positive integer; `minLength: 0` is refused — express "no minimum" by omitting the key). Only authorable on types that store a bounded string: text, textarea, email, url, phone, password, markdown, html, richtext, code, signature, qrcode.'),
   
   /** Number Constraints */
   // #8321 — `precision`/`scale` are digit COUNTS, so a non-integer or negative
@@ -1639,23 +1659,53 @@ export const FieldSchema = lazySchema(() => {
   // `maxLength` is only authorable on types that store a bounded string.
   // The key sat on the BASE schema, so it was legal on `boolean` / `lookup` /
   // `autonumber` / `formula` — types where it describes nothing that is
-  // stored — while the write-time validator has only ever enforced it on the
-  // BOUNDED_STRING_FIELD_TYPES ten. Declared converges to enforced
+  // stored — while the write-time validator has only ever enforced it on
+  // exactly the BOUNDED_STRING_FIELD_TYPES members (ten then; `signature` /
+  // `qrcode` joined in #11875). Declared converges to enforced
   // (ADR-0078): the inert declaration is refused at the authoring seam, where
   // the fix is one keystroke away, instead of parsing cleanly and doing
   // nothing (the declared-but-inert shape that hides AI-authored metadata
   // errors). `maxLength` has no schema default, so `undefined` here always
   // means "not authored" — a field without the key can never fire this.
+  //
+  // The message enumerates the set ITSELF rather than a prose copy of it —
+  // #11875 found the hand-written enumeration already one revision behind the
+  // set it described, which is the #12017 two-copies failure shape.
   if (field.maxLength !== undefined && !BOUNDED_STRING_FIELD_TYPES.has(field.type)) {
     ctx.addIssue({
       code: 'custom',
       path: ['maxLength'],
       message:
         `\`maxLength\` is only valid on field types that store a bounded string — ` +
-        `'text', 'textarea', 'email', 'url', 'phone', 'password', 'markdown', 'html', ` +
-        `'richtext', 'code' — and this field is \`${field.type}\`: its stored value has no ` +
+        `${[...BOUNDED_STRING_FIELD_TYPES].map((t) => `'${t}'`).join(', ')} — ` +
+        `and this field is \`${field.type}\`: its stored value has no ` +
         'character length for the bound to constrain, so the declaration would parse and ' +
         'enforce nothing (the write-time validator applies `maxLength` to exactly those ' +
+        'types). Drop the key, or use a bounded string type.',
+    });
+  }
+
+  // [#11949] (maintainer ruling 2026-08-25 — the #11566 template applies in
+  // full): `minLength` is only authorable on types that store a bounded
+  // string — the same defect pair, the same convergence. The key sat on the
+  // BASE schema, so it was legal on `boolean` / `lookup` / `autonumber` —
+  // types where nothing bounded is stored — while the write-time validator
+  // has only ever applied `min_length` on the BOUNDED_STRING_FIELD_TYPES
+  // set. Declared converges to enforced (ADR-0078). `minLength` has no
+  // schema default, so `undefined` here always means "not authored" — a
+  // field without the key can never fire this. The message enumerates the
+  // set ITSELF rather than a prose copy of it — the #11875 lesson the
+  // `maxLength` twin above records (#12017 two-copies failure shape).
+  if (field.minLength !== undefined && !BOUNDED_STRING_FIELD_TYPES.has(field.type)) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['minLength'],
+      message:
+        `\`minLength\` is only valid on field types that store a bounded string — ` +
+        `${[...BOUNDED_STRING_FIELD_TYPES].map((t) => `'${t}'`).join(', ')} — ` +
+        `and this field is \`${field.type}\`: its stored value has no ` +
+        'character length for the bound to constrain, so the declaration would parse and ' +
+        'enforce nothing (the write-time validator applies `minLength` to exactly those ' +
         'types). Drop the key, or use a bounded string type.',
     });
   }

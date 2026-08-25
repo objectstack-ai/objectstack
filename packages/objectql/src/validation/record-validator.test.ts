@@ -936,3 +936,100 @@ describe('validateRecord — number `scale` is enforced by rejection (#7501)', (
     expect(err.message).toBe('Max hours per shift的小数位数不能超过 0 位(当前 1 位)');
   });
 });
+
+/**
+ * #11875 (maintainer ruling 2026-08-25, option 1) — `signature` / `qrcode`
+ * join the bounded-string branch, so their declared `maxLength` / `minLength`
+ * finally BINDS at the write seam. This is the enforcement half of the ruling;
+ * the storage half (their column becomes TEXT, licensed by exactly this
+ * branch) is pinned in driver-sql's
+ * `sql-driver-11794-richtext-text-family.test.ts`.
+ *
+ * The branch now reads the spec's BOUNDED_STRING_FIELD_TYPES instead of a
+ * hand-copied type list, so the authoring seam (`FieldSchema` refuses the key
+ * outside the set) and this seam can no longer drift apart — the drift is how
+ * these two types spent a release with a declarable-nowhere/enforced-nowhere
+ * bound.
+ */
+describe('validateRecord — signature/qrcode maxLength binds at the write seam (#11875)', () => {
+  const schema = {
+    fields: {
+      sig: { type: 'signature', maxLength: 64 },
+      qr: { type: 'qrcode', maxLength: 64 },
+    },
+  };
+
+  const fieldsOf = (data: Record<string, unknown>, mode: 'insert' | 'update' = 'insert') => {
+    try {
+      validateRecord(schema, data, mode);
+    } catch (e) {
+      return (e as ValidationError).fields;
+    }
+    return null;
+  };
+
+  for (const field of ['sig', 'qr'] as const) {
+    it(`refuses a 100-char ${field} value with a field-named max_length envelope (the card's repro)`, () => {
+      const errs = fieldsOf({ [field]: 'y'.repeat(100) });
+      expect(errs).not.toBeNull();
+      expect(errs?.[0]).toMatchObject({
+        field,
+        code: 'max_length',
+        constraint: { maxLength: 64, actual: 100 },
+      });
+    });
+
+    it(`accepts the boundary value on ${field} — exactly maxLength characters`, () => {
+      expect(fieldsOf({ [field]: 'y'.repeat(64) })).toBeNull();
+    });
+
+    it(`refuses one past the boundary on ${field}`, () => {
+      const errs = fieldsOf({ [field]: 'y'.repeat(65) });
+      expect(errs?.[0]).toMatchObject({
+        field,
+        code: 'max_length',
+        constraint: { maxLength: 64, actual: 65 },
+      });
+    });
+  }
+
+  it('enforces on update as well as insert', () => {
+    const errs = fieldsOf({ sig: 'y'.repeat(100) }, 'update');
+    expect(errs?.[0]).toMatchObject({ field: 'sig', code: 'max_length' });
+  });
+
+  it('minLength travels with the branch, like every other member', () => {
+    const s = { fields: { sig: { type: 'signature', minLength: 10 } } };
+    try {
+      validateRecord(s, { sig: 'short' }, 'insert');
+      throw new Error('expected a ValidationError');
+    } catch (e) {
+      expect((e as ValidationError).fields?.[0]).toMatchObject({
+        field: 'sig',
+        code: 'min_length',
+        constraint: { minLength: 10, actual: 5 },
+      });
+    }
+  });
+
+  it('a signature/qrcode with NO declared bound accepts an ordinary data-URI (the defect this closes)', () => {
+    const s = { fields: { sig: { type: 'signature' }, qr: { type: 'qrcode' } } };
+    const dataUri = `data:image/png;base64,${'A'.repeat(1000)}`;
+    expect(() => validateRecord(s, { sig: dataUri, qr: dataUri }, 'insert')).not.toThrow();
+  });
+
+  it("controls: `secret` and `color` stay OUTSIDE the branch — the ruling's explicit carve-outs", () => {
+    // `secret` persists an opaque `sys_secret` ref (ADR-0100) and `color` is
+    // short by construction; the 2026-08-25 ruling names both as NOT covered.
+    // A hand-built runtime schema can still carry the key (authoring refuses
+    // it, this is not authored metadata) — the validator enforces nothing for
+    // them, exactly as before.
+    const s = {
+      fields: {
+        sec: { type: 'secret', maxLength: 4 },
+        col: { type: 'color', maxLength: 4 },
+      },
+    };
+    expect(() => validateRecord(s, { sec: 'longer-than-four', col: '#aabbcc' }, 'insert')).not.toThrow();
+  });
+});
