@@ -1,8 +1,19 @@
 import './global.css';
 import type { ReactNode } from 'react';
 import type { Metadata } from 'next';
+import { SITE_ORIGIN } from '@/lib/site';
 
 export const metadata: Metadata = {
+  /**
+   * The origin every relative URL in this site's metadata resolves against —
+   * canonical links today, the Open Graph / Twitter image paths next. Left unset,
+   * Next resolves them against a build-time guess of the deployment's own origin,
+   * so a preview build would advertise itself as the real site.
+   *
+   * `new URL(...)` at the point of use, so `lib/site.ts` keeps exporting an
+   * immutable string rather than a `URL` instance shared across every route.
+   */
+  metadataBase: new URL(SITE_ORIGIN),
   title: {
     template: '%s | ObjectStack',
     default: 'ObjectStack',
