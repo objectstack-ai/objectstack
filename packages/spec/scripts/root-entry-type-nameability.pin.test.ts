@@ -36,15 +36,23 @@
  *   measured that a program file importing a subpath entry makes that entry's
  *   names NAMEABLE program-wide. `context.ts` reproduces that, which is what
  *   scopes this pin to the ruled three (ui/automation names, reachable only
- *   via the root re-exports under pin). Measured against this same dist: the
- *   MINIMAL one-file program leaks two MORE names through `/data`
- *   (`BaseValidationRuleShape`, `FilterCondition`) that the fixed root entry
- *   still cannot name — deliberately NOT pinned here; that is #11350's
- *   recorded premise delta, filed as #11709 for its own ruling. For the same
- *   reason the program contains no `@objectstack/spec/ui` or `/automation`
- *   import and no direct `import type { FormFieldInput, … }` — any of those
- *   would mask the very symptom under pin. Direct existence of the three root
- *   exports is owned by `api-surface/root.json` + `check:api-surface` instead.
+ *   via the root re-exports under pin). Measured against the #11350 dist: the
+ *   MINIMAL one-file program leaked two MORE names through `/data`
+ *   (`BaseValidationRuleShape`, `FilterCondition`) that the #11350 root entry
+ *   still could not name — #11350's recorded premise delta, filed as #11709
+ *   and ruled the same way (maintainer decision 2026-08-25: A′): the root
+ *   entry now re-exports both from their declaring `/data` modules. Re-run of
+ *   #11709's measurement: pre-fix, this same program minus `context.ts`
+ *   produced exactly 2 × TS2883 (`BaseValidationRuleShape` via the
+ *   `object.zod-*` dist chunk, `FilterCondition` via `filter.zod-*`);
+ *   post-fix it is clean, so `context.ts` no longer masks any known leak —
+ *   it stays because the pin's charter is the REAL consumers' program shape,
+ *   and a follow-up gate for entry-complete nameability (all entries, no
+ *   fixture scoping) is #11986's remit, not this pin's. The program still
+ *   contains no `@objectstack/spec/ui` or `/automation` import and no direct
+ *   `import type { FormFieldInput, … }` — any of those would mask the very
+ *   symptom under pin. Direct existence of the five root re-exports is owned
+ *   by `api-surface/root.json` + `check:api-surface` instead.
  *
  * - **canary** — the anti-phantom probe. TS2883 is a DECLARATION-EMIT
  *   diagnostic: drop `declaration: true` from the harness profile and the
