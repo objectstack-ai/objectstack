@@ -250,6 +250,11 @@ export const SysSession = ObjectSchema.create({
     token: Field.text({
       label: 'Session Token',
       required: true,
+      // [#11374] Bound from better-auth 1.7.1's own MySQL schema: a unique
+      // string column is emitted as varchar(255) (get-migration.mjs), and the
+      // producer writes generateId(32) — 32 chars. 255 admits everything the
+      // upstream schema admits, and lets the unique index exist on MySQL.
+      maxLength: 255,
       hidden: true,
       readonly: true,
       internal: true,

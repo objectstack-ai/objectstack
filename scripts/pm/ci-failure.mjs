@@ -2315,6 +2315,16 @@ async function selfTest() {
     console.error('');
     process.exit(1);
   }
+  // ⛔ This summary is printed by a step of `Lint & Repo Gates` on EVERY pull
+  // request, so it must not SPELL a workflow-command token. The runner parses
+  // the legacy `##[<name>]` form anywhere in a printed line -- not only at
+  // column 0 -- and this blob used to name the anchor token literally inside
+  // backticks. That minted a real `annotation_level: failure` on a check run
+  // whose conclusion was SUCCESS, on every PR in the repo, permanently
+  // (#11886). Comments like this one are never printed and may spell the token
+  // freely; the printed prose may not, and splitting the JS string would not
+  // help -- the runner reads the printed line, not the source.
+  // `scripts/check-self-test-workflow-commands.mjs` holds this.
   console.log(
     'OK  self-test: supersession keeps the newest per name and reports the drops; the four measured\n' +
     '    annotation shapes classify, with the unrecognised one kept rather than dropped; a check that\n' +
@@ -2340,9 +2350,9 @@ async function selfTest() {
     '    annotations carried none, a log that anchored nothing is still a shortfall rather than a\n' +
     '    manufactured answer, a 410 is named as expired retention rather than as an absence of\n' +
     '    evidence, a CONNECT refusal lands as transport with the blocked host to report, and a\n' +
-    '    tail with no `##[error]` in it is labelled a window rather than an anchor. And a `fix`\n' +
-    '    renders as the ONE remedy it is: a single `fix:` marker with its continuations padded\n' +
-    '    under it, keeping a copy-pasteable command on a line of its own.',
+    '    tail carrying no runner error line at all is labelled a window rather than an anchor.\n' +
+    '    And a `fix` renders as the ONE remedy it is: a single `fix:` marker with its\n' +
+    '    continuations padded under it, keeping a copy-pasteable command on a line of its own.',
   );
 }
 

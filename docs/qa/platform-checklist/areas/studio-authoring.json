@@ -73,14 +73,14 @@
         }
       ],
       "negative": [
-        "silent acceptance of an authoring write into a read-only package is a FAIL (ADR-0057 D10 — the server is the authoritative gate; the client lock is courtesy)",
+        "silent acceptance of an authoring write into a read-only package is a FAIL (ADR-0124 D1 — the server is the authoritative gate; the client lock is courtesy)",
         "a 'published' app absent from the Home launcher, or an end-user list rendering raw picklist values instead of labels, is a FAIL"
       ],
       "traps": ["stale-console-bundle", "automation-input", "hydration-race"],
       "source": [
         "docs/audits/2026-07-studio-package-create-ux-dogfood.md ('The loop closes' — the canonical walk; findings 1/3/4/6 carried as knownGaps)",
         "ADR-0016 §9 (the MVP loop this proves)",
-        "ADR-0057 D10 (server-side gate authority)",
+        "ADR-0124 D1 (server-side gate authority)",
         "access-security.readonly-package-locks-studio (client-side lock — cross-referenced, not duplicated)"
       ],
       "history": [

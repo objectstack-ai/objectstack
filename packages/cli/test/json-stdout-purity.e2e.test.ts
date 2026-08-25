@@ -83,6 +83,7 @@ const FAMILY: Record<string, string[]> = {
   'migrate apply': [],
   'migrate files-to-references': [],
   'migrate meta': ['--stored'],
+  'migrate multi-value-columns': [],
   'migrate plan': [],
   'migrate recorded-by': [],
   'migrate resume': [],

@@ -20,13 +20,22 @@
  * RIGHT DIAGNOSIS, and the neighbouring shapes that must stay silent are pinned
  * as silent in the same breath.
  *
- * ## The detection half only
+ * ## Detection, and the remedy it now points at
  *
- * ObjectStack does NOT migrate the column. Whether it should is the other half
- * of #11535 and a live maintainer decision — a migration over existing rows plus
- * an index drop/rebuild is destructive and hard to roll back. This suite pins
- * the reporting, and pins that the reporting changes no deployment's ability to
- * boot (see the category case, which is not a tautology — read its comment).
+ * ObjectStack still does NOT migrate the column on its own. That is the ruling,
+ * not a gap: ruled C on #11700 (maintainer, 2026-08-24) — the platform warns and
+ * ships an explicit, operator-run migration, and never runs it at boot.
+ * Unattended auto-migration was rejected as the only route that alters a
+ * customer's production table with nobody watching.
+ *
+ * What changed since the detection half landed is that the migration now EXISTS:
+ * `os migrate multi-value-columns` (#11733). So the message stopped describing a
+ * problem and started naming the way out, and this suite pins the naming in both
+ * directions — the shapes that must carry the recommendation and the shapes that
+ * must not, including a live database re-booted after the repair.
+ *
+ * It also pins that none of this changes a deployment's ability to boot (see the
+ * category case, which is not a tautology — read its comment).
  *
  * ## Three dialects, and SQLite's absence is a MEASUREMENT
  *
@@ -39,7 +48,13 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { SqlDriver } from './sql-driver.js';
-import { diffManagedTable, manualJsonConversionSql, type PhysicalColumn, type SqlDialectName } from './schema-drift.js';
+import {
+  diffManagedTable,
+  manualJsonConversionSql,
+  MULTI_VALUE_COLUMN_REMEDY_COMMAND,
+  type PhysicalColumn,
+  type SqlDialectName,
+} from './schema-drift.js';
 import { DIALECT_CELLS, declareDialectCell, type DialectCell } from './live-dialect-matrix.testkit.js';
 
 const MATRIX = 'multi-value base-type drift';
@@ -108,6 +123,71 @@ describe('diffManagedTable — multi-value field over a stale textual column (#1
     expect(entry.message).not.toContain('json_build_array');
   });
 
+  // ── the message NAMES the remedy command (#11535, remaining half) ────────
+  //
+  // When the detection half landed there was no command to name, so the message
+  // handed the operator raw SQL and opened with "ObjectStack will NOT change
+  // this column for you". `os migrate multi-value-columns` (#11733) both
+  // falsified that sentence and gave the message something better to say.
+
+  it('names `os migrate multi-value-columns`, and names it BEFORE the hand-run SQL', () => {
+    for (const dialect of ['postgres', 'mysql'] as const) {
+      const [entry] = diffTags({ type: 'lookup', multiple: true }, staleColumn('character varying', 255), dialect);
+
+      expect(entry.message).toContain(MULTI_VALUE_COLUMN_REMEDY_COMMAND);
+
+      // Order is the assertion, not decoration. Both routes repair the column;
+      // only one of them dry-runs first, prompts, and re-checks the finding
+      // afterwards. An operator who stops reading at the first `ALTER TABLE`
+      // they see should have already passed the command.
+      const commandAt = entry.message.indexOf(MULTI_VALUE_COLUMN_REMEDY_COMMAND);
+      const sqlAt = entry.message.indexOf(manualJsonConversionSql(dialect, 'proj_task', 'tags'));
+      expect(commandAt).toBeGreaterThanOrEqual(0);
+      expect(sqlAt).toBeGreaterThan(commandAt);
+
+      // The dry run is the default and is worth a full sentence: an operator who
+      // reads "run this" on a production database needs to know it writes
+      // nothing until they ask again.
+      expect(entry.message).toMatch(/dry run/i);
+      expect(entry.message).toContain('--apply');
+      expect(entry.message).toMatch(/backup/i);
+    }
+  });
+
+  it('no longer claims ObjectStack will not migrate the column — that became false when #11733 landed', () => {
+    // A regression guard on a specific false sentence, kept because the failure
+    // it describes is invisible: the message would still be loud, still name the
+    // right column, and still print working SQL, while telling the operator that
+    // the command two lines below it does not exist.
+    const [entry] = diffTags({ type: 'lookup', multiple: true }, staleColumn('character varying', 255), 'postgres');
+    expect(entry.message).not.toMatch(/will NOT change this column/i);
+
+    // What IS still true, and must stay said: nothing migrates the column
+    // unattended. Ruled C on #11700 — the platform warns and ships an
+    // operator-run command; it never runs it at boot.
+    expect(entry.message).toMatch(/never migrates this column on its own/i);
+  });
+
+  it('keeps the statement VERBATIM, because the CLI recovers the dialect by containment', () => {
+    // ⚠️ Cross-package contract, pinned from the emitting side. A
+    // `ManagedDriftEntry` carries no dialect, so `planStaleColumnTargets`
+    // (packages/cli/.../migrate/multi-value-columns.ts) identifies one by asking
+    // which dialect's statement the MESSAGE contains. A reword that paraphrases
+    // the SQL, wraps it, or breaks it across a line makes every finding
+    // `remedy_not_recognized` — the command this message now points at would
+    // refuse to run, and nothing in driver-sql's own suite would notice.
+    // This reproduces that probe rather than describing it.
+    const probe = (message: string) =>
+      (['postgres', 'mysql'] as const).filter((d) => message.includes(manualJsonConversionSql(d, 'proj_task', 'tags')));
+
+    for (const dialect of ['postgres', 'mysql'] as const) {
+      const [entry] = diffTags({ type: 'lookup', multiple: true }, staleColumn('character varying', 255), dialect);
+      // Exactly one — a message matching both would make the probe's answer
+      // depend on array order.
+      expect(probe(entry.message)).toEqual([dialect]);
+    }
+  });
+
   // ── the shapes that must stay SILENT ─────────────────────────────────────
 
   it('says nothing when the column is already `json` — the healthy database', () => {
@@ -129,6 +209,42 @@ describe('diffManagedTable — multi-value field over a stale textual column (#1
     // is not silent, so there is no silence to break.
     expect(diffTags({ type: 'integer', multiple: true }, staleColumn('integer'), 'postgres')).toEqual([]);
     expect(diffTags({ type: 'datetime', multiple: true }, staleColumn('timestamp with time zone'), 'postgres')).toEqual([]);
+  });
+
+  it('the remedy command is named by THIS finding and by nothing else', () => {
+    // The other half of the non-vacuity pair. `os migrate multi-value-columns`
+    // converts a column to `json`; a message that recommended it for a healthy
+    // column, a single-value field, or a plain width difference would be
+    // pointing an operator at a type change nothing here asked for. A signal
+    // that fires on everything reads exactly as green as one that fires
+    // correctly, so the shapes that must NOT carry it are enumerated.
+    const mustNotName: Array<[string, Parameters<typeof diffTags>[0], PhysicalColumn[], SqlDialectName]> = [
+      // already migrated — the repair has been done
+      ['migrated json column', { type: 'lookup', multiple: true }, staleColumn('json'), 'postgres'],
+      // never multi-value — the column is right and always was
+      ['single-value field', { type: 'string' }, staleColumn('character varying', 255), 'postgres'],
+      // a real finding, but a WIDTH one: `os migrate apply` handles it
+      ['single-value width drift', { type: 'string', maxLength: 50 }, staleColumn('character varying', 255), 'postgres'],
+      ['single-value width widen', { type: 'string', maxLength: 500 }, staleColumn('character varying', 255), 'postgres'],
+      // dialects/types where the stale column corrupts nothing
+      ['sqlite', { type: 'lookup', multiple: true }, staleColumn('varchar', 255), 'sqlite'],
+      ['stale integer column', { type: 'integer', multiple: true }, staleColumn('integer'), 'postgres'],
+    ];
+
+    for (const [label, field, columns, dialect] of mustNotName) {
+      const out = diffTags(field, columns, dialect);
+      for (const entry of out) {
+        expect(entry.message, `${label} must not recommend the column-type migration`)
+          .not.toContain(MULTI_VALUE_COLUMN_REMEDY_COMMAND);
+        expect(entry.op.type, label).not.toBe('manual_column_type_change');
+      }
+    }
+
+    // And the fixture is not vacuous in the other direction: two of those rows
+    // DO produce a finding, so the loop above is reading real messages rather
+    // than passing over empty arrays.
+    expect(diffTags({ type: 'string', maxLength: 50 }, staleColumn('character varying', 255), 'postgres')).toHaveLength(1);
+    expect(diffTags({ type: 'string', maxLength: 500 }, staleColumn('character varying', 255), 'postgres')).toHaveLength(1);
   });
 
   it('leaves the single-value varchar-width branch (#11431) exactly where it was', () => {
@@ -188,6 +304,25 @@ const singleValueMeta = [{ name: TABLE, fields: { name: { type: 'string' }, tags
 const multiValueMeta = [{ name: TABLE, fields: { name: { type: 'string' }, tags: { type: 'string', multiple: true } } }];
 
 class DriftProbeDriver extends SqlDriver {
+  /**
+   * Every line the boot path logged — the operator's ACTUAL view.
+   *
+   * `detectManagedDrift()` returns objects; what an operator meets on a restart
+   * is `reconcileAndWarnDrift` putting `d.message` through the logger. Asserting
+   * only on the returned object would leave the delivery unpinned, which is the
+   * half this card is about: the finding was already correct, and still told the
+   * operator to go write SQL by hand.
+   */
+  public logged: string[] = [];
+
+  constructor(config: ConstructorParameters<typeof SqlDriver>[0]) {
+    super(config);
+    (this as unknown as { logger: { warn: (m: string) => void; error: (m: string) => void } }).logger = {
+      warn: (m: string) => this.logged.push(m),
+      error: (m: string) => this.logged.push(m),
+    };
+  }
+
   columnsOf(table: string) {
     return this.introspectColumns(table);
   }
@@ -199,6 +334,8 @@ function declareBaseTypeDriftSuite(cell: DialectCell): void {
     let driver: DriftProbeDriver;
     let physicalType: string;
     let readBack: unknown;
+    /** Exactly what the boot in step 2 logged — snapshotted before anything else runs. */
+    let bootLines: string[] = [];
 
     beforeAll(async () => {
       driver = new DriftProbeDriver(cell.config());
@@ -211,7 +348,9 @@ function declareBaseTypeDriftSuite(cell: DialectCell): void {
 
       // 2. the metadata change + reboot. `initObjects` is additive-only: nothing
       //    is missing, so nothing is added, and the column is never revisited.
+      driver.logged = [];
       await driver.initObjects(multiValueMeta as any);
+      bootLines = [...driver.logged];
 
       physicalType = (await driver.columnsOf(TABLE)).find((c) => c.name === 'tags')!.type;
 
@@ -278,6 +417,38 @@ function declareBaseTypeDriftSuite(cell: DialectCell): void {
       expect(found[0].category).toBe('needs_confirm');
     });
 
+    it(corrupts
+      ? 'the BOOT tells the operator to run `os migrate multi-value-columns`'
+      : 'the BOOT says nothing at all, so no operator is sent to migrate a healthy column', () => {
+      // The delivery, not the detection. This is the line a restart actually
+      // prints — `reconcileAndWarnDrift` handing `d.message` to the logger —
+      // captured from the real boot in step 2 rather than reconstructed.
+      const driftLines = bootLines.filter((l) => l.includes('[schema-drift]'));
+
+      if (!corrupts) {
+        // SQLite: the value round-trips as a real array (pinned above), so a
+        // recommendation to convert the column would send an operator to alter
+        // a database that has nothing wrong with it.
+        expect(driftLines.filter((l) => l.includes(MULTI_VALUE_COLUMN_REMEDY_COMMAND))).toEqual([]);
+        return;
+      }
+
+      const named = driftLines.filter((l) => l.includes(MULTI_VALUE_COLUMN_REMEDY_COMMAND));
+      expect(named).toHaveLength(1);
+
+      // One line has to carry the whole diagnosis AND the way out: an operator
+      // reading a boot log is not going to go find the source.
+      expect(named[0]).toContain(`${TABLE}.tags`);
+      expect(named[0]).toContain(physicalType);
+      expect(named[0]).toMatch(/dry run/i);
+      expect(named[0]).toContain('--apply');
+
+      // And the statement survived the trip through the logger intact — this is
+      // the string the CLI matches on to recover the dialect.
+      const dialect = cell.id === 'pg' ? 'postgres' : 'mysql';
+      expect(named[0]).toContain(manualJsonConversionSql(dialect, TABLE, 'tags'));
+    });
+
     it.skipIf(!corrupts)('the remedy the finding prints actually works, and clears the finding', async () => {
       // An operator-facing remedy nobody runs is a remedy that drifts into being
       // wrong. This runs the emitted statement verbatim against the live server,
@@ -300,6 +471,31 @@ function declareBaseTypeDriftSuite(cell: DialectCell): void {
       // operator has acted.
       const after = await driver.detectManagedDrift();
       expect(after.filter((d) => d.op.type === 'manual_column_type_change')).toEqual([]);
+
+      // …and so is the BOOT LINE. The negative direction on a live database, and
+      // the one an operator actually experiences: having run the command the
+      // message recommended, the next restart must stop recommending it. A
+      // signal that keeps firing after the repair trains operators to ignore it,
+      // which costs exactly as much as never firing.
+      //
+      // ⚠️ A SECOND DRIVER, not another `initObjects` on this one. `driftWarned`
+      // is a per-instance throttle keyed by `driftKey(d)` — the same instance
+      // stays silent on its second boot whether or not the drift is still there,
+      // so re-booting `driver` would assert nothing at all. A fresh instance is
+      // what a restart actually is.
+      const rebooted = new DriftProbeDriver(cell.config());
+      try {
+        await rebooted.connect();
+        await rebooted.initObjects(multiValueMeta as any);
+        expect(rebooted.logged.filter((l) => l.includes(MULTI_VALUE_COLUMN_REMEDY_COMMAND))).toEqual([]);
+      } finally {
+        await rebooted.disconnect().catch(() => {});
+      }
+
+      // Non-vacuity: a fresh instance booting the SAME metadata against the
+      // stale column did name it (`bootLines`, step 2 above), so the silence
+      // belongs to the repair rather than to a fixture that stopped booting.
+      expect(bootLines.filter((l) => l.includes(MULTI_VALUE_COLUMN_REMEDY_COMMAND))).toHaveLength(1);
 
       // And the data is in the shape the declaration promises, for every row
       // state: the corrupted array is an array again, a legacy single value has

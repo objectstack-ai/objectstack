@@ -21,6 +21,7 @@ from `node_modules` — there is no local copy in the skill bundle.
 
 - `node_modules/@objectstack/spec/src/api/errors.zod.ts` — Standardized Error Codes Protocol
 - `node_modules/@objectstack/spec/src/automation/flow-function.zod.ts` — The contract for a **named handler function a `script` node invokes** —
+- `node_modules/@objectstack/spec/src/data/driver-sql.zod.ts` — SQL Dialect Enumeration
 - `node_modules/@objectstack/spec/src/data/driver.zod.ts` — Common Driver Options
 - `node_modules/@objectstack/spec/src/data/driver/common.zod.ts` — Shared building blocks for the per-driver `datasource.config` shapes (#4410).
 - `node_modules/@objectstack/spec/src/data/driver/config-registry.zod.ts` — The driver-id → `datasource.config` shape registry (#4410).
@@ -42,6 +43,7 @@ from `node_modules` — there is no local copy in the skill bundle.
 - `node_modules/@objectstack/spec/src/shared/identifiers.zod.ts` — System Identifier Schema
 - `node_modules/@objectstack/spec/src/shared/protection.zod.ts` — Package-level metadata protection (ADR-0010 §3.7 — Phase 4.3)
 - `node_modules/@objectstack/spec/src/shared/suggestions.zod.ts` — "Did you mean?" Suggestion Utilities
+- `node_modules/@objectstack/spec/src/system/deploy-bundle.zod.ts` — Deploy Bundle Protocol
 - `node_modules/@objectstack/spec/src/ui/action-params.zod.ts` — The action DISPATCH contract: what the platform validates on the way in, and
 - `node_modules/@objectstack/spec/src/ui/action.zod.ts` — Action Parameter Schema
 - `node_modules/@objectstack/spec/src/ui/bulk-action.zod.ts` — Bulk Action Schemas

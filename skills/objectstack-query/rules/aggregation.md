@@ -20,7 +20,7 @@ Guide for building ObjectStack aggregation queries.
 > (driver-rest, driver-memory, timezone/date-bucket fallbacks) supports all six
 > functions plus `distinct`. For portable queries, stick to the first five.
 
-> **Removed in 17 (#6188).** `array_agg` and `string_agg` are no longer part of
+> **Removed in 17.** `array_agg` and `string_agg` are no longer part of
 > the vocabulary — they were declared and lowered by no SQL backend, so a query
 > using them succeeded or failed depending on which driver happened to be
 > behind the object. A query carrying either is refused at parse. There is no
@@ -91,14 +91,14 @@ aggregations (never bucket by hand in app code):
 - The engine pushes bucketing down to the driver (`DATE_TRUNC` etc.) when
   the dialect supports that granularity, and transparently falls back to
   in-memory bucketing otherwise — results are correct either way, **including
-  the column keys** (#6401: until then the SQL drivers ignored `alias`, so an
+  the column keys** (earlier SQL drivers ignored `alias`, so an
   aliased group came back under the field name when the query was pushed down
   and under the alias when it fell back — decided by a capability bit and the
   `timezone`, neither of which the caller can see).
 
 ## HAVING Clause
 
-> ✅ **Enforced since #4286.** The engine applies `having` AFTER aggregation
+> ✅ **Enforced.** The engine applies `having` AFTER aggregation
 > (both the native-driver path and the in-memory fallback), referencing the
 > **aggregated row's columns** — aggregation aliases and groupBy projections.
 > Ordinary FilterCondition operators plus `$and`/`$or`/`$not`; an unknown
@@ -169,7 +169,7 @@ const [active] = await engine.aggregate('user', {
 
 ## Window Functions
 
-> ⛔ **REMOVED in `@objectstack/spec` 17 (#4286, ADR-0049).** The `QueryAST`
+> ⛔ **REMOVED in `@objectstack/spec` 17 (ADR-0049).** The `QueryAST`
 > schema no longer declares `windowFunctions` — the engine never routed the
 > property to any driver, so it was silently dropped. The key is tombstoned:
 > a query carrying it fails to parse with the upgrade prescription. The one
@@ -251,7 +251,7 @@ over the two periods and join the buckets in app code.
   groupBy: ['customer_id']
 }
 
-// ✅ Right: `having` references the aggregation ALIAS, after grouping (#4286)
+// ✅ Right: `having` references the aggregation ALIAS, after grouping
 const rows = await engine.aggregate('order', {
   groupBy: ['customer_id'],
   aggregations: [{ function: 'count', alias: 'order_count' }],

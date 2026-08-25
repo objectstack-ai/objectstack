@@ -33,7 +33,7 @@ for the revision window, and a **declared back-edge** closing the loop:
       config: { approvers: [{ type: 'position', value: 'manager' }], lockRecord: true,
                 maxRevisions: 2 } },                         // send-back budget
     // `approval_revise`, not `wait`: the window is service-owned, ended only by
-    // the submitter's resubmit — so it takes no config (#3823).
+    // the submitter's resubmit — so it takes no config.
     { id: 'wait_revision', type: 'approval_revise', label: 'Awaiting Revision' },
     { id: 'approved', type: 'end', label: 'Approved' },
     { id: 'rejected', type: 'end', label: 'Rejected' },
@@ -58,7 +58,7 @@ the framework repo.
 |---|---|---|
 | Missing `label` on the flow or on a node | `label` is required by `FlowSchema` — `FlowSchema.parse` / `registerFlow` rejects the definition before any graph validation runs | `registerFlow` (schema parse) |
 | Resubmit edge **without** `type: 'back'` | `registerFlow` validates the graph-minus-back-edges as a DAG, so it rejects the cycle as un-declared | `registerFlow`; lint `flow-approval-revise-unmarked-backedge` |
-| `revise` edge into a plain **`wait`** node (or any other type) | The window is a service-owned pause: a `wait` is `resumeAuthority: 'any'`, so a raw run-resume walks the back-edge with no submitter check and no audit row, and can destroy the run. `sendBack` refuses this metadata (#3823, amended ADR-0044) | lint `flow-approval-revise-target-not-service-owned` (**error**) |
+| `revise` edge into a plain **`wait`** node (or any other type) | The window is a service-owned pause: a `wait` is `resumeAuthority: 'any'`, so a raw run-resume walks the back-edge with no submitter check and no audit row, and can destroy the run. `sendBack` refuses this metadata (amended ADR-0044) | lint `flow-approval-revise-target-not-service-owned` (**error**) |
 | `revise` edge to a window that **never loops back** | A valid DAG (registerFlow accepts it), but the submitter has nowhere to resubmit — the branch dead-ends | lint `flow-approval-revise-dead-end` |
 | `maxRevisions: 0` together with a `revise` edge | Send-back is disabled, so every revise auto-rejects and the branch never runs | lint `flow-approval-revise-disabled` |
 | Re-suspending the approval node in a "revise mode" (no window node, no edge) | Hides a state machine inside one node — invisible to the canvas/run log; not the ADR-0044 model. (The 2026-07-28 amendment made the window a dedicated node TYPE, which keeps it visible; it did not move the pause inside the approval node.) | design review |

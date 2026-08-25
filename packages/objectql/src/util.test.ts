@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import {
   toTitleCase,
   convertIntrospectedSchemaToObjects,
@@ -213,6 +213,122 @@ describe('convertIntrospectedSchemaToObjects', () => {
     expect(metrics.fields.weight.type).toBe('number');
     expect(metrics.fields.score.type).toBe('number');
     expect(metrics.fields.quantity.type).toBe('number');
+  });
+
+  describe('a foreign key whose target carries referencedSchema is refused, loudly (#11377)', () => {
+    /**
+     * The card's measured shape: `cross_child.p` references
+     * `os11377_far.remote_parent`, a table outside the introspecting
+     * session's resolution scope, so the driver's answer carries
+     * `referencedSchema` beside the BARE `referencedTable`. `q` is the
+     * in-scope control — no `referencedSchema`, wired exactly as before.
+     */
+    const crossSchema: IntrospectedSchema = {
+      dialect: 'postgres',
+      introspectedAt: '2026-08-24T00:00:00.000Z',
+      tables: {
+        cross_child: {
+          name: 'cross_child',
+          columns: [
+            { name: 'id', type: 'varchar', nullable: false, primaryKey: true },
+            { name: 'p', type: 'varchar', nullable: true, primaryKey: false, maxLength: 64 },
+            { name: 'q', type: 'varchar', nullable: false, primaryKey: false },
+          ],
+          foreignKeys: [
+            {
+              columnName: 'p',
+              referencedTable: 'remote_parent',
+              referencedColumn: 'id',
+              constraintName: 'fk_cross',
+              referencedSchema: 'os11377_far',
+            },
+            {
+              columnName: 'q',
+              referencedTable: 'local_parent',
+              referencedColumn: 'id',
+              constraintName: 'fk_local',
+            },
+          ],
+          primaryKeys: ['id'],
+        },
+      },
+    };
+
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it('creates NO lookup field — the column converts as a plain field instead', () => {
+      const logger = { warn: vi.fn() };
+      const objects = convertIntrospectedSchemaToObjects(crossSchema, {
+        skipSystemColumns: false,
+        logger,
+      });
+
+      // The whole field, strictly: not a lookup, no `reference` key at all —
+      // a lookup wired to the bare name is exactly the #11201 wrong-object
+      // collision this refusal exists to prevent. The plain path still reads
+      // the column's own facts (`maxLength`, nullability).
+      expect(objects[0].fields.p).toStrictEqual({
+        name: 'p',
+        type: 'text',
+        label: 'P',
+        required: false,
+        maxLength: 64,
+      });
+      expect(Object.keys(objects[0].fields.p)).not.toContain('reference');
+    });
+
+    it('flags the refusal through options.logger, naming the constraint, the address and the remedy', () => {
+      const logger = { warn: vi.fn() };
+      convertIntrospectedSchemaToObjects(crossSchema, { skipSystemColumns: false, logger });
+
+      expect(logger.warn).toHaveBeenCalledTimes(1);
+      const [message, meta] = logger.warn.mock.calls[0]!;
+      // The pinned message: what was refused, why, and what to do.
+      expect(message).toContain('[convert-introspected-schema]');
+      expect(message).toContain('foreign key fk_cross on cross_child.p');
+      expect(message).toContain('references os11377_far.remote_parent');
+      expect(message).toContain("OUTSIDE the introspecting session's resolution scope");
+      expect(message).toContain('NO lookup field was created');
+      expect(message).toContain('converted as a plain field');
+      expect(message).toContain("Re-introspect with the parent's schema on the session's search path");
+      expect(meta).toStrictEqual({
+        table: 'cross_child',
+        column: 'p',
+        constraint: 'fk_cross',
+        referencedSchema: 'os11377_far',
+        referencedTable: 'remote_parent',
+      });
+    });
+
+    it('is loud with NO logger passed — the flag defaults to console.warn', () => {
+      const spy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      convertIntrospectedSchemaToObjects(crossSchema, { skipSystemColumns: false });
+
+      expect(spy).toHaveBeenCalledTimes(1);
+      expect(String(spy.mock.calls[0]![0])).toContain('[convert-introspected-schema]');
+    });
+
+    it('keeps wiring a resolvable foreign key byte-identically, with no flag', () => {
+      const logger = { warn: vi.fn() };
+      const objects = convertIntrospectedSchemaToObjects(crossSchema, {
+        skipSystemColumns: false,
+        logger,
+      });
+
+      // The in-scope control: the pre-#11377 lookup shape, the whole object.
+      expect(objects[0].fields.q).toStrictEqual({
+        name: 'q',
+        type: 'lookup',
+        reference: 'local_parent',
+        label: 'Q',
+        required: true,
+      });
+      // ONE warn — the cross-schema refusal above, nothing about `q`.
+      expect(logger.warn).toHaveBeenCalledTimes(1);
+      expect(String(logger.warn.mock.calls[0]![0])).not.toContain('fk_local');
+    });
   });
 
   it('should handle time type', () => {

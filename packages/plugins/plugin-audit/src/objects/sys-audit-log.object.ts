@@ -252,6 +252,19 @@ export const SysAuditLog = ObjectSchema.create({
       // A DELETED RECORD (an `action: 'delete'` row, whose target must NOT
       // exist) stays authorable through the landed escape hatch: an
       // internal-id-shaped value passes through untouched.
+      //
+      // ⚠️ ORDERING, and why this object differs from its three siblings
+      // (#11674): this id half is OPTIONAL, so a seed that names a target
+      // loaded later is genuinely order-independent — pass 1 inserts without
+      // the column and pass 2 back-fills it through the internal id captured at
+      // insert time, measured end-to-end against the real engine in
+      // `packages/objectql/src/engine-seed-required-deferral.test.ts`. ⛔ Do not
+      // carry that property over to `sys_approval_request`, `sys_record_share`
+      // or `sys_share_link`: their id half is `required: true`, deferring
+      // DELETES the column from the pass-1 insert, and required-validation
+      // rejects the row before pass 2 can help. Those three must seed the
+      // target dataset first; this one need not. Making this column `required`
+      // would therefore also make its seeds order-dependent.
       referenceVia: 'object_name',
       group: 'Target',
     }),

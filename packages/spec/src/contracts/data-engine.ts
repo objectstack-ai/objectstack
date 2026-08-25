@@ -11,6 +11,7 @@ import {
   DroppedFieldsEvent,
 } from '../data/index.js';
 import type { IDataDriver } from './data-driver.js';
+import type { IntrospectedSchema } from './schema-diff-service.js';
 
 /**
  * In-process write-observability hooks for `insert`/`update` (#3407).
@@ -262,4 +263,29 @@ export interface IDataEngine {
    */
   getDefaultDriverName?(): string | undefined;
   getDriverByName?(name: string): IDataDriver | undefined;
+
+  /**
+   * Introspect a datasource's live remote schema (ADR-0015): resolve the
+   * driver registered under `datasource` and delegate to its
+   * `introspectSchema()` capability. Implementations throw when the
+   * datasource has no registered driver, or its driver does not offer
+   * introspection — absence is answered with a named error, never a guess.
+   *
+   * Optional for the same reason as the registry pair above: only an engine
+   * that owns a named-driver registry can resolve a datasource to a driver;
+   * test fakes and remote/virtual engines simply omit it.
+   *
+   * [#11493] Declared because the binding is evidenced, exactly as [#4251]
+   * asks: ObjectQL has implemented this method since ADR-0015, and the
+   * external-datasource service reads it off the `'data'` service — while
+   * this contract stayed silent, that consumer had to re-declare a private
+   * structural engine type to recover the spec return type from the
+   * implementation's untyped `Promise`. The return type is the spec's ONE
+   * introspection shape ({@link IntrospectedSchema}), the same contract
+   * #11381 put on `DatasourceDriverHandle.introspectSchema` — this member
+   * extends that ruling (#11123's population/channel argument) to the
+   * engine-registration seam, so both roads into the runtime read now meet
+   * a compiler.
+   */
+  introspectDatasource?(datasource: string): Promise<IntrospectedSchema>;
 }

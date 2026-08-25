@@ -6,7 +6,7 @@ object with fields, enter a record, create an app with navigation, publish, and
 use the result as an end user — driving a real Chromium against `/_console`
 (vendored console build `7782698`, matching the `.objectui-sha` pin, so findings
 are not stale-bundle artifacts). Both sides of the read-only gate were exercised
-per ADR-0057 D10.
+per ADR-0124 D5.
 
 Run: `objectstack dev --ui --seed-admin` on the showcase example, fresh SQLite DB,
 `admin@objectos.ai` seeded admin, headless Chromium via CDP with screenshots at

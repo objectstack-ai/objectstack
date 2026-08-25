@@ -460,14 +460,6 @@ export function importUnsafeStatements(source) {
 const KNOWN_IMPORT_UNSAFE = new Set([
   'scripts/check-changeset-no-major.mjs',
   'scripts/check-empty-changeset.mjs',
-  'scripts/check-error-status-conformance.mjs',
-  'scripts/check-query-options-erasure-ratchet.mjs',
-  'scripts/check-release-page-status.mjs',
-  'scripts/checklist-select.mjs',
-  'scripts/objectui-range.mjs',
-  'scripts/pm/check-governed-prose.mjs',
-  'scripts/qa/qa-rollup.mjs',
-  'scripts/ts-parse.mjs',
 ]);
 
 /**

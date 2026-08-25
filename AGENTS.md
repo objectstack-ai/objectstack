@@ -29,7 +29,8 @@ the script's own header is the authority on detail.
 
 - **引用中文裁决时保持原文、不翻译**,即使承载它的 issue/PR 正文通篇是英文——改写引文
   就是改写裁决。上面那段引用即是一例:它是维护者的原话,一个字未动。
-- 代码、标识符、提交信息(commit messages)、ADR/文档正文等仓库产物保持现有语言惯例(以英文为主),不要因本节而改写。
+- 代码、标识符、提交信息(commit messages)、ADR/文档正文等仓库产物保持现有语言惯例(以英文
+  为主),不要因本节而改写。
 
 The rules are split per channel because a merged rule was measured to fail (it produced
 half-Chinese, half-English PR bodies in one day). One rule per channel, no overlap.
@@ -125,9 +126,16 @@ pays its first load at module top; `pnpm check:test-source-alias` gates it.
 | **Frontend debug** (UI in `../objectui` calls backend) | `PORT=3000 pnpm dev` | `pnpm dev` = the **showcase** kitchen-sink app (default; best for exercising the platform). Port **must** be 3000 (UI hard-wired); persistent state; leave running. For the minimal CRM app instead: `PORT=3000 pnpm dev:crm`. |
 | **Backend-only debug** | `pnpm dev -- --fresh -p <random>` | Random high port; ephemeral tempdir; **you must kill it** when done |
 
-`--fresh`: ephemeral tempdir (auto-deleted on exit) + `--seed-admin` (POSTs sign-up, prints creds — default `admin@objectos.ai` / `admin123`, override via `--admin-email`/`--admin-password`). The seeded admin is auto-promoted to **platform admin** (the system seed identity `usr_system` is skipped), so Setup/Studio are reachable on first login.
+`--fresh`: ephemeral tempdir (auto-deleted on exit) + `--seed-admin` (POSTs sign-up, prints creds — default
+`admin@objectos.ai` / `admin123`, override via `--admin-email`/`--admin-password`). The seeded admin is auto-promoted to
+**platform admin** (the system seed identity `usr_system` is skipped), so Setup/Studio are reachable on first login.
 
-Rules: never run two backends on port 3000; for backend tasks pick a random port and tear it down; **never kill a server you didn't start** (other agents/the user may be using it — see Multi-agent discipline §8); always use a `pnpm dev`/`dev:crm`/`dev:showcase` script, not raw `pnpm --filter` — but note what pnpm actually does with `--`: it forwards the **separator itself** into the child's argv, so this spelling only works where the receiving CLI tolerates a leading `--`. ⛔ Do not carry it over to test commands — vitest silently discards everything after a bare `--` (measured; see `.claude/agents/os-dev.md` → Toolchain traps).
+Rules: never run two backends on port 3000; for backend tasks pick a random port and tear it down; **never kill a server
+you didn't start** (other agents/the user may be using it — see Multi-agent discipline §8); always use a
+`pnpm dev`/`dev:crm`/`dev:showcase` script, not raw `pnpm --filter` — but note what pnpm actually does with `--`: it
+forwards the **separator itself** into the child's argv, so this spelling only works where the receiving CLI tolerates a
+leading `--`. ⛔ Do not carry it over to test commands — vitest silently discards everything after a bare `--`
+(measured; see `.claude/agents/os-dev.md` → Toolchain traps).
 
 ```bash
 pnpm dev:crm -- --fresh -p 38421   # start; debug via curl
@@ -136,44 +144,124 @@ kill $(lsof -ti tcp:38421)         # tear down — tempdir auto-deletes
 
 ### Frontend (Studio UI) — sibling repo `../objectui`
 
-This repo ships **backend only**. All Studio/Console UI work happens in `../objectui` (separate repo, checked out next to `framework/`). Workflow: edit + commit + push in `../objectui`, then in `framework/` run `pnpm objectui:refresh` to pull its build into `packages/console/`.
+This repo ships **backend only**. All Studio/Console UI work happens in `../objectui` (separate repo, checked out next
+to `framework/`). Workflow: edit + commit + push in `../objectui`, then in `framework/` run `pnpm objectui:refresh` to
+pull its build into `packages/console/`.
 
-Other scripts: `objectui:bump` (pull only), `objectui:build`, `objectui:clean`. ⚠️ Never hand-edit `packages/console/dist/` or `.cache/objectui-*/` — regenerated.
+Other scripts: `objectui:bump` (pull only), `objectui:build`, `objectui:clean`. ⚠️ Never hand-edit
+`packages/console/dist/` or `.cache/objectui-*/` — regenerated.
 
-**Moving the pin has a second half: `pnpm sdui:manifest`.** ADR-0082 D4's spec↔registry declaration-parity ratchet reads objectui's `sdui.manifest.json`, which changes only when `.objectui-sha` moves — so the pin bump is the ratchet's trigger, and its only one. It is an **on-demand gate by decision**, never a CI job; `objectui:bump` and `objectui:refresh` both print the reminder. Needs Playwright chromium. Full procedure: `docs/releases-maintenance.md` → "After the pin moves".
+**Moving the pin has a second half: `pnpm sdui:manifest`.** ADR-0082 D4's spec↔registry declaration-parity ratchet
+reads objectui's `sdui.manifest.json`, which changes only when `.objectui-sha` moves — so the pin bump is the
+ratchet's trigger, and its only one. It is an **on-demand gate by decision**, never a CI job; `objectui:bump` and
+`objectui:refresh` both print the reminder. Needs Playwright chromium. Full procedure: `docs/releases-maintenance.md`
+→ "After the pin moves".
 
-**Fast iteration on `../objectui` src (no commit/refresh loop):** run objectui's own console dev server — `cd ../objectui && pnpm --filter @object-ui/console dev` (Vite on **:5180**, HMR). Its `/api` proxy targets `DEV_PROXY_TARGET || http://localhost:3000`, so **run the backend you're testing on :3000** (`PORT=3000 pnpm dev` for showcase) and browse `:5180`. Note `:3001/_console` (or whatever the backend serves) is the **published** console, not your `../objectui` src — only `:5180` reflects local UI edits. See `../objectui/AGENTS.md` for the app-id / localStorage / auth gotchas.
+**Fast iteration on `../objectui` src (no commit/refresh loop):** run objectui's own console dev server —
+`cd ../objectui && pnpm --filter @object-ui/console dev` (Vite on **:5180**, HMR). Its `/api` proxy targets
+`DEV_PROXY_TARGET || http://localhost:3000`, so **run the backend you're testing on :3000** (`PORT=3000 pnpm dev` for
+showcase) and browse `:5180`. Note `:3001/_console` (or whatever the backend serves) is the **published** console, not
+your `../objectui` src — only `:5180` reflects local UI edits. See `../objectui/AGENTS.md` for the app-id /
+localStorage / auth gotchas.
 
 ---
 
 ## Prime Directives
 
 1. **Zod First.** All schemas start as Zod. Types via `z.infer<typeof X>`. JSON Schemas generated from Zod.
-2. **No business logic in `packages/spec`.** Spec = schemas/types/constants only. Runtime logic goes in `core`, `runtime`, or `services/*`.
+2. **No business logic in `packages/spec`.** Spec = schemas/types/constants only. Runtime logic goes in `core`,
+   `runtime`, or `services/*`.
 3. **Naming:**
    - TS config keys → `camelCase` (`maxLength`, `defaultValue`)
    - Machine names (data values) → `snake_case` (`name: 'first_name'`)
-   - Error codes → `SCREAMING_SNAKE` (`PERMISSION_DENIED`) — machine constants, not data values; scope and rationale in [ADR-0112](./docs/adr/0112-error-code-vocabulary-and-ledger.md). Not a general license to deviate.
-   - Metadata type names → **singular** (`'agent'`, `'view'`, `'flow'`) — matches `MetadataTypeSchema` in `packages/spec/src/kernel/metadata-plugin.zod.ts`
+   - Error codes → `SCREAMING_SNAKE` (`PERMISSION_DENIED`) — machine constants, not data values; scope and rationale
+     in [ADR-0112](./docs/adr/0112-error-code-vocabulary-and-ledger.md). Not a general license to deviate.
+   - Metadata type names → **singular** (`'agent'`, `'view'`, `'flow'`) — matches `MetadataTypeSchema` in
+     `packages/spec/src/kernel/metadata-plugin.zod.ts`
    - REST endpoints → plural (`/api/v1/ai/agents`)
 4. **Imports:** Use `@objectstack/spec` namespaces or subpaths. Never relative `../../packages/spec`.
 5. **No workarounds.** Adopt sustainable, well-architected solutions — not temporary patches.
-6. **Object name = table name.** The object `name` is the canonical id everywhere (API, ObjectQL, REST, SDK, DB table). **Never** set `namespace` (deprecated) or `tableName` (always equals `name`). For module prefixes, embed in the name (`sys_user`, `ai_conversations`).
-7. **One Zod source per metadata type.** Each type (`view`, `flow`, `agent`, …) has exactly one schema in `packages/spec/src/{domain}/`. Org overlay opt-in lives only in `allowOrgOverride` on `DEFAULT_METADATA_TYPE_REGISTRY` — no parallel whitelists. See ADR-0005.
-8. **North Star alignment.** Read `content/docs/concepts/north-star.mdx` before structural changes. If a change doesn't advance §7 Built, shrink Drift, or unlock Missing — it probably shouldn't ship.
-9. **`OS_` env-var prefix + structure.** All ObjectStack-owned env vars MUST start with `OS_`, then follow **`OS_{DOMAIN}_{FEATURE}[_QUALIFIER]`** where `DOMAIN` is the subsystem (`AUTH`, `SEARCH`, `CORS`, `CLOUD`, `DATABASE`, `CLUSTER`, `MCP`, `SSO`, …) so related vars group together (cf. `OS_AUTH_*`, `OS_CORS_*`). Pick the shape by what the var *is*:
-   - **Boolean feature flag** → suffix **`_ENABLED`**, default-off / opt-in: `OS_{DOMAIN}_{FEATURE}_ENABLED` (`OS_SSO_ENABLED`, `OS_SCIM_ENABLED`, `OS_SEARCH_PINYIN_ENABLED`). Never a bare `OS_PINYIN_SEARCH` — bare names read as config, not toggles.
-   - **Config value** (URL / path / secret / level / count) → `OS_{DOMAIN}_{NAME}` (`OS_CLOUD_URL`, `OS_DATABASE_URL`, `OS_LOG_LEVEL`, `OS_AUTH_SECRET`).
-   - **Escape hatch / dangerous override** → **`OS_ALLOW_{X}`** — deliberately ungrouped and scary-looking (`OS_ALLOW_MAIN_EDITS`, `OS_ALLOW_MEMORY_CLUSTER_MULTINODE`).
+6. **Object name = table name.** The object `name` is the canonical id everywhere (API, ObjectQL, REST, SDK, DB table).
+   **Never** set `namespace` (deprecated) or `tableName` (always equals `name`). For module prefixes, embed in the name
+   (`sys_user`, `ai_conversations`).
+7. **One Zod source per metadata type.** Each type (`view`, `flow`, `agent`, …) has exactly one schema in
+   `packages/spec/src/{domain}/`. Org overlay opt-in lives only in `allowOrgOverride` on
+   `DEFAULT_METADATA_TYPE_REGISTRY` — no parallel whitelists. See ADR-0005.
+8. **North Star alignment.** Read `content/docs/concepts/north-star.mdx` before structural changes. If a change doesn't
+   advance §7 Built, shrink Drift, or unlock Missing — it probably shouldn't ship.
+9. **`OS_` env-var prefix + structure.** All ObjectStack-owned env vars MUST start with `OS_`, then follow
+   **`OS_{DOMAIN}_{FEATURE}[_QUALIFIER]`** where `DOMAIN` is the subsystem (`AUTH`, `SEARCH`, `CORS`, `CLOUD`,
+   `DATABASE`, `CLUSTER`, `MCP`, `SSO`, …) so related vars group together (cf. `OS_AUTH_*`, `OS_CORS_*`). Pick the
+   shape by what the var *is*:
+   - **Boolean feature flag** → suffix **`_ENABLED`**, default-off / opt-in: `OS_{DOMAIN}_{FEATURE}_ENABLED`
+     (`OS_SSO_ENABLED`, `OS_SCIM_ENABLED`, `OS_SEARCH_PINYIN_ENABLED`). Never a bare `OS_PINYIN_SEARCH` — bare names
+     read as config, not toggles.
+   - **Config value** (URL / path / secret / level / count) → `OS_{DOMAIN}_{NAME}` (`OS_CLOUD_URL`, `OS_DATABASE_URL`,
+     `OS_LOG_LEVEL`, `OS_AUTH_SECRET`).
+   - **Escape hatch / dangerous override** → **`OS_ALLOW_{X}`** — deliberately ungrouped and scary-looking
+     (`OS_ALLOW_MAIN_EDITS`, `OS_ALLOW_MEMORY_CLUSTER_MULTINODE`).
    - **Opt-out** → `OS_SKIP_{X}` / `OS_DISABLE_{X}`. **Test/CI-only** → `OS_TEST_*` / `OS_EXPECT_*`.
-   - Pre-existing vars that don't fit (`OS_METADATA_WRITABLE`, `OS_EAGER_SCHEMAS`, `OS_SERVER_TIMING`) are **debt, not precedent** — new vars follow this rule; rename old ones via the deprecation helper below when touched.
+   - Pre-existing vars that don't fit (`OS_METADATA_WRITABLE`, `OS_EAGER_SCHEMAS`, `OS_SERVER_TIMING`) are **debt, not
+     precedent** — new vars follow this rule; rename old ones via the deprecation helper below when touched.
 
-   When renaming a legacy var, use `readEnvWithDeprecation('OS_NEW', 'LEGACY')` from `@objectstack/types` (keeps legacy working one release). Third-party exceptions kept as-is: `NODE_ENV`, `HOME`, `OPENAI_API_KEY`, `TURSO_*`, OAuth `*_CLIENT_ID/SECRET`, `RESEND_API_KEY`, `POSTMARK_TOKEN`, `AI_GATEWAY_*`, `SMTP_*`.
-10. **File issues for out-of-scope findings — don't silently expand scope or leave them buried.** When you hit a bug, gap, or unenforced capability that's unrelated to the current task, or too large to fix in scope, open a GitHub issue (`gh issue create`) with a clear repro/decision and link it from your PR. Corollary: **never advertise or demo a capability the runtime doesn't actually deliver** (declared ≠ enforced) — fix it, trim it, or file an issue, but don't fake coverage. The recurring shape: a spec declaring more rule types than the write-path validator enforced was closed by **trimming** what could never be enforced and **implementing** the rest — and even then the claim had to stay narrow, because the evaluator was wired into insert and single-id update while bulk update silently skipped every rule: the same declared-≠-enforced gap one layer down, at the **call site** rather than the `switch`. A `case` label is not enforcement; check the **call site**.
-11. **Worktree-first — never edit on the shared `main` checkout.** This repo is edited by **multiple agents at once**; the shared tree has its HEAD switched and reset *under you*, silently clobbering uncommitted work — a feature branch on the *shared* checkout is **not** enough (it still gets switched under you). Before your **first file edit**, be in a dedicated worktree on a feature branch: `git worktree add ../objectstack-<task> -b <branch> main && cd ../objectstack-<task> && pnpm install`. Two PreToolUse hooks **enforce** this — `.claude/hooks/guard-main-checkout.sh` blocks `Edit`/`Write`/`NotebookEdit`, and `.claude/hooks/guard-main-checkout-bash.sh` blocks the identical write arriving through **Bash** (`>`/`>>` redirection, `sed -i`, `perl -i`, `tee`, `cp`, `mv`, `rm`, `touch`) — and both check the **target file's own repo**, so sibling repos (`objectui`/`cloud`) you touch are covered too (deliberate non-task override: `OS_ALLOW_MAIN_EDITS=1`, one switch for both). The Bash guard is precision-first: it never blocks reads, and any shape it cannot resolve with confidence (`bash -c …`, `xargs`, `node -e`, a `$VAR`/glob target) is allowed through — the rule still outranks the hook. **The one thing a worktree does *not* isolate is the stash** — `refs/stash` lives in the **common** `.git`, shared by every worktree; a third hook (`guard-shared-stash.sh`, `OS_ALLOW_STASH=1`) blocks the mutating forms, and the collision-free replacements are in Multi-agent discipline below.
-12. **Contract-first — fix the metadata, not the runtime.** This is a metadata-driven framework: `packages/spec` is the one contract between metadata *producers* and the runtime/renderers that *consume* it. When a piece of metadata "doesn't work," ask **first**: *is it spec-compliant? is this the long-term-correct direction?* If the metadata is wrong, fix it at the **producer** and **reject it at authoring/publish** (validation / lint) so the error surfaces loudly — do **not** add a lenient alias or `??` fallback in a consumer (a node executor, the REST layer, a renderer) to tolerate off-spec input. A tolerant fallback fossilizes the wrong convention into a second de-facto contract, dilutes the spec, and hides the producer's bug — one strict contract beats N dialects. This is an **internal** contract (we own both ends), so "be liberal in what you accept" (Postel) does **not** apply — that's for untrusted boundaries. Change the **spec** only when the spec itself is genuinely wrong, and then deliberately (edit the Zod schema + migrate), never by accreting consumer-side fallbacks. When an alias must be tolerated at all, declare it as an **ADR-0087 conversion-layer entry** (never a bare `??`, and no executor shims) so it is declared, loud, tested, and *removable on a schedule* — the `cfg.filter ?? cfg.filters`-style fallbacks the flow executors once carried were all paid down exactly that way, emptying and deleting the executor shim that read them. Stored `sys_metadata` rows (data at rest) are covered from the other side: every rehydration seam replays the **full** conversion chain — retired entries included — via `applyConversionsToStoredItem` (ADR-0087 addendum), so a consumer never needs its own accommodation for a legacy stored shape either. *Worked example:* an AI-authored flow node used wrong key names and template syntax for what the executor reads → the fix was correcting the authoring skill + a publish-gate lint that rejects the wrong shape, **not** a runtime alias in the executor (that alias was proposed and rejected). Strengthens #5.
-13. **An accepted ADR binds until a superseding ADR says otherwise.** Reversing a recorded decision is itself a decision: it needs a **new ADR** (or an amended status line on the old one), not a changeset that quietly does the opposite. Before changing behaviour in `docs/adr/`-governed territory, **grep the ADRs for the surface you are touching** — the decision is often older and broader than the code comment in front of you. A reversal of three accepted ADRs once landed as a patch-level changeset and held for a day; the mechanism was not carelessness — **the file being edited never named the ADRs that governed it**, so the author could not have known. Hence the corollary: when you implement an ADR's decision, **leave its id in the code**, and anchor load-bearing spots in `scripts/adr-anchors/` (`pnpm check:adr-anchors`) — **one new JSON file per anchor, named for the path it anchors; there is no index to register it in** — so the next author is told which decision they are standing on. A decision nobody can find is a decision that will be reversed.
-14. **⛔ A governed surface is confirmed and merged by the maintainer, by hand — no AI seat merges, queues, or arms auto-merge on a PR whose diff touches one.** Three maintainer rulings, verbatim and untranslated — each widens the one before it, and the third *is* the current definition of the surface:
+   When renaming a legacy var, use `readEnvWithDeprecation('OS_NEW', 'LEGACY')` from `@objectstack/types` (keeps legacy
+   working one release). Third-party exceptions kept as-is: `NODE_ENV`, `HOME`, `OPENAI_API_KEY`, `TURSO_*`, OAuth
+   `*_CLIENT_ID/SECRET`, `RESEND_API_KEY`, `POSTMARK_TOKEN`, `AI_GATEWAY_*`, `SMTP_*`.
+10. **File issues for out-of-scope findings — don't silently expand scope or leave them buried.** When you hit a bug,
+    gap, or unenforced capability that's unrelated to the current task, or too large to fix in scope, open a GitHub
+    issue (`gh issue create`) with a clear repro/decision and link it from your PR. Corollary: **never advertise or demo
+    a capability the runtime doesn't actually deliver** (declared ≠ enforced) — fix it, trim it, or file an issue,
+    but don't fake coverage. The recurring shape: a spec declaring more rule types than the write-path validator
+    enforced was closed by **trimming** what could never be enforced and **implementing** the rest — and even then the
+    claim had to stay narrow, because the evaluator was wired into insert and single-id update while bulk update
+    silently skipped every rule: the same declared-≠-enforced gap one layer down, at the **call site** rather than the
+    `switch`. A `case` label is not enforcement; check the **call site**.
+11. **Worktree-first — never edit on the shared `main` checkout.** This repo is edited by **multiple agents at once**;
+    the shared tree has its HEAD switched and reset *under you*, silently clobbering uncommitted work — a feature
+    branch on the *shared* checkout is **not** enough (it still gets switched under you). Before your **first file
+    edit**, be in a dedicated worktree on a feature branch:
+    `git worktree add ../objectstack-<task> -b <branch> main && cd ../objectstack-<task> && pnpm install`. Two
+    PreToolUse hooks **enforce** this — `.claude/hooks/guard-main-checkout.sh` blocks `Edit`/`Write`/`NotebookEdit`,
+    and `.claude/hooks/guard-main-checkout-bash.sh` blocks the identical write arriving through **Bash** (`>`/`>>`
+    redirection, `sed -i`, `perl -i`, `tee`, `cp`, `mv`, `rm`, `touch`) — and both check the **target file's own
+    repo**, so sibling repos (`objectui`/`cloud`) you touch are covered too (deliberate non-task override:
+    `OS_ALLOW_MAIN_EDITS=1`, one switch for both). The Bash guard is precision-first: it never blocks reads, and any
+    shape it cannot resolve with confidence (`bash -c …`, `xargs`, `node -e`, a `$VAR`/glob target) is allowed through
+    — the rule still outranks the hook. **The one thing a worktree does *not* isolate is the stash** — `refs/stash`
+    lives in the **common** `.git`, shared by every worktree; a third hook (`guard-shared-stash.sh`, `OS_ALLOW_STASH=1`)
+    blocks the mutating forms, and the collision-free replacements are in Multi-agent discipline below.
+12. **Contract-first — fix the metadata, not the runtime.** This is a metadata-driven framework: `packages/spec` is
+    the one contract between metadata *producers* and the runtime/renderers that *consume* it. When a piece of metadata
+    "doesn't work," ask **first**: *is it spec-compliant? is this the long-term-correct direction?* If the metadata is
+    wrong, fix it at the **producer** and **reject it at authoring/publish** (validation / lint) so the error surfaces
+    loudly — do **not** add a lenient alias or `??` fallback in a consumer (a node executor, the REST layer, a
+    renderer) to tolerate off-spec input. A tolerant fallback fossilizes the wrong convention into a second de-facto
+    contract, dilutes the spec, and hides the producer's bug — one strict contract beats N dialects. This is an
+    **internal** contract (we own both ends), so "be liberal in what you accept" (Postel) does **not** apply — that's
+    for untrusted boundaries. Change the **spec** only when the spec itself is genuinely wrong, and then deliberately
+    (edit the Zod schema + migrate), never by accreting consumer-side fallbacks. When an alias must be tolerated at all,
+    declare it as an **ADR-0087 conversion-layer entry** (never a bare `??`, and no executor shims) so it is declared,
+    loud, tested, and *removable on a schedule* — the `cfg.filter ?? cfg.filters`-style fallbacks the flow executors
+    once carried were all paid down exactly that way, emptying and deleting the executor shim that read them. Stored
+    `sys_metadata` rows (data at rest) are covered from the other side: every rehydration seam replays the **full**
+    conversion chain — retired entries included — via `applyConversionsToStoredItem` (ADR-0087 addendum), so a
+    consumer never needs its own accommodation for a legacy stored shape either. *Worked example:* an AI-authored flow
+    node used wrong key names and template syntax for what the executor reads → the fix was correcting the authoring
+    skill + a publish-gate lint that rejects the wrong shape, **not** a runtime alias in the executor (that alias was
+    proposed and rejected). Strengthens #5.
+13. **An accepted ADR binds until a superseding ADR says otherwise.** Reversing a recorded decision is itself a
+    decision: it needs a **new ADR** (or an amended status line on the old one), not a changeset that quietly does the
+    opposite. Before changing behaviour in `docs/adr/`-governed territory, **grep the ADRs for the surface you are
+    touching** — the decision is often older and broader than the code comment in front of you. A reversal of three
+    accepted ADRs once landed as a patch-level changeset and held for a day; the mechanism was not carelessness —
+    **the file being edited never named the ADRs that governed it**, so the author could not have known. Hence the
+    corollary: when you implement an ADR's decision, **leave its id in the code**, and anchor load-bearing spots in
+    `scripts/adr-anchors/` (`pnpm check:adr-anchors`) — **one new JSON file per anchor, named for the path it anchors;
+    there is no index to register it in** — so the next author is told which decision they are standing on. A decision
+    nobody can find is a decision that will be reversed.
+14. **⛔ A governed surface is confirmed and merged by the maintainer, by hand — no AI seat merges, queues, or arms
+    auto-merge on a PR whose diff touches one.** Three maintainer rulings, verbatim and untranslated — each widens the
+    one before it, and the third *is* the current definition of the surface:
 
     > **adr 只能由维护者自己确认,人工合并,ai 不得擅自合并。** (2026-08-08)
 
@@ -181,19 +269,85 @@ Other scripts: `objectui:bump` (pull only), `objectui:build`, `objectui:clean`. 
 
     > **`docs/adr/**` + `.claude/**`(含 agents/hooks/settings,不只 skills)+ `skills/**` + `AGENTS.md` + `CLAUDE.md`。混合 diff 照现行规则一条命中即整 PR 分叉** (2026-08-18)
 
-    **Which surfaces — and where that list actually lives.** The 2026-08-18 quotation above *is* the definition, and it is wider than ADRs and wider than skills: the two repo-root instruction files are on it, so **the file you are reading is itself a governed surface**, and so is `.claude/` entire — agents, hooks and settings, not only `.claude/skills/`. ⚠️ Even so, treat that quotation as a reading aid rather than the register: the set has grown three times in two days. The register is the `GOVERNED_SURFACES` table in `scripts/pm/check-governed-merges.mjs`, and adding a surface is an edit *there*, never here. This directive no longer drifts from it in silence: `pnpm check:pm-governed-prose` reds per-PR when the surfaces named here are fewer than the register's — or more, the direction that manufactures enforcement nobody has. ⚠️ When it reds, name the surface **in this paragraph**; ⛔ never edit the quotation above to satisfy a gate — a verbatim ruling rewritten is a ruling rewritten. Print today's set rather than trusting this paragraph: `node -e "import('./scripts/pm/check-governed-merges.mjs').then(m=>console.log(m.GOVERNED_SURFACES.map(s=>s.glob).join(' · ')))"`
+    **Which surfaces — and where that list actually lives.** The 2026-08-18 quotation above *is* the definition, and
+    it is wider than ADRs and wider than skills: the two repo-root instruction files are on it, so **the file you are
+    reading is itself a governed surface**, and so is `.claude/` entire — agents, hooks and settings, not only
+    `.claude/skills/`. ⚠️ Even so, treat that quotation as a reading aid rather than the register: the set has grown
+    three times in two days. The register is the `GOVERNED_SURFACES` table in `scripts/pm/check-governed-merges.mjs`,
+    and adding a surface is an edit *there*, never here. This directive no longer drifts from it in silence:
+    `pnpm check:pm-governed-prose` reds per-PR when the surfaces named here are fewer than the register's — or more,
+    the direction that manufactures enforcement nobody has. ⚠️ When it reds, name the surface **in this paragraph**;
+    ⛔ never edit the quotation above to satisfy a gate — a verbatim ruling rewritten is a ruling rewritten. Print
+    today's set rather than trusting this paragraph:
+    `node -e "import('./scripts/pm/check-governed-merges.mjs').then(m=>console.log(m.GOVERNED_SURFACES.map(s=>s.glob).join(' · ')))"`
 
-    **Authoring stays open to every seat** — drafting the ADR, the skill or the instruction edit, pushing the branch, opening the PR, revising it under review. What is reserved is the **landing**: on any PR whose diff touches a governed surface, ⛔ never merge it, ⛔ never add it to the merge queue, ⛔ never call `enable_pr_auto_merge`, ⛔ never flip it out of draft to make any of those possible. Judge it on the PR's **file list**, not on its description, and a **mixed diff is not a proportion question** — one path hit is enough; if the rest needs to land, split the governed files into their own PR. **Reviewed + approved + fully green does not override this.** Under #13 an accepted ADR *is* the decision, so merging one is the act of adopting a governance position — the one class of change about which "CI is green" carries no information at all (a thorough, fully-green ADR draft has been closed by the maintainer on demand grounds no gate could evaluate). The other surfaces are reserved for a reason of the same shape: the agent instruction tree and these two root files are the operating protocol every *later* dispatch reads, and the published catalog lands in codebases this repo cannot see, so a bad merge propagates into work nobody has started yet — and green says nothing about whether it should propagate.
+    **Authoring stays open to every seat** — drafting the ADR, the skill or the instruction edit, pushing the branch,
+    opening the PR, revising it under review. What is reserved is the **landing**: on any PR whose diff touches a
+    governed surface, ⛔ never merge it, ⛔ never add it to the merge queue, ⛔ never call `enable_pr_auto_merge`,
+    ⛔ never flip it out of draft to make any of those possible. Judge it on the PR's **file list**, not on its
+    description, and a **mixed diff is not a proportion question** — one path hit is enough; if the rest needs to
+    land, split the governed files into their own PR. **Reviewed + approved + fully green does not override this.**
+    Under #13 an accepted ADR *is* the decision, so merging one is the act of adopting a governance position — the one
+    class of change about which "CI is green" carries no information at all (a thorough, fully-green ADR draft has been
+    closed by the maintainer on demand grounds no gate could evaluate). The other surfaces are reserved for a reason of
+    the same shape: the agent instruction tree and these two root files are the operating protocol every *later*
+    dispatch reads, and the published catalog lands in codebases this repo cannot see, so a bad merge propagates into
+    work nobody has started yet — and green says nothing about whether it should propagate.
 
-    **Already armed or queued when you read this?** ⚠️ Converting the PR back to **draft** is the only action that reliably removes it from the merge queue; `disable_pr_auto_merge` alone drops the arming but **not** queue membership. Do both, then confirm from the remote that it is in neither the queue nor `origin/main` (§7's draft-flip re-arm note, run backwards). ⚠️ **And do not read draft as a barrier that holds by itself** — a drafted ADR PR has nevertheless been merged, twice, by two different AI seats within one hour of the first ruling above (both ratified retroactively, explicitly setting no precedent), and a skill PR whose own body said it was awaiting a human merge was flipped ready by an unidentified seat and landed by the merge queue with zero reviews of any kind. **The barrier is this directive, and it is the only pre-merge barrier there is.** The per-PR approval check that used to sit beside it retired under the maintainer's 2026-08-18 ruling that a human merge IS the review record for a governed surface — 「人工合并即人工审核」 — because it was red on every governed PR by design, sat outside the required-context set, and so never blocked anything. ⛔ Do not read that retirement as a relaxation: it removed a check that was not holding, and left the discipline carrying the whole load. Behind the directive sits **detection, not prevention**: `docs/adr/` in CODEOWNERS routes review requests — and it is the *only* governed surface routed there, so on the other four nothing summons the maintainer automatically — while the report-only post-merge audit (`scripts/pm/check-governed-merges.mjs`, whose header carries this rule's incident history) lists every governed-surface merge for the PM round report. Every entry on that list should be a merge the maintainer performed or ordered in person; one he does not recognise is a seat violation, filed and rolled back. A seat that has read this far is not thereby licensed to judge an exception; the rule has no exception to judge.
+    **Already armed or queued when you read this?** ⚠️ Converting the PR back to **draft** is the only action that
+    reliably removes it from the merge queue; `disable_pr_auto_merge` alone drops the arming but **not** queue
+    membership. Do both, then confirm from the remote that it is in neither the queue nor `origin/main` (§7's
+    draft-flip re-arm note, run backwards). ⚠️ **And do not read draft as a barrier that holds by itself** — a
+    drafted ADR PR has nevertheless been merged, twice, by two different AI seats within one hour of the first ruling
+    above (both ratified retroactively, explicitly setting no precedent), and a skill PR whose own body said it was
+    awaiting a human merge was flipped ready by an unidentified seat and landed by the merge queue with zero reviews of
+    any kind. **The barrier is this directive, and it is the only pre-merge barrier there is.** The per-PR approval
+    check that used to sit beside it retired under the maintainer's 2026-08-18 ruling that a human merge IS the review
+    record for a governed surface — 「人工合并即人工审核」 — because it was red on every governed PR by
+    design, sat outside the required-context set, and so never blocked anything. ⛔ Do not read that retirement as a
+    relaxation: it removed a check that was not holding, and left the discipline carrying the whole load. Behind the
+    directive sits **detection, not prevention**: `docs/adr/` in CODEOWNERS routes review requests — and it is the
+    *only* governed surface routed there, so on the other four nothing summons the maintainer automatically — while
+    the report-only post-merge audit (`scripts/pm/check-governed-merges.mjs`, whose header carries this rule's incident
+    history) lists every governed-surface merge for the PM round report. Every entry on that list should be a merge the
+    maintainer performed or ordered in person; one he does not recognise is a seat violation, filed and rolled back. A
+    seat that has read this far is not thereby licensed to judge an exception; the rule has no exception to judge.
 
-15. **⛔ A version release is performed by the maintainer, by hand — no AI seat publishes, tags, cuts a Release, or triggers a release workflow, and none merges the Version Packages PR.** Maintainer ruling, 2026-08-07, verbatim and untranslated:
+15. **⛔ A version release is performed by the maintainer, by hand — no AI seat publishes, tags, cuts a Release, or
+    triggers a release workflow, and none merges the Version Packages PR.** Maintainer ruling, 2026-08-07, verbatim and
+    untranslated:
 
     > **刚才我也没提出要求,是哪个ai自己替我发了 rc.4,版本发布必须是人工的。这个要写入规范。**
 
-    Its last sentence is this directive's warrant: 「这个要写入规范」. A rule that binds every seat has to be readable by every seat — which is why it lives here, not only in a lane-specific skill file. **Release-adjacent work stays open to every seat.** The release board, `.objectui-sha` pin bumps, version reconciliation, writing changesets, compiling release notes when asked, and *verifying* release state (`npm view`, `git ls-remote --tags`) are ordinary tasks. What is reserved is the **release act itself**: ⛔ running `changeset publish` / `pnpm run release`, ⛔ pushing a version tag, ⛔ cutting a GitHub Release, ⛔ pushing a runtime image, ⛔ `workflow_dispatch`-ing `release.yml` or any other publish-capable workflow, ⛔ **approving a pending `release` environment deployment** (ADR-0125 — since 2026-08-20 that click IS the publish authorisation, and a deployment waiting for hours is the system working, not a state you clear), and ⛔ merging — or queueing, or arming auto-merge on — the **Version Packages** PR (`chore: version packages`). That PR is bot-authored and standing-open by design: it is regenerated on every push to `main`, so "green, current, and nobody has objected" is its permanent resting state, not a signal that it is due. When you find a publish nobody ordered — a tag or an npm version that simply appeared — ⛔ do not "repair" it with a counter-publish: file it as an incident for the maintainer.
+    Its last sentence is this directive's warrant: 「这个要写入规范」. A rule that binds every seat has to be
+    readable by every seat — which is why it lives here, not only in a lane-specific skill file. **Release-adjacent
+    work stays open to every seat.** The release board, `.objectui-sha` pin bumps, version reconciliation, writing
+    changesets, compiling release notes when asked, and *verifying* release state (`npm view`, `git ls-remote --tags`)
+    are ordinary tasks. What is reserved is the **release act itself**: ⛔ running `changeset publish` /
+    `pnpm run release`, ⛔ pushing a version tag, ⛔ cutting a GitHub Release, ⛔ pushing a runtime image, ⛔
+    `workflow_dispatch`-ing `release.yml` or any other publish-capable workflow, ⛔ **approving a pending `release`
+    environment deployment** (ADR-0125 — since 2026-08-20 that click IS the publish authorisation, and a deployment
+    waiting for hours is the system working, not a state you clear), and ⛔ merging — or queueing, or arming
+    auto-merge on — the **Version Packages** PR (`chore: version packages`). That PR is bot-authored and standing-open
+    by design: it is regenerated on every push to `main`, so "green, current, and nobody has objected" is its permanent
+    resting state, not a signal that it is due. When you find a publish nobody ordered — a tag or an npm version that
+    simply appeared — ⛔ do not "repair" it with a counter-publish: file it as an incident for the maintainer.
 
-    **The precedent is that the mechanical channel fires with nobody deciding to use it.** The release workflow's `on: push` lane once shipped a full release candidate end to end — 69 packages to npm, tags, GitHub Releases, runtime image — with **no human, no dispatch, no seat clicking anything**, twice in one week. So the existence of a path to a release is not authorization to walk it — the same sentence #14 makes about the queue button. ⚠️ **And do not read the YAML as a barrier that holds against you — since ADR-0125 (2026-08-20) it stops very little.** The publish job is triggered by the **push that lands the Version Packages PR** and held at `environment: release` until a required reviewer approves. Read what that costs: the old design's barrier was the `workflow_dispatch` *event*, unforgeable by a push, a queue landing, a bot token or a schedule — never by you, though, since a dispatch is precisely the event an authenticated seat *can* synthesise, which is why this directive stood beside it. That event barrier is gone by choice; what remains is a **repo setting** (required reviewers on `release`) that no file here can assert, that an unprotected environment mimics perfectly in the run log, and that any admin can remove without touching tracked code. So the merge you are already forbidden to perform is now the release trigger: merging `chore: version packages` no longer moves a version number, it **queues a deployment in the maintainer's name** — the single most load-bearing prohibition in this directive. The YAML stops almost nothing now; this directive is the part that stops you.
+    **The precedent is that the mechanical channel fires with nobody deciding to use it.** The release workflow's
+    `on: push` lane once shipped a full release candidate end to end — 69 packages to npm, tags, GitHub Releases,
+    runtime image — with **no human, no dispatch, no seat clicking anything**, twice in one week. So the existence of
+    a path to a release is not authorization to walk it — the same sentence #14 makes about the queue button. ⚠️
+    **And do not read the YAML as a barrier that holds against you — since ADR-0125 (2026-08-20) it stops very
+    little.** The publish job is triggered by the **push that lands the Version Packages PR** and held at
+    `environment: release` until a required reviewer approves. Read what that costs: the old design's barrier was the
+    `workflow_dispatch` *event*, unforgeable by a push, a queue landing, a bot token or a schedule — never by you,
+    though, since a dispatch is precisely the event an authenticated seat *can* synthesise, which is why this directive
+    stood beside it. That event barrier is gone by choice; what remains is a **repo setting** (required reviewers on
+    `release`) that no file here can assert, that an unprotected environment mimics perfectly in the run log, and that
+    any admin can remove without touching tracked code. So the merge you are already forbidden to perform is now the
+    release trigger: merging `chore: version packages` no longer moves a version number, it **queues a deployment in the
+    maintainer's name** — the single most load-bearing prohibition in this directive. The YAML stops almost nothing
+    now; this directive is the part that stops you.
 
 ---
 
@@ -310,7 +464,8 @@ Regex literals and script-tag-shaped tokens go in fenced code with the dangerous
 character spelled out, or are described in words (fences do NOT protect them); after
 writing any less-than fragment, read the body back and verify it survived. The two
 measured mutation shapes and their triggers live in pm-dispatch `references/platform-readings.md`.
-⛔ A body reading short only through the API is probably intact — check the rendered page before "repairing" it; a rewrite destroys a correct card.
+⛔ A body reading short only through the API is probably intact — check the rendered page before "repairing" it; a
+rewrite destroys a correct card.
 
 Even inside your own worktree, operate defensively:
 
@@ -522,7 +677,8 @@ Studio UI: `../objectui` (sibling repo).
 | `Studio` | `studio/` | Studio UI metadata |
 | `Shared` | `shared/` | Error maps, normalization utilities |
 
-Root also exports: `defineStack`, `composeStacks`, `defineView`, `defineApp`, `defineFlow`, `defineAgent`, `defineTool`, `defineSkill`.
+Root also exports: `defineStack`, `composeStacks`, `defineView`, `defineApp`, `defineFlow`, `defineAgent`, `defineTool`,
+`defineSkill`.
 
 ---
 
@@ -939,20 +1095,52 @@ new open registry? Add it to `OPEN_CAPABILITY_REGISTRIES` in the same PR that fi
    surface** (Prime Directive #14 names them — more than ADRs): push it, open the PR,
    and stop there, landing it is the maintainer's, by hand. For that class, a
    finished task = a PR left visibly awaiting a human merge.
-3. **Add a changeset for feature work.** When the change is a feature or functional improvement, run `pnpm changeset` (or add a `.changeset/*.md` entry) describing it before committing. Pure bug fixes do **not** require a changeset.
-   **Breaking changesets must carry their migration.** If the change removes or renames anything an author can write (a spec key, an export, a config field), the changeset body must state the FROM → TO mapping and the one-line fix — this text ships to consumers as `CHANGELOG.md` inside the npm package and is what an upgrading agent greps after the tombstone error. Removing an authorable spec key also requires a tombstone so the rejection itself carries the prescription — `retiredKey()` (`packages/spec/src/shared/retired-key.ts`) on a non-strict schema, or an entry in the relevant `UNKNOWN_KEY_GUIDANCE` / `*_RETIRED_KEY_GUIDANCE` map (see `object.zod.ts`, `ai/tool.zod.ts`) when the schema is `.strict()`. The changeset is one of fourteen surfaces a retirement touches — follow the `spec-property-retirement` skill (`.claude/skills/`) rather than reconstructing the kit, and note the two routes imply **opposite** liveness-ledger dispositions.
-   **A breaking changeset must also state its ADR-0087 disposition, in writing.** Add exactly one marker to the changeset body — `pnpm check:adr-0087-registration` enforces it, and the CI step is *Require an ADR-0087 disposition on a declared-breaking changeset*:
+3. **Add a changeset for feature work.** When the change is a feature or functional improvement, run `pnpm changeset`
+   (or add a `.changeset/*.md` entry) describing it before committing. Pure bug fixes do **not** require a changeset.
+   **Breaking changesets must carry their migration.** If the change removes or renames anything an author can write (a
+   spec key, an export, a config field), the changeset body must state the FROM → TO mapping and the one-line fix —
+   this text ships to consumers as `CHANGELOG.md` inside the npm package and is what an upgrading agent greps after the
+   tombstone error. Removing an authorable spec key also requires a tombstone so the rejection itself carries the
+   prescription — `retiredKey()` (`packages/spec/src/shared/retired-key.ts`) on a non-strict schema, or an entry in
+   the relevant `UNKNOWN_KEY_GUIDANCE` / `*_RETIRED_KEY_GUIDANCE` map (see `object.zod.ts`, `ai/tool.zod.ts`) when the
+   schema is `.strict()`. The changeset is one of fourteen surfaces a retirement touches — follow the
+   `spec-property-retirement` skill (`.claude/skills/`) rather than reconstructing the kit, and note the two routes
+   imply **opposite** liveness-ledger dispositions.
+   **A breaking changeset must also state its ADR-0087 disposition, in writing.** Add exactly one marker to the
+   changeset body — `pnpm check:adr-0087-registration` enforces it, and the CI step is *Require an ADR-0087
+   disposition on a declared-breaking changeset*:
    ```
    <!-- adr-0087: registered SOME-MIGRATION-ID -->
    <!-- adr-0087: not-required (unpublished) why -->
    <!-- adr-0087: not-required (already-registered SOME-MIGRATION-ID) why -->
    <!-- adr-0087: not-required (no-migration-prescription) why -->
    ```
-   Why it is asked of you at all: the ADR-0087 gates pin ledger ↔ **artifact synchrony**, and the artifacts are a pure projection of the registry — a retirement whose entry was **never written** leaves everything perfectly consistent and every gate green (a removal has shipped that way, caught only by a human comparing by eye). Ledger entries are the sole channel that reaches an upgrader (`objectstack migrate meta`, `spec-changes.json`, the upgrade guide) — for a surface with no spec schema there is no tombstone or schema rejection either. Roughly 1 declared-breaking change in 7 needs an entry, so `not-required` is the ordinary answer and costs one line; the markers are re-verified mechanically, and `no-migration-prescription` is refused when the changeset's own body carries a FROM → TO prescription.
-4. **A removal that breaks the pinned sibling checkout ships together with the sibling fix and the pin bump — or it does not ship.** The `Console Pin Gate` job builds objectui at the pinned `.objectui-sha` against **current** `main`, so a removal or rename the pinned sibling still imports turns `main` red for every PR in the repo the moment it merges — "retire the surface" and "leave the sibling untouched" cannot both hold. A ruling that authorizes such a removal therefore implicitly authorizes the objectui-side fix and the pin bump as part of the same landing (the bump's `sdui:manifest` second half included — see the Frontend section). Pre-merge check for any removal or rename of an exported surface: does the pinned sibling import what you are removing? `git grep` it in `../objectui` at the pinned SHA before merging.
-5. **Added or removed a `packages/spec` export? Run `pnpm --filter @objectstack/spec gen:api-surface` and commit the result.** The `TypeScript Type Check` job diffs spec's built export surface against `api-surface/` (one shard per entry point); a new export makes the snapshot stale and turns the job red. It reads the **built `dist` declarations**, so `OS_SKIP_DTS=1` — the flag you reach for to make local builds fast — skips exactly the artifact the gate inspects, and the check passes locally while failing in CI. Same shape for the other generated-artifact gates in that job (`check:docs`, `check:skill-refs`, `check:react-blocks`), which read `src/` and so do reproduce locally.
+   Why it is asked of you at all: the ADR-0087 gates pin ledger ↔ **artifact synchrony**, and the artifacts are a pure
+   projection of the registry — a retirement whose entry was **never written** leaves everything perfectly consistent
+   and every gate green (a removal has shipped that way, caught only by a human comparing by eye). Ledger entries are
+   the sole channel that reaches an upgrader (`objectstack migrate meta`, `spec-changes.json`, the upgrade guide) —
+   for a surface with no spec schema there is no tombstone or schema rejection either. Roughly 1 declared-breaking
+   change in 7 needs an entry, so `not-required` is the ordinary answer and costs one line; the markers are re-verified
+   mechanically, and `no-migration-prescription` is refused when the changeset's own body carries a FROM → TO
+   prescription.
+4. **A removal that breaks the pinned sibling checkout ships together with the sibling fix and the pin bump — or it
+   does not ship.** The `Console Pin Gate` job builds objectui at the pinned `.objectui-sha` against **current** `main`,
+   so a removal or rename the pinned sibling still imports turns `main` red for every PR in the repo the moment it
+   merges — "retire the surface" and "leave the sibling untouched" cannot both hold. A ruling that authorizes such a
+   removal therefore implicitly authorizes the objectui-side fix and the pin bump as part of the same landing (the
+   bump's `sdui:manifest` second half included — see the Frontend section). Pre-merge check for any removal or rename
+   of an exported surface: does the pinned sibling import what you are removing? `git grep` it in `../objectui` at the
+   pinned SHA before merging.
+5. **Added or removed a `packages/spec` export? Run `pnpm --filter @objectstack/spec gen:api-surface` and commit the
+   result.** The `TypeScript Type Check` job diffs spec's built export surface against `api-surface/` (one shard per
+   entry point); a new export makes the snapshot stale and turns the job red. It reads the **built `dist`
+   declarations**, so `OS_SKIP_DTS=1` — the flag you reach for to make local builds fast — skips exactly the
+   artifact the gate inspects, and the check passes locally while failing in CI. Same shape for the other
+   generated-artifact gates in that job (`check:docs`, `check:skill-refs`, `check:react-blocks`), which read `src/` and
+   so do reproduce locally.
 6. Update `CHANGELOG.md` / `ROADMAP.md` if user-facing or architectural.
-7. **Delete temporary artifacts** — screenshots, traces, scratch logs, `.playwright-mcp/`, throwaway `tmp*.ts`, ad-hoc scripts. Repo must look identical to before, minus intended changes.
+7. **Delete temporary artifacts** — screenshots, traces, scratch logs, `.playwright-mcp/`, throwaway `tmp*.ts`, ad-hoc
+   scripts. Repo must look identical to before, minus intended changes.
 
 ---
 

@@ -1,6 +1,6 @@
 ---
 title: v17.0.0
-description: Files become platform records with governed download, bulk export becomes its own opt-in privilege, the SDK reaches every route the server actually mounts, approvals route approvers dynamically, and a boot that cannot reach its datasource stops pretending it can. Backend and Console notes for 17.0.0 and 17.1.0.
+description: Files become platform records with governed download, bulk export becomes its own opt-in privilege, the SDK reaches every route the server actually mounts, approvals route approvers dynamically, and a boot that cannot reach its datasource stops pretending it can. Backend and Console notes for 17.0.0, 17.1.0, and 17.2.0.
 ---
 
 **The v17 line** is a truth-telling release. Where v16 made *declared metadata*
@@ -13,22 +13,25 @@ readable by everyone in the tenant. Alongside that, `agent.tools[]`, the
 GraphQL surface, the `ObjectStackProtocol` alias, and a long tail of
 parsed-but-never-enforced spec clusters are removed rather than maintained.
 
-> **Release status: 17.1.0 is released**, and is the current version of the v17
-> line. It was published to the `latest` tag on 2026-08-20, taking over from
-> 17.0.0 — which was published on 2026-08-14, closing a train that ran through
-> `17.0.0-rc.0` … `rc.6` (the last of them cut 2026-08-10). A plain install now
-> resolves 17.1.0. `changeset pre exit` ran with the 17.0.0 cut, so the
-> `@objectstack/*` packages no longer publish as `17.0.0-rc.N`. Caret ranges on
-> `^16.x` hold at 16.x until you opt in, which is the reason this train is a
-> major at all: its breaking density (the `ApiMethod` shrink, the GraphQL
-> removal, the ADR-0104 write cutover, the dead-cluster retirements) is too high
-> to auto-upgrade `^16.x` consumers into on their next install.
+> **Release status: 17.2.0 is released**, and is the current version of the v17
+> line. It was published to the `latest` tag on 2026-08-23, taking over from
+> 17.1.0 — published 2026-08-20, which took over from 17.0.0 — published
+> 2026-08-14, closing a train that ran through `17.0.0-rc.0` … `rc.6` (the last
+> of them cut 2026-08-10). A plain install now resolves 17.2.0. `changeset pre
+> exit` ran with the 17.0.0 cut, so the `@objectstack/*` packages no longer
+> publish as `17.0.0-rc.N`. Caret ranges on `^16.x` hold at 16.x until you opt
+> in, which is the reason this train is a major at all: its breaking density
+> (the `ApiMethod` shrink, the GraphQL removal, the ADR-0104 write cutover, the
+> dead-cluster retirements) is too high to auto-upgrade `^16.x` consumers into
+> on their next install.
 >
-> ⚠️ **17.1.0 is a minor by version number, not by blast radius.** Several of its
-> security corrections change who can read or write on an existing deployment,
-> and several accept-set narrowings that landed after the 17.0.0 cut ship as
-> `minor` under the lockstep launch-window convention. Read the 17.1.0 upgrade
-> checklist before upgrading.
+> ⚠️ **17.1.0 and 17.2.0 are minors by version number, not by blast radius.**
+> Several of 17.1.0's security corrections change who can read or write on an
+> existing deployment — read its upgrade checklist below. 17.2.0 adds write-path
+> accept-set tightenings of the same shape: a by-id `update`/`delete` that used
+> to silently drop an extra `where` predicate, or a mismatched `data.id` /
+> `where.id`, now refuses loudly instead (#11009, #11142) — read **Highlights —
+> 17.2.0** below before upgrading.
 
 ## Highlights — 17.0.0
 
@@ -148,6 +151,58 @@ parsed-but-never-enforced spec clusters are removed rather than maintained.
   structured `confirm` object on actions, `I18nLabel` on metric widgets, and
   host-performed `submitBehavior.url` redirects for consoles mounted at a
   sub-path.
+
+## Highlights — 17.2.0
+
+- **Two write-path guardrails close the "silently dropped predicate" hole.** A
+  by-id `update`/`delete` whose `where` names anything besides `id` now refuses
+  loudly instead of binding the row unconditionally and discarding the extra
+  keys — a compare-and-set written as `{ where: { id, status: {...} } }` used to
+  land unconditionally with no diagnostic (#11009). A by-id `update` whose
+  `data.id` and `where.id` are both truthy scalars that **disagree** now refuses
+  `UPDATE_ID_MISMATCH` (HTTP 400) instead of writing the payload row and
+  silently dropping the losing id (#11142). Both were unconditional writes
+  masquerading as conditional ones, not failures — flow `update_record` /
+  `delete_record` nodes that named `id` plus other filter keys without
+  declaring `multi: true` are where this is most likely to surface.
+- **Further ADR-0049 enforce-or-remove retirements.** `sys_position.permissions`
+  — a security-object column no producer ever wrote and no runtime path ever
+  read — is gone (#9885); so are `MetricSchema.filters`, the per-metric raw-SQL
+  filter nothing read (#10414), the `record:highlights` field `icon` (#10054),
+  and the `themes` carrier key plus `ThemeSchema` — `app.branding` remains the
+  one color-authoring surface (#10485).
+- **`http_request_errors_total` is retired** (#9834). Its only emitter never
+  saw the REST data API, the auth mount, or any inbound surface but the
+  dispatcher's own route Proxy, so the series undercounted from day one. A
+  dashboard or alert keyed on it now reads a flat zero — that zero is the
+  removal, not a healthy server.
+- **Analytics stops answering the wrong number on a cross-object filter.** A
+  filter nested inside a combinator (`$or`, `$not`, a nested `$and`) on the
+  ObjectQL path used to reach `engine.aggregate` unchecked, because the
+  cross-object envelope check only saw a top-level AND-ed leaf; both analytics
+  doors now refuse it the same way a top-level cross-object filter already was
+  (#10759), and a dataset's own definition-level `filter` gets the identical
+  guard (#10861).
+- **Driver introspection stops guessing.** `driver-sql`'s
+  `introspectPrimaryKeys` / `introspectForeignKeys` / `introspectUniqueConstraints`
+  used to swallow a failed read and report "no keys" with no diagnostic; a
+  failed read now throws by default (`{ onFailure: 'partial' }` opts back into
+  the old behaviour) — schema-drift comparisons and federated-object codegen
+  were consuming that silent absence as a real answer (#11161).
+- **CLI: two dead authoring surfaces are gone.** `os g agent` is retired and
+  now says why and points at skills — the kernel ships exactly two agents
+  (`ask`/`build`) per ADR-0063 §2, so scaffolding a third was already discarded
+  (#10359). The `@capabilities` hook-body directive comment is retired — the
+  build strips the `//` comment it read before any handler is a runtime
+  function, so it never reached a build that used it (#10917).
+- **A per-item publish naming `?package=` stops matching another package's
+  draft.** `POST /api/v1/meta/:type/:name/publish?package=PKG_ID` now resolves
+  its draft's org scope package-exactly, closing a path where the scope probe
+  could match a different package's draft in the caller's org and the
+  package-exact promote then 404'd over the caller's own publishable draft
+  sitting env-wide. A publish that states `?package=` no longer discovers a
+  package-less draft of the same `(type, name)` — retry without the query
+  parameter for that draft.
 
 ---
 

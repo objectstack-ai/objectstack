@@ -417,6 +417,16 @@ import {
   selfTest as workspaceEnumeratorSelfTest,
   workspacePackageDirs,
 } from './workspace-enumerator.mjs';
+// `typecheck`-script -> tsconfig program set. Shared with
+// `check-type-source-resolution.mjs` since #11490, which needs the identical
+// answer to decide its POPULATION: two copies of this predicate drift, and the
+// symptom of drift is a green gate on either side.
+import {
+  configsNamedByTypecheck,
+  typecheckScriptChain,
+  SELF_TEST_CASE_COUNT as TYPECHECK_CONFIGS_CASES,
+  selfTest as typecheckConfigsSelfTest,
+} from './typecheck-configs.mjs';
 
 // Anchored to the script, not to cwd: the verdict must not depend on where the
 // guard was invoked from.
@@ -1355,36 +1365,6 @@ function configCovers(config, rel) {
 }
 
 /**
- * The `typecheck` script, plus every same-package script it delegates to, as a
- * list of the script bodies in visit order.
- *
- * A LIST rather than the joined blob it used to build, because the two readers
- * want different things from it. `configsNamedByTypecheck` only ever asked
- * "does this text mention X" and a blob answers that; GENERATED_COVERED also
- * asks "does X run BEFORE tsc", and that is only decidable INSIDE one script
- * body, where text order is shell order. Across bodies the concatenation order
- * is visit order, which has nothing to do with execution order --
- * `typecheck: 'pnpm gen && tsc'` + `gen: 'next typegen'` joins to `... tsc ...
- * next typegen` while running the generator first, so a blob would red a
- * correct config. Keeping the bodies apart is what lets that case ABSTAIN
- * instead (#10880).
- */
-function typecheckScriptChain(scripts) {
-  const visited = new Set();
-  const chain = [];
-  const visit = (name, depth) => {
-    if (depth > 4 || visited.has(name) || typeof scripts[name] !== 'string') return;
-    visited.add(name);
-    chain.push(scripts[name]);
-    for (const m of scripts[name].matchAll(/\b(?:pnpm(?:\s+run)?|npm\s+run|yarn(?:\s+run)?)\s+([\w:.-]+)/g)) {
-      visit(m[1], depth + 1);
-    }
-  };
-  visit('typecheck', 0);
-  return chain;
-}
-
-/**
  * A declared generator command as a pattern that matches it in a script body:
  * tokens in order, any run of whitespace between them, and a word boundary at
  * each end that has one. `next typegen` must not be found inside
@@ -1493,23 +1473,6 @@ function gitIgnoredPaths(rels) {
     );
   }
   return new Set(res.stdout.split('\0').filter(Boolean));
-}
-
-/**
- * Which tsconfig files does the `typecheck` script actually put in front of
- * tsc? Expanded through same-package `pnpm <script>` / `npm run <script>`
- * indirection, because a package that splits the work across two scripts is
- * still running both. A bare `tsc` reads `tsconfig.json`, so any mention of tsc
- * credits the default config; every other config must be NAMED (`-p
- * tsconfig.test.json`), which is what keeps a decorative sibling config from
- * reading as coverage (#5286).
- */
-function configsNamedByTypecheck(scripts) {
-  const text = typecheckScriptChain(scripts).map((s) => ` ${s}`).join('');
-  const named = new Set();
-  for (const m of text.matchAll(/tsconfig[\w.-]*\.json/g)) named.add(m[0]);
-  if (/\btsc\b/.test(text)) named.add('tsconfig.json');
-  return named;
 }
 
 /**
@@ -3971,32 +3934,13 @@ function selfTest() {
 
   // The observation half is where the :267 blind spot lived: `excludesTests`
   // read only `tsconfig.json`, so a sibling test config was invisible however
-  // it was wired. These two helpers now decide it, so they are pinned too.
-  const namedCases = [
-    { label: 'a bare tsc credits the default config only', scripts: { typecheck: 'tsc --noEmit' }, expect: ['tsconfig.json'] },
-    {
-      label: 'an explicitly named sibling config counts',
-      scripts: { typecheck: 'tsc --noEmit && tsc --noEmit -p tsconfig.test.json' },
-      expect: ['tsconfig.json', 'tsconfig.test.json'],
-    },
-    {
-      label: 'one level of `pnpm <script>` indirection is followed',
-      scripts: { typecheck: 'tsc --noEmit && pnpm check:tests', 'check:tests': 'tsx x.mts --project tsconfig.test.json' },
-      expect: ['tsconfig.json', 'tsconfig.test.json'],
-    },
-    {
-      label: 'a config no script names is not coverage, however present the file is',
-      scripts: { typecheck: 'tsc --noEmit', 'some:other': 'tsc -p tsconfig.test.json' },
-      expect: ['tsconfig.json'],
-    },
-    { label: 'no typecheck script names nothing', scripts: {}, expect: [] },
-  ];
-  for (const c of namedCases) {
-    const got = [...configsNamedByTypecheck(c.scripts)].sort();
-    if (JSON.stringify(got) !== JSON.stringify([...c.expect].sort())) {
-      failures.push(`configsNamedByTypecheck — ${c.label}: expected ${JSON.stringify(c.expect)}, got ${JSON.stringify(got)}`);
-    }
-  }
+  // it was wired. `configsNamedByTypecheck` and `typecheckScriptChain` now
+  // decide it, and since #11490 they live in `scripts/typecheck-configs.mjs`
+  // because `check-type-source-resolution.mjs` needs the same answer for its
+  // population. Their cases moved WITH them -- one rule, one home, one battery
+  // -- and are folded in here so this gate still fails when the predicate it
+  // depends on breaks.
+  for (const failure of typecheckConfigsSelfTest()) failures.push(failure);
 
   const src = { file: 'tsconfig.json', roots: ['src'], excludesTests: false };
   const srcNoTests = { file: 'tsconfig.json', roots: ['src'], excludesTests: true };
@@ -5108,7 +5052,7 @@ function selfTest() {
   }
   console.log(
     `✓ check:type-check-coverage --self-test — ${cases.length} semantic case(s) + ` +
-      `${namedCases.length + coverCases.length + unreadCases.length + accountedCases.length
+      `${TYPECHECK_CONFIGS_CASES + coverCases.length + unreadCases.length + accountedCases.length
         + derivedCases.length + sourceCandidateCases.length + includeRootCases.length
         + chainCases.length + generatorCases.length + layerCases.length} observation case(s) + ` +
       `${driftCases.length + countCases.length + projectCases.length + setupErrorCases.length} re-measure case(s) + ` +

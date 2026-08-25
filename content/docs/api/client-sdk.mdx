@@ -400,7 +400,9 @@ try {
 // `{ status: 'paused', runId, screen }`; render the screen, then resume the run
 // with the collected values. A wizard pauses again for each further step.
 const run = await client.automation.execute('convert_lead', { params: { recordId } });
-if (run.status === 'paused') {
+// `execute` returns `AutomationResult`, on which `runId` and `screen` are
+// OPTIONAL — a run that COMPLETED carries neither — so narrow before resuming.
+if (run.status === 'paused' && run.runId) {
   await client.automation.resume('convert_lead', run.runId, {
     inputs: { account_name: 'Radium Labs' },
   });
@@ -438,7 +440,10 @@ await client.shareLinks.revoke(link.token);
 
 // Security (admin) — resolve package audience-binding suggestions (ADR-0090)
 const { suggestions } = await client.security.suggestedBindings.list({ status: 'pending' });
-await client.security.suggestedBindings.confirm(suggestions[0].id);
+// A suggestion ROW is deliberately open (`Record<string, unknown>`) — its column
+// set belongs to the backing object, not the contract. Read the fields you know
+// (`id`, `status`, `package_id`) and narrow them at the point of use.
+await client.security.suggestedBindings.confirm(String(suggestions[0].id));
 
 // Storage — File upload and management
 await client.storage.upload(fileData, 'user');

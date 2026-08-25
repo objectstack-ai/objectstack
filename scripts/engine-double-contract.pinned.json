@@ -1457,6 +1457,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/plugins/plugin-security/src/packaged-permission-set-restore-leg.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/plugins/plugin-security/src/per-organization-catalog.test.ts",
       "verb": "update",
       "pinned": 1
@@ -1688,6 +1693,16 @@
     },
     {
       "file": "packages/rest/src/meta-compound-save-force-parity.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/rest/src/meta-compound-save-mode-parity.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/rest/src/meta-compound-save-mode-parity.test.ts",
       "verb": "update",
       "pinned": 1
     },

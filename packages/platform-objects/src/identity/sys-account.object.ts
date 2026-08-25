@@ -147,6 +147,10 @@ export const SysAccount = ObjectSchema.create({
     provider_id: Field.text({
       label: 'Provider ID',
       required: true,
+      // [#11374] Transitive bound: SSO-registered providers are the widest
+      // producer, and sys_sso_provider.provider_id declares maxLength: 255;
+      // better-auth's built-in social providers are short fixed slugs.
+      maxLength: 255,
       description: 'OAuth provider identifier (google, github, etc.)',
     }),
 
@@ -160,15 +164,33 @@ export const SysAccount = ObjectSchema.create({
     // Deliberately NOT `required` even though better-auth always supplies it: a
     // NOT NULL column cannot be added to a table that already holds rows, and
     // schema sync runs before the backfill.
+    // [#11374] Bound = 2048, transitively from sys_sso_provider.issuer
+    // (maxLength: 2048, the landed contract for the widest producer): the SSO
+    // OIDC path writes the verified token's raw `iss` claim — or the provider's
+    // registered issuer — verbatim into this column, and SAML entityIDs are
+    // capped at 1024 by SAML metadata. Anything tighter would refuse a sign-in
+    // that sys_sso_provider's own contract admits. 2048 exceeds the 768-char
+    // utf8mb4 key-part ceiling, so this column deliberately stays TEXT and the
+    // (issuer, account_id) unique index still cannot exist on MySQL — that is
+    // #11627's hash-shadow-key territory, not a reason to guess a tighter
+    // number here.
     issuer: Field.text({
       label: 'Issuer',
       required: false,
+      maxLength: 2048,
       description: 'Authority that vouched for the provider account id — an OIDC issuer, or local:… for providers without one',
     }),
 
     account_id: Field.text({
       label: 'Provider Account ID',
       required: true,
+      // [#11374] Bound from the identity-provider norms for the two federated
+      // shapes this column stores: an OIDC `sub` MUST NOT exceed 255 ASCII
+      // chars (OIDC Core §2) and a SAML persistent/transient NameID MUST NOT
+      // exceed 256 chars (SAML Core 2.0 §8.3.7/§8.3.8) — 256 is the wider of
+      // the two, and comfortably above the 191 better-auth's own MySQL schema
+      // enforces on this column.
+      maxLength: 256,
       description: "User's ID in the provider's system",
     }),
     
