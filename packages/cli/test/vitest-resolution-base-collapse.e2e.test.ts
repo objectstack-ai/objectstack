@@ -33,13 +33,13 @@
  * spawned-child pin of the same claim in `serve-host-fallback-base.e2e.test.ts`
  * went RED. Same tree, same ablation, opposite verdicts.
  *
- * **M2 — `NODE_PATH` reaches the spawned child, and CJS honours it.** This one
- * is NOT vitest rewriting anything, and it survives the obvious remedy. A vitest
+ * **M2 — `NODE_PATH` reaches a spawned child, and CJS honours it.** This one is
+ * NOT vitest rewriting anything, and it survives the obvious remedy. A vitest
  * worker runs with `NODE_PATH` pointing at pnpm's hoisted store
  * (`node_modules/.pnpm/node_modules`, which holds everything transitively
- * reachable in the workspace), and `test/helpers/serve-process.ts`'s `childEnv()`
- * strips only `TEST` / `VITEST*` — so `NODE_PATH` rides into every spawned child
- * this package starts.
+ * reachable in the workspace), and until #11773
+ * `test/helpers/serve-process.ts`'s `childEnv()` stripped only `TEST` /
+ * `VITEST*` — so `NODE_PATH` rode into every spawned child this package starts.
  *
  * The split that decides whether that matters, measured here:
  *
@@ -56,8 +56,23 @@
  * child escapes M1 but NOT M2. `serve-host-fallback-base.e2e.test.ts`'s CONTROL
  * is sound only because `createHostImporter`'s fallback leg is an ESM `import()`.
  * Had it been CJS — as `createHostRequire` is — the inherited `NODE_PATH` would
- * have kept it green through the very ablation it exists to fail. A spawned pin
- * whose claim routes through CJS must pass `childEnv({ NODE_PATH: undefined })`.
+ * have kept it green through the very ablation it exists to fail.
+ *
+ * ── The repair (#11773), and what it moved in this file ────────────────────
+ *
+ * `childEnv()` now strips `NODE_PATH` too (`RESOLUTION_BASE_ENV_KEYS`), so M2 is
+ * closed by DEFAULT rather than by every author of a spawned pin remembering it.
+ * The store is still one override away — `childEnv({ NODE_PATH: … })` — which is
+ * how the #4719 pin in `serve-organizations-host-resolution.e2e.test.ts`
+ * reproduces the pnpm bin shim on purpose, and how the `withStore` leg below
+ * still measures the platform split M2 is about. ⛔ Do not delete that leg: the
+ * `clean` readings are only a measurement while something in this file can still
+ * make the probe answer the other way.
+ *
+ * The last describe block is the pin the strip exists for. It is deliberately
+ * NOT "assert `NODE_PATH` is absent from the child env" — the defect being fixed
+ * here WAS a vacuous pin, and an absence assertion repeats that failure one
+ * level up by passing against a child that resolves nothing at all.
  *
  * ── Reading this file ──────────────────────────────────────────────────────
  *
@@ -132,17 +147,27 @@ console.log(JSON.stringify({
   esmCliDeclared: attempt(() => import.meta.resolve(${JSON.stringify(CLI_DECLARED)})),
   esmTypesDeclared: attempt(() => import.meta.resolve(${JSON.stringify(TYPES_DECLARED)})),
   esmNowhere: attempt(() => import.meta.resolve(${JSON.stringify(NOWHERE)})),
+  // PROOF OF ANCHOR for the CJS leg. \`esmReferrer\` above proves it for ESM;
+  // these are two different resolvers and neither one's anchor is evidence for
+  // the other's — which is the whole subject of this file.
+  cjsFirstSearchPath: (req.resolve.paths(${JSON.stringify(CLI_DECLARED)}) ?? [])[0] ?? '(none)',
   cjsCliDeclared: attempt(() => req.resolve(${JSON.stringify(CLI_DECLARED)})),
+  cjsTypesDeclared: attempt(() => req.resolve(${JSON.stringify(TYPES_DECLARED)})),
   cjsNowhere: attempt(() => req.resolve(${JSON.stringify(NOWHERE)})),
   noBaseImporter: await attemptAsync(() => createHostImporter(appRoot)(${JSON.stringify(CLI_DECLARED)})),
 }));
 `;
 
 let appRoot: string;
-/** Real Node, `NODE_PATH` stripped — the uncontaminated baseline. */
+/** Real Node, the env `childEnv()` hands over TODAY — `NODE_PATH` stripped (#11773). */
 let clean: Record<string, string>;
-/** Real Node, `NODE_PATH` exactly as `childEnv()` hands it over. */
-let inherited: Record<string, string>;
+/**
+ * The same child with the hoisted store put back on `NODE_PATH` EXPLICITLY —
+ * the pnpm bin shim shape, and since #11773 the only way a child gets it. This
+ * leg is what keeps the readings above from being a claim about a child that
+ * simply cannot resolve anything.
+ */
+let withStore: Record<string, string>;
 
 async function runChild(env: Record<string, string | undefined>): Promise<Record<string, string>> {
   const { stdout } = await execFileAsync(
@@ -163,8 +188,8 @@ beforeAll(async () => {
     join(appRoot, 'package.json'),
     JSON.stringify({ name: 'fixture-app', version: '1.0.0', type: 'module' }),
   );
-  clean = await runChild(childEnv({ NO_COLOR: '1', NODE_PATH: undefined }));
-  inherited = await runChild(childEnv({ NO_COLOR: '1' }));
+  clean = await runChild(childEnv({ NO_COLOR: '1' }));
+  withStore = await runChild(childEnv({ NO_COLOR: '1', NODE_PATH: process.env.NODE_PATH }));
 }, 120_000);
 
 afterAll(() => {
@@ -184,7 +209,7 @@ describe('#11412 CONTROLS — the probe can return every answer it is asked to d
   });
 
   it('CAN say MISS: a specifier nothing satisfies misses on both legs, both envs', () => {
-    for (const probe of [clean, inherited]) {
+    for (const probe of [clean, withStore]) {
       expect(probe.esmNowhere).toMatch(/^MISS:/);
       expect(probe.cjsNowhere).toMatch(/^MISS:/);
     }
@@ -215,21 +240,55 @@ describe('#11412 M1 — vitest flattens the resolution base an in-process test w
   });
 });
 
-describe('#11412 M2 — spawning escapes Vite, but NODE_PATH rides along and CJS honours it', () => {
-  it('childEnv() hands NODE_PATH to the child (it strips only TEST / VITEST*)', () => {
-    expect(inherited.nodePathSeen).not.toBe('(unset)');
-    // The stripped-env leg is what proves the line above is about `childEnv()`'s
-    // policy and not about this box always having NODE_PATH set.
+describe('#11412 M2 — NODE_PATH moves a child’s CJS base; #11773 stops it arriving by accident', () => {
+  it('the worker HAS a NODE_PATH, and childEnv() no longer hands it to the child', () => {
+    // PRECONDITION, in the sense this file's header uses the word. With no
+    // NODE_PATH on the worker there would be no store to strip, and every
+    // reading below would be green against nothing.
+    expect(process.env.NODE_PATH ?? '(unset)').not.toBe('(unset)');
     expect(clean.nodePathSeen).toBe('(unset)');
+    // …and an explicit override still wins, which is what the #4719 pin needs.
+    expect(withStore.nodePathSeen).not.toBe('(unset)');
   });
 
-  it('ESM ignores NODE_PATH: the base survives into the child', () => {
+  it('ESM ignores NODE_PATH: the base survives into the child either way', () => {
     expect(clean.esmCliDeclared).toMatch(/^MISS:/);
-    expect(inherited.esmCliDeclared).toMatch(/^MISS:/);
+    expect(withStore.esmCliDeclared).toMatch(/^MISS:/);
   });
 
   it('CJS honours NODE_PATH: the same base, the same specifier, the opposite answer', () => {
     expect(clean.cjsCliDeclared).toMatch(/^MISS:/);
-    expect(inherited.cjsCliDeclared).toMatch(/^RESOLVED:/);
+    expect(withStore.cjsCliDeclared).toMatch(/^RESOLVED:/);
+    // The HIT names the store it came from, so the acceptance is provably the
+    // fallback supplying `chalk` rather than the base having reached it.
+    expect(withStore.cjsCliDeclared).toContain('.pnpm');
+  });
+
+  it('FALLBACK, not override: the store cannot change an answer the walk already hits', () => {
+    // This is why only the ACCEPTANCE direction is dangerous — the store adds
+    // reachability, it never redirects it.
+    expect(clean.cjsTypesDeclared).toMatch(/^RESOLVED:/);
+    expect(withStore.cjsTypesDeclared).toBe(clean.cjsTypesDeclared);
+  });
+});
+
+describe('#11773 — a CJS-routed resolution in a childEnv() child measures its REAL base', () => {
+  it('ANCHOR: the child’s CJS walk starts at the types package, not at the test', () => {
+    expect(clean.cjsFirstSearchPath).toBe(join(TYPES_BASE, 'node_modules'));
+  });
+
+  it('POSITIVE: that walk resolves — the base reaches its own declared dependency', () => {
+    // Prove the instrument produces a positive before trusting its negative: a
+    // probe that could only ever say MISS would "confirm" the line below while
+    // measuring nothing at all.
+    expect(clean.cjsTypesDeclared).toMatch(/^RESOLVED:/);
+  });
+
+  it('NEGATIVE: and it cannot reach a package its base does not declare', () => {
+    // The load-bearing assertion of this card. Before #11773 this read
+    // RESOLVED — the inherited hoisted store supplied `chalk`, and a spawned
+    // pin written over it would have certified a base that never reached it.
+    // Restore the forwarding in `childEnv()` and this line goes red.
+    expect(clean.cjsCliDeclared).toMatch(/^MISS:/);
   });
 });

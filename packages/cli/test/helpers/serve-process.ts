@@ -136,14 +136,61 @@ function isVitestWorkerKey(key: string): boolean {
 }
 
 /**
- * Build the environment for a spawned CLI child: this process's environment
- * minus the vitest worker family above, plus `overrides`.
+ * Variables that silently move a spawned child's module RESOLUTION BASE. A
+ * different defect from the runner leak above, stripped for a different reason
+ * (#11773).
  *
- * The strip is a **class**, not the fixed list: `TEST` exactly, plus anything
- * matching `VITEST`/`VITEST_*`. `VITEST_WORKER_ENV_KEYS` names the five that
- * vitest 4 exports today (and is what the pin asserts against), but a future
- * runner variable in that namespace is caught without anyone having to
- * rediscover this trap first.
+ * A vitest worker runs with `NODE_PATH` pointing at pnpm's hoisted store
+ * (`node_modules/.pnpm/node_modules`), which holds everything transitively
+ * reachable anywhere in the workspace. `NODE_PATH` is a FALLBACK, not an
+ * override — the `node_modules` walk wins whenever it hits — so the store can
+ * only turn a MISS into a HIT. The dangerous direction is therefore an
+ * ACCEPTANCE claim ("this base CAN reach X"): green because the store supplied
+ * X, not because the base did.
+ *
+ * The split that decides whether it bites, measured in
+ * `test/vitest-resolution-base-collapse.e2e.test.ts`:
+ *
+ *     resolution API                        NODE_PATH honoured?   base kept?
+ *     ESM  import() / import.meta.resolve            NO               YES
+ *     CJS  createRequire().resolve()                 YES              NO
+ *
+ * Spawning a real Node child is this directory's remedy for the resolution base
+ * an in-process test cannot measure at all (#11412) — it escapes Vite's
+ * rewrite, but it did NOT escape this, so a spawned pin whose claim routes
+ * through CJS was as vacuous as the in-process one it replaced.
+ * `serve-host-fallback-base.e2e.test.ts`'s control survived only because
+ * `createHostImporter`'s fallback leg happens to be an ESM `import()`; had it
+ * been CJS — as `createHostRequire` is — the inherited `NODE_PATH` would have
+ * kept it green through the very ablation it exists to fail.
+ *
+ * ⛔ Deliberately NOT folded into `VITEST_WORKER_ENV_KEYS` above. That list is
+ * "what vitest sets on its own worker", and `NODE_PATH` is not vitest's: every
+ * pnpm bin shim exports one, so a REAL `serve`/`dev` child in production
+ * carries it — that is #4719's entire history. Stripping it here is a DEFAULT
+ * for spawned test children, not a claim that no child should ever see it. A
+ * test that reproduces the shim shape says so explicitly, and the #4719 pin in
+ * `serve-organizations-host-resolution.e2e.test.ts` already does
+ * (`env: { …, NODE_PATH: hoistedStore }`) — `overrides` are applied after the
+ * strip, so that opt-in still wins. What changes is that the fidelity is now
+ * DECLARED by the test that wants it rather than inherited by every child.
+ */
+export const RESOLUTION_BASE_ENV_KEYS = ['NODE_PATH'] as const;
+
+const RESOLUTION_BASE_ENV_SET: ReadonlySet<string> = new Set(RESOLUTION_BASE_ENV_KEYS);
+
+/**
+ * Build the environment for a spawned CLI child: this process's environment
+ * minus the TWO families stripped above, plus `overrides`.
+ *
+ * The vitest-worker strip is a **class**, not the fixed list: `TEST` exactly,
+ * plus anything matching `VITEST`/`VITEST_*`. `VITEST_WORKER_ENV_KEYS` names
+ * the five that vitest 4 exports today (and is what the pin asserts against),
+ * but a future runner variable in that namespace is caught without anyone
+ * having to rediscover this trap first. The resolution-base strip
+ * (`RESOLUTION_BASE_ENV_KEYS`) is the opposite shape — exact names only, no
+ * namespace — because `NODE_PATH` is a variable real children legitimately
+ * carry, so widening it by prefix would strip things nobody measured.
  *
  * `overrides` is applied AFTER the strip, so a test that genuinely wants one of
  * these set in its child can still say so explicitly — the point is that
@@ -156,7 +203,7 @@ export function childEnv(
 ): Record<string, string | undefined> {
   const env: Record<string, string | undefined> = {};
   for (const [key, value] of Object.entries(process.env)) {
-    if (isVitestWorkerKey(key)) continue;
+    if (isVitestWorkerKey(key) || RESOLUTION_BASE_ENV_SET.has(key)) continue;
     env[key] = value;
   }
   return { ...env, ...overrides };
