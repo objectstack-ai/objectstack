@@ -1967,6 +1967,9 @@ importers:
       '@objectstack/runtime':
         specifier: workspace:*
         version: link:../../runtime
+      '@objectstack/spec':
+        specifier: workspace:*
+        version: link:../../spec
       '@types/node':
         specifier: ^26.2.0
         version: 26.2.0
