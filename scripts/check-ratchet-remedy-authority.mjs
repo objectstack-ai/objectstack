@@ -690,6 +690,10 @@ const CONTROL = {
     expect: 'excluded',
     why: 'CROSS_PACKAGE_TEST_INPUTS declares which globs a package tests read. A naive-prototype false positive.',
   },
+  'check-doc-authoring.mjs': {
+    expect: 'excluded',
+    why: 'Carries no ratchet at all. ROOTS, SKIP_PATHS, SKIP_FILES and GENERATED_SKILL_ARTIFACTS are declarations of what the two corpus rules read and what is generated rather than authored; each is path-scoped, and none is offered to the author as something to widen. Its published-catalog id rule reached this corpus by first shipping a per-passage allowlist and being turned red here for offering it — maintainer ruling 2026-08-25 replaced that passage with a placeholder and removed the list. If this flips, that list came back.',
+  },
   'check-error-code-casing.mjs': {
     expect: 'excluded',
     why: 'EXEMPT_FILES records a file whose literals are not error codes.',

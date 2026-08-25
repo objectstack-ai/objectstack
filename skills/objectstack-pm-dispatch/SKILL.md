@@ -67,7 +67,7 @@ separate backlog repository, or want different defaults.
 ```
 /pm-dispatch                 # drain the pm:queue backlog, 3 agents at a time
 /pm-dispatch batch:5         # wider batch
-/pm-dispatch #128 #131       # two named issues, nothing else
+/pm-dispatch #<n> #<n>       # two named issues, nothing else
 /pm-dispatch rounds:1        # one round, then stop and report
 ```
 

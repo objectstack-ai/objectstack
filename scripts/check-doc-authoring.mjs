@@ -275,29 +275,22 @@ const GENERATED_SKILL_ARTIFACTS = [
   /\/references\/react-blocks\.md$/,
 ];
 
-/**
- * An id-shaped token that is FICTIONAL EXAMPLE DATA in a syntax demonstration,
- * not a citation of a real internal issue.
- *
- * Entries are `path:line-substring` and must clear a deliberately narrow bar:
- * the number denotes "an issue number you would type here", the passage teaches
- * the syntax rather than sourcing a claim, and removing it would damage the
- * lesson. `/pm-dispatch #128 #131` is the invocation grammar of the command the
- * page documents — `#N` IS the argument — so the ids are instructive AS ids.
- *
- * ⛔ This is not a place to park a citation you would rather not rewrite. A
- * provenance reference ("removed in #4286", "see #3447") is never example data,
- * however inconvenient; rewrite it to keep the teaching and drop the id, which
- * is what the ruling asks for. The list is pinned in the self-test so it cannot
- * grow silently.
- */
-const EXAMPLE_ID_ALLOWLIST = [
-  {
-    file: 'skills/objectstack-pm-dispatch/SKILL.md',
-    contains: '/pm-dispatch #128 #131',
-    why: 'CLI usage line — the ids are the command\'s own argument syntax, not a citation.',
-  },
-];
+// There is deliberately NO per-passage allowlist here, and adding one is not a
+// remedy this gate offers.
+//
+// The first cut of this rule carried one, for a single passage: the published PM
+// skill's CLI usage line, which read `/pm-dispatch #128 #131` and taught the
+// command's argument grammar with two real-looking ids. Maintainer ruling
+// 2026-08-25 took the other route — the line now reads `/pm-dispatch #<n> #<n>`,
+// the same placeholder spelling the sibling `filed as #<n>:` site in that file
+// already used. The `#` still teaches the argument grammar, the numbers stop
+// impersonating a citation, and the exemption it needed disappears with it.
+//
+// That is the general shape, not a one-off: a passage that seems to need an
+// example id needs a PLACEHOLDER instead. `#<n>` teaches the same syntax, is
+// unmistakable to a customer reading it, and costs no exemption. A growable
+// allowlist would have been the one place a genuine citation could come to rest
+// — "it's an example" is exactly what the author of the next one would believe.
 
 /**
  * A bare internal issue-id reference: `#` followed by 3–5 digits.
@@ -472,18 +465,12 @@ function collectPublishedSkillFiles(root = PUBLISHED_SKILLS_ROOT) {
   return kept.sort();
 }
 
-/** True when `line` is an allowlisted fictional-example passage in `file`. */
-function isAllowlistedExample(file, line) {
-  return EXAMPLE_ID_ALLOWLIST.some((e) => e.file === file && line.includes(e.contains));
-}
-
 /** Bare internal issue-id references in one published file's source. */
 function findIdViolations(source, file) {
   const out = [];
   const lines = source.split('\n');
   for (let i = 0; i < lines.length; i++) {
     const ln = lines[i];
-    if (isAllowlistedExample(posix(file), ln)) continue;
     const ids = ln.match(INTERNAL_ID);
     if (ids) out.push({ file: posix(file), line: i + 1, ids, text: ln.trim() });
   }
@@ -756,18 +743,21 @@ function selfTest() {
         expect(`precision — ${label} does not fire`, scan().length, 0);
       }
 
-      // The allowlist fires as an exemption, and ONLY on its own passage.
+      // The placeholder that replaced the one passage which used to need an
+      // exemption (maintainer ruling 2026-08-25). It must PASS — otherwise the
+      // remedy the failure text prescribes is itself a violation.
       mkdirSync(join(idDir, 'skills', 'objectstack-pm-dispatch'), { recursive: true });
       writeFileSync(
         join(idDir, 'skills', 'objectstack-pm-dispatch', 'SKILL.md'),
-        ['```', '/pm-dispatch #128 #131       # two named issues, nothing else', '```'].join('\n'),
+        ['```', '/pm-dispatch #<n> #<n>       # two named issues, nothing else', '```'].join('\n'),
       );
       writeFileSync(planted, 'The `cursor` key was removed in protocol 17.');
-      expect('the allowlisted fictional-example line is exempt', scan().length, 0);
-      // ...but the same ids elsewhere are not exempt: the entry is pinned to
-      // its file AND its passage, so it cannot become a blanket file pass.
-      writeFileSync(planted, 'Filed as #128 and #131.');
-      expect('the same ids outside the allowlisted passage are still RED', scan().length, 1);
+      expect('the `#<n>` placeholder — the prescribed remedy — passes', scan().length, 0);
+      // ...and the real ids it replaced would NOT have, which is what makes the
+      // rewrite load-bearing rather than cosmetic.
+      writeFileSync(planted, '/pm-dispatch #128 #131       # two named issues');
+      expect('the concrete ids it replaced are RED, with no exemption to reach for',
+        scan().length, 1);
       writeFileSync(planted, 'The `cursor` key was removed in protocol 17.');
 
       // Empty is a hard error, not a pass (#4932), for this rule too.
@@ -820,30 +810,26 @@ function selfTest() {
   expect('no exemption swallows a declared root whole',
     [...SKIP_PATHS].some((p) => ROOTS.includes(p)), false);
 
-  // ── The example-id allowlist, pinned so it cannot grow in silence ────────
-  // Enforcement cannot hold this: an entry added for the wrong reason runs
-  // green forever. Pinning the CONTENT is what makes a widening show up as a
-  // failing case here rather than as a citation quietly re-entering the
-  // catalog under an exemption nobody re-read.
-  expect('the example-id allowlist holds exactly the passages it was measured for',
-    EXAMPLE_ID_ALLOWLIST.map((e) => `${e.file}::${e.contains}`).join(' | '),
-    'skills/objectstack-pm-dispatch/SKILL.md::/pm-dispatch #128 #131');
-  expect('every allowlist entry records WHY it is example data and not a citation',
-    EXAMPLE_ID_ALLOWLIST.every((e) => typeof e.why === 'string' && e.why.length > 20), true);
-  expect('every allowlist entry names a file on the published surface',
-    EXAMPLE_ID_ALLOWLIST.every((e) => e.file.startsWith(`${PUBLISHED_SKILLS_ROOT}/`)), true);
-  // An entry must be a PASSAGE, never a bare filename — a `contains` that
-  // matched everything would exempt the whole file.
-  expect('every allowlist entry is pinned to a passage, not a whole file',
-    EXAMPLE_ID_ALLOWLIST.every(
-      (e) => e.contains.length > 8 && new RegExp(INTERNAL_ID_SOURCE).test(e.contains),
-    ), true);
+  // ── On the absence of a per-passage exemption ────────────────────────────
+  //
+  // This rule has none, and that is enforced from OUTSIDE this file rather than
+  // asserted inside it. `scripts/check-ratchet-remedy-authority.mjs` sweeps every
+  // gate's author-facing text for a remedy that expands a registry; the first cut
+  // of this rule carried a one-entry allowlist and that gate turned it red, which
+  // is how the maintainer's 2026-08-25 ruling for the `#<n>` placeholder arrived.
+  // Reintroducing such a list — the natural way to silence a future red, one
+  // plausible passage at a time — reds there again, on a gate this file cannot
+  // vote in. That is a better guard than a self-referential assertion here, which
+  // would be reading its own source to prove a claim about its own source.
+  //
+  // The behavioural half is pinned above: the concrete ids the placeholder
+  // replaced are RED, with nothing to add them to.
 
   if (failures.length) {
     console.error(`\n✗ check-doc-authoring self-test failed:\n${failures.join('\n')}\n`);
     process.exit(1);
   }
-  console.log('✓ check-doc-authoring self-test: scope wiring (.claude and the live docs/ corpus in, .claude/worktrees and docs/{audits,handoff,plans} out), detection, the dead-root hard error (red when a ROOT is renamed, green when restored), the empty-scan hard error (red when a root yields nothing and when the whole scan does, green when restored), the published-catalog internal-id rule (red on a planted id in prose, in a fenced comment and in the repo#NNNN spelling, green when removed; hex colours, version numbers, HTTP codes, array indices and the "#1" ordinal all pass; references/ reached, generated artifacts and the internal roots out; the example allowlist pinned to its passage) and the dispatch-gates declaration (every separator-less ROOT declared as a subtree, nothing declared this gate does not walk, the over-claim bounded to SKIP_PATHS) all hold.');
+  console.log('✓ check-doc-authoring self-test: scope wiring (.claude and the live docs/ corpus in, .claude/worktrees and docs/{audits,handoff,plans} out), detection, the dead-root hard error (red when a ROOT is renamed, green when restored), the empty-scan hard error (red when a root yields nothing and when the whole scan does, green when restored), the published-catalog internal-id rule (red on a planted id in prose, in a fenced comment and in the repo#NNNN spelling, green when removed; hex colours, version numbers, HTTP codes, array indices and the "#1" ordinal all pass; references/ reached, generated artifacts and the internal roots out; the `#<n>` placeholder passes while the concrete ids it replaced stay red, with no exemption to reach for) and the dispatch-gates declaration (every separator-less ROOT declared as a subtree, nothing declared this gate does not walk, the over-claim bounded to SKIP_PATHS) all hold.');
 }
 
 function main() {
@@ -930,9 +916,10 @@ function main() {
       + `\nentirely; a sentence that teaches something keeps the lesson and loses the number`
       + `\n("removed in #4286" -> "removed in protocol 17", or just "removed"). Prefer a customer-`
       + `\nresolvable anchor where one exists — a protocol version, an ADR number, a lint rule id.`
-      + `\n\nMaintainer ruling 2026-08-12, verbatim: 「处理 issue 时犯的错应该总结成经验,保留 issue id没有意义」`
-      + `\n\n⛔ Do NOT silence this by adding an EXAMPLE_ID_ALLOWLIST entry — that list is for`
-      + `\nfictional example data in a syntax demonstration, never for a provenance reference.\n`,
+      + `\n\nWriting a usage example that needs an issue number? Use the placeholder \`#<n>\`.`
+      + `\nIt teaches the same syntax and is unmistakable to a customer reading it.`
+      + `\n\nThere is no per-passage exemption to reach for, by design: this rule has none.`
+      + `\n\nMaintainer ruling 2026-08-12, verbatim: 「处理 issue 时犯的错应该总结成经验,保留 issue id没有意义」\n`,
     );
   }
 
