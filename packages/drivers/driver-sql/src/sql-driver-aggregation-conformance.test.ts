@@ -104,12 +104,43 @@
  *
  * ## [#11456] Ablation — that the NEW cells execute, and can fail
  *
- * PENDING — prediction recorded before running. A converted matrix that finds
- * zero live cells reports OK, so the conversion's own claim needs its own
- * measurement. Predicted: mutating the `count_distinct` lowering to drop its
- * `distinct` — revert (B) above, whose SQLite direction is already recorded —
- * reddens the `live postgres` cell on the SAME four cases, proving the live
- * cell runs the assertions rather than merely connecting.
+ * A converted matrix that finds zero live cells reports OK, so the conversion's
+ * own claim needed its own measurement. Predicted BEFORE running: mutating the
+ * `count_distinct` lowering to drop its `distinct` — revert (B) above, whose
+ * SQLite direction is already recorded — reddens the `live postgres` cell on
+ * the SAME four cases, proving that cell runs the assertions rather than
+ * merely connecting.
+ *
+ * Measured on live PostgreSQL 16.13, the mutation confirmed on disk by anchored
+ * counts (`distinct: true` 1 → 0, `distinct: false` 0 → 1) before any result
+ * was read: **8 failed / 29 passed / 1 skipped**, four in EACH executing cell —
+ * exactly the predicted direction and no other movement.
+ *
+ * The `live postgres` four, verbatim:
+ *
+ *  - `count_distinct(stage)` ungrouped: `value: 4` where the case says `2`;
+ *  - `count_distinct(stage) grouped by region`: `west` 3 where the case says 2;
+ *  - the emitted-SQL case, on
+ *    `expected 'select count("stage") as "n" from "co…' to contain 'count(distinct "stage")'`;
+ *  - the field-less refusal, now RESOLVING (`expected undefined to be defined`)
+ *    — `count(*)` is valid, so a non-distinct lowering has nothing to refuse.
+ *
+ * ⚠️ The third one is the load-bearing observation for this conversion, and it
+ * is why the derived quoting above is not circular: the PG cell failed against
+ * `count(distinct "stage")` — pg's OWN quoting, derived from pg's OWN client —
+ * while the SQLite cell failed against the backtick spelling in the same run.
+ * One assertion, two dialect-correct expectations, both of them able to fail.
+ * `count_distinct(score)` stayed GREEN on both cells throughout, as predicted,
+ * which is what keeps the four above from being a suite that simply broke.
+ *
+ * The mutation was restored and the restore VERIFIED rather than trusted —
+ * `sql-driver.ts` re-read as byte-identical to `origin/main`, and the suite
+ * re-run green. That check earned its keep: the `trap … EXIT INT TERM` fired
+ * but its `git checkout` used a repo-relative path after the script had `cd`'d
+ * into the package, so git answered `error: pathspec … did not match any
+ * file(s)` and the trap's own success line printed anyway. A restore leg that
+ * reports success and does nothing leaves every later measurement running
+ * against mutated code.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
