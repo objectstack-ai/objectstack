@@ -1116,11 +1116,61 @@ export const PublishPackageDraftsResponseSchema = lazySchema(() => z.object({
 
 /**
  * Delete Metadata Item Request
- * Removes a customization overlay row from sys_metadata (ADR-0005).
+ * Removes a customization overlay row from sys_metadata (ADR-0005) — the
+ * "reset to artifact factory default" semantic behind
+ * `DELETE /api/v1/meta/:type/:name`.
+ *
+ * Declared member for member against the implementation's parameter type in
+ * `@objectstack/metadata-protocol` and the REST reset door's actual sends — a
+ * declared-surface catch-up, not a new capability (#11679, the #11006
+ * maintainer-ruled pattern): every member here already ships and is enforced.
+ * The member existed on `MetadataProtocol` all along; the request schema
+ * declared 2 of the 8 members the reset door sends, so the door's call site
+ * had to stay behind an `as any` cast (removing it surfaced `TS2353` on the
+ * six undeclared keys — the opposite half of the publish door's `TS2339`).
+ *
+ * One wire member is deliberately NOT declared: `environmentId`, the
+ * transport-level multi-kernel routing key, OUT of protocol request shapes by
+ * the #9741 maintainer ruling (2026-08-18) — `resolveProtocol(environmentId)`
+ * selects the target kernel before this method is entered, the implementation
+ * never reads it off the request, and `packages/rest` layers it on via its
+ * `TransportScopedMetaRequest` wrapper.
  */
 export const DeleteMetaItemRequestSchema = lazySchema(() => z.object({
   type: z.string().describe('Metadata type name'),
   name: z.string().describe('Item name'),
+  organizationId: z.string().optional().describe(
+    'Organization (tenant) scope for the reset (#8805). Load-bearing, not '
+    + 'advisory: it selects the ADR-0005 overlay partition, so it decides '
+    + 'WHICH row the reset destroys — an org-scoped delete removes that '
+    + 'tenant\'s own overlay, while an org-less delete reaches the '
+    + 'environment-wide row and would blank the item for every tenant. '
+    + 'Absent = environment-wide.',
+  ),
+  parentVersion: z.string().optional().describe(
+    'ADR-0008 optimistic-concurrency pin: the version token the caller '
+    + 'believes is current (on the REST door, the `If-Match` request header). '
+    + 'Present, a concurrent edit is reported as a 409 conflict instead of '
+    + 'silently reset; absent = last-write-wins against the current row '
+    + '(Studio\'s "Reset" button is unpinned).',
+  ),
+  actor: z.string().optional().describe(
+    'Identity recorded on the delete\'s history tombstone row. On the REST '
+    + 'door this is the request\'s authenticated identity (one producer, '
+    + '#7749) — never a caller-supplied header. Absent, the event is recorded '
+    + 'actor-less (null), deliberately not attributed to "system" (#4556).',
+  ),
+  state: z.enum(['active', 'draft']).optional().describe(
+    'Which lifecycle row to discard: `draft` discards the pending draft '
+    + 'overlay only (the still-active overlay, if any, keeps serving); '
+    + '`active` or absent resets the live row. Absent defaults to `active`.',
+  ),
+  dropStorage: z.boolean().optional().describe(
+    'Destructive opt-in, default false: also drop the object\'s physical '
+    + 'table after the metadata row is removed (`object` type + `active` '
+    + 'state only; never `sys_` tables). Used by the "discard a previewed '
+    + 'object" flow so a publish-to-preview leaves no orphan table.',
+  ),
 }));
 
 /**
@@ -1132,6 +1182,106 @@ export const DeleteMetaItemResponseSchema = lazySchema(() => z.object({
   success: z.boolean(),
   reset: z.boolean().optional(),
   message: z.string().optional(),
+}));
+
+/**
+ * Audit Metadata Item Request
+ *
+ * Request shape for `GET /api/v1/meta/:type/:name/audit` (the `auditMetaItem`
+ * protocol method) — the ADR-0010 §3.6 compliance trail: recent
+ * `sys_metadata_audit` rows (save/publish/rollback/delete/reset attempts, both
+ * allowed and denied) that Studio's 审计日志 / Audit log tab renders. Mirrors
+ * the implementation's parameter type in `@objectstack/metadata-protocol`
+ * member for member — a declared-surface catch-up, not a new capability
+ * (the #11006 maintainer-ruled pattern, 2026-08-22 option B, carried one door
+ * over): the verb and every member here already ship and are enforced.
+ *
+ * `environmentId` is deliberately NOT declared — the transport-level
+ * multi-kernel routing key is OUT of protocol request shapes by the #9741
+ * maintainer ruling (2026-08-18): `resolveProtocol(environmentId)` selects the
+ * target kernel before this method is entered, and the implementation never
+ * reads it off the request (the REST audit door stopped sending it when #8747
+ * scoped the read).
+ */
+export const AuditMetaItemRequestSchema = lazySchema(() => z.object({
+  type: z.string().describe('Metadata type name'),
+  name: z.string().describe('Item name'),
+  organizationId: z.string().nullable().optional().describe(
+    'Organization (tenant) scope for the read (#8747). With an organization, '
+    + 'the trail includes that org\'s rows AND the env-wide '
+    + '(`organization_id IS NULL`) rows — the env-wide limb is load-bearing, '
+    + 'because env-level writes are stamped org-less. `null` and absent are '
+    + 'equivalent and both mean the env-wide rows only — the fail-closed '
+    + 'direction: an unresolved organization reads env-wide rows, never every '
+    + 'tenant\'s.',
+  ),
+  limit: z.number().optional().describe(
+    'Maximum events to return, newest first. The implementation clamps to '
+    + '[1, 500] and defaults to 100 — out-of-range values are clamped, never '
+    + 'refused.',
+  ),
+}));
+
+/**
+ * Audit Metadata Item Response
+ *
+ * The body of `GET /api/v1/meta/:type/:name/audit`, mirrored member for member
+ * from the implementation's return type (`ObjectStackProtocolImplementation
+ * .auditMetaItem`), newest event first.
+ *
+ * **What an empty `events` means, and what it deliberately does NOT mean**
+ * (#9426 / ADR-0110 D3 — a MISS and a FAULT are different facts): `[]` is the
+ * honest answer for a genuinely clean trail, for a host engine that exposes no
+ * `find` (a metadata-only store), and for an environment whose audit table has
+ * not been provisioned. It is NEVER the answer for a protocol that lacks the
+ * verb — the REST door refuses 501 before the call — nor for a failed read: a
+ * non-benign read failure (connection drop, timeout, permission denial)
+ * propagates as an error rather than being invented into an empty trail
+ * (#9638).
+ */
+export const AuditMetaItemResponseSchema = lazySchema(() => z.object({
+  events: z.array(z.object({
+    id: z.unknown().describe('Row id of the audit event. Opaque to callers.'),
+    occurredAt: z.string().describe('When the attempt happened (ISO-8601 string).'),
+    actor: z.string().describe(
+      'Who attempted the operation. `system` when the row recorded no actor.',
+    ),
+    source: z.string().nullable().describe(
+      'Which code path recorded the event (e.g. `protocol.deleteMetaItem`). '
+      + '`null` when the row recorded none.',
+    ),
+    operation: z.enum(['save', 'publish', 'rollback', 'delete', 'reset']).describe(
+      'Which metadata-protection door was attempted.',
+    ),
+    outcome: z.enum(['allowed', 'denied', 'forced']).describe(
+      'Whether the attempt went through, was refused, or overrode a lock '
+      + '(ADR-0010 §3.6).',
+    ),
+    code: z.string().describe(
+      'Machine-readable verdict code for the outcome (e.g. `item_locked`). '
+      + 'Empty string when the row recorded none.',
+    ),
+    lockState: MetadataLockSchema.nullable().describe(
+      'The lock verdict in force at the time of the attempt (ADR-0010 §3.3). '
+      + '`null` when no lock applied.',
+    ),
+    lockOverridden: z.boolean().describe(
+      'True when the attempt went through by overriding a lock (`outcome: '
+      + '"forced"` rows).',
+    ),
+    requestId: z.string().nullable().describe(
+      'Correlation id of the originating request. `null` when the row '
+      + 'recorded none.',
+    ),
+    note: z.string().nullable().describe(
+      'Free-text note recorded with the event. `null` when the row recorded '
+      + 'none.',
+    ),
+  })).describe(
+    'Recent protection-audit events for the item, newest first. See the '
+    + 'schema-level note for what an empty array means — and what it never '
+    + 'means.',
+  ),
 }));
 
 /**
@@ -2288,6 +2438,8 @@ export type PublishMetaItemResponse = z.input<typeof PublishMetaItemResponseSche
 export type PublishPackageDraftsResponse = z.input<typeof PublishPackageDraftsResponseSchema>;
 export type DeleteMetaItemRequest = z.input<typeof DeleteMetaItemRequestSchema>;
 export type DeleteMetaItemResponse = z.input<typeof DeleteMetaItemResponseSchema>;
+export type AuditMetaItemRequest = z.input<typeof AuditMetaItemRequestSchema>;
+export type AuditMetaItemResponse = z.input<typeof AuditMetaItemResponseSchema>;
 export type GetMetaItemCachedRequest = z.input<typeof GetMetaItemCachedRequestSchema>;
 export type GetMetaItemCachedResponse = z.input<typeof GetMetaItemCachedResponseSchema>;
 /** Post-parse shape of {@link GetMetaItemCachedResponse} — defaults applied, transforms run (ADR-0122). */
@@ -2552,6 +2704,22 @@ export interface MetadataProtocol {
    * implementation predating the declaration.
    */
   getMetaItemLayered?(request: GetMetaItemLayeredRequest): Promise<GetMetaItemLayeredResponse>;
+  /**
+   * ADR-0010 §3.6 compliance trail read (`GET /api/v1/meta/:type/:name/audit`)
+   * — recent `sys_metadata_audit` rows for one item, newest first, so Studio's
+   * 审计日志 / Audit log tab can show who tried what and whether a lock
+   * blocked it. Declared optional like its `deleteMetaItem` /
+   * `getMetaItemLayered` siblings: additive to a shipped contract, with the
+   * implementation (`@objectstack/metadata-protocol`) predating the
+   * declaration. Promotes what was an ADR-0076 D9 server-only extension into
+   * a declared optional member (the #11006 maintainer-ruled pattern,
+   * 2026-08-22 option B, carried one door over) — before this, the REST audit
+   * door reached the verb through a runtime cast and its request literal was
+   * compiled against nothing. A host without the verb is CONFORMING: the REST
+   * door feature-detects and answers 501 before the call (#9426 — a missing
+   * capability is never reported as an empty trail).
+   */
+  auditMetaItem?(request: AuditMetaItemRequest): Promise<AuditMetaItemResponse>;
   getUiView?(request: GetUiViewRequest): Promise<GetUiViewResponse>;
 }
 
