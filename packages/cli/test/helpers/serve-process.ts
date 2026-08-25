@@ -66,41 +66,45 @@ export function randomPort(): string {
  * The third row is the isolation for THAT probe: `TEST` alone is what
  * better-auth reads.
  *
- * ## ⚠️ `VITEST` is NOT cosmetic either — a claim this file got wrong once
+ * ## VITEST is stripped as defence-in-depth now, not for a live product read
  *
  * The first revision of this header said the `VITEST*` entries were stripped
- * as hygiene, "nothing in `os serve` reads them today". That was **false**, and
- * CI found the counterexample:
+ * as hygiene, "nothing in `os serve` reads them today". That was **false**
+ * for a while: `detectMode` in `local-crypto-provider.ts` read `env.VITEST`
+ * directly, so an inherited `VITEST=true` put a spawned child's crypto layer
+ * in `test` mode — ephemeral key, never touches disk, never refuses — no
+ * matter what posture the rest of the boot was in. #11448 (`a58eac3e`,
+ * merged 2026-08-23) removed that arm; `detectMode` today reads only
+ * `NODE_ENV`:
  *
  * ```ts
- * // packages/services/service-settings/src/local-crypto-provider.ts:133
+ * // packages/services/service-settings/src/local-crypto-provider.ts:185
  * const detectMode = (env: EnvMap): CryptoMode => {
- *   if (env.VITEST || env.NODE_ENV === 'test') return 'test';
+ *   if (env.NODE_ENV === 'test') return 'test';
  *   if (env.NODE_ENV === 'production') return 'production';
  *   return 'development';
  * };
  * ```
  *
- * So an inherited `VITEST=true` put every spawned child's crypto layer in
- * `test` mode — ephemeral key, never touches disk, never refuses — no matter
- * what posture the rest of the boot was in. That is the SAME defect class as
- * the `TEST` leak one layer over: a security-relevant gate (here, stable
- * encryption-key enforcement) softened by a variable the child inherited from
- * the test runner rather than by anything the code under test decided.
- * Stripping `VITEST` is therefore load-bearing in its own right, and the
- * `serve-node-env-production-default` pin going red the moment it stopped
- * leaking is the gate working, not the gate misfiring: that fixture's
- * "production posture" had been genuine for auth and fake for crypto.
+ * No product source reads `VITEST` any more, and `pnpm check:runner-env-posture`
+ * is the gate that keeps that class shut. The strip below stays anyway — now
+ * as **defence-in-depth over a gated class**, not as the fix for a live read:
+ * the choke point here should not depend on product source staying that way.
  *
- * The consequence is why `OS_SECRET_KEY` is a default below. Once the child
- * stops claiming to be a vitest worker, `detectMode` answers `development`
- * for the ordinary boots here, and development mode **persists** a minted key
- * to `$HOME/.objectstack/dev-crypto-key`. Measured: with that file absent a
- * production-posture boot refuses to start, and with it present — put there by
- * any earlier dev-mode boot in the same run — the same boot succeeds. That is
- * a cross-test ordering coupling through the runner's home directory, and
- * under vitest's parallel workers it is nondeterministic. An explicit key
- * removes both halves: nothing is written, and nothing is depended on.
+ * The consequence this drove — `OS_SECRET_KEY` being a default below — no
+ * longer follows from a VITEST leak; re-derive it from `NODE_ENV`, which is
+ * what `detectMode` actually reads. `bin/run-dev.js` pins
+ * `process.env.NODE_ENV = 'development'` before argv is even parsed, and
+ * `NODE_ENV` is deliberately outside this strip family (below), so every
+ * child spawned through this helper is ALREADY in `development` crypto
+ * posture — with or without a leaked `VITEST`. Development mode **persists**
+ * a minted key to `$HOME/.objectstack/dev-crypto-key`. Measured: with that
+ * file absent a production-posture boot refuses to start, and with it
+ * present — put there by any earlier dev-mode boot in the same run — the
+ * same boot succeeds. That is a cross-test ordering coupling through the
+ * runner's home directory, and under vitest's parallel workers it is
+ * nondeterministic. An explicit key removes both halves: nothing is written,
+ * and nothing is depended on.
  *
  * ⛔ `NODE_ENV` is deliberately NOT in this family. The vitest worker exports
  * `NODE_ENV=test` too, but every caller here already pins the child's
