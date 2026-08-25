@@ -19,6 +19,7 @@ import {
 } from './datasource-connection-service.js';
 import type { DatasourceConnectPolicy } from './contracts/connect-policy.js';
 import type { Logger } from './logger.js';
+import type { IDataEngine } from '@objectstack/spec/contracts';
 
 /**
  * Minimal metadata-service surface used for datasource persistence + the
@@ -40,20 +41,33 @@ interface MetadataServiceLike {
   listDiagnosed?: (type: string) => Promise<{ items: unknown[]; degraded: boolean; errors: string[] }>;
 }
 
-/** Engine surface used for hot pool (de)registration. */
-interface DataEngineLike {
-  registerDriver?: (driver: unknown, isDefault?: boolean) => void;
-  registerDatasourceDef?: (def: { name: string; schemaMode?: string; external?: { allowWrites?: boolean } }) => void;
-  getDriverByName?: (name: string) => unknown;
-  // sys_metadata CRUD used to persist runtime datasource records durably (same
-  // table runtime objects use). Optional — absent on lightweight kernels, in
-  // which case persistence degrades to in-memory (pre-existing behavior).
-  findOne?: (object: string, query: { where?: Record<string, unknown> }) => Promise<Record<string, unknown> | undefined | null>;
-  find?: (object: string, query: { where?: Record<string, unknown> }) => Promise<Record<string, unknown>[]>;
-  insert?: (object: string, row: Record<string, unknown>) => Promise<unknown>;
-  update?: (object: string, row: Record<string, unknown>, opts: { where: Record<string, unknown> }) => Promise<unknown>;
-  delete?: (object: string, opts: { where: Record<string, unknown> }) => Promise<unknown>;
-}
+/**
+ * The sys_metadata CRUD slice of the ENGINE CONTRACT this plugin consumes,
+ * DERIVED from {@link IDataEngine} rather than re-declared structurally — the
+ * #4251 B3 sweep pattern, extending #11493's ruling one file over. A private
+ * structural re-declaration meets no compiler on the producer side, so engine
+ * drift lands silently in the consumer; deriving means it lands as a build
+ * error here instead.
+ *
+ * `Partial<…>` is load-bearing, not shorthand. This is a deliberate
+ * graceful-degradation seam: a lightweight kernel can register a `'data'`
+ * service with no durable CRUD, every member is then absent, and persistence
+ * degrades to in-memory (pre-existing behavior). The `engine?.insert` /
+ * `engine?.find` probes below are the runtime half of that same contract.
+ * Making any member REQUIRED would change what a degraded boot does, so the
+ * optionality is preserved exactly as the hand-written type had it.
+ *
+ * The re-declaration this replaces also carried `registerDriver?`,
+ * `registerDatasourceDef?` and `getDriverByName?`. All three were DEAD here —
+ * zero call sites in this file, and the type is file-private — the same
+ * never-matched-probe shape #11493 deleted. Hot pool (de)registration is
+ * actually driven through {@link ConnectionEngineLike}, which declares those
+ * members and is the type the connection service is handed below; they are
+ * dropped rather than moved so there is one declaration of them, not two.
+ */
+type DataEngineLike = Partial<
+  Pick<IDataEngine, 'findOne' | 'find' | 'insert' | 'update' | 'delete'>
+>;
 
 /**
  * Durable persistence for runtime datasource records via the `sys_metadata`
