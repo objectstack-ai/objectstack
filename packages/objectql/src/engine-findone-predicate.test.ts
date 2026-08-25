@@ -62,11 +62,19 @@ async function makeEngine() {
   // die at a different door and tell us nothing about this one.
   // `searchableFields` is explicit so the `search` case resolves deterministically
   // rather than through the auto-default.
-  engine.registry.registerObject({
-    name: OBJECT,
-    fields: { title: { type: 'text' }, status: { type: 'text' } },
-    searchableFields: ['title', 'status'],
-  } as any);
+  // `packageId` is REQUIRED (`registerObject(schema, packageId, …)`); the
+  // one-argument spelling some older doubles in this package still use is a
+  // TS2554 that objectql's own `tsconfig.json` hides, because it excludes
+  // `**/*.test.ts` — visible only to the TEST_DEBT re-measure, which is a
+  // shrink-only ratchet. Passing it keeps this file out of that pile.
+  engine.registry.registerObject(
+    {
+      name: OBJECT,
+      fields: { title: { type: 'text' }, status: { type: 'text' } },
+      searchableFields: ['title', 'status'],
+    },
+    'test-package',
+  );
   return { engine, calls };
 }
 
