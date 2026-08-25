@@ -54,8 +54,8 @@ Enforces lowercase with underscores or dots to ensure:
 ## TypeScript Usage
 
 ```typescript
-import { EventNameSchema, MetadataItemNameSchema, SnakeCaseIdentifierSchema, SystemIdentifierSchema } from '@objectstack/spec/shared';
-import type { EventName, MetadataItemName, SnakeCaseIdentifier, SystemIdentifier } from '@objectstack/spec/shared';
+import { EventNameSchema, SnakeCaseIdentifierSchema, SystemIdentifierSchema } from '@objectstack/spec/shared';
+import type { EventName, SnakeCaseIdentifier, SystemIdentifier } from '@objectstack/spec/shared';
 
 // Validate data
 const result = EventNameSchema.parse(data);
@@ -66,15 +66,6 @@ const result = EventNameSchema.parse(data);
 ## EventName
 
 Event name (lowercase with dot notation for namespacing)
-
-**Type:** `string`
-
-
----
-
-## MetadataItemName
-
-Metadata item name (lowercase snake_case segments, optionally dot-qualified)
 
 **Type:** `string`
 

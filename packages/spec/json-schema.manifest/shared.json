@@ -19,7 +19,6 @@
     "shared/HttpRequest",
     "shared/IsolationLevelEnum",
     "shared/MetadataFormat",
-    "shared/MetadataItemName",
     "shared/MutationEventEnum",
     "shared/ObjectName",
     "shared/Predicate",
