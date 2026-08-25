@@ -75,6 +75,7 @@ import type {
     GetMetaItemLayeredRequest,
     PublishMetaItemRequest,
     AuditMetaItemRequest,
+    DeleteMetaItemRequest,
 } from '@objectstack/spec/api';
 // [#8073] The closed ADR-0112 error vocabulary, so the explain family's single
 // refusal emitter types its `code` parameter as the vocabulary rather than as
@@ -5684,7 +5685,7 @@ export class RestServer {
                         return;
                     }
                     const p = await this.resolveProtocol(environmentId, req);
-                    if (!(p as any).deleteMetaItem) {
+                    if (!p.deleteMetaItem) {
                         // [#7035] ADR-0112 envelope. This site was the worst of
                         // the three shapes: a BARE STRING `error`, with no code
                         // at all — so neither `err.error.code` nor `err.code`
@@ -5748,7 +5749,23 @@ export class RestServer {
                         // org-scope comment for the measurement.
                         canonicalMetaUrlType(req.params.type), ctx?.tenantId,
                     );
-                    const result = await (p as any).deleteMetaItem({
+                    // [#11679] The `(p as any)` cast this call carried came off
+                    // when `DeleteMetaItemRequestSchema` caught up with the
+                    // eight members this door sends. Unlike the publish door's
+                    // cast (member existence, TS2339), this one was load-bearing
+                    // on REQUEST SHAPE: the member was declared all along, but
+                    // the schema declared only `{ type, name }`, so removing the
+                    // cast surfaced TS2353 on six keys. The literal is now
+                    // compiled against the spec contract through the #9741
+                    // `TransportScopedMetaRequest` wrapper — `environmentId` is
+                    // the transport-level routing key that wrapper layers on,
+                    // ⛔ never a protocol key; every other key here is checked
+                    // against the declared request, so an undeclared member is a
+                    // compile error instead of a payload member no contract has
+                    // ever seen. The 501 guard above stays: the member is
+                    // declared OPTIONAL, and the guard is what narrows it to
+                    // callable here.
+                    const deleteRequest: TransportScopedMetaRequest<DeleteMetaItemRequest> = {
                         type: req.params.type,
                         name: req.params.name,
                         organizationId,
@@ -5757,7 +5774,8 @@ export class RestServer {
                         ...(actor ? { actor } : {}),
                         ...(stateParam ? { state: stateParam } : {}),
                         ...(dropStorage ? { dropStorage: true } : {}),
-                    });
+                    };
+                    const result = await p.deleteMetaItem(deleteRequest);
                     res.json(result);
                 } catch (error: any) {
                     handleRouteError(res, error);

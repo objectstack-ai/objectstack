@@ -1116,11 +1116,61 @@ export const PublishPackageDraftsResponseSchema = lazySchema(() => z.object({
 
 /**
  * Delete Metadata Item Request
- * Removes a customization overlay row from sys_metadata (ADR-0005).
+ * Removes a customization overlay row from sys_metadata (ADR-0005) — the
+ * "reset to artifact factory default" semantic behind
+ * `DELETE /api/v1/meta/:type/:name`.
+ *
+ * Declared member for member against the implementation's parameter type in
+ * `@objectstack/metadata-protocol` and the REST reset door's actual sends — a
+ * declared-surface catch-up, not a new capability (#11679, the #11006
+ * maintainer-ruled pattern): every member here already ships and is enforced.
+ * The member existed on `MetadataProtocol` all along; the request schema
+ * declared 2 of the 8 members the reset door sends, so the door's call site
+ * had to stay behind an `as any` cast (removing it surfaced `TS2353` on the
+ * six undeclared keys — the opposite half of the publish door's `TS2339`).
+ *
+ * One wire member is deliberately NOT declared: `environmentId`, the
+ * transport-level multi-kernel routing key, OUT of protocol request shapes by
+ * the #9741 maintainer ruling (2026-08-18) — `resolveProtocol(environmentId)`
+ * selects the target kernel before this method is entered, the implementation
+ * never reads it off the request, and `packages/rest` layers it on via its
+ * `TransportScopedMetaRequest` wrapper.
  */
 export const DeleteMetaItemRequestSchema = lazySchema(() => z.object({
   type: z.string().describe('Metadata type name'),
   name: z.string().describe('Item name'),
+  organizationId: z.string().optional().describe(
+    'Organization (tenant) scope for the reset (#8805). Load-bearing, not '
+    + 'advisory: it selects the ADR-0005 overlay partition, so it decides '
+    + 'WHICH row the reset destroys — an org-scoped delete removes that '
+    + 'tenant\'s own overlay, while an org-less delete reaches the '
+    + 'environment-wide row and would blank the item for every tenant. '
+    + 'Absent = environment-wide.',
+  ),
+  parentVersion: z.string().optional().describe(
+    'ADR-0008 optimistic-concurrency pin: the version token the caller '
+    + 'believes is current (on the REST door, the `If-Match` request header). '
+    + 'Present, a concurrent edit is reported as a 409 conflict instead of '
+    + 'silently reset; absent = last-write-wins against the current row '
+    + '(Studio\'s "Reset" button is unpinned).',
+  ),
+  actor: z.string().optional().describe(
+    'Identity recorded on the delete\'s history tombstone row. On the REST '
+    + 'door this is the request\'s authenticated identity (one producer, '
+    + '#7749) — never a caller-supplied header. Absent, the event is recorded '
+    + 'actor-less (null), deliberately not attributed to "system" (#4556).',
+  ),
+  state: z.enum(['active', 'draft']).optional().describe(
+    'Which lifecycle row to discard: `draft` discards the pending draft '
+    + 'overlay only (the still-active overlay, if any, keeps serving); '
+    + '`active` or absent resets the live row. Absent defaults to `active`.',
+  ),
+  dropStorage: z.boolean().optional().describe(
+    'Destructive opt-in, default false: also drop the object\'s physical '
+    + 'table after the metadata row is removed (`object` type + `active` '
+    + 'state only; never `sys_` tables). Used by the "discard a previewed '
+    + 'object" flow so a publish-to-preview leaves no orphan table.',
+  ),
 }));
 
 /**

@@ -1932,3 +1932,114 @@ describe('MetadataProtocol declares auditMetaItem (#11678)', () => {
     expect(misspelt.name).toBe('account_list');
   });
 });
+
+import { DeleteMetaItemRequestSchema } from './protocol.zod';
+import type { DeleteMetaItemRequest, DeleteMetaItemResponse } from './protocol.zod';
+
+describe('DeleteMetaItemRequestSchema declares the contract members the reset door sends (#11679)', () => {
+  // The sharper sibling of the audit door: the MEMBER was declared all along
+  // (so a scan for undeclared members walked past it), while the request
+  // schema declared 2 of the 8 members `DELETE /meta/:type/:name` sends —
+  // which is why the call-site cast could not come off (TS2353 on six keys,
+  // the opposite half of the publish door's TS2339). The measure is the
+  // implementation's parameter type in `@objectstack/metadata-protocol` —
+  // `{ type, name, organizationId?, parentVersion?, actor?, state?,
+  // dropStorage? }` — and the REST door's actual sends. As in the sibling
+  // blocks above, accept-pins assert the parsed VALUE: this is a non-strict
+  // object, so `success` alone is exactly the silent-strip state this family
+  // of cards closes.
+
+  const base = { type: 'view', name: 'account_list' } as const;
+
+  it('accepts the full request and PRESERVES every member through parse', () => {
+    const full = {
+      ...base,
+      organizationId: 'org_alpha',
+      parentVersion: 'sha256:abc123',
+      actor: 'admin@objectos.ai',
+      state: 'draft',
+      dropStorage: true,
+    };
+    const result = DeleteMetaItemRequestSchema.safeParse(full);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data).toEqual(full);
+    }
+  });
+
+  it('requires type AND name — the reset addresses one item', () => {
+    expect(DeleteMetaItemRequestSchema.safeParse(base).success).toBe(true);
+    expect(DeleteMetaItemRequestSchema.safeParse({ type: 'view' }).success).toBe(false);
+    expect(DeleteMetaItemRequestSchema.safeParse({ name: 'account_list' }).success).toBe(false);
+  });
+
+  it('the three optional strings stay optional and reject non-strings — values, not bags', () => {
+    for (const key of ['organizationId', 'parentVersion', 'actor'] as const) {
+      const absent = DeleteMetaItemRequestSchema.safeParse(base);
+      expect(absent.success).toBe(true);
+      if (absent.success) {
+        expect(key in (absent.data as object)).toBe(false);
+      }
+      expect(DeleteMetaItemRequestSchema.safeParse({ ...base, [key]: 42 }).success).toBe(false);
+      expect(DeleteMetaItemRequestSchema.safeParse({ ...base, [key]: { v: 'x' } }).success).toBe(false);
+    }
+  });
+
+  it('keeps the state vocabulary closed and dropStorage boolean', () => {
+    expect(DeleteMetaItemRequestSchema.safeParse({ ...base, state: 'active' }).success).toBe(true);
+    expect(DeleteMetaItemRequestSchema.safeParse({ ...base, state: 'pending' }).success).toBe(false);
+    expect(DeleteMetaItemRequestSchema.safeParse({ ...base, dropStorage: false }).success).toBe(true);
+    // The REST door only ever SENDS `dropStorage: true` (conditional spread),
+    // but the contract member is a boolean, mirroring the implementation.
+    expect(DeleteMetaItemRequestSchema.safeParse({ ...base, dropStorage: 'true' }).success).toBe(false);
+  });
+
+  it('does not declare environmentId — transport-level by the #9741 ruling, stripped and shape-absent', () => {
+    // Same regression guard as the meta-read, publish and audit blocks above:
+    // the reset door DOES spread `environmentId` into its outgoing payload,
+    // and that member rides `packages/rest`'s `TransportScopedMetaRequest`
+    // envelope — never this schema. If someone declares it, this test names
+    // the ruling they are overturning (2026-08-18 on #9741).
+    const result = DeleteMetaItemRequestSchema.safeParse({ ...base, environmentId: 'env_alpha' });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect('environmentId' in (result.data as object)).toBe(false);
+    }
+    const shape = (DeleteMetaItemRequestSchema as unknown as { shape: Record<string, unknown> }).shape;
+    expect(Object.keys(shape)).not.toContain('environmentId');
+  });
+});
+
+describe('MetadataProtocol.deleteMetaItem types against the caught-up request schema (#11679)', () => {
+  // The member declaration itself predates this card; these pins are the
+  // request-shape half — what turns red if the schema drops back to
+  // `{ type, name }` (the member would still exist; the door literal would
+  // stop compiling) or if a key drifts off the implementation's vocabulary.
+
+  it('declares the member optional, against the delete request/response schemas', () => {
+    expectTypeOf<MetadataProtocol['deleteMetaItem']>().toEqualTypeOf<
+      ((request: DeleteMetaItemRequest) => Promise<DeleteMetaItemResponse>) | undefined
+    >();
+    const absent: Pick<MetadataProtocol, 'deleteMetaItem'> = {};
+    expect('deleteMetaItem' in absent).toBe(false);
+  });
+
+  it('refuses an undeclared key at the member call shape — the TS2353 half this card names', () => {
+    const good: DeleteMetaItemRequest = {
+      type: 'view',
+      name: 'account_list',
+      organizationId: 'org_alpha',
+      parentVersion: 'sha256:abc123',
+      actor: 'admin',
+      state: 'draft',
+      dropStorage: true,
+    };
+    expect(good.type).toBe('view');
+    // @ts-expect-error `environmentId` is transport-level (#9741) — not a declared request member; the REST door layers it on via TransportScopedMetaRequest.
+    const withEnv: DeleteMetaItemRequest = { type: 'view', name: 'account_list', environmentId: 'env_a' };
+    expect(withEnv.name).toBe('account_list');
+    // @ts-expect-error an undeclared (here: misspelt) key is refused at the call shape.
+    const misspelt: DeleteMetaItemRequest = { type: 'view', name: 'account_list', dropstorage: true };
+    expect(misspelt.name).toBe('account_list');
+  });
+});
