@@ -31,13 +31,17 @@ const components = getMDXComponents() as any;
 /**
  * `frontmatter.date` as an ISO 8601 instant, or `undefined`.
  *
- * ⚠️ The value arriving here is **not** the `2026-07-17` written in the MDX. YAML
- * parses an unquoted date into a `Date`, and `source.config.ts` declares the field
- * as `z.coerce.string()`, so what reaches this component is that `Date` run through
- * `String()` — a locale-and-timezone-dependent spelling. The page renders it
- * unchanged into `<time dateTime={...}>`, which is a separate pre-existing defect;
- * this function does not paper over it, it just refuses to put a string schema.org
- * cannot parse into `datePublished`. An unparseable date yields no property at all.
+ * The field is declared `z.coerce.string()` in `source.config.ts`, so its type
+ * says nothing about its shape. Measured against the rendered page rather than
+ * assumed: what arrives is the plain `2026-07-17` written in the MDX — the same
+ * string this route already puts in `<time dateTime={...}>` — which `new Date()`
+ * reads as UTC midnight, giving a value that does not move with the build host's
+ * timezone.
+ *
+ * The guard is still not decoration: `z.coerce.string()` accepts *any* string, so
+ * a post written with `date: last Tuesday` would type-check and reach here. An
+ * unparseable date yields no `datePublished` at all rather than a string
+ * schema.org cannot read.
  */
 function isoDate(value: string | undefined): string | undefined {
   if (!value) return undefined;

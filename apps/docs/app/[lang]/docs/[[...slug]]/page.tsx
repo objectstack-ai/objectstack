@@ -35,11 +35,27 @@ type DocPage = NonNullable<ReturnType<typeof source.getPage>>;
  *
  * `getBreadcrumbItems()` is fumadocs' own tree walk (`fumadocs-core/breadcrumb`),
  * not a path split: it locates the page node and returns the folders above it,
- * each labelled from that folder's `meta.json` title and linked to its `index`
- * page. ⛔ Nothing here splits `page.url` on `/`. A slug segment with no node
- * behind it contributes no crumb, which is the correct answer — a folder whose
- * `meta.json` does not list the page has no browsable URL to point a crumb at,
- * and inventing one would advertise a trail a user cannot walk.
+ * each labelled from that folder's `meta.json` title and linked to that folder's
+ * `index` node. ⛔ Nothing here splits `page.url` on `/`, and nothing constructs a
+ * URL the loader has not already produced.
+ *
+ * ⚠️ **An ancestor arrives without a URL more often than not, and this drops it.**
+ * Measured against a local production build, not inferred: fumadocs attaches a
+ * folder's `index.mdx` as that folder's `index` node only when the folder's
+ * `meta.json` does **not** list `"index"` in `pages`. 17 of the 35 `meta.json`
+ * files under `content/docs` do list it, so their folder nodes carry a
+ * `name` and no `url`, and 172 of 403 doc pages therefore ship a trail that skips
+ * its section. Confirmed causally by deleting that one line from
+ * `content/docs/data-modeling/meta.json` and rebuilding: the section crumb
+ * appeared, linked, while an untouched control section stayed short.
+ *
+ * ⛔ The missing URL is deliberately **not** reconstructed here. The folder's index
+ * page exists, is in the sitemap and answers 200 — the defect is in the content
+ * config that hides it from the tree, not in this consumer, and a lookup that
+ * re-derived it would make a producer bug invisible and permanent. Google requires
+ * `item` on every crumb but the last, so a name-only crumb is not an option
+ * either. Filed separately; when it lands, these trails complete with no change to
+ * this file.
  *
  * Two things the tree cannot supply are added around it, both from data this
  * page already holds:
