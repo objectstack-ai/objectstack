@@ -150,6 +150,19 @@ export const SysRecordShare = ObjectSchema.create({
       // exist. Loud seed-time refusal replaces a grant that silently meant
       // nothing and then silently disappeared.
       group: 'Target',
+      //
+      // ⚠️ ORDERING CONSTRAINT — this id half is `required: true`, and that
+      // makes it ORDER-DEPENDENT in seeds even though a pointer pair
+      // contributes no static ordering edge (#11674, measured against the real
+      // engine in `packages/objectql/src/engine-seed-required-deferral.test.ts`):
+      // the seed loader defers an unresolvable reference by DELETING the column
+      // from the pass-1 insert, required-validation rejects that row, and pass 2
+      // is then left with no row to back-fill. So the pass-2 healing that makes
+      // an OPTIONAL id half order-independent (`sys_audit_log`) does not reach
+      // this one. ⇒ SEED THE TARGET DATASET FIRST. The failure if you do not is
+      // loud in three places — a write error naming this column, a
+      // dropped-deferral error, and `success: false` — and since #11674 the
+      // loader also WARNS at load time, before the engine rejects the row.
       referenceVia: 'object_name',
     }),
 
