@@ -93,7 +93,7 @@ spec zod schema  ──gen──►  react-blocks.md      (AI reads it — decis
                                 │
                                 ▼
                            prop gate                  (os validate — decision 5)
-                           (hard: missing-required / typo)
+                           (missing-required → error / typo → warning)
 ```
 
 `examples/app-showcase/src/pages/renewals-pipeline.page.ts` is the **golden page**: authored straight from the contract (five server-connected blocks), it passes `os validate`; injecting a missing required `objectName` and an `onSucces` typo makes the gate fail with an error + a warning (captured in `docs/audits/2026-06-react-tier-authoring-dogfood.md`). The chain demonstrably closes.
