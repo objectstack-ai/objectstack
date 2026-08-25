@@ -367,7 +367,12 @@ describe('#12125 — every `os build --json` failure exit carries the conversion
       warnings.filter((w) => typeof w === 'object' && w !== null && 'conversionId' in (w as object)),
       'a conversion notice appeared inside `warnings` — the two fields were folded',
     ).toEqual([]);
-    expect(conversionsOf(payload)).toHaveLength(1);
+    // ⛔ Deliberately asserts the FOLD property and nothing else, so this pin is
+    // green in BOTH states — that is what makes it a regression guard rather
+    // than evidence for this change. "the payload carries the one notice" is
+    // the `3f (package docs)` test's job, on this very fixture; asserting it
+    // here too made this pin red-before and its name a lie. (Measured: it
+    // failed in the ablated tree for that reason alone.)
   }, 180_000);
 });
 
