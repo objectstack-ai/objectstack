@@ -970,6 +970,7 @@ function selfTest() {
     // comma break too, which no corpus line would ever reveal.
     ...(() => {
       const hanComma = atomize('常态,不是许可');           // 常 态 , 不 是 许 可
+      const hanCommaSpaced = atomize('常态, 不是');        // 常 态 , 不(sp) 是
       const asciiComma = atomize('first, second');       // "first," · "second"
       const spaced = atomize('常态 , 不是');               // the mark follows a space
       // The one shape where the OLD wrapper actually took the break: the atom
@@ -985,7 +986,12 @@ function selfTest() {
         ['...but after a LATIN word it stays an ordinary break point', hanAsciiPunctTail(asciiComma, 0), false],
         ['...and a mark with a space before it follows nothing', hanAsciiPunctTail(spaced, 2), false],
         ['...and an atom not ending in one is never the mark', hanAsciiPunctTail(hanComma, 1), false],
-        ['breakLegal refuses the break after a Han+ASCII mark', breakLegal(hanComma, 3), false],
+        ['breakLegal refuses the break after a Han+ASCII mark', breakLegal(hanCommaSpaced, 3), false],
+        // Why only ONE shape ever leaked, pinned so the case above cannot pass
+        // for the wrong reason: with no space after the mark there was never a
+        // legal break there anyway (neither side is wide), so the defect could
+        // only enter where the author had written `, ` and the wrapper spent it.
+        ['...a mark with no following space was never a break point to begin with', breakLegal(hanComma, 3), false],
         ['...still allows the CJK-to-CJK break one atom earlier', breakLegal(hanComma, 1), true],
         ['...and still allows an ordinary ASCII space break', breakLegal(asciiComma, 1), true],
         // End to end, on the shape that used to produce the defect.
