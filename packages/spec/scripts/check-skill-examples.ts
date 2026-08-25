@@ -1186,6 +1186,22 @@ function fail(message: string): never {
   process.exit(1);
 }
 
+/**
+ * REFUSE — "this gate produced no result", as distinct from `fail()`'s "this
+ * gate produced a result and it is bad" (#12051).
+ *
+ * Deliberately NOT `fail()` with a different string: the two states need two
+ * verdict tokens a reader can grep for and tell apart at a glance, and stacking
+ * the prefixes (`✗ ⛔ REFUSE`) reads as one emphatic failure rather than as a
+ * different KIND of failure. Same exit code — a refusal is still a red build,
+ * because a gate that cannot check its surface must never look like one that
+ * did.
+ */
+function refuse(message: string): never {
+  console.error(`\n⛔ REFUSE — ${message}\n`);
+  process.exit(1);
+}
+
 // ── Self-test ────────────────────────────────────────────────────────────────
 
 /**
@@ -2403,7 +2419,7 @@ function main() {
     const lines: string[] = [];
     for (const { surface, examples, unparsed } of refusals) {
       lines.push(
-        `⛔ REFUSE [${surface.name}] — this surface was NOT type-checked.\n\n` +
+        `[${surface.name}] was NOT type-checked.\n\n` +
           `   ${unparsed.length} marked block(s) do not parse. TypeScript reports syntactic errors and\n` +
           `   then STOPS: the semantic pass never runs, for any file in the program. So the other\n` +
           `   ${examples.length - unparsed.length} marked block(s) on this surface were not type-checked either — this run\n` +
@@ -2423,7 +2439,7 @@ function main() {
         lines.push('');
       }
     }
-    fail(
+    refuse(
       lines.join('\n') +
         `  Fix the parse errors, or drop the os:check marker from a block that is an\n` +
         `  illustrative fragment rather than a compile claim (an ellipsis placeholder like\n` +
@@ -2600,8 +2616,8 @@ function main() {
   if (!anyDiags) {
     if (compiled.size !== bySurface.length) {
       const skipped = bySurface.map((s) => s.surface.name).filter((n) => !compiled.has(n));
-      fail(
-        `⛔ REFUSE — ${skipped.length} surface(s) never reached tsc: ${skipped.join(', ')}.\n\n` +
+      refuse(
+        `${skipped.length} surface(s) never reached tsc: ${skipped.join(', ')}.\n\n` +
           `  Nothing below this line may report success: a green verdict here would be a claim\n` +
           `  about a semantic pass that did not run. This is an internal invariant (#12051) — if\n` +
           `  you just added a skip or an early \`continue\` to the compile loop, that is the cause,\n` +
