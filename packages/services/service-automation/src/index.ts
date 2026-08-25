@@ -19,6 +19,12 @@ export type {
     SuspendedRun,
     SuspendedRunStore,
     FlowDispatchStore,
+    // [ADR-0126 §7.2] The packaged-flow activation ledger port and its row —
+    // the durable off-switch that REPLACES the retired process-local
+    // `flowEnabled` map (#10243). Exported so a host can supply its own
+    // backing store, and so the shape a consumer reads is the platform's.
+    FlowActivationStore,
+    FlowActivationRow,
     RunRecord,
     StepLogEntry,
     UnknownNodeTypeAuditEntry,
@@ -83,6 +89,13 @@ export { SysAutomationRun } from './sys-automation-run.object.js';
 export { InMemoryFlowDispatchStore, ObjectStoreFlowDispatchStore } from './flow-dispatch-store.js';
 export type { FlowDispatchStoreEngine } from './flow-dispatch-store.js';
 export { SysFlowDispatch } from './sys-flow-dispatch.object.js';
+
+// [ADR-0126 §4/§7.2] Packaged-flow enable/disable. The durable ledger behind
+// `AutomationEngine.toggleFlow` — the in-memory store is for tests and hosts
+// with no ObjectQL; the ObjectQL-backed store writes `sys_metadata_activation`
+// so a disabled packaged flow stays disabled across a restart.
+export { InMemoryFlowActivationStore, ObjectStoreFlowActivationStore } from './flow-activation-store.js';
+export type { FlowActivationStoreEngine } from './flow-activation-store.js';
 
 // Kernel plugin — seeds all built-in nodes; this is the only plugin needed for
 // a fully-functional automation capability.

@@ -115,7 +115,7 @@ describe('SqliteWasmDriver Schema Sync (SQLite)', () => {
         name: 'multi_test',
         fields: {
           tags: { type: 'select', multiple: true } as any,
-          users: { type: 'lookup', reference_to: 'user', multiple: true } as any,
+          users: { type: 'lookup', reference: 'user', multiple: true } as any,
         },
       },
     ];

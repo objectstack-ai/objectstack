@@ -62,6 +62,51 @@ const config = {
       'lucide-react': './node_modules/lucide-react',
     },
   },
+  async headers() {
+    // The agent-reader surfaces below each serve the full text of documentation
+    // pages as `text/markdown` / `text/plain`, at URLs a crawler can reach. They
+    // are a deliberate feature -- this is how AI agents read these docs -- so
+    // they keep answering 200 with their full body to anyone who asks. The only
+    // thing added here is a directive telling *search engines* which copy is the
+    // one worth indexing: the HTML page.
+    //
+    // `noindex` rather than `Link: <...>; rel="canonical"`, and the reasons are
+    // not interchangeable:
+    //
+    //   1. Coverage. Only the per-page markdown has an HTML twin to point a
+    //      canonical at. `/llms.txt` is an index of every page and
+    //      `/llms-full.txt` is all 400+ of them concatenated (8 MB today); there
+    //      is no single HTML URL either one is a duplicate *of*, so a canonical
+    //      header cannot say anything honest about them and would leave the two
+    //      largest parallel copies on the site undirected. `noindex` states the
+    //      same intent for all four sources.
+    //   2. A canonical link is a hint a search engine weighs against other
+    //      signals and may overrule; `noindex` is a directive. What this card
+    //      wants is the strong form -- keep the copy fetchable, keep it out of
+    //      results.
+    //
+    // The two are also not additive: pairing `noindex` with a canonical pointing
+    // elsewhere is contradictory (the target is asked to absorb the signal of a
+    // page that has asked to be dropped), so exactly one of them belongs here.
+    //
+    // ⚠️ This works only while `robots.txt` still allows these paths to be
+    // crawled -- a `Disallow` would stop the fetch that reveals the header and
+    // leave the URLs eligible for URL-only indexing instead. `app/robots.ts`
+    // names them under `Allow:` on purpose; the two files are one mechanism.
+    //
+    // Matching is on the *incoming* request path, before rewrites, which is why
+    // `/docs/:path*.mdx` is spelled here as the client asks for it. Its rewrite
+    // destination `/llms.mdx/docs/:path*` is a real route and answers directly
+    // too (measured: `/llms.mdx/docs/data-modeling/objects` -> 200
+    // `text/markdown`), so each page actually has two markdown URLs and both are
+    // listed.
+    const noindex = ['/docs/:path*.mdx', '/llms.mdx/:path*', '/llms.txt', '/llms-full.txt'];
+
+    return noindex.map((source) => ({
+      source,
+      headers: [{ key: 'X-Robots-Tag', value: 'noindex' }],
+    }));
+  },
   async redirects() {
     return toNextRedirects();
   },

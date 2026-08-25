@@ -2770,22 +2770,90 @@ function selfTest() {
     // script under test inherits it through `spawnSync`.
     const noBash4 = join(tmp, 'no-bash4-builtins.sh');
     writeFileSync(noBash4, 'enable -n mapfile readarray 2>/dev/null\n');
+
     // The instrument must not be vacuous. If BASH_ENV were ever ignored (a
     // posix-mode bash, a future harness change), R7b would pass by proving
     // nothing, so the disabling is measured on a probe FIRST, both ways.
+    //
+    // ⭐ #12254 — that probe used to be `mapfile` ITSELF, which made this leg a
+    // GUARANTEED FAIL on the one platform it exists to model. On stock macOS
+    // `/bin/bash` IS 3.2, so `mapfile` is missing from the plain run too: the
+    // leg reported `plain=` empty exactly like `sim.out=`, "the simulation
+    // removed something" could not be satisfied by any correct harness, and
+    // `check:objectui-changeset` sat red on every macOS seat while CI
+    // (ubuntu-latest, bash 5) stayed green — so nothing would ever catch it.
+    // A control written to stop a vacuous pass had become a platform-
+    // conditional failure, which is the SAME error family one level up: a
+    // check whose own precondition was never measured across the population of
+    // hosts it runs on.
+    //
+    // The fix is to stop hardcoding a belief about another platform's builtin
+    // table and ASK THE HOST. `probeBuiltin` is chosen at runtime from bash
+    // 2.x-era builtins that (a) this shell reports as a builtin and (b) have no
+    // external `/usr/bin` twin to fall through to — so `enable -n` on one
+    // produces the very same 127 "command not found" that a missing bash-4
+    // builtin produces on 3.2, and the leg measures the HARNESS instead of the
+    // platform. Deliberately not a skip: a host that offers no qualifying
+    // builtin fails this leg loudly, because a control that quietly does
+    // nothing is the exact shape R7a exists to prevent.
+    const probeCandidates = ['shopt', 'caller', 'compgen', 'hash', 'umask'];
+    const pickProbe = spawnSync(
+      'bash',
+      [
+        '-c',
+        'for b in "$@"; do ' +
+          '[ "$(type -t "$b" 2>/dev/null)" = builtin ] || continue; ' +
+          '[ -n "$(type -P "$b" 2>/dev/null)" ] && continue; ' +
+          'printf %s "$b"; exit 0; done; exit 1',
+        'pick-probe-builtin',
+        ...probeCandidates,
+      ],
+      { encoding: 'utf8' },
+    );
+    const probeBuiltin = pickProbe.stdout.trim();
+    const builtinProbe = join(tmp, 'builtin-probe.sh');
+    writeFileSync(builtinProbe, `${probeBuiltin} >/dev/null\nprintf 'PROBE-STATUS=%s\\n' "$?"\n`);
+    const noProbeBuiltin = join(tmp, 'no-probe-builtin.sh');
+    writeFileSync(noProbeBuiltin, `enable -n ${probeBuiltin} 2>/dev/null\n`);
+    const probePlain = spawnSync('bash', [builtinProbe], { encoding: 'utf8' });
+    const probeSim = spawnSync('bash', [builtinProbe], {
+      encoding: 'utf8',
+      env: { ...process.env, BASH_ENV: noProbeBuiltin },
+    });
+    const probeStatus = (r) => (r.stdout.match(/PROBE-STATUS=(\d+)/) ?? [])[1];
+    check(
+      '#12071/#12254 R7a the BASH_ENV harness really removes a builtin THIS host has (else R7b proves nothing)',
+      probeBuiltin !== '' &&
+        probeStatus(probePlain) !== undefined &&
+        probeStatus(probePlain) !== '127' &&
+        probeStatus(probeSim) === '127' &&
+        probeSim.stderr.includes(probeBuiltin),
+      `builtin=${probeBuiltin || `<none of ${probeCandidates.join(',')} qualified on this host>`} ` +
+        `plain=${probePlain.stdout.trim()} sim=${probeSim.stdout.trim()} sim.err=${probeSim.stderr.trim()}`,
+    );
+
+    // …and separately, the state R7b actually depends on: in the shell R7b
+    // runs, `mapfile` is unavailable. This holds on BOTH hosts and for
+    // DIFFERENT reasons — `enable -n` removed it on bash 5, it was never there
+    // on bash 3.2 — which is why it is its own leg rather than folded into the
+    // harness leg above: neither leg alone is unconditional, and together they
+    // leave no host on which R7b can pass vacuously. The detail line names
+    // which way this host got there, so a macOS operator reading a GREEN run
+    // still learns that their `/bin/bash` is the genuine 3.2 article.
     const mapfileProbe = join(tmp, 'mapfile-probe.sh');
     writeFileSync(mapfileProbe, 'mapfile -t x < <(printf "a\\n") && echo MAPFILE-WORKS\n');
-    const probePlain = spawnSync('bash', [mapfileProbe], { encoding: 'utf8' });
-    const probeSim = spawnSync('bash', [mapfileProbe], {
+    const mapfilePlain = spawnSync('bash', [mapfileProbe], { encoding: 'utf8' });
+    const mapfileSim = spawnSync('bash', [mapfileProbe], {
       encoding: 'utf8',
       env: { ...process.env, BASH_ENV: noBash4 },
     });
+    const hostHasMapfile = mapfilePlain.stdout.includes('MAPFILE-WORKS');
     check(
-      '#12071 R7a the simulated-3.2 harness really removes the builtin (else R7b proves nothing)',
-      probePlain.stdout.includes('MAPFILE-WORKS') &&
-        !probeSim.stdout.includes('MAPFILE-WORKS') &&
-        probeSim.stderr.includes('mapfile'),
-      `plain=${probePlain.stdout.trim()} sim.out=${probeSim.stdout.trim()} sim.err=${probeSim.stderr.trim()}`,
+      '#12071/#12254 R7a2 … and in the R7b shell mapfile is gone, however this host got there',
+      !mapfileSim.stdout.includes('MAPFILE-WORKS') && mapfileSim.stderr.includes('mapfile'),
+      `host-has-mapfile=${hostHasMapfile} (${
+        hostHasMapfile ? 'bash 4+, so enable -n has to remove it' : 'host bash is already 3.2-era, nothing to remove'
+      }) sim.out=${mapfileSim.stdout.trim()} sim.err=${mapfileSim.stderr.trim()}`,
     );
 
     // The R2 shape again — pushed, never merged — through a shell that has no

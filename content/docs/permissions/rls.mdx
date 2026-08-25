@@ -3,8 +3,6 @@ title: Row-Level Security (RLS)
 description: Declarative per-row policies compiled into query filters — the grammar, the context variables, how policies compose, and the fail-closed contract.
 ---
 
-# Row-Level Security (RLS)
-
 RLS answers a question the other layers can't: *which rows* of an object may
 this user touch? Object permissions say "can read tasks"; the OWD baseline says
 "tasks are private"; RLS says **"only the tasks assigned to you"** — as a
