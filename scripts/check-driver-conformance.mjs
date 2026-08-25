@@ -113,6 +113,7 @@
 
 import { mkdirSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
+import { stripComments } from './js-comment-mask.mjs';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -940,7 +941,7 @@ function walkTsInto(dir, out) {
  * behind. Extracted so the dialect axis asserts a stance the same way this
  * script asserts a case-set, rather than inventing a second idiom next to it.
  *
- * @param {string} src file text — pass it through {@link stripCommentsTs} when a
+ * @param {string} src file text — pass it through `stripComments` when a
  *   comment mentioning the symbol must not count. (`consumes` deliberately does
  *   not, so its verdicts stay byte-identical to what they were.)
  */
@@ -984,106 +985,28 @@ function consumes(driverDir, marker) {
 }
 
 // ── The dialect axis: detectors ─────────────────────────────────────────────
-
-/** Punctuation after which a `/` starts a regex literal rather than a division. */
-const REGEX_PREV_PUNCT = new Set(['', '(', ',', '=', ':', '[', '!', '&', '|', '?', '{', '}', ';', '+', '-', '*', '%', '~', '^', '<', '>']);
-/** ...and the keywords after which the same is true (`return /re/.test(x)`). */
-const REGEX_PREV_KEYWORD = new Set(['return', 'typeof', 'instanceof', 'in', 'of', 'new', 'delete', 'void', 'case', 'do', 'else', 'yield', 'await', 'throw']);
-
-/**
- * `src` with its comments removed, strings and regex literals left intact.
- *
- * ## Why this is load-bearing rather than tidiness
- *
- * The dialect stance is read off the source text, so a MENTION must not count as
- * a declaration — and on this tree the mentions are everywhere, because the
- * files that were FIXED describe the fix in prose:
- *
- *   sql-driver-aggregation-conformance.test.ts  the #11456 conversion. Its head
- *       note says "It used to construct `client: 'better-sqlite3'` as a literal",
- *       so a detector grepping for the literal flags the one file that was
- *       repaired.
- *   sql-driver.ts  mentions `FILTER_LOGIC_CASES` and `client: 'postgres'` in
- *       comments only. Measured: 5 of this driver's 8 covering files change their
- *       client-literal answer between raw and stripped text.
- *
- * Strings stay because a stripper that ate them would have to be right about
- * `'https://…'`; regex literals stay because a `/` mistaken for a comment start
- * would swallow the rest of a line — and a swallowed line is a MISSING stance,
- * i.e. a false red. Both directions are pinned in the self-test.
- */
-function stripCommentsTs(src) {
-  let out = '';
-  let i = 0;
-  const n = src.length;
-  let prevPunct = '';
-  let prevWord = '';
-  let prevWasWord = false;
-  const regexAllowed = () => (prevWasWord ? REGEX_PREV_KEYWORD.has(prevWord) : REGEX_PREV_PUNCT.has(prevPunct));
-  while (i < n) {
-    const c = src[i];
-    const d = src[i + 1];
-    if (c === '/' && d === '/') {
-      while (i < n && src[i] !== '\n') i++;
-      continue;
-    }
-    if (c === '/' && d === '*') {
-      i += 2;
-      // Newlines are kept so line numbers survive for anything that reports them.
-      while (i < n && !(src[i] === '*' && src[i + 1] === '/')) {
-        if (src[i] === '\n') out += '\n';
-        i++;
-      }
-      i += 2;
-      out += ' ';
-      prevPunct = ' ';
-      prevWasWord = false;
-      continue;
-    }
-    if (c === '"' || c === "'" || c === '`') {
-      out += c;
-      i++;
-      while (i < n) {
-        const s = src[i];
-        if (s === '\\') { out += s + (src[i + 1] ?? ''); i += 2; continue; }
-        out += s;
-        i++;
-        if (s === c) break;
-      }
-      prevPunct = c;
-      prevWasWord = false;
-      continue;
-    }
-    if (c === '/' && regexAllowed()) {
-      out += c;
-      i++;
-      let inClass = false;
-      while (i < n) {
-        const s = src[i];
-        if (s === '\\') { out += s + (src[i + 1] ?? ''); i += 2; continue; }
-        out += s;
-        i++;
-        if (s === '\n') break;            // unterminated: it was a division after all
-        if (s === '[') inClass = true;
-        else if (s === ']') inClass = false;
-        else if (s === '/' && !inClass) break;
-      }
-      prevPunct = '/';
-      prevWasWord = false;
-      continue;
-    }
-    out += c;
-    if (/[A-Za-z0-9_$]/.test(c)) {
-      prevWord = prevWasWord ? prevWord + c : c;
-      prevWasWord = true;
-    } else if (!/\s/.test(c)) {
-      prevPunct = c;
-      prevWasWord = false;
-    }
-    i++;
-  }
-  return out;
-}
+//
+// The stance is read off source TEXT, so a MENTION must not count as a
+// declaration — and on this tree the mentions are everywhere, because the files
+// that were FIXED describe the fix in prose:
+//
+//   sql-driver-aggregation-conformance.test.ts  the #11456 conversion. Its head
+//       note says "It used to construct `client: 'better-sqlite3'` as a literal",
+//       and quotes the import it now uses — so a reader of raw text finds a whole
+//       import statement inside a comment and scores the file by its own
+//       changelog.
+//   sql-driver.ts  names `FILTER_LOGIC_CASES` and `client: 'postgres'` in
+//       comments only. Measured: 5 of this driver's 8 covering files change their
+//       client-literal answer between raw and masked text.
+//
+// Separating the two is `scripts/js-comment-mask.mjs`, which exists because
+// gates kept answering it privately and the copies drifted into two silent
+// families — a naive regex that opens a phantom comment on a `/*` inside a
+// string, and a string-aware scanner that opens a phantom string on a quote
+// inside a regex character class. This gate deliberately does NOT grow a third
+// copy. `stripComments` is the right projection of the two it offers: this
+// caller feeds the result to a scanner and reports neither a line number nor a
+// byte offset, which is the documented discriminator.
 
 /**
  * This driver's dialect-matrix testkit, or `null` when the package has none.
@@ -1109,7 +1032,7 @@ function discoverDialectTestkit(driverDir) {
     // enough key that a file-wide scan would collect unrelated ones and report a
     // dialect list the driver does not speak. Bounded by the array's own
     // terminator, so a second `id:`-bearing export below it cannot leak in.
-    const body = stripCommentsTs(src).split(new RegExp(`^export const ${DIALECT_TESTKIT_EXPORT}\\b`, 'm'))[1] ?? '';
+    const body = stripComments(src).split(new RegExp(`^export const ${DIALECT_TESTKIT_EXPORT}\\b`, 'm'))[1] ?? '';
     const cellIds = [...(body.split(/^\]/m)[0] ?? '').matchAll(/\bid:\s*'([a-z0-9_-]+)'/g)].map((m) => m[1]);
     return { file, specifier: `./${base.replace(/\.ts$/, '.js')}`, cellIds };
   }
@@ -1127,7 +1050,7 @@ function discoverDialectTestkit(driverDir) {
  * @param {string} specifier the testkit's module specifier for this package
  */
 function dialectStance(src, specifier) {
-  const clean = stripCommentsTs(src);
+  const clean = stripComments(src);
   if (DIALECT_MATRIX_SYMBOLS.some((s) => drivenFrom(clean, s, specifier))) return 'matrix';
   if (DIALECT_CELL_SYMBOLS.some((s) => drivenFrom(clean, s, specifier))) return 'cell';
   return 'undeclared';
@@ -1668,24 +1591,19 @@ function selfTest() {
   // classifier (both directions, plus the precedence), the testkit discovery,
   // and the invariant itself red-then-green over a synthetic tree.
 
-  // -- stripCommentsTs: comments go, code stays. --
-  // The false-GREEN direction: a comment must not be able to declare anything.
-  expect('a line comment is removed', !stripCommentsTs('const a = 1; // DIALECT_CELLS\n').includes('DIALECT_CELLS'));
-  expect('a block comment is removed', !stripCommentsTs('/* DIALECT_CELLS */ const a = 1;\n').includes('DIALECT_CELLS'));
-  // The false-RED direction: eating code would hide a real stance. Each of these
-  // is a shape a naive `//`-scanner gets wrong, and getting it wrong here costs a
-  // suite that DOES declare its stance a red it cannot act on.
-  expect('a `//` inside a string is not a comment',
-    stripCommentsTs("const u = 'https://example.test/x'; const KEEP = 1;\n").includes('KEEP'));
-  expect('a `//` inside a regex literal is not a comment',
-    stripCommentsTs('const r = /a\\/\\/b/; const KEEP = 1;\n').includes('KEEP'));
-  expect('a regex after `return` is a regex, not a division (its quotes must not open a string)',
-    stripCommentsTs('function f(s) { return /[\'"]/.test(s); }\nconst KEEP = 1;\n').includes('KEEP'));
-  expect('a real division is still a division, and the comment after it still goes',
-    (() => {
-      const out = stripCommentsTs('const q = a / b; // DIALECT_CELLS\nconst KEEP = 1;\n');
-      return out.includes('KEEP') && !out.includes('DIALECT_CELLS');
-    })());
+  // -- The comment mask, as THIS gate uses it. --
+  // The mask's own contract — every literal form, both phantom-span families —
+  // is pinned by `node scripts/js-comment-mask.mjs --self-test` and by
+  // `check-comment-mask-corpus.mjs`, which diffs it against
+  // @typescript-eslint/parser over the whole tree in CI. Re-testing it here
+  // would be a second copy of the answer this gate deliberately does not keep.
+  // What IS asserted here is that this gate routes through it at all: the two
+  // cases below are the ones a private `stripComments` got wrong, so they name
+  // the failure family rather than re-deriving the fix.
+  expect('a comment cannot declare anything', !stripComments('const a = 1; // DIALECT_CELLS\n').includes('DIALECT_CELLS'));
+  expect('and a quote inside a regex character class does not swallow the code after it (the '
+    + 'phantom-string family, which is why this gate uses the shared mask rather than its own)',
+    stripComments('function f(s) { return /[\'"]/.test(s); }\nconst KEEP = 1;\n').includes('KEEP'));
 
   // -- dialectStance: what a suite SAYS it runs on. --
   const KIT_SPEC = './kit.testkit.js';
