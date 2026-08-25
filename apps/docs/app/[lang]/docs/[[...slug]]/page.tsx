@@ -9,6 +9,7 @@ import { File, Folder, Files } from 'fumadocs-ui/components/files';
 import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
 import { LLMCopyButton, ViewOptions } from '@/components/ai/page-actions';
 import { gitConfig } from '@/lib/layout.shared';
+import { absoluteUrl } from '@/lib/site';
 
 export default async function Page(props: {
   params: Promise<{ lang: string; slug?: string[] }>;
@@ -63,5 +64,12 @@ export async function generateMetadata(props: {
   return {
     title: page.data.title,
     description: page.data.description,
+    /**
+     * `page.url` is the same locale-stripped route fumadocs uses for in-site links
+     * and that `app/sitemap.ts` lists, so the canonical link and the sitemap entry
+     * cannot drift apart. `absoluteUrl()` throws rather than emit a URL on another
+     * host if that ever stops being a site-relative path.
+     */
+    alternates: { canonical: absoluteUrl(page.url) },
   };
 }

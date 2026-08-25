@@ -4,6 +4,7 @@ import { ArrowRight, Check } from 'lucide-react';
 import { Bricolage_Grotesque, IBM_Plex_Mono } from 'next/font/google';
 import { HomeLayout } from 'fumadocs-ui/layouts/home';
 import { baseOptions, gitConfig } from '@/lib/layout.shared';
+import { absoluteUrl } from '@/lib/site';
 import { YouTubeEmbed } from '@/components/youtube-embed';
 
 /** The 90-second overview — the same video the README's hero cover links to. */
@@ -25,6 +26,13 @@ export const metadata: Metadata = {
   title: 'Metadata framework for AI-written apps',
   description:
     'ObjectStack turns the whole app — data model, UI, workflows, permissions — into typed metadata: a complete CRM in under 150k tokens, one context window.',
+  /**
+   * `/` is the one indexable spelling of the homepage: `proxy.ts` rewrites `/` to
+   * this route internally, and the prefixed form `/en` 307s back to `/`. Every
+   * other spelling a crawler reaches it by — query strings, tracking parameters —
+   * points here.
+   */
+  alternates: { canonical: absoluteUrl('/') },
 };
 
 const VOCABULARY: { tag: string; title: string; copy: string }[] = [

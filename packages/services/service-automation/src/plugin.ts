@@ -26,6 +26,13 @@ import {
     type SuspendedRunStoreEngine,
 } from './suspended-run-store.js';
 import { ObjectStoreFlowDispatchStore } from './flow-dispatch-store.js';
+// [ADR-0126 §4] The activation ledger's object is declared in
+// `packages/platform-objects`, beside its data-plane siblings — the ADR puts it
+// there so it needs zero `packages/spec` surface. This plugin REGISTERS it for
+// the same reason it registers `sys_automation_run`: the table has to exist
+// wherever automation runs, which is exactly where the ledger is consumed.
+import { SysMetadataActivation } from '@objectstack/platform-objects';
+import { ObjectStoreFlowActivationStore, type FlowActivationStoreEngine } from './flow-activation-store.js';
 
 /**
  * #1928 — normalize an ObjectQL object's `fields` (a name-keyed map, or an
@@ -542,7 +549,7 @@ export class AutomationServicePlugin implements Plugin {
                 scope: 'system',
                 defaultDatasource: 'cloud',
                 namespace: 'sys',
-                objects: [SysAutomationRun, SysFlowDispatch],
+                objects: [SysAutomationRun, SysFlowDispatch, SysMetadataActivation],
             });
             return true;
         } catch (err) {
@@ -720,6 +727,37 @@ export class AutomationServicePlugin implements Plugin {
                     // in-process dedup and says so once.
                     this.engine.setFlowDispatchStore(new ObjectStoreFlowDispatchStore(dataEngine));
                     ctx.logger.info('[Automation] Flow-dispatch idempotency ledger enabled (sys_flow_dispatch)');
+                    // [ADR-0126 §4/§7.2] The packaged-flow activation ledger.
+                    // Attached under the same guard as the two stores above —
+                    // it needs the same engine surface and its object rode the
+                    // same manifest registration, so `runObjectRegistered`
+                    // vouches for this table too. Without it, `toggleFlow`
+                    // degrades to an in-process flip and WARNS on every flip
+                    // that the change will not survive a restart.
+                    const activationStore = new ObjectStoreFlowActivationStore(
+                        dataEngine as unknown as FlowActivationStoreEngine,
+                    );
+                    try {
+                        await activationStore.probe();
+                        this.engine.setFlowActivationStore(activationStore);
+                        ctx.logger.info('[Automation] Packaged-flow activation ledger enabled (sys_metadata_activation)');
+                    } catch (err) {
+                        // Unlike the suspended-run store, this one is NOT
+                        // attached on a failed probe. The asymmetry is
+                        // deliberate: an unreachable run store loses history,
+                        // while an unreachable activation store would let
+                        // `toggleFlow` report a durable install-wide switch
+                        // that never persisted — and a disabled flow silently
+                        // re-arming on the next boot is the failure this leg
+                        // exists to close. Degraded means degraded and says so.
+                        ctx.logger.error(
+                            '[Automation] sys_metadata_activation could not be read at startup — packaged-flow enable/disable ' +
+                            'will NOT be durable and disabled flows will re-arm on restart. Check that schema sync ran for this ' +
+                            "datasource; the driver's own failure is in this record's meta.",
+                            undefined,
+                            describeThrownForLog(err),
+                        );
+                    }
                 }
             } else {
                 ctx.logger.info('[Automation] No ObjectQL engine — suspended runs kept in-memory only');
@@ -917,6 +955,34 @@ export class AutomationServicePlugin implements Plugin {
             }
         } catch (err) {
             ctx.logger.warn('[Automation] flow pull from ObjectQL registry failed', describeThrownForLog(err));
+        }
+
+        // [ADR-0126 §7.2] Apply the activation ledger to what was just pulled.
+        //
+        // Ordering is load-bearing and this is the only correct spot: AFTER the
+        // pull, because `registerFlow` arms every flow's trigger and a
+        // ledger-disabled flow must end up UNBOUND; and after the store was
+        // attached in the block above, because there is nothing to read
+        // otherwise. An empty ledger — the stock-boot case — disarms nothing,
+        // which is ADR-0126 §4's "an empty ledger changes nothing anywhere".
+        try {
+            const disarmed = await this.engine.hydrateFlowActivations();
+            if (disarmed.length > 0) {
+                ctx.logger.info(
+                    `[Automation] Activation ledger: ${disarmed.length} packaged flow(s) are switched off for this ` +
+                    `installation and were left unbound — ${disarmed.map((n) => `'${n}'`).join(', ')}.`,
+                );
+            }
+        } catch (err) {
+            // A read failure here must not be silent: every flow stays ARMED,
+            // so a flow an administrator switched off would fire. Loud, and
+            // `error` rather than `warn` for that reason.
+            ctx.logger.error(
+                '[Automation] the packaged-flow activation ledger could not be read — every pulled flow is ARMED, ' +
+                'including any an administrator switched off. The ledger read failure is in this record\'s meta.',
+                undefined,
+                describeThrownForLog(err),
+            );
         }
 
         // ── ADR-0097: materialize provider-bound declarative connector instances ──
