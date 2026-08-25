@@ -980,37 +980,23 @@ export const AUTH_SSO_PROVIDER_SCHEMA = {
 // SCIM plugin – scimProvider table (@better-auth/scim)
 // ---------------------------------------------------------------------------
 
-/**
- * `@better-auth/scim` plugin `scimProvider` model mapping.
- *
- * Each row is a SCIM connection: a bearer token an external IdP (Okta / Entra)
- * uses to auto-provision / deprovision THIS environment's users — the env is
- * the SCIM Service Provider (ADR-0071). This plugin hardcodes its model and
- * exposes NO `schema` option — still true of the installed
- * `@better-auth/scim@1.7.0-rc.1` (`SCIMOptions` declares no `schema` /
- * `modelName` / `fields` member at all; measured 2026-08-19). It is no longer
- * true of `@better-auth/sso@1.7.1`, which this doc used to lean on for the
- * comparison and which now accepts one (#8224). So for scim — and for scim
- * alone — the ADAPTER layer (AUTH_MODEL_TO_PROTOCOL + field resolution in
- * objectql-adapter.ts) is the only available route: the mapping cannot be
- * handed to the plugin.
- *
- * | camelCase (better-auth) | snake_case (ObjectStack) |
- * |:------------------------|:-------------------------|
- * | providerId              | provider_id              |
- * | scimToken               | scim_token               |
- * | organizationId          | organization_id          |
- * | userId                  | user_id                  |
- */
-export const AUTH_SCIM_PROVIDER_SCHEMA = {
-  modelName: 'sys_scim_provider',
-  fields: {
-    providerId: 'provider_id',
-    scimToken: 'scim_token',
-    organizationId: 'organization_id',
-    userId: 'user_id',
-  },
-} as const;
+// NOTE: there is intentionally no `scimProvider` mapping constant here, and no
+// `buildScimPluginSchema()`. `@better-auth/scim` hardcodes its model and exposes
+// NO `schema` option — still true of the installed `@better-auth/scim@1.7.0-rc.1`
+// (`SCIMOptions` declares no `schema` / `modelName` / `fields` member at all;
+// measured 2026-08-19), so there is nowhere to hand one. This is no longer true
+// of `@better-auth/sso@1.7.1`, which now accepts one (#8224) — for scim, and for
+// scim alone, the ADAPTER layer is the only available route.
+//
+// `sys_scim_provider`'s column names are therefore owned by that adapter layer
+// alone: AUTH_MODEL_TO_PROTOCOL + the camelCase → snake_case field resolution in
+// objectql-adapter.ts, pinned by the sso/scim block in
+// better-auth-schema-parity.test.ts. A copy of those names here would be a
+// SECOND declaration of one contract that nothing reads and nothing enforces —
+// it could drift from the live one with every gate green, and the next reader
+// could not tell which was authoritative (ADR-0049 enforce-or-remove). Do not
+// re-add one unless the plugin grows a `schema` option AND it is passed there.
+// See ADR-0071.
 
 // ---------------------------------------------------------------------------
 // Helper: build device-authorization plugin schema option

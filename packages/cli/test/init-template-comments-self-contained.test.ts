@@ -137,7 +137,11 @@ describe('rendered init templates are followable by a stranger', () => {
     }
     // The two templates that emit an object (app, plugin) must have reached
     // the OWD comment's file, or assertion 2 below would vacuously pass.
-    const objectFiles = rendered.filter((r) => /src\/objects\/.*_item\.ts$/.test(r.file));
+    // Selected STRUCTURALLY (anything under src/objects/ that is not the
+    // barrel) rather than by filename spelling: this guard went red on the
+    // #11598 rename from `<ns>_item.ts` to `<ns>_item.object.ts`, which is a
+    // correct catch but a re-edit the property never needed.
+    const objectFiles = rendered.filter((r) => /^src\/objects\/(?!index\.ts$)[^/]+\.ts$/.test(r.file));
     expect(objectFiles.length).toBeGreaterThan(0);
   });
 
@@ -173,7 +177,7 @@ describe('rendered init templates are followable by a stranger', () => {
     },
   );
 
-  const objectFiles = rendered.filter((r) => /src\/objects\/.*_item\.ts$/.test(r.file));
+  const objectFiles = rendered.filter((r) => /^src\/objects\/(?!index\.ts$)[^/]+\.ts$/.test(r.file));
   it.each(objectFiles.map((r) => [`${r.templateKey}/${r.file}`, r] as const))(
     '%s still explains the org-wide default',
     (_label, r) => {

@@ -558,6 +558,27 @@ const PATH_LITERAL = /^(['"`])([^'"`]*)\1$/;
 const NEW_URL_LITERAL = /^new\s+URL\(\s*(['"`])([^'"`]*)\1\s*,\s*import\.meta\.url\s*,?\s*\)$/;
 
 /**
+ * `PATH_LITERAL`'s character class excludes only quote characters, so a
+ * BACKTICK-delimited argument containing no quotes matches it even when it is
+ * an interpolating template — `` `${someVar}` `` reads as the literal segment
+ * text `${someVar}`, which the walk below would count as ONE ordinary descent
+ * instead of routing it through the cannot-read branch that exists for exactly
+ * this case. That is not a lower bound: it biases the depth walk UPWARD and can
+ * hide an escape the unreadable-argument trade was written to still catch
+ * (#11487). A single- or double-quoted literal is unaffected — `${` inside one
+ * of those is ordinary text, never interpolation, so only the backtick
+ * delimiter needs the extra check. This is the ONE call site `PATH_LITERAL`
+ * has in this file (inside `pathExpression()`'s `resolve`/`join` argument
+ * walk), so narrowing it here does not move any other consumer's verdict.
+ */
+function readablePathLiteral(arg) {
+  const lit = arg.match(PATH_LITERAL);
+  if (!lit) return null;
+  if (lit[1] === '`' && lit[2].includes('${')) return null;
+  return lit;
+}
+
+/**
  * A formatter's TRAILING COMMA, dropped from an argument list before it is read.
  *
  * The other half of the line-spanning spelling (#11093), and the half that would
@@ -650,7 +671,7 @@ function pathExpression(expr, hereDepth, known, fileSegs = null) {
   if (!base) return undefined;
   let { end, min, vendored, segs } = base;
   for (const a of args.slice(1)) {
-    const lit = a.match(PATH_LITERAL);
+    const lit = readablePathLiteral(a);
     if (!lit) {
       // An argument this scan cannot read leaves the DEPTH walk where it was —
       // deliberately, since the escape verdict is a lower bound and has always
@@ -1939,6 +1960,36 @@ function selfTest() {
         "const P = join(ROOT, someVariable, 'x.ts');",
       1,
     ),
+  );
+  // ── the INTERPOLATING TEMPLATE argument (#11487) ──────────────────────────
+  //
+  // `PATH_LITERAL`'s character class excludes only quote characters, so a
+  // backtick argument holding no quotes matches it even when it is an
+  // interpolating template — `` `${someVar}` `` read as the literal segment
+  // text `${someVar}` and walked as ONE ordinary descent, biasing the depth
+  // walk UPWARD instead of taking the cannot-read path above. That is the
+  // exact inverse of the trade this file relies on everywhere else: an
+  // unreadable argument is safe, and a template read as readable was LESS
+  // safe than unreadable. Same climb, same file, only the middle argument
+  // differs from the unreadable-argument pair just above.
+  const TEMPLATE_SEED = 'const HERE = dirname(fileURLToPath(import.meta.url));\n';
+  const TEMPLATE_UNREADABLE = TEMPLATE_SEED + "const P = join(HERE, someVar, '../../other-pkg/src/y.ts');";
+  const TEMPLATE_INTERP = TEMPLATE_SEED + "const P = join(HERE, `${someVar}`, '../../other-pkg/src/y.ts');";
+  ok('(control) the unreadable-argument sibling of the pair below still flags at depth -1', at(TEMPLATE_UNREADABLE, 1));
+  ok(
+    'an interpolating template argument takes the SAME cannot-read path as an unreadable one — it flags too',
+    at(TEMPLATE_INTERP, 1),
+  );
+  ok(
+    'and — like any unreadable argument — yields no name for the path it builds (never a WRONG name)',
+    !named(TEMPLATE_INTERP, 1, CO).some((p) => p.endsWith('y.ts')),
+  );
+  ok(
+    'a non-interpolating backtick literal is NOT swept up by the narrowing — still read, still flags, still named',
+    (() => {
+      const src = TEMPLATE_SEED + "const P = join(HERE, `../../other-pkg/src/y.ts`);";
+      return at(src, 1) && named(src, 1, CO).includes('packages/other-pkg/src/y.ts');
+    })(),
   );
   ok(
     'a climb ABOVE the repo root yields no name (there is no repo-relative one)',
