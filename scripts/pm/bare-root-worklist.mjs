@@ -601,6 +601,53 @@ function selfTest() {
     + 'check-examples-live-imports.mjs, check-driver-conformance.mjs). ⛔ Declaring a root the '
     + 'gate does not read wholesale is the costlier error.' : ''}`, fresh.length === 0);
 
+  // CONTRADICTED: a refusal that outlived the reachability it refused. This is
+  // the THIRD direction of the same coupling, and the one neither assertion
+  // above can see, because both audit the KEY SET. A row whose gate later
+  // declares its root is STILL A ROW, so its verdict is not stale; and it has
+  // left `open`, so it is not fresh either. Both halves stay satisfied while
+  // `report` prints REACHABLE directly above a recorded reason saying the
+  // population cannot be spelled — one row asserting both that it is now
+  // reachable and that it is not. This was PREDICTED in #11155's dev report and
+  // then MEASURED on PR #12061, by declaring a hint on a gate carrying a
+  // REFUSE-UNSPELLABLE verdict: the modified and unmodified trees both exited 0
+  // here, which is why a green self-test could not be read as evidence.
+  //
+  // The pairing is general rather than restricted to the two refusals, because
+  // EVERY verdict this file defines presupposes an UNCOVERED row: the refusals
+  // say a declaration was refused, and DECLARED-NARROWER says in as many words
+  // that the bare root is still not covered.
+  //
+  // ⛔ So the remedy is NOT "move the row to DECLARED-NARROWER". That is the
+  // obvious repair, it is what the reporting card proposed, and it is wrong —
+  // measured here rather than assumed. `covered` asks whether a hint reaches an
+  // ARBITRARY file at the top of the root, so it turns true ONLY for the
+  // spellings that collapse back to the bare word itself; every genuinely
+  // narrower subtree, and every deeper segment filter, leaves the row uncovered.
+  // A covered row is therefore the bare root wearing a separator or a glob,
+  // which is the one thing DECLARED-NARROWER states it is not. No covered row
+  // can honestly wear any of the three, and choosing between the two honest
+  // resolutions RE-DECIDES a verdict on a shrink-only map — not something this
+  // assertion may do quietly, so it names both and picks neither.
+  const contradicted = rows
+    .filter((r) => r.covered && TRIAGE.has(r.key))
+    .map((r) => `${r.key} [recorded ${TRIAGE.get(r.key).verdict}]`)
+    .sort();
+  t(`no recorded verdict sits on a row the sweep now finds REACHABLE${contradicted.length
+    ? ` — CONTRADICTED: ${contradicted.join(' · ')}. That gate now declares a hint reaching an `
+      + 'arbitrary file at the top of the root, so the row claims BOTH that the population is '
+      + 'reachable by declaration and, in its own recorded reason, that it is not. Two honest '
+      + 'resolutions, differing in WHICH half is wrong. Withdraw the DECLARATION, if the recorded '
+      + 'reason still holds and the hint names the gate for files it never opens — the usual '
+      + 'answer under REFUSE-UNSPELLABLE, whose whole reason is that a wholesale hint would be '
+      + 'FALSE, and the costlier error by the price hintCovers records. Or withdraw the VERDICT, '
+      + 'if the declaration is deliberate and overrides the refusal, leaving the row to print '
+      + 'REACHABLE with no reason beneath it: that is the shrink this map already permits, and the '
+      + 'seven reachable rows carrying no verdict today are its live shape. ⛔ Do NOT re-point the '
+      + 'row at DECLARED-NARROWER: that verdict is defined for a row that stays UNCOVERED, and a '
+      + 'covered row is the bare root wearing a glob, not a narrower subtree.'
+    : ''}`, contradicted.length === 0);
+
   // The spelling rule the triage docblock states, held mechanically: a key
   // spelled as a bare path would enter this file's own declared population.
   const asHints = (s) => extractWatchHints(`const L = ${JSON.stringify(s)};`);
