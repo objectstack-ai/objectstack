@@ -58,7 +58,7 @@ import type { FlowFunctionEffect } from '@objectstack/spec/automation';
 // Imported from spec directly rather than through `@objectstack/core`'s
 // re-export block: that block is labelled backward-compatibility, and this
 // contract is new (#5945).
-import type { IScopedContext, IScopedObjectRepository } from '@objectstack/spec/contracts';
+import type { IScopedContext, IScopedObjectRepository, IntrospectedSchema as SpecIntrospectedSchema } from '@objectstack/spec/contracts';
 import {
   IDataDriver,
   IDataEngine,
@@ -12328,9 +12328,18 @@ export class ObjectQL implements IObjectQLEngine {
    *
    * @throws if the datasource has no registered driver, or the driver does
    *   not support introspection.
+   *
+   * [#11493] The return is the spec's ONE introspection shape — the
+   * `IDataEngine.introspectDatasource?` contract member this method
+   * implements — not the untyped `Promise<unknown>` it declared while
+   * `IDataDriver` was silent about `introspectSchema`. The `as any` on the
+   * driver lookup went in the same stroke: the member is on the driver
+   * contract now, so the duck-typed probe below is a typed read. Runtime is
+   * deliberately byte-identical — both throws and the delegation are
+   * unchanged.
    */
-  async introspectDatasource(datasource: string): Promise<unknown> {
-    const driver = this.drivers.get(datasource) as any;
+  async introspectDatasource(datasource: string): Promise<SpecIntrospectedSchema> {
+    const driver = this.drivers.get(datasource);
     if (!driver) {
       throw new Error(`[ObjectQL] Datasource '${datasource}' has no registered driver to introspect.`);
     }
