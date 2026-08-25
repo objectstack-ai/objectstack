@@ -28,7 +28,7 @@ from `node_modules` — there is no local copy in the skill bundle.
 - `node_modules/@objectstack/spec/src/shared/expression.zod.ts` — Expression Protocol
 - `node_modules/@objectstack/spec/src/shared/identifiers.zod.ts` — System Identifier Schema
 - `node_modules/@objectstack/spec/src/shared/protection.zod.ts` — Package-level metadata protection (ADR-0010 §3.7 — Phase 4.3)
-- `node_modules/@objectstack/spec/src/shared/retry-policy.zod.ts` — The **single declaration** of the exponential-backoff retry policy (#4661,
+- `node_modules/@objectstack/spec/src/shared/retry-policy.zod.ts` — The **single declaration** of the exponential-backoff retry policy.
 - `node_modules/@objectstack/spec/src/shared/suggestions.zod.ts` — "Did you mean?" Suggestion Utilities
 
 ## How to read these
