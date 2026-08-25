@@ -556,6 +556,13 @@ jobs:
             echo "No packages on this shard — nothing to test."
             exit 0
           fi
+          # Bound vitest's INNER worker pool (#11958). A no-op on a runner with
+          # <= 5 cores (it only ever LOWERS vitest's own `cores - 1` default);
+          # it exists so a larger runner cannot multiply turbo's outer
+          # --concurrency by a host-sized inner pool. Empty on failure, which is
+          # vitest's own "use the default" signal. Needs turbo.json's
+          # globalPassThroughEnv entry or turbo strips it — see the script header.
+          export VITEST_MAX_WORKERS="$(node scripts/vitest-worker-cap.mjs)"
           FILTERS=$(sed 's/^/--filter=/' "$RUNNER_TEMP/shard-packages.txt" | tr '\n' ' ')
           mkdir -p "$RUNNER_TEMP/stall-reports"
           node scripts/run-with-stall-guard.mjs --log "$RUNNER_TEMP/test-core.log" --stall-minutes 10 \
@@ -1129,6 +1136,13 @@ jobs:
         env:
           NODE_OPTIONS: --report-on-signal --report-signal=SIGUSR2 --report-directory=${{ runner.temp }}/stall-reports
         run: |
+          # Bound vitest's INNER worker pool (#11958). A no-op on a runner with
+          # <= 5 cores (it only ever LOWERS vitest's own `cores - 1` default);
+          # it exists so a larger runner cannot multiply turbo's outer
+          # --concurrency by a host-sized inner pool. Empty on failure, which is
+          # vitest's own "use the default" signal. Needs turbo.json's
+          # globalPassThroughEnv entry or turbo strips it — see the script header.
+          export VITEST_MAX_WORKERS="$(node scripts/vitest-worker-cap.mjs)"
           mkdir -p "$RUNNER_TEMP/stall-reports"
           node scripts/run-with-stall-guard.mjs --log "$RUNNER_TEMP/dogfood.log" --stall-minutes 10 \
             --report-dir "$RUNNER_TEMP/stall-reports" -- \

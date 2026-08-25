@@ -77,8 +77,9 @@
     },
     "requiredWhen": {
       "status": "live",
-      "evidence": "packages/objectql/src/validation/record-validator.ts",
-      "note": "CEL."
+      "verifiedAt": "2026-08-25",
+      "evidence": "packages/objectql/src/validation/rule-validator.ts:1792-1810 (evaluates the field's requiredWhen predicate on the write path and reports the unevaluable/unbound cases by name); packages/objectql/src/validation/rule-validator.ts:762-763 (fieldRequiresParentRoot — a parent-scoped predicate widens the binding, #4977)",
+      "note": "CEL. 2026-08-25: REPOINTED — the evidence cited its SIBLING packages/objectql/src/validation/record-validator.ts, which has 0 occurrences of `requiredWhen`: that module enforces the static ADR-0113 `required` contract, while the CEL predicate is evaluated one file over in rule-validator.ts. Both files exist and neither citation carried a line, so this was invisible to every check the gate had — the plausible-neighbour shape of citation rot rather than a code movement."
     },
     "readonlyWhen": {
       "status": "live",

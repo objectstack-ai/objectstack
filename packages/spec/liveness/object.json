@@ -157,8 +157,8 @@
         },
         "organizationField": {
           "status": "live",
-          "evidence": "packages/plugins/plugin-audit/src/audit-writers.ts",
-          "note": "STAMP-ONLY by the #8778 maintainer ruling (option A): consulted exclusively by resolveRecordOrganizationField when audit rows are stamped, so a credential table can stay unwalled while its trail follows the record's own organization (sys_api_key.active_organization_id, #8707/#8287). Deliberately read by NO tenant-scoping path; read-neutrality is pinned by tests beside applyTenantScope/injectTenantOnInsert (driver-sql), computeTenantLayer0Filter (plugin-security) and resolveInjectedSystemColumns (spec).",
+          "evidence": "packages/metadata-core/src/record-organization.ts:177-180 (resolveRecordOrganizationField reads `tenancy.organizationField` as limb 0 of the precedence, and falls through when the object has no such column)",
+          "note": "STAMP-ONLY by the #8778 maintainer ruling (option A): consulted exclusively by resolveRecordOrganizationField when audit rows are stamped, so a credential table can stay unwalled while its trail follows the record's own organization (sys_api_key.active_organization_id, #8707/#8287). Deliberately read by NO tenant-scoping path; read-neutrality is pinned by tests beside applyTenantScope/injectTenantOnInsert (driver-sql), computeTenantLayer0Filter (plugin-security) and resolveInjectedSystemColumns (spec). 2026-08-25: REPOINTED — the evidence cited plugin-audit/src/audit-writers.ts, which has read the key through `createRecordOrganizationResolver` ever since #10101 promoted the resolver into @objectstack/metadata-core; audit-writers.ts:220 says so in its own re-export comment. The cited file still existed and the citation carried no line, so neither the existence check nor the #11210 line bound could see it. The stamping CALL SITE is audit-writers.ts:863 — kept here in prose rather than as a citation, because a call site that never names the key belongs in `producer`, not in `evidence`.",
           "verifiedAt": "2026-08-15"
         }
       }
