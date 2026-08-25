@@ -18,6 +18,7 @@
 // halves are in the room together.
 
 import { describe, it, expect } from 'vitest';
+import type { EngineQueryOptions } from '@objectstack/spec/data';
 import { ObjectQL } from './engine.js';
 import {
   ENGINE_FINDONE_PREDICATE_CASES,
@@ -73,7 +74,11 @@ async function makeEngine() {
 async function observeEngine(query: unknown): Promise<'selective' | 'reject'> {
   const { engine, calls } = await makeEngine();
   try {
-    await engine.findOne(OBJECT, query as any);
+    // `as unknown as EngineQueryOptions`, never a bare `as any`: the case-set
+    // deliberately carries OFF-CONTRACT bags (`where: []`, an `orderBy` record)
+    // because those are the shapes the guard exists to refuse, and this spelling
+    // names the contract being bypassed instead of erasing it (#4674/#4918).
+    await engine.findOne(OBJECT, query as unknown as EngineQueryOptions);
   } catch (e) {
     const message = (e as Error).message;
     // Only the #4419 refusal counts as this predicate's verdict. Anything else
@@ -144,7 +149,9 @@ describe('engine findOne predicate — the shared predicate IS the engine (#1195
 
   it('requires orderBy to be a NON-EMPTY ARRAY, as `Array.isArray` does in the engine', () => {
     expect(resolveEngineFindOnePredicate(OBJECT, { orderBy: [] }).kind).toBe('reject');
-    expect(resolveEngineFindOnePredicate(OBJECT, { orderBy: { title: 'desc' } as any }).kind)
+    // `EngineFindOneQueryInput.orderBy` is `unknown`, so the record form needs no
+    // assertion at all — the predicate's own input type admits it and answers.
+    expect(resolveEngineFindOnePredicate(OBJECT, { orderBy: { title: 'desc' } }).kind)
       .toBe('reject');
   });
 });
