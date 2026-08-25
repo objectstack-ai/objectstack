@@ -16,7 +16,9 @@ The **Source of Truth** for the ObjectStack Protocol. Contains strictly typed Zo
 
 The package publishes one entry per protocol domain (`@objectstack/spec/data`,
 `/ui`, `/kernel`, …) plus fine-grained vocabulary entries
-(`@objectstack/spec/meta-spelling` — the `/meta/:type` URL-spelling contract).
+(`@objectstack/spec/meta-spelling` — the `/meta/:type` URL-spelling contract
+and the `defineStack()` manifest-collection vocabulary, two deliberately
+distinct maps per objectstack#8424).
 Each entry is a self-contained bundle: what an entry's module graph reaches is
 what every consumer of that entry pays for.
 

@@ -88,12 +88,18 @@
 // `@objectstack/driver-memory`, 39 test files dead at load between them). The
 // typed literal below keeps the closed-set compile check without the runtime
 // import — the `packages/spec/src/contracts/storage-service.ts` pattern.
-// `/shared` cannot get the same treatment: `pluralToSingular` is a runtime
-// value and its map has ONE owner (#7378 row 2 — copying it here would be the
-// per-implementation folk normalization the ruling forbids), so the consumer
-// configs carry a `/shared` alias entry instead.
+// `pluralToSingular` cannot get the same treatment: it is a runtime value and
+// its map has ONE owner (#7378 row 2 — copying it here would be the
+// per-implementation folk normalization the ruling forbids). It is imported
+// from `/meta-spelling` — the schema-free vocabulary entry — NOT `/shared`:
+// this module is on every browser consumer's eager graph through
+// `@objectstack/client`, and a `/shared` value import here linked the whole
+// zod schema closure into every browser bundle (#11503, measured in the
+// console; #10096 standing principle: 「浏览器可达的 spec 导出面必须
+// schema-free」). Consumer vitest configs resolve the subpath through their
+// anchored `@objectstack/spec/<ns>` alias rule (#9457).
 import type { StandardErrorCode } from '@objectstack/spec/api';
-import { pluralToSingular } from '@objectstack/spec/shared';
+import { pluralToSingular } from '@objectstack/spec/meta-spelling';
 
 /** The standard catalog's generic argument-validation code, type-checked against the closed set. */
 const REGISTER_REFUSAL_CODE: StandardErrorCode = 'VALIDATION_ERROR';
@@ -103,7 +109,7 @@ const REGISTER_REFUSAL_CODE: StandardErrorCode = 'VALIDATION_ERROR';
  * (#7378 row 2). Folds a plural manifest spelling to the singular metadata
  * type name (`'objects'` → `'object'`, `'views'` → `'view'`, …) through the
  * platform's one plural↔singular map (`PLURAL_TO_SINGULAR`,
- * `@objectstack/spec/shared`); a name with no plural mapping — which includes
+ * `@objectstack/spec/meta-spelling`); a name with no plural mapping — which includes
  * every canonical singular type — passes through unchanged.
  */
 export function canonicalMetadataServiceType(type: string): string {

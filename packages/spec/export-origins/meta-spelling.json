@@ -3,8 +3,12 @@
   "entry": "./meta-spelling",
   "exports": {
     "META_URL_TO_SINGULAR": "src/meta-spelling/meta-url-data.generated.ts#META_URL_TO_SINGULAR (const)",
+    "PLURAL_TO_SINGULAR": "src/meta-spelling/manifest-collection-spelling.ts#PLURAL_TO_SINGULAR (const)",
+    "SINGULAR_TO_PLURAL": "src/meta-spelling/manifest-collection-spelling.ts#SINGULAR_TO_PLURAL (const)",
     "canonicalMetaUrlType": "src/meta-spelling/metadata-url-spelling.ts#canonicalMetaUrlType (function)",
     "metaUrlSpellingRefusal": "src/meta-spelling/metadata-url-spelling.ts#metaUrlSpellingRefusal (function)",
+    "pluralToSingular": "src/meta-spelling/manifest-collection-spelling.ts#pluralToSingular (function)",
+    "singularToPlural": "src/meta-spelling/manifest-collection-spelling.ts#singularToPlural (function)",
     "unrecognisedMetaTypeRefusal": "src/meta-spelling/metadata-url-spelling.ts#unrecognisedMetaTypeRefusal (function)"
   }
 }
