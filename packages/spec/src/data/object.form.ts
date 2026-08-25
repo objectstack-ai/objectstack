@@ -127,7 +127,10 @@ export const objectForm = defineForm({
             // write-time validator's list; maintainer ruling 2026-08-24).
             // `code` was the one this list was missing.
             { field: 'maxLength', type: 'number', helpText: 'Max characters', visibleWhen: "data.type in ['text','textarea','email','url','phone','password','markdown','html','richtext','code']" },
-            { field: 'minLength', type: 'number', helpText: 'Min characters', visibleWhen: "data.type in ['text','textarea','email','url','phone','password','markdown','html','richtext']" },
+            // #11949 — `minLength` aligned to the same ten (maintainer ruling
+            // 2026-08-25: the #11566 template applies in full). `code` was the
+            // one this row was missing.
+            { field: 'minLength', type: 'number', helpText: 'Min characters', visibleWhen: "data.type in ['text','textarea','email','url','phone','password','markdown','html','richtext','code']" },
 
             // Numeric constraints
             { field: 'min', type: 'number', helpText: 'Minimum value', visibleWhen: "data.type in ['number','currency','percent','rating','slider','progress']" },
