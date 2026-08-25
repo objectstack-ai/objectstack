@@ -59,6 +59,7 @@ import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';
 import { SchemaRegistry } from './registry.js';
 import { assertEngineUpdateDispatch } from './engine-update-dispatch.js';
 import { assertEngineDeleteDispatch } from './engine-delete-dispatch.js';
+import { assertEngineFindOnePredicate } from './engine-findone-predicate.js';
 
 const ORG_A = 'org_a';
 const ORG_B = 'org_b';
@@ -82,7 +83,15 @@ function makeEngine(registry: SchemaRegistry) {
     const engine: any = {
         registry,
         find: vi.fn(async (_table: string, opts: any) => rows.filter((r) => matches(r, opts?.where ?? {}))),
-        findOne: vi.fn(async (table: string, opts: any) => (await engine.find(table, opts))[0] ?? null),
+        findOne: vi.fn(async (table: string, opts: any) => {
+            // [#11957] Pinned to ObjectQL.findOne's OWN #4419 predicate: `findOne`
+            // applies limit: 1, so a query naming no record returns an ARBITRARY row
+            // and the engine REFUSES it. A double that answers it anyway is how
+            // #11767 shipped a bootstrap bypass that was inert on every real
+            // deployment while a 641-line unit matrix stayed green.
+            assertEngineFindOnePredicate(table, opts);
+            return (await engine.find(table, opts))[0] ?? null;
+        }),
         insert: vi.fn(async (_table: string, data: any) => {
             const row = { id: data.id ?? `row_${nextId++}`, ...data };
             rows.push(row);
