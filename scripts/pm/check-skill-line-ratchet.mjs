@@ -186,7 +186,18 @@ export const CEILINGS = new Map([
   // 2026-08-20, verbatim and untranslated: 「A — 抬上限到 961 (Recommended)」
   // (issue #10126, comment 5353111732). Headroom is 0 again by construction, and
   // the next author needing a line is back to compressing.
-  ['AGENTS.md', 961],
+  //
+  // 961 → 969 (#10855 / PR #11908): the published-spellings mirror re-sync. The
+  // AGENTS.md copy of check-cross-package-test-inputs' recognised-spellings list
+  // had drifted (the findUp anchor seeds missing), the honest re-sync costs +8
+  // lines, and lossless rewrap headroom across the section measured 0 — so it
+  // could not be paid in place. The mirror is now mechanically enforced by
+  // check-published-list-mirrors.mjs, which prices any later drift at the moment
+  // it is incurred. Maintainer ruling 2026-08-25, verbatim and untranslated:
+  // 「同意，帮我合并，然后继续」 — accepting option A (raise to 969) as presented
+  // in the PM-chat batch review; provenance recorded on PR #11908. Headroom is 0
+  // again by construction.
+  ['AGENTS.md', 969],
   // #9965: root CLAUDE.md is the other repo-root instruction file — same read
   // path (every seat session), same governance (Prime Directive #14). It is
   // structurally growth-prone in the way the ratchet is built for: it exists to
