@@ -6057,189 +6057,232 @@ export class RestServer {
 
         // POST /meta/:type/:name/publish — promote the pending draft
         // overlay to live. 404 [no_draft] when nothing to publish.
-        this.routeManager.register({
-            method: 'POST',
-            path: `${metaPath}/:type/:name/publish`,
-            handler: async (req: any, res: any) => {
-                try {
-                    const environmentId = isScoped ? req.params?.environmentId : undefined;
-                    // [#8919] Authoring capability gate — the SAME four lines the
-                    // `PUT` / `DELETE` / `_migrate-stored` doors carry, deliberately
-                    // not a second way of demanding the same capability.
-                    //
-                    // Promotion is authoring. `promoteDraftForPublish` flips the
-                    // `sys_metadata` row `state: 'draft'` → `'active'`, and
-                    // ADR-0027 (E)(5) defines sealing a publish as exactly that
-                    // flip — so this door decides which body is LIVE. Measured
-                    // before the gate: an authenticated principal holding no
-                    // authoring capability at all reached `publishMetaItem` and
-                    // got 200, i.e. it could take a draft somebody else authored
-                    // and make it the live overlay. The `/meta` umbrella already
-                    // refused ANONYMOUS here (401, `registerMetadataEndpoints`),
-                    // so this closes the authenticated-but-uncapable cohort — the
-                    // one the four sibling doors close and these two did not.
-                    //
-                    // ⛔ Not a publish-specific capability: `manage_metadata` is
-                    // ADR-0066 D1's authoring capability and the same one the save
-                    // door demands, so no caller who can author a draft is newly
-                    // refused (measured: the save→publish loop's own first step is
-                    // already gated on it). Splitting author from publisher would
-                    // need a DIFFERENT declared capability and is a product call.
-                    //
-                    // Gate FIRST — before the protocol is resolved — so an
-                    // unauthorized caller cannot use the 501-vs-200 answer to probe
-                    // which kernels implement publishing, and so nothing is promoted
-                    // before the refusal. `isSystem` bypasses, matching every other
-                    // capability gate on the platform.
-                    const ctx = await this.resolveExecCtx(environmentId, req).catch(() => undefined);
-                    const held = new Set<string>(
-                        Array.isArray(ctx?.systemPermissions) ? ctx!.systemPermissions : [],
-                    );
-                    if (!ctx?.isSystem && !held.has('manage_metadata')) {
-                        res.status(403).json({
-                            error: {
-                                code: 'FORBIDDEN',
-                                message: 'Publishing a metadata item requires the `manage_metadata` capability.',
-                            },
-                        });
-                        return;
-                    }
-                    const p = await this.resolveProtocol(environmentId, req);
-                    if (!p.publishMetaItem) {
-                        res.status(501).json({
-                            error: 'Publish operation not supported by protocol implementation',
-                        });
-                        return;
-                    }
-                    // [#7749 producer, #7941 precedence] The request's authenticated
-                    // identity — one producer, shared by every `/meta` write (see
-                    // resolveMetaWriteActor). `X-Actor` is not consulted.
-                    const actor = await this.resolveMetaWriteActor(environmentId, req);
-                    const body = (req.body && typeof req.body === 'object') ? req.body : {};
-                    const message = typeof body.message === 'string' ? body.message : undefined;
+        //
+        // [#11932] BOTH ARITIES, and the loop is the point rather than a
+        // tidy-up: the ADR-0033 `/published` READ a few hundred lines down is
+        // mounted in both spellings (#7526) and the `getItem`/`saveItem` twins
+        // are too, so a compound-named draft could be STAGED through
+        // `PUT /meta/:type/:section/:name?mode=draft` (#11712, PR #11933) and
+        // READ back through `GET /meta/:type/:section/:name/published` — and
+        // then had no per-item REST door to PROMOTE it. Writable, readable,
+        // and not publishable, by the same caller, over the same transport.
+        //
+        // ⛔ It was never the CAPABILITY that was missing, which is why this is
+        // a mount and not a feature: `publishMetaItem` keys the draft on
+        // type/name/organization/package and reads the name's SPELLING
+        // nowhere, so `crm/task` is a draft key exactly like `crm_task` is.
+        // Measured against the real protocol over a seeded compound draft
+        // before this route existed — it promoted normally.
+        //
+        // ORDER. The hazard the `/published` twin documents below is REAL for
+        // this shape and is pinned in `meta-route-registration-order.test.ts`:
+        // Hono is first-match-wins, so a same-arity sibling registered ahead of
+        // this pattern shadows it (measured — a `/:type/:section/:name/:verb`
+        // catch-all registered first answers `…/publish` instead). What differs
+        // from the READ side, and is worth stating because a reader will assume
+        // otherwise: `/meta` has NO `POST` catch-all today, so nothing on the
+        // live table can absorb this path — the constraint is latent, not
+        // currently violated, and the pin exists so it stays that way.
+        for (const publishPath of [
+            `${metaPath}/:type/:name/publish`,
+            `${metaPath}/:type/:section/:name/publish`,
+        ]) {
+            this.routeManager.register({
+                method: 'POST',
+                path: publishPath,
+                handler: async (req: any, res: any) => {
+                    try {
+                        const environmentId = isScoped ? req.params?.environmentId : undefined;
+                        // [#8919] Authoring capability gate — the SAME four lines the
+                        // `PUT` / `DELETE` / `_migrate-stored` doors carry, deliberately
+                        // not a second way of demanding the same capability.
+                        //
+                        // Promotion is authoring. `promoteDraftForPublish` flips the
+                        // `sys_metadata` row `state: 'draft'` → `'active'`, and
+                        // ADR-0027 (E)(5) defines sealing a publish as exactly that
+                        // flip — so this door decides which body is LIVE. Measured
+                        // before the gate: an authenticated principal holding no
+                        // authoring capability at all reached `publishMetaItem` and
+                        // got 200, i.e. it could take a draft somebody else authored
+                        // and make it the live overlay. The `/meta` umbrella already
+                        // refused ANONYMOUS here (401, `registerMetadataEndpoints`),
+                        // so this closes the authenticated-but-uncapable cohort — the
+                        // one the four sibling doors close and these two did not.
+                        //
+                        // ⛔ Not a publish-specific capability: `manage_metadata` is
+                        // ADR-0066 D1's authoring capability and the same one the save
+                        // door demands, so no caller who can author a draft is newly
+                        // refused (measured: the save→publish loop's own first step is
+                        // already gated on it). Splitting author from publisher would
+                        // need a DIFFERENT declared capability and is a product call.
+                        //
+                        // Gate FIRST — before the protocol is resolved — so an
+                        // unauthorized caller cannot use the 501-vs-200 answer to probe
+                        // which kernels implement publishing, and so nothing is promoted
+                        // before the refusal. `isSystem` bypasses, matching every other
+                        // capability gate on the platform.
+                        const ctx = await this.resolveExecCtx(environmentId, req).catch(() => undefined);
+                        const held = new Set<string>(
+                            Array.isArray(ctx?.systemPermissions) ? ctx!.systemPermissions : [],
+                        );
+                        if (!ctx?.isSystem && !held.has('manage_metadata')) {
+                            res.status(403).json({
+                                error: {
+                                    code: 'FORBIDDEN',
+                                    message: 'Publishing a metadata item requires the `manage_metadata` capability.',
+                                },
+                            });
+                            return;
+                        }
+                        const p = await this.resolveProtocol(environmentId, req);
+                        if (!p.publishMetaItem) {
+                            res.status(501).json({
+                                error: 'Publish operation not supported by protocol implementation',
+                            });
+                            return;
+                        }
+                        // [#7749 producer, #7941 precedence] The request's authenticated
+                        // identity — one producer, shared by every `/meta` write (see
+                        // resolveMetaWriteActor). `X-Actor` is not consulted.
+                        const actor = await this.resolveMetaWriteActor(environmentId, req);
+                        const body = (req.body && typeof req.body === 'object') ? req.body : {};
+                        const message = typeof body.message === 'string' ? body.message : undefined;
 
-                    // [#10063] Software-package binding for the PROMOTION —
-                    // `?package=<id>`, deliberately the SAME wire spelling and the
-                    // same normalisation the `PUT` door states it with a few
-                    // hundred lines up, not a second dialect for one value.
-                    //
-                    // Why this door needed it at all. #9612 taught the runtime
-                    // publish gate to narrow `objects` to the written item's
-                    // package closure, but only when the caller can NAME the
-                    // package. Three write doors reach that gate; `saveMetaItem`
-                    // and `publishPackageDrafts` both name one, and this one —
-                    // the single-item draft→active promotion — named nothing. So
-                    // every HTTP-driven promotion, which is precisely Studio's
-                    // designer save→publish loop on every edit, handed the gate
-                    // the whole tenant. The protocol half was already built and
-                    // waiting: `promoteDraftForPublish` declares
-                    // `packageId?: string | null` and threads it into both the
-                    // gate and `repo.promoteDraft`. Only the caller was mute.
-                    //
-                    // ⚠️ THE SHARP EDGE, and the reason this is a conditional
-                    // spread rather than a plain key. `promoteDraftForPublish`
-                    // forwards to `repo.promoteDraft` with
-                    // `...('packageId' in request ? { packageId: request.packageId ?? null } : {})`
-                    // — it branches on the KEY BEING PRESENT, not on the value,
-                    // because `null` is a meaningful scope there (pin the lookup
-                    // to the UNBOUND row) while an absent key means "match any
-                    // package", the historical resolution. Writing
-                    // `packageId: packageId` here would therefore put a
-                    // present-and-`undefined` key on every publish that names no
-                    // package, coercing it to `null` downstream and pinning the
-                    // lookup to unbound rows — so a draft authored under a package
-                    // would stop being found and the door would answer `no_draft`.
-                    // That is a silent outage on the untouched path, produced by a
-                    // change that reads like it only ADDS an option. The key must
-                    // be ABSENT when the caller states nothing.
-                    //
-                    // ⛔ Not read off the draft row either — see
-                    // `promoteDraftForPublish`'s own warning: `rowToItem` projects
-                    // `sys_metadata` into a `MetadataItem`, which carries no
-                    // package id, so a read from there is `undefined` on every
-                    // path — narrowing that never fires while looking like it
-                    // does. Widening `MetadataItem` is a `packages/spec` contract
-                    // change and stays filed rather than taken here.
-                    if (refuseRepeatedQueryParams(req, res, ['package'])) return;
-                    const packageRaw = req.query?.package;
-                    const packageId = typeof packageRaw === 'string' && packageRaw && packageRaw !== 'all'
-                        ? packageRaw
-                        : undefined;
+                        // [#10063] Software-package binding for the PROMOTION —
+                        // `?package=<id>`, deliberately the SAME wire spelling and the
+                        // same normalisation the `PUT` door states it with a few
+                        // hundred lines up, not a second dialect for one value.
+                        //
+                        // Why this door needed it at all. #9612 taught the runtime
+                        // publish gate to narrow `objects` to the written item's
+                        // package closure, but only when the caller can NAME the
+                        // package. Three write doors reach that gate; `saveMetaItem`
+                        // and `publishPackageDrafts` both name one, and this one —
+                        // the single-item draft→active promotion — named nothing. So
+                        // every HTTP-driven promotion, which is precisely Studio's
+                        // designer save→publish loop on every edit, handed the gate
+                        // the whole tenant. The protocol half was already built and
+                        // waiting: `promoteDraftForPublish` declares
+                        // `packageId?: string | null` and threads it into both the
+                        // gate and `repo.promoteDraft`. Only the caller was mute.
+                        //
+                        // ⚠️ THE SHARP EDGE, and the reason this is a conditional
+                        // spread rather than a plain key. `promoteDraftForPublish`
+                        // forwards to `repo.promoteDraft` with
+                        // `...('packageId' in request ? { packageId: request.packageId ?? null } : {})`
+                        // — it branches on the KEY BEING PRESENT, not on the value,
+                        // because `null` is a meaningful scope there (pin the lookup
+                        // to the UNBOUND row) while an absent key means "match any
+                        // package", the historical resolution. Writing
+                        // `packageId: packageId` here would therefore put a
+                        // present-and-`undefined` key on every publish that names no
+                        // package, coercing it to `null` downstream and pinning the
+                        // lookup to unbound rows — so a draft authored under a package
+                        // would stop being found and the door would answer `no_draft`.
+                        // That is a silent outage on the untouched path, produced by a
+                        // change that reads like it only ADDS an option. The key must
+                        // be ABSENT when the caller states nothing.
+                        //
+                        // ⛔ Not read off the draft row either — see
+                        // `promoteDraftForPublish`'s own warning: `rowToItem` projects
+                        // `sys_metadata` into a `MetadataItem`, which carries no
+                        // package id, so a read from there is `undefined` on every
+                        // path — narrowing that never fires while looking like it
+                        // does. Widening `MetadataItem` is a `packages/spec` contract
+                        // change and stays filed rather than taken here.
+                        if (refuseRepeatedQueryParams(req, res, ['package'])) return;
+                        const packageRaw = req.query?.package;
+                        const packageId = typeof packageRaw === 'string' && packageRaw && packageRaw !== 'all'
+                            ? packageRaw
+                            : undefined;
 
-                    // [#8805] The publish half of the same organization, and it
-                    // is REQUIRED for the `PUT` fix to be usable rather than a
-                    // separate improvement: `promoteDraftForPublish` resolves the
-                    // draft through `getOverlayRepo(orgId)`, so once a draft
-                    // authored through `PUT ?mode=draft` lands org-scoped, a
-                    // publish carrying no organization looks in the env-wide
-                    // partition, finds nothing, and answers `no_draft` — the
-                    // Studio designer's save→publish loop, broken. Scoping the
-                    // save without scoping the publish is not a smaller change,
-                    // it is a broken one.
-                    //
-                    // [#8919] The context is now the one the capability gate above
-                    // already resolved, so the caller a publish is SCOPED to can
-                    // never drift from the caller it was AUTHORIZED against — the
-                    // same single-resolution shape the `PUT` door carries.
-                    // `resolveExecCtx` is memoised per request and called in 40+
-                    // handlers in this file (see the `/published` comment's seam
-                    // warning, which stands).
-                    const organizationId = organizationIdForMetaWrite(
-                        // [#10340] FOLDED, not raw — see the PUT door's
-                        // org-scope comment for the measurement.
-                        canonicalMetaUrlType(req.params.type), ctx?.tenantId,
-                    );
-                    // [#11145] The `(p as any)` cast this call carried came off
-                    // when `MetadataProtocol` declared `publishMetaItem` (#11006,
-                    // maintainer ruling 2026-08-22, option B). What the cast was
-                    // load-bearing FOR is recorded because it is counter-intuitive
-                    // and was measured, not assumed: deleting it while the member
-                    // was undeclared answered
-                    //   `TS2339: Property 'publishMetaItem' does not exist on
-                    //    type 'RestProtocol'`
-                    // — NOT a `TS2353` about an unknown key. The cast was feature
-                    // detection for an ADR-0076 D9 server-only extension, so only
-                    // declaring the member could retire it; widening the
-                    // implementation's own request type in
-                    // `@objectstack/metadata-protocol` (which this package
-                    // deliberately does not depend on) never could, and #10350
-                    // measured exactly that.
-                    //
-                    // What replaces it is the point of the exercise, not a
-                    // side effect: the literal below is compiled against the spec
-                    // contract through the #9741 `TransportScopedMetaRequest`
-                    // wrapper, so an undeclared key here is a COMPILE ERROR
-                    // (`TS2353`, measured) instead of a payload member no contract
-                    // has ever seen. `environmentId` is the transport-level
-                    // routing key that wrapper layers on — ⛔ never a protocol
-                    // key; a key that belongs on the request belongs in the spec
-                    // schema.
-                    //
-                    // The 501 feature-detection guard above STAYS. The member is
-                    // declared OPTIONAL (ADR-0076 D9 promotion is additive to a
-                    // shipped contract, and a kernel may not implement the
-                    // promotion door at all), and that same guard is what narrows
-                    // it to callable here.
-                    const publishRequest: TransportScopedMetaRequest<PublishMetaItemRequest> = {
-                        type: req.params.type,
-                        name: req.params.name,
-                        organizationId,
-                        ...(environmentId ? { environmentId } : {}),
-                        ...(actor ? { actor } : {}),
-                        ...(message ? { message } : {}),
-                        ...(packageId ? { packageId } : {}),
-                    };
-                    const result = await p.publishMetaItem(publishRequest);
-                    res.json(result);
-                } catch (error: any) {
-                    handleRouteError(res, error);
-                }
-            },
-            metadata: {
-                summary: 'Publish the pending draft overlay (promotes draft → active)',
-                tags: ['metadata'],
-            },
-        });
+                        // [#8805] The publish half of the same organization, and it
+                        // is REQUIRED for the `PUT` fix to be usable rather than a
+                        // separate improvement: `promoteDraftForPublish` resolves the
+                        // draft through `getOverlayRepo(orgId)`, so once a draft
+                        // authored through `PUT ?mode=draft` lands org-scoped, a
+                        // publish carrying no organization looks in the env-wide
+                        // partition, finds nothing, and answers `no_draft` — the
+                        // Studio designer's save→publish loop, broken. Scoping the
+                        // save without scoping the publish is not a smaller change,
+                        // it is a broken one.
+                        //
+                        // [#8919] The context is now the one the capability gate above
+                        // already resolved, so the caller a publish is SCOPED to can
+                        // never drift from the caller it was AUTHORIZED against — the
+                        // same single-resolution shape the `PUT` door carries.
+                        // `resolveExecCtx` is memoised per request and called in 40+
+                        // handlers in this file (see the `/published` comment's seam
+                        // warning, which stands).
+                        const organizationId = organizationIdForMetaWrite(
+                            // [#10340] FOLDED, not raw — see the PUT door's
+                            // org-scope comment for the measurement.
+                            canonicalMetaUrlType(req.params.type), ctx?.tenantId,
+                        );
+                        // [#11145] The `(p as any)` cast this call carried came off
+                        // when `MetadataProtocol` declared `publishMetaItem` (#11006,
+                        // maintainer ruling 2026-08-22, option B). What the cast was
+                        // load-bearing FOR is recorded because it is counter-intuitive
+                        // and was measured, not assumed: deleting it while the member
+                        // was undeclared answered
+                        //   `TS2339: Property 'publishMetaItem' does not exist on
+                        //    type 'RestProtocol'`
+                        // — NOT a `TS2353` about an unknown key. The cast was feature
+                        // detection for an ADR-0076 D9 server-only extension, so only
+                        // declaring the member could retire it; widening the
+                        // implementation's own request type in
+                        // `@objectstack/metadata-protocol` (which this package
+                        // deliberately does not depend on) never could, and #10350
+                        // measured exactly that.
+                        //
+                        // What replaces it is the point of the exercise, not a
+                        // side effect: the literal below is compiled against the spec
+                        // contract through the #9741 `TransportScopedMetaRequest`
+                        // wrapper, so an undeclared key here is a COMPILE ERROR
+                        // (`TS2353`, measured) instead of a payload member no contract
+                        // has ever seen. `environmentId` is the transport-level
+                        // routing key that wrapper layers on — ⛔ never a protocol
+                        // key; a key that belongs on the request belongs in the spec
+                        // schema.
+                        //
+                        // The 501 feature-detection guard above STAYS. The member is
+                        // declared OPTIONAL (ADR-0076 D9 promotion is additive to a
+                        // shipped contract, and a kernel may not implement the
+                        // promotion door at all), and that same guard is what narrows
+                        // it to callable here.
+
+                        // [#11932] The compound arity's name is assembled from the two
+                        // URL segments, byte-for-byte the way the `/published` READ twin
+                        // and the compound `getItem`/`saveItem` doors assemble theirs:
+                        // `<section>/<name>` is ONE opaque protocol key, not two fields.
+                        // Absent `section` (the single-segment arity) the value is the
+                        // `name` segment unchanged, so the door this card widens answers
+                        // exactly what it answered before.
+                        const publishSection = req.params?.section;
+                        const publishName = publishSection
+                            ? `${publishSection}/${req.params?.name ?? ''}`
+                            : String(req.params?.name ?? '');
+                        const publishRequest: TransportScopedMetaRequest<PublishMetaItemRequest> = {
+                            type: req.params.type,
+                            name: publishName,
+                            organizationId,
+                            ...(environmentId ? { environmentId } : {}),
+                            ...(actor ? { actor } : {}),
+                            ...(message ? { message } : {}),
+                            ...(packageId ? { packageId } : {}),
+                        };
+                        const result = await p.publishMetaItem(publishRequest);
+                        res.json(result);
+                    } catch (error: any) {
+                        handleRouteError(res, error);
+                    }
+                },
+                metadata: {
+                    summary: 'Publish the pending draft overlay (promotes draft → active)',
+                    tags: ['metadata'],
+                },
+            });
+        }
 
         // POST /meta/:type/:name/rollback — restore a historical version
         // as the new live overlay. Body: { toVersion: <number>, message? }.

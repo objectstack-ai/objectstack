@@ -1687,6 +1687,16 @@
       "pinned": 1
     },
     {
+      "file": "packages/rest/src/meta-compound-publish-door.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/rest/src/meta-compound-publish-door.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/rest/src/meta-compound-save-force-parity.test.ts",
       "verb": "delete",
       "pinned": 1

@@ -337,6 +337,9 @@ const DISPOSITIONS: Record<string, Disposition> = {
   'PUT /api/v1/meta/:type/:name': { kind: 'no-record-echo', why: 'Metadata plane: metadata item, not a data record.' },
   'DELETE /api/v1/meta/:type/:name': { kind: 'no-record-echo', why: 'Metadata plane: delete receipt.' },
   'POST /api/v1/meta/:type/:name/publish': { kind: 'no-record-echo', why: 'Metadata plane: publish receipt.' },
+  // [#11932] The compound-name arity of the row above — one handler, one
+  // receipt shape, reached by a name spelled in two URL segments.
+  'POST /api/v1/meta/:type/:section/:name/publish': { kind: 'no-record-echo', why: 'Metadata plane: publish receipt (compound-name arity).' },
   'POST /api/v1/meta/:type/:name/rollback': { kind: 'no-record-echo', why: 'Metadata plane: rollback receipt.' },
   'PUT /api/v1/meta/:type/:section/:name': { kind: 'no-record-echo', why: 'Metadata plane: compound metadata section.' },
 

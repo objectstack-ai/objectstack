@@ -114,6 +114,17 @@ const DOORS: readonly Door[] = [
         protocolMethod: 'publishMetaItem', params: { type: 'object', name: 'account' }, body: {},
     },
     {
+        // [#11932] The compound-name arity of the door above, mounted from the
+        // same two-entry loop. It is enumerated here rather than trusted to
+        // "same handler, same gate": this file exists because the gate used to
+        // be a convention held by repetition, and a second arity is precisely
+        // the kind of edit that can split one handler into two.
+        label: 'POST /meta/:type/:section/:name/publish — compound-name promote [#11932]',
+        method: 'POST', path: `${META}/:type/:section/:name/publish`,
+        protocolMethod: 'publishMetaItem',
+        params: { type: 'object', section: 'views', name: 'all_leads' }, body: {},
+    },
+    {
         label: 'POST /meta/:type/:name/rollback — restore a historical version [#8919]',
         method: 'POST', path: `${META}/:type/:name/rollback`,
         protocolMethod: 'rollbackMetaItem',

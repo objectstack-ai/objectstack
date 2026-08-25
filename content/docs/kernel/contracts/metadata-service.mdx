@@ -420,7 +420,11 @@ const draft = await metadataService.get('object', 'opportunity');
 
 The REST layer mounts package routes under `/api/v1/packages` and per-item metadata
 routes under `/api/v1/meta`. Publishing a single metadata item's pending draft is done
-via the `/meta/:type/:name/publish` route.
+via the `/meta/:type/:name/publish` route — or, for an item addressed by a compound
+name such as `views/all_leads`, via the compound arity
+`/meta/:type/:section/:name/publish`. Both arities are one handler and behave
+identically; the compound spelling is how every other read and write on this surface
+addresses a sub-resource.
 
 | Method | Path | Description |
 |:---|:---|:---|
@@ -429,4 +433,5 @@ via the `/meta/:type/:name/publish` route.
 | `GET` | `/api/v1/packages/:id` | Get a specific package |
 | `DELETE` | `/api/v1/packages/:id` | Delete a package |
 | `POST` | `/api/v1/meta/:type/:name/publish` | Promote a metadata item's pending draft to live |
+| `POST` | `/api/v1/meta/:type/:section/:name/publish` | The same promotion, for a compound-named item |
 | `POST` | `/api/v1/meta/:type/:name/rollback` | Restore a historical version as the live overlay |

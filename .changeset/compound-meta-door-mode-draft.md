@@ -28,13 +28,17 @@ unrecognised `mode=`, an empty `mode=` and no `mode` at all are all unchanged:
 they publish, exactly as before. The spelling test is the twin's, `draft`
 case-insensitive.
 
-⚠️ **The draft you can now stage has no per-item REST promotion door in this
-arity.** `POST /meta/:type/:name/publish` is mounted for single-segment names
-only, while its read twin `GET /meta/:type/:section/:name/published` is mounted
-for both — so a compound-named draft is writable and readable over REST and not
-promotable there. Until that route exists, promote through
-`POST /packages/:id/publish-drafts` (whole-package) or the runtime dispatcher's
-own `meta.publish` verb. Tracked in #11932; this release does not change it.
+The draft you can now stage **is** promotable per item over REST, as of the
+sibling entry in this same release: `POST /meta/:type/:section/:name/publish`
+is mounted (#11932). This paragraph used to say the opposite — that the
+promotion door existed for single-segment names only, so a compound-named draft
+was writable and readable over REST and not promotable there — and it was true
+when this entry was written. It is corrected here rather than left standing,
+because both entries compile into one release and a reader would otherwise be
+told in one paragraph that the door does not exist and in the next that it does.
+`POST /packages/:id/publish-drafts` (whole-package) and the runtime dispatcher's
+own `meta.publish` verb remain available and unchanged; they were never the
+per-item door.
 
 **2. A repeated `?mode` is now REFUSED where it was accepted.** This narrows
 what the door takes. `?mode=draft&mode=draft` arrives as an array; the
