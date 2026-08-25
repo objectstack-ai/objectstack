@@ -85,6 +85,28 @@ expect allow 'grep -rn "cd x && git stash pop" .claude/'
 expect allow 'echo "never run git stash pop in a shared checkout"'
 expect allow 'git grep -n "git stash"'
 
+echo "== an UNQUOTED \\\" opens no quote, so the stash behind it is still seen (#11738) =="
+# The measured hole: segmentation read the escaped `"` as OPENING a quoted region that never
+# closed. Every separator behind it went inert, the whole command collapsed into a single
+# `echo` segment, and the real `git stash pop` was just another argument. Same repair
+# guard-main-checkout-bash.sh's split_segments() took in #11131. Every case below was
+# ALLOWED before that branch existed; the bare forms next door are the controls that say
+# the guard was reached at all.
+expect block 'echo \" ; git stash'
+expect block 'echo \" ; git stash pop'
+expect block 'echo \" && git stash pop'
+expect block 'printf \" ; git stash drop'
+expect block 'echo \" ; git -C ../objectstack-issue-11738 stash pop'
+expect block "$(printf 'echo \\"\ngit stash pop\n')"
+# Precision twins: the escape must not manufacture a block where nothing touches the stack,
+# and the read-only and SHA-pinned forms stay allowed behind one.
+expect allow 'echo \" ; echo hello'
+expect allow 'echo \" ; git status'
+expect allow 'echo \" ; git stash list'
+expect allow 'echo \" ; git stash apply abc1234'
+expect allow 'echo a\ b'
+expect allow 'echo \\ ; git status'
+
 echo "== escape hatch =="
 expect allow 'git stash pop' OS_ALLOW_STASH=1
 

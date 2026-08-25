@@ -1632,6 +1632,43 @@ describe('ObjectSchema semantic roles (ADR-0085)', () => {
   });
 });
 
+describe('ObjectSchema editMode (#11408 — declared by maintainer ruling, #10144 family)', () => {
+  it('accepts both enum values through the strict parse and carries them on the output', () => {
+    // Full parse green (not merely "no unrecognized_keys"): the ruling adopts
+    // the key as authored surface, so a legal document must parse end to end.
+    const modal = ObjectSchema.parse({ name: 'task', fields: {}, editMode: 'modal' });
+    expect(modal.editMode).toBe('modal');
+    const page = ObjectSchema.parse({ name: 'task', fields: {}, editMode: 'page' });
+    expect(page.editMode).toBe('page');
+  });
+
+  it('stays optional: an object without editMode parses and the output carries no value', () => {
+    const parsed = ObjectSchema.parse({ name: 'task', fields: {} });
+    expect(parsed.editMode).toBeUndefined();
+  });
+
+  it('rejects a value outside the enum, as a VALUE error located at editMode — not unrecognized_keys', () => {
+    // Before #11408 the failure mode was `unrecognized_keys` at the top level
+    // (the key itself was unknown). Declaring the key moves the judgment to
+    // the VALUE: a bad spelling must now fail as an enum error at the
+    // `editMode` path, proving the key is recognised and its value contract
+    // is enforced.
+    for (const bad of ['drawer', 'inline', true, 3] as const) {
+      const result = ObjectSchema.safeParse({ name: 'task', fields: {}, editMode: bad });
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.error.issues[0].code).not.toBe('unrecognized_keys');
+        expect(result.error.issues[0].path).toEqual(['editMode']);
+      }
+    }
+  });
+
+  it('is accepted by the authoring path (create()) as well as parse()', () => {
+    const created = ObjectSchema.create({ name: 'task', fields: {}, editMode: 'page' });
+    expect(created.editMode).toBe('page');
+  });
+});
+
 describe('ObjectSchema.fieldGroups', () => {
   it('should accept an object without fieldGroups (fully optional)', () => {
     const result = ObjectSchema.safeParse({

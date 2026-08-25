@@ -809,9 +809,10 @@ async function selfTest() {
       );
     }
 
-    // And the live tree. This is also the only wired coverage of the OTHER
-    // gate's call site: `pnpm check:slot-lookup` has no --self-test hook, and
-    // CI runs this one before the gate itself.
+    // And the live tree. This is also the only coverage of the OTHER gate's
+    // call site: `pnpm check:slot-lookup` ships a `--self-test` of its own
+    // (#12052) but does not repeat this adoption walk, and CI runs this one
+    // ahead of either gate.
     for (const problem of checkGuardAdoption(repoRoot)) assert(false, problem);
   }
 

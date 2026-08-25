@@ -281,7 +281,15 @@ export const CEILINGS = new Map([
   // 2026-08-20, verbatim and untranslated: 「A — 抬上限到 961 (Recommended)」
   // (issue #10126, comment 5353111732). Headroom is 0 again by construction, and
   // the next author needing a line is back to compressing.
-  ['AGENTS.md', 1149],
+  //
+  // 1149 → 1150 (#11819): Prime Directive #15's warrant sentence described the
+  // Version Packages PR as regenerated "on every push to main" — false since the
+  // #11233 trigger split. The correct sentence (six-hourly schedule; push drives
+  // the publish lane) is longer, and the whole paragraph measures zero lossless
+  // rewrap headroom, so the correction costs one line. Maintainer ruling
+  // 2026-08-25, verbatim and untranslated, accepting the measured +1/D1 option:
+  // 「我看到了,你分析过了,接受你的建议」. Headroom is 0 again by construction.
+  ['AGENTS.md', 1150],
   // #9965: root CLAUDE.md is the other repo-root instruction file — same read
   // path (every seat session), same governance (Prime Directive #14). It is
   // structurally growth-prone in the way the ratchet is built for: it exists to

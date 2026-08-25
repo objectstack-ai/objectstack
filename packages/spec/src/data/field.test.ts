@@ -444,6 +444,99 @@ describe('FieldSchema', () => {
         }
       });
     });
+
+    /**
+     * #11949 (maintainer ruling 2026-08-25) — `minLength` converges on the
+     * #11566 template above: `maxLength`'s twin defect pair (no shape
+     * validation + authorable on every type), the same convergence. The lower
+     * bound is deliberately 1: `minLength: 0` is a permanently-true
+     * declaration ("no minimum" is expressed by omitting the key), exactly
+     * the vacuous noise an AI metadata author mass-produces, so it is
+     * refused loudly at authoring rather than parsing cleanly and asserting
+     * nothing.
+     */
+    describe('malformed or misplaced minLength declarations are refused at authoring (#11949)', () => {
+      const shapeCases: Array<[value: number, code: string]> = [
+        [0, 'too_small'],     // the ruled fork: a vacuous "no minimum" declaration
+        [-5, 'too_small'],
+        [12.5, 'invalid_type'], // non-integer count
+      ];
+      for (const [value, code] of shapeCases) {
+        it(`refuses minLength: ${value} on a text field with a ${code} issue at [minLength]`, () => {
+          const result = FieldSchema.safeParse({
+            name: 'title', label: 'Title', type: 'text', minLength: value,
+          });
+          expect(result.success).toBe(false);
+          if (!result.success) {
+            const issue = result.error.issues.find((i) => i.path[0] === 'minLength');
+            expect(issue?.code).toBe(code);
+            // Message substance, not just a throw: the refusal names what a
+            // legal value looks like (int / >=1), so an AI author can fix it.
+            expect(issue?.message).toMatch(code === 'invalid_type' ? /expected int/ : />=1/);
+          }
+        });
+      }
+
+      // Same representative families as the maxLength block above — the
+      // base-schema placement this key is converging away from — including
+      // `secret` and `color`, the near-misses the #11875 ruling explicitly
+      // left OUT of the set.
+      const wrongTypes = [
+        'boolean', 'number', 'date', 'select', 'lookup', 'autonumber',
+        'formula', 'json', 'secret', 'color',
+      ] as const;
+      for (const type of wrongTypes) {
+        it(`refuses minLength on type: '${type}' with a custom issue at [minLength]`, () => {
+          const result = FieldSchema.safeParse({
+            name: 'f', label: 'F', type, minLength: 3,
+          });
+          expect(result.success).toBe(false);
+          if (!result.success) {
+            const issue = result.error.issues.find((i) => i.path[0] === 'minLength');
+            expect(issue?.code).toBe('custom');
+            // The refusal names the legal set and the offending type, so an
+            // AI author can fix the declaration without leaving the message.
+            expect(issue?.message).toMatch(/bounded string/);
+            expect(issue?.message).toContain(`\`${type}\``);
+          }
+        });
+      }
+
+      it('accepts a positive-integer minLength on every bounded-string type, round-tripping byte-identically', () => {
+        // Hardcoded on purpose (not iterated off the export) so this test is
+        // an independent measurement of the set, not a tautology. Ten at
+        // #11566; `signature` / `qrcode` joined in #11875.
+        const twelve = [
+          'text', 'textarea', 'email', 'url', 'phone', 'password',
+          'markdown', 'html', 'richtext', 'code', 'signature', 'qrcode',
+        ] as const;
+        for (const type of twelve) {
+          const result = FieldSchema.safeParse({
+            name: 'f', label: 'F', type, minLength: 2,
+          });
+          expect(result.success).toBe(true);
+          if (result.success) expect(result.data.minLength).toBe(2);
+        }
+      });
+
+      it('accepts minLength: 1 (the lower bound is 1, not 2) and both bounds together', () => {
+        const result = FieldSchema.safeParse({
+          name: 'f', label: 'F', type: 'text', minLength: 1, maxLength: 255,
+        });
+        expect(result.success).toBe(true);
+        if (result.success) {
+          expect(result.data.minLength).toBe(1);
+          expect(result.data.maxLength).toBe(255);
+        }
+      });
+
+      it('absent minLength stays absent — no default materializes, on any type', () => {
+        for (const type of ['text', 'boolean', 'lookup'] as const) {
+          const result = FieldSchema.parse({ name: 'f', label: 'F', type }) as Record<string, unknown>;
+          expect('minLength' in result).toBe(false);
+        }
+      });
+    });
   });
 
   describe('useGrouping — number-field digit-grouping presentation hint (#7768)', () => {

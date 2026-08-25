@@ -27,6 +27,7 @@ import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protoco
 import { SchemaRegistry } from './registry.js';
 import { assertEngineDeleteDispatch } from './engine-delete-dispatch.js';
 import { assertEngineUpdateDispatch } from './engine-update-dispatch.js';
+import { assertEngineFindOnePredicate } from './engine-findone-predicate.js';
 
 const PKG = 'app.showcase';
 const OBJ = 'showcase_account';
@@ -66,6 +67,12 @@ function makeSession() {
     const engine: any = {
         registry,
         async findOne(table: string, o: { where: Record<string, unknown> }) {
+            // [#11957] Pinned to ObjectQL.findOne's OWN #4419 predicate: `findOne`
+            // applies limit: 1, so a query naming no record returns an ARBITRARY row
+            // and the engine REFUSES it. A double that answers it anyway is how
+            // #11767 shipped a bootstrap bypass that was inert on every real
+            // deployment while a 641-line unit matrix stayed green.
+            assertEngineFindOnePredicate(table, o);
             if (table === 'sys_metadata_history') return historyRows.find((h) => matchesWhere(h, o.where)) ?? null;
             if (table !== 'sys_metadata') return null;
             return findRow(o.where)?.row ?? null;
