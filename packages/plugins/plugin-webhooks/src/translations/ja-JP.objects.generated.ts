@@ -17,7 +17,7 @@ import type { TranslationData } from '@objectstack/spec/system';
 export const jaJPObjects: NonNullable<TranslationData['objects']> = {
   sys_webhook: {
     label: "Webhook",
-    pluralLabel: "Webhook",
+    pluralLabel: "ウェブフック",
     description: "送信 HTTP Webhook サブスクリプション。defineWebhook() またはスタジオエディタで作成し、HTTP コネクタプラグインが実行します。",
     fields: {
       id: {
@@ -51,7 +51,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       method: {
         label: "HTTP メソッド",
-        help: "GET / POST / PUT / PATCH / DELETE",
+        help: "コールバックリクエストで使用する HTTP メソッド",
         options: {
           get: "GET",
           post: "POST",

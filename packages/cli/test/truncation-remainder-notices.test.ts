@@ -407,7 +407,7 @@ describe('[#11642] a pointer is only offered where it resolves', () => {
     // asserted in prose: the key each list is published under, on the very
     // exit whose text face carries the notice.
     const carried: Array<[string, string]> = [
-      ['compile.ts', "error: 'strict-body: missing body', issues }"],
+      ['compile.ts', "error: 'strict-body: missing body', issues,"],
       ['compile.ts', "error: 'author-time rules failed', issues: ruleErrors"],
       ['compile.ts', "error: 'access matrix drift', changes: drift"],
       ['compile.ts', "error: 'docs validation failed', issues: docErrors"],
@@ -417,7 +417,14 @@ describe('[#11642] a pointer is only offered where it resolves', () => {
       // hints and the ADR-0046 doc advisories joined the two already here, so
       // "re-run with `--json` for the full list" resolves for four lists
       // rather than two.
-      ['compile.ts', 'warnings: [...ruleAdvisories, ...docWarnings, ...unknownKeyWarnings, ...capProviderWarnings],'],
+      //
+      // [#11772] Spelling updated again, claim STRONGER again: the four-list
+      // spread moved to `warningsSoFar()`, which EVERY `emitJson` exit reads —
+      // so the notice's remedy now resolves whichever later gate stops the run,
+      // not only on the exit that reaches the end. The per-exit payloads are
+      // pinned in `build-json-failure-warnings.e2e.test.ts`; what is checked
+      // here is that the notice still sits at an exit that publishes the list.
+      ['compile.ts', 'warnings: warningsSoFar(),'],
       ['validate.ts', 'errors: ruleErrors,'],
       ['validate.ts', 'errors: docErrors,'],
     ];
