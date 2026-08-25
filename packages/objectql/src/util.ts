@@ -42,6 +42,17 @@ export interface IntrospectedColumn extends SpecIntrospectedColumn {
    * — is the contract sentence; this is the consumer-side copy of the same
    * key and must not drift from it. An absent flag on a composite member
    * means "not single-column unique", never "no constraint".
+   *
+   * A PRIMARY KEY is NOT a unique constraint to this flag (#11654), on any
+   * dialect and for any key type. `isUnique` means a *declared*
+   * single-column UNIQUE constraint; key membership has a lossless face of
+   * its own ({@link IntrospectedTable.primaryKeys} and `primaryKey` below),
+   * so excluding keys keeps the two flags non-overlapping and drops no
+   * fact. Note this is a statement about what KIND of constraint the flag
+   * reports, never a claim that a key column admits duplicates. A key
+   * column that separately carries its own single-column unique constraint
+   * is still flagged — the constraint is what is being reported, not the
+   * column.
    */
   isUnique?: boolean;
   /**
@@ -57,12 +68,33 @@ export interface IntrospectedColumn extends SpecIntrospectedColumn {
 export interface IntrospectedForeignKey {
   /** Column name in the source table */
   columnName: string;
-  /** Referenced table name */
+  /**
+   * Referenced table name — always the BARE name, never schema-qualified
+   * (#11377). When the parent lives outside the introspecting session's
+   * resolution scope, the qualification arrives as {@link referencedSchema}.
+   */
   referencedTable: string;
   /** Referenced column name */
   referencedColumn: string;
   /** Constraint name */
   constraintName?: string;
+  /**
+   * The parent table's schema, present when — and only when — the parent
+   * lives OUTSIDE the introspecting session's resolution scope, i.e. when the
+   * bare {@link referencedTable} name is NOT what that session would resolve
+   * to the parent (#11377). Absent (never `undefined`) for an in-scope
+   * parent. The producer's declaration — `SqlDriver`'s
+   * `IntrospectedForeignKey.referencedSchema` in `@objectstack/driver-sql` —
+   * is the contract sentence; this is the consumer-side copy of the same key
+   * and must not drift from it.
+   *
+   * A consumer that turns `referencedTable` into an object reference must
+   * read this key: a bare name the session cannot resolve either points at
+   * nothing or — the #11201 collision family — at a same-named table in the
+   * current schema. {@link convertIntrospectedSchemaToObjects} refuses to
+   * wire a lookup for such a key and says so loudly.
+   */
+  referencedSchema?: string;
 }
 
 /**
@@ -169,6 +201,19 @@ function mapDatabaseTypeToFieldType(
  *
  * This allows using existing database tables without manually defining metadata.
  *
+ * ## A foreign key whose target carries `referencedSchema` is NOT wired (#11377)
+ *
+ * `referencedSchema` present means the parent lives outside the introspecting
+ * session's resolution scope, so the bare `referencedTable` name is not an
+ * address: as an object `reference` it either points at nothing or — the
+ * #11201 collision family — at a same-named table in the current schema,
+ * silently. Maintainer ruling (2026-08-24, on the card): such a key is LOUDLY
+ * skipped and flagged, never wired to the bare name. The column itself is
+ * kept — converted as a plain field from its database type, exactly as a
+ * column with no foreign key — so the data stays visible while the false
+ * address does not ship. The flag goes through `options.logger` (defaults to
+ * `console`, so a bare call is loud by default).
+ *
  * @param introspectedSchema - The schema returned from driver.introspectSchema()
  * @param options            - Optional filtering / conversion settings
  * @returns Array of ServiceObject definitions that can be registered with ObjectQL
@@ -191,12 +236,20 @@ export function convertIntrospectedSchemaToObjects(
     includeTables?: string[];
     /** Whether to skip system columns like id, created_at, updated_at (default: true) */
     skipSystemColumns?: boolean;
+    /**
+     * Where the unresolvable-foreign-key flag is delivered (#11377) — the
+     * minimal logger surface, matching `PluginContext.logger`. Defaults to
+     * `console`: the flag exists to be seen, so a caller that passes nothing
+     * still gets it loudly.
+     */
+    logger?: { warn(message: string, meta?: Record<string, unknown>): void };
   }
 ): ServiceObject[] {
   const objects: ServiceObject[] = [];
   const excludeTables = options?.excludeTables || [];
   const includeTables = options?.includeTables;
   const skipSystemColumns = options?.skipSystemColumns !== false;
+  const logger = options?.logger ?? console;
 
   for (const [tableName, table] of Object.entries(introspectedSchema.tables)) {
     if (excludeTables.includes(tableName)) continue;
@@ -213,7 +266,32 @@ export function convertIntrospectedSchemaToObjects(
       // Check for foreign key → lookup field
       const foreignKey = table.foreignKeys.find((fk) => fk.columnName === column.name);
 
-      if (foreignKey) {
+      if (foreignKey && foreignKey.referencedSchema !== undefined) {
+        // #11377: the parent lives outside the introspecting session's
+        // resolution scope — the bare name is not an address (nothing, or the
+        // #11201 wrong-object collision). Refuse the wiring loudly; the
+        // column falls through to the plain-field path below, so the data
+        // stays visible while the false reference does not ship.
+        logger.warn(
+          `[convert-introspected-schema] foreign key ${foreignKey.constraintName ?? '(unnamed)'} ` +
+            `on ${tableName}.${column.name} references ` +
+            `${foreignKey.referencedSchema}.${foreignKey.referencedTable}, a table OUTSIDE the ` +
+            `introspecting session's resolution scope — the bare name ` +
+            `"${foreignKey.referencedTable}" cannot be trusted to resolve to it, so NO lookup ` +
+            `field was created for this column; it is converted as a plain field instead. ` +
+            `Re-introspect with the parent's schema on the session's search path to wire this ` +
+            `lookup.`,
+          {
+            table: tableName,
+            column: column.name,
+            constraint: foreignKey.constraintName,
+            referencedSchema: foreignKey.referencedSchema,
+            referencedTable: foreignKey.referencedTable,
+          },
+        );
+      }
+
+      if (foreignKey && foreignKey.referencedSchema === undefined) {
         fields[column.name] = {
           name: column.name,
           type: 'lookup' as const,

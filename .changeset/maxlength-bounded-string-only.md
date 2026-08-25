@@ -1,0 +1,9 @@
+---
+'@objectstack/spec': minor
+---
+
+`FieldSchema.maxLength` tightens on both axes (#11566, maintainer ruling 2026-08-24). Shape: the key is now `z.number().int().min(1)`, so `maxLength: 0`, negative and non-integer declarations are refused at parse — none of them is a character length, and `maxLength: 0` measurably sent the SQL schema-drift planner asking for `varchar(0)` DDL at severity error/destructive before #11431 taught that consumer to defend itself. Applicability: the key sat on the base schema and was authorable on every field type; it is now refused on any type that does not store a bounded string, and accepted on exactly the write-time validator's ten — `text`, `textarea`, `email`, `url`, `phone`, `password`, `markdown`, `html`, `richtext`, `code` — the only one of the three previously-disagreeing lists with a measured reader, exported as `BOUNDED_STRING_FIELD_TYPES`.
+
+What newly gets rejected: `maxLength: 0` / negative / non-integer on any type, and `maxLength` with any value on every non-bounded-string type (`boolean`, `number`, `date`, `select`, `lookup`, `autonumber`, `formula`, `json`, `secret`, …). Both rejections are prescriptive — the message names the legal shape, the legal type set, and the fix. The two authoring forms (`field.form.ts`, previously three types; `object.form.ts`, previously nine) converge on the same ten. Already-legal declarations (a positive-integer `maxLength` on a bounded-string type) round-trip byte-identically, and absence stays absence — no default materializes.
+
+The ADR-0087 ledger entry for this narrowing is deferred to #11950 (the migration registry file was serialized behind an in-flight change when this landed), following the #8321 `scale`/`precision` template: a mechanical delete of malformed or misplaced values plus a semantic re-declare prescription at the next major boundary.

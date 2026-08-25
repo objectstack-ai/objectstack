@@ -52,9 +52,9 @@ describe('[#10729] contributes.kinds registration logging', () => {
     engine.registerApp({
       id: 'com.example.bi',
       contributes: {
-        // Exactly the schema's shape — and exactly its own documented example
-        // ("Registering a BI plugin to handle *.report.ts").
-        kinds: [{ id: 'sys.bi.report', globs: ['**/*.report.ts'] }],
+        // Exactly the schema's shape: `{ id, description? }` (`globs` was
+        // retired unread, #11169).
+        kinds: [{ id: 'sys.bi.report', description: 'BI reports' }],
       },
     });
 
@@ -73,7 +73,7 @@ describe('[#10729] contributes.kinds registration logging', () => {
 
     engine.registerApp({
       id: 'com.example.bi',
-      contributes: { kinds: [{ id: 'sys.bi.report', globs: ['**/*.report.ts'] }] },
+      contributes: { kinds: [{ id: 'sys.bi.report' }] },
     });
 
     // `registerKind` → `registerItem('kind', kind, 'id')`. The value in the log
@@ -91,7 +91,6 @@ describe('[#10729] contributes.kinds registration logging', () => {
       contributes: {
         kinds: [{
           id: 'sys.bi.report',
-          globs: ['**/*.report.ts'],
           // Neither key is declared by the schema. They are what the old line
           // reached for, so an author who copied an ancient example could put
           // them here — and the log must NOT start preferring them again.

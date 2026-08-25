@@ -371,7 +371,9 @@ const SITES = [
   },
   {
     id: 'PLURAL_TO_SINGULAR',
-    file: 'packages/spec/src/shared/metadata-collection.zod.ts',
+    // [#11503] The declaration moved out of shared/metadata-collection.zod.ts
+    // to the schema-free /meta-spelling graph; /shared re-exports it.
+    file: 'packages/spec/src/meta-spelling/manifest-collection-spelling.ts',
     what: 'plural stack key -> singular metadata type name',
     extract: (src) => {
       const b = sliceBody(src, 'export const PLURAL_TO_SINGULAR: Record<string, string> = {');
@@ -642,7 +644,7 @@ function run({ list = false } = {}) {
     return 1;
   }
 
-  const collectionSource = readSource('packages/spec/src/shared/metadata-collection.zod.ts');
+  const collectionSource = readSource('packages/spec/src/meta-spelling/manifest-collection-spelling.ts');
   const singular = collectionSource ? pluralToSingularMap(collectionSource) : null;
 
   console.log(

@@ -5172,7 +5172,30 @@ const step18: MigrationStep = {
     'other authorable carrier and leave with the key (RETIRED_DEFS_BY_MAJOR[18]); the live ' +
     'per-breakpoint channel on a page component is `responsiveStyles` (ADR-0065), which ' +
     'objectui really compiles. The mechanical conversion strips the key from stored pages ' +
-    '(pure lossless delete — it never had an effect to lose).',
+    '(pure lossless delete — it never had an effect to lose). ' +
+    'Finally, it retires nine of the eleven members of the plugin manifest\'s ' +
+    '`contributes` block (#10724, ADR-0049 enforce-or-remove; triage graded 2026-08-21, ' +
+    'cloud census leg discharged clean 2026-08-24): `events`, `menus`, `themes`, ' +
+    '`translations`, `actions`, `drivers`, `fieldTypes`, `functions` and `commands`. ' +
+    '#10627 measured — three repos, controlled — that the whole monorepo contains exactly ' +
+    'one non-test read of `manifest.contributes`, and it reads `kinds`; the other nine ' +
+    'members parsed, entered the manifest, and changed nothing, while published docs and ' +
+    'the schema\'s own JSDoc kept teaching them (`commands` documented Commander.js ' +
+    'resolution the CLI dropped for oclif; `fieldTypes` advertised a registration seam ' +
+    'that never existed). All nine are retiredKey tombstones mirroring `loading`; ' +
+    '`kinds` survives (live reader) and `routes` is untouched pending its own fork ' +
+    '(#10726). D3 semantic, no D2 conversion: a manifest is not a stack collection ' +
+    'member, so a conversion would be a transform with no seam that ever runs. ' +
+    'On the surviving `kinds` bucket it also retires the `globs` sub-field (#11169, ' +
+    'ADR-0049 enforce-or-remove; maintainer ruling 2026-08-24): the schema promised ' +
+    'that declaring `globs` enables file-type discovery, but discovery globs ' +
+    '`filePatterns` off the metadata type registry — which `contributes.kinds` does ' +
+    'not extend, as `metadata-plugin.zod.ts` records outright — so an authored ' +
+    '`globs` was accepted, stored, served back through `GET /metadata/kind`, and ' +
+    'never consulted (zero value reads; the only non-test occurrences were the ' +
+    'schema declaration and two type positions). The `kind` bucket itself and its ' +
+    '`id` are untouched; file-type discovery stays single-channel on `filePatterns`. ' +
+    'D3 semantic `plugin-manifest-kind-globs-retired`, same no-seam reasoning.',
   conversionIds: [
     'field-malformed-scale-precision-removed',
     'record-chatter-position-vocabulary',
@@ -5274,6 +5297,29 @@ const step18: MigrationStep = {
         + 'keys at every level (cube, refreshKey, measures, dimensions, joins); '
         + 'every `/analytics/query` body\'s `timeDimensions[]` items carry only '
         + '`dimension`/`granularity`/`dateRange`. Declared keys parse byte-identically to before.',
+    },
+    {
+      id: 'audience-posture-default-invite-only',
+      surface: 'system.AuthConfig.audience',
+      replacement:
+        "explicit `auth: { audience: { posture: 'open' | 'email_domain', selfRegistrationPermissionSet: '<set>' } }` " +
+        '(deployments that intend open self-registration only)',
+      reason:
+        'The default audience posture flipped in #11739: an UNDECLARED `audience` now means ' +
+        '`invite_only` — email/password self-registration (and social-provider JIT sign-up) is ' +
+        'refused with 403 SELF_REGISTRATION_CLOSED unless the address holds a pending invitation. ' +
+        'Previously the emergent default was open self-registration with no email verification. ' +
+        'Whether a deployment truly means to admit strangers (public portal) or was open only by ' +
+        'accident is a security judgment no transform can make — and a posture that opens ' +
+        'self-registration must also DECLARE the permission set a self-registrant receives and ' +
+        'accepts forced email verification, neither of which can be invented mechanically.',
+      acceptanceCriteria:
+        'A deployment that relies on open self-registration declares `audience.posture` ' +
+        "('open', or 'email_domain' with `allowedEmailDomains`) plus `selfRegistrationPermissionSet`, " +
+        'and its sign-up flow still works end to end (verification email delivered, registrant holds ' +
+        'the declared permission set). Every other deployment verifies operators can still add users ' +
+        '(invitation, admin create-user / import, SCIM, or an operator-registered identity provider) ' +
+        'and that anonymous sign-up now answers 403 SELF_REGISTRATION_CLOSED.',
     },
     {
       id: 'cbp-master-detail-required-forced',
@@ -5808,6 +5854,101 @@ const step18: MigrationStep = {
         + 'the field deliberately when that happens.',
     },
     {
+      id: 'field-max-length-malformed-or-misplaced-refused',
+      surface: 'object field `maxLength` declarations — `maxLength: 0`, negative or non-integer '
+        + 'values on any type, and the key with any value on field types outside '
+        + '`BOUNDED_STRING_FIELD_TYPES` (`boolean`, `lookup`, `autonumber`, `formula`, `select`, '
+        + '`json`, `secret`, …)',
+      replacement: 'a positive-integer `maxLength` (>= 1) on a bounded-string field type — `text`, '
+        + '`textarea`, `email`, `url`, `phone`, `password`, `markdown`, `html`, `richtext`, `code`, '
+        + 'plus `signature`/`qrcode` since #11875 (the set is `BOUNDED_STRING_FIELD_TYPES`; the '
+        + '#11566 narrowing itself landed on the ten-member set of its day) '
+        + '— or no declaration at all. Deleting the key is mechanical and behaviour-preserving '
+        + 'for a MISPLACED declaration: the write-time validator only ever applied `max_length` '
+        + 'inside its bounded-string branch, so the key was inert by construction on every other '
+        + 'type. A MALFORMED value on a bounded-string type is the judgment case — the '
+        + 'validator\'s raw `>` comparison did consume it (`maxLength: 0` accepted only the '
+        + 'empty string, a negative value refused every write, `maxLength: 12.5` behaved as '
+        + '"at most 12"), and the SQL schema-drift planner consumed `maxLength: 0` as '
+        + '`varchar(0)` DDL until #11431 taught it to defend itself — so only the author knows '
+        + 'the bound they MEANT: re-declare it as a positive integer, or delete it deliberately '
+        + 'accepting the unbounding',
+      reason:
+        '#11566 (maintainer ruling 2026-08-24; enforcement shipped on the 17.x line in PR '
+        + '#11989 — accept-set narrowings ride minors, and this entry tells `migrate meta` users '
+        + 'at the major boundary; registration was deferred to #11950 because the registry file '
+        + 'was serialized behind an in-flight change when the enforcement landed). Shape: a '
+        + 'character length is a positive integer, so the key tightened from `z.number()` to '
+        + '`z.number().int().min(1)` — `maxLength: 0` measurably sent schema-drift planning '
+        + '`varchar(0)` DDL no server accepts, at severity error/destructive, before #11431 '
+        + 'taught that consumer to defend itself (the #8321 `precision`/`scale` house pattern). '
+        + 'Applicability: the key sat on the BASE field schema — authorable on `boolean` / '
+        + '`lookup` / `autonumber`, types where nothing bounded is stored — while the write-time '
+        + 'validator (objectql `record-validator.ts`) only ever enforced it on its ten '
+        + 'bounded-string types, the one list of the three that had a measured reader; that list '
+        + 'is promoted to the protocol as `BOUNDED_STRING_FIELD_TYPES`, the schema refuses the '
+        + 'key outside it (ADR-0078 declared=enforced), and both authoring forms '
+        + '(`field.form.ts`, previously 3 types; `object.form.ts`, previously 9) show the key '
+        + 'for exactly that set.',
+      acceptanceCriteria:
+        'Every field declaring `maxLength` carries a positive integer and is a bounded-string '
+        + 'type. Well-formed declarations (a positive-integer `maxLength` on a bounded-string '
+        + 'type) parse byte-identically to before; fields declaring no `maxLength` are '
+        + 'untouched, and absence stays absence — no default materializes. Deleting a misplaced '
+        + 'key changes no runtime behaviour (it sat outside the validator\'s bounded-string '
+        + 'branch and enforced nothing). For a malformed value on a bounded-string type the '
+        + 'author decides: re-declare the intended positive-integer bound (enforced by the '
+        + 'write-time validator from the next write on, and honoured by schema drift as '
+        + '`varchar(n)`), or delete the key and accept the type\'s unbounded/default column '
+        + 'shape — either way the accidental old behaviour (empty-only writes under '
+        + '`maxLength: 0`, unwritable fields under a negative value) is gone by decision, not '
+        + 'by silence.',
+    },
+    {
+      id: 'field-min-length-malformed-or-misplaced-refused',
+      surface: 'object field `minLength` declarations — `minLength: 0`, negative or non-integer '
+        + 'values on any type, and the key with any value on field types outside '
+        + '`BOUNDED_STRING_FIELD_TYPES` (`boolean`, `lookup`, `autonumber`, `formula`, `select`, '
+        + '`json`, `secret`, …)',
+      replacement: 'a positive-integer `minLength` (>= 1) on a bounded-string field type — `text`, '
+        + '`textarea`, `email`, `url`, `phone`, `password`, `markdown`, `html`, `richtext`, `code`, '
+        + '`signature`, `qrcode` (the twelve-member `BOUNDED_STRING_FIELD_TYPES` set; '
+        + '`signature`/`qrcode` joined in #11875) '
+        + '— or no declaration at all ("no minimum" is expressed by OMITTING the key, never by '
+        + '`minLength: 0`). Deleting the key is mechanical and behaviour-preserving for a '
+        + 'MISPLACED declaration (the write-time validator only ever applied `min_length` inside '
+        + 'its bounded-string branch, so the key was inert by construction elsewhere) and for '
+        + '`minLength: 0` / negative values anywhere (a string length is never below zero, so the '
+        + 'check could not fire). A FRACTIONAL value on a bounded-string type is the judgment '
+        + 'case: the validator\'s raw `<` comparison did consume it (`minLength: 2.5` behaved as '
+        + '"at least 3"), so only the author knows the integer they MEANT — re-declare it '
+        + 'deliberately if the constraint was wanted',
+      reason:
+        '#11949 (maintainer ruling 2026-08-25): `minLength` carried the exact defect pair #11566 '
+        + 'closed for `maxLength`, and converges on the same template. Shape: the key was '
+        + '`z.number()`, so `minLength: -5` and `minLength: 2.5` parsed cleanly while describing '
+        + 'no character length; it is now `z.number().int().min(1)`. The lower bound is 1 by '
+        + 'ruling: `minLength: 0` is refused loudly — a vacuous always-true declaration is '
+        + 'exactly the noise an AI metadata author mass-produces, and the refusal surfaces it at '
+        + 'authoring time. Applicability: the key sat on the BASE field schema — authorable on '
+        + '`boolean` / `lookup` / `autonumber`, types where nothing bounded is stored — while the '
+        + 'write-time validator (objectql `record-validator.ts`) only ever enforced it on the '
+        + 'bounded-string set; the schema now refuses it outside `BOUNDED_STRING_FIELD_TYPES` '
+        + '(ADR-0078 declared=enforced), and both authoring forms (`field.form.ts`, previously 3 '
+        + 'types; `object.form.ts`, previously 9) show the key for exactly that set.',
+      acceptanceCriteria:
+        'Every field declaring `minLength` carries a positive integer and is a bounded-string '
+        + 'type. Well-formed declarations (a positive-integer `minLength` on a bounded-string '
+        + 'type) parse byte-identically to before; fields declaring no `minLength` are untouched, '
+        + 'and absence stays absence — no default materializes. Deleting a misplaced key or a '
+        + '`0`/negative value changes no runtime behaviour (misplaced keys sat outside the '
+        + 'validator\'s bounded-string branch; a `0`/negative bound could never fire). Deleting a '
+        + 'fractional value on a bounded-string type relaxes the write seam by up to one '
+        + 'character — the author decides whether to delete or re-declare the integer they '
+        + 'meant; a wanted minimum is re-declared as a positive integer and enforced by the '
+        + 'write-time validator from the next write on.',
+    },
+    {
       id: 'field-scale-precision-integer-refused',
       surface: 'object field `scale` / `precision` declarations (`Field.number` and friends) — '
         + 'non-integer or negative values (`scale: 2.5`, `precision: -1`)',
@@ -6013,6 +6154,47 @@ const step18: MigrationStep = {
         + 'before and after.',
     },
     {
+      id: 'object-grid-data-view-data-converged',
+      surface:
+        "`object-grid` component props — `data` (the KIND: bare array `z.array(z.unknown())` "
+        + 'vs the `ViewDataSchema` provider object)',
+      replacement:
+        "`ViewDataSchema` — the provider-discriminated object (`provider: 'object' | 'api' | "
+        + "'value' | 'schema'`). Static inline rows move from `data: [...]` to "
+        + "`data: { provider: 'value', items: [...] }` — the same rows, wrapped in the one "
+        + 'arm that means "hardcoded data array". The other three arms are unchanged '
+        + '`ViewDataSchema` semantics; `staticData` (the deprecated bare-array shortcut the '
+        + 'renderer still reads) keeps its shape but is not the prescription',
+      reason:
+        'Two entries of one contract disagreed on the KIND (objectui#6207, contract-vs-'
+        + "contract): `ComponentPropsMap['object-grid'].data` said bare array ('Static inline "
+        + "rows — bypasses the object query') while `ViewDataSchema` — the authority "
+        + 'objectui#5090 ruled the registry declaration against, pinned by '
+        + '`gridDataInputContract.test.ts`, and what `ObjectGridSchema.data` resolves to — is '
+        + "an object discriminated on `provider`. Measured on @objectstack/spec@17.2.0: "
+        + "`{ provider: 'value', items: [] }` — the pinned-legal form — was REFUSED by the "
+        + 'props-map entry (`expected array, received object`) while the bare array parsed. '
+        + 'Whichever authority a value satisfied, the other refused it, and the objectui '
+        + 'parity gate had to carry the reasoned exemption `object-grid.data:object` to look '
+        + 'away. The maintainer ruling (2026-08-25, batch adjudication batch 4; verbatim: '
+        + '「同意」, Option A) converged the props-map entry onto `ViewDataSchema`; the '
+        + 'bare-array form is the deprecated `staticData` shortcut the objectui#4648 '
+        + 'carve-out already refuses to publish. The ruled migration check ran with the '
+        + 'change: the sweep of generated artifacts, templates and first-party corpora '
+        + '(examples/, skills/, create-objectstack, spec fixtures) found ZERO bare-array '
+        + '`data` authors, so no rewrite ships — this entry carries the prescription for '
+        + 'authors outside the repo.',
+      acceptanceCriteria:
+        "`ComponentPropsMap['object-grid'].safeParse({ data: { provider: 'value', items: [] } })` "
+        + 'succeeds (and the other `ViewDataSchema` arms parse through the same entry); a '
+        + 'bare-array `data: [...]` is refused at the `data` path. An author carrying '
+        + "`data: [...]` writes `data: { provider: 'value', items: [...] }` — same rows, "
+        + 'one wrapping object. Downstream (objectui, after a released spec version reaches '
+        + 'the pin): the `object-grid.data:object` exemption entry in '
+        + '`registry-inputs-spec-parity.test.ts` becomes deletable, which is what closes '
+        + 'objectui#6207.',
+    },
+    {
       id: 'object-index-unknown-keys-refused',
       surface: 'object `indexes[]` entries (`IndexSchema`) — undeclared keys',
       replacement: 'the declared surface: `name` / `fields` / `unique` (ADR-0120 scope). A key that '
@@ -6036,6 +6218,98 @@ const step18: MigrationStep = {
         + 'byte-identically to before, at every ADR-0120 `unique` spelling. A stored body from the '
         + 'drift window carrying `indexes[].where` is rejected with the database-layer prescription '
         + 'rather than saved with the key silently dropped.',
+    },
+    {
+      id: 'plugin-manifest-contributes-dead-members-retired',
+      surface:
+        'manifest.contributes.events / manifest.contributes.menus / manifest.contributes.themes / '
+        + 'manifest.contributes.translations / manifest.contributes.actions / '
+        + 'manifest.contributes.drivers / manifest.contributes.fieldTypes / '
+        + 'manifest.contributes.functions / manifest.contributes.commands (nine of the block\'s '
+        + 'eleven members; `kinds` and `routes` are NOT part of this retirement)',
+      replacement:
+        'delete the keys — each capability already has its one enforced channel: `events` → '
+        + "subscribe imperatively in plugin code (`ctx.hook('kernel:ready', …)` from `init`/`start`); "
+        + '`menus` → the app `navigation` tree or `manifest.navigationContributions` (ADR-0029 D7); '
+        + '`themes` → the stack-level `themes` metadata collection (an unrelated `ThemeSchema` '
+        + 'surface); `translations` → the `translation` metadata type, authored with '
+        + '`defineTranslationBundle` in `defineStack({ translations })`; `actions` → the stack '
+        + '`actions` collection or `engine.registerAction`; `drivers` → register a kernel service '
+        + 'named `driver.*` (objectql calls `registerDriver` on it); `fieldTypes` → nothing (no '
+        + 'registration seam exists; the vocabulary is the spec `FieldType` enum); `functions` → '
+        + '`defineStack({ functions })` → `engine.registerFunction`; `commands` → oclif native '
+        + "plugin auto-discovery (an `oclif` section in the plugin's own `package.json`; see "
+        + '`cli-extension.zod.ts`)',
+      reason:
+        'ADR-0049 enforce-or-remove; #10724 (triage graded 2026-08-21, cloud precondition '
+        + 'discharged 2026-08-24). #10627 measured, monorepo-wide and non-test with control probes, '
+        + 'that the ENTIRE monorepo contains exactly one read of `manifest.contributes` — '
+        + '`packages/objectql/src/engine.ts`, member `kinds` — so all nine members above parsed, '
+        + 'entered the manifest, and changed nothing. The census stands on three repos: objectstack '
+        + '(re-verified on current main at claim time), objectui (0 property reads; control: 63 '
+        + 'files carry the bare word), and cloud (measured clean 2026-08-24 at `5b5925a`: zero '
+        + '`manifest.contributes` reads, controls held). Several members were actively misleading: '
+        + '`events` was authored in-repo by a plugin that already subscribes imperatively; '
+        + '`commands` documented Commander.js resolution the CLI dropped for oclif auto-discovery; '
+        + '`fieldTypes` advertised a registration seam that has never existed. '
+        + 'Why D3 semantic and not a D2 conversion: the conversion chain walks a normalized STACK '
+        + 'and `PLURAL_TO_SINGULAR` has no `packages` / `plugins` entry, so a manifest is not a '
+        + 'stack collection member and a conversion would be a transform with no seam that ever '
+        + 'runs (the `kernel/Manifest:loading` precedent, recorded verbatim in its retired-key '
+        + 'entry).',
+      acceptanceCriteria:
+        'No `objectstack.config.ts` manifest and no packaged `manifest.json` authors any of the '
+        + 'nine members. The enforced channel is the one place a manifest is parsed with an author '
+        + 'present: `os plugin build` runs `ManifestSchema.safeParse` and exits non-zero printing '
+        + 'the per-key tombstone prescription; TypeScript authors fail earlier still (each key is '
+        + 'typed `never`). `contributes.kinds` keeps parsing and registering '
+        + '(`registry.registerKind`), and `contributes.routes` is untouched pending its own fork '
+        + '(#10726). ⚠️ Runtime behaviour is deliberately UNCHANGED and must be verified as such: '
+        + 'nothing ever read the nine members, so removing them removes no behaviour. A package '
+        + 'ALREADY INSTALLED whose stored manifest carries one degrades to a single '
+        + '`[metadata_spec_invalid]` log line at registration (the registry\'s `validate()` is a '
+        + 'diagnostic, not a gate) rather than a boot failure; clear it by deleting the key from '
+        + 'the source manifest and reinstalling.',
+    },
+    {
+      id: 'plugin-manifest-kind-globs-retired',
+      surface: 'manifest.contributes.kinds[].globs (the `kind` bucket itself and its `id` are untouched)',
+      replacement:
+        'delete the key — a kind entry is `{ id, description? }`. File-type discovery is '
+        + "single-channel on the metadata type registry's `filePatterns` "
+        + '(`MetadataTypeSchema`, registered via `registerMetadataTypeSchema` / the default '
+        + 'registry), which `contributes.kinds` never extended; if plugin-extensible '
+        + 'discovery is ever wanted, it gets designed against that registry, not revived '
+        + 'here',
+      reason:
+        'ADR-0049 enforce-or-remove; #11169, maintainer ruling 2026-08-24 (「接受你的建议。」) on '
+        + 'the aligned four-facet analysis. The sub-field was declared-but-unenforced on an '
+        + 'authorable published surface: the schema promised that declaring `globs` "enables the '
+        + 'system to parse and validate new file types" (its own example: a BI plugin handling '
+        + '`*.report.ts`), and the platform accepted it, stored it, and served it back through '
+        + '`GET /metadata/kind` — while the discovery the description promised never ran, because '
+        + 'real glob-driven artifact discovery reads `filePatterns` off the metadata type registry '
+        + 'and `metadata-plugin.zod.ts` records outright that `contributes.kinds` does not extend '
+        + 'it. Measured in PR #11168 and re-verified at claim time with the card\'s positive '
+        + 'control: zero value reads anywhere (the only non-test occurrences of the path are the '
+        + 'schema declaration and two type positions), and no in-repo manifest authors the key '
+        + 'outside test fixtures. Enforce was weighed and rejected on all four facets: it would '
+        + 'build a SECOND discovery channel parallel to `filePatterns` for a spelling with zero '
+        + 'pull. Why D3 semantic and not a D2 conversion: a manifest is not a stack collection '
+        + 'member (`PLURAL_TO_SINGULAR` has no `packages`/`plugins` entry), so a conversion would '
+        + 'be a transform with no seam that ever runs.',
+      acceptanceCriteria:
+        'An authored `contributes.kinds[].globs` is a loud rejection through every '
+        + 'spec-validating path — `retiredKey()` types it `never` (tsc error at the authoring '
+        + 'site) and the parse raises the prescription itself (`os plugin build` exits non-zero '
+        + 'printing it). `contributes.kinds` with `{ id, description? }` still parses and still '
+        + 'registers (`engine` → `registry.registerKind`), and the registered bucket stays '
+        + 'reachable via `GET /metadata/kind`. ⚠️ Runtime behaviour is deliberately UNCHANGED '
+        + 'and must be verified as such: nothing read the value, so removing it removes no '
+        + 'behaviour; the `registerKind` / `getAllKinds` type positions drop `globs` from their '
+        + 'declared shapes (a type-only change — the parameter widens). A stored kind item that '
+        + 'still carries `globs` keeps serving as stored data; clear it by deleting the key from '
+        + 'the source manifest and republishing.',
     },
     {
       id: 'record-chatter-position-vocabulary-converged',
@@ -6080,6 +6354,38 @@ const step18: MigrationStep = {
         + "'bottom'. If a panel relied on the old schema default `collapsible: true`, author "
         + '`collapsible: true` explicitly — an unset key now defers to the renderer, which does '
         + 'not collapse.',
+    },
+    {
+      id: 'send-template-input-org-retired',
+      surface: 'contracts.emailService.sendTemplate input.org',
+      replacement:
+        '(removed — never implemented; delete the key from the call. It is NOT replaced by '
+        + '`organizationId`: that member is the delivery row\'s tenant stamp '
+        + '(`sys_email.organization_id` pass-through, #11741) and opts into no template overlay '
+        + 'resolution)',
+      reason:
+        'ADR-0049 enforce-or-remove (#11832). `SendTemplateInput.org` was declared as "Tenant id '
+        + 'for org-overlay resolution (when supported)" and no implementation ever read it: '
+        + '`@objectstack/plugin-email` — the only IEmailService implementation — resolves templates '
+        + 'on `(name, locale)` only, so a caller passing `org` got no org-overlay resolution and no '
+        + 'error; the "(when supported)" hedge was the declaration admitting the gap. After #11741 '
+        + 'landed `organizationId` beside it, the input carried two org-shaped keys of which one did '
+        + 'nothing — exactly the shape that invites an AI author to pick the wrong one. There is no '
+        + 'behaviour to preserve and nothing stored to rewrite: the key only ever appeared in a '
+        + 'call-time input bag (the `data.engine.update options.upsert` precedent), which is why '
+        + 'this is a D3 semantic entry with no D2 conversion — no metadata seam ever runs on it. '
+        + 'Org-overlay template resolution, if it ever earns a measured business pull, is a new '
+        + 'capability with its own ruling — not this key revived.',
+      acceptanceCriteria:
+        'No caller passes `org` to `IEmailService.sendTemplate()`. The enforcement channel is the '
+        + 'compiler: `SendTemplateInput` is a programmatic contracts interface with no Zod surface, '
+        + 'so authoring `org` is an excess-property `tsc` error (pinned in '
+        + '`packages/spec/src/contracts/email-service.test.ts`). Runtime behaviour is deliberately '
+        + 'UNCHANGED: nothing ever read the member, so removing it removes no behaviour — a '
+        + 'JavaScript caller still passing `org` keeps its exact pre-removal outcome (the key is '
+        + 'carried inert and ignored). Template resolution still keys on `(name, locale)`, and '
+        + '`organizationId` still stamps `sys_email.organization_id` without acquiring any overlay '
+        + 'semantics.',
     },
     // Registered as D3 SEMANTIC and deliberately NOT as a D2 conversion, on the
     // D2 scope guard (lossless only — the `owd-legacy-read-aliases` / `'full'`
@@ -6680,6 +6986,150 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // conversion `metric-filters-removed`, which strips the key from every metric
     // in `analyticsCubes[].measures`.
     'data/Metric:filters',
+    // #10724 — ADR-0049 enforce-or-remove on the plugin manifest's `contributes`
+    // block; one of NINE members tombstoned together. Census, registration major,
+    // and the why-no-D2-conversion reasoning are recorded once in the sibling
+    // entry `kernel/Manifest:contributes.events` (this family) and in
+    // `kernel/Manifest:loading` (the precedent); the D3 semantic entry is
+    // `plugin-manifest-contributes-dead-members-retired`.
+    //
+    // `actions` declared invocable server actions nothing ever registered. The
+    // working surfaces are the stack `actions` collection (METADATA_ARRAY_KEYS,
+    // registered by the engine) and `engine.registerAction`.
+    'kernel/Manifest:contributes.actions',
+    // #10724 — ADR-0049 enforce-or-remove on the plugin manifest's `contributes`
+    // block; one of NINE members tombstoned together. Census, registration major,
+    // and the why-no-D2-conversion reasoning are recorded once in the sibling
+    // entry `kernel/Manifest:contributes.events` (this family) and in
+    // `kernel/Manifest:loading` (the precedent); the D3 semantic entry is
+    // `plugin-manifest-contributes-dead-members-retired`.
+    //
+    // `commands` documented Commander.js runtime resolution as current behaviour;
+    // the CLI never resolved commands from it. Commands are auto-discovered via
+    // oclif's native plugin system (`cli-extension.zod.ts` records the migration:
+    // "The `objectstack.config.ts` plugins array no longer determines CLI
+    // commands").
+    'kernel/Manifest:contributes.commands',
+    // #10724 — ADR-0049 enforce-or-remove on the plugin manifest's `contributes`
+    // block; one of NINE members tombstoned together. Census, registration major,
+    // and the why-no-D2-conversion reasoning are recorded once in the sibling
+    // entry `kernel/Manifest:contributes.events` (this family) and in
+    // `kernel/Manifest:loading` (the precedent); the D3 semantic entry is
+    // `plugin-manifest-contributes-dead-members-retired`.
+    //
+    // `drivers` declared storage drivers nothing ever read. A driver is wired by
+    // registering a kernel SERVICE named `driver.*` (objectql's plugin calls
+    // `registerDriver` on it); the only in-repo author (driver-memory) was
+    // registered that way, not by its declaration.
+    'kernel/Manifest:contributes.drivers',
+    // #10724 — ADR-0049 enforce-or-remove on the plugin manifest's `contributes`
+    // block (triage graded 2026-08-21; cloud leg measured clean 2026-08-24). One
+    // of NINE members tombstoned together: #10627 measured exactly ONE non-test
+    // read of `manifest.contributes` monorepo-wide (engine.ts, member `kinds`),
+    // with controls, re-verified across objectstack + objectui + cloud at claim
+    // time. `events` in particular was decorative twice over: its only in-repo
+    // author (plugin-hono-server) already subscribed to the same events
+    // imperatively in plugin code, so the declaration drove nothing even for the
+    // one package that wrote it.
+    //
+    // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
+    // tombstone ships on the 17.x line (launch-window convention) and the
+    // prescription lives at the major boundary where `migrate meta` users look.
+    //
+    // Registered here but NOT in `src/conversions/registry.ts`, for the reason
+    // `kernel/Manifest:loading` gives: a package manifest is not a stack
+    // collection member (`PLURAL_TO_SINGULAR` has no `packages` / `plugins`
+    // entry), so a D2 conversion would be a transform with no seam that ever
+    // runs. The prescription reaches authors through the tombstone at
+    // `os plugin build` → `ManifestSchema.safeParse` and through the D3 semantic
+    // entry `plugin-manifest-contributes-dead-members-retired`.
+    'kernel/Manifest:contributes.events',
+    // #10724 — ADR-0049 enforce-or-remove on the plugin manifest's `contributes`
+    // block; one of NINE members tombstoned together. Census, registration major,
+    // and the why-no-D2-conversion reasoning are recorded once in the sibling
+    // entry `kernel/Manifest:contributes.events` (this family) and in
+    // `kernel/Manifest:loading` (the precedent); the D3 semantic entry is
+    // `plugin-manifest-contributes-dead-members-retired`.
+    //
+    // `fieldTypes` advertised an extension point the platform does not have:
+    // there is no `registerFieldType` seam anywhere — zero hits monorepo-wide.
+    // The field-type vocabulary is the spec `FieldType` enum.
+    'kernel/Manifest:contributes.fieldTypes',
+    // #10724 — ADR-0049 enforce-or-remove on the plugin manifest's `contributes`
+    // block; one of NINE members tombstoned together. Census, registration major,
+    // and the why-no-D2-conversion reasoning are recorded once in the sibling
+    // entry `kernel/Manifest:contributes.events` (this family) and in
+    // `kernel/Manifest:loading` (the precedent); the D3 semantic entry is
+    // `plugin-manifest-contributes-dead-members-retired`.
+    //
+    // `functions` declared ObjectQL functions nothing ever registered from here.
+    // The working surface is `defineStack({ functions })` → hook-binder →
+    // `engine.registerFunction`.
+    'kernel/Manifest:contributes.functions',
+    // #11169 — ADR-0049 enforce-or-remove on `contributes.kinds[].globs`
+    // (maintainer ruling 2026-08-24, 「接受你的建议。」: remove via the full
+    // ceremony). The sub-field promised glob-driven file-type discovery the
+    // platform performs somewhere else: real artifact discovery globs
+    // `filePatterns` off the metadata type registry, and
+    // `metadata-plugin.zod.ts` states outright that `contributes.kinds` does not
+    // extend it. Measured (PR #11168, re-run with positive control at claim
+    // time): zero consumers — the only non-test occurrences of the path are the
+    // schema declaration and two type positions (`registerKind`'s parameter,
+    // `getAllKinds`' return), and nothing reads the value — so an authored
+    // `globs` was stored, served back through `GET /metadata/kind`, and never
+    // consulted. The `kind` bucket itself and its `id` are NOT touched: the
+    // bucket is live (engine → `registerKind`) and reachable via the generic
+    // `GET /metadata/:type` passthrough.
+    //
+    // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
+    // tombstone ships on the 17.x line (launch-window convention) and the
+    // prescription lives at the major boundary where `migrate meta` users look.
+    //
+    // Registered here but NOT in `src/conversions/registry.ts`, for the reason
+    // `kernel/Manifest:loading` gives: a package manifest is not a stack
+    // collection member, so a D2 conversion would be a transform with no seam
+    // that ever runs. The prescription reaches authors through the tombstone at
+    // `os plugin build` → `ManifestSchema.safeParse` and through the D3 semantic
+    // entry `plugin-manifest-kind-globs-retired`.
+    'kernel/Manifest:contributes.kinds.globs',
+    // #10724 — ADR-0049 enforce-or-remove on the plugin manifest's `contributes`
+    // block; one of NINE members tombstoned together. Census, registration major,
+    // and the why-no-D2-conversion reasoning are recorded once in the sibling
+    // entry `kernel/Manifest:contributes.events` (this family) and in
+    // `kernel/Manifest:loading` (the precedent); the D3 semantic entry is
+    // `plugin-manifest-contributes-dead-members-retired`.
+    //
+    // `menus` had the tightest control in the census: the bare word has only three
+    // non-test hits monorepo-wide — this declaration plus two alias maps that
+    // redirect the spelling to `navigation`. The working surface is app
+    // `navigation` / `manifest.navigationContributions` (ADR-0029 D7), which the
+    // engine registers.
+    'kernel/Manifest:contributes.menus',
+    // #10724 — ADR-0049 enforce-or-remove on the plugin manifest's `contributes`
+    // block; one of NINE members tombstoned together. Census, registration major,
+    // and the why-no-D2-conversion reasoning are recorded once in the sibling
+    // entry `kernel/Manifest:contributes.events` (this family) and in
+    // `kernel/Manifest:loading` (the precedent); the D3 semantic entry is
+    // `plugin-manifest-contributes-dead-members-retired`.
+    //
+    // `themes` here was a `{ id, label, path }` shape with no reader anywhere. It
+    // is UNRELATED to the stack-level `themes` collection (a `ThemeSchema`
+    // surface, itself retired as a carrier by `stack-themes-carrier-retired`):
+    // stack-level theme hits reach the registry through top-level metadata
+    // collections, never through `contributes.themes`.
+    'kernel/Manifest:contributes.themes',
+    // #10724 — ADR-0049 enforce-or-remove on the plugin manifest's `contributes`
+    // block; one of NINE members tombstoned together. Census, registration major,
+    // and the why-no-D2-conversion reasoning are recorded once in the sibling
+    // entry `kernel/Manifest:contributes.events` (this family) and in
+    // `kernel/Manifest:loading` (the precedent); the D3 semantic entry is
+    // `plugin-manifest-contributes-dead-members-retired`.
+    //
+    // `translations` promised `{ locale, path }` file registration no loader ever
+    // performed. The working surface is the `translation` metadata type — stack
+    // `translations` collection (`defineTranslationBundle`), governed by
+    // `packages/spec/liveness/translation.json`.
+    'kernel/Manifest:contributes.translations',
     // #8586 — ADR-0049 enforce-or-remove (maintainer ruling 2026-08-14, ruled
     // REMOVE). `additionalTypes` was declared, authorable, and documented on four
     // docs pages as THE way a plugin registers a custom metadata type — and read

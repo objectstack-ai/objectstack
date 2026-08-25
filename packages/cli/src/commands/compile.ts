@@ -19,7 +19,7 @@ import { buildAccessMatrix, diffAccessMatrix } from '@objectstack/lint';
 import { runAuthoringRules, splitBySeverity, authoringRulesFor } from '@objectstack/lint';
 import { resolveSduiManifest } from '../utils/sdui-manifest.js';
 import { preflightRequiredCapabilities, renderCapabilityMessage } from '../utils/capability-preflight.js';
-import { collectAndLintDocs } from '../utils/collect-docs.js';
+import { collectAndLintDocs, type DocIssue } from '../utils/collect-docs.js';
 import { buildRuntimeBundle, cleanupOldRuntimeBundles } from '../utils/build-runtime.js';
 import {
   printHeader,
@@ -83,6 +83,59 @@ export default class Compile extends Command {
       printHeader('Compile');
     }
 
+    // [#11772] THE ADVISORY LISTS THIS RUN HAS COMPUTED SO FAR, hoisted out of
+    // the `try` so that EVERY `emitJson` exit can read them — not the terminal
+    // success payload alone.
+    //
+    // The defect: `warnings` lived on the success payload only (plus, for one
+    // list, the author-time-rules failure). The text face prints the #3786
+    // undeclared-authoring-key block at 3d ending `— re-run with --json for the
+    // full list`, and #11529's advisory printer ends the same way. A build that
+    // then failed at a LATER gate (access matrix 3e, package docs 3f, the
+    // runtime bundle, or a throw caught at the bottom) emitted that gate's
+    // failure payload, and none of those carried the list — so the author was
+    // told to re-run with `--json` and got a payload without the withheld
+    // entries in it. That is the "the remedy named is unreachable" shape of
+    // #11643 and #11391.
+    //
+    // Maintainer ruling 2026-08-25, option 1 of the three the card offered:
+    // every failure exit carries the lists the run has ALREADY COMPUTED, so
+    // `warnings` means the same thing on every exit and a machine consumer has
+    // exactly one way to read it. Option 2 — carry them only where the text
+    // face printed them, making the payload's SHAPE depend on how far the run
+    // got — was rejected as the hardest contract to declare. Option 3 (weaken
+    // the pointer) was rejected as making the product worse.
+    //
+    // ⛔ CARRYING, NOT COMPUTING. Every list stays computed at exactly the step
+    // that owns it; these bindings only make the value visible to the exits
+    // DOWNSTREAM of that step. An exit that runs before a given step therefore
+    // still sees that list empty, and that is the honest reading of "what the
+    // run has already computed": hoisting a computation earlier so an early
+    // exit looks fuller would be option 2 wearing option 1's clothes, and it
+    // would change what the command costs on its failure paths as well.
+    //
+    // ORDER IS `os validate --json`'s, stated ONCE here and read by the success
+    // payload too — the "one list cannot drift from itself" idiom #11643 and
+    // #11727 applied one list over. The spread used to be written out at the
+    // payload, so a tenth exit could have been added with a different order and
+    // nothing would have caught it.
+    // Typed off `splitBySeverity` and not by naming `AuthoringFinding`: the #4409
+    // import scan (packages/lint/src/authoring-rule-wiring.test.ts) reads every
+    // symbol this file names from `@objectstack/lint` and strips `type ` rather
+    // than exempting it, and `splitBySeverity` — which produces this list — is
+    // already ratcheted there. Binding the annotation to the producer is also the
+    // tighter statement: the list cannot disagree with the function that fills it.
+    let ruleAdvisories: ReturnType<typeof splitBySeverity>['advisories'] = [];
+    let capProviderWarnings: Array<{ token: string; message: string }> = [];
+    let unknownKeyWarnings: string[] = [];
+    let docWarnings: DocIssue[] = [];
+    const warningsSoFar = () => [
+      ...ruleAdvisories,
+      ...docWarnings,
+      ...unknownKeyWarnings,
+      ...capProviderWarnings,
+    ];
+
     try {
       // 1. Load Configuration
       if (!flags.json) printStep('Loading configuration...');
@@ -141,7 +194,7 @@ export default class Compile extends Command {
         ];
         if (issues.length > 0) {
           if (flags.json) {
-            await emitJson({ success: false, error: 'strict-body: missing body', issues }, 0, { compact: true });
+            await emitJson({ success: false, error: 'strict-body: missing body', issues, warnings: warningsSoFar() }, 0, { compact: true });
             this.exit(1);
           }
           console.log('');
@@ -196,7 +249,7 @@ export default class Compile extends Command {
 
       if (!result.success) {
         if (flags.json) {
-          await emitJson({ success: false, errors: (result.error as unknown as ZodError).issues }, 0, { compact: true });
+          await emitJson({ success: false, errors: (result.error as unknown as ZodError).issues, warnings: warningsSoFar() }, 0, { compact: true });
           this.exit(1);
         }
         console.log('');
@@ -223,7 +276,8 @@ export default class Compile extends Command {
         parsed: result.data as Record<string, unknown>,
         sduiManifest: resolveSduiManifest(),
       });
-      const { errors: ruleErrors, advisories: ruleAdvisories } = splitBySeverity(findings);
+      const { errors: ruleErrors, advisories } = splitBySeverity(findings);
+      ruleAdvisories = advisories;
 
       if (ruleAdvisories.length > 0 && !flags.json) {
         console.log('');
@@ -237,7 +291,7 @@ export default class Compile extends Command {
         // Every failing rule reports at once — see the note in `validate.ts`.
         if (flags.json) {
           await emitJson(
-            { success: false, error: 'author-time rules failed', issues: ruleErrors, warnings: ruleAdvisories },
+            { success: false, error: 'author-time rules failed', issues: ruleErrors, warnings: warningsSoFar() },
             0,
             { compact: true },
           );
@@ -266,12 +320,28 @@ export default class Compile extends Command {
           : [],
         projectDir: path.dirname(absolutePath),
       });
+      // [#11727] MAPPED HERE, once, and consumed by BOTH faces — the text block
+      //     just below and the `--json` payload at the end of this command. The
+      //     hints used to be rendered inside that print block, i.e. under
+      //     `!flags.json`, so the payload could not reach them: computed, then
+      //     discarded, for the one audience `--json` exists to serve. This is
+      //     the same defect #11643 fixed one list over, and the same fix —
+      //     hoist the formatting to the computation site so one list feeds both
+      //     faces. `os validate --json` already maps to exactly this
+      //     `{ token, message }` record beside its own preflight call, so
+      //     mirroring it is what keeps the two commands from reporting
+      //     different sets. One list cannot drift from itself.
+      capProviderWarnings = capPreflight.warnings.map((c) => ({
+        token: c.token,
+        message: renderCapabilityMessage(c),
+      }));
       if (capPreflight.errors.length > 0) {
         if (flags.json) {
           await emitJson({
             success: false,
             error: 'capability provider preflight failed',
             issues: capPreflight.errors.map((c) => ({ token: c.token, message: renderCapabilityMessage(c) })),
+            warnings: warningsSoFar(),
           }, 0, { compact: true });
           this.exit(1);
         }
@@ -282,10 +352,10 @@ export default class Compile extends Command {
         }
         this.exit(1);
       }
-      if (capPreflight.warnings.length > 0 && !flags.json) {
+      if (capProviderWarnings.length > 0 && !flags.json) {
         console.log('');
-        for (const c of capPreflight.warnings) {
-          printWarning(renderCapabilityMessage(c));
+        for (const w of capProviderWarnings) {
+          printWarning(w.message);
         }
       }
 
@@ -307,7 +377,7 @@ export default class Compile extends Command {
       //     its own `normalized` — so hoisting the formatting rather than
       //     restating it at the payload is what keeps the two faces from
       //     reporting different sets. One list cannot drift from itself.
-      const unknownKeyWarnings = [
+      unknownKeyWarnings = [
         ...lintUnknownStackKeys(normalized as Record<string, unknown>, ObjectStackDefinitionSchema),
         ...lintUnknownAuthoringKeys(normalized as Record<string, unknown>, ObjectStackDefinitionSchema),
       ].map(formatUnknownAuthoringKey);
@@ -319,18 +389,18 @@ export default class Compile extends Command {
         // into the `--json` payload (`warnings`) a few lines below; it would
         // have been a dead end before that landed.
         //
-        // ⚠️ …and it resolves ON THE SUCCESS EXIT ONLY — the one conditional
-        // pointer of the nine. `warnings` lives in the terminal payload, so a
-        // build that fails at a LATER gate (access matrix 3e, package docs 3f,
-        // the runtime bundle) emits that gate's failure payload instead, and
-        // none of those carries this list: the author is told to re-run with
-        // `--json` and gets a payload without the withheld keys in it. The six
-        // error-path notices have no such gap — their `--json` branch sits in
-        // the same block as the text face. Filed as #11772; closing it means
-        // changing a `--json` payload shape, which is a machine-contract
-        // decision and not this card's. ⛔ Do not read the line above as
-        // unconditional — an unqualified claim that holds in one branch is the
-        // same shape as the silence this whole change is about.
+        // [#11772] …and it resolves on EVERY exit now, which is what makes the
+        // pointer above unconditional. It used to resolve on the SUCCESS exit
+        // alone: `warnings` lived in the terminal payload, so a build that
+        // failed at a LATER gate (access matrix 3e, package docs 3f, the
+        // runtime bundle, or a throw) emitted that gate's failure payload and
+        // none of those carried this list — the author was told to re-run with
+        // `--json` and got a payload without the withheld keys in it. Every
+        // `emitJson` exit reads `warningsSoFar()`, so this list now survives
+        // whichever later gate stops the run. ⛔ If a tenth exit is added, it
+        // carries the lists too, or this pointer goes back to being a claim
+        // that holds in one branch only — the same shape as the silence
+        // #11642 was about. `build-json-failure-warnings.e2e.test.ts` pins it.
         printBulletList(unknownKeyWarnings, {
           noun: 'undeclared authoring key(s)',
           remedy: JSON_FULL_LIST_REMEDY,
@@ -367,7 +437,7 @@ export default class Compile extends Command {
             const drift = diffAccessMatrix(committed, currentMatrix);
             if (drift.length > 0) {
               if (flags.json) {
-                await emitJson({ success: false, error: 'access matrix drift', changes: drift }, 0, { compact: true });
+                await emitJson({ success: false, error: 'access matrix drift', changes: drift, warnings: warningsSoFar() }, 0, { compact: true });
                 this.exit(1);
               }
               console.log('');
@@ -396,10 +466,22 @@ export default class Compile extends Command {
       if (!flags.json) printStep('Collecting package docs (ADR-0046)...');
       const docsResult = collectAndLintDocs(absolutePath, result.data as Record<string, unknown>);
       const docErrors = docsResult.issues.filter((i) => i.severity === 'error');
-      const docWarnings = docsResult.issues.filter((i) => i.severity === 'warning');
+      // [#11727] Consumed by BOTH faces — the text block below and the `--json`
+      //     payload. Only the text block read it before, so the advisories were
+      //     computed and then dropped for `--json`, exactly as the #3366 hints
+      //     above were. Carried into the payload as the ISSUE RECORDS
+      //     themselves, unmapped, because that is what `os validate --json`
+      //     ships (`warnings: [..., ...docWarnings, ...]` over the same
+      //     `collectAndLintDocs` output) — the text face's `path: message`
+      //     rendering is a text-face concern and stays here.
+      //
+      //     `severity === 'warning'` and validate's `severity !== 'error'`
+      //     select the same set: `DocIssue.severity` is `'error' | 'warning'`,
+      //     so there is no third value for the two spellings to disagree about.
+      docWarnings = docsResult.issues.filter((i) => i.severity === 'warning');
       if (docErrors.length > 0) {
         if (flags.json) {
-          await emitJson({ success: false, error: 'docs validation failed', issues: docErrors }, 0, { compact: true });
+          await emitJson({ success: false, error: 'docs validation failed', issues: docErrors, warnings: warningsSoFar() }, 0, { compact: true });
           this.exit(1);
         }
         console.log('');
@@ -453,7 +535,7 @@ export default class Compile extends Command {
           // pipelines can guard against accidental regressions.
           const msg = `--no-runtime-bundle requires every callable to have a metadata body (${stillNeeded} missing, ${lowering.bodyExtractionWarnings.length} extraction warning(s)). Re-run with --strict-body to see details, or omit --no-runtime-bundle.`;
           if (flags.json) {
-            await emitJson({ success: false, error: msg }, 0, { compact: true });
+            await emitJson({ success: false, error: msg, warnings: warningsSoFar() }, 0, { compact: true });
             this.exit(1);
           }
           console.log('');
@@ -477,7 +559,7 @@ export default class Compile extends Command {
             cleanupOldRuntimeBundles(artifactDir, runtimeBundle.outputFileName);
           } catch (err: any) {
             if (flags.json) {
-              await emitJson({ success: false, error: `runtime bundle failed: ${err.message}` }, 0, { compact: true });
+              await emitJson({ success: false, error: `runtime bundle failed: ${err.message}`, warnings: warningsSoFar() }, 0, { compact: true });
               this.exit(1);
             }
             console.log('');
@@ -528,7 +610,36 @@ export default class Compile extends Command {
           // ...unknownKeyWarnings, …]`, likewise a heterogeneous list). The
           // homogeneity this key used to have was not a contract; it was the
           // symptom of the omission.
-          warnings: [...ruleAdvisories, ...unknownKeyWarnings],
+          //
+          // [#11727] …and then, still, two lists short of parity: the #3366
+          // capability-provider hints and the ADR-0046 package-docs advisories
+          // were computed above and dropped under the same `!flags.json` guard
+          // the undeclared-key findings used to sit behind. Same defect, same
+          // audience, fourth instance in these two files. A CI consumer reading
+          // `warnings` off `os build --json` saw `[]` for a stack whose
+          // `requires` names an unknown capability token and whose shipped doc
+          // has unreadable frontmatter — while the same consumer reading
+          // `os validate --json` on that same tree saw both.
+          //
+          // ORDER AND SHAPE MIRROR `os validate --json` rather than being
+          // chosen here: that payload reads `[...ruleAdvisories, ...docWarnings,
+          // ...unknownKeyWarnings, ...capProviderWarnings, ...structuralWarnings]`,
+          // and this is that list minus its last member. Doc advisories ride as
+          // ISSUE RECORDS and capability hints as `{ token, message }` records,
+          // which is what validate ships for each — so a consumer reads one
+          // shape per class from either command rather than learning two.
+          //
+          // `structuralWarnings` is ABSENT ON PURPOSE, and it is not this
+          // omission's fourth sibling: `os validate` computes those four from
+          // `collectMetadataStats`, and `os compile` never computes them at all
+          // (this file has no "No objects defined" / "may not do much" string,
+          // in any face). That makes it a MISSING COMPUTATION rather than a
+          // dropped list — and whether a command that writes an artifact should
+          // advise "No apps or plugins defined" is a judgment, not a mechanical
+          // port. Measured on #11727 (this change) and split out as #11896,
+          // which is where that judgment is made — deliberately NOT this card,
+          // which #11727 closes.
+          warnings: warningsSoFar(),
           // [#10678] Body-extraction failures that made a callable fall back to
           // the legacy .mjs bundle. A SEPARATE key on purpose, and the reason is
           // parity too — the opposite way round from `unknownKeyWarnings` just
@@ -586,7 +697,7 @@ export default class Compile extends Command {
     } catch (error: any) {
       if (isExitSignal(error)) throw error;
       if (flags.json) {
-        await emitJson({ success: false, error: error.message }, 0, { compact: true });
+        await emitJson({ success: false, error: error.message, warnings: warningsSoFar() }, 0, { compact: true });
         this.exit(1);
       }
       console.log('');

@@ -77,17 +77,27 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import process from 'node:process';
+import { isEntrypoint } from '../invoked-as.mjs';
 
-// `check-governed-merges.mjs` runs its OWN self-test at module scope when it
-// sees `--self-test` in `process.argv` — it has no entry-point guard, and this
-// is its first importer. Left alone, running THIS file's `--self-test` would
-// also run the sibling's, and a failure there calls `process.exit(1)` before a
-// single case of ours reports: our result would be masked by another script's
-// name. So the flag is withheld for the duration of the import only.
-const realArgv = process.argv;
-process.argv = realArgv.filter((arg) => arg !== '--self-test');
+// A dynamic import, because this file used to have to reach the sibling with
+// `--self-test` withheld from `process.argv`: `check-governed-merges.mjs` ran
+// its own self-test at module scope, so running OUR `--self-test` also ran the
+// sibling's, and a failure there called `process.exit(1)` before a single case
+// of ours reported.
+//
+// That workaround is GONE, and this comment records why rather than preserving
+// it: the sibling now guards BOTH of its module-scope triggers on
+// `invokedDirectly = isEntrypoint(import.meta.url)` (its `main()` at :1201 and
+// its self-test at :1614), so on this import path the flag cannot reach either
+// one no matter what argv says. Measured rather than reasoned — importing the
+// sibling with `--self-test` planted in `process.argv` runs no self-test,
+// prints nothing and returns its 34 exports.
+//
+// Mutating `process.argv` was never free: it is process-global, so it edited
+// the argv of whatever imported THIS file too, for the duration of the import.
+// The static form stays a dynamic `import()` only because
+// `scripts/pm/dispatch-gates.mjs` reads this edge.
 const { GOVERNED_SURFACES } = await import('./check-governed-merges.mjs');
-process.argv = realArgv;
 
 const REPO_ROOT = new URL('../../', import.meta.url);
 
@@ -335,5 +345,7 @@ function selfTest() {
   return 0;
 }
 
-const isSelfTest = process.argv.slice(2).includes('--self-test');
-process.exit(isSelfTest ? selfTest() : runGate());
+if (isEntrypoint(import.meta.url)) {
+  const isSelfTest = process.argv.slice(2).includes('--self-test');
+  process.exit(isSelfTest ? selfTest() : runGate());
+}

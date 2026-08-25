@@ -102,6 +102,43 @@ export const FieldType = z.enum([
 export type FieldType = z.input<typeof FieldType>;
 
 /**
+ * Field types whose stored value is a BOUNDED STRING — the set on which a
+ * `maxLength` / `minLength` character bound describes something that is
+ * actually stored (#11566, maintainer ruling 2026-08-24).
+ *
+ * This is the write-time validator's own enforcement list (objectql
+ * `record-validator.ts`, the string-types branch) promoted to the protocol:
+ * three lists used to disagree (field.form showed the key for 3 types,
+ * object.form for 9, the validator enforced 10), and the validator's ten is
+ * the only one with a measured reader. `FieldSchema` refuses `maxLength`
+ * outside this set (see the superRefine below) — and, per the #11949 ruling
+ * (2026-08-25), `minLength` too: the twin defect pair converges on the same
+ * template — and the two authoring forms show both keys for exactly this
+ * set — declared converges to enforced (ADR-0078).
+ *
+ * `signature` / `qrcode` joined in #11875 (maintainer ruling 2026-08-25,
+ * option 1): their stored value IS the author's own string and routinely far
+ * past 255 characters (a data-URI PNG for `signature`), and the write-time
+ * validator now enforces their declared bound — declared = enforced holds in
+ * both directions, which is also what licenses their unbounded TEXT column in
+ * `driver-sql` (the #11794 invariant: TEXT is permitted exactly because the
+ * write seam enforces the declared `maxLength`).
+ *
+ * Deliberately NOT here: `secret` (stored ciphertext handle — the authored
+ * value's length is not what the column holds; ADR-0100 — explicitly outside
+ * the #11875 ruling), `color` (short by construction — same ruling),
+ * `select`/`multiselect` (bounded by their options, not by a character count),
+ * `json`/`code`-adjacent structured types other than `code` itself, and every
+ * non-string type.
+ */
+export const BOUNDED_STRING_FIELD_TYPES: ReadonlySet<string> = new Set([
+  'text', 'textarea', 'email', 'url', 'phone', 'password',
+  'markdown', 'html', 'richtext', 'code',
+  // #11875 — the write seam enforces these two's declared bound (see above).
+  'signature', 'qrcode',
+] as const satisfies readonly FieldType[]);
+
+/**
  * Field types whose stored value the RUNTIME owns outright — issued by the
  * engine (or the driver's persistent sequence), never supplied by a caller on
  * either write path. Today exactly `autonumber` (#5503).
@@ -853,8 +890,22 @@ export const FieldSchema = lazySchema(() => {
   defaultValue: z.unknown().optional().describe('Default applied on INSERT when the field is omitted or null (`\'\'` is a real value, not absence). Three legal shapes (#7127), discriminated in the engine\'s own order: a CEL Expression envelope `{ dialect: \'cel\', source: \'today()\' }` (accepted structurally; result type is a runtime concern); a runtime TOKEN — `NOW()` on `datetime`/`date`/`time` only, `current_user` on `user` or `lookup` with `reference: \'sys_user\'` only, neither on a multi-value field; or a LITERAL, which must satisfy this field\'s own stored value contract (ADR-0104 D1 `valueSchemaFor`). Anything else is refused at parse time with a prescriptive message.'),
   
   /** Text/String Constraints */
-  maxLength: z.number().optional().describe('Max character length'),
-  minLength: z.number().optional().describe('Min character length'),
+  // #11566 — a character length is a positive integer, so `0`, `-5` and `12.5`
+  // are refused at the producer (house pattern: the #8321 `precision`/`scale`
+  // refusal below; same "a malformed count has no defined meaning" argument —
+  // `maxLength: 0` measurably sent schema-drift planning `varchar(0)` DDL no
+  // server accepts, at severity error/destructive, before #11431 taught the
+  // consumer to defend itself). Which TYPES may author the key is the
+  // superRefine below (BOUNDED_STRING_FIELD_TYPES).
+  maxLength: z.number().int().min(1).optional().describe('Max character length (positive integer). Only authorable on types that store a bounded string: text, textarea, email, url, phone, password, markdown, html, richtext, code, signature, qrcode.'),
+  // #11949 (maintainer ruling 2026-08-25) — `minLength` converges on the
+  // #11566 template above, `maxLength`'s twin defect pair: same shape, same
+  // applicability set, same forms convergence. The lower bound is deliberately
+  // 1, not 0: "no minimum" is expressed by OMITTING the key, so `minLength: 0`
+  // is a permanently-true declaration — exactly the vacuous noise an AI
+  // metadata author mass-produces — and is refused loudly at authoring instead
+  // of parsing cleanly and asserting nothing.
+  minLength: z.number().int().min(1).optional().describe('Min character length (positive integer; `minLength: 0` is refused — express "no minimum" by omitting the key). Only authorable on types that store a bounded string: text, textarea, email, url, phone, password, markdown, html, richtext, code, signature, qrcode.'),
   
   /** Number Constraints */
   // #8321 — `precision`/`scale` are digit COUNTS, so a non-integer or negative
@@ -1002,6 +1053,16 @@ export const FieldSchema = lazySchema(() => {
    * `.default('set_null')` era. The `default` annotation states the contract
    * default to schema consumers without touching parse order — the
    * `autonumberFormat` pattern below.
+   *
+   * #9784 — the `.overwrite` materializes the default ONLY on the reference
+   * types where the key has meaning (`lookup` / `tree`; `master_detail` omits
+   * it per the #9689 idempotent-materialization ruling). On every other type
+   * the key was inert by construction — the engine reads it exclusively
+   * behind a `master_detail`/`lookup` + `reference` guard — yet the
+   * materialized value shipped in every built artifact as an apparent
+   * explicit declaration (the #4447 shadowing mechanism). A bare `text` /
+   * `datetime` / `number` field now parses to output WITHOUT the key; an
+   * authored value on any type is preserved verbatim (accept-set unchanged).
    */
   deleteBehavior: z.enum(['set_null', 'cascade', 'restrict']).optional().meta({
     description: 'What happens if referenced record is deleted',
@@ -1594,6 +1655,61 @@ export const FieldSchema = lazySchema(() => {
     });
   }
 
+  // [#11566] (maintainer ruling 2026-08-24 — 「四维分析一致的，接手你的建议。」):
+  // `maxLength` is only authorable on types that store a bounded string.
+  // The key sat on the BASE schema, so it was legal on `boolean` / `lookup` /
+  // `autonumber` / `formula` — types where it describes nothing that is
+  // stored — while the write-time validator has only ever enforced it on
+  // exactly the BOUNDED_STRING_FIELD_TYPES members (ten then; `signature` /
+  // `qrcode` joined in #11875). Declared converges to enforced
+  // (ADR-0078): the inert declaration is refused at the authoring seam, where
+  // the fix is one keystroke away, instead of parsing cleanly and doing
+  // nothing (the declared-but-inert shape that hides AI-authored metadata
+  // errors). `maxLength` has no schema default, so `undefined` here always
+  // means "not authored" — a field without the key can never fire this.
+  //
+  // The message enumerates the set ITSELF rather than a prose copy of it —
+  // #11875 found the hand-written enumeration already one revision behind the
+  // set it described, which is the #12017 two-copies failure shape.
+  if (field.maxLength !== undefined && !BOUNDED_STRING_FIELD_TYPES.has(field.type)) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['maxLength'],
+      message:
+        `\`maxLength\` is only valid on field types that store a bounded string — ` +
+        `${[...BOUNDED_STRING_FIELD_TYPES].map((t) => `'${t}'`).join(', ')} — ` +
+        `and this field is \`${field.type}\`: its stored value has no ` +
+        'character length for the bound to constrain, so the declaration would parse and ' +
+        'enforce nothing (the write-time validator applies `maxLength` to exactly those ' +
+        'types). Drop the key, or use a bounded string type.',
+    });
+  }
+
+  // [#11949] (maintainer ruling 2026-08-25 — the #11566 template applies in
+  // full): `minLength` is only authorable on types that store a bounded
+  // string — the same defect pair, the same convergence. The key sat on the
+  // BASE schema, so it was legal on `boolean` / `lookup` / `autonumber` —
+  // types where nothing bounded is stored — while the write-time validator
+  // has only ever applied `min_length` on the BOUNDED_STRING_FIELD_TYPES
+  // set. Declared converges to enforced (ADR-0078). `minLength` has no
+  // schema default, so `undefined` here always means "not authored" — a
+  // field without the key can never fire this. The message enumerates the
+  // set ITSELF rather than a prose copy of it — the #11875 lesson the
+  // `maxLength` twin above records (#12017 two-copies failure shape).
+  if (field.minLength !== undefined && !BOUNDED_STRING_FIELD_TYPES.has(field.type)) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['minLength'],
+      message:
+        `\`minLength\` is only valid on field types that store a bounded string — ` +
+        `${[...BOUNDED_STRING_FIELD_TYPES].map((t) => `'${t}'`).join(', ')} — ` +
+        `and this field is \`${field.type}\`: its stored value has no ` +
+        'character length for the bound to constrain, so the declaration would parse and ' +
+        'enforce nothing (the write-time validator applies `minLength` to exactly those ' +
+        'types). Drop the key, or use a bounded string type.',
+    });
+  }
+
   // #7918 (maintainer ruling 2026-08-12, Option A): the FIELD-level
   // `precision` key doubles as the currency display width — objectui's
   // CurrencyField reads it, and objectui#4361 pinned authored-precision-wins
@@ -1708,11 +1824,13 @@ export const FieldSchema = lazySchema(() => {
     // the superRefine above always sees the pre-materialized value. The key is
     // re-inserted at its SHAPE position (Zod emits parse output in shape
     // order), so output is byte-identical to the `.default('set_null')` era on
-    // every field type EXCEPT `master_detail` — see the ruling below. The one
-    // accepted cost, same as the currency precedent's: the INFERRED output
-    // type now declares `deleteBehavior?` even though a parsed non-
-    // `master_detail` field always carries it (ADR-0122 forbids hand-narrowing
-    // the inferred type); the runtime contract is the enforced one.
+    // the reference types that still materialize it (`lookup` / `tree`) — see
+    // the two rulings below for why `master_detail` and every non-reference
+    // type omit it instead. The one accepted cost, same as the currency
+    // precedent's: the INFERRED output type declares `deleteBehavior?` even
+    // though a parsed `lookup`/`tree` field always carries it (ADR-0122
+    // forbids hand-narrowing the inferred type); the runtime contract is the
+    // enforced one.
     if (field.deleteBehavior !== undefined) return field;
     // #9689 (maintainer ruling 2026-08-24, idempotent materialization —
     // 「四维分析一致的，接手你的建议。」): NEVER materialize a default the
@@ -1731,6 +1849,27 @@ export const FieldSchema = lazySchema(() => {
     // byte-identity, and the #7918 currency `precision` twin of this landmine
     // is #11423 — same principle, its own card.
     if (field.type === 'master_detail') return field;
+    // #9784 — materialize the default ONLY on reference types. `deleteBehavior`
+    // has no meaning on a non-reference field: the engine's
+    // `cascadeDeleteRelations` reaches the key exclusively on
+    // `master_detail`/`lookup` fields carrying a `reference`
+    // (`packages/objectql/src/engine.ts`, the type + `fdef.reference` guards),
+    // so on a `text`/`datetime`/`number` field the materialized value was
+    // inert by construction — yet it shipped in every built app artifact,
+    // where a default materialized at parse becomes an EXPLICIT declaration
+    // downstream (the #4447 shadowing mechanism), and where an AI author
+    // reading the artifact reasonably concludes the key is meaningful there
+    // (ADR-0033 direction). Non-reference fields therefore parse to output
+    // that OMITS the key. The accept-set is untouched: an AUTHORED
+    // `deleteBehavior` on any type still parses exactly as before (the
+    // `!== undefined` early return above), so stored artifacts from the
+    // materializing era stay legal. `tree` (hierarchical reference) keeps
+    // materializing with `lookup`: it is in the relational family, where the
+    // key states delete semantics — the conservative byte-identity side of
+    // the line. `user` is stored identically to `lookup` but sits outside
+    // today's cascade guard exactly like `text` does, so it takes the
+    // non-reference side; an authored value there still round-trips.
+    if (field.type !== 'lookup' && field.type !== 'tree') return field;
     const withDefault: Record<string, unknown> = { ...field, deleteBehavior: 'set_null' };
     const out: Record<string, unknown> = {};
     for (const key of shapeOrder) {

@@ -98,74 +98,21 @@ export const MAP_SUPPORTED_FIELDS = [
 
 export type MapSupportedField = (typeof MAP_SUPPORTED_FIELDS)[number];
 
-/**
- * Mapping from plural manifest field names to singular metadata type names.
- *
- * Manifest / `defineStack()` uses plural property names because they are
- * collection fields (e.g. `objects: [...]`, `apps: [...]`).  The metadata
- * registry and `MetadataTypeSchema` use singular names as the canonical form.
- *
- * Use this mapping at the boundary where manifest fields are fed into the
- * metadata registry to ensure a consistent singular naming convention.
- */
-export const PLURAL_TO_SINGULAR: Record<string, string> = {
-  objects: 'object',
-  apps: 'app',
-  pages: 'page',
-  dashboards: 'dashboard',
-  reports: 'report',
-  datasets: 'dataset',
-  actions: 'action',
-  // `themes: 'theme'` was removed at #10485 (ADR-0049; the carrier key is
-  // retired). Its absence here is load-bearing twice over: the generated
-  // `META_URL_TO_SINGULAR` (gen:meta-url-spelling) loses the fold, so
-  // `/meta/theme` gets `unrecognisedMetaTypeRefusal`'s loud verdict instead of
-  // the pre-#10194 store-anything branch; and `applyConversionsToStoredItem`
-  // passes legacy `theme` rows through untouched rather than manufacturing a
-  // collection for them.
-  flows: 'flow',
-  jobs: 'job',
-  positions: 'position',
-  permissions: 'permission',
-  // [ADR-0066 D1, #5870] Package-declared authorization capabilities. The
-  // singular form is what `bootstrapDeclaredCapabilities` reads back
-  // (`readDeclared(ql, 'capability')`) and what `AppPlugin` already registers
-  // under; without the mapping the registration seam stored them as
-  // `'capabilities'`, a store nothing reads.
-  capabilities: 'capability',
-  sharingRules: 'sharing_rule',
-  apis: 'api',
-  webhooks: 'webhook',
-  agents: 'agent',
-  tools: 'tool',
-  skills: 'skill',
-  ragPipelines: 'rag_pipeline',
-  hooks: 'hook',
-  mappings: 'mapping',
-  analyticsCubes: 'analytics_cube',
-  connectors: 'connector',
-  datasources: 'datasource',
-  views: 'view',
-  emailTemplates: 'email_template',
-  docs: 'doc',
-  books: 'book',
-};
-
-/** Reverse mapping: singular metadata type → plural manifest field name. */
-export const SINGULAR_TO_PLURAL: Record<string, string> = Object.fromEntries(
-  Object.entries(PLURAL_TO_SINGULAR).map(([plural, singular]) => [singular, plural]),
-);
-
-/** Convert a plural manifest field name to its singular metadata type name. Returns the input unchanged if no mapping exists. */
-export function pluralToSingular(key: string): string {
-  return PLURAL_TO_SINGULAR[key] ?? key;
-}
-
-/** Convert a singular metadata type name to its plural manifest field name. Returns the input unchanged if no mapping exists. */
-export function singularToPlural(key: string): string {
-  return SINGULAR_TO_PLURAL[key] ?? key;
-}
-
+// [#11503] The plural↔singular manifest-collection vocabulary
+// (`PLURAL_TO_SINGULAR`, `SINGULAR_TO_PLURAL`, `pluralToSingular`,
+// `singularToPlural`) moved to `../meta-spelling/manifest-collection-spelling`
+// so its one owner lives on a schema-free graph (#10096 standing principle:
+// 「浏览器可达的 spec 导出面必须 schema-free」) — `@objectstack/core` keys every
+// metadata store on the fold, and reading it from THIS module put the whole
+// `/shared` zod closure on every browser consumer's eager graph. Re-exported
+// here so `/shared` keeps its published surface (#8424); the declaration —
+// and the map's domain documentation — lives at the new home.
+export {
+  PLURAL_TO_SINGULAR,
+  SINGULAR_TO_PLURAL,
+  pluralToSingular,
+  singularToPlural,
+} from '../meta-spelling/manifest-collection-spelling.js';
 
 /**
  * Normalize a single metadata collection value from map format to array format.

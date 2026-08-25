@@ -65,7 +65,7 @@ aggregation goes through `POST /api/v1/data/{object}/query` with
 > **Key rule:** If your object defines `apiMethods`, only those operations (and
 > what derives from them) are exposed. For example, `apiMethods: ['get', 'list']`
 > creates a read-only API. The authorable values are the SIX PRIMITIVES
-> (`get/list/create/update/delete/bulk`, #3543); everything else (`export`,
+> (`get/list/create/update/delete/bulk`); everything else (`export`,
 > `search`, `upsert`, …) is DERIVED from them by the server — `['list']` grants
 > aggregate/search/export for free, `['create','update']` grants upsert/import.
 > An empty array `[]` means deny-all (fully closed).
@@ -149,7 +149,7 @@ The alternative — and usually the better one — is the **declarative** surfac
 ## Declarative Endpoints (`apis:`) — no handler code
 
 `defineStack({ apis })` declares an HTTP endpoint as **metadata**. Declared
-endpoints are **live from protocol 17** (#5040): the runtime matches
+endpoints are **live from protocol 17**: the runtime matches
 `METHOD` + `path`, runs the endpoint's policy keys, and delegates to the *same*
 pipelines the built-in routes use — `object_operation` to the data pipeline
 behind `/api/v1/data/{object}`, `flow` to the automation pipeline behind
@@ -282,7 +282,7 @@ only the scoped routes are registered; with `optional`/`auto` the bare
 
 ## API Methods (Operations)
 
-The authorable `ApiMethod` enum is the SIX PRIMITIVES (#3543). The wider
+The authorable `ApiMethod` enum is the SIX PRIMITIVES. The wider
 EFFECTIVE operation vocabulary (`ApiOperation`, 14 values) is what gates and
 responses speak — the eight extra verbs are DERIVED from the primitives, never
 declared in `apiMethods`:
@@ -306,8 +306,8 @@ declared in `apiMethods`:
 | `aggregate` | `list` | No dedicated route — use `POST /data/{object}/query` with `groupBy`/`aggregations` | Count, sum, avg, min, max |
 | `history` | `get` ∧ `trackHistory` | Gating only — no dedicated generated route today | Audit trail access |
 | `search` | `list` ∧ `searchable` | Global `GET /api/v1/search` (cross-object), not per-object | Full-text search |
-| `restore` | never (trash retired, #2377) | Gating only | Restore a soft-deleted record (reserved — platform deletes are hard today) |
-| `purge` | never (trash retired, #2377) | Gating only | Permanent deletion |
+| `restore` | never (trash retired) | Gating only | Restore a soft-deleted record (reserved — platform deletes are hard today) |
+| `purge` | never (trash retired) | Gating only | Permanent deletion |
 | `import` | `create` ∨ `update` (writeMode-precise) | `POST /data/{object}/import` | Bulk data import |
 | `export` | `list` | `GET /data/{object}/export` | Data export |
 
@@ -578,7 +578,7 @@ async function firstTenAccounts() {
    external-facing APIs.
 5. **Assuming `DELETE` is recoverable.** ObjectStack `DELETE` is a hard
    delete — there is no recycle bin (the dead `enable.trash` flag was removed
-   in 16.x, #2377). For recoverability, use per-field `trackHistory` (audit
+   in 16.x). For recoverability, use per-field `trackHistory` (audit
    trail) or a `lifecycle` archive policy instead of custom soft-delete logic.
 
 ---

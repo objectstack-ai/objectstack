@@ -8,9 +8,9 @@
   `contracts/**`、退役行为半边、strictness 台账;describe/JSDoc/墓碑散文/错误
   guidance 与 alias 表;`packages/spec/scripts/**`、`packages/spec/docs/**` 及围着
   spec 契约转的工具链(门禁/生成器/lint 规则/报错散文/references 管线)。
-- 一般开发工具面留 devx(维护者 2026-08-09 裁决);`packages/spec` 恒归本席,不论
-  谁需要它。
-- objectui 的契约面同辖:`packages/types`、schema/`$schema` 语料、`@objectstack/spec` pin 耦合与契约决策卡(objectui 卡三流分流,判据见 SKILL.md 多仓协调)。
+- 一般开发工具面留 devx(维护者 2026-08-09 裁决);`packages/spec` 恒归本席,不论谁需要它。
+- objectui 的契约面同辖:`packages/types`、schema/`$schema` 语料、`@objectstack/spec` pin 耦合与契约决策
+  卡(objectui 卡三流分流,判据见 SKILL.md 多仓协调)。
 
 ## 席内分派参考
 
@@ -31,13 +31,16 @@
 ## 常设承诺
 
 - findings 首触定级归分诊席,本席只供证据。
+- **门禁强制的跨车道 ledger 追加整类预批**(`error-code-ledger.zod.ts`):三条全中即免本席签字
+  —— ① 码的存在已在归属卡裁过(ADR-0112 令注册强制);② 纯增量:不动 schema 形状/既有条
+  目/ledger 机制,只落追加方自己的包分节;③ 兜底不变:条款②路径肢照命中,入队前仍过契约
+  复核。出类(新 ledger 字段、重构、别道条目、准入/拒收语义)⇒ 本席卡,不论谁需要它。
 - **待命巡逻每次做整车道全交集读**(delta 扫描有尾隙:扫描后、波次边界前入队的卡
   谁都看不见;全交集读是安全网)。
-- **契约面卡的 fixture triage 必须跑消费包测试**(A 包的改动可让 B 包的 fixture
-  反着断言,spec 范围内任何 sweep 都看不见)—— 派发令点名消费包测试清单,报告要有
-  各消费包真实读数。
-- 派发前触发文件必查照 SKILL.md 标签纪律执行(读锚 H17 索引相交);跨仓 pin 滞后读法在 SKILL.md 多仓协调。
+- **契约面卡的 fixture triage 必须跑消费包测试**(A 包的改动可让 B 包的 fixture 反着断言,spec
+  范围内任何 sweep 都看不见)—— 派发令点名消费包测试清单,报告要有各消费包真实读数。
+- 派发前触发文件必查照 SKILL.md 标签纪律执行(读锚 H17 索引相交)。
 
 ## 席内判断
 
-- 候选卡评论必读(SKILL.md 候选与批次);裁决与撤销住在评论里,即使正文看起来已是决策形状。
+- 候选卡评论必读(SKILL.md 候选与批次);裁决与撤销住在评论里,即使正文已是决策形状。

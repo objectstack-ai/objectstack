@@ -632,6 +632,26 @@ const CONTROL = {
     why: 'PR for #10534 follow-up 4. Its main remedy (ledger the mount, with evidence) is the author\'s and touches no ratchet; its PENDING_DISPOSITION paths expand a shrink-only exemption list whose one entry exists by maintainer ruling, so both are marked rather than refused.',
   },
 
+  // The ninth, and the third to join as a NEW gate rather than by retrofit
+  // (#11927). Marking rather than refusal, on the same reading as the seventh
+  // and eighth: there IS a legitimate act here and it has an owner. The gate
+  // ratchets what `packages/client`'s BUILT exports resolve to, and four of the
+  // 65 sites it ledgers keep `any` deliberately because no published contract
+  // exists to bind (#11924) — so the ledger cannot be demanded to zero, and a
+  // 66th site that genuinely cannot be typed yet is a real entry someone must be
+  // able to add. That act expands a shrink-only ledger, which makes it the
+  // maintainer's rather than the landing author's, and the gate's unledgered-file
+  // message says so beside the offer.
+  //
+  // ⚠️ Recorded from the sweep's own verdict (`--list` reports it under `marked`,
+  // anchor `shrink`), not from the author's intent. The two agreeing is the point
+  // of the corpus; asserting the intent and never checking it is what the control
+  // exists to prevent.
+  'check-exported-any-returns.mts': {
+    expect: 'marked',
+    why: 'PR for #11927, and the second .mts instance after check-test-typecheck.mts. Its per-site ledger is shrink-only and the message says so in the same breath; adding a site is a real remedy when no contract exists to bind (#11924), so the path is named with its owner rather than denied.',
+  },
+
   'check-adr-links.mjs': {
     expect: 'refused',
     why: 'Refuses by binding a negation to the verb, over a shrink-only registry.',
@@ -689,6 +709,10 @@ const CONTROL = {
   'check-cross-package-test-inputs.mjs': {
     expect: 'excluded',
     why: 'CROSS_PACKAGE_TEST_INPUTS declares which globs a package tests read. A naive-prototype false positive.',
+  },
+  'check-doc-authoring.mjs': {
+    expect: 'excluded',
+    why: 'Carries no ratchet at all. ROOTS, SKIP_PATHS, SKIP_FILES and GENERATED_SKILL_ARTIFACTS are declarations of what the two corpus rules read and what is generated rather than authored; each is path-scoped, and none is offered to the author as something to widen. Its published-catalog id rule reached this corpus by first shipping a per-passage allowlist and being turned red here for offering it — maintainer ruling 2026-08-25 replaced that passage with a placeholder and removed the list. If this flips, that list came back.',
   },
   'check-error-code-casing.mjs': {
     expect: 'excluded',

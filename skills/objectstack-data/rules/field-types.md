@@ -68,15 +68,15 @@ options: [
 
 | Type | When to Use | Key Config |
 |:-----|:------------|:-----------|
-| `lookup` | Reference another object (independent) | `reference`, `lookupFilters`, `multiple` |
-| `master_detail` | Parent–child with lifecycle control | `reference`, `deleteBehavior` (cascade/restrict/set_null) |
+| `lookup` | Reference another object (independent) | `reference`, `lookupFilters`, `multiple`, `deleteBehavior` |
+| `master_detail` | Parent–child with lifecycle control | `reference`, `deleteBehavior` (`cascade`/`restrict` — `set_null` is refused) |
 | `tree` | Hierarchical self-reference | `reference` |
 | `user` | Person picker — a lookup specialized to `sys_user` (assignee, watchers). Stored identically to `lookup` | `multiple` (collaborators), `defaultValue: 'current_user'` |
 
 > **`multiple: true` lookup ≠ junction object.** A multi-value lookup is stored
 > and read as an **array of ids** on the record — it is NOT a junction table.
 > Reach for a **junction object** (two lookups) only when the relationship
-> itself carries attributes (position, added_at, …). (#1872)
+> itself carries attributes (position, added_at, …).
 
 ## Media
 
@@ -264,7 +264,7 @@ grouped number (never a hardcoded `$`). The same chain backs analytics measures
   reference: 'account',
   required: true,
   // Structured, picker-honoured filter — the former string[] `referenceFilters`
-  // was removed (#2377, ADR-0049): it filtered nothing.
+  // was removed (ADR-0049): it filtered nothing.
   lookupFilters: [
     { field: 'status', operator: 'eq', value: 'active' },
   ],

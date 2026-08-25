@@ -1,6 +1,6 @@
 # ADR-0125: The human act that authorises a release is the environment approval, not a typed version string
 
-**Status**: Proposed (2026-08-20) — awaiting the maintainer's hand-merge, which is itself the acceptance act for a governed surface (Prime Directive #14). Implementation ships in the same PR: `.github/workflows/release.yml`.
+**Status**: Accepted (2026-08-20) — accepted by the merge that landed it on `main` ([#10150](https://github.com/objectstack-ai/objectstack/pull/10150), commit `81d1fa11d`), which is itself the acceptance act for a governed surface (Prime Directive #14). Implementation shipped in the same PR: `.github/workflows/release.yml`.
 **Deciders**: ObjectStack Protocol Architects (maintainer ruling, 2026-08-20, on the back of the [#10146](https://github.com/objectstack-ai/objectstack/issues/10146) release failure)
 **Builds on**: the 2026-08-07 maintainer ruling recorded in **AGENTS.md Prime Directive #15** (「版本发布必须是人工的」) and its implementation in [#6170](https://github.com/objectstack-ai/objectstack/issues/6170) (the two-lane split of `release.yml`)
 **Supersedes**: nothing. It **re-implements** Prime Directive #15's requirement; the requirement itself is untouched and is quoted again below so no later reader has to reconstruct it.

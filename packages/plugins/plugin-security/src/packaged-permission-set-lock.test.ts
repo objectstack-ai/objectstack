@@ -41,11 +41,21 @@
  * ## ⭐ The fail-open this must not inherit (#11518)
  *
  * `buildExistingByName`'s UNSCOPED page cap (`limit: names.length`,
- * `seed-name-lookup.ts`) truncates as soon as one name can carry more than one
- * row, and a truncated page reads as "absent". Asking THAT oracle "is this set
+ * `seed-name-lookup.ts`) truncated as soon as one name could carry more than one
+ * row, and a truncated page read as "absent". Asking THAT oracle "is this set
  * package-declared?" would turn a truncation into "not package-declared" — and
  * the save this ruling exists to refuse would be accepted. A silent fork
  * produced by the code written to stop silent forks.
+ *
+ * #11518 has since repaired the cap itself — an overflowing page is now detected
+ * and degrades to the per-item read rather than answering — so the controls
+ * below no longer guard against THAT truncation reaching this verdict. They are
+ * kept, and they still pass, because what they actually pin is structural and
+ * outlives the repair: this verdict is not decided by a name-keyed page read at
+ * all. Unscoped, `buildExistingByName` still answers with the FIRST row by id
+ * for a name, so on a name several organizations hold it answers with somebody
+ * else's row — the same question, a different wrong answer, and one no page
+ * budget reaches.
  *
  * So the provenance question is decided from the engine's SchemaRegistry — the
  * same source `readDeclared` / `permission-set-overlay-discard.ts` already use,
@@ -812,7 +822,7 @@ describe('control A — #11518 shape: a name carrying MORE THAN ONE row still re
     const names = ['ehr_quality_inspector'];
     const capped = await ql.find('sys_permission_set', {
       where: { name: { $in: names } },
-      limit: names.length, // ← the UNSCOPED cap live on main at seed-name-lookup.ts
+      limit: names.length, // ← the UNSCOPED cap seed-name-lookup.ts carried before #11518
     });
     expect(ql.permRows.filter((r: any) => r.name === 'ehr_quality_inspector')).toHaveLength(2);
     expect(capped, 'the page is truncated — half the rows for this name are invisible').toHaveLength(1);

@@ -54,8 +54,11 @@
  *     nobody edited a file is not a ratchet.
  *   - NO DEPENDENCY. The workspace carries no tokenizer today (checked at
  *     landing: no `tiktoken` / `gpt-tokenizer` / `gpt-3-encoder` in any
- *     manifest), and root dependencies are fenced (#9465). Adding one to make a
- *     lint gate's numbers prettier is not a trade this gate needs.
+ *     manifest). Adding one to make a lint gate's numbers prettier is not a
+ *     trade this gate needs. Refused on that merit alone, not by a fence: root
+ *     dependencies as a CLASS are not #9465 territory -- the GATE INVOCATION
+ *     IDIOM note at the top of `.github/workflows/lint.yml` carries that lane's
+ *     verbatim scope, and it is pointed at rather than restated here.
  *   - INDEPENDENTLY REPRODUCIBLE. Anyone can audit a ceiling without running
  *     this script: `ceil($(wc -c < file) / 4)`. A tokenizer's count can only be
  *     checked by re-running the tokenizer.
@@ -130,6 +133,27 @@ export const CEILING_BASIS = {
   main: '465bfce90',
   pending10402: '7228d6c25',
   from10402: ['skills/objectstack-data/SKILL.md', 'skills/objectstack-platform/SKILL.md'],
+  /**
+   * Every ceiling below was RE-MEASURED after the internal issue-id strip, on
+   * this sha plus that change. Maintainer ruling 2026-08-23: strip the internal
+   * issue-id references from the published catalog, per-file ceiling drops
+   * landing in the same PR.
+   *
+   * The re-measure supersedes both bases above as the origin of the numbers —
+   * they are kept because they still explain the SHAPE of the two rows that
+   * carried a second basis, not because any current number is read from them.
+   * ⚠️ #10402's reserved headroom was already spent when this landed:
+   * `objectstack-data` measured 13817 against a 13817 ceiling on the base
+   * below — exactly zero, which is the header's "the headroom returns to zero
+   * on its own", observed.
+   *
+   * Several rows drop by MORE than their file shrank, because a lowering also
+   * reclaims whatever slack the row already carried (`objectstack-formula`
+   * shrank 34 and its ceiling drops 53). That is the ratchet working as
+   * designed: shrink-only means a ceiling may be lowered to the measurement
+   * whenever one is taken, not merely by the size of the day's deletion.
+   */
+  strippedInternalIds: '3f571a6d2',
 };
 
 /**
@@ -141,23 +165,27 @@ export const CEILING_BASIS = {
  * branch head `7228d6c25` — see {@link CEILING_BASIS}.
  */
 export const CEILINGS = new Map([
-  ['skills/objectstack-ai/SKILL.md', 6824],
-  ['skills/objectstack-api/SKILL.md', 6342],
-  ['skills/objectstack-automation/SKILL.md', 12543],
-  // basis 7228d6c25 (PR #10402 head), not main — see CEILING_BASIS.
-  // +20 (13797→13817): maintainer ruling 2026-08-23 on PR #11141 — the three
-  // SECURITY_OWD_UNSET-required sharingModel keys. Ruling quoted in that PR's body.
-  ['skills/objectstack-data/SKILL.md', 13817],
-  ['skills/objectstack-formula/SKILL.md', 6055],
-  ['skills/objectstack-i18n/SKILL.md', 6349],
-  // basis 7228d6c25 (PR #10402 head), not main — see CEILING_BASIS.
-  ['skills/objectstack-platform/SKILL.md', 12716],
+  // Every row re-measured after the internal issue-id strip — see
+  // CEILING_BASIS.strippedInternalIds. `(was N)` is the ceiling this replaced.
+  ['skills/objectstack-ai/SKILL.md', 6806], //          -18 (was 6824)
+  ['skills/objectstack-api/SKILL.md', 6331], //         -11 (was 6342)
+  // 12511 -> 12643 (#11348): the flow value-expression section documented the
+  // expression surface but not the function vocabulary (round/floor/ceil/abs/
+  // min/max); an unknown function fails at RUNTIME, not at flow-save, so the
+  // published teaching is the only guard. +132 tokens, compressed to minimum.
+  // Maintainer ruling 2026-08-25 (option B1, raise the ceiling), verbatim and
+  // untranslated: 「我看到了,你分析过了,接受你的建议」.
+  ['skills/objectstack-automation/SKILL.md', 12643],
+  ['skills/objectstack-data/SKILL.md', 13783], //       -34 (was 13817)
+  ['skills/objectstack-formula/SKILL.md', 6002], //     -53 (was 6055)
+  ['skills/objectstack-i18n/SKILL.md', 6338], //        -11 (was 6349)
+  ['skills/objectstack-platform/SKILL.md', 12705], //   -11 (was 12716)
+  // Unchanged: this skill's only id-shaped tokens are a CLI usage line and a
+  // JSON shape example. The one edit there (`#457` -> `#<n>`) is byte-neutral.
   ['skills/objectstack-pm-dispatch/SKILL.md', 14239],
-  ['skills/objectstack-query/SKILL.md', 5569],
-  ['skills/objectstack-ui/SKILL.md', 25154],
-  // +10 (8325→8335): same 2026-08-23 ruling — crm_lead's SECURITY_OWD_UNSET-required
-  // sharingModel key (value mirrored from examples/app-crm per the same ruling).
-  ['skills/objectstack-upgrade/SKILL.md', 8335],
+  ['skills/objectstack-query/SKILL.md', 5552], //       -17 (was 5569)
+  ['skills/objectstack-ui/SKILL.md', 25125], //         -29 (was 25154)
+  ['skills/objectstack-upgrade/SKILL.md', 8333], //      -2 (was 8335)
 ]);
 
 /**
@@ -355,6 +383,17 @@ function selfTest() {
       CEILING_BASIS.from10402.join(','),
       'skills/objectstack-data/SKILL.md,skills/objectstack-platform/SKILL.md'],
     ['both second-basis files carry a ceiling', CEILING_BASIS.from10402.every((p) => CEILINGS.has(p)), true],
+
+    // ── the internal-id strip re-measure ─────────────────────────────────
+    // Same reason as the two pins above: the gate never reads this sha, so a
+    // recorded provenance that drifts from the numbers it explains does so in
+    // silence. Pinned here, it moves only when someone means to move it.
+    ['the internal-id-strip basis sha is recorded', CEILING_BASIS.strippedInternalIds, '3f571a6d2'],
+    // The direction, asserted rather than assumed: this re-measure LOWERED the
+    // bundle. A future edit that re-measures upward has to change this number
+    // and meet the maintainer-ruling bar in the header while doing it.
+    ['the re-measure lowered the bundle total',
+      [...CEILINGS.values()].reduce((a, b) => a + b, 0) < 117943, true],
 
     // ── the report line ──────────────────────────────────────────────────
     ['the report prints a bundle total',

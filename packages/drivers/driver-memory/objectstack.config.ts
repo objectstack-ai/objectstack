@@ -247,15 +247,10 @@ const MemoryDriverPlugin: ObjectStackManifest = {
     extensions: [],
   },
 
-  contributes: {
-    drivers: [
-      {
-        id: 'memory',
-        label: 'In-Memory Storage',
-        description: 'Stores data in memory (volatile, for testing/development)',
-      },
-    ],
-  }
+  // `contributes.drivers` was retired (#10724, ADR-0049): the declaration drove
+  // nothing — this driver is wired by registering the `driver.memory` kernel
+  // service (the objectql plugin calls `registerDriver` on `driver.*` services),
+  // which is the enforced channel.
 };
 
 export default MemoryDriverPlugin;

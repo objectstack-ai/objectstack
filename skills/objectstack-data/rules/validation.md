@@ -17,7 +17,7 @@ The **complete** set of `type` discriminators accepted by `ValidationRuleSchema`
 
 There is no other type. In particular:
 
-- **No `unique` type** (removed from the spec in #1475) — enforce uniqueness
+- **No `unique` type** (removed from the spec) — enforce uniqueness
   with a **unique index** ([see below](#uniqueness--use-unique-indexes)).
 - **No `async` / `custom` type** — external checks and arbitrary validation
   code belong in a `beforeInsert` / `beforeUpdate` **lifecycle hook**
@@ -69,7 +69,7 @@ condition: P`record.type == 'enterprise' && isBlank(record.account_manager)`
 
 > On **insert**, an optional field omitted from the payload reads as `null`
 > in the predicate — `record.due_date == null` matches an omitted field the
-> same as an explicit `null` (#1871). Use `isBlank(v)` to catch `null` and
+> same as an explicit `null`. Use `isBlank(v)` to catch `null` and
 > empty strings together.
 
 ## Uniqueness — Use Unique Indexes

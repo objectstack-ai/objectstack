@@ -322,7 +322,7 @@ Rules:
   Want both demos? Put them on different views.
 - **On an object list view (`*.view.ts` `list` / `listViews`), only
   `element: 'dropdown'` (value chips) is allowed — `tabs` is page-only**
-  (ADR-0047 amendment, framework #2679 / objectui #2338). An object view's
+  (ADR-0047 amendment). An object view's
   saved-view `ViewTabBar` already owns the tab-bar role, so a `tabs`
   user-filter would render a second, colliding tab bar. The spec narrows it
   (`ObjectUserFiltersSchema` — a `tabs` element is untypable at author time
@@ -403,7 +403,7 @@ result, no result at all.
 | a renamed / mistyped column | `searchable-field-unknown` | `400 INVALID_FIELD` |
 | a dotted path (`account_id.name`) | `searchable-field-unknown` | `400 INVALID_FIELD` |
 | a real column outside the allowed set | `searchable-field-unsearchable` | `400 INVALID_FIELD` |
-| a virtual `formula` column — nothing stored to scan (#6674) | `searchable-field-unsearchable` | `400 INVALID_FIELD` |
+| a virtual `formula` column — nothing stored to scan | `searchable-field-unsearchable` | `400 INVALID_FIELD` |
 
 Both diagnostics are **errors**, not warnings — `os validate` fails the build.
 The two you will actually hit, verbatim:
@@ -418,7 +418,7 @@ list-view searchableFields entry "status" is outside object "support_case"'s
 declared searchableFields (subject, case_number, description) — the set 'search'
 scans. Clients echo this declaration verbatim as the '$searchFields' override,
 and the runtime refuses an entry outside the allowed set: every toolbar search
-on this list returns 400 INVALID_FIELD (#4254).
+on this list returns 400 INVALID_FIELD.
 ```
 
 #### `searchableFields: []` does NOT turn search off
@@ -719,7 +719,7 @@ escalate to. Decide on **expressibility**; reuse/governance is Level B.
 |:--|:--|
 | one base object + **to-one** joins (`include`, ≤3 hops) | a join that **changes grain** / a **to-many** rollup onto the parent |
 | 0..N dimensions; date-bucket `day/week/month/quarter/year` | a **computed dimension** / CASE bucket / numeric bin |
-| measures `count/sum/avg/min/max/count_distinct` | list aggregation (collect-into-array / concatenate — retired at #6188, no spelling exists) or any custom-SQL metric |
+| measures `count/sum/avg/min/max/count_distinct` | list aggregation (collect-into-array / concatenate — retired in protocol 17, no spelling exists) or any custom-SQL metric |
 | **derived measures** — `ratio/sum/difference/product` of other measures | scalar math on raw fields (`amount*0.8`), aggregate-of-aggregate |
 | WHERE (`$and/$or/$not` on the base object) + measure-scoped filters | **HAVING** (filtering the aggregate result) |
 | `compareTo` (previous period/year) + `totals` (matrix subtotals) | **window** (rank, running total, lag/lead, %-of-total); **union**; reshaping params |
@@ -748,7 +748,7 @@ Standardized answers to the recurring ambiguous cases:
   join); a lookup-path *filter* is not a reliable analytics-path construct.
 - **A dashboard filter driving several charts** (date/region) → **not** a dataset:
   a dashboard variable + per-chart `filterBindings` broadcast into each chart's
-  WHERE (#2501). A dataset is implied only when a parameter **reshapes** the query
+  WHERE. A dataset is implied only when a parameter **reshapes** the query
   (grain/window/join) — and those are beyond the envelope anyway.
 
 **Level B — naming is governance, not expressibility.** An inline dataset draft
@@ -1508,7 +1508,7 @@ compareTo: { kind: 'previousPeriod' }                            // one dated di
 compareTo: { kind: 'previousYear', dimension: 'close_date' }     // several — say which
 ```
 
-> **Removed in v17 (#5011):** the bare strings `compareTo: 'previousPeriod'` /
+> **Removed in v17:** the bare strings `compareTo: 'previousPeriod'` /
 > `'previousYear'` and the `{ offset: '7d' | '1M' | '1y' }` arm. The strings and
 > `{ offset: '1y' }` are rewritten for you by `os migrate meta --from 16`; any
 > other `offset` duration has no faithful target — state the window on the
@@ -1645,7 +1645,7 @@ relative-date placeholders. The canonical contract is published as
 `node_modules/@objectstack/spec/src/data/date-macros.zod.ts`); two resolvers
 consume it and must stay in lockstep with it — `resolveDateMacros` in
 `@object-ui/core` (before the request leaves the browser) and
-`resolveFilterTokens` in `@objectstack/core` (framework#3582: the ObjectQL
+`resolveFilterTokens` in `@objectstack/core` (the ObjectQL
 read path and the analytics dataset executor, which is what a dashboard
 widget's `filter` actually travels through — it never passes a renderer).
 
@@ -1931,7 +1931,7 @@ zero relearning:
 const org = ctx.user?.organizationId ?? ctx.session?.organizationId;
 ```
 
-> The former `ctx.session.tenantId` alias was removed in v16 (#3290); read the
+> The former `ctx.session.tenantId` alias was removed in v16; read the
 > caller's active org under `organizationId`.
 
 Action bodies execute **trusted** (the `ctx.engine` / `ctx.api` facade bypasses
@@ -1946,7 +1946,7 @@ spelling, the same one the hook `ctx.session`, `ctx.user.positions` and the
 sharing service use:
 
 ```typescript
-// ✅ Canonical since #5613
+// ✅ Canonical
 const positions = ctx.session?.positions ?? [];
 ```
 
@@ -1990,7 +1990,7 @@ export const PrintA3Action = defineAction({
 #### `opensInNewTab` + `newTabUrl` — async / computed redirect (SSO)
 
 For actions whose redirect URL is **computed after a fetch** (SSO and SSO-like
-handlers), set `opensInNewTab: true` (#1787). The renderer pre-opens the tab
+handlers), set `opensInNewTab: true`. The renderer pre-opens the tab
 **synchronously** on click so popup blockers don't fire, then navigates it to
 the handler's returned `redirectUrl`. For external deep-links with no server
 round-trip, add `newTabUrl` — a direct URL template (supports the `{recordId}`
@@ -2075,7 +2075,7 @@ Two UI-specific traps it catches, both **silent at runtime** otherwise:
 
 - **Action / field predicate** — a bare field ref in an action `visible` /
   `disabled` or a field `visibleWhen` (`done` instead of `record.done`)
-  evaluates to `null` and hides the control on *every* record (the #2183/#2185
+  evaluates to `null` and hides the control on *every* record (the
   "button never shows" trap).
 - **Dashboard widget binding** — a widget `dataset` / `dimensions` / `values`
   that doesn't resolve to a declared dataset/field renders an empty chart

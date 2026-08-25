@@ -19,6 +19,54 @@ concurrency:
   group: lint-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
+# ─────────────────────────────────────────────────────────────────────────────
+# ⭐ GATE INVOCATION IDIOM — stated ONCE, here. The steps below point at it.
+#
+# Most gate steps in this file run their script directly:
+#
+#     run: node scripts/check-<thing>.mjs
+#
+# rather than through a `pnpm check:*` alias. That is a deliberate in-repo
+# idiom with its own justification, not a workaround:
+#
+#   * Many gate steps in this file already use it — it is the local precedent.
+#   * `scripts/pm/dispatch-gates.mjs` derives gate families from EITHER
+#     spelling, so the direct form loses no discovery.
+#   * It adds no key to the root manifest.
+#   * It is pinned rather than incidental: check-aggregator-roster,
+#     check-ci-filter-parity and check-doc-frontmatter each assert in their own
+#     self-test that `node <self>` appears in THIS file, so silently rewiring
+#     one of them to an alias reddens its gate.
+#
+# ⚠️ It is NOT because root `package.json` is off limits. This file used to say
+# that, in one shape or another, at nineteen separate sites, and it is FALSE.
+# The declared territory of the #9465 @changesets/cli v3 lane inside that file
+# is scoped by the lane's own parenthetical, verbatim from the issue body:
+#
+#     root `package.json` (the `@changesets/cli` range and the `version` script)
+#
+# That parenthetical is SCOPING, not illustrative: one dependency range and one
+# script key. It does not cover the file, and it does not cover a new `check:*`
+# key — so adding `check:<thing>` to the root manifest would have been allowed
+# all along. The steps below take the direct form on the merits listed above;
+# they are not fenced out of the alternative.
+#
+# Stated once here, and POINTED AT rather than restated, because the over-broad
+# reading propagates by copying — measured, not supposed. A dev agent wrote the
+# same sentence into a new comment and a new script's docblock and said plainly:
+# "I copied the phrasing from neighbouring comments instead of checking it."
+# The count was 15 sites when #10894 was filed on 2026-08-21 and 19 by
+# 2026-08-24, four of them added AFTER the card was filed and two of those
+# within ninety minutes of it being picked up. Nineteen CORRECTED copies would
+# re-arm the identical mechanism: a claim that reads as verified because it
+# reads exactly like the verified ones beside it. So there is one statement of
+# this idiom — this one — and every step refers to it.
+#
+# Changing this note? It is prose, and no gate can red on a wrong sentence
+# here; that is precisely how nineteen wrong ones accumulated. Check any claim
+# about the #9465 fence against #9465's own body before you write it down.
+# ─────────────────────────────────────────────────────────────────────────────
+
 jobs:
 
   lint:
@@ -176,11 +224,8 @@ jobs:
       #
       # What runs here is the self-tests, not the modules' callers: the callers
       # are the two gate steps below, which already run on every PR.
-      # Invoked as `node` rather than through `pnpm check:*`: those aliases
-      # belong in root package.json, declared territory of the @changesets/cli
-      # v3 migration lane (#9465) while it runs — same shape as the
-      # `node scripts/…` steps later in this lane. dispatch-gates.mjs derives
-      # gate families from either spelling.
+      # Invoked as `node` rather than through `pnpm check:*`: see the GATE
+      # INVOCATION IDIOM note at the top of this file.
       # `ts-parse` spawns ~20 real node children (~10 s measured, and the spawns
       # are the point — they pin that a caller's try/catch cannot swallow the
       # refusal); the other two are in-process fixtures, ~0.5 s combined.
@@ -297,9 +342,9 @@ jobs:
       # contract (scripts/check-required-contexts.mjs) that only a
       # maintainer-present Settings change can enrol, and an unenrolled job is
       # an advisory gate — #5617 verbatim. This job is already required.
-      # Invoked as `node` rather than `pnpm check:*` for the same reason as the
-      # other `node scripts/…` steps in this lane: that alias is a line in root
-      # package.json, inside the @changesets/cli v3 fence (#9465).
+      # Invoked as `node` rather than `pnpm check:*`, same as the other
+      # `node scripts/…` steps in this lane: see the GATE INVOCATION IDIOM note
+      # at the top of this file.
       # Runs its own comparator self-test first — 12 cases proving the
       # comparison can still REPORT, because "0 files disagree" and "the
       # comparison is broken" otherwise print the same line.
@@ -547,11 +592,9 @@ jobs:
       # from this step reddens instead of going quiet. Temp-dir fixtures, no
       # network, ~1.7 s.
       #
-      # Invoked as `node` rather than through a `pnpm check:*` alias: that alias
-      # belongs in root package.json, which is declared territory of the
-      # @changesets/cli v3 migration lane (#9465) while it runs. Same shape as
-      # check-links.yml's ADR-link step, and dispatch-gates.mjs derives gate
-      # families from either spelling.
+      # Invoked as `node` rather than through a `pnpm check:*` alias: see the
+      # GATE INVOCATION IDIOM note at the top of this file. Same shape as
+      # check-links.yml's ADR-link step.
       - name: Release-rehearsal clone preflight self-test
         run: node scripts/pm/release-rehearsal-clone.mjs --self-test
 
@@ -586,9 +629,8 @@ jobs:
       # until now NOTHING in this repo ran, and an unrun self-test is a phantom
       # check — the AGENTS.md rule about `@ts-expect-error` in an uncompiled
       # file, wearing a different hat. Invoked as `node`/`bash` rather than
-      # through `pnpm check:*`: that alias belongs in root package.json, which
-      # is declared territory of the @changesets/cli v3 migration lane (#9465)
-      # while it runs. Temp-dir fixtures, no network, ~6 s in total.
+      # through `pnpm check:*`: see the GATE INVOCATION IDIOM note at the top of
+      # this file. Temp-dir fixtures, no network, ~6 s in total.
       #
       # (`check-governed-merges.mjs`'s own cases run in the
       # `pnpm check:pm-governed-merges` step above, which is already its
@@ -685,24 +727,109 @@ jobs:
       # commands executing when the first fails, 3 of 3 when none does. A harness
       # that cannot reproduce the defect cannot certify the fix.
       #
-      # Invoked as `node scripts/…` rather than through a `pnpm check:*` alias,
-      # on the precedent this job already sets: several gate steps here are
-      # invoked directly, and dispatch-gates.mjs derives gate families from
-      # either spelling, so the direct form loses no discovery and adds no key
-      # to the root manifest.
-      #
-      # ⚠️ NOT because root package.json is off limits. The #9465 changeset lane
-      # fences that file's `@changesets/cli` range and its `version` script — the
-      # parenthetical in the issue body is scoping, not illustrative — and not
-      # the file, so a `check:step-collectors` key would have been allowed. Said
-      # plainly because the over-broad reading is easy to acquire and then
-      # propagates as a constraint nobody actually has, which is this step's own
-      # defect class wearing a different hat: a claim that reads as verified.
+      # Invoked as `node scripts/…` rather than through a `pnpm check:*` alias:
+      # see the GATE INVOCATION IDIOM note at the top of this file, which is
+      # where the correction this comment used to carry now lives in full.
       # Temp-dir fixtures, no network, ~1 s.
       - name: Step-collector gate (self-tests that mask each other)
         run: |
           node scripts/check-step-collectors.mjs --self-test
           node scripts/check-step-collectors.mjs
+
+      # Self-test wiring gate (#11150) — the guard over the `--self-test` legs
+      # themselves, in this file and every other workflow.
+      #
+      # A gate whose defect class is its MATCHING RULE cannot detect its own
+      # regression on a clean tree. Green means the finding set is empty;
+      # weakening the rule can only SHRINK that set; and the empty set is the
+      # fixed point of shrinking. So the production verdict is byte-identical
+      # before and after the rule breaks, and `--self-test` — which supplies an
+      # adversarial input a clean tree by construction does not contain — is the
+      # ONLY instrument watching it.
+      #
+      # Measured rather than argued, one ablation per gate with the mutation
+      # confirmed on disk before any reading was taken: loosening
+      # `check-auth-mount-ledger`'s exact `METHOD path` accounting into a
+      # strict-prefix credit, and deleting the recognizer `check-error-code-
+      # casing` needed for the lowercase codes that shipped past it, each left
+      # the production run GREEN and reddened only the self-test. So the
+      # `<gate> --self-test` + `<gate>` steps throughout this file are not
+      # ceremony beside the live run — for that family the first line is the
+      # only line carrying coverage, and deleting it to save CI time would
+      # remove the coverage while every available signal still said the gate
+      # works.
+      #
+      # What this step holds is the mechanically decidable SUPERSET: every
+      # script CI runs that ships a `--self-test` must have that self-test run
+      # by CI too. Membership needs no classifier, and that is the point —
+      # membership in the family itself is NOT statically decidable. The same
+      # kind of ablation on `check-dispatcher-error-vocabulary` REDDENS its
+      # production run, because a row it declares stops being reached and its
+      # ledger is an equality rather than an emptiness; while a second rule
+      # inside `check-route-envelope` moves neither run. Two rules in one file
+      # can sit on opposite sides, so a family enumerated by name would wire the
+      # wrong set and then read as complete.
+      #
+      # Scripts whose self-test CI runs by some route other than the flag (a
+      # wrapper that spawns another tool's, a gate that runs its own cases on
+      # every invocation) are a shrink-only ledger inside the script, and every
+      # row carries evidence that is re-checked on each run rather than
+      # believed.
+      #
+      # ⚠️ No count is written into this comment on purpose: a number in CI
+      # prose goes stale in silence, which is the same class of defect as the
+      # card that produced this step. The gate prints its own scope line.
+      #
+      # Invoked as `node scripts/…` rather than through a `pnpm check:*` alias:
+      # see the GATE INVOCATION IDIOM note at the top of this file. Reads
+      # `scripts/` and `.github/workflows/` off disk, no network, ~1 s.
+      - name: Self-test wiring gate
+        run: |
+          node scripts/check-self-test-wired.mjs --self-test
+          node scripts/check-self-test-wired.mjs
+
+      # Self-test output vs. the runner's command parser (#11886). Sibling of
+      # the step above and sharing its population: that one asks whether CI RUNS
+      # each self-test, this one asks what each self-test PRINTS while it does.
+      #
+      # The defect it closes was live on every PR in this repo. A line of
+      # `scripts/pm/ci-failure.mjs`'s self-test prose named a workflow-command
+      # token literally, inside backticks, as documentation of what that tool
+      # anchors on. The runner does not know a token is being quoted: it parsed
+      # it and minted `annotation_level: failure` on a check run whose
+      # conclusion was SUCCESS. On `d63b01436` that artifact was the ONLY
+      # annotation the `Lint & Repo Gates` run carried. A failure-level
+      # annotation on a green required check is a claim that something failed,
+      # and a repo that mints one on every PR is teaching its readers to skim
+      # exactly the surface other gates report findings into.
+      #
+      # ⚠️ INVISIBLE TO EVERY LOCAL RUN, which is the whole reason it is a gate:
+      # the text is ordinary prose on disk and in a terminal, and only a runner
+      # transforms it. It was found by reading one job's annotations through the
+      # API, not by anything in this file.
+      #
+      # Two facts were measured on real runs and the gate's shape follows them:
+      # the legacy `##[...]` form is parsed ANYWHERE in a printed line (the
+      # measured token sat at column 18 and was still consumed), while the
+      # `::...::` form is parsed only at LINE START (two mid-sentence ones print
+      # on every PR from `check-prerelease-pin-watch` and mint nothing). So the
+      # first detector is unanchored and the second is anchored — flagging inert
+      # prose would be a false positive the next author would be right to delete.
+      #
+      # It RUNS the self-tests rather than reasoning about their source, because
+      # "is this token printed?" is only answerable by printing it. A static
+      # prefilter picks which ones to run — over-selecting freely, since the
+      # verdict never comes from it — which is what keeps this step at ~14 s
+      # instead of the ~4 min the whole population costs.
+      #
+      # Invoked as `node scripts/…` rather than through a `pnpm check:*` alias:
+      # see the GATE INVOCATION IDIOM note at the top of this file. Reads
+      # `scripts/` and `.github/workflows/` off disk and spawns the selected
+      # self-tests; no network.
+      - name: Self-test workflow-command gate
+        run: |
+          node scripts/check-self-test-workflow-commands.mjs --self-test
+          node scripts/check-self-test-workflow-commands.mjs
 
       # Verify-lock entry-point self-test (#9661). `scripts/pm/os-verify-lock.sh`
       # is the ONE way an agent takes the container's shared heavy-verify lock,
@@ -918,10 +1045,9 @@ jobs:
       # naming what could not be read (#4690 / #7484).
       #
       # Invoked as `node` rather than through a `pnpm check:*` alias, same as
-      # the aggregator-roster step below: that alias belongs in root
-      # package.json, declared territory of the @changesets/cli v3 migration
-      # lane (#9465) while it runs. Dependency-free filesystem read, sub-second
-      # over the whole corpus.
+      # the aggregator-roster step below: see the GATE INVOCATION IDIOM note at
+      # the top of this file. Dependency-free filesystem read, sub-second over
+      # the whole corpus.
       - name: Docs frontmatter parses
         run: |
           node scripts/check-doc-frontmatter.mjs --self-test
@@ -1009,8 +1135,8 @@ jobs:
       # failing step here is read by everyone — and enforcement later needs
       # only the flag flip, not a Settings change.
       # Invoked as `node` rather than a `pnpm check:*` alias, same as the
-      # frontmatter step above: the alias is a line in root package.json,
-      # inside the @changesets/cli v3 fence (#9465) while that lane runs.
+      # frontmatter step above: see the GATE INVOCATION IDIOM note at the top of
+      # this file.
       - name: Route spellings taught in prose match the ledgers (advisory)
         run: |
           node scripts/check-doc-route-spelling.mjs --self-test
@@ -1044,6 +1170,51 @@ jobs:
       # back empty, is what stops a vacuous green from reading as coverage.
       - name: React pages honour the useAdapter() query and result contracts
         run: pnpm check:react-page-adapter-contract
+
+      # #10830 form-section `name` in docs examples: the docs pages that TEACH
+      # the i18n-anchor convention were the one surface where nothing enforced
+      # it. `packages/lint`'s `translation-section-name-missing` walks app
+      # METADATA — `collectionEntries`, `walkPageComponents`, `viewContainerSites`
+      # — and never sees an `.mdx` fence, and its severity is `'warning'` besides.
+      # `{/* os:check */}` fences ARE type-checked against the live spec by
+      # `packages/spec/scripts/check-skill-examples.ts`, but `name` is
+      # `.optional()` in the schema — deliberately, and it STAYS (#10709) — so a
+      # nameless section type-checks CLEAN. `content/docs/ui/forms.mdx`'s first
+      # block carried an `os:check` marker over a nameless section for months.
+      #
+      # A gate rather than a fourth sweep, decided by the card's own history:
+      # the same population was hand-counted three times and produced three
+      # numbers — #10579 "3 of 5 over four ui/ pages" (single-line scan), #10709
+      # "7 of 15 across 5 pages" (multi-line, but required `{` to start a fresh
+      # line, so it missed `sections: [{`), PR #10827 "8 of 16 across 5 pages".
+      # Each pass corrected its predecessor's matcher and introduced a subtler
+      # version of the same error.
+      #
+      # This gate's landing census found the error all three SHARED and none
+      # noticed: all three scoped to `content/docs/ui/**`, and six more nameless
+      # literals were sitting in TS fences under `content/docs/concepts/` and
+      # `content/docs/protocol/objectui/`. The real population is 22 literals
+      # across 8 pages, not 16 across 5 — a hand-derived SCOPE is defeated the
+      # same way a hand-derived matcher is, and that is the argument for a
+      # mechanical one. `CENSUS_ANCHORS` pins one of those out-of-`ui/` pages, so
+      # re-narrowing the scope REFUSES instead of reporting a clean corpus.
+      #
+      # Invoked as `node` rather than through a `pnpm check:*` alias, same as the
+      # doc-frontmatter and aggregator-roster steps: see the GATE INVOCATION
+      # IDIOM note at the top of this file. Dependency-free filesystem read,
+      # sub-second over the whole corpus.
+      #
+      # Its --self-test runs FIRST and is where the rule is observed FAILING:
+      # this PR swept the live corpus, so a passing run over real data cannot
+      # distinguish a working matcher from one that matches nothing. The verdict
+      # line prints the POPULATION it judged, and `run()` REFUSES — never exits 0
+      # — when the corpus falls below its floors or a census anchor stops
+      # contributing. A silent zero here would be this gate committing the exact
+      # defect it exists to catch.
+      - name: Docs form-section examples carry a `name`
+        run: |
+          node scripts/check-docs-section-name.mjs --self-test
+          node scripts/check-docs-section-name.mjs
 
       # #9632 published-README links: a README in a package's `files` array with
       # `private` unset is rendered on npm and on GitHub as well as here, and
@@ -1217,6 +1388,19 @@ jobs:
       - name: Reserved-word ("role") docs ratchet
         run: pnpm check:role-word
 
+      # #11671: `os i18n extract --fill=default` fills GAPS only, so revising a
+      # source string rewrites `en` and strands the previous source text in every
+      # other locale. The bundle stays in sync BY KEY, so `check:i18n` reports OK
+      # and `check:i18n-coverage` counts the leaf translated (it tests presence,
+      # not freshness) — measured on PR #11659, three locales serving a 602-char
+      # superseded draft of a 411-char help string under 31 green checks.
+      # This gate reads the committed bundles as TEXT — no workspace build — which
+      # is why it sits here rather than with its two i18n siblings in `typecheck`.
+      # Existing drift is frozen in scripts/i18n-stale-fill-baseline.json with a
+      # reason per entry; NEW drift fails. Improvements ratchet down via --update.
+      - name: Stale translation fills (i18n) ratchet
+        run: pnpm check:i18n-stale-fill
+
       # #6319: content/docs/getting-started/quick-reference.mdx is the protocol
       # index, and each "## <Name> Protocol (N schemas)" heading is a DECLARATION
       # about the table under it. The page is hand-written (build-docs.ts writes
@@ -1315,10 +1499,8 @@ jobs:
       # them — the #9604 precedent, re-measured.
       #
       # Invoked as `node scripts/…` rather than through a `pnpm check:*` alias,
-      # same as the other direct steps in this lane: that alias is a line in root
-      # package.json, inside the @changesets/cli v3 fence (#9465), and the direct
-      # form loses no discovery — dispatch-gates.mjs derives gate families from
-      # either spelling. Precedent: PR #10698.
+      # same as the other direct steps in this lane: see the GATE INVOCATION
+      # IDIOM note at the top of this file. Precedent: PR #10698.
       #
       # Runs its own --self-test first, and that leg is load-bearing: this gate
       # computes its own population, so a block parser that stopped matching
@@ -1766,7 +1948,8 @@ jobs:
       # instrument is fatal here in every mode. `--strict` promotes findings to
       # exit 1 for a caller that owns the remedy; nothing on a PR passes it.
       #
-      # No `pnpm check:*` alias: root package.json is inside the #9465 fence.
+      # No `pnpm check:*` alias: see the GATE INVOCATION IDIOM note at the top
+      # of this file.
       - name: Release section-coverage guard
         run: |
           node scripts/check-release-section-coverage.mjs --self-test
@@ -1889,8 +2072,8 @@ jobs:
       # entry without one.
       #
       # Invoked as `node` rather than through a `pnpm check:*` alias, same as the
-      # other `node scripts/...` steps in this lane: that alias is a line in root
-      # package.json, inside the @changesets/cli v3 fence (#9465).
+      # other `node scripts/...` steps in this lane: see the GATE INVOCATION
+      # IDIOM note at the top of this file.
       #
       # Its --self-test runs first and is not ceremony. The gate is GREEN OVER AN
       # EMPTY EXECUTABLE POPULATION -- every mention of the verb on this tree is
@@ -1950,11 +2133,9 @@ jobs:
       # as a fresh one, and this comment is what the next reader checks the
       # harness against. Prose classes survive an M16; a count does not.
       #
-      # Invoked as `node` rather than through a `pnpm check:*` alias: that alias
-      # belongs in root package.json, declared territory of the @changesets/cli
-      # v3 migration lane (#9465) while it runs. Same shape as the
-      # release-rehearsal step above; dispatch-gates.mjs derives gate families
-      # from either spelling. No network, no build; ~0.2 s.
+      # Invoked as `node` rather than through a `pnpm check:*` alias: see the
+      # GATE INVOCATION IDIOM note at the top of this file. Same shape as the
+      # release-rehearsal step above. No network, no build; ~0.2 s.
       - name: Cross-repo closer outcome contract
         run: |
           node scripts/check-cross-repo-closer-outcome.mjs --self-test
@@ -1979,10 +2160,8 @@ jobs:
       # is exactly the change that would miss one.
       #
       # Invoked as `node` rather than a `pnpm check:*` alias for the same reason
-      # as the step above: that alias belongs in root package.json, declared
-      # territory of the @changesets/cli v3 migration lane (#9465) while it
-      # runs. dispatch-gates.mjs derives gate families from either spelling.
-      # No network, no build; ~1 s, most of it the tracked-file sweep.
+      # as the step above: see the GATE INVOCATION IDIOM note at the top of this
+      # file. No network, no build; ~1 s, most of it the tracked-file sweep.
       - name: Closing-keyword parser parity
         run: |
           node scripts/check-closing-keyword-parity.mjs --self-test
@@ -2021,8 +2200,8 @@ jobs:
       # matching nothing.
       #
       # Invoked as `node` rather than through a `pnpm check:*` alias, same
-      # reason as the step above: root package.json is declared territory of
-      # the @changesets/cli v3 migration lane (#9465) while it runs.
+      # reason as the step above: see the GATE INVOCATION IDIOM note at the top
+      # of this file.
       - name: Merge-queue triage outcome contract
         run: |
           node scripts/check-merge-queue-triage-outcome.mjs --self-test
@@ -2068,9 +2247,8 @@ jobs:
       # state is a refusal rather than a quiet pass — no aggregator found, a
       # workflow that will not parse, or a roster that resolves to zero members
       # all exit 1 naming what could not be read (#4690).
-      # Invoked as `node` rather than through a `pnpm check:*` alias: that
-      # alias belongs in root package.json, which is declared territory of the
-      # @changesets/cli v3 migration lane (#9465) while it runs. Reads two YAML
+      # Invoked as `node` rather than through a `pnpm check:*` alias: see the
+      # GATE INVOCATION IDIOM note at the top of this file. Reads two YAML
       # files; sub-second.
       - name: Aggregator roster gate
         run: |
@@ -2179,10 +2357,9 @@ jobs:
       # either filter has left the OR, and reports a `crosspkg` entry that
       # covers no declaration any more.
       # Invoked as `node` rather than through a `pnpm check:*` alias for the
-      # same reason as the steps below: that alias belongs in root package.json,
-      # declared territory of the @changesets/cli v3 lane (#9465) while it runs.
-      # dispatch-gates.mjs derives gate families from either spelling. Two YAML
-      # parses and a string comparison; milliseconds.
+      # same reason as the steps below: see the GATE INVOCATION IDIOM note at
+      # the top of this file. Two YAML parses and a string comparison;
+      # milliseconds.
       - name: CI filter parity (cross-package Layer C)
         run: |
           node scripts/check-ci-filter-parity.mjs --self-test
@@ -2201,10 +2378,8 @@ jobs:
       # and the reader-side refusal that now catches that needs a live pin of its
       # own or it rots the same way.
       # Invoked as `node` rather than through a `pnpm check:*` alias for the same
-      # reason as the release-rehearsal self-test above: that alias belongs in
-      # root package.json, declared territory of the @changesets/cli v3 lane
-      # (#9465) while it runs. dispatch-gates.mjs derives gate families from
-      # either spelling. Pure functions, no IO, milliseconds.
+      # reason as the release-rehearsal self-test above: see the GATE INVOCATION
+      # IDIOM note at the top of this file. Pure functions, no IO, milliseconds.
       - name: Shard partitioner self-test
         run: node scripts/partition-test-shards.mjs --self-test
 
@@ -2224,10 +2399,8 @@ jobs:
       # corpus (every `scripts/**/*.d.mts`), so a third mirror added tomorrow is
       # covered by existing rather than by anyone remembering to enrol it.
       # Invoked as `node` rather than through a `pnpm check:*` alias for the
-      # same reason as the two steps above: that alias belongs in root
-      # package.json, declared territory of the @changesets/cli v3 lane (#9465)
-      # while it runs. dispatch-gates.mjs derives gate families from either
-      # spelling. Imports two small modules; milliseconds.
+      # same reason as the two steps above: see the GATE INVOCATION IDIOM note
+      # at the top of this file. Imports two small modules; milliseconds.
       - name: Hand-written declaration mirrors
         run: |
           node scripts/check-declaration-mirrors.mjs --self-test
@@ -2415,6 +2588,28 @@ jobs:
       - name: WHERE-matcher conformance gate
         run: pnpm check:where-matcher
 
+      # ObjectQL double `limit` gate (#11525, from #10978). The third member of
+      # the family above, and the one the other two leave uncovered: a
+      # `find(object, opts)` double that matches `where` correctly and then hands
+      # back EVERY matched row. It cannot tell a read bounded at 200 from the same
+      # read bounded at 1000, or from an unbounded one, so any limit change on
+      # that read is green by construction and the production symptom is a
+      # silently truncated result set rather than an error -- #10978's worked
+      # example truncates an RLS input. PR #11521 converted nine doubles on the
+      # authorization path and measured the population; #11525 is the observation
+      # one level up: nothing held those nine right. This lifts each discovered
+      # double out of its file and asks it a bounded question, encoding all three
+      # shape rules the nine settled -- presence not truthiness, bound after the
+      # filter, bound before any row-touching stage. Behavioural rather than
+      # syntactic on purpose: the bound is applied through inline slices, per-file
+      # helpers and shared helpers alike, and no pattern-match over source spans
+      # them. Pre-existing doubles are in a shrink-only measured baseline. Runs
+      # its own --self-test first: the detector can be broken while every double
+      # is fine, and a scan that quietly stops matching would report OK while
+      # reading nothing (#4868's family).
+      - name: ObjectQL double limit gate
+        run: pnpm check:objectql-double-limit
+
       # Paired kernel-hook pin gate (#5282, from #5170 / #5257 / #5274). The two
       # kernels — ObjectKernel (production) and LiteKernel (vitest / serverless /
       # edge) — run the same plugin code and the same hook vocabulary, but do NOT
@@ -2468,8 +2663,8 @@ jobs:
       # pointing at #10371 which owns their repair; the list refuses new members
       # outright, so nothing can join it to get CI green.
       # Invoked as `node` rather than through a `pnpm check:*` alias, same as
-      # the other `node scripts/…` steps in this lane: that alias is a line in
-      # root package.json, inside the @changesets/cli v3 fence (#9465).
+      # the other `node scripts/…` steps in this lane: see the GATE INVOCATION
+      # IDIOM note at the top of this file.
       # Runs its own --self-test first, and that leg is not decoration: this
       # gate computes its own population, so a scan that stopped matching would
       # print a confident green over a tree it never read (#4690's family). The
@@ -3190,8 +3385,8 @@ jobs:
       # SUCCESS as well as failure, which is the visibility half of #10473 — every
       # PR's log carries each file's distance from its ceiling.
       #
-      # Invoked as `node`, NOT through an npm script: root package.json is fenced
-      # (#9465), and this gate needs no wiring there — same shape as the two
+      # Invoked as `node`, NOT through an npm script — see the GATE INVOCATION
+      # IDIOM note at the top of this file; same shape as the two
       # `node scripts/…` steps earlier in this lane. Static text only, no build, so
       # it belongs in this pre-build group. No paths filter, for the standard reason:
       # a filter on skills/** would go dormant on the PR that edits the ceilings.
@@ -3859,6 +4054,35 @@ jobs:
       # result is "nothing found" has to prove it can still find something.
       - name: Check no exported spec type resolves to `any`
         run: pnpm --filter @objectstack/spec run check:exported-any
+
+      # [#11927] The same question, asked of the SDK boundary instead of the
+      # spec surface — and asked because #8140 bound 51 erased return types
+      # across `packages/client` by hand, which buys a snapshot and not a
+      # property. Nothing stopped the 52nd.
+      #
+      # It reads the built `.d.ts` for the reason the neighbour above does, plus
+      # one this package makes sharper: the largest erasure class here carries NO
+      # return annotation at all, taking its type from `unwrapResponse<any>`
+      # (#11925) or from a bare `res.json()`, which lib.dom declares
+      # `Promise<any>` (#12104). Neither spelling contains the text `Promise` or
+      # `any`, so no grep can see them — only a checker asking what the export
+      # RESOLVES to. So it belongs here with the other dist-reading consumer
+      # gates, after the build steps, and on an unbuilt or stale tree it is a
+      # hard refusal naming the build command rather than a skip (#4690, #7122).
+      #
+      # Baseline, not zero: 65 sites are carried as NAMED, shrink-only ledger
+      # entries with a written reason each (packages/client/exported-any-returns.json),
+      # because four of them keep `any` deliberately — no contract exists to bind
+      # (#11924) — and a gate demanding zero would either block on that work or
+      # invite a false declaration to reach green. Self-tests first, like its
+      # neighbours, and that self-test is load-bearing in a specific direction
+      # here: a caller-supplied `<T = any>` is NOT erasure, and a detector that
+      # cannot tell the two apart produces pressure to replace a correct generic
+      # with a wrong concrete type. Both directions are pinned there.
+      #
+      # Adds no required context — a step in an existing lane (#9325).
+      - name: Check no exported client callable resolves to `any`
+        run: pnpm --filter @objectstack/client run check:exported-any-returns
 
       # Third axis on the same surface: api-surface/ shows a name on two
       # entries but not whether the two are ONE declaration re-exported (fine)

@@ -47,6 +47,7 @@ import {
   isPlainRecord,
   ALL_OPERATORS,
   RETIRED_FILTER_OPERATORS,
+  BOUNDED_STRING_FIELD_TYPES,
   REFERENCE_VALUE_TYPES,
   FILE_REFERENCE_TYPES,
   STRUCTURED_JSON_TYPES,
@@ -550,8 +551,21 @@ function validateOne(
     }
   }
 
-  // ── string types ────────────────────────────────────────────────
-  if (t === 'text' || t === 'textarea' || t === 'email' || t === 'url' || t === 'phone' || t === 'password' || t === 'markdown' || t === 'html' || t === 'richtext' || t === 'code') {
+  // ── string types (BOUNDED_STRING_FIELD_TYPES) ───────────────────
+  // The membership is the SPEC'S set, not a local list, on purpose (#11875):
+  // this branch is the write seam that makes a declared `maxLength` /
+  // `minLength` actually bind, and `FieldSchema` refuses the keys on any type
+  // outside the same set — so the two seams reading one constant is what
+  // keeps declared = enforced from drifting (they were two hand-copies until
+  // `signature`/`qrcode` joined and only one copy moved). The set held
+  // text / textarea / email / url / phone / password / markdown / html /
+  // richtext / code at #11566; `signature` and `qrcode` joined at #11875
+  // (maintainer ruling 2026-08-25, option 1) — their stored value is the
+  // author's own string (routinely a data URI far past 255 chars), and this
+  // branch enforcing their bound is what licenses their unbounded TEXT column
+  // in driver-sql (the #11794 invariant). The email/url/phone format checks
+  // below stay per-type conditions inside the branch.
+  if (BOUNDED_STRING_FIELD_TYPES.has(t)) {
     const s = typeof value === 'string' ? value : String(value);
     if (def.maxLength !== undefined && s.length > def.maxLength) {
       return fail('max_length', { maxLength: def.maxLength, actual: s.length });

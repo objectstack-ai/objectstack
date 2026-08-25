@@ -59,6 +59,15 @@ import { refuseRepeatedQueryParams, assertFilterParamSuppliedOnce } from './quer
 import { refuseUnknownQueryParams } from './query-allowlist.js';
 import type { DirectMountedRoute, MountedRouteSource } from './direct-mount.js';
 import { RestServerConfig, RestApiConfig, CrudEndpointsConfig, MetadataEndpointsConfig, BatchEndpointsConfig, RouteGenerationConfig } from '@objectstack/spec/api';
+// [#11683] The catalog's own floor for "a required `code` and no more specific
+// one" — see its use in `registerSharingEndpoints`, where the nested ADR-0112
+// envelope declares `code` REQUIRED while the flat classification it re-dresses
+// legitimately carries none.
+import { standardErrorCodeForHttpStatus } from '@objectstack/spec/api';
+// [#11637] The DECLARED contract for `config.api`, imported as a VALUE rather
+// than a type. Both hops into this package were casts, so this schema had
+// never run on any deployment path — see `assertDeclaredApiConfig` below.
+import { RestApiConfigSchema } from '@objectstack/spec/api';
 import { DataProtocol, MetadataProtocol } from '@objectstack/spec/api';
 // [#9741] Declared request shapes for the meta-read doors below — imported so
 // each door's request literal is compiled against the spec contract instead of
@@ -69,6 +78,8 @@ import type {
     GetMetaItemCachedRequest,
     GetMetaItemLayeredRequest,
     PublishMetaItemRequest,
+    AuditMetaItemRequest,
+    DeleteMetaItemRequest,
 } from '@objectstack/spec/api';
 // [#8073] The closed ADR-0112 error vocabulary, so the explain family's single
 // refusal emitter types its `code` parameter as the vocabulary rather than as
@@ -194,6 +205,7 @@ import { logError, logWarn } from './log.js';
 import {
     mapDataError,
     sandboxBusinessMessage,
+    classifiedRefusalAnswer,
     sendThrownError,
     sendDeclaredFault,
     sendFieldVisibilityFault,
@@ -691,6 +703,21 @@ type NormalizedRestServerConfig = {
         overrides: RouteGenerationConfig['overrides'];
     };
 };
+
+/**
+ * The declared `api` contract, minus the retired keys whose posture this seam
+ * does not own (see {@link RestServer.assertDeclaredApiConfig}).
+ *
+ * Built on first use, not at module load: `RestApiConfigSchema` is a
+ * `lazySchema` Proxy whose whole point is deferring allocation until someone
+ * parses, and calling `.omit()` at module top level would resolve it on every
+ * import of this file. Cached because `.omit()` allocates a fresh schema and a
+ * `RestServer` is constructed per boot (and per test).
+ */
+function buildDeclaredApiConfigSchema() {
+    return RestApiConfigSchema.omit({ requireAuth: true, projectResolution: true });
+}
+let declaredApiConfigSchemaCache: ReturnType<typeof buildDeclaredApiConfigSchema> | undefined;
 
 /**
  * RestServer
@@ -2912,9 +2939,112 @@ export class RestServer {
     }
     
     /**
+     * Run the DECLARED contract for `config.api` — the parse this seam used to
+     * skip. Throws on a configuration `RestApiConfigSchema` rejects.
+     *
+     * [#11637] `RestApiConfigSchema` (`@objectstack/spec/api`) constrains this
+     * object, most load-bearingly:
+     *
+     *     version: z.string().regex(...).default('v1')
+     *
+     * `version` is spliced into `getApiBasePath()` and therefore into the mount
+     * of EVERY route this server registers. Nothing ran that regex on any
+     * deployment path: both hops in are casts (`config.api as any` in
+     * `rest-api-plugin.ts`, then `as Partial<RestApiConfig>` below), and the
+     * kernel's `PluginConfigValidator` could not have covered it either — the
+     * plugin declares no `configSchema`, `PluginLoader` calls its own
+     * `validatePluginConfig(metadata)` with NO config argument and returns
+     * early ("config validation postponed"), and `createRestApiPlugin` closes
+     * over its config so the kernel never receives it to validate. `??` was the
+     * only guard left, and `??` substitutes `null`/`undefined` only: `''`
+     * walked straight past it and mounted the whole API at `/api//`, and
+     * `'v1/beta'` spliced an extra path segment into every route.
+     *
+     * VALIDATION ONLY — the parsed output is deliberately discarded and the
+     * normalization below keeps reading the raw input. Two measured reasons:
+     *
+     *  - `enableSearch` is read below through `as any` and is declared NOWHERE
+     *    in `packages/spec` (zero hits in `packages/spec/src`).
+     *    `RestApiConfigSchema` is not `.strict()`, and a non-strict
+     *    `z.object()` STRIPS keys it does not declare — measured: parsing
+     *    `{ version: 'v1', enableSearch: false }` returns an object with no
+     *    `enableSearch` at all. Consuming the parsed output would therefore
+     *    turn search back ON, silently, for a deployment that turned it off:
+     *    the ADR-0104 silent-strip class that `shared/retired-key.ts` exists to
+     *    prevent. The undeclared key is a defect in its own right, filed
+     *    separately rather than fixed here (`packages/spec` is not this
+     *    change's surface).
+     *
+     *  - the retired `api.requireAuth` key is `.omit()`ed rather than enforced.
+     *    #3963 retired it with a deliberate warn-and-ignore posture
+     *    (`rest-api-plugin.ts`: "is IGNORED"), chosen in a world where nothing
+     *    parsed this config; converting that into a boot failure is that
+     *    decision's to make, not this seam's, and 96 in-repo fixtures still
+     *    pass the key. `.omit()` is typed against the shape, so the day the
+     *    tombstone ages out of `packages/spec` this line fails `tsc` — the
+     *    drift cannot go silent.
+     *
+     *  - `api.projectResolution` is `.omit()`ed for a DIFFERENT reason, and it
+     *    is the one CI caught: the declared enum is
+     *    `z.enum(['required', 'optional', 'auto'])`, and the value this
+     *    platform actually ships is `'none'` — produced by
+     *    `@objectstack/runtime`'s standalone stack, whose
+     *    `StandaloneStackResult.api` DECLARES the literal type
+     *    `{ enableProjectScoping: false; projectResolution: 'none' }`, and
+     *    forwarded by `os serve` straight into this config
+     *    (`apiConfig.projectResolution ?? 'auto'` — `'none'` is not nullish, so
+     *    it passes through). Three packages disagree about this key's
+     *    vocabulary, and they have disagreed silently for exactly as long as
+     *    nothing ran the schema. Parsing it here does not settle that
+     *    disagreement, it just turns every `os serve` boot into a crash.
+     *    ⛔ Which spelling is right — teach the enum `'none'`, or migrate the
+     *    runtime onto `'auto'` — is a contract question about project-scoping
+     *    semantics that this seam cannot answer and this card does not own
+     *    (`packages/spec` is `domain:spec`'s surface). Filed as #11999.
+     *
+     * The sibling sub-objects (`crud`, `metadata`, `batch`, `routes`) are still
+     * cast, not parsed, and carry declared constraints of their own
+     * (`batch.maxBatchSize: z.number().int().min(1).max(1000)`, the
+     * `routes.nameTransform` enum, ...). Same defect class, filed separately:
+     * this change deliberately puts ONE narrowing in front of contract review
+     * rather than five.
+     */
+    private assertDeclaredApiConfig(api: unknown): void {
+        declaredApiConfigSchemaCache ??= buildDeclaredApiConfigSchema();
+        const result = declaredApiConfigSchemaCache.safeParse(api ?? {});
+        if (result.success) return;
+
+        const details = result.error.issues
+            .map((issue) => `  - api.${issue.path.join('.') || '(root)'}: ${issue.message}`)
+            .join('\n');
+        // The `version` rationale is appended only when `version` is what
+        // failed. Measured during this change's own ablation: a
+        // `projectResolution` refusal printed the whole "an empty version
+        // mounts the entire API at /api//" paragraph, which reads as a
+        // diagnosis of a key the operator did not write — worse than no
+        // rationale, because it sends them to the wrong line of their config.
+        const versionFailed = result.error.issues.some((issue) => issue.path[0] === 'version');
+        throw new Error(
+            'REST API configuration is invalid: `api` does not satisfy `RestApiConfigSchema` '
+            + '(@objectstack/spec/api), the schema that declares it.\n'
+            + details
+            + (versionFailed
+                ? '\nThis is refused at construction because `api.version` becomes a path segment in '
+                  + 'EVERY route this server mounts (`getApiBasePath()` = `apiPath ?? '
+                  + '`${basePath}/${version}``) — an empty version mounts the entire API at `/api//`, '
+                  + 'and one carrying `/` splices an extra segment into every route.'
+                : ''),
+        );
+    }
+
+    /**
      * Normalize configuration with defaults
      */
     private normalizeConfig(config: RestServerConfig): NormalizedRestServerConfig {
+        // [#11637] Parse before the cast, not instead of it: the cast below is
+        // what makes the rest of this method type-check, and it is only sound
+        // once the declared contract has actually been run.
+        this.assertDeclaredApiConfig(config.api);
         const api = (config.api ?? {}) as Partial<RestApiConfig>;
         const crud = (config.crud ?? {}) as Partial<CrudEndpointsConfig>;
         const metadata = (config.metadata ?? {}) as Partial<MetadataEndpointsConfig>;
@@ -5677,7 +5807,7 @@ export class RestServer {
                         return;
                     }
                     const p = await this.resolveProtocol(environmentId, req);
-                    if (!(p as any).deleteMetaItem) {
+                    if (!p.deleteMetaItem) {
                         // [#7035] ADR-0112 envelope. This site was the worst of
                         // the three shapes: a BARE STRING `error`, with no code
                         // at all — so neither `err.error.code` nor `err.code`
@@ -5741,7 +5871,23 @@ export class RestServer {
                         // org-scope comment for the measurement.
                         canonicalMetaUrlType(req.params.type), ctx?.tenantId,
                     );
-                    const result = await (p as any).deleteMetaItem({
+                    // [#11679] The `(p as any)` cast this call carried came off
+                    // when `DeleteMetaItemRequestSchema` caught up with the
+                    // eight members this door sends. Unlike the publish door's
+                    // cast (member existence, TS2339), this one was load-bearing
+                    // on REQUEST SHAPE: the member was declared all along, but
+                    // the schema declared only `{ type, name }`, so removing the
+                    // cast surfaced TS2353 on six keys. The literal is now
+                    // compiled against the spec contract through the #9741
+                    // `TransportScopedMetaRequest` wrapper — `environmentId` is
+                    // the transport-level routing key that wrapper layers on,
+                    // ⛔ never a protocol key; every other key here is checked
+                    // against the declared request, so an undeclared member is a
+                    // compile error instead of a payload member no contract has
+                    // ever seen. The 501 guard above stays: the member is
+                    // declared OPTIONAL, and the guard is what narrows it to
+                    // callable here.
+                    const deleteRequest: TransportScopedMetaRequest<DeleteMetaItemRequest> = {
                         type: req.params.type,
                         name: req.params.name,
                         organizationId,
@@ -5750,7 +5896,8 @@ export class RestServer {
                         ...(actor ? { actor } : {}),
                         ...(stateParam ? { state: stateParam } : {}),
                         ...(dropStorage ? { dropStorage: true } : {}),
-                    });
+                    };
+                    const result = await p.deleteMetaItem(deleteRequest);
                     res.json(result);
                 } catch (error: any) {
                     handleRouteError(res, error);
@@ -5824,7 +5971,7 @@ export class RestServer {
                 try {
                     const environmentId = isScoped ? req.params?.environmentId : undefined;
                     const p = await this.resolveProtocol(environmentId, req);
-                    if (typeof (p as any).auditMetaItem !== 'function') {
+                    if (typeof p.auditMetaItem !== 'function') {
                         // [#9426 / ADR-0110 D3] A MISS and a FAULT are different
                         // facts, and this branch is the second one: the resolved
                         // protocol cannot read an audit trail AT ALL, so the
@@ -5849,16 +5996,17 @@ export class RestServer {
                         //
                         // Refusing HERE rather than asserting at assembly is
                         // deliberate, and is the reasoning PR #9425 landed one
-                        // route over. `auditMetaItem` is not a member of
-                        // `RestProtocol` (= `DataProtocol & MetadataProtocol`) and
-                        // is not declared in `packages/spec` at all — it is an
-                        // ADR-0076 D9 server-only extension, which is why it is
-                        // reached through a runtime cast. A host that implements
-                        // the DECLARED contract exactly is therefore a CONFORMING
-                        // deployment that lands here with no type error, and a
-                        // boot-time assertion would promote an undeclared optional
-                        // extension into a required one — a `packages/spec`
-                        // contract decision, not a route one.
+                        // route over. `auditMetaItem` is a declared OPTIONAL
+                        // member of `MetadataProtocol` (the #11006-pattern
+                        // catch-up that retired this door's `(p as any)` casts;
+                        // it was an undeclared ADR-0076 D9 server-only
+                        // extension before that). A host without the verb is
+                        // therefore a CONFORMING deployment that lands here
+                        // with no type error, and a boot-time assertion would
+                        // promote a declared-optional member into a required
+                        // one — a `packages/spec` contract decision, not a
+                        // route one. The guard is also what narrows the member
+                        // to callable below.
                         //
                         // Envelope per #7035: the ADR-0112 NESTED
                         // `{ error: { code, message } }` the sibling `/meta` 501
@@ -5910,12 +6058,24 @@ export class RestServer {
                     // states below — not from the request payload. It is still
                     // read on the two lines that need it.
                     const ctx = await this.resolveExecCtx(environmentId, req).catch(() => undefined);
-                    const result = await (p as any).auditMetaItem({
+                    // The `(p as any)` casts this door carried came off when
+                    // `MetadataProtocol` declared `auditMetaItem` (the #11006
+                    // pattern, same as the publish door below): the literal is
+                    // now compiled against the spec contract, so an undeclared
+                    // key here is a compile error (TS2353) instead of a payload
+                    // member no contract has ever seen. Plain
+                    // `AuditMetaItemRequest` rather than the
+                    // `TransportScopedMetaRequest` wrapper on purpose: this
+                    // door stopped sending `environmentId` when #8747 scoped
+                    // the read (see the note above), so there is no
+                    // transport-level member left to layer on.
+                    const auditRequest: AuditMetaItemRequest = {
                         type: req.params.type,
                         name: req.params.name,
                         organizationId: ctx?.tenantId ?? null,
                         ...(limit !== undefined && Number.isFinite(limit) ? { limit } : {}),
-                    });
+                    };
+                    const result = await p.auditMetaItem(auditRequest);
                     res.json(result);
                 } catch (error: any) {
                     handleRouteError(res, error);
@@ -6729,7 +6889,17 @@ export class RestServer {
                     // Threading `force` here without also naming it here would
                     // have re-opened that inversion on a fresh door, on a
                     // destructive verb, reported as 200.
-                    if (refuseRepeatedQueryParams(req, res, ['force', 'package'])) return;
+                    //
+                    // [#11712] `mode` joins for the same reason and in the same
+                    // stroke as the read below. The single-segment twin has
+                    // listed all three since #6877; this door listed two,
+                    // because it read two. The mechanism is #6877's unchanged:
+                    // a repeated `?mode=draft&mode=draft` arrives as an ARRAY,
+                    // the `typeof req.query?.mode === 'string'` test below is
+                    // FALSE for it, and the save falls silently back to
+                    // publishing live — the very outcome this card is about,
+                    // re-entered through the door the fix opens.
+                    if (refuseRepeatedQueryParams(req, res, ['force', 'package', 'mode'])) return;
                     // [#11095] Phase 3a-destructive: `?force=true` opts past the
                     // destructive-change safety check — BYTE-IDENTICAL to the
                     // single-segment `PUT /meta/:type/:name` above, truthy
@@ -6810,6 +6980,42 @@ export class RestServer {
                         ...(actor ? { actor } : {}),
                         ...(force ? { force: true } : {}),
                         ...(packageId ? { packageId } : {}),
+                        // [#11712] ADR-0005 per-item lifecycle: `?mode=draft`
+                        // stages the write instead of publishing it live.
+                        // BYTE-IDENTICAL to the single-segment
+                        // `PUT /meta/:type/:name` above, spelling test and all,
+                        // because it is byte-identically the same decision —
+                        // #7019's ruling applied a fifth time, with its reason:
+                        // this route is "word for word the same operation" as
+                        // its twin, one generic `saveMetaItem` reached by a name
+                        // spelled in two segments. #6603/#7019 (capability
+                        // gate), #8805 (write-side org), #7035 (the 501
+                        // envelope) and #11095 (`?force`) each closed a
+                        // divergence on this pair on exactly that finding.
+                        //
+                        // The harm was measured, not reasoned. Until this
+                        // landed the request was built field by field with no
+                        // `mode` among the fields, so `saveMetaItem` fell to its
+                        // `'publish'` default: `PUT /meta/object/crm/task
+                        // ?mode=draft` answered `200` with `state: 'active'` and
+                        // OVERWROTE the live row, while the byte-identical
+                        // intent one route over inserted a `state: 'draft'` row
+                        // and left the live one alone. Nothing in the answer
+                        // said the parameter had been ignored — a caller asking
+                        // for a staging buffer got a publish.
+                        //
+                        // ⛔ NOT repaired by refusing the parameter here: the
+                        // draft store keys on `type`/`name`/org/package and is
+                        // indifferent to how the name is spelled, and the
+                        // ADR-0033 read half is ALREADY mounted in both arities
+                        // (`GET /:type/:section/:name/published`, #7526, whose
+                        // own comment cites `getPublished('lead',
+                        // 'views/all_leads')`). A compound draft is a shape this
+                        // surface already serves; only the write door was
+                        // missing.
+                        ...((typeof req.query?.mode === 'string'
+                            && req.query.mode.toLowerCase() === 'draft')
+                            ? { mode: 'draft' } : {}),
                     } as any);
                     res.json(result);
                 } catch (error: any) {
@@ -9107,6 +9313,13 @@ export class RestServer {
                     //
                     // Neither arm's STATUS moves. ① keeps answering the declared
                     // 4xx and ③ keeps answering 500; only the sentence changes.
+                    //
+                    // [#11684] …and that last sentence was the defect report
+                    // for the card below: leaving the status alone left an
+                    // UNDECLARED sandbox refusal in ③, answering 500 where the
+                    // `/data` door answers 400 for the identical throw. ①b now
+                    // sits between the two arms and moves exactly that class.
+                    // The sentence this line computes is unchanged.
                     const clientMsg = sandboxBusinessMessage(error) ?? msg;
                     // ── [#5352] ① The ADR-0112 envelope, read FIRST ──────────
                     // A thrown error that already carries `code` + a 4xx
@@ -9140,6 +9353,55 @@ export class RestServer {
                     const envelopeCode = typeof error?.code === 'string' && error.code.length > 0 ? error.code : undefined;
                     if (envelopeStatus !== undefined && envelopeStatus >= 400 && envelopeStatus < 500 && envelopeCode) {
                         return res.status(envelopeStatus).json({ code: envelopeCode, message: clientMsg.slice(0, 1000) });
+                    }
+                    // ── [#11684] ①b The refusal ① could not read ─────────────
+                    // ① answers a refusal that declared BOTH halves of the
+                    // envelope, spelled `status`. Two classified refusals fell
+                    // past it into ③ and were reported to the caller as server
+                    // faults:
+                    //
+                    //   - **An UNDECLARED sandboxed hook refusal.** A hook body
+                    //     running `throw new Error('month-end close is in
+                    //     progress')` — the most common shape an app author
+                    //     writes — declares no `status` and no `code`, so ①
+                    //     never opened. Measured: `500 ANALYTICS_QUERY_FAILED`
+                    //     here against `400` with the same sentence on
+                    //     `POST /data/:object`, i.e. one hook body, one
+                    //     `throw`, two statuses decided by whether the caller
+                    //     hit a dashboard tile or a list view.
+                    //   - **The `statusCode` spelling** (#7525). ①'s read is
+                    //     `error.status` alone, and `plugin-approvals`'
+                    //     lifecycle hooks — plus `runtime`'s
+                    //     `action-execution.ts` and `metadata-protocol` — spell
+                    //     it `statusCode`. Same refusal, same declaration, 500.
+                    //
+                    // {@link classifiedRefusalAnswer} is the `/data` door's own
+                    // classification, imported rather than re-derived for the
+                    // same reason {@link sandboxBusinessMessage} above it is: a
+                    // third local opinion at this boundary is precisely how the
+                    // two faces came to disagree. It answers `undefined` for
+                    // everything ③ still owns — a declared 5xx, a crashed body
+                    // (#7543), a driver fault, anything unclassified — so ③'s
+                    // reach is unchanged except for the two shapes named above.
+                    //
+                    // ⛔ This is NOT a widening of ①'s both-halves gate. That
+                    // gate is #5352's ruling for producers that ship half an
+                    // ADR-0112 envelope, it still stands, and the seam encodes
+                    // it. What crosses here without a `code` is the SANDBOX
+                    // limb, where "no code" is not half a declaration: the
+                    // author declared the condition by reporting it, and
+                    // `classifyDataError`'s unwrap door has answered that with
+                    // 400 and the verbatim sentence since it existed
+                    // (`hook-error-format.dogfood.test.ts`). Nothing is
+                    // invented — a refusal that declared no code is answered
+                    // with no code, exactly as `/data` answers it.
+                    const refusal = classifiedRefusalAnswer(error);
+                    if (refusal) {
+                        const { error: refusalText, ...refusalFields } = refusal.body;
+                        return res.status(refusal.status).json({
+                            ...refusalFields,
+                            message: String(refusalText ?? clientMsg).slice(0, 1000),
+                        });
                     }
                     // ── ② … is GONE. The message-sniffing list is retired ────
                     // [#5367] `/analytics/dataset/query` used to classify six
@@ -9546,7 +9808,73 @@ export class RestServer {
         // readers are this file's own route mappings plus one
         // `plugin-approvals` check on an error it threw itself in-process).
         // It therefore stays exactly as it is; only the response SHAPE moved.
+        //
+        // [#11683] …and it stays exactly as it is here too. What moved is that
+        // the prefix read is no longer the FIRST question, and no longer the
+        // only one. It is the ADR-0111 idiom for producers that declare
+        // nothing else, and the census that made it safe to keep is still
+        // true: every throw site in `plugin-sharing/src/sharing-service.ts`
+        // (11 of them, re-censused at claim) is a bare `Error` carrying one of
+        // these prefixes and NO `code`, NO `status`. Backward compatibility is
+        // therefore not a courtesy — it is the only channel this service has.
+        //
+        // What it could never read is a refusal that DID declare itself, and
+        // two of those reach these three catches today:
+        //
+        //   - `plugin-sharing`'s own write gate throws
+        //     `{ code: 'FORBIDDEN', status: 403 }` (`sharing-plugin.ts`).
+        //     `FORBIDDEN` is not one of the five, so a refusal that declared
+        //     403 twice over was answered `500 SHARE_*_FAILED`.
+        //   - A sandboxed hook on the `sys_record_share` write arrives with
+        //     the QuickJS debug wrapper on `.message` and the business text on
+        //     `.innerMessage`. The wrapper IS the prefix, so nothing matched
+        //     and the wrapper was interpolated verbatim into the 500 — #11588's
+        //     leak on a branch #11588 did not reach.
+        //
+        // Both are asked FIRST now, through {@link classifiedRefusalAnswer} —
+        // the `/data` door's own classification, so this family cannot answer
+        // a refusal differently from every other face that catches it. A
+        // declaration outranking a message read is the whole point: this
+        // route's defect was that classification was a property of how the
+        // sentence happened to start.
+        //
+        // ⛔ The DIALECT does not move. #8111 converted these arms onto the
+        // nested ADR-0112 D5 envelope and the `check:route-envelope` ratchet
+        // only ticks down, so the classification is re-dressed through
+        // `respondError` rather than sent by `handleRouteError` (which speaks
+        // the flat dialect). Vocabulary and position stay two decisions.
         const respondSharingError = (res: any, error: any): boolean => {
+            // A refusal the producer classified — answered exactly as `/data`
+            // answers it. `undefined` for everything else, which falls to the
+            // prefix idiom below and then to the caller's own 500 arm, both
+            // unchanged.
+            const refusal = classifiedRefusalAnswer(error);
+            if (refusal) {
+                // `code` is REQUIRED by the nested envelope, and the flat
+                // classification legitimately carries none for an undeclared
+                // sandbox refusal (ADR-0112: the producer names the condition,
+                // so nothing is invented for the half it did not name). The
+                // catalog's own floor fills the required field —
+                // `standardErrorCodeForHttpStatus`, whose docblock exists for
+                // exactly this ("Total by construction: a producer can always
+                // fill a required `code`") and which is the same derivation
+                // `resolveThrownHttpError` applies at every other door. This
+                // is the one place the two dialects genuinely differ: the flat
+                // body may omit `code`, the nested one may not.
+                //
+                // ⚠️ Measured and NOT repaired here: an UNREGISTERED producer
+                // code is demoted by the shared resolver to a `declaredCode`
+                // sibling (ADR-0112 #9232), and `sendError`'s `extra` does not
+                // accept that field — so the author's own spelling is dropped
+                // on this family while `/data` carries it. Widening the shared
+                // envelope writer is a `@objectstack/types` change outside
+                // this card's surface; filed separately.
+                const code = typeof refusal.body.code === 'string'
+                    ? refusal.body.code as ErrorCode
+                    : standardErrorCodeForHttpStatus(refusal.status);
+                respondError(res, refusal.status, code, String(refusal.body.error ?? ''));
+                return true;
+            }
             const msg = String(error?.message ?? error ?? '');
             const map: Array<[ErrorCode, number]> = [
                 ['VALIDATION_FAILED', 400],
@@ -9566,6 +9894,31 @@ export class RestServer {
             }
             return false;
         };
+        /**
+         * [#11683] The text the three 500 arms may put on the wire.
+         *
+         * The arms interpolate the caught error's own message, and that is
+         * unchanged for every ordinary fault — `sharing-envelope.test.ts` pins
+         * a plain `Error('boom')` arriving as `boom` and it still does.
+         *
+         * The one shape it withholds is a SANDBOX error that reached a 500 at
+         * all, which after the classification above means one thing: a hook
+         * body that CRASHED rather than refused (`isScriptFaultMessage`,
+         * #7543). Its `.message` is the QuickJS debug wrapper and its
+         * `.innerMessage` is a `TypeError: …` — the wrapper the card measured
+         * leaking, wrapped around a runtime fault the caller must not read
+         * either. `/data` answers that case `INTERNAL_ERROR_MESSAGE` through
+         * {@link UNCLASSIFIED_FAULT}; this says the same sentence, so the leak
+         * is closed on this family unconditionally rather than only for the
+         * refusals the classification door catches.
+         *
+         * The full wrapper still reaches the operator: every caller logs the
+         * whole error object immediately above its `respondError`.
+         */
+        const sharingFaultMessage = (error: any): string =>
+            typeof error?.innerMessage === 'string' && error.innerMessage
+                ? INTERNAL_ERROR_MESSAGE
+                : String(error?.message ?? error).slice(0, 500);
 
         // GET — list shares on a record. [ADR-0111 D5] Management-gated in the
         // service: invisible record → 404, visible-but-not-manager → 403.
@@ -9587,7 +9940,7 @@ export class RestServer {
                     // The 500 arms keep their 500-char cap: an unexpected
                     // fault's message is not a contract, and truncating it
                     // stays a sanitization step — only the position moves.
-                    respondError(res, 500, 'SHARES_LIST_FAILED', String(error?.message ?? error).slice(0, 500));
+                    respondError(res, 500, 'SHARES_LIST_FAILED', sharingFaultMessage(error));
                 }
             },
             metadata: { summary: 'List per-record sharing grants', tags: ['sharing'] },
@@ -9621,7 +9974,7 @@ export class RestServer {
                 } catch (error: any) {
                     if (respondSharingError(res, error)) return;
                     logError('[REST] Grant share error:', error);
-                    respondError(res, 500, 'SHARE_GRANT_FAILED', String(error?.message ?? error).slice(0, 500));
+                    respondError(res, 500, 'SHARE_GRANT_FAILED', sharingFaultMessage(error));
                 }
             },
             metadata: { summary: 'Grant a per-record share to a principal', tags: ['sharing'] },
@@ -9650,7 +10003,7 @@ export class RestServer {
                 } catch (error: any) {
                     if (respondSharingError(res, error)) return;
                     logError('[REST] Revoke share error:', error);
-                    respondError(res, 500, 'SHARE_REVOKE_FAILED', String(error?.message ?? error).slice(0, 500));
+                    respondError(res, 500, 'SHARE_REVOKE_FAILED', sharingFaultMessage(error));
                 }
             },
             metadata: { summary: 'Revoke a per-record share by id', tags: ['sharing'] },

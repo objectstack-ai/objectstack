@@ -26,6 +26,15 @@ export {
   DEFAULT_EXTENDER_PRIORITY,
 } from './registry.js';
 export type { ObjectContributor, SchemaRegistryOptions } from './registry.js';
+// [#11997] The canonical "does a code package ship this body?" test (ADR-0029
+// D9.6). Exported because the ADR-0005 overlay precedence is not the registry's
+// alone to apply: any consumer that collapses two same-named contenders into one
+// slot — the automation engine's flow map is the first — has to answer the SAME
+// question, and its whole reason for existing is that callers must not drift
+// into a second answer. Consumers ask this; they do not re-derive it from
+// `_packageId`, which cannot tell a tenant overlay from a code artifact on its
+// own (see the function's own doc, and `isTenantAuthored` above it).
+export { isCodeArtifactBody } from './registry.js';
 // [#7865] Injected-column provenance — the machine-readable marker for anchors
 // the registry registers without provisioning storage (external objects,
 // ADR-0015). Canonical home: `@objectstack/metadata-core`, beside the
@@ -63,7 +72,7 @@ export type { CompanionFieldMeta, CompanionObjectMeta } from './search-companion
 
 // Export Engine
 export { ObjectQL, ObjectRepository, ScopedContext } from './engine.js';
-export type { HookHandler, HookEntry, OperationContext, EngineMiddleware } from './engine.js';
+export type { HookHandler, HookEntry, OperationContext, EngineMiddleware, HeldFileResolver } from './engine.js';
 export type { AdmittedValueShapeViolationTally } from './engine.js';
 export { SummaryRecomputeError } from './summary-errors.js';
 export type { SummaryRecomputeFailure } from './summary-errors.js';
@@ -133,6 +142,24 @@ export type {
   EngineUpdateDispatchData,
   EngineUpdateDispatchCase,
 } from './engine-update-dispatch.js';
+
+// [#11957] The READ-side sibling of the two dispatches above, on exactly the
+// same terms. `ObjectQL.findOne` applies `limit: 1`, so a query with no `where`
+// and no `orderBy` would return an ARBITRARY row — `requireFindOnePredicate`
+// REFUSES it (#4419) and every in-memory double answered it happily, which is
+// how #11767 shipped a first-run bypass that was permanently inert on real
+// deployments while a 641-line unit matrix stayed green.
+export {
+  resolveEngineFindOnePredicate,
+  assertEngineFindOnePredicate,
+  engineFindOnePredicateRefusalMessage,
+  ENGINE_FINDONE_PREDICATE_CASES,
+} from './engine-findone-predicate.js';
+export type {
+  EngineFindOnePredicate,
+  EngineFindOneQueryInput,
+  EngineFindOnePredicateCase,
+} from './engine-findone-predicate.js';
 
 // Export in-memory aggregation fallback (used by engine.aggregate when the
 // driver lacks native groupBy/aggregations support; also useful for tests).

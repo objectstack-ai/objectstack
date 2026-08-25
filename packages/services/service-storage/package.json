@@ -14,7 +14,7 @@
     }
   },
   "scripts": {
-    "build": "tsup --config ../../../tsup.config.ts",
+    "build": "tsup --config ../../../tsup.config.ts && node ../../../scripts/check-dts-emitted.mjs",
     "test": "vitest run"
   },
   "dependencies": {
@@ -38,6 +38,7 @@
   },
   "devDependencies": {
     "@objectstack/objectql": "workspace:*",
+    "@objectstack/driver-sql": "workspace:*",
     "@types/node": "^26.2.0",
     "typescript": "^6.0.3",
     "vitest": "^4.1.10"

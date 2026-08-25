@@ -26,7 +26,8 @@ flow。ADR-0049 说这样的属性必须**被强制执行**、标 **`experimenta
 本技能是第三条路:一次删除真正的代价是什么,按什么顺序付。
 
 删掉键本身也许只占 5% 的工作。其余 95% 在于:一个键可以在 ~14 个地方被编写,而**守
-着每个地方的门禁是分别地、串行地失败的** —— 一个过期面遮住其余全部,于是你得到的是
+着每个地方的门禁是分别地、串行地失败的** —— 一个过期面遮住其余全部,于是你得到的
+是
 每个面一轮红构建,而不是一轮报出全部。
 
 先读验证侧:`packages/spec/liveness/README.md`(裁定怎么得出、`verifiedAt`、为什么
@@ -146,9 +147,11 @@ ratchet(#2978)会先开火,
 1. 反引号包着的**全限定**键打头 —— `` `flow.errorHandling.fallbackNodeId` ``,不是裸尾段。
 2. `was removed in @objectstack/spec <version> (#issue[, ADR-XXXX Dn])`。
 3. 一个破折号从句讲**它为何惰性或错误** —— "it never had an effect"、"no renderer ever read it"。
-4. 祈使句修复:改名写 "use `<replacement>`" + "Rename the key; the value (…) is unchanged.";删除写 "Delete the key." + **真正生效的机制是什么**。
+4. 祈使句修复:改名写 "use `<replacement>`" + "Rename the key; the value (…) is unchanged.";删除写 "Delete
+   the key." + **真正生效的机制是什么**。
 5. ``Run `os migrate meta --from <N-1>` to list the mechanical edits for existing sources; apply them by hand.``
-   —— 命令重放链、打印机械修改清单,从不写 source 文件(#9591 的 in-place codemod 落地前恒真)。
+   —— 命令重放链、打印机械修改清单,从不写 source 文件(#9591 的 in-place codemod 落地前恒
+   真)。
    消息不点名 conversion id;conversion 由 CLI 命令引用。唯一允许的变体(按形状、不按站点):
    conversion 只覆盖值的一部分时,两从句形点名覆盖的部分 —— ``Run `os migrate meta --from <N-1>`
    to list the mechanical edits for the <X> case; <what the tool does with the rest>.``

@@ -95,15 +95,38 @@ const positional = argv.filter(
 const JSON_OUT = has('--json');
 const SHOW_EXCLUDED = has('--all');
 
-if (has('-h') || has('--help')) {
-  console.log(
-    readFileSync(fileURLToPath(import.meta.url), 'utf8')
-      .split('\n')
-      .filter((l) => l.startsWith('//'))
-      .map((l) => l.slice(3))
-      .join('\n'),
-  );
-  process.exit(0);
+/**
+ * Usage text, read back out of this file's own `//` lines so the two cannot
+ * drift.
+ *
+ * It is a FUNCTION rather than a top-level `if` because this module exports
+ * bindings. As a bare top-level statement the test read the IMPORTER's argv:
+ * an importer that happened to carry `-h` or `--help` got this header written
+ * to its stdout and then `process.exit(0)` — its process ended mid-import
+ * carrying a SUCCESS status, which no caller reading the status alone can
+ * tell apart from a clean import.
+ *
+ * BOUNDED to the header, not every column-0 `//` line in the file (#11952).
+ * A bare `.filter(startsWith('//'))` has no notion of "the header": it took
+ * EVERY column-0 `//` line anywhere in the file, so an ordinary implementation
+ * comment written at column 0 later in the file — a helper's one-line
+ * rationale, a self-test section banner — silently became part of the usage
+ * text a reader pastes. The header IS a contiguous prefix of this file (right
+ * after the shebang), so this walks lines in order, skips the shebang before
+ * the block starts, and STOPS at the first line that is not a `//` line once
+ * the block has started — a `takeWhile`, not a `filter`. That makes "add a
+ * column-0 comment anywhere later" structurally unable to reach `--help`
+ * again, rather than merely detectable after the fact.
+ */
+function printHelp() {
+  const lines = readFileSync(fileURLToPath(import.meta.url), 'utf8').split('\n');
+  const start = lines.findIndex((l) => l.startsWith('//'));
+  const header = [];
+  for (let i = start; i >= 0 && i < lines.length && lines[i].startsWith('//'); i++) {
+    header.push(lines[i].slice(3));
+  }
+  console.log(header.join('\n'));
+  return 0;
 }
 
 function die(msg) {
@@ -603,6 +626,31 @@ function selfTest() {
         cliJson.releasing.filter((r) => r.breaking).length === 2,
       JSON.stringify(cliJson.releasing.map((r) => r.breakingSource)),
     );
+
+    // --- #11952: `--help`'s self-read is bound to the header, not every
+    // column-0 `//` line in the file. Pin the acceptance criterion literally:
+    // the header is still there, and none of the six measured stray lines —
+    // an internal helper's rationale (pinAt, mid-`main`) and this very
+    // self-test's own section banner — leak into the usage text.
+    const helpOut = run(['--help']);
+    check(
+      '--help still carries the real header (Usage/Env sections intact)',
+      helpOut.includes('Usage:') &&
+        helpOut.includes('node scripts/objectui-range.mjs <old-rev> [new-rev]') &&
+        helpOut.includes('OBJECTUI_ROOT=/path/to/objectui'),
+      helpOut,
+    );
+    const strayLines = [
+      'Resolve the objectui SHA pinned at a given framework rev',
+      'Self-test (#4843) — the repo idiom for a `scripts/` gate',
+      'git repo carrying the exact shapes measured on the real range',
+      'code over it, assert the ARTIFACT (the markdown a maintainer pastes)',
+    ];
+    check(
+      '--help does NOT leak mid-file implementation comments (#11952)',
+      strayLines.every((s) => !helpOut.includes(s)),
+      helpOut,
+    );
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
@@ -617,5 +665,6 @@ function selfTest() {
 }
 
 if (isEntrypoint(import.meta.url)) {
+  if (has('-h') || has('--help')) process.exit(printHelp());
   process.exit(has('--self-test') ? selfTest() : main());
 }

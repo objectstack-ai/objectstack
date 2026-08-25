@@ -47,8 +47,7 @@ Prefer `defineHook()` over a bare `: Hook` literal (the same rule as
 `defineDatasource`): it validates when the module is imported, so
 constraint-level mistakes a bare annotation can't catch — a non-`snake_case`
 `name`, a misspelled key routed through a spread — fail while you author
-instead of at deploy, and the export carries defaults already materialized
-(#4269).
+instead of at deploy, and the export carries defaults already materialized.
 
 ### Logic: `body` (preferred) or `handler` (deprecated)
 
@@ -91,7 +90,7 @@ Sandbox essentials (full contract in
 - **`capabilities`** (declare what the body uses, else it throws) — the five legal
   tokens: `api.read`, `api.write`, `api.transaction`, `crypto.uuid`, `log`.
   There is **no hashing capability**: `crypto.hash` was removed in spec 17
-  (#4391) because the sandbox never implemented it.
+  because the sandbox never implemented it.
 - Cross-object writes obey the **target's** sharing model — a `public_read`
   target rejects the write with `FORBIDDEN`, and **admin is not exempt**.
 - No `console` (use `ctx.log`), no `fetch` (use Connectors), no `import` /
@@ -114,11 +113,11 @@ Sandbox essentials (full contract in
 > `findOne` too (the event attaches to record materialization, not the method), and
 > the write events fire on bulk `multi:true` operations as well. A bulk write hands
 > hooks **no** row-scoping predicate: it lives on the engine-internal
-> `OperationContext.ast` (#2982), so the RLS / sharing filters composed onto it bind
+> `OperationContext.ast`, so the RLS / sharing filters composed onto it bind
 > the driver call itself, where no handler can widen them — scope a batch through
 > `options.where` at the caller. The `after*` events instead dispatch **once per
 > matched row**, each on a single-record-shaped context whose `input.id` names that
-> row (#5038). There is no `beforeFindOne`, `beforeCount`, `beforeAggregate`, or
+> row. There is no `beforeFindOne`, `beforeCount`, `beforeAggregate`, or
 > `*Many` event.
 >
 > **Don't reach for a hook when a declarative mechanism already fits:**

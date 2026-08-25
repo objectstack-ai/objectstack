@@ -1351,7 +1351,12 @@ describe('ObjectStackClient.automation', () => {
 
         const result = await client.automation.resume('my_flow', 'run_1', { inputs: { account_id: 'a1' } });
         expect(result.status).toBe('paused');
-        expect(result.screen.nodeId).toBe('step2');
+        // [#8140] `resume` now declares `AutomationResult`, on which `screen`
+        // is optional — a run that COMPLETED carries none. Asserting its
+        // presence before reading through it is the consumer-side half of that
+        // narrowing, and is exactly the migration an external caller makes.
+        expect(result.screen).toBeDefined();
+        expect(result.screen?.nodeId).toBe('step2');
     });
 
     // [#8684] BREAKING: a run that resumed and then FAILED used to resolve with
@@ -2560,5 +2565,202 @@ describe('Analytics namespace (#3584 dispatcher alignment)', () => {
             'http://localhost:3000/api/v1/analytics/sql',
             expect.objectContaining({ method: 'POST', body: JSON.stringify({ cube: 'leads' }) }),
         );
+    });
+});
+
+// ----------------------------------------------------------------------
+// [#11391] `meta.saveItem`'s query string — the destructive-409 remedy has
+// to be reachable from the SDK, on BOTH clients.
+//
+// The Phase 3a-destructive gate refuses with `409 DESTRUCTIVE_CHANGE` and
+// ends `— re-submit with ?force=true to proceed.` Both REST `PUT` doors read
+// `?force` and thread it, so that sentence is true of an HTTP caller. It was
+// FALSE of a first-party SDK caller: `saveItem` built a bare path and a body
+// and sent no query string at all, so doing exactly what the refusal said
+// returned the identical refusal and the only way out was raw `fetch`.
+//
+// These pins are on the URL the client BUILDS, deliberately. A test that only
+// checks the method accepts an option would stay green against a client that
+// swallows it — which is the same defect one layer in.
+// ----------------------------------------------------------------------
+
+describe('[#11391] meta.saveItem query string (unscoped client)', () => {
+    it('threads `force: true` onto the URL as ?force=true', async () => {
+        const { client, fetchMock } = createMockClient({ success: true, version: 2 });
+        await client.meta.saveItem('object', 'customer', { name: 'customer' }, { force: true });
+        const [url, init] = fetchMock.mock.calls[0];
+        expect(String(url)).toBe('http://localhost:3000/api/v1/meta/object/customer?force=true');
+        expect(init.method).toBe('PUT');
+        // The body is untouched by the option — `force` is a query parameter,
+        // not a field the server reads off the document being saved.
+        expect(JSON.parse(init.body)).toEqual({ name: 'customer' });
+    });
+
+    it('exposes ?package and ?mode=draft in the same bag, in a stable order', async () => {
+        const { client, fetchMock } = createMockClient({ success: true });
+        await client.meta.saveItem('object', 'customer', { name: 'customer' }, {
+            force: true,
+            packageId: 'app.crm',
+            mode: 'draft',
+        });
+        expect(String(fetchMock.mock.calls[0][0])).toBe(
+            'http://localhost:3000/api/v1/meta/object/customer?force=true&package=app.crm&mode=draft',
+        );
+    });
+
+    it('sends `package` alone when that is all the caller set', async () => {
+        const { client, fetchMock } = createMockClient({ success: true });
+        await client.meta.saveItem('object', 'customer', {}, { packageId: 'app.crm' });
+        expect(String(fetchMock.mock.calls[0][0])).toBe(
+            'http://localhost:3000/api/v1/meta/object/customer?package=app.crm',
+        );
+    });
+
+    it('url-encodes a packageId that needs it', async () => {
+        const { client, fetchMock } = createMockClient({ success: true });
+        await client.meta.saveItem('object', 'customer', {}, { packageId: 'acme/crm suite' });
+        expect(String(fetchMock.mock.calls[0][0])).toBe(
+            'http://localhost:3000/api/v1/meta/object/customer?package=acme%2Fcrm+suite',
+        );
+    });
+
+    it('BACKWARD COMPATIBLE: a 3-argument call still sends no query string at all', async () => {
+        const { client, fetchMock } = createMockClient({ success: true });
+        await client.meta.saveItem('object', 'customer', { name: 'customer' });
+        // Byte-identical to the pre-#11391 URL — not `…/customer?`.
+        expect(String(fetchMock.mock.calls[0][0])).toBe(
+            'http://localhost:3000/api/v1/meta/object/customer',
+        );
+    });
+
+    it('an empty bag is also byte-identical to no bag', async () => {
+        const { client, fetchMock } = createMockClient({ success: true });
+        await client.meta.saveItem('object', 'customer', {}, {});
+        expect(String(fetchMock.mock.calls[0][0])).toBe(
+            'http://localhost:3000/api/v1/meta/object/customer',
+        );
+    });
+
+    it('NEVER spells the opt-OUT on the wire (#6877): force:false sends nothing', async () => {
+        const { client, fetchMock } = createMockClient({ success: true });
+        await client.meta.saveItem('object', 'customer', {}, { force: false });
+        // `?force=false` would be a live hazard rather than a no-op: the door
+        // refuses a REPEATED `force` because a repeated value arrives as an
+        // array and a non-empty array is truthy — a spelled-out opt-OUT that
+        // reached the wire twice would turn the destructive guard ON. Emitting
+        // nothing keeps this client clear of that edge.
+        expect(String(fetchMock.mock.calls[0][0])).toBe(
+            'http://localhost:3000/api/v1/meta/object/customer',
+        );
+    });
+
+    it("mode:'publish' is the default said out loud and sends nothing", async () => {
+        const { client, fetchMock } = createMockClient({ success: true });
+        await client.meta.saveItem('object', 'customer', {}, { mode: 'publish' });
+        expect(String(fetchMock.mock.calls[0][0])).toBe(
+            'http://localhost:3000/api/v1/meta/object/customer',
+        );
+    });
+
+    it('a compound name keeps its unencoded slash AND gets the query string', async () => {
+        const { client, fetchMock } = createMockClient({ success: true });
+        await client.meta.saveItem('object', 'views/all_leads', { label: 'All leads' }, { force: true });
+        // The slash must still survive (%2F would collapse this onto the
+        // 3-segment route and miss `PUT /meta/:type/:section/:name`), and the
+        // compound door reads `?force` too since #11095.
+        expect(String(fetchMock.mock.calls[0][0])).toBe(
+            'http://localhost:3000/api/v1/meta/object/views/all_leads?force=true',
+        );
+    });
+});
+
+describe('[#11391] meta.saveItem query string (environment-scoped twin)', () => {
+    it('threads `force: true` on the scoped client too', async () => {
+        const { client, fetchMock } = createMockClient({ success: true });
+        await client.project('proj-123').meta.saveItem(
+            'object', 'customer', { name: 'customer' }, { force: true },
+        );
+        const [url, init] = fetchMock.mock.calls[0];
+        expect(String(url)).toBe(
+            'http://localhost:3000/api/v1/environments/proj-123/meta/object/customer?force=true',
+        );
+        expect(init.method).toBe('PUT');
+    });
+
+    it('exposes the same three parameters as the unscoped twin', async () => {
+        const { client, fetchMock } = createMockClient({ success: true });
+        await client.project('proj-123').meta.saveItem('object', 'customer', {}, {
+            force: true,
+            packageId: 'app.crm',
+            mode: 'draft',
+        });
+        expect(String(fetchMock.mock.calls[0][0])).toBe(
+            'http://localhost:3000/api/v1/environments/proj-123/meta/object/customer'
+            + '?force=true&package=app.crm&mode=draft',
+        );
+    });
+
+    it('BACKWARD COMPATIBLE: a 3-argument scoped call still sends no query string', async () => {
+        const { client, fetchMock } = createMockClient({ success: true });
+        await client.project('proj-123').meta.saveItem('object', 'customer', {});
+        expect(String(fetchMock.mock.calls[0][0])).toBe(
+            'http://localhost:3000/api/v1/environments/proj-123/meta/object/customer',
+        );
+    });
+
+    it('IN STEP with the unscoped twin: identical query for identical options', async () => {
+        // The twins are one method on two clients reaching one pair of routes
+        // (the scoped mount is the same `registerForBase` replayed under
+        // `/environments/:id`). This compares the QUERY they build rather than
+        // restating both URLs, so it keeps holding if either path changes.
+        const { client, fetchMock } = createMockClient({ success: true });
+        const opts = { force: true, packageId: 'app.crm', mode: 'draft' } as const;
+        await client.meta.saveItem('object', 'customer', {}, opts);
+        await client.project('proj-123').meta.saveItem('object', 'customer', {}, opts);
+        const queryOf = (u: unknown) => new URL(String(u)).search;
+        expect(queryOf(fetchMock.mock.calls[1][0])).toBe(queryOf(fetchMock.mock.calls[0][0]));
+        expect(queryOf(fetchMock.mock.calls[0][0])).toBe('?force=true&package=app.crm&mode=draft');
+    });
+});
+
+describe('[#11391] the destructive-409 remedy loop is now closed for an SDK caller', () => {
+    it('refused with DESTRUCTIVE_CHANGE, the caller can do what the message says', async () => {
+        // Round 1 answers the real refusal envelope; round 2 answers a save.
+        const refusal = {
+            error: "[destructive_change] object/customer would drop or transform existing data:"
+                + " field 'legacy_code' removed — re-submit with ?force=true to proceed.",
+            code: 'DESTRUCTIVE_CHANGE',
+        };
+        const responses = [
+            { ok: false, status: 409, statusText: 'Conflict', json: async () => refusal, headers: new Headers() },
+            { ok: true, status: 200, statusText: 'OK', json: async () => ({ success: true, version: 3 }), headers: new Headers() },
+        ];
+        const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(responses.shift()));
+        const client = new ObjectStackClient({ baseUrl: 'http://localhost:3000', fetch: fetchMock });
+
+        // 1. Refused. Assert the ENVELOPE the caller branches on, not merely
+        //    that something threw: a bare `.toThrow()` would stay green
+        //    against any error at all.
+        const err: any = await client.meta.saveItem('object', 'customer', { name: 'customer' })
+            .then(() => { throw new Error('expected the destructive save to be refused'); }, (e) => e);
+        expect(err.code).toBe('DESTRUCTIVE_CHANGE');
+        // The SDK parks the numeric on `httpStatus`; `status` is only set on
+        // the auth-login path, so this is the carrier to read here.
+        expect(err.httpStatus).toBe(409);
+        expect(String(err.message)).toContain('re-submit with ?force=true to proceed.');
+        expect(String(fetchMock.mock.calls[0][0])).toBe(
+            'http://localhost:3000/api/v1/meta/object/customer',
+        );
+
+        // 2. Do literally what the refusal prescribed — and the parameter it
+        //    names actually reaches the route. THIS is the acceptance
+        //    criterion: before #11391 there was no argument to pass here.
+        const saved = await client.meta.saveItem(
+            'object', 'customer', { name: 'customer' }, { force: true },
+        );
+        expect(String(fetchMock.mock.calls[1][0])).toBe(
+            'http://localhost:3000/api/v1/meta/object/customer?force=true',
+        );
+        expect(saved).toEqual({ success: true, version: 3 });
     });
 });

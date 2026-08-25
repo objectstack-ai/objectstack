@@ -234,6 +234,7 @@
     "ObjectFormProps": "src/ui/component.zod.ts#ObjectFormProps (type)",
     "ObjectFormPropsSchema": "src/ui/component.zod.ts#ObjectFormPropsSchema (const)",
     "ObjectGridProps": "src/ui/component.zod.ts#ObjectGridProps (type)",
+    "ObjectGridPropsParsed": "src/ui/component.zod.ts#ObjectGridPropsParsed (type)",
     "ObjectGridPropsSchema": "src/ui/component.zod.ts#ObjectGridPropsSchema (const)",
     "ObjectKanbanProps": "src/ui/component.zod.ts#ObjectKanbanProps (type)",
     "ObjectKanbanPropsSchema": "src/ui/component.zod.ts#ObjectKanbanPropsSchema (const)",

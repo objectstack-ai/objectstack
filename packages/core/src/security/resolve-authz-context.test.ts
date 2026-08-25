@@ -374,6 +374,22 @@ describe('resolveLocalizationContext — batched fallback read (#2409)', () => {
   });
 });
 
+// Simulates a fresh environment: `sys_setting` not migrated/written yet, so
+// every read rejects the way the real sql-driver's "no such table" does.
+// Shared by the #10221 cache block below and the #11877 leg-narrowing block
+// after it, which needs the same backend fault standing BEHIND a settings
+// refusal.
+function makeMissingTableQl() {
+  const counts = { sys_setting: 0 };
+  return {
+    counts,
+    async find(_object: string) {
+      counts.sys_setting += 1;
+      throw new Error('no such table: sys_setting');
+    },
+  };
+}
+
 // #10221: a fresh environment's `sys_setting` table doesn't exist yet, so
 // EVERY request's read used to fail and the sql-driver's `[sql-driver]
 // DATABASE_ERROR` warning repeated once per request, burying real errors.
@@ -394,19 +410,6 @@ describe('resolveLocalizationContext — failure-only cross-request cache (#1022
   afterEach(() => {
     vi.useRealTimers();
   });
-
-  // Simulates a fresh environment: `sys_setting` not migrated/written yet, so
-  // every read rejects the way the real sql-driver's "no such table" does.
-  function makeMissingTableQl() {
-    const counts = { sys_setting: 0 };
-    return {
-      counts,
-      async find(_object: string) {
-        counts.sys_setting += 1;
-        throw new Error('no such table: sys_setting');
-      },
-    };
-  }
 
   it('does not re-query on a second call within the TTL window when the read fails (same tenant)', async () => {
     const ql = makeMissingTableQl();
@@ -481,6 +484,193 @@ describe('resolveLocalizationContext — failure-only cross-request cache (#1022
     const second = await resolveLocalizationContext({ ql, tenantId: 'o1' });
     expect(second.timezone).toBe('Asia/Tokyo');
     expect(ql.counts.sys_setting).toBe(2);
+  });
+});
+
+// ── #11877 — a SETTINGS-SERVICE refusal must not populate the failure memo ──
+//
+// The memo above exists for one thing (#10221): a `sys_setting` query that
+// actively FAILS must not re-run — and re-log the driver's line — on every
+// request. Its write condition was wider than that. `failed` was set by SIX
+// legs and only ONE of them is the backend fault the cache's own docblock
+// describes:
+//
+//   settings.getMany(...) threw            — the grouped read (settings leg)
+//   settings.get(...) threw          × 3   — the older per-key arm (settings)
+//   the settings block threw               — "service unavailable" (settings)
+//   ql.find('sys_setting', ...) threw      — THE backend fault
+//
+// The five settings legs are reachable INSIDE the settings engine's bind
+// window: `SettingsService.getMany` refuses all-or-nothing for a
+// `localization` namespace whose manifest is not (yet) registered. So a
+// caller that deliberately re-reads AFTER the bind — the #11580 repair does
+// exactly that, re-resolving at `kernel:bootstrapped` — could be answered
+// from the memo taken inside the window, within the 30s TTL, with nothing in
+// the output saying the correction did not happen.
+//
+// And directly against this cache's own docblock ("a successful read is NEVER
+// cached"): a settings refusal standing alongside a perfectly SUCCESSFUL
+// direct read memoized that successful value for 30s — the exact staleness
+// `analytics-timezone.dogfood.test.ts` (#1982/#2018) exists to forbid.
+//
+// So the memo is written only for the backend-fault leg now. #10221's
+// protection is untouched, and BOTH directions are pinned below: a genuine
+// backend fault still memoizes — including with a settings refusal standing
+// in front of it — while a settings refusal alone no longer does.
+describe('resolveLocalizationContext — only a backend fault populates the memo (#11877)', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /** What the workspace has PERSISTED — answerable only once the engine binds. */
+  const CONFIGURED = { timezone: 'Asia/Shanghai', locale: 'zh-CN', currency: 'CNY' };
+
+  // The all-or-nothing refusal `SettingsService.getMany` gives for a namespace
+  // whose manifest is not (yet) registered. It throws out of an in-memory
+  // registry check — before any query, before any log line — which is why
+  // memoizing THIS leg never suppressed a query or a log line to begin with.
+  function makeBindWindowSettings() {
+    const state = { bound: false, getManyCalls: 0 };
+    return {
+      state,
+      get: async () => {
+        throw new Error('per-key get must not be called on the batched arm');
+      },
+      getMany: async () => {
+        state.getManyCalls += 1;
+        if (!state.bound) throw new Error("unknown settings namespace 'localization'");
+        return {
+          timezone: { value: CONFIGURED.timezone },
+          locale: { value: CONFIGURED.locale },
+          currency: { value: CONFIGURED.currency },
+        };
+      },
+    };
+  }
+
+  // ── the reproduction this card was filed without ────────────────────────
+  //
+  // Pre-bind read inside the window (settings refuses, `sys_setting` answers
+  // an ordinary empty result) → deliberate post-bind re-read 1s later, well
+  // inside the 30s TTL. The clock is FAKE and advanced explicitly; nothing
+  // here sleeps on the wall clock.
+  it('a post-bind re-read inside the TTL is answered by the now-bound service, not by the pre-bind memo', async () => {
+    const settings = makeBindWindowSettings();
+    const ql = makeCountingQl({ sys_setting: [] });
+
+    const preBind = await resolveLocalizationContext({ ql, settings, tenantId: 'o1' });
+    expect(preBind).toEqual({ timezone: 'UTC', locale: 'en-US', currency: undefined });
+    expect(settings.state.getManyCalls).toBe(1);
+
+    settings.state.bound = true; // the settings engine binds
+    await vi.advanceTimersByTimeAsync(1_000); // still deep inside the 30s window
+
+    const postBind = await resolveLocalizationContext({ ql, settings, tenantId: 'o1' });
+    // The re-read must REACH the service (a memo hit would never call it) and
+    // must carry the configured values, which exist only behind the bind.
+    expect(settings.state.getManyCalls).toBe(2);
+    expect(postBind).toEqual({ timezone: 'Asia/Shanghai', locale: 'zh-CN', currency: 'CNY' });
+  });
+
+  // The same refusal, but the direct read SUCCEEDS with rows. The memoized
+  // value here was a correct, successful answer — frozen for 30s by a leg that
+  // has nothing to do with the backend.
+  it('a settings refusal never freezes a SUCCESSFUL direct read: a row change is visible on the very next call', async () => {
+    const settings = makeBindWindowSettings(); // stays unbound → refuses every call
+    const rows = [{ namespace: 'localization', key: 'timezone', scope: 'tenant', value: 'UTC' }];
+    const ql = makeCountingQl({ sys_setting: rows });
+
+    const first = await resolveLocalizationContext({ ql, settings, tenantId: 'o1' });
+    expect(first.timezone).toBe('UTC');
+
+    rows[0].value = 'America/Los_Angeles'; // a settings write lands, no TTL advance
+    const second = await resolveLocalizationContext({ ql, settings, tenantId: 'o1' });
+    expect(second.timezone).toBe('America/Los_Angeles');
+    expect(ql.counts.sys_setting).toBe(2);
+  });
+
+  // The older per-key arm (a service with no `getMany`): three `get` legs,
+  // same rule.
+  it('the per-key get legs do not populate the memo either', async () => {
+    const state = { bound: false, gets: 0 };
+    const settings = {
+      get: async (_ns: string, key: string) => {
+        state.gets += 1;
+        if (!state.bound) throw new Error("unknown settings namespace 'localization'");
+        return { value: (CONFIGURED as Record<string, string>)[key] };
+      },
+    };
+    const ql = makeCountingQl({ sys_setting: [] });
+
+    expect(await resolveLocalizationContext({ ql, settings, tenantId: 'o1' })).toEqual({
+      timezone: 'UTC',
+      locale: 'en-US',
+      currency: undefined,
+    });
+    expect(state.gets).toBe(3);
+
+    state.bound = true;
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(await resolveLocalizationContext({ ql, settings, tenantId: 'o1' })).toEqual({
+      timezone: 'Asia/Shanghai',
+      locale: 'zh-CN',
+      currency: 'CNY',
+    });
+    expect(state.gets).toBe(6);
+  });
+
+  // The whole-block leg: a `get` that throws SYNCHRONOUSLY never attaches its
+  // `.catch`, so the throw escapes `Promise.all` into the outer
+  // "settings service unavailable → direct read" handler. Same rule.
+  it('the outer "settings service unavailable" leg does not populate the memo either', async () => {
+    const state = { bound: false, gets: 0 };
+    const settings = {
+      // Deliberately NOT async: this throws before a promise exists.
+      get: (_ns: string, key: string) => {
+        state.gets += 1;
+        if (!state.bound) throw new Error('settings service unavailable');
+        return Promise.resolve({ value: (CONFIGURED as Record<string, string>)[key] });
+      },
+    };
+    const ql = makeCountingQl({ sys_setting: [] });
+
+    expect(await resolveLocalizationContext({ ql, settings, tenantId: 'o1' })).toEqual({
+      timezone: 'UTC',
+      locale: 'en-US',
+      currency: undefined,
+    });
+
+    state.bound = true;
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect((await resolveLocalizationContext({ ql, settings, tenantId: 'o1' })).timezone).toBe('Asia/Shanghai');
+  });
+
+  // ── the half that must be PRESERVED (#10221) ────────────────────────────
+  //
+  // Narrowing the write condition must not narrow it to nothing. A settings
+  // refusal standing in FRONT of a genuinely failing `sys_setting` read is the
+  // real #10221 environment (fresh deployment: no manifest registered yet AND
+  // no table yet) — the failing query must still be memoized there.
+  it('still memoizes when a settings refusal stands in front of a genuine backend fault', async () => {
+    const settings = makeBindWindowSettings(); // unbound → refuses
+    const ql = makeMissingTableQl(); // and the direct read throws
+
+    await resolveLocalizationContext({ ql, settings, tenantId: 'o1' });
+    expect(ql.counts.sys_setting).toBe(1);
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    await resolveLocalizationContext({ ql, settings, tenantId: 'o1' });
+    // Memo hit: the failing query — and the driver's log line for it — did not
+    // repeat. The settings refusal is re-attempted (it is free), but that is
+    // not what #10221 was protecting.
+    expect(ql.counts.sys_setting).toBe(1);
+
+    await vi.advanceTimersByTimeAsync(30_001);
+    await resolveLocalizationContext({ ql, settings, tenantId: 'o1' });
+    expect(ql.counts.sys_setting).toBe(2); // and it still self-heals on expiry
   });
 });
 

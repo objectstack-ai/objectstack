@@ -11,6 +11,7 @@
     "system/AppInstallRequest",
     "system/AppInstallResult",
     "system/AppManifest",
+    "system/AudienceConfig",
     "system/AuthConfig",
     "system/AuthPluginConfig",
     "system/AuthProviderConfig",

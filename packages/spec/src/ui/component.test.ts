@@ -645,6 +645,94 @@ describe('RecordDetailsProps', () => {
     expect(message).toContain('`showBorders` → `showBorder`');
   });
 
+  // #11661 — three more section keys in exactly the pre-#11289 position
+  // (honoured by the renderer, refused by this shape), declared under the
+  // inherited ruling. Measured at the `.objectui-sha` pin (`190fbd01`):
+  // `defaultCollapsed` at `DetailSection.tsx:139`
+  // (`useState(section.defaultCollapsed ?? false)`), `icon` at
+  // `DetailSection.tsx:516/546`, `description` at `DetailSection.tsx:520/557`.
+  it('preserves the #11661 section keys verbatim', () => {
+    const result = RecordDetailsProps.parse({
+      sections: [{
+        label: 'Company',
+        fields: ['industry', 'website'],
+        collapsible: true,
+        defaultCollapsed: true,
+        icon: 'building-2',
+        description: 'Firmographics and reach',
+      }],
+    });
+    expect(result.sections?.[0].defaultCollapsed).toBe(true);
+    expect(result.sections?.[0].icon).toBe('building-2');
+    expect(result.sections?.[0].description).toBe('Firmographics and reach');
+  });
+
+  it('does not materialize the #11661 keys on a clean parse', () => {
+    // Same `maxVisible` principle as the #11289 trio: expanded / no icon / no
+    // sub-heading are the RENDERER'S fallbacks; a schema default would turn
+    // "the author said nothing" into "the author asked for the default".
+    const section = RecordDetailsProps.parse({
+      sections: [{ label: 'Overview', fields: ['name'] }],
+    }).sections?.[0] as Record<string, unknown>;
+    expect('defaultCollapsed' in section).toBe(false);
+    expect('icon' in section).toBe(false);
+    expect('description' in section).toBe(false);
+  });
+
+  it('rejects wrongly-typed values for the #11661 keys', () => {
+    for (const [key, value] of [
+      ['defaultCollapsed', 'yes'],
+      ['icon', 7],
+      ['description', ['two', 'lines']],
+    ] as const) {
+      const r = RecordDetailsProps.safeParse({
+        sections: [{ label: 'A', fields: ['a'], [key]: value }],
+      });
+      expect(r.success).toBe(false);
+      expect(r.success === false && r.error.issues[0].code).toBe('invalid_type');
+      expect(r.success === false && r.error.issues[0].path).toEqual(['sections', 0, key]);
+    }
+  });
+
+  it('still refuses unknown section keys after the #11661 widening', () => {
+    // The strict face survives, and the new keys entered the "did you mean"
+    // candidate list — the declaration reached the same error map the strict
+    // shape reads.
+    const r = RecordDetailsProps.safeParse({
+      sections: [{ label: 'A', fields: ['a'], defaultCollapse: true }],
+    });
+    expect(r.success).toBe(false);
+    const message = r.success === false
+      ? r.error.issues.map((i) => i.message).join('\n')
+      : '';
+    expect(message).toContain('`defaultCollapse` → `defaultCollapsed`');
+  });
+
+  it('still refuses the two keys #11661 deliberately withholds (`title`, `headerColor`)', () => {
+    // Both are honoured by the renderer at the pin, and both stay OUT of the
+    // accept set on purpose: `title` is a second spelling of the heading slot
+    // `label` declares (the `page:card` `body`-vs-`children` shape, which
+    // #5775 converged rather than declared) and is held for a maintainer
+    // ruling; `headerColor` reaches the DOM only as `bg-${...}`, a
+    // template-literal Tailwind class that generates no CSS under the v4
+    // source scan — dead-in-practice, so declaring it would advertise a
+    // capability the renderer does not deliver. A later batch declaring
+    // either must flip this pin consciously.
+    for (const [key, value] of [
+      ['title', 'Company'],
+      ['headerColor', 'muted'],
+    ] as const) {
+      const r = RecordDetailsProps.safeParse({
+        sections: [{ label: 'A', fields: ['a'], [key]: value }],
+      });
+      expect(r.success).toBe(false);
+      const message = r.success === false
+        ? r.error.issues.map((i) => i.message).join('\n')
+        : '';
+      expect(message).toContain(`\`${key}\``);
+    }
+  });
+
   it('preserves hideFields verbatim (sys-user.page.ts:106)', () => {
     // Undeclared until #5611, so a non-strict `z.object` dropped it on the
     // floor: the platform page's hidden-field list survived only because
@@ -2033,6 +2121,34 @@ describe('#7751 — object-* block props schemas', () => {
     expect(parsed.filter).toEqual([['owner_id', '=', '{current_user_id}']]);
   });
 
+  it("object-grid `data` takes the ViewDataSchema provider object — the ui#6207 convergence (Option A)", () => {
+    // The #5090-pinned authority: static inline rows are `{ provider: 'value',
+    // items }`. Before the 2026-08-25 ruling this exact value was REFUSED by
+    // this entry ("expected array, received object") while being the
+    // pinned-legal form of the authority the objectui declaration is held to.
+    const inline = ComponentPropsMap['object-grid'].safeParse({
+      data: { provider: 'value', items: [] },
+    });
+    expect(inline.success).toBe(true);
+    // A second arm of the union, to prove the whole discriminated authority is
+    // reachable through this entry rather than one hardcoded branch.
+    const bound = ComponentPropsMap['object-grid'].safeParse({
+      data: { provider: 'object', object: 'showcase_task' },
+    });
+    expect(bound.success).toBe(true);
+  });
+
+  it('the bare-array `data` — the deprecated `staticData` shortcut — is REFUSED at the `data` path', () => {
+    // Reverse verification of the convergence: the value this entry used to
+    // accept (`z.array(z.unknown())`) no longer parses. The #4648 carve-out
+    // already refuses to publish the bare-array author; this closes the spec
+    // entry that still advertised it. Migration:
+    // `object-grid-data-view-data-converged`.
+    const r = ComponentPropsMap['object-grid'].safeParse({ data: [{ id: 1 }] });
+    expect(r.success).toBe(false);
+    expect(r.error!.issues.some((i) => i.path[0] === 'data')).toBe(true);
+  });
+
   it('`defaultFilters` stays HONOURED — it is a read legacy fallback, not an inert spelling', () => {
     // ObjectGrid.tsx reads it and lowers it to `$filter` when `filter` is
     // absent (the routed finding on #7751 verified the read point). Only the
@@ -2085,6 +2201,56 @@ describe('#7751 — object-* block props schemas', () => {
       details: [{ title: 'Tasks', childObject: 'showcase_task', addLabel: 'Add task' }],
     });
     expect(r.success, JSON.stringify((r as any).error?.issues)).toBe(true);
+  });
+
+  describe('`object-master-detail-form` `formType` speaks the measured vocabulary (#11873)', () => {
+    // Spec half of objectui#5939: the renderer honours exactly `simple` and
+    // `tabbed` for the parent half; the old bare `z.string()` let any value
+    // parse clean, match no branch, and render a silently sectionless parent
+    // form (the objectui#3840 probe read GREEN through a real crash this way).
+    const schema = ComponentPropsMap['object-master-detail-form'];
+
+    for (const value of ['simple', 'tabbed'] as const) {
+      it(`'${value}' is accepted`, () => {
+        const r = schema.safeParse({ objectName: 'po', details: [], formType: value });
+        expect(r.success, JSON.stringify((r as any).error?.issues)).toBe(true);
+      });
+    }
+
+    it("a never-vocabulary value ('wizzard' — the issue's own repro) refuses with the plain enum refusal", () => {
+      const result = schema.safeParse({ objectName: 'po', details: [], formType: 'wizzard' });
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        const issue = result.error.issues[0]!;
+        expect(issue.code).toBe('invalid_value');
+        expect(issue.path).toEqual(['formType']);
+        // Never a legal spelling anywhere, so it gets zod's own enum message,
+        // not a retirement prescription.
+        expect(issue.message).not.toContain('is not part of');
+      }
+    });
+
+    describe('the four `object-form` spellings refuse with a per-value prescription', () => {
+      // Each names the measured way it breaks the atomic parent+details
+      // contract and prescribes the two honoured values — the `record:chatter`
+      // `position` precedent (#8762): an enum-VALUE narrowing has no
+      // `retiredKey()` tombstone, so the enum's own error map carries the
+      // prescription, keyed on `issue.input`.
+      for (const from of ['wizard', 'split', 'drawer', 'modal'] as const) {
+        it(`'${from}' → refused, prescribing 'simple' or 'tabbed'`, () => {
+          const result = schema.safeParse({ objectName: 'po', details: [], formType: from });
+          expect(result.success).toBe(false);
+          if (!result.success) {
+            const issue = result.error.issues[0]!;
+            expect(issue.code).toBe('invalid_value');
+            expect(issue.path).toEqual(['formType']);
+            expect(issue.message).toContain(`'${from}' is not part of`);
+            expect(issue.message).toContain("Write 'simple'");
+            expect(issue.message).toContain('object-form');
+          }
+        });
+      }
+    });
   });
 
   it("the designer's dead `groupField` spelling is answered with the `groupBy` the board reads", () => {
