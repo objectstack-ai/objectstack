@@ -96,7 +96,7 @@ const UNTITLED_DECLARATION = {
     name: 'showcase_project_membership',
     label: 'Project Membership',
     fields: {
-        project: { name: 'project', label: 'Project', type: 'lookup', reference_to: 'showcase_project' },
+        project: { name: 'project', label: 'Project', type: 'lookup', reference: 'showcase_project' },
         seats: { name: 'seats', label: 'Seats', type: 'number' },
     },
 };
