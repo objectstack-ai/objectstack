@@ -57,8 +57,8 @@ pnpm add @objectstack/client
   left on this page.
 
   Measured with all fences marked, then reverted — 13 fences at the time,
-  before the flow-rejection block was split out of the tour: 114 diagnostics, TS2304 /
-  TS18046 / TS18004 / TS2591, spread over the nine continuation blocks — and
+  before the flow-rejection block was split out of the tour: 114 diagnostics,
+  TS2304 / TS18046 / TS18004 / TS2591, spread over the nine continuation blocks — and
   ZERO TS2307. Before the carve-out the same sweep produced 128 diagnostics
   including TS2307 on every SDK import. Not one diagnostic in either sweep was
   a doc-vs-SDK divergence; that is what the three marked blocks now hold.
@@ -434,8 +434,8 @@ await client.automation.trigger('send_welcome_email', { userId });
 
 // A flow that does not run REJECTS — it does not resolve with an inner
 // `{ success: false }`. Branch on the thrown error's `code`, not on the
-// resolved value; the narrowed `catch` that needs is "Flow execution errors"
-// under Error Handling, below.
+// resolved value. The narrowed `catch` this needs under `strict` is its own
+// block below: "Flow execution errors", under Error Handling.
 await client.automation.execute('order_approval', { params: { orderId } });
 
 // Screen flows pause for user input instead of completing. `execute()` returns
