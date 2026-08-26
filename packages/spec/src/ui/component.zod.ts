@@ -316,13 +316,14 @@ const COMPONENT_LEVEL_GUIDANCE: readonly KeySetGuidance[] = [
 /**
  * A component that declares no props at all — `app:launcher`, `nav:menu`,
  * `nav:breadcrumb`, `global:search`, `global:notifications`, `user:profile`,
- * `element:divider`, and the two plugin console widgets `cloud-connection:panel`
- * and `marketplace:installed-list` (#11575).
+ * `element:divider`, and the three plugin console widgets
+ * `cloud-connection:panel` and `marketplace:installed-list` (#11575) and
+ * `mcp:connect-agent` (#12344).
  *
  * A factory rather than one shared `EmptyProps` const, because the surface name
  * is the whole value of the rejection here: an empty shape has no candidate
  * keys, so the edit-distance fallback can say nothing, and "unrecognized key on
- * this component" would leave the author guessing which of the nine it meant.
+ * this component" would leave the author guessing which of the ten it meant.
  * One `strictObject(` call site either way — the ledger counts sites from the
  * AST, and this is one.
  *
@@ -2743,6 +2744,21 @@ export const ComponentPropsMap = {
   // the claim (#8691/#8744 record where those diverge).
   'cloud-connection:panel': emptyProps('cloud-connection:panel'),
   'marketplace:installed-list': emptyProps('marketplace:installed-list'),
+  // #12344 — the same mechanism a third instance over, on `@objectstack/mcp`'s
+  // plugin-shipped Setup page (`CONNECT_AGENT_PAGE`, `connect-ui.ts`): a
+  // console-registered widget reachable only through the type union's open
+  // string arm, no row here, so the #5068 gate's dispatch skipped it and door 3
+  // of the mcp canonical-envelope gate (#12269) had to carry a standing
+  // exemption for it. Key set measured from the renderer's ACTUAL read points
+  // at the `.objectui-sha` pin (app-shell `console/connect/
+  // ConnectAgentWidget.tsx`): the registration discards the schema node
+  // entirely (`() => <ConnectAgent />`) and the component function takes no
+  // parameters — every value it renders comes from `/discovery`, i18n and its
+  // own state, never from the authored bag — so the accepted key set is EMPTY:
+  // strict, refuses every key. The registration's declared `inputs: []`
+  // happens to agree, but the row is the measurement, not the claim
+  // (#8691/#8744 record where those diverge). The shipped page authors `{}`.
+  'mcp:connect-agent': emptyProps('mcp:connect-agent'),
 
   // AI
   'ai:chat_window': AIChatWindowProps,
