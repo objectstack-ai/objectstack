@@ -5527,10 +5527,18 @@ function selfTest() {
   t('and the agent operating manual it took in for the same reason', docAuthoringHints.some((h) => hintCovers(h, '.claude/agents/os-dev.md')));
   t('and the published skills catalog', docAuthoringHints.some((h) => hintCovers(h, 'skills/objectstack-upgrade/SKILL.md')));
   t('and the content tree', docAuthoringHints.some((h) => hintCovers(h, 'content/docs/deployment/cli.mdx')));
-  // The negative half, load-bearing for a declaration spanning four roots: a
-  // gate named on EVERY card is the louder version of naming none. These are
-  // the three biggest trees in the repo and none of them is corpus.
-  t('and claims nothing under packages/', !docAuthoringHints.some((h) => hintCovers(h, 'packages/spec/src/index.ts')));
+  // Rule 3's root, added when the gate took in the spec's customer-facing zod
+  // refusal messages. It is NOT one of ROOTS — the Markdown rules never walk it
+  // — so the gate's own self-test (which derives its declaration from ROOTS)
+  // cannot pin it and this case is the only place that does.
+  t('and the spec refusal-message population Rule 3 walks', docAuthoringHints.some((h) => hintCovers(h, 'packages/spec/src/ui/action.zod.ts')));
+  // The negative half, load-bearing for a declaration spanning five roots: a
+  // gate named on EVERY card is the louder version of naming none. `packages/`
+  // is now claimed in ONE place and must stay that narrow — the whole tree is
+  // 78 packages and none of the other 77 is corpus, nor is spec's own build
+  // output, which the walk skips.
+  t('and claims nothing elsewhere under packages/', !docAuthoringHints.some((h) => hintCovers(h, 'packages/runtime/src/index.ts')));
+  t('nor spec outside its source tree', !docAuthoringHints.some((h) => hintCovers(h, 'packages/spec/package.json')));
   t('nor under apps/', !docAuthoringHints.some((h) => hintCovers(h, 'apps/console/src/main.tsx')));
   t('nor under examples/', !docAuthoringHints.some((h) => hintCovers(h, 'examples/crm/objects/account.object.ts')));
 
