@@ -261,7 +261,7 @@ directory rather than per file.
 | `cloud/` | 83 |
 | `identity/` | 32 |
 | `integration/` | 10 |
-| `kernel/` | 276 |
+| `kernel/` | 273 |
 | `qa/` | 6 |
 | `shared/` | 20 |
 | `system/` | 361 |

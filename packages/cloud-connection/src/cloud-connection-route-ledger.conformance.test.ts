@@ -53,6 +53,13 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, it, expect } from 'vitest';
+// The repo's ONE answer to "is this span a comment, or code?" — its header
+// carries the two private-stripper families that drifted apart and the
+// parser-differential sweep that measured which way each fails. This package
+// already imports the module next door in `canonical-expression-envelopes.test.ts`.
+// `stripComments` (not `maskComments`) is the projection this file wants: every
+// finding here reports a `file:line` or a bare file name, never an offset.
+import { stripComments } from '../../../scripts/js-comment-mask.mjs';
 import { CLOUD_CONNECTION_ROUTE_LEDGER } from './cloud-connection-route-ledger.js';
 
 /**
@@ -121,63 +128,28 @@ const DECLARED_COMPUTED_MOUNTS = [
 // ---------------------------------------------------------------------------
 
 /**
- * Strip comments before scanning. Prose cannot mount a route, and this
- * package's headers quote every wire path they serve — so a raw-text scan would
- * report a documented path as an unledgered mount, a false red on an accurate
- * package. The three string forms are tracked so a literal CONTAINING comment
- * punctuation (`'/api/v1/x/*'`, `'https://host'`) is never mistaken for a
- * comment opener; `comment-stripper` below pins both directions, because a
- * stripper that swallowed real code would make this scan silently blind, which
- * is the failure that actually matters here.
+ * WHY COMMENTS ARE REMOVED BEFORE ANY SCAN HERE. Prose cannot mount a route and
+ * cannot reach for a host app, and this package's headers quote every wire path
+ * they serve — a raw-text scan reports a documented path as an unledgered mount
+ * and a documented `getRawApp()` as a second reacher: a false red on an
+ * accurate package.
+ *
+ * This file used to answer that question with its own character scanner. It was
+ * converted to `scripts/js-comment-mask.mjs` (#12398), the tree's one answer to
+ * it, and the swap was MEASURED rather than assumed: over this package's 13
+ * scanned source files the two differ on exactly one,
+ * `marketplace-proxy-plugin.ts`, where the private scanner read the `//` inside
+ * the regex literal `/\/packages\/[^/]+\/versions\//` as a line-comment opener
+ * and deleted the 38 characters of REAL CODE that followed it to end of line —
+ * inside a declared MOUNT SOURCE, which is source this census reads. That is
+ * the naive-`//` family the shared module's header measures, live here.
+ *
+ * `stripComments` keeps line numbers (block-comment newlines survive — this
+ * package's headers run to eighty lines and every finding quotes `file:line`)
+ * and keeps string, template and regex literals INTACT, which is what lets the
+ * census resolve wire paths out of them at all. `scan machinery` at the foot of
+ * this file pins both directions.
  */
-export function stripComments(source: string): string {
-    let out = '';
-    let i = 0;
-    while (i < source.length) {
-        const c = source[i];
-        const next = source[i + 1];
-        if (c === '/' && next === '/') {
-            while (i < source.length && source[i] !== '\n') i++;
-            continue;
-        }
-        if (c === '/' && next === '*') {
-            i += 2;
-            // Newlines inside the block are PRESERVED. Line numbers are what
-            // every finding below points a reader at, and this package's
-            // headers run to eighty lines — swallowing them would send someone
-            // to a line eighty short of the mount, which reads as a wrong
-            // report rather than as the accurate one it is.
-            while (i < source.length && !(source[i] === '*' && source[i + 1] === '/')) {
-                if (source[i] === '\n') out += '\n';
-                i++;
-            }
-            i += 2;
-            continue;
-        }
-        if (c === '\'' || c === '"' || c === '`') {
-            const quote = c;
-            out += c;
-            i++;
-            while (i < source.length) {
-                if (source[i] === '\\') {
-                    out += source.slice(i, i + 2);
-                    i += 2;
-                    continue;
-                }
-                out += source[i];
-                if (source[i] === quote) {
-                    i++;
-                    break;
-                }
-                i++;
-            }
-            continue;
-        }
-        out += c;
-        i++;
-    }
-    return out;
-}
 
 /** Module-scope `const NAME = '<literal>';` bindings, for resolving mount paths. */
 export function constantBindings(code: string): Map<string, string> {
@@ -293,6 +265,30 @@ function packageSourceFiles(): string[] {
 /** The spellings by which a module in this package reaches the HOST app. */
 const HOST_APP_REACH = /getRawApp|['"`]http-server['"`]|['"`]http\.server['"`]/;
 
+/**
+ * Does `source` reach for the host app IN CODE?
+ *
+ * COMMENTS ARE REMOVED FIRST, and that half is the whole of #12398. A docblock
+ * explaining why a mount sits where it does — "the mount takes the
+ * framework-native handle through `IHttpServer.getRawApp()`" — is prose, and
+ * prose reaches for nothing. Scanned raw it scored as an extra reacher and
+ * failed an IDENTITY assertion by naming a file that reaches for nothing, whose
+ * own failure text then invites the wrong repair: widening the expected list,
+ * which retires the only property the assertion has.
+ *
+ * STRING, TEMPLATE AND REGEX LITERALS ARE LEFT INTACT, and that half is what
+ * keeps the fix from being a silent disarm. Two of the three spellings above
+ * ARE string literals — `ctx.getService('http.server')` reaches for the host
+ * app entirely inside quotes — so a probe that masked literals as well as
+ * comments would detect nothing and this identity would pass vacuously. Both
+ * directions are pinned in `scan machinery` at the foot of this file.
+ */
+const reachesHostApp = (source: string): boolean => HOST_APP_REACH.test(stripComments(source));
+
+/** Which of `files` reach for the host app in code. Driveable for the pins. */
+const filesReachingHostApp = (files: readonly string[], read: (f: string) => string): string[] =>
+    files.filter((f) => reachesHostApp(read(f)));
+
 const ledgerRoutes = (): Set<string> => new Set(CLOUD_CONNECTION_ROUTE_LEDGER.map((e) => e.route));
 const liveCensus = (): Census => censusOf(MOUNT_SOURCES, readSource);
 
@@ -369,7 +365,7 @@ describe('cloud-connection mount population', () => {
         // An IDENTITY, not a count: the day a FIFTH module in this package
         // resolves `http-server` or calls `getRawApp()`, this names it — and
         // the census above, which only reads MOUNT_SOURCES, would not have.
-        const reaching = packageSourceFiles().filter((f) => HOST_APP_REACH.test(readSource(f)));
+        const reaching = filesReachingHostApp(packageSourceFiles(), readSource);
         expect(
             reaching,
             'files reaching for the host HTTP app. A registrar not listed in MOUNT_SOURCES is invisible '
@@ -473,6 +469,38 @@ describe('scan machinery, pinned in both directions', () => {
         const src = '/* a\nb\nc */\nrawApp.get(`/api/v1/x`, h);\n';
         const census = censusOf(['fake.ts'], () => src);
         expect(census.routes[0].line).toBe(4);
+    });
+
+    it('the host-app reach probe does not count PROSE — the #12398 false positive', () => {
+        // The exact docblock shape that fired it: a module explaining that the
+        // mount takes the framework-native handle, in a comment.
+        expect(reachesHostApp('// the mount takes the handle through `IHttpServer.getRawApp()`\n')).toBe(false);
+        expect(reachesHostApp("/*\n * resolves 'http-server' before mounting\n */\n")).toBe(false);
+        expect(reachesHostApp("/* the ctx.getService('http.server') seam, explained */\n")).toBe(false);
+    });
+
+    it('the host-app reach probe still counts a REACH THAT LIVES IN A STRING', () => {
+        // The direction that makes the fix a fix rather than a disarm: two of
+        // the three spellings are service keys, which are string literals.
+        expect(reachesHostApp("const s = ctx.getService('http.server');\n")).toBe(true);
+        expect(reachesHostApp('const s = ctx.getService("http-server");\n')).toBe(true);
+        expect(reachesHostApp('const s = ctx.getService(`http-server`);\n')).toBe(true);
+        expect(reachesHostApp('const app = server.getRawApp();\n')).toBe(true);
+    });
+
+    it('a genuine FIFTH reacher is still named — anti-vacuity on the identity limb', () => {
+        // LOAD-BEARING POSITIVE for #12398's fix, driven through the same
+        // function the live limb calls with source injected. Without it, a
+        // strip that quietly stopped matching anything would leave the identity
+        // green forever — the failure direction the whole family distrusts.
+        const fake: Record<string, string> = {
+            'cloud-connection-plugin.ts': 'const app = http.getRawApp();\n',
+            'prose-only.ts': '// getRawApp() is reached in the four mount sources, never here\n',
+            'zzz-fifth-reacher.ts': "const s = ctx.getService('http.server');\n",
+        };
+        expect(
+            filesReachingHostApp(Object.keys(fake).sort(), (f) => fake[f]),
+        ).toEqual(['cloud-connection-plugin.ts', 'zzz-fifth-reacher.ts']);
     });
 
     it('resolves the three argument spellings this package actually uses', () => {

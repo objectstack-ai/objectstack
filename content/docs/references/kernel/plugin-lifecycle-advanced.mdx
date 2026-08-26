@@ -25,29 +25,12 @@ the #11825 retirement record below.
 ## TypeScript Usage
 
 ```typescript
-import { DistributedStateConfigSchema, HotReloadConfigSchema, PluginHealthCheckSchema, PluginHealthReportSchema, PluginHealthStatusSchema, PluginStateSnapshotSchema } from '@objectstack/spec/kernel';
-import type { DistributedStateConfig, HotReloadConfig, PluginHealthCheck, PluginHealthReport, PluginHealthStatus, PluginStateSnapshot } from '@objectstack/spec/kernel';
+import { HotReloadConfigSchema, PluginHealthCheckSchema, PluginHealthReportSchema, PluginHealthStatusSchema, PluginStateSnapshotSchema } from '@objectstack/spec/kernel';
+import type { HotReloadConfig, PluginHealthCheck, PluginHealthReport, PluginHealthStatus, PluginStateSnapshot } from '@objectstack/spec/kernel';
 
 // Validate data
-const result = DistributedStateConfigSchema.parse(data);
+const result = HotReloadConfigSchema.parse(data);
 ```
-
----
-
-## DistributedStateConfig
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **provider** | `Enum<'redis' \| 'etcd' \| 'custom'>` | ✅ | Distributed state backend provider |
-| **endpoints** | `string[]` | optional | Backend connection endpoints |
-| **keyPrefix** | `string` | optional | Prefix for all keys (e.g., "plugin:my-plugin:") |
-| **ttl** | `integer` | optional | State expiration time in seconds |
-| **auth** | `{ username?: string; password?: string; token?: string; certificate?: string }` | optional |  |
-| **replication** | `{ enabled: boolean; minReplicas: integer }` | optional |  |
-| **customConfig** | `Record<string, any>` | optional | Provider-specific configuration |
-
 
 ---
 
@@ -61,23 +44,10 @@ const result = DistributedStateConfigSchema.parse(data);
 | **watchPatterns** | `string[]` | optional | Glob patterns to watch for changes |
 | **debounceDelay** | `integer` | optional (default: `1000`) | Wait time after change detection before reload |
 | **preserveState** | `boolean` | optional (default: `true`) | Keep plugin state across reloads |
-| **stateStrategy** | `Enum<'memory' \| 'disk' \| 'distributed' \| 'none'>` | optional (default: `"memory"`) | How to preserve state during reload |
-| **distributedConfig** | `{ provider: Enum<'redis' \| 'etcd' \| 'custom'>; endpoints?: string[]; keyPrefix?: string; ttl?: integer; … }` | optional | Configuration for distributed state management |
+| **stateStrategy** | `Enum<'memory' \| 'none'>` | optional (default: `"memory"`) | How to preserve state during reload |
 | **shutdownTimeout** | `integer` | optional (default: `30000`) | Maximum time to wait for graceful shutdown |
 | **beforeReload** | `string[]` | optional | Hook names to call before reload |
 | **afterReload** | `string[]` | optional | Hook names to call after reload |
-
-### Nested Shape: `HotReloadConfig.distributedConfig`
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **provider** | `Enum<'redis' \| 'etcd' \| 'custom'>` | ✅ | Distributed state backend provider |
-| **endpoints** | `string[]` | optional | Backend connection endpoints |
-| **keyPrefix** | `string` | optional | Prefix for all keys (e.g., "plugin:my-plugin:") |
-| **ttl** | `integer` | optional | State expiration time in seconds |
-| **auth** | `{ username?: string; password?: string; token?: string; certificate?: string }` | optional |  |
-| **replication** | `{ enabled: boolean; minReplicas: integer }` | optional |  |
-| **customConfig** | `Record<string, any>` | optional | Provider-specific configuration |
 
 
 ---
