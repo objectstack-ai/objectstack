@@ -11,7 +11,9 @@ import { spawnSync } from 'child_process';
 import { z } from 'zod';
 import { schemaNameFromExportKey } from './lib/schema-name';
 import {
+  collapsedEmitCount,
   findDefKeyCollisions,
+  findSelfAliasedDefKeys,
   formatDefKeyCollisions,
   type EmittedDef,
 } from './lib/def-key-collisions';
@@ -473,6 +475,28 @@ const defKeyCollisions = findDefKeyCollisions(emittedDefs);
 if (defKeyCollisions.length > 0) {
   console.error(`\n❌ ${formatDefKeyCollisions(defKeyCollisions)}`);
   process.exit(1);
+}
+
+// ─── Report: the writes the guard above exempted (#12588) ─────────────
+// Reaching here means every def key written twice is a self-alias, because the
+// guard exits on any that is not. Those writes still collapse — `count` is one
+// per EMIT while `generatedSchemas` is keyed by def key — so the emit total is
+// higher than the number of definitions this build publishes. That difference
+// used to be visible only as a subtraction between two summary lines, and it
+// leaked into the published bundle as an `x-schema-count` nobody could reconcile
+// with the `$defs` beside it. Name the population instead of implying it.
+// A report, not a gate: there is no threshold here and no exit path.
+const selfAliasedDefKeys = findSelfAliasedDefKeys(emittedDefs);
+const collapsedEmits = collapsedEmitCount(selfAliasedDefKeys);
+if (collapsedEmits > 0) {
+  console.log(
+    `\nℹ️  ${collapsedEmits} emit(s) collapsed into ${selfAliasedDefKeys.length} existing def key(s) ` +
+      `— all self-aliases (one schema object reached by two export names), so ${count} emits publish ` +
+      `${generatedSchemas.size} definitions:`,
+  );
+  for (const alias of selfAliasedDefKeys) {
+    console.log(`     json-schema/${alias.defKey}.json  <-  ${alias.exportKeys.join(', ')}`);
+  }
 }
 
 // ─── Ratchet: a published schema must never silently disappear ────────
@@ -2531,23 +2555,30 @@ if (defaultsChanged && !CHECK) {
 // ─── Generate Bundled Schema ─────────────────────────────────────────
 // Single-file bundled schema containing all generated schemas for IDE autocomplete
 
+// Assemble bundled $defs from the in-memory map populated during generation.
+// (Avoid re-reading the json-schema/ tree to dodge CI filesystem races.)
+//
+// Assembled BEFORE the envelope, so `x-schema-count` below is taken from what
+// this bundle actually carries (#12588). It used to be `count`, the per-EMIT
+// counter, while `$defs` is keyed by def key — so every self-aliased key
+// reported above widened the gap, and the published artifact declared 1596
+// definitions while shipping 1585. A self-describing artifact counts what it
+// contains; the emit total is a property of the build, not of the file, and is
+// still reported on the summary line at the end of this script.
+const defs: Record<string, unknown> = {};
+for (const [defKey, schema] of generatedSchemas) {
+  defs[defKey] = schema;
+}
+
 const bundledSchema: Record<string, unknown> = {
   $schema: 'https://json-schema.org/draft/2020-12/schema',
   $id: `${SCHEMA_BASE_URL}/objectstack.json`,
   title: 'ObjectStack Protocol',
   description: `ObjectStack Protocol v${SPEC_VERSION} — Complete bundled JSON Schema for IDE autocomplete`,
   'x-spec-version': SPEC_VERSION,
-  'x-schema-count': count,
-  $defs: {} as Record<string, unknown>,
+  'x-schema-count': Object.keys(defs).length,
+  $defs: defs,
 };
-
-const defs = bundledSchema.$defs as Record<string, unknown>;
-
-// Assemble bundled $defs from the in-memory map populated during generation.
-// (Avoid re-reading the json-schema/ tree to dodge CI filesystem races.)
-for (const [defKey, schema] of generatedSchemas) {
-  defs[defKey] = schema;
-}
 
 const bundledPath = path.join(OUT_DIR, 'objectstack.json');
 writeFileWithRetry(bundledPath, JSON.stringify(bundledSchema, null, 2));

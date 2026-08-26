@@ -30,7 +30,9 @@ import path from 'node:path';
 import { SCHEMA_MANIFEST_DIR_NAME } from './lib/sharded-artifacts';
 
 import {
+  collapsedEmitCount,
   findDefKeyCollisions,
+  findSelfAliasedDefKeys,
   formatDefKeyCollisions,
   type EmittedDef,
 } from './lib/def-key-collisions';
@@ -107,6 +109,114 @@ describe('findDefKeyCollisions', () => {
       emitted('shared', 'HttpMethod', { a: 1 }),
       emitted('shared', 'HttpMethodSubsetSchema', { a: 2 }),
     ])).toEqual([]);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// #12588 — the exempt population, enumerated.
+// ─────────────────────────────────────────────────────────────────────────
+//
+// `findDefKeyCollisions` is silent about self-aliases because they are not a
+// problem. They are, however, the reason a build's emit count exceeds the
+// number of definitions it publishes — and that unexplained delta is what put a
+// wrong `x-schema-count` into the shipped bundle. These pin the other half.
+
+describe('findSelfAliasedDefKeys — the population the guard exempts (#12588)', () => {
+  it('reports a self-alias, which is exactly what findDefKeyCollisions stays silent about', () => {
+    const task = { type: 'object' };
+    const entries = [emitted('system', 'Task', task), emitted('system', 'TaskSchema', task)];
+
+    expect(findSelfAliasedDefKeys(entries)).toEqual([
+      { defKey: 'system/Task', exportKeys: ['Task', 'TaskSchema'] },
+    ]);
+    // The two verdicts are complementary, not overlapping.
+    expect(findDefKeyCollisions(entries)).toEqual([]);
+  });
+
+  it('is silent about a real collision — that one belongs to the guard, not to a report', () => {
+    const entries = [
+      emitted('shared', 'HttpMethod', { enum: ['GET', 'HEAD'] }),
+      emitted('shared', 'HttpMethodSchema', { enum: ['GET'] }),
+    ];
+
+    expect(findSelfAliasedDefKeys(entries)).toEqual([]);
+    expect(findDefKeyCollisions(entries)).toHaveLength(1);
+  });
+
+  it('ignores a def key written once — one write collapses nothing', () => {
+    expect(findSelfAliasedDefKeys([emitted('data', 'FieldSchema', {})])).toEqual([]);
+  });
+
+  it('partitions every multiply-written def key between the two functions', () => {
+    // The invariant that makes "emits - definitions" fully accounted for: a key
+    // written more than once is either exempt or a collision, never neither and
+    // never both. Asserted over a mixed build rather than stated in prose.
+    const alias = {};
+    const entries = [
+      emitted('ui', 'ThemeModeSchema', alias),
+      emitted('ui', 'ThemeMode', alias),
+      emitted('shared', 'HttpMethod', { a: 1 }),
+      emitted('shared', 'HttpMethodSchema', { a: 2 }),
+      emitted('data', 'FieldSchema', {}),
+    ];
+
+    const aliases = findSelfAliasedDefKeys(entries).map((a) => a.defKey);
+    const collisions = findDefKeyCollisions(entries).map((c) => c.defKey);
+
+    expect(aliases).toEqual(['ui/ThemeMode']);
+    expect(collisions).toEqual(['shared/HttpMethod']);
+    expect(aliases.filter((k) => collisions.includes(k))).toEqual([]);
+    // Every key with more than one write is claimed by exactly one of them.
+    const writtenTwice = ['ui/ThemeMode', 'shared/HttpMethod'];
+    expect([...aliases, ...collisions].sort()).toEqual([...writtenTwice].sort());
+  });
+
+  it('follows first-encounter order, so a build report is stable across runs', () => {
+    const a = {};
+    const b = {};
+    expect(
+      findSelfAliasedDefKeys([
+        emitted('system', 'QueueConfig', b),
+        emitted('api', 'ApiEndpoint', a),
+        emitted('api', 'ApiEndpointSchema', a),
+        emitted('system', 'QueueConfigSchema', b),
+      ]).map((x) => x.defKey),
+    ).toEqual(['system/QueueConfig', 'api/ApiEndpoint']);
+  });
+});
+
+describe('collapsedEmitCount — the emits a self-aliased key absorbs (#12588)', () => {
+  it('counts N-1 per key: the first write is the definition, the rest collapse onto it', () => {
+    expect(
+      collapsedEmitCount([
+        { defKey: 'api/ApiEndpoint', exportKeys: ['ApiEndpoint', 'ApiEndpointSchema'] },
+        { defKey: 'system/Task', exportKeys: ['Task', 'TaskSchema'] },
+      ]),
+    ).toBe(2);
+  });
+
+  it('counts a triple alias as two collapsed emits, not one', () => {
+    expect(
+      collapsedEmitCount([{ defKey: 'api/Thing', exportKeys: ['Thing', 'ThingSchema', 'ThingZod'] }]),
+    ).toBe(2);
+  });
+
+  it('is zero on a build where nothing collapsed', () => {
+    expect(collapsedEmitCount([])).toBe(0);
+  });
+
+  it('reconciles the two totals: emits - collapsed = definitions', () => {
+    // The arithmetic the published `x-schema-count` got wrong, in miniature.
+    const alias = {};
+    const entries = [
+      emitted('api', 'ApiEndpoint', alias),
+      emitted('api', 'ApiEndpointSchema', alias),
+      emitted('data', 'FieldSchema', {}),
+      emitted('data', 'ObjectSchema', {}),
+    ];
+    const definitions = new Set(entries.map((e) => `${e.category}/${e.schemaName}`)).size;
+
+    expect(entries.length - collapsedEmitCount(findSelfAliasedDefKeys(entries))).toBe(definitions);
   });
 });
 
