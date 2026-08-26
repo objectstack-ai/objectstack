@@ -7,6 +7,8 @@ fix(platform-objects): source `sys_oauth_resource.identifier`'s bound from its p
 **BREAKING** accept-set narrowing on two published objects, shipped as `minor`
 under the repo's launch-window convention for breaking changes.
 
+<!-- adr-0087: not-required (no-migration-prescription) Narrows two field bounds on objects whose `protection.lock` is `full`; no metadata key is removed or renamed, so no authored metadata can name the discarded band and there is nothing for an upgrader to rewrite. The physical column change is applied by schema sync itself, and the discarded (255, 1024] band is unreachable — measured, the sole writer stores this identifier in varchar(255). -->
+
 `sys_oauth_resource.identifier` declared `maxLength: 1024`. That number cited no
 producer — it arrived with the object wholesale (#3080) as generous slack for
 "a URI". Every other bound in the #11374 family names where it came from; this
