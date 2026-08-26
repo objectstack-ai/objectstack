@@ -44,11 +44,17 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { E2E_SECRET_KEY, childEnv, randomPort } from './helpers/serve-process.js';
+import {
+  E2E_SECRET_KEY,
+  RUN_JS_RESOLVES_FROM_DIST,
+  childEnv,
+  randomPort,
+  requireBuiltCli,
+} from './helpers/serve-process.js';
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 /**
@@ -75,47 +81,17 @@ const HERE = resolve(fileURLToPath(import.meta.url), '..');
  * STATE as well as about the source in the checkout, which is the trade
  * `scripts/check-test-source-alias.mjs` argues against for in-process imports.
  * `turbo.json` declares `@objectstack/cli#test` `dependsOn: ["build"]` (#11268)
- * so CI always builds `dist/` first; `requireBuiltCli()` below is what a
- * developer running `vitest` directly gets instead of oclif's "command serve
- * not found". Neither catches a `dist/` that is merely BEHIND its source —
+ * so CI always builds `dist/` first; `requireBuiltCli()` — hoisted into
+ * `helpers/serve-process.ts` by #12539, with the reason it refuses supplied
+ * from HERE (`RUN_JS_RESOLVES_FROM_DIST`) because it is true of this
+ * entrypoint and not of the tsx one — is what a developer running `vitest`
+ * directly gets instead of oclif's "command serve not found". Neither catches
+ * a `dist/` that is merely BEHIND its source —
  * that residual is the honest cost of consuming the artifact, and
  * `serve-node-env-production-default.e2e.test.ts` (which has consumed `dist/`
  * since #11113) carries exactly the same one.
  */
 const CLI = resolve(HERE, '../bin/run.js');
-
-/**
- * Refuse to run against an unbuilt `packages/cli`, in a sentence rather than as
- * oclif's "command serve not found".
- *
- * The command target is read from the CLI's own `oclif.commands.target` rather
- * than restated here: that declaration is where `dist/commands` is decided, and
- * a copy keeps probing the old path after someone moves it — the argument
- * `scripts/cli-build-prerequisite.mjs` makes for the gates that shell out to
- * this CLI. Only that one declared shape is read; anything else (unreadable,
- * or `oclif.commands` written as a bare string) DEFERS rather than failing, so
- * a checkout this cannot understand never turns red here and the spawn's own
- * output stays the fallback — the same fail-open direction those gates take.
- */
-function requireBuiltCli(): void {
-  let target: unknown;
-  try {
-    target = JSON.parse(readFileSync(resolve(HERE, '../package.json'), 'utf8'))?.oclif?.commands?.target;
-  } catch {
-    return;
-  }
-  if (typeof target !== 'string' || !target) return;
-  const commandFile = resolve(HERE, '..', target.replace(/^\.\//, ''), 'serve.js');
-  if (existsSync(commandFile)) return;
-  throw new Error(
-    `packages/cli is not built: ${commandFile} does not exist.\n` +
-      'This file spawns bin/run.js with NODE_ENV unset, which is what makes oclif resolve the ' +
-      'command from dist/ instead of transpiling src/ — so on an unbuilt tree the child answers ' +
-      '"command serve not found" and every boot below times out.\n' +
-      'CI declares the build (turbo: @objectstack/cli#test dependsOn build); a direct vitest run does not.\n' +
-      'Run: pnpm exec turbo run build --filter=@objectstack/cli',
-  );
-}
 
 /** The consumer's real identity — see `serve-capability-identity.test.ts`. */
 const CONSUMER_PLUGIN_ID = 'com.objectstack.connector.mcp';
@@ -393,7 +369,7 @@ async function readFrame(res: Response, id: number): Promise<Record<string, unkn
 describe('#7652: an app loading the MCP client connector still gets the MCP server', () => {
   beforeAll(async () => {
     // Build prerequisite first: the spawns below resolve `serve` from `dist/`.
-    requireBuiltCli();
+    requireBuiltCli(RUN_JS_RESOLVES_FROM_DIST);
 
     dir = mkdtempSync(join(tmpdir(), 'mcp-collision-e2e-'));
     writeFileSync(join(dir, 'objectstack.config.ts'), CONFIG, 'utf8');
