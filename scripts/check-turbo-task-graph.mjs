@@ -456,12 +456,28 @@ export function readRootScripts(root) {
   } catch (err) {
     throw new TaskGraphReadError(`cannot read the root ${ROOT_MANIFEST_FILE}: ${err.message}`);
   }
-  const scripts = parsed?.scripts && typeof parsed.scripts === 'object' ? Object.keys(parsed.scripts) : [];
+  return rootScriptNames(parsed);
+}
+
+/**
+ * The script names of an already-parsed root manifest, or a refusal.
+ *
+ * Split from the read for the same reason `verdict` is a pure function: the
+ * refusal below is a branch a clean tree can never reach, so `--self-test` has
+ * to be able to drive it without a filesystem fixture whose own contents would
+ * then decide whether the pin holds.
+ *
+ * @param {unknown} manifest
+ * @returns {Set<string>}
+ */
+export function rootScriptNames(manifest) {
+  const table = manifest?.scripts;
+  const scripts = table && typeof table === 'object' && !Array.isArray(table) ? Object.keys(table) : [];
   if (scripts.length === 0) {
     throw new TaskGraphReadError(
       `the root ${ROOT_MANIFEST_FILE} declares no scripts — a "${ROOT_PACKAGE_TOKEN}#<task>" key is judged against\n` +
         `exactly that table, so an empty one is a file this gate could not read, never a root\n` +
-        `manifest with nothing to run.`,
+        `manifest with nothing to run. Every such key would otherwise be reported inert at once.`,
     );
   }
   return new Set(scripts);
@@ -737,6 +753,13 @@ export function selfTest() {
   refuses('a root package.json that cannot be read refuses', () =>
     readRootScripts(join(ROOT, 'scripts', 'no-such-dir-12465')),
   );
+  // The zero-scripts refusal, driven directly: a clean tree cannot reach it, and
+  // a silently empty set would report every legitimate `//#` key inert at once.
+  refuses('a root manifest with no scripts table refuses', () => rootScriptNames({}));
+  refuses('a root manifest with an empty scripts table refuses', () => rootScriptNames({ scripts: {} }));
+  refuses('a root manifest whose scripts table is an array refuses', () => rootScriptNames({ scripts: ['lint'] }));
+  t('a root manifest with scripts yields exactly its script names',
+    [...rootScriptNames({ scripts: { lint: 'eslint .', dev: 'node x' } })].sort().join(',') === 'dev,lint');
 
   // ── Non-vacuity, on the LIVE tree ──
   // The cases above are all synthetic; this is the one that fails when the gate
