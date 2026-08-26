@@ -55,7 +55,7 @@ import { describe, expect, it, vi } from 'vitest';
 // depends in this direction, and that reverse edge is a cycle turbo refuses.
 import {
     assertEngineDeleteDispatch,
-    assertEngineUpdateDispatch,
+    assertEngineUpdateDispatch, assertEngineFindOnePredicate, type EngineFindOneQueryInput,
 } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 // `.js` extension required under `moduleResolution: nodenext`. Without it the
@@ -73,7 +73,8 @@ function stubEngine() {
     return {
         rows,
         engine: {
-            async findOne() { return null; },
+            async findOne(object: string, query?: EngineFindOneQueryInput) {
+                              assertEngineFindOnePredicate(object, query); return null; },
             async find() { return rows.slice(); },
             async insert(table: string, data: Record<string, any>) {
                 if (table === 'sys_metadata_audit') return { id: 'audit_skip' };

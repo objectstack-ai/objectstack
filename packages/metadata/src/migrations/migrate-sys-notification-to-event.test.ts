@@ -9,7 +9,7 @@ import { describe, it, expect } from 'vitest';
 // would close a dependency cycle turbo rejects, and is why both of this file's
 // (file, verb) pairs sat in the gate's DEBT ledger until #5619 sank the two
 // predicates into a package that depends on neither side.
-import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate, type EngineFindOneQueryInput } from '@objectstack/metadata-core';
 import { migrateSysNotificationToEvent } from './migrate-sys-notification-to-event.js';
 
 /** Columns the legacy (pre-ADR-0030) sys_notification table physically has. */
@@ -57,7 +57,8 @@ function fakeEngine() {
                 return data;
             },
             async find() { return []; },
-            async findOne() { return null; },
+            async findOne(object: string, query?: EngineFindOneQueryInput) {
+                              assertEngineFindOnePredicate(object, query); return null; },
             async delete(_object?: string, options?: Record<string, unknown>) {
                 assertEngineDeleteDispatch(options);
                 return {};

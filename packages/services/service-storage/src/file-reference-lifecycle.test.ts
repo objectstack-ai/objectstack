@@ -8,6 +8,7 @@ import {
   FileFieldBulkWriteError,
   type FileReferenceEngine,
 } from './file-reference-lifecycle.js';
+import { assertEngineFindOnePredicate } from '@objectstack/objectql';
 
 const silentLogger = () => ({ info: vi.fn(), warn: vi.fn(), debug: vi.fn() });
 
@@ -74,6 +75,7 @@ function fakeEngine(opts: {
       return typeof options?.limit === 'number' ? rows.slice(0, options.limit) : rows;
     },
     async findOne(object, options: any) {
+      assertEngineFindOnePredicate(object, options);
       calls.push({ op: 'findOne', object, arg: options?.where });
       return (tables[object] ?? []).find((r) => matches(r, options?.where ?? {})) ?? null;
     },

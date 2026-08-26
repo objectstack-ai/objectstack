@@ -38,7 +38,7 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { FileI18nAdapter } from '@objectstack/service-i18n';
 import { PermissionSetSchema } from '@objectstack/spec/security';
 import type { PermissionSet } from '@objectstack/spec/security';
@@ -125,6 +125,7 @@ function makeEngine() {
       return (tables[object] ??= []).filter((r) => matches(r, options?.where ?? options?.filter));
     },
     async findOne(object: string, options: any = {}) {
+      assertEngineFindOnePredicate(object, options);
       return (await this.find(object, options))[0] ?? null;
     },
     async insert(object: string, data: any) { (tables[object] ??= []).push({ ...data }); return data; },

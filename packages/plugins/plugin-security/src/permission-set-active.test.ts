@@ -26,6 +26,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { SecurityPlugin } from './security-plugin.js';
 import type { PermissionSet } from '@objectstack/spec/security';
 import type { ISecurityService } from '@objectstack/spec/contracts';
+import { assertEngineFindOnePredicate, type EngineFindOneQueryInput } from '@objectstack/metadata-core';
 
 /** The metadata-declared baseline every authenticated caller resolves additively. */
 const MEMBER_DEFAULT: PermissionSet = {
@@ -64,7 +65,7 @@ async function locateSecurityService(
   const ql: any = {
     registerMiddleware: () => {},
     getSchema: (name: string) => (name === 'deal' ? schema : null),
-    findOne: async () => null,
+    findOne: async (object: string, query?: EngineFindOneQueryInput) => { assertEngineFindOnePredicate(object, query); return null; },
     find: async (object: string, query: any) => {
       if (object !== 'sys_permission_set') return [];
       const wanted: string[] = query?.where?.name?.$in ?? [];

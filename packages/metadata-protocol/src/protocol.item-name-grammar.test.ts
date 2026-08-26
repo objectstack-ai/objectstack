@@ -41,7 +41,7 @@
 import { describe, expect, it } from 'vitest';
 // [#5619] The producer's OWN write-verb dispatch decisions, so the fake engine
 // below cannot accept a call ObjectQL itself refuses.
-import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 
 interface Row {
@@ -76,6 +76,7 @@ function makeProtocol(seedRows: Array<Partial<Row>> = []) {
     const deletes: Array<Record<string, unknown> | undefined> = [];
     const engine: any = {
         async findOne(_t: string, opts: { where: Record<string, unknown> }) {
+            assertEngineFindOnePredicate(_t, opts);
             for (const row of rows.values()) {
                 if (opts.where.type !== undefined && row.type !== opts.where.type) continue;
                 if (opts.where.name !== undefined && row.name !== opts.where.name) continue;

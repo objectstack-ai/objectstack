@@ -86,6 +86,7 @@ import {
   createObjectQLAdapterFactory,
   NORMALISED_IDENTIFIER_FIELDS,
 } from './objectql-adapter';
+import { assertEngineFindOnePredicate } from '@objectstack/objectql';
 
 /**
  * The `sys_user` columns face 2 touches, declared — a real table has to be told.
@@ -130,7 +131,7 @@ function sqlReadEngine(driver: SqlDriver): IDataEngine {
   // `query-options/no-any-erasure` (#4674/#4918) counts test-side calls too.
   return {
     find: (object: string, query: QueryAST) => driver.find(object, query),
-    findOne: (object: string, query: QueryAST) => driver.findOne(object, query),
+    findOne: (object: string, query: QueryAST) => { assertEngineFindOnePredicate(object, query); return driver.findOne(object, query); },
     count: (object: string, query?: QueryAST) => driver.count(object, query),
   } as unknown as IDataEngine;
 }

@@ -14,7 +14,7 @@
 // is already in the database.
 
 import { describe, it, expect, vi } from 'vitest';
-import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 
 const SCHEMA = {
@@ -47,7 +47,7 @@ function makeTransactionalEngine(opts: { driverCanTransact?: boolean } = {}) {
         if (data?.title === POISON) throw new Error('update exploded');
         return { id: options?.where?.id, ...data };
     });
-    const findOne = vi.fn(async (_object: string, options?: any) => ({ id: options?.where?.id }));
+    const findOne = vi.fn(async (_object: string, options?: any) => { assertEngineFindOnePredicate(_object, options); return ({ id: options?.where?.id }); });
     const del = vi.fn(async (_object: string, options?: any) => {
         assertEngineDeleteDispatch(options);
         return { deleted: 1 };

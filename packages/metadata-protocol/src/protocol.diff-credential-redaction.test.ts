@@ -39,7 +39,7 @@
  * cannot distinguish (a diff that emitted no values at all would pass it).
  */
 import { afterEach, describe, expect, it } from 'vitest';
-import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, hashSpec } from '@objectstack/metadata-core';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, hashSpec, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { getMetadataTypeRedactor, registerMetadataTypeRedactor } from '@objectstack/spec/kernel';
 import { ObjectStackProtocolImplementation } from './index.js';
 
@@ -120,6 +120,7 @@ function makeStubEngine() {
             return (tables[table] ?? []).filter((r) => matches(r, opts.where));
         },
         async findOne(table: string, opts: { where: Record<string, unknown> }) {
+            assertEngineFindOnePredicate(table, opts);
             return (tables[table] ?? []).find((r) => matches(r, opts.where)) ?? null;
         },
         async insert() { return { id: 'stub' }; },

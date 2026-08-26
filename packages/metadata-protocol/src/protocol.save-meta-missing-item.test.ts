@@ -51,6 +51,7 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { ObjectStackProtocolImplementation, clientFacingFailureText } from './protocol.js';
+import { assertEngineFindOnePredicate, type EngineFindOneQueryInput } from '@objectstack/metadata-core';
 
 /**
  * A protocol over an engine whose every verb is a tripwire: this guard is the
@@ -58,7 +59,7 @@ import { ObjectStackProtocolImplementation, clientFacingFailureText } from './pr
  * all would mean the check had moved behind something with side effects.
  */
 function makeProtocol() {
-    const findOne = vi.fn(async () => null);
+    const findOne = vi.fn(async (object: string, query?: EngineFindOneQueryInput) => { assertEngineFindOnePredicate(object, query); return null; });
     const find = vi.fn(async () => [] as unknown[]);
     const engine = {
         registry: { getObject: () => undefined },

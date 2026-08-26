@@ -36,6 +36,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { SecurityPlugin } from './security-plugin.js';
 import type { PermissionSet } from '@objectstack/spec/security';
+import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 
 const USER = 'usr_admin';
 const OTHER = 'usr_other';
@@ -144,6 +145,7 @@ async function boot(options: BootOptions = {}) {
     getSchema: (object: string) => SCHEMAS[object],
     find: vi.fn(async (object: string, o: any = {}) => (rows[object] ?? []).filter((r) => matches(r, o?.where))),
     findOne: vi.fn(async (object: string, o: any = {}) => {
+      assertEngineFindOnePredicate(object, o);
       if (options.faultOn && object === options.faultOn) throw datasourceOutage(object);
       return (rows[object] ?? []).find((r) => matches(r, o?.where)) ?? null;
     }),

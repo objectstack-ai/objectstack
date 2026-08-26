@@ -45,7 +45,7 @@
 // enumeration is shown to pick it up, and the scan is shown to catch its leak.
 
 import { describe, it, expect } from 'vitest';
-import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 import {
   collectInternalWriteResponseFields,
@@ -106,7 +106,7 @@ function makeSentinelEngine() {
       assertEngineDeleteDispatch(options);
       return { deleted: 1 };
     },
-    findOne: async (_object: string, options?: any) => storedRow(options?.where?.id ?? 'row-1'),
+    findOne: async (_object: string, options?: any) => { assertEngineFindOnePredicate(_object, options); return storedRow(options?.where?.id ?? 'row-1'); },
     find: async (_object: string, _options?: any) => [storedRow('row-1')],
     count: async () => 1,
     validate: async () => ({ valid: true, issues: [] }),

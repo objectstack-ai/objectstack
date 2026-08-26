@@ -582,7 +582,17 @@ function classify(type: string, path: string, status: string, led: any, cat: any
 
 // Reverse integrity: every `@proof:` tag declared under the dogfood proof tree
 // must be registered in proof-registry.mts. An orphan tag means a proof was
-// written but never wired into the high-risk-class list — flag it (warning).
+// written but never wired into the high-risk-class list.
+//
+// RED since 2026-08-26, having been a ⚠ before. The warning was calibrated for
+// a backlog era — it reported 13 orphan tags at once, then 11 — and a signal
+// that never fails the build cannot close the class it names: the 11 were
+// registered in one round, a 12th arrived with the next dogfood proof, and the
+// second card was written from the same ⚠ line as the first. The census that
+// licenses the flip is that round's own arithmetic: the list is at ZERO on the
+// commit this changes, so the gate starts green and only a NEW unregistered tag
+// can red it — the same "a check that starts at zero can be red" reasoning the
+// key-mention half was switched on under.
 function scanOrphanProofs() {
   const proofDir = join(repoRoot, 'packages/qa/dogfood/test');
   if (!existsSync(proofDir)) return; // spec may be consumed standalone (published)
@@ -820,6 +830,10 @@ const failed =
   // be red; that is the whole reason the census came first.
   report.keyMentionUnanchored.length > 0 ||
   report.keyMentionStale.length > 0 ||
+  // A dogfood `@proof:` tag the registry never learned about. Red rather than ⚠
+  // since 2026-08-26 — see scanOrphanProofs for why the warning could not close
+  // the class, and for the zero-census that lets this start green.
+  report.orphanProofs.length > 0 ||
   report.orphanEntries.length > 0 ||
   report.verification.errors.length > 0 ||
   report.producers.errors.length > 0 ||
@@ -937,8 +951,29 @@ if (asJson) {
     );
   }
   if (report.orphanProofs.length) {
-    console.log(`\n⚠ ${report.orphanProofs.length} unregistered dogfood proof tag(s) — add to proof-registry.mts:`);
+    console.log(`\n✗ ${report.orphanProofs.length} unregistered dogfood proof tag(s) — add to proof-registry.mts:`);
     report.orphanProofs.forEach((s: string) => console.log(`    ${s}`));
+    console.log(
+      '\n   A `@proof:` tag on disk that the registry does not know is a proof no ledger entry\n' +
+      '   can cite: `BOUND_PROOF_PATHS` is built from HIGH_RISK_CLASSES, so an unregistered\n' +
+      '   proof cannot bind a `live` verdict however thoroughly it runs.\n\n' +
+      '   Add a HIGH_RISK_CLASSES entry in proof-registry.mts. Registering is mechanical;\n' +
+      '   the judgment half is `bound`. Read the proof file and ask: is there an AUTHORABLE\n' +
+      '   property whose `live` status it actually gates?\n' +
+      '     • yes → `bound: true` + the `ledgerBindings` entry, and put the same `proof` ref\n' +
+      '       on that ledger row (the wiring test in proof-registry.test.ts holds both ends);\n' +
+      '     • no  → `bound: false` + a `blockedReason` naming what it guards INSTEAD (a\n' +
+      '       runtime/service invariant, a breadth sweep, or an entry already spoken for —\n' +
+      '       a ledger row carries one `proof` ref). Registered-and-honestly-unbound is a\n' +
+      '       first-class outcome; most of the registry is exactly that.\n' +
+      '   ⛔ Do not bind a proof to a property it does not AUTHOR just to reach `bound: true`\n' +
+      '   — a citation for a property the proof never exercises is the false comfort the\n' +
+      '   whole ledger exists to end.\n\n' +
+      '   This was a ⚠ until 2026-08-26. It reported 13 tags, then 11, and a warning nothing\n' +
+      '   fails on cannot close a class: the 11 were registered in one round and a 12th\n' +
+      '   arrived with the next dogfood proof, its card written off the same ⚠ line. The list\n' +
+      '   was at zero when this became red, so a hit here is a NEW tag, not a backlog.',
+    );
   }
   if (report.proofMissing.length) {
     console.log(`\n✗ ${report.proofMissing.length} high-risk 'live' propert(ies) missing a runtime proof:`);
@@ -1168,7 +1203,8 @@ if (asJson) {
       'every container inheritance is declared, every `live` entry\'s repo-local evidence path ' +
       'resolves, every `path:NNN` citation names a line that file actually has and every cited ' +
       'file names the property it is evidence for (or is a recorded exemption), all bound ' +
-      'high-risk proofs resolve, and the README state table carries a row ' +
+      'high-risk proofs resolve, every dogfood `@proof:` tag on disk is registered in ' +
+      'proof-registry.mts, and the README state table carries a row ' +
       `for each of the ${report.readmeRowCount} governed type(s) it claims to index.`,
     );
     console.log(

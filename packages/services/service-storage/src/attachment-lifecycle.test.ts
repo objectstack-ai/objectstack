@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect, vi } from 'vitest';
-import { ObjectQL } from '@objectstack/objectql';
+import { ObjectQL, assertEngineFindOnePredicate } from '@objectstack/objectql';
 import {
   installAttachmentLifecycleHooks,
   createSysFileReapGuard,
@@ -51,6 +51,7 @@ function fakeEngine(seed: {
       return typeof options?.limit === 'number' ? rows.slice(0, options.limit) : rows;
     },
     async findOne(object, options: any) {
+      assertEngineFindOnePredicate(object, options);
       return tables[object].find((r) => matches(r, options?.where ?? {})) ?? null;
     },
     async update(object, data: any, _options) {

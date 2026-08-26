@@ -16,6 +16,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { ObjectStackProtocolImplementation } from './protocol.js';
+import { assertEngineFindOnePredicate, type EngineFindOneQueryInput } from '@objectstack/metadata-core';
 
 /**
  * Registry-backed stub. Reference scanning reads through `getMetaItems`, which
@@ -25,7 +26,8 @@ import { ObjectStackProtocolImplementation } from './protocol.js';
 function protocolWith(items: Record<string, Array<Record<string, unknown>>>) {
     const engine: any = {
         async find() { return []; },
-        async findOne() { return null; },
+        async findOne(object: string, query?: EngineFindOneQueryInput) {
+                          assertEngineFindOnePredicate(object, query); return null; },
         async count() { return 0; },
         registry: {
             listItems: (type: string) => items[type] ?? [],

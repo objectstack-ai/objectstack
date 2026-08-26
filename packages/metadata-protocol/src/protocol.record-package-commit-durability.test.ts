@@ -52,7 +52,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 // cannot accept a call ObjectQL refuses. From `@objectstack/metadata-core`, not
 // `@objectstack/objectql` — objectql depends on THIS package, so that import
 // would close a dependency cycle turbo rejects outright.
-import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 
 interface Row {
@@ -126,6 +126,7 @@ function makeStubEngine() {
 
     const engine = {
         async findOne(table: string, opts: { where: Record<string, unknown> }) {
+            assertEngineFindOnePredicate(table, opts);
             if (table !== 'sys_metadata') {
                 return (sideTables[table] ?? []).find((r) => matchesWhere(r, opts.where)) ?? null;
             }

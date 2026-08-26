@@ -31,7 +31,7 @@
 
 import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 import { Hono } from 'hono';
-import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/objectql';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/objectql';
 import { AuthManager } from './auth-manager';
 import { AuthPlugin } from './auth-plugin';
 import { runOrganizationAddMember } from './organization-add-member.js';
@@ -105,6 +105,7 @@ const createMemoryEngine = () => {
       return { ...row };
     },
     async findOne(name: string, q: any = {}) {
+      assertEngineFindOnePredicate(name, q);
       const row = rows(name).find((r) => matches(r, q.where));
       return row ? project(row, q.fields) : null;
     },

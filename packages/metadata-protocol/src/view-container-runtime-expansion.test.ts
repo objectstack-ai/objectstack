@@ -28,7 +28,7 @@
  * choke point all three runtime hydration callers share.
  */
 import { describe, expect, it } from 'vitest';
-import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from './index.js';
 
 interface Row {
@@ -62,7 +62,8 @@ function makeStubEngine() {
         return null;
     };
     const engine: any = {
-        async findOne(_t: string, opts: { where: Record<string, unknown> }) { return findRow(opts.where)?.row ?? null; },
+        async findOne(_t: string, opts: { where: Record<string, unknown> }) {
+                                                                              assertEngineFindOnePredicate(_t, opts); return findRow(opts.where)?.row ?? null; },
         async find(_t: string, opts: { where: Record<string, unknown> }) {
             return Array.from(rows.values()).filter((r) => matches(r, opts.where));
         },

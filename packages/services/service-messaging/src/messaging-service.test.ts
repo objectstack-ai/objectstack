@@ -5,6 +5,7 @@ import { MessagingService } from './messaging-service.js';
 import { InboxCallerError } from './inbox-caller.js';
 import { MemoryNotificationOutbox } from './memory-outbox.js';
 import type { Delivery, MessagingChannel, SendResult } from './channel.js';
+import { assertEngineFindOnePredicate, type EngineFindOneQueryInput } from '@objectstack/metadata-core';
 
 function silentLogger() {
     return { info: () => {}, warn: () => {}, error: () => {} };
@@ -42,6 +43,7 @@ function fakeData(findOneImpl?: (obj: string, q: any) => any) {
             },
             async find() { return []; },
             async findOne(object: string, query: any) {
+                assertEngineFindOnePredicate(object, query);
                 findOnes.push({ object, query });
                 return findOneImpl ? findOneImpl(object, query) : null;
             },
@@ -182,7 +184,8 @@ describe('MessagingService', () => {
                     if (object === 'sys_team_member') return [{ user_id: 'u_sales' }];
                     return [];
                 },
-                async findOne(object: string) {
+                async findOne(object: string, query?: EngineFindOneQueryInput) {
+                    assertEngineFindOnePredicate(object, query);
                     return object === 'lead' ? { id: 'l1', owner_id: 'u_owner' } : null;
                 },
                 async update() { return {}; },
@@ -236,7 +239,8 @@ describe('MessagingService', () => {
                     }
                     return [];
                 },
-                async findOne() { return null; },
+                async findOne(object: string, query?: EngineFindOneQueryInput) {
+                                  assertEngineFindOnePredicate(object, query); return null; },
                 async update() { return {}; },
                 async delete() { return {}; },
                 async count() { return 0; },
@@ -390,7 +394,8 @@ describe('MessagingService', () => {
                     return { id: 'row' };
                 },
                 async find() { return []; },
-                async findOne(object: string) {
+                async findOne(object: string, query?: EngineFindOneQueryInput) {
+                    assertEngineFindOnePredicate(object, query);
                     if (object !== 'sys_notification') return null;
                     // First call = the fast-path miss; second = post-conflict lookup finds the winner.
                     if (firstLookup) { firstLookup = false; return null; }
@@ -422,7 +427,8 @@ describe('MessagingService', () => {
             const engine = {
                 async insert() { throw new Error('disk full'); },
                 async find() { return []; },
-                async findOne() { return null; },
+                async findOne(object: string, query?: EngineFindOneQueryInput) {
+                                  assertEngineFindOnePredicate(object, query); return null; },
                 async update() { return {}; },
                 async delete() { return {}; },
                 async count() { return 0; },
@@ -465,6 +471,7 @@ function inboxEngine(seed: { inbox?: any[]; receipts?: any[] } = {}) {
             return typeof query.limit === 'number' ? rows.slice(0, query.limit) : rows;
         },
         async findOne(object: string, query: any = {}) {
+            assertEngineFindOnePredicate(object, query);
             return (store[object] ?? []).find((r) => matches(r, query.where)) ?? null;
         },
         async insert(object: string, row: any) {

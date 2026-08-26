@@ -23,6 +23,7 @@ import { describe, it, expect } from 'vitest';
 import { normalizeStackInput } from '@objectstack/spec';
 import { AutomationEngine } from '../engine.js';
 import { registerCrudNodes } from './crud-nodes.js';
+import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 
 function silentLogger(): any {
   const l: any = { info() {}, warn() {}, error() {}, debug() {} };
@@ -34,7 +35,8 @@ function fakeData() {
   const calls: Array<{ op: string; obj: string; opts?: any }> = [];
   const data: any = {
     async find(obj: string, opts: any) { calls.push({ op: 'find', obj, opts }); return [{ id: 'r1' }]; },
-    async findOne(obj: string, opts: any) { calls.push({ op: 'findOne', obj, opts }); return { id: 'r1' }; },
+    async findOne(obj: string, opts: any) {
+                                            assertEngineFindOnePredicate(obj, opts); calls.push({ op: 'findOne', obj, opts }); return { id: 'r1' }; },
     async insert(obj: string, fields: any) { calls.push({ op: 'insert', obj, opts: { fields } }); return { id: `${obj}_1`, ...fields }; },
     async update(obj: string, fields: any, opts: any) { calls.push({ op: 'update', obj, opts: { ...opts, fields } }); return { ok: true }; },
     async delete(obj: string, opts: any) { calls.push({ op: 'delete', obj, opts }); return { ok: true }; },

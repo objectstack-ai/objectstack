@@ -32,7 +32,7 @@ import { describe, expect, it } from 'vitest';
 import { ViewMetadataSchema } from '@objectstack/spec/ui';
 import {
     assertEngineDeleteDispatch,
-    assertEngineUpdateDispatch,
+    assertEngineUpdateDispatch, assertEngineFindOnePredicate,
 } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation, graftFoldedFormSections } from './protocol.js';
 
@@ -72,6 +72,7 @@ function makeProtocol() {
     };
     const engine: any = {
         async findOne(_t: string, opts: { where: Record<string, unknown> }) {
+            assertEngineFindOnePredicate(_t, opts);
             return findRow(opts.where)?.row ?? null;
         },
         async find(_t: string, opts: { where: Record<string, unknown> }) {

@@ -25,7 +25,7 @@ import { describe, expect, it } from 'vitest';
 // would close a dependency cycle turbo rejects outright — which is why all 26
 // of this package's (file, verb) pairs sat in the gate's DEBT ledger until
 // #5619 sank the two predicates into a package both sides already depend on.
-import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 import { formatStoredMigrationReport, storedMigrationClean } from './stored-migration.js';
 
@@ -84,6 +84,7 @@ function makeStubEngine(
             return rowsOf(t).filter((r) => matches(r, opts?.where ?? {}));
         },
         async findOne(t: string, opts?: { where?: Record<string, unknown> }) {
+            assertEngineFindOnePredicate(t, opts);
             return rowsOf(t).find((r) => matches(r, opts?.where ?? {})) ?? null;
         },
         async insert(t: string, row: Record<string, any>) {

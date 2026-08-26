@@ -96,7 +96,7 @@ import { describe, expect, it, vi } from 'vitest';
 // [#5619] The producer's OWN write-verb dispatch decisions (#4550 delete /
 // #5480 update), from `@objectstack/metadata-core` — never `@objectstack/objectql`,
 // which depends on THIS package and would close a cycle.
-import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 // The closed union itself. Asserting membership against the SCHEMA rather than
 // against a literal is what makes section 1 a contract test: whatever lands on
 // the wire has to parse, whoever changes the catalog next.
@@ -201,6 +201,7 @@ function makeKernel(opts: {
             return Array.from(rows.values()).filter((r) => match(r, o?.where ?? {}));
         },
         async findOne(table: string, o: { where: Record<string, unknown> }) {
+            assertEngineFindOnePredicate(table, o);
             boom('findOne', table);
             if (table !== 'sys_metadata') return null;
             for (const r of rows.values()) if (match(r, o?.where ?? {})) return r;

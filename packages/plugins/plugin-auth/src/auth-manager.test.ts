@@ -2,7 +2,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { AuthManager, ipMatchesRange } from './auth-manager';
-import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/objectql';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate, type EngineFindOneQueryInput } from '@objectstack/objectql';
 
 // Mock better-auth so we can control the handler behaviour
 vi.mock('better-auth', () => ({
@@ -898,7 +898,7 @@ describe('AuthManager', () => {
       find: vi.fn(async (object: string) =>
         object === 'sys_member' && role !== null ? [{ role }] : [],
       ),
-      findOne: vi.fn(async () => null),
+      findOne: vi.fn(async (object: string, query?: EngineFindOneQueryInput) => { assertEngineFindOnePredicate(object, query); return null; }),
       count: vi.fn(async () => 0),
       insert: vi.fn(async () => ({})),
       update: vi.fn(async (_o: string, data: any, options?: any) => {
@@ -3052,6 +3052,7 @@ describe('AuthManager', () => {
     // in dogfood that a query-agnostic mock had masked.
     const makeEngine = (user: any) => ({
       findOne: vi.fn(async (_obj: string, q: any) => {
+        assertEngineFindOnePredicate(_obj, q);
         const w = q?.where ?? {};
         if (!user) return null;
         const matches = Object.entries(w).every(([k, v]) => (user as any)[k] === v);
@@ -3665,6 +3666,7 @@ describe('AuthManager', () => {
     const SECRET = 'test-secret-at-least-32-chars-long';
     const makeEngine = (user: any) => ({
       findOne: vi.fn(async (_o: string, q: any) => {
+        assertEngineFindOnePredicate(_o, q);
         const w = q?.where ?? {};
         if (!user) return null;
         return Object.entries(w).every(([k, v]) => (user as any)[k] === v) ? user : null;
@@ -3787,6 +3789,7 @@ describe('AuthManager', () => {
     const SECRET = 'test-secret-at-least-32-chars-long';
     const makeEngine = (user: any, org: any) => ({
       findOne: vi.fn(async (obj: string, q: any) => {
+        assertEngineFindOnePredicate(obj, q);
         const row = obj === 'sys_organization' ? org : user;
         if (!row) return null;
         const w = q?.where ?? {};

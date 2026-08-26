@@ -596,6 +596,28 @@ export interface AutomationReadySummary {
   unbound: Array<{ flowName: string; triggerType: string; reason: string }>;
   /** Bound record-change flows whose target object is not registered (dead binding). */
   unknownObject: Array<{ flowName: string; object: string }>;
+  /**
+   * Bare flow names claimed by more than one definition, as the ADR-0005
+   * overlay precedence resolved them (#12028).
+   *
+   * `armed` is the body that is actually in the engine's flow map and will
+   * dispatch; `shadowedCount` is how many same-named definitions it displaced.
+   * BOTH are carried on purpose. The engine's flow map is keyed by BARE name,
+   * so a displaced definition is invisible by construction: it is not in
+   * `flowCount`, not in `unbound`, not in `unknownObject`, and not in
+   * `listFlows()`. A count on its own would report that something is wrong and
+   * withhold the one fact the operator is standing there to get — *which* body
+   * is the one running.
+   *
+   * Empty on every healthy boot. No contested name, no line: this banner is
+   * read on every `os dev` / `os start`, and a warning that fires when nothing
+   * is wrong is a warning readers learn to skip.
+   */
+  shadowed: Array<{
+    flowName: string;
+    armed: { source: 'package' | 'runtime'; packageId?: string };
+    shadowedCount: number;
+  }>;
   /** Enabled flows whose persisted status is 'draft' (they still fire). */
   draftCount: number;
 }
@@ -734,6 +756,20 @@ export function printBootDiagnostics(diagnostics: BootDiagnostics) {
 }
 
 /**
+ * Name one flow body the way an operator can act on it (#12028).
+ *
+ * Deliberately worded to match `@objectstack/service-automation`'s own
+ * bootstrap warning for the same event, so an operator who sees both at
+ * `--log-level info` reads one story rather than two. `packageId` is optional
+ * on the engine's contender shape, so both halves have a defined answer here
+ * instead of interpolating an absent id into the sentence.
+ */
+function describeFlowBody(c: { source: 'package' | 'runtime'; packageId?: string }): string {
+  if (c.source !== 'package') return 'a runtime-authored row (sys_metadata)';
+  return c.packageId ? `package '${c.packageId}'` : 'a code-shipped package (id unknown)';
+}
+
+/**
  * One-glance answer to "did my flows actually arm?" — the question the
  * boot-quiet stdout window otherwise makes unanswerable (the engine's own
  * bind/registration logs are swallowed during startup).
@@ -757,6 +793,19 @@ function printAutomationSummary(a: AutomationReadySummary) {
   if (a.draftCount > 0) parts.push(`· ${a.draftCount} draft`);
   console.error(chalk.dim(`  Flows:   ${parts.join(' ')}`));
 
+  // #12028 — printed FIRST among the warnings because it re-reads every line
+  // above it: the counts describe the ARMED bodies only, so when a name is
+  // contested "3 flow(s), 3 bound" is true of a set that does not include the
+  // definition the operator just edited.
+  for (const s of a.shadowed) {
+    console.error(
+      chalk.yellow(
+        `  ⚠ flow '${s.flowName}' is claimed by ${s.shadowedCount + 1} definitions — ` +
+        `${describeFlowBody(s.armed)} is ARMED, ${s.shadowedCount} shadowed ` +
+        `(ADR-0005 overlay precedence; only the armed definition dispatches)`,
+      ),
+    );
+  }
   for (const u of a.unbound) {
     console.error(
       chalk.yellow(`  ⚠ flow '${u.flowName}' declares a '${u.triggerType}' trigger but is NOT bound — ${u.reason}`),

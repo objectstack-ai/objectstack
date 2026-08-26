@@ -4,6 +4,7 @@ import { describe, it, expect } from 'vitest';
 import { createSmsChannel } from './sms-channel.js';
 import { NotificationTemplateStore } from './template-renderer.js';
 import type { Delivery } from './channel.js';
+import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 
 function silentCtx() {
     return { logger: { info: () => {}, warn: () => {}, error: () => {} } };
@@ -32,6 +33,7 @@ function fakeData(opts: { users?: Record<string, string>; templates?: any[] } = 
     const templates = opts.templates ?? [];
     return {
         async findOne(object: string, query: any) {
+            assertEngineFindOnePredicate(object, query);
             const w = query?.where ?? {};
             if (object === 'sys_user') {
                 const phone = users[String(w.id)];

@@ -56,6 +56,7 @@ import { matchesFilterCondition } from '@objectstack/formula';
 import { PermissionSetSchema } from '@objectstack/spec/security';
 import type { PermissionSet } from '@objectstack/spec/security';
 import { defaultPermissionSets } from './objects/default-permission-sets.js';
+import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 
 const MKT = 'usr_marketing';
 const ADMIN = 'usr_admin';
@@ -371,6 +372,7 @@ function makeStore(rows: Record<string, Row[]>) {
       return typeof options?.limit === 'number' ? hits.slice(0, options.limit) : hits;
     }),
     findOne: vi.fn(async (object: string, options: any = {}) => {
+      assertEngineFindOnePredicate(object, options);
       const all = rows[object] ?? [];
       return all.find((r) => matchesFilterCondition(r, options?.where ?? options?.filter ?? null)) ?? null;
     }),

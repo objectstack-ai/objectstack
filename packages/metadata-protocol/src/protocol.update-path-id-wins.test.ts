@@ -58,7 +58,7 @@ import { describe, it, expect, vi } from 'vitest';
 import {
     assertEngineDeleteDispatch,
     assertEngineUpdateDispatch,
-    resolveEngineUpdateDispatch,
+    resolveEngineUpdateDispatch, assertEngineFindOnePredicate,
 } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 
@@ -92,6 +92,7 @@ type Row = Record<string, unknown> & { id: string };
 function makeProtocol(rows: Row[]) {
     const store = new Map<string, Row>(rows.map((r) => [r.id, { ...r }]));
     const findOne = vi.fn(async (_object: string, opts: any) => {
+        assertEngineFindOnePredicate(_object, opts);
         const row = store.get(String(opts?.where?.id));
         return row ? { ...row } : null;
     });

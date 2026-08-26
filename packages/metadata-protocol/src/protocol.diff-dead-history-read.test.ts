@@ -27,7 +27,7 @@
  * re-pick the fixture from the registry, not to delete the assertion.
  */
 import { describe, expect, it } from 'vitest';
-import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, hashSpec } from '@objectstack/metadata-core';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, hashSpec, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from './index.js';
 
 /** Takes `historyMetaItem`'s early return — neither flag set in the registry. */
@@ -82,6 +82,7 @@ function makeStubEngine(opts: { throwOnHistory?: boolean } = {}) {
             return (tables[table] ?? []).filter((r) => matches(r, o.where));
         },
         async findOne(table: string, o: { where: Record<string, unknown> }) {
+            assertEngineFindOnePredicate(table, o);
             return (tables[table] ?? []).find((r) => matches(r, o.where)) ?? null;
         },
         async insert() { return { id: 'stub' }; },
