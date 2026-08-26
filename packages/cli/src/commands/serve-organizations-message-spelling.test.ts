@@ -33,11 +33,31 @@
  * from a literal on purpose. Rename the roster key and these keep passing —
  * the prose moved with it. Re-spell it inline in any of these messages and the
  * rendered line stops matching the declaration, which is the exact drift this
- * file exists to catch.
+ * file exists to catch. (The roster leg that makes that safe is not here: it is
+ * `test/serve-capability-vocabulary.test.ts`, which pins the same static as a
+ * roster KEY. Both halves are required; they simply live in two files.)
+ *
+ * ── Widened by #12492, not rewritten ─────────────────────────────────────
+ *
+ * `serve.ts` and `doctor.ts` each carried a byte-identical `TENANCY_POSTURE_FIX_HINTS`
+ * table. It now lives once, in `../utils/tenancy-posture-hints.ts`, and
+ * `Serve.ORGANIZATIONS_RUNTIME_PKG` re-exports that module's declaration rather
+ * than declaring the literal itself — so every pin above still reads ONE
+ * declaration, through the handle `serve` exposes. ⛔ Nothing here was dropped.
+ *
+ * Site 7 is new and is the reading that makes the sharing REAL rather than
+ * textual: it asserts that the bullets `serve` renders come from that shared
+ * table, `single` and `group` included — the two entries that touch no roster
+ * and that, before #12492, nothing at either command ever read.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import type { HostDeclaration } from '@objectstack/types/node';
+import { TENANCY_POSTURES } from '@objectstack/spec/security';
+
+// The table `doctor` renders too (#12492). Read here so site 7 measures the
+// SHARING, not this command talking to itself.
+import { TENANCY_POSTURE_FIX_HINTS } from '../utils/tenancy-posture-hints.js';
 
 import Serve, {
   formatDegradedTenancyWarning,
@@ -47,7 +67,15 @@ import Serve, {
   resolveTenancyPostureOrRefusal,
 } from './serve.js';
 
-/** The one declaration. Every expectation below is built from THIS, never from a literal. */
+/**
+ * The one declaration, read through the handle `serve` exposes.
+ *
+ * Since #12492 this static is a RE-EXPORT of
+ * `../utils/tenancy-posture-hints.ts`'s `ORGANIZATIONS_RUNTIME_PKG`, so this is
+ * still one declaration and not a copy of one. Reading it as `Serve.…` is
+ * deliberate: what these pins are about is what THIS COMMAND puts in front of an
+ * operator, and the static is the seam the boot path and the roster pin address.
+ */
 const PKG = Serve.ORGANIZATIONS_RUNTIME_PKG;
 
 /**
@@ -176,6 +204,32 @@ describe('serve — the posture description an operator reads names the declarat
       + "(the legacy spelling 'multi' is accepted and normalizes to this)",
     );
   });
+
+  // #12492. Site 6 pins the `isolated` PROSE, hard-coded, and that is what
+  // reddens on a reword. This pins something site 6 cannot: that the bullets
+  // come from the table `os doctor` renders too — `single` and `group`
+  // included, the two entries no roster touches and nothing anywhere read
+  // before this card. Re-grow a module-local table in `serve.ts` and this goes
+  // red on every posture at once.
+  it('site 7 — every posture bullet renders the SHARED hint table verbatim, `single` and `group` included', () => {
+    process.env.OS_TENANCY_POSTURE = 'not-a-posture';
+    const verdict = resolveTenancyPostureOrRefusal();
+    expect(verdict.ok, 'the gate accepted a value that is not a posture').toBe(false);
+    if (verdict.ok) return;
+    const rendered = lines(verdict.fatal);
+    for (const posture of TENANCY_POSTURES) {
+      const hint = TENANCY_POSTURE_FIX_HINTS[posture];
+      expect(rendered).toContain(
+        `      • set OS_TENANCY_POSTURE=${posture}${hint ? ` — ${hint}` : ''}`,
+      );
+    }
+    // …and the sweep above actually swept. An empty posture vocabulary would
+    // satisfy every assertion inside the loop without reading a thing — the two
+    // entries this card is ABOUT are named explicitly for that reason.
+    expect(TENANCY_POSTURES).toContain('single');
+    expect(TENANCY_POSTURES).toContain('group');
+    expect(TENANCY_POSTURES).toContain('isolated');
+  });
 });
 
 describe('#12151 CONTROL — these pins can say no', () => {
@@ -187,6 +241,32 @@ describe('#12151 CONTROL — these pins can say no', () => {
     expect(`      • add ${PKG}(the enterprise multi-org runtime) to THIS APP`).not.toBe(expected);
     expect(`      • add ${PKG}  (the enterprise multi-org runtime) to THIS APP`).not.toBe(expected);
     expect(lines(remedyUndeclared())[0]).toBe(expected);
+  });
+
+  it('the shared-table comparison rejects a bullet whose hint was reworded (#12492)', () => {
+    // If site 7 could not tell a reworded hint from the shared one it would be
+    // decorative. Anchored on `group`, one of the two entries that had nothing
+    // watching them before this card, and against a term that is NOT a
+    // substring of the one under test: 'closed engine' is a different claim.
+    const real = `      • set OS_TENANCY_POSTURE=group — ${TENANCY_POSTURE_FIX_HINTS.group}`;
+    expect(
+      '      • set OS_TENANCY_POSTURE=group — organization wall enforced by the closed engine, one shared database',
+    ).not.toBe(real);
+    expect('      • set OS_TENANCY_POSTURE=group').not.toBe(real);
+    // …and says yes to the real thing — rendered through the real gate, not
+    // restated. `expect(X).toBe(X)` here would be a vacuous truth dressed as a
+    // control, which is the failure mode a control exists to rule out.
+    const saved = process.env.OS_TENANCY_POSTURE;
+    try {
+      process.env.OS_TENANCY_POSTURE = 'not-a-posture';
+      const verdict = resolveTenancyPostureOrRefusal();
+      expect(verdict.ok).toBe(false);
+      if (verdict.ok) return;
+      expect(lines(verdict.fatal)).toContain(real);
+    } finally {
+      if (saved === undefined) delete process.env.OS_TENANCY_POSTURE;
+      else process.env.OS_TENANCY_POSTURE = saved;
+    }
   });
 
   it('the scoped-name reader returns a positive on a foreign package and empty on none', () => {

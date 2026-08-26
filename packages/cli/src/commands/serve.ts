@@ -52,6 +52,12 @@ import { LOG_LEVELS, resolveLogLevel, readLogLevelEnv } from '../utils/log-level
 import { BootLogCapture, isVerboseBootLevel } from '../utils/boot-log-capture.js';
 import { graftAuthoredRuntimeMembers, isAppPluginLike } from '../utils/graft-runtime-hooks.js';
 import { redactConnectionUrl, describeDriverConnection } from '../utils/connection-display.js';
+// The posture prose `os serve` and `os doctor` BOTH print, declared once (#12492).
+// Aliased on the way in only so the static re-export below reads unambiguously.
+import {
+  ORGANIZATIONS_RUNTIME_PKG as SHARED_ORGANIZATIONS_RUNTIME_PKG,
+  TENANCY_POSTURE_FIX_HINTS,
+} from '../utils/tenancy-posture-hints.js';
 // Shared with @objectstack/verify and the dogfood multi-org probes (#4700) —
 // node-only, hence the `/node` subpath rather than the edge-safe root export.
 import {
@@ -495,7 +501,7 @@ export default class Serve extends Command {
 
   /**
    * The `plugins[]`-wired multi-org runtime this command loads when the
-   * resolved tenancy posture is walled (ADR-0105 D12) — declared ONCE, here.
+   * resolved tenancy posture is walled (ADR-0105 D12).
    *
    * `serve` is the only runtime that prints this package name AT OPERATORS (the
    * install remedy, the fatal refusal, the degraded-boot warning), and the
@@ -514,11 +520,21 @@ export default class Serve extends Command {
    * Exposed as a static for the same reason ALWAYS_ON_CAPABILITIES above is:
    * one declaration, two readers — the boot path and the pin.
    *
+   * ⚠️ Since #12492 this is a RE-EXPORT, not the declaration. The literal now
+   * lives in `../utils/tenancy-posture-hints.ts`, beside the posture prose that
+   * interpolates it, because `os doctor` prints that same name and needed a
+   * source it could read WITHOUT depending on a `serve` command's export. It is
+   * kept as a static for the same reason ALWAYS_ON_CAPABILITIES above is kept as
+   * one: `Serve.ORGANIZATIONS_RUNTIME_PKG` is the stable handle the boot path
+   * and two sibling pins (`serve-capability-vocabulary.test.ts`,
+   * `serve-cluster-host-resolution.test.ts`) already address, and a re-export
+   * keeps every one of those readings pointed at one declaration.
+   *
    * This single-sources the SPELLING and nothing else. Which postures load the
    * runtime, and what each of the two failure stages means, stay exactly where
    * they are; the roster is deliberately not a resolution registry.
    */
-  static readonly ORGANIZATIONS_RUNTIME_PKG = '@objectstack/organizations';
+  static readonly ORGANIZATIONS_RUNTIME_PKG = SHARED_ORGANIZATIONS_RUNTIME_PKG;
 
   /**
    * Auto-registered plugin tiers. Plugins explicitly listed in
@@ -4263,20 +4279,6 @@ export function createUnknownHostnameGuardPlugin(
 export type TenancyPostureGateVerdict =
   | { ok: true; posture: TenancyPosture }
   | { ok: false; fatal: string };
-
-/**
- * One-line prescriptions for the accepted postures, keyed by the vocabulary
- * `@objectstack/spec/security` owns. A posture added there but not described
- * here still gets listed by the gate (bare, without prose) rather than silently
- * dropped from the advice — the fix list can go terse, never stale.
- */
-const TENANCY_POSTURE_FIX_HINTS: Readonly<Record<string, string>> = {
-  single: 'one organization, no organization wall — the default',
-  group: 'organization wall enforced by the open engine, one shared database',
-  isolated:
-    `organization wall + the enterprise ${Serve.ORGANIZATIONS_RUNTIME_PKG} runtime `
-    + "(the legacy spelling 'multi' is accepted and normalizes to this)",
-};
 
 /**
  * Resolve the deployment's requested tenancy posture, or produce the FATAL text
