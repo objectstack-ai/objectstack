@@ -283,6 +283,46 @@ export const DELIBERATE = {
   },
 };
 
+/**
+ * The built-entrypoint spawns whose ts-path-enabling `NODE_ENV` is the POINT,
+ * keyed `<repo-relative path>::<enclosing function>` like {@link DELIBERATE},
+ * and a DECLARATION registry for the same reason: an entry is the right answer
+ * for a site the rule cannot be satisfied at, not a ceiling to be burned down.
+ *
+ * ⭐ Both entries below are IRREDUCIBLE, and that is the whole justification.
+ * `serve-node-env-production-default.e2e.test.ts` varies the child's `NODE_ENV`
+ * as its INDEPENDENT VARIABLE -- unset, `development`, `test` -- and asserts
+ * what `serve`'s trusted-origin gate does under each. The two set legs cannot
+ * be written any other way:
+ *
+ *   - keeping `bin/run.js` means oclif reroutes to `src/`, by the mechanism
+ *     this rule exists to refuse;
+ *   - switching those legs to `bin/run-dev.js` pins `NODE_ENV=development`
+ *     before argv is parsed, which makes the `test` leg unreachable and the
+ *     file's own header ⛔ forbids the switch for the unset leg;
+ *   - setting `NODE_ENV` after oclif has resolved the command is not reachable
+ *     from outside the child at all.
+ *
+ * So the pair is not an accident there and there is no spelling that avoids it.
+ * ⚠️ What these entries do NOT license is the file's SILENCE about it: its
+ * header argues at length that only the shipped, built entrypoint reaches the
+ * gate, and never says that two of its three legs therefore execute
+ * `src/commands`. That is a comment-truthfulness finding, reported separately;
+ * it is ⛔ not something a registry entry can fix.
+ *
+ * Pinned in BOTH directions by {@link judge}: an entry that stops matching
+ * FAILS, so if those legs are ever rewritten the gate says so rather than
+ * carrying a carve-out nobody re-reads.
+ */
+export const DELIBERATE_REROUTE = {
+  'packages/cli/test/serve-node-env-production-default.e2e.test.ts::it("NODE_ENV=development (explicit): the gate stays OPEN \u2014 unaffected by the production default")': {
+    why: 'NODE_ENV is this file\'s independent variable, not an accident: the leg asserts the trusted-origin gate under an explicit development. bin/run-dev.js cannot express it (it pins development before argv, killing the sibling test leg) and no spelling keeps dist/ while setting the variable.',
+  },
+  'packages/cli/test/serve-node-env-production-default.e2e.test.ts::it("NODE_ENV=test (explicit): the gate stays OPEN \u2014 unaffected by the production default")': {
+    why: 'The sibling leg, same argument, one value over. Keyed separately on purpose -- one entry may silence one site, which is what #12531 made possible.',
+  },
+};
+
 // ---------------------------------------------------------------------------
 // The scan
 // ---------------------------------------------------------------------------
@@ -707,6 +747,309 @@ export function envlessSpawnCalls(fileName, source) {
   return { calls, undeclared: found };
 }
 
+// ---------------------------------------------------------------------------
+// Rule 3 (#11464): the built entrypoint and a ts-path-enabling NODE_ENV
+// ---------------------------------------------------------------------------
+
+/** `bin/run.js` -- the SHIPPED entrypoint, whose commands live in `dist/`. */
+const BUILT_ENTRYPOINT = 'bin/run.js';
+
+/**
+ * The `NODE_ENV` values that send `@oclif/core`'s command lookup to `src/`.
+ *
+ * `@oclif/core@4.13.3` skips its TypeScript path lookup only when `isProd()`,
+ * which `lib/util/util.js:66` defines as a NEGATED membership test:
+ * `!['development', 'test'].includes(process.env.NODE_ENV ?? '')`. So these two
+ * values -- and only these two -- turn the reroute ON. `production` and unset
+ * both leave it off, which is why the rule below refuses a SET of values rather
+ * than demanding one particular spelling.
+ */
+export const TS_PATH_NODE_ENV = new Set(['development', 'test']);
+
+/** Why a built-entrypoint spawn was reported. Exported so the self-test names them. */
+export const REROUTE = {
+  INHERITED: 'the child\'s NODE_ENV is not declared at this call, so the vitest worker\'s NODE_ENV=test reaches it and oclif resolves commands from src/',
+  REROUTED: 'the child is handed a NODE_ENV of development or test, so oclif resolves commands from src/ -- which cancels the bin/run.js spawn',
+  OPAQUE: 'the child\'s NODE_ENV cannot be read here (an env this scan cannot resolve, or an override it cannot follow)',
+};
+
+/** Does this expression hold a string literal naming the built entrypoint? */
+function namesBuiltEntrypoint(node) {
+  let found = false;
+  const visit = (n) => {
+    if (found) return;
+    if (ts.isStringLiteralLike(n) && n.text.endsWith(BUILT_ENTRYPOINT)) found = true;
+    else ts.forEachChild(n, visit);
+  };
+  visit(node);
+  return found;
+}
+
+/**
+ * Every local binding in one source that stands for the built entrypoint.
+ *
+ * `const CLI = resolve(HERE, '../bin/run.js')` is the only spelling in the
+ * population, but the test is on the LITERAL rather than on the call around it,
+ * so `join(...)`, a template or a bare string all resolve the same way.
+ *
+ * ⚠️ `bin/run-dev.js` does not end with `bin/run.js`, so the tsx shim -- which
+ * is the OTHER entrypoint and the one that is SUPPOSED to reach `src/` -- can
+ * never be caught by this suffix.
+ */
+export function builtEntrypointBindings(sourceFile) {
+  const names = new Set();
+  const visit = (node) => {
+    if (ts.isVariableDeclaration(node) && node.name && ts.isIdentifier(node.name)
+      && node.initializer && namesBuiltEntrypoint(node.initializer)) {
+      names.add(node.name.text);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
+  return names;
+}
+
+/**
+ * Does this spawn call's ARGV reach the built entrypoint?
+ *
+ * Anchored to the call rather than to the file, because naming `bin/run.js` and
+ * SPAWNING it are different acts: `invocation-loudness.e2e.test.ts` resolves the
+ * path in order to assert it appears in a diagnostic, and spawns the tsx shim.
+ * A file-anchored membership test would put that file in the population and the
+ * rule would be measuring the wrong thing.
+ *
+ * Object literals are skipped: the options object is not argv, and the `env` it
+ * carries is what the rule reads NEXT rather than part of what is being run.
+ */
+function spawnsBuiltEntrypoint(node, entryBindings) {
+  let found = false;
+  const visit = (n) => {
+    if (found || ts.isObjectLiteralExpression(n)) return;
+    if (ts.isStringLiteralLike(n) && n.text.endsWith(BUILT_ENTRYPOINT)) found = true;
+    else if (ts.isIdentifier(n) && entryBindings.has(n.text)) found = true;
+    else ts.forEachChild(n, visit);
+  };
+  for (const arg of node.arguments ?? []) visit(arg);
+  return found;
+}
+
+/**
+ * The object literal a spawn call's child environment is built from.
+ *
+ * `env: { ... }` is read directly; `env: childEnv({ ... })` is read through one
+ * call, taking its last object-literal argument -- which is where every
+ * override in this population lives. ⛔ The helper is NOT named or required:
+ * the rule stays negative, so a call that builds its environment some other
+ * READABLE way is green, and one this scan cannot follow is a finding.
+ *
+ * @returns {{state: 'literal', node: ts.ObjectLiteralExpression}
+ *   | {state: 'empty'} | {state: 'unreadable'} | {state: 'absent'}}
+ */
+function childEnvLiteral(node) {
+  const args = node.arguments ?? [];
+  const literals = args.filter((arg) => {
+    const value = unwrapValue(arg);
+    return value && ts.isObjectLiteralExpression(value);
+  });
+  if (literals.length === 0) return { state: 'absent' };
+  const options = unwrapValue(literals[literals.length - 1]);
+  for (const prop of options.properties) {
+    if (ts.isSpreadAssignment(prop)) continue;
+    if (propertyKey(prop) !== 'env') continue;
+    if (!ts.isPropertyAssignment(prop)) return { state: 'unreadable' };
+    const value = unwrapValue(prop.initializer);
+    if (!value) return { state: 'unreadable' };
+    if (ts.isObjectLiteralExpression(value)) return { state: 'literal', node: value };
+    if (ts.isCallExpression(value)) {
+      const objects = value.arguments.filter((arg) => {
+        const inner = unwrapValue(arg);
+        return inner && ts.isObjectLiteralExpression(inner);
+      });
+      // `childEnv()` with no overrides declares nothing about NODE_ENV: the
+      // choke point copies it through from the vitest worker on purpose.
+      if (objects.length === 0) return { state: 'empty' };
+      return { state: 'literal', node: unwrapValue(objects[objects.length - 1]) };
+    }
+    return { state: 'unreadable' };
+  }
+  return { state: 'absent' };
+}
+
+/** What one object literal says about `NODE_ENV`, ignoring spreads. */
+function declaredNodeEnv(literal) {
+  let verdict = { kind: 'silent' };
+  for (const prop of literal.properties) {
+    if (ts.isSpreadAssignment(prop)) continue;
+    if (propertyKey(prop) !== 'NODE_ENV') continue;
+    if (!ts.isPropertyAssignment(prop)) {
+      verdict = { kind: 'unreadable' };
+      continue;
+    }
+    const value = unwrapValue(prop.initializer);
+    if (value && ts.isStringLiteralLike(value)) verdict = { kind: 'value', value: value.text };
+    else if (value && ((ts.isIdentifier(value) && value.text === 'undefined') || ts.isVoidExpression(value))) {
+      verdict = { kind: 'unset' };
+    } else verdict = { kind: 'unreadable' };
+  }
+  return verdict;
+}
+
+/** The spreads that appear AFTER the last `NODE_ENV` entry -- the only ones that can override it. */
+function overridingSpreads(literal) {
+  const props = literal.properties;
+  let lastNodeEnv = -1;
+  for (let i = 0; i < props.length; i += 1) {
+    if (!ts.isSpreadAssignment(props[i]) && propertyKey(props[i]) === 'NODE_ENV') lastNodeEnv = i;
+  }
+  return props.filter((prop, i) => ts.isSpreadAssignment(prop) && i > lastNodeEnv);
+}
+
+/**
+ * The nearest enclosing function whose PARAMETERS can be resolved, with the
+ * name its same-file callers use.
+ */
+function enclosingResolvableFunction(node) {
+  let cursor = node.parent;
+  while (cursor) {
+    if (ts.isFunctionDeclaration(cursor) && cursor.name) return { fn: cursor, name: cursor.name.text };
+    if ((ts.isArrowFunction(cursor) || ts.isFunctionExpression(cursor)) && cursor.parent
+      && ts.isVariableDeclaration(cursor.parent) && ts.isIdentifier(cursor.parent.name)) {
+      return { fn: cursor, name: cursor.parent.name.text };
+    }
+    cursor = cursor.parent;
+  }
+  return null;
+}
+
+/** Every same-file call of `name`, paired with its argument at `index`. */
+function callSiteArguments(sourceFile, name, index) {
+  const sites = [];
+  const visit = (node) => {
+    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === name) {
+      sites.push({ call: node, arg: node.arguments[index] ?? null });
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
+  return sites;
+}
+
+/**
+ * Resolve one spread ONE HOP, to the arguments its enclosing function is called
+ * with in the same file.
+ *
+ * ## Why this hop is not optional
+ *
+ * Rule 1 is file-anchored precisely BECAUSE it cannot follow a hop of this
+ * shape, and its header says so. Rule 3 cannot make the same trade: every one
+ * of the four built-entrypoint spawns in the population is written
+ * `childEnv({ ..., NODE_ENV: undefined, ...env })`, where `env` is the enclosing
+ * helper's parameter. Without the hop, ALL FOUR are unreadable and the rule
+ * reports four findings that say only "this scan gave up" -- a gate that
+ * resolves to zero readable sites in its own population, which is the vacuity
+ * this file refuses everywhere else. With the hop, the same four are decided
+ * from what their callers actually pass.
+ *
+ * ⚠️ ONE hop, same file, and the limit is named here rather than discovered:
+ * a caller that forwards ITS own parameter is not followed and is reported as
+ * unreadable, never as green.
+ *
+ * @returns {Array<{node: ts.Node, verdict: {kind: string, value?: string}}>}
+ */
+function resolveSpread(spread, sourceFile) {
+  const source = unwrapValue(spread.expression);
+  if (!source || !ts.isIdentifier(source)) return [{ node: spread, verdict: { kind: 'unreadable' } }];
+  const enclosing = enclosingResolvableFunction(spread);
+  if (!enclosing) return [{ node: spread, verdict: { kind: 'unreadable' } }];
+  const index = enclosing.fn.parameters.findIndex(
+    (param) => ts.isIdentifier(param.name) && param.name.text === source.text,
+  );
+  if (index < 0) return [{ node: spread, verdict: { kind: 'unreadable' } }];
+
+  const sites = callSiteArguments(sourceFile, enclosing.name, index);
+  if (sites.length === 0) return [{ node: spread, verdict: { kind: 'unreadable' } }];
+
+  return sites.map((site) => {
+    if (!site.arg) return { node: site.call, verdict: { kind: 'silent' } };
+    const value = unwrapValue(site.arg);
+    if (!value || !ts.isObjectLiteralExpression(value)) {
+      return { node: site.call, verdict: { kind: 'unreadable' } };
+    }
+    // A nested spread inside the caller's own literal is a second hop.
+    if (overridingSpreads(value).length > 0) return { node: site.call, verdict: { kind: 'unreadable' } };
+    return { node: site.call, verdict: declaredNodeEnv(value) };
+  });
+}
+
+/** A verdict about one child's NODE_ENV, turned into a reason or into nothing. */
+function reasonFor(verdict, base) {
+  const effective = verdict.kind === 'silent' ? base : verdict;
+  if (effective.kind === 'unreadable') return REROUTE.OPAQUE;
+  if (effective.kind === 'silent') return REROUTE.INHERITED;
+  if (effective.kind === 'value' && TS_PATH_NODE_ENV.has(effective.value)) return REROUTE.REROUTED;
+  return null;
+}
+
+/**
+ * The built-entrypoint spawns in one source, and which of them let their child
+ * resolve commands from `src/`.
+ *
+ * `spawns` is returned alongside `findings` for the reason rule 2 returns its
+ * call count: an empty finding list reads identically whether every spawn is
+ * sound or the entrypoint resolution stopped resolving anything.
+ *
+ * @returns {{spawns: number, findings: Array<{line: number, fn: string, api: string, reason: string, text: string}>}}
+ */
+export function builtEntrypointSpawns(fileName, source) {
+  const sourceFile = parseSourceFile(fileName, source, scriptKindFor(fileName));
+  const bindings = spawnBindings(sourceFile);
+  const entryBindings = builtEntrypointBindings(sourceFile);
+  const findings = [];
+  let spawns = 0;
+
+  const report = (node, api, reason) => {
+    findings.push({
+      line: sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile)).line + 1,
+      fn: enclosingFunctionName(node, sourceFile),
+      api,
+      reason,
+      text: node.getText(sourceFile).replace(/\s+/g, ' ').slice(0, 72),
+    });
+  };
+
+  const visit = (node) => {
+    if ((ts.isCallExpression(node) || ts.isNewExpression(node))) {
+      const api = spawnApiOf(node, bindings);
+      if (api && spawnsBuiltEntrypoint(node, entryBindings)) {
+        spawns += 1;
+        const env = childEnvLiteral(node);
+        if (env.state === 'unreadable') report(node, api, REROUTE.OPAQUE);
+        else if (env.state === 'absent' || env.state === 'empty') report(node, api, REROUTE.INHERITED);
+        else {
+          const base = declaredNodeEnv(env.node);
+          const spreads = overridingSpreads(env.node);
+          if (spreads.length === 0) {
+            const reason = reasonFor(base, base);
+            if (reason) report(node, api, reason);
+          } else {
+            for (const spread of spreads) {
+              for (const resolved of resolveSpread(spread, sourceFile)) {
+                const reason = reasonFor(resolved.verdict, base);
+                // The override's own site is where the value was CHOSEN, so
+                // that is what the message and the registry key name.
+                if (reason) report(resolved.node, api, reason);
+              }
+            }
+          }
+        }
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
+  return { spawns, findings };
+}
+
 /** The site key a registry entry is written against. */
 export const siteKey = (row) => `${row.file}::${row.fn}`;
 
@@ -723,8 +1066,9 @@ export const siteKey = (row) => `${row.file}::${row.fn}`;
  *   files and name real functions. A synthesised registry is what lets the
  *   #12531 collision be shown GONE through the real classification path,
  *   rather than read off a key string.
+ * @param {Record<string, {why: string}>} rerouteRegistry  The same, for rule 3.
  */
-export function audit(root, registry = DELIBERATE) {
+export function audit(root, registry = DELIBERATE, rerouteRegistry = DELIBERATE_REROUTE) {
   const populationDir = join(root, POPULATION_ROOT);
   let exists = false;
   try {
@@ -733,19 +1077,22 @@ export function audit(root, registry = DELIBERATE) {
     exists = false;
   }
   if (!exists) {
-    return { files: 0, spawners: 0, spawnCalls: 0, findings: [], deliberate: [], envless: [], refusal: `the population root ${POPULATION} does not resolve to a directory under ${root}` };
+    return { files: 0, spawners: 0, spawnCalls: 0, findings: [], deliberate: [], envless: [], rerouted: [], deliberateReroute: [], builtSpawns: 0, refusal: `the population root ${POPULATION} does not resolve to a directory under ${root}` };
   }
 
   const files = walkSources(populationDir);
   if (files.length === 0) {
-    return { files: 0, spawners: 0, spawnCalls: 0, findings: [], deliberate: [], envless: [], refusal: `${POPULATION} resolved to a directory containing no TypeScript source` };
+    return { files: 0, spawners: 0, spawnCalls: 0, findings: [], deliberate: [], envless: [], rerouted: [], deliberateReroute: [], builtSpawns: 0, refusal: `${POPULATION} resolved to a directory containing no TypeScript source` };
   }
 
   const findings = [];
   const deliberate = [];
   const envless = [];
+  const rerouted = [];
+  const deliberateReroute = [];
   let spawners = 0;
   let spawnCalls = 0;
+  let builtSpawns = 0;
   for (const abs of files) {
     const rel = relative(root, abs).split(sep).join('/');
     let source;
@@ -759,6 +1106,9 @@ export function audit(root, registry = DELIBERATE) {
         findings: [],
         deliberate: [],
         envless: [],
+        rerouted: [],
+        deliberateReroute: [],
+        builtSpawns: 0,
         refusal: `${rel} could not be read (${error.code ?? error.message}) -- a source this gate cannot read is not a source with nothing to report`,
       };
     }
@@ -775,6 +1125,13 @@ export function audit(root, registry = DELIBERATE) {
     const calls = envlessSpawnCalls(abs, source);
     spawnCalls += calls.calls;
     for (const hit of calls.undeclared) envless.push({ file: rel, ...hit });
+
+    const built = builtEntrypointSpawns(abs, source);
+    builtSpawns += built.spawns;
+    for (const hit of built.findings) {
+      const row = { file: rel, ...hit };
+      (Object.hasOwn(rerouteRegistry, siteKey(row)) ? deliberateReroute : rerouted).push(row);
+    }
   }
 
   if (spawners === 0) {
@@ -785,11 +1142,14 @@ export function audit(root, registry = DELIBERATE) {
       findings: [],
       deliberate: [],
       envless: [],
+      rerouted: [],
+      deliberateReroute: [],
+      builtSpawns: 0,
       refusal: `${files.length} source(s) under ${POPULATION} and not one of them spawns a child -- the population is unresolvable, which is not the same as clean`,
     };
   }
 
-  return { files: files.length, spawners, spawnCalls, findings, deliberate, envless, refusal: null };
+  return { files: files.length, spawners, spawnCalls, builtSpawns, findings, deliberate, envless, rerouted, deliberateReroute, refusal: null };
 }
 
 /** Per-file counts, the shape the ratchet holds. */
@@ -803,7 +1163,7 @@ export function countByFile(findings) {
  * Compare observed counts against the ratchet, in both directions, and the
  * declaration registry against what is still on disk.
  */
-export function judge(findings, deliberate, baseline) {
+export function judge(findings, deliberate, baseline, deliberateReroute = []) {
   const observed = countByFile(findings);
   const over = [];
   const under = [];
@@ -817,7 +1177,16 @@ export function judge(findings, deliberate, baseline) {
   }
   const seen = new Set(deliberate.map(siteKey));
   const missing = Object.keys(DELIBERATE).filter((key) => !seen.has(key));
-  return { over, under, missing, held: deliberate.length };
+  const seenReroute = new Set(deliberateReroute.map(siteKey));
+  const missingReroute = Object.keys(DELIBERATE_REROUTE).filter((key) => !seenReroute.has(key));
+  return {
+    over,
+    under,
+    missing,
+    missingReroute,
+    held: deliberate.length,
+    heldReroute: deliberateReroute.length,
+  };
 }
 
 function readBaseline(root = REPO_ROOT) {
@@ -835,7 +1204,7 @@ function readBaseline(root = REPO_ROOT) {
 // ---------------------------------------------------------------------------
 
 function main() {
-  const { files, spawners, spawnCalls, findings, deliberate, envless, refusal } = audit(REPO_ROOT);
+  const { files, spawners, spawnCalls, builtSpawns, findings, deliberate, envless, rerouted, deliberateReroute, refusal } = audit(REPO_ROOT);
   if (refusal) {
     console.error(`❌  check:cli-test-child-env -- REFUSING to report a verdict: ${refusal}.`);
     console.error(
@@ -879,8 +1248,57 @@ function main() {
     return 1;
   }
 
+  if (rerouted.length) {
+    console.error(`❌  check:cli-test-child-env -- ${rerouted.length} spawn(s) of the BUILT CLI let the child resolve commands from src/:\n`);
+    for (const row of rerouted) {
+      console.error(`  ${row.file}:${row.line}  [${row.fn}]  ${row.api}  ${row.text}`);
+      console.error(`    ${row.reason}`);
+    }
+    console.error(
+      '\n    A test that spawns packages/cli/bin/run.js is asking for the BUILT CLI --'
+      + '\n    the shipped entrypoint, whose commands live in dist/. A child whose NODE_ENV'
+      + '\n    is `development` or `test` is asking @oclif/core to resolve those commands'
+      + '\n    from src/ instead and transpile them on the fly. Asking for both cancels:'
+      + '\n    dist/ is never executed, and the comment claiming the built entry stays'
+      + '\n    plausible. Measured against @oclif/core@4.13.3\'s own Config.load(), reading'
+      + '\n    back the root plugin\'s resolved commandsDir:'
+      + '\n'
+      + '\n      NODE_ENV unset        -> packages/cli/dist/commands'
+      + '\n      NODE_ENV=production   -> packages/cli/dist/commands'
+      + '\n      NODE_ENV=development  -> packages/cli/src/commands'
+      + '\n      NODE_ENV=test         -> packages/cli/src/commands'
+      + '\n'
+      + '\n    lib/util/util.js:66 defines isProd() as a NEGATED membership test --'
+      + '\n    !["development","test"].includes(process.env.NODE_ENV ?? "") -- and the'
+      + '\n    TypeScript path lookup is skipped only when that is true.'
+      + '\n'
+      + '\n    ⚠️ SILENCE IS NOT SAFE, which is why an undeclared NODE_ENV reds here too.'
+      + '\n    vitest exports NODE_ENV=test on its worker and childEnv() deliberately does'
+      + '\n    NOT strip it (its header says why), so a spawn that names bin/run.js and'
+      + '\n    simply says nothing about NODE_ENV lands in the rerouted leg BY INHERITANCE.'
+      + '\n    The failure does not require anyone to set the variable on purpose.'
+      + '\n'
+      + '\n    This rule names no helper and demands no particular spelling. It asks only'
+      + '\n    that the child of a built-entrypoint spawn be READABLY not in development or'
+      + '\n    test. What the population does today is say so at the call:'
+      + '\n'
+      + '\n      spawn(process.execPath, [CLI, \'serve\'], { cwd, env: childEnv({ NODE_ENV: undefined }) });'
+      + '\n'
+      + '\n    If the CLI under test is meant to run from src/, spawn bin/run-dev.js --'
+      + '\n    the tsx shim, which is the entrypoint that means that -- rather than'
+      + '\n    disabling bin/run.js from the outside.'
+      + '\n'
+      + '\n    ⛔ There is NO baseline for this rule. A site whose ts-path-enabling NODE_ENV'
+      + '\n    is the POINT -- one that varies NODE_ENV as its own independent variable --'
+      + '\n    is a DELIBERATE_REROUTE entry in scripts/check-cli-test-child-env.mjs'
+      + '\n    carrying its reason, reviewed by the PR that needs it, and pinned in both'
+      + '\n    directions so it cannot outlive the site.',
+    );
+    return 1;
+  }
+
   const baseline = readBaseline();
-  const { over, under, missing, held } = judge(findings, deliberate, baseline);
+  const { over, under, missing, missingReroute, held, heldReroute } = judge(findings, deliberate, baseline, deliberateReroute);
 
   if (over.length) {
     console.error(`❌  check:cli-test-child-env -- ${over.length} file(s) build a spawned child's environment from the whole of process.env:\n`);
@@ -949,18 +1367,36 @@ function main() {
     return 1;
   }
 
+  if (missingReroute.length) {
+    console.error(`❌  check:cli-test-child-env -- ${missingReroute.length} DELIBERATE_REROUTE site(s) no longer present:\n`);
+    for (const key of missingReroute) console.error(`  ${key}\n    was: ${DELIBERATE_REROUTE[key].why}`);
+    console.error(
+      '\n    These are the built-entrypoint spawns whose ts-path-enabling NODE_ENV is the'
+      + '\n    POINT -- a leg that varies NODE_ENV as its own independent variable. Each is'
+      + '\n    pinned in both directions so a carve-out cannot outlive the site it was'
+      + '\n    written for and quietly cover the next one that keys the same way.'
+      + '\n'
+      + '\n    If the site really is gone, delete its DELIBERATE_REROUTE entry in the same'
+      + '\n    commit. If it merely MOVED -- a renamed it() title re-keys it -- update the'
+      + '\n    key and say so in the PR body.',
+    );
+    return 1;
+  }
+
   const remaining = Object.values(baseline).reduce((a, b) => a + b, 0);
   console.log(
     `✓ check:cli-test-child-env: ${spawners} spawner source(s) among ${files} under ${POPULATION}; `
-    + `no new bulk process.env copy reaches a spawned child, and all ${spawnCalls} spawn call(s) declare their child's env `
-    + `(${remaining} baselined in ${Object.keys(baseline).length} file(s), ⛔ SHRINK-ONLY; ${held} deliberate site(s) still pinned).`,
+    + `no new bulk process.env copy reaches a spawned child, all ${spawnCalls} spawn call(s) declare their child's env, `
+    + `and all ${builtSpawns} spawn(s) of the built CLI keep their child out of development/test `
+    + `(${remaining} baselined in ${Object.keys(baseline).length} file(s), ⛔ SHRINK-ONLY; `
+    + `${held} deliberate site(s) and ${heldReroute} deliberate reroute(s) still pinned).`,
   );
   return 0;
 }
 
 /** `--list`: the whole census, for burning the ratchet down. */
 function list() {
-  const { files, spawners, spawnCalls, findings, deliberate, envless, refusal } = audit(REPO_ROOT);
+  const { files, spawners, spawnCalls, builtSpawns, findings, deliberate, envless, rerouted, deliberateReroute, refusal } = audit(REPO_ROOT);
   if (refusal) {
     console.error(`REFUSED: ${refusal}`);
     return 1;
@@ -968,14 +1404,21 @@ function list() {
   for (const row of envless.sort((a, b) => siteKey(a).localeCompare(siteKey(b)))) {
     console.log(`undeclared  ${row.file}:${row.line}  [${row.fn}]  ${row.api}  ${row.text}`);
   }
+  for (const row of rerouted.sort((a, b) => siteKey(a).localeCompare(siteKey(b)))) {
+    console.log(`rerouted    ${row.file}:${row.line}  [${row.fn}]  ${row.api}  ${row.text}`);
+  }
   for (const row of deliberate.sort((a, b) => siteKey(a).localeCompare(siteKey(b)))) {
     console.log(`deliberate  ${row.file}:${row.line}  [${row.fn}]`);
+  }
+  for (const row of deliberateReroute.sort((a, b) => siteKey(a).localeCompare(siteKey(b)))) {
+    console.log(`declared-reroute  ${row.file}:${row.line}  [${row.fn}]`);
   }
   for (const row of findings.sort((a, b) => siteKey(a).localeCompare(siteKey(b)))) {
     console.log(`baselined   ${row.file}:${row.line}  [${row.fn}]  ${row.text}`);
   }
   console.log(
     `\n${spawners} spawner source(s) in ${files}; ${spawnCalls} spawn call(s), ${envless.length} undeclared; `
+    + `${builtSpawns} built-entrypoint spawn(s), ${rerouted.length} rerouted, ${deliberateReroute.length} declared; `
     + `${findings.length} bulk copy/copies, ${deliberate.length} deliberate.`,
   );
   console.log(JSON.stringify(countByFile(findings), null, 2));
@@ -990,18 +1433,19 @@ function list() {
  * the behaviour being asserted and cannot be observed from inside it.
  */
 function auditRoot(root) {
-  const { files, spawners, spawnCalls, findings, deliberate, envless, refusal } = audit(root);
+  const { files, spawners, spawnCalls, builtSpawns, findings, deliberate, envless, rerouted, refusal } = audit(root);
   if (refusal) {
     console.error(`REFUSED: ${refusal}`);
     return 1;
   }
-  if (findings.length || envless.length) {
+  if (findings.length || envless.length || rerouted.length) {
     for (const f of findings) console.error(`  ${f.file}:${f.line}  [${f.fn}]  ${f.text}`);
     for (const f of envless) console.error(`  ${f.file}:${f.line}  [${f.fn}]  ${f.api}  ${f.reason}`);
-    console.error(`FOUND files=${files} spawners=${spawners} calls=${spawnCalls} findings=${findings.length} envless=${envless.length}`);
+    for (const f of rerouted) console.error(`  ${f.file}:${f.line}  [${f.fn}]  ${f.api}  ${f.reason}`);
+    console.error(`FOUND files=${files} spawners=${spawners} calls=${spawnCalls} built=${builtSpawns} findings=${findings.length} envless=${envless.length} rerouted=${rerouted.length}`);
     return 1;
   }
-  console.log(`OK files=${files} spawners=${spawners} calls=${spawnCalls} findings=0 envless=0 deliberate=${deliberate.length}`);
+  console.log(`OK files=${files} spawners=${spawners} calls=${spawnCalls} built=${builtSpawns} findings=0 envless=0 rerouted=0 deliberate=${deliberate.length}`);
   return 0;
 }
 
