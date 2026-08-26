@@ -278,3 +278,101 @@ recorded as accepted scope. Until then, only a sweep like this one can catch it.
 - 2FA challenge gate + lockout: covered (`identity-auth.auth-method-matrix` +
   `two-factor-lockout.dogfood.test.ts`); endpoint existence pinned by
   `auth-route-ledger.conformance.test.ts`.
+
+## 8. Scoped sweep 2026-08-26 — ADR-0126 验收卡 #12438 (packaged flow/action disable + clone)
+
+Scoped sweep triggered by acceptance card #12438 (Epic #12150, nine PRs merged at
+af56546). Three read-only hunters (routes/runtime · Setup/Studio UI · docs claims)
+diffed the shipped ADR-0126 surface against the ledger; **the whole surface was
+uncovered** (zero hits for `ADR-0126|sys_metadata_activation|ACTION_DISABLED` across
+the checklist before this sweep). 14 items were authored + 1 revision in the same
+change (automation ×4; api-backend ×2; access-security ×3; platform-core ×3;
+studio-authoring ×2; `automation.flow-toggle-kill-switch` re-sourced rev 2 — its old
+source cited the `flowEnabled` map §7.2 retired). Ledger 207 → 221 items. What follows
+is what is NOT a checklist item.
+
+### 8a. Product defects found while grounding (decide handling)
+
+Each is captured inside a checklist item as an expected-fail probe or knownGap, so a
+run records actual behavior instead of ticking green.
+
+| # | defect | evidence | captured in | sensitivity |
+|---|---|---|---|---|
+| D16 | **Setup packaged-automation page is unreachable — no nav entry.** The page + registry ref `automation:packaged` shipped in objectui (`app-shell/src/views/setup/PackagedAutomationPage.tsx`, `services/builtinComponents.tsx:64-69`), but `packages/platform-objects/src/apps/setup-nav.contributions.ts` names no such item (only `developer:packages` at :51); reachable only by typed URL `/apps/setup/component/automation/packaged`. Epic L5 (#6301) and L6-UI (#6412) are CLOSED, so this is a dropped half, not pending work. Card **A1 is expected to fail**; `build-without-code.mdx:37` ships the promise publicly (docs ahead of surface — the sequencing ADR §8.5 asked to avoid). | objectstack `setup-nav.contributions.ts:32-171` vs objectui `PackagedAutomationPage.navContribution.test.tsx` (pins only the objectui half) | automation.setup-packaged-automation-board (expected-fail nav clause — a typed-URL pass must not tick it) | UX/release — safe to file; testers warned on #12438 |
+| D17 | **`PUT`/`DELETE /api/v1/automation/:name` bypass the packaged lock** — `manage_metadata` alone re-registers/unregisters a packaged flow's live definition; `registerFlow` has zero `_lock`/provenance check, while `/meta/flow` refuses the same write. ADR-0126 §2 "refused loudly at the write door" is unimplemented at this door. | `packages/runtime/src/domains/automation.ts:1826-1865`; `packages/services/service-automation/src/engine.ts:2625-2730` | access-security.packaged-flow-write-door-parity (expected-fail parity clauses) | integrity — admin-gated, not an escalation; safe to file |
+| D18 | **The flow clone is engine-registry-only** — no `sys_metadata` write on the clone path, `_packageId`/`_provenance` stripped, no post-clone navigation; Studio's Automations rail lists package-scoped metadata, so a package-less engine-only clone matches no package. "The clone is an ordinary flow, yours to edit in Studio" (ADR §1.3/§7.1, `build-without-code.mdx:37`) is unproven; restart survival unknown. | `domains/automation.ts:1414-1436` (registerFlow only); `flow-clone.ts:225`; objectui `StudioDesignSurface.tsx:3286`; `PackagedAutomationPage.tsx:302-313` | automation.packaged-flow-clone-contract (honest restart+Studio clause, expected-fail) | correctness — safe to file |
+| D19 | **The subflow refusal's own remedy is dead** — "Disable the calling flow(s) first" is what the 409 prescribes, but `packagedSubflowCallers` scans the registered flow map with **no activation check**, so an already-DISABLED caller still guards its callee; the prescribed sequence can never complete. No test covers the sequence. | `engine.ts:2932-2947` (no activation consult) vs `:2992-2996` (the prescription); ADR §7.3 | automation.packaged-flow-subflow-disable-refusal (expected-fail remedy-sequence clause) | correctness — safe to file |
+| D20 | **Extension-field collision silently OVERRIDES the shipped base field** — `mergeObjectDefinitions` spreads `extension.fields` over `base.fields`, and the authoring schema documents "Fields to add/override" with priority "wins on conflict". No generic collision gate exists (`managed-extension-fields` covers better-auth sys objects only; ADR §3 adopts it as *prior art*, not a live gate). May be by-design — but then integrations.mdx's "never by reshaping what shipped" overstates. | `packages/objectql/src/registry.ts:146`; `packages/spec/src/data/object.zod.ts:2979,2996-2997` | platform-core.packaged-object-extend-only (knownGap, do-not-file-as-FAIL rule) | integrity/design — needs a ruling |
+| D21 | **Non-durable toggle disclosure is a server log line only** — with no activation ledger attached, `toggleFlow` warns "IN PROCESS ONLY … will NOT survive a restart", but the response body (`{name, enabled}`) and every UI surface carry nothing; card 已知边界 3's asymmetry has no user-facing channel and no docs sentence anywhere. | `engine.ts:3018-3028`; `domains/automation.ts:1321-1322` | — (not an item; needs a maintainer call on the channel: response field vs UI copy vs docs) | UX-integrity — maintainer call |
+| D22 | **`POST /automation/:name/clone` is unledgered** — live route absent from `route-ledger.ts` and from the JS client; `api-backend.route-ledger-live-parity` runs ledger→live only, so an unledgered mount is invisible to it. Suggest a ledger row now; consider a reverse-parity (live→ledger) item as a standing gate. | `domains/automation.ts:1340` vs `route-ledger.ts:316-336` | — (not an item) | low — internal discipline |
+
+Two objectui-side polish rows captured inside `automation.setup-packaged-automation-board`
+rather than as defect rows: `actionErrorDetail` drops `details[]`, so field-level
+prescriptions on validation refusals never reach the operator (`packages/core/src/actions/actionErrorDetail.ts:27-35`
+— a narrowing, not a rewrite); and the page renders live switches for a plain member
+with the refusal discovered only after the click (`ComponentNavView` has no gate; ledger
+reads are deliberately open per `sys-metadata-activation.object.ts:153-157` — record the
+posture, then decide which shape is wanted).
+
+### 8b. Docs drift (PD#10 class — file as docs fixes, not checklist items)
+
+- **`content/docs/kernel/contracts/metadata-service.mdx:211-324`** teaches the superseded
+  three-layer overlay protocol as the customization architecture — which ADR-0126 §6.4
+  forbids citing — and its worked example overlays an **`object`** (tier B,
+  `allowOrgOverride:false`): the exact `NOT_OVERRIDABLE` phantom write the §6.1 wall refuses.
+- **`content/docs/protocol/objectui/concept.mdx:415-450`** (+ `index.mdx:446`) promises
+  per-tenant field-level object customization ("Make phone required", "Add custom field
+  vip_status") — contradicts Regime E and the sentence now shipped at
+  `capabilities/integrations.mdx:17` ("not by editing what shipped").
+- **`build-without-code.mdx`** routes no-code admins to a code-only mechanism without
+  saying so — extension packages ship in code with the package
+  (`data-modeling/object-extensions.mdx:22,28`); one clause ("via an extension package
+  your developer ships") closes it.
+- **The shipped Regime-C doors are undocumented**: no docs page for
+  `/automation/:name/clone`, `/actions/_activation/:object/:action`, the subflow 409, or
+  the §5 operator gate; `ACTION_DISABLED` appears only in the generated ledgers;
+  `references/api/automation-api.mdx:22`'s toggle row predates the durable/gated semantics.
+- **ADR-0126's header still reads `Status: Proposed`** while all nine epic PRs are merged
+  at af56546 — flip it (the acceptance act evidently happened).
+
+### 8c. Card-accuracy notes for the tester (#12438)
+
+- **A1 will fail** (D16); the typed URL works and the rest of A/B/C is testable through it.
+- **已知边界 3 is inaccurate as worded**: with the ledger attached, `toggleFlow` writes a
+  row for ANY flow it holds (`packageId: ''` for non-packaged — `actions.ts:139-145`
+  states the design); the non-persistent case is the ledger-less boot (D21), not
+  "non-packaged flows" per se.
+- **D1's refusal on a stock (single-posture) boot is the `manage_metadata` tier** — the §5
+  posture gate is deliberately inert under `single`; and the two doors speak different
+  sentences (flow: `FLOW_ENABLEMENT_DENY_MESSAGE`; action: the shared activation-gate
+  wording). **D2 needs a `group`/`isolated` boot** (enterprise `@objectstack/organizations`)
+  — no stock fixture; unit-pinned only.
+- **B1: clone requires a new machine name AND a new label**, both mandatory server-side.
+- **C1's code is `ACTION_DISABLED`; the packaged-flow disable reuses `FLOW_DISABLED`** —
+  distinguish the ledger disable from a Studio `status` disable by the message's
+  `sys_metadata_activation` phrase, never by code alone.
+
+### 8d. Fixtures worth adding (would un-block clauses recorded as knownGaps)
+
+- two stock objects sharing an action machine name → unblocks the 409 `RESOURCE_CONFLICT`
+  ambiguity arm (`api-backend.action-activation-door-contract`).
+- a `group`/`isolated` posture boot recipe → unblocks the §5 operator-gate legs
+  (`access-security.activation-write-operator-gate`) and card row D2.
+- a documented no-automation lean-composition boot for manual runners → the dogfood
+  harness (`bootStack(showcaseStack)` minus automation) is currently the only path for
+  `platform-core.activation-ledger-registration-home`'s 503-turnaround leg.
+
+### 8e. Checked and CLEAN (so the next sweep does not re-derive)
+
+- **E1's three-tier language landed verbatim** at `capabilities/integrations.mdx:17` and
+  `build-without-code.mdx:37`; repo-wide, no unconditional "install then customize in
+  Studio" claim remains in `content/docs`.
+- **The dashboard overlay door exists** (`dashboard allowOrgOverride: true`,
+  `packages/spec/src/kernel/metadata-plugin.zod.ts:787`) — the display-class item asserts
+  the tier-1 promise on both view and dashboard.
+- **`TenancyPostureSchema` is enumSource-pinnable** (direct inline `z.enum`, 3 members) —
+  pinned on the operator-gate item. **`sys_metadata_activation.metadata_type` is NOT
+  pinnable** (untyped `Field.text`, string-literal writers `'flow'`/`'action'`) —
+  hand-enumerated on the row-contract item and flagged un-pinned.
+- **No security-sensitive finding to withhold**: D16–D22 are admin-gated behaviors or
+  disclosure-shape issues; nothing here discloses an unfixed privilege escalation.

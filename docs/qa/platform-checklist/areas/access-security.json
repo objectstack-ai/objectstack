@@ -2072,6 +2072,303 @@
         },
         { "revision": 2, "date": "2026-08-18", "change": "added the two markers this item was missing. blocked {by: fixture, ref: #9334} — three independent rounds (#9334, #9417, and the wave sweep) each re-derived the same dead end: the stock deployment is tenancy: single, so ADR-0095 Layer 0 is inert (tenant-layer.ts postureEnforcesWall returns null) and booting OS_TENANCY_POSTURE=isolated is correctly refused because @objectstack/organizations is not declared; without the marker the selector keeps listing it runnable and a fourth round pays for it again. automated.ref — no-active-organization-write-refusal.test.ts pins every clause at unit level and was already green, which RUNNER rule 6's converse says should have been recorded here", "ref": "#9386" }
       ]
+    },
+    {
+      "id": "access-security.activation-write-operator-gate",
+      "title": "Activation-ledger write authority (ADR-0126 §5): the manage_metadata tier refuses first on every posture, and the shared operator gate — INERT on stock `single` — demands the platform_admin POSITION in walled postures, at both the flow and action doors",
+      "since": "v17",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": [
+        "admin (first sign-in dev admin — holds manage_metadata; the entitled contrast)",
+        "plain member (everyone baseline only, no manage_metadata — the D1 tier-refusal persona)",
+        "a fresh member granted a SCRATCH permission set carrying system_permissions ['manage_metadata'] and NO platform_admin position — the inert-gate proof persona (holding the tier capability without the operator identity)",
+        "platform operator (platform_admin POSITION) — needed only for the BLOCKED walled-posture legs"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "stock showcase boots the `single` tenancy posture (no tenancy service / ADR-0093 D4-D5 fallback) — CONFIRM the posture before scoring, because it decides which gate can answer at all",
+          "a packaged flow: showcase_urgent_task_alert (com.example.showcase, examples/app-showcase/src/automation/flows/index.ts:1679) for POST /api/v1/automation/showcase_urgent_task_alert/toggle",
+          "a packaged action for POST /api/v1/actions/_activation/showcase_task/showcase_mark_done (examples/app-showcase/src/ui/actions/index.ts)",
+          "a runtime-authored scratch permission set with system_permissions ['manage_metadata'] granted to a fresh member via a sys_user_permission_set row (same runtime-authoring pattern access-security.fls-mask-and-strip's read half uses) — no stock showcase set grants manage_metadata"
+        ],
+        "knownGaps": [
+          "The group/isolated legs (clauses 5) have NO stock fixture: enabling a walled posture requires the enterprise @objectstack/organizations runtime (packages/spec/src/security/tenancy-posture.ts:23-34 'Open code, entitled activation', ADR-0105 D12), no example app sets a posture, and booting OS_TENANCY_POSTURE=isolated without it is correctly REFUSED (ADR-0093 D5) — the same dead end three rounds re-derived on access-security.no-active-org-session-semantics (#9334). Those clauses are blocked(fixture); the unit pins in automated.ref are their standing oracle. Never fake a posture to tick them.",
+          "⚠️ On the STOCK `single` posture the §5 operator gate is INERT by design (activation-gate.ts:141-147 — postureEnforcesWall('single') is false, so the gate returns before the position is ever read). The refusal an unentitled caller gets on stock showcase is the manage_metadata AUTHORING TIER, not the operator gate — score clause 1/2 against the tier and never against §5, or the run records the wrong gate as proven."
+        ]
+      },
+      "steps": [
+        "boot showcase isolated; admin session; PROVE the posture is `single` (no tenancy service resolves / the deployment declares none) and record the evidence — the posture selects which gate can answer",
+        "as the plain member: POST /api/v1/automation/showcase_urgent_task_alert/toggle {\"enabled\": false} — capture status, code and the EXACT message string",
+        "as the plain member: POST /api/v1/actions/_activation/showcase_task/showcase_mark_done {\"enabled\": false} — capture status, code and the exact message",
+        "as the plain member again: repeat the flow toggle with a deliberately INVALID body (e.g. {\"enabled\": \"false\"}) — the refusal must still be the 403, not a 400 body-validation answer (the gate runs before body validation, automation.ts:1017-1045; activation-gate.ts:128-131)",
+        "GET /api/v1/data/sys_metadata_activation (reads are open — sys-metadata-activation.object.ts:153-158) and confirm no row for either artifact was written by the refusals",
+        "author the scratch manage_metadata permission set, grant it to a fresh member, and prove server-side that the member's positions do NOT include platform_admin (session row / GET /auth/get-session — never the grant gesture)",
+        "as that member: POST /api/v1/automation/showcase_urgent_task_alert/toggle {\"enabled\": false} — expect 200; read the ledger row back (metadata_type 'flow', active false, organization_id NULL); then re-enable ({\"enabled\": true}) to restore the fixture",
+        "as the same member: POST /api/v1/actions/_activation/showcase_task/showcase_mark_done {\"enabled\": false} — expect 200 + the metadata_type 'action' row; re-enable to restore",
+        "walled-posture legs: BLOCKED on stock fixtures (see knownGaps) — the group/isolated matrix (org admin with manage_metadata refused naming the posture and the per-artifact remedy; platform_admin POSITION admitted; no row on refusal) is pinned at unit level by automated.ref"
+      ],
+      "acceptance": [
+        {
+          "clause": "flow door, stock `single` posture: the refusal an unentitled caller gets is the manage_metadata AUTHORING TIER — 403 PERMISSION_DENIED with the exact enablement sentence — and NOT the §5 operator gate, which is inert on `single`; the run must record which gate it scored",
+          "oracle": "api",
+          "verify": "POST /api/v1/automation/showcase_urgent_task_alert/toggle as the plain member answers 403, code PERMISSION_DENIED, message exactly 'Enabling or disabling an automation flow requires the `manage_metadata` capability.' (FLOW_ENABLEMENT_DENY_MESSAGE, packages/runtime/src/domains/automation.ts:333-334 — the toggle-specific sentence, not the generic 'Authoring automation flows requires…' one). A message naming the tenancy posture here would mean the §5 gate answered — on `single` that is a FAIL of this clause, not a pass",
+          "evidence": "the refusal trace with the full message string quoted"
+        },
+        {
+          "clause": "action door, stock `single` posture: same tier, the actions domain's own call into the shared gate — 403 PERMISSION_DENIED naming manage_metadata and the #10243 'functionally equivalent to deleting it' rationale, with subject 'a packaged action'",
+          "oracle": "api",
+          "verify": "POST /api/v1/actions/_activation/showcase_task/showcase_mark_done as the plain member answers 403 PERMISSION_DENIED with the refuseUngrantedActivationAuthoring sentence (packages/runtime/src/domains/activation-gate.ts:184-203, called at domains/actions.ts:154; the posture arm at actions.ts:156 stays silent on `single`)",
+          "evidence": "the refusal trace with the message quoted"
+        },
+        {
+          "clause": "a refused caller writes nothing and learns nothing: no sys_metadata_activation row exists for either artifact after the refusals, and an unentitled caller with an INVALID body still gets the 403 — never a 400 that maps out the toggle contract (both gates run before body validation)",
+          "oracle": "api",
+          "verify": "GET /api/v1/data/sys_metadata_activation filtered on the two names returns no row attributable to the refused attempts; the invalid-body probe as the plain member answers 403 PERMISSION_DENIED, not 400 (gate placement: automation.ts:1017-1045 ahead of the service probe and body checks; activation-gate.ts:128-131)",
+          "evidence": "the ledger reads + the invalid-body trace"
+        },
+        {
+          "clause": "the §5 gate is INERT on `single`, not satisfied: a caller holding manage_metadata but NOT the platform_admin POSITION succeeds at BOTH doors, and each write lands one install-level ledger row (organization_id NULL) — install-level and org-level are the same scope on one logical tenant (activation-gate.ts:22-27,141-147)",
+          "oracle": "api",
+          "verify": "the scratch-set member's positions are proven server-side to exclude platform_admin (BUILTIN_IDENTITY_PLATFORM_ADMIN = 'platform_admin', packages/spec/src/identity/eval-user.zod.ts:32), then both toggles answer 200 and GET /api/v1/data/sys_metadata_activation shows the metadata_type 'flow' and 'action' rows with active false, organization_id NULL; re-enable restores active true",
+          "evidence": "the position proof + both 200 traces + the ledger rows"
+        },
+        {
+          "clause": "walled postures (`group`/`isolated`) — BLOCKED on stock fixtures (knownGaps, #9334 precedent): an org admin holding manage_metadata is refused 403 PERMISSION_DENIED with a message naming the POSTURE and the per-artifact remedy — flows recommend the clone path, actions deliberately do NOT (operator + sibling authoring instead) — no row is written on refusal, and a caller carrying the platform_admin POSITION (not a capability) is admitted",
+          "oracle": "test",
+          "verify": "stands on the unit pins until an enterprise-posture fixture exists: packages/runtime/src/domains/automation-activation-posture-gate.test.ts (#12157) and action-activation-posture-gate.test.ts (#12160) drive the posture x identity matrix against both doors and assert toggleFlow/the write was never entered on refusal; the refusal sentence and remedies are activation-gate.ts:100-118,155-163. Do not tick this clause from an HTTP probe on a faked posture",
+          "evidence": "the two test runs' output, cited by test name"
+        },
+        {
+          "clause": "engine self-invocation bypasses both tiers (isSystem, never settable from the wire) — the boot pull and ledger hydration must not be refused by the gate that guards the wire",
+          "oracle": "test",
+          "verify": "the isSystem arms of the same unit pins (activation-gate.ts:139,190 — both return undefined before any check); corroborate live by the fact that a restart re-hydrates flow activations without error while the gate is armed",
+          "evidence": "test output + the boot log line"
+        }
+      ],
+      "negative": [
+        "the §5 posture-gate sentence ('…this deployment runs the \\'single\\' tenancy posture…') appearing on a stock boot is a FAIL — the gate must not fire where postureEnforcesWall is false",
+        "run the refused calls as ADMIN too and confirm 200 (wrong-persona both sides): the denial must come from the missing capability, not a broken route",
+        "the two doors' tier sentences must not swap: the flow door owns its own FLOW_ENABLEMENT_DENY_MESSAGE while the action door speaks the shared activation-gate sentence — a run quoting the wrong door's string has probed the wrong door",
+        "absent tenancy service fails OPEN by design (activation-gate.ts:50-56,141-147): do not file a missing-refusal finding against a deployment with no tenancy service — that is ADR-0093 D4/D5, not a hole"
+      ],
+      "variants": [
+        "single (stock — gate inert, tier decides)",
+        "group (blocked: enterprise posture fixture)",
+        "isolated (blocked: enterprise posture fixture)"
+      ],
+      "enumSource": {
+        "file": "packages/spec/src/security/tenancy-posture.ts",
+        "export": "TenancyPostureSchema",
+        "expect": 3
+      },
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/runtime/src/domains/automation-activation-posture-gate.test.ts (#12157, flow door) + packages/runtime/src/domains/action-activation-posture-gate.test.ts (#12160, action door) — the full posture x identity matrix for both doors, including the group/isolated legs this item marks blocked(fixture), the no-write-on-refusal assertion, and the isSystem bypass"
+      },
+      "source": [
+        "packages/runtime/src/domains/activation-gate.ts (the shared §5 gate: posture read 141-147, platform_admin POSITION test 149-150, manage_metadata tier 184-203, per-artifact remedies 100-118, fail-open rationale 50-56)",
+        "packages/runtime/src/domains/automation.ts:333-334 (FLOW_ENABLEMENT_DENY_MESSAGE), :471-474 (isFlowActivationWrite), :1017-1045 (gate ordering ahead of service probe and body checks)",
+        "packages/runtime/src/domains/actions.ts:154-157 (both tiers at the action door)",
+        "packages/spec/src/security/tenancy-posture.ts (TenancyPostureSchema — the variants source; postureEnforcesWall; the ADR-0105 D12 entitlement note)",
+        "docs/adr/0126-packaged-metadata-customization-model.md §5 (D3: install-level rows, operator-gated in multi-org postures)",
+        "#12438 (the sweep), #12159 (ADR-0126 flow legs), #10243 (the measured incident the gate makes durable), #12157 / #12160 (the two door cards)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-08-26",
+          "change": "new — ADR-0126 §5 write authority had no checklist coverage. Authored with the stock-posture truth stated up front (the §5 gate is INERT on `single`; the D1 refusal is the manage_metadata tier) so a runner never scores the wrong gate, and with the group/isolated legs blocked(fixture) on the enterprise-posture gap (#9334 precedent) instead of faked. Variants pinned to TenancyPostureSchema (verified extractable by the validator's enumSource extractor)",
+          "ref": "#12438"
+        }
+      ]
+    },
+    {
+      "id": "access-security.packaged-flow-write-door-parity",
+      "title": "Write-door parity on a packaged flow: PUT/DELETE /automation/:name must refuse the same packaged artifact that PUT /meta/flow/:name refuses (ADR-0126 §2 locked base) — EXPECTED FAIL today, the /automation door sails through on manage_metadata alone",
+      "since": "v17",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": [
+        "admin (holds manage_metadata — deliberately, so every refusal observed is the package LOCK and never the capability tier)"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a packaged flow: showcase_urgent_task_alert (com.example.showcase, examples/app-showcase/src/automation/flows/index.ts:1679)",
+          "capture the flow's full current definition BEFORE any probe (GET /api/v1/automation/showcase_urgent_task_alert) — it is the restore payload"
+        ],
+        "knownGaps": [
+          "the acceptance is the ADR-0126 §2 PARITY PROMISE ('the packaged base is locked — in-place edit refused loudly at the write door'), not today's behavior: as of #12438 the /automation door has NO lock — PUT/DELETE /automation/:name reach registerFlow/unregisterFlow with only the manage_metadata authoring gate in front (packages/runtime/src/domains/automation.ts:1826-1865), and the engine has zero lock/provenance check on that path (packages/services/service-automation/src/engine.ts:2625-2730). Clauses 2-3 are EXPECTED FAILS: a 200 there, where /meta refuses the same artifact, is the product finding, tracked centrally in FOLLOW-UPS (#12438). Keep the parity promise as the acceptance so the item flips green when the door is locked, without a rewrite"
+        ]
+      },
+      "steps": [
+        "boot showcase isolated; admin session; GET /api/v1/automation/showcase_urgent_task_alert and store the full definition (the restore payload); also GET /api/v1/meta/flow/showcase_urgent_task_alert?layers=true to prove the artifact is package-backed (populated code layer, _packageId com.example.showcase)",
+        "control leg, the /meta door: PUT /api/v1/meta/flow/showcase_urgent_task_alert with a trivially modified copy of the definition (e.g. label suffix) — capture status, code and WHICH layer answered; repeat with ?package=com.example.showcase and capture that code too",
+        "probe leg 1: PUT /api/v1/automation/showcase_urgent_task_alert with the same trivially modified definition — capture status and, if 2xx, GET the flow back to prove the live registration mutated",
+        "probe leg 2: DELETE /api/v1/automation/showcase_urgent_task_alert — capture status and, if 2xx, confirm GET /api/v1/automation/showcase_urgent_task_alert now 404s (the shipped flow is gone from the live engine)",
+        "RESTORE, unconditionally: PUT /api/v1/automation/showcase_urgent_task_alert with the stored original definition (re-registering is the cheap path; a cold restart's boot flow pull is the fallback), then GET it back and diff against the stored capture — byte-identical",
+        "verify the flow still fires: trigger its record-change mutation once and confirm a run appears (the restore must revive the trigger binding, not just the definition read)"
+      ],
+      "acceptance": [
+        {
+          "clause": "control: the /meta door refuses the packaged flow write with a ledgered metadata-protocol code, and the definition is unchanged — this is the same locked-base class access-security.readonly-package-locks-studio pins on the /meta/object door",
+          "oracle": "api",
+          "verify": "PUT /api/v1/meta/flow/showcase_urgent_task_alert answers >=400 with a ledgered code — record WHICH (expect the NOT_OVERRIDABLE family without ?package=, ITEM_LOCKED when ?package= names the read-only base; do not over-pin the exact spelling, the owd-save-gate rev-3 lesson — the layer that answers is part of the evidence, not an assumption); GET before/after identical",
+          "evidence": "both PUT traces (with and without ?package=) + the before/after /meta reads"
+        },
+        {
+          "clause": "parity, update door: PUT /api/v1/automation/showcase_urgent_task_alert against the SAME packaged artifact is refused — ⚠️ EXPECTED FAIL today: the door runs only the manage_metadata authoring gate (automation.ts:1826-1857) and registerFlow re-registers with no lock or provenance check (engine.ts:2625-2715), so a 200 here while /meta refused the identical artifact IS the finding. Record the fail with both traces side by side; the defect is tracked centrally in FOLLOW-UPS (#12438) — do not re-file it per run",
+          "oracle": "api",
+          "verify": "same admin session, same artifact, same-shape body at both doors; the verdicts must MATCH. A 2xx on /automation with a mutated GET read-back, paired with the /meta refusal from clause 1, is a fail of this clause and the expected present-day outcome",
+          "evidence": "the /automation PUT trace + the mutated (or unchanged) GET read-back, paired with clause 1's refusal"
+        },
+        {
+          "clause": "parity, delete door: DELETE /api/v1/automation/showcase_urgent_task_alert is refused for the same reason — ⚠️ EXPECTED FAIL today (unregisterFlow, engine.ts:2717-2730, removes the shipped flow from the live engine with no check; 'delete first, refuse second' is the exact shape the #10145 measurement recorded at this door before the capability gate existed, and the lock half is still missing)",
+          "oracle": "api",
+          "verify": "DELETE answers >=400 and the flow still serves; a 200 followed by a 404 on GET /api/v1/automation/showcase_urgent_task_alert is the fail (and the deletion this item's restore step exists to undo)",
+          "evidence": "the DELETE trace + the follow-up GET"
+        },
+        {
+          "clause": "the probes leave no residue: after the restore step the live registration is byte-identical to the pre-probe capture AND the flow demonstrably fires again — a restore that re-registers the definition but leaves the trigger unbound is not a restore",
+          "oracle": "api",
+          "verify": "GET /api/v1/automation/showcase_urgent_task_alert diffs clean against the stored capture; one triggering mutation produces a run (GET the flow's runs, or the /_status enabled+bound read)",
+          "evidence": "the diff + the post-restore run evidence"
+        }
+      ],
+      "negative": [
+        "a 403 on the /automation probes coming from a MISSING manage_metadata capability is the wrong tier and proves nothing about the lock — this item's persona holds the capability precisely so any refusal observed is the package lock; quote the refusal message to prove which gate answered",
+        "do NOT read clause 1's /meta refusal as covering the /automation door — two doors onto one artifact are the item; scoring one door twice is the mistake",
+        "the toggle door is NOT this item: POST /:name/toggle is the sanctioned activation switch (access-security.activation-write-operator-gate); this item is about DEFINITION writes and deletion of the locked base (ADR-0126 §2/§6 — sole definition ledger, never silent override)"
+      ],
+      "traps": [
+        "destructive-in-place",
+        "dispatcher-vs-hono-route"
+      ],
+      "source": [
+        "packages/runtime/src/domains/automation.ts:1826-1865 (PUT/DELETE /automation/:name → registerFlow/unregisterFlow, manage_metadata gate only)",
+        "packages/services/service-automation/src/engine.ts:2625-2730 (registerFlow/unregisterFlow — zero lock/provenance check on this path)",
+        "docs/adr/0126-packaged-metadata-customization-model.md §2 (Regime C: 'the packaged base is locked — in-place edit refused loudly at the write door') + §6 wall 2 (sole definition ledger)",
+        "packages/plugins/plugin-security/src/packaged-permission-set-lock.ts (the same lock implemented at the permission-set data door — the regime's first instance, proving the refusal shape the /automation door lacks)",
+        "cross-ref access-security.readonly-package-locks-studio (the /meta door's locked-base class on objects) + access-security.owd-save-gate rev 3 (why the /meta control leg records the answering layer instead of assuming it)",
+        "#12438 (the sweep that measured the gap; FOLLOW-UPS carries the product finding centrally), #12159 (ADR-0126 flow implementation legs)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-08-26",
+          "change": "new — #12438 measured that PUT/DELETE /automation/:name re-register/unregister a PACKAGED flow on manage_metadata alone while PUT /meta/flow/:name refuses the same artifact: the ADR-0126 §2 lock is unimplemented at the /automation door. Authored as a door-parity item with the parity promise as the acceptance and the present-day 200 recorded as an expected fail (tracked centrally in FOLLOW-UPS), plus a mandatory restore step because the probe mutates a live engine registration",
+          "ref": "#12438"
+        }
+      ]
+    },
+    {
+      "id": "access-security.packaged-permission-set-lifecycle",
+      "title": "Packaged permission-set lifecycle (#11513) survives ADR-0126 unchanged: locked base at the data door, clone-to-customize with every facet carried, `active` row-state flip — and NONE of it writes a sys_metadata_activation row",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "mixed",
+      "personas": [
+        "admin (drives the lock probes, the lifecycle actions and the Setup surface)",
+        "member M holding the packaged set under test (granted showcase_contributor via a sys_user_permission_set row) — the persona whose live access proves the active flip enforces"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a package-declared permission set: showcase_contributor (declared by com.example.showcase in examples/app-showcase/src/security/permission-sets.ts, projected to a sys_permission_set row at boot) — the SchemaRegistry, not the row's managed_by column, is what the lock reads (packaged-permission-set-lock.ts)",
+          "the Setup permission-sets surface rendering the object's own actions (Activate / Deactivate / Clone on locations list_item + record_header — packages/plugins/plugin-security/src/objects/sys-permission-set.object.ts:41-155)",
+          "member M granted showcase_contributor, with a showcase_contributor-only verb to probe (e.g. a project PATCH the everyone baseline does not grant — compute the baseline union per access-security.crud-permission-matrix's knownGaps before picking it)"
+        ],
+        "knownGaps": [
+          "the ledger-wall clause rides the maintainer ruling of 2026-08-26 in #12159 (ADR-0126 §8 item 3): permission sets KEEP the landed #11513 machinery — the kind's own sys_permission_set.active column and the data-door lock — and do NOT write sys_metadata_activation until a separate convergence card decides projection-vs-migration. If that card lands, this clause flips meaning: re-ground it there before scoring, rather than filing the new rows as a scope-wall breach"
+        ]
+      },
+      "steps": [
+        "boot showcase with the console; admin session; provision member M (grant showcase_contributor); baseline: as M exercise the contributor-granted probe verb — 2xx; count sys_metadata_activation rows (GET /api/v1/data/sys_metadata_activation — reads are open)",
+        "lock, API: as admin PATCH /api/v1/data/sys_permission_set/<showcase_contributor id> with a DEFINITION change (e.g. an object_permissions tweak) — capture the 403 and its message verbatim",
+        "lock, UI: attempt the same edit through the Setup/Studio permission-set surface and capture what renders (the server refusal text, not a local fallback)",
+        "row-state carve-out: run the Deactivate action from the Setup list (or PATCH /api/v1/data/sys_permission_set/<id> {\"active\": false} — exactly what the action sends, bodyExtra sys-permission-set.object.ts:66) — expect 2xx, NOT the lock",
+        "as M: repeat the probe verb — now refused; re-read the row (active false) and confirm M's sys_user_permission_set assignment row still exists (deactivation keeps assignments, per the action's own confirmText)",
+        "clone: run the Clone action on showcase_contributor (POST /api/v1/data/sys_permission_set — new label + snake_case name both required); read the clone back and field-compare every definition facet against the base; attempt the clone again with the SAME name — 409",
+        "clone is org-owned: PATCH the clone's definition (same shape step 2 sent at the base) — 2xx; grant the clone to a fresh member and prove one of its verbs live",
+        "reactivate the base (Activate action / {\"active\": true}) — as M the probe verb works again",
+        "ledger wall: re-count and re-list sys_metadata_activation — identical to step 1's baseline: no metadata_type 'permission' row, no row naming showcase_contributor or the clone, from ANY of the above"
+      ],
+      "acceptance": [
+        {
+          "clause": "locked base: an in-place DEFINITION write against a package-declared set is refused 403 NOT_OVERRIDABLE with the #11513 message naming the sanctioned path (clone it), and the stored definition is unchanged — fail-closed: undeterminable provenance refuses too, with its own distinct message",
+          "oracle": "api",
+          "verify": "the PATCH answers 403, code NOT_OVERRIDABLE, message from PackagedPermissionSetLockedError (packages/plugins/plugin-security/src/packaged-permission-set-lock.ts:265-283 — names the package and the Clone action; the provenance-unknown refusal at :286-299 is a different sentence, distinguish by message); a re-read shows the definition facets unchanged",
+          "evidence": "the PATCH trace with message quoted + the before/after reads"
+        },
+        {
+          "clause": "the active flip is ROW STATE, not a definition write: a bare {active} PATCH passes the lock (the #4669 carve-out runs BEFORE the lock — permission-set-projection.ts:1128-1134) and lands on the driver, and enforcement follows it — M's granted verb is refused while active=false and restored on re-activation, with M's assignment row intact throughout",
+          "oracle": "api",
+          "verify": "deactivate 2xx (a 403 here is the lock swallowing the carve-out — a FAIL that breaks the shipped Deactivate action); M's probe verb >=400 while inactive, 2xx after reactivation; sys_user_permission_set row for M present at every step",
+          "evidence": "the lifecycle traces + M's before/during/after probes + the assignment-row reads"
+        },
+        {
+          "clause": "clone contract (#11703 regression guard): new label AND machine name mandatory; ALL definition facets carried — description, object_permissions, field_permissions, AND the three #11703 dropped ones (system_permissions, row_level_security, tab_permissions); admin_scope deliberately ABSENT (ruled 2026-08-24, stated in the action's own description); the clone starts active; a taken name answers 409; no linkage column (no cloned_from anywhere — amendment ruling 2)",
+          "oracle": "api",
+          "verify": "field-compare the clone row against the base per the clone_permission_set params list (sys-permission-set.object.ts:137-154 — the params list IS the payload); admin_scope empty/default on the clone; duplicate-name POST → 409 (projection duplicate check); no cloned_from/replaced_by key on the row",
+          "evidence": "the clone POST + the field-by-field diff + the 409 trace"
+        },
+        {
+          "clause": "the clone is an ordinary org-owned set: its definition is freely editable (the same PATCH shape the base refused answers 2xx) and its grants enforce live for a member holding it",
+          "oracle": "api",
+          "verify": "PATCH the clone's definition 2xx + persisted re-read; a member granted the clone exercises one of its verbs 2xx",
+          "evidence": "the clone-edit trace + the member probe"
+        },
+        {
+          "clause": "⭐ the no-ledger-row wall (ruling 2026-08-26 in #12159; ADR-0126 §8 item 3): NEITHER the active flip NOR the clone writes any sys_metadata_activation row — permission sets ride the kind's own active column until the convergence card; a metadata_type 'permission' row appearing from these operations is a FAIL of the model (the same scope wall platform-core.activation-ledger-row-contract owns for the after-every-switch sweep)",
+          "oracle": "api",
+          "verify": "GET /api/v1/data/sys_metadata_activation before and after the full lifecycle: row count identical, no metadata_type 'permission' row, no row naming showcase_contributor or the clone (grounded: packages/plugins/plugin-security has zero references to sys_metadata_activation — the ledger writers are the flow toggle and action _activation doors only)",
+          "evidence": "the before/after ledger listings"
+        },
+        {
+          "clause": "the Setup surface serves the lifecycle honestly: Activate/Deactivate/Clone actions render on the permission-set list/record surfaces, the Clone dialog demands both new-name fields and explains the admin_scope omission, and an attempted in-place edit surfaces the SERVER's refusal text — not a local fallback string",
+          "oracle": "dom",
+          "verify": "after a screenshot confirms the surface rendered, read the action affordances and the refusal rendering; the displayed refusal must contain the server message's clone-path sentence verbatim",
+          "evidence": "screenshots + the DOM read of the refusal text"
+        }
+      ],
+      "negative": [
+        "a 403 on the BARE {active} PATCH is a FAIL even though it looks like the lock working — the row-state carve-out is load-bearing for the shipped Deactivate/Activate actions (permission-set-projection.ts:1140-1144 says so in as many words)",
+        "a clone missing system_permissions, row_level_security or tab_permissions is the exact #11703 silent-grant-loss regression this item guards — diff every facet, not just the two that were never dropped",
+        "the two 403 sentences (packaged-locked vs provenance-unknown) must not be conflated: both are NOT_OVERRIDABLE, and only the message says whether the lock decided or failed closed",
+        "cross-refs, to keep one defect one count: the /meta-door package lock on objects is access-security.readonly-package-locks-studio; the WRITABLE-set edit loop through /meta/permission is access-security.permission-matrix-edit-loop (its fixture note explicitly excludes locked package sets — this item is that excluded case, at the DATA door); grant enforcement itself is access-security.crud-permission-matrix"
+      ],
+      "traps": [
+        "wrong-persona",
+        "stale-console-bundle",
+        "hydration-race"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/plugins/plugin-security/src/packaged-permission-set-lock.test.ts (provenance classifier, fail-closed verdicts, the clone action's payload pinned facet-by-facet against the params list — pin 6) + packaged-permission-set-restore-leg.test.ts; the live enforcement flip and the no-ledger-row wall stay manual"
+      },
+      "source": [
+        "packages/plugins/plugin-security/src/packaged-permission-set-lock.ts (classifier + both refusals; the SchemaRegistry-not-managed_by decision)",
+        "packages/plugins/plugin-security/src/permission-set-projection.ts:1076-1169 (insert-path lock + duplicate 409; the #4669 row-state carve-out at :1128-1134 ordered BEFORE the update-path lock at :1135-1167)",
+        "packages/plugins/plugin-security/src/objects/sys-permission-set.object.ts:41-155 (activate/deactivate bodyExtra {active}, clone_permission_set params — the payload contract)",
+        "docs/adr/0126-packaged-metadata-customization-model.md §1.1 (the #11513 machinery, named as the regime's first instance), §8 item 3 (permission sets converge later; the landed shape stays valid meanwhile)",
+        "#11513 (lock the base, clone to customize — the 2026-08-24 ruling), #11703 (the three dropped clone facets), #12159 (ruling 2026-08-26: no ledger rows for permission sets pending the convergence card), #12438 (the sweep)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-08-26",
+          "change": "new — the landed #11513 surface (data-door lock, clone action, active row-state lifecycle) had no checklist item: readonly-package-locks-studio covers the /meta door on objects and permission-matrix-edit-loop explicitly scopes itself to WRITABLE sets, so the packaged-set data-door lifecycle was uncovered end to end. Authored as the ADR-0126 regression guard with the no-ledger-row wall as its ⭐ clause, per the 2026-08-26 ruling in #12159 (card 已知边界 4): flipping active or cloning must keep writing sys_permission_set state only, never a sys_metadata_activation row",
+          "ref": "#12438"
+        }
+      ]
     }
   ]
 }
