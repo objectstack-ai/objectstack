@@ -1539,6 +1539,9 @@ importers:
       '@objectstack/plugin-hono-server':
         specifier: workspace:*
         version: link:../plugin-hono-server
+      '@objectstack/plugin-security':
+        specifier: workspace:*
+        version: link:../plugin-security
       '@types/node':
         specifier: ^26.2.0
         version: 26.2.0

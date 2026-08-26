@@ -199,9 +199,10 @@ export default ${toCamelCase(name)}App;
      *
      * That reasoning was scoped to `skill` on the belief that the other six
      * types were not filesystem-discovered. #11071 measured the loader
-     * instead: `MetadataPlugin._loadFromFileSystem` globs EVERY registry entry
-     * by its own `filePatterns`, so all seven wrote into the same
-     * invisibility. The override is gone and the rule is the harness default.
+     * instead — the mechanism, and the precondition that keeps it from
+     * firing in this repo today, are stated once in `metadata-file-name.ts`
+     * (#12075), not restated here. The override is gone and the rule is the
+     * harness default.
      */
     generate: (name: string) => `import { defineSkill } from '@objectstack/spec/ai';
 

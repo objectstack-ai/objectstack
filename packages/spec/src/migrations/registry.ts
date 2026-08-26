@@ -6112,6 +6112,76 @@ const step18: MigrationStep = {
         + 'assuming the old result set was correct.',
     },
     {
+      id: 'hot-reload-inert-state-strategies-retired',
+      surface:
+        "`HotReloadConfig.stateStrategy` values 'disk' and 'distributed', plus the "
+        + '`HotReloadConfig.distributedConfig` key and the `DistributedStateConfig` def '
+        + 'it carried (3 exported names: `DistributedStateConfigSchema` / '
+        + '`DistributedStateConfig` / `DistributedStateConfigParsed`)',
+      replacement:
+        "'memory' for in-process state preservation across a reload, or 'none' to "
+        + 'disable it — the two values `PluginStateManager` actually implements. There '
+        + 'is no in-tree replacement for durable or distributed plugin state: persist '
+        + 'it in the host, which owns the process lifetime these strategies pretended '
+        + 'to outlive. Real disk or distributed persistence returns only via the '
+        + 'ENFORCE route of ADR-0049 — the implementation first, the declaration with '
+        + 'it.',
+      reason:
+        'ADR-0049 enforce-or-remove, applied one level INSIDE the library the '
+        + '2026-08-25 #11825 ruling kept. That ruling retired the authorable '
+        + 'lifecycle-config container and deliberately kept `HotReloadConfigSchema` as '
+        + 'a host-driven library parameter type; this card measured the kept '
+        + "vocabulary's own remainder and found the same defect in it. Measured at "
+        + 'cdbd9204b6 with a firing positive control (`stateStrategy` resolves to real '
+        + 'readers in `core/src/hot-reload.ts`, so the scan sees readers): the '
+        + "'disk' and 'distributed' arms of `PluginStateManager.saveState` both wrote "
+        + "to the SAME in-memory Map as 'memory' — the in-source comments said "
+        + "'memory fallback' — and announced the substitution at DEBUG level only, so "
+        + 'a host that asked for durable or cluster-replicated state got process-local '
+        + 'memory and no error: state that does not survive the restart it was '
+        + 'configured to survive. `distributedConfig` had ZERO readers anywhere '
+        + '(every reference inside `packages/spec` itself plus the generated reference '
+        + 'page; nothing in objectui), so an author could name a Redis endpoint, a TTL '
+        + 'and a replication factor and nothing ever opened a connection — the #3950 '
+        + 'shape, sharpened by cluster-persistence vocabulary an AI author (ADR-0033) '
+        + 'reads as proof the capability exists. The key left with the enum value its '
+        + 'own doc comment named it "required" for, and `DistributedStateConfig` was '
+        + 'its orphan value schema. Two routes in one card because the surface has two '
+        + 'shapes: an enum-VALUE narrowing is invisible to the four ratchets (the def '
+        + 'still emits), so its prescription hangs on the enum\'s own `error` map '
+        + 'dispatched by `issue.input` (the `crypto.hash` / `managedBy: \'system\'` '
+        + 'precedent); the whole-def removal MUST move them, and that movement is its '
+        + 'own evidence. No D2 conversion and no tombstone: `HotReloadConfig` is not '
+        + 'an authorable surface — no metadata-type binding, stack collection or '
+        + 'manifest embed ever carried it, and nothing in the tree parses '
+        + '`HotReloadConfigSchema` outside its own unit test — so there is no authored '
+        + 'document to rewrite and no one who could receive a parse-time '
+        + 'prescription. Route 3, the #4834 / #11825 shape: this entry IS the '
+        + 'declaration.',
+      acceptanceCriteria:
+        "No host passes `stateStrategy: 'disk'` or `'distributed'` to "
+        + '`HotReloadManager.registerPlugin`. TypeScript hosts cannot: '
+        + "`HotReloadConfigParsed['stateStrategy']` is now `'memory' | 'none'`, so "
+        + 'either value is a compile error at the call site. JavaScript hosts, and '
+        + 'config that arrived as JSON, get a loud registration-time refusal carrying '
+        + 'the prescription — an ADR-0112 envelope (`code: VALIDATION_ERROR`, '
+        + '`status: 400`) thrown BEFORE the `enabled` check, so a disabled config '
+        + 'cannot smuggle the false declaration through. No import of '
+        + '`DistributedStateConfigSchema`, `DistributedStateConfig` or '
+        + '`DistributedStateConfigParsed` from `@objectstack/spec` or '
+        + '`@objectstack/spec/kernel` survives — every one is TS2305 after upgrade, '
+        + 'pinned by resolved symbol identity in '
+        + '`kernel/plugin-lifecycle-advanced-retirement.test.ts`. ⚠️ Runtime state '
+        + "behaviour is UNCHANGED for every config that worked: 'disk' and "
+        + "'distributed' already stored to memory, so a host that migrates either to "
+        + "'memory' keeps byte-identical behaviour — what changes is that the two "
+        + 'spellings which never described what happened are now refused instead of '
+        + 'silently honoured. The #11825 keep itself stands: `HotReloadConfigSchema`, '
+        + '`PluginStateSnapshotSchema` and the health vocabularies still export from '
+        + '`./kernel`, and `HotReloadManager` / `PluginHealthMonitor` still export '
+        + 'from `@objectstack/core` with their tests green.',
+    },
+    {
       id: 'identity-api-key-schema-retired',
       surface:
         'identity.apiKey (the whole of `ApiKeySchema` in identity/identity.zod.ts — '
@@ -6383,6 +6453,56 @@ const step18: MigrationStep = {
         + 'the source manifest and reinstalling.',
     },
     {
+      id: 'plugin-manifest-contributes-routes-retired',
+      surface:
+        'manifest.contributes.routes (the one member #10724 deliberately excluded; '
+        + '`kinds` is now the block\'s sole surviving live member)',
+      replacement:
+        'delete the key. A route that needs real handler CODE is mounted imperatively: '
+        + 'resolve the `http.server` service from the plugin context and register the '
+        + 'handler on `kernel:ready` (plugin-hono-server registers the service; '
+        + '`examples/app-showcase` mounts POST /api/v1/showcase/recalc that way). A '
+        + 'declarative endpoint over a pipeline the platform already runs — query/return '
+        + 'records, trigger a flow — is `defineStack({ apis })` (live since protocol 17, '
+        + '#5040)',
+      reason:
+        'ADR-0049 enforce-or-remove; #10726, maintainer ruling 2026-08-22 (Option B of the '
+        + 'enforce/remove/enforce-later fork, accepted verbatim 「接受所有」 on the decision '
+        + 'batch carrying the four-axis analysis). #10627 measured zero readers of the key '
+        + 'monorepo-wide with control probes: the HttpDispatcher never registered a prefix '
+        + 'from the declaration, so an entry parsed cleanly and served nothing — while FOUR '
+        + 'published surfaces presented it as working machinery, one of them a '
+        + 'customer-published skill (`skills/objectstack-api` told authors to choose it when '
+        + '"the endpoint needs real handler CODE"). That is ADR-0049\'s silent no-op with a '
+        + 'published recommendation attached. Per the ruling\'s own sequencing the '
+        + 'author-facing corrections landed FIRST (PR #11327: the skill\'s decision table, '
+        + 'the dispatcher protocol doc, ADR-0088:40, app.mdx), and the two remaining '
+        + 'teaching sites (#11328: the plugin-rest-api.zod.ts worked manifest example, the '
+        + 'metadata-plugin.zod.ts `router` delivered-form comments) are redirected in the '
+        + 'removal PR itself. The cloud precondition was discharged 2026-08-24 (#10812: '
+        + 'cloud @ 5b5925a, zero `manifest.contributes` reads, controls green). Enforce '
+        + '(fork A) was weighed and rejected on all four facets: net-new execution surface '
+        + 'plus a prefix-claim authority question (who may claim `/api/v1/…`) for a '
+        + 'declarative spelling with zero measured authors, while the capability is already '
+        + 'reachable imperatively. Why D3 semantic and not a D2 conversion: a manifest is '
+        + 'not a stack collection member (`PLURAL_TO_SINGULAR` has no `packages`/`plugins` '
+        + 'entry), so a conversion would be a transform with no seam that ever runs.',
+      acceptanceCriteria:
+        'An authored `contributes.routes` is a loud rejection through every spec-validating '
+        + 'path — `retiredKey()` types it `never` (tsc error at the authoring site) and the '
+        + 'parse raises the prescription itself (`os plugin build` exits non-zero printing '
+        + 'it). `contributes.kinds` — the block\'s sole surviving member — keeps parsing and '
+        + 'registering (engine → `registry.registerKind`). No author-facing material still '
+        + 'recommends the key: every former teaching site points at the imperative '
+        + '`http.server` mount (and `defineStack({ apis })` for declarative projections). '
+        + '⚠️ Runtime behaviour is deliberately UNCHANGED and must be verified as such: '
+        + 'nothing ever read the member, so removing it removes no behaviour. A package '
+        + 'ALREADY INSTALLED whose stored manifest carries one degrades to a single '
+        + '`[metadata_spec_invalid]` log line at registration (the registry\'s `validate()` '
+        + 'is a diagnostic, not a gate) rather than a boot failure; clear it by deleting the '
+        + 'key from the source manifest and reinstalling.',
+    },
+    {
       id: 'plugin-manifest-kind-globs-retired',
       surface: 'manifest.contributes.kinds[].globs (the `kind` bucket itself and its `id` are untouched)',
       replacement:
@@ -6636,6 +6756,107 @@ const step18: MigrationStep = {
         + 'remaining authored key on either widget is deleted (it never configured anything), '
         + 'and behaviour that seems to need one is a renderer capability request against '
         + 'objectui, not a metadata key.',
+    },
+    {
+      id: 'ui-form-field-length-malformed-refused',
+      surface: 'form-view field row `maxLength` / `minLength` declarations '
+        + '(`FormFieldSchema`, the rows inside `FormView.sections[].fields[]`) — '
+        + '`0`, negative or non-integer values',
+      replacement: 'a positive-integer bound (>= 1), or no declaration at all ("no minimum" is '
+        + 'expressed by OMITTING `minLength`, never by `minLength: 0`). The row-level key is a '
+        + 'per-form override that can only NARROW what the referenced object field already '
+        + 'declares (the object field surface tightened first: #11566/#11949) — so a malformed '
+        + 'row value is deleted, and a bound that was actually wanted is re-declared as a '
+        + 'positive integer, or dropped in favour of the object field\'s own authoritative '
+        + 'declaration',
+      reason:
+        '#12174: the form-field row carried the pre-#11566 shape — bare `z.number()` — after '
+        + 'the object-field surface converged (`maxLength` #11566, `minLength` #11949, both '
+        + '`z.number().int().min(1)`). The row keys are LIVE, measured in objectui: the spec '
+        + 'bridge (`packages/react/src/spec-bridge/bridges/form-view.ts` mapField, '
+        + 'objectui#5898) and plugin-form (`sectionFields.ts` normalizeSectionField) both copy '
+        + 'them onto the runtime field, the console FormPage merges `override.maxLength ?? '
+        + 'def.maxLength` onto the rendered input (objectui#5595), and the fields package '
+        + 'builds react-hook-form validation rules from `minLength`/`maxLength` — so '
+        + '`maxLength: 0` on a form row reached the DOM as an input that accepts nothing, and '
+        + 'the public-form resolve route (`GET /forms/:slug`) serves the rows verbatim to '
+        + 'anonymous renderers. The schema now refuses the malformed values at parse '
+        + '(`z.number().int().min(1)`, ADR-0078 declared=enforced). Unlike the object-field '
+        + 'twins there is NO type-conditional gate: a form row references its object field by '
+        + 'name and usually omits `type`, so the referenced field\'s type is invisible at parse '
+        + 'time — value shape is checkable on this surface, key placement is the object '
+        + 'field\'s own schema\'s job.',
+      acceptanceCriteria:
+        'Every form-view field row declaring `maxLength` or `minLength` carries a positive '
+        + 'integer. Well-formed rows (a positive-integer bound) parse byte-identically to '
+        + 'before; rows declaring neither key are untouched, and absence stays absence — no '
+        + 'default materializes. A stored form view carrying a malformed row value is refused '
+        + 'on its next authoring-path save with a prescriptive per-key issue; the author '
+        + 'deletes the key (the object field\'s own declaration keeps governing the write '
+        + 'seam) or re-declares the intended positive integer.',
+    },
+    {
+      id: 'ui-form-field-precision-scale-integer-refused',
+      surface: 'form-view field row `precision` / `scale` declarations '
+        + '(`FormFieldSchema`, the rows inside `FormView.sections[].fields[]`) — '
+        + 'non-integer or negative values (`scale: 2.5`, `precision: -1`)',
+      replacement: 'a non-negative integer digit count, or no declaration at all. The row-level '
+        + 'key is a per-form override of the referenced object field\'s own declaration (that '
+        + 'surface tightened first: #8321) — a malformed row value is deleted, and a count '
+        + 'that was actually wanted is re-declared as a non-negative integer (`scale: 2.5` was '
+        + 'probably `2` or `3`)',
+      reason:
+        '#12174: the form-field row carried the pre-#8321 shape — bare `z.number()` — after '
+        + 'the object-field surface converged on `z.number().int().min(0)` for both digit '
+        + 'counts. The row keys are LIVE, measured in objectui: the spec bridge '
+        + '(`form-view.ts` mapField, objectui#5898) and plugin-form (`sectionFields.ts`) copy '
+        + 'them onto the runtime field, `ObjectForm` derives the number input\'s step from '
+        + '`precision`, and the `NumberField` widget reads `scale` — so a malformed count '
+        + 'flowed into rendering arithmetic (`Math.pow(10, -precision)`) with no defined '
+        + 'meaning. The schema now refuses non-integer and negative values for both keys at '
+        + 'parse time (ADR-0078 declared=enforced). Same no-type-gate rationale as the length '
+        + 'pair entry (`ui-form-field-length-malformed-refused`): the row usually omits '
+        + '`type`, so only value shape is checkable on this surface. '
+        + '⚠️ `CurrencyConfigSchema.precision` and the gantt `scale` enum are different '
+        + 'surfaces and are unchanged.',
+      acceptanceCriteria:
+        'Every form-view field row declaring `precision` or `scale` carries a non-negative '
+        + 'integer. Well-formed rows (`0`, `2`, any non-negative integer) parse '
+        + 'byte-identically to before; rows declaring neither key are untouched, and absence '
+        + 'stays absence. A stored form view carrying a malformed row value is refused on its '
+        + 'next authoring-path save with a prescriptive per-key issue; the author deletes the '
+        + 'key or re-declares the integer they meant.',
+    },
+    {
+      id: 'ui-mcp-connect-agent-unknown-keys-refused',
+      surface: 'page `mcp:connect-agent` component — `properties` (any key at all: the widget '
+        + 'declares no props)',
+      replacement: 'an empty `properties` bag (`{}`), or omit `properties` entirely. The widget '
+        + 'reads no prop: the console registration discards the schema node '
+        + '(`() => <ConnectAgent />`) and the component function takes no parameters — every '
+        + 'value it renders comes from `/discovery`, i18n and its own state — so there is no '
+        + 'declared key to move to; a key authored on it configures nothing and is removed, '
+        + 'not renamed. Node-level keys (`visibleWhen`, `id`, `style`, …) stay on the component '
+        + 'node, where the page runtime reads them.',
+      reason:
+        'This was a third instance of the #8691/#8744 class (#11575 closed the previous two): a '
+        + 'console-registered widget on `@objectstack/mcp`\'s plugin-shipped Setup page, '
+        + 'reachable through the component type union\'s open string arm, with a registered '
+        + 'renderer but no `ComponentPropsMap` row — so the #5068 props gate\'s dispatch '
+        + 'skipped it as unregistered, any authored key rode through every validator in '
+        + 'silence, and door 3 of the mcp canonical-envelope gate (#12269) had to carry a '
+        + 'standing exemption for the type. The new row is strict and EMPTY, measured from the '
+        + 'renderer\'s actual read points at the objectui pin (not from the registration\'s '
+        + 'declared-input list): the registration ignores the component node entirely, so the '
+        + 'widget accepts no configuration at all, and an authored key is now a publish-time '
+        + 'refusal naming the surface instead of a silent no-op.',
+      acceptanceCriteria:
+        'Every `mcp:connect-agent` node authors an empty (or absent) `properties` bag and '
+        + 'validates clean — the plugin-shipped page (`connect_agent`) already does; '
+        + '`objectstack validate` reports no `component-props-unknown-key` finding for the '
+        + 'type. Any remaining authored key on the widget is deleted (it never configured '
+        + 'anything), and behaviour that seems to need one is a renderer capability request '
+        + 'against objectui, not a metadata key.',
     },
     {
       id: 'ui-record-blocks-unknown-keys-refused',
@@ -7216,6 +7437,31 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // `navigation` / `manifest.navigationContributions` (ADR-0029 D7), which the
     // engine registers.
     'kernel/Manifest:contributes.menus',
+    // #10726 — ADR-0049 enforce-or-remove fork on `contributes.routes`, the ONE
+    // `contributes` member deliberately excluded from #10724's nine-member
+    // retirement because removing it needed a ruling, not a tombstone: the key
+    // was the only DECLARED channel for a real capability (serving a code-handler
+    // endpoint), and four published surfaces — a customer-published skill among
+    // them — taught it as working machinery. Maintainer ruled Option B 2026-08-22
+    // (「接受所有」 on the decision batch carrying the four-axis analysis): remove
+    // the key; author-facing materials redirect to the imperative `http.server`
+    // mount, the form that actually works. The ruling's cloud precondition was
+    // discharged 2026-08-24 (#10812: cloud @ 5b5925a, zero `manifest.contributes`
+    // reads, controls green), completing #10627's three-repo census at exactly
+    // one live read (engine.ts, member `kinds` — now the block's sole survivor).
+    //
+    // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
+    // tombstone ships on the 17.x line (launch-window convention) and the
+    // prescription lives at the major boundary where `migrate meta` users look.
+    //
+    // Registered here but NOT in `src/conversions/registry.ts`, for the reason
+    // `kernel/Manifest:loading` gives: a package manifest is not a stack
+    // collection member (`PLURAL_TO_SINGULAR` has no `packages` / `plugins`
+    // entry), so a D2 conversion would be a transform with no seam that ever
+    // runs. The prescription reaches authors through the tombstone at
+    // `os plugin build` → `ManifestSchema.safeParse` and through the D3 semantic
+    // entry `plugin-manifest-contributes-routes-retired`.
+    'kernel/Manifest:contributes.routes',
     // #10724 — ADR-0049 enforce-or-remove on the plugin manifest's `contributes`
     // block; one of NINE members tombstoned together. Census, registration major,
     // and the why-no-D2-conversion reasoning are recorded once in the sibling
@@ -7945,6 +8191,42 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // narrowings ride minor releases) and the prescription lives at the major
     // boundary where `migrate meta` users look (the #8586 / PR #8702 precedent).
     'kernel/AdvancedPluginLifecycleConfig',
+    // #12340 — kernel/plugin-lifecycle-advanced.zod.ts
+    // `DistributedStateConfigSchema`, retired whole (ADR-0049 enforce-or-remove).
+    //
+    // The orphan value schema of `HotReloadConfig.distributedConfig`, which had
+    // ZERO readers — measured at cdbd9204b6 with a firing positive control
+    // (`stateStrategy` resolves to real readers in `core/src/hot-reload.ts`, so
+    // the scan sees readers; `distributedConfig` resolved to nothing outside
+    // `packages/spec` itself in objectstack, and to nothing in objectui). An
+    // author could name a Redis or etcd endpoint, a key prefix, a TTL, auth
+    // credentials and a replication factor, and NOTHING ever opened a connection
+    // — the #3950 shape, sharpened by cluster-persistence vocabulary an AI author
+    // (ADR-0033) reads as proof the capability exists.
+    //
+    // It leaves with the enum value it existed for. `HotReloadConfig.stateStrategy`
+    // narrowed to ['memory','none'] in the same card, because the 'disk' and
+    // 'distributed' arms of `PluginStateManager.saveState` both wrote to the same
+    // in-memory Map as 'memory' and said so at DEBUG level only. With
+    // 'distributed' gone, a key whose own doc comment called it "required when
+    // stateStrategy is 'distributed'" names a value that no longer exists — it
+    // could not honestly outlive the narrowing.
+    //
+    // This is the #11825 keep, narrowed from inside, NOT reversed: that ruling
+    // kept `HotReloadConfigSchema` and `HotReloadManager` as a host-driven library
+    // and they both stand here. What it also listed among the survivors was
+    // `DistributedStateConfig` — a line this card reverses on new evidence, since
+    // #11825 measured the CONTAINER's six groups and never this key's own readers.
+    // The survival pin in `plugin-lifecycle-advanced-retirement.test.ts` moves in
+    // the same commit, deliberately and with the reasoning recorded there.
+    //
+    // Route 3: `HotReloadConfig` is not an authorable surface — no metadata-type
+    // binding, stack collection or manifest embed ever carried it, and nothing in
+    // the tree parses `HotReloadConfigSchema` outside its own unit test — so there
+    // is no authored document for a D2 conversion to rewrite and nobody who could
+    // receive a parse-time tombstone. This table plus the D3 semantic entry
+    // `hot-reload-inert-state-strategies-retired` ARE the declaration.
+    'kernel/DistributedStateConfig',
     // #11825 — `kernel/GracefulDegradation` left with
     // `kernel/AdvancedPluginLifecycleConfig`: its ONLY consumer was the retired
     // container's `degradation` key (the #3950 rule — an exported value schema

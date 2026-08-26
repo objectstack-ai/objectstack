@@ -214,9 +214,12 @@ describe('[#5582] a 5xx that declares no code passes its status and invents noth
         // This is the exact shape the two pins this issue named were written
         // on, and the exact shape `resolveErrorResponse` already answers this
         // way ("a dynamically-assigned status is treated identically (no code
-        // declared)", `rest-5xx-message-sanitization.test.ts`): ADR-0112 says
-        // the PRODUCER names the condition, so the half that was declared is
-        // honoured and the half that was not is left empty. Inventing
+        // declared)", `rest-5xx-message-sanitization.test.ts`): ADR-0112 D4
+        // governs the semantic-CODE channel — the producer names the condition
+        // on the CODE axis — so the half that was declared is
+        // honoured and the half that was not is left empty. The 502 itself
+        // passes through on #5437/#5582's rule, NOT the ADR's: ADR-0112 rules
+        // no HTTP status for an undeclared throw. Inventing
         // `INTERNAL_ERROR` here would put a code on the wire nobody wrote —
         // and overwriting the 502 with a 500 would re-derive a declared status
         // from message text, which is what #5437 ruled against one door over.

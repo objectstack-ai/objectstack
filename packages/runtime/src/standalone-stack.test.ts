@@ -20,6 +20,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createStandaloneStack } from './standalone-stack.js';
 import { createDefaultHostConfig, resolveDefaultArtifactPath } from './default-host.js';
+// [#11999] The DECLARED contract for the `api` block this factory emits. The
+// producer side of the pin whose absence let `'none'` ship: asserted against
+// the value `createStandaloneStack` actually returns, never against a copy of
+// it. `@objectstack/spec` is a plain `dependencies` entry of this package.
+import { RestApiConfigSchema } from '@objectstack/spec/api';
 // The REAL resolution, imported — not reproduced. `@objectstack/plugin-security`
 // is a plain `dependencies` entry of this package (and another test in this same
 // package, src/domains/share-links-enforcement-context.test.ts, already imports
@@ -124,6 +129,30 @@ describe('createStandaloneStack — surfaces app RBAC from the artifact (ADR-005
     expect(result.requires).toEqual(['auth']);
     expect(result.objects!.map((o: any) => o.name)).toEqual(['note']);
     expect(result.manifest?.id).toBe('com.test.scope-app');
+  });
+
+  it('[#11999] the emitted `api` block is a value RestApiConfigSchema accepts', () => {
+    // Parsed off the REAL boot result, not off a restatement of it — the
+    // hand-copies are what let three packages disagree here.
+    //
+    // Until #11999 this shipped `projectResolution: 'none'`, which the
+    // declared enum does not contain. Nothing caught it because `RestServer`
+    // CAST this config rather than parsing it, and every reader that acts on
+    // the key is gated on `enableProjectScoping` first — so the undeclared
+    // value silently took `'auto'`'s branch without ever being named as such.
+    const parsed = RestApiConfigSchema.parse({ ...result.api });
+    expect(parsed.enableProjectScoping).toBe(false);
+    expect(parsed.projectResolution).toBe('auto');
+
+    // …and the schema is genuinely discriminating here, not vacuously green:
+    // the value that shipped is refused by the very same instrument, on the
+    // `projectResolution` path specifically.
+    const shipped = RestApiConfigSchema.safeParse({ ...result.api, projectResolution: 'none' });
+    expect(shipped.success).toBe(false);
+    const issue = shipped.success ? undefined : shipped.error.issues.find(
+      (i) => i.path.join('.') === 'projectResolution',
+    );
+    expect(issue?.code).toBe('invalid_value');
   });
 
   it('the surfaced config feeds the REAL appSecurityPluginOptions → the app profile', () => {

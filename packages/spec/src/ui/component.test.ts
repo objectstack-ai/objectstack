@@ -1010,6 +1010,36 @@ describe('ComponentPropsMap', () => {
       }
     });
   });
+
+  // #12344 — the `@objectstack/mcp` console widget, the same mechanism a
+  // third instance over. Row exists so the #5068 gate's dispatch reaches it
+  // (and so the mcp canonical-envelope gate's door 3 reads its bag instead of
+  // carrying a standing exemption); the accepted key set is EMPTY, measured
+  // from the renderer's read points at the `.objectui-sha` pin (the
+  // registration discards the schema node — `() => <ConnectAgent />` — and
+  // the component function takes no parameters).
+  describe('mcp console widget (#12344)', () => {
+    it('declares a row for mcp:connect-agent', () => {
+      expect(ComponentPropsMap['mcp:connect-agent']).toBeDefined();
+    });
+
+    it('accepts the empty bag the shipped page authors', () => {
+      expect(() => ComponentPropsMap['mcp:connect-agent'].parse({})).not.toThrow();
+    });
+
+    it('refuses any authored key, naming the surface — the pre-row silent no-op', () => {
+      // Before the row, the key below rode through every validator in
+      // silence (the widget reads nothing authored). The refusal must name
+      // WHICH zero-prop component refused, or the author is left guessing.
+      const widget = ComponentPropsMap['mcp:connect-agent'].safeParse({ serverUrl: 'https://x' });
+      expect(widget.success).toBe(false);
+      if (!widget.success) {
+        const message = widget.error.issues.map((i) => i.message).join('\n');
+        expect(message).toContain('mcp:connect-agent');
+        expect(message).toContain('serverUrl');
+      }
+    });
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -1720,8 +1750,45 @@ describe('RecordActivityProps (enhanced)', () => {
     expect(result.limit).toBe(50);
   });
 
-  it('should reject invalid feed item type', () => {
-    expect(() => RecordActivityProps.parse({ types: ['invalid_type'] })).toThrow();
+  // -------------------------------------------------------------------------
+  // `types` is an OPEN vocabulary (#11658, executing the 2026-08-24 maintainer
+  // ruling on #11507: `sys_activity.type` is author-extensible, and "every
+  // closed map over this vocabulary is now the bug"). The closed-enum pin that
+  // used to live here ("should reject invalid feed item type",
+  // `types: ['invalid_type']` throwing) pinned exactly the branch the ruling
+  // removed — it is replaced, not merely reworded, by the cases below.
+  // -------------------------------------------------------------------------
+  it('accepts author-contributed activity kinds beyond the built-in set (#11507 ruling, #11658)', () => {
+    // 'scheduled' is a real contributed value (hotcrm writes it today);
+    // 'my_custom_kind' stands in for any future author vocabulary.
+    const result = RecordActivityProps.safeParse({
+      types: ['comment', 'scheduled', 'my_custom_kind'],
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.types).toEqual(['comment', 'scheduled', 'my_custom_kind']);
+    }
+  });
+
+  it('does not reject a typo of a built-in kind by name — the ruling accepted this cost (#11658)', () => {
+    // Under the closed enum, 'commnet' got a named rejection. An open
+    // vocabulary cannot distinguish a typo from a contributed kind, and the
+    // ruling accepted that trade rather than re-close the vocabulary.
+    const result = RecordActivityProps.safeParse({ types: ['commnet'] });
+    expect(result.success).toBe(true);
+  });
+
+  it('still rejects non-string and empty entries — open vocabulary, not untyped (#11658)', () => {
+    const nonString = RecordActivityProps.safeParse({ types: [42] });
+    expect(nonString.success).toBe(false);
+    if (!nonString.success) {
+      expect(nonString.error.issues[0]?.path).toEqual(['types', 0]);
+    }
+    const empty = RecordActivityProps.safeParse({ types: [''] });
+    expect(empty.success).toBe(false);
+    if (!empty.success) {
+      expect(empty.error.issues[0]?.path).toEqual(['types', 0]);
+    }
   });
 });
 

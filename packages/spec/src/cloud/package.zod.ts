@@ -234,7 +234,7 @@ export const PackageSchema = lazySchema(() => z.object({
   /**
    * Publisher provenance tier — surfaced as a trust badge in the Marketplace
    * and Studio. Defaults to `private` for org-scoped packages; the
-   * `objectstack publish` CLI sets it explicitly when promoting first-party
+   * `os package publish` command sets it explicitly when promoting first-party
    * or partner content.
    */
   publisher: PackagePublisherSchema.default('private'),

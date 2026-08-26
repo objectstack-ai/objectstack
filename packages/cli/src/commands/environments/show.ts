@@ -6,13 +6,13 @@ import { createApiClient, requireAuth } from '../../utils/api-client.js';
 import { formatOutput } from '../../utils/output-formatter.js';
 
 /**
- * `os environments show <id>` — show detailed information for a single project.
+ * `os environments show <id>` — show detailed information for a single environment.
  *
- * Renders the project row plus its database, active credential, and
+ * Renders the environment row plus its database, active credential, and
  * membership row (same shape as `client.projects.get(id)`).
  */
 export default class EnvironmentsShow extends Command {
-  static override description = 'Show detailed information for a project';
+  static override description = 'Show detailed information for an environment';
 
   static override examples = [
     '$ os environments show 00000000-0000-0000-0000-000000000001',
@@ -20,7 +20,7 @@ export default class EnvironmentsShow extends Command {
   ];
 
   static override args = {
-    id: Args.string({ description: 'Project id', required: true }),
+    id: Args.string({ description: 'Environment id', required: true }),
   };
 
   static override flags = {
@@ -49,7 +49,7 @@ export default class EnvironmentsShow extends Command {
         await formatOutput(res, 'yaml');
       } else {
         const p = res?.project ?? {};
-        console.log(`\nProject: ${p.display_name ?? p.id}`);
+        console.log(`\nEnvironment: ${p.display_name ?? p.id}`);
         console.log('─'.repeat(60));
         console.log(`  id:             ${p.id}`);
         console.log(`  organization:   ${p.organization_id ?? '—'}`);

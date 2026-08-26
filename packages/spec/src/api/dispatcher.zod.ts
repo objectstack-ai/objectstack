@@ -15,9 +15,10 @@ import { CoreServiceName, ServiceCriticalitySchema } from '../system/core-servic
  * 3. Returns 503 Service Unavailable when a service is not registered
  * 4. Serves prefixes registered by the kernel services above. Plugins that need
  *    a code handler mount it imperatively on the `http.server` service (resolve
- *    it from the plugin context on `kernel:ready`), NOT through the manifest's
- *    `contributes.routes` key — nothing reads that key, so an entry there parses
- *    cleanly and serves nothing.
+ *    it from the plugin context on `kernel:ready`) — the manifest's
+ *    `contributes.routes` key was removed in @objectstack/spec 17 (#10726):
+ *    nothing ever read it, and authoring it is now a tsc error and a parse
+ *    error carrying that prescription.
  * 
  * Architecture alignment:
  * - Kubernetes: API server aggregation layer

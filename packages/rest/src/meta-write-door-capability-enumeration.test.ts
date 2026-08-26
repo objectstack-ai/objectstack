@@ -21,6 +21,18 @@
  * notice it is missing a gate. The per-door refusal cases are what that
  * coverage assertion is worth something for.
  *
+ * ## [#11473] "the server registers" means every MOUNT BASE, not one
+ *
+ * `RestServer.registerRoutes` calls `registerForBase(...)` once per base, so
+ * with `api.enableProjectScoping` on, the same door set is mounted a second time
+ * under `/api/v1/environments/:environmentId`. The derivation above used to
+ * filter the route table on a literal `/api/v1/meta` prefix, which no scoped
+ * door can match — a filter whose blind spot was precisely the population it
+ * exists to enumerate, and invisible from inside the assertion because the only
+ * boot here was an unscoped one, for which the filter is complete. It now
+ * matches the `meta` path SEGMENT and the expectation is built per base, so the
+ * closed-set claim is checked against every mount the composition brings up.
+ *
  * ## What was measured before the gate landed (both new doors)
  *
  *   shape                                   publish        rollback
@@ -44,9 +56,28 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { ANONYMOUS_DENY_CODE, ANONYMOUS_DENY_STATUS } from '@objectstack/core';
 import { RestServer } from './rest-server.js';
 
-const META = '/api/v1/meta';
+/**
+ * The unscoped mount base, and the `/meta` prefix on it. The `DOORS` table
+ * below is written against `META`; every other mount is derived from it by
+ * {@link onBase}.
+ */
+const UNSCOPED_BASE = '/api/v1';
+const META = `${UNSCOPED_BASE}/meta`;
+
+/**
+ * [#11473] The environment-scoped mount base.
+ *
+ * `registerRoutes` calls `registerForBase(...)` **once per base**, and
+ * `registerMetadataEndpoints` is one of the registrars it calls — so the whole
+ * door set is mounted a SECOND time under this prefix whenever
+ * `api.enableProjectScoping` is true. Measured by the boots below: 5 write
+ * doors with scoping off, 10 with `projectResolution: 'auto'`, and 5 — the
+ * scoped ones ONLY — with `'required'`.
+ */
+const SCOPED_BASE = `${UNSCOPED_BASE}/environments/:environmentId`;
 
 function mockServer() {
     return {
@@ -81,14 +112,20 @@ interface Door {
 }
 
 /**
- * The six metadata write doors, as registered by `registerMetadataEndpoints`.
+ * The metadata write doors, as registered by `registerMetadataEndpoints` — five
+ * of them since #12195 retired the compound-name save (the count is the table's
+ * own length, never a number written in prose: it read "six" for as long as it
+ * took #12195 to remove an entry without touching this sentence).
+ *
  * Four carried the gate before #8919 (`_migrate-stored` #4857-era, the single
  * and compound saves #6603/#7019, the reset #7019); `publish` and `rollback`
- * are the two this card added.
+ * are the two that card added.
  *
  * ⚠️ This table is COMPARED against the server's own route table below — do not
  * add a door here without adding its refusal case, and do not add a mutating
- * `/meta` route to the server without adding it here.
+ * `/meta` route to the server without adding it here. The comparison is made
+ * once PER MOUNT BASE (see {@link onBase}), so a door is enumerated on every
+ * base the composition mounts it on, not only on `/api/v1`.
  */
 const DOORS: readonly Door[] = [
     {
@@ -128,7 +165,53 @@ const DOORS: readonly Door[] = [
 /** Every protocol method any door reaches — all present, so 501 is never the answer. */
 const PROTOCOL_METHODS = [...new Set(DOORS.map((d) => d.protocolMethod))];
 
-function boot(context: Record<string, unknown> | undefined) {
+/**
+ * [#11473] A `/meta` route on ANY mount base — matched on the `meta` path
+ * SEGMENT, deliberately not on a `/api/v1/meta` prefix.
+ *
+ * The prefix spelling is what this file used until #11473, and its blind spot
+ * was exactly the population the enumeration exists to enumerate: a scoped door
+ * is mounted at `/api/v1/environments/:environmentId/meta/...`, which does not
+ * start with `/api/v1/meta`. Because the only boot here was an unscoped one,
+ * the filter was complete FOR THAT BOOT and the gap could not be seen from
+ * inside the assertion it silently narrowed. Measured before the change, on the
+ * three compositions the tests below now boot: the prefix filter derived 5, 5
+ * and 0 doors where 5, 10 and 5 are mounted — so under
+ * `projectResolution: 'required'` the "closed, enumerated set" was being
+ * asserted over the EMPTY set while five real write doors were live.
+ *
+ * Over-inclusive by intent: this filter's job is to force a new mutating meta
+ * route to be enumerated, so catching one route too many costs an explicit
+ * table entry, while catching one too few costs the whole assertion.
+ */
+const META_SEGMENT = /(?:^|\/)meta(?:\/|$)/;
+
+/**
+ * The same door, addressed on another mount base
+ * (`/api/v1/meta/...` → `/api/v1/environments/:environmentId/meta/...`).
+ */
+function onBase(door: Door, base: string): string {
+    return `${base}${door.path.slice(UNSCOPED_BASE.length)}`;
+}
+
+/** Every door, on every base the composition under test mounts. */
+function expectedDoors(bases: readonly string[]): string[] {
+    return bases
+        .flatMap((base) => DOORS.map((d) => `${d.method} ${onBase(d, base)}`))
+        .sort();
+}
+
+/**
+ * [#11473] The scoping half of the composition under test. Omitted → the
+ * platform default, which is `enableProjectScoping: false` (`rest-server.ts`,
+ * `api.enableProjectScoping ?? false`) and therefore a single unscoped mount.
+ */
+interface Composition {
+    readonly enableProjectScoping?: boolean;
+    readonly projectResolution?: 'required' | 'optional' | 'auto';
+}
+
+function boot(context: Record<string, unknown> | undefined, composition: Composition = {}) {
     const calls: Record<string, number> = {};
     const protocol: any = {
         getDiscovery: vi.fn().mockResolvedValue({ version: 'v0', routes: { data: '', metadata: '', ui: '', auth: '/auth' } }),
@@ -149,30 +232,47 @@ function boot(context: Record<string, unknown> | undefined) {
         });
     }
 
-    const rest = new RestServer(mockServer() as any, protocol as any, { api: { requireAuth: false } } as any);
+    const rest = new RestServer(
+        mockServer() as any,
+        protocol as any,
+        { api: { requireAuth: false, ...composition } } as any,
+    );
     (rest as any).resolveExecCtx = async () => context;
     rest.registerRoutes();
 
     return {
         rest,
         calls,
-        /** Every mutating `/meta` route the composed server actually registers. */
+        /**
+         * Every mutating `/meta` route the composed server actually registers —
+         * on EVERY base it registered one on (see {@link META_SEGMENT}).
+         */
         registeredWriteDoors: () => (rest as any).getRoutes()
             .filter((r: any) => typeof r.path === 'string'
-                && r.path.startsWith(`${META}`)
+                && META_SEGMENT.test(r.path)
                 && r.method !== 'GET')
             .map((r: any) => `${r.method} ${r.path}`)
             .sort(),
-        knock: async (door: Door) => {
+        /**
+         * Drive one door as the composed server would route it. `base` selects
+         * the mount: the scoped one needs an `environmentId` path param, which
+         * is also what makes a scoped knock a REAL knock rather than a second
+         * boot that never routes anything (#11373's shape, one layer out).
+         */
+        knock: async (door: Door, base: string = UNSCOPED_BASE) => {
+            const path = onBase(door, base);
+            const params = base === UNSCOPED_BASE
+                ? door.params
+                : { environmentId: 'env_probe', ...door.params };
             const route = (rest as any).getRoutes().find(
-                (r: any) => r.method === door.method && r.path === door.path,
+                (r: any) => r.method === door.method && r.path === path,
             );
-            if (!route) throw new Error(`route not registered: ${door.method} ${door.path}`);
+            if (!route) throw new Error(`route not registered: ${door.method} ${path}`);
             const res = mockRes();
             await route.handler({
                 method: door.method,
-                path: door.path.replace(/:(\w+)/g, (_m: string, k: string) => door.params[k] ?? k),
-                params: door.params,
+                path: path.replace(/:(\w+)/g, (_m: string, k: string) => params[k] ?? k),
+                params,
                 query: {},
                 headers: {},
                 body: door.body,
@@ -189,10 +289,118 @@ describe('#8919 — the metadata write doors are a CLOSED, enumerated set', () =
         // below runs and the author learns whether it carries the gate. A door
         // added without a gate can no longer arrive silently.
         const stack = boot({ userId: 'u', systemPermissions: [] });
-        expect(stack.registeredWriteDoors()).toEqual(
-            DOORS.map((d) => `${d.method} ${d.path}`).sort(),
-        );
+        expect(stack.registeredWriteDoors()).toEqual(expectedDoors([UNSCOPED_BASE]));
     });
+});
+
+describe('#11473 — "CLOSED, enumerated set" holds for EVERY base, not just the one this file boots', () => {
+    // The claim above this file's name is global; the derivation that backed it
+    // was not. `registerRoutes` mounts the door set once per base, and the only
+    // composition anyone booted here was the default one — so the assertion was
+    // true about `/api/v1` and silent about everything else. These cases boot
+    // the other two compositions the server can actually be configured into.
+    //
+    // ⚠️ LATENT, not live: `enableProjectScoping` defaults to `false`, so a
+    // default deployment mounts none of the scoped doors and an anonymous probe
+    // of one 404s (`ENDPOINT_NOT_FOUND`). What is being closed here is a
+    // coverage gap in an anti-drift assertion, not a reachable hole.
+
+    it("'auto' mounts BOTH bases, and both are enumerated", () => {
+        const stack = boot(
+            { userId: 'u', systemPermissions: [] },
+            { enableProjectScoping: true, projectResolution: 'auto' },
+        );
+        const doors = stack.registeredWriteDoors();
+        expect(doors).toEqual(expectedDoors([UNSCOPED_BASE, SCOPED_BASE]));
+        // Stated as a count too, because the number is the part that regressed:
+        // the pre-#11473 prefix filter saw 5 of these 10.
+        expect(doors).toHaveLength(DOORS.length * 2);
+    });
+
+    it("'required' mounts ONLY the scoped base — the case a `/api/v1/meta` prefix filter enumerated as empty", () => {
+        // The sharpest reading of the blind spot. Under `required`,
+        // `registerForBase` is called with the scoped base and nothing else, so
+        // a prefix filter anchored at `/api/v1/meta` derives ZERO doors and the
+        // anti-drift comparison would have been asserting a closed set over an
+        // empty one while five real write doors were mounted.
+        const stack = boot(
+            { userId: 'u', systemPermissions: [] },
+            { enableProjectScoping: true, projectResolution: 'required' },
+        );
+        const doors = stack.registeredWriteDoors();
+        expect(doors).toEqual(expectedDoors([SCOPED_BASE]));
+        expect(doors).toHaveLength(DOORS.length);
+        expect(doors.every((d: string) => d.includes(SCOPED_BASE))).toBe(true);
+        // And nothing is left on the unscoped base to fall back to.
+        expect(doors.some((d: string) => d.includes(`${META}/`))).toBe(false);
+    });
+});
+
+describe('#11473 — the scoped mount really ROUTES, and refuses on the same terms', () => {
+    // One probe, not a second copy of the matrix above, and the reason is
+    // structural rather than economical: `registerMetadataEndpoints` swaps in a
+    // guarded registrar, calls `registerMetadataEndpointsInner(basePath)` inside
+    // the swap, and restores it in a `finally` — so the umbrella wraps whatever
+    // that body registers, and the body is the same body on both passes. The
+    // per-door capability gates live in that same body. There is no seam at
+    // which the two mounts could carry different gates.
+    //
+    // What is NOT structural, and is therefore what these cases actually buy:
+    // that a request addressed to the scoped path is routed at all. A scoping-on
+    // fixture that boots but never routes into the scoped mount would pass while
+    // measuring nothing — the failure shape #11373 found one layer down. Each
+    // case below resolves a real route object by its scoped path and invokes it.
+
+    const SCOPED_DOORS = DOORS.map((d) => [`${d.label} @ scoped`, d] as const);
+
+    it.each(SCOPED_DOORS)(
+        '%s → anonymous gets the flat anonymous-deny envelope, protocol never reached',
+        async (_label, door) => {
+            const stack = boot(undefined, { enableProjectScoping: true, projectResolution: 'auto' });
+            const out = await stack.knock(door, SCOPED_BASE);
+            // The `/data` + `/meta` family answers the FLAT envelope
+            // (`{ error, code, message }`), not the wrapped one — both are live
+            // and sanctioned per ADR-0112's 2026-07-30 amendment, and the rule
+            // is to assert the envelope the seam DECLARES rather than a chain
+            // that swallows either.
+            expect(out.status).toBe(ANONYMOUS_DENY_STATUS);
+            expect(out.body).toMatchObject({ code: ANONYMOUS_DENY_CODE });
+            expect(stack.calls[door.protocolMethod]).toBe(0);
+        },
+    );
+
+    it.each(SCOPED_DOORS)(
+        '%s → a capability-less caller gets 403 FORBIDDEN, protocol never reached',
+        async (_label, door) => {
+            const stack = boot(
+                { userId: 'u_portal', systemPermissions: [] },
+                { enableProjectScoping: true, projectResolution: 'auto' },
+            );
+            const out = await stack.knock(door, SCOPED_BASE);
+            expect(out.status).toBe(403);
+            expect(out.body).toMatchObject({ error: { code: 'FORBIDDEN' } });
+            expect(stack.calls[door.protocolMethod]).toBe(0);
+        },
+    );
+
+    it.each(SCOPED_DOORS)(
+        '%s → the control: a `manage_metadata` holder reaches the protocol through the scoped path',
+        async (_label, door) => {
+            // Without this, the two refusals above cannot be told apart from a
+            // scoped mount that refuses everything for the wrong reason (an
+            // unrouted path, a missing param, a 404). The protocol call count
+            // going from 0 to 1 on the SAME scoped path is what proves the
+            // refusals were decisions and not accidents.
+            const stack = boot(
+                { userId: 'u_author', systemPermissions: ['manage_metadata'] },
+                { enableProjectScoping: true, projectResolution: 'auto' },
+            );
+            const out = await stack.knock(door, SCOPED_BASE);
+            expect(out.status).not.toBe(403);
+            expect(out.status).not.toBe(ANONYMOUS_DENY_STATUS);
+            expect(stack.calls[door.protocolMethod]).toBe(1);
+        },
+    );
 });
 
 describe('#8919 — every metadata write door refuses a capability-less caller', () => {

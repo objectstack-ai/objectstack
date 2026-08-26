@@ -24,7 +24,6 @@
     "kernel/DeprecationNotice",
     "kernel/DisablePackageRequest",
     "kernel/DisablePackageResponse",
-    "kernel/DistributedStateConfig",
     "kernel/EnablePackageRequest",
     "kernel/EnablePackageResponse",
     "kernel/Event",

@@ -2911,7 +2911,12 @@ export class SchemaRegistry {
     // the DB row silently shadow the new artifact value. That is correct
     // ADR-0005 behavior, but the silent shadowing can surprise package
     // authors and operators. Log a single warning so the situation is
-    // discoverable in startup logs.
+    // discoverable in the logs.
+    //
+    // [#12027] This guard covers ONE of the two orders — the package arriving
+    // second, which at runtime means a late registration (marketplace install,
+    // HMR reload), never a cold boot. The cold-boot order is covered by the
+    // second guard below; read the two together.
     // [#7730] `bareKey` rather than `baseName`: for a discriminated type the
     // overlay slot this warning asks about is the bundle member with the SAME
     // discriminator (`auth.welcome@zh-CN`), not the name on its own — which is
@@ -2925,6 +2930,78 @@ export class SchemaRegistry {
           `exists in sys_metadata. The runtime row will shadow the package value ` +
           `(ADR-0005 overlay precedence). Rename one, or delete the sys_metadata ` +
           `row if the package value should win.`,
+        );
+      }
+    }
+
+    // [#12027] THE SAME COLLISION, IN THE ORDER A COLD BOOT ACTUALLY PRODUCES.
+    //
+    // The guard above carries `packageId &&`, so it only ever speaks when the
+    // PACKAGE registers second. A kernel boot cannot produce that order: the
+    // artifact reaches this registry in kernel Phase 1 (AppPlugin.init ->
+    // `manifest.register` -> `ObjectQL.registerApp`), and `sys_metadata`
+    // rehydration runs in Phase 2 (`ObjectQLPlugin.start` ->
+    // `restoreMetadataFromDb` -> `loadMetaFromDb` -> the protocol's
+    // `hydrateOverlayIntoRegistry`, which registers under the BARE key with no
+    // packageId). Phase 1 strictly precedes Phase 2, so at boot the overlay is
+    // always the second arrival and the guard above is structurally unreachable
+    // — it fires only for a LATE package registration (marketplace install, a
+    // post-`start()` `manifest.register`, an HMR reload).
+    //
+    // Measured on a real `@objectstack/example-crm` boot before this landed: a
+    // stored `view` overlay of a packaged view produced 0 `[Registry] Collision`
+    // lines and 4 silent shadowings (the container plus its three expanded
+    // ViewItems). ADR-0005 §Collision-warning says this warning is what makes
+    // the silent shadowing "discoverable in startup logs"; in the only order
+    // startup produces, it was not discoverable at all.
+    //
+    // ## Why this is a SECOND message and not one message widened to fit both
+    //
+    // The two orders are the same end state (`getItem` checks the bare key
+    // first, so the runtime row wins either way) reached by two different
+    // events, and the event is the part an operator has to act on. Above: a
+    // package just arrived and is DEAD ON ARRIVAL behind a row that predates
+    // it. Here: a stored row just took over a definition this process already
+    // loaded from code. A single message would have to drop which one arrived
+    // second, which is precisely the fact that tells the reader whether they
+    // are looking at a failed install or at a customization taking effect.
+    //
+    // ## Why it says "may be deliberate", and why it still fires by default
+    //
+    // Unlike the order above — where `!dbOnly._packageId` narrows to a
+    // package-LESS row, i.e. an accidental name collision — this direction
+    // cannot tell a deliberate customization from an accidental collision: the
+    // protocol merges the artifact's `_packageId`/`_provenance` envelope onto
+    // the overlay body (ADR-0010 §3.3 `mergeArtifactProtection`) before it
+    // reaches this method, so both look identical here. The message therefore
+    // states the consequence and both readings rather than accusing. It stays
+    // at `warn` because a diagnostic nobody sees is the defect being fixed.
+    //
+    // Volume, measured rather than assumed (the #12015 discipline — a warning
+    // that fires on every boot of a stock deployment is saying nothing):
+    // 0 lines on a stock CRM boot, because a stock `sys_metadata` holds no
+    // overlay of a packaged name; thereafter once per shadowed name per
+    // process. `!collection.has(bareKey)` is what bounds it — the line marks
+    // the TRANSITION (a bare slot that was empty is now taken), not the state,
+    // so the read-side hydration and the write-through, which re-register the
+    // same overlay on later reads and writes, stay silent.
+    if (!packageId && !collection.has(bareKey)) {
+      let shadowed: any;
+      for (const [key, existing] of collection) {
+        if (key !== bareKey && key.endsWith(`:${bareKey}`) && isCodeArtifactBody(existing)) {
+          shadowed = existing;
+          break;
+        }
+      }
+      if (shadowed) {
+        console.warn(
+          `[Registry] Collision: ${type}/${baseName} is shipped by package ` +
+          `"${shadowed._packageId}" and a runtime-authored row with the same name has ` +
+          `just been registered from sys_metadata. The runtime row now shadows the ` +
+          `package value (ADR-0005 overlay precedence): every read of ${type}/${baseName} ` +
+          `serves the stored row, not the packaged definition. That is the sanctioned ` +
+          `path when the row is a deliberate customization — if it is not one, delete ` +
+          `the sys_metadata row (or rename one of the two) so the package value serves.`,
         );
       }
     }

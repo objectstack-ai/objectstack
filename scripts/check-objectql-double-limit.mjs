@@ -230,6 +230,38 @@ const repoRoot = resolve(__dirname, '..');
 const BASELINE_PATH = 'scripts/objectql-double-limit.baseline.json';
 const SCAN_ROOT = 'packages';
 
+/**
+ * ## The dispatch-gates declaration — the `ROOT_DIR_WATCH_HINTS` idiom (#12322)
+ *
+ * `scripts/pm/dispatch-gates.mjs` derives WHICH gates a card must run by matching the
+ * path literals in each gate's source against the card's changed files. `SCAN_ROOT`
+ * above is a bare single-segment word, which `hintCovers` REFUSES as too generic (a
+ * measured refusal, +139084 fabricated pairs, and it stays). The population sentence
+ * this gate does state — every `*.test.ts` under that root — lives in a COMMENT, which
+ * the hint extractor masks by design. So before this declaration the derivation reached
+ * this gate for 0 of the ~2755-file test corpus: #12322 measured it, and a dev adding a
+ * hand-written ObjectQL double ran a full green local union with no signal that the gate
+ * exists to fail on it.
+ *
+ * ⚠️ Until #12300 there was nothing honest to write here. Every glob spelling of this
+ * population collapsed to a malformed double-separator prefix matching NOTHING, so the
+ * only spellable claim was the bare root — TRUE of 2755 test files and FALSE of the
+ * ~2500 non-test files under the same root, the costlier error, since a find double can
+ * only land in a test file. #12300 taught `hintCovers` to MATCH a glob in a non-final
+ * segment instead of collapsing it, so the precise spelling below is live: measured at
+ * 2755 of 2755 on this tree, 100% precise and complete against `testFilesUnder`'s own
+ * admission.
+ *
+ * ⛔ It must be spelled as a LITERAL, not built from `SCAN_ROOT` — the hint extractor
+ * reads source text, so a computed `` `${SCAN_ROOT}/**` `` would produce no hint and
+ * leave the gate exactly as invisible. Both directions are pinned in `--self-test`
+ * below, and the recorded verdict for this row in `scripts/pm/bare-root-worklist.mjs`
+ * carries its own liveness-and-precision pin over the live corpus. A declaration that
+ * can drift from the scan is worse than none — it replaces a silent gate with a lying
+ * one.
+ */
+const ROOT_DIR_WATCH_HINTS = ['packages/**/*.test.ts'];
+
 // ---------------------------------------------------------------------------
 // The probe vocabulary. Field names are deliberately synthetic so no double can
 // special-case them (many branch on `organization_id`, `user_id`, `id`).
@@ -1162,6 +1194,47 @@ async function selfTest() {
   expect('a shape-breaking double is ledgered in its own kind, not folded into blind',
     reconcile(fakeWrong, { 'b.test.ts': { blind: 0, wrong: 1 } }).length === 0
     && reconcile(fakeWrong, { 'b.test.ts': { blind: 1 } }).length === 2);
+
+  // -- the dispatch-gates declaration (#12322's landing obligation) ---------
+  //
+  // Enforcement cannot hold either half here: the declaration is read by ANOTHER TOOL
+  // (`scripts/pm/dispatch-gates.mjs`), so a wrong or stale one runs green in this file
+  // forever and pays itself out as a dev dispatched on a test-file card with this gate
+  // missing from the brief. A missing declaration is a silent gate; a surplus one is a
+  // lying gate. Driven through this gate's OWN corpus walk, not a copy of its regex.
+  const DECLARED_TAIL = '.test.ts';
+  const walked = testFilesUnder(join(repoRoot, SCAN_ROOT))
+    .map((abs) => relative(repoRoot, abs).replace(/\\/g, '/'));
+  // ⚠️ The needle is ASSEMBLED, never spelled. Written as a literal here it would appear
+  // in this assertion's own source text, so `includes` would find it in the check rather
+  // than in the declaration and stay green with the declaration deleted -- a phantom pin.
+  // Measured: the naive spelling survived deleting the whole declaration line.
+  const declNeedle = `'${SCAN_ROOT}/` + '*'.repeat(2) + `/*${DECLARED_TAIL}'`;
+  const ownSource = readFileSync(fileURLToPath(import.meta.url), 'utf8');
+  expect('the declaration is spelled as a LITERAL in this source, not computed -- the hint '
+    + 'extractor reads source text, so a computed root would build no hint at all',
+    ownSource.includes(declNeedle));
+  expect('the declared hint is rooted at the population constant this gate actually walks',
+    ROOT_DIR_WATCH_HINTS.length === 1 && ROOT_DIR_WATCH_HINTS[0].startsWith(`${SCAN_ROOT}/`));
+  expect('the corpus walk is non-empty, so the two directions below judge something',
+    walked.length > 0);
+  expect('nothing is declared that this gate does not walk -- every file testFilesUnder admits '
+    + 'lies under the declared root and ends in the declared extension',
+    ROOT_DIR_WATCH_HINTS.every((h) => h.endsWith(DECLARED_TAIL))
+    && walked.every((f) => f.startsWith(`${SCAN_ROOT}/`) && f.endsWith(DECLARED_TAIL)));
+  // …and the declared filter is a NARROWING rather than the bare root wearing a glob:
+  // a non-test sibling sitting in the same directory as an admitted file is NOT admitted.
+  const admitted = new Set(walked);
+  const siblingDir = walked.length ? dirname(join(repoRoot, walked[0])) : null;
+  const nonTestSibling = siblingDir
+    ? readdirSync(siblingDir)
+      .map((e) => relative(repoRoot, join(siblingDir, e)).replace(/\\/g, '/'))
+      .find((f) => !f.endsWith(DECLARED_TAIL) && statSync(join(repoRoot, f)).isFile())
+    : null;
+  expect('a non-test sibling exists to prove the filter discriminates', Boolean(nonTestSibling));
+  expect('and the declaration is a NARROWING, not the bare root wearing a glob -- that sibling '
+    + 'is under the same root and is NOT in the walk',
+    Boolean(nonTestSibling) && !admitted.has(nonTestSibling));
 
   if (failures.length > 0) {
     console.error(`x check-objectql-double-limit --self-test (${failures.length} failure(s)):\n`);

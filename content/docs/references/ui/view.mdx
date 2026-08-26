@@ -140,12 +140,12 @@ Column footer summary configuration
 | **options** | `{ label: string; value: string; color?: string; default?: boolean; … }[]` | optional | Options for select/multiselect/radio/checkboxes fields |
 | **reference** | `string` | optional | Target object name for lookup/master_detail fields |
 | **publicPicker** | `{ displayFields?: string[]; maxResults?: integer; filter?: object[]; object?: string }` | optional | Opt this field into the anonymous public-form lookup picker (GET /forms/:slug/lookup/:field). Without it the route answers 403 LOOKUP_NOT_PUBLIC and the field is stripped from the rendered public form. |
-| **maxLength** | `number` | optional | Maximum character length (for text/textarea/email/url/phone) |
-| **minLength** | `number` | optional | Minimum character length |
+| **maxLength** | `integer` | optional | Maximum character length (positive integer; for text/textarea/email/url/phone) |
+| **minLength** | `integer` | optional | Minimum character length (positive integer; `minLength: 0` is refused — express "no minimum" by omitting the key) |
 | **min** | `number` | optional | Minimum value (for number/currency/percent/slider) |
 | **max** | `number` | optional | Maximum value |
-| **precision** | `number` | optional | Total digits (for number/currency) |
-| **scale** | `number` | optional | Decimal places |
+| **precision** | `integer` | optional | Total digits (non-negative integer; for number/currency) |
+| **scale** | `integer` | optional | Decimal places (non-negative integer) |
 | **multiple** | `boolean` | optional | Allow multiple values (for select/lookup/file/image) |
 | **label** | `string \| Record<string, string>` | optional | Display label override |
 | **placeholder** | `string \| Record<string, string>` | optional | Placeholder text |
@@ -302,12 +302,12 @@ View filter rule
 | **options** | `{ label: string; value: string; color?: string; default?: boolean; … }[]` | optional | Options for select/multiselect/radio/checkboxes fields |
 | **reference** | `string` | optional | Target object name for lookup/master_detail fields |
 | **publicPicker** | `{ displayFields?: string[]; maxResults?: integer; filter?: object[]; object?: string }` | optional | Opt this field into the anonymous public-form lookup picker (GET /forms/:slug/lookup/:field). Without it the route answers 403 LOOKUP_NOT_PUBLIC and the field is stripped from the rendered public form. |
-| **maxLength** | `number` | optional | Maximum character length (for text/textarea/email/url/phone) |
-| **minLength** | `number` | optional | Minimum character length |
+| **maxLength** | `integer` | optional | Maximum character length (positive integer; for text/textarea/email/url/phone) |
+| **minLength** | `integer` | optional | Minimum character length (positive integer; `minLength: 0` is refused — express "no minimum" by omitting the key) |
 | **min** | `number` | optional | Minimum value (for number/currency/percent/slider) |
 | **max** | `number` | optional | Maximum value |
-| **precision** | `number` | optional | Total digits (for number/currency) |
-| **scale** | `number` | optional | Decimal places |
+| **precision** | `integer` | optional | Total digits (non-negative integer; for number/currency) |
+| **scale** | `integer` | optional | Decimal places (non-negative integer) |
 | **multiple** | `boolean` | optional | Allow multiple values (for select/lookup/file/image) |
 | **label** | `string \| Record<string, string>` | optional | Display label override |
 | **placeholder** | `string \| Record<string, string>` | optional | Placeholder text |

@@ -35,10 +35,12 @@
  *
  * The spawn is written out here rather than taken from `test/helpers/
  * serve-process.ts` on purpose: that helper always runs the child WITH `cwd` set
- * to the app, which is the one shape this file must not use. Only its
- * `childEnv()` choke point is borrowed (#11267) — what the child INHERITS is
- * orthogonal to which directory it is started in, and this file boots the real
- * stack, better-auth included, which reads `TEST` directly.
+ * to the app, which is the one shape this file must not use. What IS borrowed
+ * from it is everything orthogonal to the directory the child starts in:
+ * `childEnv()` (#11267) — this file boots the real stack, better-auth included,
+ * which reads `TEST` directly — plus `randomPort()` and `portContentionError()`
+ * (#12441), because a port draw is not a property of the CWD either and this
+ * file used to carry its own second, overlapping one.
  *
  * ── The anti-vacuity floor ───────────────────────────────────────────────
  *
@@ -57,7 +59,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { childEnv } from './helpers/serve-process.js';
+import { childEnv, portContentionError, randomPort } from './helpers/serve-process.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -149,6 +151,13 @@ interface Run { stdout: string; stderr: string; both: string }
  *
  * An early exit resolves rather than rejects: a boot that DIES still has to have
  * said why, and the refusal case below reads exactly that.
+ *
+ * ⭐ ONE exception (#12441): a boot that died because it could not BIND rejects,
+ * naming the port. Resolving it would hand the caller an output buffer with no
+ * marker in it, and the assertions would then fail with "the cluster gate was
+ * not loaded from the app" — a sentence about resolution bases, for a failure
+ * that is entirely about a port. That mis-signalling is the whole cost the card
+ * measured, and it is more expensive than the lost run.
  */
 function runServeFrom(
   cwd: string,
@@ -156,8 +165,15 @@ function runServeFrom(
   waitFor: RegExp,
   timeoutMs = 240_000,
 ): Promise<Run> {
-  return new Promise((resolveRun) => {
-    const port = String(40000 + Math.floor(Math.random() * 20000));
+  return new Promise((resolveRun, rejectRun) => {
+    // ⛔ Was an inline `String(40000 + Math.random() * 20000)`, a SECOND blind
+    // draw whose range overlapped the one in
+    // `serve-node-env-production-default.e2e.test.ts` (41000-60000) — so under
+    // `--maxWorkers > 1` the two files could collide with EACH OTHER, not only
+    // with a neighbouring agent's dev server. One bind-probed draw now, in the
+    // helper; its docblock is the authority on what that does and does not
+    // guarantee.
+    const port = randomPort();
     const child = spawn(TSX, [CLI, 'serve', configArg, '--port', port], {
       cwd,
       env: childEnv({
@@ -179,6 +195,15 @@ function runServeFrom(
       settled = true;
       clearTimeout(timer);
       try { child.kill('SIGTERM'); } catch { /* already gone */ }
+      const contended = portContentionError(
+        stdout + stderr,
+        'os serve (bin/run-dev.js ⇒ NODE_ENV=development)',
+        port,
+      );
+      if (contended) {
+        rejectRun(contended);
+        return;
+      }
       resolveRun({ stdout, stderr, both: stdout + stderr });
     };
     const timer = setTimeout(finish, timeoutMs);

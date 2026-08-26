@@ -31,6 +31,14 @@ import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, it, expect } from 'vitest';
+// The repo's ONE answer to "is this span a comment, or code?" — see its header
+// for the two private-stripper families that drifted apart and why neither was
+// safe. `stripComments` (not `maskComments`) is the projection this file wants:
+// every finding here reports a `file:line` or a bare file name, never an
+// offset, and the module's own guidance is to pick by what the caller reports.
+// The `.mjs` specifier is deliberate; `scripts/js-comment-mask.d.mts` beside it
+// is a hand-written declaration, so this import needs no `allowJs`.
+import { stripComments } from '../../../scripts/js-comment-mask.mjs';
 import { METADATA_ROUTE_LEDGER } from './metadata-route-ledger.js';
 
 /**
@@ -60,49 +68,26 @@ const NON_ROUTE_MEMBERS = new Set(['use', 'notFound', 'onError', 'fire', 'fetch'
 // ---------------------------------------------------------------------------
 
 /**
- * Strip comments before scanning. Prose cannot mount a route, and this
- * package's headers quote the wire paths they serve — a raw-text scan would
- * report a documented path as an unledgered mount. Newlines inside block
- * comments are PRESERVED so every finding's `file:line` points at the real
- * line; `hmr-routes.ts` opens with a 27-line header, so swallowing them would
- * report the mount 27 lines short of where it is.
+ * WHY COMMENTS ARE REMOVED BEFORE ANY SCAN HERE. Prose cannot mount a route and
+ * cannot reach for a host app, and this package's headers quote the wire paths
+ * and the handles they serve — a raw-text scan reports a documented path as an
+ * unledgered mount, and a documented `getRawApp()` as a second reacher.
+ *
+ * This file used to answer that question with its own character scanner. It was
+ * converted to `scripts/js-comment-mask.mjs` (#12398), which is the tree's one
+ * answer to it, and the swap was MEASURED rather than assumed: over this
+ * package's 29 scanned source files the two differ on exactly one, `plugin.ts`,
+ * where the private scanner read the `//` inside the regex literal
+ * `/^https?:\/\//i` as a line-comment opener and deleted the 40 characters of
+ * REAL CODE that followed it to end of line. That is the naive-`//` family the
+ * shared module's header measures, live in the very file this guard's identity
+ * limb pins.
+ *
+ * `stripComments` keeps line numbers (block-comment newlines survive) and keeps
+ * string, template and regex literals INTACT — both properties are load-bearing
+ * below: `hmr-routes.ts` opens with a 27-line header, and the host-app reach
+ * this file detects is partly a SERVICE KEY, which is a string literal.
  */
-export function stripComments(source: string): string {
-    let out = '';
-    let i = 0;
-    while (i < source.length) {
-        const c = source[i];
-        const next = source[i + 1];
-        if (c === '/' && next === '/') {
-            while (i < source.length && source[i] !== '\n') i++;
-            continue;
-        }
-        if (c === '/' && next === '*') {
-            i += 2;
-            while (i < source.length && !(source[i] === '*' && source[i + 1] === '/')) {
-                if (source[i] === '\n') out += '\n';
-                i++;
-            }
-            i += 2;
-            continue;
-        }
-        if (c === '\'' || c === '"' || c === '`') {
-            const quote = c;
-            out += c;
-            i++;
-            while (i < source.length) {
-                if (source[i] === '\\') { out += source.slice(i, i + 2); i += 2; continue; }
-                out += source[i];
-                if (source[i] === quote) { i++; break; }
-                i++;
-            }
-            continue;
-        }
-        out += c;
-        i++;
-    }
-    return out;
-}
 
 /**
  * Blank out string CONTENTS, preserving quotes, length and newlines.
@@ -258,6 +243,30 @@ function packageSourceFiles(dir = SRC_DIR): string[] {
 /** The spellings by which a module reaches the HOST app. */
 const HOST_APP_REACH = /getRawApp|['"`]http-server['"`]|['"`]http\.server['"`]/;
 
+/**
+ * Does `source` reach for the host app IN CODE?
+ *
+ * COMMENTS ARE REMOVED FIRST, and that half is the whole of #12398. A docblock
+ * explaining why a mount sits outside the auth seam — "the mount takes the
+ * framework-native handle through `IHttpServer.getRawApp()`" — is prose, and
+ * prose reaches for nothing. Scanned raw it scored as a second reacher and
+ * failed an IDENTITY assertion by naming a file that reaches for nothing, whose
+ * own failure text then invites the wrong repair: widening the expected list,
+ * which retires the only property the assertion has.
+ *
+ * STRING, TEMPLATE AND REGEX LITERALS ARE LEFT INTACT, and that half is what
+ * keeps the fix from being a silent disarm. Two of the three spellings above
+ * ARE string literals — `ctx.getService('http.server')` reaches for the host
+ * app entirely inside quotes — so the sibling `maskStrings` below must never be
+ * applied here. Both directions are pinned in `scan machinery` at the foot of
+ * this file, including a genuine second reacher that lives in a string.
+ */
+const reachesHostApp = (source: string): boolean => HOST_APP_REACH.test(stripComments(source));
+
+/** Which of `files` reach for the host app in code. Driveable for the pins. */
+const filesReachingHostApp = (files: readonly string[], read: (f: string) => string): string[] =>
+    files.filter((f) => reachesHostApp(read(f)));
+
 /** A mount-shaped call on a handle named `app` — how a SECOND registrar would look. */
 const MOUNT_SHAPED = /\bapp\s*\.\s*(?:get|post|put|patch|delete|options|head|all)\s*\(/;
 
@@ -315,7 +324,7 @@ describe('metadata mount population', () => {
     it('plugin.ts is the only file that reaches for the host app', () => {
         // An IDENTITY, not a count: the day a second module resolves
         // `http-server` or calls `getRawApp()`, this names it.
-        const reaching = packageSourceFiles().filter((f) => HOST_APP_REACH.test(readSource(f)));
+        const reaching = filesReachingHostApp(packageSourceFiles(), readSource);
         expect(
             reaching,
             'files reaching for the host HTTP app. A second registrar is invisible to the census above — '
@@ -440,6 +449,40 @@ describe('scan machinery, pinned in both directions', () => {
         // Structure survives: quotes, line count and the live call are intact.
         expect(masked.split('\n').length).toBe(src.split('\n').length);
         expect(masked).toContain('http.getRawApp()');
+    });
+
+    it('the host-app reach probe does not count PROSE — the #12398 false positive', () => {
+        // The exact docblock that fired it: a module explaining that the mount
+        // takes the framework-native handle, in a comment.
+        expect(reachesHostApp('// the mount takes the handle through `IHttpServer.getRawApp()`\n')).toBe(false);
+        expect(reachesHostApp("/*\n * resolves 'http-server' before mounting\n */\n")).toBe(false);
+        expect(reachesHostApp("/* the ctx.getService('http.server') seam, explained */\n")).toBe(false);
+    });
+
+    it('the host-app reach probe still counts a REACH THAT LIVES IN A STRING', () => {
+        // The direction that makes the fix a fix rather than a disarm. Two of
+        // the three spellings are service keys — string literals — so a probe
+        // that masked literals as well as comments would detect nothing here
+        // and the identity limb would pass vacuously forever.
+        expect(reachesHostApp("const s = ctx.getService('http.server');\n")).toBe(true);
+        expect(reachesHostApp('const s = ctx.getService("http-server");\n')).toBe(true);
+        expect(reachesHostApp('const s = ctx.getService(`http-server`);\n')).toBe(true);
+        expect(reachesHostApp('const app = server.getRawApp();\n')).toBe(true);
+    });
+
+    it('a genuine SECOND reacher is still named — anti-vacuity on the identity limb', () => {
+        // LOAD-BEARING POSITIVE for #12398's fix: driven through the same
+        // function the live limb calls, with source injected. Without it, a
+        // strip that quietly stopped matching anything would leave the identity
+        // green forever — the failure direction the whole family distrusts.
+        const fake: Record<string, string> = {
+            'plugin.ts': 'const app = http.getRawApp();\n',
+            'routes/prose-only.ts': '// getRawApp() is reached in plugin.ts, never here\n',
+            'routes/second-reacher.ts': "const s = ctx.getService('http.server');\n",
+        };
+        expect(
+            filesReachingHostApp(Object.keys(fake).sort(), (f) => fake[f]),
+        ).toEqual(['plugin.ts', 'routes/second-reacher.ts']);
     });
 
     it('resolves both binding spellings this package uses, and refuses the rest', () => {

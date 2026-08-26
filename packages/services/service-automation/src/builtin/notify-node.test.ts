@@ -76,6 +76,31 @@ describe('notify (baseline node)', () => {
         );
     });
 
+    it('describes `template` with the locale the delivery path actually resolves, not a per-recipient one', () => {
+        // This description is rendered in the Studio form an author fills in, so
+        // it is the shortest path from wording to an authoring mistake. It used
+        // to say the row is "resolved by (name, recipient locale) ... and
+        // rendered per recipient", which reads as "each recipient's own language
+        // selects the row". It does not: `payload.locale` is interpolated once
+        // BEFORE fan-out and the fallback is the deployment default, so one
+        // locale serves the whole notification (`sys_user` carries no locale
+        // column; a per-user locale is deferred by the 2026-08-13 ruling).
+        // Acting on the old promise is a net regression — TEMPLATE_* failures
+        // classify `permanent` and dead-letter — so the qualification is pinned
+        // here, and a bare "recipient locale" is refused, to keep a later edit
+        // from quietly restoring it.
+        const engine = new AutomationEngine(createTestLogger());
+        registerNotifyNode(engine, createCtx());
+        const schema = engine.getActionDescriptor('notify')?.configSchema as
+            | { properties?: { template?: { description?: string } } }
+            | undefined;
+        const description = schema?.properties?.template?.description ?? '';
+        expect(description).toMatch(/not one per recipient/);
+        expect(description).toMatch(/payload\.locale/);
+        expect(description).toMatch(/deployment default/);
+        expect(description).not.toMatch(/recipient locale/);
+    });
+
     describe('with a messaging service registered', () => {
         let engine: AutomationEngine;
         let messaging: ReturnType<typeof fakeMessaging>;
@@ -229,7 +254,8 @@ describe('notify (baseline node)', () => {
             const payload = messaging.emitted[0].payload;
             // The reference rides RAW (a static metadata cross-reference); its
             // render context is interpolated per run — that pair is what the
-            // email channel resolves per recipient locale at delivery time.
+            // email channel resolves at delivery time, against one locale for the
+            // whole notification (`payload.locale`, else the deployment default).
             expect(payload.template).toBe('crm.large_deal_won');
             expect(payload.templateData).toEqual({ dealName: 'Acme', dealUrl: '/opps/42' });
             // No inline content keys on this path: a channel without template

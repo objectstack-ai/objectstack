@@ -616,6 +616,12 @@ export {
 } from './lint-flow-patterns.js';
 
 export { lintLivenessProperties } from './lint-liveness-properties.js';
+// #11624 — the ledger's warn set, as a decision procedure. `os lint` runs the
+// rule above AND the CLI's i18n coverage walker in one pass, and the walker has
+// to know which translation groups authoring is warned for or the two halves
+// contradict each other on the same keys. Exported so it reads ONE verdict
+// instead of re-deriving it from the same JSON.
+export { authorWarnedProperties } from './lint-liveness-properties.js';
 export type { LivenessLintFinding } from './lint-liveness-properties.js';
 export {
   LIVENESS_DEAD_PROPERTY,

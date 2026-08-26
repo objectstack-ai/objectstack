@@ -2295,8 +2295,9 @@ export class ObjectQLPlugin implements Plugin {
    *    FUNCTIONAL degradation — a capability this deployment does not have —
    *    so it is `warn` per the AGENTS.md degradation-log-level rule. It is
    *    deliberately not `error`: `sys_metadata_activation` is registered by
-   *    whichever composition consumes it (the automation service registers it
-   *    today), so an ObjectQL host without that composition is a legitimate
+   *    `PlatformObjectsPlugin` (#12359 ruling, 2026-08-26 — registration
+   *    follows the declaration), which a lean or translations-only kernel is
+   *    free not to compose, so an ObjectQL host without it is a legitimate
    *    deployment, and an `error` on every one of them is exactly the
    *    over-application that trains operators to skim `error`.
    *
@@ -2322,11 +2323,11 @@ export class ObjectQLPlugin implements Plugin {
     //
     //   1. `find` on a table that does not exist is a driver FAULT, and the
     //      engine logs it at `error` on its way out. A composition that simply
-    //      does not register `sys_metadata_activation` (no automation service
-    //      — that plugin is the object's registrant today) would print that
-    //      error on every single boot, for a capability it never asked for.
-    //      An unregistered object is a fact this can read without touching the
-    //      datasource at all.
+    //      does not register `sys_metadata_activation` (no
+    //      `PlatformObjectsPlugin` — the object's single registrant since the
+    //      #12359 ruling) would print that error on every single boot, for a
+    //      capability it never asked for. An unregistered object is a fact this
+    //      can read without touching the datasource at all.
     //   2. It splits the two cases the log levels below distinguish: absent
     //      from this composition (ordinary, `debug`) versus registered but
     //      unreadable (a real misconfiguration, `warn`).

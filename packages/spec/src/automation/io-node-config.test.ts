@@ -233,10 +233,22 @@ describe('NotifyConfigSchema — strict as of #4001 批 9', () => {
   //
   // Ruled 「立项，走 emailTemplates 路线」: a notify node references a
   // `sys_email_template` bundle by name and the delivery path resolves
-  // `(name, recipient locale)` at delivery time. Inline `title`/`message`
+  // `(name, locale)` at delivery time. Inline `title`/`message`
   // stay fully valid (the acceptance faces above) as the non-localizable
   // path; the two paths are mutually exclusive — loud refusal over silent
   // precedence, following `objectNavTargetExclusivity` (ui/app.zod.ts).
+  //
+  // The `locale` half of that pair is pinned below to the DEPLOYMENT DEFAULT,
+  // not to a per-recipient value. These strings previously said "recipient
+  // locale" unqualified, which reads as "each recipient's own language selects
+  // the row" — the delivery path does not do that and deliberately does not
+  // (maintainer ruling 2026-08-13: no per-user locale until measured pull;
+  // `sys_user` carries no locale column, and `payload.locale` is interpolated
+  // once before fan-out, so it is one value for the whole notification). The
+  // assertions therefore pin the qualification itself: a future edit that
+  // drops it back to a bare "recipient locale" turns these RED, because the
+  // wording an author reads is the whole contract here — declared must equal
+  // enforced.
   describe('template reference (#9205)', () => {
     /** Custom (superRefine) issues at exactly `path`, or `[]` when accepted. */
     function customIssuesAt(value: unknown, path: string): ReadonlyArray<{ code: string; message: string }> {
@@ -274,7 +286,13 @@ describe('NotifyConfigSchema — strict as of #4001 批 9', () => {
         // identified, and the fix stated.
         expect(msg).toContain('`template`');
         expect(msg).toContain('`title`');
-        expect(msg).toMatch(/recipient locale/);
+        // The localizable path is identified by what it actually resolves —
+        // `(name, locale)` with the locale qualified — never a bare
+        // "recipient locale", which promises per-recipient selection.
+        expect(msg).toMatch(/\(name, locale\)/);
+        expect(msg).toMatch(/deployment default/);
+        expect(msg).toMatch(/not per recipient/);
+        expect(msg).not.toMatch(/recipient locale/);
         expect(msg).toMatch(/delete `title`\/`message`/);
         expect(msg).toMatch(/silently ignore/);
       }
@@ -299,10 +317,22 @@ describe('NotifyConfigSchema — strict as of #4001 批 9', () => {
       // Non-empty arms first, so the pattern arms cannot pass vacuously (#6918).
       const templateDoc = shape.template!.description ?? '';
       expect(templateDoc.length, 'template .describe() must not be empty').toBeGreaterThan(0);
-      // The contract: resolves by (name, recipient locale) at delivery time…
-      expect(templateDoc).toMatch(/recipient locale/);
+      // The contract: resolves by (name, locale) at delivery time…
+      expect(templateDoc).toMatch(/\(name, locale\)/);
       expect(templateDoc).toMatch(/delivery time/);
       expect(templateDoc).toContain('sys_email_template');
+      // …with the locale named as what it IS — the deployment default, one
+      // value per notification. A bare "recipient locale" here is the defect
+      // this pin exists to catch: it licenses "convert the nodes and non-English
+      // users get non-English mail", which is false and is a net regression when
+      // acted on (TEMPLATE_* failures classify `permanent` and dead-letter).
+      expect(templateDoc).not.toMatch(/recipient locale/);
+      expect(templateDoc).toMatch(/deployment default/);
+      expect(templateDoc).toContain('II18nService.getDefaultLocale()');
+      expect(templateDoc).toMatch(/not one per recipient/);
+      // The deferral is dated, so the text carries its own provenance rather
+      // than reading as a permanent limitation of the design.
+      expect(templateDoc).toContain('2026-08-13');
       // …and it is a RAW cross-reference, like topic/channels.
       expect(templateDoc).toMatch(/no `\{token\}` interpolation/i);
 

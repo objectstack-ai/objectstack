@@ -234,6 +234,22 @@ const NO_GENERATOR: ReadonlyArray<{ check: string; why: string }> = [
     check: 'check:dual-source-exports',
     why: 'audits the built .d.ts for same-name exports resolving to DIFFERENT declarations across entry points — baseline is hand-ratcheted, not generated (needs a fresh `pnpm build`)',
   },
+  // #11986, chartered by the 2026-08-25 ruling on #11709. Reads the built dist
+  // like the two above, and for the same reason: the defect is only visible in
+  // the declarations a CONSUMER resolves to through the `exports` map.
+  //
+  // NO_GENERATOR, and the classification is the safety property rather than
+  // bookkeeping — `check:dual-source-exports`'s reason, one surface over.
+  // `entry-nameability.baseline.json` is a hand-ratcheted accommodation ledger,
+  // and the `gen:` a reader would reach for — rewrite it from whatever the tree
+  // currently leaks — is the one operation it must never offer: it would admit
+  // the eighth leak by running a command, which is exactly the per-name
+  // whack-a-mole this gate was filed to end. A failure here is a re-export to
+  // write (or a ledger row to delete), never a command to run.
+  {
+    check: 'check:entry-nameability',
+    why: "audits the built .d.ts: a type structurally mentioned in the declaration emitted for a consumer that CALLS one of an entry's exported functions must be nameable from that same entry — the ledger is hand-ratcheted and closed to new rows, not generated (needs a fresh `pnpm build`)",
+  },
   // #10199, the mechanized form of the 2026-08-20 ruling on #10096. Reads the
   // built dist like the two above, but the BUNDLES rather than the declarations
   // — it walks the module graph a consumer's import actually loads and asserts a

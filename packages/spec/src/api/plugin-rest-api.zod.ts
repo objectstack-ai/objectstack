@@ -28,40 +28,30 @@ import { MiddlewareConfigSchema } from '../system/http-server.zod';
  * - Microsoft Dynamics: Web API with entity operations
  * - Strapi: Auto-generated REST endpoints from schemas
  * 
- * @example Plugin Manifest
+ * @example Serving routes from a plugin (imperative `http.server` mount)
  * ```typescript
- * {
- *   "name": "rest_api",
- *   "version": "1.0.0",
- *   "type": "server",
- *   "contributes": {
- *     "routes": [
- *       {
- *         "prefix": "/api/v1/discovery",
- *         "service": "metadata",
- *         "methods": ["getDiscovery"],
- *         "middleware": [
- *           { "name": "response_envelope", "type": "transformation", "enabled": true }
- *         ]
- *       },
- *       {
- *         "prefix": "/api/v1/meta",
- *         "service": "metadata",
- *         "methods": ["getMetaTypes", "getMetaItems", "getMetaItem", "saveMetaItem"],
- *         "middleware": [
- *           { "name": "auth", "type": "authentication", "enabled": true },
- *           { "name": "request_validation", "type": "validation", "enabled": true }
- *         ]
- *       },
- *       {
- *         "prefix": "/api/v1/data",
- *         "service": "data",
- *         "methods": ["findData", "getData", "createData", "updateData", "deleteData"]
- *       }
- *     ]
+ * // Routes are mounted in CODE — resolve the `http.server` service from the
+ * // plugin context and register handlers on `kernel:ready` (the service is
+ * // registered by plugin-hono-server; `examples/app-showcase`'s
+ * // recalc-endpoint is a real consumer of this exact shape). The worked
+ * // manifest example that used to sit here declared `contributes.routes`,
+ * // which was removed in @objectstack/spec 17 (#10726): nothing ever read
+ * // it, so every route it showed parsed cleanly and served nothing.
+ * class RestApiPlugin {
+ *   name = 'rest_api';
+ *   async init(ctx: PluginContext) {
+ *     ctx.hook('kernel:ready', async () => {
+ *       const server = await ctx.getService<IHttpServer>('http.server');
+ *       server.get('/api/v1/discovery', (req, res) => { ... });
+ *       server.post('/api/v1/data/:object', (req, res) => { ... });
+ *     });
  *   }
  * }
  * ```
+ *
+ * A declarative endpoint over a pipeline the platform already runs
+ * (query/return records, trigger a flow) is `defineStack({ apis })` instead —
+ * no plugin code at all.
  */
 
 // ==========================================

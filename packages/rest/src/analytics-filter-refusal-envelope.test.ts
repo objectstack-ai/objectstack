@@ -444,7 +444,10 @@ describe('[#5352] reading the envelope did not turn every failure into a 400', (
   });
 
   it('a HALF envelope (4xx status, no code) is not honoured — this route invents no code', async () => {
-    // ADR-0112's point is that the PRODUCER names the condition. A status with
+    // ADR-0112 D4's point is the semantic-CODE channel: `error.code` is closed
+    // at every door and the producer's own spelling rides `declaredCode`
+    // beside it — the producer names the condition ON THE CODE AXIS. The ADR
+    // rules no HTTP status for an undeclared throw. A status with
     // no code is a producer bug; answering it with a code chosen here would be
     // the consumer-side leniency the ADR exists to remove, and would hide the
     // bug behind a plausible wire shape.

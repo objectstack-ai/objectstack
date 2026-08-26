@@ -43,31 +43,78 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { E2E_SECRET_KEY, TSX, childEnv, randomPort } from './helpers/serve-process.js';
+import { E2E_SECRET_KEY, childEnv, randomPort } from './helpers/serve-process.js';
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 /**
- * `bin/run-dev.js` through `tsx` — the SOURCE entrypoint, like the ~20 sibling
- * e2e files in this directory.
+ * `bin/run.js` through plain `node` — the SHIPPED entrypoint, and this file
+ * genuinely reaches it (#11707).
  *
- * ⛔ NOT `bin/run.js`. This file used to spell that one and call it "the SHIPPED
- * entrypoint"; the claim was never true here (#11317). The boot below pins
- * `NODE_ENV=development` on the child for the `--dev` admin seed, and
- * @oclif/core 4.13.3 skips its TypeScript path lookup only when `isProd()` —
- * `!['development', 'test'].includes(process.env.NODE_ENV ?? '')`. Under that
- * value oclif rewrites the command target from the declared `./dist/commands`
- * to `./src/commands` and transpiles, so `packages/cli/dist` is never consulted
- * whichever stub is named. `serve-node-env-production-default.e2e.test.ts` is
- * the file that genuinely reaches the built artifact, and it gets there by
- * leaving `NODE_ENV` UNSET — the value that disables the reroute. Restoring
- * `bin/run.js` here without dropping the `NODE_ENV` pin below is a no-op with a
- * false comment attached.
+ * Both halves of that are load-bearing and neither works alone. @oclif/core
+ * 4.13.3 skips its TypeScript path lookup only when `isProd()` —
+ * `!['development', 'test'].includes(process.env.NODE_ENV ?? '')` — so under a
+ * child `NODE_ENV` of `development` or `test` it rewrites the command target
+ * from the declared `./dist/commands` to `./src/commands` and transpiles, and
+ * `packages/cli/dist` goes unread whichever stub is named. This file used to
+ * pin `NODE_ENV=development` on the child (#11317); the boot below leaves it
+ * UNSET instead — the value that disables the reroute — and the `--dev` admin
+ * seed survives that, for the reason spelled out at the `NODE_ENV` entry below.
+ *
+ * ⛔ Do not restore either half on its own. `bin/run-dev.js` assigns
+ * `NODE_ENV = 'development'` before argv is parsed, so it reroutes
+ * unconditionally; and re-pinning `NODE_ENV` on the child while naming
+ * `bin/run.js` is the self-cancelling pair #11317 found here — it promises the
+ * built artifact, delivers source, and says nothing.
+ *
+ * PRICE, stated because it is real. This file is now a verdict about BUILD
+ * STATE as well as about the source in the checkout, which is the trade
+ * `scripts/check-test-source-alias.mjs` argues against for in-process imports.
+ * `turbo.json` declares `@objectstack/cli#test` `dependsOn: ["build"]` (#11268)
+ * so CI always builds `dist/` first; `requireBuiltCli()` below is what a
+ * developer running `vitest` directly gets instead of oclif's "command serve
+ * not found". Neither catches a `dist/` that is merely BEHIND its source —
+ * that residual is the honest cost of consuming the artifact, and
+ * `serve-node-env-production-default.e2e.test.ts` (which has consumed `dist/`
+ * since #11113) carries exactly the same one.
  */
-const CLI = resolve(HERE, '../bin/run-dev.js');
+const CLI = resolve(HERE, '../bin/run.js');
+
+/**
+ * Refuse to run against an unbuilt `packages/cli`, in a sentence rather than as
+ * oclif's "command serve not found".
+ *
+ * The command target is read from the CLI's own `oclif.commands.target` rather
+ * than restated here: that declaration is where `dist/commands` is decided, and
+ * a copy keeps probing the old path after someone moves it — the argument
+ * `scripts/cli-build-prerequisite.mjs` makes for the gates that shell out to
+ * this CLI. Only that one declared shape is read; anything else (unreadable,
+ * or `oclif.commands` written as a bare string) DEFERS rather than failing, so
+ * a checkout this cannot understand never turns red here and the spawn's own
+ * output stays the fallback — the same fail-open direction those gates take.
+ */
+function requireBuiltCli(): void {
+  let target: unknown;
+  try {
+    target = JSON.parse(readFileSync(resolve(HERE, '../package.json'), 'utf8'))?.oclif?.commands?.target;
+  } catch {
+    return;
+  }
+  if (typeof target !== 'string' || !target) return;
+  const commandFile = resolve(HERE, '..', target.replace(/^\.\//, ''), 'serve.js');
+  if (existsSync(commandFile)) return;
+  throw new Error(
+    `packages/cli is not built: ${commandFile} does not exist.\n` +
+      'This file spawns bin/run.js with NODE_ENV unset, which is what makes oclif resolve the ' +
+      'command from dist/ instead of transpiling src/ — so on an unbuilt tree the child answers ' +
+      '"command serve not found" and every boot below times out.\n' +
+      'CI declares the build (turbo: @objectstack/cli#test dependsOn build); a direct vitest run does not.\n' +
+      'Run: pnpm exec turbo run build --filter=@objectstack/cli',
+  );
+}
 
 const CONFIG = `
 export default {
@@ -117,7 +164,7 @@ interface Booted {
  */
 function boot(env: Record<string, string | undefined>, waitFor: RegExp): Promise<Booted> {
   return new Promise((resolveBoot, rejectBoot) => {
-    const child = spawn(TSX, [CLI, 'serve', '-p', port, '--dev'], {
+    const child = spawn(process.execPath, [CLI, 'serve', '-p', port, '--dev'], {
       cwd: dir,
       stdio: ['pipe', 'pipe', 'pipe'],
       // `childEnv`, not a bare `...process.env`: the vitest worker exports
@@ -129,20 +176,46 @@ function boot(env: Record<string, string | undefined>, waitFor: RegExp): Promise
         NO_COLOR: '1',
         OS_LOG_LEVEL: 'info',
         OS_DISABLE_CONSOLE: '1',
-        // Explicit, not minted: with `VITEST` no longer inherited (#11267),
-        // `local-crypto-provider.ts`'s detectMode answers `development` for
-        // this child instead of `test`, and development mode PERSISTS a minted
-        // key to `$HOME/.objectstack/dev-crypto-key`. Supplying one keeps this
-        // boot from writing to the runner's home directory and from coupling
-        // itself to whatever other test got there first.
+        // Explicit, not minted — but NOT because of the `VITEST` strip above.
+        // What follows is quoted in the PAST TENSE on purpose: the code it
+        // quotes is GONE. `detectMode` used to read
+        // `if (env.VITEST || env.NODE_ENV === 'test') return 'test'`, so an
+        // inherited `VITEST=true` did put a spawned child's crypto layer in
+        // `test` mode. #11448 (`a58eac3e2`, merged 2026-08-23) deleted that
+        // arm; the live `detectMode` (`local-crypto-provider.ts:185`, read
+        // off this tree) reads `NODE_ENV` and nothing else. So stripping
+        // `VITEST` is not what selects the posture here, and the `test` →
+        // `development` flip the old wording predicted is unreachable in
+        // either direction.
+        //
+        // What DOES select `development` is the `NODE_ENV` entry below, and
+        // it is measured on this tree, not inherited: this file spawns
+        // `bin/run.js`, which pins no `NODE_ENV` of its own (only
+        // `bin/run-dev.js` does), with the variable UNSET — so `serve.ts`
+        // assigns `process.env.NODE_ENV = 'development'` in-process for
+        // `--dev` before `runtime.start()`, and the crypto provider reads
+        // `process.env` when it resolves its key, after that assignment.
+        //
+        // ⭐ The conclusion is unchanged and load-bearing: development mode
+        // PERSISTS a minted key to `$HOME/.objectstack/dev-crypto-key`, so
+        // supplying one keeps this boot from writing to the runner's home
+        // directory and from coupling itself to whatever other test got
+        // there first.
         OS_SECRET_KEY: E2E_SECRET_KEY,
-        // Explicit, not inherited: the dev-admin seed this fixture signs in as
-        // is hard-gated on `NODE_ENV === 'development'`, and vitest exports
-        // `test`, which would leave the DB user-less and the mint unauthorized.
-        // Still passed explicitly although `bin/run-dev.js` assigns it too: the
-        // shim's assignment runs after its own static imports have evaluated,
-        // so only the child env pins the value for the whole process lifetime.
-        NODE_ENV: 'development',
+        // UNSET, not `development` — and `undefined` rather than `''`, because
+        // Node's `spawn()` omits an undefined-valued entry rather than
+        // stringifying it. Unset is what keeps oclif's ts-path reroute OFF, so
+        // `CLI` above resolves the command from `dist/`; the vitest worker
+        // exports `NODE_ENV=test`, which would switch the reroute back on, so
+        // the entry has to be here to remove it rather than merely omitted.
+        //
+        // The `--dev` admin seed this boot depends on still runs. `serve.ts`
+        // assigns `process.env.NODE_ENV = 'development'` IN-PROCESS for `--dev`
+        // when the variable is unset, before `runtime.start()`, and
+        // plugin-auth's `isDevAdminSeedArmed()` reads it at CALL time inside
+        // the `kernel:ready` hook — after that assignment. Both halves
+        // re-measured on this tree, not inherited from the card.
+        NODE_ENV: undefined,
         ...env,
       }),
     }) as ChildProcessWithoutNullStreams;
@@ -213,6 +286,9 @@ async function stop(child: ChildProcessWithoutNullStreams): Promise<void> {
 
 describe('#7645: the stdio MCP transport answers over a spawned CLI process', () => {
   beforeAll(async () => {
+    // Build prerequisite first: the spawns below resolve `serve` from `dist/`.
+    requireBuiltCli();
+
     dir = mkdtempSync(join(tmpdir(), 'mcp-stdio-e2e-'));
     writeFileSync(join(dir, 'objectstack.config.ts'), CONFIG, 'utf8');
     writeFileSync(

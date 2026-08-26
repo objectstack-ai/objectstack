@@ -1,10 +1,24 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
+import { RestApiConfigSchema, DiscoverySchema } from '@objectstack/spec/api';
+import type { StandaloneStackResult } from '@objectstack/runtime';
 import { mergeBootConfig } from './merge-boot-config.js';
 
-/** What `createStandaloneStack()` actually returns for the `api` block. */
-const BOOT_API = { enableProjectScoping: false, projectResolution: 'none' } as const;
+/**
+ * What `createStandaloneStack()` actually returns for the `api` block.
+ *
+ * Annotated with the producer's own declared literal type rather than left as
+ * a bare `as const`, so this stops being a HAND-COPY that can drift from the
+ * thing it claims to mirror. A copy is precisely how #11999 survived: this
+ * constant, `merge-boot-config.ts`'s doc block and
+ * `StandaloneStackResult.api` each spelled the value separately, and nothing
+ * held them equal. Change the runtime's literal without changing this line
+ * and `tsc --noEmit` fails here — `packages/cli`'s `typecheck` compiles
+ * `include: ["src"]` with no test exclusion, so this pin is live (the build
+ * tsconfig excludes tests, this one does not).
+ */
+const BOOT_API: StandaloneStackResult['api'] = { enableProjectScoping: false, projectResolution: 'auto' };
 
 describe('mergeBootConfig (#4002)', () => {
     it('keeps an authored api key the boot result does not set', () => {
@@ -26,7 +40,7 @@ describe('mergeBootConfig (#4002)', () => {
         );
 
         expect(merged.api.enableProjectScoping).toBe(false);
-        expect(merged.api.projectResolution).toBe('none');
+        expect(merged.api.projectResolution).toBe('auto');
         expect(merged.api.enforceProjectMembership).toBe(false); // untouched by boot → survives
     });
 
@@ -70,5 +84,71 @@ describe('mergeBootConfig (#4002)', () => {
 
         expect(authored).toEqual({ api: { enforceProjectMembership: false } });
         expect(boot).toEqual({ api: { ...BOOT_API } });
+    });
+});
+
+/**
+ * [#11999] The check that did not exist — and whose absence is the whole
+ * reason three packages disagreed about `api.projectResolution`'s vocabulary
+ * for as long as nothing executed the schema.
+ *
+ * `@objectstack/spec` declared `z.enum(['required','optional','auto'])`,
+ * `@objectstack/runtime` shipped `'none'`, and `os serve` forwarded it
+ * unchanged (`apiConfig.projectResolution ?? 'auto'` never fires — `'none'`
+ * is not nullish). `RestServer` CAST this config instead of parsing it, so
+ * the enum never ran on any deployment path; downstream, every reader that
+ * acts on the key is gated on `enableProjectScoping` first, so `'none'`
+ * silently took `'auto'`'s branch without ever being named as such.
+ *
+ * These cases run the declared schema against the value this package
+ * actually boots with, which is the one thing none of the three did.
+ */
+describe('[#11999] the boot api block is a DECLARED config, not just a working one', () => {
+    it('parses clean against RestApiConfigSchema', () => {
+        const parsed = RestApiConfigSchema.parse({ ...BOOT_API });
+        expect(parsed.enableProjectScoping).toBe(false);
+        expect(parsed.projectResolution).toBe('auto');
+    });
+
+    it('still parses after the merge — the block `serve` actually forwards', () => {
+        // Parsing BOOT_API alone would not cover the seam: what reaches
+        // `createRestApiPlugin` and the Dispatcher plugin is the MERGED api
+        // block, so an authored key surviving the merge must not break it.
+        const merged: any = mergeBootConfig(
+            { api: { enforceProjectMembership: false } },
+            { api: { ...BOOT_API }, plugins: [] },
+        );
+        const parsed = RestApiConfigSchema.parse(merged.api);
+        expect(parsed.projectResolution).toBe('auto');
+    });
+
+    it('REFUSES the undeclared `none` this shipped before #11999', () => {
+        // A pin is only worth having if it can say no, so the negative is
+        // asserted here rather than trusted. Asserted on the refusal's
+        // identity — the offending path and the issue code — not on the bare
+        // fact that something failed: a `safeParse` that went false for an
+        // unrelated key would otherwise read as this case passing.
+        const r = RestApiConfigSchema.safeParse({ ...BOOT_API, projectResolution: 'none' });
+        expect(r.success).toBe(false);
+        const issue = r.success ? undefined : r.error.issues.find(
+            (i) => i.path.join('.') === 'projectResolution',
+        );
+        expect(issue?.code).toBe('invalid_value');
+        expect(issue?.message).toContain('auto');
+    });
+
+    it('is a value the DISCOVERY advertisement may also carry', () => {
+        // The second declared contract this key answers to, and the reason
+        // `enableProjectScoping: false` does NOT make the value moot.
+        // `RestServer`'s discovery handler copies `api.projectResolution`
+        // into `discovery.scoping.resolution` UNCONDITIONALLY — no
+        // `enableProjectScoping` guard — and `DiscoverySchema` declares that
+        // field as the same three-member enum. Shipping `'none'` therefore
+        // published a discovery payload the platform's own schema rejects, on
+        // every `os serve` boot.
+        const scoping = { enabled: BOOT_API.enableProjectScoping, resolution: BOOT_API.projectResolution, scoped: false };
+        const field = DiscoverySchema.shape.scoping.unwrap().shape.resolution;
+        expect(field.safeParse(scoping.resolution).success).toBe(true);
+        expect(field.safeParse('none').success).toBe(false);
     });
 });

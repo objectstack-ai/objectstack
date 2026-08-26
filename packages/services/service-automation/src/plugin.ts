@@ -26,12 +26,16 @@ import {
     type SuspendedRunStoreEngine,
 } from './suspended-run-store.js';
 import { ObjectStoreFlowDispatchStore } from './flow-dispatch-store.js';
-// [ADR-0126 §4] The activation ledger's object is declared in
-// `packages/platform-objects`, beside its data-plane siblings — the ADR puts it
-// there so it needs zero `packages/spec` surface. This plugin REGISTERS it for
-// the same reason it registers `sys_automation_run`: the table has to exist
-// wherever automation runs, which is exactly where the ledger is consumed.
-import { SysMetadataActivation } from '@objectstack/platform-objects';
+// [ADR-0126 §4 · #12359 ruling, 2026-08-26] ⛔ `SysMetadataActivation` is
+// deliberately NOT imported here any more. This plugin registered the
+// activation ledger's object while flows were its only consumer; registration
+// now follows the DECLARATION and lives in `PlatformObjectsPlugin`, beside
+// `SysMigration` / `SysSecret`. It is a MOVE — re-adding it here would make two
+// manifests own one object, which is the governed case (ADR-0029 D7) the ruling
+// closed by naming a single owner. The store attached in `start()` below still
+// probes the table before it is trusted, so a composition that carries
+// automation without platform-objects degrades exactly as an unreadable table
+// always did: loudly, and without claiming a durable flip.
 import { ObjectStoreFlowActivationStore, type FlowActivationStoreEngine } from './flow-activation-store.js';
 
 /**
@@ -549,7 +553,7 @@ export class AutomationServicePlugin implements Plugin {
                 scope: 'system',
                 defaultDatasource: 'cloud',
                 namespace: 'sys',
-                objects: [SysAutomationRun, SysFlowDispatch, SysMetadataActivation],
+                objects: [SysAutomationRun, SysFlowDispatch],
             });
             return true;
         } catch (err) {
@@ -728,12 +732,26 @@ export class AutomationServicePlugin implements Plugin {
                     this.engine.setFlowDispatchStore(new ObjectStoreFlowDispatchStore(dataEngine));
                     ctx.logger.info('[Automation] Flow-dispatch idempotency ledger enabled (sys_flow_dispatch)');
                     // [ADR-0126 §4/§7.2] The packaged-flow activation ledger.
-                    // Attached under the same guard as the two stores above —
-                    // it needs the same engine surface and its object rode the
-                    // same manifest registration, so `runObjectRegistered`
-                    // vouches for this table too. Without it, `toggleFlow`
-                    // degrades to an in-process flip and WARNS on every flip
-                    // that the change will not survive a restart.
+                    // Without it, `toggleFlow` degrades to an in-process flip
+                    // and WARNS on every flip that the change will not survive
+                    // a restart.
+                    //
+                    // ⚠️ [#12359 ruling, 2026-08-26] `runObjectRegistered` no
+                    // longer vouches for THIS table — `sys_metadata_activation`
+                    // is registered by `PlatformObjectsPlugin` now, not by the
+                    // manifest call above, so the flag says nothing about it.
+                    // The gate that actually decides is the `probe()` below,
+                    // which is a read of the real table and was always the
+                    // authoritative one. The nesting is kept deliberately: it
+                    // costs nothing on every composition that reaches here (a
+                    // kernel with no manifest service registers neither object,
+                    // so the probe would fail anyway), and widening the flow
+                    // leg's attach policy is a behaviour change no ruling
+                    // covers — Part 1 moves a REGISTRATION, not this policy.
+                    // What the move does fix is the consumer that had no
+                    // service of its own to gate on: packaged-ACTION disable,
+                    // whose door answered 503 on every actions-and-no-
+                    // automation boot.
                     const activationStore = new ObjectStoreFlowActivationStore(
                         dataEngine as unknown as FlowActivationStoreEngine,
                     );
