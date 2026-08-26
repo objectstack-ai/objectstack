@@ -360,6 +360,46 @@ describe('PluginHealthMonitor', () => {
       monitor.stopMonitoring('observed-plugin');
     });
 
+    // ⭐⭐ The same contract with NOTHING else in the way. The pin above walks
+    // the sequence and checks each step, which means an ablation trips one of
+    // its early assertions first; this one asserts only what an operator reads
+    // at the END, so the assertion that fails IS the contract:
+    //
+    //   "a plugin reported `healthy` is a plugin that is alive."
+    //
+    // Deliberately NOT "`init` was called" — that pin goes green the moment
+    // somebody adds a no-op `init`, while this one cannot: it reads the
+    // plugin's own liveness, which only a real re-initialisation restores.
+    it('a plugin reported `healthy` is a plugin that is alive', async () => {
+      const config = failingConfig({ failureThreshold: 1, successThreshold: 3 });
+      const mode = { current: 'throw' as 'throw' | 'pass' };
+      const { plugin, state } = observable('terminal-state-plugin', async () => {
+        if (mode.current === 'throw') throw new Error('check exploded');
+        return true;
+      });
+
+      monitor.registerPlugin('terminal-state-plugin', config);
+      monitor.startMonitoring('terminal-state-plugin', plugin);
+
+      // The failing round, the window the destroy used to land in, then
+      // `successThreshold` consecutive passes. No assertions in between.
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(FORMER_RESTART_BACKOFF_MS);
+      mode.current = 'pass';
+      for (let round = 1; round <= config.successThreshold; round++) {
+        await vi.advanceTimersByTimeAsync(INTERVAL_MS);
+        await vi.advanceTimersByTimeAsync(0);
+      }
+
+      expect(monitor.getHealthStatus('terminal-state-plugin')).toBe('healthy');
+      expect(
+        state.alive,
+        'the monitor reported `healthy` for a plugin that had been destroyed'
+      ).toBe(true);
+
+      monitor.stopMonitoring('terminal-state-plugin');
+    });
+
     it('leaves a plugin whose check THROWS alone, however many rounds fail', async () => {
       // Was: 'restarts a plugin whose check THROWS, once failureThreshold
       // accumulates', asserting destroyed.count === 1 and `recovering`.
