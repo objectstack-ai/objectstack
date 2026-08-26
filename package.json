@@ -71,6 +71,7 @@
     "check:partof-closing-keyword": "node scripts/check-partof-closing-keyword.mjs --self-test",
     "check:single-claim-paths": "node scripts/check-single-claim-paths.mjs --self-test",
     "check:pnpm-filter-targets": "node scripts/pnpm-filter-targets.mjs --self-test && node scripts/check-pnpm-filter-targets.mjs --self-test && node scripts/check-pnpm-filter-targets.mjs",
+    "check:turbo-task-graph": "node scripts/check-turbo-task-graph.mjs --self-test && node scripts/check-turbo-task-graph.mjs",
     "check:adr-anchors": "node scripts/check-adr-anchors.mjs --self-test && node scripts/check-adr-anchors.mjs",
     "check:adr-links": "node scripts/check-adr-links.mjs --self-test && node scripts/check-adr-links.mjs",
     "check:platform-checklist": "node scripts/checklist-select.mjs --self-test && node scripts/check-platform-checklist.mjs",

@@ -354,6 +354,42 @@ jobs:
       - name: scripts/ TypeScript parses go through one module
         run: pnpm check:parse-guard
 
+      # Nobody writes a NEW private comment-stripper (#12307).
+      # `scripts/js-comment-mask.mjs` exists because two private `stripComments`
+      # families drifted apart in opposite directions — one regex-based and
+      # blind to string literals, opening PHANTOM comments that delete real
+      # code; one string-aware but regex-blind, hiding real comments. What the
+      # tree had no instrument for was ADOPTION: `check:comment-mask-corpus`
+      # below verifies the shared mask against a real parser, which is a claim
+      # about the MODULE and says nothing about its callers. So the module
+      # landed, some callers were converted by hand, and the residue was found
+      # by hand three separate times — three cards for one conversion.
+      # This gate is the half that covers the caller nobody has written yet:
+      # a new private stripper reds on the PR that writes it, while the 23
+      # measured pre-existing ones sit in a shrink-only ledger and are NOT
+      # required to move first (a gate that reds on day one is a gate nobody
+      # can land). Converting them is per-row and deliberately not this gate's
+      # call.
+      # ⚠️ NOT a widening of `check:parse-guard` above: that gate governs the
+      # three TypeScript PARSER ENTRY POINTS and its own header refuses a root
+      # broader than `scripts/**` twice. Comment-stripping is a different
+      # subject, and widening that population would still catch no stripper.
+      # Its `--self-test` runs FIRST and is where the detectors are observed
+      # FIRING and, just as importantly, observed STAYING SILENT on an adopter
+      # and on prose — the live corpus is green by construction, so a passing
+      # production run alone cannot tell a working detector from a dead one.
+      # The ledger's stale-row equality is the other half: breaking a detector
+      # reddens the production run (measured: 3 stale rows) instead of going
+      # quietly green, which is what keeps this out of the double-green family
+      # `check:self-test-wired` names.
+      # Invoked as `node` rather than through a `pnpm check:*` alias: see the
+      # GATE INVOCATION IDIOM note at the top of this file.
+      # Scans ~5k files under packages/** + examples/**, no spawns; ~2s.
+      - name: No new private comment-strippers (all route through js-comment-mask)
+        run: |
+          node scripts/check-comment-mask-adoption.mjs --self-test
+          node scripts/check-comment-mask-adoption.mjs
+
       # The bash-3.2 floor, over every shell file the repo ships (#12221).
       # `/usr/bin/env bash` is bash 3.2.57 on macOS -- Apple ships no bash 4+,
       # for licensing reasons -- and THIS RUNNER IS BASH 5, where every construct
@@ -3023,6 +3059,43 @@ jobs:
       # non-vacuity while the real population is zero.
       - name: No committed command forwards args to vitest through a bare --
         run: pnpm check:agent-test-spelling
+
+      # Every `<pkg>#<task>` override in turbo.json must name a package the
+      # workspace HAS and a script that package RUNS (#12046).
+      #
+      # ⛔ Turbo does NOT refuse either miss. Measured on turbo 2.10.10 against a
+      # fixture workspace, each case a real `turbo run <task> --dry=json`:
+      #
+      #     @fx/nope#build   (no such package)     -> exit 0, no diagnostic, key
+      #                                               never reaches the graph
+      #     @fx/a#typecheck  (package has no such
+      #                       script)              -> exit 0, task shown in the
+      #                                               dry-run graph, never runs
+      #
+      # So a task-graph edit meant to change what CI builds, orders or caches can
+      # configure NOTHING while every signal its author has — exit code, dry-run
+      # output, this whole workflow — reads as landed. The stale direction is the
+      # same silence: rename a package or drop a script and the entry that used
+      # to configure it goes quietly inert.
+      #
+      # `dependsOn` is deliberately out of scope here: turbo already refuses an
+      # unresolvable one loudly (exit 1, `x Could not find "@fx/a#prebuildxyz"`),
+      # and re-checking it would be this gate claiming a population the tool that
+      # owns it polices better — the #11556 failure this card was filed against.
+      #
+      # The gate is also the first thing in the repo that DECLARES turbo.json as
+      # a path population, in the `turbo.json/**` subtree spelling the dispatch
+      # derivation can match. Before it, a card whose surface was turbo.json
+      # derived zero gate families: the one gate that parses the file
+      # (check:cross-package-test-inputs) reaches it as a bare filename, which
+      # `extractWatchHints` refuses as too generic.
+      #
+      # Reads turbo.json and the workspace manifests. No build, no pnpm
+      # invocation, no network, sub-second. The `check:` key runs `--self-test`
+      # first: this gate's defect class is its matching rule, which a clean tree
+      # cannot distinguish from a rule that stopped matching.
+      - name: turbo.json package tasks name real packages and real scripts
+        run: pnpm check:turbo-task-graph
 
   # Lane 1 of 4 behind the required `TypeScript Type Check` context. The
   # aggregator job at the bottom of this file explains the split, holds the

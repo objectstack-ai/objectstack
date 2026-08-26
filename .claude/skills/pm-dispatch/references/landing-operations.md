@@ -26,20 +26,20 @@
 
 ## B. 跟到 MERGED 为止;入队后的看护归车道 PM 落地窗口
 
-车道 PM 的权责:验收(复核清单);**首次入队** —— ACCEPT 后挂 6–9 分钟 flip 定
-点,到点核门禁 job 结论(承载门禁族的 job `completed: success`),绿即转 ready +
-挂 auto-merge,未绿阶梯重挂;CI success webhook 不可靠,⛔ 不坐等不忙轮询;定点文
-本照定时器写法纪律(幂等开头、只写判据);确认 **MERGED** —— 每轮同时读队列分支与
-`origin/main` 两个读数。ready 与 auto-merge 顺序不可反(转回 draft 会同时掉
-auto-merge 与队列成员资格)。
+车道 PM 的权责:验收(复核清单);**首次入队** —— ACCEPT 后挂 6–9 分钟 flip 定点,到点核门禁
+job 结论(承载门禁族的 job `completed: success`),绿即转 ready + 挂 auto-merge,未绿阶梯重挂;
+CI success webhook 不可靠,⛔ 不坐等不忙轮询;定点文本照定时器写法纪律(幂等开头、只写判
+据);确认 **MERGED** —— 每轮同时读队列分支与 `origin/main` 两个读数。ready 与 auto-merge 顺
+序不可反(转回 draft 会同时掉 auto-merge 与队列成员资格)。**契约复审链 PASS 落地的 PR 到窗
+口时已 ready + auto-merge 在挂**(清标与落地同一笔,见 `contract-review.md`)—— 窗口自身权责
+不变:跟到 MERGED、踢出处置、落地后对账。
 
-**转 ready / 挂 auto-merge 之前先读 `mergeable_state`**:`dirty` ⇒ 先 merge
-`origin/main`(生成物在面上按 A 的固定序)再挂;`unknown` ⇒ 重读一次(惰性计算,事实行见平台读
-数)。**ready + 全绿 ≠ 已入队 —— 队列从不主动拉 PR,入队是显式动
-作。**零 `enqueued` 事件按序查:① `mergeable_state` 是否 `dirty`;②
-enable-auto-merge 调用根本没落地(GraphQL、吃配额、回显两向不可靠,按既有陷阱行
-重发一次,以 timeline 事件验证,⛔ 不看 `auto_merge` 字段);③ PR 碰
-`.github/workflows/**` 而 token 缺 workflows 权限。
+**转 ready / 挂 auto-merge 之前先读 `mergeable_state`**:`dirty` ⇒ 先 merge `origin/main`
+(生成物在面上按 A 的固定序)再挂;`unknown` ⇒ 重读一次(惰性计算,事实行见平台读数)。
+**ready + 全绿 ≠ 已入队 —— 队列从不主动拉 PR,入队是显式动作。**零 `enqueued` 事件按序查:
+① `mergeable_state` 是否 `dirty`;② enable-auto-merge 调用根本没落地(GraphQL、吃配额、回显
+两向不可靠,按既有陷阱行重发一次,以 timeline 事件验证,⛔ 不看 `auto_merge` 字段);③ PR
+碰 `.github/workflows/**` 而 token 缺 workflows 权限。
 
 **确认 MERGED 的同一动作里给 `Part of` 卡收口**(`Fixes` 卡 GitHub 代关、标签随
 卡离开在飞视图):`Part of` 卡开着不摘 `pm:dispatched`,就把无在飞物的卡永远算在

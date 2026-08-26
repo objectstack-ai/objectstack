@@ -100,9 +100,12 @@
 //
 // A pin that must measure a resolution BASE therefore spawns a real Node child.
 // ⚠️ Spawning escapes Vite but NOT `NODE_PATH`: a vitest worker carries pnpm's
-// hoisted store in it, `childEnv()` forwards it, and CJS `createRequire()`
-// honours it while ESM `import()` ignores it. A spawned pin whose claim routes
-// through CJS must strip it (`childEnv({ NODE_PATH: undefined })`).
+// hoisted store in it, and CJS `createRequire()` honours it while ESM
+// `import()` ignores it. `childEnv()` forwarded it until #11773 and STRIPS it
+// now (`RESOLUTION_BASE_ENV_KEYS`), so a spawned pin whose claim routes through
+// CJS gets an honest base by default. A test that wants the pnpm bin shim shape
+// back asks for it explicitly (`childEnv({ NODE_PATH: ... })`) -- which is what
+// the #4719 pin does.
 //
 // The mechanism, both halves, and the controls that prove each one can fail live
 // in `packages/cli/test/vitest-resolution-base-collapse.e2e.test.ts`.

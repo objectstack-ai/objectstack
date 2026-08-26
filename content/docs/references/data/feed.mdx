@@ -5,13 +5,16 @@ description: Feed protocol schemas
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
 
-Activity-timeline UI config enums.
+Activity-timeline UI config enums, and the `sys_activity.type` built-in set.
 
 The `service-feed` backend was retired (ADR-0052 §5 / #1955); `sys_comment` /
-`sys_activity` are the canonical record-collaboration/timeline backend. Only these
-two enums remain here — they are pure UI configuration for the record activity
-component (`RecordActivityProps` in `../ui/component.zod.ts`), with no backend
-dependency. (A later `feed` → `activity` rename is tracked separately.)
+`sys_activity` are the canonical record-collaboration/timeline backend. The two
+enums here are pure UI configuration for the record activity component
+(`RecordActivityProps` in `../ui/component.zod.ts`), with no backend dependency;
+`SYS_ACTIVITY_BUILTIN_TYPES` below is the published built-in vocabulary of the
+`sys_activity.type` column, co-located with `FeedItemType` because UI consumers
+map one onto the other. (A later `feed` → `activity` rename is tracked
+separately.)
 
 <Callout type="info">
 **Source:** `packages/spec/src/data/feed.zod.ts`
