@@ -509,7 +509,6 @@ const DECLARED_UNRESOLVABLE: Record<LoadSite['callee'], Record<string, string>> 
 /** Every load the scan could not pin to a specifier, whatever the callee. */
 const UNRESOLVED_LOADS = LOAD_SITES.filter((site) => site.specifier === undefined);
 
-
 /**
  * A host app that DECLARES an optional package and carries it in its own
  * `node_modules` — the shape of every EE app that declares
