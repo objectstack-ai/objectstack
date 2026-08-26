@@ -4258,6 +4258,28 @@ jobs:
           OS_EXPECT_ROOT_NAMEABILITY: '1'
         run: pnpm --filter @objectstack/spec exec vitest run scripts/root-entry-type-nameability.pin.test.ts
 
+      # [#11986] The same invariant, generalized from ONE entry to all 17 — the
+      # C half of the 2026-08-25 ruling on #11709 (A′ was the two re-exports,
+      # this is the gate that stops a fourth round of per-name repair). The pin
+      # above keeps its own charter: it reproduces the REAL configs' program
+      # shape verbatim, fixture file included. This one compiles a probe per
+      # public entry over every callable export, so no entry sits unmeasured.
+      #
+      # ⛔ Never batch the entries into one program to save time. A program file
+      # importing a subpath entry makes that entry's names nameable PROGRAM-WIDE
+      # (#11350's control; the gate's --self-test measures it in both
+      # directions), so a single batched program reports zero leaks no matter how
+      # many exist — full cost, no measurement. Measured here: 47s for all 17
+      # entries, 422 probes.
+      #
+      # Sits with its family — `check:api-surface` / `check:exported-any` /
+      # `check:dual-source-exports` — because it reads the built dist a
+      # consumer's import actually resolves to, so it needs the build steps
+      # above and refuses (never skips) on a stale or unbuilt tree. Adds no
+      # required context: a step in an existing lane (#9325).
+      - name: Check public-entry type nameability (built dist, declaration emit)
+        run: pnpm --filter @objectstack/spec run check:entry-nameability
+
       # Same surface, the other axis: api-surface/ records that an export
       # EXISTS, never what it resolves to — so four exported types sat at `any`
       # across a whole major with every gate green (#4171). #4115 tells consumers
