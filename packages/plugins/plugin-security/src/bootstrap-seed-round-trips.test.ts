@@ -751,27 +751,39 @@ describe('#11096 — a read that CANNOT ANSWER is not the answer "none exist"', 
  *
  * ## What is pinned, and what is deliberately NOT
  *
- * Two halves, and only ONE of them is batched:
+ * Two halves, and since #11520 BOTH are batched — as two SEPARATE reads asking
+ * two different questions, which is the whole subtlety:
  *
- *  - the CURATED half (`KNOWN_CAPABILITIES`) now costs ONE batched `$in` read
+ *  - the CURATED half (`KNOWN_CAPABILITIES`) costs ONE batched `$in` read
  *    carrying the #8470 predicate, and zero writes on a steady-state rebuild;
- *  - the DERIVED half keeps its per-item read, because its question is
- *    cross-organization by construction and its counters are computed from the
- *    lowest-id row installation-wide (see the seeder's header). The pins below
- *    state that residue as `1 + derived` rather than hiding it — a later card
- *    that batches it is expected to move these numbers deliberately.
+ *  - the DERIVED half costs ONE batched `$in` read carrying NO predicate. It
+ *    stays wide because its question is cross-organization by construction and
+ *    its counters are computed from the lowest-id row installation-wide (see the
+ *    seeder's header). ⛔ A "simplification" that folds the two into one read —
+ *    or that narrows the derived one to the platform bucket to make folding
+ *    possible — reverses #8552 and #8751 by read shape; the predicate pin below
+ *    and the `platformStampedInOrg` suite in `bootstrap-system-capabilities.test
+ *    .ts` are what stop it.
+ *
+ * ⚠️ These counts MOVED in #11520, deliberately: this doc previously stated the
+ * derived residue as `1 + derived` and said "a later card that batches it is
+ * expected to move these numbers deliberately". #11518 removed the objection
+ * that kept it per-item (the page cap became a measurement, so an unnarrowed
+ * batched read that truncates degrades loudly instead of silently reading
+ * `absent` and inserting), so the residue is now a second constant read rather
+ * than a linear one.
  *
  * ⚠️ NO speedup is claimed. The hosted `bootstrap-curve.mjs` rig lives in
  * `objectstack-ai/cloud` and its axes are permission sets / positions / objects,
  * not this one. These tests count round trips and pin WHICH ROW each leg
  * touched; nothing here measures wall time.
  */
-describe('#11451 — the curated half is O(1) round trips, the derived half is the filed residue', () => {
+describe('#11451/#11520 — BOTH halves are O(1) round trips, as two differently-shaped reads', () => {
   const CURATED_NAMES = KNOWN_CAPABILITIES.map((c) => c.name);
   const derivedSets = (n: number) => [{ systemPermissions: Array.from({ length: n }, (_, i) => `app.cap.${i}`) }];
   const capQl = (behaviour = {}) => makeCountingQl('sys_capability', 'capability', [], behaviour);
 
-  it('the curated existence read is ONE round trip at every derived size', async () => {
+  it('the existence reads are O(1) at every derived size — the residue is GONE', async () => {
     const measure = async (d: number) => {
       const ql = capQl();
       await bootstrapSystemCapabilities(ql, derivedSets(d));      // first boot: seeds
@@ -780,14 +792,24 @@ describe('#11451 — the curated half is O(1) round trips, the derived half is t
       expect(r.seeded).toBe(0);
       expect(r.updated).toBe(0);                                   // ⬅ the gate
       expect(r.unchanged).toBe(CURATED_NAMES.length + d);
-      return { finds: ql.calls.find, updates: ql.calls.update, derived: d };
+      return { finds: ql.calls.find, updates: ql.calls.update, unchanged: r.unchanged, derived: d };
     };
 
     const rows = [await measure(0), await measure(5), await measure(20)];
-    // The curated half contributes exactly 1 read at every size; the remaining
-    // `d` are the derived half's per-item reads, which this card does not batch.
-    expect(rows.map((x) => x.finds - x.derived)).toEqual([1, 1, 1]);
-    expect(rows.map((x) => x.finds)).toEqual([1, 6, 21]);
+    // [#11520] FLAT, not `1 + d`. One read for the curated half, one for the
+    // derived half — and at d=0 the derived read is not issued at all, because
+    // `buildExistingByName` returns before reading when no name survives its
+    // filter. That asymmetry is the reason the expectation is written out per
+    // size rather than as a single constant.
+    expect(rows.map((x) => x.finds)).toEqual([1, 2, 2]);
+    // ⭐ The anti-vacuity half lives in `measure` itself, and it has to: a
+    // `finds` of 2 reached by SKIPPING the derived half would satisfy the line
+    // above. `expect(r.unchanged).toBe(CURATED_NAMES.length + d)` there is what
+    // rules that out — every derived name was looked up, judged ours, and found
+    // already correct. Restated here so the count and the work are read together:
+    expect(rows.map((x) => x.unchanged)).toEqual([
+      CURATED_NAMES.length, CURATED_NAMES.length + 5, CURATED_NAMES.length + 20,
+    ]);
     // ⬅ The unconditional UPDATE is gone from BOTH halves.
     expect(rows.map((x) => x.updates)).toEqual([0, 0, 0]);
   });
@@ -807,6 +829,36 @@ describe('#11451 — the curated half is O(1) round trips, the derived half is t
     // separately: a predicate leaking in as `key: undefined` would pass the
     // assertion above while changing what every other caller emits.
     expect(Object.keys(ql.wheres[0]).sort()).toEqual(['managed_by', 'name', 'organization_id']);
+  });
+
+  /**
+   * ⭐ [#11520] The RULED pin on the derived read's SHAPE. `bootstrap-system-
+   * capabilities.test.ts` pins the consequences (#8751's `platformStampedInOrg`,
+   * #8552's untouched bucket); this pins the cause, because the cheap fix that
+   * reverses both is a one-key edit right here.
+   *
+   * The derived question is "the lowest-id row for this name, installation-wide"
+   * (`X`). Adding `organization_id: null` asks for the bucket occupant (`B`)
+   * instead — a different row whenever an organization's row sorts lower — which
+   * silently stops #8751's signal and turns #8552's deliberate decline-to-seed
+   * into an insert. Neither has a maintainer ruling. So the derived read carries
+   * `name` and NOTHING else.
+   */
+  it('⭐ the DERIVED read is UNNARROWED — `name` only, no bucket predicate (#8552/#8751)', async () => {
+    const ql = capQl();
+    await bootstrapSystemCapabilities(ql, derivedSets(3));
+    ql.reset();
+    await bootstrapSystemCapabilities(ql, derivedSets(3));
+
+    // Two reads, in loop order: curated (predicated) then derived (wide).
+    expect(ql.calls.find).toBe(2);
+    const derivedWhere = ql.wheres[1];
+    expect(derivedWhere).toEqual({ name: { $in: ['app.cap.0', 'app.cap.1', 'app.cap.2'] } });
+    // The KEY SET separately, for the same reason the curated pin above does it:
+    // `toEqual` ignores `undefined`-valued properties, so a leaked
+    // `organization_id: undefined` would pass the assertion above while changing
+    // the question the driver is asked.
+    expect(Object.keys(derivedWhere).sort()).toEqual(['name']);
   });
 
   it('the existing callers still emit their exact key set — no predicate leaked in', async () => {
@@ -883,8 +935,8 @@ describe('#11451 — the curated half is O(1) round trips, the derived half is t
       scope: c.scope, managed_by: 'platform', organization_id: null, active: true,
     })));
     const warns: string[] = [];
-    // No derived names: the derived half's `tryFind` swallows a failed read by
-    // design, so mixing one in would measure that half instead of this one.
+    // No derived names here: this pin is about the CURATED half, and #11520 adds
+    // the derived counterpart as its own test below rather than widening this one.
     const r = await bootstrapSystemCapabilities(broken, [], { logger: { warn: (m) => warns.push(m) } });
     expect(r.unreadable).toBe(KNOWN_CAPABILITIES.length);
     expect(r.seeded).toBe(0);
@@ -892,5 +944,46 @@ describe('#11451 — the curated half is O(1) round trips, the derived half is t
     expect(broken.rows).toHaveLength(KNOWN_CAPABILITIES.length);
     expect(warns.some((w) => w.includes('batched seed existence read failed'))).toBe(true);
     expect(warns.some((w) => w.includes('could not be read'))).toBe(true);
+  });
+
+  /**
+   * ⭐ [#11520] The derived counterpart — and the one place this card changes
+   * observable behaviour, pinned so the change is a decision rather than a
+   * side effect.
+   *
+   * BEFORE: the derived half read through `tryFind`, which catches and returns
+   * `[]`. An unreadable database therefore read as "absent" and routed every
+   * derived name to its INSERT branch. Where the read failed but the write did
+   * not — a transient read timeout, a lagging replica — that is a DUPLICATE
+   * placeholder, refused only where the unique index happens to exist; and where
+   * the insert failed too it was silent, because the `blockedCurated` diagnostic
+   * is curated-only.
+   *
+   * AFTER: `unknown` is declined, exactly as the shared oracle's module header
+   * requires of every other caller. Strictly stricter, in the direction #10946
+   * chose deliberately for the curated half and #11518 extended to truncation.
+   */
+  it('⭐ [#11520] a DERIVED name whose read cannot answer is DECLINED, never blind-inserted', async () => {
+    const DERIVED = 2;
+    const broken = capQl({ findThrows: true });
+    broken.rows.push(...KNOWN_CAPABILITIES.map((c, i) => ({
+      id: `cap_${i}`, name: c.name, label: c.label, description: c.description,
+      scope: c.scope, managed_by: 'platform', organization_id: null, active: true,
+    })));
+    const before = broken.rows.length;
+    const warns: string[] = [];
+    const r = await bootstrapSystemCapabilities(broken, derivedSets(DERIVED), {
+      logger: { warn: (m) => warns.push(m) },
+    });
+
+    // BOTH halves decline — every definition is left entirely alone.
+    expect(r.unreadable).toBe(KNOWN_CAPABILITIES.length + DERIVED);
+    expect(r.seeded).toBe(0);
+    // ⛔ LOAD-BEARING: the derived insert that used to happen here does not.
+    expect(broken.calls.insert).toBe(0);
+    expect(broken.rows).toHaveLength(before);
+    // …and the summary warning covers both halves, so its total is the whole
+    // definition set rather than the curated count it would otherwise exceed.
+    expect(warns.some((w) => w.includes('capabilities left untouched'))).toBe(true);
   });
 });
