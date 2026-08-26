@@ -43,16 +43,21 @@ pnpm add @objectstack/client
   React Hooks block — the three that stand alone. What is not: every block that
   continues Quick Start's implied context. Quick Start establishes `client`
   once and each later block reads it, so a marker there reds with TS2304
-  "Cannot find name 'client'". The two Error Handling blocks USED to add
+  "Cannot find name 'client'". The Error Handling blocks USED to add
   TS18046 ("'error' is of type 'unknown'") on top of that; they now narrow the
   `catch` binding through a guard the first block declares, which is what a
   reader's own strict project needs anyway. That leaves only the page-wide
   TS2304 convention between them and a marker — still unmarked here because
-  the marker question is its own card, so nothing compiles these two blocks.
-  The remaining unnarrowed `catch` is inside the API-surface tour block
-  (`automation.execute`), which is a fragment for other reasons.
+  the marker question is its own card, so nothing compiles them.
+  The page's third `catch` — the flow-rejection example — used to sit inside
+  the API-surface tour fence, where no guard was in scope to narrow it and the
+  fence's own subject is the client surface, not error handling. It now stands
+  alone under Error Handling as "Flow execution errors", reads the same guard,
+  and the tour keeps a pointer in its place. No unnarrowed `catch` binding is
+  left on this page.
 
-  Measured with all 13 fences marked, then reverted: 114 diagnostics, TS2304 /
+  Measured with all fences marked, then reverted — 13 fences at the time,
+  before the flow-rejection block was split out of the tour: 114 diagnostics, TS2304 /
   TS18046 / TS18004 / TS2591, spread over the nine continuation blocks — and
   ZERO TS2307. Before the carve-out the same sweep produced 128 diagnostics
   including TS2307 on every SDK import. Not one diagnostic in either sweep was
@@ -428,15 +433,10 @@ await client.i18n.getFieldLabels('account', 'zh-CN');
 await client.automation.trigger('send_welcome_email', { userId });
 
 // A flow that does not run REJECTS — it does not resolve with an inner
-// `{ success: false }`. Branch on `err.code`, not on the resolved value:
-try {
-  await client.automation.execute('order_approval', { params: { orderId } });
-} catch (err) {
-  err.httpStatus;             // 409 | 422 | 400 | 404
-  err.code;                   // 'FLOW_DISABLED' | 'FLOW_NO_START_NODE' | 'FLOW_FAILED'
-  err.details?.errorMessage;  // the flow author's own text, on a FLOW_FAILED
-  err.details?.summary;       // which node failed, on a FLOW_FAILED
-}
+// `{ success: false }`. Branch on the thrown error's `code`, not on the
+// resolved value; the narrowed `catch` that needs is "Flow execution errors"
+// under Error Handling, below.
+await client.automation.execute('order_approval', { params: { orderId } });
 
 // Screen flows pause for user input instead of completing. `execute()` returns
 // `{ status: 'paused', runId, screen }`; render the screen, then resume the run
@@ -701,6 +701,49 @@ from.
 condition. Neither is guaranteed on the wire — as the narrowing example shows,
 `error.category` and `error.retryable` are present only when the server sent
 them, and the REST server's per-field validation envelope sends neither.
+
+### Flow execution errors
+
+`client.automation.execute()` **rejects** when the flow does not run — it does
+not resolve with an inner `{ success: false }` — so branch on the thrown error,
+not on the resolved value. Its refusal codes are ledger-registered rather than
+members of the standard catalog above, which makes them service-specific, not
+unofficial.
+
+Only a run that actually dispatched has artefacts to report, so `details` —
+`unknown` on the shared shape, because what rides in it is per-surface — is
+narrowed one step further here:
+
+```typescript
+/**
+ * What the automation door attaches to `details` on a `FLOW_FAILED`: the run's
+ * own artefacts. A flow that never dispatched (`FLOW_DISABLED`,
+ * `FLOW_NO_START_NODE`, or an unknown flow's 404) has no author text and no
+ * node log to point at, which is why both members are optional.
+ */
+interface FlowFailureDetails {
+  errorMessage?: string;   // the flow author's own text (`flow.errorMessage`)
+  summary?: unknown;       // per-node accounting (spec's `FlowRunSummary`)
+}
+
+function hasFlowFailureDetails(
+  error: ObjectStackApiError,
+): error is ObjectStackApiError & { details: FlowFailureDetails } {
+  return typeof error.details === 'object' && error.details !== null;
+}
+
+try {
+  await client.automation.execute('order_approval', { params: { orderId } });
+} catch (err) {
+  if (!isApiError(err)) throw err;     // not a server response — rethrow
+  console.error(err.httpStatus);       // 409 | 422 | 400 | 404
+  console.error(err.code);             // 'FLOW_DISABLED' | 'FLOW_NO_START_NODE' | 'FLOW_FAILED'
+  if (err.code === 'FLOW_FAILED' && hasFlowFailureDetails(err)) {
+    console.error(err.details.errorMessage);   // the flow author's own text
+    console.error(err.details.summary);        // which node failed
+  }
+}
+```
 
 ---
 
