@@ -11082,7 +11082,13 @@ export class ObjectQL implements IObjectQLEngine {
     // own internal paths for no gain.
     if (context?.isSystem === true) return true;
     try {
-      let own = await this.find(childName, { where: probeWhere, context } as any);
+      // Typed through the DECLARED options type rather than cast: `where` is
+      // `Record<string, unknown>` on `EngineQueryOptionsSchema` and `context`
+      // rides `BaseEngineOptions`, so nothing here needs erasing
+      // (`check:query-options-erasure` — the grandfathered `as any` on the
+      // elevated probe above is a pre-existing site this card does not sweep,
+      // tracked in #4918).
+      let own: any[] = await this.find(childName, { where: probeWhere, context });
       // The SAME narrowing the elevated probe applied (#9362), or the two sets
       // would be compared through different definitions of "references this
       // record" and a multi-value relation would read as non-disclosable
@@ -11092,7 +11098,31 @@ export class ObjectQL implements IObjectQLEngine {
       }
       const ownIds = new Set((own ?? []).map((r: any) => String(r?.id)));
       return ownIds.size === probedIds.length && probedIds.every((rid) => ownIds.has(rid));
-    } catch {
+    } catch (error) {
+      // Says something rather than rethrowing, and the asymmetry is the point
+      // (`check:durability-read-invention` accepts either — "say something, or
+      // ask the error's type").
+      //
+      // Rethrowing is WRONG here specifically. The integrity answer is already
+      // in hand: the elevated probe succeeded, the dependents are known, and
+      // this delete is being refused either way. Propagating a failure of the
+      // DISCLOSURE probe would convert a correct `409 DELETE_RESTRICTED` into a
+      // `500` — a worse answer for the caller, produced by a query that exists
+      // only to decide how much detail the refusal carries.
+      //
+      // Nor is the invented value a durability hazard of the class that rule
+      // guards: no declared set is being read, and `false` withholds. The
+      // failure mode of getting this wrong is a slightly less informative
+      // refusal, never a permitted delete and never an over-disclosure.
+      //
+      // The one thing that WOULD be wrong is doing it silently — an operator
+      // seeing count-free refusals has no way to tell "withheld on purpose"
+      // from "the disclosure probe has been failing for a week".
+      this.logger.warn(
+        `[reference-cleanup] could not determine whether the caller may be told how many '${childName}' ` +
+        `record(s) reference this one; withholding the count from the refusal (the refusal itself stands)`,
+        { object: childName, error: (error as Error)?.message ?? String(error) },
+      );
       return false;
     }
   }
