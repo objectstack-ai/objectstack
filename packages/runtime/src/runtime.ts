@@ -2,6 +2,7 @@
 
 import { ObjectKernel, Plugin, IHttpServer, ObjectKernelConfig } from '@objectstack/core';
 import {
+    AuthzClusterBridgePlugin,
     ClusterServicePlugin,
     MetadataClusterBridgePlugin,
     type ClusterServicePluginOptions,
@@ -71,6 +72,18 @@ export class Runtime {
             // it's registered by a plugin or directly.
             this.kernel.use(new MetadataClusterBridgePlugin());
         }
+
+        // [#11968] The authorization-cache substrate's bridge + boot-time
+        // posture statement. Registered UNCONDITIONALLY, outside the
+        // `cluster !== false` branch above, and that placement is the point:
+        // `cluster: false` is not a reason to skip the check, it is the loudest
+        // case the check has — an enabled grants cache with no invalidation bus
+        // whatsoever. Skipping it there would reproduce #4785's shape, a
+        // security-relevant mechanism absent with nothing said.
+        //
+        // Inert on the shipped default: with OS_AUTHZ_GRANTS_CACHE_TTL_MS at 0
+        // it attaches nothing, publishes nothing and logs nothing above debug.
+        this.kernel.use(new AuthzClusterBridgePlugin());
     }
 
     private normalizeClusterOptions(

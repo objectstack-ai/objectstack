@@ -369,3 +369,24 @@ export type {
 
 // ADR-0038 L3 — post-publish runtime probes (one real read per published
 // artifact); findings are BuildIssue-shaped with layer 'runtime'.
+
+// [#11968] The authorization caching SUBSTRATE — the engine-seam write epoch
+// and the `authz.invalidated` bridge (#11633 §2.1/§3, Fork 2 → B, ruled
+// 2026-08-25). Nothing here caches anything; leg B (#11967) is the first
+// consumer. ⭐ Read `write-epoch.ts` and `@objectstack/core`'s
+// `authz-invalidation-channel.ts` before consuming either: the epoch sees only
+// THIS process's writes, delivery on the channel is at-most-once, and the TTL
+// on the consuming cache — never this substrate — is the correctness contract.
+export {
+  WriteEpoch,
+  isWriteEpochLike,
+  isWriteEpochOperation,
+  WRITE_EPOCH_OPERATIONS,
+} from './write-epoch.js';
+export type {
+  WriteEpochLike,
+  WriteEpochListener,
+  WriteEpochUnsubscribe,
+} from './write-epoch.js';
+export { bridgeAuthzInvalidation } from './authz-invalidation-bridge.js';
+export type { AuthzInvalidationBridgeOptions } from './authz-invalidation-bridge.js';

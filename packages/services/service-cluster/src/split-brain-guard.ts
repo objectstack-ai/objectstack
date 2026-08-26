@@ -26,6 +26,23 @@
 /** In-process drivers whose state does not coordinate across replicas. */
 const IN_PROCESS_DRIVERS = new Set(['memory']);
 
+/**
+ * True when `driver` keeps its cluster primitives **inside one process**, so
+ * `IPubSub` does not fan out to peer replicas.
+ *
+ * Exported (#11968) so the authorization-cache posture statement reads this
+ * fact from the module that owns it rather than re-deciding which drivers are
+ * in-process. The two consumers ask it for different reasons and must not be
+ * allowed to drift: this guard throws when a multi-node topology is *declared*
+ * over an in-process driver, while the posture statement warns when an enabled
+ * grants cache has no cross-node invalidation channel — a case that needs no
+ * declaration to be real, because `Runtime` registers the memory driver by
+ * default.
+ */
+export function isInProcessClusterDriver(driver: string): boolean {
+    return IN_PROCESS_DRIVERS.has(driver);
+}
+
 /** Environment inputs the guard reads. */
 export interface SplitBrainGuardEnv {
     /** `'true'` -> operator declares a multi-node deployment. */
@@ -63,7 +80,7 @@ export function assertClusterDriverSafeForTopology(
     env: SplitBrainGuardEnv = process.env,
 ): void {
     if (!declaresMultiNode(env)) return;
-    if (!IN_PROCESS_DRIVERS.has(driver)) return;
+    if (!isInProcessClusterDriver(driver)) return;
     if (isTrue(env.OS_ALLOW_MEMORY_CLUSTER_MULTINODE)) return;
 
     throw new Error(

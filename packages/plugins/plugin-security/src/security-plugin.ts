@@ -11,6 +11,11 @@ import { markFilterSubtreeProvenance, FieldMaskingRuleSchema, type FieldMaskingR
 // operation-level refusals. Second consumer, same mechanism — a second remedy
 // for one defect class is what that module exists to prevent.
 import { renderOperationMessage } from '@objectstack/spec/system';
+import {
+  localWriteEpochSource,
+  resolveWriteEpochSource,
+  type WriteEpochSource,
+} from './write-epoch-source.js';
 import { PermissionEvaluator, crudBucketForOperation } from './permission-evaluator.js';
 import { composeHumanBaselinePermissionSets, PLATFORM_BASELINE_PERMISSION_SET } from './app-default-permission-set.js';
 import { DelegatedAdminGate } from './delegated-admin-gate.js';
@@ -883,11 +888,16 @@ export class SecurityPlugin implements Plugin {
    * de-duplication: a context that performs a WRITE and then reads again is
    * entitled to see the write. A permission change lands as a write to
    * `sys_permission_set` / `sys_user_permission_set` / `sys_position_*` through
-   * this very engine, so {@link SecurityPlugin.writeEpoch} is bumped on every
-   * write operation the middleware sees -- before the `isSystem` bypass, so a
+   * this very engine, so {@link SecurityPlugin.epoch} is bumped on every write
+   * operation the engine seam sees -- before the `isSystem` bypass, so a
    * seeder, a package publish or the auto-org-admin grant invalidates too -- and
    * an entry is reused only while the epoch it was resolved at still stands.
    * Any write, by ANY context in this process, retires every entry.
+   *
+   * [#11968] That bump now happens in the ENGINE, ahead of the whole middleware
+   * chain, rather than at the head of this plugin's middleware. The covered set
+   * is unchanged -- it is the same seam -- but it is now covered BY
+   * CONSTRUCTION rather than by two files agreeing on which operations count.
    *
    * What that leaves is exactly one thing: two reads by one context with no
    * intervening write, which is the find/count pair above and is the definition
@@ -899,11 +909,19 @@ export class SecurityPlugin implements Plugin {
     { epoch: number; key: string; sets: Promise<PermissionSet[]> }
   >();
   /**
-   * [#10757] Monotonic counter bumped on every engine WRITE this middleware
-   * sees. Read only by {@link SecurityPlugin.permissionSetMemo}; see its doc for
-   * why the guard exists and what it is guarding against.
+   * [#10757, extracted #11968] Monotonic counter read by
+   * {@link SecurityPlugin.permissionSetMemo}; see its doc for why the guard
+   * exists and what it is guarding against.
+   *
+   * The counter itself is no longer this plugin's. #11633 §10.3 hoisted the
+   * mechanism into the engine (`ObjectQL.writeEpoch`), so every consumer of
+   * "something authorization-relevant changed" shares ONE signal instead of
+   * each watching its own subset of writes. {@link resolveWriteEpochSource}
+   * binds to the engine's seam when the wired engine exposes it and falls back
+   * to a private counter when it does not — the pre-`start()` value here is
+   * that fallback, so the memo is never keyed on `undefined`.
    */
-  private writeEpoch = 0;
+  private epoch: WriteEpochSource = localWriteEpochSource();
   /**
    * This plugin's report sink. Console-backed until a host injects one — see
    * {@link SecurityReportSink} and {@link CONSOLE_SECURITY_SINK} for the ruling
@@ -1033,6 +1051,12 @@ export class SecurityPlugin implements Plugin {
     // engine middleware AND the public getReadFilter service method.
     this.metadata = metadata;
     this.ql = ql;
+
+    // [#11968] Bind the invalidation epoch to the ENGINE's seam when the wired
+    // engine exposes one. Resolved here, once, rather than probed per request:
+    // the plugin DI graph is static after start, and a per-request probe would
+    // let the memo key on one counter and the invalidation land on another.
+    this.epoch = resolveWriteEpochSource(ql);
     this.rlsCompiler.setLogger?.(ctx.logger);
     // [C2 / ADR-0095] Late-bound resolver for the optional `sharing` service.
     this.resolveKernelService = (name: string) => {
@@ -1055,7 +1079,11 @@ export class SecurityPlugin implements Plugin {
         // the per-context memo here keeps it on the same invalidation footing
         // as every other metadata-derived cache above, rather than being the
         // one that survives a Studio edit.
-        this.writeEpoch++;
+        //
+        // [#11968] This bump stays here whichever side owns the epoch: it is
+        // precisely the invalidation the ENGINE seam cannot see, because no row
+        // is written. The engine covers writes; this covers declarations.
+        this.epoch.bump('metadata');
       });
     }
 
@@ -1459,8 +1487,18 @@ export class SecurityPlugin implements Plugin {
       // system ones: the platform seeder, a package publish, the auto-org-admin
       // grant. A guard that only saw user writes would leave a memo standing
       // across exactly the grants that matter. See {@link permissionSetMemo}.
-      if (opCtx.operation === 'insert' || opCtx.operation === 'update' || opCtx.operation === 'delete') {
-        this.writeEpoch++;
+      //
+      // [#11968] When the engine owns the seam it has ALREADY bumped, earlier
+      // in this same operation and ahead of every middleware — bumping again
+      // here would be a second advance for one write. Harmless to the memo
+      // (which only compares equality) but not harmless on the bus: the
+      // `authz.invalidated` bridge publishes per bump. The guard below is
+      // therefore about message count, not about correctness.
+      if (
+        !this.epoch.seamOwnedByEngine &&
+        (opCtx.operation === 'insert' || opCtx.operation === 'update' || opCtx.operation === 'delete')
+      ) {
+        this.epoch.bump('write');
       }
 
       // System operations bypass security
@@ -4447,11 +4485,11 @@ export class SecurityPlugin implements Plugin {
     // and no caller should have to know which of the two it holds. (The
     // PermissionSet objects inside were already shared instances: they come
     // from the metadata/bootstrap registries, not from this call.)
-    if (hit && hit.epoch === this.writeEpoch && hit.key === key) {
+    if (hit && hit.epoch === this.epoch.current && hit.key === key) {
       return hit.sets.then((s) => [...s]);
     }
     const sets = this.resolvePermissionSetsForContextUnmemoized(context);
-    const entry = { epoch: this.writeEpoch, key, sets };
+    const entry = { epoch: this.epoch.current, key, sets };
     this.permissionSetMemo.set(context, entry);
     sets.catch(() => {
       if (this.permissionSetMemo.get(context) === entry) {

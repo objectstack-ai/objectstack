@@ -42,10 +42,16 @@ export {
 export {
     assertClusterDriverSafeForTopology,
     declaresMultiNode,
+    isInProcessClusterDriver,
     type SplitBrainGuardEnv,
 } from './split-brain-guard.js';
 
 export { MetadataClusterBridgePlugin } from './metadata-cluster-bridge-plugin.js';
+
+// [#11968] The `authz.invalidated` bridge + the non-optional boot-time posture
+// statement (#11633 §3, ruled 2026-08-25). Registered by `@objectstack/runtime`
+// in the default composition; inert until a grants cache is enabled.
+export { AuthzClusterBridgePlugin } from './authz-cluster-bridge-plugin.js';
 
 // Re-export contracts for convenience.
 export type {

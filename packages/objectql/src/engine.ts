@@ -61,7 +61,7 @@ import type { FlowFunctionEffect } from '@objectstack/spec/automation';
 // Imported from spec directly rather than through `@objectstack/core`'s
 // re-export block: that block is labelled backward-compatibility, and this
 // contract is new (#5945).
-import type { IScopedContext, IScopedObjectRepository, IntrospectedSchema as SpecIntrospectedSchema } from '@objectstack/spec/contracts';
+import type { IPubSub, IScopedContext, IScopedObjectRepository, IntrospectedSchema as SpecIntrospectedSchema } from '@objectstack/spec/contracts';
 import {
   IDataDriver,
   IDataEngine,
@@ -80,6 +80,8 @@ import {
   // from importing `@objectstack/metadata-protocol`, where it was written.
   recordNotFoundError,
 } from '@objectstack/core';
+import { WriteEpoch, isWriteEpochOperation } from './write-epoch.js';
+import { bridgeAuthzInvalidation } from './authz-invalidation-bridge.js';
 import { SummaryRecomputeError, type SummaryRecomputeFailure } from './summary-errors.js';
 import { CrossDatasourceTransactionWriteError, TransactionUnsupportedError } from './transaction-errors.js';
 import {
@@ -3207,6 +3209,84 @@ export class ObjectQL implements IObjectQLEngine {
   }
 
   /**
+   * [#11968] The engine-seam write epoch — the invalidation substrate of the
+   * ruled authorization caching design (#11633 §2.1, §3).
+   *
+   * A monotonic counter advanced by {@link executeWithMiddleware} on every
+   * `insert` / `update` / `delete` that passes the middleware chain. It is a
+   * generalisation of the private counter `@objectstack/plugin-security` has
+   * carried since #10757: the mechanism was always the engine's, and hoisting
+   * it here is what lets a second consumer share ONE signal instead of minting
+   * a parallel one that watches a different set of writes.
+   *
+   * ⭐ It is a SEAM, not a call-site list. A path that grants a capability
+   * cannot forget to invalidate, because writing through this engine is the
+   * only way to write at all. See `write-epoch.ts` for why that property is the
+   * one to protect when editing, and for what the epoch deliberately does not
+   * carry (anything about WHICH entry to drop).
+   *
+   * ⛔ The epoch alone is not a licence to cache. It sees writes THIS process
+   * makes; a peer node's grant revocation is invisible to it. A cached
+   * authorization answer additionally needs a TTL bound — see
+   * `authz-invalidation-channel.ts` in `@objectstack/core`.
+   */
+  readonly writeEpoch = new WriteEpoch();
+
+  /** Disposer for the `authz.invalidated` bridge, when one is attached. */
+  private authzInvalidationDetach?: () => void;
+  /** The `(pubsub, nodeId)` pair currently bridged, for idempotent re-attach. */
+  private authzInvalidationBinding?: { pubsub: unknown; nodeId: string };
+
+  /**
+   * [#11968] Attach a cluster pub/sub transport so this engine's write epoch
+   * fans out on the `authz.invalidated` channel and peers' hints advance it
+   * locally. Mirrors `MetadataManager.attachClusterPubSub()`, including its
+   * idempotency on the `(pubsub, nodeId)` pair, and is called the same way — by
+   * a bridge plugin in `@objectstack/service-cluster`, once per kernel boot,
+   * after both services exist.
+   *
+   * ⚠️ Attach only when something is actually caching authorization answers.
+   * The bridge publishes one message per write, which buys nothing with no
+   * consumer — and the substrate's acceptance criterion is that runtime
+   * behaviour is unchanged until leg B (#11967) lands.
+   *
+   * ⭐ Attaching this does NOT make a cached answer safe. Delivery is
+   * at-most-once on every shipped driver, so a missed message is expected and
+   * the consuming TTL remains the correctness bound. The channel module in
+   * `@objectstack/core` carries the full statement.
+   *
+   * @returns a disposer that detaches the bridge.
+   */
+  attachAuthzInvalidationPubSub(pubsub: IPubSub, nodeId: string): () => void {
+    if (
+      this.authzInvalidationBinding?.pubsub === pubsub &&
+      this.authzInvalidationBinding?.nodeId === nodeId
+    ) {
+      return () => this.detachAuthzInvalidationPubSub();
+    }
+    this.detachAuthzInvalidationPubSub();
+    this.authzInvalidationDetach = bridgeAuthzInvalidation({
+      epoch: this.writeEpoch,
+      pubsub,
+      nodeId,
+      logger: this.logger,
+    });
+    this.authzInvalidationBinding = { pubsub, nodeId };
+    this.logger.info('ObjectQL attached to the authz.invalidated cluster channel', {
+      nodeId,
+    });
+    return () => this.detachAuthzInvalidationPubSub();
+  }
+
+  /** Tear down the `authz.invalidated` bridge. Safe to call multiple times. */
+  detachAuthzInvalidationPubSub(): void {
+    const detach = this.authzInvalidationDetach;
+    this.authzInvalidationDetach = undefined;
+    this.authzInvalidationBinding = undefined;
+    detach?.();
+  }
+
+  /**
    * Register a middleware function
    * Middlewares execute in onion model around every data operation.
    * @param fn The middleware function
@@ -3221,6 +3301,24 @@ export class ObjectQL implements IObjectQLEngine {
    * Execute an operation through the middleware chain
    */
   private async executeWithMiddleware(ctx: OperationContext, executor: () => Promise<any>): Promise<any> {
+    // [#11968] Advance the write epoch FIRST — ahead of every middleware, and
+    // so ahead of any `isSystem` bypass one of them applies. The writes most
+    // likely to change what a caller may see are system ones: the platform
+    // seeder, a package publish, the auto-org-admin grant. A guard that only
+    // saw user writes would leave cached authorization standing across exactly
+    // the grants that matter. (`@objectstack/plugin-security` made the same
+    // choice inside its own middleware in #10757; hoisting it here is what
+    // makes the covered set identical BY CONSTRUCTION to "everything the
+    // middleware chain sees", instead of identical by two authors agreeing.)
+    //
+    // ⛔ Do not move this below the `applicable` filter: that filter is a
+    // per-object middleware selector, and an epoch that only advanced when some
+    // middleware happened to be registered for the written object would be a
+    // seam with holes in it.
+    if (isWriteEpochOperation(ctx.operation)) {
+      this.writeEpoch.bump('write');
+    }
+
     const applicable = this.middlewares.filter(m =>
       !m.object || m.object === '*' || m.object === ctx.object
     );

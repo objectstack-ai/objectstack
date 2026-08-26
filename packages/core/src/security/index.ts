@@ -177,3 +177,26 @@ export {
   OPERATION_PRIVATE_KEY_PREFIX,
   withoutOperationPrivateKeys,
 } from './operation-private-keys.js';
+
+// [#11968] ADR-0127-shaped authorization caching SUBSTRATE — the cross-node
+// channel contract and the boot-time posture statement (#11633 §3, Fork 2 → B,
+// ruled 2026-08-25). No cache lives here and nothing consumes these yet; leg B
+// (#11967) is the first consumer. Read the channel module before using either:
+// the TTL is the correctness contract, and a missed message is EXPECTED.
+export {
+  AUTHZ_INVALIDATED_CHANNEL,
+  type AuthzInvalidationReason,
+  type AuthzInvalidatedPayload,
+} from './authz-invalidation-channel.js';
+export {
+  AUTHZ_GRANTS_CACHE_TTL_ENV,
+  resolveAuthzCachePosture,
+  readAuthzGrantsCacheTtlMs,
+  reportAuthzCachePosture,
+  type AuthzInvalidationBusState,
+  type AuthzCachePosture,
+  type AuthzCachePostureInput,
+  type AuthzCachePostureStatement,
+  type AuthzGrantsCacheTtlReading,
+  type AuthzPostureSink,
+} from './authz-cache-posture.js';
