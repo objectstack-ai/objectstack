@@ -317,20 +317,23 @@ export const ManifestSchema = z.object({
   /**
    * Contribution Points (VS Code Style).
    *
-   * NINE MEMBERS REMOVED in v17.x (#10724, ADR-0049 enforce-or-remove):
-   * `events`, `menus`, `themes`, `translations`, `actions`, `drivers`,
-   * `fieldTypes`, `functions`, `commands`. The census behind it (#10627,
-   * re-verified at claim time, three repos with control probes) measured
-   * exactly ONE non-test read of `manifest.contributes` in the entire
-   * monorepo — `packages/objectql/src/engine.ts` reading `kinds` — so every
-   * other member parsed, entered the manifest, and changed nothing.
+   * TEN MEMBERS REMOVED in v17.x (ADR-0049 enforce-or-remove): nine at
+   * #10724 — `events`, `menus`, `themes`, `translations`, `actions`,
+   * `drivers`, `fieldTypes`, `functions`, `commands` — and `routes` at
+   * #10726, its own enforce-or-remove fork, maintainer-ruled Option B
+   * 2026-08-22 (remove; author-facing materials redirect to the imperative
+   * `http.server` mount) once the cloud census (#10812) closed clean. The
+   * census behind them (#10627, re-verified at claim time, three repos with
+   * control probes) measured exactly ONE non-test read of
+   * `manifest.contributes` in the entire monorepo —
+   * `packages/objectql/src/engine.ts` reading `kinds` — so every other
+   * member parsed, entered the manifest, and changed nothing.
    * Tombstoned rather than deleted because this object is not `.strict()`:
    * a plain deletion would silently strip the key, replacing an inert
    * declaration with an invisible one (the `loading` precedent below).
    *
-   * Survivors: `kinds` (live reader: engine → `registry.registerKind`) and
-   * `routes` (open enforce-or-remove fork #10726 — deliberately untouched
-   * by #10724; do not tombstone it here without its own ruling).
+   * Survivor: `kinds` (live reader: engine → `registry.registerKind`) —
+   * the block's sole remaining live member.
    */
   contributes: z.object({
     /**
@@ -435,25 +438,17 @@ export const ManifestSchema = z.object({
       '`engine.registerFunction`.',
     ),
 
-    /**
-      * Register API Route Namespaces.
-      * Declares the API endpoints this plugin provides to the HttpDispatcher.
-      * The kernel routes matching prefixes to this plugin's handler.
-      * 
-      * @example
-      * routes: [
-      *   { prefix: '/api/v1/i18n', service: 'i18n', methods: ['getLocales', 'getTranslations'] }
-      * ]
-      */
-    routes: z.array(z.object({
-      /** URL path prefix (e.g. "/api/v1/ai") */
-      prefix: z.string().regex(/^\//).describe('API path prefix'),
-      /** Service name this plugin provides */
-      service: z.string().describe('Service name this plugin provides'),
-      /** Protocol method names implemented */
-      methods: z.array(z.string()).optional()
-        .describe('Protocol method names implemented (e.g. ["getLocales", "getTranslations"])'),
-    })).optional().describe('API route contributions to HttpDispatcher'),
+    /** REMOVED (#10726) — mount code-handler routes on the `http.server` service; declarative endpoints are `defineStack({ apis })`. */
+    routes: retiredKey(
+      '`manifest.contributes.routes` was removed in @objectstack/spec 17 (#10726, ' +
+      'ADR-0049 enforce-or-remove) — nothing ever read it: the HttpDispatcher never ' +
+      'registered a prefix from the declaration, so an entry here parsed cleanly and ' +
+      'served nothing while published material kept recommending it. Delete the key. ' +
+      'A route that needs real handler CODE is mounted imperatively: resolve the ' +
+      '`http.server` service from the plugin context and register the handler on ' +
+      '`kernel:ready`. A declarative endpoint over a pipeline the platform already ' +
+      'runs (query/return records, trigger a flow) is `defineStack({ apis })`.',
+    ),
 
     /**
      * REMOVED (#10724) — CLI commands are oclif-auto-discovered, never resolved
