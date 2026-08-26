@@ -85,23 +85,37 @@
  *
  * ## WHY THIS FILE IS THE REASON `@objectstack/cli#test` DECLARES `build`
  *
- * This is the only file in `packages/cli` that genuinely consumes
- * `packages/cli/dist`, and it is the only one that can be, for a reason that
- * is this card's own subject matter turned back on the test harness.
+ * This file was the FIRST in `packages/cli` to genuinely consume
+ * `packages/cli/dist`, and for a while the only one, for a reason that is
+ * this card's own subject matter turned back on the test harness. Four files
+ * consume it today: this one, and the three named below that #11707 moved
+ * onto the built artifact. What did not change is that the `dependsOn`
+ * declaration this section is about is what makes any of them safe.
  *
  * `turbo.json` used to declare `"@objectstack/cli#test": { dependsOn:
  * ["^build"] }` — dependencies only, never this package's own build. So
  * `packages/cli/dist` does not exist when the `Test Core` shard runs. Five
  * other files here name `bin/run.js`; two only assert the path as a string,
  * and the three that actually spawn it (`serve-mcp-stdio-answers`,
- * `serve-mcp-capability-collision`, `serve-stdio-stdout-purity`) pass
- * `NODE_ENV: 'development'` to the child so its `--dev` admin seed runs.
+ * `serve-mcp-capability-collision`, `serve-stdio-stdout-purity`) used to pass
+ * `NODE_ENV: 'development'` to the child so its `--dev` admin seed ran.
  * That value is also what makes `@oclif/core`'s `tsPath()` rewrite the
  * command target from the declared `./dist/commands` to `./src/commands` and
  * auto-transpile: `lib/util/util.js` defines `isProd = () =>
  * !['development','test'].includes(process.env.NODE_ENV ?? '')`, and the
  * lookup is skipped only when that is true. Those three therefore never
- * touch `dist/` at all, and the missing build stayed invisible.
+ * touched `dist/` at all, and the missing build stayed invisible.
+ *
+ * THEY REACH IT NOW, and the declaration below is the whole reason that is
+ * allowed. #11707 dropped that `NODE_ENV` pin: all three leave the variable
+ * unset and spawn `bin/run.js` through plain `node` — this file's own shape —
+ * and the `--dev` seed survives because `serve.ts` assigns
+ * `process.env.NODE_ENV = 'development'` IN-PROCESS for `--dev` before
+ * `runtime.start()`, which is after oclif has already resolved the command.
+ * Measured when they moved, with a distinct marker planted in each tree:
+ * `node bin/run.js` + unset executes `dist/commands`, `node bin/run.js` +
+ * `NODE_ENV=development` executes `src/commands`. The pair is as silent as it
+ * ever was; what removed the hazard is that `dependsOn` reads `["build"]`.
  *
  * This pin cannot dodge it. Unset `NODE_ENV` is the input under test, and
  * unset is exactly the value that leaves `isProd()` true and the reroute
