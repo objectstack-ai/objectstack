@@ -10239,27 +10239,27 @@ export class RestServer {
         // Refusing here makes the contract true for every implementation, in
         // the same envelope `handleValidation` already produces (400 /
         // VALIDATION_FAILED, ADR-0112).
-        const refuseIncompleteReport = (res: any, body: any): boolean => {
+        // It THROWS rather than writing a response, and that is the design, not
+        // a detour: `handleValidation` below is this surface's single place for
+        // building a VALIDATION_FAILED body. Writing a second one here would
+        // make one route answer the same refusal in two different envelopes —
+        // and would add a non-conforming body to the `check:route-envelope`
+        // ratchet, which only ticks down. Raised before `saveReport` is called,
+        // so the door refuses rather than the service.
+        const assertSaveReportInput = (body: any): void => {
             const missing = (['name', 'object', 'query'] as const)
                 .filter((field) => body?.[field] === undefined || body?.[field] === null);
             if (missing.length > 0) {
-                res.status(400).json({
-                    code: 'VALIDATION_FAILED',
-                    error: `${missing.join(', ')} ${missing.length === 1 ? 'is' : 'are'} required`,
-                });
-                return true;
+                throw new Error(
+                    `VALIDATION_FAILED: ${missing.join(', ')} ${missing.length === 1 ? 'is' : 'are'} required`,
+                );
             }
             // `query` is a `ReportQuery` envelope — never a scalar and never a
             // list. A string here is the shape an authoring mistake actually
             // takes, and it reaches storage as a stringified scalar otherwise.
             if (typeof body.query !== 'object' || Array.isArray(body.query)) {
-                res.status(400).json({
-                    code: 'VALIDATION_FAILED',
-                    error: 'query must be a ReportQuery object',
-                });
-                return true;
+                throw new Error('VALIDATION_FAILED: query must be a ReportQuery object');
             }
-            return false;
         };
         const handleValidation = (res: any, err: any): boolean => {
             const msg = String(err?.message ?? err ?? '');
@@ -10313,10 +10313,12 @@ export class RestServer {
                     if (this.enforceAuth(req, res, context)) return;
                     const svc = await resolveService(environmentId);
                     if (!svc) return respond501(res);
-                    // AFTER the 501 on purpose: "no reports service is mounted"
-                    // is a deployment fact and outranks anything about the body.
-                    if (refuseIncompleteReport(res, req.body ?? {})) return;
                     try {
+                        // AFTER the 501 on purpose: "no reports service is
+                        // mounted" is a deployment fact and outranks anything
+                        // about the body. Inside the try so the refusal reaches
+                        // `handleValidation` like any other VALIDATION_FAILED.
+                        assertSaveReportInput(req.body ?? {});
                         const row = await svc.saveReport(req.body ?? {}, context ?? {});
                         res.status(201).json(row);
                     } catch (err: any) {
