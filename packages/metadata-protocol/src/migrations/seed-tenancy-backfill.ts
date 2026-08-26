@@ -193,7 +193,20 @@ export type SeedTenancyBackfillStatus =
   | 'no-split'
   /** A split exists but the install is multi-tenant — ruled: skip, loudly. */
   | 'skipped-multi-tenant'
-  /** A split exists but the organization count is not exactly 1. */
+  /**
+   * A split exists and the install holds NO organization yet (#12395).
+   *
+   * Benign, and deliberately NOT folded into `skipped-ambiguous-organization`:
+   * with zero organizations there is no second partition, so each object runs
+   * exactly one counter and nothing can be minted twice. The state self-heals at
+   * the first sign-up through the `sys_organization`-insert handoff.
+   *
+   * The same 0 / 1 / several line objectql already draws in
+   * `resolveSystemWriteOrganization`, whose `no-organization-yet` decision this
+   * is named after — "⛔ Refusing here would refuse first boot itself."
+   */
+  | 'no-organization-yet'
+  /** A split exists but the install holds SEVERAL organizations — no derivable owner. */
   | 'skipped-ambiguous-organization'
   /** The backfill ran. */
   | 'applied';
@@ -572,6 +585,27 @@ export function buildSplitProbeSql(client?: string): string {
  * to remove one.
  */
 const PLATFORM_NAMESPACE = /^(sys_|cloud_|ai_)/;
+
+/**
+ * What the affected-object list is, and is not (#12395).
+ *
+ * It is read from `_objectstack_sequences` at the instant this probe runs, and
+ * this probe runs on `kernel:ready`. A seed that overruns its budget keeps
+ * writing in the BACKGROUND past that point (`[Seeder] Inline seed exceeded
+ * <n>ms budget … continuing in background to avoid blocking kernel start`), so a
+ * first boot can reach here with only part of the seed's counters allocated —
+ * measured at 194 ms apart, naming 3 objects where the settled database holds 9.
+ *
+ * Stated rather than removed by ordering: the boot pass exists for the
+ * EXISTING-install half, whose rows are already written and need no wait, and
+ * the fresh-install half is delivered by the `sys_organization`-insert handoff,
+ * which by construction runs after sign-up. Making boot block on seed settlement
+ * would delay a repair that has nothing to wait for.
+ */
+const SNAPSHOT_CAVEAT =
+  `This list is a snapshot taken when the probe ran, not a census: a boot that reaches ` +
+  `'kernel:ready' while an over-budget inline seed is still writing in the background names only ` +
+  `the counters allocated so far, so a later run on the same database may name more.`;
 
 /** The organizations the install has, capped — the single-tenant guard reads this. */
 export function buildOrganizationProbeSql(client?: string): string {
@@ -1245,21 +1279,69 @@ export async function backfillSeedTenancy(
         `no derivable answer to which organization owns the untenanted rows. Remedy: decide the owner per ` +
         `object, then UPDATE <object> SET ${ORGANIZATION_FIELD} = '<org id>' WHERE ${ORGANIZATION_FIELD} ` +
         `IS NULL, and merge that object's '${GLOBAL_TENANT}' row in ${SEQUENCES_TABLE} into the ` +
-        `organization-scoped row at the greater last_value.`,
+        `organization-scoped row at the greater last_value. ` +
+        SNAPSHOT_CAVEAT,
       { splits, posture: resolveTenancyPosture() },
     );
     return { status: 'skipped-multi-tenant', splits, collisions: [], objectsStamped: 0 };
   }
 
-  // 4. Exactly one organization, or there is nothing derivable to adopt.
+  // 4. How many organizations does the install hold? Three answers, not two:
+  //    none yet (benign, 4a), exactly one (derivable — the repair runs), or
+  //    several (ambiguous, 4b).
+  //
+  //    A probe that THREW is tracked separately and must never reach 4a. It
+  //    yields the same empty array as a genuine zero, and reading a failure as
+  //    "no organizations yet" is a known way to turn an outage into a benign-
+  //    looking log line — objectql fixed that exact confusion in
+  //    `resolveSystemWriteOrganization`'s probe (#9261). Unknown is not zero.
   let organizationIds: string[] = [];
+  let organizationProbeError = '';
   try {
     organizationIds = (await selectRows(exec, buildOrganizationProbeSql(client)))
       .map((r) => (r.id == null ? '' : String(r.id)))
       .filter((id) => id.length > 0);
-  } catch {
+  } catch (e) {
+    organizationProbeError = (e as Error).message || 'unknown error';
     organizationIds = [];
   }
+  // 4a. NO organization yet — benign, and NOT the ambiguous case (#12395).
+  //
+  //     `!== 1` used to fold this together with "several organizations", and the
+  //     two are opposite conditions. With several, the owner is genuinely
+  //     underdetermined and an operator has to choose. With NONE, there is no
+  //     second partition to be split ACROSS: every counter is the one
+  //     `__global__` row, so "two autonumber counters" and "can mint the same
+  //     identifier twice" — what the loud branch below says — are both false
+  //     here, at a moment when they read as an active data-integrity emergency.
+  //     (The `organizationLastValue: 0` this state reports is `buildSplitProbeSql`'s
+  //     LEFT JOIN finding no second row, not a second counter sitting at zero.)
+  //
+  //     Nor is it a state anyone can act on: seeds load inline during `start()`,
+  //     while the first organization is created by plugin-auth's
+  //     `ensureDefaultOrganization` behind an admin permission-set grant, so it
+  //     cannot exist until a sign-up POST reaches a running server. The repair is
+  //     already scheduled for that exact moment by the `sys_organization`-insert
+  //     handoff in runtime's app-plugin.
+  //
+  //     `info`, not silence. The split is real even though the hazard is not, and
+  //     a diagnostic silenced in BOTH directions would be worse than the one it
+  //     replaces — this still says what was seen, it just stops claiming harm.
+  if (organizationIds.length === 0 && organizationProbeError === '') {
+    logger?.info?.(
+      `[metadata-protocol] seed/API tenancy split detected on an install with no organization yet — ` +
+        `nothing to adopt, and nothing at risk (#8686). Affected: ${affected}. ` +
+        `${ORGANIZATION_TABLE} is empty, so each of these objects runs exactly ONE counter (its ` +
+        `'${GLOBAL_TENANT}' row) and no "unique" identifier can be minted twice while there is only ` +
+        `one partition. No operator action: this self-heals at the first sign-up, when the ` +
+        `${ORGANIZATION_TABLE}-insert handoff runs this same repair against a settled database. ` +
+        SNAPSHOT_CAVEAT,
+      { splits, organizationCount: 0 },
+    );
+    return { status: 'no-organization-yet', splits, collisions: [], objectsStamped: 0 };
+  }
+
+  // 4b. SEVERAL organizations — the genuinely ambiguous case, still loud.
   if (organizationIds.length !== 1) {
     logger?.warn?.(
       `[metadata-protocol] seed/API tenancy split detected but the target organization is not ` +
@@ -1268,8 +1350,14 @@ export async function backfillSeedTenancy(
         `${ORGANIZATION_TABLE} (exactly 1 is required to adopt one without guessing). Until this is ` +
         `resolved these objects run two autonumber counters and can mint the same "unique" identifier ` +
         `twice. Remedy: as above — stamp the untenanted rows with the owning organization and merge the ` +
-        `'${GLOBAL_TENANT}' counter row into the organization-scoped one.`,
-      { splits, organizationCount: organizationIds.length },
+        `'${GLOBAL_TENANT}' counter row into the organization-scoped one. ` +
+        (organizationProbeError === ''
+          ? ''
+          : `NOTE: the ${ORGANIZATION_TABLE} probe FAILED (${organizationProbeError}), so the count ` +
+            `above is "unknown", not a measured zero — an unreadable probe is reported here rather ` +
+            `than through the benign no-organization-yet path (#9261). `) +
+        SNAPSHOT_CAVEAT,
+      { splits, organizationCount: organizationIds.length, organizationProbeError },
     );
     return { status: 'skipped-ambiguous-organization', splits, collisions: [], objectsStamped: 0 };
   }
