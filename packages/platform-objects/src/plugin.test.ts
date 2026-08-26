@@ -1,6 +1,9 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 // [#5855] The fake engine's `update` routes through the producer's OWN dispatch
 // predicate (#5480), so this double cannot accept a call `ObjectQL.update`
 // refuses. Imported from `@objectstack/metadata-core` (already a `dependencies`
@@ -10,7 +13,7 @@ import { describe, it, expect } from 'vitest';
 // the predicate into a package that depends on neither side.
 import { assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import { PlatformObjectsPlugin } from './plugin.js';
-import { SysMigration, SysMigrationJournal, SysSecret } from './system/index.js';
+import { SysMetadataActivation, SysMigration, SysMigrationJournal, SysSecret } from './system/index.js';
 
 /**
  * Hand-rolled fake PluginContext (mirrors the service-plugin tests) — this
@@ -46,7 +49,7 @@ function makeCtx() {
 }
 
 describe('PlatformObjectsPlugin: platform-infrastructure object registration (#4243, #4270)', () => {
-  it('registers SysMigration, SysMigrationJournal and SysSecret through the manifest service', async () => {
+  it('registers SysMigration, SysMigrationJournal, SysSecret and SysMetadataActivation through the manifest service', async () => {
     const ctx = makeCtx();
     const manifests: any[] = [];
     ctx.registerService('manifest', { register: (m: any) => manifests.push(m) });
@@ -56,7 +59,12 @@ describe('PlatformObjectsPlugin: platform-infrastructure object registration (#4
     expect(manifests).toHaveLength(1);
     expect(manifests[0].id).toBe('com.objectstack.platform-objects');
     expect(manifests[0].scope).toBe('system');
-    expect(manifests[0].objects).toEqual([SysMigration, SysMigrationJournal, SysSecret]);
+    expect(manifests[0].objects).toEqual([
+      SysMigration,
+      SysMigrationJournal,
+      SysSecret,
+      SysMetadataActivation,
+    ]);
     expect(manifests[0].objects.map((o: any) => o.name)).toEqual([
       'sys_migration',
       // ADR-0119 D2 (#4617). Registered UNCONDITIONALLY, alongside the flag
@@ -65,7 +73,38 @@ describe('PlatformObjectsPlugin: platform-infrastructure object registration (#4
       // compose and others do not is a journal a boot scanner cannot rely on.
       'sys_migration_journal',
       'sys_secret',
+      // [#12359 ruling, 2026-08-26 — 「同意」] ADR-0126 §4's activation ledger.
+      // Registration follows the DECLARATION: the object is declared in this
+      // package, so this plugin registers it. Until the ruling its only
+      // registrant was the automation service's manifest — which made
+      // packaged-ACTION disable, whose consult and write path live on the
+      // ObjectQL engine, unavailable in every actions-and-no-automation
+      // composition (measured: 503 SERVICE_UNAVAILABLE on the flip).
+      'sys_metadata_activation',
     ]);
+  });
+
+  /**
+   * [#12359] The other half of "MOVE, not add". A second manifest naming the
+   * same object is the governed contributor case (ADR-0029 D7), and the ruling
+   * closed it by giving the ledger ONE owner rather than by declaring a double
+   * registration benign. This pin is what a later edit re-adding the object to
+   * the automation service's manifest has to argue with — a grep-level check,
+   * because the two registrations live in different packages and neither one's
+   * unit tests can see the other.
+   */
+  it('is the SINGLE registrant — the automation service no longer names the ledger', async () => {
+    const automationPlugin = readFileSync(
+      resolve(
+        dirname(fileURLToPath(import.meta.url)),
+        '../../services/service-automation/src/plugin.ts',
+      ),
+      'utf8',
+    );
+    // Only the explanatory comment may mention the symbol; no import of it, and
+    // no manifest entry for it.
+    expect(automationPlugin).not.toMatch(/import\s*\{[^}]*SysMetadataActivation/);
+    expect(automationPlugin).not.toMatch(/objects:\s*\[[^\]]*SysMetadataActivation/);
   });
 
   /**

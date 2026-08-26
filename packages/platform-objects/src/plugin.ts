@@ -2,6 +2,7 @@
 
 import { SetupAppTranslations } from './apps/translations/index.js';
 import { MetadataFormsTranslations } from './metadata-translations/index.js';
+import { SysMetadataActivation } from './system/sys-metadata-activation.object.js';
 import { SysMigration } from './system/sys-migration.object.js';
 import { SysMigrationJournal } from './system/sys-migration-journal.object.js';
 import { SysSecret } from './system/sys-secret.object.js';
@@ -47,6 +48,27 @@ import { SEED_SETTLEMENT_SERVICE } from '@objectstack/spec/contracts';
  *    service-settings registered it, a kernel composed without settings
  *    hard-failed every secret-field write with an error that blamed
  *    platform-objects. Registered here, that error message is true.
+ *  - **`sys_metadata_activation`** — the packaged-metadata activation
+ *    ledger (ADR-0126 §4). Same story a third time, and the ruling that
+ *    moved it here is recorded verbatim on #12359 (maintainer, 2026-08-26,
+ *    「同意」): registration follows the DECLARATION. Until then the only
+ *    registrant was the automation service's manifest, because flows were
+ *    the ledger's first and only consumer; the moment packaged ACTIONS
+ *    became the second, the consult and write path moved to the ObjectQL
+ *    engine — present in every composition that can execute an action —
+ *    while the object it needs was still gated on an unrelated service.
+ *    Measured cost of that gap: a `bootStack(showcaseStack)` boot (actions,
+ *    no automation service) answered the activation door 503
+ *    SERVICE_UNAVAILABLE, correctly but permanently. Registered here, every
+ *    composition carrying platform-objects has the ledger, so packaged
+ *    disable works without the automation service and each future ADR-0126
+ *    §8 consumer (`tool`, `skill`, `position`) inherits it.
+ *
+ *    ⚠️ MOVE, not add — **single owner, one registration**. The automation
+ *    service no longer names this object in its own manifest: two manifests
+ *    registering one object is a governed contributor question (ADR-0029
+ *    D7), and the ruling closed it by giving the ledger one owner rather
+ *    than by measuring whether a double registration is benign.
  *  - **Fresh-datastore attestation** (#3438, ADR-0104 2026-07-30) —
  *    travels with the ledger registration: a store this boot created from
  *    empty is attested once that boot's own data has settled
@@ -96,12 +118,14 @@ export class PlatformObjectsPlugin {
         version: this.version,
         type: 'plugin',
         scope: 'system',
-        objects: [SysMigration, SysMigrationJournal, SysSecret],
+        objects: [SysMigration, SysMigrationJournal, SysSecret, SysMetadataActivation],
       });
     } catch {
       // No manifest service (lean / i18n-only kernels) — the ledger stays
-      // unregistered (every flag reader answers "not verified") and the
-      // secret store stays unregistered (secret-field writes fail closed).
+      // unregistered (every flag reader answers "not verified"), the secret
+      // store stays unregistered (secret-field writes fail closed), and the
+      // activation ledger stays unregistered (every enable/disable door
+      // refuses loudly with 503 rather than keeping a bit that reverts).
     }
   }
 
