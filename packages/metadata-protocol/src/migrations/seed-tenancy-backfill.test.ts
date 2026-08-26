@@ -36,7 +36,14 @@ import {
   buildStampSql,
   buildCounterMergeSql,
   buildGlobalCounterDeleteSql,
+  buildSequencesKeyShapeProbeSql,
+  buildGlobalCounterProbeSql,
+  buildCounterRowProbeSql,
+  buildCounterMergeByKeyHashSql,
+  buildCounterInsertSql,
+  buildGlobalCounterDeleteByKeyHashSql,
   buildSequencesPresenceSql,
+  sequenceKeyHash,
   SEQUENCES_TABLE,
   GLOBAL_TENANT,
   ORGANIZATION_FIELD,
@@ -132,6 +139,72 @@ describe('#8686 SQL builders', () => {
   it('the presence probe reads no rows', () => {
     expect(buildSequencesPresenceSql()).toContain('WHERE 1 = 0');
   });
+
+  // ── #12394 — the handoff writes before it deletes ─────────────────────────
+  //
+  // The old merge was an UPDATE against a row that does not exist on a fresh
+  // install, followed by an unconditional DELETE. These pin the two statements
+  // that make the write REACH somewhere, and the key they are addressed by.
+
+  it('the key-shape probe reads no rows and names key_hash', () => {
+    expect(buildSequencesKeyShapeProbeSql()).toContain('WHERE 1 = 0');
+    expect(buildSequencesKeyShapeProbeSql()).toContain('"key_hash"');
+  });
+
+  it('the counter INSERT names every column the current table shape requires', () => {
+    const modern = buildCounterInsertSql(true);
+    // `key_hash` is NOT NULL with no default — an INSERT that omitted it could
+    // not land at all — and `scope` is what keeps a per-day/per-group counter
+    // from collapsing into another scope's row.
+    for (const column of ['key_hash', 'object', 'tenant_id', 'field', 'scope', 'last_value']) {
+      expect(modern).toContain(`"${column}"`);
+    }
+    expect(modern).toContain('VALUES (?, ?, ?, ?, ?, ?)');
+    // `updated_at` is left to the column default: one less column to be wrong
+    // about on a table shape this module did not create.
+    expect(modern).not.toContain('"updated_at"');
+  });
+
+  it('the legacy shape is addressed by the three columns the driver falls back to', () => {
+    // A table whose `key_hash` rebuild has not run or did not succeed. The
+    // driver keys those by (object, tenant_id, field); so does this.
+    const legacy = buildCounterInsertSql(false);
+    expect(legacy).toContain('VALUES (?, ?, ?, ?)');
+    expect(legacy).not.toContain('"key_hash"');
+    expect(legacy).not.toContain('"scope"');
+    expect(buildCounterRowProbeSql(false)).toContain(
+      'WHERE "object" = ? AND "field" = ? AND "tenant_id" = ?',
+    );
+    expect(buildGlobalCounterProbeSql(false)).not.toContain('"scope"');
+  });
+
+  it('the modern shape is addressed by key_hash alone, and so is the retirement', () => {
+    expect(buildCounterRowProbeSql(true)).toContain('WHERE "key_hash" = ?');
+    expect(buildCounterMergeByKeyHashSql()).toContain('WHERE "key_hash" = ?');
+    // The `__global__` row is retired by its OWN stored hash — read back, never
+    // recomputed — so a scope spelled wrong cannot delete a row it did not merge.
+    expect(buildGlobalCounterDeleteByKeyHashSql()).toContain('DELETE FROM "_objectstack_sequences"');
+    expect(buildGlobalCounterDeleteByKeyHashSql()).toContain('WHERE "key_hash" = ?');
+    expect(buildGlobalCounterProbeSql(true)).toContain('"key_hash"');
+    expect(buildGlobalCounterProbeSql(true)).toContain('"scope"');
+  });
+
+  it('every new counter statement binds its values and names no literal tenant', () => {
+    for (const sql of [
+      buildSequencesKeyShapeProbeSql(),
+      buildGlobalCounterProbeSql(true),
+      buildGlobalCounterProbeSql(false),
+      buildCounterRowProbeSql(true),
+      buildCounterRowProbeSql(false),
+      buildCounterMergeByKeyHashSql(),
+      buildCounterInsertSql(true),
+      buildCounterInsertSql(false),
+      buildGlobalCounterDeleteByKeyHashSql(),
+    ]) {
+      expect(sql).not.toContain(GLOBAL_TENANT);
+      expect(sql).toContain(SEQUENCES_TABLE);
+    }
+  });
 });
 
 describe('#8686 identifier gate', () => {
@@ -192,6 +265,15 @@ describe('#9381 dialect-aware statement text', () => {
           buildStampSql('crm_case', ['case_number'], client),
           buildCounterMergeSql(client),
           buildGlobalCounterDeleteSql(client),
+          buildSequencesKeyShapeProbeSql(client),
+          buildGlobalCounterProbeSql(true, client),
+          buildGlobalCounterProbeSql(false, client),
+          buildCounterRowProbeSql(true, client),
+          buildCounterRowProbeSql(false, client),
+          buildCounterMergeByKeyHashSql(client),
+          buildCounterInsertSql(true, client),
+          buildCounterInsertSql(false, client),
+          buildGlobalCounterDeleteByKeyHashSql(client),
         ];
         for (const sql of statements) {
           expect(sql).not.toContain('"');
@@ -206,9 +288,19 @@ describe('#9381 dialect-aware statement text', () => {
       it('quotes `last_value` — a RESERVED word on MySQL 8.0 — wherever it is unqualified', () => {
         // `LAST_VALUE()` is a window function there, so a bare `last_value` is a
         // parse error even when the table name is spelled correctly. Measured.
-        const merge = buildCounterMergeSql(client);
-        expect(merge).toContain(`SET ${bt('last_value')} = ?`);
-        expect(merge).not.toMatch(/(?<![`\w])last_value(?![`\w])/);
+        for (const merge of [buildCounterMergeSql(client), buildCounterMergeByKeyHashSql(client)]) {
+          expect(merge).toContain(`SET ${bt('last_value')} = ?`);
+          expect(merge).not.toMatch(/(?<![`\w])last_value(?![`\w])/);
+        }
+        // The reads and the INSERT name it too, and a bare one is the same
+        // parse error there.
+        for (const sql of [
+          buildGlobalCounterProbeSql(true, client),
+          buildCounterRowProbeSql(true, client),
+          buildCounterInsertSql(true, client),
+        ]) {
+          expect(sql).not.toMatch(/(?<![`\w])last_value(?![`\w])/);
+        }
       });
 
       it('routes the stamp guard through a derived table (MySQL rejects the self-reference)', () => {
@@ -234,6 +326,15 @@ describe('#9381 dialect-aware statement text', () => {
         buildStampSql('crm_case', ['case_number'], client),
         buildCounterMergeSql(client),
         buildGlobalCounterDeleteSql(client),
+        buildSequencesKeyShapeProbeSql(client),
+        buildGlobalCounterProbeSql(true, client),
+        buildGlobalCounterProbeSql(false, client),
+        buildCounterRowProbeSql(true, client),
+        buildCounterRowProbeSql(false, client),
+        buildCounterMergeByKeyHashSql(client),
+        buildCounterInsertSql(true, client),
+        buildCounterInsertSql(false, client),
+        buildGlobalCounterDeleteByKeyHashSql(client),
       ];
       for (const sql of statements) {
         expect(sql).not.toContain(BACKTICK);
@@ -262,6 +363,157 @@ describe('#9381 dialect-aware statement text', () => {
 });
 
 /**
+ * #12394 — the counter handoff, against a store that is KEYED.
+ *
+ * ## The hole this closes
+ *
+ * Every other fake seam in this file answers by STATEMENT SHAPE: it matches on
+ * `sql.includes('"key_hash" = ?')` and hands back the one row it is holding,
+ * without ever reading the parameter. A fake like that models a database in
+ * which every key addresses the same row — so the one decision this handoff
+ * makes, INSERT-vs-UPDATE keyed by `key_hash`, is answered correctly no matter
+ * what key the migration asks with. The branch cannot fail here, which is the
+ * same thing as saying it is not covered.
+ *
+ * It was not covered anywhere else at unit speed either: the UPDATE branch (an
+ * organization-scoped row that ALREADY exists) reached CI only through two
+ * integration fixtures, and both of them seeded `key_hash` as an invented string
+ * — `'h1'`/`'h2'` and `'h_global'`/`'h_org'`. Those were inert for as long as the
+ * repair addressed counter rows by `(object, field, tenant_id)`. The moment it
+ * began addressing them by `key_hash`, both fixtures described a table no
+ * install can hold, the destination row read as ABSENT, and the repair inserted
+ * a SECOND counter for one logical sequence — on SQLite and on MySQL alike, so
+ * this was never a dialect gap.
+ *
+ * ## What makes this fixture able to fail
+ *
+ * It is a real keyed store: rows live in a `Map` under their own `key_hash`, the
+ * probe answers by the parameter it was given, and the INSERT REFUSES a key that
+ * is already present — because `key_hash` is the table's PRIMARY KEY and its
+ * only key (no unique index stands behind `(object, tenant_id, field, scope)`).
+ * A fake looser than the producer is how a dead write path ships green; this one
+ * is exactly as strict. A repair that wrote its mark under a key other than the
+ * one it probed now ends with two rows or a refused write, and both are red.
+ */
+describe('#12394 the counter handoff writes the row the driver will read', () => {
+  const OBJECT = 'crm_case';
+  const FIELD = 'case_number';
+  const ORG = 'org_a';
+
+  /** A `_objectstack_sequences` that is keyed the way the real table is keyed. */
+  function keyedSequences(seed: Array<Record<string, unknown>>) {
+    const rows = new Map<string, Record<string, unknown>>();
+    for (const row of seed) rows.set(String(row.key_hash), { ...row });
+    const exec = async (sql: string, params: unknown[] = []): Promise<unknown> => {
+      if (sql.includes('WHERE 1 = 0')) return []; // presence + key-shape probes
+      if (sql.includes('LEFT JOIN')) {
+        return [
+          { object: OBJECT, field: FIELD, global_last_value: 38, organization_last_value: 1 },
+        ];
+      }
+      if (sql.includes(ORGANIZATION_TABLE)) return [{ id: ORG }];
+      if (sql.includes('rows_holding')) return [];
+      if (sql.startsWith('INSERT') && sql.includes(SEQUENCES_TABLE)) {
+        const key = String(params[0]);
+        // The PRIMARY KEY, enforced. Without this the fixture would absorb the
+        // very defect it exists to catch.
+        if (rows.has(key)) throw new Error(`duplicate key value violates the primary key: ${key}`);
+        rows.set(key, {
+          key_hash: key,
+          object: String(params[1]),
+          tenant_id: String(params[2]),
+          field: String(params[3]),
+          scope: String(params[4]),
+          last_value: Number(params[5]),
+        });
+        return [];
+      }
+      if (sql.startsWith('UPDATE') && sql.includes(SEQUENCES_TABLE)) {
+        const row = rows.get(String(params[1]));
+        if (row) row.last_value = Number(params[0]);
+        return [];
+      }
+      if (sql.startsWith('DELETE') && sql.includes(SEQUENCES_TABLE)) {
+        rows.delete(String(params[0]));
+        return [];
+      }
+      if (sql.startsWith('UPDATE') || sql.startsWith('DELETE')) return []; // the stamp
+      // The org-scoped row, addressed by the key the caller actually asked with.
+      if (sql.includes('"key_hash" = ?')) {
+        const row = rows.get(String(params[0]));
+        return row ? [{ last_value: row.last_value }] : [];
+      }
+      // The `__global__` rows for one object/field — one per scope.
+      if (sql.includes('tenant_id')) {
+        return [...rows.values()].filter((r) => r.tenant_id === GLOBAL_TENANT);
+      }
+      return [];
+    };
+    return { rows, seam: { exec } as never };
+  }
+
+  const globalRow = {
+    key_hash: sequenceKeyHash(OBJECT, GLOBAL_TENANT, FIELD, ''),
+    object: OBJECT,
+    tenant_id: GLOBAL_TENANT,
+    field: FIELD,
+    scope: '',
+    last_value: 38,
+  };
+
+  it('[first boot] creates the organization row at the merged mark, then retires __global__', async () => {
+    const { rows, seam } = keyedSequences([globalRow]);
+    const result = await backfillSeedTenancy(seam);
+
+    expect(result.status).toBe('applied');
+    // One row, under the key the DRIVER will compute — not under any key.
+    expect([...rows.keys()]).toEqual([sequenceKeyHash(OBJECT, ORG, FIELD, '')]);
+    expect([...rows.values()][0]!.last_value).toBe(38);
+  });
+
+  it('[the CI regression] an existing organization row is RAISED, never duplicated', async () => {
+    // The shape both integration fixtures were really in, spelled with the key
+    // the platform actually stores. A repair that probes with one key and writes
+    // under another leaves two rows here, which is what CI caught.
+    const { rows, seam } = keyedSequences([
+      globalRow,
+      {
+        key_hash: sequenceKeyHash(OBJECT, ORG, FIELD, ''),
+        object: OBJECT,
+        tenant_id: ORG,
+        field: FIELD,
+        scope: '',
+        last_value: 1,
+      },
+    ]);
+    const result = await backfillSeedTenancy(seam);
+
+    expect(result.status).toBe('applied');
+    expect(rows.size).toBe(1);
+    expect([...rows.values()][0]).toMatchObject({ tenant_id: ORG, last_value: 38 });
+  });
+
+  it('[never lowered] an organization row already ahead of __global__ keeps its own mark', async () => {
+    const { rows, seam } = keyedSequences([
+      globalRow,
+      {
+        key_hash: sequenceKeyHash(OBJECT, ORG, FIELD, ''),
+        object: OBJECT,
+        tenant_id: ORG,
+        field: FIELD,
+        scope: '',
+        last_value: 91,
+      },
+    ]);
+    await backfillSeedTenancy(seam);
+
+    expect(rows.size).toBe(1);
+    // The merge rule is the greater of the two COUNTERS, never the data max.
+    expect([...rows.values()][0]!.last_value).toBe(91);
+  });
+});
+
+/**
  * #9451 — the durable receipt.
  *
  * The behaviour that matters (a row that is still in the database after the
@@ -275,11 +527,17 @@ describe('#9381 dialect-aware statement text', () => {
 describe('#9451 the seed-tenancy repair leaves a durable receipt', () => {
   /** One split object, one organization, no collisions — drives the repair to `applied`. */
   function fakeSeamExec(overrides: { collisions?: Record<string, unknown>[] } = {}) {
-    return async (sql: string, _params?: unknown[]): Promise<unknown> => {
+    // The organization-scoped counter row, held as a one-row store. #12394's
+    // handoff WRITES the merged high-water mark and READS IT BACK before it
+    // retires the `__global__` row, so a fixture that answered the read-back
+    // with nothing would be modelling a database that silently dropped the
+    // write — and the repair would correctly refuse to delete anything.
+    let orgCounter: Record<string, unknown> | undefined;
+    return async (sql: string, params?: unknown[]): Promise<unknown> => {
       // Dispatched on the statements the module actually compiles, so a builder
       // that changed shape breaks this fixture rather than silently turning it
       // into a healthy install.
-      if (sql.includes('WHERE 1 = 0')) return []; // presence probe
+      if (sql.includes('WHERE 1 = 0')) return []; // presence + key-shape probes
       if (sql.includes('LEFT JOIN')) {
         return [
           {
@@ -292,8 +550,20 @@ describe('#9451 the seed-tenancy repair leaves a durable receipt', () => {
       }
       if (sql.includes(ORGANIZATION_TABLE)) return [{ id: 'org_a' }];
       if (sql.includes('rows_holding')) return overrides.collisions ?? [];
+      if (sql.startsWith('INSERT')) {
+        orgCounter = { last_value: Number(params?.[5]) };
+        return [];
+      }
+      if (sql.startsWith('UPDATE') && sql.includes(SEQUENCES_TABLE)) {
+        orgCounter = { last_value: Number(params?.[0]) };
+        return [];
+      }
       if (sql.startsWith('UPDATE') || sql.startsWith('DELETE')) return [];
-      if (sql.includes('tenant_id')) return [{ tenant_id: 'org_a', last_value: 1 }];
+      // The organization-scoped row, addressed the way the driver addresses it.
+      if (sql.includes('"key_hash" = ?')) return orgCounter ? [orgCounter] : [];
+      // The `__global__` rows for one object/field — one per scope, carrying the
+      // stored hash the retirement is addressed by.
+      if (sql.includes('tenant_id')) return [{ key_hash: 'hash-global', scope: '', last_value: 38 }];
       return [];
     };
   }
@@ -536,5 +806,150 @@ describe('#9451 the seed-tenancy repair leaves a durable receipt', () => {
     // and says, loudly, that it could not record itself.
     expect(resolveSeedTenancySeam({ driver: { execute: async () => [] } })?.ledger).toBeUndefined();
     expect(resolveSeedTenancyLedger({ getObject: () => ({}), find: async () => [] })).toBeUndefined();
+  });
+});
+
+describe('#12395 zero organizations is a third state, not the ambiguous one', () => {
+  /**
+   * The contract these cases pin is a DISCRIMINATION, not a wording:
+   * `organizationCount: 0` must not warn, and `organizationCount: 2` must still
+   * warn. Both arms are asserted in every case that can carry both, because a
+   * diagnostic silenced in both directions would pass a one-armed test while
+   * being strictly worse than the line it replaced.
+   *
+   * NOTE ON EXISTING ASSERTIONS: none were changed. The two pins that already
+   * existed on `skipped-ambiguous-organization` — `null-seam.test.ts` and
+   * runtime's `seed-tenancy-autonumber-split.integration.test.ts` — both drive
+   * the TWO-organization arm (`org_a`/`org_b`, `org_second`), which keeps its
+   * status and its warning here. No test covered the zero arm before this one.
+   */
+  function spy() {
+    const warn: Array<[string, unknown]> = [];
+    const info: Array<[string, unknown]> = [];
+    return {
+      warn,
+      info,
+      logger: {
+        info: (m: string, p?: unknown) => void info.push([m, p]),
+        warn: (m: string, p?: unknown) => void warn.push([m, p]),
+        error: () => {},
+      },
+    };
+  }
+
+  /** A seam holding one `__global__` counter and `orgs` organizations. */
+  function seam(orgs: string[], opts: { organizationProbeThrows?: boolean } = {}) {
+    const sql: string[] = [];
+    const exec = async (statement: string) => {
+      sql.push(statement);
+      if (statement.includes('WHERE 1 = 0')) return [];
+      if (statement.includes('LEFT JOIN')) {
+        return [
+          {
+            object: 'crm_case',
+            field: 'case_number',
+            global_last_value: 38,
+            // No organization-scoped row exists: the LEFT JOIN yields NULL here.
+            organization_last_value: null,
+          },
+        ];
+      }
+      if (statement.includes(ORGANIZATION_TABLE)) {
+        if (opts.organizationProbeThrows) throw new Error('connection reset by peer');
+        return orgs.map((id) => ({ id }));
+      }
+      return [];
+    };
+    return { seam: { exec, client: 'better-sqlite3' as const }, sql };
+  }
+
+  const HAZARD = 'can mint the same "unique" identifier twice';
+
+  it('[zero] does NOT warn, and reports its own state instead of the ambiguous one', async () => {
+    const log = spy();
+    const { seam: s } = seam([]);
+    const result = await backfillSeedTenancy(s, log.logger as any);
+
+    // The discrimination, arm 1.
+    expect(log.warn).toHaveLength(0);
+    expect(log.info).toHaveLength(1);
+    expect(result.status).toBe('no-organization-yet');
+    expect(log.info[0][1]).toMatchObject({ organizationCount: 0 });
+
+    // Still VISIBLE — silenced about harm, not about the observation.
+    expect(result.splits).toEqual([
+      { object: 'crm_case', field: 'case_number', globalLastValue: 38, organizationLastValue: 0 },
+    ]);
+  });
+
+  it('[several] still warns, and still names the hazard', async () => {
+    const log = spy();
+    const { seam: s } = seam(['org_a', 'org_b']);
+    const result = await backfillSeedTenancy(s, log.logger as any);
+
+    // The discrimination, arm 2 — unchanged from before this card.
+    expect(log.warn).toHaveLength(1);
+    expect(log.info).toHaveLength(0);
+    expect(result.status).toBe('skipped-ambiguous-organization');
+    expect(log.warn[0][1]).toMatchObject({ organizationCount: 2 });
+    expect(log.warn[0][0]).toContain(HAZARD);
+  });
+
+  it('[the claim moved with the state] only the ambiguous arm asserts the minting hazard', async () => {
+    // The card's actual complaint: the line claimed two live counters and an
+    // active duplicate-minting risk at a moment when exactly one counter
+    // existed. Asserting BOTH arms is what keeps this from going green on a
+    // rewrite that simply deletes the sentence everywhere.
+    const zero = spy();
+    await backfillSeedTenancy(seam([]).seam, zero.logger as any);
+    const several = spy();
+    await backfillSeedTenancy(seam(['org_a', 'org_b']).seam, several.logger as any);
+
+    expect(zero.info[0][0]).not.toContain(HAZARD);
+    expect(several.warn[0][0]).toContain(HAZARD);
+    // And the benign line says why it is benign, in the counter's own terms.
+    expect(zero.info[0][0]).toContain('exactly ONE counter');
+  });
+
+  it('[no writes] the zero state touches no data — the repair threshold is unchanged', async () => {
+    // Clause-② evidence in executable form: the set of inputs on which this
+    // migration MODIFIES data is exactly what it was — `length === 1` — so the
+    // zero arm must still issue reads only.
+    const { seam: s, sql } = seam([]);
+    const result = await backfillSeedTenancy(s, spy().logger as any);
+
+    expect(result.objectsStamped).toBe(0);
+    const writes = sql.filter((q) => /^\s*(UPDATE|DELETE|INSERT)/i.test(q));
+    expect(writes).toEqual([]);
+  });
+
+  it('[#9261] an organization probe that FAILED is not read as "no organizations yet"', async () => {
+    // The probe returns the same empty array for "none" and for "could not
+    // ask". Folding the second into the benign path would convert an outage
+    // into a reassuring info line — the confusion objectql already fixed in
+    // `resolveSystemWriteOrganization`. Unknown is not zero.
+    const log = spy();
+    const { seam: s } = seam([], { organizationProbeThrows: true });
+    const result = await backfillSeedTenancy(s, log.logger as any);
+
+    expect(result.status).toBe('skipped-ambiguous-organization');
+    expect(log.info).toHaveLength(0);
+    expect(log.warn).toHaveLength(1);
+    expect(log.warn[0][1]).toMatchObject({ organizationProbeError: 'connection reset by peer' });
+    expect(log.warn[0][0]).toContain('probe FAILED');
+  });
+
+  it('[snapshot] every list-bearing branch says the list is a probe-time snapshot', async () => {
+    // Problem 2. The affected list is read at `kernel:ready`, which a boot can
+    // reach while an over-budget inline seed is still writing — measured at 3
+    // objects named where the settled database held 9. Stated rather than
+    // reordered away; see SNAPSHOT_CAVEAT's comment for why boot does not wait.
+    const zero = spy();
+    await backfillSeedTenancy(seam([]).seam, zero.logger as any);
+    const several = spy();
+    await backfillSeedTenancy(seam(['org_a', 'org_b']).seam, several.logger as any);
+
+    expect(zero.info[0][0]).toContain('snapshot taken when the probe ran');
+    expect(several.warn[0][0]).toContain('snapshot taken when the probe ran');
   });
 });

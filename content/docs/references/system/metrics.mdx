@@ -396,6 +396,14 @@ Service Level Indicator
 | **window** | `{ size: integer; rolling?: boolean }` | ✅ | Measurement window |
 | **enabled** | `boolean` | optional (default: `true`) |  |
 
+### Nested Shape: `ServiceLevelIndicator.successCriteria[option 1]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **threshold** | `number` | ✅ | Threshold value |
+| **operator** | `Enum<'lt' \| 'lte' \| 'gt' \| 'gte' \| 'eq'>` | ✅ | Comparison operator |
+| **percentile** | `number` | optional | Percentile (0-1) |
+
 ### Nested Shape: `ServiceLevelIndicator.window`
 
 | Property | Type | Required | Description |

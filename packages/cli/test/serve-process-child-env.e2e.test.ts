@@ -67,8 +67,42 @@
  * reading `TEST`, that leg goes red, and the answer is to re-read this header
  * and re-measure, not to silence it.
  *
- * Cost: two real `os serve` boots, ~18s together when measured on this
- * container. Both children are killed in `afterAll` regardless of outcome.
+ * ## ⚠️ The port this file talks to is READ BACK, never assumed (#12548)
+ *
+ * The probe below is an HTTP request to `localhost:<port>`, and what it asserts
+ * on the answer is a SECURITY posture. Until #12548 that request went to the
+ * port this file ASKED for. Children here spawn through `bin/run-dev.js`, which
+ * pins `NODE_ENV=development` before argv is parsed, so `serve.ts`'s
+ * `portAutoShiftAllowed` is TRUE for every one of them: a taken port is not an
+ * error there, it is a hop to the next free one, and the boot then SUCCEEDS.
+ * The harness got a healthy child, a green run, and a request addressed to
+ * whatever still held the port it asked for. On the shared container this fleet
+ * develops in that is plausibly a neighbouring agent's dev server — measured
+ * answering another harness's own request with
+ * `{"iAm":"A NEIGHBOURING AGENT DEV SERVER, not os serve"}`.
+ *
+ * ⇒ a foreign process could supply the answer to the one assertion in this
+ * directory where being wrong matters most. So `readyVerdict()` below settles
+ * only once the child has SAID which port it took, and `portDriftError()`
+ * (`helpers/serve-process.ts`, #12525) REFUSES a mismatch rather than probing.
+ *
+ * ⛔ The gate keys on the banner's TAIL, never on `Server is ready`. That line
+ * is the banner's HEAD, printed one `console.error` before the `API:` row that
+ * carries the port — so a head-keyed gate can settle while the port is still
+ * unknown, and the comparison then compares nothing. Whether it did would
+ * depend on how the pipe happened to chunk, which is the worst shape a check
+ * can have: blind at random, and its silence reads as a pass.
+ *
+ * ⛔ And this is not an argument to make `os serve` stricter. Auto-shifting in
+ * development is correct and deliberate (#11113 pins the production half for
+ * its own reasons). The defect was that this harness could not tell.
+ *
+ * Cost: THREE real `os serve` boots — the two legs of the comparison above
+ * (~18s together when measured on this container), plus the forced-drift arm
+ * that proves the refusal can actually fire. That third boot is bought
+ * deliberately: a read-back never observed failing is decoration, and on this
+ * file it would be decoration over a security assertion. Every child is killed
+ * in `afterAll` regardless of outcome.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -77,7 +111,17 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Readable } from 'node:stream';
-import { CLI, TSX, E2E_SECRET_KEY, childEnv, randomPort, VITEST_WORKER_ENV_KEYS } from './helpers/serve-process.js';
+import {
+  CLI,
+  TSX,
+  E2E_SECRET_KEY,
+  boundPortFromBanner,
+  childEnv,
+  holdPort,
+  portDriftError,
+  randomPort,
+  VITEST_WORKER_ENV_KEYS,
+} from './helpers/serve-process.js';
 
 /** What `spawn(…, { stdio: ['ignore', 'pipe', 'pipe'] })` actually returns — no `stdin`. */
 type ProbeChild = ChildProcessByStdio<null, Readable, Readable>;
@@ -149,15 +193,77 @@ async function stop(child: ProbeChild): Promise<void> {
   });
 }
 
+/** How a refusal names this file's child — it spawns directly, so no helper can. */
+const WHAT = 'os serve (bin/run-dev.js \u21d2 NODE_ENV=development, spawned directly by this file)';
+
+/** What this file's ready gate makes of the child's output SO FAR. */
+type ReadyVerdict =
+  /** The child has not announced a bound port yet — keep waiting. */
+  | { settled: false }
+  /** It announced the port it was asked for, and this is that number. */
+  | { settled: true; port: number }
+  /** It announced a DIFFERENT port, or a banner that cannot say which. */
+  | { settled: true; refusal: Error };
+
 /**
- * Boot the real `os serve` through the same entrypoint `runServe()` uses, probe
- * the origin check while it is UP, then stop it. `runServe()` itself cannot
- * stand in here: it kills the child the moment `waitFor` matches, so there is
- * no window in which to send a request.
+ * ⭐ The ready gate (#12548): settle on having SEEN the port, never on a ready
+ * marker.
+ *
+ * `boundPortFromBanner()` keys on the banner's LAST line, so `no-banner` means
+ * "the child has not finished saying which port it took" — and returning
+ * `{ settled: false }` for it is what makes the comparison below have something
+ * to compare. ⛔ Do not settle this on `Server is ready`: that is the banner's
+ * HEAD, one `console.error` ahead of the `API:` row, and a gate keyed there
+ * resolves with the port still unknown. `portDriftError()` would then answer
+ * `null` — a silent pass — and the whole check would be decorative.
+ *
+ * Every other state is a settled verdict, and the two failing ones are ERRORS
+ * rather than skips for the reason `portDriftError()`'s own docblock gives: an
+ * instrument that cannot answer has to say it could not answer.
  */
-async function probeOrigin(env: Record<string, string | undefined>): Promise<{ status: number; code: unknown }> {
-  const port = randomPort();
-  const child = spawn(TSX, [CLI, 'serve', 'objectstack.config.ts', '--port', port], {
+function readyVerdict(output: string, requestedPort: string): ReadyVerdict {
+  const readback = boundPortFromBanner(output);
+  if (readback.state === 'no-banner') return { settled: false };
+
+  const refusal = portDriftError(output, WHAT, requestedPort);
+  if (refusal) return { settled: true, refusal };
+
+  if (readback.state !== 'bound') {
+    // Unreachable while `portDriftError()` answers for every state but
+    // `no-banner`. Written as a refusal rather than assumed away, so that
+    // widening its silence some day fails loudly HERE instead of quietly
+    // handing this file a port no one verified.
+    return {
+      settled: true,
+      refusal: new Error(
+        `portDriftError() stayed silent on a ${readback.state} banner, so this harness has no `
+        + `verified port to probe.\n--- child output ---\n${output}`,
+      ),
+    };
+  }
+
+  return { settled: true, port: readback.port };
+}
+
+/**
+ * Boot the real `os serve` through the same entrypoint `runServe()` uses, read
+ * the port the child ACTUALLY bound back out of its own banner, probe the
+ * origin check on THAT port while it is UP, then stop it.
+ *
+ * `runServe()` cannot stand in here, twice over: it kills the child the moment
+ * `waitFor` matches, so there is no window in which to send a request — and
+ * because this file therefore spawns directly, #12525's read-back inside
+ * `runServe()` never reaches it. That is why the gate is written out here.
+ *
+ * `requestedPort` is a parameter rather than a local so the forced-drift arm
+ * below can hand it a port that is genuinely HELD. ⛔ Nothing else should pass
+ * one: the default draw is bind-probed, and a hand-picked number is not.
+ */
+async function probeOrigin(
+  env: Record<string, string | undefined>,
+  requestedPort: string = randomPort(),
+): Promise<{ status: number; code: unknown }> {
+  const child = spawn(TSX, [CLI, 'serve', 'objectstack.config.ts', '--port', requestedPort], {
     cwd: dir,
     stdio: ['ignore', 'pipe', 'pipe'],
     env,
@@ -166,27 +272,38 @@ async function probeOrigin(env: Record<string, string | undefined>): Promise<{ s
 
   let out = '';
   let err = '';
-  await new Promise<void>((ready, fail) => {
-    const timer = setTimeout(
-      () => fail(new Error(`serve never became ready\n--- stdout ---\n${out}\n--- stderr ---\n${err}`)),
-      150_000,
-    );
-    const onData = () => {
-      if (/Press Ctrl\+C to stop|Server is ready/.test(out + err)) {
-        clearTimeout(timer);
-        ready();
-      }
-    };
-    child.stdout.on('data', (d) => { out += String(d); onData(); });
-    child.stderr.on('data', (d) => { err += String(d); onData(); });
-    child.on('exit', (code) => {
-      clearTimeout(timer);
-      fail(new Error(`serve exited ${code} before it was ready\n--- stdout ---\n${out}\n--- stderr ---\n${err}`));
-    });
-  });
-
   try {
-    const res = await fetch(`http://localhost:${port}/api/v1/auth/sign-in/email`, {
+    const bound = await new Promise<number>((ready, fail) => {
+      const timer = setTimeout(
+        () => fail(new Error(
+          'serve never printed a COMPLETE ready banner, so it never said which port it bound'
+          + `\n--- stdout ---\n${out}\n--- stderr ---\n${err}`,
+        )),
+        150_000,
+      );
+      const onData = () => {
+        const verdict = readyVerdict(out + err, requestedPort);
+        if (!verdict.settled) return;
+        clearTimeout(timer);
+        if ('refusal' in verdict) fail(verdict.refusal);
+        else ready(verdict.port);
+      };
+      child.stdout.on('data', (d) => { out += String(d); onData(); });
+      child.stderr.on('data', (d) => { err += String(d); onData(); });
+      child.on('exit', (code) => {
+        clearTimeout(timer);
+        fail(new Error(
+          `serve exited ${code} before it announced a bound port`
+          + `\n--- stdout ---\n${out}\n--- stderr ---\n${err}`,
+        ));
+      });
+    });
+
+    // ⭐ `bound`, not `requestedPort`. They are provably the same number on this
+    // line — a mismatch was REFUSED above rather than reaching it — and
+    // addressing the child's own announced port is what keeps that true if the
+    // gate is ever loosened.
+    const res = await fetch(`http://localhost:${bound}/api/v1/auth/sign-in/email`, {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
@@ -229,6 +346,16 @@ describe('#11267: childEnv() keeps the vitest worker out of a spawned os serve',
     expect(env.OS_LOG_LEVEL).toBe('warn');
   });
 
+  it('the ready gate does not settle until the child has SAID which port it took', () => {
+    // ⭐ #12548. The banner's HEAD alone is exactly what the gate this file used
+    // to have settled on, and at that instant the `API:` row naming the port has
+    // not been printed yet — so a drift comparison made there compares nothing
+    // and `portDriftError()` answers `null`, a silent pass. This is the cheap
+    // half of the check; the forced-drift boot below is the load-bearing one.
+    expect(readyVerdict('', '41234')).toEqual({ settled: false });
+    expect(readyVerdict('\n  \u2713 Server is ready\n', '41234')).toEqual({ settled: false });
+  });
+
   it('an `undefined` override survives as an own key, so spawn() unsets it', () => {
     const env = childEnv({ NODE_ENV: undefined });
     expect(Object.hasOwn(env, 'NODE_ENV')).toBe(true);
@@ -268,6 +395,30 @@ describe('#11267: childEnv() keeps the vitest worker out of a spawned os serve',
         expect(code).toBe('INVALID_ORIGIN');
       },
       180_000,
+    );
+
+    it(
+      'THE LOAD-BEARING ARM: a child that DRIFTS off a held port is REFUSED, not probed',
+      async () => {
+        // ⛔ Nothing is simulated here: the port is really held, so `serve`'s own
+        // `isPortAvailable()` says no and its dev-mode `getAvailablePort()` walks
+        // off it. This is the lost race, produced.
+        //
+        // ⭐ What it pins is not `portDriftError()` — `serve-port-readback.e2e.
+        // test.ts` owns that — but THIS file's wiring: that the gate above
+        // reaches the refusal at all. A read-back called at a point that cannot
+        // observe the port is silent forever, and its silence reads as a pass on
+        // the security assertion this file exists to make.
+        const held = await holdPort();
+        try {
+          await expect(probeOrigin(childEnv(OVERRIDES), String(held.port))).rejects.toThrow(
+            /PORT DRIFT/,
+          );
+        } finally {
+          await held.release();
+        }
+      },
+      240_000,
     );
   });
 });

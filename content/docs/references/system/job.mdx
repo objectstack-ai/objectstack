@@ -71,6 +71,28 @@ const result = CronScheduleSchema.parse(data);
 | **_packageVersion** | `string` | optional | Owning package version. |
 | **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
 
+### Nested Shape: `Job.schedule[type='cron']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `'cron'` | ✅ |  |
+| **expression** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | ✅ | Cron expression — cron`0 0 * * *` for daily at midnight. Build emits `{dialect:"cron",source}` envelope. |
+| **timezone** | `string` | optional (default: `"UTC"`) | Timezone for cron execution (e.g., "America/New_York") |
+
+### Nested Shape: `Job.schedule[type='interval']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `'interval'` | ✅ |  |
+| **intervalMs** | `integer` | ✅ | Interval in milliseconds |
+
+### Nested Shape: `Job.schedule[type='once']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `'once'` | ✅ |  |
+| **at** | `string` | ✅ | ISO 8601 datetime when to execute |
+
 ### Nested Shape: `Job.retryPolicy`
 
 | Property | Type | Required | Description |

@@ -211,8 +211,35 @@
 //   the commit above, and the 2026-08-20 verdict reproduced in every term. In CI
 //   the box is not this package's — `ci.yml` runs `turbo run test
 //   --concurrency=4` — so pinning a worker count here spends cores belonging to
-//   whatever else lands on the shard. Worker allocation is a property of the
-//   shard, decided in `ci.yml`, not of this config (#10149).
+//   whatever else lands on the shard. That OUTER fan-out — how many package
+//   `test` tasks run at once — is a property of the shard, decided in `ci.yml`,
+//   not of this config (#10149).
+//
+//   ⚠️ THE INNER POOL IS BOUNDED TOO, AND THE WORDING HERE USED TO DENY IT.
+//   Vitest's own worker pool, inside THIS package's task, has had a host-sized
+//   cap since #11958: the root `test` script and the CI test steps export
+//   `VITEST_MAX_WORKERS` from `scripts/vitest-worker-cap.mjs`, which only ever
+//   LOWERS vitest's own `cores - 1` default. ⛔ Their call sites are
+//   deliberately NOT listed here — a list of call sites inside a package config
+//   is the next thing to rot, and a citation that rotted is why this paragraph
+//   exists. The script is single-source and carries its own reasoning.
+//
+//   ⭐ Worth keeping is WHY that omission was worse than a gap. The export sits
+//   in the SAME `run:` block as the `--concurrency` flag quoted above, a few
+//   lines earlier, under a comment explaining it. Saying "worker allocation is
+//   decided in `ci.yml`" and then naming only the turbo flag sent the reader to
+//   the exact place the cap lives and told them what they would find there — so
+//   they walked past it, on the authority of this file. That is how a one-way
+//   citation survives: the newer document points back at the older one, and
+//   nobody re-reads the older one to check that it still holds.
+//
+//   ⚠️ The lever is also INERT wherever that variable is exported, not merely
+//   unwise. Vitest applies the env var to the RESOLVED config, so it overwrites
+//   a declared `maxWorkers` rather than being bounded by it. Observed on vitest
+//   4.1.10 against a positive control: a `vitest.config.ts` declaring
+//   `maxWorkers: 8` resolves to 8 with the variable unset, and to 2 under
+//   `VITEST_MAX_WORKERS=2`. A pin added here would read as taken and change
+//   nothing in exactly the runs that matter.
 //
 //   `NODE_COMPILE_CACHE` for the spawned processes — re-measured 5.15/5.34/
 //   5.16/5.42s cached against 5.46/5.61/5.64/5.71s uncached, for 42MB of cache

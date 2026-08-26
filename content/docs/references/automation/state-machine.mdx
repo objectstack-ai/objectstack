@@ -159,6 +159,24 @@ Type: `string`
 | **states** | `Record<string, { type: Enum<'atomic' \| 'compound' \| 'parallel' \| 'final' \| 'history'>; entry?: (string \| object)[]; exit?: (string \| object)[]; on?: Record<string, string \| object \| object[]>; … }>` | optional |  |
 | **meta** | `{ label?: string; description?: string; color?: string; aiInstructions?: string }` | optional |  |
 
+### Nested Shape: `StateMachine.on[string][option 2]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **target** | `string` | optional | Target State ID |
+| **cond** | `string \| { type: string; params?: Record<string, any> }` | optional | Condition (Guard) required to take this path |
+| **actions** | `(string \| { type: string; params?: Record<string, any> })[]` | optional | Actions to execute during transition |
+| **description** | `string` | optional | Human readable description of this rule |
+
+### Nested Shape: `StateMachine.on[string][option 3][number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **target** | `string` | optional | Target State ID |
+| **cond** | `string \| { type: string; params?: Record<string, any> }` | optional | Condition (Guard) required to take this path |
+| **actions** | `(string \| { type: string; params?: Record<string, any> })[]` | optional | Actions to execute during transition |
+| **description** | `string` | optional | Human readable description of this rule |
+
 
 ---
 
@@ -176,6 +194,24 @@ Type: `string`
 | **initial** | `string` | optional | Initial child state (if compound) |
 | **states** | `Record<string, [StateNode](#statenode)>` | optional |  |
 | **meta** | `{ label?: string; description?: string; color?: string; aiInstructions?: string }` | optional |  |
+
+### Nested Shape: `StateNode.on[string][option 2]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **target** | `string` | optional | Target State ID |
+| **cond** | `string \| { type: string; params?: Record<string, any> }` | optional | Condition (Guard) required to take this path |
+| **actions** | `(string \| { type: string; params?: Record<string, any> })[]` | optional | Actions to execute during transition |
+| **description** | `string` | optional | Human readable description of this rule |
+
+### Nested Shape: `StateNode.on[string][option 3][number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **target** | `string` | optional | Target State ID |
+| **cond** | `string \| { type: string; params?: Record<string, any> }` | optional | Condition (Guard) required to take this path |
+| **actions** | `(string \| { type: string; params?: Record<string, any> })[]` | optional | Actions to execute during transition |
+| **description** | `string` | optional | Human readable description of this rule |
 
 ### Nested Shape: `StateNode.always[number]`
 

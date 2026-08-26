@@ -1,0 +1,77 @@
+// The TEST-layer type-check program (#12542, adopting the mechanism #5286 set
+// for `packages/spec` and #5449 generalised). `tsconfig.json` above stays as it
+// is: it is the BUILD config, and its `**/*.test.ts` / `**/*.spec.ts` exclusion
+// has a reason — ci.yml gates that no test file reaches the published artifact.
+// This sibling puts the excluded layer back in front of tsc, and
+// `package.json`'s `typecheck` script NAMES it (via `check:test-typecheck
+// --project`), because a config no script invokes is exactly the phantom this
+// whole change is about.
+//
+// BEFORE THIS FILE, NO tsc PROGRAM COMPILED A SINGLE TEST FILE HERE. All 149 of
+// them were named by the build config's `exclude`, and `typecheck` was
+// `tsc --noEmit` against that very config — so `pnpm --filter @objectstack/rest
+// typecheck` exiting 0 was a true sentence carrying no information about any
+// test file in the package, and both `@ts-expect-error` directives in this
+// layer (`src/rest.test.ts`, `src/rest-api-plugin-slot-lookups.test.ts`) were
+// phantom checks that evaluated never. Under this program neither reports
+// TS2578, so both are live and each is suppressing a real error.
+//
+// What differs from the build config, and what deliberately does NOT:
+//   - module semantics ONLY, plus `lib`. The tests are written and executed as
+//     ESM by vitest (esbuild/vite), and this package IS `"type": "module"`, so
+//     the build config's NodeNext compiles them as ESM too — and then demands
+//     explicit `.js` extensions on relative imports, which vitest does not.
+//     That one mismatch was 72 x TS2835 and, above each of them, the 49 x
+//     TS7006 they caused: an import that does not resolve makes every symbol it
+//     names `any`. `lib` inherits as ES2020 from the root config, which was 16 x
+//     TS2550 — all sixteen the same `Array.prototype.at` message. Those 137
+//     diagnostics were about the CHECK, never about the code. Matching vitest is
+//     fidelity, not laxity. No `DOM` in `lib`, unlike `packages/client`: nothing
+//     in this layer touches a browser global.
+//   - ⛔ STRICTNESS IS UNTOUCHED. `strict`, `noUnusedLocals`,
+//     `noUnusedParameters`, `noImplicitReturns`, `noFallthroughCasesInSwitch`
+//     are inherited from the root config, and `types: ["node"]` from
+//     `tsconfig.json`. Nothing here may loosen a type rule; if a test does not
+//     compile, that is the finding.
+//
+// ⚠️ WHAT THIS PROGRAM INHERITS FROM `tsconfig.json`, both of them load-bearing
+// and neither of them re-declared here (read that file's #9960 comment first):
+//   - `rootDir: ".."`. Already widened to `packages/` there, as a CONSEQUENCE
+//     of the `paths` rule below rather than a preference. So the TS6059 pile
+//     that `packages/client`'s sibling config had to widen `rootDir` to clear
+//     does not arise here — it was paid for already, and this file changes
+//     nothing about it.
+//   - `paths: { "@objectstack/metadata-protocol": [".../src/index.ts"] }`. A
+//     child that declared its own `paths` would REPLACE this map rather than
+//     merge into it, silently sending that specifier back to `dist/`. This file
+//     declares no `paths` at all, so the rule stands and 22 of the producer's
+//     source files are in this program, exactly as they are in the build one.
+//
+// MEASURED at 5fbd58e0d, workspace closure built first: `--listFiles` puts 149
+// `src/**/*.test.ts` in the program (489 files total), and the layer reports 37
+// errors across 13 files — TS2554 x14 (wrong arity, all fourteen 'Expected 2-5
+// arguments, but got 1'), TS18048 x13 (all in `src/export-integration.test.ts`),
+// TS2345 x5, TS7006 x4, TS6133 x1. Every one of the 37 is pre-existing: this
+// change edits no test file, and each error would have been reported on
+// `origin/main` had this program always existed. They are ledgered per file in
+// `test-typecheck-debt.json` beside this config, EXACT and shrink-only — a file
+// that gains an error is red, one that loses one is red until re-recorded, one
+// that reaches zero is red until its entry is deleted, and a file NOT listed
+// there may have no errors at all.
+//
+// ⚠️ `src/rest.test.ts` (4 of the 37) is also held by PR #12421, and the two
+// interact BY DESIGN. After that PR merges: an error it adds to that file reds
+// the ledger on ITS run, and an error it removes reds the entry as stale on the
+// next run. Both are the pin working, and both land on the change that caused
+// them — but only if the next reader knows the coupling is there.
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022"]
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist"]
+}

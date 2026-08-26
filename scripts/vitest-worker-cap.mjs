@@ -10,12 +10,18 @@
  *
  *   OUTER  `turbo run test --concurrency=50%`  — how many package `test` tasks
  *          run at once. Bounded as a share of the host's cores (#11954/#11938).
- *   INNER  vitest's own pool inside EACH of those tasks. Unbounded: 40 of this
- *          repo's 41 `vitest.config.ts` files say nothing about pool sizing
+ *   INNER  vitest's own pool inside EACH of those tasks. Unbounded: 41 of this
+ *          repo's 42 `vitest.config.ts` files say nothing about pool sizing
  *          (the one mention, in `packages/cli`, is a COMMENT recording a
  *          rejected lever), so every package takes vitest's default, which is
  *          `max(availableParallelism() - 1, 1)` — i.e. it scales with the
  *          HOST's core count, not with the shard it was given.
+ *          ⚠️ That pair is counted on `52a982388` and is stated in this file
+ *          exactly ONCE. It was first written as 40/41 carrying no commit, and
+ *          it was correct then (`d18bc3277`) — but another config landed three
+ *          hours later, and the pair went on reading as precise while being
+ *          wrong. A date says when someone looked; a commit says WHAT they
+ *          looked at.
  *
  * Peak concurrent test-worker processes is therefore `outer × inner`, and both
  * terms grow with core count, so the product grows QUADRATICALLY. Measured on

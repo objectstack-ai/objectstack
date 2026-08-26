@@ -335,7 +335,7 @@ function isNeverNode(prop: any): boolean {
  * a numeric `enum`), so a node-level `type` test would mis-render the mixed
  * case that a per-value test gets right for free.
  */
-function formatLiteral(value: unknown): string {
+export function formatLiteral(value: unknown): string {
   // The only kind that IS quoted — and it keeps its quotes exactly as before.
   if (typeof value === 'string') return `'${value}'`;
   // `z.literal(null)` → `{ type: 'null', const: null }`. `null` is a keyword,
@@ -577,6 +577,19 @@ export interface NestedShape {
    * for the docs: `Props['items'][number]` IS the element type. That is what
    * lets a heading name the shape without a second omission/relocation sigil in
    * a table that already carries `…` and `… +N more`.
+   *
+   * ## The variant selector (#12316)
+   *
+   * A property whose type is a union of two or more object shapes has no single
+   * "the shape of this property", so one more segment joins the composition at
+   * the point the walk crosses the union — `[type='sidebar']`, or `[option 2]`
+   * where the union carries no discriminant. It is a SELECTOR and not an index:
+   * it sits exactly where the union sits in the wrapper stack, so
+   * `on[string][option 3][number]` reads left to right as *the record value, its
+   * third option, an element of it* — the same reading `[string][number]`
+   * already has. See `nestedShapesOf` for why the two spellings, and why the
+   * segment is absent from every single-shape accessor (all 1469 of them keep
+   * the byte-identical heading they had).
    */
   accessor: string;
   /** Live (non-tombstone) key names, in declaration order. */
@@ -612,16 +625,14 @@ export interface NestedShape {
  * one shape, and all three reach it here the same way `renderType` does:
  * anonymous `$defs` expanded, tombstones filtered, cycles refused.
  *
- * ## Why more than one shape returns `null`
+ * ## Why more than one shape still returns `null` HERE
  *
- * `formatPropertyType`'s vocabulary relocation is matched to its cell CONDITION
- * FOR CONDITION, and refuses the positions where "the allowed values of this
- * property" would not be the whole truth. Same rule here: a property whose type
- * is a union of several object shapes has no single "the shape of this
- * property" to name — `App.navigation`'s nine variants would need a variant
- * index in the heading, i.e. a second addressing notation — so those keep the
- * rendering they have. Measured on the tree at the time of the fix: 28 of 1293
- * shape-opening property rows are in that state.
+ * Those rows are no longer refused by the renderer — `nestedShapesOf` names all
+ * of them and #12316 gives each its own sub-table — but they have no single
+ * answer to give THIS function, whose whole signature is "the one shape". A
+ * caller wanting the multi-shape rows calls `nestedShapesOf` and reads its
+ * length; a caller asking this question gets `null`, which is the truthful
+ * answer to it and the one `nested-shape.test.ts` pins in both directions.
  *
  * A NAMED `$ref` also returns `null`, and a self `$ref` (`"#"`) with it: both
  * resolve to a schema with its own `## Section` on some page, where the keys
@@ -630,61 +641,175 @@ export interface NestedShape {
  * this is the branch that keeps the rule true if that changes.)
  */
 export function nestedShapeOf(prop: any, ctx?: TypeContext): NestedShape | null {
-  const found: NestedShape[] = [];
+  // ONE walk, two readings — they cannot drift apart about what "one shape
+  // level" means, the same way `formatPropertyType`'s cell and its relocation
+  // come from one `elideEnum` call.
+  const found = nestedShapesOf(prop, ctx);
+  return found.length === 1 ? found[0] : null;
+}
 
-  const walk = (node: any, expanding: Set<string>, accessor: string, guard: number): void => {
-    if (!node || typeof node !== 'object' || guard > 8) return;
-    // Two or more already: the answer is `null` whatever else we find.
-    if (found.length > 1) return;
+/**
+ * Which key of a union identifies its variants to an author — the key every
+ * shape-bearing variant pins to a DIFFERENT literal.
+ *
+ * Both halves are load-bearing. "Present on every variant with a `const`" is
+ * what makes the key readable as a selector at all; "different on each" is what
+ * makes the selector name ONE variant. A union where two variants pin the same
+ * value has no discriminant by this test even though `type` is a `const` on
+ * both — and answering `type` there would emit two identical headings, i.e.
+ * two identical anchors on one page, the defect the `Schema.key` qualification
+ * of `### Allowed Values:` exists to prevent.
+ *
+ * Read from the VARIANT node rather than from the shape found beneath it: a
+ * variant may be an array or a record whose element carries the keys, and
+ * `Transition[]` has no `const` anywhere on the node the author selects.
+ *
+ * First qualifying key in declaration order. Zod emits the discriminator first
+ * for `z.discriminatedUnion()`, so declaration order is the author's own answer
+ * to "which key tells these apart" rather than a guess this function makes.
+ */
+function discriminantKeyOf(variants: any[], perVariant: NestedShape[][]): string | null {
+  const contributing = variants.filter((_, index) => perVariant[index].length > 0);
+  if (contributing.length < 2) return null;
+
+  const first = contributing[0];
+  if (!first?.properties || typeof first.properties !== 'object') return null;
+
+  for (const key of Object.keys(first.properties)) {
+    const values: string[] = [];
+    let qualifies = true;
+    for (const variant of contributing) {
+      const child = variant?.properties?.[key];
+      if (!child || typeof child !== 'object' || child.const === undefined) {
+        qualifies = false;
+        break;
+      }
+      values.push(formatLiteral(child.const));
+    }
+    if (qualifies && new Set(values).size === contributing.length) return key;
+  }
+  return null;
+}
+
+/**
+ * EVERY shape a property opens at depth 0, each with the accessor that selects
+ * it — the general answer `nestedShapeOf` reads its single-shape case out of.
+ *
+ * ## What #12309 left on the floor, and why it is safe to pick up now (#12316)
+ *
+ * #12309 refused a property that opens two or more object shapes, for a reason
+ * that was true when it was written: "a heading would need a variant index,
+ * i.e. a second addressing notation". Measured then and re-measured on
+ * `origin/main` at `7bd6447`: **28 of the 8604 rendered property rows** are in
+ * that state, all 28 with describe text on at least one variant —
+ * `ui/App.navigation` and `ui/NavigationContribution.items` with nine variants
+ * each, `data/ConditionalValidation.then` / `.otherwise` with five, and so on
+ * down to the four two-variant rows.
+ *
+ * What makes the index unnecessary is that the accessor is a COMPOSITION, not a
+ * name. Every segment it already has answers "which way down did the walk go" —
+ * `[number]` for an element, `[string]` for a record value — and a union is one
+ * more way down. So the variant segment joins the composition at the union's
+ * own position rather than being appended to the finished path, and the grammar
+ * gains a segment instead of gaining a notation.
+ *
+ * ## The two spellings, and why the discriminant one is preferred
+ *
+ * `[type='sidebar']` states what the AUTHOR WRITES to select that variant: the
+ * literal is the same `formatLiteral` spelling the Type cell prints two lines
+ * above, so a reader copying `type: 'sidebar'` off the heading is copying the
+ * schema's own answer. It is also STABLE — reordering the union, or adding a
+ * tenth navigation variant, moves no existing heading and therefore breaks no
+ * existing anchor. 22 of the 28 rows have one.
+ *
+ * `[option 2]` is the fallback for the six that do not, and it is deliberately
+ * the word the union branch of `schema-section.ts` has printed since long
+ * before this — `#### Option 2` under `### Union Options` — rather than a bare
+ * `[2]`, which in a stack of `[number]`/`[string]` segments would read as a
+ * TUPLE INDEX into the property's own type. It counts POSITION IN THE UNION,
+ * including variants that open no shape at all, so `string | { … } | { … }[]`
+ * numbers its objects 2 and 3: the number is then checkable against the Type
+ * cell the reader already has, which is the only thing that makes a positional
+ * selector honest.
+ *
+ * ## What does not change
+ *
+ * A property opening exactly ONE shape gets no selector segment — the union is
+ * not what identifies its shape, and 1469 of the 1497 shape-opening rows are in
+ * that state. This is why the stamp is conditioned on the union's OWN yield
+ * (`total >= 2`) and not on the row's: `string | { … }` crosses a union and
+ * still names its shape `Schema.key`, byte for byte as #12309 left it.
+ */
+export function nestedShapesOf(prop: any, ctx?: TypeContext): NestedShape[] {
+  const walk = (node: any, expanding: Set<string>, accessor: string, guard: number): NestedShape[] => {
+    if (!node || typeof node !== 'object' || guard > 8) return [];
     // A tombstone accepts nothing; there is no shape under it.
-    if (isNeverNode(node)) return;
+    if (isNeverNode(node)) return [];
 
     if (node.$ref) {
       // Both spellings name a schema documented in its own section.
-      if (node.$ref === '#') return;
+      if (node.$ref === '#') return [];
       const name = refName(node.$ref);
-      if (!isAnonymousRef(name)) return;
-      if (expanding.has(name)) return;
+      if (!isAnonymousRef(name)) return [];
+      if (expanding.has(name)) return [];
       const target = ctx?.defs?.[name];
-      if (!target) return;
+      if (!target) return [];
       const next = new Set(expanding);
       next.add(name);
-      walk({ ...target, $ref: undefined }, next, accessor, guard + 1);
-      return;
+      return walk({ ...target, $ref: undefined }, next, accessor, guard + 1);
     }
 
     // Checked before the object branch for the same reason `renderType` checks
     // them there: a vocabulary or a literal is a leaf, never a shape.
-    if (node.enum || node.const !== undefined) return;
+    if (node.enum || node.const !== undefined) return [];
 
     if (node.type === 'array') {
-      walk(node.items, expanding, `${accessor}[number]`, guard + 1);
-      return;
+      return walk(node.items, expanding, `${accessor}[number]`, guard + 1);
     }
 
     if (Array.isArray(node.anyOf) || Array.isArray(node.oneOf)) {
-      for (const variant of node.anyOf || node.oneOf) {
-        walk(variant, new Set(expanding), accessor, guard + 1);
-      }
-      return;
+      const variants: any[] = node.anyOf || node.oneOf;
+      const perVariant = variants.map(variant => walk(variant, new Set(expanding), accessor, guard + 1));
+      const total = perVariant.reduce((sum, shapes) => sum + shapes.length, 0);
+      // One shape (or none) below this union: the union is not what identifies
+      // it, so it contributes no segment. `string | { … }` keeps `Schema.key`.
+      if (total < 2) return perVariant.flat();
+
+      const discriminant = discriminantKeyOf(variants, perVariant);
+      const selected: NestedShape[] = [];
+      perVariant.forEach((shapes, index) => {
+        // A variant that opens no shape gets no selector — and the guard is not
+        // just an optimisation: `discriminantKeyOf` qualifies its key on the
+        // CONTRIBUTING variants only, so a `string` arm of
+        // `string | { type: 'a' … } | { type: 'b' … }` has no `properties` for
+        // the selector to read and computing one here would throw.
+        if (shapes.length === 0) return;
+        const selector = discriminant
+          ? `[${discriminant}=${formatLiteral(variants[index].properties[discriminant].const)}]`
+          : `[option ${index + 1}]`;
+        for (const shape of shapes) {
+          // Spliced in at the UNION's position, not appended to the finished
+          // path: everything the walk composed below this union came from
+          // inside the selected variant and has to read as such.
+          selected.push({ ...shape, accessor: accessor + selector + shape.accessor.slice(accessor.length) });
+        }
+      });
+      return selected;
     }
 
     if (node.type === 'object' || node.properties || node.additionalProperties) {
       const keys = node.properties
         ? Object.keys(node.properties).filter(k => !isNeverNode(node.properties[k]))
         : [];
-      if (keys.length > 0) {
-        found.push({ node, accessor, keys });
-        return;
-      }
+      if (keys.length > 0) return [{ node, accessor, keys }];
       if (node.additionalProperties && typeof node.additionalProperties === 'object') {
-        walk(node.additionalProperties, expanding, `${accessor}[string]`, guard + 1);
+        return walk(node.additionalProperties, expanding, `${accessor}[string]`, guard + 1);
       }
     }
+    return [];
   };
 
-  walk(prop, new Set(ctx?.expanding ?? []), '', 0);
-  return found.length === 1 ? found[0] : null;
+  return walk(prop, new Set(ctx?.expanding ?? []), '', 0);
 }
 
 /**

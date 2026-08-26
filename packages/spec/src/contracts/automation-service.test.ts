@@ -169,6 +169,30 @@ describe('Automation Service Contract', () => {
     expect(flowEnabled).toBe(true);
   });
 
+  // [#11504] The #10025 ruling's contract half: a definition-level
+  // input-schema refusal is a NEVER-DISPATCHED exit with its own
+  // `AutomationResult.code` member. The compile of the literal below IS the
+  // assertion — the #9384 reverse verification run forward: before the union
+  // widened, this exact string was a type error.
+  it('should accept FLOW_INPUT_SCHEMA_INVALID as a never-dispatched trigger refusal', async () => {
+    const service: IAutomationService = {
+      execute: async (): Promise<AutomationResult> => ({
+        success: false,
+        code: 'FLOW_INPUT_SCHEMA_INVALID',
+        error: "Node 'sync' config violates its declared inputSchema",
+      }),
+      listFlows: async () => ['guarded_flow'],
+    };
+
+    const result = await service.execute('guarded_flow');
+    expect(result.success).toBe(false);
+    expect(result.code).toBe('FLOW_INPUT_SCHEMA_INVALID');
+    // Never dispatched ⇒ no lifecycle verdict, matching FLOW_DISABLED /
+    // FLOW_NO_START_NODE (#9378): `status` absent is exactly what separates a
+    // refused dispatch from a run that dispatched and failed.
+    expect(result.status).toBeUndefined();
+  });
+
   // [#4127] `getConnectorDescriptors` is the sibling of `getActionDescriptors`
   // — the other half of the flow designer's `connector_action` pickers — and
   // was the last of the four dispatcher routes calling a method the contract

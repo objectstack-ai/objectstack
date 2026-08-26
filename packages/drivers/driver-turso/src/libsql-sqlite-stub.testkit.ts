@@ -52,8 +52,9 @@ export interface LibsqlSqliteStub {
 /**
  * Build the stub. `:memory:` unless a file is given.
  *
- * `undefined` args are normalised to `null` because better-sqlite3 rejects
- * them, while libsql accepts and binds them as NULL.
+ * Arguments are normalised by {@link normalize} to the value classes
+ * better-sqlite3 can bind, using the conversions `@libsql/client` performs
+ * client-side. See that function for what is modelled and why.
  */
 export function makeLibsqlSqliteStub(filename = ':memory:'): LibsqlSqliteStub {
   const db = new Database(filename);
@@ -84,8 +85,44 @@ export function makeLibsqlSqliteStub(filename = ':memory:'): LibsqlSqliteStub {
   };
 }
 
+/**
+ * The client-side value conversion `@libsql/client` performs before a bind
+ * reaches SQLite — modelled here because the stub binds through better-sqlite3
+ * directly and better-sqlite3 performs none of it.
+ *
+ * ## Why this is the stub's job and not the transport's (#12393)
+ *
+ * `RemoteTransport.serializeValue` passes a boolean through unchanged, and its
+ * comment says why: *"booleans are kept as-is (libsql handles them)"*. Read
+ * against the dependency rather than trusted — `@libsql/client`'s sqlite3
+ * backend converts a bound boolean to `1`/`0` itself under the default
+ * `intMode` (`lib-esm/sqlite3.js`, the `typeof value === "boolean"` arm of its
+ * argument valuer). So the transport's comment is accurate and the stub was the
+ * half that diverged: it handed the raw boolean to better-sqlite3, which
+ * rejects it outright with *"SQLite3 can only bind numbers, strings, bigints,
+ * buffers, and null"*.
+ *
+ * The asymmetry that hid it: the LOCAL path never reaches this question,
+ * because `SqlDriver.formatInput` carries its own bind safety net for exactly
+ * these value classes. So a boolean written through remote mode was the one
+ * combination nothing in this package exercised, and the gap surfaced only when
+ * `VALUE_ROUNDTRIP_CASES` asked every driver to store a declared `boolean`.
+ *
+ * ⚠️ What this deliberately does NOT model: the client also valuates `Date` to
+ * `value.valueOf()` and `ArrayBuffer` to a Buffer. Neither is added on
+ * speculation — `serializeValue` converts a `Date` to an ISO string before the
+ * client ever sees it, so no reachable write binds one, and an unreachable
+ * conversion here would be a claim about the client nothing in this package
+ * checks. Add them when a caller needs them, with the same source citation.
+ */
 const normalize = (args: unknown[] | undefined) =>
-  (args ?? []).map((a) => (a === undefined ? null : a));
+  (args ?? []).map((a) => {
+    // better-sqlite3 rejects `undefined`; libsql accepts it and binds NULL.
+    if (a === undefined) return null;
+    // The `intMode: 'number'` default, which is what the driver runs under.
+    if (typeof a === 'boolean') return a ? 1 : 0;
+    return a;
+  });
 
 /**
  * The stub, typed as the `@libsql/client` `Client` that `TursoDriverConfig`

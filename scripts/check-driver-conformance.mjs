@@ -252,6 +252,11 @@ const CASE_SETS = [
     marker: 'FILTER_COMPARAND_TYPE_CASES',
     what: 'the comparand-type door: the six accepted types compile everywhere, everything else is refused loudly — #7872',
   },
+  {
+    file: 'value-roundtrip-conformance.ts',
+    marker: 'VALUE_ROUNDTRIP_CASES',
+    what: 'value storage round-trip: what you wrote is what you read back, type included — #12393',
+  },
 ];
 
 // ── The ledger ──────────────────────────────────────────────────────────────
@@ -512,6 +517,35 @@ const CASE_SETS = [
 //
 // The ledger is now EMPTY, which is the state its header calls the intended
 // steady one. Read the open set from a run, not from this prose.
+
+// ## VALUE_ROUNDTRIP: a tenth column that added ZERO rows (#12393)
+//
+// Worth recording precisely because it is the shape the two paragraphs above
+// describe as the goal and neither of them achieved on arrival. FILTER_TEXT
+// landed ahead of its implementations and opened five rows; AGGREGATION landed
+// with two. VALUE_ROUNDTRIP landed with none — all five drivers answered it on
+// the day it arrived.
+//
+// ⛔ Read that as a MEASUREMENT, not as evidence the column is weak. The
+// measurement is only meaningful because the column was ablated: restoring the
+// pre-#12380 SQLite json branch turns this column red on THREE drivers
+// (driver-sql, driver-sqlite-wasm and driver-turso's local transport, all of
+// which route through `SqlDriver.formatInput`) while leaving every one of the
+// other nine columns green — which is the whole argument the card was filed
+// on. See `packages/spec/src/data/value-roundtrip-conformance.ts` and the
+// per-driver suites for the numbers.
+//
+// Why zero rows was reachable at all: the column was deliberately SEQUENCED
+// second, behind #12380's route-A codec fix, precisely so it would not ship red
+// on SQLite by construction. That ordering is the reusable part — it is the
+// #12014 -> #12136 shape applied again, and it is why this column needed no
+// ledger entry and no new escape hatch.
+//
+// One value class is deliberately OUTSIDE the column rather than ledgered
+// inside it: a declared field written as an explicit `undefined`, which the
+// JS-backed drivers return as an own key holding `undefined` (#9276, open and
+// tracked). A ledger row would have been the wrong instrument — the case-set
+// simply does not ask that question yet, and the case-set file says so by name.
 
 // The intended steady state, reached on 2026-08-11: every (driver x case-set)
 // cell is covered by an imported case-set, and nothing is deferred. Keep it
