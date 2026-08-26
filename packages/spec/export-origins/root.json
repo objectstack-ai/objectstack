@@ -3,6 +3,7 @@
   "entry": ".",
   "exports": {
     "ADMIN_FULL_ACCESS": "src/identity/eval-user.zod.ts#ADMIN_FULL_ACCESS (const)",
+    "ADMIN_FULL_ACCESS_CAPABILITIES": "src/identity/eval-user.zod.ts#ADMIN_FULL_ACCESS_CAPABILITIES (const)",
     "ALL_CONVERSIONS": "src/conversions/registry.ts#ALL_CONVERSIONS (const)",
     "ASSEMBLED_VIEW_ITEMS_KEY": "src/ui/assembled-views.zod.ts#ASSEMBLED_VIEW_ITEMS_KEY (const)",
     "AUDIENCE_ANCHOR_POSITIONS": "src/identity/position.zod.ts#AUDIENCE_ANCHOR_POSITIONS (const)",
