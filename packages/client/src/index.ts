@@ -104,6 +104,7 @@ import type {
   RemoteTable,
   ReportRunResult,
   ReportSchedule,
+  SaveReportInput,
   SavedReport,
   SchemaValidationReport,
   ScreenSpec,
@@ -4383,8 +4384,17 @@ export class ObjectStackClient {
         return Array.isArray(body) ? body : (body?.data ?? []);
     },
 
-    /** Create or update a saved report definition. 400 [VALIDATION_FAILED] on a bad spec. */
-    save: async (report: any): Promise<SavedReport> => {
+    /**
+     * Create or update a saved report definition.
+     *
+     * [#11926] The parameter is the service contract's own `SaveReportInput`,
+     * not `any`: `name`, `object` and `query` are required, and omitting one is
+     * a compile error here rather than a surprise from whichever reports
+     * implementation the deployment mounts. The wire refusal is the route's —
+     * `POST /reports` answers 400 [VALIDATION_FAILED] for the same three keys,
+     * so a JavaScript caller that never sees this type is refused too.
+     */
+    save: async (report: SaveReportInput): Promise<SavedReport> => {
         const res = await this.fetch(`${this.baseUrl}/api/v1/reports`, {
             method: 'POST',
             body: JSON.stringify(report ?? {}),

@@ -1605,14 +1605,78 @@ describe('RestServer', () => {
       expect(saveReport).toHaveBeenCalled();
     });
 
-    it('POST /reports surfaces VALIDATION_FAILED as 400', async () => {
-      const saveReport = vi.fn(async () => { throw new Error('VALIDATION_FAILED: name is required'); });
+    // [#11926] This pin's subject is the PASS-THROUGH: a VALIDATION_FAILED
+    // raised by the SERVICE is mapped to 400 by `handleValidation`. It used to
+    // drive `body: {}`, which the route now refuses at the door before the
+    // service is ever consulted — the assertions below would still have gone
+    // green, but on the door's refusal rather than the service's, pinning
+    // nothing. So the body is now one the door ACCEPTS and the double throws
+    // for a reason only a service can have, and `saveReport` is asserted to
+    // have actually been called so this cannot quietly go vacuous again.
+    it('POST /reports surfaces a service-raised VALIDATION_FAILED as 400', async () => {
+      const saveReport = vi.fn(async () => { throw new Error('VALIDATION_FAILED: format must be one of csv, json, html_table'); });
       const rest = makeRest(async () => ({ saveReport }));
       const { save } = getReportRoutes(rest);
       const res = { json: vi.fn(), status: vi.fn().mockReturnThis() };
-      await save!.handler({ body: {} } as any, res as any);
+      await save!.handler({ body: { name: 'X', object: 'lead', query: {}, format: 'pdf' } } as any, res as any);
+      expect(saveReport).toHaveBeenCalled();
       expect(res.status).toHaveBeenCalledWith(400);
       expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ code: 'VALIDATION_FAILED' }));
+    });
+
+    // [#11926] The door itself. `IReportService.saveReport` takes a
+    // `SaveReportInput`, on which `name`, `object` and `query` are required;
+    // the route used to forward `req.body ?? {}` unchecked, so the requirement
+    // held only as far as each implementation chose to re-derive it. These pin
+    // that the ROUTE states it — note `saveReport` is asserted NOT to have been
+    // called, which is the whole difference from the pass-through pin above.
+    it('POST /reports refuses a body the service contract requires more of', async () => {
+      const cases: Array<{ label: string; body: any }> = [
+        { label: 'no query', body: { name: 'X', object: 'lead' } },
+        { label: 'null query', body: { name: 'X', object: 'lead', query: null } },
+        { label: 'no object', body: { name: 'X', query: {} } },
+        { label: 'no name', body: { object: 'lead', query: {} } },
+        { label: 'empty body', body: {} },
+      ];
+      for (const { label, body } of cases) {
+        const saveReport = vi.fn(async (input: any) => ({ id: 'rpt_new', ...input }));
+        const rest = makeRest(async () => ({ saveReport }));
+        const { save } = getReportRoutes(rest);
+        const res = { json: vi.fn(), status: vi.fn().mockReturnThis() };
+        await save!.handler({ body } as any, res as any);
+        expect(res.status, label).toHaveBeenCalledWith(400);
+        expect(res.json, label).toHaveBeenCalledWith(expect.objectContaining({ code: 'VALIDATION_FAILED' }));
+        expect(saveReport, label).not.toHaveBeenCalled();
+      }
+    });
+
+    // [#11926] `query` is a `ReportQuery` envelope. A scalar or a list is the
+    // shape an authoring mistake actually takes, and it is present, so the
+    // required-key check above cannot catch it.
+    it('POST /reports refuses a query that is not a ReportQuery envelope', async () => {
+      for (const query of ['object=lead', 42, true, [{ field: 'id' }]]) {
+        const saveReport = vi.fn(async (input: any) => ({ id: 'rpt_new', ...input }));
+        const rest = makeRest(async () => ({ saveReport }));
+        const { save } = getReportRoutes(rest);
+        const res = { json: vi.fn(), status: vi.fn().mockReturnThis() };
+        await save!.handler({ body: { name: 'X', object: 'lead', query } } as any, res as any);
+        expect(res.status, JSON.stringify(query)).toHaveBeenCalledWith(400);
+        expect(saveReport, JSON.stringify(query)).not.toHaveBeenCalled();
+      }
+    });
+
+    // [#11926] An empty `ReportQuery` is LEGAL — every field on it is optional
+    // — so the door must not over-refuse. Without this, tightening `query` to
+    // "present and an object" could drift into "present and non-empty" with no
+    // test noticing.
+    it('POST /reports accepts an empty query object', async () => {
+      const saveReport = vi.fn(async (input: any) => ({ id: 'rpt_new', ...input }));
+      const rest = makeRest(async () => ({ saveReport }));
+      const { save } = getReportRoutes(rest);
+      const res = { json: vi.fn(), status: vi.fn().mockReturnThis() };
+      await save!.handler({ body: { name: 'X', object: 'lead', query: {} } } as any, res as any);
+      expect(saveReport).toHaveBeenCalled();
+      expect(res.status).toHaveBeenCalledWith(201);
     });
 
     it('GET /reports/:id returns 404 when missing', async () => {

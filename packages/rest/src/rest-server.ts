@@ -10227,6 +10227,40 @@ export class RestServer {
             code: 'NOT_IMPLEMENTED',
             message: 'Reports service is not configured on this deployment',
         });
+        // [#11926] The door states the contract for `POST /reports` below.
+        // `IReportService.saveReport` takes a `SaveReportInput`
+        // (`packages/spec/src/contracts/report-service.ts`), on which `name`,
+        // `object` and `query` are all REQUIRED — but an HTTP body is untyped,
+        // so forwarding it unchecked handed the service a value merely CLAIMED
+        // to be a `SaveReportInput`. That left the requirement for every
+        // implementation to re-derive privately: the bundled
+        // `@objectstack/plugin-reports` does re-derive it, a third-party one
+        // need not, and a caller could not tell which one it was talking to.
+        // Refusing here makes the contract true for every implementation, in
+        // the same envelope `handleValidation` already produces (400 /
+        // VALIDATION_FAILED, ADR-0112).
+        const refuseIncompleteReport = (res: any, body: any): boolean => {
+            const missing = (['name', 'object', 'query'] as const)
+                .filter((field) => body?.[field] === undefined || body?.[field] === null);
+            if (missing.length > 0) {
+                res.status(400).json({
+                    code: 'VALIDATION_FAILED',
+                    error: `${missing.join(', ')} ${missing.length === 1 ? 'is' : 'are'} required`,
+                });
+                return true;
+            }
+            // `query` is a `ReportQuery` envelope — never a scalar and never a
+            // list. A string here is the shape an authoring mistake actually
+            // takes, and it reaches storage as a stringified scalar otherwise.
+            if (typeof body.query !== 'object' || Array.isArray(body.query)) {
+                res.status(400).json({
+                    code: 'VALIDATION_FAILED',
+                    error: 'query must be a ReportQuery object',
+                });
+                return true;
+            }
+            return false;
+        };
         const handleValidation = (res: any, err: any): boolean => {
             const msg = String(err?.message ?? err ?? '');
             if (msg.startsWith('VALIDATION_FAILED')) {
@@ -10279,6 +10313,9 @@ export class RestServer {
                     if (this.enforceAuth(req, res, context)) return;
                     const svc = await resolveService(environmentId);
                     if (!svc) return respond501(res);
+                    // AFTER the 501 on purpose: "no reports service is mounted"
+                    // is a deployment fact and outranks anything about the body.
+                    if (refuseIncompleteReport(res, req.body ?? {})) return;
                     try {
                         const row = await svc.saveReport(req.body ?? {}, context ?? {});
                         res.status(201).json(row);

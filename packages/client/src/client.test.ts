@@ -375,11 +375,37 @@ describe('Reports namespace (#3587 gap closure)', () => {
 
     it('reports.save pins POST /reports', async () => {
         const { client, fetchMock } = createMockClient({ id: 'r1' });
-        await client.reports.save({ name: 'Pipeline', object: 'lead' });
+        await client.reports.save({ name: 'Pipeline', object: 'lead', query: { fields: ['id'] } });
         const [url, init] = fetchMock.mock.calls[0];
         expect(String(url)).toBe('http://localhost:3000/api/v1/reports');
         expect(init.method).toBe('POST');
-        expect(JSON.parse(init.body)).toEqual({ name: 'Pipeline', object: 'lead' });
+        expect(JSON.parse(init.body)).toEqual({ name: 'Pipeline', object: 'lead', query: { fields: ['id'] } });
+    });
+
+    // [#11926] The literal below is the ORIGINAL fixture of the test above,
+    // preserved verbatim rather than repaired. For as long as `reports.save`
+    // took `any` it sat there constructing an input the service contract
+    // REFUSES — `SaveReportInput.query` is required — against a mock transport
+    // that never reaches a service, so no run could ever have failed on it. It
+    // is evidence, and giving it a `query` would have silenced the evidence
+    // without closing anything. So it moves here, and the compiler asserts the
+    // refusal instead.
+    //
+    // This is a bidirectional pin, not a comment. `client.test.ts` is compiled
+    // by `tsconfig.test.json` — named by this package's `typecheck` script —
+    // and holds no `test-typecheck-debt.json` entry, so an unlisted file must
+    // have zero errors. Widen the parameter back to `any` and the directive
+    // below stops matching an error: tsc reds with TS2578, "unused
+    // '@ts-expect-error' directive". It cannot rot into a phantom check.
+    it('[#11926] reports.save refuses a query-less report at the type level', async () => {
+        const { client, fetchMock } = createMockClient({ id: 'r1' });
+        // @ts-expect-error — `query` is required by `SaveReportInput`.
+        await client.reports.save({ name: 'Pipeline', object: 'lead' });
+        // The SDK is a transport, not a second validator: the request still
+        // goes out unaltered. The refusal ON THE WIRE belongs to the route and
+        // is pinned in packages/rest/src/rest.test.ts — see
+        // 'POST /reports refuses a body the service contract requires more of'.
+        expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ name: 'Pipeline', object: 'lead' });
     });
 
     it('reports.get / delete pin /reports/:id and delete tolerates 204', async () => {
