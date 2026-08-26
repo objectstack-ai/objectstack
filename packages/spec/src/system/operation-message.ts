@@ -108,6 +108,30 @@ export function operationMessageTranslationKey(messageKey: string): string {
  * rule the field catalog states: `DELETE_RESTRICTED` stays one member of the
  * ADR-0112 vocabulary that clients match on.
  *
+ * [#12166] Each has an `_opaque` twin — the SAME sentence with `{{count}}`
+ * removed, and nothing else changed. Four templates, still one wire code.
+ *
+ * They exist because the delete-time reference check now runs under the SYSTEM
+ * identity (maintainer ruling 2026-08-26): the engine's dependents probe sees
+ * rows the caller may hold no read grant on, so the count in the counted
+ * variants can be a number the caller could not have obtained. Shipping it
+ * would turn the refusal into a cardinality oracle over a table the caller
+ * cannot read. The ruling's second constraint — the error names the referenced
+ * OBJECT, never record contents, "one notch more conservative than Salesforce"
+ * — is what these serve.
+ *
+ * ⛔ They are NOT a general "shorter" variant, and the choice between the pairs
+ * is not cosmetic. `ObjectQL.dependentCountIsDisclosable` owns it: the counted
+ * form is used only when the caller's own identity would have produced the same
+ * rows. Rendering a counted variant unconditionally re-opens the leak; making
+ * the opaque one the default withholds an actionable number from every caller
+ * who could always compute it. Both halves matter.
+ *
+ * The object and the relation field stay named in the opaque forms. They are
+ * DECLARED METADATA, not rows, and they are the whole of what makes the refusal
+ * self-diagnosable — the reporting deployment's admins could see a delete
+ * button that always 403'd and had no way to learn which table was blocking it.
+ *
  * Placeholders: `{{object}}` and `{{dependentObject}}` are LABELS in the
  * caller's locale (the API names live on `developerMessage` and on the
  * structured `object` / `dependentObject` fields), `{{field}}` is the
@@ -155,6 +179,10 @@ export const BUILTIN_OPERATION_MESSAGES: Record<string, Record<string, string>> 
       'This {{object}} is still referenced by {{count}} {{dependentObject}} record(s) through “{{field}}”. Delete or reassign them first.',
     delete_restricted_required:
       'This {{object}} is still referenced by {{count}} {{dependentObject}} record(s) through “{{field}}”, which is required and cannot be cleared. Delete or reassign them first.',
+    delete_restricted_opaque:
+      'This {{object}} is still referenced by {{dependentObject}} record(s) through “{{field}}”. Delete or reassign them first.',
+    delete_restricted_required_opaque:
+      'This {{object}} is still referenced by {{dependentObject}} record(s) through “{{field}}”, which is required and cannot be cleared. Delete or reassign them first.',
   },
   'zh-CN': {
     permission_denied: '您没有执行此操作的权限,如需访问请联系管理员。',
@@ -164,6 +192,10 @@ export const BUILTIN_OPERATION_MESSAGES: Record<string, Record<string, string>> 
       '该{{object}}正被 {{count}} 条{{dependentObject}}记录通过「{{field}}」引用,请先删除或改派这些记录。',
     delete_restricted_required:
       '该{{object}}正被 {{count}} 条{{dependentObject}}记录通过「{{field}}」引用,且该字段为必填、无法清空,请先删除或改派这些记录。',
+    delete_restricted_opaque:
+      '该{{object}}正被{{dependentObject}}记录通过「{{field}}」引用,请先删除或改派这些记录。',
+    delete_restricted_required_opaque:
+      '该{{object}}正被{{dependentObject}}记录通过「{{field}}」引用,且该字段为必填、无法清空,请先删除或改派这些记录。',
   },
   'ja-JP': {
     permission_denied: 'この操作を実行する権限がありません。アクセスが必要な場合は管理者にお問い合わせください。',
@@ -175,6 +207,10 @@ export const BUILTIN_OPERATION_MESSAGES: Record<string, Record<string, string>> 
       'この{{object}}は {{count}} 件の{{dependentObject}}レコードから「{{field}}」で参照されています。先にそれらを削除するか、参照先を変更してください。',
     delete_restricted_required:
       'この{{object}}は {{count}} 件の{{dependentObject}}レコードから「{{field}}」で参照されています。この項目は必須のため空にできません。先にそれらを削除するか、参照先を変更してください。',
+    delete_restricted_opaque:
+      'この{{object}}は{{dependentObject}}レコードから「{{field}}」で参照されています。先にそれらを削除するか、参照先を変更してください。',
+    delete_restricted_required_opaque:
+      'この{{object}}は{{dependentObject}}レコードから「{{field}}」で参照されています。この項目は必須のため空にできません。先にそれらを削除するか、参照先を変更してください。',
   },
   'es-ES': {
     permission_denied:
@@ -187,6 +223,10 @@ export const BUILTIN_OPERATION_MESSAGES: Record<string, Record<string, string>> 
       '{{count}} registro(s) de {{dependentObject}} todavía hacen referencia a este {{object}} mediante «{{field}}». Elimínelos o reasígnelos primero.',
     delete_restricted_required:
       '{{count}} registro(s) de {{dependentObject}} todavía hacen referencia a este {{object}} mediante «{{field}}», un campo obligatorio que no puede vaciarse. Elimínelos o reasígnelos primero.',
+    delete_restricted_opaque:
+      'Todavía hay registros de {{dependentObject}} que hacen referencia a este {{object}} mediante «{{field}}». Elimínelos o reasígnelos primero.',
+    delete_restricted_required_opaque:
+      'Todavía hay registros de {{dependentObject}} que hacen referencia a este {{object}} mediante «{{field}}», un campo obligatorio que no puede vaciarse. Elimínelos o reasígnelos primero.',
   },
 };
 

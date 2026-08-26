@@ -10931,6 +10931,173 @@ export class ObjectQL implements IObjectQLEngine {
   }
 
   /**
+   * [#12166] The identity the pre-delete reference CHECK runs under — system,
+   * unconditionally (maintainer ruling 2026-08-26, option A).
+   *
+   * `sudo()`-shaped, never a bare `{ isSystem: true }`. The full reasoning sits
+   * at the one call site (`cascadeDeleteRelations`'s dependents probe); the
+   * short form is that the spread carries three things the bare spelling would
+   * drop — the caller's transaction handle, the TENANT scope, and `userId`,
+   * which is the audit ledger's triggered-by half beside `isSystem`'s
+   * executed-as half.
+   *
+   * A helper rather than an inline spread because the disclosure re-probe below
+   * has to be able to say "the caller's OWN context" by contrast, and because a
+   * second inline spelling is how one of the two would later gain a key the
+   * other lacks.
+   */
+  private static referenceCheckContext(context?: ExecutionContext): ExecutionContext {
+    return { ...(context ?? {}), isSystem: true } as ExecutionContext;
+  }
+
+  /**
+   * [#12166, ruling constraint 3] File the reference-check elevation, BOTH
+   * halves: `triggeredBy` = the operator who asked for the delete,
+   * `executedAs: 'system'` = the identity the check actually ran under.
+   *
+   * ## Why a record exists at all
+   *
+   * The elevation is the whole of what this card changed, and an elevation
+   * nobody can see afterwards is the thing a security reviewer has no way to
+   * audit. The ruling names the Salesforce/Dataverse ledger shape for exactly
+   * this reason: a platform-executed integrity action is attributable to the
+   * human who triggered it, not laundered into "system did something".
+   *
+   * ## Why the LOGGER and not a `sys_audit_log` row
+   *
+   * Stated plainly, because a narrow audit edge has to be visible to be honest
+   * (`read-audit.ts` takes the same posture about its own narrowing):
+   *
+   * The elevated operation is a READ, and `plugin-audit`'s read writer declares
+   * — and pins — that a system-elevated read produces NO row, deliberately:
+   * those are the platform reading for its own bookkeeping, and recording them
+   * would bury the human views that ledger exists to make findable. Minting a
+   * row here would either contradict that declared boundary or require the
+   * engine to reach into a plugin it does not depend on. The engine's logger is
+   * the channel it owns, and it is where the reporting deployment read the
+   * defect in the first place — the issue's evidence is a server log line.
+   *
+   * So: this is a LOG record, at `info`, and the honest limit of it is that a
+   * deployment which does not retain engine logs retains no trace. A durable
+   * `sys_audit_log` row for the elevation is a follow-up that belongs to
+   * plugin-audit, which owns that row shape.
+   *
+   * `debug` was not an option: a record that is off by default in production is
+   * not an audit record.
+   *
+   * ⛔ The record names the referenced OBJECT and the relation FIELD — declared
+   * metadata — and never a row id, a field value, or a count. Constraint 2
+   * governs what the CALLER is told; this is the server-side ledger and could
+   * defensibly say more, but saying more here is how a count reaches a support
+   * transcript, and the two surfaces are kept on one rule so neither has to be
+   * re-audited alone.
+   */
+  private recordReferenceCheckElevation(
+    object: string,
+    id: string | number,
+    childName: string,
+    fieldName: string,
+    context?: ExecutionContext,
+  ): void {
+    // The triggered-by half. `userId` survives the `sudo()`-shaped elevation,
+    // which is what makes the two halves recordable at all; `actor` is the
+    // service-principal channel (ADR-0014 D2) that keeps a non-user-
+    // authenticated caller attributable instead of anonymous.
+    const triggeredBy =
+      (context?.userId != null && String(context.userId)) ||
+      (typeof (context as any)?.actor === 'string' && (context as any).actor.trim()) ||
+      // Not "unknown": a context with neither channel IS the platform acting
+      // for itself (boot provisioning, seed replay, an inner cascade), and
+      // naming that honestly is more useful than a null.
+      (context?.isSystem === true ? 'system' : 'anonymous');
+    this.logger.info(
+      `[reference-cleanup] referential integrity check on '${childName}' executed as SYSTEM ` +
+      `for delete of ${object}/${String(id)} triggered by ${triggeredBy}`,
+      {
+        triggeredBy,
+        executedAs: 'system',
+        object,
+        recordId: String(id),
+        referencedObject: childName,
+        relationField: fieldName,
+      },
+    );
+  }
+
+  /**
+   * [#12166, ruling constraint 2] May the refusal disclose HOW MANY rows
+   * reference this record?
+   *
+   * The elevation above is what makes this question exist. Before it, the
+   * dependents probe ran as the caller, so every number the `DELETE_RESTRICTED`
+   * envelope reported (`dependentCount`, the localized message's `count`, the
+   * developerMessage) was derived from rows the caller could read by
+   * definition. After it, the probe sees rows the caller may have no grant on
+   * at all — and shipping that count back would hand a caller with NO read
+   * permission on `childName` an exact, repeatable cardinality oracle over it:
+   * delete-probe each record of `object`, read the count off the 409, and
+   * reconstruct the hidden table's reference histogram without ever being
+   * allowed to read a row.
+   *
+   * The ruling closes that: the error names the referenced OBJECT and nothing
+   * about rows — "one notch more conservative than Salesforce". It does NOT ask
+   * for the count to be dropped for everyone, and dropping it would be its own
+   * regression (the count is what makes the refusal actionable, and it predates
+   * this card for callers who could always compute it). So the count is
+   * disclosed on exactly one condition: **the caller's own identity would have
+   * produced the same rows.**
+   *
+   * The comparison is on ROW IDENTITY, not on length. Two different sets can
+   * have the same size, and RLS narrowing is precisely the case that produces
+   * one — a caller who may read `childName` at the object level but whose
+   * row-level filter hides two of three referencing rows must not be told
+   * "three" either. Comparing id sets makes the object-level denial and the
+   * row-level narrowing the same answer, which is what they are.
+   *
+   * Costs one extra query, and only on the refusal path — the delete is being
+   * aborted anyway, so this is not on any successful delete's critical path.
+   *
+   * Fails CLOSED, on the DISCLOSURE axis: any throw at all (a genuine
+   * permission denial, an outage, a driver error) answers "not disclosable".
+   * That direction is deliberate and is the opposite of #8895's stance for the
+   * integrity probe itself — an integrity guard that cannot run must not
+   * silently pass, but a DISCLOSURE that cannot be justified must not silently
+   * happen. The two guards face opposite ways because a wrong answer costs
+   * opposite things: there, a permitted delete that should have been refused;
+   * here, a leak. Nothing about the refusal itself depends on this — an
+   * unanswerable probe still refuses the delete, just without the number.
+   */
+  private async dependentCountIsDisclosable(
+    childName: string,
+    probeWhere: Record<string, unknown>,
+    probedIds: readonly string[],
+    fieldName: string,
+    multiValued: boolean,
+    id: string | number,
+    context?: ExecutionContext,
+  ): Promise<boolean> {
+    // The caller IS the system (seed replay, migration, an internal cascade
+    // recursion). Nothing was elevated PAST them, so there is nothing to
+    // withhold — and withholding here would strip the count from the engine's
+    // own internal paths for no gain.
+    if (context?.isSystem === true) return true;
+    try {
+      let own = await this.find(childName, { where: probeWhere, context } as any);
+      // The SAME narrowing the elevated probe applied (#9362), or the two sets
+      // would be compared through different definitions of "references this
+      // record" and a multi-value relation would read as non-disclosable
+      // always.
+      if (multiValued && own) {
+        own = own.filter((row: any) => ObjectQL.storedReferenceIncludes(row?.[fieldName], id));
+      }
+      const ownIds = new Set((own ?? []).map((r: any) => String(r?.id)));
+      return ownIds.size === probedIds.length && probedIds.every((rid) => ownIds.has(rid));
+    } catch {
+      return false;
+    }
+  }
+
+  /**
    * Apply referential delete behavior for relations pointing AT this record,
    * before it is removed. For every registered object with a `master_detail`
    * or `lookup` field referencing `object`, honor the field's `deleteBehavior`:
@@ -10981,6 +11148,12 @@ export class ObjectQL implements IObjectQLEngine {
     // raised reaches the caller with its envelope intact, exactly as #8895's
     // probe failure does.
     const objects: ServiceObject[] = this._registry.getAllObjects();
+    // [#12166, ruling constraint 3] Referenced objects this call has already
+    // filed an elevation record for. One record per referenced OBJECT, not per
+    // relation: two lookup fields on the same child pointing at the same parent
+    // are one "the platform read object X as system" fact, and filing it twice
+    // would make the ledger's row count a function of the child's field layout.
+    const elevationRecorded = new Set<string>();
     for (const child of objects) {
       const childName = (child as any)?.name as string | undefined;
       const fields = (child as any)?.fields as Record<string, any> | undefined;
@@ -11099,11 +11272,73 @@ export class ObjectQL implements IObjectQLEngine {
           behavior = 'restrict';
         }
 
+        // [#12166] The probe filter, hoisted: the DISCLOSURE re-probe below has
+        // to ask the identical question under the caller's own identity, and a
+        // second call to `referenceProbeFilter` would be a second spelling of
+        // "which rows reference this record" that could drift from this one.
+        const probeWhere = this.referenceProbeFilter(fieldName, fdef, id);
+
+        // [#12166, ruling constraint 3] File the elevation BEFORE it happens,
+        // and file BOTH halves — triggered-by = the deleting operator,
+        // executed-as = system (the Salesforce/Dataverse ledger shape).
+        //
+        // Before the probe rather than after, because the fact being recorded
+        // is that the platform read this object under an identity the caller
+        // does not hold. That is true whether the probe then finds rows, finds
+        // none, refuses the delete, or fails — and a record written only on the
+        // success path would be missing exactly the runs an auditor goes
+        // looking for.
+        if (!elevationRecorded.has(childName)) {
+          elevationRecorded.add(childName);
+          this.recordReferenceCheckElevation(object, id, childName, fieldName, context);
+        }
+
         let dependents: any[];
         try {
           dependents = await this.find(
             childName,
-            { where: this.referenceProbeFilter(fieldName, fdef, id), context } as any,
+            // [#12166] (maintainer ruling 2026-08-26, option A) SYSTEM identity,
+            // unconditionally. This probe is the platform's own referential-
+            // integrity read, not a query the caller asked for, and running it
+            // as the caller made "delete permission" silently mean "delete +
+            // read on EVERY referencing table": a caller with full delete rights
+            // on `object` but no read grant on `childName` got a blanket 403
+            // from the security middleware — whether or not a reference existed,
+            // and with `childName` EMPTY. Measured on a real deployment across
+            // 17 role×object pairs, with the A/B control that granting read-only
+            // on the referencing object (touching NOTHING about delete rights)
+            // turned the identical delete into a 200.
+            //
+            // Referential-integrity actions are engine responsibility executed
+            // under system identity on every mainstream platform — the RDBMS FK
+            // baseline, Salesforce (lookup clearing / cascade delete documented
+            // as bypassing sharing), Dataverse, ServiceNow, Odoo. Caller
+            // identity here was the outlier.
+            //
+            // The elevation is `sudo()`-SHAPED (`{ ...context, isSystem: true }`),
+            // never a bare `{ isSystem: true }` — the same posture
+            // `recomputeSummaries` holds one axis over. Three reasons, and each
+            // one is a defect if dropped:
+            //   - the open transaction handle, `tenantId` and `timezone` must
+            //     survive, or this probe leaves the caller's transaction and
+            //     stops being TENANT-scoped — a bare system context would widen
+            //     the probe across the tenant wall, which is the opposite of
+            //     what this card relaxes;
+            //   - `userId` survives, and that IS the audit ledger's
+            //     "triggered-by" half (ruling constraint 3): the record carries
+            //     triggered-by = the deleting operator and executed-as = system.
+            //     `read-audit.ts` states the same property of `sudo()`;
+            //   - it is a NARROW elevation: nothing else about the delete path
+            //     changes identity (ruling constraint 1). The `set_null` UPDATE
+            //     and the `cascade` DELETE below still run as the caller, byte
+            //     for byte, so this relaxes the reference CHECK and not the
+            //     caller's own authority over the dependent rows.
+            //
+            // [Constraint 4] If the spec later declares per-relationship
+            // on-delete behaviour, BEHAVIOUR follows the declaration; the
+            // identity of this probe stays system, unconditionally. Do not make
+            // this line conditional on `behavior`.
+            { where: probeWhere, context: ObjectQL.referenceCheckContext(context) } as any,
           );
         } catch (error) {
           // [#8895] Discriminate by error TYPE — this probe IS the referential
@@ -11154,6 +11389,16 @@ export class ObjectQL implements IObjectQLEngine {
           );
         }
         if (!dependents || dependents.length === 0) continue;
+
+        // [#12166] The elevated probe's row IDENTITY, captured here — after the
+        // multi-value narrowing and BEFORE the `requiredSetNull && multiValued`
+        // narrowing below reduces `dependents` to the emptied subset. This is
+        // the set the disclosure decision compares against, and the stage
+        // matters: the emptied subset is computed from these rows' own stored
+        // values, so a caller who can see exactly these rows can derive the
+        // emptied count too, while a caller who cannot see them can derive
+        // neither. Comparing at the later stage would leak the difference.
+        const probedIds: readonly string[] = dependents.map((r: any) => String(r?.id));
 
         // [#9688] The deferred half of the required escalation, decided per
         // ROW now that the rows are read and exactly narrowed — every row
@@ -11214,29 +11459,54 @@ export class ObjectQL implements IObjectQLEngine {
           const required = fdef.deleteBehavior !== 'restrict' && fdef.required === true;
           const msgCtx = this.validationMessageContext(object, context);
           const parent = objects.find((o) => (o as any)?.name === object);
+          // [#12166, ruling constraint 2] Whether this refusal may carry the
+          // row COUNT — see `dependentCountIsDisclosable` for why the elevation
+          // above is what makes the question exist, and why the answer is "only
+          // if the caller's own identity would have produced the same rows".
+          // The OBJECT is named either way: that half is what the ruling
+          // requires the caller to learn.
+          const discloseCount = await this.dependentCountIsDisclosable(
+            childName, probeWhere, probedIds, fieldName, multiValued, id, context,
+          );
           const err: any = new Error(
             renderOperationMessage(
               {
-                messageKey: required ? 'delete_restricted_required' : 'delete_restricted',
+                messageKey: discloseCount
+                  ? (required ? 'delete_restricted_required' : 'delete_restricted')
+                  : (required ? 'delete_restricted_required_opaque' : 'delete_restricted_opaque'),
                 params: {
                   object: this.objectDisplayLabel(object, (parent as any)?.label, msgCtx),
                   dependentObject: this.objectDisplayLabel(childName, (child as any)?.label, msgCtx),
                   field: resolveFieldLabel(fieldName, fdef, { ...msgCtx, objectName: childName }),
-                  count: dependents.length,
+                  ...(discloseCount ? { count: dependents.length } : {}),
                 },
               },
               { locale: msgCtx.locale, translate: msgCtx.translate },
             ),
           );
+          // The DEVELOPER half is subject to the same rule, and the reason is
+          // measured rather than assumed: for `DELETE_RESTRICTED` (unlike the
+          // #7414 permission denial) this sentence RIDES THE ENVELOPE — REST's
+          // `mapDataError` ships it — so a count withheld from `message` and
+          // left here would not be withheld at all.
           err.developerMessage =
-            `Cannot delete ${object} (${id}): ${dependents.length} dependent ${childName} record(s) reference it via ${fieldName}` +
+            `Cannot delete ${object} (${id}): ` +
+            `${discloseCount ? `${dependents.length} dependent ${childName} record(s) reference it` : `dependent ${childName} record(s) reference it`} via ${fieldName}` +
             `${required ? ` (${fieldName} is required, so it cannot be cleared)` : ''}. ` +
             `Delete or reassign them first, or set deleteBehavior:'cascade' on ${childName}.${fieldName}.`;
           err.code = 'DELETE_RESTRICTED';
           err.status = 409;
           err.object = object;
+          // Constraint 2's REQUIRED half — the referenced object is named
+          // unconditionally, because "which table is blocking me" is the one
+          // thing the reporting deployment's admins could not self-diagnose.
           err.dependentObject = childName;
-          err.dependentCount = dependents.length;
+          // …and its withheld half. Absent rather than zeroed: `0` would be a
+          // false statement about the rows (there is at least one, or this
+          // branch would not have been reached), and REST's envelope builder
+          // already omits the key for a non-number, so an absent count reaches
+          // the client as an absent key rather than as a lie.
+          if (discloseCount) err.dependentCount = dependents.length;
           throw err;
         }
 
