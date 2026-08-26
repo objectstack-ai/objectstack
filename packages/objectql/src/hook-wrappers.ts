@@ -606,10 +606,49 @@ function installFlatInput(ctx: HookContext): () => void {
         : [];
       return Array.from(new Set(dataKeys));
     },
+    // [#12397] MIRRORS `data`'s own descriptor; it does not synthesise one.
+    // The literal that stood here — `{ configurable: true, enumerable: true,
+    // writable: true, value: data[prop] }` — happens to be the truth for every
+    // key created by ordinary assignment, which is why it cost nothing while
+    // assignment was the only way a key could arrive. #12277 routed
+    // `defineProperty` into `data`, so a hook can now put a key on the record
+    // payload with NON-DEFAULT attributes, and the synthesis kept reporting the
+    // defaults: `Object.defineProperty(input, 'k', { enumerable: false, … })`
+    // read back `enumerable: true` while `Object.keys(input)` — which reaches
+    // the same key through `ownKeys`/`data` — correctly omitted it. Two
+    // instruments, one payload, contradicting answers.
+    //
+    // `configurable` is the one attribute that CANNOT be mirrored. The proxy
+    // target is the `{ data, options, id? }` wrapper, which does not carry the
+    // record key at all, and a proxy may not report a property its target lacks
+    // as non-configurable — so mirroring it verbatim throws `TypeError` on any
+    // key `data` holds as `configurable: false`, and takes `Object.keys` and
+    // spread down with it, since both reach every listed key through this trap.
+    // It is therefore FORCED true and the rest mirrored. That forcing is the
+    // proxy's own constraint, not a claim about the payload.
+    //
+    // Two consequences worth naming, both pinned in
+    // `hook-input-descriptor-mirror.test.ts`:
+    //
+    //   - Reading a descriptor no longer RUNS author code. The synthesis
+    //     evaluated `data[prop]` to fill `value`, so asking a payload holding
+    //     an accessor for its descriptor invoked the getter; a mirror copies
+    //     `get`/`set` across untouched.
+    //   - `prop in data` is true for the whole prototype chain, so the
+    //     synthesis answered for INHERITED keys too — `toString` reported as an
+    //     own, enumerable, writable data property no payload has ever held.
+    //     Only an own key has a descriptor to mirror; the rest fall through.
+    //
+    // What this trap deliberately does NOT decide: whether a record payload may
+    // carry an accessor at all, and what the engine should do persisting one
+    // (it persists a payload by evaluating it). That is a contract question
+    // about the payload, and neither routing nor persistence is touched here —
+    // the trap reports what is there, under every answer to it.
     getOwnPropertyDescriptor(target, prop) {
       const data = target.data;
-      if (data && typeof data === 'object' && prop in data) {
-        return { configurable: true, enumerable: true, writable: true, value: (data as any)[prop] };
+      if (data && typeof data === 'object') {
+        const own = Object.getOwnPropertyDescriptor(data, prop);
+        if (own) return { ...own, configurable: true };
       }
       // Wrapper keys: still descriptors so `prop in input` works, but
       // marked non-enumerable so they don't appear in Object.keys().
