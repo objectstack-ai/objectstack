@@ -69,6 +69,21 @@
  * a sweep, and is deliberately not this gate's call: a row whose verdict
  * changes under the shared mask is a finding to read.
  *
+ * FIRST SHRINK (#12398): the three route-ledger conformance guards
+ * (`metadata`, `cloud-connection`, `trigger-api`) were converted and their rows
+ * deleted here in the same PR, which is the half this gate's `stale` branch
+ * exists to demand. Their conversion was a measurement and it found something:
+ * on two of the three, the private scanner was reading the `//` inside a REGEX
+ * LITERAL as a line-comment opener and deleting real code to end of line --
+ * `/^https?:\/\//i` in `packages/metadata/src/plugin.ts` (40 bytes) and
+ * `/\/packages\/[^/]+\/versions\//` in
+ * `packages/cloud-connection/src/marketplace-proxy-plugin.ts` (38 bytes, inside
+ * a declared MOUNT SOURCE). That is the naive-`//` family this gate exists for,
+ * found live rather than argued from the shape. `packages/cli/src/utils/
+ * console-route-ledger.conformance.test.ts` is the fourth guard in that family
+ * and stays recorded: its population limb already stripped, so it was out of
+ * that card's scope and nobody has re-read its scanner.
+ *
  * A recorded row that the scan no longer finds FAILS as stale. That is the
  * property `check-self-test-wired.mjs` names as the difference between a rule
  * with a witness and a rule without one: it converts "no findings" into "the
@@ -197,8 +212,6 @@ const LEDGER = new Map([
     { shapes: ['regex-block', 'regex-line'], verdict: 'specimen', why: 'the private two-regex strip this file carried until its conversion, kept as a NEGATIVE CONTROL that the shared mask beats it; converting it would delete the evidence' }],
   ['packages/cli/src/utils/console-route-ledger.conformance.test.ts',
     { shapes: ['scanner-decl'], verdict: 'unconverted', why: 'predates this gate; hand-rolled scanner, preserves block-comment newlines' }],
-  ['packages/cloud-connection/src/cloud-connection-route-ledger.conformance.test.ts',
-    { shapes: ['scanner-decl'], verdict: 'unconverted', why: 'predates this gate; hand-rolled scanner carrying its own 80-line rationale for preserving newlines' }],
   ['packages/create-objectstack/src/template-registry.test.ts',
     { shapes: ['regex-line'], verdict: 'unconverted', why: 'predates this gate; line-comment strip over a template manifest, the spelling the filing card missed' }],
   ['packages/drivers/driver-sql/src/live-dialect-matrix.isolation.test.ts',
@@ -215,8 +228,6 @@ const LEDGER = new Map([
     { shapes: ['regex-block', 'regex-line'], verdict: 'unconverted', why: 'predates this gate; the full naive two-regex pair' }],
   ['packages/metadata-protocol/src/migrations/live-mysql-database.isolation.test.ts',
     { shapes: ['regex-block', 'regex-line'], verdict: 'unconverted', why: 'predates this gate; the full naive two-regex pair' }],
-  ['packages/metadata/src/metadata-route-ledger.conformance.test.ts',
-    { shapes: ['scanner-decl'], verdict: 'unconverted', why: 'predates this gate; hand-rolled scanner, preserves block-comment newlines' }],
   ['packages/plugins/plugin-approvals/src/admin-exemption-retired.test.ts',
     { shapes: ['scanner-decl'], verdict: 'unconverted', why: 'predates this gate; hand-rolled scanner that DROPS block-comment newlines while its gate reports a line number' }],
   ['packages/plugins/plugin-auth/src/rate-limit-storage-isolation.test.ts',
@@ -227,8 +238,6 @@ const LEDGER = new Map([
     { shapes: ['regex-block', 'regex-line'], verdict: 'unconverted', why: 'predates this gate; the full naive two-regex pair' }],
   ['packages/spec/scripts/lazify-schemas.ts',
     { shapes: ['regex-block', 'regex-line'], verdict: 'unconverted', why: 'predates this gate; import-block matcher consuming leading comments, and package-local tooling the card excluded by substring' }],
-  ['packages/triggers/trigger-api/src/trigger-api-route-ledger.conformance.test.ts',
-    { shapes: ['scanner-decl'], verdict: 'unconverted', why: 'predates this gate; hand-rolled scanner that DROPS block-comment newlines while its gate reports a line number' }],
 ]);
 
 function walk(dir, out = []) {

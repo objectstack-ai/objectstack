@@ -60,7 +60,9 @@ import {
   isDeclaredByHost,
   packageNameFromSpecifier,
   readHostDeclaration,
+  type HostDeclaration,
   type HostImporter,
+  type HostImportFailureKind,
 } from '@objectstack/types/node';
 import {
   printHeader,
@@ -2860,46 +2862,20 @@ export default class Serve extends Command {
                   // file that was already correct. The importer now says which
                   // one it is, so this text can too.
                   const declaration = readHostDeclaration(organizationsPkg, hostRoot);
-                  const remedy =
-                    hostImportFailureKind(orgErr) === 'declared-unresolvable'
-                      ? '      • this app DECLARES @objectstack/organizations ' +
-                        `(${declaration.field}: ${JSON.stringify(declaration.specifier)}) — the\n` +
-                        '        declaration is NOT the problem and re-reading package.json will not help.\n' +
-                        `        Repair the INSTALL in ${hostRoot}: run \`pnpm install\`, check that a\n` +
-                        '        production prune did not drop it, and that its dist is actually built — or\n'
-                      : '      • add @objectstack/organizations (the enterprise multi-org runtime) to THIS APP\n' +
-                        "        — declare it in the app's package.json and install; the CLI resolves it from the\n" +
-                        '          app, not from the framework it is linked out of. Being merely reachable\n' +
-                        '          through NODE_PATH / a hoisted workspace store is deliberately not enough\n' +
-                        '          (#4719) — that made this wall depend on how the process was launched.\n' +
-                        '          NOTE: this runtime is closed-source and is NOT on the public npm registry —\n' +
-                        '          it is distributed with an enterprise / cloud subscription. Without one this\n' +
-                        '          bullet is not followable, and one of the two below is your path — or\n';
+                  const remedy = formatOrganizationsInstallRemedy(
+                    hostImportFailureKind(orgErr),
+                    declaration,
+                    hostRoot,
+                  );
                   console.error(
-                    chalk.red(
-                      `\n  ✖ FATAL: tenancy posture '${tenancyPosture}' was requested but ` +
-                        '@objectstack/organizations could not be loaded,\n' +
-                        '    so the organization wall is INACTIVE. Refusing to boot — a deployment that requested\n' +
-                        '    multi-organization isolation must not serve traffic without it (ADR-0093 D5).\n\n' +
-                        '    Fix one of:\n' +
-                        remedy +
-                        "      • set OS_TENANCY_POSTURE=single (or unset OS_MULTI_ORG_ENABLED) to run single-org, or\n" +
-                        '      • set OS_ALLOW_DEGRADED_TENANCY=1 to boot in an explicitly degraded single-org state.\n\n' +
-                        `    cause: ${cause}\n`,
-                    ),
+                    chalk.red(formatOrganizationsAbsentFatal(tenancyPosture, remedy, cause)),
                   );
                   process.exit(1);
                 }
                 // Explicitly opted into degraded operation — boot, but brand it
                 // loudly. The `tenancy` service also reports `degraded: true` to
                 // /auth/config and the Setup dashboard so it stays visible.
-                console.warn(
-                  chalk.yellow(
-                    `  ⚠ DEGRADED TENANCY (OS_ALLOW_DEGRADED_TENANCY=1): posture '${tenancyPosture}' requested but ` +
-                      '@objectstack/organizations is unavailable — booting with the organization wall INACTIVE. ' +
-                      'Organization boundaries are NOT enforced. (ADR-0093 D5)',
-                  ),
-                );
+                console.warn(chalk.yellow(formatDegradedTenancyWarning(tenancyPosture)));
                 // Degraded boot: `orgMod` stays undefined, so stage 2 below is
                 // skipped. Nothing was loaded, so nothing can be mounted.
               }
@@ -2925,23 +2901,7 @@ export default class Serve extends Command {
                   // be caught and boot would continue with the wall inactive.
                   console.error(
                     chalk.red(
-                      `\n  ✖ FATAL: tenancy posture '${tenancyPosture}' was requested and ` +
-                        '@objectstack/organizations WAS found and loaded,\n' +
-                        '    but its OrganizationsPlugin refused to mount, so the organization wall is INACTIVE.\n' +
-                        '    Refusing to boot — a deployment that requested multi-organization isolation must not\n' +
-                        '    serve traffic without it (ADR-0093 D5).\n\n' +
-                        '    This is NOT a missing-package problem: the runtime is installed and resolvable here,\n' +
-                        '    so module resolution / NODE_PATH / dependency pruning are not the place to look.\n\n' +
-                        '    The plugin reported (verbatim — the framework does not interpret it):\n' +
-                        (mountCode !== undefined ? `      code: ${String(mountCode)}\n` : '') +
-                        `      ${mountMessage}\n\n` +
-                        '    Fix one of:\n' +
-                        '      • resolve what the plugin reported above — its message is the authority on the\n' +
-                        '        remedy; this CLI has no further detail to add, or\n' +
-                        "      • set OS_TENANCY_POSTURE=single (or unset OS_MULTI_ORG_ENABLED) to run single-org.\n\n" +
-                        '    OS_ALLOW_DEGRADED_TENANCY does NOT apply to this failure and will not get past it:\n' +
-                        '    it covers an ABSENT multi-org runtime the operator accepts doing without, not a\n' +
-                        '    present one that declined to mount. (#4818)\n',
+                      formatOrganizationsMountFatal(tenancyPosture, mountMessage, mountCode),
                     ),
                   );
                   process.exit(1);
@@ -4314,7 +4274,7 @@ const TENANCY_POSTURE_FIX_HINTS: Readonly<Record<string, string>> = {
   single: 'one organization, no organization wall — the default',
   group: 'organization wall enforced by the open engine, one shared database',
   isolated:
-    'organization wall + the enterprise @objectstack/organizations runtime '
+    `organization wall + the enterprise ${Serve.ORGANIZATIONS_RUNTIME_PKG} runtime `
     + "(the legacy spelling 'multi' is accepted and normalizes to this)",
 };
 
@@ -4373,6 +4333,127 @@ export function resolveTenancyPostureOrRefusal(): TenancyPostureGateVerdict {
       ),
     };
   }
+}
+
+
+/**
+ * The operator-facing prose that names the multi-org runtime, as SEAMS rather
+ * than string expressions buried inside `run()` — the same reason
+ * {@link resolveTenancyPostureOrRefusal} above is one (#5359).
+ *
+ * #11614 single-sourced the name `serve` RESOLVES onto
+ * {@link Serve.ORGANIZATIONS_RUNTIME_PKG} and stopped there, deliberately: the
+ * five sentences below are what an operator reads at the worst possible moment,
+ * and churning them for a provable no-op is how a whitespace slip lands in the
+ * one text that has to be right. This is the other half, done the way that
+ * makes it checkable rather than eyeballed — the name is interpolated from the
+ * same declaration the roster pins, and
+ * `serve-organizations-message-spelling.test.ts` asserts what these RENDER, not
+ * that the constant appears in the source. Rename the roster key and the prose
+ * moves with it; re-spell it inline and the rendered text stops matching.
+ *
+ * Deliberately NOT a source scan for "no bare literal outside the declaration":
+ * that shape has to exclude comments (three of them here legitimately name the
+ * package) and is easy to get wrong.
+ *
+ * Each function returns PLAIN text. The `chalk` wrapper and the `process.exit`
+ * stay at the call site, where the control flow is readable.
+ */
+
+/**
+ * The install remedy bullet for a multi-org runtime that would not load — two
+ * absences, two remedies (#4719).
+ *
+ * `declared-unresolvable` means the app's `package.json` DOES name the package
+ * and the install is what is broken; anything else means the app never declared
+ * it. Telling the first operator to re-read a file that is already correct is
+ * the defect this branch exists to avoid.
+ */
+export function formatOrganizationsInstallRemedy(
+  kind: HostImportFailureKind | undefined,
+  declaration: HostDeclaration,
+  hostRoot: string,
+): string {
+  const pkg = Serve.ORGANIZATIONS_RUNTIME_PKG;
+  return kind === 'declared-unresolvable'
+    ? `      • this app DECLARES ${pkg} ` +
+      `(${declaration.field}: ${JSON.stringify(declaration.specifier)}) — the\n` +
+      '        declaration is NOT the problem and re-reading package.json will not help.\n' +
+      `        Repair the INSTALL in ${hostRoot}: run \`pnpm install\`, check that a\n` +
+      '        production prune did not drop it, and that its dist is actually built — or\n'
+    : `      • add ${pkg} (the enterprise multi-org runtime) to THIS APP\n` +
+      "        — declare it in the app's package.json and install; the CLI resolves it from the\n" +
+      '          app, not from the framework it is linked out of. Being merely reachable\n' +
+      '          through NODE_PATH / a hoisted workspace store is deliberately not enough\n' +
+      '          (#4719) — that made this wall depend on how the process was launched.\n' +
+      '          NOTE: this runtime is closed-source and is NOT on the public npm registry —\n' +
+      '          it is distributed with an enterprise / cloud subscription. Without one this\n' +
+      '          bullet is not followable, and one of the two below is your path — or\n';
+}
+
+/**
+ * Stage 1 refusal: a walled posture was requested and the multi-org runtime is
+ * ABSENT, so the organization wall would be inactive (ADR-0093 D5).
+ */
+export function formatOrganizationsAbsentFatal(
+  posture: TenancyPosture,
+  remedy: string,
+  cause: string,
+): string {
+  return (
+    `\n  ✖ FATAL: tenancy posture '${posture}' was requested but ` +
+    `${Serve.ORGANIZATIONS_RUNTIME_PKG} could not be loaded,\n` +
+    '    so the organization wall is INACTIVE. Refusing to boot — a deployment that requested\n' +
+    '    multi-organization isolation must not serve traffic without it (ADR-0093 D5).\n\n' +
+    '    Fix one of:\n' +
+    remedy +
+    "      • set OS_TENANCY_POSTURE=single (or unset OS_MULTI_ORG_ENABLED) to run single-org, or\n" +
+    '      • set OS_ALLOW_DEGRADED_TENANCY=1 to boot in an explicitly degraded single-org state.\n\n' +
+    `    cause: ${cause}\n`
+  );
+}
+
+/**
+ * The degraded-boot brand: the operator explicitly accepted an absent multi-org
+ * runtime via `OS_ALLOW_DEGRADED_TENANCY=1`, so boot continues — loudly.
+ */
+export function formatDegradedTenancyWarning(posture: TenancyPosture): string {
+  return (
+    `  ⚠ DEGRADED TENANCY (OS_ALLOW_DEGRADED_TENANCY=1): posture '${posture}' requested but ` +
+    `${Serve.ORGANIZATIONS_RUNTIME_PKG} is unavailable — booting with the organization wall INACTIVE. ` +
+    'Organization boundaries are NOT enforced. (ADR-0093 D5)'
+  );
+}
+
+/**
+ * Stage 2 refusal: the runtime IS present and its plugin declined to mount
+ * (#4818). A different fact with a different remedy, and one
+ * `OS_ALLOW_DEGRADED_TENANCY` deliberately does not cover.
+ */
+export function formatOrganizationsMountFatal(
+  posture: TenancyPosture,
+  mountMessage: string,
+  mountCode: unknown,
+): string {
+  return (
+    `\n  ✖ FATAL: tenancy posture '${posture}' was requested and ` +
+    `${Serve.ORGANIZATIONS_RUNTIME_PKG} WAS found and loaded,\n` +
+    '    but its OrganizationsPlugin refused to mount, so the organization wall is INACTIVE.\n' +
+    '    Refusing to boot — a deployment that requested multi-organization isolation must not\n' +
+    '    serve traffic without it (ADR-0093 D5).\n\n' +
+    '    This is NOT a missing-package problem: the runtime is installed and resolvable here,\n' +
+    '    so module resolution / NODE_PATH / dependency pruning are not the place to look.\n\n' +
+    '    The plugin reported (verbatim — the framework does not interpret it):\n' +
+    (mountCode !== undefined ? `      code: ${String(mountCode)}\n` : '') +
+    `      ${mountMessage}\n\n` +
+    '    Fix one of:\n' +
+    '      • resolve what the plugin reported above — its message is the authority on the\n' +
+    '        remedy; this CLI has no further detail to add, or\n' +
+    "      • set OS_TENANCY_POSTURE=single (or unset OS_MULTI_ORG_ENABLED) to run single-org.\n\n" +
+    '    OS_ALLOW_DEGRADED_TENANCY does NOT apply to this failure and will not get past it:\n' +
+    '    it covers an ABSENT multi-org runtime the operator accepts doing without, not a\n' +
+    '    present one that declined to mount. (#4818)\n'
+  );
 }
 
 /**

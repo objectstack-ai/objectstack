@@ -380,9 +380,18 @@ describe('[#7525] a hook that refuses WITHOUT a status is unchanged', () => {
 
         expect(r.status).toBe(500);
         expect(r.body.code).toBe('INTERNAL_ERROR');
-        // Its own `code` is NOT promoted to the wire by this fix: ADR-0112 says
-        // the producer names the condition, and this producer named a code but
-        // no status. Inventing a 4xx from the code alone would be the
+        // Its own `code` is NOT promoted to the wire by this fix: ADR-0112 D4
+        // governs the semantic-CODE channel — the producer names the condition
+        // on the CODE axis — and this producer named a code but
+        // no status.
+        //
+        // ⚠️ Do not read the 500 above as an ADR-0112 ruling. It is the
+        // classifiers' default (#7525); ADR-0112 rules no HTTP status for an
+        // undeclared throw. The unqualified form of this sentence was read as
+        // ruling exactly that, and argued for a `500` on the sibling
+        // `/analytics/dataset/query` question the ADR is silent on.
+        //
+        // Inventing a 4xx from the code alone would be the
         // consumer-side leniency Prime Directive #12 removes — the follow-up
         // that belongs with #7463, not here.
         expect(r.body.code).not.toBe('CLOSE_PERIOD_LOCKED');

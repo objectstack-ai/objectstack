@@ -1134,6 +1134,52 @@ export function isNonPathNamespace(literal) {
 }
 
 /**
+ * Resolve a MODULE-RELATIVE literal against the directory of the script that
+ * WROTE it, as a repo-relative path — or `null` when it names nothing inside
+ * the repo.
+ *
+ * ## Why this is the producer's job and not the reader's
+ *
+ * `./lib/dist-freshness`, `../src/kernel/protocol-version` — those are how a
+ * gate INSIDE a package spells a file it really reads. Stripping the prefix
+ * produced `lib/dist-freshness` and `src/kernel/protocol-version`, strings this
+ * tree has no top-level `lib/` or `src/` for, so they reached nothing and the
+ * residue asserted they "never were repo paths" about files that are on disk.
+ * Resolving is the contract-first repair: the extracted hint means what the
+ * source means, rather than the reader being taught to forgive a spelling the
+ * producer got wrong.
+ *
+ * ## Two refusals, both about naming no path rather than about taste
+ *
+ *   escapes the repo      `relative()` answers with a leading `..` — a sibling
+ *                         checkout is not a path `hintCovers` can compare
+ *                         against, because its inputs are repo-relative.
+ *   resolves to the root  the empty string, which every input "starts with" and
+ *                         which would therefore cover the entire tree.
+ *
+ * ## The same idiom as `firstPartyImportTargets`, deliberately
+ *
+ * That function already resolves a relative specifier against
+ * `dirname(join(root, scriptPath))` and reads the answer back through
+ * `relative(root, …)`. Two resolvers for "where does this script's `../` point"
+ * would be free to disagree, and one of them would be the one nobody
+ * re-measured. This is the same three lines, and the self-test pins that the
+ * import follow and the hint resolve agree on a shared specimen.
+ *
+ * ## Price (measured, and the deliverable this card owes)
+ *
+ * The resolve is a NO-OP for every literal already spelled from the repo root
+ * by a writer at that depth, which is most of them — see the pair-count
+ * measurement in this change's PR body, taken over the live fleet with
+ * `hintCovers` as the sole predicate.
+ */
+export function resolveModuleRelativeHint(literal, scriptPath, { root = ROOT } = {}) {
+  const rel = relative(root, resolve(join(root, dirname(scriptPath)), literal));
+  if (!rel || rel === '..' || rel.startsWith('../')) return null;
+  return rel;
+}
+
+/**
  * Scan a check script's MODULE BODY for the path-ish string literals it
  * operates on. A hint is a quoted string that contains a `/` (or names a
  * top-level dotted dir) and looks like a repo path rather than a URL or a
@@ -1156,7 +1202,7 @@ export function isNonPathNamespace(literal) {
  * in the module body — rather than a boundary this function is pretending to
  * draw.
  *
- * ## Why leading `../` is stripped
+ * ## Why a module-relative literal is RESOLVED against its writer, not stripped
  *
  * Dropping the comments turned one gate's only surviving literal into a hint
  * that could no longer match anything: `check:pm-skill-ratchet` reads
@@ -1166,9 +1212,31 @@ export function isNonPathNamespace(literal) {
  * is the accident this function exists to stop relying on. The leading `../`
  * segments are the SCRIPT's depth, not part of the watched path: a
  * module-relative URL is how these scripts spell a repo path, and `hintCovers`
- * compares against repo-relative inputs. So they are stripped, and a literal
- * that is nothing but dots (`'../..'`, this file's own ROOT) names no file and
- * is dropped outright.
+ * compares against repo-relative inputs.
+ *
+ * They used to be STRIPPED, and the strip carried an unstated premise: that the
+ * writer sits at the depth its own `../` run climbs to, i.e. that the literal
+ * is spelled from the repo root. That holds for `scripts/*.mjs` writing
+ * `'../../packages/…'` and it FAILS for a gate that lives inside a package —
+ * `packages/spec/scripts/check-x.ts` writing `'./lib/dist-freshness'` yielded
+ * the hint `lib/dist-freshness`, a string that never was a repo path while the
+ * file it names exists. That is a hint set stating something FALSE about the
+ * source, and the residue said so out loud: `unreachableReason` printed "never
+ * was a repo path" about targets that are on disk.
+ *
+ * So the prefix is resolved against `scriptPath`'s own directory instead
+ * (`resolveModuleRelativeHint`). For a literal already spelled from the root by
+ * a writer at that depth the resolve is a NO-OP — which is why this widening is
+ * cheap, and the measurement in that helper's docblock is the price.
+ *
+ * `scriptPath` is optional and the strip is what a caller without one still
+ * gets. Not every caller has a path to give (a fixture string in a self-test
+ * has no writer), and a caller that has one and forgets is a missing lead
+ * rather than a fabricated one — the direction this file errs in everywhere.
+ * A literal that is nothing but dots (`'../..'`, this file's own ROOT) names no
+ * file and is dropped outright on BOTH paths, before either runs: resolving one
+ * would name the writer's own directory, which is a subtree claim no author
+ * made by writing `'..'`.
  *
  * ## Why a TRAILING dot is stripped too, and why it stopped being cosmetic
  *
@@ -1194,23 +1262,45 @@ export function isNonPathNamespace(literal) {
  * where the hint is built — not at comparison time, where every caller would
  * have to remember to do it.
  */
-export function extractWatchHints(scriptSource) {
+export function extractWatchHints(scriptSource, scriptPath = null) {
   const moduleBody = maskSelfTests(maskComments(scriptSource));
   const hints = new Set();
   for (const m of moduleBody.matchAll(/['"`]([^'"`\n]{2,120})['"`]/g)) {
     const raw = m[1];
     if (/^(https?:|[A-Z_]+=|-{1,2}\w)/.test(raw)) continue;
     if (!/^[\w.@][\w.@/*-]*$/.test(raw)) continue;
-    const s = raw.replace(/^(?:\.\.?(?:\/|$))+/, '');
-    if (!s) continue;
-    const looksPathy = s.includes('/') || /^\.(claude|changeset|github|gitattributes)\b/.test(s);
+    // ADMISSION reads the literal as the AUTHOR wrote it, minus the depth
+    // prefix — byte for byte the test this scan has always applied. Only the
+    // VALUE is resolved, below. Widening admission to the resolved form was
+    // measured on this tree and REFUSED: it admits every single-segment sibling
+    // specifier (`'./invoked-as.mjs'`, `'./package.json'`) as a watched
+    // population, which is a second and unpriced answer to the question
+    // `firstPartyImportTargets` already owns — with the wrong provenance label,
+    // `gate source` where the import channel says `gate source via <mod>`. It
+    // also put a path population on two gates that DECLARE they have none. The
+    // bare-single-segment refusal in `hintCovers`' docblock is the same
+    // standing verdict, one class over.
+    const stripped = raw.replace(/^(?:\.\.?(?:\/|$))+/, '');
+    // Dots and nothing else name no file, on either path — checked before the
+    // resolve so it cannot turn `'..'` into the writer's own directory.
+    if (!stripped) continue;
+    const looksPathy = stripped.includes('/') || /^\.(claude|changeset|github|gitattributes)\b/.test(stripped);
     if (!looksPathy) continue;
-    const trimmed = s.replace(/[./]+$/, '');
+    const trimmed = stripped.replace(/[./]+$/, '');
     if (!trimmed) continue;
     // A slash is the separator of several namespaces, and only one of them is
     // the filesystem. See `isNonPathNamespace` for what is refused and why the
     // refusal is measured rather than guessed.
     if (isNonPathNamespace(trimmed)) continue;
+    // A literal the writer spelled module-relative means the file that sits
+    // there RELATIVE TO THE WRITER; one spelled from the root already is what
+    // it claims to be. A caller with no `scriptPath` keeps the strip.
+    if (stripped !== raw && scriptPath) {
+      const resolved = resolveModuleRelativeHint(raw.replace(/[./]+$/, ''), scriptPath);
+      if (!resolved) continue; // escapes the repo, or names the root itself
+      hints.add(resolved);
+      continue;
+    }
     hints.add(trimmed);
   }
   return [...hints];
@@ -3924,7 +4014,7 @@ export function discoverFamilies() {
       // A module that declares nothing contributes everything it spells, which
       // is the behaviour every followed module had before the marker existed.
       const source = readFileSync(join(ROOT, rel), 'utf8');
-      const spelled = extractWatchHints(source);
+      const spelled = extractWatchHints(source, rel);
       const declared = declaredInheritedPopulation(source, spelled);
       moduleHints.set(rel, declared ? declared.population : spelled);
     }
@@ -3941,7 +4031,7 @@ export function discoverFamilies() {
       // them can describe different revisions of a file, the same discipline
       // the trigger paths take above.
       const source = readFileSync(abs, 'utf8');
-      entry.hints.push(...extractWatchHints(source));
+      entry.hints.push(...extractWatchHints(source, f));
       entry.noPopulationReason ??= declaredNoPathPopulation(source);
       // A `--self-test` family follows NO import, and that is a measurement
       // rather than a preference (#11404). The invocation runs the script's
@@ -4767,7 +4857,7 @@ function selfTest() {
     readFileSync(join(ROOT, 'scripts/pm/bare-root-worklist.mjs'), 'utf8'),
   );
   const wouldHaveInherited = importedByBareRoot.flatMap((m) =>
-    extractWatchHints(readFileSync(join(ROOT, m), 'utf8')),
+    extractWatchHints(readFileSync(join(ROOT, m), 'utf8'), m),
   );
   t(
     `the refused inheritance is real — the modules this gate imports declare ${wouldHaveInherited.length} literal(s)`,
@@ -4786,7 +4876,7 @@ function selfTest() {
   // extractor the case above uses.
   const inheritableFromImports = importedByBareRoot.flatMap((m) => {
     const src = readFileSync(join(ROOT, m), 'utf8');
-    const spelled = extractWatchHints(src);
+    const spelled = extractWatchHints(src, m);
     return declaredInheritedPopulation(src, spelled)?.population ?? spelled;
   });
   t(
@@ -4829,7 +4919,7 @@ function selfTest() {
       const src = readFileSync(join(ROOT, f), 'utf8');
       for (const mod of firstPartyImportTargets(f, src)) {
         if (!promoted.includes(mod)) continue;
-        const lost = extractWatchHints(readFileSync(join(ROOT, mod), 'utf8'));
+        const lost = extractWatchHints(readFileSync(join(ROOT, mod), 'utf8'), mod);
         if (lost.length > 0) subtracted.push(`${check} <- ${mod} (${lost.join(', ')})`);
       }
     }
@@ -4910,7 +5000,7 @@ function selfTest() {
       if (!existsSync(join(ROOT, f))) continue;
       for (const mod of firstPartyImportTargets(f, readFileSync(join(ROOT, f), 'utf8'))) {
         if (!admittedTs.includes(mod)) continue;
-        const lost = extractWatchHints(readFileSync(join(ROOT, mod), 'utf8'));
+        const lost = extractWatchHints(readFileSync(join(ROOT, mod), 'utf8'), mod);
         if (lost.length > 0) tsSubtracted.push(`${check} <- ${mod} (${lost.join(', ')})`);
       }
     }
@@ -5162,6 +5252,95 @@ function selfTest() {
   t('a module-relative path is normalised to repo-relative', relHints.includes('.claude/agents/os-dev.md'));
   t('a literal that is nothing but dots names no file', !relHints.some((h) => h.startsWith('..')));
 
+  // ── The literal is RESOLVED against its writer, never stripped (#12371) ───
+  //
+  // The strip assumed the writer sits at the depth its own `../` run climbs to.
+  // That holds for `scripts/*.mjs` and FAILS for a gate inside a package, whose
+  // `'./lib/x'` came out as the top-level `lib/x` — a string this tree has no
+  // `lib/` for, while the file it names is on disk. Both directions are pinned:
+  // what MUST convert, and what must NOT.
+  const insideAPackage = "import { f } from './lib/dist-freshness';\nconst S = '../src/kernel/protocol-version';";
+  const pkgHints = extractWatchHints(insideAPackage, 'packages/spec/scripts/check-x.ts');
+  t(
+    'a gate inside a package resolves its own-directory literal against ITSELF',
+    pkgHints.includes('packages/spec/scripts/lib/dist-freshness'),
+  );
+  t(
+    '…and a `../` literal against its parent, not against the repo root',
+    pkgHints.includes('packages/spec/src/kernel/protocol-version'),
+  );
+  t(
+    'the top-level spelling the strip used to produce is GONE, not merely joined',
+    !pkgHints.includes('lib/dist-freshness') && !pkgHints.includes('src/kernel/protocol-version'),
+  );
+  // The no-op half, and the reason the widening is cheap: a writer that really
+  // does sit at the depth it climbs gets the same hint it always got.
+  t(
+    'a literal already spelled from the root by a writer at that depth is unchanged',
+    extractWatchHints("const P = '../../packages/spec/src';", 'scripts/pm/x.mjs').includes('packages/spec/src'),
+  );
+  t(
+    'a literal carrying no relative prefix is untouched by the resolve',
+    extractWatchHints("const P = 'packages/spec/src';", 'packages/spec/scripts/check-x.ts').includes('packages/spec/src'),
+  );
+  // MUST NOT convert. Admission still reads the literal as the author wrote it,
+  // so a single-segment sibling specifier is no hint at all — the same refusal
+  // `hintCovers`' docblock states for a bare filename. Admitting it would hand
+  // every gate its own import specifiers as a watched population, a second and
+  // unpriced answer to the question `firstPartyImportTargets` owns.
+  t(
+    'a single-segment sibling specifier does NOT convert into a hint',
+    extractWatchHints("import { invokedAs } from './invoked-as.mjs';", 'scripts/check-x.mjs').length === 0,
+  );
+  t(
+    '…nor does a bare sibling manifest name',
+    extractWatchHints("const P = './package.json';", 'scripts/check-x.mjs').length === 0,
+  );
+  t(
+    'a literal that climbs out of the repo names nothing',
+    extractWatchHints("const P = '../../../elsewhere/x/y';", 'scripts/check-x.mjs').length === 0,
+  );
+  t(
+    'and one that resolves to the repo root itself names nothing — it would cover the tree',
+    resolveModuleRelativeHint('../..', 'scripts/pm/x.mjs') === null,
+  );
+  // A caller with no path keeps the strip: not every caller has a writer to
+  // resolve against, and a missing lead is the direction this file errs in.
+  t(
+    'a caller that passes no script path still gets the stripped spelling',
+    extractWatchHints("import { f } from './lib/dist-freshness';").includes('lib/dist-freshness'),
+  );
+  // One resolver, not two. `firstPartyImportTargets` answers the same question
+  // for the import follow; if they could disagree, one of them is the copy
+  // nobody re-measured.
+  t(
+    'the hint resolve and the import follow agree on a shared specimen',
+    resolveModuleRelativeHint('./invoked-as.mjs', 'scripts/check-doc-anchors.mjs') ===
+      firstPartyImportTargets('scripts/check-doc-anchors.mjs', "import { invokedAs } from './invoked-as.mjs';")[0],
+  );
+  // LIVE, on this tree: the specimen the card was filed for, driven through
+  // `hintCovers` — never through `collapseHint` and never re-implemented.
+  const liveSchemaHints = extractWatchHints(
+    readFileSync(join(ROOT, 'packages/spec/scripts/build-schemas.ts'), 'utf8'),
+    'packages/spec/scripts/build-schemas.ts',
+  );
+  t(
+    'the live spec builder names its own src subtree, resolved',
+    liveSchemaHints.includes('packages/spec/src/data'),
+  );
+  t(
+    '…and that hint really reaches a tracked file, which the stripped spelling never did',
+    hintCovers('packages/spec/src/data', 'packages/spec/src/data/field.zod.ts') &&
+      !hintCovers('src/data', 'packages/spec/src/data/field.zod.ts'),
+  );
+  // The residue's claim stops being false: a resolved literal HAS a tracked
+  // prefix, so `unreachableClass` no longer files it as "never was a repo path"
+  // about a file that exists.
+  t(
+    'a resolved dead hint has a tracked prefix, so the residue stops calling it "never a repo path"',
+    Boolean(deepestTrackedPrefix('packages/spec/scripts/lib/dist-freshness', trackedPrefixes(trackedFiles()))),
+  );
+
   t('hint covers deeper path', hintCovers('.claude/agents', '.claude/agents/os-dev.md'));
   t('collapsed glob prefix covers', hintCovers('packages/spec/src/**', 'packages/spec/src/data/filter.zod.ts'));
   t('input dir covers hint below it', hintCovers('packages/spec/scripts/check-x.mjs', 'packages/spec'));
@@ -5306,19 +5485,19 @@ function selfTest() {
   // gates stops declaring its root, re-point the case at whatever gate then
   // does". Left pointing at the gate it would have gone green over an empty
   // hint list, which is the vacuous-pass shape these cases exist to refuse.
-  const crossPkgHints = extractWatchHints(readFileSync(join(ROOT, 'scripts/cross-package-test-inputs.mjs'), 'utf8'));
+  const crossPkgHints = extractWatchHints(readFileSync(join(ROOT, 'scripts/cross-package-test-inputs.mjs'), 'utf8'), 'scripts/cross-package-test-inputs.mjs');
   // NOT `scripts/check-nul-bytes.mjs`: that gate names that file explicitly
   // too, so the case would pass with the declaration still refused — measured,
   // it survived the ablation. Pick a scripts path reachable ONLY through the
   // declared subtree, or the case pins nothing.
   t('the cross-package declaration table reaches the root scripts dir it declares', crossPkgHints.some((h) => hintCovers(h, 'scripts/pm/dispatch-gates.mjs')));
   t('and the content tree it declares', crossPkgHints.some((h) => hintCovers(h, 'content/docs/getting-started/index.mdx')));
-  const governedHints = extractWatchHints(readFileSync(join(ROOT, 'scripts/pm/check-governed-merges.mjs'), 'utf8'));
+  const governedHints = extractWatchHints(readFileSync(join(ROOT, 'scripts/pm/check-governed-merges.mjs'), 'utf8'), 'scripts/pm/check-governed-merges.mjs');
   t('the governed-merge gate reaches the published skills catalog it declares', governedHints.some((h) => hintCovers(h, 'skills/objectstack-upgrade/SKILL.md')));
 
   // The card this landed for: the ONLY fragment coverage in the repo, which
   // scored `silent` for every content card while being REQUIRED in lint.yml.
-  const anchorHints = extractWatchHints(readFileSync(join(ROOT, 'scripts/check-doc-anchors.mjs'), 'utf8'));
+  const anchorHints = extractWatchHints(readFileSync(join(ROOT, 'scripts/check-doc-anchors.mjs'), 'utf8'), 'scripts/check-doc-anchors.mjs');
   t('the doc-anchors gate reaches the content page population it declares', anchorHints.some((h) => hintCovers(h, 'content/docs/deployment/cli.mdx')));
   t('and does not thereby claim a path outside that population', !anchorHints.some((h) => hintCovers(h, 'packages/spec/src/index.ts')));
 
@@ -5330,7 +5509,7 @@ function selfTest() {
   // populated `names:` column, which reads as "declared, just not relevant to
   // you" rather than as a blind spot — the reason it survived five same-class
   // fixes without being noticed.
-  const docAuthoringHints = extractWatchHints(readFileSync(join(ROOT, 'scripts/check-doc-authoring.mjs'), 'utf8'));
+  const docAuthoringHints = extractWatchHints(readFileSync(join(ROOT, 'scripts/check-doc-authoring.mjs'), 'utf8'), 'scripts/check-doc-authoring.mjs');
   // One case per declared root, because a single one passes for a declaration
   // that dropped the other three — which is the exact shape being fixed. Each
   // path is reachable ONLY through its root's subtree spelling, never through a
@@ -5361,7 +5540,7 @@ function selfTest() {
   // lint.yml — twice at the cost of a p0's CI round (#9391, PR #9695). It now
   // declares the subtree it lints. Read from the real gate, not a fixture: what
   // is being pinned is that the tree still HAS the declaration.
-  const slotHints = extractWatchHints(readFileSync(join(ROOT, 'scripts/check-slot-lookup-ratchet.mjs'), 'utf8'));
+  const slotHints = extractWatchHints(readFileSync(join(ROOT, 'scripts/check-slot-lookup-ratchet.mjs'), 'utf8'), 'scripts/check-slot-lookup-ratchet.mjs');
   t('the slot-lookup ratchet reaches the package source population it declares', slotHints.some((h) => hintCovers(h, 'packages/services/service-datasource/src/admin-routes.ts')));
   // The negative half is the load-bearing one for a declaration this broad: a
   // gate named on EVERY card is the louder version of naming none. `packages/**`
@@ -5379,7 +5558,7 @@ function selfTest() {
   // zero gates, on the largest ceiling in that map at headroom 0. It declares
   // the subtree spelling instead. Read from the real gate, not a fixture: what
   // is pinned is that the tree still HAS the declaration.
-  const lineRatchetHints = extractWatchHints(readFileSync(join(ROOT, 'scripts/pm/check-skill-line-ratchet.mjs'), 'utf8'));
+  const lineRatchetHints = extractWatchHints(readFileSync(join(ROOT, 'scripts/pm/check-skill-line-ratchet.mjs'), 'utf8'), 'scripts/pm/check-skill-line-ratchet.mjs');
   t('the pm line ratchet reaches the repo-root instruction file it declares', lineRatchetHints.some((h) => hintCovers(h, 'AGENTS.md')));
   // The negative half, and the reason this is a DECLARATION rather than an
   // extractor change. Widening the extractor to admit bare top-level `*.md`
@@ -5415,7 +5594,7 @@ function selfTest() {
     ['the doc-anchors gate (ARCHITECTURE.md half)', 'scripts/check-doc-anchors.mjs', 'ARCHITECTURE.md'],
   ];
   for (const [what, gate, rootFile] of rootFileDeclarations) {
-    const gateHints = extractWatchHints(readFileSync(join(ROOT, gate), 'utf8'));
+    const gateHints = extractWatchHints(readFileSync(join(ROOT, gate), 'utf8'), gate);
     t(`${what} reaches the repo-root file it declares (${rootFile})`, gateHints.some((h) => hintCovers(h, rootFile)));
     // The negative half, and the reason each of these is a DECLARATION rather
     // than an extractor change: a declaration must buy its own file and NOT the
@@ -5427,9 +5606,9 @@ function selfTest() {
   // …and the root files stay separated from each other: the governed-merge
   // register is the only one of the six that declares two, and nothing here may
   // reach a root file its gate does not read.
-  const proseHints = extractWatchHints(readFileSync(join(ROOT, 'scripts/pm/check-governed-prose.mjs'), 'utf8'));
+  const proseHints = extractWatchHints(readFileSync(join(ROOT, 'scripts/pm/check-governed-prose.mjs'), 'utf8'), 'scripts/pm/check-governed-prose.mjs');
   t('a one-root declaration does not reach the other root file', !proseHints.some((h) => hintCovers(h, 'CLAUDE.md')));
-  const anchorRootHints = extractWatchHints(readFileSync(join(ROOT, 'scripts/check-doc-anchors.mjs'), 'utf8'));
+  const anchorRootHints = extractWatchHints(readFileSync(join(ROOT, 'scripts/check-doc-anchors.mjs'), 'utf8'), 'scripts/check-doc-anchors.mjs');
   t('and the doc-anchors pair claims neither instruction file', !anchorRootHints.some((h) => hintCovers(h, 'AGENTS.md') || hintCovers(h, 'CLAUDE.md')));
 
   // The DIRECTORY half of the same class (#10107). A gate whose population is a
@@ -5446,7 +5625,7 @@ function selfTest() {
   // still HAS the declaration. If this gate stops walking that root, delete the
   // declaration and these cases together — never keep them green by re-pointing
   // at a gate that never read it.
-  const roleWordHints = extractWatchHints(readFileSync(join(ROOT, 'scripts/check-role-word.mjs'), 'utf8'));
+  const roleWordHints = extractWatchHints(readFileSync(join(ROOT, 'scripts/check-role-word.mjs'), 'utf8'), 'scripts/check-role-word.mjs');
   t('the role-word ratchet reaches the published skills catalog it declares', roleWordHints.some((h) => hintCovers(h, 'skills/objectstack-platform/SKILL.md')));
   t('and still reaches the content half it always named', roleWordHints.some((h) => hintCovers(h, 'content/docs/deployment/cli.mdx')));
   // The negative halves, and the reason this is a DECLARATION and not an
@@ -5478,7 +5657,7 @@ function selfTest() {
   //
   // Read from the real gate, not a fixture: what is pinned is that the tree
   // still HAS the declaration.
-  const docFormulaHints = extractWatchHints(readFileSync(join(ROOT, 'packages/lint/scripts/check-doc-formula-expressions.mjs'), 'utf8'));
+  const docFormulaHints = extractWatchHints(readFileSync(join(ROOT, 'packages/lint/scripts/check-doc-formula-expressions.mjs'), 'utf8'), 'packages/lint/scripts/check-doc-formula-expressions.mjs');
   // One case per declared root, because a single one passes for a declaration
   // that dropped the other two. Each path is reachable ONLY through its root's
   // subtree spelling, never through a SKIP_PATHS literal.
@@ -6109,7 +6288,7 @@ function selfTest() {
   // gate through the ordinary watch-hint match. That gate names `.changeset` in
   // its own source, so this asserts the whole chain (discover -> resolve ->
   // hint -> cover) rather than the parser alone.
-  const adrHints = extractWatchHints(readFileSync(join(ROOT, 'scripts/check-adr-0087-registration.mjs'), 'utf8'));
+  const adrHints = extractWatchHints(readFileSync(join(ROOT, 'scripts/check-adr-0087-registration.mjs'), 'utf8'), 'scripts/check-adr-0087-registration.mjs');
   t('a .changeset path is covered by the ADR-0087 gate own hints', adrHints.some((h) => hintCovers(h, '.changeset/some-breaking-change.md')));
 
   // ── The measured population (#8478), against the REAL scripts ─────────────
@@ -6125,7 +6304,7 @@ function selfTest() {
   // check-adr-0087-registration 34 -> 6, check-skill-id-lint 2 -> 2 (already
   // clean, the control). Across all 66 discoverable gate scripts: 1144 hints ->
   // 473, with no hint gained that any repo path can reach.
-  const readHints = (rel) => extractWatchHints(readFileSync(join(ROOT, rel), 'utf8'));
+  const readHints = (rel) => extractWatchHints(readFileSync(join(ROOT, rel), 'utf8'), rel);
   const covers = (hs, p) => hs.some((h) => hintCovers(h, p));
 
   t(
@@ -6862,7 +7041,7 @@ function selfTest() {
   // and silent about the rule.
   const liveGateFiles = new Set([...liveDiscovery.byCheck.values()].flatMap((e) => e.files ?? []));
   const liveSource = (rel) => readFileSync(join(ROOT, rel), 'utf8');
-  const liveModuleHints = (rel) => extractWatchHints(liveSource(rel));
+  const liveModuleHints = (rel) => extractWatchHints(liveSource(rel), rel);
   const liveTargets = (rel) => firstPartyImportTargets(rel, liveSource(rel));
 
   // The recogniser, on fixture source: one line per refusal, so a widening or
@@ -6906,7 +7085,7 @@ function selfTest() {
     for (const f of entry.files ?? []) {
       if (!existsSync(join(ROOT, f))) continue;
       const source = liveSource(f);
-      own.push(...extractWatchHints(source));
+      own.push(...extractWatchHints(source, f));
       for (const mod of firstPartyImportTargets(f, source)) {
         if (liveGateFiles.has(mod) || direct.includes(mod)) continue;
         direct.push(mod);
@@ -7109,7 +7288,7 @@ function selfTest() {
   // be gone from the file the derivation actually reads.
   const misparsedFamilySources = ['scripts/release-github-releases.mjs', 'scripts/check-skill-frame-freshness.mjs'];
   for (const rel of misparsedFamilySources) {
-    const famHints = extractWatchHints(readFileSync(join(ROOT, rel), 'utf8'));
+    const famHints = extractWatchHints(readFileSync(join(ROOT, rel), 'utf8'), rel);
     t(`${rel} no longer declares a phantom population`, !famHints.some(isNonPathNamespace));
   }
   // The live pin that the repair CHANGED the verdict: neither family may sit in
@@ -7118,7 +7297,7 @@ function selfTest() {
   // `undetermined` ("names no path at all"), which is the honest bucket.
   const liveSweepEntries = [];
   for (const rel of misparsedFamilySources) {
-    liveSweepEntries.push([rel, fam(extractWatchHints(readFileSync(join(ROOT, rel), 'utf8')))]);
+    liveSweepEntries.push([rel, fam(extractWatchHints(readFileSync(join(ROOT, rel), 'utf8'), rel))]);
   }
   t('the repaired families declare no population at all, so the sweep skips them', unreachableFamilies([...liveSweepEntries, ['check:anchor', fam(['packages/spec/src'])]], liveCorpus).length === 0);
 

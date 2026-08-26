@@ -9,11 +9,11 @@
  * A test asserting only that the command created something passes just as
  * happily when the filename matches no `filePatterns` entry — which IS the
  * defect. `DEFAULT_METADATA_TYPE_REGISTRY` declares `skill`'s file
- * convention as `*.skill.ts` / `*.skill.yml`;
- * `MetadataPlugin._loadFromFileSystem` globs each type by its own
- * `filePatterns`, `MetadataManager.getTypeInfo` publishes them to every
- * type-descriptor consumer, and `skill` is `allowRuntimeCreate: true` — a
- * type the platform expects to discover. The harness's own convention is
+ * convention as `*.skill.ts` / `*.skill.yml` — the loader mechanism behind
+ * that convention, and the precondition that keeps this repo from meeting
+ * it today, are stated once in `metadata-file-name.ts` (#12075), not
+ * restated here. `skill` is `allowRuntimeCreate: true` — a type the
+ * platform expects to discover. The harness's own convention is
  * `NAME.ts`, so a naive skill scaffold lands as `lead_qualification.ts`,
  * matches neither pattern, and then type-checks, validates and publishes with
  * nothing anywhere saying it was skipped. That is the silent-strip shape
@@ -45,10 +45,11 @@
  * `os g object` is exercised here as a CONTROL, and what it controls for
  * changed. #11025 scoped the filename fix to `skill` and fenced the repo-wide
  * route, so the control pinned `customer.ts` and a `'./customer'` barrel line.
- * #11071 measured the loader rather than assuming: `_loadFromFileSystem` globs
- * every registry entry by its own `filePatterns`, so all seven generators wrote
- * into the same invisibility, and the per-generator override was replaced by a
- * default derived from the registry. The control now pins the OTHER side of
+ * #11071 measured the loader rather than assuming — the mechanism, and the
+ * precondition that keeps it from firing in this repo today, are stated once
+ * in `metadata-file-name.ts` (#12075), not restated here — and the
+ * per-generator override was replaced by a default derived from the
+ * registry. The control now pins the OTHER side of
  * that: `os g object` writes a name the `object` entry's own patterns match,
  * proving the derivation is wired into the real command and not just unit-true.
  *

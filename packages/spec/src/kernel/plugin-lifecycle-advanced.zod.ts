@@ -137,59 +137,35 @@ export const PluginHealthReportSchema = lazySchema(() => z.object({
   })).optional(),
 }));
 
+
 /**
- * Distributed State Configuration
- * Configuration for distributed state management in cluster environments
+ * Prescription for the two `stateStrategy` values retired in 18 (#12340).
+ *
+ * Deliberately carries NO `os migrate meta --from 17` sentence. That command
+ * replays the conversion chain over authored METADATA SOURCES, and
+ * `HotReloadConfig` is not an authorable surface — it is a library parameter a
+ * host passes to `HotReloadManager` in TypeScript (the #4914 / #11825 keep).
+ * No authored document has ever been able to carry `stateStrategy`, so naming
+ * the command here would promise an affordance that cannot apply — the same
+ * false-promise defect ADR-0049 exists to prevent. The migrate-sentence pin
+ * judges only prescriptions that DO name the command, so its absence is in
+ * scope by construction, not by exemption.
  */
-export const DistributedStateConfigSchema = lazySchema(() => z.object({
-  /**
-   * Distributed cache provider
-   */
-  provider: z.enum(['redis', 'etcd', 'custom'])
-    .describe('Distributed state backend provider'),
-  
-  /**
-   * Connection URL or endpoints
-   */
-  endpoints: z.array(z.string()).optional()
-    .describe('Backend connection endpoints'),
-  
-  /**
-   * Key prefix for namespacing
-   */
-  keyPrefix: z.string().optional()
-    .describe('Prefix for all keys (e.g., "plugin:my-plugin:")'),
-  
-  /**
-   * Time to live in seconds
-   */
-  ttl: z.number().int().min(0).optional()
-    .describe('State expiration time in seconds'),
-  
-  /**
-   * Authentication configuration
-   */
-  auth: z.object({
-    username: z.string().optional(),
-    password: z.string().optional(),
-    token: z.string().optional(),
-    certificate: z.string().optional(),
-  }).optional(),
-  
-  /**
-   * Replication settings
-   */
-  replication: z.object({
-    enabled: z.boolean().default(true),
-    minReplicas: z.number().int().min(1).default(1),
-  }).optional(),
-  
-  /**
-   * Custom provider configuration
-   */
-  customConfig: z.record(z.string(), z.unknown()).optional()
-    .describe('Provider-specific configuration'),
-}));
+const HOT_RELOAD_STATE_STRATEGY_RETIRED =
+  "`HotReloadConfig.stateStrategy: 'disk'` and `HotReloadConfig.stateStrategy: "
+  + "'distributed'` were removed in @objectstack/spec 18 (#12340, ADR-0049 "
+  + 'enforce-or-remove) — neither was ever implemented. Both switch arms in '
+  + "`PluginStateManager.saveState` wrote to the SAME in-memory Map as 'memory' "
+  + "(the in-source comments said 'memory fallback'), and the only trace was a "
+  + 'debug-level log line, so a host that asked for disk or cluster-replicated '
+  + 'state got process-local memory and no error — state that does not survive '
+  + "the restart it was configured to survive. Use 'memory' if in-process "
+  + "state preservation across a reload is what you want, or 'none' to disable "
+  + 'it; there is no in-tree replacement for durable or distributed plugin '
+  + 'state. Persist it in the host instead — the host owns the process '
+  + 'lifetime these strategies pretended to outlive. Real disk or distributed '
+  + 'persistence returns only via the ENFORCE route of ADR-0049: the '
+  + 'implementation first, the declaration with it.';
 
 /**
  * Hot Reload Configuration
@@ -220,16 +196,23 @@ export const HotReloadConfigSchema = lazySchema(() => z.object({
     .describe('Keep plugin state across reloads'),
   
   /**
-   * State serialization strategy
+   * State serialization strategy.
+   *
+   * `'disk'` and `'distributed'` were REMOVED in 18 (#12340) — see
+   * `HOT_RELOAD_STATE_STRATEGY_RETIRED` above. Only the two values
+   * `PluginStateManager` actually implements are declarable.
    */
-  stateStrategy: z.enum(['memory', 'disk', 'distributed', 'none']).default('memory')
+  stateStrategy: z.enum(['memory', 'none'], {
+    // Only the two values that USED to be legal get the retirement
+    // prescription; every other input keeps zod's own enum message, which
+    // already lists the legal tokens. (`HookBodyCapability`'s `crypto.hash`
+    // is the model, itself following `object.managedBy: 'system'`.)
+    error: (issue) =>
+      issue.input === 'disk' || issue.input === 'distributed'
+        ? HOT_RELOAD_STATE_STRATEGY_RETIRED
+        : undefined,
+  }).default('memory')
     .describe('How to preserve state during reload'),
-  
-  /**
-   * Distributed state configuration (required when stateStrategy is "distributed")
-   */
-  distributedConfig: DistributedStateConfigSchema.optional()
-    .describe('Configuration for distributed state management'),
   
   /**
    * Graceful shutdown timeout
@@ -288,11 +271,40 @@ export const HotReloadConfigSchema = lazySchema(() => z.object({
 //
 // What SURVIVES, deliberately: the input vocabularies of the host-driven
 // library classes the ruling keeps — `PluginHealthStatus` / `PluginHealthCheck`
-// / `PluginHealthReport`, `HotReloadConfig` (with its embedded
-// `DistributedStateConfig`) and `PluginStateSnapshot`. They are library
+// / `PluginHealthReport`, `HotReloadConfig` and `PluginStateSnapshot`. They are library
 // parameter types, not an authorable config surface: a host constructs the
 // classes and passes these shapes in TypeScript, which is exactly what the
 // #4914 ruling kept `HotReloadConfigSchema` for.
+//
+// ── [#12340] AMENDED 2026-08-26: the kept library keeps only what it honours ─
+//
+// The keep above is INTACT — `HotReloadConfigSchema` and `HotReloadManager`
+// stay. What left is the part of the kept vocabulary that was itself
+// declared-but-unenforced, measured at cdbd9204b6 with a firing positive
+// control (`stateStrategy` resolves to real readers in
+// `core/src/hot-reload.ts`; `distributedConfig` resolves to nothing outside
+// `packages/spec` in objectstack, and to nothing in objectui):
+//
+//   - `stateStrategy` narrowed ['memory','disk','distributed','none'] ->
+//     ['memory','none']. The 'disk' and 'distributed' arms of
+//     `PluginStateManager.saveState` both wrote to the in-memory Map and said
+//     so only at debug level. An enum-VALUE narrowing is invisible to the four
+//     ratchets (the def still emits), so the prescription hangs on the enum's
+//     own `error` map — `HOT_RELOAD_STATE_STRATEGY_RETIRED`, dispatched by
+//     `issue.input`.
+//   - `DistributedStateConfigSchema` / `distributedConfig` REMOVED. Zero
+//     readers anywhere: an author could name a Redis endpoint and a TTL and
+//     nothing ever opened a connection. It was the orphan value schema of the
+//     one key that referenced it, and its documented trigger ("required when
+//     stateStrategy is \"distributed\"") names a value that no longer exists —
+//     so it could not honestly outlive the narrowing. A whole def leaving MUST
+//     move the ratchets; that movement is the route's own evidence.
+//
+// The 2026-08-25 keep listed `DistributedStateConfig` among the survivors, so
+// this card REVERSES a named line of that ruling on new evidence (that ruling
+// measured the CONTAINER's groups, never this key's own readers). The pin in
+// `plugin-lifecycle-advanced-retirement.test.ts` moves with it, deliberately
+// and in the same commit — never as a quiet edit to make a red pin green.
 //
 // Route 3 (no tombstone, no conversion): with no carrier key and no authored
 // document there is nothing to tombstone and no seam for a D2 conversion —
@@ -345,9 +357,6 @@ export type PluginHealthCheck = z.input<typeof PluginHealthCheckSchema>;
 /** Post-parse shape of {@link PluginHealthCheck} — defaults applied, transforms run (ADR-0122). */
 export type PluginHealthCheckParsed = z.infer<typeof PluginHealthCheckSchema>;
 export type PluginHealthReport = z.input<typeof PluginHealthReportSchema>;
-export type DistributedStateConfig = z.input<typeof DistributedStateConfigSchema>;
-/** Post-parse shape of {@link DistributedStateConfig} — defaults applied, transforms run (ADR-0122). */
-export type DistributedStateConfigParsed = z.infer<typeof DistributedStateConfigSchema>;
 export type HotReloadConfig = z.input<typeof HotReloadConfigSchema>;
 /** Post-parse shape of {@link HotReloadConfig} — defaults applied, transforms run (ADR-0122). */
 export type HotReloadConfigParsed = z.infer<typeof HotReloadConfigSchema>;

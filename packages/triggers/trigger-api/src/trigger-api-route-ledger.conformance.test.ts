@@ -58,6 +58,14 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, it, expect, vi } from 'vitest';
+// The repo's ONE answer to "is this span a comment, or code?" — its header
+// carries the two private-stripper families that drifted apart and the
+// parser-differential sweep that measured which way each fails.
+// `stripComments` (not `maskComments`) is the projection this file wants: every
+// finding here reports a `src/<file>: <literal>` or a bare file name, never an
+// offset. The `.mjs` specifier is deliberate; `scripts/js-comment-mask.d.mts`
+// beside it is a hand-written declaration, so this import needs no `allowJs`.
+import { stripComments } from '../../../../scripts/js-comment-mask.mjs';
 import { ApiTriggerPlugin } from './plugin.js';
 import { TRIGGER_API_ROUTE_LEDGER } from './trigger-api-route-ledger.js';
 
@@ -204,55 +212,26 @@ function packageSourceFiles(): string[] {
 }
 
 /**
- * Strip comments before scanning for path literals. Prose cannot mount a route,
- * and this package's own doc comments quote wire paths — so a raw-text scan
- * would report a documented path as an unledgered mount, which is a false red
- * on an accurate package. The three string forms are tracked so that a literal
- * CONTAINING comment punctuation (`'/api/v1/x/*'`, `'http://host'`) is never
- * mistaken for a comment opener; `comment-stripper` below pins both directions,
- * because a stripper that swallowed real code would make this scan silently
- * blind, which is the failure that actually matters here.
+ * WHY COMMENTS ARE REMOVED BEFORE ANY SCAN HERE. Prose cannot mount a route and
+ * cannot reach for a host app, and this package's own doc comments quote wire
+ * paths and handles — a raw-text scan reports a documented path as an
+ * unledgered mount and a documented `getRawApp()` as a second reacher: a false
+ * red on an accurate package.
+ *
+ * This file used to answer that question with its own character scanner. It was
+ * converted to `scripts/js-comment-mask.mjs` (#12398), the tree's one answer to
+ * it. The swap was MEASURED rather than assumed: over this package's three
+ * scanned source files the two agree on every byte of live code and differ only
+ * where the private scanner DROPPED block-comment newlines — the shared module
+ * keeps them, so a `file:line` finding now points at the real line instead of
+ * one short by the length of the header above it. Nothing this file reports
+ * moves; the reads it feeds are literal collections, not offsets.
+ *
+ * String, template and regex literals are left INTACT, which is what lets the
+ * path scan below find a wire path at all — and, for the host-app reach probe,
+ * what keeps a service key from being masked away. `comment-stripper` below
+ * pins both directions.
  */
-function stripComments(source: string): string {
-    let out = '';
-    let i = 0;
-    while (i < source.length) {
-        const c = source[i];
-        const next = source[i + 1];
-        if (c === '/' && next === '/') {
-            while (i < source.length && source[i] !== '\n') i++;
-            continue;
-        }
-        if (c === '/' && next === '*') {
-            i += 2;
-            while (i < source.length && !(source[i] === '*' && source[i + 1] === '/')) i++;
-            i += 2;
-            continue;
-        }
-        if (c === '\'' || c === '"' || c === '`') {
-            const quote = c;
-            out += c;
-            i++;
-            while (i < source.length) {
-                if (source[i] === '\\') {
-                    out += source.slice(i, i + 2);
-                    i += 2;
-                    continue;
-                }
-                out += source[i];
-                if (source[i] === quote) {
-                    i++;
-                    break;
-                }
-                i++;
-            }
-            continue;
-        }
-        out += c;
-        i++;
-    }
-    return out;
-}
 
 /** Every absolute-path literal in one source file, comments removed. */
 function pathLiteralsIn(file: string): string[] {
@@ -265,6 +244,29 @@ const ABSOLUTE_PATH_LITERAL = /(['"`])(\/[A-Za-z0-9._~:@-][^'"`\s]*)\1/g;
 
 /** The two spellings by which a module in this package reaches the HOST app. */
 const HOST_APP_REACH = /getRawApp|['"`]http-server['"`]/;
+
+/**
+ * Does `source` reach for the host app IN CODE?
+ *
+ * COMMENTS ARE REMOVED FIRST, and that half is the whole of #12398. A docblock
+ * explaining that a mount takes the framework-native handle through
+ * `IHttpServer.getRawApp()` is prose, and prose reaches for nothing. Scanned
+ * raw it scored as a second reacher and failed an IDENTITY assertion by naming
+ * a file that reaches for nothing, whose own failure text then invites the
+ * wrong repair: widening the expected list, which retires the only property the
+ * assertion has.
+ *
+ * STRING AND TEMPLATE LITERALS ARE LEFT INTACT, and that half is what keeps the
+ * fix from being a silent disarm: `'http-server'` is a SERVICE KEY, so a probe
+ * that masked literals as well as comments would detect nothing here and this
+ * identity would pass vacuously. Both directions are pinned at the foot of this
+ * file.
+ */
+const reachesHostApp = (source: string): boolean => HOST_APP_REACH.test(stripComments(source));
+
+/** Which of `files` reach for the host app in code. Driveable for the pins. */
+const filesReachingHostApp = (files: readonly string[], read: (f: string) => string): string[] =>
+    files.filter((f) => reachesHostApp(read(f)));
 
 // ---------------------------------------------------------------------------
 
@@ -354,8 +356,9 @@ describe('trigger-api mount population (source scan)', () => {
         // An IDENTITY, not a count: the day a second module resolves
         // `http-server` or calls `getRawApp()`, this names it, and limb 1 —
         // which only drives ApiTriggerPlugin — would not have.
-        const reaching = packageSourceFiles().filter((f) =>
-            HOST_APP_REACH.test(readFileSync(join(SRC_DIR, f), 'utf8')),
+        const reaching = filesReachingHostApp(
+            packageSourceFiles(),
+            (f) => readFileSync(join(SRC_DIR, f), 'utf8'),
         );
         expect(
             reaching,
@@ -367,6 +370,33 @@ describe('trigger-api mount population (source scan)', () => {
 });
 
 describe('comment-stripper (the scan machinery, pinned in both directions)', () => {
+    it('the host-app reach probe does not count PROSE — the #12398 false positive', () => {
+        expect(reachesHostApp('// the mount takes the handle through `IHttpServer.getRawApp()`\n')).toBe(false);
+        expect(reachesHostApp("/*\n * resolves 'http-server' before mounting\n */\n")).toBe(false);
+    });
+
+    it('the host-app reach probe still counts a REACH THAT LIVES IN A STRING', () => {
+        // The direction that makes the fix a fix rather than a disarm:
+        // `'http-server'` is a service key, and a service key is a string.
+        expect(reachesHostApp("const s = ctx.getService('http-server');\n")).toBe(true);
+        expect(reachesHostApp('const s = ctx.getService("http-server");\n')).toBe(true);
+        expect(reachesHostApp('const s = ctx.getService(`http-server`);\n')).toBe(true);
+        expect(reachesHostApp('const app = server.getRawApp();\n')).toBe(true);
+    });
+
+    it('a genuine second reacher is still named — anti-vacuity on the identity limb', () => {
+        // LOAD-BEARING POSITIVE for #12398's fix, driven through the same
+        // function the live limb calls with source injected.
+        const fake: Record<string, string> = {
+            'plugin.ts': 'const app = http.getRawApp();\n',
+            'prose-only.ts': '// getRawApp() is reached in plugin.ts, never here\n',
+            'zzz-second-reacher.ts': "const s = ctx.getService('http-server');\n",
+        };
+        expect(
+            filesReachingHostApp(Object.keys(fake).sort(), (f) => fake[f]),
+        ).toEqual(['plugin.ts', 'zzz-second-reacher.ts']);
+    });
+
     it('drops paths that only appear in prose, and keeps every path in code', () => {
         const fixture = [
             "// mounts '/api/v1/commented-out'",

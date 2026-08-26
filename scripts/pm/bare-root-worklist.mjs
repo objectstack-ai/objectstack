@@ -107,8 +107,43 @@ const POPULATION_CONSTANT = /^(?:[A-Z0-9_]*_ROOTS?|[A-Z0-9_]*_DIRS?|POPULATION|[
  *                      does regardless. Recall bought at the cost of precision,
  *                      on the one column whose whole value is precision.
  *   REFUSE-UNSPELLABLE the population is a file-KIND or FILENAME filter inside
- *                      the root. The subtree idiom can only say "all of it", at
- *                      the precision quoted. This is the +139084 shape.
+ *                      the root, and NO spelling of the idiom describes it. The
+ *                      subtree idiom can only say "all of it", at the precision
+ *                      quoted. This is the +139084 shape.
+ *   SPELLABLE-UNDECLARED
+ *                      a PRECISE live spelling of the population EXISTS, and the
+ *                      declaration is deferred with the reason recorded. The row
+ *                      stays in the sweep because the bare root is still not
+ *                      covered. This verdict exists because the definitional
+ *                      basis of the one above it moved: #12300 taught
+ *                      `hintCovers` to MATCH a glob in a non-final segment
+ *                      instead of collapsing it, so populations that genuinely
+ *                      had no honest spelling in 2026-08 acquired one, and a
+ *                      verdict NAMED "unspellable" describing them degraded from
+ *                      "cannot be spelled" into "we chose not to spell it" —
+ *                      the tolerance this repo refuses on the consumer side,
+ *                      moved one level up. Maintainer ruling, 2026-08-26,
+ *                      verbatim: 「同意」, splitting the class by MEASURED
+ *                      downstream pull: rows with a recorded consumer get the
+ *                      declaration (see the two DECLARED-NARROWER rows carrying
+ *                      a `spelling`), rows without get this verdict.
+ *                      ⛔ Every record MUST carry a `spelling` naming a
+ *                      `SPELLINGS` entry, and `--self-test` MUST pin that
+ *                      spelling's LIVENESS and PRECISION in `hintCovers`' own
+ *                      terms. That pin is the whole licence for this value: an
+ *                      unpinned vocabulary value is the allowlist rot #10840
+ *                      refused by name, and the ruling rejects the option on it.
+ *                      No pin, no verdict. The pin follows #12330's shape — the
+ *                      mechanism a repaired row turns on, held mechanically,
+ *                      rather than a prose scanner.
+ *
+ * ⚠️ The line between the last two is measured, not stylistic, and it runs
+ * through PRECISION: a row is SPELLABLE-UNDECLARED only when a spelling exists
+ * that covers the population and NOTHING ELSE. The three check:runner-env-posture
+ * rows stay REFUSED with a live `packages/**\/src/**` spelling in hand precisely
+ * because that spelling is 42% true — there is nothing there a precision pin
+ * could hold, and recording "a precise spelling exists" would be the same lie
+ * one value further along.
  *
  * Every percentage below was measured on the tree, not estimated: numerator is
  * the files the gate's own walk filter admits, denominator the tracked files
@@ -135,6 +170,31 @@ const POPULATION_CONSTANT = /^(?:[A-Z0-9_]*_ROOTS?|[A-Z0-9_]*_DIRS?|POPULATION|[
  * gate exports no walk to drive and reproducing the filter by hand would be the
  * estimate this docblock refuses.
  *
+ * ⭐ RE-ADJUDICATED on 2026-08-26 (maintainer ruling on this file's own worklist,
+ * verbatim 「同意」): seventeen rows carrying REFUSE-UNSPELLABLE were re-measured on
+ * post-#12300 `main` and every one of those refusals was FALSE of the tree — a
+ * precise, live, 100%-precise spelling existed for each. The map is SHRINK-ONLY
+ * and this was a RE-DECISION, not a repair, which is why it needed a ruling: the
+ * authorisation sentence granted there is that bringing a verdict back to truth
+ * after its definitional basis moved is not loosening the map. ⛔ It authorises
+ * nothing else — adding a row is still not a remedy for a stale one.
+ *
+ * Fifteen of the seventeen — the ones with no recorded downstream consumer —
+ * became `SPELLABLE-UNDECLARED`, each pinned. The two with measured pull got
+ * their spelling DECLARED in the gate's own source and their refusal withdrawn:
+ * `check:skill-refs` (consumer #12310) and `check:objectql-double-limit`
+ * (consumer #12322). Both landed as `DECLARED-NARROWER` rather than leaving the
+ * map, because that verdict is defined for exactly this shape — the gate took
+ * the escape, and the row STAYS in the sweep because the bare root is still not
+ * covered. A withdrawn verdict that deleted the row would land it back as an
+ * untriaged FRESH row on the next run, which is the assertion below saying so.
+ *
+ * ⚠️ One row of that seventeen was re-measured into a DIFFERENT population, not
+ * merely fresher digits: #12392 (PR #12423, `69d0e18`) made
+ * `check-skills-token-ratchet`'s walk RECURSIVE over whole skill directories, so
+ * the pre-merge reading of 11 of 50 described a filename filter the gate no
+ * longer applies. Its numbers, its spelling AND its deferral reason are all new.
+ *
  * The `check:runner-env-posture SCANNED_ROOTS packages` row was then re-derived
  * AGAIN later the same day, after #12300 changed how `hintCovers` judges a glob
  * in a non-final segment and left that row's stated mechanism describing a
@@ -144,12 +204,125 @@ const POPULATION_CONSTANT = /^(?:[A-Z0-9_]*_ROOTS?|[A-Z0-9_]*_DIRS?|POPULATION|[
  * recorded beside it. That is the drift this docblock permits and not the
  * mixed-terms defect it forbids: no term of that row was refreshed alone.
  */
+/**
+ * The precise spellings the `SPELLABLE-UNDECLARED` and `DECLARED-NARROWER`
+ * records below name, and the independent structural claim each one makes.
+ *
+ * ⚠️ Held as SEGMENT ARRAYS and joined at runtime, never spelled as a path
+ * literal — the same rule the triage keys follow with their spaces, and the one
+ * the `src`-segment pin below already obeys. A glob literal here would enter
+ * this file's own hint set and hand a reporting tool a population it does not
+ * read, which the self-test refuses in as many words.
+ *
+ * `holds` is the spelling's claim written INDEPENDENTLY of `hintCovers` — a
+ * plain segment test a reader can check by eye. It is not a copy of the matcher:
+ * `hintCovers` reaches its answer through `globInNonFinalSegment`,
+ * `zeroSegmentForms` and `triggerCovers`' regex over the whole string, so the
+ * two can disagree, and the self-test asserting they do NOT is the pin. That is
+ * what "precise in `hintCovers`' own terms" means here and it is the whole
+ * reason a fourth verdict was allowed to exist: a vocabulary value recording
+ * "a precise live spelling exists" whose spelling nothing re-measures is the
+ * allowlist #10840 refused by name.
+ *
+ * ⛔ When a pin below reds, the answer is to RE-MEASURE the row and re-decide
+ * its verdict — never to relax `holds` until it agrees again. `holds` is the
+ * claim; the covered set is the tree; a divergence means the record stopped
+ * describing the tree, which is the exact defect this file exists to catch.
+ */
+const SPELLINGS = new Map([
+  ['packages manifests', {
+    segments: ['packages', '**', 'package.json'],
+    claim: 'every workspace manifest at any depth under the packages root',
+    holds: (s) => s[0] === 'packages' && s.length >= 2 && s[s.length - 1] === 'package.json',
+  }],
+  ['apps manifests', {
+    segments: ['apps', '**', 'package.json'],
+    claim: 'every workspace manifest at any depth under the apps root',
+    holds: (s) => s[0] === 'apps' && s.length >= 2 && s[s.length - 1] === 'package.json',
+  }],
+  ['examples manifests', {
+    segments: ['examples', '**', 'package.json'],
+    claim: 'every workspace manifest at any depth under the examples root',
+    holds: (s) => s[0] === 'examples' && s.length >= 2 && s[s.length - 1] === 'package.json',
+  }],
+  ['i18n extract configs', {
+    segments: ['packages', '**', 'scripts', 'i18n-extract.config.ts'],
+    claim: 'the named extract config directly beneath a scripts segment, anywhere under packages',
+    holds: (s) => s[0] === 'packages' && s.length >= 3
+      && s[s.length - 1] === 'i18n-extract.config.ts' && s[s.length - 2] === 'scripts',
+  }],
+  ['example app configs', {
+    segments: ['examples', '*', 'objectstack.config.ts'],
+    claim: 'the named app config in each immediate child of the examples root',
+    holds: (s) => s.length === 3 && s[0] === 'examples' && s[2] === 'objectstack.config.ts',
+  }],
+  ['published skill files', {
+    segments: ['skills', '*', '**'],
+    claim: 'every file inside a published skill directory, at any depth',
+    holds: (s) => s[0] === 'skills' && s.length >= 3,
+  }],
+  ['skill entrypoints', {
+    segments: ['skills', '*', 'SKILL.md'],
+    claim: 'the SKILL.md in each immediate child of the skills root',
+    holds: (s) => s.length === 3 && s[0] === 'skills' && s[2] === 'SKILL.md',
+  }],
+  ['package test files', {
+    segments: ['packages', '**', '*.test.ts'],
+    claim: 'every `.test.ts` file at any depth under the packages root',
+    holds: (s) => s[0] === 'packages' && s.length >= 2 && s[s.length - 1].endsWith('.test.ts'),
+  }],
+  ['skill reference folders', {
+    segments: ['skills', '*', 'references', '**'],
+    claim: "every file inside a skill's references folder, at any depth",
+    holds: (s) => s[0] === 'skills' && s.length >= 4 && s[2] === 'references',
+  }],
+]);
+
+/** The recorded spelling, assembled. Never a literal — see `SPELLINGS`. */
+export function spellingOf(name) {
+  const s = SPELLINGS.get(name);
+  return s ? s.segments.join('/') : null;
+}
+
 const TRIAGE = new Map([
   // ── Taken: a strictly narrower subtree ────────────────────────────────────
   ['check:driver-conformance DRIVERS_DIR packages', {
     verdict: 'DECLARED-NARROWER',
     why: 'the literal is a join() component; the real population is the driver subtree, declared '
       + 'there at 259 of 291 files (89%) instead of 259 of 4903 (5.3%) at the bare root',
+  }],
+  ['check:objectql-double-limit SCAN_ROOT packages', {
+    verdict: 'DECLARED-NARROWER',
+    spelling: 'package test files',
+    why: 'REFUSED as unspellable until 2026-08-26, and the refusal was FALSE of this tree: it '
+      + 'rested on the reading that every glob form of the population collapses to a malformed '
+      + 'double-separator prefix reaching 0 files. #12300 retired that collapse — a glob in a '
+      + 'non-final segment is MATCHED now — so the recorded spelling is live and reaches 2755 of '
+      + 'the 2755 `.test.ts` files the gate own testFilesUnder() walk admits, 100% precise and '
+      + 'complete, re-measured on this tree. Declared beside SCAN_ROOT under the '
+      + 'ROOT_DIR_WATCH_HINTS idiom, which is what #12310-class consumer #12322 asked for: before '
+      + 'it, the derivation reached this gate for 0 of the test corpus and a dev adding a find '
+      + 'double ran a green union with no local signal. The row STAYS in the sweep because the '
+      + 'bare root is still not covered — the spelling reaches no arbitrary file at the top of '
+      + 'the root — which is what this verdict says and is correct, not outstanding debt',
+  }],
+  ['check:skill-refs SKILLS_DIR skills', {
+    verdict: 'DECLARED-NARROWER',
+    spelling: 'skill reference folders',
+    why: 'REFUSED as unspellable until 2026-08-26 on the grounds that collapseHint reduces the '
+      + 'real population to a double slash no tree can hold (#12246). #12300 retired that '
+      + 'collapse for this shape, so the recorded spelling is a live hint reaching 12 of the 12 '
+      + 'tracked reference files — 100% precise and complete, and TRUE of what the gate does: '
+      + 'build-skill-references.ts enumerates and prunes each skills/<name>/references/ wholesale '
+      + 'through manageDir/ownsReferenceEntry, so it reads the folder entire and not merely the 9 '
+      + '_index.md files it emits. Declared beside SKILLS_DIR under the ROOT_DIR_WATCH_HINTS '
+      + 'idiom, for consumer #12310: the only literals the derivation could recover from that '
+      + 'source were import specifiers and the emitted-surface string, which reached 9 of the 12 '
+      + 'by accident and no card at all through the bare root. That generator carries no '
+      + '--self-test to hold the declaration honest from its own side, so the coupling is held '
+      + 'HERE, by the liveness and precision pins this record now carries — a declaration that '
+      + 'can drift from the scan is worse than none. The row stays in the sweep: the bare root is '
+      + 'still not covered',
   }],
   // ── Refused: the population is the whole root, and the root is saturated ──
   ['check:authz-resolver SCAN_ROOTS packages', {
@@ -207,6 +380,7 @@ const TRIAGE = new Map([
     verdict: 'REFUSE-WIDE',
     why: '162 of 238 (68%), refused with its packages half for the reason above',
   }],
+  // ── Refused: the population is a filter the idiom cannot spell ────────────
   ['check:ratchet-remedy-authority SCRIPTS_DIR scripts', {
     verdict: 'REFUSE-UNSPELLABLE',
     why: 'reads the TOP LEVEL of the root only, and only two extensions (`.mjs` and `.mts`) — 144 '
@@ -221,11 +395,12 @@ const TRIAGE = new Map([
       + 'and its own docblock says so. What cannot be spelled here is the EXTENSION filter, not a '
       + 'non-recursive walk — `scripts/**` is spellable and TRUE of this walk, and refused anyway '
       + 'because it would name this gate for 261 files to reach 2. Same class as the '
-      + 'check:driver-conformance CASE_SETS_DIR and check:skills-token-ratchet SKILLS_DIR rows '
-      + 'below, so lifting the row-above non-recursive limit would leave this one exactly as '
-      + 'refused',
+      + 'check:driver-conformance CASE_SETS_DIR row below, so lifting the row-above non-recursive '
+      + 'limit would leave this one exactly as refused. ⚠️ Its former third neighbour, the '
+      + 'check:skills-token-ratchet SKILLS_DIR row, LEFT this class on 2026-08-26 and is no '
+      + 'longer the company it was cited as: #12392 made that walk recursive over whole skill '
+      + 'directories, which is a subtree and not an extension filter',
   }],
-  // ── Refused: the population is a filter the idiom cannot spell ────────────
   ['check:driver-conformance CASE_SETS_DIR packages', {
     verdict: 'REFUSE-UNSPELLABLE',
     why: 'a filename pattern inside one directory — 7 of 143 files (4.9%). Its sibling constant '
@@ -245,92 +420,6 @@ const TRIAGE = new Map([
     verdict: 'REFUSE-UNSPELLABLE',
     why: 'test files only, 2510 of 4903 (51%)',
   }],
-  ['check:objectql-double-limit SCAN_ROOT packages', {
-    verdict: 'REFUSE-UNSPELLABLE',
-    why: 'test files only — the walk admits `*.test.ts` and nothing else, 2696 of 5161 (52%), the '
-      + 'same file-KIND filter as its check:where-matcher and check:examples-live-imports '
-      + 'neighbours above and refused alike. Measured rather than assumed, in both directions: the '
-      + 'only spellable claim, `packages/**`, covers all 2696 test files AND all 2465 non-test '
-      + 'files under the root, so it would name this gate for 2465 files it never opens — the '
-      + 'costlier error, since a find double can only land in a test file. Nothing narrower is '
-      + 'spellable: every glob form of the real population collapses to a malformed '
-      + 'double-separator prefix (`packages/**/*.test.ts` -> `packages//.test.ts`) that hintCovers '
-      + 'matches against 0 of 2696, so a narrow declaration would not be a precise hint but a live '
-      + 'hint covering nothing. No narrower SUBTREE exists either — the corpus is spread over 28 '
-      + 'second-level directories, and 274 of the 2696 sit outside any `src` segment, so even the '
-      + 'check:runner-env-posture `src`-segment shape would be false here as well as uncollapsible',
-  }],
-  ['check:i18n-coverage EXAMPLES_DIR examples', {
-    verdict: 'REFUSE-UNSPELLABLE',
-    why: 'one named config file per child directory — 3 of 238 (1.3%)',
-  }],
-  ['check:i18n-coverage PACKAGES_DIR packages', {
-    verdict: 'REFUSE-UNSPELLABLE',
-    why: 'files named i18n-extract.config.ts beneath a scripts segment — 9 of 5035 (0.18%), the '
-      + 'narrowest row on this list. Same filename-filter shape as its EXAMPLES_DIR sibling above, '
-      + 'and refused with it rather than split: a subtree hint would name this gate for 5035 files '
-      + 'to reach 9. The root was ALWAYS this invisible — it reached the sweep only once the fix '
-      + 'for #10907 gave the literal a population-constant name, so this row records a population '
-      + 'that was previously unnameable rather than one the fix introduced',
-  }],
-  ['check:i18n PACKAGES_DIR packages', {
-    verdict: 'REFUSE-UNSPELLABLE',
-    why: 'files named i18n-extract.config.ts beneath a scripts segment — 9 of 5093 (0.18%), tying '
-      + 'its check:i18n-coverage sibling above for the narrowest row on this list. The two gates '
-      + 'select the same nine configs by the same filename-and-segment test, so they are refused '
-      + 'alike: a subtree hint would name this gate for 5093 files to reach 9. Nothing narrower is '
-      + 'spellable, measured rather than assumed — every glob spelling of the real population '
-      + 'collapses to a malformed double-separator prefix that hintCovers matches against NOTHING, '
-      + 'so a narrow declaration would not be a precise hint but a live hint covering zero files. '
-      + 'The miss is also smaller than the row: this gate already reaches the cards that can '
-      + 'actually move a bundle through the convention triggers (a package that owns an extract '
-      + 'config, and a metadata form module), both verified live, and a wholesale root declaration '
-      + 'would drown that precision rather than add to it. The root reached the sweep only once the '
-      + 'fix for #11647 gave the literal a population-constant name, so this row records a '
-      + 'population that was previously unnameable rather than one the fix introduced',
-  }],
-  ['check:i18n-stale-fill PACKAGES_DIR packages', {
-    verdict: 'REFUSE-UNSPELLABLE',
-    why: 'the THIRD gate on this list to reach its population through the shared '
-      + 'findExtractConfigs walk, so it is refused with the two above rather than judged apart — '
-      + 'files named i18n-extract.config.ts beneath a scripts segment, 9 of 5185 (0.17%). The walk '
-      + 'IS recursive across the root, which is not the question these verdicts ask: what it '
-      + 'ADMITS is a filename-and-segment test, and that is the unspellable shape. Re-measured '
-      + 'here rather than inherited from the sibling rows — both star spellings of the real '
-      + 'population collapse to the same malformed double-separator prefix, which hintCovers was '
-      + 'checked against a real config path and matched NOTHING, while the only spellings that '
-      + 'cover anything collapse to the bare root. So the choice is a live hint over zero files or '
-      + 'a hint over 5185 files to reach 9. This gate additionally READS the 40 committed bundle '
-      + 'files, but it reaches those through each config docstring and its documented out flag, '
-      + 'never through this walk, so they widen what it opens and not what this constant names. '
-      + 'The miss is smaller than the row for the same reason its siblings record: the cards that '
-      + 'can actually strand a leaf reach this gate through the convention trigger for a package '
-      + 'owning an extract config, which #11671 extended to name this gate alongside check:i18n',
-  }],
-  ['scripts/check-skills-token-ratchet.mjs SKILLS_DIR skills', {
-    verdict: 'REFUSE-UNSPELLABLE',
-    why: 'one named file per child directory, 11 of 50 (22%). It already reaches its own cards '
-      + 'through the artifact roster it names file by file, so the miss is smaller than the row',
-  }],
-  ['check:skill-docs SKILLS_DIR skills', {
-    verdict: 'REFUSE-UNSPELLABLE',
-    why: 'one named file per child directory plus the root README — 12 of 50 (24%). '
-      + 'build-skill-docs.ts:221 readdirSync-es the bare root and reconciles the listing against '
-      + 'DISPLAY in both directions (:227-228), so a new or removed objectstack-*/SKILL.md moves '
-      + 'the verdict and no fixed list can name it; but :222 admits a child only if it CARRIES '
-      + 'SKILL.md, so the population is that filename filter, not the root. Recorded to match the '
-      + 'check-skills-token-ratchet row above, which reads the SAME root the same way at the same '
-      + 'scale — one root answered one way',
-  }],
-  ['check:skill-refs SKILLS_DIR skills', {
-    verdict: 'REFUSE-UNSPELLABLE',
-    why: 'a named subdirectory per child, enumerated and pruned wholesale — 12 of 50 (24%), 9 of '
-      + 'them the _index.md it emits. It never reads the bare root: build-skill-references.ts:304 '
-      + 'iterates the authored SKILL_MAP (:43-127), resolves skills/<name>/, and manages '
-      + 'skills/<name>/references/ via manageDir/ownsReferenceEntry (:288-294). The true population '
-      + 'is skills/*/references/**, which collapseHint reduces to skills//references/** — a double '
-      + 'slash no tree can hold (#12246) — so the only spellable claim left is the bare root',
-  }],
   ['check:runner-env-posture SCANNED_ROOTS packages', {
     verdict: 'REFUSE-UNSPELLABLE',
     why: 'non-test source beneath a `src` SEGMENT — 1812 of 5241 (35%), re-derived from the gate '
@@ -343,10 +432,13 @@ const TRIAGE = new Map([
       + 'of the 2479 it over-names are the test files this gate deliberately skips — the one '
       + 'filter no glob idiom can spell. So the narrowest LIVE spelling is 42% true where the '
       + 'bare root is 35%: the segment buys seven points, not a precise claim, and both spellings '
-      + 'are false about the same non-test filter. Its nearest neighbour check:authz-resolver is '
-      + 'REFUSE-WIDE at a similar 39% because ITS population really is every non-test source '
-      + 'under the root, so the bare-root declaration there is TRUE and refused only for width; '
-      + 'here the bare root is FALSE, and so is every narrower spelling the idiom offers',
+      + 'are false about the same non-test filter. ⚠️ That is what keeps this row REFUSED rather '
+      + 'than SPELLABLE-UNDECLARED, and it is the whole line between the two verdicts: this row '
+      + 'has no 100%-precise spelling to record, so there is nothing here a liveness-and-precision '
+      + 'pin could hold. Its nearest neighbour check:authz-resolver is REFUSE-WIDE at a similar '
+      + '39% because ITS population really is every non-test source under the root, so the '
+      + 'bare-root declaration there is TRUE and refused only for width; here the bare root is '
+      + 'FALSE, and so is every narrower spelling the idiom offers',
   }],
   ['check:runner-env-posture SCANNED_ROOTS examples', {
     verdict: 'REFUSE-UNSPELLABLE',
@@ -362,35 +454,146 @@ const TRIAGE = new Map([
       + 'package that grows a src tree is covered the day it lands rather than the day someone '
       + 'remembers — which is the same silent-coverage-loss this gate exists to prevent',
   }],
+  // ── Spellable, and the declaration deferred ───────────────────────────────
+  //
+  // Every row here was REFUSE-UNSPELLABLE until 2026-08-26 and every one of
+  // those refusals was FALSE of this tree: #12300 retired the collapse they
+  // rested on. What is recorded now is the measured spelling and the reason the
+  // declaration is deferred, which is a different claim from "no honest
+  // declaration exists" and the only one these rows can still make.
+  ['check:i18n-coverage EXAMPLES_DIR examples', {
+    verdict: 'SPELLABLE-UNDECLARED',
+    spelling: 'example app configs',
+    why: 'one named config file per child directory — 3 of 241 tracked files under the root '
+      + '(1.2%), re-measured 2026-08-26. The recorded spelling is live and reaches 3 of 3, 100% '
+      + 'precise and complete. Deferred: no consumer has asked for this gate to be nameable, and '
+      + 'the i18n family it belongs to would want one declaration per gate rather than one here',
+  }],
+  ['check:i18n-coverage PACKAGES_DIR packages', {
+    verdict: 'SPELLABLE-UNDECLARED',
+    spelling: 'i18n extract configs',
+    why: 'files named i18n-extract.config.ts beneath a scripts segment — 9 of 5275 (0.17%), '
+      + 're-measured 2026-08-26. Its recorded reason USED to be that every glob spelling of the '
+      + 'real population collapses to a malformed double-separator prefix matching NOTHING; '
+      + '#12300 falsified that, and the spelling now reaches 9 of the 9 configs findExtractConfigs '
+      + 'admits — 100% precise and complete. Deferred rather than declared: three gates reach this '
+      + 'same population through the shared findExtractConfigs walk, so a declaration is a '
+      + 'three-gate edit with no consumer asking for it, and the miss stays smaller than the row — '
+      + 'the cards that can move a bundle already reach these gates through the convention trigger '
+      + 'for a package owning an extract config',
+  }],
+  ['check:i18n PACKAGES_DIR packages', {
+    verdict: 'SPELLABLE-UNDECLARED',
+    spelling: 'i18n extract configs',
+    why: 'the same nine configs by the same filename-and-segment test as its check:i18n-coverage '
+      + 'sibling above, so it is recorded with it rather than judged apart — 9 of 5275 (0.17%), '
+      + 're-measured 2026-08-26 rather than inherited. Its old refusal cited the double-separator '
+      + 'collapse #12300 retired; the spelling is live at 9 of 9, 100% precise. Deferred for the '
+      + 'reason recorded above, and this gate additionally already reaches the cards that can '
+      + 'actually move a bundle through the convention triggers (#11671), both verified live',
+  }],
+  ['check:i18n-stale-fill PACKAGES_DIR packages', {
+    verdict: 'SPELLABLE-UNDECLARED',
+    spelling: 'i18n extract configs',
+    why: 'the THIRD gate to reach its population through the shared findExtractConfigs walk — 9 '
+      + 'of 5275 (0.17%), re-measured 2026-08-26 rather than inherited from its two siblings. The '
+      + 'walk IS recursive across the root, which is not the question these verdicts ask: what it '
+      + 'ADMITS is a filename-and-segment test, and since #12300 that test HAS a live spelling, '
+      + 'reaching 9 of 9 at 100% precision — which is exactly what falsified the double-separator '
+      + 'refusal this row used to carry. This gate additionally READS the committed bundle files, '
+      + 'but it reaches those through each config docstring and its documented out flag, never '
+      + 'through this walk, so they widen what it opens and not what this constant names. '
+      + 'Deferred with its siblings',
+  }],
+  ['scripts/check-skills-token-ratchet.mjs SKILLS_DIR skills', {
+    verdict: 'SPELLABLE-UNDECLARED',
+    spelling: 'published skill files',
+    why: '⚠️ RE-MEASURED 2026-08-26 after #12392 (PR #12423, `69d0e18`) merged, and the row it '
+      + 'replaces described a population this gate no longer has: discoverBundleFiles() now walks '
+      + 'every published skill directory RECURSIVELY, so "one named file per child directory, 11 '
+      + 'of 50" is stale in BOTH terms. The population is 49 files today, and the old '
+      + 'one-SKILL.md-per-child spelling (the `skill entrypoints` row of SPELLINGS) reaches 11 '
+      + 'of them, 22% — precise but 78% incomplete. ⚠️ Spelled by NAME and not as a path here, '
+      + 'for the reason the triage keys carry spaces: a bare path spelling in this file enters '
+      + 'its own hint set. The '
+      + 'spelling recorded here is the recursive one, and it reaches 49 of 49: 100% precise AND '
+      + 'complete, the walk being a subtree filter now rather than the filename filter the old '
+      + 'refusal was written about. Deferred on the OTHER half of the trade, measured: those 49 '
+      + 'files are 49 of the 50 tracked under the root, so declaring the precise spelling buys '
+      + 'one file of discrimination over the bare root and restates "run the farm" for every '
+      + 'skills card — the REFUSE-WIDE trade arriving at a row that is no longer unspellable. It '
+      + 'also already reaches its own cards through the artifact roster it names file by file',
+  }],
+  ['check:skill-docs SKILLS_DIR skills', {
+    verdict: 'SPELLABLE-UNDECLARED',
+    spelling: 'skill entrypoints',
+    why: 'one named file per child directory plus the root README — 12 of 50 (24%), re-measured '
+      + '2026-08-26. ⚠️ The recorded spelling is 100% PRECISE and deliberately INCOMPLETE: it '
+      + 'reaches 11 of the 12, and the twelfth is skills/README.md, a file this generator WRITES '
+      + 'and which sits outside any skill directory, so no single spelling of this idiom reaches '
+      + 'both. That is the honest record and the reason this row is not declared on the strength '
+      + 'of a precise-looking hint. build-skill-docs.ts:221 readdirSync-es the bare root and '
+      + 'reconciles the listing against DISPLAY in both directions (:227-228), so a new or removed '
+      + 'objectstack-*/SKILL.md moves the verdict and no fixed list can name it; :222 admits a '
+      + 'child only if it CARRIES SKILL.md, which is what the recorded spelling states. ⛔ It is '
+      + 'NOT recorded to match its check-skills-token-ratchet neighbour any more: that gate went '
+      + 'recursive in #12392 and the two now read the SAME root at DIFFERENT scales, 49 files '
+      + 'against 12',
+  }],
   ['check:changeset-gate-self-tests PACKAGE_ROOTS packages', {
-    verdict: 'REFUSE-UNSPELLABLE',
-    why: 'workspace manifests only — 73 of 4903 (1.5%)',
+    verdict: 'SPELLABLE-UNDECLARED',
+    spelling: 'packages manifests',
+    why: 'workspace manifests only — 74 of 5275 (1.4%), re-measured 2026-08-26. The recorded '
+      + 'spelling is live and reaches 74 of 74, 100% precise and complete. Deferred: nine rows '
+      + 'across three gates share this one population shape and no consumer has asked for any of '
+      + 'them, so declaring here is a nine-edit expansion ahead of demand',
   }],
   ['check:changeset-gate-self-tests PACKAGE_ROOTS apps', {
-    verdict: 'REFUSE-UNSPELLABLE', why: 'workspace manifests only — 1 of 35 (2.9%)',
+    verdict: 'SPELLABLE-UNDECLARED',
+    spelling: 'apps manifests',
+    why: 'workspace manifests only — 1 of 40 (2.5%), re-measured 2026-08-26; the spelling reaches '
+      + '1 of 1, 100% precise and complete. Deferred with its packages half',
   }],
   ['check:changeset-gate-self-tests PACKAGE_ROOTS examples', {
-    verdict: 'REFUSE-UNSPELLABLE', why: 'workspace manifests only — 4 of 238 (1.7%)',
+    verdict: 'SPELLABLE-UNDECLARED',
+    spelling: 'examples manifests',
+    why: 'workspace manifests only — 4 of 241 (1.7%), re-measured 2026-08-26; the spelling reaches '
+      + '4 of 4, 100% precise and complete. Deferred with its packages half',
   }],
   ['scripts/check-adr-0087-registration.mjs PACKAGE_ROOTS packages', {
-    verdict: 'REFUSE-UNSPELLABLE', why: 'workspace manifests only — 73 of 4903 (1.5%)',
+    verdict: 'SPELLABLE-UNDECLARED',
+    spelling: 'packages manifests',
+    why: 'workspace manifests only — 74 of 5275 (1.4%), re-measured 2026-08-26 rather than '
+      + 'inherited from the identically-shaped row above; the spelling reaches 74 of 74. Deferred '
+      + 'for the reason recorded there',
   }],
   ['scripts/check-adr-0087-registration.mjs PACKAGE_ROOTS apps', {
-    verdict: 'REFUSE-UNSPELLABLE', why: 'workspace manifests only — 1 of 35 (2.9%)',
+    verdict: 'SPELLABLE-UNDECLARED',
+    spelling: 'apps manifests',
+    why: 'workspace manifests only — 1 of 40 (2.5%), re-measured 2026-08-26; 1 of 1 covered',
   }],
   ['scripts/check-adr-0087-registration.mjs PACKAGE_ROOTS examples', {
-    verdict: 'REFUSE-UNSPELLABLE', why: 'workspace manifests only — 4 of 238 (1.7%)',
+    verdict: 'SPELLABLE-UNDECLARED',
+    spelling: 'examples manifests',
+    why: 'workspace manifests only — 4 of 241 (1.7%), re-measured 2026-08-26; 4 of 4 covered',
   }],
   ['check:skill-compatibility PACKAGE_ROOTS packages', {
-    verdict: 'REFUSE-UNSPELLABLE',
-    why: 'workspace manifests only — 73 of 4903 (1.5%). Refused BY NAME in that gate self-test, '
-      + 'beside the skills root it did declare',
+    verdict: 'SPELLABLE-UNDECLARED',
+    spelling: 'packages manifests',
+    why: 'workspace manifests only — 74 of 5275 (1.4%), re-measured 2026-08-26; 74 of 74 covered. '
+      + 'Refused BY NAME in that gate own self-test, beside the skills root it did declare — so '
+      + 'this row records a deferral the gate itself already states, now with the spelling that '
+      + 'deferral is about',
   }],
   ['check:skill-compatibility PACKAGE_ROOTS apps', {
-    verdict: 'REFUSE-UNSPELLABLE', why: 'workspace manifests only — 1 of 35 (2.9%)',
+    verdict: 'SPELLABLE-UNDECLARED',
+    spelling: 'apps manifests',
+    why: 'workspace manifests only — 1 of 40 (2.5%), re-measured 2026-08-26; 1 of 1 covered',
   }],
   ['check:skill-compatibility PACKAGE_ROOTS examples', {
-    verdict: 'REFUSE-UNSPELLABLE', why: 'workspace manifests only — 4 of 238 (1.7%)',
+    verdict: 'SPELLABLE-UNDECLARED',
+    spelling: 'examples manifests',
+    why: 'workspace manifests only — 4 of 241 (1.7%), re-measured 2026-08-26; 4 of 4 covered',
   }],
 ]);
 
@@ -705,11 +908,78 @@ function selfTest() {
     + 'REFUSED rather than declarable — the half of the reason a live hint does not settle',
     srcSegmentHit.some(isTestPath));
 
-  // Every verdict must be one of the three the docblock defines, and every
-  // refusal must carry its measured reason — a bare verdict is the allowlist row
-  // this file exists not to become.
-  const VERDICTS = new Set(['DECLARED-NARROWER', 'REFUSE-WIDE', 'REFUSE-UNSPELLABLE']);
-  t('every verdict is one of the three defined, and carries a stated reason',
+  // ── The RECORDED SPELLINGS, pinned: LIVENESS and PRECISION ────────────────
+  //
+  // The binding condition the SPELLABLE-UNDECLARED verdict exists under, and the
+  // reason the maintainer's 2026-08-26 ruling could accept a fourth vocabulary
+  // value at all: a value recording "a precise live spelling exists" whose
+  // spelling nothing re-measures IS the allowlist #10840 refused by name. The
+  // record would keep its prose while the tree moved out from under it —
+  // exactly the failure that produced this whole card, one level further along.
+  //
+  // Pinned in `hintCovers`' OWN TERMS, following #12330's shape: not a scanner
+  // over the `why` prose (refused there, for the reasons stated there), but the
+  // MECHANISM each record depends on, asked of the live corpus. Three directions,
+  // because each catches a different way a record can stop being true:
+  //
+  //   LIVE      the hint reaches at least one tracked file. A spelling that
+  //             collapses to nothing is the dead-hint species #12246 was filed
+  //             for, and the refusals these rows replaced were WRITTEN about it.
+  //   PRECISE   every file `hintCovers` admits satisfies the spelling's own
+  //             claim. This is the half that makes the verdict honest: without
+  //             it the record says "precise" about a hint that over-names.
+  //   COMPLETE  every file the claim names is reached. Without it a spelling
+  //             could pass PRECISE by covering almost nothing.
+  //
+  // `holds` is written independently of `hintCovers` — a plain segment test —
+  // so the two agreeing is EVIDENCE rather than a tautology: `hintCovers` routes
+  // through globInNonFinalSegment, zeroSegmentForms and triggerCovers' regex,
+  // and those genuinely can disagree with a segment walk (they do, on the
+  // zero-segment forms of `**`). A divergence means the record stopped
+  // describing the tree. ⛔ The remedy is to re-measure the ROW, never to relax
+  // `holds` until it agrees again.
+  const spellingRows = [...TRIAGE.entries()].filter(([, v]) => v.spelling);
+  t('every SPELLABLE-UNDECLARED record names a spelling — the verdict is DEFINED only with one, '
+    + 'and the ruling that created it rejects the whole option on an unpinned value',
+    [...TRIAGE.values()].every((v) => v.verdict !== 'SPELLABLE-UNDECLARED' || Boolean(v.spelling)));
+  t('every recorded spelling names a SPELLINGS entry',
+    spellingRows.every(([, v]) => SPELLINGS.has(v.spelling)));
+  t('the pins below judge something — at least one record carries a spelling',
+    spellingRows.length > 0);
+  const usedSpellings = new Set(spellingRows.map(([, v]) => v.spelling));
+  t('no SPELLINGS entry sits unused — an entry no record names is the unread list this pin '
+    + 'exists to prevent, arriving inside the pin itself',
+    [...SPELLINGS.keys()].every((k) => usedSpellings.has(k)));
+
+  for (const name of [...usedSpellings].sort()) {
+    const { segments, claim, holds } = SPELLINGS.get(name);
+    const hint = segments.join('/');
+    const covered = files.filter((f) => hintCovers(hint, f));
+    const over = covered.filter((f) => !holds(seg(f)));
+    const claimed = files.filter((f) => holds(seg(f)));
+    const under = claimed.filter((f) => !hintCovers(hint, f));
+    const rootFiles = files.filter((f) => seg(f)[0] === segments[0]);
+    t(`the spelling recorded as "${name}" is LIVE — hintCovers reaches ${covered.length} tracked `
+      + `file(s) with it, so no record below names a hint that covers nothing`, covered.length > 0);
+    t(`…and it is PRECISE: every file hintCovers admits for "${name}" (${claim}) satisfies that `
+      + `claim${over.length ? ` — OVER-NAMES ${over.length}: ${over.slice(0, 4).join(' · ')}. `
+        + 'Re-measure the row and re-decide its verdict; do not widen the claim to match.' : ''}`,
+      over.length === 0);
+    t(`…and COMPLETE over its own claim: every one of the ${claimed.length} file(s) the claim `
+      + `names is reached${under.length ? ` — MISSES ${under.length}: ${under.slice(0, 4).join(' · ')}` : ''}`,
+      under.length === 0);
+    t(`…and it is a real NARROWING rather than the bare root wearing a glob: it covers `
+      + `${covered.length} of the ${rootFiles.length} tracked file(s) under its own root`,
+      rootFiles.length > 0 && covered.length < rootFiles.length);
+  }
+
+  // Every verdict must be one of the four the docblock defines, and every one
+  // must carry its measured reason — a bare verdict is the allowlist row this
+  // file exists not to become.
+  const VERDICTS = new Set([
+    'DECLARED-NARROWER', 'REFUSE-WIDE', 'REFUSE-UNSPELLABLE', 'SPELLABLE-UNDECLARED',
+  ]);
+  t('every verdict is one of the four defined, and carries a stated reason',
     [...TRIAGE.values()].every((v) => VERDICTS.has(v.verdict) && typeof v.why === 'string' && v.why.length > 20));
 
   if (failures.length) {
@@ -719,10 +989,13 @@ function selfTest() {
   }
   console.log(
     `OK  self-test: ${rows.length} live row(s), ${open.length} unreachable as spelled, `
-      + `${TRIAGE.size} recorded verdict(s) — none stale, none missing. The recogniser is proven `
-      + 'to speak and to discriminate (a separator-carrying and a dotted root are both refused as '
-      + 'already visible), the constant-name restriction is proven to restrict, and neither the '
-      + 'triage keys nor this file declare any population of their own.',
+      + `${TRIAGE.size} recorded verdict(s) — none stale, none missing, none contradicted. `
+      + `${spellingRows.length} record(s) carry a spelling and every one of ${usedSpellings.size} `
+      + 'distinct spelling(s) is pinned LIVE, PRECISE and COMPLETE against the tracked corpus in '
+      + "hintCovers' own terms. The recogniser is proven to speak and to discriminate (a "
+      + 'separator-carrying and a dotted root are both refused as already visible), the '
+      + 'constant-name restriction is proven to restrict, and neither the triage keys nor this '
+      + 'file declare any population of their own.',
   );
 }
 
