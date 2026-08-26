@@ -47,3 +47,5 @@ Who is affected, in both directions:
 - The server-side artifact-file watcher is untouched on every boot shape that had
   it: the reload still happens, only the broadcast to (now absent) SSE clients is
   skipped.
+
+<!-- adr-0087: not-required (no-migration-prescription) a mounted HTTP route stops existing under a non-development posture; no authorable key, no spec declaration, no Zod schema and no stored value moves, so `objectstack migrate meta` has nothing to rewrite and no ledger entry could reach anyone this affects -->
