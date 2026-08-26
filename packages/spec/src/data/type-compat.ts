@@ -133,12 +133,29 @@ const BASE_ALIASES: Record<string, CanonicalSqlType> = {
 /**
  * For each canonical SQL type: the suggested ObjectStack field type plus the
  * set of field types it is exactly / lossily compatible with.
+ *
+ * Membership is **many-to-many by design**: the question each row answers is
+ * "which field types can THIS column serve?", and `isCompatible` is keyed on
+ * the column, so one field type appearing under several canonical types is
+ * normal and never ambiguous (`text` is exact under `text` / `uuid` / `enum`;
+ * `tags` and `multiselect` under `json` / `array`). Adding a type to one row
+ * therefore does NOT evict it from another — the two answers are about
+ * different columns.
  */
 const CANONICAL_TO_FIELD: Record<
   CanonicalSqlType,
   { suggested: FieldType; exact: FieldType[]; lossy: FieldType[] }
 > = {
-  text: { suggested: 'text', exact: ['text', 'textarea', 'email', 'url', 'phone', 'markdown', 'html', 'richtext', 'code', 'select', 'color'], lossy: [] },
+  // `signature` / `qrcode` are in the exact set because an unbounded TEXT
+  // column is the platform's OWN emitted physical shape for them (#11875,
+  // maintainer ruling 2026-08-25): their stored value is a string — routinely
+  // a data-URI — per `STRING_VALUE_TYPES` / `valueSchemaFor`, and
+  // `sql-driver.ts` emits them in its text family alongside `richtext` /
+  // `code`. Without them here, introspecting a table the driver itself created
+  // reported a `text` column holding a signature as NOT exactly compatible
+  // with the very field type that wrote it. They stay under `binary` as well,
+  // per the many-to-many rule above.
+  text: { suggested: 'text', exact: ['text', 'textarea', 'email', 'url', 'phone', 'markdown', 'html', 'richtext', 'code', 'select', 'color', 'signature', 'qrcode'], lossy: [] },
   integer: { suggested: 'number', exact: ['number', 'autonumber', 'rating', 'percent'], lossy: ['currency', 'boolean'] },
   bigint: { suggested: 'number', exact: ['number', 'autonumber'], lossy: ['currency'] },
   decimal: { suggested: 'number', exact: ['number', 'currency', 'percent'], lossy: ['rating'] },
@@ -149,6 +166,19 @@ const CANONICAL_TO_FIELD: Record<
   datetime: { suggested: 'datetime', exact: ['datetime'], lossy: ['date'] },
   json: { suggested: 'json', exact: ['json', 'composite', 'repeater', 'record', 'location', 'address', 'tags', 'multiselect'], lossy: ['text'] },
   uuid: { suggested: 'text', exact: ['text', 'lookup', 'master_detail', 'user'], lossy: [] },
+  // `signature` stays here deliberately. This row is not a stored-value-shape
+  // claim — `file` and `image` are `FILE_REFERENCE_TYPES`, whose stored value
+  // is a reference-id STRING, so no member of this set round-trips as bytes.
+  // What the row says is that a remote BLOB column can carry this class of
+  // CONTENT, which a foreign schema (one ObjectStack did not create — the only
+  // kind this matrix is asked about) may well do for a captured signature
+  // image. Membership was re-measured when `text` gained the two types: no
+  // path in this monorepo stores a `signature` field value as a binary payload
+  // — the driver's only `t.binary()` emission is the remote-column
+  // introspection mapping, never a field-type mapping — so nothing here is
+  // load-bearing for the platform's own writes; it is import-side reach, and
+  // removing it would single out `signature` from `file` / `image` on the same
+  // axis with no evidence asking for that.
   binary: { suggested: 'file', exact: ['file', 'image', 'signature'], lossy: ['text'] },
   enum: { suggested: 'select', exact: ['select', 'radio', 'text'], lossy: [] },
   array: { suggested: 'multiselect', exact: ['multiselect', 'checkboxes', 'tags', 'json'], lossy: ['text'] },
