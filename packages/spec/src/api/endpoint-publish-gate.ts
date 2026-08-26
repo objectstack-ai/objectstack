@@ -354,6 +354,9 @@ function targetGate(
         return undefined;
     }
 
+    // Internal anchor for the `proxy` half: the egress/SSRF ruling this defers to
+    // is #5040 §7-3. It stays in this comment rather than in the message — the
+    // message is printed to a customer who cannot open the tracker.
     return {
         path: at('type'),
         message:
@@ -362,8 +365,8 @@ function targetGate(
             + 'no path in this repo verifies that a script target is reachable through the automation '
             + 'service — express the logic as a flow (`type: \'flow\'`) whose script node runs your '
             + 'registered function. `proxy` is refused because forwarding to an arbitrary outbound URL is '
-            + 'a new egress/SSRF surface that needs its own security ruling before it can be served '
-            + '(#5040 §7-3); call the third-party system from a flow instead, where the outbound call is '
+            + 'a new egress/SSRF surface that needs its own security ruling before it can be served; '
+            + 'call the third-party system from a flow instead, where the outbound call is '
             + 'made by a declared connector. Both stay in the vocabulary and are rejected here rather '
             + 'than parsed and ignored.',
     };
@@ -559,11 +562,13 @@ function policyGate(
     }
 
     if (cacheTtl !== undefined && endpoint.method !== 'GET') {
+        // Internal anchor for the GET-only rule: #5040 §3.3. Kept out of the
+        // message, which is printed to a customer with no tracker access.
         return {
             path: at('cacheTtl'),
             message:
-                `${named} declares \`cacheTtl\` on a ${endpoint.method} endpoint. \`cacheTtl\` is GET-only `
-                + '(#5040 §3.3): it becomes a `Cache-Control` header on a successful response, and a '
+                `${named} declares \`cacheTtl\` on a ${endpoint.method} endpoint. \`cacheTtl\` is GET-only: `
+                + 'it becomes a `Cache-Control` header on a successful response, and a '
                 + 'non-GET answer is not a cacheable representation, so the key would be parsed and never '
                 + 'take effect. Remove `cacheTtl`, or declare the endpoint as GET if it really is a read.',
         };

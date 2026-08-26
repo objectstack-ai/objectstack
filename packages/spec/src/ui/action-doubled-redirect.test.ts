@@ -47,9 +47,14 @@ describe('ActionSchema — doubled post-success navigation (#11519)', () => {
       // The remedy: one destination, declared in one place.
       expect(msg).toMatch(/drop|remove|keep/i);
       // The interim renderer precedence this refusal supersedes at authoring
-      // time (declared wins, objectui#5933) is recorded so an author hitting
-      // the error understands what happens to metadata published before it.
-      expect(msg).toContain('objectui#5933');
+      // time is recorded so an author hitting the error understands what
+      // happens to metadata published before it. Pinned as the SUBSTANCE —
+      // which channel wins and which is dropped — rather than as the tracker id
+      // that used to stand in for it: the id resolved to nothing for the author
+      // this message is printed at, while the sentence tells them the outcome.
+      expect(msg).toContain('interim precedence');
+      expect(msg).toContain('silently ignored');
+      expect(msg).not.toMatch(/(?<![#&])#[0-9]{3,5}(?![0-9A-Za-z])/);
     });
 
     it('is refused through the registered `action` metadata schema too (the parsing door)', () => {
