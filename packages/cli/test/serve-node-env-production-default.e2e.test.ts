@@ -244,13 +244,24 @@ async function probeOriginCheck(env: Record<string, string | undefined>): Promis
       // file measures, so the key is supplied explicitly.
       //
       // ⚠️ It was NOT needed before #11267 — and that is the finding, not an
-      // inconvenience. `local-crypto-provider.ts:133` reads
+      // inconvenience. What follows is quoted in the PAST TENSE on purpose:
+      // the code it quotes is GONE. `detectMode` used to read
       // `if (env.VITEST || env.NODE_ENV === 'test') return 'test'`, so while
       // this fixture still inherited the vitest worker's `VITEST=true`, its
       // crypto layer sat in TEST mode (ephemeral key, no disk, no refusal)
       // while the rest of the boot was in production posture. The production
       // posture this file exists to pin was genuine for auth and fake for
-      // crypto. Supplying the key is what makes it genuine for both.
+      // crypto.
+      //
+      // #11448 (`a58eac3e`, merged 2026-08-23) deleted that arm. The live
+      // `detectMode` (`local-crypto-provider.ts:185`) reads `NODE_ENV` and
+      // nothing else, so the key requirement no longer depends on `childEnv()`
+      // stripping anything: the unset-`NODE_ENV` leg selects production
+      // posture from `NODE_ENV` alone, and production refuses without a stable
+      // key whether or not a `VITEST` leaks in. The strip stays anyway, now as
+      // defence-in-depth over a class `pnpm check:runner-env-posture` holds
+      // shut in product source. Supplying the key is what makes the posture
+      // genuine for both halves.
       OS_SECRET_KEY: E2E_SECRET_KEY,
       // The base default for every call: truly unset, unless overridden by
       // `env` below. Node's spawn omits an `undefined`-valued entry rather
