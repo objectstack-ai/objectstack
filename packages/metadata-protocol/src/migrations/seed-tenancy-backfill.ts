@@ -709,7 +709,12 @@ export function buildGlobalCounterDeleteSql(client?: string): string {
  *
  * The separator is the ASCII unit separator, spelled as the escape \u001f and never as a raw control byte — the driver spells it the same way.
  */
-function sequenceKeyHash(object: string, tenantId: string, field: string, scope: string): string {
+export function sequenceKeyHash(
+  object: string,
+  tenantId: string,
+  field: string,
+  scope: string,
+): string {
   return createHash('sha256')
     .update(`${object}\u001f${tenantId}\u001f${field}\u001f${scope}`)
     .digest('hex');

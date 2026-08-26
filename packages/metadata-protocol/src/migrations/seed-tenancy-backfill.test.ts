@@ -43,6 +43,7 @@ import {
   buildCounterInsertSql,
   buildGlobalCounterDeleteByKeyHashSql,
   buildSequencesPresenceSql,
+  sequenceKeyHash,
   SEQUENCES_TABLE,
   GLOBAL_TENANT,
   ORGANIZATION_FIELD,
@@ -358,6 +359,157 @@ describe('#9381 dialect-aware statement text', () => {
     const clientless = resolveSeedTenancySeam({ driver: { execute: async () => [] } });
     expect(clientless?.client).toBeUndefined();
     expect(resolveSeedTenancySeam({})).toBeUndefined();
+  });
+});
+
+/**
+ * #12394 — the counter handoff, against a store that is KEYED.
+ *
+ * ## The hole this closes
+ *
+ * Every other fake seam in this file answers by STATEMENT SHAPE: it matches on
+ * `sql.includes('"key_hash" = ?')` and hands back the one row it is holding,
+ * without ever reading the parameter. A fake like that models a database in
+ * which every key addresses the same row — so the one decision this handoff
+ * makes, INSERT-vs-UPDATE keyed by `key_hash`, is answered correctly no matter
+ * what key the migration asks with. The branch cannot fail here, which is the
+ * same thing as saying it is not covered.
+ *
+ * It was not covered anywhere else at unit speed either: the UPDATE branch (an
+ * organization-scoped row that ALREADY exists) reached CI only through two
+ * integration fixtures, and both of them seeded `key_hash` as an invented string
+ * — `'h1'`/`'h2'` and `'h_global'`/`'h_org'`. Those were inert for as long as the
+ * repair addressed counter rows by `(object, field, tenant_id)`. The moment it
+ * began addressing them by `key_hash`, both fixtures described a table no
+ * install can hold, the destination row read as ABSENT, and the repair inserted
+ * a SECOND counter for one logical sequence — on SQLite and on MySQL alike, so
+ * this was never a dialect gap.
+ *
+ * ## What makes this fixture able to fail
+ *
+ * It is a real keyed store: rows live in a `Map` under their own `key_hash`, the
+ * probe answers by the parameter it was given, and the INSERT REFUSES a key that
+ * is already present — because `key_hash` is the table's PRIMARY KEY and its
+ * only key (no unique index stands behind `(object, tenant_id, field, scope)`).
+ * A fake looser than the producer is how a dead write path ships green; this one
+ * is exactly as strict. A repair that wrote its mark under a key other than the
+ * one it probed now ends with two rows or a refused write, and both are red.
+ */
+describe('#12394 the counter handoff writes the row the driver will read', () => {
+  const OBJECT = 'crm_case';
+  const FIELD = 'case_number';
+  const ORG = 'org_a';
+
+  /** A `_objectstack_sequences` that is keyed the way the real table is keyed. */
+  function keyedSequences(seed: Array<Record<string, unknown>>) {
+    const rows = new Map<string, Record<string, unknown>>();
+    for (const row of seed) rows.set(String(row.key_hash), { ...row });
+    const exec = async (sql: string, params: unknown[] = []): Promise<unknown> => {
+      if (sql.includes('WHERE 1 = 0')) return []; // presence + key-shape probes
+      if (sql.includes('LEFT JOIN')) {
+        return [
+          { object: OBJECT, field: FIELD, global_last_value: 38, organization_last_value: 1 },
+        ];
+      }
+      if (sql.includes(ORGANIZATION_TABLE)) return [{ id: ORG }];
+      if (sql.includes('rows_holding')) return [];
+      if (sql.startsWith('INSERT') && sql.includes(SEQUENCES_TABLE)) {
+        const key = String(params[0]);
+        // The PRIMARY KEY, enforced. Without this the fixture would absorb the
+        // very defect it exists to catch.
+        if (rows.has(key)) throw new Error(`duplicate key value violates the primary key: ${key}`);
+        rows.set(key, {
+          key_hash: key,
+          object: String(params[1]),
+          tenant_id: String(params[2]),
+          field: String(params[3]),
+          scope: String(params[4]),
+          last_value: Number(params[5]),
+        });
+        return [];
+      }
+      if (sql.startsWith('UPDATE') && sql.includes(SEQUENCES_TABLE)) {
+        const row = rows.get(String(params[1]));
+        if (row) row.last_value = Number(params[0]);
+        return [];
+      }
+      if (sql.startsWith('DELETE') && sql.includes(SEQUENCES_TABLE)) {
+        rows.delete(String(params[0]));
+        return [];
+      }
+      if (sql.startsWith('UPDATE') || sql.startsWith('DELETE')) return []; // the stamp
+      // The org-scoped row, addressed by the key the caller actually asked with.
+      if (sql.includes('"key_hash" = ?')) {
+        const row = rows.get(String(params[0]));
+        return row ? [{ last_value: row.last_value }] : [];
+      }
+      // The `__global__` rows for one object/field — one per scope.
+      if (sql.includes('tenant_id')) {
+        return [...rows.values()].filter((r) => r.tenant_id === GLOBAL_TENANT);
+      }
+      return [];
+    };
+    return { rows, seam: { exec } as never };
+  }
+
+  const globalRow = {
+    key_hash: sequenceKeyHash(OBJECT, GLOBAL_TENANT, FIELD, ''),
+    object: OBJECT,
+    tenant_id: GLOBAL_TENANT,
+    field: FIELD,
+    scope: '',
+    last_value: 38,
+  };
+
+  it('[first boot] creates the organization row at the merged mark, then retires __global__', async () => {
+    const { rows, seam } = keyedSequences([globalRow]);
+    const result = await backfillSeedTenancy(seam);
+
+    expect(result.status).toBe('applied');
+    // One row, under the key the DRIVER will compute — not under any key.
+    expect([...rows.keys()]).toEqual([sequenceKeyHash(OBJECT, ORG, FIELD, '')]);
+    expect([...rows.values()][0]!.last_value).toBe(38);
+  });
+
+  it('[the CI regression] an existing organization row is RAISED, never duplicated', async () => {
+    // The shape both integration fixtures were really in, spelled with the key
+    // the platform actually stores. A repair that probes with one key and writes
+    // under another leaves two rows here, which is what CI caught.
+    const { rows, seam } = keyedSequences([
+      globalRow,
+      {
+        key_hash: sequenceKeyHash(OBJECT, ORG, FIELD, ''),
+        object: OBJECT,
+        tenant_id: ORG,
+        field: FIELD,
+        scope: '',
+        last_value: 1,
+      },
+    ]);
+    const result = await backfillSeedTenancy(seam);
+
+    expect(result.status).toBe('applied');
+    expect(rows.size).toBe(1);
+    expect([...rows.values()][0]).toMatchObject({ tenant_id: ORG, last_value: 38 });
+  });
+
+  it('[never lowered] an organization row already ahead of __global__ keeps its own mark', async () => {
+    const { rows, seam } = keyedSequences([
+      globalRow,
+      {
+        key_hash: sequenceKeyHash(OBJECT, ORG, FIELD, ''),
+        object: OBJECT,
+        tenant_id: ORG,
+        field: FIELD,
+        scope: '',
+        last_value: 91,
+      },
+    ]);
+    await backfillSeedTenancy(seam);
+
+    expect(rows.size).toBe(1);
+    // The merge rule is the greater of the two COUNTERS, never the data max.
+    expect([...rows.values()][0]!.last_value).toBe(91);
   });
 });
 

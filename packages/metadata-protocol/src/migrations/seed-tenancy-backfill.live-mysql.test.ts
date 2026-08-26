@@ -46,6 +46,7 @@
  */
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { createHash } from 'node:crypto';
 import mysql from 'mysql2/promise';
 import {
   backfillSeedTenancy,
@@ -67,6 +68,32 @@ const EXPECT_LIVE = process.env.OS_EXPECT_LIVE_DIALECT_MATRIX === '1';
 const DB = currentLiveMysqlDatabase();
 const OBJECT = 'os9381_case';
 const FIELD = 'case_number';
+
+/**
+ * The row key of `_objectstack_sequences`, spelled the way its only production
+ * writer spells it (#12394).
+ *
+ * This fixture used to seed `key_hash` as the placeholders `'h_global'` and
+ * `'h_org'`. That was invisible for as long as the repair addressed counter rows
+ * by `(object, field, tenant_id)` — nothing read the column, so any string did.
+ * #12394's handoff addresses the destination row by `key_hash`, which is the key
+ * the table is actually keyed on, so an invented hash describes a table no
+ * install can hold: the repair reads the organization row as ABSENT and inserts
+ * a SECOND counter for one logical sequence.
+ *
+ * Spelled here rather than imported because `metadata-protocol` does not depend
+ * on `driver-sql` — which makes this a THIRD independent spelling of the same
+ * derivation, and therefore a pin on it: a separator or field-order change in
+ * `seed-tenancy-backfill.ts` stops matching these rows and this suite goes red.
+ * The separator is the ASCII unit separator, written as the escape \u001f and
+ * never as a raw control byte — the same discipline the module and the driver
+ * both keep.
+ */
+function sequenceKeyHash(object: string, tenantId: string, field: string, scope: string): string {
+  return createHash('sha256')
+    .update(`${object}\u001f${tenantId}\u001f${field}\u001f${scope}`)
+    .digest('hex');
+}
 
 if (!MYSQL_URL && EXPECT_LIVE) {
   describe('#9381 live MySQL', () => {
@@ -113,9 +140,18 @@ describe.skipIf(!MYSQL_URL)('#9381 seed-tenancy backfill on a LIVE MySQL', () =>
     // Column names spelled the way the driver's own `createSequencesTable`
     // spells them; `last_value` is quoted here for the same reason the migration
     // has to quote it (see the reserved-word assertion below).
+    //
+    // [#12394] `key_hash` carries its real PRIMARY KEY. The driver declares it
+    // `.notNullable().primary()`, and it is the ONLY key this table has — no
+    // unique index stands behind `(object, tenant_id, field, scope)`. Seeding it
+    // as a plain column let a repair that wrote a SECOND row for one logical
+    // counter land quietly as an extra row instead of an `ER_DUP_ENTRY`; with
+    // the real key here, that defect can only ever be an error on the two
+    // dialects that enforce it.
     await conn.query(
       `CREATE TABLE \`${SEQUENCES_TABLE}\` (` +
-        '`key_hash` VARCHAR(64), `object` VARCHAR(64), `tenant_id` VARCHAR(64), ' +
+        '`key_hash` VARCHAR(64) NOT NULL PRIMARY KEY, `object` VARCHAR(64), ' +
+        '`tenant_id` VARCHAR(64), ' +
         '`field` VARCHAR(64), `scope` VARCHAR(255) NOT NULL DEFAULT \'\', ' +
         '`last_value` INT, `updated_at` DATETIME(3))',
     );
@@ -127,8 +163,12 @@ describe.skipIf(!MYSQL_URL)('#9381 seed-tenancy backfill on a LIVE MySQL', () =>
     await conn.query("INSERT INTO `sys_organization` (`id`) VALUES ('org_live')");
     await conn.query(
       `INSERT INTO \`${SEQUENCES_TABLE}\` (\`key_hash\`, \`object\`, \`tenant_id\`, \`field\`, \`last_value\`) ` +
-        `VALUES ('h_global', '${OBJECT}', '${GLOBAL_TENANT}', '${FIELD}', 38), ` +
-        `('h_org', '${OBJECT}', 'org_live', '${FIELD}', 4)`,
+        `VALUES (?, '${OBJECT}', '${GLOBAL_TENANT}', '${FIELD}', 38), ` +
+        `(?, '${OBJECT}', 'org_live', '${FIELD}', 4)`,
+      [
+        sequenceKeyHash(OBJECT, GLOBAL_TENANT, FIELD, ''),
+        sequenceKeyHash(OBJECT, 'org_live', FIELD, ''),
+      ],
     );
     // The card's own repro: seeded rows carry NULL, API rows carry the org, and
     // CASE-00001/2 were minted on BOTH sides.
