@@ -208,3 +208,123 @@ describe('HotReloadManager', () => {
     });
   });
 });
+
+
+// ── [#12340] `stateStrategy` refuses what it cannot honour ──────────────────
+//
+// Before this card, `registerPlugin` accepted 'disk' and 'distributed' and
+// `saveState` wrote both to the same in-memory Map as 'memory', reporting the
+// substitution at DEBUG level only. A host that asked for durable or
+// cluster-replicated state got process-local memory and no error — state that
+// does not survive the restart it was configured to survive.
+//
+// Every assertion below is about observable behaviour: the refusal envelope,
+// the prescription's load-bearing facts, and the fact that the honoured
+// strategies still work. None of them asserts the source.
+describe('[#12340] stateStrategy refusal', () => {
+  const configWith = (strategy: string): HotReloadConfigParsed =>
+    ({
+      enabled: true,
+      debounceDelay: 0,
+      preserveState: true,
+      stateStrategy: strategy,
+      shutdownTimeout: 1000,
+    }) as unknown as HotReloadConfigParsed;
+
+  let mgr: HotReloadManager;
+  beforeEach(() => {
+    mgr = new HotReloadManager(createRecordingLogger([]));
+  });
+
+  for (const retired of ['disk', 'distributed']) {
+    it(`refuses '${retired}' at registration, with an ADR-0112 envelope`, () => {
+      let caught: (Error & { code?: string; status?: number }) | undefined;
+      try {
+        mgr.registerPlugin('p', configWith(retired));
+      } catch (e) {
+        caught = e as Error & { code?: string; status?: number };
+      }
+
+      // The envelope, not merely "it threw" — a bare toThrow() would stay
+      // green against any unrelated failure on this path.
+      expect(caught, `'${retired}' must be refused`).toBeDefined();
+      expect(caught?.code).toBe('VALIDATION_ERROR');
+      expect(caught?.status).toBe(400);
+
+      // The prescription's load-bearing facts. Pinned by CONTENT, never by
+      // byte-equality with the spec-side string: the two answer different
+      // doors (parse vs registration) and are deliberately not shared.
+      const m = caught?.message ?? '';
+      expect(m).toContain(retired);
+      expect(m).toContain('#12340');
+      expect(m).toContain('ADR-0049');
+      expect(m).toContain('were removed');
+      expect(m).toContain("Use 'memory'");
+      expect(m).toContain('p'); // locates the offending plugin
+    });
+  }
+
+  it('refuses an unknown strategy WITHOUT claiming it was retired', () => {
+    // Anti-vacuity: a typo must not be told it "was removed" — that misinforms
+    // the author of `dsik`, who never had a working config to migrate from.
+    let caught: (Error & { code?: string }) | undefined;
+    try {
+      mgr.registerPlugin('p', configWith('dsik'));
+    } catch (e) {
+      caught = e as Error & { code?: string };
+    }
+    expect(caught).toBeDefined();
+    expect(caught?.code).toBe('VALIDATION_ERROR');
+    expect(caught?.message).not.toContain('were removed');
+    expect(caught?.message).toContain('never been implemented');
+  });
+
+  it("refuses a leftover 'distributedConfig' instead of silently ignoring it", () => {
+    // The schema is not .strict(), so zod would STRIP this key on any parse
+    // path — a clean parse and a setting that never takes effect. #12340 took
+    // route 3 (no tombstone: nothing parses this schema), so THIS is the door
+    // that keeps the removal honest for the audience that exists.
+    const cfg = {
+      ...configWith('memory'),
+      distributedConfig: { provider: 'redis', endpoints: ['redis://localhost:6379'] },
+    } as unknown as HotReloadConfigParsed;
+
+    let caught: (Error & { code?: string; status?: number }) | undefined;
+    try {
+      mgr.registerPlugin('p', cfg);
+    } catch (e) {
+      caught = e as Error & { code?: string; status?: number };
+    }
+    expect(caught).toBeDefined();
+    expect(caught?.code).toBe('VALIDATION_ERROR');
+    expect(caught?.status).toBe(400);
+    expect(caught?.message).toContain('distributedConfig');
+    expect(caught?.message).toContain('#12340');
+    expect(caught?.message).toContain('nothing ever read it');
+  });
+
+  it('refuses even when hot reload is disabled', () => {
+    // The door must not depend on `enabled`: a false declaration is false
+    // whether or not the feature is switched on.
+    const cfg = { ...configWith('disk'), enabled: false } as HotReloadConfigParsed;
+    expect(() => mgr.registerPlugin('p', cfg)).toThrow(/#12340/);
+  });
+
+  for (const live of ['memory', 'none'] as const) {
+    it(`still registers and reloads with '${live}'`, async () => {
+      const cfg = configWith(live);
+      expect(() => mgr.registerPlugin('p', cfg)).not.toThrow();
+
+      const plugin = {
+        name: 'p', version: '1.0.0', init: () => {}, destroy: async () => {},
+      } as unknown as Plugin;
+      let restored: Record<string, unknown> | undefined;
+      const ok = await mgr.reloadPlugin(
+        'p', plugin, '1.0.0', () => ({ hello: 'world' }), (st) => { restored = st; }
+      );
+      expect(ok).toBe(true);
+      // 'memory' preserves state across the reload; 'none' deliberately does not.
+      expect(restored).toEqual(live === 'memory' ? { hello: 'world' } : undefined);
+    });
+  }
+});

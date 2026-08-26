@@ -23,6 +23,101 @@ const generateUUID = () => {
 };
 
 /**
+ * The `stateStrategy` values `PluginStateManager` actually implements.
+ *
+ * This is the ENFORCED set — it exists so the runtime door and the switch in
+ * `saveState` cannot drift apart silently. `@objectstack/spec`'s
+ * `HotReloadConfigSchema` declares exactly these two (#12340).
+ */
+const HONOURED_STATE_STRATEGIES = ['memory', 'none'] as const;
+
+/**
+ * Prescription for the two strategies retired in 18 (#12340).
+ *
+ * Deliberately PARALLEL to `HOT_RELOAD_STATE_STRATEGY_RETIRED` in
+ * `packages/spec/src/kernel/plugin-lifecycle-advanced.zod.ts` rather than
+ * imported from it: every `@objectstack/core` import of
+ * `@objectstack/spec/kernel` is type-only, and a value import would be the
+ * first — linking that module's zod closure into every consumer of this
+ * package for one string. The two prescriptions answer different doors (parse
+ * vs registration); the facts they must both carry are pinned in
+ * `hot-reload.test.ts`, by content and never by byte-equality.
+ */
+const RETIRED_STATE_STRATEGY_GUIDANCE =
+  "'disk' and 'distributed' were removed from HotReloadConfig.stateStrategy in "
+  + '@objectstack/spec 18 (#12340, ADR-0049 enforce-or-remove) — neither was ever '
+  + "implemented. Both wrote to the same in-memory Map as 'memory' and reported it "
+  + 'only at debug level, so a host that asked for durable or cluster-replicated '
+  + 'state got process-local memory and no error. '
+  + "Use 'memory' for in-process state preservation across a reload, or 'none' to "
+  + 'disable it. There is no in-tree replacement for durable or distributed plugin '
+  + 'state — persist it in the host, which owns the process lifetime these '
+  + 'strategies pretended to outlive.';
+
+/**
+ * An ADR-0112-enveloped refusal (`code` + `status` on the error), so a caller —
+ * and a rejection-class test — can assert the refusal rather than merely "it
+ * threw". `VALIDATION_ERROR` is the standard catalog's generic
+ * argument-validation code, following `metadata-service-contract.ts`.
+ */
+function stateStrategyRefusal(message: string): Error & { code: string; status: number } {
+  const err = new Error(message) as Error & { code: string; status: number };
+  err.code = 'VALIDATION_ERROR';
+  err.status = 400;
+  return err;
+}
+
+/**
+ * Refuse a `stateStrategy` this library does not implement, at the moment the
+ * host hands the config over.
+ *
+ * TypeScript hosts cannot reach this: `HotReloadConfigParsed['stateStrategy']`
+ * is `'memory' | 'none'`, so `'disk'` is a compile error. This is the door for
+ * the callers types do not reach — JavaScript hosts, and config that arrived
+ * as JSON — which is exactly where a silent fallback used to live.
+ */
+function assertHonouredStateStrategy(pluginName: string, strategy: unknown): void {
+  if ((HONOURED_STATE_STRATEGIES as readonly unknown[]).includes(strategy)) {
+    return;
+  }
+  const shown = typeof strategy === 'string' ? `'${strategy}'` : String(strategy);
+  const retired = strategy === 'disk' || strategy === 'distributed';
+  throw stateStrategyRefusal(
+    `[HotReload] Plugin '${pluginName}': unsupported stateStrategy ${shown}. `
+    + `Honoured values are ${HONOURED_STATE_STRATEGIES.map((v) => `'${v}'`).join(' and ')}. `
+    + (retired
+      ? RETIRED_STATE_STRATEGY_GUIDANCE
+      : 'This value has never been implemented by PluginStateManager.')
+  );
+}
+
+/**
+ * Refuse a `distributedConfig` left over from before #12340.
+ *
+ * `HotReloadConfigSchema` is not `.strict()`, so zod would silently STRIP this
+ * key on the parse paths that exist — a clean parse and a setting that never
+ * takes effect, which is the exact failure the authorable-surface gate names.
+ * The key was removed rather than tombstoned (route 3: nothing in the tree
+ * parses this schema, so a parse-time prescription reaches nobody), and this
+ * is the door that makes that route honest for the audience that DOES exist —
+ * a host handing the object straight to the class.
+ */
+function assertNoRetiredDistributedConfig(pluginName: string, config: object): void {
+  if (!Object.prototype.hasOwnProperty.call(config, 'distributedConfig')) {
+    return;
+  }
+  throw stateStrategyRefusal(
+    `[HotReload] Plugin '${pluginName}': 'distributedConfig' was removed from `
+    + 'HotReloadConfig in @objectstack/spec 18 (#12340, ADR-0049 '
+    + 'enforce-or-remove) — nothing ever read it. A provider, endpoints, a key '
+    + 'prefix, a TTL and a replication factor could all be declared and no '
+    + "connection was ever opened. It left with the stateStrategy: 'distributed' "
+    + 'value it was documented as being required for. Delete the key; there is no '
+    + 'in-tree replacement for distributed plugin state — persist it in the host.'
+  );
+}
+
+/**
  * Plugin State Manager
  * 
  * Handles state persistence and restoration during hot reloads
@@ -62,23 +157,6 @@ class PluginStateManager {
       case 'memory':
         this.memoryStore.set(snapshotId, snapshot);
         this.logger.debug('State saved to memory', { pluginId, snapshotId });
-        break;
-
-      case 'disk':
-        // For disk storage, we would write to file system
-        // For now, store in memory as fallback
-        this.memoryStore.set(snapshotId, snapshot);
-        this.logger.debug('State saved to disk (memory fallback)', { pluginId, snapshotId });
-        break;
-
-      case 'distributed':
-        // For distributed storage, would use Redis/etcd
-        // For now, store in memory as fallback
-        this.memoryStore.set(snapshotId, snapshot);
-        this.logger.debug('State saved to distributed store (memory fallback)', { 
-          pluginId, 
-          snapshotId 
-        });
         break;
 
       case 'none':
@@ -176,6 +254,14 @@ export class HotReloadManager {
    * Register a plugin for hot reload
    */
   registerPlugin(pluginName: string, config: HotReloadConfigParsed): void {
+    // Refused BEFORE the `enabled` check on purpose: a config naming a
+    // strategy this library cannot honour is malformed whether or not hot
+    // reload is switched on, and a door that opens only for `enabled: true`
+    // would let the false declaration through on exactly the configs nobody
+    // is watching.
+    assertHonouredStateStrategy(pluginName, config.stateStrategy);
+    assertNoRetiredDistributedConfig(pluginName, config);
+
     if (!config.enabled) {
       this.logger.debug('Hot reload disabled for plugin', { plugin: pluginName });
       return;

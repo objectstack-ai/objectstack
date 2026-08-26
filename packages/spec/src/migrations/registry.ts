@@ -6112,6 +6112,76 @@ const step18: MigrationStep = {
         + 'assuming the old result set was correct.',
     },
     {
+      id: 'hot-reload-inert-state-strategies-retired',
+      surface:
+        "`HotReloadConfig.stateStrategy` values 'disk' and 'distributed', plus the "
+        + '`HotReloadConfig.distributedConfig` key and the `DistributedStateConfig` def '
+        + 'it carried (3 exported names: `DistributedStateConfigSchema` / '
+        + '`DistributedStateConfig` / `DistributedStateConfigParsed`)',
+      replacement:
+        "'memory' for in-process state preservation across a reload, or 'none' to "
+        + 'disable it — the two values `PluginStateManager` actually implements. There '
+        + 'is no in-tree replacement for durable or distributed plugin state: persist '
+        + 'it in the host, which owns the process lifetime these strategies pretended '
+        + 'to outlive. Real disk or distributed persistence returns only via the '
+        + 'ENFORCE route of ADR-0049 — the implementation first, the declaration with '
+        + 'it.',
+      reason:
+        'ADR-0049 enforce-or-remove, applied one level INSIDE the library the '
+        + '2026-08-25 #11825 ruling kept. That ruling retired the authorable '
+        + 'lifecycle-config container and deliberately kept `HotReloadConfigSchema` as '
+        + 'a host-driven library parameter type; this card measured the kept '
+        + "vocabulary's own remainder and found the same defect in it. Measured at "
+        + 'cdbd9204b6 with a firing positive control (`stateStrategy` resolves to real '
+        + 'readers in `core/src/hot-reload.ts`, so the scan sees readers): the '
+        + "'disk' and 'distributed' arms of `PluginStateManager.saveState` both wrote "
+        + "to the SAME in-memory Map as 'memory' — the in-source comments said "
+        + "'memory fallback' — and announced the substitution at DEBUG level only, so "
+        + 'a host that asked for durable or cluster-replicated state got process-local '
+        + 'memory and no error: state that does not survive the restart it was '
+        + 'configured to survive. `distributedConfig` had ZERO readers anywhere '
+        + '(every reference inside `packages/spec` itself plus the generated reference '
+        + 'page; nothing in objectui), so an author could name a Redis endpoint, a TTL '
+        + 'and a replication factor and nothing ever opened a connection — the #3950 '
+        + 'shape, sharpened by cluster-persistence vocabulary an AI author (ADR-0033) '
+        + 'reads as proof the capability exists. The key left with the enum value its '
+        + 'own doc comment named it "required" for, and `DistributedStateConfig` was '
+        + 'its orphan value schema. Two routes in one card because the surface has two '
+        + 'shapes: an enum-VALUE narrowing is invisible to the four ratchets (the def '
+        + 'still emits), so its prescription hangs on the enum\'s own `error` map '
+        + 'dispatched by `issue.input` (the `crypto.hash` / `managedBy: \'system\'` '
+        + 'precedent); the whole-def removal MUST move them, and that movement is its '
+        + 'own evidence. No D2 conversion and no tombstone: `HotReloadConfig` is not '
+        + 'an authorable surface — no metadata-type binding, stack collection or '
+        + 'manifest embed ever carried it, and nothing in the tree parses '
+        + '`HotReloadConfigSchema` outside its own unit test — so there is no authored '
+        + 'document to rewrite and no one who could receive a parse-time '
+        + 'prescription. Route 3, the #4834 / #11825 shape: this entry IS the '
+        + 'declaration.',
+      acceptanceCriteria:
+        "No host passes `stateStrategy: 'disk'` or `'distributed'` to "
+        + '`HotReloadManager.registerPlugin`. TypeScript hosts cannot: '
+        + "`HotReloadConfigParsed['stateStrategy']` is now `'memory' | 'none'`, so "
+        + 'either value is a compile error at the call site. JavaScript hosts, and '
+        + 'config that arrived as JSON, get a loud registration-time refusal carrying '
+        + 'the prescription — an ADR-0112 envelope (`code: VALIDATION_ERROR`, '
+        + '`status: 400`) thrown BEFORE the `enabled` check, so a disabled config '
+        + 'cannot smuggle the false declaration through. No import of '
+        + '`DistributedStateConfigSchema`, `DistributedStateConfig` or '
+        + '`DistributedStateConfigParsed` from `@objectstack/spec` or '
+        + '`@objectstack/spec/kernel` survives — every one is TS2305 after upgrade, '
+        + 'pinned by resolved symbol identity in '
+        + '`kernel/plugin-lifecycle-advanced-retirement.test.ts`. ⚠️ Runtime state '
+        + "behaviour is UNCHANGED for every config that worked: 'disk' and "
+        + "'distributed' already stored to memory, so a host that migrates either to "
+        + "'memory' keeps byte-identical behaviour — what changes is that the two "
+        + 'spellings which never described what happened are now refused instead of '
+        + 'silently honoured. The #11825 keep itself stands: `HotReloadConfigSchema`, '
+        + '`PluginStateSnapshotSchema` and the health vocabularies still export from '
+        + '`./kernel`, and `HotReloadManager` / `PluginHealthMonitor` still export '
+        + 'from `@objectstack/core` with their tests green.',
+    },
+    {
       id: 'identity-api-key-schema-retired',
       surface:
         'identity.apiKey (the whole of `ApiKeySchema` in identity/identity.zod.ts — '
@@ -7945,6 +8015,42 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // narrowings ride minor releases) and the prescription lives at the major
     // boundary where `migrate meta` users look (the #8586 / PR #8702 precedent).
     'kernel/AdvancedPluginLifecycleConfig',
+    // #12340 — kernel/plugin-lifecycle-advanced.zod.ts
+    // `DistributedStateConfigSchema`, retired whole (ADR-0049 enforce-or-remove).
+    //
+    // The orphan value schema of `HotReloadConfig.distributedConfig`, which had
+    // ZERO readers — measured at cdbd9204b6 with a firing positive control
+    // (`stateStrategy` resolves to real readers in `core/src/hot-reload.ts`, so
+    // the scan sees readers; `distributedConfig` resolved to nothing outside
+    // `packages/spec` itself in objectstack, and to nothing in objectui). An
+    // author could name a Redis or etcd endpoint, a key prefix, a TTL, auth
+    // credentials and a replication factor, and NOTHING ever opened a connection
+    // — the #3950 shape, sharpened by cluster-persistence vocabulary an AI author
+    // (ADR-0033) reads as proof the capability exists.
+    //
+    // It leaves with the enum value it existed for. `HotReloadConfig.stateStrategy`
+    // narrowed to ['memory','none'] in the same card, because the 'disk' and
+    // 'distributed' arms of `PluginStateManager.saveState` both wrote to the same
+    // in-memory Map as 'memory' and said so at DEBUG level only. With
+    // 'distributed' gone, a key whose own doc comment called it "required when
+    // stateStrategy is 'distributed'" names a value that no longer exists — it
+    // could not honestly outlive the narrowing.
+    //
+    // This is the #11825 keep, narrowed from inside, NOT reversed: that ruling
+    // kept `HotReloadConfigSchema` and `HotReloadManager` as a host-driven library
+    // and they both stand here. What it also listed among the survivors was
+    // `DistributedStateConfig` — a line this card reverses on new evidence, since
+    // #11825 measured the CONTAINER's six groups and never this key's own readers.
+    // The survival pin in `plugin-lifecycle-advanced-retirement.test.ts` moves in
+    // the same commit, deliberately and with the reasoning recorded there.
+    //
+    // Route 3: `HotReloadConfig` is not an authorable surface — no metadata-type
+    // binding, stack collection or manifest embed ever carried it, and nothing in
+    // the tree parses `HotReloadConfigSchema` outside its own unit test — so there
+    // is no authored document for a D2 conversion to rewrite and nobody who could
+    // receive a parse-time tombstone. This table plus the D3 semantic entry
+    // `hot-reload-inert-state-strategies-retired` ARE the declaration.
+    'kernel/DistributedStateConfig',
     // #11825 — `kernel/GracefulDegradation` left with
     // `kernel/AdvancedPluginLifecycleConfig`: its ONLY consumer was the retired
     // container's `degradation` key (the #3950 rule — an exported value schema
