@@ -327,6 +327,58 @@ describe('what is NOT drift', () => {
   });
 });
 
+describe('a leaf stranded in ONE locale alone — the reason the ruling chose Option A', () => {
+  // The gate that shipped first for this class (`check:i18n-stale-fill`) infers
+  // provenance from TWO locales holding byte-identical text: two different
+  // target languages do not independently produce the same prose, so agreement
+  // between them is evidence that neither translated it. That inference is
+  // sound, and it is structurally blind to a leaf stranded in exactly ONE
+  // locale — there is no second witness to agree with. A RECORDED hash needs no
+  // witness, which is the whole of what Option A buys over the status quo.
+  //
+  // Not a hypothetical population: on the tree this landed against, 18 generated
+  // leaves are recorded in exactly one locale (zh-CN 2, ja-JP 3, es-ES 13) —
+  // English-looking terms one locale left as a fill while the others translated
+  // them ('Variables (JSON)', 'Reply-To', 'Checksum'). Every one of those is a
+  // leaf only this mechanism can ever speak about.
+  const LABEL = 'objects.sys_activity.fields.type.label';
+
+  // One locale left the source label in English (a fill); another translated it.
+  const filledLocale = genTranslated(SRC_V1, 'Type');
+  const translatedLocale = genTranslated(SRC_V1, '\u7c7b\u578b');
+
+  const filledRecords = collectFilledFromHashes(filledLocale, genSource(SRC_V1), undefined);
+  const translatedRecords = collectFilledFromHashes(translatedLocale, genSource(SRC_V1), undefined);
+
+  // The source label alone moves; the help string is deliberately left alone so
+  // the only thing either locale can be stale about is the single-locale leaf.
+  const movedSource: TranslationData = {
+    objects: {
+      sys_activity: {
+        label: 'Activity',
+        fields: { type: { label: 'Kind', help: SRC_V1 } },
+      },
+    },
+  };
+
+  it('records the filled label in the locale that left it, and in no other', () => {
+    expect(filledRecords[LABEL]).toBe(hashSource('Type'));
+    expect(translatedRecords[LABEL]).toBeUndefined();
+  });
+
+  it('reports it stale in that locale alone once the source label moves', () => {
+    expect(findStaleFills(filledLocale, movedSource, filledRecords).map((s) => s.path)).toEqual([LABEL]);
+    expect(findStaleFills(translatedLocale, movedSource, translatedRecords)).toEqual([]);
+  });
+
+  it('serves the current source label there, and leaves the real translation untouched', () => {
+    const servedFilled = withSourceFallback(filledLocale, movedSource, undefined, filledRecords);
+    expect(served(servedFilled, LABEL)).toBe('Kind');
+    const servedTranslated = withSourceFallback(translatedLocale, movedSource, undefined, translatedRecords);
+    expect(served(servedTranslated, LABEL)).toBe('\u7c7b\u578b');
+  });
+});
+
 describe('the committed provenance companions', () => {
   const tables = {
     'zh-CN': zhCNGeneratedSourceHashes,
