@@ -70,6 +70,13 @@ export * from './pagination-conformance';
 // (`count(distinct x)`) is the first in the vocabulary that two faces of one
 // driver can get wrong in ways only a row-result comparison sees.
 export * from './aggregation-conformance';
+// Canonical conformance cases for value storage ROUND-TRIP (#12393) — "what you
+// wrote is what you read back", asserted on type as well as value, plus the
+// injectivity pairs a per-value check cannot see. The census's nine other
+// case-sets are all about WHICH ROWS come back; this is the one about what the
+// values in them are, and its absence is why that family (#12380, #11535,
+// #11782, #10995) kept arriving one card at a time.
+export * from './value-roundtrip-conformance';
 export * from './date-macros.zod';
 // Dashboard date-range preset names (#4614 single source, re-homed by #8793) —
 // declared for the dashboard date-filter positions, REFUSED as bare ordering
