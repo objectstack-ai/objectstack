@@ -29,7 +29,10 @@
  *         shallow-merged on top of `mutatedInput` as an explicit patch.
  *      Writes go through `Object.assign`, which means the host engine's
  *      flat-record Proxy (installed by `wrapDeclarativeHook`) sees them
- *      via its set trap.
+ *      via its set trap. `Object.assign` cannot express a REMOVAL, so
+ *      keys the VM deleted are diffed out of the entry snapshot and
+ *      deleted on the host separately (#12277) — see
+ *      {@link applyMutationsToInput}.
  *
  * The ACTION path deliberately has no step 4: its output is the script's
  * return value, and its write channel is `ctx.api.object(...)`. In particular
@@ -317,7 +320,7 @@ export function hookBodyRunnerFactory(
           // constructor option dead for hooks.
           timeoutMs: (body as any).timeoutMs,
         });
-        applyMutationsToInput(engineCtx, result);
+        applyMutationsToInput(engineCtx, result, sandboxCtx.input);
       } catch (err: any) {
         opts.logger?.error?.('[BodyRunner] sandboxed hook threw', err, {
           appId: opts.appId,
@@ -467,11 +470,93 @@ function warnDiscardedRecordWrites(
   );
 }
 
-function applyMutationsToInput(engineCtx: any, result: ScriptResult): void {
+/**
+ * [#12277] Keys of the ENTRY snapshot that the VM could actually see, and
+ * therefore the only keys whose absence from the exit snapshot is evidence of
+ * a deletion.
+ *
+ * Both directions of the sandbox boundary are JSON (`safeJsonStringify` in,
+ * `JSON.stringify` out), and JSON has no spelling for `undefined`, a function,
+ * or a symbol. A key carrying one of those is absent from the VM's `ctx.input`
+ * from the start, so it is absent from the dump too — indistinguishable, on the
+ * dump alone, from a key the body deleted. Filtering the entry side through the
+ * SAME lens removes that ambiguity at the source instead of guessing at it.
+ *
+ * Every failure mode here is deliberately conservative — a key that cannot be
+ * probed is simply not deletable, so the worst outcome is the pre-#12277
+ * behaviour (a delete that does not land) rather than a field destroyed on
+ * evidence that was never there. One residual miss follows from that and is
+ * worth naming: `safeJsonStringify` marshals a `bigint` into the VM as a
+ * string, while the probe below throws on it and drops it — so a delete of a
+ * bigint-valued key is still lost. Losing a delete is the recoverable
+ * direction; inventing one is not.
+ */
+function vmVisibleEntryKeys(entryInput: unknown): string[] {
+  if (!entryInput || typeof entryInput !== 'object' || Array.isArray(entryInput)) return [];
+  const out: string[] = [];
+  for (const [k, v] of Object.entries(entryInput as Record<string, unknown>)) {
+    try {
+      if (JSON.stringify(v) !== undefined) out.push(k);
+    } catch {
+      /* unserialisable (cycle, bigint) — not deletable on this evidence */
+    }
+  }
+  return out;
+}
+
+/**
+ * Write one settled body's mutations back onto the host `ctx.input`.
+ *
+ * ## [#12277] Why a key diff, and not `Object.assign` alone
+ *
+ * `Object.assign` copies own enumerable properties, and **has no way to
+ * represent a deletion**: a key the VM removed simply is not in `mutatedInput`,
+ * and the original stays. So `delete ctx.input.internal_notes` in a sandboxed
+ * body was lost on the way home — and lost in the worst possible shape,
+ * because INSIDE the VM the delete is real. Measured on the pre-fix code, with
+ * the host row alongside:
+ *
+ * ```
+ * delete ctx.input.internal_notes    ->  true
+ * 'internal_notes' in ctx.input      ->  false      // the VM agrees
+ * Object.keys(ctx.input)             ->  ['subject'] // …and so does this
+ * host ctx.input after write-back    ->  { subject: 'HELP',
+ *                                          internal_notes: 'STAFF-ONLY' }
+ * ```
+ *
+ * Every instrument reachable from inside the body confirms the removal, an
+ * assignment made in the same call lands, and the field is stored anyway.
+ * There is no diagnostic to notice and nothing to notice it with.
+ *
+ * The sibling half of the same defect was the engine's flat-input Proxy
+ * missing its `deleteProperty` trap (`installFlatInput`,
+ * `packages/objectql/src/hook-wrappers.ts`); the two are unrelated mechanisms
+ * with one author-visible outcome. They are fixed together on purpose: closing
+ * one alone would make the same authored `delete` behave differently depending
+ * on whether the body runs in-process or in QuickJS, which is a worse contract
+ * than the symmetric silence it replaces.
+ *
+ * Deletions apply BEFORE both merges, so a body that deletes a key and then
+ * returns it (`delete ctx.input.x; return { x: 1 };`) keeps the explicit patch
+ * — the return value is the later, more deliberate statement of the two.
+ */
+function applyMutationsToInput(
+  engineCtx: any,
+  result: ScriptResult,
+  // `unknown`, not `Record<string, unknown>`: that is what `ScriptContext.input`
+  // declares, and narrowing is {@link vmVisibleEntryKeys}'s job. Widening the
+  // declared type here to make the call site typecheck would move the guard to
+  // the producer's word rather than this consumer's own check.
+  entryInput?: unknown,
+): void {
   const target = engineCtx?.input;
   if (!target || typeof target !== 'object') return;
   if (result.mutatedInput && typeof result.mutatedInput === 'object') {
-    Object.assign(target, result.mutatedInput);
+    const mutated = result.mutatedInput;
+    for (const key of vmVisibleEntryKeys(entryInput)) {
+      if (!(key in mutated)) delete (target as Record<string, unknown>)[key];
+    }
+    Object.assign(target, mutated);
   }
   if (
     result.value &&
