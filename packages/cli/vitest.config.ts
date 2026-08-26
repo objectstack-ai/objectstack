@@ -97,14 +97,17 @@
 //
 // The cost is test-body work, and it is concentrated, not uniform: median file
 // 0.03s, 105 of 137 files under 2s, top 20 files = 87.7% of the wall. The 20
-// files that spawn the real CLI as a subprocess (`bin/run-dev.js` through
-// `tsx`, against a `mkdtemp` project) are 56.1% of the file wall (300.1s) while
-// carrying 177 of 1498 tests. Each spawn re-executes the CLI's module graph in
-// a COLD process, which is the standing theory after all — relocated out of
-// vitest's worker, where neither its transform cache nor its module registry
-// can reach it. Floor per spawn, doing nothing but printing a version:
+// files that spawned the real CLI as a subprocess (all 20 of them
+// `bin/run-dev.js` through `tsx` on that date, against a `mkdtemp` project)
+// were 56.1% of the file wall (300.1s) while carrying 177 of 1498 tests —
+// three have since moved to the built entry (#11707; last section of this
+// header) and the split has not been re-measured. Each spawn re-executes the
+// CLI's module graph in a COLD process, which is the standing theory after
+// all — relocated out of vitest's worker, where neither its transform cache
+// nor its module registry can reach it. Floor per spawn, doing nothing but
+// printing a version:
 //
-//   tsx bin/run-dev.js --version   6.5-6.8s     (the source entry these use)
+//   tsx bin/run-dev.js --version   6.5-6.8s     (the source entry all 20 used)
 //   node bin/run.js --version      2.9-3.2s     (the built entry)
 //   node -e 0                      0.031s       (process floor)
 //
@@ -173,12 +176,45 @@
 // `packages/cli` has no `vi.mock` of `@objectstack/types` (its only mock targets
 // are `../utils/optional-package.js`, `node:fs/promises` and
 // `@objectstack/cloud-connection`) — but neither is free, and a package added
-// here later must be re-checked for both. Swapping the spawns to
-// the built entry would halve per-spawn boot and is exactly the source-vs-dist
-// trade `scripts/check-test-source-alias.mjs` exists to refuse — see the note
-// above on why a test that passes GREEN against a stale artifact is the
-// dangerous outcome. Before adding a `test` block for speed, re-measure: if
-// `tests` is still the dominant term, the block is not the lever.
+// here later must be re-checked for both.
+//
+// ## WHY THE SPAWN SWAP IS NOT THIS GATE'S TRADE TO REFUSE (#11707, #12460)
+//
+// This file used to close by calling a swap of the spawns to the built entry
+// “exactly the source-vs-dist trade `scripts/check-test-source-alias.mjs`
+// exists to refuse”. It is not one, and naming a gate for a verdict it never
+// reaches reads as verification while verifying nothing. What that gate does
+// measure: the specifiers written in `import` / `export … from` / `import()` /
+// `require()` statements reachable from a package's test files, kept when they
+// name a workspace dep whose own entry point resolves under `dist/`, then
+// resolved through THIS config's `resolve.alias` table. That is a verdict about
+// IN-PROCESS import resolution. It says nothing about which entry a test hands
+// to `spawn()`, and its own header signs that second axis over to a different
+// mechanism (“A SECOND resolution hazard, which this gate does NOT cover”,
+// #11412). The `plugin-auth` entry below is this file's worked example: it
+// satisfies the gate while being inert for the child, whose own `exports`
+// lookup reaches `dist/` either way.
+//
+// So the swap was available, and #11707 took it — 2.06x faster in test time,
+// measured there. Four files in `test/` consume `packages/cli/dist` today:
+// `serve-node-env-production-default` (since #11113) and the three spawners
+// #11707 moved onto `node bin/run.js` with `NODE_ENV` unset
+// (`serve-mcp-stdio-answers`, `serve-mcp-capability-collision`,
+// `serve-stdio-stdout-purity`). Re-running this gate on that commit and on its
+// parent returns a byte-identical verdict AND a byte-identical measured
+// population: it did not see the swap.
+//
+// What keeps those four honest is a declaration, not this gate. `turbo.json`
+// declares `@objectstack/cli#test` `dependsOn: ["build"]` (#11268), so CI
+// builds `dist/` before the suite runs, and each of the four refuses an unbuilt
+// tree in a sentence of its own. The residual — a `dist/` merely BEHIND its
+// source — is real, and those files state it. An in-process import has no such
+// declaration standing behind it, which is why the alias entries above exist
+// and why the gate does refuse THAT trade — see the note above on why a test
+// that passes GREEN against a stale artifact is the dangerous outcome.
+//
+// Before adding a `test` block for speed, re-measure: if `tests` is still the
+// dominant term, the block is not the lever.
 import { defineConfig } from 'vitest/config';
 import path from 'path';
 
