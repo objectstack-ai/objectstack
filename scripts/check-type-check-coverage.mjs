@@ -746,6 +746,26 @@ const EXEMPT = {
 // interchangeable only where the excluded tests import nothing the src layer
 // does not, and that is a property to MEASURE per package, never to assume.
 //
+// `@objectstack/rest` GRADUATED from this ledger (#12542; entry: 155 raw,
+// re-measured 37 raw across 13 files under the sibling program). It is worth a
+// line because the gap between those two numbers is the whole argument for
+// fixing the CONFIG before reading the residue, and this entry's own note had
+// predicted it: 121 of the 155 were TS2835 plus the implicit-any pile it
+// causes, and TS2550 x16 was one `Array.prototype.at` message against a `lib`
+// older than es2022. Under `tsconfig.test.json`'s vitest-matching module
+// semantics both classes go to ZERO -- TS2835 x72 -> 0, TS2550 x16 -> 0,
+// TS7006 x49 -> 4 -- because this package is `"type": "module"`, so NodeNext
+// was compiling extensionless relative imports as unresolvable ESM and every
+// symbol they named was `any`. What is LEFT is a different shape from what the
+// old tally described, and it grew in one place while collapsing in four:
+// TS2554 x14 (unchanged to the unit), TS18048 x13 (a class the 155 never
+// contained AT ALL -- 'possibly undefined' reads that only become visible once
+// the imports above them resolve to real types), TS2345 x5, TS7006 x4,
+// TS6133 x1 = 37. That is the #8612 lesson this ledger already carries,
+// measured a second time: collapsing a cascade EXPOSES errors as well as
+// removing them, and a note sized on the TS2835 line alone would have read as
+// "155 minus 121 = 34" and been wrong in both directions.
+//
 // SINCE MEASURED, across this whole ledger rather than on that one package
 // (#11491, at e47d5ef61, by dropping each entry's `"**/*.test.ts"` exclusion
 // and reading `check:type-source-resolution`): 14 of the 18 entries that HAVE
@@ -871,64 +891,6 @@ const TEST_DEBT = {
       + 'resolves, so budget for a repair being bigger than its TS2835 line suggests. '
       + 'RECORDED EXACTLY, no bootstrap margin: this layer has never been gated, so the first new error in '
       + 'it should go red rather than be absorbed.',
-  },
-  '@objectstack/rest': {
-    errors: 155,
-    note: 'RE-TALLIED from tsc at the 155 below (#10821), measured at 951b025e4 with the workspace closure '
-      + 'built by the same command lint.yml runs before this gate, so the composition, the per-file split '
-      + 'and the total are ONE measurement rather than a rescale: TS2835 x72 (NodeNext extensions), '
-      + 'TS7006 x49, TS2550 x16 (`Array.prototype.at` against a `lib` older than es2022 -- all 16 are that '
-      + 'one message), TS2554 x14 (wrong arity, all 14 \'Expected 2-5 arguments, but got 1\'), plus 4 '
-      + 'singletons (TS2769 x2, TS2345, TS6133). 72+49+16+14+4 = 155, which is the recorded number '
-      + 'EXACTLY -- this entry carries no remainder clause because it no longer needs one, and RECORDED '
-      + 'still equals the measurement with no margin. '
-      + 'WHAT THIS REPLACES, and why none of it was rescaled: the old tally read \'TS2835 x67, TS7006 x57, '
-      + 'TS2554 x13, TS2550 x10 (composition as counted at 153; not re-tallied by class at the 155 '
-      + 'below)\'. It summed to 147 with no clause for the remaining 6, so a reader could not tell an '
-      + 'ABRIDGED tally from a SHORT one -- both readings were open and neither was checkable from the '
-      + 'ledger. Both halves are settled here, and only one of them was ever answerable: (a) the 6 are NOT '
-      + 'attributed and never will be. The per-class breakdown at e8db1a230 was not retained, so they are '
-      + 'retired WITH the tally that carried them rather than invented, on this ledger\'s own rule that a '
-      + 'made-up attribution is worse than an admitted gap. (b) 153-vs-155 was never one measurement '
-      + 'disagreeing with itself: 153 was measured at e8db1a230, RECORDED was later lowered onto a '
-      + 'DIFFERENT measurement (155 at 55da611, #6939), and the composition was never re-taken across that '
-      + 'move -- which is precisely what the \'not re-tallied by class\' clause was saying out loud, and '
-      + 'why it was honest rather than sloppy. Rescaling the old numbers onto 155 would have been wrong in '
-      + 'any case, and the re-tally shows it: the shape moved in BOTH directions -- TS2835 67 -> 72, '
-      + 'TS2550 10 -> 16 and TS2554 13 -> 14 rose while TS7006 57 -> 49 FELL -- and two classes the old '
-      + 'tally never named (TS2769, TS2345) are in the pile now. '
-      + 'Graduated from DEBT in #6905 -- this TEST_DEBT '
-      + 'entry is now the sole gate on the package\'s test layer (src moved to `turbo run typecheck`). '
-      + 'Measured '
-      + '105 -> 136 (5ab08428) -> 143 (77adf29, hours later the same day) -> 153 (e8db1a230) -> 155 '
-      + '(55da611) -> still 155 (951b025e4, the re-tally above). Read the '
-      + 'top-of-ledger NodeNext note before sizing this one: TS2835 and the implicit-any pile it causes '
-      + 'are 121 of the 155, and '
-      + 'they are 72 IMPORT-LINE repairs, not 121: the 72 TS2835 sit on 72 distinct lines across 64 files '
-      + 'but name only 11 distinct targets, and 49 of the 72 are the single `./rest-server` import. Every '
-      + 'one of the 22 files carrying a TS7006 also carries a TS2835 -- no exceptions -- so there is no '
-      + 'implicit-any in this layer without a broken import above it, and 31 of the 49 are one parameter '
-      + 'name (`r`). Budget for the cli lesson (#8612) that collapsing a cascade can EXPOSE errors as well '
-      + 'as remove them. Concentrated at the top and flat after: src/rest.test.ts x38 (TS7006 x21, '
-      + 'TS2550 x11, TS2835 x4, TS2345 x1, TS6133 x1) and no other file above x5. '
-      + 'Of the +10 that then bumped 153 to a bootstrap-margin RECORDED 163, '
-      + '8 are attributable to three test files that '
-      + 'window added -- rest-meta-save-receipt-envelope.test.ts x4 (#5265 / PR #5926), '
-      + 'meta-item-envelope.test.ts x2 (#5563 / PR #5895), '
-      + 'analytics-dataset-unlisted-refusal-envelope.test.ts x2; the remaining 2 landed in files that '
-      + 'already existed and are NOT attributed further, because the pre-merge per-file counts were not '
-      + 'retained and a made-up attribution is worse than an admitted gap. This is also the '
-      + 'fastest-moving entry in either ledger, and it is '
-      + 'the one that proved the gate works: #5278\'s own PR went red in CI on it, because a `pull_request` '
-      + 'run builds the branch MERGED INTO main and three rest-touching PRs had landed since the sweep. A '
-      + 'ledger number is always a number about a moment. RECORDED 163 stood as that bootstrap margin (+10 '
-      + 'over 153 measured at e8db1a230 and re-confirmed at 153 an hour later at 77c7c884b) until #6939 '
-      + '(a surplus finding filed right after the #6905 DEBT graduation) re-measured tsc at 155 -- an 8-error '
-      + 'surplus the margin had been silently absorbing, and #7038 caught the note\'s "Also in DEBT." sentence '
-      + 'going stale in the same graduation. Lowered 163 -> 155 at 55da611 (#6939, #7038): RECORDED now '
-      + 'equals the exact measurement, no margin, so the next new error here goes red immediately -- a '
-      + 'bootstrap margin can be re-established deliberately later if that slack is wanted again '
-      + '(#5278 option A).',
   },
   '@objectstack/plugin-auth': {
     errors: 97,

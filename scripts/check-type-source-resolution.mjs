@@ -319,9 +319,35 @@ const KNOWN_DIST_RESOLVED_TYPE_IMPORTS = {
     '@objectstack/core', '@objectstack/formula', '@objectstack/metadata-core', '@objectstack/objectql',
     '@objectstack/platform-objects', '@objectstack/spec', '@objectstack/types',
   ],
+  // #12542: `packages/rest` had NO tsc program compiling any of its 149 test
+  // files, and its new `tsconfig.test.json` (the #5286 sibling route) is the
+  // first one that does. The six deps after `@objectstack/core` here arrive
+  // from that program, exactly as `@objectstack/client`'s and
+  // `@objectstack/trigger-record-change`'s test-program deps do above.
+  //
+  // ⚠️ This is a program-set widening and its numbers are stated, per this
+  // registry's own rule: before, at 5fbd58e0d, `--list` reported 93 programs /
+  // 77 packages, 54 entries, 233 pairs; after, 94 programs / 77 packages, 54
+  // entries, 239 pairs. +1 program, +0 entries, +6 pairs, all six in this one
+  // package and all six reached only through `tsconfig.test.json`.
+  //
+  // Why the entry and not `paths` rules, which is what this gate's failure text
+  // asks for: MEASURED both ways on the same checkout. `paths` redirecting
+  // these six to source puts their `src` trees in the program and takes the
+  // test layer from 37 errors to 42 — the +5 being TS6133 in
+  // `../plugins/plugin-hono-server/src/{hono-plugin,current-user-endpoints}.ts`
+  // and `../drivers/driver-sql/src/sql-driver.ts`, i.e. OTHER packages' source
+  // billed to `packages/rest/test-typecheck-debt.json`, where they would then
+  // red on those packages' PRs. It would also make the type program diverge
+  // from the runtime one: `packages/rest/vitest.config.ts` aliases exactly two
+  // of the six (`plugin-hono-server`, `service-datasource`) to source and
+  // resolves the other four through `dist/`, so blanket `paths` here is not
+  // fidelity to vitest either.
   '@objectstack/rest': [
-    '@objectstack/core', '@objectstack/metadata-core', '@objectstack/objectql',
-    '@objectstack/observability', '@objectstack/platform-objects', '@objectstack/service-package',
+    '@objectstack/core', '@objectstack/driver-sql', '@objectstack/metadata',
+    '@objectstack/metadata-core', '@objectstack/objectql', '@objectstack/observability',
+    '@objectstack/platform-objects', '@objectstack/plugin-hono-server', '@objectstack/plugin-security',
+    '@objectstack/service-analytics', '@objectstack/service-datasource', '@objectstack/service-package',
     '@objectstack/spec', '@objectstack/types',
   ],
   '@objectstack/runtime': [
