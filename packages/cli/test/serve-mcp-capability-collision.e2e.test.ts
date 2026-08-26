@@ -233,12 +233,26 @@ function boot(env: Record<string, string | undefined>, waitFor: RegExp): Promise
     const timer = setTimeout(() => {
       if (settled) return;
       settled = true;
-      rejectBoot(new Error(`serve never printed ${waitFor}\n--- stdout ---\n${out.slice(-4000)}\n--- stderr ---\n${err.slice(-4000)}`));
+      rejectBoot(new Error(`serve never printed ${waitFor} (child-reported bound port: ${boundPort(out + err) ?? 'NEVER PRINTED'}; this file reserved ${port})\n--- stdout ---\n${out.slice(-4000)}\n--- stderr ---\n${err.slice(-4000)}`));
     }, 150_000);
 
     const onOutput = () => {
       bootOutput = err;
-      if (!settled && waitFor.test(out + err)) {
+      if (settled) return;
+      // ⭐ #12526: the child is the authority on which port it bound, so read it
+      // back before handing this boot to assertions that will use `port`.
+      const bound = boundPort(out + err);
+      if (bound !== null && bound !== port) {
+        settled = true;
+        clearTimeout(timer);
+        rejectBoot(portDriftError(port, bound, out, err));
+        return;
+      }
+      // `bound !== null` is part of the gate, not an optimisation: resolving on
+      // `waitFor` alone would let a boot through before the child had said which
+      // port it took, and the drift check would then be a no-op on an already
+      // settled promise. Every marker below arrives with or before the banner.
+      if (bound !== null && waitFor.test(out + err)) {
         settled = true;
         clearTimeout(timer);
         resolveBoot(child);
@@ -260,6 +274,63 @@ function boot(env: Record<string, string | undefined>, waitFor: RegExp): Promise
       rejectBoot(new Error(`serve exited ${code} before ${waitFor}\n--- stdout ---\n${out.slice(-4000)}\n--- stderr ---\n${err.slice(-4000)}`));
     });
   });
+}
+
+/**
+ * The port the CHILD says it bound — read out of the child's OWN output, never
+ * out of what this file reserved (#12526, and #12441 ruling 2 before it).
+ *
+ * ## Why this file needs it at all
+ *
+ * The spawn below passes `--dev`, and `serve.ts` reads
+ * `portAutoShiftAllowed = flags.dev || NODE_ENV === 'development'` — `flags.dev`
+ * ALONE opens the auto-select branch, whatever `NODE_ENV` is. So a port taken
+ * between `randomPort()`'s bind probe and this spawn does NOT fail the boot the
+ * way it does in `serve-node-env-production-default.e2e.test.ts` (no `--dev`
+ * there, so unset `NODE_ENV` defaults to production and a taken port is a hard
+ * `exit 1` that `portContentionError()` can name). Here `getAvailablePort()`
+ * silently hops the child onto the next free port and it reports itself READY.
+ *
+ * That is the strictly worse direction: a GREEN boot on the wrong port. Every
+ * request this file makes afterwards goes to `port` — the port it reserved and
+ * no longer owns — so it measures whatever else took it. Measured on this tree
+ * with a neighbour holding the reserved port: reserved 34259, child bound
+ * 34260, boot green, and the file's own next request was answered
+ * `{"iAm":"A NEIGHBOURING AGENT DEV SERVER, not os serve"}`.
+ *
+ * ⚠️ The `--dev` responsible has been on this spawn line since `83e6016fa` — it
+ * long predates #11707/#12459, which changed `NODE_ENV` and never touched it.
+ * This was never read, not newly introduced.
+ *
+ * Two patterns because either one alone can be absent: the structured log obeys
+ * `OS_LOG_LEVEL`, and the banner line is what survives when it does not.
+ */
+function boundPort(output: string): string | null {
+  const match = /HTTP server started successfully[^\n]*?"port":\s*(\d+)/.exec(output)
+    ?? /API:\s+http:\/\/localhost:(\d+)/.exec(output);
+  return match ? match[1] : null;
+}
+
+/**
+ * A lost port race, said out loud — the failure this file used to hide behind a
+ * green boot (#12526).
+ */
+function portDriftError(reserved: string, bound: string, out: string, err: string): Error {
+  return new Error(
+    `PORT DRIFT: this file reserved port ${reserved}, but the child bound ${bound}.\n`
+    + `\`os serve -p ${reserved} --dev\` passes \`--dev\`, so \`serve.ts\`'s `
+    + `\`portAutoShiftAllowed = flags.dev || NODE_ENV === 'development'\` opened the auto-select `
+    + `branch and \`getAvailablePort()\` hopped the child off the port that was asked for. The `
+    + `boot SUCCEEDED — on the wrong port.\n`
+    + `⛔ Something else took ${reserved} between \`randomPort()\`'s bind probe and the spawn. That `
+    + `is a HOST race (several agents share one container), not a verdict about the code under `
+    + `test — but it is NOT harmless here: every assertion below talks to ${reserved}, which is `
+    + `now that other process, so continuing would measure a stranger rather than this boot.\n`
+    + `⛔ Do not "fix" this by following the child to ${bound}: the point is that the port this `
+    + `file uses and the port the child bound must be the SAME port. Re-run this file in `
+    + `isolation; if it reproduces there, the port is genuinely held.\n`
+    + `--- stdout ---\n${out.slice(-4000)}\n--- stderr ---\n${err.slice(-4000)}`,
+  );
 }
 
 async function stop(child: ChildProcessWithoutNullStreams): Promise<void> {
