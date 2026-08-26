@@ -148,7 +148,7 @@ describe('Plugin Lifecycle Advanced Schemas', () => {
         // document for whoever hits it. Assert the load-bearing clauses, not
         // the byte string.
         const message = result.success ? '' : result.error.issues[0]?.message ?? '';
-        expect(message).toContain('was removed');
+        expect(message).toContain('were removed');
         expect(message).toContain('#12340');
         expect(message).toContain('ADR-0049');
         expect(message).toMatch(/memory fallback|in-memory Map/);
@@ -163,7 +163,7 @@ describe('Plugin Lifecycle Advanced Schemas', () => {
       const result = HotReloadConfigSchema.safeParse({ stateStrategy: 'dsik' });
       expect(result.success).toBe(false);
       const message = result.success ? '' : result.error.issues[0]?.message ?? '';
-      expect(message).not.toContain('was removed');
+      expect(message).not.toContain('were removed');
       expect(message).not.toContain('#12340');
     });
 
