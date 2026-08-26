@@ -51,16 +51,29 @@
  * in `@objectstack/runtime`'s `/actions` domain, which is where a caller and a
  * resolvable object set exist to name.
  *
- * ## Relationship to the flow twin — one contract, two implementations, on record
+ * ## Relationship to the flow twin — ONE implementation now (#12350)
  *
  * `packages/services/service-automation/src/flow-activation-store.ts` is the
- * same store one tier up, landed first (#12296). This module deliberately does
- * NOT import it and is not imported by it: `service-automation` does not depend
- * on `@objectstack/objectql`, and the engine must not depend on a service, so
- * neither direction is available today. What holds the two together is the row
- * contract in ADR-0126 §4 and the pins on both sides; consolidating them onto
- * one implementation (in a package both may depend on) is filed as its own
- * card rather than smuggled into this leg.
+ * same ledger one tier up, landed first (#12296). The two briefly carried
+ * independent copies of the §4 row contract, because neither direction of
+ * import exists: `service-automation` does not depend on
+ * `@objectstack/objectql`, and the engine must not depend on a service. #12350
+ * closed that by moving the contract into `@objectstack/core` — the package
+ * BOTH already depend on — as
+ * {@link ObjectStoreMetadataActivationStore}.
+ *
+ * ⚠️ So the row semantics are NOT written in this file any more. Read them in
+ * `@objectstack/core`'s `utils/metadata-activation-store.ts`; what stays here
+ * is exactly what is ACTION-specific — the discriminator, the engine's
+ * projection, and the refusal sentences below. The section headings above that
+ * describe the row shape are kept because they are what an action author needs
+ * in the file they open, but the code they describe has one home.
+ *
+ * ⛔ The code home is not the package that declares the OBJECT: `objectql`
+ * does not depend on `@objectstack/platform-objects` and adding that edge
+ * would invert the tiering. Where the object's REGISTRATION lives is a
+ * different question with a different answer (`PlatformObjectsPlugin`, ruled
+ * on #12359) — a composition decision, not a module-import one.
  *
  * ## Why the ENGINE holds the projection
  *
@@ -73,25 +86,31 @@
  * handler registry, so the projection sits beside the map it governs.
  */
 
+import {
+    InMemoryMetadataActivationStore,
+    METADATA_ACTIVATION_TABLE,
+    ObjectStoreMetadataActivationStore,
+    type MetadataActivationRow,
+    type MetadataActivationStore,
+    type MetadataActivationStoreEngine,
+} from '@objectstack/core';
+
 /**
  * The ledger table. A NAME, not an import: this package does not depend on
  * `@objectstack/platform-objects` (which declares the object) and must not —
  * the same posture the flow twin takes, and the same one this engine already
- * takes for `sys_metadata` / `sys_secret`.
+ * takes for `sys_metadata` / `sys_secret`. Re-exported from `@objectstack/core`
+ * so the two consumers cannot spell it differently (#12350).
  */
-export const ACTION_ACTIVATION_TABLE = 'sys_metadata_activation';
-const TABLE = ACTION_ACTIVATION_TABLE;
+export const ACTION_ACTIVATION_TABLE = METADATA_ACTIVATION_TABLE;
 
 /**
  * The ledger's `metadata_type` discriminator for this consumer. Every read and
- * write here is scoped by it: the ledger is generic (ADR-0126 §4) and this
- * module never assumes it owns the table — flow rows share it today, permission
- * rows may later.
+ * write is scoped by it: the ledger is generic (ADR-0126 §4) and this module
+ * never assumes it owns the table — flow rows share it today, permission rows
+ * may later.
  */
 const METADATA_TYPE = 'action';
-
-/** Infrastructure rows, not tenant data — the `sys_metadata_activation` posture. */
-const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] } as const;
 
 /**
  * [ADR-0126 §4] One packaged action's install-level activation row, as the
@@ -99,15 +118,12 @@ const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] } as const;
  * `package_id` / `organization_id` / `active`; `metadata_type` is fixed to
  * `'action'` by the store and `organization_id` is never written on this line
  * (§5), so those two never reach the projection.
+ *
+ * An alias of the shared row (#12350): the ADR declares ONE row shape, so a
+ * separate declaration here could only ever drift from it. `name` here is the
+ * action's declarative machine name (ADR-0110 D1).
  */
-export interface ActionActivationRow {
-    /** The packaged action's declarative machine name (ADR-0110 D1). */
-    name: string;
-    /** The package that ships the base artifact. */
-    packageId: string;
-    /** Is the packaged action armed for this installation. */
-    active: boolean;
-}
+export type ActionActivationRow = MetadataActivationRow;
 
 /**
  * [ADR-0126 §8] The durable off-switch for packaged actions.
@@ -116,12 +132,7 @@ export interface ActionActivationRow {
  * store attached, or a store with no rows, dispatches exactly as a stock boot
  * always has.
  */
-export interface ActionActivationStore {
-    /** Every install-level action activation row (`organization_id IS NULL`). */
-    list(): Promise<ActionActivationRow[]>;
-    /** Insert or update the install-level row for one packaged action. */
-    setActive(row: ActionActivationRow): Promise<void>;
-}
+export type ActionActivationStore = MetadataActivationStore;
 
 /**
  * The exact slice of the engine this store needs: a keyed read, an insert and
@@ -129,11 +140,7 @@ export interface ActionActivationStore {
  * bit, it never removes the row (see the module header), and demanding only
  * what is used keeps every test double honest about that.
  */
-export interface ActionActivationStoreEngine {
-    find(object: string, options?: any): Promise<any[]>;
-    insert(object: string, data: any, options?: any): Promise<any>;
-    update(object: string, data: any, options?: any): Promise<any>;
-}
+export type ActionActivationStoreEngine = MetadataActivationStoreEngine;
 
 /**
  * In-memory {@link ActionActivationStore} — process-lifetime only, for tests
@@ -141,115 +148,26 @@ export interface ActionActivationStoreEngine {
  * off-switch: what it lacks versus the ObjectStore implementation is
  * DURABILITY, which is exactly the property ADR-0126 §6 wall 3 asks for.
  */
-export class InMemoryActionActivationStore implements ActionActivationStore {
-    private readonly rows = new Map<string, ActionActivationRow>();
-
-    async list(): Promise<ActionActivationRow[]> {
-        return [...this.rows.values()];
-    }
-
-    async setActive(row: ActionActivationRow): Promise<void> {
-        this.rows.set(row.name, { ...row });
-    }
-}
+export class InMemoryActionActivationStore extends InMemoryMetadataActivationStore {}
 
 /**
  * Durable {@link ActionActivationStore} backed by the `sys_metadata_activation`
  * object (ADR-0126 §4).
+ *
+ * A binding, not an implementation (#12350): it fixes the `metadata_type` and
+ * nothing else — the §4 row semantics live once, in `@objectstack/core`. The
+ * one-argument constructor is deliberate: a caller that had to pass the
+ * discriminator could pass the wrong one, and the action leg has exactly one
+ * correct value.
  *
  * All access uses a system context: the object is `managedBy: 'engine-owned'`
  * and declares `apiMethods: ['get', 'list']`, i.e. the generic data API cannot
  * write it at all — these rows are written by the ADR-0126 enable/disable door
  * and by nothing else.
  */
-export class ObjectStoreActionActivationStore implements ActionActivationStore {
-    constructor(private readonly engine: ActionActivationStoreEngine) {}
-
-    /**
-     * Every install-level action row. Read once at boot to hydrate the
-     * projection.
-     *
-     * Rows carrying an `organization_id` are SKIPPED, not merged: the per-org
-     * dimension is reserved and unwritten on this line (§5), so a row with one
-     * set was not written by this code. Reading it as install-level would apply
-     * one organization's choice to the whole installation — the #10243
-     * direction, arrived at from the read side. A future per-org consumer adds
-     * its own scoped read; it does not widen this one.
-     */
-    async list(): Promise<ActionActivationRow[]> {
-        const rows = await this.engine.find(TABLE, {
-            where: { metadata_type: METADATA_TYPE },
-            context: SYSTEM_CTX,
-        });
-        if (!Array.isArray(rows)) return [];
-        const out: ActionActivationRow[] = [];
-        for (const row of rows) {
-            const r = row as { name?: unknown; package_id?: unknown; active?: unknown; organization_id?: unknown };
-            if (r.organization_id != null) continue;
-            if (typeof r.name !== 'string' || !r.name) continue;
-            out.push({
-                name: r.name,
-                packageId: typeof r.package_id === 'string' ? r.package_id : '',
-                // The column defaults to `true`; only an explicit `false`
-                // disarms. A driver that round-trips booleans as 0/1
-                // (SQLite/libsql) is read through the same `=== false || === 0`
-                // test the flow twin uses, so a `0` is not mistaken for `true`.
-                active: !(r.active === false || r.active === 0),
-            });
-        }
-        return out;
-    }
-
-    /**
-     * Insert or update the install-level row for one packaged action.
-     *
-     * Read-then-write rather than a blind upsert because the object's
-     * uniqueness is a DECLARED index (`unique: 'organization'`), not a primary
-     * key this store controls: there is no id to collide on, so an
-     * insert-and-catch could not tell "already there" from a real store
-     * failure.
-     *
-     * ⛔ `organization_id` is not in either payload. Omitting it is what leaves
-     * it NULL, which is the whole of §5's install-level scope on this line.
-     */
-    async setActive(row: ActionActivationRow): Promise<void> {
-        const existing = await this.engine.find(TABLE, {
-            where: { metadata_type: METADATA_TYPE, name: row.name },
-            context: SYSTEM_CTX,
-        });
-        const current = Array.isArray(existing)
-            ? existing.find((r: any) => r?.organization_id == null)
-            : undefined;
-
-        if (current && (current as { id?: unknown }).id != null) {
-            await this.engine.update(
-                TABLE,
-                { id: (current as { id: unknown }).id, active: row.active, package_id: row.packageId },
-                { context: SYSTEM_CTX },
-            );
-            return;
-        }
-
-        await this.engine.insert(
-            TABLE,
-            {
-                metadata_type: METADATA_TYPE,
-                name: row.name,
-                package_id: row.packageId,
-                active: row.active,
-            },
-            { context: SYSTEM_CTX },
-        );
-    }
-
-    /**
-     * Read the backing table once so a misconfiguration surfaces at BOOT rather
-     * than as a failed toggle later. Throws the driver error verbatim — `no
-     * such table: sys_metadata_activation` means the object was never
-     * registered (or its schema never synced) in this composition.
-     */
-    async probe(): Promise<void> {
-        await this.engine.find(TABLE, { where: {}, limit: 1, context: SYSTEM_CTX });
+export class ObjectStoreActionActivationStore extends ObjectStoreMetadataActivationStore {
+    constructor(engine: ActionActivationStoreEngine) {
+        super(engine, METADATA_TYPE);
     }
 }
 

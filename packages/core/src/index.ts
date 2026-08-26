@@ -58,6 +58,15 @@ export * from './utils/filter-tokens.js';
 // on each other.
 export * from './utils/temporal-comparand.js';
 
+// [#12350 / ADR-0126 §4] THE activation-ledger row contract, parameterized by
+// `metadata_type`. Same reason as the two entries above: its consumers —
+// `@objectstack/objectql` (packaged actions) and
+// `@objectstack/service-automation` (packaged flows) — cannot import each
+// other in either direction, and this is the package both already depend on.
+// The ledger's OBJECT stays declared in `@objectstack/platform-objects`; only
+// the row contract lives here, reached by table NAME.
+export * from './utils/metadata-activation-store.js';
+
 // Export the shared single-record 404 (#4435/#5138, moved down here in #7867) —
 // the one `RECORD_NOT_FOUND` envelope `protocol.updateData`/`deleteData`,
 // `callData`'s ObjectQL fallback and the engine's own by-id write gate answer
