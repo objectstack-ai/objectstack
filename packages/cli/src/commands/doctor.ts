@@ -528,11 +528,59 @@ export function environmentSourcesCheck(
  * here is still listed by the fix list (bare, without prose) rather than
  * silently dropped — the advice can go terse, never stale.
  */
+/**
+ * The `plugins[]`-wired multi-org runtime this command NAMES in its posture
+ * advice, spelled once so the sentence below cannot drift in silence (#12464).
+ *
+ * ⚠️ This is the THIRD declaration of this literal, and that is an accepted
+ * cost rather than an oversight. The roster KEY in `PLATFORM_PLUGIN_WIRED_RUNTIMES`
+ * is one; `Serve.ORGANIZATIONS_RUNTIME_PKG` (`serve.ts`, #11614) is another.
+ * What this const buys is NOT fewer copies — it is that this copy can no longer
+ * drift unnoticed: `doctor-organizations-message-spelling.test.ts` pins the
+ * RENDERED bullet against this value and pins this value as a roster key, so a
+ * roster rename turns a test red instead of leaving `os doctor` printing a
+ * package name that boot no longer resolves with every gate green. Three
+ * declarations is structurally worse than two; a duplicate that can drift
+ * silently and one that cannot are different things.
+ *
+ * ── Why this does not read the name from the spec roster ─────────────────
+ *
+ * Because the roster cannot supply it. `PLATFORM_PLUGIN_WIRED_RUNTIMES` is
+ * keyed BY package name, and its row type `PlatformPluginWiredRuntime` carries
+ * no `package` field — deliberately: *"here the package name is the KEY, so it
+ * cannot be `null` and cannot drift from a duplicate field"*. Its own header
+ * settles the rest: *"What this roster deliberately is NOT: a resolution
+ * registry … the rows record that fact as prose provenance, they do not encode
+ * it as a lookup."* Both rows are `edition: 'enterprise'`, so nothing
+ * machine-readable selects this one. The roster VALIDATES a name you already
+ * hold; it does not hand you one — which is why the pin reads it as a KEY
+ * CHECK, the only first-class read it actually offers.
+ *
+ * ⛔ Do NOT replace this with an import of `Serve.ORGANIZATIONS_RUNTIME_PKG`: a
+ * diagnostic command taking a dependency on a `serve` command's export, in
+ * order to spell a package name, is a worse coupling than the duplication it
+ * removes.
+ *
+ * ── Deletion condition ───────────────────────────────────────────────────
+ *
+ * This const goes away the day a shared tenancy-hint table lands (tracked at
+ * #12492). The whole `TENANCY_POSTURE_FIX_HINTS` table below is duplicated
+ * between here and `serve.ts` — `single` and `group` byte-identical too, and
+ * those two touch no roster, so nothing could ever notice them drift. One
+ * shared table single-sources all three sentences AND this package name at
+ * once. This is a step toward that, not the end state.
+ *
+ * Exported for the same reason `serve` exposes its own as a static: one
+ * declaration, two readers — the sentence and the pin. A pin that read a copy
+ * of this value instead of this value would be pinning the test against itself.
+ */
+export const ORGANIZATIONS_RUNTIME_PKG = '@objectstack/organizations';
+
 const TENANCY_POSTURE_FIX_HINTS: Readonly<Record<string, string>> = {
   single: 'one organization, no organization wall — the default',
   group: 'organization wall enforced by the open engine, one shared database',
   isolated:
-    'organization wall + the enterprise @objectstack/organizations runtime '
+    `organization wall + the enterprise ${ORGANIZATIONS_RUNTIME_PKG} runtime `
     + "(the legacy spelling 'multi' is accepted and normalizes to this)",
 };
 
