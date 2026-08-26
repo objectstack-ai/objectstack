@@ -1,7 +1,7 @@
 # 平台读数事实表(references —— 按需加载)
 
 出处:主文件「平台读数纪律」。本表 = GitHub API / 工具行为的**实测事实**,做对应操作的那
-一刻查阅; 原则住主文件。⛔ 不引用 issue 编号 —— 每条自含失效模式与边界。
+一刻查阅;原则住主文件。⛔ 不引用 issue 编号 —— 每条自含失效模式与边界。
 
 ## 队列成员资格与 auto-merge
 
@@ -52,7 +52,7 @@
   死假说:auto-merge **不会**在已绿 PR 上静默空转(恢复窗口里两个全绿 PR 挂上即合)。
 - enable 后的验证序列:① 先验队列分支(给条目 ~20–30s 建出);② 分支在 ⇒ 结束,⛔ 不翻转;
   ③ 等待后仍缺席**且队列已见 churn**(更新的条目建出了分支而你的没有 —— 截断下单纯
-  缺席不充分; 首挂静默不入队实测存在,churn 后翻转即愈)⇒ 翻转一次(`disable` → `enable`),仍
+  缺席不充分;首挂静默不入队实测存在,churn 后翻转即愈)⇒ 翻转一次(`disable` → `enable`),仍
   以 timeline 事件验证; ④ ⛔ enable 与它的队列验证之间永不插 `disable` ——「入队」webhook 可
   能乱序迟到,armed 窗口里补的 disable 会撤掉已发生的真实入队。
 - **队列踢出先认签名再决定重投**:已知 flaky 核对失败签名一致 ⇒ 原样重投;止血修复合入
@@ -195,7 +195,7 @@
 
 - **读数五坑**:`cd X && cmd` 会短路(路径不存在时命令在当前仓继续执行,产出假读数)—— 跨
   仓一律 `git -C <path>`; `git grep -c <pat> | wc -l` 数文件数不是命中数;裸名 grep 被幸存家族当子
-  串命中 —— 退役核验带引号精确名, 更硬判据是查声明
+  串命中 —— 退役核验带引号精确名,更硬判据是查声明
   式(`^(export )?(const|type|interface) <Name>\b`)而非查提及;浅检出上的历史读数不可信
   (`merge-base --is-ancestor` 假「非祖先」、`rev-list --count` 截断、`branch -r --contains` 零输出)——
   先 `--deepen` 再判,或走 REST `compare`; **容器里没有 `gh`**(实测 `command -v gh` 退出 1,两个标准路
@@ -271,9 +271,9 @@
   两侧收据做算术;双方占同一编号是常态(各取当时 max+1),重编号后进侧。
 - **容器重启杀死在飞 dev,现场三态判读**:① 分支已推 + PR 已开 ⇒ 只欠验收(CI 重跑 + 复
   核,不动代码); ② 死在 regen 中途(未提交全是生成物、merge commit 已在)⇒ PM 直接续作 ——
-  build → 整链 regen → 生成物门禁全绿 → 提交推送, 恢复 commit 带 `Recovery commit:` 前缀留审
+  build → 整链 regen → 生成物门禁全绿 → 提交推送,恢复 commit 带 `Recovery commit:` 前缀留审
   计;⚠️ 有的现场 regen 一件没跑,推送前先跑生成物门禁别赌; ③ 死在源码编辑中途 ⇒ 先
-  读 diff 判完整性 —— docblock 写全动机/失效模式/判据的,PM 可代跑终验后提交, 写一半意图
+  读 diff 判完整性 —— docblock 写全动机/失效模式/判据的,PM 可代跑终验后提交,写一半意图
   不明的 ⛔ 不代提交、记进交接;dev 临时目录(`.os-scratch/` 一类)是工作物不是交付物,清
   掉,⛔ 不进 feature PR。
 - **零提交的探针分支不是在飞工作**:容器发不出分支删除 refspec(实测
@@ -303,12 +303,12 @@
   `out of scope: #N` / `#N remains open`)。实测边界三条:关键词只绑**同一行**的 `#N`;动名
   词(closing/fixing)不是关键词;行内反引号里的关键词不触发(code span 实测不建闭合链接;围栏
   块未独立实测,按同规则对待但留待复测)。
-- **PR body 与 squash commit message 是两个独立解析源**(commit 干净 ≠ body 干净, 只查 commit 会
+- **PR body 与 squash commit message 是两个独立解析源**(commit 干净 ≠ body 干净,只查 commit 会
   漏);误关的卡以 `completed` 状态对一切「只看 open」的过滤与巡检隐身,无任何机械守卫覆盖
   这条路径 —— 消费侧检查 = 合并后读 `closed_by_pull_requests`(在复核清单)。
 
 ## 断粮检测与跨墙恢复细则(5 小时用量墙)
 
 原则、定时器选型(⛔ 不用 send_later 链)与恢复 playbook 在主文件;事实补遗:`npx ccusage blocks` 容
-器内可用(读本地会话记录),报当前 5 小时窗口边界/剩余与燃烧率; 盲区:窗口起点是本地推
+器内可用(读本地会话记录),报当前 5 小时窗口边界/剩余与燃烧率;盲区:窗口起点是本地推
 断的近似值;撞墙报文形如「limit reached, resets at HH:MM」(重置时刻只在此刻可得)。

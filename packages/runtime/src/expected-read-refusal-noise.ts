@@ -54,19 +54,55 @@
  *   * it withholds ONLY the expected fault — the line must name one of the
  *     caller's declared tables AND carry that same table's `no such table`
  *     reason. Any other table, any other reason, any other level and any other
- *     logger method is forwarded to the real console untouched;
+ *     logger method is forwarded untouched to the sink that would have
+ *     received it;
  *   * it COUNTS what it withheld, per table and per channel, and the caller
  *     asserts those counts. A capture nobody asserts is a mute.
+ *
+ * ⚠️ [#11569] "Forwarded untouched" is NOT the same as "loud", and the two
+ * channels differ on exactly that point. Measured, not inferred (pinned by
+ * `expected-read-refusal-noise.channel-asymmetry.test.ts`):
+ *
+ *   * `captureDriver`'s pass-through calls `console.warn` / `console.error`
+ *     DIRECTLY, so an unrecognised driver refusal reaches a reader whatever
+ *     the kernel's log level is;
+ *   * `captureEngine`'s pass-through calls the ENGINE'S OWN logger — the one
+ *     the kernel built from its `logger` config and handed over by reference
+ *     — so it inherits that logger's level. `ObjectLogger.write` returns
+ *     early unless `error` is enabled, which it is not whenever the
+ *     configured level ranks ABOVE `error` (`fatal`, `silent`).
+ *
+ * ⇒ So the engine channel's loudness is the CALLER'S, not this module's, and
+ * it is not uniform across this capture's consumers: the ones that boot
+ * `new ObjectKernel({ logger: { level: 'silent' } })` see an unrecognised
+ * ENGINE frame nowhere at all, while the ones that leave the kernel at its
+ * default (`info`) still see it. ⛔ Do not read the silent-fixture case as the
+ * rule for all of them, and do not read a quiet engine channel in one fixture
+ * as evidence about another.
+ *
+ * ⇒ Read the guarantee per channel: the DRIVER channel is pinned in both
+ * directions (withheld-when-expected, loud-when-not); the ENGINE channel is
+ * pinned in one (withheld-when-expected, counted, asserted) and is only as
+ * loud as the fixture's own kernel logger in the other. The driver half of the
+ * same fault stays loud, which is where this class of fault can still be
+ * picked up.
  *
  * ⛔ The engine gate is deliberately the narrowest of the two: a frame is
  * withheld only when it sits directly above a driver refusal this capture
  * already recognised ({@link ExpectedReadRefusalCapture.pending}). A
  * `DATABASE_ERROR` on one of the same tables arising from any OTHER cause is
  * not recognised by the driver sink, so its frame is not withheld here either
- * — it reaches the log with both halves intact.
+ * — this capture never swallows it. Its DRIVER half reaches the log intact,
+ * on the direct console sink above. Its ENGINE half is handed back to the
+ * engine's own logger, so whether a reader sees it is that logger's decision
+ * and not this module's — under `logger: { level: 'silent' }` it is dropped
+ * (see the asymmetry note above, and {@link captureExpectedReadRefusals}'s
+ * `captureEngine`).
  *
- * ⛔ Nothing here reads or relaxes a fixture's own assertions. This is the
- * console side-effect only.
+ * ⛔ Nothing here reads or relaxes a fixture's own assertions. This is the LOG
+ * side-effect only — and "the log" means `console` on the driver channel and
+ * the engine's own logger on the engine channel, which is the whole of the
+ * asymmetry above.
  *
  * ## Why a shared module rather than a copy per fixture
  *
@@ -138,6 +174,11 @@ export interface ExpectedReadRefusalCapture {
    * method resolves to the engine's own. ⛔ Call it before the expected reads
    * happen; the engine's logger is a private field with no setter, which is
    * the same access `engine-readonly-when-parent.test.ts` established.
+   *
+   * ⚠️ [#11569] Its PASS-THROUGH is quieter than
+   * {@link ExpectedReadRefusalCapture.captureDriver}'s: an unrecognised frame
+   * goes to the engine's own logger and is dropped under a kernel configured
+   * above `error`. The implementation carries the full note.
    */
   captureEngine(engine: unknown): void;
 }
@@ -217,6 +258,35 @@ export function captureExpectedReadRefusals(
       (driver as { logger: unknown }).logger = sink;
     },
 
+    /**
+     * ⚠️ [#11569] Where a NON-matching frame actually goes, and why it is not
+     * the same place `captureDriver`'s goes.
+     *
+     * The fall-through below is `target.error(msg, err, meta)` — `target` is
+     * the ENGINE'S OWN logger, i.e. the `ObjectLogger` the kernel built from
+     * its `logger` config and handed to the engine by reference
+     * (`core/src/kernel.ts` → `hostContext.logger`). So the pass-through
+     * inherits that logger's level: `ObjectLogger.write` returns early unless
+     * `error` is enabled, and it is not whenever the configured level ranks
+     * above `error` — `fatal` or `silent`. Fixtures that boot with
+     * `logger: { level: 'silent' }` therefore see an unrecognised engine frame
+     * NOWHERE. `captureDriver`'s sink, by contrast, calls `console` directly
+     * and is loud regardless. Both directions are pinned in
+     * `expected-read-refusal-noise.channel-asymmetry.test.ts`.
+     *
+     * ⛔ Deliberately NOT "repaired" by pointing this branch at `console`:
+     * that makes every consuming fixture — including two in another lane's
+     * packages — newly loud on a channel they expect to be quiet, to recover a
+     * diagnosis no test has yet been shown to have lost. Ruled a DOCUMENTED
+     * limit rather than a defect (#11569); a loud-channel mechanism gets its
+     * own card if an unrecognised engine frame ever actually costs one.
+     *
+     * ⛔ What this does NOT weaken: a RECOGNISED frame is still withheld here,
+     * still counted per table, and still asserted through
+     * {@link ExpectedReadRefusalCapture.silentChannels} — that half is a pin,
+     * and the driver channel carrying the same fault stays loud in both
+     * directions.
+     */
     captureEngine(engine: unknown): void {
       const base = (engine as { logger: Record<string, any> }).logger;
       (engine as { logger: unknown }).logger = new Proxy(base, {
@@ -474,9 +544,12 @@ export function captureExpectedCrossFieldRefusalNoise(
  * is process-global and sits in the path of everything the worker writes —
  * the reporter's own diagnostics included — for as long as it is installed.
  * Twenty-one invariant per-boot frames that carry no per-test signal do not
- * buy a third capture mechanism of that reach, and #11569 (this module's
- * engine pass-through already lands in a silenced logger) means the two
- * mechanisms here want repairing before a third is stacked on them.
+ * buy a third capture mechanism of that reach. #11569 — this module's engine
+ * pass-through lands in the engine's own logger, and is therefore dropped
+ * under exactly the `level: 'silent'` fixtures this section is about — was
+ * ruled a DOCUMENTED limit of the two mechanisms above rather than a repair to
+ * make (see the file header), so it is one more reason not to stack a third
+ * on top of them, and not a repair this section is waiting on.
  *
  * ⛔ Nor is the repair a predicate pointed at `kernel.logger`: the kernel takes
  * a logger CONFIG, builds its own and hands it to the plugin loader and the

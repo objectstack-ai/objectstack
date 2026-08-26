@@ -573,7 +573,7 @@ the segment reaches for no declared type, so there is nothing to suggest.
 See the [Metadata API](/docs/api/metadata-api).  
 **Retry:** `no_retry` — replaying the same request against the same deployment returns the
 same `400`. ⚠️ That is stability, not determinism: the verdict is not a pure function of
-the type segment, and the exemptions below decide whether it fires at all.
+the type segment, and the exemption below decides whether it fires at all.
 
 `PUT /api/v1/meta/fieldz/showcase_task.title` answers `400` with:
 
@@ -589,21 +589,22 @@ the type segment, and the exemptions below decide whether it fires at all.
 ```
 
 <Callout type="warn">
-**Two shapes reach this door and are served, not refused** — neither of them visible in
-the message, so a caller who does not read this entry finds them by collision:
+**One shape reaches this door and is served, not refused** — it is not visible in the
+message, so a caller who does not read this entry finds it by collision:
 
-1. **Compound arity.** A `name` containing `/` exempts the request, because at that arity
-   the `:type` segment carries an **object** name rather than a type claim:
-   `PUT /meta/lead/views/all_leads` is `type='lead'`, `name='views/all_leads'`, and no
-   static contract can enumerate the objects a deployment carries. Residue, stated rather
-   than hidden: `PUT /meta/fieldz/a/b` is therefore **accepted** — at that arity `fieldz`
-   is a claim about an object, not about a metadata type. The exemption is the **arity**,
-   not the name: `PUT /meta/lead/all_leads` is still refused.
-2. **Pre-existing namespace.** If `sys_metadata` already holds rows under that type key,
-   the write proceeds. The **store** decides this, never the caller — the probe runs only
-   after the static verdict has already fired, and it asks whether the *namespace* exists,
-   not whether your item does. This is what keeps rows minted before this refusal existed
-   editable by the tooling that copies and re-saves them.
+- **Pre-existing namespace.** If `sys_metadata` already holds rows under that type key,
+  the write proceeds. The **store** decides this, never the caller — the probe runs only
+  after the static verdict has already fired, and it asks whether the *namespace* exists,
+  not whether your item does. This is what keeps rows minted before this refusal existed
+  editable by the tooling that copies and re-saves them.
+
+A second exemption used to sit beside it and is **retired**: a `name` containing `/` used
+to skip this verdict entirely, because at the compound `/meta/:type/:section/:name` arity
+the `:type` segment carried an **object** name rather than a type claim. Item names may no
+longer contain `/` — they are lowercase snake_case segments, optionally dot-qualified
+(`crm_lead`, `crm_lead.pipeline`), refused at the publish door otherwise — and the compound
+arities are un-mounted. The residue that exemption used to document is closed with it:
+`PUT /meta/fieldz/a/b` is no longer accepted, and no longer reaches this verdict at all.
 
 ⇒ **The same segment can be refused on one deployment and served on another, depending on
 stored state.** A `400` here is a statement about *this* deployment, not a portable
@@ -622,7 +623,7 @@ it.
 **Why it is refused rather than passed through.** A namespace nothing reads and nothing
 serves is not a harmless extra key — it accumulates silently, and every row in it is
 invisible to the tooling that lists, validates and ships metadata. Refusing at the mint
-door is what stops the first row from being written; the exemptions above are what keep
+door is what stops the first row from being written; the exemption above is what keeps
 that refusal from stranding the rows written before it existed.
 
 ⛔ **Not this error:** a segment that *misspells a type the platform declares* —
