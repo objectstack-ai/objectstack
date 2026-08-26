@@ -82,8 +82,19 @@ import { isHumanUserRow } from './audience-posture.js';
 /**
  * Minimal in-memory ql: three tables, `where` matched by equality. Enough for
  * `bootstrapPlatformAdmin`'s seed step, its existing-admin probe and the
- * first-user promotion. `claimSeedOwnership` (best-effort, on the promotion
- * path) short-circuits because this object exposes no `registry`.
+ * first-user promotion.
+ *
+ * Two deliberate omissions, both load-bearing:
+ *
+ *  - **No `update`.** The only caller is the `resync` branch, which this pin
+ *    never asks for. Declaring one anyway would be a fake write verb looser
+ *    than `ObjectQL.update` sitting on a path no assertion covers — so it is
+ *    absent rather than pinned. Its absence also short-circuits
+ *    `claimSeedOwnership` (best-effort on the promotion path) at that
+ *    function's own `typeof ql.update !== 'function'` guard.
+ *  - **`find` honours the caller's `limit`** — applied AFTER the filter, by
+ *    presence, so a bound the caller really passes is not silently ignored by
+ *    a double that answers with more rows than the real engine would.
  */
 function makeQl(userRows: unknown[]) {
   const tables: Record<string, any[]> = {
@@ -96,20 +107,17 @@ function makeQl(userRows: unknown[]) {
     async find(object: string, q: any) {
       const rows = tables[object] ?? [];
       const where = q?.where ?? {};
-      return rows.filter((r) =>
+      const matched = rows.filter((r) =>
         Object.entries(where).every(([k, v]) => {
           if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
           return (r as any)?.[k] === v;
         }),
       );
+      return typeof q?.limit === 'number' ? matched.slice(0, q.limit) : matched;
     },
     async insert(object: string, data: any) {
       (tables[object] ??= []).push({ ...data });
       return { id: data.id };
-    },
-    async update(object: string, data: any) {
-      const row = (tables[object] ?? []).find((r) => (r as any)?.id === data?.id);
-      if (row) Object.assign(row as object, data);
     },
   };
 }
