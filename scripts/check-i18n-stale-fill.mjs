@@ -124,6 +124,37 @@ const at = (p) => join(ROOT, p);
 const BASELINE_PATH = 'scripts/i18n-stale-fill-baseline.json';
 const PACKAGES_DIR = 'packages';
 
+/**
+ * The one `*.generated.ts` in an out-dir that is NOT a translation bundle.
+ *
+ * `os i18n extract --source-hashes` writes `<locale>.source-hashes.generated.ts`
+ * beside the bundles — the provenance sidecar from maintainer ruling #12069
+ * Option A, whose leaves are 16-hex digests of source strings, not prose.
+ *
+ * Excluded by NAME rather than by shape, and this gate's population is the
+ * reason it has to be excluded at all: the discovery groups an out-dir's
+ * `*.generated.ts` files by kind, so without this the three companions form a
+ * fourth "bundle set" with no `en` member. Measured before the exclusion
+ * landed: the gate exits 1 on the first one with "could not be parsed as a
+ * bundle literal" (its refuse-rather-than-skip rule doing its job on a file
+ * that is not a bundle). Had the sidecar happened to parse, the outcome would
+ * have been worse and quieter — one digest per source string means the SAME
+ * path carries the SAME digest in every locale, so condition 1 (>=2 locales
+ * byte-identical) holds for hundreds of paths, and a hex digest is
+ * script-disjoint from `zh-CN` and differs from an absent `en` by more than
+ * case, so conditions 3 and 4 hold too. That is the shape this constant exists
+ * to keep out of the population.
+ *
+ * ⛔ Not a way to shrink what the gate judges: the sidecar contains no
+ * translated leaf, so no leaf leaves this gate's population with it.
+ */
+const PROVENANCE_KIND = 'source-hashes.generated.ts';
+
+/** Is this `<locale>.<kind>` suffix a translation bundle rather than the sidecar? */
+export function isTranslationBundleKind(kind) {
+  return kind !== PROVENANCE_KIND;
+}
+
 /** The locale the extractor copies the source into. `os i18n extract`'s default. */
 const DEFAULT_LOCALE = 'en';
 
@@ -260,7 +291,8 @@ function discoverBundleSets() {
     if (!existsSync(at(out))) continue;
     const wanted = new Set([DEFAULT_LOCALE, ...locales.split(',')]);
     const files = readdirSync(at(out)).filter((f) => f.endsWith('.generated.ts'));
-    for (const kind of [...new Set(files.map((f) => f.replace(/^[^.]+\./, '')))].sort()) {
+    const kinds = [...new Set(files.map((f) => f.replace(/^[^.]+\./, '')))].filter(isTranslationBundleKind).sort();
+    for (const kind of kinds) {
       const members = files
         .filter((f) => f.endsWith(kind))
         .map((f) => ({ locale: f.slice(0, f.length - kind.length - 1), file: `${out}/${f}` }))
@@ -378,6 +410,18 @@ function selfTest() {
   const both = ratchet(['a', 'c'], ['a', 'b']);
   expect('ratchet reports a NEW id', both.added.length === 1 && both.added[0] === 'c');
   expect('ratchet reports a REPAIRED id (ratchet down)', both.removed.length === 1 && both.removed[0] === 'b');
+
+  // The provenance sidecar is not a bundle. Pinned because the discovery groups
+  // an out-dir by filename kind, so a future companion file lands in the
+  // population by default and this is the only thing that keeps it out.
+  expect(
+    'the source-hashes provenance companion is NOT a translation bundle kind',
+    isTranslationBundleKind('source-hashes.generated.ts') === false,
+  );
+  expect(
+    'the real bundle kinds still are',
+    isTranslationBundleKind('objects.generated.ts') && isTranslationBundleKind('metadata-forms.generated.ts'),
+  );
 
   console.log(failures === 0 ? '\ncheck-i18n-stale-fill: self-test OK\n' : `\ncheck-i18n-stale-fill: self-test FAILED (${failures})\n`);
   process.exit(failures === 0 ? 0 : 1);

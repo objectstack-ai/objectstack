@@ -10,7 +10,16 @@
  *   os i18n extract packages/platform-objects/scripts/i18n-extract.config.ts \
  *     --locales=zh-CN,ja-JP,es-ES \
  *     --fill=default \
+ *     --source-hashes \
  *     --out=packages/platform-objects/src/apps/translations
+ *
+ * `--source-hashes` also emits `<locale>.source-hashes.generated.ts` — the
+ * provenance companion from maintainer ruling #12069 Option A (#11671). Without
+ * it, a leaf filled from the source and then left behind when the source was
+ * revised is indistinguishable BY VALUE from a real translation, so it publishes
+ * a superseded draft under a green `check:i18n` forever. This package opts in;
+ * the other eight bundle sets do not yet, and until they do their generated
+ * leaves stay legacy-trusted (never reported, never wrong about).
  *
  * From the repo root that is `pnpm i18n:extract`, and `pnpm check:i18n` is the
  * same run with `--check`: it writes nothing and fails if the committed
