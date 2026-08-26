@@ -72,18 +72,38 @@
  * `check:pm-governed-prose`, `check:required-contexts` and five others already
  * take for `AGENTS.md/**`. After it, a turbo.json edit derives this family.
  *
- * ## What this gate deliberately does NOT judge, stated rather than discovered
+ * ## GENERIC task keys, and the near miss that reads as a refutation (#12373)
  *
- * GENERIC task keys -- the ones with no `#`, like `build` or `test:e2e` -- are
- * out of population. The invariant is the same shape ("a task nothing can run
- * is inert"), and on the tree this landed against it has a live violation:
- * `test:e2e` is defined here with `outputs: ["playwright-report/**", ...]` and
- * is held by ZERO of the 78 workspace packages -- the real Playwright script in
- * `examples/app-showcase` is spelled `test:smoke`, which turbo.json does not
- * configure at all. Closing that needs an edit to `turbo.json`, which is not
- * this card's file surface, and a gate that ships red is worse than no gate.
- * Filed as #12373; widen this gate's population to generic keys in the same
- * change that fixes that entry, not before.
+ * GENERIC keys -- the ones with no `#`, like `build` or `test:smoke` -- are in
+ * population as of #12373, under the same invariant one level up: a generic key
+ * no workspace package declares a script for configures a task that can never
+ * run. Turbo is silent about it in the same way, and the silence is worse here
+ * because it reaches a human directly: the root `package.json` wraps these keys
+ * as `turbo run <task>`, so an inert one is a command that exits 0 having run
+ * nothing, handed around as evidence a suite passed (#4690's family).
+ *
+ * That is not hypothetical, it is the entry this limb was written for. Measured
+ * from git: `test:e2e` entered turbo.json on 2026-05-21 (7972e7b829) when
+ * `examples/app-crm` declared `"test:e2e": "playwright test"` beside an `e2e/`
+ * directory and a `playwright.config.ts`. On 2026-05-24, `e737fbce39`
+ * ("simplify app-crm to minimal metadata smoke-test") deleted that script. The
+ * turbo entry stayed, and for the three months to 2026-08-26 it configured a
+ * task no package could run, while `pnpm test:e2e` kept exiting 0.
+ *
+ * ⚠️ The ROOT manifest is not a workspace member and does not make a generic key
+ * live -- and counting it is the mistake that reads as a refutation of the
+ * finding rather than as a different measurement. `test:e2e` was held by ONE
+ * file (the root `package.json`) and by ZERO of the 78 members, and only the
+ * second number decides whether `turbo run test:e2e` matches anything. The
+ * failure text below says so where it will be read.
+ *
+ * A generic key that exists only as a `dependsOn` target is judged the same, on
+ * purpose. Measured on the tree this limb landed against: the only `dependsOn`
+ * targets in the whole file are `build` and `^build`, and `build` is declared by
+ * 72 of the 78 members -- so no such key exists here to exempt. Nor should one
+ * be exempt if it appears: turbo resolves `dependsOn` against the DEFINITION, so
+ * a dependency on a generic task no package declares still runs nothing, and the
+ * exemption would be a hole shaped exactly like the entry above.
  *
  * ## Refusals, never quiet passes (#4690)
  *
@@ -192,19 +212,62 @@ export function editDistanceWithin(a, b, max) {
 }
 
 /**
+ * Every workspace package declaring a script called `task`, sorted.
+ *
+ * This is the whole of what a GENERIC key is judged against, and the membership
+ * it reads is the enumerator's -- so the root manifest, which is not a member,
+ * cannot make a key look held. See the header for why that distinction is the
+ * one this limb is most likely to be argued out of.
+ *
+ * @param {string} task
+ * @param {Map<string, Set<string>>} scriptsByPackage
+ * @returns {string[]}
+ */
+export function holdersOf(task, scriptsByPackage) {
+  const holders = [];
+  for (const [pkg, scripts] of scriptsByPackage) if (scripts.has(task)) holders.push(pkg);
+  return holders.sort();
+}
+
+/**
  * The rule, as a pure function over already-parsed inputs, so `--self-test` can
  * drive it with the adversarial task tables a clean tree does not contain.
  *
+ * The two populations are counted separately and BOTH are returned: a limb that
+ * quietly stops matching reports zero findings exactly like a limb that found
+ * nothing wrong, so `main()` needs each count to assert it read something.
+ *
  * @param {Record<string, unknown>} tasks turbo.json's `tasks` table
  * @param {Map<string, Set<string>>} scriptsByPackage package name -> script names
- * @returns {{ problems: string[], judged: number }}
+ * @returns {{ problems: string[], judged: number, genericJudged: number }}
  */
 export function verdict(tasks, scriptsByPackage) {
   const problems = [];
   let judged = 0;
+  let genericJudged = 0;
   for (const key of Object.keys(tasks)) {
     const split = splitTaskKey(key);
-    if (!split) continue;
+    if (!split) {
+      genericJudged += 1;
+      if (holdersOf(key, scriptsByPackage).length === 0) {
+        const declaredAnywhere = new Set();
+        for (const scripts of scriptsByPackage.values()) for (const name of scripts) declaredAnywhere.add(name);
+        const near = nearestNames(key, declaredAnywhere);
+        problems.push(
+          `"${key}" is a generic task that NO workspace package declares a script for.\n` +
+            `    Turbo is silent about this too: a run matches nothing and exits 0, so the root\n` +
+            `    script that wraps it ("turbo run ${key}") is a command handed around as evidence\n` +
+            `    a suite passed while running nothing at all.\n` +
+            `    ⚠️ The ROOT package.json does NOT count and is the near miss that reads as a\n` +
+            `    refutation: it is not one of the ${scriptsByPackage.size} workspace members this gate\n` +
+            `    enumerates, so a script there leaves the key held by zero of them and just as inert.\n` +
+            (near.length ? `    Did you mean: ${near.join(', ')}?\n` : '') +
+            `    Rename the key to the script the workspace declares, add that script to the\n` +
+            `    package that should run it, or delete the entry.`,
+        );
+      }
+      continue;
+    }
     judged += 1;
     const { pkg, task } = split;
     const scripts = scriptsByPackage.get(pkg);
@@ -238,7 +301,7 @@ export function verdict(tasks, scriptsByPackage) {
       );
     }
   }
-  return { problems, judged };
+  return { problems, judged, genericJudged };
 }
 
 /**
@@ -313,7 +376,19 @@ function main() {
     throw err;
   }
 
-  const { problems, judged } = verdict(tasks, scriptsByPackage);
+  const { problems, judged, genericJudged } = verdict(tasks, scriptsByPackage);
+
+  if (genericJudged === 0) {
+    console.error(
+      `FAIL: ${TURBO_CONFIG_FILE} declares no generic (\`#\`-less) task key at all, so half of\n` +
+        `  this gate's population is empty. That is not a clean tree: the root package.json\n` +
+        `  wraps \`build\`, \`test\` and \`typecheck\` as \`turbo run <task>\`, and each of those is a\n` +
+        `  generic key in this table. Zero of them means this gate read the wrong file, or\n` +
+        `  splitTaskKey stopped classifying a \`#\`-less key as generic — never that a table\n` +
+        `  with nothing generic in it was found.`,
+    );
+    process.exit(1);
+  }
 
   if (judged === 0) {
     console.error(
@@ -326,13 +401,17 @@ function main() {
   }
 
   if (problems.length) {
-    console.error(`FAIL: ${TURBO_CONFIG_FILE} carries ${problems.length} inert task override(s).\n`);
+    console.error(
+      `FAIL: ${TURBO_CONFIG_FILE} carries ${problems.length} inert task entr${problems.length === 1 ? 'y' : 'ies'}.\n`,
+    );
     for (const p of problems) console.error(`  - ${p}\n`);
     console.error(
-      'Why this gate exists: turbo does NOT refuse either of these. A task key naming a\n' +
-        'package that does not exist, or a task the package has no script for, exits 0 with\n' +
-        'no diagnostic and configures nothing — so the edit that was meant to change what CI\n' +
-        'builds, orders or caches reads as landed while doing nothing at all (#12046).\n' +
+      'Why this gate exists: turbo does NOT refuse any of these. A task key naming a\n' +
+        'package that does not exist, a task the package has no script for, or a generic key\n' +
+        'no package declares at all, exits 0 with no diagnostic and configures nothing — so\n' +
+        'the edit that was meant to change what CI builds, orders or caches reads as landed\n' +
+        'while doing nothing at all (#12046), and a root script wrapping the generic key\n' +
+        'reads as a suite that passed (#12373).\n' +
         '\n' +
         '⛔ `dependsOn` is deliberately NOT checked here: turbo already refuses an\n' +
         'unresolvable one, loudly, with exit 1. Re-checking it would be this gate claiming a\n' +
@@ -342,8 +421,10 @@ function main() {
   }
 
   console.log(
-    `OK: ${judged} package-scoped turbo task(s) judged against ${scriptsByPackage.size} workspace ` +
-      `package(s) — every one names a package that exists and a script it declares.`,
+    `OK: ${judged} package-scoped and ${genericJudged} generic turbo task(s) judged against ` +
+      `${scriptsByPackage.size} workspace package(s) — every package-scoped one names a package ` +
+      `that exists and a script it declares, and every generic one is declared by at least one ` +
+      `member.`,
   );
 }
 
@@ -390,11 +471,38 @@ export function selfTest() {
   t('a length gap wider than the cap is refused before any work', !editDistanceWithin('a', 'abcd', 2));
   t('no near name yields no suggestion', nearestNames('@acme/nothing-like-it', workspace.keys()).length === 0);
 
+  // ── The generic limb (#12373), both directions ──
+  // The red case is the entry this limb was written for, spelled as it stood on
+  // 2026-08-26: a key every signal calls fine, held by nobody who could run it.
+  const inertGeneric = verdict({ 'test:e2e': {} }, workspace);
+  t('a generic task no package declares is a finding', inertGeneric.problems.length === 1);
+  t('the inert generic key is counted in the generic population', inertGeneric.genericJudged === 1);
+  t('the inert generic key is NOT counted as a package task', inertGeneric.judged === 0);
+  // Pinned as text because this sentence is the whole defence of the measurement:
+  // the root manifest holds `test:e2e` and is not a member, and a reader who
+  // counts files instead of members reads the finding as already refuted.
+  t(
+    'the inert generic finding rules out the root manifest by name',
+    inertGeneric.problems[0]?.includes('ROOT package.json does NOT count'),
+  );
+  const nearGeneric = verdict({ typechek: {} }, workspace);
+  t('a misspelled generic key is a finding', nearGeneric.problems.length === 1);
+  t('a misspelled generic key suggests the script that exists', nearGeneric.problems[0]?.includes('typecheck'));
+
+  t(
+    'holdersOf names every package declaring the script',
+    holdersOf('build', workspace).join(',') === '@objectstack/plugin-auth,@objectstack/spec,create-objectstack',
+  );
+  t('holdersOf is empty for a script no package declares', holdersOf('test:e2e', workspace).length === 0);
+
   // ── Direction 2: the rule must stay GREEN on every legitimate shape ──
+  // `gen:schema` stands where `test:e2e` used to: a generic key held by exactly
+  // ONE package is legitimate, and this case is what keeps the limb above from
+  // being satisfiable by "generic keys must be held by many".
   const clean = verdict(
     {
       build: {},
-      'test:e2e': {},
+      'gen:schema': {},
       '@objectstack/plugin-auth#typecheck': {},
       '@objectstack/spec#gen:schema': {},
       'create-objectstack#test': {},
@@ -402,7 +510,8 @@ export function selfTest() {
     workspace,
   );
   t('legitimate package tasks are green', clean.problems.length === 0);
-  t('generic keys are out of population and not judged', clean.judged === 3);
+  t('package-scoped keys are counted separately', clean.judged === 3);
+  t('generic keys are in population and counted', clean.genericJudged === 2);
 
   // Parsing, pinned directly: every real key in this repo's turbo.json is one
   // of these three shapes, and a boundary taken anywhere but the FIRST `#`
@@ -435,6 +544,7 @@ export function selfTest() {
   try {
     const live = verdict(readTasks(ROOT), readWorkspaceScripts(ROOT));
     t('the live turbo.json presents package tasks to judge', live.judged > 0);
+    t('the live turbo.json presents generic tasks to judge', live.genericJudged > 0);
   } catch (err) {
     failures.push(`the live tree could not be read: ${err.message}`);
   }

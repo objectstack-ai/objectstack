@@ -320,10 +320,10 @@
         "$TURBO_ROOT$/packages/cli/src/commands/init.ts"
       ]
     },
-    "test:e2e": {
+    "test:smoke": {
       "dependsOn": ["build"],
       "cache": false,
-      "outputs": ["playwright-report/**", "test-results/**"],
+      "outputs": ["test-results/**"],
       "inputs": ["src/**", "e2e/**", "playwright.config.ts"]
     },
     "dev": {
