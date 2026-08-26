@@ -473,6 +473,36 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       'scripts/js-comment-mask.d.mts',
     ],
   },
+  '@objectstack/metadata': {
+    // src/metadata-route-ledger.conformance.test.ts (#12398) imports
+    // `stripComments` from `js-comment-mask.mjs` to decide which text in this
+    // package's `src/` is prose and which is a mount or a host-app reach — the
+    // conversion off its own private scanner, whose row in
+    // `check-comment-mask-adoption.mjs` was deleted in the same PR. The
+    // coupling is real: every one of that guard's verdicts, including an
+    // IDENTITY over the package's whole source population, is a function of the
+    // module's stripping behaviour, so a change to it has to re-run this
+    // package's suite. The `.d.mts` sibling is declared alongside it because it
+    // is what gives `stripComments` its type, so this package's `tsc --noEmit`
+    // verdict is a function of it too — the reason the `@objectstack/cli` entry
+    // above declares the pair rather than the module alone.
+    globs: [
+      'scripts/js-comment-mask.mjs',
+      'scripts/js-comment-mask.d.mts',
+    ],
+  },
+  '@objectstack/trigger-api': {
+    // src/trigger-api-route-ledger.conformance.test.ts (#12398) imports
+    // `stripComments` from `js-comment-mask.mjs` for the same reason and in the
+    // same conversion as the `@objectstack/metadata` entry above: the guard's
+    // path-literal census and its host-app-reach IDENTITY are both functions of
+    // the module's stripping behaviour, and the `.d.mts` is what types the
+    // import for this package's typecheck.
+    globs: [
+      'scripts/js-comment-mask.mjs',
+      'scripts/js-comment-mask.d.mts',
+    ],
+  },
   '@objectstack/plugin-auth': {
     // src/managed-extension-fields.test.ts walks every `*.object.ts`, and pins
     // core's api-key source alongside it.
