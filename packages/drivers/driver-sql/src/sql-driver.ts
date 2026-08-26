@@ -9356,6 +9356,9 @@ export class SqlDriver implements IDataDriver {
       await this.backfillCanonicalDatetimes(tableName, exists);
       // #3994: the `Field.time` twin of the line above.
       await this.backfillCanonicalTimes(tableName, exists);
+      // #12380: converge this table's `Field.json` columns on the injective
+      // JSON-text storage form the rewritten `formatInput` now writes.
+      await this.backfillCanonicalJsonEncoding(tableName, exists);
       // #3942: the MySQL twin — widen legacy `TIMESTAMP` columns to `DATETIME(3)`.
       if (exists) await this.migrateMysqlDatetimeColumns(tableName, obj.fields ?? {});
       // #3994: widen legacy MySQL `TIME` columns to `TIME(3)`.
@@ -9446,6 +9449,104 @@ export class SqlDriver implements IDataDriver {
         this.logger.warn(
           `[sql-driver] could not canonicalise datetime storage for ${table}.${field}; ` +
           `queries stay correct via the read-side repair`,
+          { error: err instanceof Error ? err.message : String(err) },
+        );
+      }
+    }
+  }
+
+  /**
+   * Converge one table's `Field.json` columns on the injective JSON-text
+   * storage form (#12380) — the `Field.json` twin of
+   * {@link backfillCanonicalDatetimes}, built the same way for the same reasons.
+   *
+   * SQLite only. Postgres and MySQL never had the defect: their half of
+   * `formatInput` has always been an unconditional `JSON.stringify`, so their
+   * rows are already in this exact format and there is nothing on disk to
+   * rewrite (measured 17/17 faithful on PG 16.13 and MySQL 8.0.46).
+   *
+   * ## What it converts, and the one class it converts
+   *
+   * ONE `UPDATE` per column. `json_quote()` is SQLite's own spelling of
+   * `JSON.stringify` over a scalar, so "what the canonical form means" has a
+   * single definition per dialect and the migration cannot drift from the codec
+   * it exists to serve.
+   *
+   * The `WHERE` names the ONLY on-disk class the pre-fix encoding left
+   * unambiguous — a TEXT cell that is not valid JSON. Nothing but a stored
+   * plain string could have produced one: `JSON.stringify` of an object or an
+   * array is always valid JSON, and every other input either stayed a primitive
+   * storage class or already parses.
+   *
+   * ⛔ **It does not guess, because the rest cannot be guessed.** Two classes are
+   * left exactly as they are, and both are named here rather than discovered:
+   *
+   *  - **INTEGER/REAL cells** (`typeof` is not `'text'`). A number, a boolean,
+   *    and a number-like string eaten by NUMERIC affinity are the SAME BYTES on
+   *    disk — `123` the number and `'123'` the string are one INTEGER 123, and a
+   *    boolean `true` is one INTEGER 1 alongside the number 1. No migration can
+   *    know which was written, so this one asks nothing of them. This is the
+   *    class the ruling accepts as unrecoverable: it stops growing (new writes
+   *    encode injectively), it is not repaired.
+   *  - **TEXT cells that DO parse.** A stored object `{"a":1}` and a stored
+   *    STRING `'{"a":1}'` were byte-identical before this change, and both read
+   *    back as the object under the pre-fix read path. Re-quoting them would
+   *    turn every legacy object and array into a string — corrupting the common
+   *    case to guess at the rare one. Left alone, they read after this change
+   *    exactly as they read before it.
+   *
+   * ⇒ **This migration changes no read.** A legacy plain string reads back as
+   * that string before it runs (via `formatOutput`'s parse fallback) and after
+   * it runs (because `"…"` parses back to it). It is a canonicalisation that
+   * makes the on-disk format uniform and injective going forward — so a string
+   * written TOMORROW whose content is valid JSON is distinguishable from the
+   * structure it looks like — not a repair of what reads wrong today.
+   *
+   * ## Idempotent by construction, not by convention
+   *
+   * The `WHERE` is the exact complement of the `SET`'s output: `json_quote(X)`
+   * of a TEXT value is a quoted JSON string, for which `json_valid()` is 1, so
+   * a converted row cannot match the predicate again. Re-running costs one scan
+   * and zero writes — the same "a converged table is a no-op" property
+   * {@link backfillCanonicalDatetimes} has, and pinned the same way.
+   *
+   * ⚠️ An out-of-band reader of the SQLite file sees quoted JSON text where it
+   * saw a bare value. That is the accepted cost of the format, recorded here so
+   * it is read rather than discovered.
+   *
+   * Failures are logged and swallowed, exactly as in the datetime twin: the
+   * rows simply stay in the legacy form, `formatOutput`'s parse fallback keeps
+   * reading them correctly, and correctness never becomes contingent on a
+   * migration having run. That also covers a SQLite build without the JSON
+   * functions and a `skipSchemaSync` deployment that never reaches this path.
+   */
+  protected async backfillCanonicalJsonEncoding(table: string, tableExisted: boolean): Promise<void> {
+    const fields = this.jsonFields[table];
+    if (!this.isSqlite || !fields || fields.length === 0) return;
+    // A table created by this very call is empty, so every json column in it is
+    // canonical without a single row being read.
+    if (!tableExisted) return;
+
+    for (const field of fields) {
+      try {
+        const res = await this.knex.raw(
+          `update ?? set ?? = json_quote(??) where typeof(??) = 'text' and json_valid(??) = 0`,
+          [table, field, field, field, field],
+        );
+        const converted = (res as any)?.changes ?? 0;
+        if (converted) {
+          this.logger.info?.(
+            `[sql-driver] canonicalised json storage (#12380) for ${table}.${field}`,
+            { rowsConverted: converted },
+          );
+        }
+      } catch (err) {
+        // Correctness does not depend on this succeeding: `formatOutput` keeps
+        // its parse fallback precisely so an un-migrated row still reads back
+        // as the string it is.
+        this.logger.warn(
+          `[sql-driver] could not canonicalise json storage for ${table}.${field}; ` +
+          `reads stay correct via formatOutput's parse fallback`,
           { error: err instanceof Error ? err.message : String(err) },
         );
       }
@@ -14865,28 +14966,52 @@ export class SqlDriver implements IDataDriver {
       }
     }
 
-    // JSON field serialisation: PostgreSQL native jsonb columns require
-    // valid JSON for ALL values (strings, numbers, booleans, objects).
-    // SQLite stores JSON as plain TEXT so only objects/arrays need
-    // stringification (better-sqlite3 can only bind primitives).
+    // ── JSON field serialisation: ONE encoding, every dialect (#12380) ──────
+    //
+    // `JSON.stringify` unconditionally, which is what Postgres and MySQL have
+    // always done here. This DELETES the SQLite branch rather than adding one,
+    // and the reason is the declared contract, not strictness: `json`'s stored
+    // contract is `z.unknown()` (`spec/src/data/field-value.zod.ts`, "openness
+    // is now an explicit decision, not an accident of nobody checking"), so
+    // `123` the number and `'123'` the string are BOTH legal values of one
+    // field and no driver has license to collapse them onto one representation.
+    //
+    // What the deleted branch did, measured on live SQLite/PG 16.13/MySQL
+    // 8.0.46 before this change (PG and MySQL: 17/17 faithful; SQLite: 13/17
+    // type-changed). It stored a non-object AS-IS, which broke the round trip
+    // through two INDEPENDENT mechanisms:
+    //
+    //  1. READ-side. `formatOutput` `JSON.parse`s every string in a json
+    //     column, so a stored string whose CONTENT is valid JSON came back
+    //     type-changed: `'true'` → boolean, `'null'` → null, `'[]'` → array,
+    //     `'{"a":1}'` → object. Reversible — the bytes were still on disk.
+    //  2. WRITE-side, and NOT reversible. The column is declared type `json`,
+    //     which contains none of `INT`/`CHAR`/`CLOB`/`TEXT`/`BLOB`/`REAL`/
+    //     `FLOA`/`DOUB`, so SQLite's affinity rules fall through to **NUMERIC**
+    //     — and a bound number-like string is converted to INTEGER/REAL BEFORE
+    //     storage. `'0123'`, `'  123  '`, `'1e5'`, `'1.0'` and `'-0'` were
+    //     destroyed on disk, indistinguishable from the numbers they became.
+    //
+    // Stringifying closes BOTH without touching the DDL, because the encoded
+    // form of a string carries its quotes (`'123'` → `"123"`) and `"123"` is
+    // not a well-formed numeric literal, so NUMERIC affinity leaves it TEXT.
+    // Measured, not reasoned — see `sql-driver-12380-json-roundtrip.test.ts`.
+    //
+    // The on-disk delta for NEW writes is therefore exactly two classes:
+    // strings (now quoted) and booleans (now TEXT `true`/`false` instead of
+    // INTEGER 1/0, which is mechanism (3) the read path could never repair —
+    // `formatOutput`'s `booleanFields` pass is keyed to declared
+    // `Field.boolean` COLUMNS, not to booleans living inside a json payload).
+    // Objects, arrays and null are byte-identical to before, and so are
+    // numbers: `123` bound as a number and `"123"` bound as text both land as
+    // INTEGER 123 under NUMERIC affinity. Existing rows are converged by
+    // {@link backfillCanonicalJsonEncoding}.
     const jsonFields = this.jsonFields[object];
     if (jsonFields && jsonFields.length > 0) {
       for (const field of jsonFields) {
         if (copy[field] === undefined || copy[field] === null) continue;
-        if (this.isSqlite) {
-          // SQLite: only objects/arrays need JSON.stringify; primitives
-          // are stored as-is and re-parsed on read by formatOutput.
-          if (typeof copy[field] === 'object') {
-            if (!copied) { copy = { ...copy }; copied = true; }
-            copy[field] = JSON.stringify(copy[field]);
-          }
-        } else {
-          // PostgreSQL: every value must be valid JSON so the native
-          // jsonb column accepts it. JSON.stringify wraps strings in
-          // quotes, leaves numbers/booleans unchanged as literals.
-          if (!copied) { copy = { ...copy }; copied = true; }
-          copy[field] = JSON.stringify(copy[field]);
-        }
+        if (!copied) { copy = { ...copy }; copied = true; }
+        copy[field] = JSON.stringify(copy[field]);
       }
     }
 
@@ -14926,6 +15051,36 @@ export class SqlDriver implements IDataDriver {
     }
 
     if (this.isSqlite) {
+      // The exact inverse of `formatInput`'s `JSON.stringify` (#12380). Postgres
+      // and MySQL need no arm here because their clients already parse a native
+      // `json`/`jsonb` column; SQLite hands back the stored TEXT, so the driver
+      // parses it. One codec, three dialects, same answer.
+      //
+      // Only strings are parsed, and that is load-bearing rather than
+      // incidental: a json NUMBER is stored under NUMERIC affinity as INTEGER/
+      // REAL and comes back as a JS number, which is already the value that was
+      // written — parsing is neither possible nor needed for it.
+      //
+      // ── Why the catch survives, and what it now means ───────────────────────
+      //
+      // Nothing this driver writes can reach it: every new value on disk is the
+      // output of `JSON.stringify`, so it parses by construction. It is the
+      // READ-SIDE REPAIR for rows written before #12380 — a pre-fix plain string
+      // was stored raw (`America/New_York`), and re-quoting it is exactly what
+      // {@link backfillCanonicalJsonEncoding} does on the next `syncSchema`.
+      // Keeping it here is the same posture `backfillCanonicalDatetimes` takes:
+      // correctness must NEVER be contingent on a migration having run, so an
+      // un-migrated (or un-migratable, e.g. `skipSchemaSync`) deployment reads a
+      // legacy plain string back as that same string — byte-identical to what it
+      // read before this change — instead of throwing mid-row.
+      //
+      // ⚠️ It cannot repair the two classes the pre-fix encoding made ambiguous,
+      // and must not pretend to: a legacy TEXT cell that DOES parse (a stored
+      // object, or a stored string whose content was valid JSON) and a legacy
+      // INTEGER/REAL cell (a number, a boolean, or a number-like string eaten by
+      // NUMERIC affinity) are collisions already resolved on disk. Those rows
+      // read exactly as they read before this change — the class stops growing;
+      // it is not retroactively repaired. See the ruling recorded on #12380.
       const jsonFields = this.jsonFields[object];
       if (jsonFields && jsonFields.length > 0) {
         for (const field of jsonFields) {
@@ -14933,7 +15088,7 @@ export class SqlDriver implements IDataDriver {
             try {
               data[field] = JSON.parse(data[field]);
             } catch {
-              // keep as string
+              // Pre-#12380 row: keep the raw string, which IS its value.
             }
           }
         }

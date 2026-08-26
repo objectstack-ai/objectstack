@@ -24,6 +24,47 @@
  *   2. POST /api/v1/dev/metadata-events — used by external watch-recompile
  *      pipelines (e.g. `os dev` watching TS sources) to invalidate
  *      previews after rebuilding the artifact.
+ *
+ * ## The `/dev/` in the path is ENFORCED, not merely declared (#12140)
+ *
+ * `registerMetadataHmrRoutes` mounts NOTHING and returns `null` unless the
+ * process is running an explicit `NODE_ENV=development` posture — see
+ * {@link isDevMetadataEndpointEnabled}. Before that gate existed, this module's
+ * dev-only posture was carried by two sentences of prose (this header, and
+ * `MetadataPlugin`'s "production deployments simply won't have a CLI POSTing to
+ * this endpoint"), and a sentence about who will call a route is not a gate that
+ * stops them. The measured consequence: the official container image runs
+ * `os start` under `NODE_ENV=production` (`docker/Dockerfile`), that boot reaches
+ * `createStandaloneStack`, and the stack composes `MetadataPlugin`
+ * UNCONDITIONALLY (`packages/runtime/src/standalone-stack.ts`) onto a kernel that
+ * always registers `HonoServerPlugin` when serving — so both routes below were
+ * mounted, and answering, on a production-shaped boot.
+ *
+ * What an unauthenticated caller got there: `POST` re-reads the artifact from
+ * disk and broadcasts a reload frame to every connected client — a write-shaped
+ * side effect plus a broadcast — and `GET` streams metadata-change frames whose
+ * `path` field is a server-side filesystem path. Neither sits behind REST's
+ * `enforceAuth` seam, and neither can: the caller reaches this registrar by
+ * taking the host's framework-native app handle off the HTTP-server contract's
+ * raw-app escape hatch, and routes mounted on that handle are outside the auth
+ * seam BY CONSTRUCTION — the contract's own words, quoted with the spelling in
+ * `metadata-route-ledger.ts`. (The spelling is deliberately not repeated in this
+ * module: the ledger's conformance guard asserts as an IDENTITY that `plugin.ts`
+ * is the only file in this package reaching for the host app, and it reads raw
+ * source, so a prose mention here would read as a second reacher.) #9391 closed
+ * the same structural class for the `datasource-admin` family.
+ *
+ * WHY AN ENVIRONMENT GATE HERE AND AUTHENTICATION THERE, since the two fixes are
+ * not interchangeable. `datasource-admin` is the Setup → Datasources backend: it
+ * MUST answer on a production deployment, so the only available repair was to
+ * make it answer to authenticated callers. This door must not answer on a
+ * production deployment at all — its sole caller is a build tool (`os dev`'s
+ * watch-recompile loop, `packages/cli/src/commands/dev.ts`), the SDK never builds
+ * this URL (measured: zero `metadata-events` hits in `@objectstack/client`), and
+ * a reload broadcast has no meaning on a deployment that is not recompiling. So
+ * the fix is to close the door rather than to put a lock on it: bolting auth on
+ * instead would have made an unadvertised dev door into a supported production
+ * surface, which is a widening, not a hardening.
  */
 
 import type { MetadataManager } from '../metadata-manager.js';
@@ -66,11 +107,64 @@ export interface MetadataHmrHub {
   listenerCount(): number;
 }
 
+/**
+ * The one decision behind this module's dev-only posture (#12140): may this
+ * process serve `/api/v1/dev/metadata-events` at all?
+ *
+ * ## Only a literal `development` opens it — everything else is closed
+ *
+ * Unset is CLOSED, and that is the load-bearing half. The maintainer's
+ * 2026-08-06 ruling (#5673) settled what an absent `NODE_ENV` means for this
+ * repo: `production`. "An operator who never exported NODE_ENV is booting a real
+ * deployment, not asking to be treated as development" — `os serve`'s own words
+ * where it normalises the variable (`packages/cli/src/commands/serve.ts`), which
+ * is also why the `os dev` workflow keeps working across this gate: `os dev`
+ * spawns `os serve --dev`, and that branch sets `NODE_ENV='development'` when the
+ * operator left it unset, BEFORE any plugin starts.
+ *
+ * `test` is closed too, deliberately. Nothing about a vitest process makes an
+ * open reload door correct, and a suite that wants this surface says so by
+ * stubbing the posture it is exercising — which is what the gate's own pins do.
+ *
+ * ## Why not `resolveDiscoveryEnvironment`, the repo's other NODE_ENV reader
+ *
+ * That mapper is right for its job and wrong for this one. It degrades a value it
+ * does not recognise (`qa`, `preview`, `staging`) to `development`, because a
+ * DISCOVERY field that guesses `production` would let a client skip production
+ * warnings it needed. A GATE fails the opposite way: for it, "a spelling nobody
+ * recognises" must not be a key that opens the door. Same variable, opposite safe
+ * direction — so this predicate reads the variable directly and admits exactly
+ * one spelling. Trimmed and lower-cased first, matching how that mapper
+ * normalises (`'  Production '` → `'production'`), so a stray space in a
+ * `.env` file cannot decide a security question.
+ *
+ * @param env Injectable for tests; defaults to the live process environment.
+ */
+export function isDevMetadataEndpointEnabled(
+  env: Record<string, string | undefined> = process.env,
+): boolean {
+  return (env.NODE_ENV ?? '').trim().toLowerCase() === 'development';
+}
+
+/**
+ * Mount the HMR routes on the host's framework-native app handle — or mount
+ * NOTHING and return `null` when this process is not running a development
+ * posture ({@link isDevMetadataEndpointEnabled}).
+ *
+ * The refusal is the FIRST statement, ahead of every side effect this registrar
+ * performs (the broadcast hub, the `manager.subscribe` fan-out, the route
+ * registrations): a gate that runs after the wiring is a gate on the answer, not
+ * on the door. `null` rather than an inert hub, because a caller that keeps a
+ * handle it cannot use is a caller that will one day broadcast into nothing and
+ * report success; the nullable return makes "nothing was mounted" a fact the
+ * compiler forces every caller to handle.
+ */
 export function registerMetadataHmrRoutes(
   app: any,
   manager: MetadataManager,
   options: { path?: string } = {},
-): MetadataHmrHub {
+): MetadataHmrHub | null {
+  if (!isDevMetadataEndpointEnabled()) return null;
   const routePath = options.path ?? '/api/v1/dev/metadata-events';
 
   // In-process broadcast hub. Each SSE connection registers a listener;
