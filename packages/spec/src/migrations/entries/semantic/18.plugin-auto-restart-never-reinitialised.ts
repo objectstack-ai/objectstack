@@ -1,0 +1,92 @@
+// Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+
+import type { SemanticMigration } from '../../types.js';
+
+export const entry: SemanticMigration = {
+  id: 'plugin-auto-restart-never-reinitialised',
+  surface:
+    '`PluginHealthCheck.autoRestart`, `PluginHealthCheck.maxRestartAttempts` '
+    + 'and `PluginHealthCheck.restartBackoff`, and the '
+    + '`PluginHealthMonitor.attemptRestart` path that read them',
+  replacement:
+    'Poll `PluginHealthMonitor.getHealthStatus(pluginName)` / '
+    + '`getHealthReport(pluginName)` and act on `unhealthy` / `failed` in the '
+    + 'HOST. There is no in-tree replacement for the keys, because restarting '
+    + 'a plugin is the host\'s job in this host-driven library and the monitor '
+    + 'could not do it even in principle: `Plugin.init(ctx)` needs a '
+    + '`PluginContext`, which only the kernel constructs and which it exposes '
+    + 'to nobody (`ObjectKernel.context` is private, `KernelBase.createContext` '
+    + 'is protected). Recreate the kernel, or let your supervisor restart the '
+    + 'process — whichever level actually owns the plugin\'s lifetime. The '
+    + 'monitor reports; it does not act.',
+  reason:
+    'ADR-0049 enforce-or-remove, applied one class over from #12428 and '
+    + '#12340 in the same host-driven lifecycle library, and for a sharper '
+    + 'reason than either: this key HAD a reader that acted, and what it did '
+    + 'was not what the key declared. `attemptRestart` called '
+    + '`plugin.destroy()` and stopped there. The comment above the call read '
+    + '"Call destroy and init to restart", and `init` appeared in '
+    + '`health-monitor.ts` ONLY inside that comment. So what a plugin actually '
+    + "got was: destroy, a log line reading 'Plugin restarted', status "
+    + '`recovering`, and periodic health checks continuing to run against the '
+    + 'destroyed instance — which the default check when no `checkMethod` '
+    + "resolves (`{ name: 'plugin-loaded', status: 'passed' }`) passes "
+    + 'indefinitely. The TERMINAL report on a destroyed, never-re-initialised '
+    + 'plugin was therefore `healthy`, reproduced at ee3595cefd with '
+    + '`successThreshold: 3` as failed -> recovering (destroyed=1, alive=false) '
+    + '-> recovering -> recovering -> healthy (destroyed=1, alive=false). '
+    + '#11955 made that MORE convincing rather than less, because reaching '
+    + '`healthy` now costs `successThreshold` CONSECUTIVE passing rounds, so '
+    + 'the plugin has to earn a declared number of passes to be misreported. '
+    + 'Meanwhile `restartAttempts` was incremented as though a restart had '
+    + 'occurred, and `maxRestartAttempts` / `restartBackoff` scheduled further '
+    + '"restarts" of a plugin that was never brought back up. Neither of the '
+    + 'other two ADR-0049 states was available: ENFORCE would have to BUILD '
+    + 'the restart, and the class cannot host one — `Plugin.init(ctx)` needs a '
+    + '`PluginContext`, and the only two `plugin.init(...)` call sites in the '
+    + 'tree are the kernel\'s own boot loops over the full plugin list, with a '
+    + 'context that is private on `ObjectKernel` and protected on '
+    + '`KernelBase`, so a host-provided re-init hook would have had nothing to '
+    + 'call (positive control: the same scan resolves five real non-test '
+    + '`plugin.destroy()` call sites, so it sees lifecycle drivers). Building '
+    + 'that API for a caller that does not exist — no runtime constructs '
+    + '`PluginHealthMonitor` (#11825) — is exactly the speculation ADR-0049\'s '
+    + 'staged decision names as the wrong default at this milestone, where the '
+    + 'shippable liability is the false promise and not the missing feature. '
+    + 'EXPERIMENTAL requires a roadmap, and a scan of the whole `docs/` '
+    + 'planning + ADR corpus returned ZERO mentions of plugin auto-restart '
+    + 'against 118 control hits for "health" and 13 for "hot reload" in the '
+    + 'same corpus. The other two keys leave with the first rather than as a '
+    + 'tidy-up: with no restart, "Maximum restart attempts before giving up" '
+    + 'and "Backoff strategy for restart delays" have nothing left to be the '
+    + 'vocabulary OF — the same test that took `distributedConfig` out with '
+    + 'the `stateStrategy` value it was documented as being required for '
+    + '(#12340). All three are TOMBSTONED rather than deleted, for #12428\'s '
+    + 'reason: a key leaving a SURVIVING def has no route-3 exit, and '
+    + '`PluginHealthCheckSchema` is not `.strict()`, so a bare deletion would '
+    + 'be a silent strip (#3733, ADR-0104) — a milder form of the very defect '
+    + 'being retired. There is no D2 conversion, because `PluginHealthCheck` '
+    + 'is not an authorable surface: no metadata-type binding, stack '
+    + 'collection or manifest embed ever carried it, so there is no authored '
+    + 'document to rewrite. This entry IS the declaration.',
+  acceptanceCriteria:
+    'No host passes `autoRestart`, `maxRestartAttempts` or `restartBackoff` to '
+    + '`PluginHealthMonitor.registerPlugin`. TypeScript hosts cannot: all '
+    + 'three are typed `never` by the tombstones. JavaScript hosts, and config '
+    + 'that arrived as JSON, get a loud refusal carrying the prescription — an '
+    + 'ADR-0112 envelope (`code: VALIDATION_ERROR`, `status: 400`), thrown '
+    + 'BEFORE any state is stored so a refused config cannot leave a '
+    + 'half-registered plugin behind. `PluginHealthMonitor` no longer calls '
+    + '`plugin.destroy()` at all: `attemptRestart` and `calculateBackoff` are '
+    + 'gone with the `restartAttempts` counter, and a plugin that crosses '
+    + '`failureThreshold` is reported `degraded` / `unhealthy` / `failed` and '
+    + 'left running. The rest of the monitor is UNCHANGED: registration, '
+    + 'periodic checks, the `timeout` race and its refd-timer guard (#4875), '
+    + 'the two failure routes sharing counters (#11852), and '
+    + '`successThreshold` binding from every status that records a failure '
+    + '(#11955) all behave exactly as before — `recovering` is now written '
+    + 'only by the success branch, which is the one writer that ever meant it. '
+    + 'The #11825 keep still stands: `PluginHealthCheckSchema` still exports '
+    + 'from `./kernel` and `PluginHealthMonitor` still exports from '
+    + '`@objectstack/core` with its tests green.',
+};
