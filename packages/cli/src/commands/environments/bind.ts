@@ -10,28 +10,28 @@ import { formatOutput } from '../../utils/output-formatter.js';
 
 /**
  * `os environments bind` — bind a locally-compiled artifact to an existing
- * multi-environment server project.
+ * multi-environment server environment.
  *
  * Equivalent to `PATCH /api/v1/cloud/environments/<id>` with
  * `metadata.artifact_path = <absolute-path>`. The server's
- * AppBundleResolver picks up the path on the next per-project kernel
+ * AppBundleResolver picks up the path on the next per-environment kernel
  * boot, registering the bundle's objects, views, and seed data.
  *
  * Use `--build` to compile `objectstack.config.ts` first so the artifact
  * reflects the latest source.
  */
 export default class EnvironmentsBind extends Command {
-  static override description = 'Bind a local objectstack artifact to an existing project';
+  static override description = 'Bind a local objectstack artifact to an existing environment';
 
   static override examples = [
-    '$ os environments bind <project-id> --artifact ./dist/objectstack.json',
-    '$ os environments bind <project-id> --artifact ./dist/objectstack.json --build',
-    '$ os environments bind <project-id> --reseed',
+    '$ os environments bind <environment-id> --artifact ./dist/objectstack.json',
+    '$ os environments bind <environment-id> --artifact ./dist/objectstack.json --build',
+    '$ os environments bind <environment-id> --reseed',
   ];
 
   static override args = {
     environmentId: Args.string({
-      description: 'Target project id (UUID)',
+      description: 'Target environment id (UUID)',
       required: true,
     }),
   };
@@ -111,7 +111,7 @@ export default class EnvironmentsBind extends Command {
       delete existingMeta.artifactBindError;
       existingMeta.artifact_path = artifactAbs;
 
-      printKV('Project', args.environmentId, '🎯');
+      printKV('Environment', args.environmentId, '🎯');
       printKV('Artifact', artifactAbs, '📦');
 
       const res = await client.projects.update(args.environmentId, {
@@ -139,9 +139,9 @@ export default class EnvironmentsBind extends Command {
       } else if (flags.format === 'yaml') {
         await formatOutput(res, 'yaml');
       } else {
-        console.log(`\n✓ Project bound to artifact`);
+        console.log(`\n✓ Environment bound to artifact`);
         console.log(`  ${args.environmentId} → ${artifactAbs}`);
-        console.log(`  The next request to this project will load the new bundle.`);
+        console.log(`  The next request to this environment will load the new bundle.`);
         console.log('');
       }
     } catch (error: any) {

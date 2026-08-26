@@ -1,0 +1,47 @@
+{
+  "$comment": [
+    "Shrink-only ledger for `check:entry-nameability` (#11986). Each entry records a",
+    "(public entry, type name) pair that the entry-nameability invariant already",
+    "violates on `main` — a type structurally mentioned in the declaration emitted for",
+    "a consumer that CALLS one of that entry's exported functions, which cannot be",
+    "named through the package's `exports` map.",
+    "",
+    "HAND-EDITED, NEVER GENERATED, and deliberately so — the same reason",
+    "`dual-source-exports.baseline.json` is: a `gen:` that rewrote this file would let a",
+    "new leak be admitted by running a command instead of by a decision, which is the",
+    "whack-a-mole #11986 exists to end.",
+    "",
+    "SHRINK-ONLY IN BOTH DIRECTIONS. A name that appears and is not recorded here fails",
+    "the gate. A name recorded here that no longer leaks ALSO fails the gate, with an",
+    "instruction to delete the line: a ledger that keeps entries after they are repaired",
+    "stops describing the tree and starts covering for it.",
+    "",
+    "THE SHRINK PATH IS ONE LINE PER ROW. Each of these is repaired exactly the way",
+    "#11350 and #11709 were: re-export the named type, on the leaking entry, from the",
+    "module that declares it. They are NOT repaired here because doing so edits four",
+    "entry barrels and regenerates `api-surface/` — a different file surface and a",
+    "different gate family from this card's, and two of those barrels were claimed by",
+    "other in-flight work when this landed. They are filed for triage instead; see the",
+    "PR body for the measurement and the issue link.",
+    "",
+    "MEASURED ON: cdbd9204b65ae4ebec63f90f61669fb498efaa55 (2026-08-26)."
+  ],
+  "entries": {
+    "@objectstack/spec": {
+      "leaks": ["Book", "FormField", "NavigationItem"],
+      "why": "Root-entry factories whose return type expands to mention a `/system`, `/ui` type the root entry does not re-export. Same class and same repair as #11350's three names and #11709's two — A′ closed the `defineStack` instance only. Repair: re-export each from its declaring module in `src/index.ts`."
+    },
+    "@objectstack/spec/kernel": {
+      "leaks": ["UnknownAuthoringKeyFinding"],
+      "why": "A `/kernel` export's call result mentions a finding type declared in an internal module and not re-exported from the `/kernel` entry. Repair: re-export it from `src/kernel/index.ts`."
+    },
+    "@objectstack/spec/ai": {
+      "leaks": ["FilterCondition", "StateNodeConfig"],
+      "why": "`/ai` factory return types expand to mention a `/data` filter type and an `/automation` state-machine type; both are public on their own subpaths but not nameable from `/ai`. Repair: re-export both from `src/ai/index.ts`."
+    },
+    "@objectstack/spec/ui": {
+      "leaks": ["FilterCondition"],
+      "why": "`/ui` factory return types expand to mention `/data`'s `FilterCondition`, which `/ui` does not re-export. Repair: re-export it from `src/ui/index.ts`."
+    }
+  }
+}

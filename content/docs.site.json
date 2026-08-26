@@ -37,7 +37,7 @@
       "socials": [
         {
           "platform": "github",
-          "url": "https://github.com/objectstack-ai/spec"
+          "url": "https://github.com/objectstack-ai/objectstack"
         }
       ]
     },
@@ -60,7 +60,7 @@
   "page": {
     "showLastUpdate": true,
     "showEditLink": true,
-    "repoBaseUrl": "https://github.com/objectstack-ai/spec"
+    "repoBaseUrl": "https://github.com/objectstack-ai/objectstack"
   },
   "content": {
     "math": false,

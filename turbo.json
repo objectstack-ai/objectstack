@@ -26,7 +26,14 @@
     "@objectstack/metadata#test": {
       "dependsOn": ["build"],
       "outputs": [],
-      "inputs": ["$TURBO_DEFAULT$", "!dist/**", "!coverage/**", "!.turbo/**"]
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "!dist/**",
+        "!coverage/**",
+        "!.turbo/**",
+        "$TURBO_ROOT$/scripts/js-comment-mask.mjs",
+        "$TURBO_ROOT$/scripts/js-comment-mask.d.mts"
+      ]
     },
     "@objectstack/spec#test": {
       "dependsOn": ["^build"],
@@ -191,6 +198,18 @@
       "outputs": [],
       "inputs": ["$TURBO_DEFAULT$", "!dist/**", "!coverage/**", "!.turbo/**"]
     },
+    "@objectstack/trigger-api#test": {
+      "dependsOn": ["^build"],
+      "outputs": [],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "!dist/**",
+        "!coverage/**",
+        "!.turbo/**",
+        "$TURBO_ROOT$/scripts/js-comment-mask.mjs",
+        "$TURBO_ROOT$/scripts/js-comment-mask.d.mts"
+      ]
+    },
     "@objectstack/trigger-record-change#test": {
       "dependsOn": ["^build"],
       "inputs": [
@@ -320,10 +339,10 @@
         "$TURBO_ROOT$/packages/cli/src/commands/init.ts"
       ]
     },
-    "test:e2e": {
+    "test:smoke": {
       "dependsOn": ["build"],
       "cache": false,
-      "outputs": ["playwright-report/**", "test-results/**"],
+      "outputs": ["test-results/**"],
       "inputs": ["src/**", "e2e/**", "playwright.config.ts"]
     },
     "dev": {

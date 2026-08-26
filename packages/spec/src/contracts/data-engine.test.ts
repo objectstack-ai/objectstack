@@ -415,4 +415,129 @@ describe('Data Engine Contract', () => {
       expect(misShapen).toBeTruthy();
     });
   });
+
+  // ===========================================================================
+  // Datasource resolution + lifecycle members (#12248 — the #11833 ruling)
+  // ===========================================================================
+  //
+  // Five members ObjectQL has implemented for releases, all consumed
+  // cross-package, all recoverable until #12248 only through consumer-local
+  // structural re-declarations (`service-analytics`'s `DataEngineLike`,
+  // `service-datasource`'s `ConnectionEngineLike` — the #12010 inventory).
+  // Declared per the 2026-08-25 maintainer ruling on #11833 (fork 1 option A;
+  // item 4 for the `ConnectionEngineLike` trio), under the [#4251]/[#11493]
+  // evidence bar.
+  //
+  // Same discipline as the block above: NO new engine double (the value-level
+  // optionality evidence is the minimal `IDataEngine` literals earlier in this
+  // file, which omit all five and compile); every directive below is resolved
+  // by tsc, so reverting a member makes its `@ts-expect-error` unused, and an
+  // unused directive is itself an error.
+  describe('datasource resolution members (#12248, #11833 fork 1)', () => {
+    type ResolveMember = IDataEngine['resolveEffectiveDatasource'];
+    type DriverMember = IDataEngine['getDriverForObject'];
+
+    it('both are optional — an engine without datasource routing stays conformant', () => {
+      type ResolveOptional = undefined extends ResolveMember ? 'optional' : never;
+      type DriverOptional = undefined extends DriverMember ? 'optional' : never;
+      const a: ResolveOptional = 'optional';
+      const b: DriverOptional = 'optional';
+      expect(a).toBe('optional');
+      expect(b).toBe('optional');
+    });
+
+    it('resolveEffectiveDatasource answers a NAME or undefined — exactly', () => {
+      // Mutual extends: `undefined` is the declared "rides the deployment
+      // default" answer (#5288 — deliberately not the string 'default', which
+      // the engine reads as "no explicit binding, keep looking"). A drift to
+      // bare `string`, or to `string | null`, resolves `Exact` to `never`.
+      type Answer = ReturnType<NonNullable<ResolveMember>>;
+      type Exact = Answer extends string | undefined
+        ? (string | undefined extends Answer ? 'exact' : never)
+        : never;
+      const exact: Exact = 'exact';
+      expect(exact).toBe('exact');
+    });
+
+    it('refuses a null-answering resolveEffectiveDatasource implementation', () => {
+      // `null` vs `undefined` is the drift a structural re-declaration lets
+      // through silently; the declared member refuses it at the return.
+      // @ts-expect-error - the absent-binding answer is `undefined`, never `null`
+      const nullish: NonNullable<ResolveMember> = (_objectName: string) => null;
+      expect(nullish).toBeTruthy();
+    });
+
+    it('getDriverForObject answers the CONTRACT driver, or undefined — exactly', () => {
+      type Answer = ReturnType<NonNullable<DriverMember>>;
+      type Exact = Answer extends IDataDriver | undefined
+        ? (IDataDriver | undefined extends Answer ? 'exact' : never)
+        : never;
+      const exact: Exact = 'exact';
+      expect(exact).toBe('exact');
+    });
+
+    it('a consumer can narrow the returned driver to a picked slice at the call site', () => {
+      // The `service-analytics` pattern (ADR-0053 temporal coercion): the
+      // consumer keeps `Pick<IDataDriver, …>` narrowing on the RETURN — what
+      // the contract ends is re-inventing the MEMBER, not the narrowing.
+      type TemporalSurface = Pick<IDataDriver, 'temporalFilterValue' | 'temporalFilterColumnSql'>;
+      const read = (engine: IDataEngine, objectName: string): TemporalSurface | undefined =>
+        engine.getDriverForObject?.(objectName);
+      expect(typeof read).toBe('function');
+    });
+
+    it('refuses an implementation answering a non-driver', () => {
+      const bareName = { name: 'sql' };
+      // @ts-expect-error - a `{ name }` bag is not the IDataDriver contract
+      const misShapen: NonNullable<DriverMember> = (_objectName: string) => bareName;
+      expect(misShapen).toBeTruthy();
+    });
+  });
+
+  describe('datasource lifecycle members (#12248, #12010 via the #11833 ruling item 4)', () => {
+    type RegisterMember = IDataEngine['registerDatasourceDef'];
+    type MarkMember = IDataEngine['markDatasourceUnavailable'];
+    type ClearMember = IDataEngine['clearDatasourceUnavailable'];
+
+    it('all three are optional — only engines owning a datasource registry answer', () => {
+      type A = undefined extends RegisterMember ? 'optional' : never;
+      type B = undefined extends MarkMember ? 'optional' : never;
+      type C = undefined extends ClearMember ? 'optional' : never;
+      const a: A = 'optional';
+      const b: B = 'optional';
+      const c: C = 'optional';
+      expect([a, b, c]).toEqual(['optional', 'optional', 'optional']);
+    });
+
+    it('registerDatasourceDef takes the declarative def — name required, write gate keys optional', () => {
+      const register: NonNullable<RegisterMember> = (_def) => {};
+      register({ name: 'warehouse' });
+      register({ name: 'warehouse', schemaMode: 'read-only', external: { allowWrites: false } });
+      // @ts-expect-error - a datasource definition without a name registers nothing
+      register({ schemaMode: 'read-only' });
+      expect(typeof register).toBe('function');
+    });
+
+    it('markDatasourceUnavailable admits exactly the two declared kinds', () => {
+      // `'blocked'` (host policy refused) vs `'failed'` (connect failed under
+      // a degraded boot) is the framework#3828 distinction — the reason the
+      // member exists at all. The literal union is pinned in BOTH directions:
+      // the two declared arms are accepted, an undeclared arm is refused, so
+      // widening or narrowing the union moves this case.
+      const mark: NonNullable<MarkMember> = (_info) => {};
+      mark({ name: 'warehouse', kind: 'blocked' });
+      mark({ name: 'warehouse', kind: 'failed', publicDetail: 'temporarily unavailable' });
+      // @ts-expect-error - only 'blocked' | 'failed' are declared unavailability kinds
+      mark({ name: 'warehouse', kind: 'offline' });
+      expect(typeof mark).toBe('function');
+    });
+
+    it('clearDatasourceUnavailable drops a record by name and answers nothing', () => {
+      type Exact = ReturnType<NonNullable<ClearMember>> extends void ? 'void' : never;
+      const exact: Exact = 'void';
+      const clear: NonNullable<ClearMember> = (_name: string) => {};
+      clear('warehouse');
+      expect(exact).toBe('void');
+    });
+  });
 });

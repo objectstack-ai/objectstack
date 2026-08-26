@@ -247,7 +247,7 @@ export class MessagingServicePlugin implements Plugin {
             ctx.hook('kernel:ready', async () => {
                 if (getEmail()) {
                     service.registerChannel(createEmailChannel({ getEmail, getData, store: templateStore, getDefaultTemplateLocale }));
-                    ctx.logger.info('[messaging] email channel registered (renders sys_notification_template; notify `template` refs resolve sys_email_template per recipient locale)');
+                    ctx.logger.info('[messaging] email channel registered (renders sys_notification_template; notify `template` refs resolve sys_email_template by (name, locale) — one locale per notification: payload.locale, else the deployment default)');
                 }
             });
 

@@ -9,12 +9,19 @@ Activity-timeline UI config enums, and the `sys_activity.type` built-in set.
 
 The `service-feed` backend was retired (ADR-0052 §5 / #1955); `sys_comment` /
 `sys_activity` are the canonical record-collaboration/timeline backend. The two
-enums here are pure UI configuration for the record activity component
-(`RecordActivityProps` in `../ui/component.zod.ts`), with no backend dependency;
-`SYS_ACTIVITY_BUILTIN_TYPES` below is the published built-in vocabulary of the
-`sys_activity.type` column, co-located with `FeedItemType` because UI consumers
-map one onto the other. (A later `feed` → `activity` rename is tracked
-separately.)
+enums here configure the record activity component (`RecordActivityProps` in
+`../ui/component.zod.ts`). `FeedFilterMode` is pure UI configuration, but
+`FeedItemType` is not backend-free: it has no backend *import*, yet it is the
+TARGET of the map UI consumers apply to the `sys_activity.type` column — a
+backend *coupling* — and that column's vocabulary is OPEN and
+author-extensible (maintainer ruling 2026-08-24, #11507). `FeedItemType` is
+therefore the built-in guidance half of that map, never the value domain of
+an authoring surface: `RecordActivityProps.types` accepts contributed kinds
+beyond it (#11658), and consumers must map unknown `sys_activity.type` values
+to a fallback rather than drop them. `SYS_ACTIVITY_BUILTIN_TYPES` below is
+the published built-in vocabulary of the `sys_activity.type` column,
+co-located with `FeedItemType` because UI consumers map one onto the other.
+(A later `feed` → `activity` rename is tracked separately.)
 
 <Callout type="info">
 **Source:** `packages/spec/src/data/feed.zod.ts`

@@ -3,7 +3,6 @@ import {
   PluginHealthStatusSchema,
   PluginHealthCheckSchema,
   PluginHealthReportSchema,
-  DistributedStateConfigSchema,
   HotReloadConfigSchema,
   PluginStateSnapshotSchema,
 } from './plugin-lifecycle-advanced.zod';
@@ -125,7 +124,7 @@ describe('Plugin Lifecycle Advanced Schemas', () => {
         watchPatterns: ['src/**/*.ts', 'config/**/*.json'],
         debounceDelay: 2000,
         preserveState: false,
-        stateStrategy: 'disk' as const,
+        stateStrategy: 'memory' as const,
         shutdownTimeout: 60000,
         beforeReload: ['beforeReloadHook'],
         afterReload: ['afterReloadHook'],
@@ -134,69 +133,57 @@ describe('Plugin Lifecycle Advanced Schemas', () => {
       expect(result).toEqual(config);
     });
 
-    it('should validate distributed state strategy', () => {
-      const config = {
+    // ── [#12340] The two retired strategies are REFUSED, with the prescription ──
+    //
+    // This block replaces the fixture that pinned the deleted 'distributed'
+    // arm. That fixture passed precisely BECAUSE the arm existed and did
+    // nothing: it asserted the value survived the parse, which was true right
+    // up to the moment it stopped meaning anything at runtime.
+    for (const retired of ['disk', 'distributed'] as const) {
+      it(`refuses stateStrategy '${retired}' with the retirement prescription`, () => {
+        const result = HotReloadConfigSchema.safeParse({ enabled: true, stateStrategy: retired });
+        expect(result.success, `'${retired}' must no longer parse`).toBe(false);
+
+        // The message IS the contract here — it is the whole migration
+        // document for whoever hits it. Assert the load-bearing clauses, not
+        // the byte string.
+        const message = result.success ? '' : result.error.issues[0]?.message ?? '';
+        expect(message).toContain('were removed');
+        expect(message).toContain('#12340');
+        expect(message).toContain('ADR-0049');
+        expect(message).toMatch(/memory fallback|in-memory Map/);
+        expect(message).toContain("Use 'memory'");
+      });
+    }
+
+    it('keeps zod\'s own enum message for a value that was never legal', () => {
+      // Anti-vacuity for the error map: a typo must NOT be told it "was
+      // removed" — that would misinform the author of `dsik` (the
+      // `crypto.hash` precedent's exact reasoning).
+      const result = HotReloadConfigSchema.safeParse({ stateStrategy: 'dsik' });
+      expect(result.success).toBe(false);
+      const message = result.success ? '' : result.error.issues[0]?.message ?? '';
+      expect(message).not.toContain('were removed');
+      expect(message).not.toContain('#12340');
+    });
+
+    it('still accepts the two strategies the runtime implements', () => {
+      for (const live of ['memory', 'none'] as const) {
+        const result = HotReloadConfigSchema.safeParse({ enabled: true, stateStrategy: live });
+        expect(result.success, `'${live}' must still parse`).toBe(true);
+      }
+    });
+
+    it('no longer accepts distributedConfig as a declarable key', () => {
+      // Non-strict object: the key is silently stripped rather than refused.
+      // Pinning the STRIP is the honest assertion — it is what actually
+      // happens, and it is why the prescription had to hang on the enum
+      // (which IS refused) rather than on this key.
+      const result = HotReloadConfigSchema.parse({
         enabled: true,
-        stateStrategy: 'distributed' as const,
-        distributedConfig: {
-          provider: 'redis' as const,
-          endpoints: ['redis://localhost:6379'],
-          keyPrefix: 'plugin:my-plugin:',
-          ttl: 3600,
-        },
-      };
-      const result = HotReloadConfigSchema.parse(config);
-      expect(result.stateStrategy).toBe('distributed');
-      expect(result.distributedConfig?.provider).toBe('redis');
-      expect(result.distributedConfig?.keyPrefix).toBe('plugin:my-plugin:');
-    });
-  });
-
-  describe('DistributedStateConfigSchema', () => {
-    it('should validate Redis configuration', () => {
-      const config = {
-        provider: 'redis' as const,
-        endpoints: ['redis://localhost:6379', 'redis://localhost:6380'],
-        keyPrefix: 'objectstack:',
-        ttl: 7200,
-        auth: {
-          username: 'admin',
-          password: 'secret',
-        },
-        replication: {
-          enabled: true,
-          minReplicas: 2,
-        },
-      };
-      const result = DistributedStateConfigSchema.parse(config);
-      expect(result.provider).toBe('redis');
-      expect(result.endpoints).toHaveLength(2);
-      expect(result.ttl).toBe(7200);
-    });
-
-    it('should validate Etcd configuration', () => {
-      const config = {
-        provider: 'etcd' as const,
-        endpoints: ['http://localhost:2379'],
-        auth: {
-          certificate: '/path/to/cert.pem',
-        },
-      };
-      const result = DistributedStateConfigSchema.parse(config);
-      expect(result.provider).toBe('etcd');
-    });
-
-    it('should validate custom provider configuration', () => {
-      const config = {
-        provider: 'custom' as const,
-        customConfig: {
-          type: 'consul',
-          address: 'consul.example.com:8500',
-        },
-      };
-      const result = DistributedStateConfigSchema.parse(config);
-      expect(result.provider).toBe('custom');
-      expect(result.customConfig).toBeDefined();
+        distributedConfig: { provider: 'redis', endpoints: ['redis://localhost:6379'] },
+      } as Record<string, unknown>);
+      expect(result).not.toHaveProperty('distributedConfig');
     });
   });
 

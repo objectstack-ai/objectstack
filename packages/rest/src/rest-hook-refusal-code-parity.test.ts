@@ -343,7 +343,9 @@ describe('[#10345] the sandbox unwrap is the branch, and it was never status-sha
 
 describe('[#10345] the pinned defaults the fix must not disturb', () => {
     it('a refusal that declares NO code still carries none — nothing is invented', () => {
-        // ADR-0112: the PRODUCER names the condition. Narrowing or widening the
+        // ADR-0112 D4 governs the semantic-CODE channel — the producer names
+        // the condition on the CODE axis, and the ADR rules no HTTP status for
+        // an undeclared throw. Narrowing or widening the
         // vocabulary must never start ADDING codes to bodies that carried none.
         const r = mapDataError(sandboxRefusal('month-end close is in progress'), 'crm_account');
         expect(r.status).toBe(400);

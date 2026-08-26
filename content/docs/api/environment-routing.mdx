@@ -20,7 +20,9 @@ depending on request context.
 
 ## Server configuration
 
-Enable scoped route registration in `objectstack.config.ts`:
+Environment scoping is a **host** decision, not an application one. The two keys
+are declared on the stack's top-level `api` block, but the host that boots the
+stack is what decides whether they take effect:
 
 {/* os:check */}
 ```typescript
@@ -35,17 +37,53 @@ export default defineStack({
 });
 ```
 
+<Callout type="warn">
+**On the default `os serve` path this block does not turn scoping on.** A bare
+`defineStack()` config carries no instantiated plugins, so the CLI boots
+`createStandaloneStack()` and merges that boot result over the authored config
+(`mergeBootConfig`). The boot builder ships
+`api: { enableProjectScoping: false, projectResolution: 'auto' }` and wins on
+exactly those two keys — deliberately, because scoping is not the author's call
+on a standalone host.
+
+The two keys are not overridden the same way:
+
+- `enableProjectScoping: true` is **contradicted**. The value forwarded to the
+  REST and dispatcher plugins is `false`, and no scoped routes are registered.
+- `projectResolution: 'auto'` is **redundant**. The boot builder pins the same
+  value, so writing it changes nothing; declaring any *other* strategy here is
+  silently replaced by `'auto'`.
+
+Every other authored `api` key — `enforceProjectMembership`, for example —
+survives the merge untouched.
+</Callout>
+
+The block above is live when the CLI does **not** boot the standalone stack:
+when the exported config is host-shaped, meaning its `plugins` array already
+carries instantiated plugin objects. That is the shape a multi-environment host
+assembles, and this open-core CLI supports the `standalone` boot mode only —
+cloud / multi-environment hosts ship from a separate distribution. Setting
+`OS_MODE=off` (or `bootMode: 'off'` on the exported config) also skips the
+standalone boot, but it drops the CLI to its legacy lightweight assembler rather
+than producing a scoped standalone host; `bootMode` is additionally not a
+declared stack key, so `defineStack()` rejects it as an unrecognized key.
+
 <Callout type="info">
 `api` is a declared top-level field on `ObjectStackDefinitionSchema`, so it
 survives `defineStack`'s strict parsing — you can pass it directly inside the
 `defineStack({ ... })` call as shown above. (Older stacks that instead spread
 it onto the exported config object, e.g. `export default { ...stack, api: {...} }`,
 still work the same way.) The CLI reads the resolved value from the exported
-config (`config.api`) when registering the REST and dispatcher plugins.
+config (`config.api`) when registering the REST and dispatcher plugins — but it
+reads it *after* the boot result has been merged in, which is why the standalone
+path forwards the boot builder's scoping decision rather than the author's.
 </Callout>
 
 The option names are historical for compatibility with existing config files;
 the route, header, env var, and request context all use `environment`.
+
+Once scoping is enabled by the host, `projectResolution` selects the route
+surface:
 
 | Strategy | Behavior | When to use |
 |:---|:---|:---|

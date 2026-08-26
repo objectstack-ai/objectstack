@@ -288,4 +288,98 @@ export interface IDataEngine {
    * a compiler.
    */
   introspectDatasource?(datasource: string): Promise<IntrospectedSchema>;
+
+  /**
+   * Which datasource is `objectName` BOUND to — the EFFECTIVE one, resolved
+   * through the same five steps the engine's own query routing walks
+   * (explicit `object.datasource` → `datasourceMapping` rules → the ADR-0057
+   * §3.6 lifecycle split → the owning package's `defaultDatasource` → the
+   * deployment default), computed as a NAME and without taking a driver.
+   *
+   * `undefined` means nothing binds the object anywhere and it rides the
+   * deployment's default driver — deliberately NOT the string `'default'`,
+   * because `ObjectSchema.datasource` carries `.default('default')` and in
+   * the engine that value means "no explicit binding, keep looking", never
+   * "the primary DB" (#5288: a diagnostic built on the declared value named
+   * a database the rows were not in). Callers that need the default driver's
+   * name have {@link getDefaultDriverName}. Implementations never throw here:
+   * a binding whose datasource has no registered driver is still this
+   * object's datasource, and a naming probe must be able to report the name
+   * that is broken.
+   *
+   * Optional for the same reason as the registry pair above: only an engine
+   * that owns datasource routing can answer; test fakes and remote/virtual
+   * engines simply omit it, and callers probe with `?.`.
+   *
+   * [#12248] Declared under the [#4251]/[#11493] evidence bar, per the
+   * 2026-08-25 maintainer ruling on #11833 (fork 1, option A): ObjectQL has
+   * implemented this method since #5288, and `service-analytics` reads it
+   * off the data engine for datasource-capability tiering — while this
+   * contract stayed silent, that consumer had to carry a private structural
+   * `DataEngineLike` re-declaration to name the member at all.
+   */
+  resolveEffectiveDatasource?(objectName: string): string | undefined;
+
+  /**
+   * Resolve the storage driver backing `objectName` — the public face of the
+   * engine's internal per-operation driver routing, answering `undefined`
+   * (instead of throwing) when no driver is available.
+   *
+   * Optional exactly like {@link getDriverByName}: only an engine that owns a
+   * named-driver registry can resolve an object to a driver.
+   *
+   * [#12248] Declared under the same evidence bar, per the same #11833
+   * ruling (fork 1, option A): ObjectQL implements it, and three packages
+   * already consume it cross-package through structural re-declarations or
+   * `any` — `service-analytics` (ADR-0053 temporal storage-form coercion,
+   * via a local `getDriverForObject?` returning a picked temporal surface),
+   * `metadata-protocol` (the partial-index probe's driver-ownership read),
+   * and `plugin-audit` (schema-sync driver probe). Consumers that need only
+   * a slice of the driver keep narrowing the RETURN at the call site
+   * (`Pick<IDataDriver, …>` admits the full contract value); what this
+   * member ends is each of them re-inventing the MEMBER.
+   */
+  getDriverForObject?(objectName: string): IDataDriver | undefined;
+
+  /**
+   * Datasource lifecycle writes — optional: only engines that own a
+   * datasource registry (the same population as the driver-registry pair
+   * above). All three are consumed today by `service-datasource`'s
+   * `DatasourceConnectionService`, which drives the engine through the
+   * `'data'` slot and, until [#12248], could name these members only through
+   * its consumer-local structural `ConnectionEngineLike` re-declaration —
+   * the third such type the #11833 sweep measured (#12010), adjudicated onto
+   * the contract by the 2026-08-25 ruling's item 4.
+   *
+   * Register a datasource *definition* (ADR-0015) — declarative
+   * `schemaMode` + `external.allowWrites`, so the engine's write gate can
+   * enforce external-datasource ownership. Distinct from registering a live
+   * driver connection. Safe to call repeatedly; last write wins.
+   */
+  registerDatasourceDef?(def: {
+    name: string;
+    schemaMode?: string;
+    external?: { allowWrites?: boolean };
+  }): void;
+
+  /**
+   * Record that a **declared** datasource has no live driver, and why
+   * (framework#3828): `'blocked'` — the host's connect policy refused it;
+   * `'failed'` — the connect failed while the operator opted into a degraded
+   * boot. Without this record the engine cannot distinguish either case from
+   * a misspelled datasource name, and answers all three with the same bare
+   * "is not registered". `publicDetail` is the only part safe to echo to an
+   * end user; the operator-facing cause stays in logs and the admin surface.
+   */
+  markDatasourceUnavailable?(info: {
+    name: string;
+    kind: 'blocked' | 'failed';
+    publicDetail?: string;
+  }): void;
+
+  /**
+   * Drop a previous {@link markDatasourceUnavailable} record (successful
+   * (re)connect, or pool removal).
+   */
+  clearDatasourceUnavailable?(name: string): void;
 }

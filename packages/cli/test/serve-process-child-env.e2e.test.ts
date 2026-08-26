@@ -36,11 +36,26 @@
  * `VITEST_WORKER_ID`, `VITEST_POOL_ID`, `VITEST_MODE` in place) also answers
  * `403 INVALID_ORIGIN`, so `TEST` alone is what better-auth reads.
  *
- * ⚠️ `VITEST` is not merely hygiene either, though this file said so in its
- * first revision and was wrong: `local-crypto-provider.ts:133` reads it
- * (`if (env.VITEST || env.NODE_ENV === 'test') return 'test'`) and an
- * inherited one silently put a spawned child's crypto layer in test mode. Same
- * class, different gate. `helpers/serve-process.ts` carries the measurement.
+ * ⚠️ `VITEST` was not merely hygiene either, though this file said so in its
+ * first revision and was wrong. What follows is quoted in the PAST TENSE on
+ * purpose — the code it quotes is GONE. `detectMode` in
+ * `local-crypto-provider.ts` used to read
+ * `if (env.VITEST || env.NODE_ENV === 'test') return 'test'`, so an inherited
+ * `VITEST=true` silently put a spawned child's crypto layer in test mode.
+ * #11448 (`a58eac3e`, merged 2026-08-23) deleted that arm; the live
+ * `detectMode` (`local-crypto-provider.ts:185`) reads `NODE_ENV` and nothing
+ * else.
+ *
+ * ⛔ So do not read the strip as still moving crypto posture: children
+ * spawned through this helper run `bin/run-dev.js`, which pins
+ * `process.env.NODE_ENV = 'development'` before argv is parsed, and `NODE_ENV`
+ * is deliberately outside `childEnv()`'s strip family — their posture is
+ * `development` with or without a leaked `VITEST`. The old wording predicted a
+ * `test` → `development` flip that cannot happen, and that prediction has
+ * already cost one dispatch (#11596) its scoping assumption. The strip stays
+ * anyway, now as defence-in-depth over a class `pnpm check:runner-env-posture`
+ * holds shut in product source. Same class, different gate;
+ * `helpers/serve-process.ts` carries the measurement.
  *
  * ## ⚠️ The first boot deliberately builds the env the WRONG way
  *

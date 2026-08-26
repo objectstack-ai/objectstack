@@ -41,6 +41,7 @@
     "@objectstack/driver-sql": "workspace:*",
     "@objectstack/objectql": "workspace:*",
     "@objectstack/plugin-hono-server": "workspace:*",
+    "@objectstack/plugin-security": "workspace:*",
     "@types/node": "^26.2.0",
     "hono": "^4.13.2",
     "typescript": "^6.0.3",

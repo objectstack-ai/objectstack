@@ -85,23 +85,37 @@
  *
  * ## WHY THIS FILE IS THE REASON `@objectstack/cli#test` DECLARES `build`
  *
- * This is the only file in `packages/cli` that genuinely consumes
- * `packages/cli/dist`, and it is the only one that can be, for a reason that
- * is this card's own subject matter turned back on the test harness.
+ * This file was the FIRST in `packages/cli` to genuinely consume
+ * `packages/cli/dist`, and for a while the only one, for a reason that is
+ * this card's own subject matter turned back on the test harness. Four files
+ * consume it today: this one, and the three named below that #11707 moved
+ * onto the built artifact. What did not change is that the `dependsOn`
+ * declaration this section is about is what makes any of them safe.
  *
  * `turbo.json` used to declare `"@objectstack/cli#test": { dependsOn:
  * ["^build"] }` — dependencies only, never this package's own build. So
  * `packages/cli/dist` does not exist when the `Test Core` shard runs. Five
  * other files here name `bin/run.js`; two only assert the path as a string,
  * and the three that actually spawn it (`serve-mcp-stdio-answers`,
- * `serve-mcp-capability-collision`, `serve-stdio-stdout-purity`) pass
- * `NODE_ENV: 'development'` to the child so its `--dev` admin seed runs.
+ * `serve-mcp-capability-collision`, `serve-stdio-stdout-purity`) used to pass
+ * `NODE_ENV: 'development'` to the child so its `--dev` admin seed ran.
  * That value is also what makes `@oclif/core`'s `tsPath()` rewrite the
  * command target from the declared `./dist/commands` to `./src/commands` and
  * auto-transpile: `lib/util/util.js` defines `isProd = () =>
  * !['development','test'].includes(process.env.NODE_ENV ?? '')`, and the
  * lookup is skipped only when that is true. Those three therefore never
- * touch `dist/` at all, and the missing build stayed invisible.
+ * touched `dist/` at all, and the missing build stayed invisible.
+ *
+ * THEY REACH IT NOW, and the declaration below is the whole reason that is
+ * allowed. #11707 dropped that `NODE_ENV` pin: all three leave the variable
+ * unset and spawn `bin/run.js` through plain `node` — this file's own shape —
+ * and the `--dev` seed survives because `serve.ts` assigns
+ * `process.env.NODE_ENV = 'development'` IN-PROCESS for `--dev` before
+ * `runtime.start()`, which is after oclif has already resolved the command.
+ * Measured when they moved, with a distinct marker planted in each tree:
+ * `node bin/run.js` + unset executes `dist/commands`, `node bin/run.js` +
+ * `NODE_ENV=development` executes `src/commands`. The pair is as silent as it
+ * ever was; what removed the hazard is that `dependsOn` reads `["build"]`.
  *
  * This pin cannot dodge it. Unset `NODE_ENV` is the input under test, and
  * unset is exactly the value that leaves `isProd()` true and the reroute
@@ -130,7 +144,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import type { Readable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
-import { childEnv, E2E_SECRET_KEY } from './helpers/serve-process.js';
+import { childEnv, E2E_SECRET_KEY, portContentionError, reservePort } from './helpers/serve-process.js';
 
 /** What `spawn(..., { stdio: ['ignore', 'pipe', 'pipe'] })` actually returns — no `stdin`. */
 type ProbeChild = ChildProcessByStdio<null, Readable, Readable>;
@@ -183,11 +197,6 @@ export default {
 let dir: string;
 const children: ProbeChild[] = [];
 
-/** A random high port, so a run never contends with another agent's dev server on this host. */
-function randomPort(): number {
-  return 41000 + Math.floor(Math.random() * 19000);
-}
-
 interface OriginCheckResult {
   status: number;
   body: any;
@@ -204,7 +213,19 @@ interface OriginCheckResult {
  * stringifying them, so this is not the same as `NODE_ENV=''`.
  */
 async function probeOriginCheck(env: Record<string, string | undefined>): Promise<OriginCheckResult> {
-  const port = randomPort();
+  // A BIND-PROBED port, from the one draw this directory has (#12441). It used
+  // to be a blind `41000 + Math.random() * 19000` under a docblock claiming "a
+  // run never contends with another agent's dev server on this host" — and this
+  // very file is where that claim was falsified, with `✗ Port 49402 is already
+  // in use`. ⚠️ `reservePort()` narrows that race, it does not close it; the
+  // `exit` handler below is what makes the residual loss legible. Read
+  // `reservePort()`'s own docblock before trusting either half of that.
+  //
+  // ⛔ This must stay a DRAWN port, not a fixed one: `serve` is driven here with
+  // `NODE_ENV` unset, i.e. into its production posture, where it refuses to
+  // auto-select a different port on purpose (#11113) — so a pinned port would
+  // convert an unlikely collision into a certain one.
+  const port = reservePort();
   const untrustedOriginPort = port + 1;
   writeFileSync(join(dir, 'objectstack.config.ts'), configFor(port), 'utf8');
 
@@ -230,13 +251,24 @@ async function probeOriginCheck(env: Record<string, string | undefined>): Promis
       // file measures, so the key is supplied explicitly.
       //
       // ⚠️ It was NOT needed before #11267 — and that is the finding, not an
-      // inconvenience. `local-crypto-provider.ts:133` reads
+      // inconvenience. What follows is quoted in the PAST TENSE on purpose:
+      // the code it quotes is GONE. `detectMode` used to read
       // `if (env.VITEST || env.NODE_ENV === 'test') return 'test'`, so while
       // this fixture still inherited the vitest worker's `VITEST=true`, its
       // crypto layer sat in TEST mode (ephemeral key, no disk, no refusal)
       // while the rest of the boot was in production posture. The production
       // posture this file exists to pin was genuine for auth and fake for
-      // crypto. Supplying the key is what makes it genuine for both.
+      // crypto.
+      //
+      // #11448 (`a58eac3e`, merged 2026-08-23) deleted that arm. The live
+      // `detectMode` (`local-crypto-provider.ts:185`) reads `NODE_ENV` and
+      // nothing else, so the key requirement no longer depends on `childEnv()`
+      // stripping anything: the unset-`NODE_ENV` leg selects production
+      // posture from `NODE_ENV` alone, and production refuses without a stable
+      // key whether or not a `VITEST` leaks in. The strip stays anyway, now as
+      // defence-in-depth over a class `pnpm check:runner-env-posture` holds
+      // shut in product source. Supplying the key is what makes the posture
+      // genuine for both halves.
       OS_SECRET_KEY: E2E_SECRET_KEY,
       // The base default for every call: truly unset, unless overridden by
       // `env` below. Node's spawn omits an `undefined`-valued entry rather
@@ -282,7 +314,21 @@ async function probeOriginCheck(env: Record<string, string | undefined>): Promis
     child.stderr.on('data', (d) => { err += String(d); onData(); });
     child.on('exit', (code) => {
       clearTimeout(timer);
-      readyReject(new Error(`serve exited ${code} before "Server is ready"\n--- stdout ---\n${out}\n--- stderr ---\n${err}`));
+      // ⭐ Port contention gets its OWN failure, before the generic one (#12441).
+      // The generic message — `serve exited 1 before "Server is ready"` — is
+      // literally what a lost port race produced in this file, and it costs a
+      // reader a round to work out that a file about NODE_ENV defaulting just
+      // failed for a reason that has nothing to do with NODE_ENV. `serve` in
+      // production posture prints `✗ Port <n> is already in use.` and exits 1,
+      // so the evidence is already in `err` — it just was not being read.
+      readyReject(
+        portContentionError(
+          out + err,
+          'os serve (bin/run.js, NODE_ENV unset ⇒ production ⇒ no auto-select)',
+          port,
+        )
+        ?? new Error(`serve exited ${code} before "Server is ready"\n--- stdout ---\n${out}\n--- stderr ---\n${err}`),
+      );
     });
   });
 

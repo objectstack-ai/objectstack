@@ -1461,7 +1461,8 @@ export const AppSchema = lazySchema(() => strictObject(
     'security review, not a rename. A route that genuinely needs handler CODE is mounted ' +
     'imperatively instead: resolve the `http.server` service from your plugin context and ' +
     'register the route on `kernel:ready` (NOT the manifest `contributes.routes` key — ' +
-    'nothing reads it, so an entry there parses cleanly and serves nothing). ' +
+    'removed in @objectstack/spec 17, #10726: nothing ever read it, and authoring it is ' +
+    'now rejected with its own prescription). ' +
     'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
   ),
 

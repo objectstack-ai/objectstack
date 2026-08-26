@@ -1863,14 +1863,31 @@ const FormFieldBaseSchema = lazySchema(() => {
   ),
   
   /** Text constraints */
-  maxLength: z.number().optional().describe('Maximum character length (for text/textarea/email/url/phone)'),
-  minLength: z.number().optional().describe('Minimum character length'),
-  
+  // #12174 — the form-field row's constraint keys converge on the value shape
+  // #11566/#11949 (lengths) and #8321 (precision/scale) landed on the object
+  // field surface: a character length is a positive integer and a digit count
+  // a non-negative one, so `maxLength: 0`, `minLength: -5` and `scale: 2.5`
+  // are refused at authoring instead of flowing to the renderer (objectui
+  // reads every one of these keys off the form row: the spec bridge
+  // `form-view.ts` mapField and plugin-form `sectionFields.ts` copy all six
+  // onto the runtime field, FormPage merges `override.maxLength` onto the
+  // input, and the fields package builds validation rules from them —
+  // `maxLength: 0` reached the DOM as an input that accepts nothing).
+  // Deliberately NO type-conditional gate here, unlike the object-field
+  // superRefine (BOUNDED_STRING_FIELD_TYPES): a form row references an object
+  // field by name and usually omits `type`, so the referenced field's type is
+  // not visible to this schema at parse time — a gate firing only when the
+  // optional presentational `type` override happens to be authored would make
+  // strictness depend on an unrelated key. Value shape is checkable here;
+  // key placement is the object field's own schema's job.
+  maxLength: z.number().int().min(1).optional().describe('Maximum character length (positive integer; for text/textarea/email/url/phone)'),
+  minLength: z.number().int().min(1).optional().describe('Minimum character length (positive integer; `minLength: 0` is refused — express "no minimum" by omitting the key)'),
+
   /** Number constraints */
   min: z.number().optional().describe('Minimum value (for number/currency/percent/slider)'),
   max: z.number().optional().describe('Maximum value'),
-  precision: z.number().optional().describe('Total digits (for number/currency)'),
-  scale: z.number().optional().describe('Decimal places'),
+  precision: z.number().int().min(0).optional().describe('Total digits (non-negative integer; for number/currency)'),
+  scale: z.number().int().min(0).optional().describe('Decimal places (non-negative integer)'),
   
   /** Multi-value flag */
   multiple: z.boolean().optional().describe('Allow multiple values (for select/lookup/file/image)'),

@@ -44,8 +44,13 @@ export type ExternalErrorCode =
  *
  * ## Why HERE and not in a REST error map
  *
- * ADR-0112: the PRODUCER names the condition. This repo's HTTP exits already
- * agree on how to read one — `status` then `statusCode`, 400-599 — in
+ * The producer that knows the condition declares its own wire shape. For the
+ * STATUS half — which is what this table decides — that is this repo's
+ * convergent HTTP-exit convention, NOT an ADR-0112 ruling: ADR-0112 governs
+ * the semantic-CODE channel (cited correctly above for the ledgered `code`,
+ * D3) and rules no HTTP status for a throw. This repo's HTTP exits already
+ * agree on how to read a declared status — `status` then `statusCode`,
+ * 400-599 — in
  * `mapDataError`'s `declaredHttpStatus` (#7525), `resolveErrorResponse`
  * (#5437/#5582), `HttpDispatcher.errorFromThrown` (#3867),
  * `dispatcher-plugin.errorResponseBase`, `endpoint-executor`,

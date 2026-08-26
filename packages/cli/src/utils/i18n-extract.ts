@@ -55,6 +55,9 @@
  *   flows.<flow>.screens.<node_id>.title                       (#7646 / #11287)
  *   flows.<flow>.screens.<node_id>.fields.<field>.label
  *   flows.<flow>.screens.<node_id>.fields.<field>.placeholder
+ *     ^ gated: `flows` is `planned` + `authorWarn` in the liveness ledger, so
+ *       these are walked only once the row goes `live` (#11624 — see
+ *       `authorWarnedTranslationGroups`)
  *   metadataForms.<type>.label / .description
  *   metadataForms.<type>.sections.<section>.label / .description
  *   metadataForms.<type>.fields.<dotPath>.label / .helpText / .placeholder
@@ -64,8 +67,10 @@
  * `@objectstack/spec`) — it is included unconditionally, independent of
  * the supplied stack config.
  *
- * Pure: no filesystem or network. Safe to call from the CLI, IDE tooling
- * and unit tests.
+ * Pure given its inputs: no network, and the only filesystem read is the
+ * shipped liveness ledger behind {@link authorWarnedTranslationGroups} —
+ * injectable as `warnedGroups`, so the walk itself stays a pure function of
+ * `config`. Safe to call from the CLI, IDE tooling and unit tests.
  */
 
 import type { TranslationBundle, TranslationData } from '@objectstack/spec/system';
@@ -78,7 +83,7 @@ import {
 import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';
 import { deriveFieldGroupLayout } from '@objectstack/spec/data';
 import { expandViewContainer } from '@objectstack/spec/ui';
-import { walkPageComponents } from '@objectstack/lint';
+import { authorWarnedProperties, walkPageComponents } from '@objectstack/lint';
 import { collectFilledFromHashes } from '@objectstack/platform-objects/apps';
 
 // ─── Public types ──────────────────────────────────────────────────────
@@ -136,7 +141,7 @@ export interface ExpectedEntry {
 
 export type FillStrategy = 'empty' | 'default' | 'todo';
 
-export interface ExtractOptions {
+export interface ExtractOptions extends ExpectedEntryOptions {
   /** Default locale (filled with source values). Defaults to `'en'`. */
   defaultLocale?: string;
   /** Locales to emit. Defaults to `[defaultLocale]`. */
@@ -651,8 +656,76 @@ function walkObjectTabs(config: any, out: ExpectedEntry[]): void {
   }
 }
 
-/** Collect every translatable entry from a normalized stack config. */
-export function collectExpectedEntries(config: any): ExpectedEntry[] {
+/**
+ * Translation groups the shipped liveness ledger warns an author for authoring
+ * — today exactly `flows` (`status: planned`, `authorWarn: true`).
+ *
+ * ## Why the walk surface is gated on this at all (#11624)
+ *
+ * `os lint` runs the coverage gate built on this walker AND
+ * `lintLivenessProperties` in ONE pass, and before this gate existed they
+ * pointed opposite ways on the same keys: omit `flows.<f>.screens.<n>.title`
+ * from a bundle and the coverage gate reported `i18n/missing-flow`; author it
+ * and the liveness rule reported `liveness-planned-property` ("sets `flows` but
+ * this translation property is planned"). Measured on one stack, one run: 4
+ * demand-side findings against 2 warn-side findings, and no third option — the
+ * CLI has no per-rule suppression, only `--skip-i18n`, which silences the whole
+ * `i18n/missing-*` family. Under `--i18n-strict` the demand side is an error,
+ * so a project could be *forced* to author keys it is then warned for.
+ *
+ * ⛔ The warn side is not the bug and must not be softened: no shipped runner
+ * reads the group, so a translated wizard string really is stored and never
+ * shown. The demand is the half that is premature.
+ *
+ * ## Shape
+ *
+ * Group-general, not `flows`-specific, and read from the ledger rather than a
+ * switch of our own: the day the objectui screen-flow runner lands and the row
+ * flips to `live` (dropping its `authorWarn`), the bucket turns itself back on
+ * with no edit here — and any FUTURE group that acquires a warn is covered on
+ * the day it is marked, rather than re-opening this collision one group at a
+ * time.
+ *
+ * The join is on the group (`path[0]`) and stops there deliberately: for
+ * file-authored bundles the warn side only ever fires at that depth. Its
+ * `getNested` fans out over ARRAYS, and a translation group is a record keyed
+ * by target name, so a warned child row (`flows.label`) resolves
+ * `data.flows.label` — a path no real bundle has — and warns nobody. Matching
+ * deeper here would suppress keys nothing warns about.
+ *
+ * Unreadable ledger ⇒ empty set ⇒ nothing is gated, which is also the state in
+ * which the warn side warns on nothing. The two halves go quiet together; the
+ * one thing that must never happen is one of them speaking alone.
+ */
+export function authorWarnedTranslationGroups(): ReadonlySet<string> {
+  const warned = authorWarnedProperties('translation');
+  // Top-level groups only — see the `getNested` note above.
+  return new Set([...warned].filter((path) => !path.includes('.')));
+}
+
+/** Options shared by the two surfaces built on {@link collectExpectedEntries}. */
+export interface ExpectedEntryOptions {
+  /**
+   * Translation groups to leave out of the walk. Defaults to
+   * {@link authorWarnedTranslationGroups}. Pass an empty set to walk the whole
+   * declared surface — what the gated groups look like the day their ledger row
+   * goes `live`.
+   */
+  warnedGroups?: ReadonlySet<string>;
+}
+
+/**
+ * Collect every translatable entry from a normalized stack config.
+ *
+ * Groups the liveness ledger warns authors for authoring are left out — see
+ * {@link authorWarnedTranslationGroups}. This is the single place the gate
+ * lives, so `os lint`'s coverage report and `os i18n extract`'s skeleton can
+ * never disagree about which keys an author is being asked for.
+ */
+export function collectExpectedEntries(
+  config: any,
+  opts: ExpectedEntryOptions = {},
+): ExpectedEntry[] {
   const out: ExpectedEntry[] = [];
 
   // ── Objects ───────────────────────────────────────────────────────
@@ -930,7 +1003,9 @@ export function collectExpectedEntries(config: any): ExpectedEntry[] {
   // flows, etc.
   walkMetadataForms(out);
 
-  return out;
+  const warnedGroups = opts.warnedGroups ?? authorWarnedTranslationGroups();
+  if (warnedGroups.size === 0) return out;
+  return out.filter((entry) => !warnedGroups.has(entry.path[0]));
 }
 
 // ─── Screen flows (`flows.<flow>.screens.<node_id>.…`) ─────────────────
@@ -1205,7 +1280,12 @@ export function extractTranslations(config: any, opts: ExtractOptions = {}): Ext
   // Seed-less entries exist only so the coverage gate can spot a bundle that
   // authors a key the metadata never writes inline — there is nothing to
   // scaffold from, so they never reach a generated skeleton.
-  const allEntries = collectExpectedEntries(config).filter((e) => e.sourceValue !== undefined);
+  // `warnedGroups` rides through: a group the ledger warns authors for
+  // authoring must not be scaffolded either. Scaffolding it would hand the
+  // author a skeleton whose every filled-in key draws a warning — the same
+  // collision the coverage gate has, arriving by a different door (#11624).
+  const allEntries = collectExpectedEntries(config, { warnedGroups: opts.warnedGroups })
+    .filter((e) => e.sourceValue !== undefined);
   const entries = allEntries.filter((e) => passesFilter(e, opts.filter));
 
   const existingBundles: TranslationBundle[] = Array.isArray(config?.translations) ? config.translations : [];
