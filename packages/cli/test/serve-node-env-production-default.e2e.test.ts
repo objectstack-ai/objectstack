@@ -138,7 +138,9 @@
  * answers ` ›   Error: command serve not found` before `serve.ts` runs a
  * single line. Measured, deterministic, not load-dependent: unset and
  * `production` both fail that way, `test` and `development` both resolve
- * from `src/`. An earlier revision of this file wrapped the boot in a
+ * from `src/` — which is why the two explicit-`NODE_ENV` `it()` blocks
+ * below execute `src/commands`, and only the unset pin measures the built
+ * `dist/`. An earlier revision of this file wrapped the boot in a
  * signature-scoped retry on the theory that the failure was a transient
  * `dist/commands` read under concurrent spawn load; that retry shipped, ran
  * in the failing job, and changed nothing — which is the measurement that
@@ -150,7 +152,7 @@
  * before argv is parsed, which makes the unset-`NODE_ENV` input this whole
  * file exists to measure unreachable — the pin would go green measuring
  * nothing. `bin/run.js` plus a genuinely built `dist/` is the only shape
- * that reaches the gate.
+ * that reaches the gate for this pin.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
