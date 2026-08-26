@@ -66,12 +66,48 @@ describe('[#11825] kernel/ AdvancedPluginLifecycleConfig retirement', () => {
     'PluginHealthCheckSchema',
     'PluginHealthReportSchema',
     'HotReloadConfigSchema',
-    'DistributedStateConfigSchema',
+    // 'DistributedStateConfigSchema' — MOVED OUT by #12340, see below.
     'PluginStateSnapshotSchema',
     'PluginHealthCheckParsed',
     'HotReloadConfigParsed',
     'PluginStateSnapshot',
   ] as const;
+
+  /**
+   * [#12340] The one name this ruling's survivor list NAMED and a later card
+   * removed anyway.
+   *
+   * Not a quiet edit to make a red pin green — the reversal is the finding.
+   * #11825 measured the CONTAINER's six groups and kept `HotReloadConfig`
+   * "with its embedded `DistributedStateConfig`" as a library parameter type.
+   * It never measured THIS key's own readers. #12340 did, at cdbd9204b6 with
+   * a firing positive control, and found zero: an author could name a Redis
+   * endpoint, a TTL and a replication factor, and nothing ever opened a
+   * connection. Its only referencing key (`HotReloadConfig.distributedConfig`)
+   * left with the `stateStrategy: 'distributed'` value it was documented as
+   * being "required" for, so the schema had nothing left to be the vocabulary
+   * OF.
+   *
+   * The keep itself is intact and still pinned above: `HotReloadConfigSchema`
+   * survives, `HotReloadManager` survives. What #12340 removed is the part of
+   * the kept vocabulary that was itself declared-but-unenforced — the same
+   * ADR-0049 test that retired the container, applied one level in.
+   */
+  const RETIRED_BY_12340 = ['DistributedStateConfigSchema', 'DistributedStateConfig',
+    'DistributedStateConfigParsed'] as const;
+
+  it('[#12340] the distributed-state vocabulary has zero holders too', () => {
+    // Anti-vacuity: the same baseline the sibling assertion relies on.
+    expect(exportNamesOf('./kernel').length).toBeGreaterThan(50);
+    for (const name of RETIRED_BY_12340) {
+      expect(holdersOf(name), `${name} must have zero holders after #12340`).toEqual([]);
+    }
+    // The keep it was carved out of is UNTOUCHED — this is the assertion that
+    // makes the removal a narrowing rather than the "too-wide sweep" the
+    // survivor list was written to stop.
+    expect(exportNamesOf('./kernel')).toContain('HotReloadConfigSchema');
+    expect(exportNamesOf('./kernel')).toContain('PluginStateSnapshotSchema');
+  });
 
   it('every retired name has ZERO holders on any public entry; the survivors still stand', () => {
     // Anti-vacuity: the baseline must cover the real surface.
@@ -108,6 +144,8 @@ describe('[#11825] kernel/ AdvancedPluginLifecycleConfig retirement', () => {
     // library vocabularies (the #4914 §2 keep, restated by this ruling).
     expect(kernel).toHaveProperty('PluginHealthCheckSchema');
     expect(kernel).toHaveProperty('HotReloadConfigSchema');
+    // [#12340] gone from the barrel with its def; the keep around it stands.
+    expect(kernel).not.toHaveProperty('DistributedStateConfigSchema');
     expect(kernel).toHaveProperty('PluginStateSnapshotSchema');
     expect(kernel).toHaveProperty('ManifestSchema');
   });
