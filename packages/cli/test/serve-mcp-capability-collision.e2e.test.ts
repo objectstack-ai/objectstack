@@ -181,12 +181,31 @@ function boot(env: Record<string, string | undefined>, waitFor: RegExp): Promise
         NO_COLOR: '1',
         OS_LOG_LEVEL: 'info',
         OS_DISABLE_CONSOLE: '1',
-        // Explicit, not minted: with `VITEST` no longer inherited (#11267),
-        // `local-crypto-provider.ts`'s detectMode answers `development` for
-        // this child instead of `test`, and development mode PERSISTS a minted
-        // key to `$HOME/.objectstack/dev-crypto-key`. Supplying one keeps this
-        // boot from writing to the runner's home directory and from coupling
-        // itself to whatever other test got there first.
+        // Explicit, not minted — but NOT because of the `VITEST` strip above.
+        // What follows is quoted in the PAST TENSE on purpose: the code it
+        // quotes is GONE. `detectMode` used to read
+        // `if (env.VITEST || env.NODE_ENV === 'test') return 'test'`, so an
+        // inherited `VITEST=true` did put a spawned child's crypto layer in
+        // `test` mode. #11448 (`a58eac3e2`, merged 2026-08-23) deleted that
+        // arm; the live `detectMode` (`local-crypto-provider.ts:185`, read
+        // off this tree) reads `NODE_ENV` and nothing else. So stripping
+        // `VITEST` is not what selects the posture here, and the `test` →
+        // `development` flip the old wording predicted is unreachable in
+        // either direction.
+        //
+        // What DOES select `development` is the `NODE_ENV` entry below, and
+        // it is measured on this tree, not inherited: this file spawns
+        // `bin/run.js`, which pins no `NODE_ENV` of its own (only
+        // `bin/run-dev.js` does), with the variable UNSET — so `serve.ts`
+        // assigns `process.env.NODE_ENV = 'development'` in-process for
+        // `--dev` before `runtime.start()`, and the crypto provider reads
+        // `process.env` when it resolves its key, after that assignment.
+        //
+        // ⭐ The conclusion is unchanged and load-bearing: development mode
+        // PERSISTS a minted key to `$HOME/.objectstack/dev-crypto-key`, so
+        // supplying one keeps this boot from writing to the runner's home
+        // directory and from coupling itself to whatever other test got
+        // there first.
         OS_SECRET_KEY: E2E_SECRET_KEY,
         // UNSET, not `development` — and `undefined` rather than `''`, because
         // Node's `spawn()` omits an undefined-valued entry rather than
