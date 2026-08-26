@@ -21,6 +21,7 @@ import {
   renderTranslationModule,
   renderSourceHashModule,
   parseSourceHashModule,
+  narrowToCommittedSections,
   type FillStrategy,
 } from '../../utils/i18n-extract.js';
 
@@ -198,6 +199,52 @@ export default class I18nExtract extends Command {
       const emitsMetadataForms = (locale: string): boolean =>
         flags['metadata-forms'] && (metadataFormsCounts[locale] ?? 0) > 0;
 
+      /**
+       * The provenance table for one locale, narrowed to the sections this run
+       * actually COMMITS (#12559).
+       *
+       * `extractTranslations` computes the table over every generated section it
+       * built — `objects` and `metadataForms` both — because the rule that fills
+       * it (`collectFilledFromHashes`) is a statement about generated leaves, not
+       * about files. Which of those sections becomes a committed bundle is this
+       * layer's decision, and the two must agree: a record describes the leaf
+       * sitting in a bundle beside it, and a record for a leaf this package does
+       * not commit describes nothing that exists here.
+       *
+       * The mismatch is not hypothetical — it is what the eight-set rollout in
+       * #12559 measured on first contact. A package that owns only its own
+       * objects passes `--no-metadata-forms`, and the emitter's own note two
+       * blocks up says why: "without it, `--check` demands a baseline copy the
+       * package deliberately does not commit". Its `metadataForms` subtree is
+       * nonetheless built, and — having no entry in that package's merge
+       * baseline — arrives as a fresh `--fill=default` copy of `en`, so EVERY
+       * leaf of it satisfies `value === currentSource` and gets recorded.
+       * Measured on `plugin-audit`: 763 records, of which **2** were its own
+       * objects and 761 were digests of the Studio metadata-form baseline that
+       * `@objectstack/platform-objects` owns. Those records are unreadable here
+       * (no `metadataForms` bundle exists in this package for them to be about),
+       * and they would move all three of this package's companions every time an
+       * unrelated `*.form.ts` in `packages/spec` changed — the same cross-package
+       * coupling ADR-0029 D8 and each package's `bundle-ownership.test.ts` exist
+       * to keep out of its committed bundles.
+       *
+       * So the section list is decided by the SAME predicates that decide the
+       * bundle files, never by a second rule: `result.counts` for `objects` and
+       * {@link emitsMetadataForms} for `metadataForms`. A set that commits both —
+       * `platform-objects` is the one today — keeps every record it had. The
+       * narrowing itself is `narrowToCommittedSections`, a pure function in the
+       * extractor's utils so it can be pinned without driving oclif; this layer
+       * contributes only the two booleans it alone knows.
+       */
+      const committedSourceHashes = (locale: string): Record<string, string> | undefined => {
+        const table = result.sourceHashes[locale];
+        if (!table) return undefined;
+        const committed: string[] = [];
+        if ((result.counts[locale] ?? 0) > 0) committed.push('objects');
+        if (emitsMetadataForms(locale)) committed.push('metadataForms');
+        return narrowToCommittedSections(table, committed);
+      };
+
       if (flags.json) {
         await emitJson({
           totalExpected: result.totalExpected,
@@ -275,7 +322,7 @@ export default class I18nExtract extends Command {
         // The provenance companion rides in the SAME list, so `--check` compares
         // it by the same byte-for-byte rule as the bundles it belongs to and can
         // never diverge from what a real extract writes.
-        const table = result.sourceHashes[locale];
+        const table = committedSourceHashes(locale);
         if (flags['source-hashes'] && table) {
           emitted.push({
             file: path.join(resolvedOutDir, `${locale}.source-hashes.generated.ts`),

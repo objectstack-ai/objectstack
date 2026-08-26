@@ -15,6 +15,7 @@ import {
   extractTranslations,
   renderSourceHashModule,
   parseSourceHashModule,
+  narrowToCommittedSections,
 } from '../src/utils/i18n-extract.js';
 
 const stack = (help: string) => ({
@@ -82,5 +83,64 @@ describe('the emitted module', () => {
     expect(parseSourceHashModule('')).toBeUndefined();
     expect(parseSourceHashModule('export const x: Readonly<Record<string, string>> = { oops };')).toBeUndefined();
     expect(parseSourceHashModule('export const x: Readonly<Record<string, string>> = { "a": 3 };')).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The companion covers the sections the run COMMITS (#12559)
+// ---------------------------------------------------------------------------
+//
+// `extractTranslations` fills the table over every generated section it built,
+// `metadataForms` included, because the rule behind it is about generated
+// leaves rather than about files. A package that owns only its own objects
+// passes `--no-metadata-forms` and commits no metadata-forms bundle — and its
+// `metadataForms` subtree, absent from its merge baseline, arrives as a fresh
+// `--fill=default` copy of `en`, so every leaf of it is recordable. Unnarrowed,
+// that is what the table carries: measured on `@objectstack/plugin-audit` during
+// the #12559 rollout, 763 records of which 2 were its own objects and 761 were
+// digests of the metadata-form baseline `@objectstack/platform-objects` owns.
+//
+// The narrowing is pinned here rather than mirrored from the command, because a
+// mirror of an emit rule is a second contract — it agrees until the day one side
+// changes, and nothing says so on that day.
+
+describe('the provenance table is narrowed to the committed sections (#12559)', () => {
+  const result = extractTranslations(
+    { objects: [{ name: 'account', label: 'Account', fields: { name: { label: 'Name' } } }] },
+    { defaultLocale: 'en', locales: ['zh-CN'], fill: 'default' },
+  );
+  const table = result.sourceHashes['zh-CN'];
+  const sectionsIn = (t: Record<string, string>) => [...new Set(Object.keys(t).map((k) => k.split('.', 1)[0]))].sort();
+
+  it('has both sections to narrow — otherwise every case below would pass vacuously', () => {
+    // The registry-driven metadata-form baseline is present for any stack, so
+    // this is the precondition that makes the two cases a measurement rather
+    // than an empty walk.
+    expect(sectionsIn(table)).toEqual(['metadataForms', 'objects']);
+    expect(Object.keys(table).length).toBeGreaterThan(100);
+  });
+
+  it('drops the metadata-forms records for a set that commits no metadata-forms bundle', () => {
+    const narrowed = narrowToCommittedSections(table, ['objects']);
+    expect(sectionsIn(narrowed)).toEqual(['objects']);
+    // Every surviving record is unchanged — this narrows the table, it does not
+    // recompute it.
+    for (const [path, digest] of Object.entries(narrowed)) expect(digest).toBe(table[path]);
+  });
+
+  it('keeps every record for a set that commits both, so the covered set is untouched', () => {
+    expect(narrowToCommittedSections(table, ['objects', 'metadataForms'])).toEqual(table);
+  });
+
+  it('names a section by a leaf path\'s first dotted segment, never by a prefix match', () => {
+    // `objects` must not be reached through a section that merely starts with
+    // it, and a nested key called `objects` must not be mistaken for the section.
+    const odd = { 'objectsExtra.a.label': 'aaaaaaaaaaaaaaaa', 'metadataForms.x.objects.b': 'bbbbbbbbbbbbbbbb' };
+    expect(narrowToCommittedSections(odd, ['objects'])).toEqual({});
+    expect(narrowToCommittedSections(odd, ['metadataForms'])).toEqual({ 'metadataForms.x.objects.b': 'bbbbbbbbbbbbbbbb' });
+  });
+
+  it('commits nothing when no section is committed', () => {
+    expect(narrowToCommittedSections(table, [])).toEqual({});
   });
 });
