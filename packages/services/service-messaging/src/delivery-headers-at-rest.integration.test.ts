@@ -288,7 +288,7 @@ describe('sys_http_delivery — authored headers vs the data API (#8118)', () =>
         // its authored configuration.
         const noAccessor = {
             find: (o: string, q: unknown) => (eng as any).find(o, q),
-            findOne: (o: string, q: unknown) => { assertEngineFindOnePredicate(o, q); return (eng as any).findOne(o, q); },
+            findOne: (o: string, q: unknown) => { assertEngineFindOnePredicate(o, q as any); return (eng as any).findOne(o, q); },
             insert: (o: string, d: unknown) => (eng as any).insert(o, d),
             update: (o: string, d: unknown, q: unknown) => {
                 // Engine-double contract: this fake's update() must be exactly

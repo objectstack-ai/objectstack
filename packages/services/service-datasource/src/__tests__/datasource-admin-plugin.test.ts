@@ -8,13 +8,19 @@ import {
   type DatasourceAdminServicePluginOptions,
 } from '../datasource-admin-plugin.js';
 
+import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';
+
 // [#10126] Pay the first transform of these dist-resolved workspace deps at MODULE
 // LOAD. Each is reached below through a dynamic `import()` inside an `it()` body or a
 // hook -- both of which vitest clocks, while collection is clocked against nothing. See
 // `scripts/check-test-source-alias.mjs` (the clocked-window rule) and #10115 / PR #10120,
 // where the same shape cost 30 ejected merge-queue builds in one night.
+//
+// ORDER IS LOAD-BEARING until #12555 lands: check-test-source-alias's import regex
+// swallows a bare side-effect import whenever an `import … from …` follows it later in
+// the file, so this statement must stay BELOW every `from` import or the clocked-window
+// rule reports this file as unpaid while the line it asks for is already here.
 import '@objectstack/spec/kernel';
-import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 
 /**
  * Minimal PluginContext + in-memory metadata service. Boots the plugin and
