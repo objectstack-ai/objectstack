@@ -1361,6 +1361,30 @@ mode_report() {
   awk '{ for (i = 2; i <= NF; i++) if (substr($i, 1, 8) == "outcome=") { c[substr($i, 9)]++; break } }
        END { for (k in c) printf "  %-24s %6d\n", k, c[k] }' "$LEDGER_FILE" 2> /dev/null | sort -k2 -rn
   printf '  ⇒ queue-timeout and lock-unusable are NOT MEASURED runs: no gate was decided by them.\n'
+  # The bucket above is NOT homogeneous, and nothing in the row says so. Every
+  # record written before the verdict-word fix carries `command-exit`
+  # unconditionally -- the word was the outcome's name, not a claim about it --
+  # so a ledger that spans the fix mixes certified runs with runs that were
+  # never certified, under one heading, ranked next to a `batch-last-exit`
+  # count that IS a claim. A reader totting up `command-exit N` reads N
+  # certified runs; across the boundary that is false, and it is false in the
+  # green direction, which is how the original defect survived. Only the
+  # positive word can be trusted retrospectively, so the block says which one
+  # that is rather than leaving the two looking comparable.
+  #
+  # The second line pre-empts the repair a reader reaches for next: scanning
+  # the labels for a sequencing operator. That scan is a LOWER BOUND by
+  # construction and saying so here is cheaper than saying it after someone
+  # reports a census -- `ledger_append` cuts the label at 200 chars, and it
+  # flattens newlines to spaces BEFORE that cut, so a newline-sequenced batch
+  # (one of the very forms the word distinguishes) leaves no operator in the
+  # label at any length.
+  printf '  ⇒ command-exit is NOT one population: rows written before the verdict-word fix\n'
+  printf '    carry it unconditionally, so the bucket mixes certified with never-certified\n'
+  printf '    runs. Only batch-last-exit is a positive signal.\n'
+  printf '  ⇒ a label scan for a top-level ";", "|", "||" or "&" LOWER-BOUNDS that mixture\n'
+  printf '    and cannot census it: labels are cut at 200 chars, and a newline -- itself one\n'
+  printf '    of the sequencing forms -- is flattened to a space BEFORE the cut.\n'
 
   # waits and holds, as distributions rather than a single mean -- the tail is
   # the whole complaint on this lock, and a mean hides it.
@@ -2070,6 +2094,17 @@ mode_self_test() {
     "$(bash "$SELF" --report 2>&1 | grep -c 'lock-seconds held, by command')" 1
   st_case 'and --report labels the non-runs as NOT MEASURED rather than counting them' \
     "$(bash "$SELF" --report 2>&1 | grep -c 'NOT MEASURED')" 1
+  # The outcomes block ranks a word that certifies next to a word that did not
+  # always mean anything, and a ledger spanning the verdict-word fix holds
+  # both. These two pin the caveat that keeps the ranking honest -- without
+  # them the block silently invites `command-exit N` to be read as N certified
+  # runs, which is the original defect wearing the ledger's clothes.
+  st_case 'and --report refuses to present command-exit as one population' \
+    "$(bash "$SELF" --report 2>&1 | grep -c 'NOT one population')" 1
+  st_case 'and says a label scan lower-bounds the mixture rather than censusing it' \
+    "$(bash "$SELF" --report 2>&1 | grep -c 'LOWER-BOUNDS that mixture')" 1
+  st_case 'and names the newline flattening, which no label length can recover' \
+    "$(bash "$SELF" --report 2>&1 | grep -c 'flattened to a space BEFORE the cut')" 1
   # A measurement apparatus that can redden a gate has become part of the thing
   # it measures. This is the case that keeps it out of the way.
   st_case 'an unwritable ledger loses records, never runs' \
