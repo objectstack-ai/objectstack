@@ -245,3 +245,141 @@ describe('sendError — the `declaredCode` open channel', () => {
             .toEqual(['code', 'message']);
     });
 });
+
+/**
+ * The #9934 user-facing marking on the NESTED envelope (maintainer ruling
+ * 2026-08-19 on objectui#5210, option 1).
+ *
+ * `ApiErrorSchema` declares `userMessage` — the text a producer marked AT THROW
+ * TIME as addressed to the END USER — and two of the three doors already emit
+ * it (the flat `/data` door, the dispatcher door). `sendError`'s `extra` did
+ * not admit the field, so a route answering the nested envelope could not put
+ * it on the wire: a COMPILE ERROR to try, and the author's deliberate,
+ * localized refusal text was dropped on this door alone while a valid body
+ * shipped without it.
+ *
+ * Same discipline as the `declaredCode` block above: drive the REAL resolver
+ * and parse the emitted body with the REAL `ApiErrorSchema`, because a
+ * type-level assertion would pass against a schema that declares nothing, and
+ * `.success` alone would pass against one that merely STRIPS the field.
+ */
+describe('sendError — the `userMessage` user-facing channel', () => {
+    const USER_TEXT = '该任务已进入月末结账期，暂不能修改；请联系财务主管解锁。';
+    const DIAGNOSTIC = 'close-period guard refused the write';
+
+    /**
+     * The producer shape the runtime actually delivers: a hook refusal that
+     * opted in at throw time. Host-side hooks write this literally; a metadata
+     * app's sandboxed body reaches the same shape via `e.userMessage` crossing
+     * the QuickJS boundary (`SANDBOX_ERROR_PASSTHROUGH`).
+     */
+    const markedRefusal = () => Object.assign(
+        new Error(DIAGNOSTIC),
+        { statusCode: 403, userMessage: USER_TEXT },
+    );
+
+    it('carries the producer text verbatim WITHOUT replacing the diagnostic message', () => {
+        const { res, seen } = capture();
+        const thrown = resolveThrownHttpError(markedRefusal());
+
+        // No re-derivation here, unlike `declaredCode`: `declaredUserMessage`
+        // already decided what counts as marked, and the resolver applied it.
+        sendError(res, thrown.status, thrown.code, thrown.message, {
+            ...(thrown.userMessage !== undefined ? { userMessage: thrown.userMessage } : {}),
+        });
+
+        expect(seen.status).toBe(403);
+        expect(seen.body).toEqual({
+            success: false,
+            error: {
+                code: 'PERMISSION_DENIED',
+                // The diagnostic channel keeps its own wording…
+                message: DIAGNOSTIC,
+                // …and the marked text rides beside it, byte for byte.
+                userMessage: USER_TEXT,
+            },
+        });
+    });
+
+    it('emits a body the REAL schemas accept, with the field still on it after the parse', () => {
+        const { res, seen } = capture();
+        const thrown = resolveThrownHttpError(markedRefusal());
+        sendError(res, thrown.status, thrown.code, thrown.message, {
+            userMessage: thrown.userMessage!,
+        });
+
+        const body = seen.body as { error: unknown };
+        expect(BaseResponseSchema.safeParse(seen.body).success).toBe(true);
+        expect(envelopeViolations(seen.body)).toEqual([]);
+
+        const parsed = ApiErrorSchema.safeParse(body.error);
+        expect(parsed.success).toBe(true);
+        expect((parsed as { data: { userMessage?: string } }).data.userMessage).toBe(USER_TEXT);
+    });
+
+    it('the survives-the-parse reading can say NO — an undeclared sibling beside it is stripped', () => {
+        // Paired control on a term that is NOT a substring of the one under
+        // test. `ApiErrorSchema` is a plain `z.object`, so it strips rather
+        // than rejects: "parsed clean" is worthless alone, and this is what
+        // makes the assertion above distinguish a DECLARED field from a merely
+        // tolerated one — same body, same parse, opposite outcomes.
+        const parsed = ApiErrorSchema.safeParse({
+            code: 'PERMISSION_DENIED',
+            message: DIAGNOSTIC,
+            userMessage: USER_TEXT,
+            reason: 'closed-period',
+        });
+
+        expect(parsed.success).toBe(true);
+        const data = (parsed as { data: Record<string, unknown> }).data;
+        expect(data.userMessage).toBe(USER_TEXT);
+        expect('reason' in data).toBe(false);
+    });
+
+    it('stays ABSENT when the producer marked nothing — #3821 preserved by construction', () => {
+        // Absence is the default and it is load-bearing: the consumer keeps its
+        // generic substitution for anything unmarked. A blank marking is NOT a
+        // declaration (`declaredUserMessage`'s non-empty-string rule), so the
+        // writer must not invent a marked message for a producer that wrote
+        // none — and the key must not appear as an empty string either.
+        const { res, seen } = capture();
+        const thrown = resolveThrownHttpError(
+            Object.assign(new Error(DIAGNOSTIC), { statusCode: 403, userMessage: '   ' }),
+        );
+
+        expect(thrown.userMessage).toBeUndefined();
+
+        sendError(res, thrown.status, thrown.code, thrown.message, {
+            ...(thrown.userMessage !== undefined ? { userMessage: thrown.userMessage } : {}),
+        });
+
+        expect(Object.keys((seen.body as { error: object }).error)).toEqual(['code', 'message']);
+    });
+
+    it('rides BESIDE `declaredCode` — both open channels on one refusal', () => {
+        // The metadata-app case both cards were filed for: an app's own `.code`
+        // (unregistered, so demoted) and its own user-facing text, on the same
+        // throw. Admitting the second channel must not disturb the first.
+        const { res, seen } = capture();
+        const thrown = resolveThrownHttpError(Object.assign(
+            new Error('crm quota guard refused the write'),
+            { code: 'crm.quota_exceeded', status: 403, userMessage: USER_TEXT },
+        ));
+        const demoted = demotedDeclaredCode(thrown);
+
+        sendError(res, thrown.status, thrown.code, thrown.message, {
+            ...(demoted !== undefined ? { declaredCode: demoted } : {}),
+            ...(thrown.userMessage !== undefined ? { userMessage: thrown.userMessage } : {}),
+        });
+
+        const body = seen.body as { error: unknown };
+        const parsed = ApiErrorSchema.safeParse(body.error);
+        expect(parsed.success).toBe(true);
+        expect((parsed as { data: Record<string, unknown> }).data).toEqual({
+            code: 'PERMISSION_DENIED',
+            message: 'crm quota guard refused the write',
+            declaredCode: 'crm.quota_exceeded',
+            userMessage: USER_TEXT,
+        });
+    });
+});
