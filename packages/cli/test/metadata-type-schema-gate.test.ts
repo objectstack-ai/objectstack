@@ -48,6 +48,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ObjectStackDefinitionSchema, lintUnknownAuthoringKeys, formatUnknownAuthoringKey } from '@objectstack/spec';
 import { getMetadataTypeSchema, listMetadataTypeSchemaTypes } from '@objectstack/spec/kernel';
+import { childEnv } from './helpers/serve-process.js';
 
 const cliBin = join(fileURLToPath(new URL('.', import.meta.url)), '..', 'bin', 'run-dev.js');
 
@@ -186,6 +187,11 @@ function runCli(command: string, dir: string, args: string[] = []): { exitCode: 
       cwd: dir,
       encoding: 'utf8',
       stdio: 'pipe',
+      // Every spawned child under this directory declares its environment at the
+      // call site (#11595). An omitted `env` is the leak in its purest form: the
+      // child gets the vitest worker's environment verbatim, with nothing on the
+      // page to read.
+      env: childEnv(),
     });
     return { exitCode: 0, output };
   } catch (error: any) {
