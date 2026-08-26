@@ -7,10 +7,10 @@ import { formatOutput } from '../../utils/output-formatter.js';
 import { readAuthConfig, writeAuthConfig } from '../../utils/auth-config.js';
 
 /**
- * `os environments create` — provision a new project.
+ * `os environments create` — provision a new environment.
  *
  * Delegates to `ProjectProvisioningService.provisionProject` on the server.
- * On success, optionally activates the new project for the current session
+ * On success, optionally activates the new environment for the current session
  * and persists `activeEnvironmentId` into `~/.objectstack/credentials.json`
  * (unless `--no-activate` is passed).
  */
@@ -64,7 +64,7 @@ export default class EnvironmentsCreate extends Command {
 
       // Resolve the artifact to an absolute path so the server can read it
       // regardless of its CWD. Bail early if the file is missing — better
-      // to fail before provisioning than leave a half-bound project.
+      // to fail before provisioning than leave a half-bound environment.
       let metadata: Record<string, unknown> | undefined;
       if (flags.artifact) {
         const path = await import('node:path');
