@@ -84,12 +84,13 @@
   `GitHub access is not enabled for this session`(⛔ 不是限流,重试改不了它),而 `/rate_limit` 照答 200
   —— 它兼任不了通道探针;探针 = 一条真 repo-scoped 读。探针 403 后 `/rate_limit` 是**单调用
   凭据判别**:15000/时 = 凭据活、被 repo-scoping 拒;60/时或 auth 错 = 无凭据(实测有席位 token
-  是 14 字节占位串)—— 两形同症不同治,按单一读数写的补救半灵半瞎。**按班矩
-  阵(2026-08-25,两车道 5+ dev 席、1 PM 席)**:os-dev 子代理席一律整类 403,读写同门(加法标签
-  POST、评论 PATCH 同死 ⇒ 无评论编辑通道,更正只能重发),`gh` 缺席,MCP 与 git push 正常;顶层
-  席分裂(2026-08-24 同窗三席:两 403、一 200)⇒ ⛔ 不据他席读数推本席。**门关着时的降级
-  梯**:① git 先行(「零成本等价物」);② 公开仓 payload 档(下方「公开仓」条);③ MCP:search
-  定向一击、列表**单标签**读全 + 本地求交(`labels` 是 OR,见 MCP 参数条);④ 等重置。
+  是 14 字节占位串),两形同症不同治。**按班矩阵**:2026-08-25 两车道 5+ dev 席全被门拒(整类
+  403、读写同门 —— 加法标签 POST、评论 PATCH 同死 ⇒ 无评论编辑通道,更正=重发;`gh` 缺
+  席,MCP 与 git push 正常);2026-08-26 反例一席:os-dev 席门开,加法 POST 回 200、/rate_limit
+  15000/时;顶层席同窗分裂(两 403、一 200,2026-08-24)⇒ **门态逐容器变**,⛔ 不据他席、他日读
+  数推本席,唯一安全读法即本行的 repo-scoped 探针。**门关着时的降级梯**:① git 先行(「零成
+  本等价物」);② 公开仓 payload 档(下方「公开仓」条);③ MCP:search 定向一击、列表**单标
+  签**读全 + 本地求交(`labels` 是 OR,见 MCP 参数条);④ 等重置。
 - **默认读序 git → payload → REST → MCP/GraphQL**(2026-08-23 策略翻转,2026-08-25 增补 payload 档;
   ⚠️ REST 档以**本班 repo-scoped 探针绿**为前提 —— 前提就住本行,403 会话改按降级梯读)。
   list/查重/卡与 PR 读/标签回读默认走容器 curl 的 REST 通道 —— App installation token,core
@@ -285,10 +286,9 @@
   读:`git rev-list --count origin/main..origin/<b>` 为 0,且该分支名下无 open PR。边界:一容器一会话三
   次,成因未诊断(代理 / 服务端钩子 / 分支保护未分辨),存量未普查。
 - **会话从上下文检测不到自己的静默降档**(2026-08-20 实测:一次分诊 fire 两级静默降档,横幅
-  只在 UI 侧渲染、上下文零信号,子轮开场仍自述「跑在契约复审档」)——服役模型的权威
-  读数是 `get_session`(claude-code-remote MCP,无参)的 `external_metadata.last_served_model`(记录最近一
-  轮实际服役者,降档链中途照真);`session_context.model` 是**配置**档不是服役档,⛔ 不作保险
-  丝输入。
+  只在 UI 侧渲染、上下文零信号,子轮开场自述「跑在契约复审档」)——服役档的权威读数
+  是 `get_session`(claude-code-remote MCP,无参)的 `external_metadata.last_served_model`(最近一轮实
+  际服役者,降档链中途照真);`session_context.model` 是配置档不是服役档,⛔ 不作保险丝输入。
 - **上条那个读数按宿主分叉,用前先确认工具在**:有的 ccd 宿主装 session-mgmt MCP,其
   `get_session`/`list_sessions` **按契约排除当前会话** ⇒ 保险丝无输入(2026-08-24);另一台宿主上它
   省 `session_id` 正常回两键(2026-08-25)⇒ ⛔ 不据一台宿主推全体。**无它时的合法替代**:grep
