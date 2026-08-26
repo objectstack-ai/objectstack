@@ -260,6 +260,15 @@ describe('#8016 — a coded refusal keeps its status AND its code on every packa
       const error = expectDeclaredEnvelope(captured);
       expect(captured.status).toBe(409);
       expect(error.code).toBe('RESOURCE_CONFLICT');
+      // [#12405] ...and the producer's spelling is not LOST for having been
+      // refused the `code` slot: it rides the open `declaredCode` sibling,
+      // which is the other half of the same ADR-0112 rule. Asserting only the
+      // narrowing left this case green through the whole period this door
+      // dropped the spelling it was holding -- the demote read as intended
+      // rather than as half-applied. `package-door-declared-code.test.ts`
+      // carries the channel in full; this line keeps THIS case honest about
+      // what "does not get to name itself" costs the author.
+      expect(error.declaredCode).toBe('PACKAGE_IS_HAUNTED');
     });
   }
 });
