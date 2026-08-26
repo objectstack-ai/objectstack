@@ -55,7 +55,7 @@
 // precedent: patch the real thing, never stub our own code).
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { assertEngineDeleteDispatch } from '@objectstack/objectql';
+import { assertEngineDeleteDispatch, assertEngineFindOnePredicate } from '@objectstack/objectql';
 import { AuthManager } from './auth-manager';
 import { createTenancyService, type TenancyService, type TenancyPosture } from './tenancy-service';
 
@@ -105,6 +105,7 @@ const createMemoryEngine = () => {
       return { ...row };
     },
     async findOne(name: string, q: any = {}) {
+      assertEngineFindOnePredicate(name, q);
       const row = rows(name).find((r) => matches(r, q.where));
       return row ? project(row, q.fields) : null;
     },

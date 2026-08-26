@@ -66,7 +66,7 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { resolveThrownHttpError, validationFailureDetails } from '@objectstack/types';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 
@@ -161,7 +161,7 @@ function makeEngine(throwOn: (verb: string, id: unknown) => unknown | undefined)
 
     const engine: any = {
         registry: { getObject: (n: string) => (n === 'leave_request' ? SCHEMA : undefined) },
-        findOne: vi.fn(async (_o: string, opts?: any) => rows.get(opts?.where?.id) ?? null),
+        findOne: vi.fn(async (_o: string, opts?: any) => { assertEngineFindOnePredicate(_o, opts); return rows.get(opts?.where?.id) ?? null; }),
         insert: vi.fn(async (_o: string, data: any) => {
             const boom = throwOn('insert', data?.id);
             if (boom) throw boom;

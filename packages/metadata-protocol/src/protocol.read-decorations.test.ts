@@ -29,7 +29,7 @@ import { describe, expect, it } from 'vitest';
 // would close a dependency cycle turbo rejects outright — which is why all 26
 // of this package's (file, verb) pairs sat in the gate's DEBT ledger until
 // #5619 sank the two predicates into a package both sides already depend on.
-import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { FlowSchema } from '@objectstack/spec/automation';
 import { METADATA_READ_DECORATIONS, getMetadataTypeSchema } from '@objectstack/spec/kernel';
 import {
@@ -71,6 +71,7 @@ function makeStubEngine() {
     };
     const engine: any = {
         async findOne(_t: string, opts: { where: Record<string, unknown> }) {
+            assertEngineFindOnePredicate(_t, opts);
             return findRow(opts.where)?.row ?? null;
         },
         async find(_t: string, opts: { where: Record<string, unknown> }) {

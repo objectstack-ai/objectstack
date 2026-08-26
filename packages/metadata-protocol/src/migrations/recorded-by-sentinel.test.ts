@@ -29,7 +29,7 @@ import { runMigrationJournal, readRunJournal } from '@objectstack/core';
 // package both sides already depend on, which is what makes this line legal.
 import {
   assertEngineDeleteDispatch,
-  assertEngineUpdateDispatch,
+  assertEngineUpdateDispatch, assertEngineFindOnePredicate,
 } from '@objectstack/metadata-core';
 import {
   createRecordedBySentinelPlan,
@@ -77,6 +77,7 @@ class FakeEngine {
   }
 
   async findOne(objectName: string, query?: { where?: Record<string, unknown> }): Promise<FakeRow | null> {
+    assertEngineFindOnePredicate(objectName, query);
     return (await this.find(objectName, query))[0] ?? null;
   }
 

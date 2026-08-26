@@ -41,6 +41,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { ErrorCode } from '@objectstack/spec/api';
 import { ObjectStackProtocolImplementation } from './protocol.js';
+import { assertEngineFindOnePredicate, type EngineFindOneQueryInput } from '@objectstack/metadata-core';
 
 interface FixtureObject {
     name: string;
@@ -113,7 +114,7 @@ describe('[#8896] searchAll — an object that could not be READ is not an objec
                 if (object === 'lead') throw error;
                 return [{ id: 'a1', name: 'Acme' }];
             }),
-            findOne: vi.fn(async () => null),
+            findOne: vi.fn(async (object: string, query?: EngineFindOneQueryInput) => { assertEngineFindOnePredicate(object, query); return null; }),
         };
         return { engine, readCalls };
     }
@@ -124,7 +125,7 @@ describe('[#8896] searchAll — an object that could not be READ is not an objec
             find: vi.fn(async (object: string) => (
                 object === 'acct' ? [{ id: 'a1', name: 'Acme' }] : [{ id: 'l1', name: 'Acme Lead' }]
             )),
-            findOne: vi.fn(async () => null),
+            findOne: vi.fn(async (object: string, query?: EngineFindOneQueryInput) => { assertEngineFindOnePredicate(object, query); return null; }),
         };
         const protocol = new ObjectStackProtocolImplementation(engine as never);
 
@@ -235,7 +236,7 @@ describe('[#11754] searchAll — a registry that cannot ENUMERATE is not a regis
                 listItems: () => [],
             },
             find,
-            findOne: vi.fn(async () => null),
+            findOne: vi.fn(async (object: string, query?: EngineFindOneQueryInput) => { assertEngineFindOnePredicate(object, query); return null; }),
         };
         const protocol = new ObjectStackProtocolImplementation(engine as never);
 
@@ -271,7 +272,7 @@ describe('[#11754] searchAll — a registry that cannot ENUMERATE is not a regis
         const engine = {
             registry: { ...fixtureRegistry([]), getAllObjects: vi.fn(() => []) },
             find: vi.fn(async () => []),
-            findOne: vi.fn(async () => null),
+            findOne: vi.fn(async (object: string, query?: EngineFindOneQueryInput) => { assertEngineFindOnePredicate(object, query); return null; }),
         };
         const protocol = new ObjectStackProtocolImplementation(engine as never);
 
@@ -293,7 +294,7 @@ describe('[#11754] searchAll — a registry that cannot ENUMERATE is not a regis
                 listItems: () => [],
             },
             find: vi.fn(async () => []),
-            findOne: vi.fn(async () => null),
+            findOne: vi.fn(async (object: string, query?: EngineFindOneQueryInput) => { assertEngineFindOnePredicate(object, query); return null; }),
         };
         const protocol = new ObjectStackProtocolImplementation(engine as never);
 
@@ -337,7 +338,7 @@ describe('[#8896] findReferencesToMeta — a source type that could not be READ 
                 if (failingType !== null && type === failingType) throw error;
                 return [];
             }),
-            findOne: vi.fn(async () => null),
+            findOne: vi.fn(async (object: string, query?: EngineFindOneQueryInput) => { assertEngineFindOnePredicate(object, query); return null; }),
         };
         return { engine, typeReads };
     }

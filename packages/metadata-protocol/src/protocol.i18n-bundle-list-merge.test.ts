@@ -50,7 +50,7 @@ import { describe, expect, it } from 'vitest';
 // [#7774] The identity table's home is `@objectstack/metadata-core`, not the
 // `SchemaRegistry` that first needed it: `@objectstack/objectql` depends on
 // THIS package, so importing the registry's copy would close a cycle.
-import { ITEM_KEY_DISCRIMINATORS } from '@objectstack/metadata-core';
+import { ITEM_KEY_DISCRIMINATORS, assertEngineFindOnePredicate, type EngineFindOneQueryInput } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 
 const PKG = 'com.acme.crm';
@@ -124,7 +124,8 @@ function makeEngine(opts: { items?: unknown[]; rows?: Row[] } = {}) {
                     return true;
                 });
             },
-            async findOne() { return null; },
+            async findOne(object: string, query?: EngineFindOneQueryInput) {
+                              assertEngineFindOnePredicate(object, query); return null; },
         } as any,
     };
 }

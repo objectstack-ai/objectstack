@@ -27,7 +27,7 @@ import {
   assertEngineUpdateDispatch,
   type EngineDeleteDispatchInput,
   type EngineUpdateDispatchData,
-  type EngineUpdateDispatchInput,
+  type EngineUpdateDispatchInput, assertEngineFindOnePredicate,
 } from '@objectstack/metadata-core';
 import {
   runMigrationJournal,
@@ -85,6 +85,7 @@ class FakeEngine {
   }
 
   async findOne(objectName: string, query?: { where?: Record<string, unknown> }): Promise<FakeRow | null> {
+    assertEngineFindOnePredicate(objectName, query);
     return (await this.find(objectName, query))[0] ?? null;
   }
 

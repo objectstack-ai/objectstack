@@ -6,6 +6,7 @@ import {
     renderNotification,
     NotificationTemplateStore,
 } from './template-renderer.js';
+import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 
 describe('interpolate', () => {
     it('substitutes {{ path.to.value }} from the context, linearly', () => {
@@ -69,6 +70,7 @@ describe('NotificationTemplateStore', () => {
             queries,
             engine: {
                 async findOne(object: string, query: any) {
+                    assertEngineFindOnePredicate(object, query);
                     queries.push({ object, where: query?.where });
                     const w = query?.where ?? {};
                     return (

@@ -46,7 +46,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 // [#5619] The producer's OWN write-verb dispatch decisions, so this double
 // cannot accept a call the real ObjectQL engine would refuse. Imported from
 // `@objectstack/metadata-core` and never `@objectstack/objectql`.
-import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { HttpDispatcher } from './http-dispatcher.js';
 import type { HttpDispatcherResult } from './http-dispatcher.js';
@@ -130,6 +130,7 @@ function makeEngine() {
             return tableOf(table).filter((r) => matches(r, opts?.where));
         },
         async findOne(table: string, opts?: { where?: Record<string, unknown> }) {
+            assertEngineFindOnePredicate(table, opts);
             return tableOf(table).find((r) => matches(r, opts?.where)) ?? null;
         },
         async insert(table: string, data: Record<string, unknown>) {

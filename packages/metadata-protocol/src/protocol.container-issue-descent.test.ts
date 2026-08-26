@@ -55,7 +55,7 @@ import { z } from 'zod';
 // [#5619] The producer's OWN write-verb dispatch decisions, so the fake engine
 // cannot accept a call ObjectQL would refuse. From `@objectstack/metadata-core`
 // and not `@objectstack/objectql`, which depends on this package.
-import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate, type EngineFindOneQueryInput } from '@objectstack/metadata-core';
 import { getMetadataTypeSchema } from '@objectstack/spec/kernel';
 import { ObjectStackProtocolImplementation, zodIssuesToMetadataIssues } from './protocol.js';
 
@@ -76,7 +76,8 @@ function makeProtocol() {
     const rows = new Map<string, Row>();
     let nextId = 0;
     const engine: any = {
-        async findOne() { return null; },
+        async findOne(object: string, query?: EngineFindOneQueryInput) {
+                          assertEngineFindOnePredicate(object, query); return null; },
         async find() { return []; },
         async insert(table: string, data: Record<string, unknown>) {
             if (table === 'sys_metadata_audit') return { id: 'audit_skip' };

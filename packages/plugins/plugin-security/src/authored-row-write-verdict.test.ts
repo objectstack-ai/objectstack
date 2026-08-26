@@ -34,7 +34,7 @@
 // shape: an app policy spelling the identical predicate is app-authored and must
 // keep counting.
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { PermissionSetSchema } from '@objectstack/spec/security';
 import type { PermissionSet } from '@objectstack/spec/security';
 import { SecurityPlugin } from './security-plugin.js';
@@ -218,6 +218,7 @@ function makeEngine(opts: { findOneThrows?: boolean } = {}) {
       return rows.filter((r) => matches(r, options.filter ?? options.where)).slice(0, options.limit ?? 1000);
     },
     async findOne(object: string, options: any = {}) {
+      assertEngineFindOnePredicate(object, options);
       // The fail-closed case drives the probe itself into a throw — the method
       // must swallow it into `abstain` and never reject outward.
       if (opts.findOneThrows) throw new Error('engine exploded');

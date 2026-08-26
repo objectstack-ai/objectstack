@@ -98,7 +98,7 @@ import { describe, expect, it, vi } from 'vitest';
 // `@objectstack/metadata-core` and NOT from `@objectstack/objectql`: objectql
 // depends on this package, so that import would close a dependency cycle turbo
 // rejects outright.
-import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 
 interface Row {
@@ -219,6 +219,7 @@ function makeStubEngine(opts: { failAudit?: boolean } = {}): Harness {
 
     const engine: any = {
         async findOne(table: string, opts2: { where: Record<string, unknown> }) {
+            assertEngineFindOnePredicate(table, opts2);
             if (table === 'sys_metadata_history') {
                 return historyRows.find((h) => matchesHistory(h, opts2.where)) ?? null;
             }

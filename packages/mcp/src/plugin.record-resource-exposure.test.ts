@@ -50,7 +50,7 @@ import type { IMetadataService } from '@objectstack/spec/contracts';
 import type { MCPServerRuntime } from './mcp-server-runtime.js';
 import { MCPServerPlugin } from './plugin.js';
 import { enforceApiExposure, GATED_ACTIONS, type McpExposureError } from './stdio-data-bridge.js';
-import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate, type EngineFindOneQueryInput } from '@objectstack/metadata-core';
 
 // ---------------------------------------------------------------------------
 // A real stdio client: newline-delimited JSON-RPC over the transport's pipes
@@ -172,7 +172,7 @@ function fakeObjectQL() {
     }),
     aggregate: vi.fn(async () => []),
     count: vi.fn(async () => 0),
-    findOne: vi.fn(async () => null),
+    findOne: vi.fn(async (object: string, query?: EngineFindOneQueryInput) => { assertEngineFindOnePredicate(object, query); return null; }),
   };
 }
 

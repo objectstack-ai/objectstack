@@ -52,7 +52,7 @@
 // actually receives in production.
 
 import { describe, it, expect } from 'vitest';
-import { assertEngineUpdateDispatch } from '@objectstack/metadata-core';
+import { assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import {
     ListNotificationsResponseSchema,
     MarkNotificationsReadResponseSchema,
@@ -120,6 +120,7 @@ function inboxEngine() {
             return typeof query.limit === 'number' ? rows.slice(0, query.limit) : rows;
         },
         async findOne(object: string, query: any = {}) {
+            assertEngineFindOnePredicate(object, query);
             return (store[object] ?? []).find((r) => matches(r, query.where)) ?? null;
         },
         async insert(object: string, row: any) {

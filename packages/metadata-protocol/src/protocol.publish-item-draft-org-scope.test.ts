@@ -28,7 +28,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 import type { MetaItemPublishedEvent } from './protocol.js';
 
@@ -112,6 +112,7 @@ function makeStubEngine() {
 
     const engine: any = {
         async findOne(table: string, opts: { where: Record<string, unknown> }) {
+            assertEngineFindOnePredicate(table, opts);
             if (table === 'sys_metadata_history') {
                 return historyRows.find((h) => matchesHistory(h, opts.where)) ?? null;
             }

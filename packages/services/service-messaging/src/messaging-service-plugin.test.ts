@@ -3,6 +3,7 @@
 import { describe, it, expect } from 'vitest';
 import { MessagingServicePlugin } from './messaging-service-plugin.js';
 import type { MessagingService } from './messaging-service.js';
+import { assertEngineFindOnePredicate, type EngineFindOneQueryInput } from '@objectstack/metadata-core';
 
 /**
  * A lightweight fake PluginContext — enough surface for the plugin's init():
@@ -26,7 +27,8 @@ function fakeCtx() {
             return { id: `row_${inserts.length}`, ...row };
         },
         async find() { return []; },
-        async findOne() { return null; },
+        async findOne(object: string, query?: EngineFindOneQueryInput) {
+                          assertEngineFindOnePredicate(object, query); return null; },
         async update() { return {}; },
         async delete() { return {}; },
     });
@@ -109,7 +111,8 @@ function provisionCtx() {
             return [] as unknown[];
         },
         async insert() { return {}; },
-        async findOne() { return null; },
+        async findOne(object: string, query?: EngineFindOneQueryInput) {
+                          assertEngineFindOnePredicate(object, query); return null; },
         async update() { return {}; },
         async delete() { return {}; },
     };

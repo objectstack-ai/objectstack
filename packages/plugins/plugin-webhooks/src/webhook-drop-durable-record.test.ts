@@ -39,7 +39,7 @@ import type {
     RealtimeEventHandler,
     RealtimeEventPayload,
 } from '@objectstack/spec/contracts';
-import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import {
     HttpDispatcher,
     MemoryHttpOutbox,
@@ -92,6 +92,7 @@ function makeEngine(
     const engine: any = {
         async find() { return rows; },
         async findOne(_n: string, opts?: any) {
+            assertEngineFindOnePredicate(_n, opts);
             const id = opts?.where?.id;
             if (id === undefined) return rows[0] ?? null;
             return rows.find((r) => r.id === id) ?? null;

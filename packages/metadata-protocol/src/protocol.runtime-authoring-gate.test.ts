@@ -30,7 +30,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 // would close a dependency cycle turbo rejects outright — which is why all 26
 // of this package's (file, verb) pairs sat in the gate's DEBT ledger until
 // #5619 sank the two predicates into a package both sides already depend on.
-import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 // [#4716] The advisory-tier rule the Q2 fence test proves its body WOULD trip
 // — imported from the full barrel deliberately: this is a TEST, not the gate
 // (the gate itself may only reach the registry through `@objectstack/lint/runtime`,
@@ -99,6 +99,7 @@ function makeStubEngine() {
     };
     const engine: any = {
         async findOne(_t: string, opts: { where: Record<string, unknown> }) {
+            assertEngineFindOnePredicate(_t, opts);
             return findRow(opts.where)?.row ?? null;
         },
         async find(_t: string, opts: { where: Record<string, unknown> }) {

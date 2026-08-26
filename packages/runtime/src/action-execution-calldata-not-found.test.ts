@@ -53,7 +53,7 @@ import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protoco
 // mirroring it) is what makes that impossible. `@objectstack/objectql` is
 // already a `dependencies` entry of `@objectstack/runtime`, so no manifest
 // change is needed to reach it.
-import { assertEngineDeleteDispatch } from '@objectstack/objectql';
+import { assertEngineDeleteDispatch, assertEngineFindOnePredicate } from '@objectstack/objectql';
 import { ApiEndpointSchema, DeleteDataResponseSchema } from '@objectstack/spec/api';
 import type { ApiEndpoint } from '@objectstack/spec/api';
 
@@ -125,7 +125,7 @@ function fallbackHarness(store = rows()) {
 function protocolHarness(store = rows()) {
     const engine: any = {
         registry: { getObject: (n: string) => (n === 'task' ? SCHEMA : undefined) },
-        findOne: async (_o: string, opts: any) => store.get(String(opts?.where?.id)) ?? null,
+        findOne: async (_o: string, opts: any) => { assertEngineFindOnePredicate(_o, opts); return store.get(String(opts?.where?.id)) ?? null; },
         find: async () => [...store.values()],
         update: async (_o: string, data: any, opts: any) => {
             const id = String(opts?.where?.id);

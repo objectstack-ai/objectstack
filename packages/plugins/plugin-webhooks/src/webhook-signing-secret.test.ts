@@ -26,7 +26,7 @@ import type {
     RealtimeEventHandler,
     RealtimeEventPayload,
 } from '@objectstack/spec/contracts';
-import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate, type EngineFindOneQueryInput } from '@objectstack/metadata-core';
 import { MemoryHttpOutbox, HttpDispatcher, type FetchImpl } from '@objectstack/service-messaging';
 import { AutoEnqueuer } from './auto-enqueuer.js';
 
@@ -65,7 +65,8 @@ class FakeRealtime implements IRealtimeService {
 function makeEngine(rows: any[]): IDataEngine {
     return {
         async find() { return rows; },
-        async findOne() { return rows[0] ?? null; },
+        async findOne(object: string, query?: EngineFindOneQueryInput) {
+                          assertEngineFindOnePredicate(object, query); return rows[0] ?? null; },
         async insert(_n: string, d: any) { return d; },
         async update(_n: string, data: any, options?: any) {
             assertEngineUpdateDispatch(data, options);

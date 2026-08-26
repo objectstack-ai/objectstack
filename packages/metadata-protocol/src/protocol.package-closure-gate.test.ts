@@ -32,7 +32,7 @@ import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 // The producer's OWN write-verb dispatch decisions, so the fake engine cannot
 // accept a call ObjectQL refuses. From `@objectstack/metadata-core`, never from
 // `@objectstack/objectql` — that import would close a cycle turbo rejects.
-import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 
 const OWN = 'com.acme.crm';
@@ -105,6 +105,7 @@ function makeStubEngine() {
     };
     const engine: any = {
         async findOne(_t: string, opts: { where: Record<string, unknown> }) {
+            assertEngineFindOnePredicate(_t, opts);
             return findRow(opts.where)?.row ?? null;
         },
         async find(_t: string, opts: { where: Record<string, unknown> }) {

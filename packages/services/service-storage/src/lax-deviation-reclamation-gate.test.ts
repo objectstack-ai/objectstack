@@ -21,7 +21,7 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import { assertEngineUpdateDispatch } from '@objectstack/objectql';
+import { assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/objectql';
 import {
   isDataMigrationVerified,
   mayActIrreversibly,
@@ -88,6 +88,7 @@ function reapEngine() {
       return tables[object].filter((r) => Object.entries(where).every(([k, v]) => { if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`); return r[k] === v; }));
     },
     async findOne(object: string, options: any) {
+      assertEngineFindOnePredicate(object, options);
       const where = options?.where ?? {};
       return tables[object].find((r) => Object.entries(where).every(([k, v]) => { if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`); return r[k] === v; })) ?? null;
     },

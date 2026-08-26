@@ -20,7 +20,7 @@
 // the library does around our write.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/objectql';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/objectql';
 import { runWithEndpointContext } from '@better-auth/core/context';
 import { AuthManager } from './auth-manager';
 import { BETTER_AUTH_MOUNTED_SURFACE } from './auth-route-ledger';
@@ -91,6 +91,7 @@ const createMemoryEngine = () => {
       return { ...row };
     },
     async findOne(name: string, q: any = {}) {
+      assertEngineFindOnePredicate(name, q);
       const row = rows(name).find((r) => matches(r, q.where));
       return row ? project(row, q.fields) : null;
     },

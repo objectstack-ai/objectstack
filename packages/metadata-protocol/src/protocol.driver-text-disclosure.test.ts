@@ -94,7 +94,7 @@ import { describe, expect, it } from 'vitest';
 // [#5619] The producer's OWN write-verb dispatch decisions (#4550 delete /
 // #5480 update). From `@objectstack/metadata-core`, never `@objectstack/objectql`
 // — objectql depends on THIS package, so that import would close a cycle.
-import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { looksLikeInternalErrorLeak } from '@objectstack/types';
 import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';
 import { ObjectStackProtocolImplementation } from './protocol.js';
@@ -217,6 +217,7 @@ function makeKernel(opts: {
             return Array.from(rows.values());
         },
         async findOne(table: string, o: { where: Record<string, unknown> }) {
+            assertEngineFindOnePredicate(table, o);
             boom('findOne');
             if (table !== 'sys_metadata') return null;
             for (const row of rows.values()) {

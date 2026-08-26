@@ -20,6 +20,7 @@ import { describe, it, expect } from 'vitest';
 import type { IDataEngine } from '@objectstack/spec/contracts';
 import { SqlNotificationOutbox } from './sql-outbox.js';
 import { SqlHttpOutbox } from './sql-http-outbox.js';
+import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 
 interface RecordedUpdate {
     object: string;
@@ -65,6 +66,7 @@ function makeEngine(findResults: Array<Array<Record<string, unknown>>> = []) {
             return findResults[findCall++] ?? [];
         },
         async findOne(_object: string, opts?: { fields?: string[] }) {
+            assertEngineFindOnePredicate(_object, opts);
             // `ack()` reads the row it is completing; `enqueue()` probes for a
             // dedup winner and must miss so the insert path runs.
             if (opts?.fields?.includes('attempts')) return { ...row };

@@ -32,7 +32,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/objectql';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/objectql';
 import type { IEmailService, SendEmailResult, SendTemplateInput } from '@objectstack/spec/contracts';
 import { AuthManager } from './auth-manager';
 import { inviteForAudienceGate } from './audience-gate-test-support';
@@ -101,6 +101,7 @@ function createMemoryEngine() {
       return { ...row };
     },
     async findOne(name: string, query: MemoryQuery = {}): Promise<MemoryRow | null> {
+      assertEngineFindOnePredicate(name, query);
       const row = rows(name).find((r) => matches(r, query.where));
       return row ? project(row, query.fields) : null;
     },

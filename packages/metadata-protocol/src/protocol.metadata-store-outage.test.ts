@@ -66,6 +66,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { ErrorCode } from '@objectstack/spec/api';
 import { ObjectStackProtocolImplementation } from './protocol.js';
+import { assertEngineFindOnePredicate, type EngineFindOneQueryInput } from '@objectstack/metadata-core';
 
 /** A registry with nothing in it — the overlay read is the only source. */
 function emptyRegistry(items: Record<string, any> = {}) {
@@ -84,7 +85,8 @@ function emptyRegistry(items: Record<string, any> = {}) {
  * store the protocol cannot reach.
  */
 function engineThatCannotBeRead(error: () => unknown, registryItems: Record<string, any> = {}) {
-    const reject = vi.fn(async () => { throw error(); });
+    const reject = vi.fn(async (object: string, query?: EngineFindOneQueryInput) => {
+                                       assertEngineFindOnePredicate(object, query); throw error(); });
     return {
         registry: emptyRegistry(registryItems),
         find: reject,
@@ -97,7 +99,7 @@ function engineWithRows(rows: any[] = [], registryItems: Record<string, any> = {
     return {
         registry: emptyRegistry(registryItems),
         find: vi.fn(async () => rows),
-        findOne: vi.fn(async () => rows[0] ?? null),
+        findOne: vi.fn(async (object: string, query?: EngineFindOneQueryInput) => { assertEngineFindOnePredicate(object, query); return rows[0] ?? null; }),
     } as any;
 }
 

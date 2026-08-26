@@ -35,6 +35,7 @@ import {
   reconcilePermissionSetProjection,
   type ProjectionLogger,
 } from './permission-set-projection.js';
+import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 
 /**
  * In-memory ql over sys_permission_set + sys_metadata.
@@ -77,6 +78,7 @@ function makeQl() {
       return rows ? rows.filter((r) => matches(r, q?.where)) : [];
     },
     async findOne(object: string, q: any) {
+      assertEngineFindOnePredicate(object, q);
       const rows = tableFor(object);
       return rows?.find((r) => matches(r, q?.where)) ?? null;
     },

@@ -21,6 +21,7 @@ import {
   UnscopedRunDataAccessError,
 } from '../runtime-identity.js';
 import type { AutomationContext } from '@objectstack/spec/contracts';
+import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 
 function makeLogger(): any {
   const l: any = { info() {}, warn() {}, error() {}, debug() {} };
@@ -33,7 +34,8 @@ function fakeData() {
   const calls: Array<{ op: string; obj: string; ctx: any }> = [];
   const data: any = {
     async find(obj: string, q: any) { calls.push({ op: 'find', obj, ctx: q?.context }); return [{ id: 'r1' }]; },
-    async findOne(obj: string, q: any) { calls.push({ op: 'findOne', obj, ctx: q?.context }); return { id: 'r1' }; },
+    async findOne(obj: string, q: any) {
+                                         assertEngineFindOnePredicate(obj, q); calls.push({ op: 'findOne', obj, ctx: q?.context }); return { id: 'r1' }; },
     async insert(obj: string, _f: any, opts: any) { calls.push({ op: 'insert', obj, ctx: opts?.context }); return { id: `${obj}_1` }; },
     async update(obj: string, _f: any, opts: any) { calls.push({ op: 'update', obj, ctx: opts?.context }); return { ok: true }; },
     async delete(obj: string, opts: any) { calls.push({ op: 'delete', obj, ctx: opts?.context }); return { ok: true }; },

@@ -12,6 +12,7 @@ import {
 import { AutomationEngine } from '../engine.js';
 import { registerNotifyNode } from './notify-node.js';
 import type { MessagingServiceSurface } from './notify-node.js';
+import { assertEngineFindOnePredicate, type EngineFindOneQueryInput } from '@objectstack/metadata-core';
 
 /**
  * [#11303] The `notify` node is the producer that decides whether the whole
@@ -76,7 +77,8 @@ function capturingEngine(): { engine: any; written: WrittenRow[] } {
             return { ...row, id };
         },
         async find() { return []; },
-        async findOne() { return undefined; },
+        async findOne(object: string, query?: EngineFindOneQueryInput) {
+                          assertEngineFindOnePredicate(object, query); return undefined; },
     };
     return { engine, written };
 }

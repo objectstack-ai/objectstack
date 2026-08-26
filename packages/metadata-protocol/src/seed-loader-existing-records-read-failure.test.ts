@@ -42,7 +42,7 @@ import type { IDataEngine, IMetadataService } from '@objectstack/spec/contracts'
 // refuses. From `@objectstack/metadata-core`, not `@objectstack/objectql` —
 // objectql depends on THIS package, so that import would close a dependency
 // cycle turbo rejects outright.
-import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 // `.js` extension deliberately, unlike the older sibling seed-loader tests:
 // `moduleResolution: nodenext` requires it, and an extensionless specifier is
 // exactly the TS2835 that makes up part of this package's frozen TEST_DEBT
@@ -92,6 +92,7 @@ function createEngine() {
             return records;
         }),
         findOne: vi.fn(async (objectName: string, query?: Record<string, unknown>) => {
+            assertEngineFindOnePredicate(objectName, query);
             const rows = await (engine.find as unknown as (o: string, q: unknown) => Promise<StoreRow[]>)(
                 objectName, { ...query, limit: 1 },
             );

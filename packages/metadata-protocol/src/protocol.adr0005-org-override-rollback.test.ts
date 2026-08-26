@@ -98,7 +98,7 @@
  * cannot see it.
  */
 import { describe, expect, it } from 'vitest';
-import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 
@@ -119,6 +119,7 @@ function makeStubEngine(artifacts: Array<{ type: string; name: string }> = []) {
         `${w.type}|${w.name}|${w.organization_id ?? '__env__'}|${w.state ?? 'active'}`;
     const engine: any = {
         async findOne(_t: string, opts: { where: Record<string, unknown> }) {
+            assertEngineFindOnePredicate(_t, opts);
             for (const row of rows.values()) {
                 if (opts.where.type !== undefined && row.type !== opts.where.type) continue;
                 if (opts.where.name !== undefined && row.name !== opts.where.name) continue;

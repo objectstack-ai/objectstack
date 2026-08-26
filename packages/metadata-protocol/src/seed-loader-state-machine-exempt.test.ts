@@ -3,7 +3,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { SeedLoaderService } from './seed-loader';
 import type { IDataEngine, IMetadataService } from '@objectstack/spec/contracts';
-import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate, type EngineFindOneQueryInput } from '@objectstack/metadata-core';
 
 /**
  * #3433 — a curated seed is a snapshot of ESTABLISHED facts (a project already
@@ -74,7 +74,7 @@ function createEnforcingEngine(): { engine: IDataEngine; store: Record<string, a
       if (typeof query?.limit === 'number') rows = rows.slice(0, query.limit);
       return rows;
     }),
-    findOne: vi.fn(async () => null),
+    findOne: vi.fn(async (object: string, query?: EngineFindOneQueryInput) => { assertEngineFindOnePredicate(object, query); return null; }),
     // Per-row partial-success path the seed loader prefers (framework#3172):
     // one verdict per row, so a rejected row is culled, not thrown as a batch.
     insertMany: vi.fn(async (objectName: string, rows: any[], opts: any) =>

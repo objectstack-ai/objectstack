@@ -14,6 +14,7 @@ import {
 // `scripts/check-test-source-alias.mjs` (the clocked-window rule) and #10115 / PR #10120,
 // where the same shape cost 30 ejected merge-queue builds in one night.
 import '@objectstack/spec/kernel';
+import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 
 /**
  * Minimal PluginContext + in-memory metadata service. Boots the plugin and
@@ -321,6 +322,7 @@ describe('DatasourceAdminServicePlugin: runtime datasource durability', () => {
       registerDatasourceDef() {},
       getDriverByName() { return undefined; },
       findOne: async (_o: string, q: { where?: Record<string, unknown> }) => {
+        assertEngineFindOnePredicate(_o, q);
         const w = q.where ?? {};
         return rows.find((r) => Object.entries(w).every(([k, v]) => { if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`); return r[k] === v; }));
       },

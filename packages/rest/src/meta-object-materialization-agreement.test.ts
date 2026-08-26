@@ -92,7 +92,7 @@
 // `SchemaRegistry.materializeServedObjectOnto`.
 
 import { describe, it, expect, vi } from 'vitest';
-import { SchemaRegistry } from '@objectstack/objectql';
+import { SchemaRegistry, assertEngineFindOnePredicate, type EngineFindOneQueryInput } from '@objectstack/objectql';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { RestServer } from './rest-server.js';
 
@@ -227,7 +227,7 @@ async function measure(opts: {
     const engine = {
         registry,
         find: async () => [],
-        findOne: async () => undefined,
+        findOne: async (object: string, query?: EngineFindOneQueryInput) => { assertEngineFindOnePredicate(object, query); return undefined; },
     };
 
     const services = new Map<string, unknown>();

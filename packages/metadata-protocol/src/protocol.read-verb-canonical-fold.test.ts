@@ -62,6 +62,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { META_URL_TO_SINGULAR, PLURAL_TO_SINGULAR, metaUrlSpellingRefusal } from '@objectstack/spec/shared';
 import { ObjectStackProtocolImplementation } from './protocol.js';
+import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 
 /** Manifest-ABSENT and `allowOrgOverride: true` — history reads REAL rows for it. */
 const OVERLAY_ABSENT_TYPE = 'translation';
@@ -109,6 +110,7 @@ function makeStubEngine() {
             return (tables[table] ?? []).filter((r) => matches(r, where));
         },
         async findOne(table: string, o: { where?: Record<string, unknown> } = {}) {
+            assertEngineFindOnePredicate(table, o);
             reads.push({ table, where: o.where ?? {} });
             return (tables[table] ?? []).find((r) => matches(r, o.where ?? {})) ?? null;
         },

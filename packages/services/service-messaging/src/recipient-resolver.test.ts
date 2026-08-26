@@ -2,6 +2,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { RecipientResolver } from './recipient-resolver.js';
+import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 
 function silentLogger() {
     return { warn: () => {}, info: () => {} };
@@ -36,6 +37,7 @@ function fakeData(opts: {
                 return [];
             },
             async findOne(object: string, query: any) {
+                assertEngineFindOnePredicate(object, query);
                 calls.push({ method: 'findOne', object, query });
                 if (object === opts.throwOn) throw new Error('locked');
                 if (object === 'sys_user') {

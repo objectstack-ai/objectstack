@@ -145,6 +145,7 @@ import { describe, expect, it } from 'vitest';
 // rows 1-3 of the inventory one measurement instead of three guesses.
 import { resolveThrownHttpError } from '@objectstack/types';
 import { ObjectStackProtocolImplementation } from './protocol.js';
+import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 
 // ---------------------------------------------------------------------------
 // Harness — the `sys_metadata`-backed kernel the #8333 batch-verb suite uses,
@@ -207,6 +208,7 @@ function makeKernel(opts: { seed?: Row[] } = {}) {
             return Array.from(rows.values()).filter((r) => match(r, o?.where ?? {}));
         },
         async findOne(table: string, o: { where: Record<string, unknown> }) {
+            assertEngineFindOnePredicate(table, o);
             if (table !== 'sys_metadata') return null;
             for (const r of rows.values()) if (match(r, o?.where ?? {})) return r;
             return null;

@@ -26,7 +26,7 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import { assertEngineUpdateDispatch } from '@objectstack/metadata-core';
+import { assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 
 const SCHEMA = {
@@ -55,6 +55,7 @@ function makeRlsEngine() {
         context?.isSystem === true || row.owner_id === context?.userId;
 
     const findOne = vi.fn(async (_object: string, options?: any) => {
+        assertEngineFindOnePredicate(_object, options);
         const row = rows.get(options?.where?.id) ?? null;
         if (!row) return null;
         return visible(row, options?.context) ? row : null;
