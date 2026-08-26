@@ -16,6 +16,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { AuthManager } from './auth-manager';
 import { inviteForAudienceGate } from './audience-gate-test-support';
+import { assertEngineFindOnePredicate } from '@objectstack/objectql';
 
 const failures = vi.hoisted(() => ({ oauthProvider: false, bearer: false }));
 
@@ -83,6 +84,7 @@ const createMemoryEngine = () => {
       return { ...row };
     },
     async findOne(name: string, q: any = {}) {
+      assertEngineFindOnePredicate(name, q);
       return rows(name).find((r) => matches(r, q.where)) ?? null;
     },
     async find(name: string, q: any = {}) {

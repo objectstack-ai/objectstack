@@ -30,6 +30,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { CloneDataResponseSchema, SearchAllHitSchema, SearchAllResponseSchema } from '@objectstack/spec/api';
 import { ObjectStackProtocolImplementation } from './protocol.js';
+import { assertEngineFindOnePredicate, type EngineFindOneQueryInput } from '@objectstack/metadata-core';
 
 /** What a caller actually holds after the REST relay: the JSON body. */
 function overTheWire<T>(value: T): T {
@@ -144,7 +145,7 @@ function makeCloneProtocol() {
     const inserts: Array<{ object: string; data: Record<string, unknown> }> = [];
     const engine = {
         registry: { getObject: (n: string) => (n === 'customer' ? customer : undefined) },
-        findOne: vi.fn(async () => ({ ...source })),
+        findOne: vi.fn(async (object: string, query?: EngineFindOneQueryInput) => { assertEngineFindOnePredicate(object, query); return ({ ...source }); }),
         insert: vi.fn(async (object: string, data: Record<string, unknown>) => {
             inserts.push({ object, data });
             return { id: 'cus_2', ...data, created_at: '2026-08-25T00:00:00Z' };

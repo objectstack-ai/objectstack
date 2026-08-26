@@ -159,7 +159,7 @@ function checkSkillTriggerConditionValueShape(
         + `${value === undefined ? '["…"]' : previewConditionValue([value])} for a single value, `
         + `or use "${operator === 'in' ? 'eq' : 'neq'}" to compare against it. `
         + `An empty list [] is allowed and is a real predicate. The cloud agent runtime `
-        + `coerces the scalar today; the contract never declared that spelling (#7113).`,
+        + `coerces the scalar today; the contract never declared that spelling.`,
     });
     return;
   }
@@ -174,7 +174,7 @@ function checkSkillTriggerConditionValueShape(
       + `Received ${describeConditionValue(value)} (${previewConditionValue(value)}). `
       + `"${operator}" is an identity comparison, so an array can never match a context `
       + `field and the condition would ${operator === 'eq' ? 'never' : 'always'} fire — `
-      + `use "${operator === 'eq' ? 'in' : 'not_in'}" to test membership of that list (#7113).`,
+      + `use "${operator === 'eq' ? 'in' : 'not_in'}" to test membership of that list.`,
   });
 }
 

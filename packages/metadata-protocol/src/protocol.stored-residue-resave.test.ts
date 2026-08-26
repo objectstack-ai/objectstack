@@ -42,7 +42,7 @@
 import { describe, expect, it } from 'vitest';
 // [#5619] The producer's OWN write-verb dispatch decisions, so the fake engine
 // below cannot accept a call ObjectQL itself refuses.
-import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 
 function matches(r: Record<string, any>, where: Record<string, unknown>): boolean {
@@ -90,6 +90,7 @@ function makeStubEngine(seedRows: Array<Record<string, any>>) {
             return rowsOf(t).filter((r) => matches(r, opts?.where ?? {}));
         },
         async findOne(t: string, opts?: { where?: Record<string, unknown> }) {
+            assertEngineFindOnePredicate(t, opts);
             return rowsOf(t).find((r) => matches(r, opts?.where ?? {})) ?? null;
         },
         async insert(t: string, row: Record<string, any>) {

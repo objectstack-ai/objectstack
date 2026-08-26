@@ -53,7 +53,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 // Imported from `@objectstack/metadata-core` and not from `@objectstack/objectql`:
 // objectql DEPENDS ON this package, so that import would close a dependency
 // cycle turbo rejects outright (#5619).
-import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 import {
     PLATFORM_SCHEDULE_CREATE_RECORD_ORG_MISSING,
@@ -344,6 +344,7 @@ function makeStubEngine() {
     };
     const engine: any = {
         async findOne(_t: string, opts: { where: Record<string, unknown> }) {
+            assertEngineFindOnePredicate(_t, opts);
             return findRow(opts.where)?.row ?? null;
         },
         async find(_t: string, opts: { where: Record<string, unknown> }) {

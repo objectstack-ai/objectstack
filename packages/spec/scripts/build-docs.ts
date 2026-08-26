@@ -396,6 +396,27 @@ function generateMarkdown(schemaName: string, schema: any, category: string, _zo
   return renderSchemaSection(schemaName, schema, { schemaHref: schemaHrefFrom(category) });
 }
 
+/**
+ * The heading level a top-level section of a reference page sits at.
+ *
+ * A page's `<h1>` is its frontmatter `title`: `DocsTitle` renders it
+ * unconditionally (`apps/docs/app/[lang]/docs/[[...slug]]/page.tsx`), so a `# `
+ * anywhere in the body compiles to a SECOND `<h1>`. Everything this generator
+ * puts in the body therefore starts one level down — `## TypeScript Usage`
+ * below, the `## <SchemaName>` sections in `lib/schema-section.ts`, and the
+ * module description.
+ *
+ * That last one is the one that could not state the number for itself (#12249).
+ * Its text is a JSDoc file header, written as if it were a standalone document
+ * and freely opening sections with `# `; 38 pages shipped two `<h1>` because of
+ * it, which is why `content/docs/references/**` had to be carved out of
+ * `scripts/check-docs-single-h1.mjs`. The level travels to
+ * `renderFileDescription` as context for the same reason `fromCategory` does:
+ * only the page knows it, and the renderer hard-coding a 2 would put the page's
+ * heading contract in the module least able to state it.
+ */
+const PAGE_SECTION_LEVEL = 2;
+
 function generateZodFileMarkdown(zodFile: string, schemas: Array<{name: string, content: any}>, category: string): string {
   const zodTitle = zodFile.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
   
@@ -411,6 +432,7 @@ function generateZodFileMarkdown(zodFile: string, schemas: Array<{name: string, 
       fileDesc = renderFileDescription(fs.readFileSync(sourcePath, 'utf-8'), {
         fromCategory: category,
         sourcePathToDocsRoute,
+        sectionLevel: PAGE_SECTION_LEVEL,
       });
   }
 
@@ -440,7 +462,7 @@ function generateZodFileMarkdown(zodFile: string, schemas: Array<{name: string, 
   for (const gap of imports.gaps) importGaps.add(gap);
 
   if (imports.valueNames.length || imports.typeNames.length) {
-    md += `## TypeScript Usage\n\n`;
+    md += `${'#'.repeat(PAGE_SECTION_LEVEL)} TypeScript Usage\n\n`;
     md += `\`\`\`typescript\n`;
     if (imports.valueNames.length) {
       md += `import { ${imports.valueNames.join(', ')} } from '@objectstack/spec/${category}';\n`;

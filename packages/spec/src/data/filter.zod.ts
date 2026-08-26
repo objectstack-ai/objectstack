@@ -1451,7 +1451,7 @@ const normalizedFieldConditionSchema = () =>
   z.record(z.string(), FieldOperatorsSchema).refine(
     (condition) => !Object.keys(condition).some((key) => key.startsWith('$')),
     {
-      message: 'A field condition\'s keys are field names, never $-prefixed operators (#7711).',
+      message: 'A field condition\'s keys are field names, never $-prefixed operators.',
       // `abort` so this branch cannot become the union's spokesman. Measured on
       // zod 4.4.3: a union whose other options all abort returns a lone
       // CONTINUABLE failure verbatim, which made `{ $not: { c: <bad> } }` — a

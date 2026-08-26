@@ -385,6 +385,18 @@ const SLICES = [
     pinCall: 'assertEngineUpdateDispatch(data, options)',
     origin: '#5480',
   },
+  {
+    verb: 'findOne',
+    producer: 'ObjectQL.findOne',
+    symbols: new Set(['assertEngineFindOnePredicate', 'resolveEngineFindOnePredicate']),
+    modules: [
+      /^@objectstack\/objectql$/,
+      /^@objectstack\/metadata-core$/,
+      /engine-findone-predicate(\.js)?$/,
+    ],
+    pinCall: 'assertEngineFindOnePredicate(object, query)',
+    origin: '#4419',
+  },
 ];
 
 /** The verbs the ledger may name -- see the DECLARED invariant. */

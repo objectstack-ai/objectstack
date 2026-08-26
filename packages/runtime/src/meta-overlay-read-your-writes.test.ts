@@ -45,7 +45,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { ObjectStackProtocolImplementation, resetEnvWritableMetadataTypes } from '@objectstack/metadata-protocol';
-import { SchemaRegistry, assertEngineUpdateDispatch, assertEngineDeleteDispatch } from '@objectstack/objectql';
+import { SchemaRegistry, assertEngineUpdateDispatch, assertEngineDeleteDispatch, assertEngineFindOnePredicate } from '@objectstack/objectql';
 import { resolveRouteActionDeclaration, type ActionExecutionDeps } from './action-execution.js';
 
 /**
@@ -65,7 +65,7 @@ function makeEngine(registry: SchemaRegistry) {
     const engine: any = {
         registry,
         find: vi.fn(async (_table: string, opts: any) => rows.filter((r) => matches(r, opts?.where ?? {}))),
-        findOne: vi.fn(async (table: string, opts: any) => (await engine.find(table, opts))[0] ?? null),
+        findOne: vi.fn(async (table: string, opts: any) => { assertEngineFindOnePredicate(table, opts); return (await engine.find(table, opts))[0] ?? null; }),
         insert: vi.fn(async (_table: string, data: any) => {
             const row = { id: data.id ?? `row_${nextId++}`, ...data };
             rows.push(row);

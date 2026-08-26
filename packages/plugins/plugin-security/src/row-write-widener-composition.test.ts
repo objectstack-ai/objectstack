@@ -60,7 +60,7 @@
 // Anything read-scope-dependent belongs in the real-stack pin:
 // `packages/qa/dogfood/test/authored-row-write-scope.dogfood.test.ts`.
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { SharingService, buildSharingMiddleware } from '@objectstack/plugin-sharing';
 import { PermissionSetSchema } from '@objectstack/spec/security';
 import type { PermissionSet } from '@objectstack/spec/security';
@@ -244,6 +244,7 @@ function makeEngine() {
       return rows.filter((r) => matches(r, options.filter ?? options.where)).slice(0, options.limit ?? 1000);
     },
     async findOne(object: string, options: any = {}) {
+      assertEngineFindOnePredicate(object, options);
       const rows = await this.find(object, { ...options, limit: 1 });
       return rows[0] ?? null;
     },

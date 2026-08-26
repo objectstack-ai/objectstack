@@ -98,7 +98,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { HttpDispatcher } from './http-dispatcher.js';
 import type { HttpDispatcherResult } from './http-dispatcher.js';
@@ -281,6 +281,7 @@ function makeEngine() {
             return tableOf(table).filter((r) => matches(r, opts?.where));
         },
         async findOne(table: string, opts?: { where?: Record<string, unknown> }) {
+            assertEngineFindOnePredicate(table, opts);
             return tableOf(table).find((r) => matches(r, opts?.where)) ?? null;
         },
         async insert(table: string, data: Record<string, unknown>) {

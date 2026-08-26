@@ -108,8 +108,23 @@
  *
  * THEY REACH IT NOW, and the declaration below is the whole reason that is
  * allowed. #11707 dropped that `NODE_ENV` pin: all three leave the variable
- * unset and spawn `bin/run.js` through plain `node` — this file's own shape —
- * and the `--dev` seed survives because `serve.ts` assigns
+ * unset and spawn `bin/run.js` through plain `node` — ⛔ but NOT this file's
+ * own shape, and the difference decides how each one FAILS on a taken port
+ * (#12526). Those three pass `--dev` on the spawn line; this file does not.
+ * `serve.ts`'s `portAutoShiftAllowed = flags.dev || NODE_ENV === 'development'`
+ * is opened by `flags.dev` ALONE, so for those three a taken port is not an
+ * error at all: `getAvailablePort()` hops the child onto another port and the
+ * boot reports itself READY — the SILENT-DRIFT column, where their own
+ * requests then reach whatever else holds the port they reserved (measured:
+ * reserved 34259, child bound 34260, the next request answered by a
+ * neighbouring dev server). Only THIS file — `--dev` absent, so unset
+ * `NODE_ENV` defaults to production — is in the LOUD column where a taken port
+ * is a hard `exit 1` and `portContentionError()` below has something to read.
+ * ⚠️ That `--dev` has been on their spawn lines since `83e6016fa`, long
+ * predating #11707: it was never read, not newly introduced. Each of those
+ * three carries its own port-drift check now; ⛔ do not read this paragraph as
+ * putting them in this file's column.
+ * The `--dev` seed survives because `serve.ts` assigns
  * `process.env.NODE_ENV = 'development'` IN-PROCESS for `--dev` before
  * `runtime.start()`, which is after oclif has already resolved the command.
  * Measured when they moved, with a distinct marker planted in each tree:

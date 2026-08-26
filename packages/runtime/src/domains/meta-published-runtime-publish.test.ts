@@ -33,7 +33,7 @@ import { describe, it, expect } from 'vitest';
 // from `@objectstack/metadata-core` rather than `@objectstack/objectql`
 // (which re-exports it): objectql depends on this side of the graph, so that
 // import would close a cycle turbo rejects outright.
-import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { MetadataManager } from '@objectstack/metadata';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { HttpDispatcher } from '../http-dispatcher.js';
@@ -89,6 +89,7 @@ function makeStubEngine() {
 
     const engine: any = {
         async findOne(table: string, opts: { where: Record<string, unknown> }) {
+            assertEngineFindOnePredicate(table, opts);
             if (table === 'sys_metadata_history') return null;
             return findRow(opts.where)?.row ?? null;
         },

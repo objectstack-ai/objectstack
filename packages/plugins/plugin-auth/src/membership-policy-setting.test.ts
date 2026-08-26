@@ -43,6 +43,7 @@ vi.mock('./reconcile-membership.js', async (importOriginal) => {
 });
 
 import { reconcileMembership, backfillMemberships, MEMBERSHIP_POLICIES } from './reconcile-membership.js';
+import { assertEngineFindOnePredicate, type EngineFindOneQueryInput } from '@objectstack/objectql';
 
 const reconcileSpy = vi.mocked(reconcileMembership);
 const backfillSpy = vi.mocked(backfillMemberships);
@@ -75,7 +76,7 @@ function makeEngine(seed: { users?: Array<{ id: string }>; members?: Array<{ use
       }
       return [];
     }),
-    findOne: vi.fn(async () => null),
+    findOne: vi.fn(async (object: string, query?: EngineFindOneQueryInput) => { assertEngineFindOnePredicate(object, query); return null; }),
   };
 }
 

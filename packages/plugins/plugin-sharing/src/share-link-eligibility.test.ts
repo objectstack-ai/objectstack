@@ -45,7 +45,7 @@ import type { DriverQuery } from '@objectstack/spec/contracts';
 // The producer's OWN dispatch predicate: a double that opens its write verbs
 // with this cannot accept a call the real engine refuses
 // (`check:engine-double-contract`).
-import { assertEngineUpdateDispatch } from '@objectstack/objectql';
+import { assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/objectql';
 import { ShareLinkService } from './share-link-service.js';
 import { SysShareLink } from './objects/sys-share-link.object.js';
 
@@ -136,7 +136,7 @@ async function boot(article: any = ARTICLE, options: BootOptions = {}) {
       if (!options.shapeRow || object !== 'article' || !Array.isArray(rows)) return rows;
       return rows.map(options.shapeRow);
     },
-    findOne: (object: string, query: any) => driver.findOne(object, query),
+    findOne: (object: string, query: any) => { assertEngineFindOnePredicate(object, query); return driver.findOne(object, query); },
     insert: (object: string, data: any) => driver.create(object, data),
     // Opened with ObjectQL's OWN dispatch predicate rather than a hand-mirrored
     // id check, so this facade cannot accept an update the real engine refuses

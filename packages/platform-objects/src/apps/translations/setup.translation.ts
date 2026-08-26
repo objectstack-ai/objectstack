@@ -8,6 +8,9 @@ import { esES } from './es-ES.js';
 import { zhCNSourceHashes } from './zh-CN.source-hashes.js';
 import { jaJPSourceHashes } from './ja-JP.source-hashes.js';
 import { esESSourceHashes } from './es-ES.source-hashes.js';
+import { zhCNGeneratedSourceHashes } from './zh-CN.source-hashes.generated.js';
+import { jaJPGeneratedSourceHashes } from './ja-JP.source-hashes.generated.js';
+import { esESGeneratedSourceHashes } from './es-ES.source-hashes.generated.js';
 import { withSourceFallback } from './source-hash.js';
 
 /**
@@ -43,12 +46,26 @@ import { withSourceFallback } from './source-hash.js';
  *
  * A leaf with NO recorded hash is legacy-trusted and served verbatim.
  *
+ * ## The generated half joined this seam in #11671
+ *
+ * The fourth argument is the GENERATED provenance table
+ * (`<locale>.source-hashes.generated.ts`, written by `os i18n extract
+ * --source-hashes`). `zhCN` and friends carry `objects` as well as the
+ * hand-authored sections, so this one call now covers both halves — the third
+ * argument judging `apps`/`dashboards`/`pages`, the fourth judging `objects`.
+ *
+ * The module note in `source-hash.ts` records why the generated half was
+ * excluded until now and why that reason was wrong. On the day this landed no
+ * generated leaf was stale (every record equals the current source's digest by
+ * construction), so this changed what is SERVED for exactly zero leaves — it
+ * changes what happens the next time a source string moves underneath one.
+ *
  * `en` is not passed through: it is the source, not a translation of it, so
  * there is nothing for it to be stale against.
  */
 export const SetupAppTranslations: TranslationBundle = {
   en,
-  'zh-CN': withSourceFallback(zhCN, en, zhCNSourceHashes),
-  'ja-JP': withSourceFallback(jaJP, en, jaJPSourceHashes),
-  'es-ES': withSourceFallback(esES, en, esESSourceHashes),
+  'zh-CN': withSourceFallback(zhCN, en, zhCNSourceHashes, zhCNGeneratedSourceHashes),
+  'ja-JP': withSourceFallback(jaJP, en, jaJPSourceHashes, jaJPGeneratedSourceHashes),
+  'es-ES': withSourceFallback(esES, en, esESSourceHashes, esESGeneratedSourceHashes),
 };

@@ -102,7 +102,10 @@ describe('I18nLabelSchema', () => {
     const issues = JSON.stringify(r.error?.issues);
     expect(issues).toContain('invalid_key');
     expect(issues).toContain('never by `key`/`defaultValue`');
-    expect(issues).toContain('#5055');
+    // The retired form is named in words. It used to be named by a tracker id
+    // as well, which resolved to nothing for the author reading the refusal.
+    expect(issues).toContain('the retired key-reference form');
+    expect(issues).not.toMatch(/(?<![#&])#[0-9]{3,5}(?![0-9A-Za-z])/);
   });
 
   it('rejects a lone `defaultValue` with the same named error', () => {

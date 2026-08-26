@@ -38,4 +38,4 @@ scoped to the prose by its own contract (`status`, `code` and `details` untouche
 either.
 
 ⛔ `userMessage` is deliberately NOT threaded here — the shared `sendError`'s `extra`
-does not admit it yet, and that channel is tracked separately.
+has admitted it since #12404, and that channel is threaded separately, in #12502.

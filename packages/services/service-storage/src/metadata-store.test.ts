@@ -17,7 +17,7 @@
 //      returns `null` rather than throwing.
 
 import { describe, it, expect } from 'vitest';
-import { assertEngineDeleteDispatch } from '@objectstack/objectql';
+import { assertEngineDeleteDispatch, assertEngineFindOnePredicate } from '@objectstack/objectql';
 import type { IDataEngine } from '@objectstack/spec/contracts';
 import {
   StorageMetadataStore,
@@ -65,6 +65,7 @@ function createFakeEngine(opts: { failing?: EngineMethod[] } = {}) {
       return { ...data };
     },
     async findOne(object: string, query?: any) {
+      assertEngineFindOnePredicate(object, query);
       boom('findOne', object);
       const id = query?.where?.id;
       return table(object).get(String(id)) ?? null;

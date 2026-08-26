@@ -38,6 +38,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { AuthManager } from './auth-manager.js';
 import { loginEventFor } from './auth-session-audit.js';
+import { assertEngineFindOnePredicate, type EngineFindOneQueryInput } from '@objectstack/objectql';
 
 const USER = 'u_first_session';
 const DEFAULT_ORG = 'org_default';
@@ -77,7 +78,7 @@ function makeEngine(seed: MemberRow[] = []) {
     ),
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     findOne: vi.fn(async (model: string, q: any) =>
-      model === 'sys_member' ? (rows.find((r) => match(r, q?.where)) ?? null) : null,
+      { assertEngineFindOnePredicate(model, q); return model === 'sys_member' ? (rows.find((r) => match(r, q?.where)) ?? null) : null; },
     ),
   };
 }
@@ -231,7 +232,8 @@ describe("[#8247 rule 2] a user's FIRST session settles the membership before re
 
     it('a broken engine never breaks session create', async () => {
       const engine = {
-        findOne: vi.fn(async () => { throw new Error('db down'); }),
+        findOne: vi.fn(async (object: string, query?: EngineFindOneQueryInput) => {
+                                     assertEngineFindOnePredicate(object, query); throw new Error('db down'); }),
         find: vi.fn(async () => { throw new Error('db down'); }),
         insert: vi.fn(async () => { throw new Error('db down'); }),
       };

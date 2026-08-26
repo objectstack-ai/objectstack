@@ -9,6 +9,7 @@
 import { describe, it, expect } from 'vitest';
 import { AutomationEngine } from '../engine.js';
 import { registerCrudNodes } from './crud-nodes.js';
+import { assertEngineFindOnePredicate, type EngineFindOneQueryInput } from '@objectstack/metadata-core';
 
 function makeLogger(): any {
   const l: any = { info() {}, warn() {}, error() {}, debug() {} };
@@ -23,7 +24,8 @@ function fakeData() {
     async insert(obj: string, fields: any) { n += 1; return { id: `${obj}_${n}`, ...fields }; },
     async update(obj: string, fields: any, opts: any) { updates.push({ obj, fields, opts }); return { ok: true }; },
     async find() { return []; },
-    async findOne() { return null; },
+    async findOne(object: string, query?: EngineFindOneQueryInput) {
+                      assertEngineFindOnePredicate(object, query); return null; },
   };
   return { data, updates };
 }

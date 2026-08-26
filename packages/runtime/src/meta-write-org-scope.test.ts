@@ -68,7 +68,7 @@ import {
     // REST `/meta` write doors share it. This suite still drives the DISPATCHER
     // through the real stack — that is why it stays in this package.
     declaresOrgOverride,
-    organizationIdForMetaWrite,
+    organizationIdForMetaWrite, assertEngineFindOnePredicate,
 } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';
@@ -161,6 +161,7 @@ function makeEngine() {
             return tableOf(table).filter((r) => matches(r, opts?.where));
         },
         async findOne(table: string, opts?: { where?: Record<string, unknown> }) {
+            assertEngineFindOnePredicate(table, opts);
             return tableOf(table).find((r) => matches(r, opts?.where)) ?? null;
         },
         async insert(table: string, data: Record<string, unknown>) {

@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect, vi } from 'vitest';
-import { ObjectQL } from '@objectstack/objectql';
+import { ObjectQL, assertEngineFindOnePredicate } from '@objectstack/objectql';
 import { installAttachmentAccessHooks, type AttachmentSharingLike } from './attachment-access-hooks.js';
 import type { AttachmentLifecycleEngine } from './attachment-lifecycle.js';
 
@@ -24,9 +24,9 @@ function install(opts: {
       return typeof options?.limit === 'number' ? rows.slice(0, options.limit) : rows;
     },
     findOne: async (_object, options: any) =>
-      (opts.attachments ?? []).find((r) =>
+      { assertEngineFindOnePredicate(_object, options); return (opts.attachments ?? []).find((r) =>
         Object.entries(options?.where ?? {}).every(([k, v]) => { if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`); return r[k] === v; }),
-      ) ?? null,
+      ) ?? null; },
     update: async () => ({}),
   };
   installAttachmentAccessHooks(engine, () => opts.sharing, silentLogger());

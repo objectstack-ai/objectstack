@@ -6,6 +6,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
+import { childEnv } from './helpers/serve-process.js';
 
 const execFileP = promisify(execFile);
 
@@ -59,7 +60,11 @@ function hash(s: string): number {
 /** Run a harness with stdout on a pipe; return stdout even when the exit code is non-zero. */
 async function runPiped(file: string): Promise<{ stdout: string; code: number }> {
   try {
-    const { stdout } = await execFileP(TSX, [file], { maxBuffer: 64 * 1024 * 1024 });
+    // Every spawned child under this directory declares its environment at the
+    // call site (#11595). An omitted `env` is the leak in its purest form: the
+    // child gets the vitest worker's environment verbatim, with nothing on the
+    // page to read.
+    const { stdout } = await execFileP(TSX, [file], { maxBuffer: 64 * 1024 * 1024, env: childEnv() });
     return { stdout, code: 0 };
   } catch (err: any) {
     return { stdout: String(err.stdout ?? ''), code: err.code ?? 1 };
@@ -141,7 +146,7 @@ describe('emitJson over a pipe', () => {
         'process.exit(1);\n',
     );
 
-    const child = spawn(TSX, [file], { stdio: ['ignore', 'pipe', 'ignore'] });
+    const child = spawn(TSX, [file], { stdio: ['ignore', 'pipe', 'ignore'], env: childEnv() });
     child.stdout.pause();
     await new Promise<void>((resolve) => child.on('exit', () => resolve()));
     const chunks: Buffer[] = [];
@@ -194,7 +199,7 @@ describe('os validate --json over a pipe', () => {
         const { stdout } = await execFileP(
           TSX,
           [resolve(REPO_CLI, 'bin/run-dev.js'), 'validate', join(configDir, 'objectstack.config.ts'), '--json'],
-          { maxBuffer: 64 * 1024 * 1024, cwd: REPO_CLI },
+          { maxBuffer: 64 * 1024 * 1024, cwd: REPO_CLI, env: childEnv() },
         );
         return { stdout, code: 0 };
       } catch (err: any) {

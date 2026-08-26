@@ -27,6 +27,7 @@ import type {
 } from '@objectstack/spec/contracts';
 import type { EnqueueHttpInput } from '@objectstack/service-messaging';
 import { AutoEnqueuer, type HttpEnqueueFn } from './auto-enqueuer.js';
+import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 
 // ---------------------------------------------------------------------------
 // Fakes
@@ -84,6 +85,7 @@ class FakeEngine implements IDataEngine {
         return all.filter((r) => Object.entries(q.where).every(([k, v]) => { if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`); return r[k] === v; }));
     }
     async findOne(name: string, q?: any): Promise<any> {
+        assertEngineFindOnePredicate(name, q);
         return (await this.find(name, q))[0] ?? null;
     }
     async insert(name: string, data: any): Promise<any> {

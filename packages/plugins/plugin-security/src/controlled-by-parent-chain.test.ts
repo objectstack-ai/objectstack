@@ -53,6 +53,7 @@ import { SecurityPlugin } from './security-plugin.js';
 import { SharingService, type SharingEngine } from '@objectstack/plugin-sharing';
 import { matchesFilterCondition } from '@objectstack/formula';
 import type { PermissionSet } from '@objectstack/spec/security';
+import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 
 const REP = 'usr_rep';
 const OTHER = 'usr_other';
@@ -275,6 +276,7 @@ function makeStore(rows: Record<string, Row[]>, quoteModel: string = 'controlled
       return typeof options?.limit === 'number' ? hits.slice(0, options.limit) : hits;
     }),
     findOne: vi.fn(async (object: string, options: any = {}) => {
+      assertEngineFindOnePredicate(object, options);
       const all = rows[object] ?? [];
       return all.find((r) => matchesFilterCondition(r, options?.where ?? null)) ?? null;
     }),

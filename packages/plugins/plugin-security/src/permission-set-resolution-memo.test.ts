@@ -42,6 +42,7 @@ import { describe, it, expect, vi } from 'vitest';
 import type { PermissionSet } from '@objectstack/spec/security';
 
 import { SecurityPlugin } from './security-plugin.js';
+import { assertEngineFindOnePredicate, type EngineFindOneQueryInput } from '@objectstack/metadata-core';
 
 /** Resolvable from metadata, so only `custom_role` below reaches the db loader. */
 const baselineSet: PermissionSet = {
@@ -74,7 +75,7 @@ const makeHarness = () => {
     },
     getSchema: () => baseSchema,
     find,
-    findOne: vi.fn(async () => null),
+    findOne: vi.fn(async (object: string, query?: EngineFindOneQueryInput) => { assertEngineFindOnePredicate(object, query); return null; }),
   };
   const services: Record<string, unknown> = {
     manifest: { register: vi.fn() },

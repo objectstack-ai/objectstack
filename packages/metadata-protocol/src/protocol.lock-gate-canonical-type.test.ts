@@ -76,6 +76,7 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { ObjectStackProtocolImplementation } from './protocol.js';
+import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 
 /**
  * An overlay row exactly as `SysMetadataRepository` stores it: keyed by the
@@ -127,6 +128,7 @@ function harness(opts: {
             getObjectOwner: () => undefined,
         },
         findOne: vi.fn(async (object: string, query: any) => {
+            assertEngineFindOnePredicate(object, query);
             if (object !== 'sys_metadata') return null;
             const where = (query?.where ?? {}) as Record<string, unknown>;
             overlayQueries.push(where);

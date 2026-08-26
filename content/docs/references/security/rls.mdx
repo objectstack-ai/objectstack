@@ -5,18 +5,18 @@ description: Rls protocol schemas
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
 
-# Row-Level Security (RLS) Protocol
+## Row-Level Security (RLS) Protocol
 
 Implements fine-grained record-level access control inspired by PostgreSQL RLS
 and Salesforce Criteria-Based Sharing Rules.
 
-## Overview
+### Overview
 
 Row-Level Security (RLS) allows you to control which rows users can access
 in database tables based on their identity and positions. Unlike
 object-level permissions (CRUD), RLS provides record-level filtering.
 
-## Use Cases
+### Use Cases
 
 1. **Multi-Tenant Data Isolation**
    - Users only see records from their organization
@@ -41,7 +41,7 @@ object-level permissions (CRUD), RLS provides record-level filtering.
    - `using: "assigned_to_id in current_user.team_member_ids"`
      (the runtime pre-resolves `team_member_ids`, no subquery needed)
 
-## PostgreSQL RLS Comparison
+### PostgreSQL RLS Comparison
 
 PostgreSQL RLS Example:
 ```sql
@@ -64,7 +64,7 @@ ObjectStack RLS Equivalent:
 }
 ```
 
-## Salesforce Sharing Rules Comparison
+### Salesforce Sharing Rules Comparison
 
 Salesforce uses "Sharing Rules" and a visibility hierarchy for record-level
 access (our equivalent hierarchy is the business-unit tree, ADR-0090 D3).
@@ -80,7 +80,7 @@ ObjectStack RLS:
 - Subquery-shaped needs are pre-resolved by the runtime (§7.3.1)
 - Multiple policies OR-combine for union (any-match-allows) semantics
 
-## Best Practices
+### Best Practices
 
 1. **Always Define SELECT Policy**: Control what users can view
 2. **Define INSERT/UPDATE CHECK Policies**: Prevent data leakage
@@ -88,7 +88,7 @@ ObjectStack RLS:
 4. **Test Thoroughly**: RLS can have complex interactions
 5. **Monitor Performance**: Complex RLS policies can impact query performance
 
-## Security Considerations
+### Security Considerations
 
 1. **Defense in Depth**: RLS is one layer; use with object permissions
 2. **Default Deny**: If no policy matches, access is denied

@@ -6,6 +6,7 @@ import { resolveUserAuthzGrants } from '@objectstack/core';
 import { PermissionSetSchema } from '@objectstack/spec/security';
 import { PermissionEvaluator } from './permission-evaluator';
 import { explainAccess, buildContextForUser, type ExplainEngineDeps } from './explain-engine';
+import { assertEngineFindOnePredicate, type EngineFindOneQueryInput } from '@objectstack/metadata-core';
 
 const SALES_USER = PermissionSetSchema.parse({
   name: 'sales_user',
@@ -339,7 +340,7 @@ describe('explainAccess — fls reports partial masking (#9127)', () => {
         // `delegatorSets` stays null, which is a different report entirely.
         ql: {
           getSchema: () => PRIVATE_SCHEMA,
-          findOne: async () => ({ id: 'u_boss' }),
+          findOne: async (object: string, query?: EngineFindOneQueryInput) => { assertEngineFindOnePredicate(object, query); return ({ id: 'u_boss' }); },
           find: async () => [],
         },
         getPartialMaskRules: async () => ({ phone: 'phone' }),

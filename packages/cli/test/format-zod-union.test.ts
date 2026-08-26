@@ -36,6 +36,7 @@ import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
 import { ObjectStackDefinitionSchema } from '@objectstack/spec';
 import { formatZodErrors } from '../src/utils/format';
+import { childEnv } from './helpers/serve-process.js';
 
 const cliBin = join(fileURLToPath(new URL('.', import.meta.url)), '..', 'bin', 'run-dev.js');
 
@@ -177,6 +178,11 @@ function runCli(command: string, stack: Record<string, unknown>, args: string[] 
         cwd: dir,
         encoding: 'utf8',
         stdio: 'pipe',
+        // Every spawned child under this directory declares its environment at the
+        // call site (#11595). An omitted `env` is the leak in its purest form: the
+        // child gets the vitest worker's environment verbatim, with nothing on the
+        // page to read.
+        env: childEnv(),
       });
       return { exitCode: 0, output: stripAnsi(output) };
     } catch (error: any) {

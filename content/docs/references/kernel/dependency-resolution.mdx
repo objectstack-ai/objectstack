@@ -5,18 +5,18 @@ description: Dependency Resolution protocol schemas
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
 
-# Dependency Resolution Protocol
+## Dependency Resolution Protocol
 
 Defines schemas for runtime dependency resolution when installing,
 upgrading, or managing packages. Provides a standardized way to
 express dependency conflicts, resolution results, and installation order.
 
-## Architecture Alignment
+### Architecture Alignment
 - **npm**: Dependency tree resolution with conflict detection
 - **Helm**: Dependency management with version constraints
 - **Salesforce**: Package dependency validation at install time
 
-## Resolution Flow
+### Resolution Flow
 ```
 1. Parse manifest.dependencies (SemVer ranges)
 2. Check installed packages registry

@@ -53,7 +53,7 @@ import { describe, expect, it } from 'vitest';
 // cannot accept a call the real ObjectQL engine refuses (#4550 delete / #5480
 // update). Imported from `@objectstack/metadata-core` rather than
 // `@objectstack/objectql`, which depends on this package.
-import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 import { formatStoredMigrationReport, storedMigrationClean } from './stored-migration.js';
 
@@ -122,6 +122,7 @@ function makeStubEngine(seedRows: SeedRow[]) {
             return rowsOf(t).filter((r) => matches(r, opts?.where ?? {}));
         },
         async findOne(t: string, opts?: { where?: Record<string, unknown> }) {
+            assertEngineFindOnePredicate(t, opts);
             return rowsOf(t).find((r) => matches(r, opts?.where ?? {})) ?? null;
         },
         async insert(t: string, row: Record<string, any>) {

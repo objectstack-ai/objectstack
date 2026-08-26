@@ -16,7 +16,7 @@
 // answer leaves the library.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/objectql';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/objectql';
 import { AuthManager } from './auth-manager';
 import {
   REVOKE_SESSION_NOT_FOUND_CODE,
@@ -73,6 +73,7 @@ const createMemoryEngine = () => {
       return { ...row };
     },
     async findOne(name: string, q: any = {}) {
+      assertEngineFindOnePredicate(name, q);
       const row = rows(name).find((r) => matches(r, q.where));
       return row ? project(row, q.fields) : null;
     },

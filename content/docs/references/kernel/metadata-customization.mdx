@@ -5,20 +5,20 @@ description: Metadata Customization protocol schemas
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
 
-# Metadata Customization Layer Protocol
+## Metadata Customization Layer Protocol
 
 Defines the overlay system for managing user customizations on top of
 package-delivered metadata. This protocol solves the critical challenge
 of separating "vendor-managed" metadata from "customer-customized" metadata,
 enabling safe package upgrades without losing user changes.
 
-## Architecture Alignment
+### Architecture Alignment
 - **Salesforce**: Managed vs Unmanaged metadata components
 - **ServiceNow**: Update Sets with collision detection
 - **WordPress**: Parent/child theme overlay model
 - **Kubernetes**: Strategic merge patch for resource customization
 
-## Three-Layer Model
+### Three-Layer Model
 ```
 ┌─────────────────────────────────┐
 │  User Layer (scope: user)       │  ← Personal overrides (per-user)
@@ -29,7 +29,7 @@ enabling safe package upgrades without losing user changes.
 └─────────────────────────────────┘
 ```
 
-## Merge Resolution Order
+### Merge Resolution Order
 Effective metadata = System ← merge(Platform) ← merge(User)
 Each layer only stores the delta (changed fields), not the full definition.
 

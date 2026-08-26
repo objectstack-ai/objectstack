@@ -67,7 +67,7 @@ import { describe, expect, it, vi } from 'vitest';
 // [#5619] The producer's OWN write-verb dispatch decisions (#4550 delete /
 // #5480 update). From `@objectstack/metadata-core`, never `@objectstack/objectql`
 // — objectql depends on THIS package, so that import would close a cycle.
-import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate, type EngineFindOneQueryInput } from '@objectstack/metadata-core';
 import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 
@@ -117,7 +117,8 @@ function makeEngine(
         async find(_table: string, q: { where: Record<string, unknown> }) {
             return rows.filter((r) => matchesWhere(r, q.where));
         },
-        async findOne() { return null; },
+        async findOne(object: string, query?: EngineFindOneQueryInput) {
+                          assertEngineFindOnePredicate(object, query); return null; },
         async insert() { return { id: 'x' }; },
         async update(_t: string, data: Record<string, unknown>, o?: Record<string, unknown>) {
             assertEngineUpdateDispatch(data, o);

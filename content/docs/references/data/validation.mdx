@@ -5,12 +5,12 @@ description: Validation protocol schemas
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
 
-# ObjectStack Validation Protocol
+## ObjectStack Validation Protocol
 
 This module defines the validation schema protocol for ObjectStack, providing a comprehensive
 type-safe validation system similar to Salesforce's validation rules but with enhanced capabilities.
 
-## Overview
+### Overview
 
 Validation rules are applied at the data layer to ensure data integrity and enforce business logic.
 A validation rule is a **deterministic, synchronous, side-effect-free predicate over a single
@@ -30,7 +30,7 @@ The system supports these validation types:
 5. **JSON Schema Validation**: Validate a JSON field against a JSON Schema
 6. **Conditional Validation**: Apply a nested rule based on a CEL condition
 
-## Deliberately NOT validation rules
+### Deliberately NOT validation rules
 
 These were once declared here but never enforced. Because the contract above rules them out
 (they need I/O or are client-side concerns), they were removed rather than left as silent
@@ -51,7 +51,7 @@ no-ops. Use the layer that already does each one correctly:
   a `delete` event was a proven silent no-op — the enum value was removed rather than left
   advertised-but-unenforced (#3184; see docs/audits/2026-06-validationschema-property-liveness.md).
 
-## Salesforce Comparison
+### Salesforce Comparison
 
 ObjectStack validation rules are inspired by Salesforce validation rules but enhanced:
 - Salesforce: Formula-based validation with `Error Condition Formula`

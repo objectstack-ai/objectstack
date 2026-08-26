@@ -229,9 +229,36 @@ function sendThrownError(res: any, error: unknown): void {
   // adding one here would be a new rule at one door and would re-create the
   // divergence this closes.
   const declaredCode = demotedDeclaredCode(thrown);
+  // [#12502] The producer's user-facing refusal text (#9934), the SECOND
+  // declared channel this writer was holding and dropping. A third spread into
+  // the same object, and the three do not interact: `details` is structured
+  // context, `declaredCode` is a code spelling, `userMessage` is prose a
+  // producer marked AT THROW TIME as addressed to the end user.
+  //
+  // The idiom is the INVERSE of `declaredCode`'s directly above, and the
+  // inversion is the whole point of this being a separate change rather than a
+  // rider. Read `thrown.userMessage` RAW: `resolveThrownHttpError` has already
+  // applied `declaredUserMessage`'s non-empty-string rule when it built the
+  // field, and presence here means only "the producer opted in". `declaredCode`
+  // needs `demotedDeclaredCode` because its raw field carries a SECOND meaning
+  // — it is also set when the producer's spelling IS the registered member, so
+  // forwarding it raw would put two spellings of one fact on every registered
+  // refusal. ⛔ `userMessage` has no second meaning, so there is no caller
+  // obligation to re-derive and inventing one to match the sibling would be the
+  // mistake, not the safe choice. Byte for byte the dispatcher twin's
+  // expression (`errorFromThrown`, `packages/runtime/src/http-dispatcher.ts`),
+  // which serves this same path and has emitted the channel since #9934.
+  //
+  // ⚠️ NOT withheld on the sanitised 5xx above, and this one needs no judgement
+  // call: the withhold rewrites a LOCAL `message` const, and
+  // `looksLikeInternalErrorLeak` is only ever handed `thrown.message`, so
+  // `thrown.userMessage` is never an input to it. A marked text is the
+  // producer's deliberate statement to the caller at any status — the ruling
+  // that created the channel made it status-agnostic on purpose.
   const extra = {
     ...(thrown.details ? { details: thrown.details } : {}),
     ...(declaredCode !== undefined ? { declaredCode } : {}),
+    ...(thrown.userMessage !== undefined ? { userMessage: thrown.userMessage } : {}),
   };
   sendError(
     res,

@@ -3,7 +3,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { SeedLoaderService } from './seed-loader.js';
 import type { IDataEngine, IMetadataService } from '@objectstack/spec/contracts';
-import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate, type EngineFindOneQueryInput } from '@objectstack/metadata-core';
 
 /**
  * `Seed.env` is ENFORCED, not merely authorable (framework#4704).
@@ -50,7 +50,7 @@ function createEngine() {
       if (typeof query?.limit === 'number') records = records.slice(0, query.limit);
       return records;
     }),
-    findOne: vi.fn(async () => null),
+    findOne: vi.fn(async (object: string, query?: EngineFindOneQueryInput) => { assertEngineFindOnePredicate(object, query); return null; }),
     insert: vi.fn(async (objectName: string, data: any) => {
       if (!store[objectName]) store[objectName] = [];
       if (Array.isArray(data)) {

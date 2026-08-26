@@ -40,7 +40,7 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 
 const SCHEMA = {
@@ -101,7 +101,7 @@ function makeStoreEngine() {
         rows.delete(id);
         return { deleted: 1 };
     });
-    const findOne = vi.fn(async (_object: string, options?: any) => rows.get(options?.where?.id) ?? null);
+    const findOne = vi.fn(async (_object: string, options?: any) => { assertEngineFindOnePredicate(_object, options); return rows.get(options?.where?.id) ?? null; });
 
     const engine: any = {
         registry: { getObject: (n: string) => (n === 'showcase_private_note' ? SCHEMA : undefined) },

@@ -3,7 +3,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { SeedLoaderService } from './seed-loader.js';
 import type { IDataEngine, IMetadataService } from '@objectstack/spec/contracts';
-import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 
 /**
  * Declared pointer-pair resolution — #11339 (ADR-0052 §5, the ActivityPointer
@@ -55,6 +55,7 @@ function createFaithfulEngine(schemas: Record<string, any>) {
       return records;
     }),
     findOne: vi.fn(async (objectName: string, query?: any) => {
+      assertEngineFindOnePredicate(objectName, query);
       const rows = await (engine.find as any)(objectName, { ...query, limit: 1 });
       return rows[0] ?? null;
     }),

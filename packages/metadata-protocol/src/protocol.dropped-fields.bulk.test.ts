@@ -12,7 +12,7 @@
 //     response has no per-row slot; the insert strip is schema-uniform).
 
 import { describe, it, expect, vi } from 'vitest';
-import { assertEngineUpdateDispatch } from '@objectstack/metadata-core';
+import { assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 
 const SCHEMA = {
@@ -38,7 +38,7 @@ describe('updateManyData — per-row droppedFields + context threading (#3455)',
     // fixture pretends to update — existence must mean one thing in a harness.
     // (It answered a flat `null` while nothing called it; a row that does not
     // exist is now correctly refused before `engine.update`.)
-    const findOne = vi.fn(async (_object: string, options?: any) => ({ id: options?.where?.id, title: 'stored' }));
+    const findOne = vi.fn(async (_object: string, options?: any) => { assertEngineFindOnePredicate(_object, options); return ({ id: options?.where?.id, title: 'stored' }); });
     const engine = { registry: { getObject: () => SCHEMA }, update, findOne };
     const p = new ObjectStackProtocolImplementation(engine as any);
 
@@ -187,7 +187,7 @@ describe('batchData — per-row droppedFields + context threading (#3455)', () =
     });
     // [#5088] See the updateManyData fixture above: `findOne` is now the
     // existence probe in front of the write, so it must answer for `rec-1`.
-    const findOne = vi.fn(async (_object: string, options?: any) => ({ id: options?.where?.id }));
+    const findOne = vi.fn(async (_object: string, options?: any) => { assertEngineFindOnePredicate(_object, options); return ({ id: options?.where?.id }); });
     const engine = { registry: { getObject: () => SCHEMA }, update, insert: vi.fn(), findOne };
     const p = new ObjectStackProtocolImplementation(engine as any);
 

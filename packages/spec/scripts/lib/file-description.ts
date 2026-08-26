@@ -98,6 +98,47 @@
  * keeping them would hand `{ $gte: '{last_quarter_start}' }` to MDX as an
  * expression and fail the docs build — the target dialect has one spelling for
  * a code block and this is it.
+ *
+ * ## Heading levels are the PAGE's, not the source file's (#12249)
+ *
+ * The second such place, and the same argument. A `.zod.ts` header is written
+ * as a standalone document, so its author opens a section with `# `; embedded
+ * in a reference page that `# ` compiles to a second `<h1>`, because the page
+ * already renders one from its frontmatter `title` (`DocsTitle`, in
+ * `apps/docs/app/[lang]/docs/[[...slug]]/page.tsx`). Measured on `main`: 38 of
+ * the 190 described modules did that, 43 headings across them, and the whole
+ * `content/docs/references/**` tree had to be carved out of
+ * `scripts/check-docs-single-h1.mjs` because of it.
+ *
+ * So the fragment is renumbered on the way out: its SHALLOWEST heading is
+ * placed at `ctx.sectionLevel` and every other heading moves with it, keeping
+ * the relative structure the author wrote. Three properties this shape has that
+ * the obvious "demote every `# ` to `## `" does not:
+ *
+ * - **It only ever demotes.** A description whose headings already start at
+ *   level 2 is left byte-identical — 26 of the 64 described modules with
+ *   headings are in that state, and a blanket +1 would have pushed all of them
+ *   a level deeper and regenerated 26 pages that were never wrong.
+ * - **It moves the block, not the level-1 lines.** `automation/control-flow`
+ *   writes `##` with a `###` under it; renumbering the run keeps that nesting,
+ *   whereas rewriting only the `# ` lines would collide two source levels into
+ *   one output level wherever a block mixes them.
+ * - **It cannot silently corrupt code.** The shift is applied to `prose` lines
+ *   only, so a `# Install pnpm globally` inside a fenced or indented block is
+ *   left alone. That is the load-bearing half, and it is why this lives here
+ *   rather than as a regex over the emitted string in `build-docs.ts`:
+ *   `classifyLines` is already the one model in this pipeline that knows which
+ *   lines are code, and a fence-blind pass over the same text would rewrite
+ *   working snippets to satisfy a rule about HTML those lines never produce
+ *   (the same false positive `check-docs-single-h1.mjs`'s header measures at
+ *   ten pages, and calls more expensive than the defect).
+ *
+ * ATX only: no source writes a setext (`===` underline) heading, and both this
+ * renderer's consumers and `check-docs-single-h1.mjs` model headings the same
+ * ATX-only way. A shift that would push a heading past level 6 throws rather
+ * than emitting a seven-hash line, which CommonMark renders as paragraph text —
+ * unreachable on the current corpus (no h1-bearing description goes deeper than
+ * level 2) and a loud failure is the right answer if a source ever gets there.
  */
 
 /**
@@ -138,6 +179,20 @@ export interface FileDescriptionContext {
    * `<category>/<file>.zod.ts` lookup #4696 settled on.
    */
   sourcePathToDocsRoute: (target: string) => string | null;
+
+  /**
+   * The heading level a TOP-LEVEL section of the embedding page sits at — 2 for
+   * a reference page, whose `<h1>` is the frontmatter `title`.
+   *
+   * Required for the reason `fromCategory` is (#6484): only the caller knows
+   * it. A `.zod.ts` header is written as if it were its own document and has no
+   * way to know what page it will be embedded in, while `build-docs.ts` emits
+   * the page's other top-level sections itself and therefore owns the number.
+   * Hard-coding `2` here would put the page's heading contract in the module
+   * that is least able to state it, and would drift silently the first time a
+   * page's layout changed.
+   */
+  sectionLevel: number;
 }
 
 /**
@@ -338,6 +393,60 @@ function classifyLines(lines: readonly string[]): LineKind[] {
 }
 
 /**
+ * An ATX heading, and the three pieces a renumbering needs: the leading
+ * indent, the hash run, and where the rest of the line starts.
+ *
+ * CommonMark allows up to three leading spaces (a fourth makes it an indented
+ * code block, which `classifyLines` has already labelled `indented` by the time
+ * this runs). The trailing `(?=[ \t]|$)` is what keeps `#NotAHeading` and a
+ * `#5059` issue reference at the start of a line out of the match — a hash run
+ * is only a heading when a space or the end of the line closes it.
+ */
+const ATX_HEADING = /^( {0,3})(#{1,6})(?=[ \t]|$)/;
+
+/**
+ * The block's headings renumbered so its shallowest one sits at `sectionLevel`.
+ *
+ * See the module comment for why this only ever demotes, why it moves the whole
+ * block rather than the level-1 lines, and why it is scoped to `prose`. Returns
+ * the lines untouched when the block has no heading, or when its shallowest one
+ * is already at or below the page's section level.
+ */
+function withHeadingsAtSectionLevel(
+  lines: readonly string[],
+  kind: readonly LineKind[],
+  sectionLevel: number,
+): string[] {
+  const headingLevel = (line: string, i: number): number | null => {
+    if (kind[i] !== 'prose') return null;
+    const m = ATX_HEADING.exec(line);
+    return m ? m[2].length : null;
+  };
+
+  const levels = lines.map(headingLevel).filter((l): l is number => l !== null);
+  if (levels.length === 0) return [...lines];
+
+  const shift = sectionLevel - Math.min(...levels);
+  if (shift <= 0) return [...lines]; // already at or below the page's level
+
+  const deepest = Math.max(...levels) + shift;
+  if (deepest > 6) {
+    throw new Error(
+      `file-description: renumbering this module header to start at level ${sectionLevel} would ` +
+        `push a heading to level ${deepest}, and a run of seven hashes is not a heading at all. ` +
+        `Reduce the heading depth in the source's own file header instead.`,
+    );
+  }
+
+  return lines.map((line, i) => {
+    const level = headingLevel(line, i);
+    if (level === null) return line;
+    const m = ATX_HEADING.exec(line)!;
+    return `${m[1]}${'#'.repeat(level + shift)}${line.slice(m[1].length + m[2].length)}`;
+  });
+}
+
+/**
  * A blank line before every JSDoc block tag that does not already have one.
  *
  * Keeping the source's own blank lines is not sufficient on its own, because
@@ -517,25 +626,31 @@ export function renderFileDescription(source: string, ctx: FileDescriptionContex
   );
   const kind = classifyLines(lines);
 
+  // Renumbered against the SAME classification the render loop below uses, so
+  // the shift and the "this line is code" verdict can never disagree. Adding
+  // hashes cannot change a line's kind — the indent is preserved, so a prose
+  // line stays prose (#12249).
+  const leveled = withHeadingsAtSectionLevel(lines, kind, ctx.sectionLevel);
+
   // Prose is rendered a RUN of lines at a time, never line by line: a sentence,
   // an inline code span and a `{@link}` tag may each wrap across source lines,
   // and a transform applied per line cuts them in half (#5553).
   const out: string[] = [];
-  for (let i = 0; i < lines.length;) {
-    if (kind[i] === 'fenced') { out.push(lines[i]); i++; continue; }
+  for (let i = 0; i < leveled.length;) {
+    if (kind[i] === 'fenced') { out.push(leveled[i]); i++; continue; }
 
     if (kind[i] === 'indented') {
       const start = i;
-      while (i < lines.length && kind[i] === 'indented') i++;
+      while (i < leveled.length && kind[i] === 'indented') i++;
       // Re-emitted as a fence: MDX has no indented code blocks, so left as it
       // was authored this would be parsed as prose containing JSX expressions.
-      out.push('```', ...lines.slice(start, i).map(line => line.replace(/^ {4}/, '')), '```');
+      out.push('```', ...leveled.slice(start, i).map(line => line.replace(/^ {4}/, '')), '```');
       continue;
     }
 
     const start = i;
-    while (i < lines.length && kind[i] === 'prose') i++;
-    out.push(renderProse(lines.slice(start, i).join('\n'), ctx));
+    while (i < leveled.length && kind[i] === 'prose') i++;
+    out.push(renderProse(leveled.slice(start, i).join('\n'), ctx));
   }
   return out.join('\n').trim();
 }

@@ -69,7 +69,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { assertEngineUpdateDispatch, assertEngineDeleteDispatch } from '@objectstack/metadata-core';
+import { assertEngineUpdateDispatch, assertEngineDeleteDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { HttpDispatcher } from '../http-dispatcher.js';
 
@@ -152,6 +152,7 @@ function boot() {
             return [...rows.values()].filter((r) => match(r, o?.where ?? {}));
         },
         async findOne(table: string, o: { where: Record<string, unknown> }) {
+            assertEngineFindOnePredicate(table, o);
             if (table !== 'sys_metadata') return null;
             for (const r of rows.values()) if (match(r, o?.where ?? {})) return r;
             return null;

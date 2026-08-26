@@ -16,24 +16,49 @@
  * declaration, and nothing read this hint table's text.
  *
  * The defect being closed is that SILENT DRIFT, not the duplication as such.
- * The literal is still declared three times (the roster key, serve's static,
- * doctor's const) and this file does not change that — see the const's own
- * docblock for why the roster cannot supply the name, and for the deletion
- * condition that ends the duplication properly.
  *
- * ── Two legs, and the second is the point ────────────────────────────────
+ * ── Retargeted by #12492, not rewritten ──────────────────────────────────
  *
- *   (i)  RENDERED — the `isolated` bullet is rendered through the real gate
- *        and compared, whitespace included, against text built from the
- *        declaration.
- *   (ii) ROSTER — that declaration IS a key of the spec-owned
- *        `PLATFORM_PLUGIN_WIRED_RUNTIMES`.
+ * That deletion condition has since been met. `doctor.ts` no longer declares
+ * `ORGANIZATIONS_RUNTIME_PKG` or its own hint table: both moved to
+ * `../utils/tenancy-posture-hints.ts`, which `os serve` reads too. These pins
+ * moved with the declaration — ⛔ none of them was dropped, because what they
+ * measure did not change: what `os doctor` RENDERS. Leg (ii) especially, which
+ * is the load-bearing one (see below).
+ *
+ * ⚠️ The literal is still declared three times, not two: the roster key, the
+ * shared module this file now reads, and `Serve.ORGANIZATIONS_RUNTIME_PKG`,
+ * which must stay a string LITERAL in `serve.ts` or the host-anchoring sweep in
+ * `serve-cluster-host-resolution.test.ts` can no longer resolve which package
+ * that command's `import()` names. What changed is that no copy can drift in
+ * silence any more: the serve↔shared pair is pinned equal by site 8 of
+ * `serve-organizations-message-spelling.test.ts`, and each copy is separately
+ * pinned as a roster key. Ending the duplication needs that sweep's resolver to
+ * follow one more hop — a file this card does not own.
+ *
+ * ── Three legs, and the second is the point ──────────────────────────────
+ *
+ *   (i)   RENDERED — the `isolated` bullet is rendered through the real gate
+ *         and compared, whitespace included, against text built from the
+ *         declaration.
+ *   (ii)  ROSTER — that declaration IS a key of the spec-owned
+ *         `PLATFORM_PLUGIN_WIRED_RUNTIMES`.
+ *   (iii) SHARED TABLE (#12492) — every posture bullet, `single` and `group`
+ *         included, renders the shared table's entry verbatim.
  *
  * ⭐ (ii) is the entire difference between a CHECKED duplicate and a third
  * SILENT copy. Leg (i) on its own pins doctor against itself: rename the
  * roster key and the hint and the expectation move together, so (i) stays
  * green forever while `os doctor` names a package that no longer exists.
  * (ii) is what makes that rename loud. Neither leg is optional.
+ *
+ * (iii) covers the half neither of the other two can reach. `single` and
+ * `group` carry no package literal, so no roster leg is possible for them and
+ * nothing ever watched them — that is the defect #12492 filed. Leg (iii) does
+ * not check the PROSE (a reword moves the shared table and this expectation
+ * together, and leg (i)'s hard-coded text is what reddens then); it checks that
+ * doctor renders THE SHARED TABLE. Re-grow a module-local copy in `doctor.ts` —
+ * exactly the state this card found — and it goes red on every posture at once.
  *
  * ── Why it reads the RENDERED text, not the source ───────────────────────
  *
@@ -51,9 +76,16 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { PLATFORM_PLUGIN_WIRED_RUNTIMES } from '@objectstack/spec/kernel';
+import { TENANCY_POSTURES } from '@objectstack/spec/security';
 
+// The declaration and the table both live here since #12492 — `os serve` reads
+// the same module, which is what makes leg (iii) below a reading of the SHARING
+// rather than of one command talking to itself.
 import {
   ORGANIZATIONS_RUNTIME_PKG,
+  TENANCY_POSTURE_FIX_HINTS,
+} from '../utils/tenancy-posture-hints.js';
+import {
   resolveTenancyPostureOrFinding,
   readDotenvFiles,
   type DotenvReading,
@@ -108,16 +140,19 @@ afterEach(() => {
   }
 });
 
-/** The `isolated` fix-list bullet, rendered through the real gate. */
-const renderIsolatedBullet = (): string => {
+/** One posture's fix-list bullet, rendered through the real gate. */
+const renderPostureBullet = (posture: string): string => {
   process.env.OS_TENANCY_POSTURE = 'not-a-posture';
   const reading = resolveTenancyPostureOrFinding(shellOnly);
   expect(reading.ok, 'the gate accepted a value that is not a posture').toBe(false);
   if (reading.ok) throw new Error('unreachable — guarded above');
-  const bullet = lines(reading.result.fix ?? '').find((l) => l.includes('OS_TENANCY_POSTURE=isolated'));
-  expect(bullet, "the fix list no longer offers an `isolated` bullet at all").toBeDefined();
+  const bullet = lines(reading.result.fix ?? '').find((l) => l.includes(`OS_TENANCY_POSTURE=${posture}`));
+  expect(bullet, `the fix list no longer offers a '${posture}' bullet at all`).toBeDefined();
   return bullet as string;
 };
+
+/** The `isolated` fix-list bullet, rendered through the real gate. */
+const renderIsolatedBullet = (): string => renderPostureBullet('isolated');
 
 describe('doctor — the posture description an operator reads names the declaration (#12464)', () => {
   // LEG (i). Rendered through `resolveTenancyPostureOrFinding` rather than by
@@ -146,6 +181,28 @@ describe('doctor — the posture description an operator reads names the declara
     // row this advice describes is the enterprise one.
     const row = PLATFORM_PLUGIN_WIRED_RUNTIMES[PKG];
     expect(row.edition, `edition drift for the runtime doctor names ('${PKG}')`).toBe('enterprise');
+  });
+
+  // LEG (iii) — the half legs (i) and (ii) cannot reach (#12492). `single` and
+  // `group` carry no package literal, so no roster leg is possible for them;
+  // before this card nothing anywhere read their text at either command, and a
+  // reword of one command's copy drifted from the other in total silence. What
+  // closes that is not a pin on the PROSE — it is this: the bullets an operator
+  // reads here are assembled from the SHARED table, the same one `os serve`
+  // renders. A module-local hint table re-grown in `doctor.ts` reddens this.
+  it('leg (iii) — every posture bullet renders the SHARED hint table verbatim, `single` and `group` included', () => {
+    for (const posture of TENANCY_POSTURES) {
+      const hint = TENANCY_POSTURE_FIX_HINTS[posture];
+      expect(renderPostureBullet(posture)).toBe(
+        `        • OS_TENANCY_POSTURE=${posture}${hint ? ` — ${hint}` : ''}`,
+      );
+    }
+    // …and the sweep above actually swept. A posture vocabulary that went empty
+    // would satisfy every assertion inside the loop without reading anything —
+    // the two entries this card is ABOUT are named explicitly for that reason.
+    expect(TENANCY_POSTURES).toContain('single');
+    expect(TENANCY_POSTURES).toContain('group');
+    expect(TENANCY_POSTURES).toContain('isolated');
   });
 
   it('no posture bullet an operator reads names any OTHER scoped package', () => {
@@ -183,6 +240,21 @@ describe('#12464 CONTROL — these pins can say no', () => {
     // …and says yes to the real thing, so the two `not.toBe`s above are a
     // reading rather than a pair of vacuous truths.
     expect(renderIsolatedBullet()).toBe(expected);
+  });
+
+  it('the shared-table comparison rejects a bullet whose hint was reworded (#12492)', () => {
+    // If leg (iii) could not tell a reworded hint from the shared one it would
+    // be decorative. Anchored on `group` — one of the two entries that had
+    // nothing watching them at all before this card, and deliberately NOT a
+    // substring game: 'closed engine' is a different claim, not a truncation.
+    const real = `        • OS_TENANCY_POSTURE=group — ${TENANCY_POSTURE_FIX_HINTS.group}`;
+    expect(
+      '        • OS_TENANCY_POSTURE=group — organization wall enforced by the closed engine, one shared database',
+    ).not.toBe(real);
+    expect('        • OS_TENANCY_POSTURE=group').not.toBe(real);
+    // …and says yes to the real thing, so the two `not.toBe`s are a reading
+    // rather than a pair of vacuous truths.
+    expect(renderPostureBullet('group')).toBe(real);
   });
 
   it('the roster key check rejects a name the roster does not declare', () => {

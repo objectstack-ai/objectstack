@@ -43,39 +43,19 @@
 
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { createServer, type Server } from 'node:net';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { portContentionError, portIsFree, randomPort, reservePort } from './helpers/serve-process.js';
+import { holdPort, portContentionError, portIsFree, randomPort, reservePort } from './helpers/serve-process.js';
 
 /** Seeded from `import.meta.url`, the spelling `check:cross-package-test-inputs` recognises. */
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
-
-/** Bind `0.0.0.0:0` and KEEP it bound. Resolves with the port and its closer. */
-function hold(): Promise<{ port: number; release: () => Promise<void> }> {
-  return new Promise((resolveHold, rejectHold) => {
-    const server: Server = createServer();
-    server.on('error', rejectHold);
-    server.listen(0, '0.0.0.0', () => {
-      const address = server.address();
-      if (address === null || typeof address === 'string') {
-        rejectHold(new Error(`listen(0) produced no numeric address: ${String(address)}`));
-        return;
-      }
-      resolveHold({
-        port: address.port,
-        release: () => new Promise<void>((done) => server.close(() => done())),
-      });
-    });
-  });
-}
 
 describe('#12441: the e2e serve port is bind-probed, and the probe can say NO', () => {
   it(
     'THE NEGATIVE ARM: portIsFree() answers NO for a port this test is holding, and YES once released',
     async () => {
-      const held = await hold();
+      const held = await holdPort();
 
       // The load-bearing assertion of this whole file. If this ever goes green
       // the other way round, `reservePort()`'s guarantee is decoration: a probe
@@ -123,7 +103,7 @@ describe('#12441: the e2e serve port is bind-probed, and the probe can say NO', 
   it(
     'reservePort() never draws a port that is already HELD — the shape the blind draw could not avoid',
     async () => {
-      const holders = await Promise.all(Array.from({ length: 12 }, () => hold()));
+      const holders = await Promise.all(Array.from({ length: 12 }, () => holdPort()));
       const heldPorts = new Set(holders.map((h) => h.port));
       try {
         const drawn = Array.from({ length: 12 }, () => reservePort());

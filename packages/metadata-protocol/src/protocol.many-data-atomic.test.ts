@@ -21,7 +21,7 @@
 // test reads the store back afterwards.
 
 import { describe, it, expect, vi } from 'vitest';
-import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 
 const SCHEMA = { name: 'invoice', fields: { title: { name: 'title', type: 'text' } } };
@@ -70,7 +70,7 @@ function makeStoreEngine(opts: { driverCanTransact?: boolean; hasTransaction?: b
         registry: { getObject: (n: string) => (n === 'invoice' ? SCHEMA : undefined) },
         update,
         delete: del,
-        findOne: vi.fn(async (_object: string, options?: any) => rows.get(options?.where?.id)),
+        findOne: vi.fn(async (_object: string, options?: any) => { assertEngineFindOnePredicate(_object, options); return rows.get(options?.where?.id); }),
         getDefaultDriverName: () => 'default',
         getDriverByName: () => (driverCanTransact ? { beginTransaction: async () => handle } : {}),
     };

@@ -27,7 +27,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { BatchOperationResultSchema, BatchUpdateResponseSchema } from '@objectstack/spec/api';
 import { ObjectStackProtocolImplementation } from './protocol.js';
-import { assertEngineUpdateDispatch, assertEngineDeleteDispatch } from '@objectstack/metadata-core';
+import { assertEngineUpdateDispatch, assertEngineDeleteDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 
 const SCHEMA = { name: 'invoice', fields: { title: { name: 'title', type: 'text' } } };
 
@@ -74,7 +74,7 @@ function makeStoreEngine() {
             rows.delete(id);
             return { deleted: 1 };
         }),
-        findOne: vi.fn(async (_object: string, options?: any) => rows.get(options?.where?.id)),
+        findOne: vi.fn(async (_object: string, options?: any) => { assertEngineFindOnePredicate(_object, options); return rows.get(options?.where?.id); }),
         getDefaultDriverName: () => 'default',
         getDriverByName: () => ({ beginTransaction: async () => handle }),
         transaction: vi.fn(async (callback: (ctx: any) => Promise<any>, baseContext?: any) => {
