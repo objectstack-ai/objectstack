@@ -5160,9 +5160,9 @@ export function resolveBannerConfigRow(opts: {
  * banner reads the binding state off the engine instead).
  *
  * Every probe is feature-detected so an older `@objectstack/service-automation`
- * (without `getTriggerBindingAudit` / extended runtime states) degrades to the
- * plain count line instead of crashing the banner. Returns `undefined` when
- * there is nothing automation-related to show at all.
+ * (without `getTriggerBindingAudit` / `getShadowedFlows` / extended runtime
+ * states) degrades to the plain count line instead of crashing the banner.
+ * Returns `undefined` when there is nothing automation-related to show at all.
  */
 export function collectAutomationSummary(
   kernel: any,
@@ -5181,12 +5181,40 @@ export function collectAutomationSummary(
           triggerTypes: [],
           unbound: [],
           unknownObject: [],
+          shadowed: [],
           draftCount: 0,
         }
       : undefined;
   }
 
-  let states: Array<{ name: string; enabled: boolean; bound: boolean; status?: string; triggerType?: string; object?: string }> = [];
+  /**
+   * One flow body's provenance, as the engine spells it (`FlowContender` in
+   * `@objectstack/service-automation`): a code-shipped artifact, or an
+   * ADR-0005 runtime overlay row in `sys_metadata`.
+   *
+   * Declared structurally, like every other shape this function reads off the
+   * engine. The probes below are feature-detected precisely so a host running
+   * an OLDER automation package still boots its banner, and a nominal import
+   * would type these reads against the CURRENT package while the runtime
+   * deliberately tolerates a previous one.
+   */
+  type Contender = { source: 'package' | 'runtime'; packageId?: string };
+
+  let states: Array<{
+    name: string;
+    enabled: boolean;
+    bound: boolean;
+    status?: string;
+    triggerType?: string;
+    object?: string;
+    // [#12028] `getFlowRuntimeStates()` has attached these two per row since
+    // #11997 whenever a bare name had more than one contender. Named here so a
+    // later read is type-checked against the row's real shape — casting past
+    // this annotation is how the field goes back to being declared and unread,
+    // which is the whole defect this banner line closes.
+    armedFrom?: Contender;
+    shadowed?: Contender[];
+  }> = [];
   try { states = automation.getFlowRuntimeStates?.() ?? []; } catch { /* older engine */ }
   if (states.length === 0 && declaredFlowCount === 0) return undefined;
 
@@ -5195,6 +5223,19 @@ export function collectAutomationSummary(
 
   let unbound: Array<{ flowName: string; triggerType: string; reason: string }> = [];
   try { unbound = automation.getTriggerBindingAudit?.() ?? []; } catch { /* older engine */ }
+
+  // [#12028] Same-named definitions: which body armed, and which lost. Read
+  // from the engine's dedicated receipt rather than from `states` above, for
+  // one measured reason — `getFlowRuntimeStates()` can only attach the receipt
+  // to a row it is already emitting, i.e. to a name still in the flow map,
+  // whereas `getShadowedFlows()` returns every receipt the boot pull recorded.
+  // A contested name is worth saying out loud either way.
+  //
+  // Feature-detected exactly like the `unbound` probe above and with nothing
+  // more: optional call, `?? []`, `catch` for an older engine. No extra
+  // tolerance — the neighbouring read is the standard here.
+  let shadowing: Array<{ name: string; armed: Contender; shadowed: Contender[] }> = [];
+  try { shadowing = automation.getShadowedFlows?.() ?? []; } catch { /* older engine */ }
 
   // Dead bindings: a bound record-change flow whose target object nobody
   // registered — the hook is filtered to a name that never writes.
@@ -5218,6 +5259,13 @@ export function collectAutomationSummary(
     triggerTypes,
     unbound,
     unknownObject,
+    // A receipt that displaced nothing is not a contested name. The engine
+    // already refuses to record one, and the banner keeps its own end of that
+    // guarantee here rather than inheriting it: a benign boot must print no
+    // shadowing line at all, and this is where "benign" is decided.
+    shadowed: shadowing
+      .filter((r) => r.shadowed.length > 0)
+      .map((r) => ({ flowName: r.name, armed: r.armed, shadowedCount: r.shadowed.length })),
     draftCount: states.filter((s) => s.enabled && (s.status ?? 'draft') === 'draft').length,
   };
 }
