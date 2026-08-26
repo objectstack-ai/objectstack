@@ -140,16 +140,22 @@ export const SysPermissionSet = ObjectSchema.create({
         // name, so the scope has to be right here — a bare "Unique" tells the
         // author the name is taken installation-wide when it is not.
         { name: 'name', label: 'New API Name', type: 'text', required: true, helpText: 'snake_case machine name, unique per organization' },
+        // `description` is prose, not a permission facet: it stays editable
+        // (renaming a clone's description is legitimate), while the five JSON
+        // facets below are declared `carryOver` — the #11753 ruling's
+        // non-editable carry-over. Copied verbatim, shown read-only, never
+        // offered as a prefilled JSON textarea an admin could hand-mangle into
+        // a clone that grants MORE than its base.
         { field: 'description', defaultFromRow: true },
-        { field: 'object_permissions', defaultFromRow: true },
-        { field: 'field_permissions', defaultFromRow: true },
+        { field: 'object_permissions', defaultFromRow: true, carryOver: true },
+        { field: 'field_permissions', defaultFromRow: true, carryOver: true },
         // [#11703] The three facets the clone silently dropped. Same
         // JSON-string shape as the two above: `permissionSetRowFields()`
         // writes all five with `JSON.stringify`, and the data door parses all
         // five back — the accept surface did not move, only what is SENT.
-        { field: 'system_permissions', defaultFromRow: true },
-        { field: 'row_level_security', defaultFromRow: true },
-        { field: 'tab_permissions', defaultFromRow: true },
+        { field: 'system_permissions', defaultFromRow: true, carryOver: true },
+        { field: 'row_level_security', defaultFromRow: true, carryOver: true },
+        { field: 'tab_permissions', defaultFromRow: true, carryOver: true },
         // ⛔ `admin_scope` is deliberately absent — see `description` above.
       ],
     },

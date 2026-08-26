@@ -70,6 +70,7 @@
     "ui/ActionNavItem:type",
     "ui/ActionNavItem:visible",
     "ui/ActionParam:accept",
+    "ui/ActionParam:carryOver",
     "ui/ActionParam:defaultFromRow",
     "ui/ActionParam:defaultValue",
     "ui/ActionParam:field",
