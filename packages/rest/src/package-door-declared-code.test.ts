@@ -470,6 +470,53 @@ describe('[#12405] the demote is not withheld by the 5xx message sanitiser', () 
    * Pinned as a live case rather than left implicit: it is the one interaction
    * in this change a reader is entitled to see was CHOSEN. If the ruling ever
    * goes the other way, this is where it goes red.
+   *
+   * ## ⭐ The premise this rests on, and what would falsify it
+   *
+   * Everything above is the CONSISTENCY argument — one rule, two doors — and
+   * it is sound but it is the weaker half. Not withholding here is SAFE, not
+   * merely consistent, because of a fact about the producers, and that fact is
+   * recorded here because it can rot and is written down nowhere else:
+   *
+   *   **No producer reaching these four seams can put a driver errno in
+   *   `declaredCode` today, because `PackageService` discriminates on the
+   *   STATUS channel and never on `.code`.**
+   *
+   * `packages/services/service-package/src/index.ts` is explicit about why:
+   * `publish` and `delete` re-throw only what `declaresHttpAnswer(error)`
+   * accepts — a declared `status`/`statusCode` — and its own comment states the
+   * reason in as many words, that "every SQL driver populates a string `code`
+   * on its errors, so reading it would re-throw genuine driver faults as if
+   * they were refusals". `get` and `list` re-throw only the branded
+   * seam-unreadable refusal (`SERVICE_UNAVAILABLE` / 503). `protocol.deletePackage`
+   * escapes only with `TENANT_SCOPE_REQUIRED` or `metadataStoreUnavailableError`.
+   * So a bare `SQLITE_ERROR` / `42P01` is swallowed and re-answered long before
+   * this door sees it, and the dialect-disclosure shape — a backend's own
+   * error class landing in `declaredCode` beside a withheld message — is
+   * unreachable rather than tolerated.
+   *
+   * ⚠️ Which is why the case below spells a PRODUCER-authored code
+   * (`WIDGET_STORE_UNREACHABLE`) and not a driver errno: the pinned shape is
+   * the one that can actually arrive. Reading this suite as evidence that a
+   * driver dialect on the wire is fine would be reading it backwards — nothing
+   * here measures that shape, because nothing produces it.
+   *
+   * ⛔ **The falsifier, stated so the next reader inherits a measurement
+   * instead of an argument:** a producer that reaches any of these four seams
+   * carrying a driver errno as its `.code` — a `PackageService` implementation
+   * that re-throws on `.code` rather than on status, a `protocol` slice that
+   * lets a raw driver error out of `deletePackage`, or a
+   * `resolveExecutionContext` that throws one synchronously. On that day the
+   * disclosure becomes live, this block's premise is false, and the fork has to
+   * be RE-OPENED rather than re-derived from the consistency half above.
+   *
+   * Ruled A by the `domain:cli` PM seat on 2026-08-26 on exactly this ground —
+   * ⛔ not option B (suppress the demote when the message was withheld), which
+   * would invent a third rule at one door and drop the author-authored channel
+   * for precisely the metadata-app 5xx refusals ADR-0112 wrote it for. The
+   * cross-door question — whether ADR-0112's code channel is in scope for 5xx
+   * sanitisation AT ALL, answered once for all three doors — is option C and is
+   * a separate card.
    */
   it('a leaky 5xx loses its message and keeps the producer spelling', async () => {
     const publish = vi.fn(async () => {
