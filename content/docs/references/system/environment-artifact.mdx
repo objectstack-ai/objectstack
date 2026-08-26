@@ -5,7 +5,7 @@ description: Environment Artifact protocol schemas
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
 
-# Environment Artifact Envelope
+## Environment Artifact Envelope
 
 THE single declaration of the environment artifact envelope (#4740,
 #4535 C10 — maintainer route A′). `@objectstack/spec/cloud` re-exports
@@ -24,7 +24,7 @@ listing). This envelope wraps the compiled `ObjectStackDefinitionSchema`
 produced by `objectstack compile` together with control-plane assigned
 identity (`commitId`, `checksum`).
 
-## Boundary
+### Boundary
 
 - **Artifact (this schema):** compiled environment metadata plus
   provenance. Immutable, content-addressable via `commitId` and
@@ -35,7 +35,7 @@ identity (`commitId`, `checksum`).
 See `content/docs/concepts/north-star.mdx` §6.3 for the
 runtime-inputs boundary.
 
-## History (#4740)
+### History (#4740)
 
 This file previously documented a richer "v0" envelope — a
 `{ algorithm, value }` checksum object, a category-bag `metadata`, inlined

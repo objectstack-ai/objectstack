@@ -5,12 +5,12 @@ description: Metadata Plugin protocol schemas
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
 
-# Metadata Plugin Protocol
+## Metadata Plugin Protocol
 
 Defines the specification for the **Metadata Plugin** — the central authority
 responsible for managing ALL metadata across the ObjectStack platform.
 
-## Architecture
+### Architecture
 The Metadata Plugin consolidates all scattered metadata operations into a single,
 cohesive plugin that "takes over" the entire platform's metadata management:
 
@@ -30,12 +30,12 @@ cohesive plugin that "takes over" the entire platform's metadata management:
 └──────────────────────────────────────────────────────────────────┘
 ```
 
-## Alignment
+### Alignment
 - **Salesforce**: Metadata API (deploy, retrieve, describe)
 - **ServiceNow**: System Dictionary + Metadata API
 - **Kubernetes**: API Server + CRD Registry
 
-## References
+### References
 - [kernel/metadata-loader.zod.ts](/docs/references/kernel/metadata-loader) — MetadataManager wiring (datasource, cache, write gates)
 - [kernel/metadata-customization.zod.ts](/docs/references/kernel/metadata-customization) — Overlay/merge protocol
 - [system/metadata-persistence.zod.ts](/docs/references/system/metadata-persistence) — Database record format + loader/watch envelope types

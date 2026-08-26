@@ -5,13 +5,13 @@ description: Package Artifact protocol schemas
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
 
-# Package Artifact Format Protocol
+## Package Artifact Format Protocol
 
 Defines the standard structure of a package artifact (.tgz) produced by
 the build pipeline. The marketplace uses these schemas to validate, store,
 and distribute package artifacts.
 
-## Artifact Internal Structure
+### Artifact Internal Structure
 ```
 ├── manifest.json          ← ManifestSchema serialized
 ├── metadata/              ← 30+ metadata types (JSON)
@@ -32,7 +32,7 @@ and distribute package artifacts.
 └── signature.sig          ← RSA-SHA256 package signature
 ```
 
-## Architecture Alignment
+### Architecture Alignment
 - **Salesforce**: Managed Package .zip with metadata components
 - **npm**: .tgz with package.json + contents
 - **Helm**: Chart .tgz with Chart.yaml + templates

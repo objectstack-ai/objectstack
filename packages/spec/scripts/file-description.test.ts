@@ -45,6 +45,17 @@ import { findModuleDocBlock, renderFileDescription } from './lib/file-descriptio
 const HERE = path.dirname(url.fileURLToPath(import.meta.url));
 const SRC_DIR = path.resolve(HERE, '../src');
 
+/**
+ * What `build-docs.ts` passes as `sectionLevel` — a reference page's top-level
+ * sections sit at 2, because its `<h1>` is the frontmatter `title` (#12249).
+ *
+ * Named once here so every case below renders the block the way the generator
+ * really does. The cases that are ABOUT the level state their own number
+ * inline instead, so that a change to the page layout cannot quietly rewrite
+ * what they assert.
+ */
+const PAGE_SECTION_LEVEL = 2;
+
 /** First prose line of a selected block, the way a page renders it. */
 const opening = (block: string | null) =>
   block === null
@@ -215,6 +226,7 @@ describe('renderFileDescription', () => {
   const ctx = {
     fromCategory: 'automation',
     sourcePathToDocsRoute: (t: string) => (t.includes('sync') ? '/docs/references/automation/sync' : null),
+    sectionLevel: PAGE_SECTION_LEVEL,
   };
 
   it('renders nothing when the module has no description', () => {
@@ -257,7 +269,7 @@ describe('renderFileDescription', () => {
  * page and broke the docs build.
  */
 describe('renderFileDescription — #10924: the os:check marker is machinery, not content', () => {
-  const ctx = { fromCategory: 'studio', sourcePathToDocsRoute: () => null };
+  const ctx = { fromCategory: 'studio', sourcePathToDocsRoute: () => null, sectionLevel: PAGE_SECTION_LEVEL };
 
   const moduleBlock = (...body: string[]): string =>
     ['/**', ...body.map(l => (l === '' ? ' *' : ` * ${l}`)), ' */', '', "import { z } from 'zod';", ''].join('\n');
@@ -300,7 +312,7 @@ describe('renderFileDescription — #5553: line layout is content, not decoratio
   // Nothing resolves here — these cases are about line layout, not routes — so
   // every path they contain takes the code-span fallback whatever `fromCategory`
   // says.
-  const ctx = { fromCategory: 'data', sourcePathToDocsRoute: () => null };
+  const ctx = { fromCategory: 'data', sourcePathToDocsRoute: () => null, sectionLevel: PAGE_SECTION_LEVEL };
 
   it('keeps an inline code span that wraps across two source lines', () => {
     // `automation/flow-function.zod.ts:13-15`, reduced — the example the issue
@@ -458,6 +470,7 @@ describe('renderFileDescription — #6136: the bare-path rewriter skips formed l
     fromCategory: 'automation',
     sourcePathToDocsRoute: (t: string) =>
       /integration\/connector\.zod\.ts$/.test(t) ? '/docs/references/integration/connector' : null,
+    sectionLevel: PAGE_SECTION_LEVEL,
   };
 
   it('renders an untitled `{@link <path>}` as ONE link', () => {
@@ -550,6 +563,7 @@ describe('renderFileDescription — #6229: a bare path keeps its `../` prefix in
       const m = /(?:^|\/)(system|api)\/([\w-]+)\.zod\.ts$/.exec(t);
       return m ? `/docs/references/${m[1]}/${m[2]}` : null;
     },
+    sectionLevel: PAGE_SECTION_LEVEL,
   };
 
   const describedBy = (line: string) =>
@@ -654,6 +668,7 @@ describe('renderFileDescription — #6420: a bare path in parentheses still link
       const m = /(?:^|\/)(integration|automation)\/([\w-]+)\.zod\.ts$/.exec(t);
       return m ? `/docs/references/${m[1]}/${m[2]}` : null;
     },
+    sectionLevel: PAGE_SECTION_LEVEL,
   };
 
   const describedBy = (line: string) =>
@@ -785,7 +800,7 @@ describe('renderFileDescription — #6484: a same-directory path resolves agains
   const describedBy = (fromCategory: string, line: string) =>
     renderFileDescription(
       ['/**', ` * ${line}`, ' */', '', "import { z } from 'zod';", ''].join('\n'),
-      { fromCategory, sourcePathToDocsRoute },
+      { fromCategory, sourcePathToDocsRoute, sectionLevel: PAGE_SECTION_LEVEL },
     );
 
   it('links a same-directory path whose page exists — the published `api/realtime-shared` line', () => {
@@ -1011,6 +1026,122 @@ describe('corpus — no reference source donates a symbol comment to its page', 
 });
 
 /**
+ * #12249 — a module header's heading levels belong to the PAGE, not to the file.
+ *
+ * A `.zod.ts` header is written as if it were a standalone document, so its
+ * author opens a section with `# `. Embedded in a reference page that compiles
+ * to a SECOND `<h1>`, because `DocsTitle` already renders the frontmatter
+ * `title` as the page's heading-one. Measured on `main` at `20b0fdb56`: 38 of
+ * the 190 described modules, 43 headings between them (41 distinct texts) — and
+ * the whole `content/docs/references/**` tree carved out of
+ * `scripts/check-docs-single-h1.mjs` because the fix could not live there.
+ *
+ * The renderer places the block's SHALLOWEST heading at `ctx.sectionLevel` and
+ * moves the rest with it. The three cases that shape pins are the three ways
+ * the obvious "rewrite every `# ` to `## `" goes wrong: it demotes blocks that
+ * were already correct, it collides two source levels into one wherever a block
+ * mixes them, and — the expensive one — it cannot tell a heading from a shell
+ * comment inside a fence.
+ *
+ * MEASURED (reverse verification), the ordinary direction: replacing the
+ * `withHeadingsAtSectionLevel` call in `renderFileDescription` with the
+ * identity turns 9 of these 70 cases red — every level-1 case here, plus both
+ * corpus limbs, the first of them reporting exactly the 43 headings the issue
+ * measured on `main`. The two cases about what the shift must NOT touch —
+ * `already start at level 2` and `#NoSpace` — stay green, and so do the 61
+ * cases this file already had. That asymmetry is what says the pin measures the
+ * shift and not the renderer at large.
+ */
+describe('renderFileDescription — #12249: the fragment starts at the page\'s section level', () => {
+  const ctx = { fromCategory: 'data', sourcePathToDocsRoute: () => null, sectionLevel: PAGE_SECTION_LEVEL };
+
+  const moduleBlock = (...body: string[]): string =>
+    ['/**', ...body.map(l => (l === '' ? ' *' : ` * ${l}`)), ' */', '', "import { z } from 'zod';", ''].join('\n');
+
+  it('demotes a level-1 heading to the page\'s section level', () => {
+    // `data/context-tokens.zod.ts:10` verbatim — the line the issue opened
+    // with, published as `content/docs/references/data/context-tokens.mdx:11`.
+    expect(renderFileDescription(moduleBlock('# Why this lives in `spec`', '', 'Prose.'), ctx)).toBe(
+      '## Why this lives in `spec`\n\nProse.',
+    );
+  });
+
+  it('moves the whole block, keeping the nesting the author wrote', () => {
+    // The reason this is a renumbering and not a per-line rewrite: `# ` and
+    // `## ` in one block are two levels, and collapsing both onto `## ` would
+    // make a section its own subsection's sibling.
+    expect(
+      renderFileDescription(moduleBlock('# Top', '', 'Prose.', '', '## Under it', '', 'More prose.'), ctx),
+    ).toBe('## Top\n\nProse.\n\n### Under it\n\nMore prose.');
+  });
+
+  it('leaves a description whose headings already start at level 2 byte-identical', () => {
+    // 26 of the 64 described modules with headings are in this state
+    // (`api/http-cache`, `automation/control-flow`, …). A blanket `#`→`##`
+    // would have regenerated all 26 pages to no purpose, and pushed
+    // `automation/control-flow`'s `###` to a fourth level.
+    const source = moduleBlock('## A section', '', 'Prose.', '', '### Nested', '', 'More prose.');
+    expect(renderFileDescription(source, ctx)).toBe('## A section\n\nProse.\n\n### Nested\n\nMore prose.');
+    // The identity render is the same string, which is what "untouched" means.
+    expect(renderFileDescription(source, { ...ctx, sectionLevel: 1 })).toBe(renderFileDescription(source, ctx));
+  });
+
+  it('never touches a `# ` inside a fenced block — it is a shell comment, not a heading', () => {
+    // THE control, and the reason the shift lives beside `classifyLines`
+    // instead of running as a regex over the emitted string in `build-docs.ts`.
+    // A fence-blind pass rewrites working snippets to satisfy a rule about HTML
+    // those lines never produce — the false positive `check-docs-single-h1.mjs`
+    // measures at ten pages and calls more expensive than the defect itself.
+    const out = renderFileDescription(
+      moduleBlock('# Setup', '', '```bash', '# Install pnpm globally', 'npm i -g pnpm', '```'),
+      ctx,
+    );
+    expect(out).toBe('## Setup\n\n```bash\n# Install pnpm globally\nnpm i -g pnpm\n```');
+  });
+
+  it('never touches a `# ` inside an indented block, which is re-emitted as a fence', () => {
+    // `data/date-macros` and `data/context-tokens` write their examples this
+    // way, and both are among the 38. The re-fencing (#5553) happens after the
+    // shift, so the block has to be excluded by KIND, not by its final syntax.
+    const out = renderFileDescription(moduleBlock('# Macros', '', '    # not a heading', '    value: 1'), ctx);
+    expect(out).toBe('## Macros\n\n```\n# not a heading\nvalue: 1\n```');
+  });
+
+  it('does not mistake `#NoSpace` or a `#5059` issue reference for a heading', () => {
+    const out = renderFileDescription(moduleBlock('#NotAHeading', '', '#5059 closed this.'), ctx);
+    expect(out).toBe('#NotAHeading\n\n#5059 closed this.');
+  });
+
+  it('shifts a heading indented up to three spaces, which CommonMark still reads as one', () => {
+    // A fourth space would make it an indented code block, which
+    // `classifyLines` has already labelled `indented` by the time the shift
+    // runs — so three is the boundary the shift has to reach. Prose first
+    // because the fragment is trimmed as a whole, which would otherwise eat
+    // the indentation this case is about.
+    expect(renderFileDescription(moduleBlock('Prose.', '', '   # Indented'), ctx)).toBe('Prose.\n\n   ## Indented');
+  });
+
+  it('refuses rather than emitting seven hashes, which is not a heading at all', () => {
+    // Unreachable on the current corpus — no level-1-bearing description goes
+    // deeper than level 2 — and a loud failure is the right answer if a source
+    // ever gets there. Silently clamping to 6 would flatten two source levels
+    // into one; emitting `####### ` would publish the hashes as prose.
+    expect(() => renderFileDescription(moduleBlock('# Top', '', '###### Six deep'), ctx)).toThrow(
+      /would push a heading to level 7/,
+    );
+  });
+
+  it('is the page that decides the level, not this module', () => {
+    // The seam itself: `sectionLevel` is context, so a page whose sections sit
+    // at 3 gets a fragment that starts at 3. Hard-coding 2 in the renderer
+    // would make this untestable and the contract unstated.
+    expect(renderFileDescription(moduleBlock('# Top', '', '## Under it'), { ...ctx, sectionLevel: 3 })).toBe(
+      '### Top\n\n#### Under it',
+    );
+  });
+});
+
+/**
  * The corpus half of #5553 / #6136: re-derive both verdicts from the real
  * sources, so a future header cannot quietly re-acquire either defect.
  *
@@ -1074,7 +1205,7 @@ describe('corpus — every rendered description is well-formed markdown', () => 
       // reference resolvable at all (#6484), and rendering the whole corpus
       // from one fixed category would test a context the generator never
       // constructs.
-      const ctx = { fromCategory: rel.split(path.sep)[0], sourcePathToDocsRoute };
+      const ctx = { fromCategory: rel.split(path.sep)[0], sourcePathToDocsRoute, sectionLevel: PAGE_SECTION_LEVEL };
       return { rel, out: renderFileDescription(fs.readFileSync(file, 'utf-8'), ctx) };
     })
     .filter(d => d.out !== '');
@@ -1235,6 +1366,55 @@ describe('corpus — every rendered description is well-formed markdown', () => 
       }
     }
     expect(offenders).toEqual([]);
+  });
+
+  it('never emits a level-1 heading — the page already has one (#12249)', () => {
+    // The corpus half of the unit block above, and the issue's own acceptance
+    // criterion re-derived from the sources: a fragment embedded under the
+    // page's `<h1>` may not open a second one. 38 of these descriptions did,
+    // 43 headings across them, which is what carved `content/docs/references/**`
+    // out of `scripts/check-docs-single-h1.mjs`.
+    //
+    // Asserted on the RENDERED fragment, not on the emitted `.mdx`: the gate
+    // that reads the tree is `check-docs-single-h1.mjs` and it reads the
+    // artifact, so it can only ever see this AFTER a `gen:docs` run committed
+    // the damage. This sees it at the source of the string.
+    const offenders: string[] = [];
+    for (const { rel, out } of described) {
+      for (const [i, line] of withoutFences(out).split('\n').entries()) {
+        if (/^ {0,3}#(?:[ \t]|$)/.test(line)) offenders.push(`${rel}:${i + 1} ${line.trim()}`);
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  it('demotes only the 38 descriptions that needed it (#12249)', () => {
+    // The other half, and the reason this is a renumbering rather than a
+    // blanket `#`→`##`: 26 described modules already start their headings at
+    // level 2, and shifting those too would have moved 105 correct headings a
+    // level deeper and regenerated 26 pages that were never wrong.
+    //
+    // Re-derived from the SOURCES: a description needed the shift exactly when
+    // its own file header opens a heading at level 1. Rendering the same corpus
+    // at `sectionLevel: 1` — the identity, since no header goes shallower —
+    // gives the untouched string to compare against, so this counts real
+    // shifts rather than restating the fixture list.
+    const shifted = zodFiles
+      .map(file => {
+        const rel = path.relative(SRC_DIR, file);
+        const source = fs.readFileSync(file, 'utf-8');
+        const base = { fromCategory: rel.split(path.sep)[0], sourcePathToDocsRoute };
+        return {
+          rel,
+          untouched: renderFileDescription(source, { ...base, sectionLevel: 1 }),
+          emitted: renderFileDescription(source, { ...base, sectionLevel: PAGE_SECTION_LEVEL }),
+        };
+      })
+      .filter(d => d.untouched !== d.emitted);
+
+    expect(shifted.length).toBe(38);
+    // …and every one of them was shifted because it opened at level 1.
+    expect(shifted.filter(d => /^ {0,3}#(?:[ \t]|$)/m.test(withoutFences(d.untouched)))).toHaveLength(38);
   });
 
   it('keeps a description for every source that had one — #6134 selection is untouched', () => {

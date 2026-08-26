@@ -8,7 +8,7 @@ description: Context Tokens protocol schemas
 Context Tokens — the declarative placeholders that resolve against the
 **caller's session** (who am I, which org am I in) rather than the clock.
 
-# Why this lives in `spec`
+## Why this lives in `spec`
 
 These are the sibling vocabulary to `{date-macros}`. Filter values in
 dashboards, views, reports and pages travel as JSON, so a user-scoped
@@ -38,7 +38,7 @@ neither is an ERROR, not a null comparand: resolving to `null`
 degrades to `IS NULL` on most drivers and would hand back the rows
 the filter was written to exclude.
 
-# Presentation scope, NOT a security boundary
+## Presentation scope, NOT a security boundary
 
 This is the single most important thing to understand about these
 tokens. `{current_user_id}` scopes what a surface *shows*; it does not
@@ -60,7 +60,7 @@ Never reach for a context token to keep a user away from data. Removing
 a `{current_user_id}` filter widens a *view*; it must never widen
 *access*.
 
-# Where the tokens are honoured
+## Where the tokens are honoured
 
 Filter values on every surface that resolves placeholders — object list
 views, dashboard widgets, reports, SDUI page components. Navigation
@@ -69,7 +69,7 @@ such as `{active_package}`; those are nav-only and are NOT valid inside
 filter values, because filters are not evaluated with the sidebar's
 selector state.
 
-# Out of scope
+## Out of scope
 
 - `current_user.*` RLS expressions — see `@objectstack/plugin-security`.
 - `{date-macros}` — the clock-based sibling; see `./date-macros.zod.ts`.
