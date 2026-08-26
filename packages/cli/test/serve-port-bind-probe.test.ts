@@ -42,9 +42,15 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:net';
+import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { portContentionError, portIsFree, randomPort, reservePort } from './helpers/serve-process.js';
+
+/** Seeded from `import.meta.url`, the spelling `check:cross-package-test-inputs` recognises. */
+const HERE = resolve(fileURLToPath(import.meta.url), '..');
 
 /** Bind `0.0.0.0:0` and KEEP it bound. Resolves with the port and its closer. */
 function hold(): Promise<{ port: number; release: () => Promise<void> }> {
@@ -189,6 +195,29 @@ describe('#12441: a lost race fails LEGIBLY — naming port contention and the p
     const raw = 'Error: listen EADDRINUSE: address already in use 0.0.0.0:53119';
     expect(portContentionError(raw, 'os serve')?.message).toContain('53119');
   });
+
+  it(
+    'ANTI-VACUITY: the detector is held against the LIVE wording in serve.ts, not a copy of it',
+    () => {
+      // ⚠️ `MEASURED_CONTENTION` above is a transcript. A transcript cannot
+      // notice that the source it was copied from has been reworded — and the
+      // day `serve.ts` rewrites its diagnostic, every assertion in this
+      // describe block stays green while the real failure goes back to being
+      // illegible. That is a phantom check, so the live template is read here.
+      const serveSource = readFileSync(resolve(HERE, '../src/commands/serve.ts'), 'utf8');
+      const template = /Port \$\{requestedPort\} is already in use/.exec(serveSource);
+      expect(
+        template,
+        'serve.ts no longer prints `Port ${requestedPort} is already in use` — '
+        + 'portContentionError()\'s pattern in test/helpers/serve-process.ts must be '
+        + 'updated to whatever it prints now, or a lost port race goes illegible again',
+      ).not.toBeNull();
+
+      // …and the pattern must actually fire on that template once rendered.
+      const rendered = String(template?.[0]).replace('${requestedPort}', '51001');
+      expect(portContentionError(rendered, 'os serve')?.message).toContain('51001');
+    },
+  );
 
   it(
     'ABLATION-SHAPED CONTROL: stays null for a boot that died of something else',
