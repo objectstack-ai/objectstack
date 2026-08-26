@@ -6,9 +6,9 @@ import { createApiClient, requireAuth } from '../../utils/api-client.js';
 import { formatOutput } from '../../utils/output-formatter.js';
 
 /**
- * `os environments show <id>` — show detailed information for a single project.
+ * `os environments show <id>` — show detailed information for a single environment.
  *
- * Renders the project row plus its database, active credential, and
+ * Renders the environment row plus its database, active credential, and
  * membership row (same shape as `client.projects.get(id)`).
  */
 export default class EnvironmentsShow extends Command {

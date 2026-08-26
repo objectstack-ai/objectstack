@@ -6,7 +6,7 @@ import { createApiClient, requireAuth } from '../../utils/api-client.js';
 import { formatOutput } from '../../utils/output-formatter.js';
 
 /**
- * `os environments list` — list projects visible to the current session.
+ * `os environments list` — list environments visible to the current session.
  *
  * Filters by organization via `--org`. Output format is the same
  * table/json/yaml shape used by other metadata commands, for a
