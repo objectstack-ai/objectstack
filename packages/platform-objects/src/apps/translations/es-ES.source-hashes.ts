@@ -52,6 +52,7 @@ export const esESSourceHashes: Readonly<Record<string, string>> = {
   'apps.setup.navigation.group_overview.label': 'eebdbe1cc7b59cdf',
   'apps.setup.navigation.group_apps.label': '699b367291abcbe6',
   'apps.setup.navigation.nav_packages.label': '8cd8f29658025f73',
+  'apps.setup.navigation.nav_packaged_automation.label': 'f18b2b616b63012a',
   'apps.setup.navigation.nav_marketplace_browse.label': '2afbe021f5419fdd',
   'apps.setup.navigation.nav_marketplace_installed.label': '93bd5d458e05db60',
   'apps.setup.navigation.nav_cloud_connection.label': '3a7caad0cb98e71d',
