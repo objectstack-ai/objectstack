@@ -16,7 +16,7 @@ import type { TranslationData } from '@objectstack/spec/system';
 
 export const jaJPObjects: NonNullable<TranslationData['objects']> = {
   sys_webhook: {
-    label: "Webhook",
+    label: "ウェブフック",
     pluralLabel: "ウェブフック",
     description: "送信 HTTP Webhook サブスクリプション。defineWebhook() またはスタジオエディタで作成し、HTTP コネクタプラグインが実行します。",
     fields: {
