@@ -244,7 +244,35 @@ export type StandaloneStackConfig = z.input<typeof StandaloneStackConfigSchema>;
 
 export interface StandaloneStackResult {
     plugins: any[];
-    api: { enableProjectScoping: false; projectResolution: 'none' };
+    /**
+     * The environment-scoping decision for a standalone host, and the ONLY
+     * `api` keys this builder decides (`mergeBootConfig` in packages/cli
+     * merges the rest per key, so an author's other `api` declarations
+     * survive).
+     *
+     * `projectResolution` is `'auto'` — a member of the declared enum
+     * (`RestApiConfigSchema`, `packages/spec/src/api/rest-server.zod.ts`) —
+     * and NOT the `'none'` this shipped until #11999. `'none'` was never a
+     * declared value; it read as "no scoping at all" and got `'auto'`'s
+     * behaviour by fallthrough, because every reader that acts on this key
+     * is gated on `enableProjectScoping` first:
+     *
+     *   - `RestServer.registerRoutes` takes the `else` arm and never looks;
+     *   - `mountAndRecordDirectRoutes` mounts `[versionedBase]` and never looks;
+     *   - `DispatcherPlugin`'s two `enableProjectScoping && … === 'required'`
+     *     guards short-circuit.
+     *
+     * So with `enableProjectScoping: false` the strategy really is moot for
+     * ROUTING — which is why this migrates to a declared value rather than
+     * teaching the enum a fourth member. But it is not moot for the
+     * ADVERTISEMENT: `RestServer`'s discovery handler copies this value into
+     * `discovery.scoping.resolution` unconditionally, and `DiscoverySchema`
+     * declares that field as the same three-member enum. Shipping `'none'`
+     * therefore published a discovery payload that the platform's own schema
+     * rejects, on every `os serve` boot. `'auto'` is what the routing already
+     * did and what the advertisement is allowed to say.
+     */
+    api: { enableProjectScoping: false; projectResolution: 'auto' };
     /**
      * Top-level metadata copied from the loaded artifact bundle (when an
      * artifact was successfully loaded). These are surfaced so callers
@@ -757,9 +785,12 @@ export async function createStandaloneStack(config?: StandaloneStackConfig): Pro
 
     return {
         plugins,
+        // #11999 — `'auto'`, not the undeclared `'none'` this used to ship.
+        // See StandaloneStackResult.api for why the two are the same for
+        // routing here and NOT the same for the discovery advertisement.
         api: {
             enableProjectScoping: false,
-            projectResolution: 'none',
+            projectResolution: 'auto',
         },
         ...(requires ? { requires } : {}),
         ...(objects ? { objects } : {}),

@@ -9,8 +9,15 @@
  * an `api` block carrying only the environment-scoping decision:
  *
  * ```js
- * api: { enableProjectScoping: false, projectResolution: 'none' }
+ * api: { enableProjectScoping: false, projectResolution: 'auto' }
  * ```
+ *
+ * (`projectResolution` was the undeclared `'none'` until #11999 — see
+ * `StandaloneStackResult.api` in `@objectstack/runtime` for why it moved.
+ * `merge-boot-config.test.ts` pins that this block parses clean against
+ * `RestApiConfigSchema`, the check whose absence let the three packages
+ * disagree about this key's vocabulary for as long as nothing executed
+ * the schema.)
  *
  * Under a shallow spread that object REPLACED the author's entire `api` block,
  * silently discarding every key it did not itself set. Two of those keys are
