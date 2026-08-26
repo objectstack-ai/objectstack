@@ -2734,11 +2734,18 @@ export function gateFamilyFiles(families = null) {
  * `check-*` regex over `scripts/`, and it is the wrong instrument in BOTH
  * directions — measured on this tree rather than assumed:
  *
- *   - it FABRICATES 10 leads. `check-dts-emitted.mjs`, `check-platform-
- *     checklist.mjs`, `check-regen-pending.d.mts` and `check-test-typecheck.mts`
- *     wear the name and are run by no family; three more are `.test.ts` files
- *     ABOUT a gate. Neither sweep below ever opens one of them, so naming them
- *     is the fabricated lead `hintCovers`' docblock prices above a missing one.
+ *   - it FABRICATES 10 leads — files no discovered family RESOLVES to, which
+ *     is NOT the same as dead, and the difference is the whole trap. Three of
+ *     the ten are healthy and running: `check-dts-emitted.mjs` is invoked by
+ *     about eleven packages' own build scripts, and `check:platform-checklist`
+ *     is maintainer-run by design and says so where CI would otherwise run it.
+ *     `check-regen-pending.d.mts` and `check-test-typecheck.mts` wear the name
+ *     too; three more are test files ABOUT a gate. Neither sweep below ever
+ *     OPENS one of them, because both walk `entry.files` — so naming them is
+ *     the fabricated lead `hintCovers`' docblock prices above a missing one,
+ *     however alive the script itself is. ⚠ Measured, not assumed: a survey
+ *     scoped to the root manifest and the workflows reads the first of them as
+ *     unwired, and the per-package manifests say otherwise.
  *   - it MISSES 31 real gate scripts, because a gate is not obliged to be
  *     called `check-` anything: the ten `packages/spec/scripts/build-*.ts`
  *     generators are gates, and so is a `.sh`.
