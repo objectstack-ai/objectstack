@@ -1736,7 +1736,9 @@ const ObjectSchemaBase = strictObject(
       // disjoint vocabulary (sort/search/filter/refresh/rowHeight/group/
       // addRecordForm/editInline/hideFields/rowColor/buttons — the last three
       // adopted at #11195), so an author who learned that block writes these
-      // here and gets a shape that has never heard of them.
+      // here. `group`/`hideFields`/`rowColor` were refused by name but without
+      // a curated pointer until #11459 gave them one too, mirroring the other
+      // four.
       sort:
         '`sort` is a VIEW `userActions` key, not an object one — the two blocks share a ' +
         'name and nothing else. The object block governs CRUD affordances ' +
@@ -1752,6 +1754,15 @@ const ObjectSchemaBase = strictObject(
         '`editInline` is a VIEW `userActions` key. The object-level `edit` flag decides ' +
         'whether editing is offered AT ALL; how it is offered (inline vs form) is the ' +
         "view's call.",
+      group:
+        '`group` is a VIEW `userActions` key. This object block governs CRUD affordances ' +
+        'only — put toolbar controls on the view that renders the records.',
+      hideFields:
+        '`hideFields` is a VIEW `userActions` key. This object block governs CRUD ' +
+        'affordances only — put toolbar controls on the view that renders the records.',
+      rowColor:
+        '`rowColor` is a VIEW `userActions` key. This object block governs CRUD ' +
+        'affordances only — put toolbar controls on the view that renders the records.',
       clone:
         '`clone` is a CAPABILITY, not a user action — write `enable: { clone: false }`. ' +
         'The `enable` block (ObjectCapabilities) is where record deep-cloning is governed.',

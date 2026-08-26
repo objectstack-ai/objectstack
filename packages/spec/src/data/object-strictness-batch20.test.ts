@@ -436,6 +436,18 @@ describe('#4001 批 20 — curation is anchored to the sibling contract that mak
       }
     });
 
+    it('`userActions.group` / `.hideFields` / `.rowColor` name the VIEW block, same as `sort` (#11459)', () => {
+      // The three keys adopted onto the view's vocabulary at #11195 got only
+      // the generic unknown-key rejection on the object block — no curated
+      // pointer — until this card added one, mirroring `sort`/`search`/
+      // `filter`/`editInline` above.
+      for (const k of ['group', 'hideFields', 'rowColor']) {
+        const msg = rejectOnObject({ userActions: { [k]: true } });
+        expect(msg).toContain('VIEW');
+        expect(msg).toContain(k);
+      }
+    });
+
     it('`userActions.clone` points at the `enable` capability block, which really does declare it', () => {
       const msg = rejectOnObject({ userActions: { clone: false } });
       expect(msg).toContain('enable');
