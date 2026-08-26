@@ -46,6 +46,22 @@
  * The remedy is always at the source, never here: rename the loser to a def
  * name of its own (#4684's `RateLimitConfig` precedent, ADR-0112 D9 — one name
  * means one thing), or delete the duplicate and re-export the survivor.
+ *
+ * ## The exempt population is enumerable, not implied (#12588)
+ *
+ * The exemption above is silent by design — a self-alias publishes one artifact,
+ * so there is nothing to report as a *problem*. But it is not nothing: those
+ * writes are the reason the generator's emit count exceeds the number of
+ * definitions it publishes, and for a long time that delta was the only
+ * externally visible trace of them. It surfaced as a published artifact
+ * describing itself wrongly: `objectstack.json` carried `x-schema-count` taken
+ * from the emit counter while its `$defs` held one entry per def key, so the
+ * bundle claimed 1596 definitions and shipped 1585.
+ *
+ * `findSelfAliasedDefKeys` is the other half of `findDefKeyCollisions`: same
+ * bucketing, same identity predicate, opposite verdict. Together they partition
+ * every multiply-written def key, so "how many emits collapsed, and into what"
+ * is answerable rather than inferred from a subtraction.
  */
 
 /** One export as `build-schemas.ts` met it, before anything is written. */
@@ -71,14 +87,21 @@ export interface DefKeyCollision {
   exportKeys: string[];
 }
 
+/** A def key written more than once, every write the SAME schema instance. */
+export interface SelfAliasedDefKey {
+  /** `<category>/<SchemaName>` — the one file all of these writes produce. */
+  defKey: string;
+  /** Every export key that resolves to it, in encounter order. */
+  exportKeys: string[];
+}
+
 /**
- * Def keys written more than once by DIFFERENT schema instances.
- *
- * Self-aliases (every entry for a key is the identical object) are not
- * collisions and are not reported. Result order follows first encounter, so a
- * build's report is stable across runs.
+ * Group entries by the def key they publish to, preserving encounter order both
+ * between buckets and inside them, so every report built from this is stable
+ * across runs. Shared by both verdicts below: they must never disagree about
+ * which entries belong to one key.
  */
-export function findDefKeyCollisions(entries: Iterable<EmittedDef>): DefKeyCollision[] {
+function bucketByDefKey(entries: Iterable<EmittedDef>): Map<string, EmittedDef[]> {
   const byDefKey = new Map<string, EmittedDef[]>();
   for (const entry of entries) {
     const defKey = `${entry.category}/${entry.schemaName}`;
@@ -86,15 +109,59 @@ export function findDefKeyCollisions(entries: Iterable<EmittedDef>): DefKeyColli
     if (bucket) bucket.push(entry);
     else byDefKey.set(defKey, [entry]);
   }
+  return byDefKey;
+}
 
+/** Every write in the bucket names the identical object — the exempt shape. */
+function isSelfAlias(bucket: readonly EmittedDef[]): boolean {
+  return bucket.every((e) => e.schema === bucket[0].schema);
+}
+
+/**
+ * Def keys written more than once by DIFFERENT schema instances.
+ *
+ * Self-aliases (every entry for a key is the identical object) are not
+ * collisions and are not reported — `findSelfAliasedDefKeys` returns exactly
+ * those. Result order follows first encounter, so a build's report is stable
+ * across runs.
+ */
+export function findDefKeyCollisions(entries: Iterable<EmittedDef>): DefKeyCollision[] {
   const collisions: DefKeyCollision[] = [];
-  for (const [defKey, bucket] of byDefKey) {
+  for (const [defKey, bucket] of bucketByDefKey(entries)) {
     if (bucket.length < 2) continue;
     // One object reached by two names publishes one artifact — no ambiguity.
-    if (bucket.every((e) => e.schema === bucket[0].schema)) continue;
+    if (isSelfAlias(bucket)) continue;
     collisions.push({ defKey, exportKeys: bucket.map((e) => e.exportKey) });
   }
   return collisions;
+}
+
+/**
+ * Def keys written more than once where every write is the SAME instance — the
+ * population `findDefKeyCollisions` exempts, and the reason a build's emit
+ * count exceeds the number of definitions it publishes (#12588).
+ *
+ * This is a report, never a verdict: each of these publishes one artifact and
+ * nothing about it depends on export order. Callers use it to *account for* the
+ * difference between emits and definitions, not to fail a build.
+ */
+export function findSelfAliasedDefKeys(entries: Iterable<EmittedDef>): SelfAliasedDefKey[] {
+  const aliases: SelfAliasedDefKey[] = [];
+  for (const [defKey, bucket] of bucketByDefKey(entries)) {
+    if (bucket.length < 2) continue;
+    if (!isSelfAlias(bucket)) continue;
+    aliases.push({ defKey, exportKeys: bucket.map((e) => e.exportKey) });
+  }
+  return aliases;
+}
+
+/**
+ * How many emits these self-aliased keys absorb — the count by which a build's
+ * emit total exceeds its published definition count. A key written N times
+ * contributes N-1: the first write is the definition, the rest collapse onto it.
+ */
+export function collapsedEmitCount(aliases: readonly SelfAliasedDefKey[]): number {
+  return aliases.reduce((total, alias) => total + alias.exportKeys.length - 1, 0);
 }
 
 /** The build-stopping message for `findDefKeyCollisions()`. */

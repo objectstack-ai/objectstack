@@ -212,6 +212,20 @@ describe('ErrorCode (standard ∪ registered)', () => {
     expect(() => ErrorCode.parse('DUPLICATE')).toThrow();
   });
 
+  it('accepts the #10025 definition-level input-schema refusal code (#11504)', () => {
+    // The ruled contract half of #10025's Option B (maintainer, 2026-08-20):
+    // the definition-level input-schema refusal is a never-dispatched exit
+    // with its own code. Registered AHEAD of its producer, deliberately — the
+    // #10413 → #10576 split shape: the services half (`execute()`'s catch
+    // short-circuit) is #10025's, blocked on this registration, and asserts
+    // this exact string by value — so the value is pinned here by value too.
+    expect(ErrorCode.parse('FLOW_INPUT_SCHEMA_INVALID')).toBe('FLOW_INPUT_SCHEMA_INVALID');
+    expect(ERROR_CODE_LEDGER['@objectstack/runtime']).toContain('FLOW_INPUT_SCHEMA_INVALID');
+    // Not a synonym of any standard member (FLOW is a token no member
+    // carries) — registered plainly, no waiver recorded or needed.
+    expect(standardSynonymOf('FLOW_INPUT_SCHEMA_INVALID')).toBeUndefined();
+  });
+
   it('rejects unregistered, lowercase, and numeric codes', () => {
     expect(() => ErrorCode.parse('TOTALLY_MADE_UP_CODE')).toThrow();
     expect(() => ErrorCode.parse('validation_error')).toThrow(); // pre-ADR-0112 dialect

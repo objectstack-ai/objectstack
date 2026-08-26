@@ -277,6 +277,48 @@ const result = SCIMAddressSchema.parse(data);
 | **startIndex** | `integer` | optional | Start index (1-based) |
 | **itemsPerPage** | `integer` | optional | Items per page |
 
+### Nested Shape: `SCIMListResponse.Resources[number][option 1]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **schemas** | `string[]` | optional (default: `["urn:ietf:params:scim:schemas:core:2.0:User"]`) | SCIM schema URIs (must include User schema) |
+| **id** | `string` | optional | Unique resource identifier |
+| **externalId** | `string` | optional | External identifier from client system |
+| **userName** | `string` | ✅ | Unique username (REQUIRED) |
+| **name** | `{ formatted?: string; familyName?: string; givenName?: string; middleName?: string; … }` | optional | Structured name components |
+| **displayName** | `string` | optional | Display name for UI |
+| **nickName** | `string` | optional | Nickname |
+| **profileUrl** | `string` | optional | Profile page URL |
+| **title** | `string` | optional | Job title |
+| **userType** | `string` | optional | User type (employee, contractor) |
+| **preferredLanguage** | `string` | optional | Preferred language (ISO 639-1) |
+| **locale** | `string` | optional | Locale (e.g., en-US) |
+| **timezone** | `string` | optional | Timezone |
+| **active** | `boolean` | optional (default: `true`) | Account active status |
+| **password** | `string` | optional | Password (write-only) |
+| **emails** | `{ value: string; type?: Enum<'work' \| 'home' \| 'other'>; display?: string; primary: boolean }[]` | optional | Email addresses |
+| **phoneNumbers** | `{ value: string; type?: Enum<'work' \| 'home' \| 'mobile' \| 'fax' \| 'pager' \| 'other'>; display?: string; primary: boolean }[]` | optional | Phone numbers |
+| **ims** | `{ value: string; type?: string; primary?: boolean }[]` | optional | IM addresses |
+| **photos** | `{ value: string; type?: Enum<'photo' \| 'thumbnail'>; primary?: boolean }[]` | optional | Photo URLs |
+| **addresses** | `{ formatted?: string; streetAddress?: string; locality?: string; region?: string; … }[]` | optional | Physical addresses |
+| **groups** | `{ value: string; $ref?: string; display?: string; type?: Enum<'direct' \| 'indirect'> }[]` | optional | Group memberships |
+| **entitlements** | `{ value: string; type?: string; primary?: boolean }[]` | optional | Entitlements |
+| **roles** | `{ value: string; type?: string; primary?: boolean }[]` | optional | Roles |
+| **x509Certificates** | `{ value: string; type?: string; primary?: boolean }[]` | optional | X509 certificates |
+| **meta** | `{ resourceType?: string; created?: string; lastModified?: string; location?: string; … }` | optional | Resource metadata |
+| **urn:ietf:params:scim:schemas:extension:enterprise:2.0:User** | `{ employeeNumber?: string; costCenter?: string; organization?: string; division?: string; … }` | optional | Enterprise user attributes |
+
+### Nested Shape: `SCIMListResponse.Resources[number][option 2]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **schemas** | `string[]` | optional (default: `["urn:ietf:params:scim:schemas:core:2.0:Group"]`) | SCIM schema URIs (must include Group schema) |
+| **id** | `string` | optional | Unique resource identifier |
+| **externalId** | `string` | optional | External identifier from client system |
+| **displayName** | `string` | ✅ | Group display name (REQUIRED) |
+| **members** | `{ value: string; $ref?: string; type?: Enum<'User' \| 'Group'>; display?: string }[]` | optional | Group members |
+| **meta** | `{ resourceType?: string; created?: string; lastModified?: string; location?: string; … }` | optional | Resource metadata |
+
 
 ---
 

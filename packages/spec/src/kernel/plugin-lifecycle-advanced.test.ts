@@ -31,24 +31,82 @@ describe('Plugin Lifecycle Advanced Schemas', () => {
       expect(healthCheck.timeout).toBe(5000);
       expect(healthCheck.failureThreshold).toBe(3);
       expect(healthCheck.successThreshold).toBe(1);
-      expect(healthCheck.autoRestart).toBe(false);
-      expect(healthCheck.maxRestartAttempts).toBe(3);
-      expect(healthCheck.restartBackoff).toBe('exponential');
+      // [#12032] The three restart defaults ASSERTED HERE ARE GONE — declared,
+      // not a quiet edit. `autoRestart` (false), `maxRestartAttempts` (3) and
+      // `restartBackoff` ('exponential') were pinned on this line and the
+      // assertions passed precisely BECAUSE the keys parsed and the thing they
+      // named never happened. They are tombstoned; their refusal is pinned
+      // below.
+      expect(healthCheck).not.toHaveProperty('autoRestart');
+      expect(healthCheck).not.toHaveProperty('maxRestartAttempts');
+      expect(healthCheck).not.toHaveProperty('restartBackoff');
     });
 
     it('should validate custom health check configuration', () => {
+      // [#12032] `autoRestart: true`, `maxRestartAttempts: 5` and
+      // `restartBackoff: 'linear'` REMOVED from this fixture — declared, not a
+      // quiet edit. Their presence here was the strongest single pin of the
+      // false contract: the fixture asserted, via `toEqual`, that a config
+      // asking for automatic restart survives the parse intact — which was
+      // true right up to the moment it stopped meaning anything at runtime,
+      // and it never meant anything at runtime.
       const config = {
         interval: 60000,
         timeout: 10000,
         failureThreshold: 5,
         successThreshold: 2,
-        autoRestart: true,
-        maxRestartAttempts: 5,
-        restartBackoff: 'linear' as const,
         checkMethod: 'healthCheck',
       };
       const healthCheck = PluginHealthCheckSchema.parse(config);
       expect(healthCheck).toEqual(config);
+    });
+
+    // ── [#12032] The three restart keys are REFUSED, with the prescription ───
+    //
+    // Tombstones, not deletions: `PluginHealthCheckSchema` is not `.strict()`,
+    // so a bare deletion would be a SILENT STRIP (#3733, ADR-0104) — a clean
+    // parse and a setting that never takes effect, which is a milder form of
+    // the defect being retired.
+    const RETIRED_RESTART_KEYS = {
+      autoRestart: true,
+      maxRestartAttempts: 5,
+      restartBackoff: 'linear',
+    } as const;
+
+    for (const [key, value] of Object.entries(RETIRED_RESTART_KEYS)) {
+      it(`refuses ${key} with the retirement prescription (#12032)`, () => {
+        const result = PluginHealthCheckSchema.safeParse(
+          { [key]: value } as Record<string, unknown>
+        );
+        expect(result.success, `${key} must no longer parse`).toBe(false);
+
+        // The message IS the contract — it is the whole migration document for
+        // whoever hits it. Assert the load-bearing clauses, not the bytes.
+        const message = result.success ? '' : result.error.issues[0]?.message ?? '';
+        expect(message).toContain('was removed');
+        expect(message).toContain('#12032');
+        expect(message).toContain('ADR-0049');
+        expect(message).toContain('Delete the key');
+        // The measured fact, in every one of the three prescriptions: the
+        // restart was only ever a destroy.
+        expect(message).toContain('plugin.destroy()');
+        expect(message).toContain('healthy');
+        // And the affordance that DOES exist, named in place of the one that
+        // never did.
+        expect(message).toContain('getHealthStatus');
+      });
+    }
+
+    it('leaves an unrelated unknown key alone (anti-vacuity)', () => {
+      // The control. `PluginHealthCheckSchema` is not `.strict()`, so an
+      // unknown key is stripped rather than refused — which is exactly why the
+      // three above needed tombstones. Without this, the refusals could be
+      // passing because the schema had become strict, a different change.
+      const result = PluginHealthCheckSchema.safeParse(
+        { somethingElse: true } as Record<string, unknown>
+      );
+      expect(result.success).toBe(true);
+      expect(result.success && result.data).not.toHaveProperty('somethingElse');
     });
 
     it('should enforce minimum interval', () => {
@@ -121,7 +179,10 @@ describe('Plugin Lifecycle Advanced Schemas', () => {
     it('should validate custom hot reload configuration', () => {
       const config = {
         enabled: true,
-        watchPatterns: ['src/**/*.ts', 'config/**/*.json'],
+        // [#12428] `watchPatterns` REMOVED from this fixture — declared, not a
+        // quiet edit. It used to be listed here and asserted via toEqual below,
+        // an assertion that passed precisely BECAUSE the key parsed and did
+        // nothing. The key's departure is pinned as a STRIP in its own test.
         debounceDelay: 2000,
         preserveState: false,
         stateStrategy: 'memory' as const,
@@ -184,6 +245,31 @@ describe('Plugin Lifecycle Advanced Schemas', () => {
         distributedConfig: { provider: 'redis', endpoints: ['redis://localhost:6379'] },
       } as Record<string, unknown>);
       expect(result).not.toHaveProperty('distributedConfig');
+    });
+
+    it('refuses watchPatterns with the retirement prescription (#12428)', () => {
+      // Unlike the distributedConfig pin above, this one asserts a REFUSAL, not
+      // a strip: `watchPatterns` is `retiredKey()`-tombstoned. A bare deletion
+      // was tried first and `gen:schema` gate (a) refused it — this object is
+      // not `.strict()`, so deleting the key would be a silent strip (#3733,
+      // ADR-0104), which is the very defect being retired.
+      const result = HotReloadConfigSchema.safeParse({
+        enabled: true,
+        watchPatterns: ['src/**/*.ts'],
+      } as Record<string, unknown>);
+      expect(result.success, 'watchPatterns must no longer parse').toBe(false);
+
+      // The message IS the contract — it is the whole migration document for
+      // whoever hits it. Assert the load-bearing clauses, not the byte string.
+      const message = result.success ? '' : result.error.issues[0]?.message ?? '';
+      expect(message).toContain('was removed');
+      expect(message).toContain('#12428');
+      expect(message).toContain('ADR-0049');
+      expect(message).toContain('scheduleReload');
+
+      // Anti-vacuity: the surrounding keep still parses, so the refusal above
+      // is about this key and not about the schema having broken.
+      expect(HotReloadConfigSchema.safeParse({ enabled: true }).success).toBe(true);
     });
   });
 

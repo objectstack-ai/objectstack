@@ -163,6 +163,7 @@
     "api/RestApiConfig:enableMetadata = true",
     "api/RestApiConfig:enableOpenApi = true",
     "api/RestApiConfig:enableProjectScoping = false",
+    "api/RestApiConfig:enableSearch = true",
     "api/RestApiConfig:enableUi = true",
     "api/RestApiConfig:projectResolution = \"auto\"",
     "api/RestApiConfig:version = \"v1\"",

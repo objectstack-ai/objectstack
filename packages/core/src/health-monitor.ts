@@ -43,10 +43,131 @@ const RECOVERY_IS_THRESHOLD_GATED: Record<PluginHealthStatus, boolean> = {
 };
 
 /**
+ * An ADR-0112-enveloped refusal (`code` + `status` on the error), so a caller —
+ * and a rejection-class test — can assert the refusal rather than merely "it
+ * threw". `VALIDATION_ERROR` is the standard catalog's generic
+ * argument-validation code, the same envelope `hot-reload.ts` uses for the
+ * sibling retirements (#12340, #12428).
+ */
+function healthMonitorRefusal(message: string): Error & { code: string; status: number } {
+  const err = new Error(message) as Error & { code: string; status: number };
+  err.code = 'VALIDATION_ERROR';
+  err.status = 400;
+  return err;
+}
+
+/**
+ * Keys removed from `PluginHealthCheck` in 18 (#12032) that a host may still
+ * be passing.
+ *
+ * `PluginHealthCheckSchema` is not `.strict()`, so before the tombstones zod
+ * would have silently STRIPPED each of these — a clean parse and a setting
+ * that never takes effect. The tombstones answer the parse; this table is the
+ * door for the audience that does NOT parse, which is every host there is:
+ * nothing in the tree parses `PluginHealthCheckSchema` outside its own unit
+ * test, and `registerPlugin` takes the PARSED shape straight from the caller's
+ * hand.
+ *
+ * Each entry is the guidance clause; the `[HealthMonitor] Plugin '<name>': `
+ * prefix is added at throw time. The facts these must carry are pinned in
+ * `health-monitor.test.ts` by CONTENT, never by byte-equality against the
+ * spec-side prescriptions — `@objectstack/core`'s every import of
+ * `@objectstack/spec/kernel` is type-only, and a value import would be the
+ * first, linking that module's zod closure into every consumer of this package
+ * for three strings (the reasoning `hot-reload.ts` records for the same
+ * duplication).
+ */
+const RETIRED_HEALTH_CHECK_KEYS: ReadonlyArray<readonly [string, string]> = [
+  [
+    'autoRestart',
+    "'autoRestart' was removed from PluginHealthCheck in @objectstack/spec 18 "
+    + '(#12032, ADR-0049 enforce-or-remove) — it never restarted a plugin. '
+    + '`attemptRestart` called `plugin.destroy()` and stopped there, then '
+    + "logged 'Plugin restarted' and set status `recovering`, and the periodic "
+    + 'checks carried on against the destroyed instance — which the default '
+    + "check (`{ name: 'plugin-loaded', status: 'passed' }`) passes forever, so "
+    + 'a destroyed, never-re-initialised plugin ended up reported `healthy`. '
+    + 'Delete the key. This monitor no longer destroys anything: a failing '
+    + 'plugin is reported `unhealthy` or `failed` and left alone.',
+  ],
+  [
+    'maxRestartAttempts',
+    "'maxRestartAttempts' was removed from PluginHealthCheck in "
+    + '@objectstack/spec 18 (#12032, ADR-0049 enforce-or-remove) — it capped a '
+    + 'restart that never happened, so it only counted `destroy()` calls. '
+    + 'Delete the key.',
+  ],
+  [
+    'restartBackoff',
+    "'restartBackoff' was removed from PluginHealthCheck in @objectstack/spec "
+    + '18 (#12032, ADR-0049 enforce-or-remove) — it delayed a restart that '
+    + 'never happened, so it only moved when the `destroy()` landed. Delete '
+    + 'the key.',
+  ],
+];
+
+/**
+ * What a host does instead. Names only affordances that exist: the monitor
+ * could not restart a plugin even in principle, because `Plugin.init(ctx)`
+ * needs a `PluginContext` that only the kernel constructs and exposes to
+ * nobody (`ObjectKernel.context` is private, `KernelBase.createContext` is
+ * protected).
+ */
+const RESTART_IS_THE_HOSTS_JOB =
+  ' Restarting a plugin is the HOST\'s job in this host-driven library: poll '
+  + '`getHealthStatus(pluginName)` / `getHealthReport(pluginName)` and act on '
+  + '`unhealthy` / `failed` at the level that owns the plugin\'s lifetime — '
+  + 'recreate the kernel, or let your supervisor restart the process.';
+
+/**
+ * Refuse a key this library removed, at the moment the host hands the config
+ * over. First match wins; the order is the order they appear in the schema.
+ */
+function assertNoRetiredKeys(pluginName: string, config: object): void {
+  for (const [key, guidance] of RETIRED_HEALTH_CHECK_KEYS) {
+    if (!Object.prototype.hasOwnProperty.call(config, key)) {
+      continue;
+    }
+    throw healthMonitorRefusal(
+      `[HealthMonitor] Plugin '${pluginName}': ${guidance}${RESTART_IS_THE_HOSTS_JOB}`
+    );
+  }
+}
+
+/**
  * Plugin Health Monitor
- * 
- * Monitors plugin health status and performs automatic recovery actions.
- * Implements the advanced lifecycle health monitoring protocol.
+ *
+ * Monitors plugin health status. It REPORTS; it does not act on what it finds.
+ *
+ * ## The monitor no longer "restarts" anything (#12032)
+ *
+ * It used to claim it did. `attemptRestart` called `plugin.destroy()` and
+ * stopped there — the comment above the call read "Call destroy and init to
+ * restart", and `init` appeared in this file ONLY inside that comment. What a
+ * plugin got was: destroy, a log line reading 'Plugin restarted', status
+ * `recovering`, and periodic checks continuing against the destroyed instance.
+ * The default check when no `checkMethod` resolves is
+ * `{ name: 'plugin-loaded', status: 'passed' }`, which a destroyed plugin
+ * passes indefinitely, so the TERMINAL report on a destroyed, never
+ * re-initialised plugin was `healthy` — and #11955 made that MORE convincing
+ * rather than less, because reaching `healthy` now costs `successThreshold`
+ * consecutive passing rounds.
+ *
+ * The restart could not be repaired in place. `Plugin.init(ctx)` needs a
+ * `PluginContext`, and the only two `plugin.init(...)` call sites in the tree
+ * are the kernel's own boot loops, over the full plugin list, with a context
+ * that is `private` on `ObjectKernel` and `protected` on `KernelBase`. No host
+ * can obtain one, so there was nothing for a re-init hook to call. ADR-0049
+ * enforce-or-remove, with no roadmap to point EXPERIMENTAL at, therefore
+ * removed the declaration: `autoRestart`, `maxRestartAttempts` and
+ * `restartBackoff` are tombstoned in `@objectstack/spec` 18, and this class
+ * refuses a config that still carries one instead of accepting it and doing
+ * something else.
+ *
+ * What a failing plugin gets now is the truth: `degraded`, `unhealthy` or
+ * `failed`, and no destroy. Acting on that is the HOST's job — this is a
+ * host-driven library (#11825 route 2), and the host is the only party that
+ * owns the plugin's lifetime.
  */
 export class PluginHealthMonitor {
   private logger: ObjectLogger;
@@ -56,7 +177,6 @@ export class PluginHealthMonitor {
   private checkIntervals = new Map<string, NodeJS.Timeout>();
   private failureCounters = new Map<string, number>();
   private successCounters = new Map<string, number>();
-  private restartAttempts = new Map<string, number>();
 
   constructor(logger: ObjectLogger) {
     this.logger = logger.child({ component: 'HealthMonitor' });
@@ -66,11 +186,16 @@ export class PluginHealthMonitor {
    * Register a plugin for health monitoring
    */
   registerPlugin(pluginName: string, config: PluginHealthCheckParsed): void {
+    // Before anything is stored: a config still carrying a retired restart key
+    // is refused with its prescription, never accepted-and-ignored. Deliberately
+    // FIRST, so a config that would otherwise register cleanly cannot smuggle
+    // the false declaration past the door.
+    assertNoRetiredKeys(pluginName, config as object);
+
     this.healthChecks.set(pluginName, config);
     this.healthStatus.set(pluginName, 'unknown');
     this.failureCounters.set(pluginName, 0);
     this.successCounters.set(pluginName, 0);
-    this.restartAttempts.set(pluginName, 0);
 
     this.logger.info('Plugin registered for health monitoring', { 
       plugin: pluginName,
@@ -138,8 +263,8 @@ export class PluginHealthMonitor {
     let message: string | undefined;
     const checks: Array<{ name: string; status: 'passed' | 'failed' | 'warning'; message?: string }> = [];
     // Which failure route this round took, if any. A round can fail two
-    // disjoint ways and both settle here, so that the counters, the threshold
-    // and `autoRestart` are consulted in exactly one place below.
+    // disjoint ways and both settle here, so that the counters and the
+    // threshold are consulted in exactly one place below.
     let failureRoute: 'returned' | 'thrown' | undefined;
 
     try {
@@ -204,12 +329,14 @@ export class PluginHealthMonitor {
       failureRoute = 'thrown';
     }
 
-    // Both failure routes land here, and only here. Deliberately outside the
-    // `try`: `recordFailedRound` may await a restart, and a fault raised by the
-    // restart is not a health-check exception — catching it above would relabel
-    // it as one and push a second `health-check` entry for a check that ran.
+    // Both failure routes land here, and only here. Kept outside the `try`:
+    // a fault raised while RECORDING a round is not a health-check exception,
+    // and catching it above would relabel it as one and push a second
+    // `health-check` entry for a check that ran. (#11852 needed this because
+    // `recordFailedRound` awaited a restart; the restart is gone as of #12032
+    // but the reason the boundary sits here is unchanged.)
     if (failureRoute) {
-      await this.recordFailedRound(pluginName, plugin, config, failureRoute);
+      this.recordFailedRound(pluginName, config, failureRoute);
     }
 
     // Create health report
@@ -233,24 +360,26 @@ export class PluginHealthMonitor {
    * failure (`false` or `{ status: 'unhealthy' }`), or it *throws* — which by
    * `raceCheckTimeout` includes every `timeout` overrun, the severest case of
    * the two. The routes used to be handled in separate blocks, and only the
-   * returned one cleared `successCounters` or consulted `autoRestart`, so a
-   * plugin that hung until its timeout was marked `failed` and never restarted
-   * however `autoRestart` was set: the declared key covered only the milder
-   * half of the failures it names.
+   * returned one cleared `successCounters`, so the counters a declared
+   * `failureThreshold` / `successThreshold` are counted with depended on which
+   * way the round happened to fail (#11852).
    *
    * What stays route-specific is the *status label*, deliberately. A throw is
    * the separate `failed` status applied immediately with no threshold — that
    * is the documented contract (`content/docs/protocol/kernel/lifecycle.mdx`,
    * "Custom Health Checks") and is pinned by the timeout test. Only the
-   * counters and the restart decision are shared, because those are what
-   * `failureThreshold` and `autoRestart` declare, and neither names a route.
+   * counters are shared, because that is what `failureThreshold` declares, and
+   * it does not name a route.
+   *
+   * This round ENDS here. Nothing is done TO the plugin — see the #12032 note
+   * on the class: a monitor that cannot re-initialise a plugin has no business
+   * destroying one.
    */
-  private async recordFailedRound(
+  private recordFailedRound(
     pluginName: string,
-    plugin: Plugin,
     config: PluginHealthCheckParsed,
     route: 'returned' | 'thrown'
-  ): Promise<void> {
+  ): void {
     const failureCount = (this.failureCounters.get(pluginName) || 0) + 1;
     this.failureCounters.set(pluginName, failureCount);
     this.successCounters.set(pluginName, 0);
@@ -267,84 +396,6 @@ export class PluginHealthMonitor {
       });
     } else {
       this.healthStatus.set(pluginName, 'degraded');
-    }
-
-    // Attempt auto-restart if configured — route-blind, by the same threshold.
-    if (thresholdReached && config.autoRestart) {
-      await this.attemptRestart(pluginName, plugin, config);
-    }
-  }
-
-  /**
-   * Attempt to restart a plugin
-   */
-  private async attemptRestart(
-    pluginName: string,
-    plugin: Plugin,
-    config: PluginHealthCheckParsed
-  ): Promise<void> {
-    const attempts = this.restartAttempts.get(pluginName) || 0;
-    
-    if (attempts >= config.maxRestartAttempts) {
-      this.logger.error('Max restart attempts reached, giving up', { 
-        plugin: pluginName, 
-        attempts 
-      });
-      this.healthStatus.set(pluginName, 'failed');
-      return;
-    }
-
-    this.restartAttempts.set(pluginName, attempts + 1);
-    
-    // Calculate backoff delay
-    const delay = this.calculateBackoff(attempts, config.restartBackoff);
-    
-    this.logger.info('Scheduling plugin restart', { 
-      plugin: pluginName, 
-      attempt: attempts + 1, 
-      delay 
-    });
-
-    await new Promise(resolve => setTimeout(resolve, delay));
-
-    try {
-      // Call destroy and init to restart
-      if (plugin.destroy) {
-        await plugin.destroy();
-      }
-      
-      // Note: Full restart would require kernel context
-      // This is a simplified version - actual implementation would need kernel integration
-      this.logger.info('Plugin restarted', { plugin: pluginName });
-      
-      // Reset counters on successful restart
-      this.failureCounters.set(pluginName, 0);
-      this.successCounters.set(pluginName, 0);
-      this.healthStatus.set(pluginName, 'recovering');
-    } catch (error) {
-      this.logger.error('Plugin restart failed', { 
-        plugin: pluginName, 
-        error 
-      });
-      this.healthStatus.set(pluginName, 'failed');
-    }
-  }
-
-  /**
-   * Calculate backoff delay for restarts
-   */
-  private calculateBackoff(attempt: number, strategy: 'fixed' | 'linear' | 'exponential'): number {
-    const baseDelay = 1000; // 1 second base
-
-    switch (strategy) {
-      case 'fixed':
-        return baseDelay;
-      case 'linear':
-        return baseDelay * (attempt + 1);
-      case 'exponential':
-        return baseDelay * Math.pow(2, attempt);
-      default:
-        return baseDelay;
     }
   }
 
@@ -383,7 +434,6 @@ export class PluginHealthMonitor {
     this.healthReports.clear();
     this.failureCounters.clear();
     this.successCounters.clear();
-    this.restartAttempts.clear();
     
     this.logger.info('Health monitor shutdown complete');
   }

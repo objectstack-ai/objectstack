@@ -217,6 +217,30 @@ const MetadataTypeRegistryEntryBaseSchema = z.object({
   /**
    * File glob patterns for this type.
    * Used to discover metadata files on disk.
+   *
+   * ⚠️ DISCOVERY IS THE LEAST EXERCISED OF THIS FIELD'S USES (#12075, recorded
+   * beside the declaration by #12165). The only reader that actually globs
+   * these patterns is `MetadataPlugin._loadFromFileSystem`
+   * (`packages/metadata/src/plugin.ts`), reached on exactly ONE branch:
+   * `eager` bootstrap (the default) AND no `options.artifactSource`.
+   * Re-measured on `origin/main`: both non-test `new MetadataPlugin(...)`
+   * sites — `runtime/src/standalone-stack.ts` and `cli/src/commands/serve.ts`
+   * — set an `artifactSource` unconditionally, and all nine tracked
+   * `objectstack.config.ts` declare their metadata in code, so nothing this
+   * repo boots, scaffolds or ships reaches the glob pass. Recorded
+   * disposition: no end-to-end dogfood is being minted for that path —
+   * startup focus, and a path with zero measured consumers does not earn one.
+   * Unexercised is NOT broken, only unmeasured. The full measurement,
+   * discriminator included, lives on the CLI's own read of this field
+   * (`packages/cli/src/utils/metadata-file-name.ts`).
+   *
+   * ⛔ Do not read that as "this field is inert". Its VALUES have live readers
+   * that never glob: the CLI derives every scaffolded file name from them
+   * (#11071, pinned by `cli/test/generate-file-name-registry-parity.test.ts`),
+   * and `codeOnlySourceHint` reads `filePatterns[0]` back as the prescription
+   * in a 403 `not_creatable` refusal — which the `capability` and `api`
+   * entries of `DEFAULT_METADATA_TYPE_REGISTRY` below already lean on.
+   *
    * @example ["**\/*.object.ts", "**\/*.object.yml"]
    */
   filePatterns: z.array(z.string()).describe('Glob patterns to discover files of this type'),

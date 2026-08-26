@@ -154,6 +154,146 @@ Dependency reference to another migration that must run first
 | **migrationId** | `string` | ✅ | ID of the migration this depends on |
 | **package** | `string` | optional | Package that owns the dependency migration |
 
+### Nested Shape: `ChangeSet.operations[number][type='add_field']`
+
+Add a new field to an existing object
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `'add_field'` | ✅ |  |
+| **objectName** | `string` | ✅ | Target object name |
+| **fieldName** | `string` | ✅ | Name of the field to add |
+| **field** | `{ name?: string; label?: string; type: Enum<'text' \| 'textarea' \| 'email' \| 'url' \| 'phone' \| 'password' \| 'secret' \| …>; description?: string; … }` | ✅ | Full field definition to add |
+
+### Nested Shape: `ChangeSet.operations[number][type='modify_field']`
+
+Modify properties of an existing field
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `'modify_field'` | ✅ |  |
+| **objectName** | `string` | ✅ | Target object name |
+| **fieldName** | `string` | ✅ | Name of the field to modify |
+| **changes** | `Record<string, any>` | ✅ | Partial field definition updates |
+
+### Nested Shape: `ChangeSet.operations[number][type='remove_field']`
+
+Remove a field from an existing object
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `'remove_field'` | ✅ |  |
+| **objectName** | `string` | ✅ | Target object name |
+| **fieldName** | `string` | ✅ | Name of the field to remove |
+
+### Nested Shape: `ChangeSet.operations[number][type='create_object']`
+
+Create a new object
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `'create_object'` | ✅ |  |
+| **object** | `{ name: string; label?: string; pluralLabel?: string; description?: string; … }` | ✅ | Full object definition to create |
+
+### Nested Shape: `ChangeSet.operations[number][type='rename_object']`
+
+Rename an existing object
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `'rename_object'` | ✅ |  |
+| **oldName** | `string` | ✅ | Current object name |
+| **newName** | `string` | ✅ | New object name |
+
+### Nested Shape: `ChangeSet.operations[number][type='delete_object']`
+
+Delete an existing object
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `'delete_object'` | ✅ |  |
+| **objectName** | `string` | ✅ | Name of the object to delete |
+
+### Nested Shape: `ChangeSet.operations[number][type='execute_sql']`
+
+Execute a raw SQL statement
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `'execute_sql'` | ✅ |  |
+| **sql** | `string` | ✅ | Raw SQL statement to execute |
+| **description** | `string` | optional | Human-readable description of the SQL |
+
+### Nested Shape: `ChangeSet.rollback[number][type='add_field']`
+
+Add a new field to an existing object
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `'add_field'` | ✅ |  |
+| **objectName** | `string` | ✅ | Target object name |
+| **fieldName** | `string` | ✅ | Name of the field to add |
+| **field** | `{ name?: string; label?: string; type: Enum<'text' \| 'textarea' \| 'email' \| 'url' \| 'phone' \| 'password' \| 'secret' \| …>; description?: string; … }` | ✅ | Full field definition to add |
+
+### Nested Shape: `ChangeSet.rollback[number][type='modify_field']`
+
+Modify properties of an existing field
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `'modify_field'` | ✅ |  |
+| **objectName** | `string` | ✅ | Target object name |
+| **fieldName** | `string` | ✅ | Name of the field to modify |
+| **changes** | `Record<string, any>` | ✅ | Partial field definition updates |
+
+### Nested Shape: `ChangeSet.rollback[number][type='remove_field']`
+
+Remove a field from an existing object
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `'remove_field'` | ✅ |  |
+| **objectName** | `string` | ✅ | Target object name |
+| **fieldName** | `string` | ✅ | Name of the field to remove |
+
+### Nested Shape: `ChangeSet.rollback[number][type='create_object']`
+
+Create a new object
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `'create_object'` | ✅ |  |
+| **object** | `{ name: string; label?: string; pluralLabel?: string; description?: string; … }` | ✅ | Full object definition to create |
+
+### Nested Shape: `ChangeSet.rollback[number][type='rename_object']`
+
+Rename an existing object
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `'rename_object'` | ✅ |  |
+| **oldName** | `string` | ✅ | Current object name |
+| **newName** | `string` | ✅ | New object name |
+
+### Nested Shape: `ChangeSet.rollback[number][type='delete_object']`
+
+Delete an existing object
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `'delete_object'` | ✅ |  |
+| **objectName** | `string` | ✅ | Name of the object to delete |
+
+### Nested Shape: `ChangeSet.rollback[number][type='execute_sql']`
+
+Execute a raw SQL statement
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `'execute_sql'` | ✅ |  |
+| **sql** | `string` | ✅ | Raw SQL statement to execute |
+| **description** | `string` | optional | Human-readable description of the SQL |
+
 
 ---
 

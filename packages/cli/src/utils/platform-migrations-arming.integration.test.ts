@@ -149,9 +149,24 @@ async function writeDamagedInstall(): Promise<void> {
     t.bigInteger('last_value').notNullable().defaultTo(0);
     t.timestamp('updated_at');
   });
+  // [#12394] `key_hash` is DERIVED, never invented. It used to be seeded here as
+  // the placeholders `'h1'`/`'h2'`, which was harmless only for as long as the
+  // repair addressed counter rows by `(object, field, tenant_id)`: nothing read
+  // the column, so any string did. #12394's handoff addresses the destination
+  // row by `key_hash` — the key the table is actually keyed on — so a fixture
+  // carrying an invented hash describes a table the platform cannot produce, and
+  // the repair correctly reads the org row as ABSENT and inserts a SECOND one.
+  //
+  // Taking the hash from the driver's own `sequenceKeyHash` rather than
+  // re-spelling it here is the point: this fixture is now the same bytes the
+  // only production writer of this table would have written, and it cannot drift
+  // from it. `ensureSequencesKeyHashShape` recomputes the same hash for every
+  // legacy row it migrates, so this is the shape of every real install.
+  const keyHash = (object: string, tenantId: string, field: string, scope = ''): string =>
+    (seed as any).sequenceKeyHash(object, tenantId, field, scope);
   await k(SEQUENCES_TABLE).insert([
-    { key_hash: 'h1', object: 'crm_case', tenant_id: GLOBAL_TENANT, field: 'case_number', scope: '', last_value: SEEDED_LAST_VALUE },
-    { key_hash: 'h2', object: 'crm_case', tenant_id: ORG_ID, field: 'case_number', scope: '', last_value: 1 },
+    { key_hash: keyHash('crm_case', GLOBAL_TENANT, 'case_number'), object: 'crm_case', tenant_id: GLOBAL_TENANT, field: 'case_number', scope: '', last_value: SEEDED_LAST_VALUE },
+    { key_hash: keyHash('crm_case', ORG_ID, 'case_number'), object: 'crm_case', tenant_id: ORG_ID, field: 'case_number', scope: '', last_value: 1 },
   ]);
   await seed.disconnect();
 }

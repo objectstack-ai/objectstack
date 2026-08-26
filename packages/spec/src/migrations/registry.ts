@@ -5433,6 +5433,53 @@ const step18: MigrationStep = {
         + 'byte-identically (`safeParse` green, `required` unrewritten).',
     },
     {
+      id: 'cli-command-contribution-retired',
+      surface:
+        'kernel.cliCommandContribution (the orphan exported schema of '
+        + '`cli-extension.zod.ts` — 1 def, 2 exported names: '
+        + '`CLICommandContributionSchema` / `CLICommandContribution`)',
+      replacement:
+        '(removed — there is no declarative replacement, because no declarative '
+        + 'surface ever carried it. CLI commands are registered through oclif\'s '
+        + 'native plugin discovery: the plugin package declares an `oclif` '
+        + 'section in its own `package.json` — `OclifPluginConfigSchema` in the '
+        + 'same module describes that live surface and SURVIVES, as does the '
+        + 'module docblock\'s Commander.js migration record, which the '
+        + '`manifest.contributes.commands` tombstone cites)',
+      reason:
+        'ADR-0049 enforce-or-remove; #12007, the exported orphan-value-schema '
+        + 'class (#3950: an exported schema with no consumer reads as a '
+        + 'capability). The schema described a "CLI Command Contribution '
+        + 'declaration in the manifest" and claimed retention "for describing '
+        + 'command metadata in plugin manifests" — but after #10724 tombstoned '
+        + '`manifest.contributes.commands` (protocol 17), no manifest surface '
+        + 'could legally carry these entries: the export advertised a shape whose '
+        + 'only declared carrier rejects it. The manifest never referenced this '
+        + 'schema even before the tombstone — its inline `commands` item schema '
+        + 'was an independent duplicate. Zero consumers outside spec\'s own test '
+        + 'and generated artifacts, measured at the retirement\'s base commit '
+        + '(146f448a5) with positive controls in objectstack, objectui (pinned '
+        + 'sha) and cloud. With no carrier key and no authored document there is '
+        + 'nothing to tombstone and no seam for a D2 conversion: route 3, the '
+        + '#11825 / #8715 shape — RETIRED_DEFS_BY_MAJOR plus this entry ARE the '
+        + 'declaration.',
+      acceptanceCriteria:
+        'No code imports `CLICommandContributionSchema` or '
+        + '`CLICommandContribution` from `@objectstack/spec` or '
+        + '`@objectstack/spec/kernel` — both are TS2305 after upgrade, on every '
+        + 'public entry (pinned by resolved symbol identity in '
+        + '`kernel/cli-command-contribution-retirement.test.ts`). No metadata '
+        + 'document needs editing: the def was reachable from no metadata-type '
+        + 'binding, stack collection or manifest embed — the only surface that '
+        + 'ever claimed to carry command contributions '
+        + '(`manifest.contributes.commands`) already rejects the key with the '
+        + '#10724 prescription, which is unchanged by this retirement. '
+        + '`OclifPluginConfigSchema` / `OclifPluginConfig` survive on `./kernel` '
+        + '(same pin). ⚠️ Runtime behaviour is deliberately UNCHANGED: the CLI '
+        + 'never resolved commands from this declaration — commands are '
+        + 'oclif-auto-discovered, before and after.',
+    },
+    {
       id: 'dashboard-header-modal-target-page-only',
       surface:
         'dashboard `header.actions[]` entries with `actionType: \'modal\'` — an `actionUrl` naming '
@@ -6182,6 +6229,83 @@ const step18: MigrationStep = {
         + 'from `@objectstack/core` with their tests green.',
     },
     {
+      id: 'hot-reload-watch-placeholder-retired',
+      surface:
+        '`HotReloadConfig.watchPatterns`, and the `HotReloadManager.startWatching` '
+        + 'placeholder that read it',
+      replacement:
+        'Run your own watcher and call '
+        + '`HotReloadManager.scheduleReload(pluginName, reloadFn)` when a file '
+        + 'changes — that is the debounced integration point this class actually '
+        + 'implements, and it is unchanged. Declare your globs wherever your '
+        + 'watcher reads them; there is no in-tree replacement for the key, '
+        + 'because file watching is the HOST\'s job in this host-driven library. '
+        + 'The platform already depends on `chokidar` in `@objectstack/metadata`, '
+        + '`@objectstack/metadata-fs` and `@objectstack/cli` — never in '
+        + '`@objectstack/core` — so a host has a working model to copy.',
+      reason:
+        'ADR-0049 enforce-or-remove, applied one symbol over from #12340 in the '
+        + 'same file and on the same per-key test. `HotReloadManager.startWatching` '
+        + 'contained NO watcher: its whole body was a guard plus '
+        + "`logger.info('File watching started', { patterns })` above an in-source "
+        + 'note saying real watching "would require chokidar or similar / This is a '
+        + 'placeholder for the integration point". `watchHandles` was only ever '
+        + 'read, deleted, iterated and cleared and NEVER set, so `stopWatching`\'s '
+        + 'cleanup branch and the teardown loop over its keys were structurally '
+        + 'UNREACHABLE rather than merely untaken (measured with a firing positive '
+        + 'control: `reloadTimers.set` resolves a real writer in the same file and '
+        + 'the same scan; `watchHandles.set` resolves nothing anywhere). So '
+        + '`watchPatterns` had no reader that ACTED on it — its only two uses were '
+        + 'log lines — and an author could declare a glob while no file change '
+        + 'could ever trigger a reload. This is the #3950 shape with the volume '
+        + 'turned up: #12340\'s inert fallback at least announced itself at DEBUG, '
+        + 'whereas this said "File watching started" at INFO — positive '
+        + 'confirmation of a capability that did not exist, which an operator, or '
+        + 'an AI author (ADR-0033), reads as proof and stops looking. Neither of '
+        + 'the other two ADR-0049 states was available: ENFORCE would build for a '
+        + 'caller that does not exist (no runtime composes `HotReloadManager` — '
+        + 'only its own unit test and `core/examples/phase2-integration.ts` '
+        + 'construct it, the same fact that decided #12340\'s route), and '
+        + 'EXPERIMENTAL requires a roadmap, where a scan of every planning doc '
+        + 'returned ZERO mentions of hot-reload file watching against 145 control '
+        + 'hits in the same files. Route 3 again: `HotReloadConfig` is not an '
+        + 'authorable surface — no metadata-type binding, stack collection or '
+        + 'manifest embed ever carried it, and nothing in the tree parses '
+        + '`HotReloadConfigSchema` outside its own unit test — so there is no '
+        + 'authored document to rewrite and nobody who could receive a parse-time '
+        + 'prescription, so there is no D2 conversion either — it would be a '
+        + 'transform with no seam that ever runs. The key is TOMBSTONED rather '
+        + 'than deleted, and the BUILD is what decided that: the plain deletion '
+        + 'was tried first and `gen:schema` gate (a) refused it, because '
+        + '`HotReloadConfigSchema` is not `.strict()` and a bare deletion would '
+        + 'be a silent strip (#3733, ADR-0104) — the very defect being retired, '
+        + 'one layer down. #12340 could take route 3 because what left there was '
+        + 'a whole DEF; a key leaving a SURVIVING def has no such exit. This '
+        + 'entry IS the declaration.',
+      acceptanceCriteria:
+        'No host passes `watchPatterns` to `HotReloadManager.registerPlugin`, and '
+        + 'no host calls `HotReloadManager.startWatching`. TypeScript hosts cannot '
+        + 'do either: `watchPatterns` is typed `never` by the tombstone, and '
+        + '`startWatching` returns `never`. JavaScript hosts, and config that '
+        + 'arrived as JSON, get a loud refusal carrying the prescription — an '
+        + 'ADR-0112 envelope (`code: VALIDATION_ERROR`, `status: 400`), thrown for '
+        + 'a leftover `watchPatterns` BEFORE the `enabled` check so a disabled '
+        + 'config cannot smuggle the false declaration through, and thrown '
+        + 'unconditionally from `startWatching` so the placeholder can no longer '
+        + 'report success. `startWatching` is kept as a throwing door rather than '
+        + 'deleted precisely so that caller meets a prescription instead of a bare '
+        + '`TypeError: not a function`. Runtime reload behaviour is UNCHANGED for '
+        + 'every config that worked: nothing was ever watched, so nothing that '
+        + 'used to happen stops happening — `registerPlugin`, `scheduleReload`, '
+        + '`reloadPlugin` and state preservation are untouched, and '
+        + '`stopWatching` keeps the half that always did something (it cancels a '
+        + 'pending debounced reload; its unreachable `watchHandles` branch left '
+        + 'with the placeholder). The #11825 keep still stands: '
+        + '`HotReloadConfigSchema` and `PluginStateSnapshotSchema` still export '
+        + 'from `./kernel`, and `HotReloadManager` / `PluginHealthMonitor` still '
+        + 'export from `@objectstack/core` with their tests green.',
+    },
+    {
       id: 'identity-api-key-schema-retired',
       surface:
         'identity.apiKey (the whole of `ApiKeySchema` in identity/identity.zod.ts — '
@@ -6399,6 +6523,94 @@ const step18: MigrationStep = {
         + 'byte-identically to before, at every ADR-0120 `unique` spelling. A stored body from the '
         + 'drift window carrying `indexes[].where` is rejected with the database-layer prescription '
         + 'rather than saved with the key silently dropped.',
+    },
+    {
+      id: 'plugin-auto-restart-never-reinitialised',
+      surface:
+        '`PluginHealthCheck.autoRestart`, `PluginHealthCheck.maxRestartAttempts` '
+        + 'and `PluginHealthCheck.restartBackoff`, and the '
+        + '`PluginHealthMonitor.attemptRestart` path that read them',
+      replacement:
+        'Poll `PluginHealthMonitor.getHealthStatus(pluginName)` / '
+        + '`getHealthReport(pluginName)` and act on `unhealthy` / `failed` in the '
+        + 'HOST. There is no in-tree replacement for the keys, because restarting '
+        + 'a plugin is the host\'s job in this host-driven library and the monitor '
+        + 'could not do it even in principle: `Plugin.init(ctx)` needs a '
+        + '`PluginContext`, which only the kernel constructs and which it exposes '
+        + 'to nobody (`ObjectKernel.context` is private, `KernelBase.createContext` '
+        + 'is protected). Recreate the kernel, or let your supervisor restart the '
+        + 'process — whichever level actually owns the plugin\'s lifetime. The '
+        + 'monitor reports; it does not act.',
+      reason:
+        'ADR-0049 enforce-or-remove, applied one class over from #12428 and '
+        + '#12340 in the same host-driven lifecycle library, and for a sharper '
+        + 'reason than either: this key HAD a reader that acted, and what it did '
+        + 'was not what the key declared. `attemptRestart` called '
+        + '`plugin.destroy()` and stopped there. The comment above the call read '
+        + '"Call destroy and init to restart", and `init` appeared in '
+        + '`health-monitor.ts` ONLY inside that comment. So what a plugin actually '
+        + "got was: destroy, a log line reading 'Plugin restarted', status "
+        + '`recovering`, and periodic health checks continuing to run against the '
+        + 'destroyed instance — which the default check when no `checkMethod` '
+        + "resolves (`{ name: 'plugin-loaded', status: 'passed' }`) passes "
+        + 'indefinitely. The TERMINAL report on a destroyed, never-re-initialised '
+        + 'plugin was therefore `healthy`, reproduced at ee3595cefd with '
+        + '`successThreshold: 3` as failed -> recovering (destroyed=1, alive=false) '
+        + '-> recovering -> recovering -> healthy (destroyed=1, alive=false). '
+        + '#11955 made that MORE convincing rather than less, because reaching '
+        + '`healthy` now costs `successThreshold` CONSECUTIVE passing rounds, so '
+        + 'the plugin has to earn a declared number of passes to be misreported. '
+        + 'Meanwhile `restartAttempts` was incremented as though a restart had '
+        + 'occurred, and `maxRestartAttempts` / `restartBackoff` scheduled further '
+        + '"restarts" of a plugin that was never brought back up. Neither of the '
+        + 'other two ADR-0049 states was available: ENFORCE would have to BUILD '
+        + 'the restart, and the class cannot host one — `Plugin.init(ctx)` needs a '
+        + '`PluginContext`, and the only two `plugin.init(...)` call sites in the '
+        + 'tree are the kernel\'s own boot loops over the full plugin list, with a '
+        + 'context that is private on `ObjectKernel` and protected on '
+        + '`KernelBase`, so a host-provided re-init hook would have had nothing to '
+        + 'call (positive control: the same scan resolves five real non-test '
+        + '`plugin.destroy()` call sites, so it sees lifecycle drivers). Building '
+        + 'that API for a caller that does not exist — no runtime constructs '
+        + '`PluginHealthMonitor` (#11825) — is exactly the speculation ADR-0049\'s '
+        + 'staged decision names as the wrong default at this milestone, where the '
+        + 'shippable liability is the false promise and not the missing feature. '
+        + 'EXPERIMENTAL requires a roadmap, and a scan of the whole `docs/` '
+        + 'planning + ADR corpus returned ZERO mentions of plugin auto-restart '
+        + 'against 118 control hits for "health" and 13 for "hot reload" in the '
+        + 'same corpus. The other two keys leave with the first rather than as a '
+        + 'tidy-up: with no restart, "Maximum restart attempts before giving up" '
+        + 'and "Backoff strategy for restart delays" have nothing left to be the '
+        + 'vocabulary OF — the same test that took `distributedConfig` out with '
+        + 'the `stateStrategy` value it was documented as being required for '
+        + '(#12340). All three are TOMBSTONED rather than deleted, for #12428\'s '
+        + 'reason: a key leaving a SURVIVING def has no route-3 exit, and '
+        + '`PluginHealthCheckSchema` is not `.strict()`, so a bare deletion would '
+        + 'be a silent strip (#3733, ADR-0104) — a milder form of the very defect '
+        + 'being retired. There is no D2 conversion, because `PluginHealthCheck` '
+        + 'is not an authorable surface: no metadata-type binding, stack '
+        + 'collection or manifest embed ever carried it, so there is no authored '
+        + 'document to rewrite. This entry IS the declaration.',
+      acceptanceCriteria:
+        'No host passes `autoRestart`, `maxRestartAttempts` or `restartBackoff` to '
+        + '`PluginHealthMonitor.registerPlugin`. TypeScript hosts cannot: all '
+        + 'three are typed `never` by the tombstones. JavaScript hosts, and config '
+        + 'that arrived as JSON, get a loud refusal carrying the prescription — an '
+        + 'ADR-0112 envelope (`code: VALIDATION_ERROR`, `status: 400`), thrown '
+        + 'BEFORE any state is stored so a refused config cannot leave a '
+        + 'half-registered plugin behind. `PluginHealthMonitor` no longer calls '
+        + '`plugin.destroy()` at all: `attemptRestart` and `calculateBackoff` are '
+        + 'gone with the `restartAttempts` counter, and a plugin that crosses '
+        + '`failureThreshold` is reported `degraded` / `unhealthy` / `failed` and '
+        + 'left running. The rest of the monitor is UNCHANGED: registration, '
+        + 'periodic checks, the `timeout` race and its refd-timer guard (#4875), '
+        + 'the two failure routes sharing counters (#11852), and '
+        + '`successThreshold` binding from every status that records a failure '
+        + '(#11955) all behave exactly as before — `recovering` is now written '
+        + 'only by the success branch, which is the one writer that ever meant it. '
+        + 'The #11825 keep still stands: `PluginHealthCheckSchema` still exports '
+        + 'from `./kernel` and `PluginHealthMonitor` still exports from '
+        + '`@objectstack/core` with its tests green.',
     },
     {
       id: 'plugin-manifest-contributes-dead-members-retired',
@@ -7318,6 +7530,44 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // conversion `metric-filters-removed`, which strips the key from every metric
     // in `analyticsCubes[].measures`.
     'data/Metric:filters',
+    // #12428 — ADR-0049 enforce-or-remove, one symbol over from #12340 (PR #12425)
+    // in the same file and on the same per-key test. `HotReloadManager.startWatching`
+    // contained NO watcher: a guard plus `logger.info('File watching started',
+    // { patterns })` above an in-source note saying real watching "would require
+    // chokidar or similar / This is a placeholder for the integration point".
+    // `watchHandles` was only ever read, deleted, iterated and cleared and NEVER
+    // set, so `stopWatching`'s cleanup branch and the teardown loop over its keys
+    // were structurally UNREACHABLE rather than merely untaken — measured with a
+    // firing positive control (`reloadTimers.set` resolves a real writer in the
+    // same file and the same scan; `watchHandles.set` resolves nothing anywhere).
+    // `watchPatterns` therefore had no reader that ACTED on it, and #12340's
+    // silence was at least at DEBUG level where this one claimed success at INFO.
+    //
+    // Neither of ADR-0049's other two states was available: ENFORCE would build for
+    // a caller that does not exist (no runtime composes `HotReloadManager` — only
+    // its own unit test and `core/examples/phase2-integration.ts`), and
+    // EXPERIMENTAL requires a roadmap, where a scan of every planning doc returned
+    // ZERO hits for hot-reload file watching against 145 control hits in the same
+    // files. Real watching lives where it is implemented: `chokidar` is a
+    // dependency of `@objectstack/metadata`, `@objectstack/metadata-fs` and
+    // `@objectstack/cli`, never of `@objectstack/core`.
+    //
+    // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
+    // removal ships on the 17.x line (launch-window convention: accept-set
+    // narrowings ride minor releases) and the prescription lives at the major
+    // boundary where `migrate meta` users look — the same grading #12340 used one
+    // day earlier in this module.
+    //
+    // Tombstoned with `retiredKey()` in `HotReloadConfigSchema` (the surface
+    // baseline line carries `[RETIRED]`). Deliberately NO D2 conversion: the chain
+    // walks a normalized STACK, and `HotReloadConfig` is not an authorable surface
+    // — no metadata-type binding, stack collection or manifest embed ever carried
+    // it, and nothing in the tree parses `HotReloadConfigSchema` outside its own
+    // unit test — so a conversion would be a transform with no seam that ever
+    // runs. The D3 semantic entry `hot-reload-watch-placeholder-retired` is the
+    // declaration, and the registration-time refusal in
+    // `HotReloadManager.registerPlugin` is the door for the audience that exists.
+    'kernel/HotReloadConfig:watchPatterns',
     // #10724 — ADR-0049 enforce-or-remove on the plugin manifest's `contributes`
     // block; one of NINE members tombstoned together. Census, registration major,
     // and the why-no-D2-conversion reasoning are recorded once in the sibling
@@ -7510,6 +7760,165 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // The prescription reaches authors through the tombstone (`tsc` + the parse)
     // and the D3 semantic entry `metadata-plugin-additional-types-retired`.
     'kernel/MetadataPluginConfig:additionalTypes',
+    // #12032 — ADR-0049 enforce-or-remove, one class over from #12428 (PR #12571)
+    // and #12340 (PR #12425) in the same host-driven lifecycle library, and for a
+    // sharper reason than either: this key HAD a reader that acted, and what it did
+    // was not what the key declared.
+    //
+    // `PluginHealthMonitor.attemptRestart` called `plugin.destroy()` and stopped.
+    // The comment above the call read "Call destroy and init to restart"; `init`
+    // appeared in `health-monitor.ts` ONLY inside that comment. What a plugin got
+    // was destroy -> `logger.info('Plugin restarted')` -> status `recovering` ->
+    // periodic checks continuing against the destroyed instance, which the default
+    // check (`{ name: 'plugin-loaded', status: 'passed' }`, used whenever no
+    // `checkMethod` resolves) passes forever. So the TERMINAL report on a
+    // destroyed, never-re-initialised plugin was `healthy` — reproduced before
+    // anything was changed, at ee3595cefd with `successThreshold: 3`:
+    //
+    //   round 1 (failing): status=failed     destroyed=0 alive=true
+    //   after backoff:     status=recovering destroyed=1 alive=false
+    //   recovery round 3:  status=healthy    destroyed=1 alive=false
+    //
+    // #11955 made that MORE convincing rather than less: reaching `healthy` now
+    // costs `successThreshold` consecutive passing rounds.
+    //
+    // Neither of ADR-0049's other two states was available. ENFORCE would have to
+    // BUILD the restart, and the class cannot host one: `Plugin.init(ctx)` needs a
+    // `PluginContext`, and the only two `plugin.init(...)` call sites in the tree
+    // are the kernel's own boot loops (`kernel-base.ts:202`, `kernel.ts:607`), both
+    // over the full plugin list with a context that is `private` on `ObjectKernel`
+    // and `protected` on `KernelBase` — no host can obtain one (positive control:
+    // the same scan resolves five real non-test `plugin.destroy()` call sites, so
+    // it sees lifecycle drivers). Building a per-plugin re-init API plus a host
+    // callback for a caller that does not exist is the speculation ADR-0049's
+    // staged decision names as the wrong default at this milestone. EXPERIMENTAL
+    // requires a roadmap, and a scan of the whole `docs/` planning + ADR corpus
+    // returned ZERO mentions of plugin auto-restart against 118 control hits for
+    // "health" and 13 for "hot reload" in the same corpus.
+    //
+    // The three keys retire together: with no restart, "Maximum restart attempts
+    // before giving up" and "Backoff strategy for restart delays" have nothing left
+    // to be the vocabulary OF — the same test that took `distributedConfig` out
+    // with the `stateStrategy` value it was documented as being required for.
+    //
+    // Tombstoned with `retiredKey()` rather than deleted, for #12428's reason: a
+    // key leaving a SURVIVING def has no route-3 exit, and `PluginHealthCheckSchema`
+    // is not `.strict()`, so a bare deletion would be a SILENT STRIP (#3733,
+    // ADR-0104). Deliberately NO D2 conversion: the chain walks a normalized STACK,
+    // and `PluginHealthCheck` is not an authorable surface — no metadata-type
+    // binding, stack collection or manifest embed ever carried it, and nothing in
+    // the tree parses `PluginHealthCheckSchema` outside its own unit test — so a
+    // conversion would be a transform with no seam that ever runs. The D3 semantic
+    // entry `plugin-auto-restart-never-reinitialised` is the declaration, and the
+    // registration-time refusal in `PluginHealthMonitor.registerPlugin` is the door
+    // for the audience that exists.
+    'kernel/PluginHealthCheck:autoRestart',
+    // #12032 — ADR-0049 enforce-or-remove, one class over from #12428 (PR #12571)
+    // and #12340 (PR #12425) in the same host-driven lifecycle library, and for a
+    // sharper reason than either: this key HAD a reader that acted, and what it did
+    // was not what the key declared.
+    //
+    // `PluginHealthMonitor.attemptRestart` called `plugin.destroy()` and stopped.
+    // The comment above the call read "Call destroy and init to restart"; `init`
+    // appeared in `health-monitor.ts` ONLY inside that comment. What a plugin got
+    // was destroy -> `logger.info('Plugin restarted')` -> status `recovering` ->
+    // periodic checks continuing against the destroyed instance, which the default
+    // check (`{ name: 'plugin-loaded', status: 'passed' }`, used whenever no
+    // `checkMethod` resolves) passes forever. So the TERMINAL report on a
+    // destroyed, never-re-initialised plugin was `healthy` — reproduced before
+    // anything was changed, at ee3595cefd with `successThreshold: 3`:
+    //
+    //   round 1 (failing): status=failed     destroyed=0 alive=true
+    //   after backoff:     status=recovering destroyed=1 alive=false
+    //   recovery round 3:  status=healthy    destroyed=1 alive=false
+    //
+    // #11955 made that MORE convincing rather than less: reaching `healthy` now
+    // costs `successThreshold` consecutive passing rounds.
+    //
+    // Neither of ADR-0049's other two states was available. ENFORCE would have to
+    // BUILD the restart, and the class cannot host one: `Plugin.init(ctx)` needs a
+    // `PluginContext`, and the only two `plugin.init(...)` call sites in the tree
+    // are the kernel's own boot loops (`kernel-base.ts:202`, `kernel.ts:607`), both
+    // over the full plugin list with a context that is `private` on `ObjectKernel`
+    // and `protected` on `KernelBase` — no host can obtain one (positive control:
+    // the same scan resolves five real non-test `plugin.destroy()` call sites, so
+    // it sees lifecycle drivers). Building a per-plugin re-init API plus a host
+    // callback for a caller that does not exist is the speculation ADR-0049's
+    // staged decision names as the wrong default at this milestone. EXPERIMENTAL
+    // requires a roadmap, and a scan of the whole `docs/` planning + ADR corpus
+    // returned ZERO mentions of plugin auto-restart against 118 control hits for
+    // "health" and 13 for "hot reload" in the same corpus.
+    //
+    // The three keys retire together: with no restart, "Maximum restart attempts
+    // before giving up" and "Backoff strategy for restart delays" have nothing left
+    // to be the vocabulary OF — the same test that took `distributedConfig` out
+    // with the `stateStrategy` value it was documented as being required for.
+    //
+    // Tombstoned with `retiredKey()` rather than deleted, for #12428's reason: a
+    // key leaving a SURVIVING def has no route-3 exit, and `PluginHealthCheckSchema`
+    // is not `.strict()`, so a bare deletion would be a SILENT STRIP (#3733,
+    // ADR-0104). Deliberately NO D2 conversion: the chain walks a normalized STACK,
+    // and `PluginHealthCheck` is not an authorable surface — no metadata-type
+    // binding, stack collection or manifest embed ever carried it, and nothing in
+    // the tree parses `PluginHealthCheckSchema` outside its own unit test — so a
+    // conversion would be a transform with no seam that ever runs. The D3 semantic
+    // entry `plugin-auto-restart-never-reinitialised` is the declaration, and the
+    // registration-time refusal in `PluginHealthMonitor.registerPlugin` is the door
+    // for the audience that exists.
+    'kernel/PluginHealthCheck:maxRestartAttempts',
+    // #12032 — ADR-0049 enforce-or-remove, one class over from #12428 (PR #12571)
+    // and #12340 (PR #12425) in the same host-driven lifecycle library, and for a
+    // sharper reason than either: this key HAD a reader that acted, and what it did
+    // was not what the key declared.
+    //
+    // `PluginHealthMonitor.attemptRestart` called `plugin.destroy()` and stopped.
+    // The comment above the call read "Call destroy and init to restart"; `init`
+    // appeared in `health-monitor.ts` ONLY inside that comment. What a plugin got
+    // was destroy -> `logger.info('Plugin restarted')` -> status `recovering` ->
+    // periodic checks continuing against the destroyed instance, which the default
+    // check (`{ name: 'plugin-loaded', status: 'passed' }`, used whenever no
+    // `checkMethod` resolves) passes forever. So the TERMINAL report on a
+    // destroyed, never-re-initialised plugin was `healthy` — reproduced before
+    // anything was changed, at ee3595cefd with `successThreshold: 3`:
+    //
+    //   round 1 (failing): status=failed     destroyed=0 alive=true
+    //   after backoff:     status=recovering destroyed=1 alive=false
+    //   recovery round 3:  status=healthy    destroyed=1 alive=false
+    //
+    // #11955 made that MORE convincing rather than less: reaching `healthy` now
+    // costs `successThreshold` consecutive passing rounds.
+    //
+    // Neither of ADR-0049's other two states was available. ENFORCE would have to
+    // BUILD the restart, and the class cannot host one: `Plugin.init(ctx)` needs a
+    // `PluginContext`, and the only two `plugin.init(...)` call sites in the tree
+    // are the kernel's own boot loops (`kernel-base.ts:202`, `kernel.ts:607`), both
+    // over the full plugin list with a context that is `private` on `ObjectKernel`
+    // and `protected` on `KernelBase` — no host can obtain one (positive control:
+    // the same scan resolves five real non-test `plugin.destroy()` call sites, so
+    // it sees lifecycle drivers). Building a per-plugin re-init API plus a host
+    // callback for a caller that does not exist is the speculation ADR-0049's
+    // staged decision names as the wrong default at this milestone. EXPERIMENTAL
+    // requires a roadmap, and a scan of the whole `docs/` planning + ADR corpus
+    // returned ZERO mentions of plugin auto-restart against 118 control hits for
+    // "health" and 13 for "hot reload" in the same corpus.
+    //
+    // The three keys retire together: with no restart, "Maximum restart attempts
+    // before giving up" and "Backoff strategy for restart delays" have nothing left
+    // to be the vocabulary OF — the same test that took `distributedConfig` out
+    // with the `stateStrategy` value it was documented as being required for.
+    //
+    // Tombstoned with `retiredKey()` rather than deleted, for #12428's reason: a
+    // key leaving a SURVIVING def has no route-3 exit, and `PluginHealthCheckSchema`
+    // is not `.strict()`, so a bare deletion would be a SILENT STRIP (#3733,
+    // ADR-0104). Deliberately NO D2 conversion: the chain walks a normalized STACK,
+    // and `PluginHealthCheck` is not an authorable surface — no metadata-type
+    // binding, stack collection or manifest embed ever carried it, and nothing in
+    // the tree parses `PluginHealthCheckSchema` outside its own unit test — so a
+    // conversion would be a transform with no seam that ever runs. The D3 semantic
+    // entry `plugin-auto-restart-never-reinitialised` is the declaration, and the
+    // registration-time refusal in `PluginHealthMonitor.registerPlugin` is the door
+    // for the audience that exists.
+    'kernel/PluginHealthCheck:restartBackoff',
     // #9220 — ADR-0049 enforce-or-remove at ELEMENT grain. `element:filter` never
     // had a renderer or reader anywhere: objectui registers none (its
     // renderers/basic/elements.tsx header deferred the element to "owning plugins"
@@ -8191,6 +8600,32 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // narrowings ride minor releases) and the prescription lives at the major
     // boundary where `migrate meta` users look (the #8586 / PR #8702 precedent).
     'kernel/AdvancedPluginLifecycleConfig',
+    // #12007 — kernel/cli-extension.zod.ts
+    // `CLICommandContributionSchema` / `CLICommandContribution`, retired whole
+    // (ADR-0049 enforce-or-remove; triage graded 2026-08-25, the exported
+    // orphan-value-schema class — #3950). The pair described a "CLI Command
+    // Contribution declaration in the manifest" and claimed retention "for
+    // describing command metadata in plugin manifests" — but after #10724
+    // tombstoned `manifest.contributes.commands`, no manifest surface could
+    // legally carry these entries: the exported schema advertised a shape whose
+    // only declared carrier rejects it. The manifest never referenced this schema
+    // even before the tombstone (its inline `commands` item schema was an
+    // independent duplicate). Zero consumers outside spec's own test and
+    // generated artifacts, measured at the retirement's base commit (146f448a5)
+    // with positive controls in objectstack, objectui (pinned sha) and cloud.
+    // What ACTUALLY registers CLI commands is oclif's native plugin discovery —
+    // `OclifPluginConfigSchema` (same module, live `package.json` `oclif`
+    // section) SURVIVES, as does the module docblock's Commander.js migration
+    // prose, which the `contributes.commands` tombstone cites. Route 3: no
+    // carrier key, no authored document for a D2 conversion to rewrite, so no
+    // tombstone and no conversion — this table plus the D3 semantic entry
+    // `cli-command-contribution-retired` ARE the declaration.
+    //
+    // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
+    // removal ships on the 17.x line (launch-window convention: accept-set
+    // narrowings ride minor releases) and the prescription lives at the major
+    // boundary where `migrate meta` users look (the #8586 / PR #8702 precedent).
+    'kernel/CLICommandContribution',
     // #12340 — kernel/plugin-lifecycle-advanced.zod.ts
     // `DistributedStateConfigSchema`, retired whole (ADR-0049 enforce-or-remove).
     //
