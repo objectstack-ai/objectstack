@@ -144,7 +144,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import type { Readable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
-import { childEnv, E2E_SECRET_KEY } from './helpers/serve-process.js';
+import { childEnv, E2E_SECRET_KEY, portContentionError, reservePort } from './helpers/serve-process.js';
 
 /** What `spawn(..., { stdio: ['ignore', 'pipe', 'pipe'] })` actually returns — no `stdin`. */
 type ProbeChild = ChildProcessByStdio<null, Readable, Readable>;
@@ -197,11 +197,6 @@ export default {
 let dir: string;
 const children: ProbeChild[] = [];
 
-/** A random high port, so a run never contends with another agent's dev server on this host. */
-function randomPort(): number {
-  return 41000 + Math.floor(Math.random() * 19000);
-}
-
 interface OriginCheckResult {
   status: number;
   body: any;
@@ -218,7 +213,19 @@ interface OriginCheckResult {
  * stringifying them, so this is not the same as `NODE_ENV=''`.
  */
 async function probeOriginCheck(env: Record<string, string | undefined>): Promise<OriginCheckResult> {
-  const port = randomPort();
+  // A BIND-PROBED port, from the one draw this directory has (#12441). It used
+  // to be a blind `41000 + Math.random() * 19000` under a docblock claiming "a
+  // run never contends with another agent's dev server on this host" — and this
+  // very file is where that claim was falsified, with `✗ Port 49402 is already
+  // in use`. ⚠️ `reservePort()` narrows that race, it does not close it; the
+  // `exit` handler below is what makes the residual loss legible. Read
+  // `reservePort()`'s own docblock before trusting either half of that.
+  //
+  // ⛔ This must stay a DRAWN port, not a fixed one: `serve` is driven here with
+  // `NODE_ENV` unset, i.e. into its production posture, where it refuses to
+  // auto-select a different port on purpose (#11113) — so a pinned port would
+  // convert an unlikely collision into a certain one.
+  const port = reservePort();
   const untrustedOriginPort = port + 1;
   writeFileSync(join(dir, 'objectstack.config.ts'), configFor(port), 'utf8');
 
@@ -307,7 +314,21 @@ async function probeOriginCheck(env: Record<string, string | undefined>): Promis
     child.stderr.on('data', (d) => { err += String(d); onData(); });
     child.on('exit', (code) => {
       clearTimeout(timer);
-      readyReject(new Error(`serve exited ${code} before "Server is ready"\n--- stdout ---\n${out}\n--- stderr ---\n${err}`));
+      // ⭐ Port contention gets its OWN failure, before the generic one (#12441).
+      // The generic message — `serve exited 1 before "Server is ready"` — is
+      // literally what a lost port race produced in this file, and it costs a
+      // reader a round to work out that a file about NODE_ENV defaulting just
+      // failed for a reason that has nothing to do with NODE_ENV. `serve` in
+      // production posture prints `✗ Port <n> is already in use.` and exits 1,
+      // so the evidence is already in `err` — it just was not being read.
+      readyReject(
+        portContentionError(
+          out + err,
+          'os serve (bin/run.js, NODE_ENV unset ⇒ production ⇒ no auto-select)',
+          port,
+        )
+        ?? new Error(`serve exited ${code} before "Server is ready"\n--- stdout ---\n${out}\n--- stderr ---\n${err}`),
+      );
     });
   });
 

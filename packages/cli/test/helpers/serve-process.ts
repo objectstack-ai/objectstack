@@ -10,7 +10,7 @@
  * rather than re-implements it.
  */
 
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -20,9 +20,202 @@ const HERE = resolve(fileURLToPath(import.meta.url), '..');
 export const CLI = resolve(HERE, '../../bin/run-dev.js');
 export const TSX = resolve(HERE, '../../../../node_modules/.bin/tsx');
 
-/** A random high port, so a run never contends with a dev server on this host. */
+/**
+ * The bind probe, run in a throwaway Node process: bind `0.0.0.0:<want>`, print
+ * the port the kernel actually assigned, close. `want = 0` asks the kernel to
+ * choose. Returns `null` when the bind failed — which for a specific `want`
+ * means "that port is taken", and for `0` means the probe itself malfunctioned.
+ *
+ * ## Why a SUBPROCESS rather than an in-process `net.createServer()`
+ *
+ * `net.Server#listen()` reports its assigned port ASYNCHRONOUSLY. Measured on
+ * this container (node 22.22.2): `server.address()` is `null` on the very next
+ * line after `listen(0, '0.0.0.0')`, so an in-process probe can only be
+ * `async`. `randomPort()` below is called from ~14 sites across 8 other files
+ * in this directory, every one of them passing it straight into a `spawn()`
+ * argument list; turning it async would edit all of them for no behavioural
+ * gain. A `node -e` child does the same bind and is synchronous from this
+ * process's point of view.
+ *
+ * The price, measured on the container this suite runs in: ~72-75 ms per draw
+ * (10-draw means, `NODE_OPTIONS` inherited 74.7 ms, cleared 71.7 ms). Against
+ * this package's own measured per-spawn floor — 2.9 s for `node bin/run.js
+ * --version`, 6.5 s for the tsx source entry — one draw is ~2.6% of the
+ * cheapest thing it precedes, and ~14 draws are ~1 s against a suite whose wall
+ * was 495.8 s when `vitest.config.ts` last measured it (~0.2%).
+ *
+ * `NODE_OPTIONS` is cleared for the probe: it is a bare `net` bind, so nothing
+ * this suite loads applies to it, and an inherited `--import` hook would run in
+ * it for no reason.
+ */
+function probeBind(want: number): number | null {
+  const src = [
+    "const net = require('node:net');",
+    'const want = Number(process.argv[1] || 0);',
+    'const s = net.createServer();',
+    "s.on('error', () => process.exit(3));",
+    "s.listen(want, '0.0.0.0', () => {",
+    '  const p = s.address().port;',
+    '  s.close(() => process.stdout.write(String(p)));',
+    '});',
+  ].join('\n');
+  try {
+    const out = execFileSync(process.execPath, ['-e', src, String(want)], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+      timeout: 30_000,
+      env: { ...process.env, NODE_OPTIONS: '' },
+    });
+    const port = Number(out.trim());
+    return Number.isInteger(port) && port > 0 ? port : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The ONE port draw for every e2e spawn in this directory — a real bind probe,
+ * not a blind `Math.random()` (#12441).
+ *
+ * Listen on `0.0.0.0:0`, read the port the kernel assigned, close the listener,
+ * return the port for the caller to hand to `os serve`.
+ *
+ * ## ⚠️ What this guarantees, and what it does NOT — both halves, deliberately
+ *
+ * It is **still TOCTOU**. The listener is closed before `serve` binds, so the
+ * port is unheld across the close-to-spawn gap and this can still lose a race.
+ * What it actually buys:
+ *
+ *   • It never draws a port that is **already held**. A blind draw picks a
+ *     number out of a range without asking anyone, so a neighbouring agent's
+ *     dev server — bound for that process's entire lifetime, minutes or hours —
+ *     is a live target on every single draw. The kernel does not assign a port
+ *     that is currently bound, so that whole population is off the table.
+ *   • It narrows the window from "the whole run" to "one close-to-spawn gap"
+ *     (milliseconds). Only something that binds *inside* that gap can take it.
+ *   • It removes this directory's second collision source. There used to be
+ *     three independent draws over two overlapping ranges (41000-60000 here,
+ *     40000-60000 in `serve-app-anchored-optional-import.e2e.test.ts`), which
+ *     could collide with EACH OTHER under `--maxWorkers > 1`, not only with a
+ *     neighbour. There is one draw now and it asks the kernel.
+ *
+ * ⛔ The comment this replaced claimed "a run never contends with another
+ * agent's dev server on this host". That unqualified negative is the reason
+ * nobody re-examined the draw until a real run in this fleet went red on
+ * `✗ Port 49402 is already in use`. **Do not write another one here.** The
+ * residual race is real and unclosed; what pays for it is
+ * `portContentionError()` below, which makes the residual failure SAY it is a
+ * port race instead of `serve exited 1 before "Server is ready"`.
+ *
+ * ⚠️ One property that is worse than the old range and is stated rather than
+ * hidden: the kernel assigns from its ephemeral range
+ * (`/proc/sys/net/ipv4/ip_local_port_range`, 32768-60999 on this container),
+ * which is also where it draws source ports for OUTBOUND connections. The old
+ * 40000-60000 range overlapped that anyway, and the probe's win — never
+ * handing out a port some listener already holds — is the larger term. Nothing
+ * here makes the port immune once it is handed over.
+ */
+export function reservePort(): number {
+  // Retried, because a `null` for `want = 0` is a malfunctioning probe (the
+  // kernel cannot answer "busy" to a request for any free port), and turning a
+  // transient subprocess hiccup into a hard failure would replace one flake
+  // class with another.
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const port = probeBind(0);
+    if (port !== null) return port;
+  }
+  throw new Error(
+    'bind probe failed: could not obtain a free TCP port from the kernel after 3 attempts '
+    + '(listen on 0.0.0.0:0 in a `node -e` child). This is a host problem, not a verdict '
+    + 'about the code under test.',
+  );
+}
+
+/**
+ * Is `port` bindable RIGHT NOW? The **negative arm** of the same probe.
+ *
+ * Exported so `serve-port-bind-probe.test.ts` can prove the instrument is able
+ * to answer NO: a probe that reports "free" for a port the test is holding open
+ * is not an instrument, and every claim `reservePort()` makes rests on this
+ * being a real bind rather than a shape that always succeeds.
+ */
+export function portIsFree(port: number | string): boolean {
+  return probeBind(Number(port)) !== null;
+}
+
+/**
+ * `reservePort()` as a string, for the call sites that pass a port straight
+ * into a `spawn()` argument list.
+ *
+ * ⚠️ The name is kept — and is now a slight misnomer, which is cheaper than the
+ * alternative. It is `String(reservePort())` and nothing else; the draw, the
+ * guarantees and the residual race are all documented on `reservePort()` above
+ * and there is no second mechanism hiding behind this name. Renaming it would
+ * be a rename-only edit across the 8 other files in this directory that call
+ * it, which is churn this change deliberately does not spend.
+ */
 export function randomPort(): string {
-  return String(40000 + Math.floor(Math.random() * 20000));
+  return String(reservePort());
+}
+
+/** How a boot says the port was taken — `serve.ts`'s own diagnostic, then the raw kernel error. */
+const PORT_TAKEN_PATTERNS = [
+  /Port (\d+) is already in use/,
+  /EADDRINUSE[^\n]*?:(\d+)/,
+];
+
+/**
+ * ⭐ Turn a boot that died on a taken port into a failure that SAYS SO (#12441
+ * ruling ④).
+ *
+ * Returns an `Error` when `output` shows the child could not bind, else `null`.
+ *
+ * ## Why this exists, and why it is the half that pays
+ *
+ * The measured cost of a lost port race here is not the lost run. It is *"a red
+ * suite that is not reproducible, on a test file the reader has no reason to
+ * connect to a port"* — the failure surfaced as `serve exited 1 before "Server
+ * is ready"` inside a file about `NODE_ENV` defaulting, and it cost an agent a
+ * round to decide whether the failure belonged to the change under test. A fix
+ * that only lowers the probability leaves that cost exactly where it was, just
+ * rarer and therefore even more surprising when it lands.
+ *
+ * So the port number is read out of the CHILD's own diagnostic rather than
+ * passed in: whatever the harness thought it reserved, the number the child
+ * printed is the one that was contended. `probedPort` is threaded in only to
+ * say, in the message, that the port WAS probed free moments earlier — which is
+ * what tells the reader this is the residual TOCTOU gap and not a harness that
+ * never looked.
+ */
+export function portContentionError(
+  output: string,
+  what: string,
+  probedPort?: number | string,
+): Error | null {
+  let port: string | undefined;
+  for (const pattern of PORT_TAKEN_PATTERNS) {
+    const match = pattern.exec(output);
+    if (match) {
+      port = match[1];
+      break;
+    }
+  }
+  if (port === undefined) return null;
+  const probed = probedPort === undefined
+    ? ''
+    : `This harness bind-probed ${probedPort} and the kernel reported it FREE moments earlier `
+      + '(`reservePort()` in `test/helpers/serve-process.ts`), so this is the residual '
+      + 'close-to-spawn gap that probe narrows but does not close.\n';
+  return new Error(
+    `PORT CONTENTION on port ${port}: \`${what}\` could not bind it.\n`
+    + probed
+    + 'Several agents share one container in this fleet, so another process took the port '
+    + 'between the probe and the spawn.\n'
+    + '⛔ This is a HOST race, not a verdict about the code under test. Do not spend a round '
+    + 'deciding whether your change caused it — re-run this file in isolation. If it '
+    + 'reproduces there, the port is genuinely held and the message above names it.\n'
+    + `--- child output ---\n${output}`,
+  );
 }
 
 /**
@@ -215,11 +408,36 @@ export interface ServeRun {
 }
 
 /**
+ * The port a caller asked for, read back out of its own `args`.
+ *
+ * `runServe` takes the port as an opaque argv element rather than a parameter,
+ * so this is how it learns which port it probed — for the message only, never
+ * for the verdict (`portContentionError` reads the contended port out of the
+ * child's own diagnostic). `undefined` when the caller passed no `--port`,
+ * which just drops one sentence from the message.
+ */
+function portOf(args: string[]): string | undefined {
+  for (const flag of ['--port', '-p']) {
+    const at = args.indexOf(flag);
+    if (at !== -1 && at + 1 < args.length) return args[at + 1];
+  }
+  return undefined;
+}
+
+/**
  * Boot `os serve` in `cwd`, collect its output until `waitFor` matches (or the
  * process exits), then stop it. Never leaves the child running.
  *
  * A boot that DIES still has to have said why, so an early exit resolves rather
  * than rejects — the caller's assertions read what it printed on the way down.
+ *
+ * ⭐ ONE narrow exception to that, and it is deliberate (#12441): a boot that
+ * died because it could not BIND rejects, with `portContentionError()`'s
+ * message. That death says nothing about the code under test, and letting it
+ * resolve hands the caller an output buffer whose assertions then fail on
+ * whatever marker is missing — which is the illegible shape the card measured.
+ * No test in this directory drives a deliberately-busy port, so nothing is
+ * asserting on the resolved form of it.
  *
  * `waitFor` is matched against **stdout and stderr together** (#7915). `serve`
  * writes every human line — banner, boot progress, kernel logs — to stderr now,
@@ -271,8 +489,20 @@ export function runServe(
       } catch {
         /* already gone */
       }
-      if (err) rejectRun(err);
-      else resolveRun({ stdout, stderr });
+      if (err) {
+        rejectRun(err);
+        return;
+      }
+      const contended = portContentionError(
+        stdout + stderr,
+        'os serve (bin/run-dev.js, via runServe)',
+        portOf(args),
+      );
+      if (contended) {
+        rejectRun(contended);
+        return;
+      }
+      resolveRun({ stdout, stderr });
     };
 
     const timer = setTimeout(
