@@ -37,16 +37,22 @@ export const TSX = resolve(HERE, '../../../../node_modules/.bin/tsx');
  * gain. A `node -e` child does the same bind and is synchronous from this
  * process's point of view.
  *
- * The price, measured on the container this suite runs in: ~72-75 ms per draw
- * (10-draw means, `NODE_OPTIONS` inherited 74.7 ms, cleared 71.7 ms). Against
- * this package's own measured per-spawn floor — 2.9 s for `node bin/run.js
- * --version`, 6.5 s for the tsx source entry — one draw is ~2.6% of the
- * cheapest thing it precedes, and ~14 draws are ~1 s against a suite whose wall
- * was 495.8 s when `vitest.config.ts` last measured it (~0.2%).
+ * The price, measured on the container this suite runs in: ~38 ms per draw
+ * (5-draw mean, empty child env — an inherited environment measured 74.7 ms,
+ * so the strip below roughly halves it too). Against this package's own
+ * measured per-spawn floor — 2.9 s for `node bin/run.js --version`, 6.5 s for
+ * the tsx source entry — one draw is ~1.3% of the cheapest thing it precedes,
+ * and ~14 draws are ~0.5 s against a suite whose wall was 495.8 s when
+ * `vitest.config.ts` last measured it (~0.1%).
  *
- * `NODE_OPTIONS` is cleared for the probe: it is a bare `net` bind, so nothing
- * this suite loads applies to it, and an inherited `--import` hook would run in
- * it for no reason.
+ * ⛔ The probe child gets an environment built from NOTHING — not
+ * `{ ...process.env, … }`, not even `childEnv()`. It is a bare `net` bind that
+ * reads no variable at all, so the whole runner environment is surplus, and a
+ * bulk copy into a spawn is the class `pnpm check:cli-test-child-env` closes in
+ * this directory (a spread here is a real finding under that gate, not a false
+ * positive — measured: it takes this file from 0 to 1 over its ceiling). Not
+ * inheriting `NODE_OPTIONS` is the concrete win: an `--import` hook meant for
+ * the suite would otherwise load inside every port draw.
  */
 function probeBind(want: number): number | null {
   const src = [
@@ -64,7 +70,7 @@ function probeBind(want: number): number | null {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
       timeout: 30_000,
-      env: { ...process.env, NODE_OPTIONS: '' },
+      env: {},
     });
     const port = Number(out.trim());
     return Number.isInteger(port) && port > 0 ? port : null;
