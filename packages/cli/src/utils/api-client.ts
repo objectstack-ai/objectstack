@@ -16,7 +16,7 @@ export interface ApiClientOptions {
    */
   token?: string;
   /**
-   * Explicit project id. Overrides the stored `activeEnvironmentId` from
+   * Explicit environment id. Overrides the stored `activeEnvironmentId` from
    * `~/.objectstack/credentials.json` (written by `os environments switch`).
    */
   environmentId?: string;
@@ -52,7 +52,7 @@ export async function createApiClient(options: ApiClientOptions = {}): Promise<A
   // Resolve authentication token
   let token = options.token || process.env.OS_TOKEN;
 
-  // Resolve active project id (explicit > env > stored credentials)
+  // Resolve active environment id (explicit > env > stored credentials)
   let environmentId = options.environmentId || process.env.OS_ENVIRONMENT_ID;
 
   // If URL or token is missing, try to load from stored credentials

@@ -10,11 +10,11 @@ import { formatOutput } from '../../utils/output-formatter.js';
 
 /**
  * `os environments bind` — bind a locally-compiled artifact to an existing
- * multi-environment server project.
+ * multi-environment server environment.
  *
  * Equivalent to `PATCH /api/v1/cloud/environments/<id>` with
  * `metadata.artifact_path = <absolute-path>`. The server's
- * AppBundleResolver picks up the path on the next per-project kernel
+ * AppBundleResolver picks up the path on the next per-environment kernel
  * boot, registering the bundle's objects, views, and seed data.
  *
  * Use `--build` to compile `objectstack.config.ts` first so the artifact

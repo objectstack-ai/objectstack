@@ -6,13 +6,13 @@ import { createApiClient, requireAuth } from '../../utils/api-client.js';
 import { readAuthConfig, writeAuthConfig } from '../../utils/auth-config.js';
 
 /**
- * `os environments switch <id>` — set the active project for this CLI session.
+ * `os environments switch <id>` — set the active environment for this CLI session.
  *
  * Calls `POST /api/v1/cloud/environments/:id/activate` to update the
  * server-side session, then persists `activeEnvironmentId` into
  * `~/.objectstack/credentials.json` so subsequent CLI commands (and any
  * client they create via `createApiClient`) automatically target this
- * project.
+ * environment.
  */
 export default class EnvironmentsSwitch extends Command {
   static override description = 'Activate an environment for subsequent CLI calls';

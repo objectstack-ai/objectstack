@@ -36,6 +36,44 @@ const SPEC_SRC = path.resolve(__dirname, '../src');
 const SKILLS_DIR = path.resolve(REPO_ROOT, 'skills');
 const SPEC_PKG = '@objectstack/spec';
 
+/**
+ * ## The dispatch-gates declaration — the `ROOT_DIR_WATCH_HINTS` idiom (#12310)
+ *
+ * `scripts/pm/dispatch-gates.mjs` derives WHICH gates a card must run by matching the
+ * path literals in each gate's source against the card's changed files. Every literal it
+ * could recover from THIS file was an import specifier (`lib/export-list`,
+ * `@objectstack/spec`, the `*.zod.ts` entries of SKILL_MAP) — none of them a repo path —
+ * plus the emitted-surface string below, which reaches the 9 `_index.md` files this
+ * generator writes and nothing else. `SKILLS_DIR` resolves to a bare single-segment word
+ * that `hintCovers` REFUSES as too generic. So #12310 measured this gate as one no card
+ * can name: the gate that keeps skill cross-references honest, scoring the same quiet
+ * green for every card in the tree, `skills/**` cards included.
+ *
+ * ⚠️ Until #12300 there was nothing honest to write here. The real population —
+ * every file inside each managed `references/` folder — collapsed to a double slash no
+ * tree can hold (#12246), so the only spellable claim was the bare root. #12300 taught
+ * `hintCovers` to MATCH a glob in a non-final segment instead of collapsing it, and the
+ * spelling below is now live: measured at 12 of the 12 tracked reference files, 100%
+ * precise and complete.
+ *
+ * ⛔ Only what this generator actually reads belongs here, and it reads the FOLDER, not
+ * just its own output: `manageDir(refsDir, ownsReferenceEntry(refsDir))` enumerates each
+ * `skills/<name>/references/` and prunes it wholesale, so hand-written notes and
+ * `react-blocks.md` are inputs to the `--check` verdict too. Declaring only the
+ * `_index.md` files would under-name it by three; declaring the bare `skills` root would
+ * name this gate for every SKILL.md and every eval fixture it never opens — a fabricated
+ * lead, which `hintCovers` prices above the silence it would cure.
+ *
+ * ⛔ It must be spelled as a LITERAL, not built from `SKILLS_DIR` — the hint extractor
+ * reads source text, so a computed path would produce no hint and leave this gate exactly
+ * as invisible. This generator carries no `--self-test` of its own, so the coupling is
+ * held from the other side, in `scripts/pm/bare-root-worklist.mjs`: that file's recorded
+ * verdict for this row carries a LIVENESS and PRECISION pin over the live corpus, and
+ * reds if this declaration ever over-names or goes dead. A declaration that can drift
+ * from the scan is worse than none — it replaces a silent gate with a lying one.
+ */
+export const ROOT_DIR_WATCH_HINTS = ['skills/*/references/**'];
+
 const CHECK = process.argv.includes('--check');
 const { emit, manageDir, flush } = createSink({ check: CHECK, repoRoot: REPO_ROOT });
 
