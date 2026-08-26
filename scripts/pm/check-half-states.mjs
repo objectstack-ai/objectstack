@@ -5677,6 +5677,359 @@ export function h34ClaimShapedNonCanonicalSeparator(issue, commentBodies) {
 }
 
 // ---------------------------------------------------------------------------
+// H35 — a gate label REMOVED with no matching review-chain evidence (#11881).
+//
+// H31 above compares the gate's two carriers as they stand NOW and says, in its
+// own header, exactly what it cannot do: 「闸门被剥不是红灯是放行」 — a stripped
+// gate is a GREEN light, and 「被剥」 and 「从未挂过」 are indistinguishable in
+// the evidence. A label that was removed is ABSENT, and absence has two causes.
+// Every reader in this file until now has been a reader of STATE, so none of
+// them can separate the two. This row reads the EVENT that produced the state.
+//
+// The filing card's measurement is what makes the question concrete: on PR
+// #11470 the erasing actor was a SEAT (`claude[bot]`, 33 and 92 minutes after
+// the Auto Label job), not a workflow — so the whole-set-PUT gate that shipped
+// for that incident sweeps `.github/workflows/**`, `.github/actions/**` and
+// `scripts/**` and cannot reach the actor at all. Seats write through the API at
+// runtime. The compensating control the card asks for is DETECTION, and the
+// triage ruling (2026-08-25 14:58Z) scoped this card to exactly that: a
+// report-only patrol, adding detection and weakening no gate. ⛔ Escalation and
+// enforcement are a LATER card and deliberately absent here.
+//
+// ## The transport, and why this row costs no per-card fetch
+//
+// The obvious reading — fetch each card's timeline — is the trade this sweep
+// declines everywhere it arises (H15 declines it by name for the age of a
+// label; H16's header forbids "fixing" its proxy with one). This row does not
+// need it. `GET /repos/{repo}/issues/events` is a REPO-WIDE, newest-first
+// stream of the same `labeled`/`unlabeled` rows, and it carries the full issue
+// payload — number, state, CURRENT labels, body — on every row. So the whole
+// population is one paginated window of the shape this file already keeps three
+// of (H8's merged-PR window, H23's commit window, H22's closed-issue window),
+// and the per-card cost is zero. PRs arrive through it too: a pull request IS
+// an issue to this endpoint, which is what lets one window see both carriers of
+// a dual-carrier gate.
+//
+// MEASURED 2026-08-26T01:26:58Z, 160 pages: 16,000 events spanning
+// 2026-08-22T15:35:07Z … 2026-08-26T01:26:58Z = 3.41 days ⇒ ~4,691 events/day.
+//
+// ## What counts as "matching review-chain evidence" — and why it is STRUCTURAL
+//
+// `references/contract-review.md` names the evidence for a legitimate clear:
+// 「PASS 评论 + 标签缺失 + PR head 自复审后未动 = 已复审清标,不是被剥」. Read
+// literally that makes the discriminator a PASS COMMENT, and a predicate built
+// on it does not survive measurement. The verdicts are free prose and their
+// wording varies card to card — `**Contract review: PASS**`,
+// `**Contract review — PASS**`, `## Post-merge contract-review verdict: **PASS**`
+// were all live in one 18-hour window — so over the 35 card-side removals in
+// that window a strict marker matched 5 and a loose one matched 10. Widening
+// the regex until the rest match is the tolerant-consumer antipattern this repo
+// forbids by name, and its end state is worse than noise: an "any PASS token"
+// reading matched 26 of 35, including threads whose PASS was about something
+// else entirely — a check that can barely fail, which is the shape this file
+// exists to CATCH rather than to add.
+//
+// The protocol leaves a second, MACHINE-READABLE definition of the same event,
+// and this row uses that one: 「PR 与卡双载体同笔挂」…「PASS 双载体同笔清标」 —
+// the gate is hung in one stroke and cleared in one stroke, ACROSS BOTH
+// CARRIERS. A legitimate clear therefore leaves TWO removals, one per carrier,
+// seconds apart, by the same actor. A strip leaves ONE. That is a structural
+// invariant taken from the protocol's own words, not a parse of prose, and it
+// is the reason this row can decline the comment fetch as well as the timeline
+// fetch.
+//
+// ## The stroke window, derived from the measured gap distribution
+//
+// Same corpus, 206 gate removals: for each, the gap to the nearest removal on
+// the OPPOSITE carrier kind by the SAME actor.
+//
+//   ≤1s  50 | ≤2s  65 | ≤3s   5 | ≤5s  21 | ≤10s 16 | ≤30s 11 | ≤60s  4
+//   (60,90]s  0   ← the distribution is EMPTY here
+//   ≤120s 4 | ≤300s 1 | then 1000s, 3344s, … hours
+//
+// The same-stroke cluster ends at 101s and the next observation is 275s — a
+// 2.7x jump across an empty region. `H35_SAME_STROKE_SECONDS = 120` sits inside
+// that gap, so the threshold is a reading rather than a preference: no value
+// between 102 and 274 classifies the corpus differently. The tail past 120s is
+// hours wide, which is a different stroke by any reading. The batching is why
+// the cluster has width at all — the review Routine runs hourly and 「每小时一轮
+// 即天然攒批」, and a measured batch cleared 4 PRs + 4 cards in 14 seconds.
+//
+// ## Three outcomes, never two (#4690)
+//
+// A lone removal is NOT automatically a strip, and the corpus says so loudly.
+// 34 of 36 lone removals were gates that had been hung on the CARD ONLY — the
+// PR carrier never carried the label at all (verified per-PR: PR #12401 and PR
+// #12287, the two most recent, have zero gate events in their entire history).
+// For a single-carrier gate there is no second carrier to clear, so a lone
+// clear is exactly what a CORRECT clear looks like, and flagging it would
+// report the majority shape of the board as a violation.
+//
+// So the removal is judged against its own HANG, which the same window already
+// carries: a gate hung in a dual stroke and cleared in a lone one is the pair
+// written half way — that is the finding. A gate hung lone and cleared lone is
+// internally consistent and gets the file's UNJUDGED treatment instead of a
+// verdict: there is no structural evidence in EITHER direction, which is not
+// the same as evidence of correctness, and 「read, and it carries nothing」 vs
+// 「could not be read」 is the pair this whole file refuses to conflate. A
+// removal whose hang predates the window is `undated` and is counted, never
+// guessed at.
+//
+// ⚠️ The unjudgeable class is the honest residue of this card, and it is the
+// LARGER half: measured 29 over 3.41 days against 0 half-writes. Where the
+// dual-carrier discipline is actually followed it holds — 0 half-write clears
+// in 206 removals — and the exposure has moved to single-carrier gates, which
+// no carrier comparison (H31's or this one's) can ever adjudicate. Closing THAT
+// half needs a producer-side change (a canonical machine-readable verdict, or
+// the PR-side hang that 「PR 一存在即挂」 already requires), which is a decision
+// this row records rather than takes.
+//
+// ## What is reported, and the deliberate asymmetry in the two classes
+//
+// `half-write` is reported for any carrier, open or closed: a gate cleared half
+// way on a PR that then merged is the bypass that already happened, and the
+// population is ~0/day so it cannot flood the report. `unjudgeable` is reported
+// only while the carrier is still OPEN and the label still ABSENT — that is the
+// subset a reader can still act on, and it is the difference between 0.22 rows
+// per run and 8.5. Measured live subset: 3 cards over 3.41 days.
+//
+// A removal whose label is back is SILENT in both classes. That is the
+// read-back working — the card's own §2 names the 13-minute re-application on
+// #11470 as「consistent with an accidental loss caught by read-back」— and a row
+// for it would report the control functioning as a defect.
+//
+// Report-only, and emphatically: like H31 this row's subject is a GATE. ⛔ Never
+// a label written from this script — a sweeper that re-hung a review gate would
+// be issuing the review verdict, which is 自查放行.
+// ---------------------------------------------------------------------------
+
+/**
+ * The gate-semantic label family this row patrols.
+ *
+ * MEASURED on the live repo 2026-08-26 (`GET /labels`, 57 labels): the family
+ * has exactly ONE member. It is a LIST rather than the bare constant because
+ * the ruling names a family and the next gate label must join it here rather
+ * than fork a row — but the list is not speculative padding, and
+ * `needs-user-decision` deliberately stays out of it: it marks a card awaiting
+ * a maintainer, not a review chain with a dual-carrier hang/clear protocol, so
+ * the same-stroke invariant below is meaningless for it.
+ */
+export const GATE_SEMANTIC_LABELS = [CONTRACT_REVIEW_LABEL];
+
+/** Is this label one the row patrols? */
+export function isGateSemanticLabel(name) {
+  return GATE_SEMANTIC_LABELS.includes(String(name ?? ''));
+}
+
+/**
+ * How far apart two carrier writes can be and still be 「同笔」 — 120s, read
+ * out of the empty region between the measured 101s and 275s (header above).
+ */
+export const H35_SAME_STROKE_SECONDS = 120;
+
+/**
+ * The issue-event production rate, MEASURED — the divisor the window below
+ * uses, in the same executable shape H8's window uses `MEASURED_MERGES_PER_DAY`.
+ *
+ *   read     2026-08-26T01:26:58Z, `GET /repos/{repo}/issues/events`, 160 pages
+ *   window   2026-08-22T15:35:07Z … 2026-08-26T01:26:58Z  (3.41 days)
+ *   rows     16,000 events, of which 415 carried a gate-semantic label
+ *   rate     16,000 / 3.41 = ~4,691 events/day
+ */
+export const MEASURED_ISSUE_EVENTS_PER_DAY = 4691;
+
+/**
+ * The detection horizon — 12h, i.e. TWO patrol cycles at the 6-hourly cadence.
+ *
+ * One cycle would put every removal within one run of aging out, so a single
+ * failed or skipped run loses the finding permanently (this is a horizon, not a
+ * retry budget — H8's window states the same thing). Two cycles means every
+ * removal is seen by at least two consecutive runs. Past the horizon the
+ * finding is not delayed, it is gone: nothing else in this file reads events.
+ */
+export const H35_EVENT_WINDOW_HOURS = 12;
+
+/**
+ * The quota backstop, in pages of 100.
+ *
+ * At the measured rate the horizon needs `eventWindowPages()` = 24 pages; the
+ * cap is 30, which absorbs a day ~25% busier than the corpus before truncating.
+ * A run that HITS the cap has a short window, and the summary line says so —
+ * a truncated window must never read as a clean one (#4690).
+ */
+export const H35_EVENT_PAGE_CAP = 30;
+
+/**
+ * Pages of 100 needed to cover `hours` at the measured event rate. The
+ * arithmetic is executable rather than prose for the reason `windowCoverageDays`
+ * exists: a rate that moves must move the derivation with it, where a test can
+ * see it.
+ */
+export function eventWindowPages(
+  hours = H35_EVENT_WINDOW_HOURS,
+  ratePerDay = MEASURED_ISSUE_EVENTS_PER_DAY,
+  perPage = 100,
+) {
+  if (!Number.isFinite(hours) || !Number.isFinite(ratePerDay) || ratePerDay <= 0) return null;
+  if (!Number.isFinite(perPage) || perPage <= 0) return null;
+  return Math.ceil(((hours / 24) * ratePerDay) / perPage);
+}
+
+/** Every `labeled`/`unlabeled` event in a window that carries a gate-semantic label. */
+export function gateLabelEvents(events) {
+  return (events ?? []).filter(
+    (e) =>
+      e &&
+      (e.event === 'labeled' || e.event === 'unlabeled') &&
+      isGateSemanticLabel(e.label?.name),
+  );
+}
+
+/** Is this event row on a PULL REQUEST carrier rather than a card? */
+function eventOnPullRequest(event) {
+  return Boolean(event?.issue?.pull_request);
+}
+
+/** Does the carrier this event names still carry the label the event moved? */
+function carrierStillLabelled(event) {
+  const name = String(event?.label?.name ?? '');
+  return (event?.issue?.labels ?? []).some((l) => l?.name === name);
+}
+
+/**
+ * Is `event` half of a 「同笔」 dual-carrier stroke? True when the SIBLING
+ * carrier saw the same verb, on the same label, by the same actor, within the
+ * stroke window.
+ *
+ * `siblingNumbers` resolves the other carrier and is INJECTED rather than
+ * derived here: the sweep answers it with `prDeliversCard` over the PR windows
+ * it already holds, which is the same delivery relation H8 and H31 read — so
+ * the three rows can never disagree about which PR delivers which card. It
+ * returns `null` when the relation is unresolvable (no delivering PR in the
+ * windows, a body that declares nothing), and an unresolvable sibling means NOT
+ * PAIRED — which routes the removal to a judged-against-its-hang path below,
+ * never straight to a finding.
+ */
+export function pairedAcrossCarriers(event, gateEvents, options = {}) {
+  const { sameStrokeSeconds = H35_SAME_STROKE_SECONDS, siblingNumbers = () => null } = options;
+  const at = Date.parse(event?.created_at ?? '');
+  if (!Number.isFinite(at)) return false;
+  const siblings = siblingNumbers(event);
+  if (!Array.isArray(siblings) || siblings.length === 0) return false;
+  const wanted = new Set(siblings.map((n) => Number(n)));
+  const actor = String(event?.actor?.login ?? '');
+  const label = String(event?.label?.name ?? '');
+  const onPr = eventOnPullRequest(event);
+  return (gateEvents ?? []).some((o) => {
+    if (!o || o === event) return false;
+    if (o.event !== event.event) return false;
+    if (String(o.label?.name ?? '') !== label) return false;
+    if (String(o.actor?.login ?? '') !== actor) return false;
+    if (eventOnPullRequest(o) === onPr) return false;
+    if (!wanted.has(Number(o.issue?.number))) return false;
+    const t = Date.parse(o.created_at ?? '');
+    return Number.isFinite(t) && Math.abs(t - at) <= sameStrokeSeconds * 1000;
+  });
+}
+
+/** The most recent hang of the same label on the same carrier BEFORE `removal`. */
+export function precedingHang(removal, gateEvents) {
+  const at = Date.parse(removal?.created_at ?? '');
+  if (!Number.isFinite(at)) return null;
+  const label = String(removal?.label?.name ?? '');
+  const number = Number(removal?.issue?.number);
+  const hangs = (gateEvents ?? [])
+    .filter(
+      (e) =>
+        e &&
+        e.event === 'labeled' &&
+        String(e.label?.name ?? '') === label &&
+        Number(e.issue?.number) === number &&
+        Number.isFinite(Date.parse(e.created_at ?? '')) &&
+        Date.parse(e.created_at) < at,
+    )
+    .sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at));
+  return hangs[0] ?? null;
+}
+
+/**
+ * H35's classifier — the three-valued half, asserted directly by the self-test.
+ *
+ * @returns one of:
+ *   `'not-applicable'` the row is not an `unlabeled` of a gate-semantic label
+ *   `'rehung'`         the carrier carries the label again (read-back worked)
+ *   `'paired'`         cleared in a 「同笔」 dual-carrier stroke — the evidence
+ *   `'half-write'`     hung in a dual stroke, cleared in a lone one — FINDING
+ *   `'unjudgeable'`    hung lone and cleared lone (single-carrier gate)
+ *   `'undated'`        no hang inside the window; declines to judge
+ */
+export function h35RemovalVerdict(removal, gateEvents, options = {}) {
+  if (!removal || removal.event !== 'unlabeled') return 'not-applicable';
+  if (!isGateSemanticLabel(removal.label?.name)) return 'not-applicable';
+  if (carrierStillLabelled(removal)) return 'rehung';
+  if (pairedAcrossCarriers(removal, gateEvents, options)) return 'paired';
+  const hang = precedingHang(removal, gateEvents);
+  if (!hang) return 'undated';
+  return pairedAcrossCarriers(hang, gateEvents, options) ? 'half-write' : 'unjudgeable';
+}
+
+/** Shared tail — the posture, stated on every row this block emits. */
+const H35_CONTRACT =
+  'Report-only: ⛔ never a label written from this script — re-hanging a review gate from a sweeper ' +
+  'would be issuing the verdict, which is 自查放行. Detection only; escalation and enforcement are ' +
+  'a later card by the 2026-08-25 ruling.';
+
+/**
+ * H35 — null when the removal needs no row, else the finding sentence.
+ *
+ * Two classes reach a row, and they say different things on purpose. The
+ * `open`/`absent` narrowing applies to `unjudgeable` ONLY and the header states
+ * why: that class is common and actionable only while the carrier is live,
+ * while `half-write` is ~0/day and names damage that may already have landed.
+ *
+ * @param {object} removal — an `unlabeled` event row from the repo-wide window.
+ * @param {object[]} gateEvents — every gate-semantic label event in that window.
+ */
+export function h35GateRemovalWithoutEvidence(removal, gateEvents, options = {}) {
+  const verdict = h35RemovalVerdict(removal, gateEvents, options);
+  const label = String(removal?.label?.name ?? '');
+  const actor = String(removal?.actor?.login ?? 'an unreadable actor');
+  const at = String(removal?.created_at ?? 'an unreadable time');
+  const carrier = eventOnPullRequest(removal) ? 'PULL REQUEST' : 'CARD';
+
+  if (verdict === 'half-write') {
+    return (
+      `\`${label}\` was REMOVED from this ${carrier} by \`${actor}\` at ${at} in a LONE stroke, ` +
+      'while the hang it clears was written across BOTH carriers — so the pair was cleared half way. ' +
+      '「PASS 双载体同笔清标」 makes a legitimate clear two removals seconds apart, one per carrier; ' +
+      'this one has no sibling within ' +
+      `${H35_SAME_STROKE_SECONDS}s. Either the clear never reached the second carrier, or the label ` +
+      'was stripped — and 「闸门被剥不是红灯是放行」, so the failure direction is TOWARD release: an ' +
+      'ungated carrier reads to the enqueue path as one that was never gated. Remedy is a READ, not a ' +
+      'write: check the card thread for a current review verdict before re-hanging — 「PASS 评论 + 标签' +
+      `缺失 + PR head 自复审后未动 = 已复审清标,不是被剥」. ${H35_CONTRACT}`
+    );
+  }
+
+  if (verdict === 'unjudgeable') {
+    if (removal?.issue?.state !== 'open') return null;
+    return (
+      `\`${label}\` was removed from this open ${carrier} by \`${actor}\` at ${at} and the gate is ` +
+      'still absent — UNJUDGED, not clean. The hang it clears was ALSO a lone stroke: this gate only ' +
+      'ever had ONE carrier, so 「双载体同笔清标」 leaves no structural evidence in either direction ' +
+      'and no carrier comparison — H31\'s or this row\'s — can say whether it was cleared or stripped. ' +
+      'The only remaining evidence is a review verdict written as free prose, which has no canonical ' +
+      'machine-readable form (measured: a strict marker matched 5 of 35 removals, a loose one 10), so ' +
+      'this row declines to parse it rather than widen into a check that cannot fail. Two producer-side ' +
+      'repairs would each make this judgeable: hang the PR carrier as 「PR 一存在即挂」 already ' +
+      `requires, or give the verdict a canonical marker. ${H35_CONTRACT}`
+    );
+  }
+
+  return null;
+}
+
+// ---------------------------------------------------------------------------
 // Report rendering — pure over (findings, counts), so `--self-test` pins both
 // media offline. The live sweep below picks a renderer and prints it; nothing
 // about WHAT is swept or WHICH predicates fire depends on the format.
@@ -5860,6 +6213,20 @@ export function summaryLine(counts, findingCount) {
   // (a ruling) rather than a transient failure worth re-running.
   const crossRepoProbed = counts.crossRepoProbed ?? 0;
   const crossRepoUnreadable = counts.crossRepoUnreadable ?? 0;
+  // H35's event window (#11881). Reported as a pair for the same reason every
+  // pair above is: this is the file's ONLY reader of event history, so if the
+  // window came up short there is no second reader to notice. `truncated` means
+  // the page cap bound before the horizon was reached — the run saw less than
+  // its stated 12h and must not read as a board with no gate removals in it.
+  // The `unjudgeable` count is carried into the summary deliberately: it is the
+  // measured residue of this row (29 over the 3.41-day derivation corpus, against
+  // 0 half-writes), and burying it would let a quiet H35 section read as "the
+  // gate is watched" when most removals are structurally unwatchable.
+  const gateRemovals = counts.gateRemovals ?? 0;
+  const gateEventPages = counts.eventPages ?? 0;
+  const gateUnjudgeable = counts.gate_unjudgeable ?? 0;
+  const gateUndated = counts.gate_undated ?? 0;
+  const gateWindowTruncated = Boolean(counts.eventWindowTruncated);
   // H32's coverage pair — held, own-board seats and how many had their marker
   // thread read. A shortfall is not silent (an unread thread makes H32 DECLINE
   // to judge that seat, which is the quiet direction), so this is the only
@@ -5924,6 +6291,19 @@ export function summaryLine(counts, findingCount) {
     'lane is countable on THIS board — a seat held for a sibling repo\'s lane is out of scope here (its ' +
     'inventory is unreadable from this sweep, so an empty-looking queue would mean nothing), and an ' +
     'unread thread makes H32 decline to judge that seat rather than accuse it. ' +
+    `Gate-removal patrol (H35): ${gateRemovals} removal(s) of a gate-semantic label read from ` +
+    `${gateEventPages} page(s) of the repo-wide issue-event stream over the last ` +
+    `${H35_EVENT_WINDOW_HOURS}h — no per-card timeline fetch. ${gateUnjudgeable} of them are ` +
+    'UNJUDGEABLE (a gate that only ever had ONE carrier leaves 「双载体同笔清标」 no evidence in ' +
+    'either direction, so neither H31 nor H35 can say cleared-or-stripped)' +
+    `${gateUndated > 0 ? `, and ${gateUndated} more had no hang inside the window` : ''}` +
+    `${
+      gateWindowTruncated
+        ? ` ⚠️ The event window was TRUNCATED at the ${H35_EVENT_PAGE_CAP}-page cap before reaching ` +
+          `the ${H35_EVENT_WINDOW_HOURS}h horizon — this run saw LESS than its stated window, so a ` +
+          'quiet H35 section here is a short read, not a clean board.'
+        : '.'
+    } ` +
     `Report-only: findings are patrol input, not a gate verdict.`
   );
 }
@@ -7022,6 +7402,45 @@ async function listRecentDefaultBranchCommits() {
 }
 
 /**
+ * H35's repo-wide issue-event window — the ONLY reader of event history in this
+ * file, and deliberately not a per-card timeline fetch (H35's header carries
+ * the reasoning; H15 and H16 decline the per-card shape by name).
+ *
+ * TIME-bounded with a PAGE cap behind it, rather than pages alone. The stream
+ * is strictly newest-first, so the horizon is reached by reading until a row
+ * predates it — on a quiet stretch that is two pages, and the cap only binds
+ * when the board is busier than the corpus it was derived from. Both bounds are
+ * reported: `eventPages` counts what was read and `eventWindowTruncated` says
+ * the horizon was NOT reached, because a short window that reads as a clean one
+ * is the #4690 direction this file refuses everywhere.
+ *
+ * PRs ride this endpoint too (a pull request is an issue to it), which is what
+ * lets one window see BOTH carriers of a dual-carrier gate.
+ */
+async function listRecentIssueEvents(stats = {}, nowMs = Date.now()) {
+  const horizon = nowMs - H35_EVENT_WINDOW_HOURS * 3_600_000;
+  const out = [];
+  let reachedHorizon = false;
+  let page = 1;
+  for (; page <= H35_EVENT_PAGE_CAP; page++) {
+    const batch = await rest(`/repos/${OWNER_REPO}/issues/events?per_page=100&page=${page}`);
+    out.push(...batch);
+    const oldest = Date.parse(batch[batch.length - 1]?.created_at ?? '');
+    if (batch.length < 100 || (Number.isFinite(oldest) && oldest <= horizon)) {
+      reachedHorizon = true;
+      break;
+    }
+  }
+  stats.eventPages = Math.min(page, H35_EVENT_PAGE_CAP);
+  stats.eventRows = out.length;
+  stats.eventWindowTruncated = !reachedHorizon;
+  return out.filter((e) => {
+    const at = Date.parse(e?.created_at ?? '');
+    return Number.isFinite(at) && at > horizon;
+  });
+}
+
+/**
  * The unscoped listing H13 needs: the domain-without-pm-state shape is
  * DEFINED by the absence of every label the listings below key on, so no
  * label page can ever return it — the very property that hides it from seat
@@ -7424,6 +7843,39 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
     // never disagree about which PR delivers which card.
     const gateSplit = h31ContractReviewCarrierSplit(issue, openWindow);
     if (gateSplit) findings.push([issue, 'H31', gateSplit]);
+  }
+
+  // H35 (#11881) — the EVENT behind the state H31 compares. One repo-wide
+  // window, no per-card fetch; the sibling resolver below is `prDeliversCard`
+  // over the two PR windows this sweep already holds, so H8, H31 and H35 read
+  // ONE delivery relation and can never disagree about which PR delivers which
+  // card. An unresolvable sibling returns null and the removal is judged
+  // against its own hang instead — never straight to a finding.
+  const prWindow = [...mergedWindow, ...openWindow];
+  const siblingNumbers = (event) => {
+    const number = Number(event?.issue?.number);
+    if (!Number.isFinite(number)) return null;
+    if (event?.issue?.pull_request) {
+      const pr = prWindow.find((p) => Number(p?.number) === number);
+      if (!pr) return null;
+      const cards = [...seenUnscoped.keys(), ...seen.keys()].filter((n) =>
+        prDeliversCard(pr, String(n)),
+      );
+      return cards.length > 0 ? cards : null;
+    }
+    const prs = prWindow.filter((p) => prDeliversCard(p, String(number))).map((p) => p.number);
+    return prs.length > 0 ? prs : null;
+  };
+  const eventWindow = await listRecentIssueEvents(stats);
+  const gateEvents = gateLabelEvents(eventWindow);
+  stats.gateLabelEvents = gateEvents.length;
+  const removals = gateEvents.filter((e) => e.event === 'unlabeled');
+  stats.gateRemovals = removals.length;
+  for (const removal of removals) {
+    const verdict = h35RemovalVerdict(removal, gateEvents, { siblingNumbers });
+    stats[`gate_${verdict.replace(/-/g, '_')}`] = (stats[`gate_${verdict.replace(/-/g, '_')}`] ?? 0) + 1;
+    const row = h35GateRemovalWithoutEvidence(removal, gateEvents, { siblingNumbers });
+    if (row) findings.push([removal.issue, 'H35', row]);
   }
 
   // H14 + H15 — the same unscoped listing, read a second way. It is the right
@@ -11249,6 +11701,144 @@ function selfTest() {
   // names, asserted here because this regex is exported and reused per line.
   t('H34: the near-miss marker carries no `g` flag', CLAIM_NEAR_MISS_MARKER.global, false);
   t('H34: …so repeated reads of one line agree', nearMissClaimSeparators(DASH_CLAIM).join() === nearMissClaimSeparators(DASH_CLAIM).join(), true);
+
+  // -- H35 — a gate label removed with no matching review-chain evidence -----
+  // -- (#11881). Fixtures are event rows in the repo-wide stream's shape.
+  const gateEvent = (over, { n, pr = false, actor = 'os-seat', at, labels = [] }) => ({
+    event: over,
+    label: { name: CONTRACT_REVIEW_LABEL },
+    actor: { login: actor },
+    created_at: at,
+    issue: {
+      number: n,
+      state: 'open',
+      labels: labels.map((name) => ({ name })),
+      pull_request: pr ? { url: 'x' } : undefined,
+      html_url: `https://example.invalid/${n}`,
+    },
+  });
+  // The delivery relation, stubbed: card 900 <-> PR 901.
+  const sib900 = (e) => (e.issue.pull_request ? [900] : [901]);
+  const o900 = { siblingNumbers: sib900 };
+  const h35row = (...args) => String(h35GateRemovalWithoutEvidence(...args) ?? '');
+
+  // The healthy shape: hung across both carriers, cleared across both.
+  const dualHang = [
+    gateEvent('labeled', { n: 900, at: '2026-08-26T10:00:00Z' }),
+    gateEvent('labeled', { n: 901, pr: true, at: '2026-08-26T10:00:02Z' }),
+  ];
+  const dualClear = [
+    gateEvent('unlabeled', { n: 900, at: '2026-08-26T12:00:00Z' }),
+    gateEvent('unlabeled', { n: 901, pr: true, at: '2026-08-26T12:00:03Z' }),
+  ];
+  const healthy = [...dualHang, ...dualClear];
+  t('H35: a dual-carrier clear is the review-chain evidence -> silent', h35RemovalVerdict(dualClear[0], healthy, o900), 'paired');
+  t('H35: …and emits no row', h35GateRemovalWithoutEvidence(dualClear[0], healthy, o900), null);
+  t('H35: …on the PR carrier too', h35RemovalVerdict(dualClear[1], healthy, o900), 'paired');
+
+  // ⭐ THE FINDING: hung in a dual stroke, cleared on ONE carrier only.
+  const halfWrite = [...dualHang, dualClear[0]];
+  t('H35: hung dual + cleared lone -> half-write', h35RemovalVerdict(dualClear[0], halfWrite, o900), 'half-write');
+  t('H35: …and the row fires', typeof h35GateRemovalWithoutEvidence(dualClear[0], halfWrite, o900), 'string');
+  t('H35: …naming the carrier it was removed from', h35row(dualClear[0], halfWrite, o900).includes('REMOVED from this CARD'), true);
+  t('H35: …and the actor', h35row(dualClear[0], halfWrite, o900).includes('`os-seat`'), true);
+  t('H35: …and the failure direction is toward release', h35row(dualClear[0], halfWrite, o900).includes('闸门被剥不是红灯是放行'), true);
+  t('H35: …and the remedy is a READ, not a re-hang', h35row(dualClear[0], halfWrite, o900).includes('Remedy is a READ, not a write'), true);
+  t('H35: …and it states the report-only posture', h35row(dualClear[0], halfWrite, o900).includes('never a label written from this script'), true);
+  // The half-write class is NOT narrowed to open carriers — a gate cleared half
+  // way on a PR that then merged is the bypass that already happened.
+  const closedCarrier = { ...dualClear[0], issue: { ...dualClear[0].issue, state: 'closed' } };
+  t('H35: a half-write on a CLOSED carrier still reports', typeof h35GateRemovalWithoutEvidence(closedCarrier, [...dualHang, closedCarrier], o900), 'string');
+
+  // The single-carrier gate — the measured majority shape, and NOT a finding.
+  const loneHang = gateEvent('labeled', { n: 900, at: '2026-08-26T10:00:00Z' });
+  const loneClear = gateEvent('unlabeled', { n: 900, at: '2026-08-26T12:00:00Z' });
+  const singleCarrier = [loneHang, loneClear];
+  t('H35: hung lone + cleared lone -> unjudgeable, never a violation', h35RemovalVerdict(loneClear, singleCarrier, o900), 'unjudgeable');
+  t('H35: …and the row says UNJUDGED rather than clean', h35row(loneClear, singleCarrier, o900).includes('UNJUDGED, not clean'), true);
+  t('H35: …and names both producer-side repairs', h35row(loneClear, singleCarrier, o900).includes('PR 一存在即挂'), true);
+  t('H35: …and refuses to parse the prose verdict', h35row(loneClear, singleCarrier, o900).includes('declines to parse it'), true);
+  // …but only while the carrier is live: the narrowing that keeps this class at
+  // ~0.22 rows/run instead of ~8.5 (header's measured figures).
+  const closedLone = { ...loneClear, issue: { ...loneClear.issue, state: 'closed' } };
+  t('H35: an unjudgeable clear on a CLOSED carrier emits no row', h35GateRemovalWithoutEvidence(closedLone, [loneHang, closedLone], o900), null);
+  t('H35: …though it still classifies as unjudgeable', h35RemovalVerdict(closedLone, [loneHang, closedLone], o900), 'unjudgeable');
+
+  // Re-hung: the read-back worked. Reporting it would call the control a defect.
+  const rehung = gateEvent('unlabeled', { n: 900, at: '2026-08-26T12:00:00Z', labels: [CONTRACT_REVIEW_LABEL] });
+  t('H35: a removal whose label is BACK -> rehung, silent', h35RemovalVerdict(rehung, [...dualHang, rehung], o900), 'rehung');
+  t('H35: …and emits no row', h35GateRemovalWithoutEvidence(rehung, [...dualHang, rehung], o900), null);
+
+  // Three input states, never two (#4690): no hang in the window = decline.
+  t('H35: a removal with no hang in the window -> undated, not a finding', h35RemovalVerdict(dualClear[0], [dualClear[0]], o900), 'undated');
+  t('H35: …and emits no row', h35GateRemovalWithoutEvidence(dualClear[0], [dualClear[0]], o900), null);
+  // An unresolvable sibling must not manufacture a finding: it degrades to the
+  // hang comparison, which for a lone hang is `unjudgeable`.
+  t('H35: an unresolvable sibling degrades, never accuses', h35RemovalVerdict(loneClear, singleCarrier, { siblingNumbers: () => null }), 'unjudgeable');
+
+  // Scope: only `unlabeled`, only gate-semantic labels.
+  t('H35: a `labeled` row is not applicable', h35RemovalVerdict(dualHang[0], healthy, o900), 'not-applicable');
+  const otherLabel = { ...loneClear, label: { name: 'size/l' } };
+  t('H35: a non-gate label is not applicable', h35RemovalVerdict(otherLabel, [otherLabel], o900), 'not-applicable');
+  t('H35: `needs-user-decision` is deliberately NOT in the family', isGateSemanticLabel('needs-user-decision'), false);
+  t('H35: the gate label IS', isGateSemanticLabel(CONTRACT_REVIEW_LABEL), true);
+  t('H35: the family and H31 share ONE constant', GATE_SEMANTIC_LABELS.includes(CONTRACT_REVIEW_LABEL), true);
+
+  // ⚠️ THE VACUITY GUARD. H35's half-write class measured ZERO over the 3.41-day
+  // derivation corpus — a true reading of a board where the dual-carrier
+  // discipline holds, and indistinguishable from a predicate that CANNOT fire.
+  // These two cases are the difference, and they must be read as a pair: the
+  // classifier reaches `half-write` on a constructed input, and a mutation that
+  // makes the row go permanently silent turns them red HERE rather than passing
+  // as a quiet board. ⛔ Do not delete either one to make an ablation quieter.
+  t('H35 vacuity guard: the half-write class is REACHABLE', h35RemovalVerdict(dualClear[0], halfWrite, o900) === 'half-write', true);
+  t('H35 vacuity guard: …and produces a non-empty row', h35row(dualClear[0], halfWrite, o900).length > 0, true);
+  // The stroke window is a threshold read out of an EMPTY region of the measured
+  // distribution (101s .. 275s), so these two pin both of its sides.
+  const slowPair = [
+    ...dualHang,
+    dualClear[0],
+    gateEvent('unlabeled', { n: 901, pr: true, at: '2026-08-26T12:01:30Z' }),
+  ];
+  t('H35: a 90s dual clear is still ONE stroke (inside the 120s window)', h35RemovalVerdict(dualClear[0], slowPair, o900), 'paired');
+  const hoursApart = [
+    ...dualHang,
+    dualClear[0],
+    gateEvent('unlabeled', { n: 901, pr: true, at: '2026-08-26T15:00:00Z' }),
+  ];
+  t('H35: a clear hours later is NOT the same stroke', h35RemovalVerdict(dualClear[0], hoursApart, o900), 'half-write');
+  // 「同笔」 is one actor's stroke — a different login is not the same write.
+  const otherActor = [
+    ...dualHang,
+    dualClear[0],
+    gateEvent('unlabeled', { n: 901, pr: true, actor: 'os-other', at: '2026-08-26T12:00:03Z' }),
+  ];
+  t('H35: a different actor is not 同笔', h35RemovalVerdict(dualClear[0], otherActor, o900), 'half-write');
+
+  // The window derivation, executable rather than prose (H8's `windowCoverageDays` shape).
+  t('H35: the horizon is TWO patrol cycles', H35_EVENT_WINDOW_HOURS / PATROL_CADENCE_HOURS, 2);
+  t('H35: 12h at the measured rate needs 24 pages', eventWindowPages(), 24);
+  t('H35: …and the cap leaves headroom above that', H35_EVENT_PAGE_CAP > eventWindowPages(), true);
+  t('H35: a zero rate cannot divide, and says so', eventWindowPages(12, 0), null);
+  t('H35: the stroke window sits inside the measured empty region', H35_SAME_STROKE_SECONDS > 101 && H35_SAME_STROKE_SECONDS < 275, true);
+  // The window filter is a TIME horizon; the page cap is only its backstop.
+  t('H35: gateLabelEvents keeps both verbs', gateLabelEvents(healthy).length, 4);
+  t('H35: …and drops non-gate labels', gateLabelEvents([...healthy, otherLabel]).length, 4);
+  t('H35: …and drops non-label events', gateLabelEvents([...healthy, { event: 'closed' }]).length, 4);
+
+  // The summary line carries the residue, so a quiet section cannot read as
+  // "the gate is watched" when most removals are structurally unwatchable.
+  const gateCounts = { gateRemovals: 7, eventPages: 24, gate_unjudgeable: 5, gate_undated: 1 };
+  t('H35 summary: the removal count is reported', summaryLine(gateCounts, 1).includes('7 removal(s) of a gate-semantic label'), true);
+  t('H35 summary: …with the pages read', summaryLine(gateCounts, 1).includes('24 page(s) of the repo-wide issue-event stream'), true);
+  t('H35 summary: …and states it made no per-card fetch', summaryLine(gateCounts, 1).includes('no per-card timeline fetch'), true);
+  t('H35 summary: …and carries the unjudgeable residue', summaryLine(gateCounts, 1).includes('5 of them are UNJUDGEABLE'), true);
+  t('H35 summary: …and the undated count', summaryLine(gateCounts, 1).includes('1 more had no hang inside the window'), true);
+  t('H35 summary: a truncated window is announced, never silent', summaryLine({ ...gateCounts, eventWindowTruncated: true }, 0).includes('TRUNCATED'), true);
+  t('H35 summary: …and says a quiet section is a SHORT READ', summaryLine({ ...gateCounts, eventWindowTruncated: true }, 0).includes('short read, not a clean board'), true);
+  t('H35 summary: an untruncated window makes no such claim', summaryLine(gateCounts, 1).includes('TRUNCATED'), false);
+  // Absent counts degrade to 0, never to `undefined` — H32's pair does the same.
+  t('H35 summary: absent counts degrade to 0', summaryLine({}, 0).includes('0 removal(s) of a gate-semantic label'), true);
 
   // -- The `[::]` collapse (#12090): behaviour-preserving, asserted as such ---
   // The class held U+003A TWICE, never the fullwidth U+FF1A its shape implied.
