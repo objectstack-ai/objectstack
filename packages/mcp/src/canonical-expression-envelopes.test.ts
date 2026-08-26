@@ -36,24 +36,21 @@
  * a different card and a different decision. Copying is what THIS card is.
  * Recorded here so the next author inherits the count rather than the habit.
  *
- * ## The one exempted component type
+ * ## No standing exemptions (#12344)
  *
- * `page:header` carries a `ComponentPropsMap` row, so door 3 reads its
- * `properties` bag. `mcp:connect-agent` does NOT: it is a console-registered
- * widget provided by objectui's app-shell, so door 3 has no schema to read its
- * `properties` with — the same standing-exemption shape `cloud-connection`'s
- * two widgets were in between #11480 and #11575, before #11575 gave them
- * strict, empty rows measured from the renderers' read points at the
- * `.objectui-sha` pin. Giving this type its row is that same piece of work and
- * belongs on its own card (filed); it is outside this card's declared surface.
- *
- * Until then the exemption is asserted EXACTLY (a NEW unmapped type reds), and
- * it is sound only while the exempted widget authors an EMPTY props bag —
- * nothing authored is nothing to serve bare. The moment it grows a real
- * authored prop, the emptiness assert reds and forces the decision: give the
- * type a `ComponentPropsMap` row, or widen the exemption knowingly. Both halves
- * are needed; the exemption alone would be a door-3 blind spot that widens in
- * silence.
+ * `mcp:connect-agent` was exempted here between #12269 and #12344: a
+ * console-registered widget provided by objectui's app-shell with no
+ * `ComponentPropsMap` row, so door 3 had no schema to read its `properties`
+ * with — the same standing-exemption shape `cloud-connection`'s two widgets
+ * were in between #11480 and #11575. #12344 gave the type its row (strict,
+ * empty — measured from the renderer's read points at the `.objectui-sha`
+ * pin, where the registration discards the schema node entirely and the
+ * component function takes no parameters), so door 3 now reads its bag and
+ * the exemption list is empty. The machinery stays: the exemption set is
+ * still asserted EXACTLY, so any NEW unmapped type reds and forces the same
+ * decision — declare the props schema in `ComponentPropsMap`, or record the
+ * exemption here with the reason (and then also pin the exempted bag empty
+ * and the list non-vacuous, as the pre-#12344 revision of this file did).
  */
 
 import { readFileSync, readdirSync } from 'node:fs';
@@ -64,7 +61,6 @@ import type { Page } from '@objectstack/spec/ui';
 import {
   auditPageExpressionEnvelopes,
   renderBareExpressionFindings,
-  walkPageComponents,
 } from '@objectstack/lint';
 // The one answer this tree has to "comment, literal, or code". It is a plain
 // `.mjs`, but `scripts/js-comment-mask.d.mts` beside it is a hand-written
@@ -86,13 +82,14 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 
 /**
  * Every page this package ships, audited by export name — with the unmapped
- * component types each page is EXPECTED to report (the exemption above).
+ * component types each page is EXPECTED to report (none since #12344; see
+ * the module header).
  */
 const AUDITED_PAGES: { exportName: string; page: Page; exemptUnmappedTypes: string[] }[] = [
   {
     exportName: 'CONNECT_AGENT_PAGE',
     page: CONNECT_AGENT_PAGE,
-    exemptUnmappedTypes: ['mcp:connect-agent'],
+    exemptUnmappedTypes: [],
   },
 ];
 
@@ -227,40 +224,12 @@ describe('mcp Page exports serve canonical expression envelopes', () => {
   });
 
   it.each(AUDITS)('$exportName: unmapped component types are EXACTLY the recorded exemptions (door 3 precondition)', ({ audit, exemptUnmappedTypes }) => {
-    // See the header for why `mcp:connect-agent` is exempt. Anything ELSE
+    // No exemptions stand since #12344 (see the module header). Anything
     // unmapped is a new door-3 blind spot: declare the props schema in
-    // `ComponentPropsMap`, or record the exemption here with the reason — and
-    // then also pin the exempted bag empty, as the test below does, so the
-    // exemption cannot quietly cover a growing bag.
+    // `ComponentPropsMap`, or record the exemption here with the reason —
+    // and then also pin the exempted bag empty and the exemption list
+    // non-vacuous, as the pre-#12344 revision of this file did.
     expect(audit.unmappedTypes.map(e => e.type).sort()).toEqual([...exemptUnmappedTypes].sort());
-  });
-
-  it.each(AUDITS)('$exportName: every exempted component authors an EMPTY props bag', ({ page, exemptUnmappedTypes }) => {
-    // The exemption above is only sound while there is nothing authored for
-    // door 3 to miss. A real key landing in one of these bags must force a
-    // decision (props schema row, or a conscious wider exemption) — not ride
-    // through a standing exemption silently.
-    const offenders = walkPageComponents(page as AnyRec, '')
-      .filter(w => typeof w.component.type === 'string' && exemptUnmappedTypes.includes(w.component.type))
-      .filter(w => {
-        const props = w.component.properties;
-        return !!props && typeof props === 'object' && Object.keys(props).length > 0;
-      })
-      .map(w => `${w.path} [${String(w.component.type)}]`);
-    expect(offenders.join('\n')).toBe('');
-  });
-
-  it.each(AUDITS)('$exportName: the exemption list is not vacuous — every exempted type is really on this page', ({ page, exemptUnmappedTypes }) => {
-    // The reverse rot: a type left in the list after it stopped appearing on
-    // the page (or after it gained a `ComponentPropsMap` row) is an exemption
-    // covering nothing, and it would keep the EXACT assert above green while
-    // hiding the fact that the door is now open. Delete it when it goes stale.
-    const present = new Set(
-      walkPageComponents(page as AnyRec, '')
-        .map(w => w.component.type)
-        .filter((t): t is string => typeof t === 'string'),
-    );
-    expect(exemptUnmappedTypes.filter(t => !present.has(t))).toEqual([]);
   });
 
   it.each(AUDITS)('$exportName: every authored `properties` bag parses against its props schema (door 3 precondition)', ({ audit }) => {

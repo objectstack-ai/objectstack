@@ -194,7 +194,7 @@ export function registerNotifyNode(engine: AutomationEngine, ctx: PluginContext)
                     // how requiredness is owned there rather than by the form.
                     template: {
                         type: 'string',
-                        description: 'Email template name (sys_email_template.name) — resolved by (name, recipient locale) at delivery time and rendered per recipient. Mutually exclusive with inline title/message.',
+                        description: 'Email template name (sys_email_template.name) — the localizable content path: resolved by (name, locale) at delivery time, rendering subject/body from that row. The locale is ONE value for the whole notification, not one per recipient: payload.locale if the producer set one, else the deployment default (II18nService.getDefaultLocale()). The platform has no per-user locale, so recipients whose personal languages differ all receive the same row (deferred by the 2026-08-13 ruling; it layers in as an override when it lands). Mutually exclusive with inline title/message.',
                     },
                     templateData: {
                         type: 'object',
@@ -285,9 +285,11 @@ export function registerNotifyNode(engine: AutomationEngine, ctx: PluginContext)
             const actorId = toStr(interpolate(cfg.actorId, variables, context));
 
             // With a `template` reference the content lives in the template
-            // bundle, resolved per recipient locale at delivery — no inline
-            // title to demand (the Zod contract already refused a node carrying
-            // NEITHER, and one carrying BOTH).
+            // bundle, resolved by `(name, locale)` at delivery — one locale for
+            // the whole notification (`payload.locale`, else the deployment
+            // default), never one per recipient — so there is no inline title to
+            // demand (the Zod contract already refused a node carrying NEITHER,
+            // and one carrying BOTH).
             if (!title && !template) return { success: false, error: 'notify: title is required' };
             if (recipients.length === 0) {
                 // Name the templates that came up empty (framework#3582). The
@@ -374,8 +376,11 @@ export function registerNotifyNode(engine: AutomationEngine, ctx: PluginContext)
                     // Content rides in the payload per path (#9205): the inline
                     // strings, or the template reference + its render context —
                     // which the outbox snapshots onto each delivery row, so the
-                    // per-recipient-locale resolution happens at delivery time
-                    // in the channel (email-channel.ts reads payload.template).
+                    // template resolution happens at delivery time in the channel
+                    // (email-channel.ts reads payload.template). The locale it
+                    // resolves with is one value for the whole notification —
+                    // `payload.locale`, interpolated once BEFORE fan-out, else the
+                    // deployment default — never each recipient's own language.
                     // On the template path no inline title/body keys are set:
                     // channels without template support fall back to the topic,
                     // which is the honest degraded rendering, not ''.

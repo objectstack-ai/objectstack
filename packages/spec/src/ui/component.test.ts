@@ -1010,6 +1010,36 @@ describe('ComponentPropsMap', () => {
       }
     });
   });
+
+  // #12344 — the `@objectstack/mcp` console widget, the same mechanism a
+  // third instance over. Row exists so the #5068 gate's dispatch reaches it
+  // (and so the mcp canonical-envelope gate's door 3 reads its bag instead of
+  // carrying a standing exemption); the accepted key set is EMPTY, measured
+  // from the renderer's read points at the `.objectui-sha` pin (the
+  // registration discards the schema node — `() => <ConnectAgent />` — and
+  // the component function takes no parameters).
+  describe('mcp console widget (#12344)', () => {
+    it('declares a row for mcp:connect-agent', () => {
+      expect(ComponentPropsMap['mcp:connect-agent']).toBeDefined();
+    });
+
+    it('accepts the empty bag the shipped page authors', () => {
+      expect(() => ComponentPropsMap['mcp:connect-agent'].parse({})).not.toThrow();
+    });
+
+    it('refuses any authored key, naming the surface — the pre-row silent no-op', () => {
+      // Before the row, the key below rode through every validator in
+      // silence (the widget reads nothing authored). The refusal must name
+      // WHICH zero-prop component refused, or the author is left guessing.
+      const widget = ComponentPropsMap['mcp:connect-agent'].safeParse({ serverUrl: 'https://x' });
+      expect(widget.success).toBe(false);
+      if (!widget.success) {
+        const message = widget.error.issues.map((i) => i.message).join('\n');
+        expect(message).toContain('mcp:connect-agent');
+        expect(message).toContain('serverUrl');
+      }
+    });
+  });
 });
 
 // ---------------------------------------------------------------------------

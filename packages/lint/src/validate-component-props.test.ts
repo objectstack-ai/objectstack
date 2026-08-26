@@ -829,3 +829,42 @@ describe('validateComponentProps — cloud-connection:panel / marketplace:instal
     expect(findings).toEqual([]);
   });
 });
+
+/**
+ * #12344 — the `@objectstack/mcp` console widget, the same mechanism a third
+ * instance over.
+ *
+ * The pre-fix state this pins against: `mcp:connect-agent` had no
+ * `ComponentPropsMap` row (an open-string-arm type — never in
+ * `PageComponentType` — so nothing else judged it either), and the walker's
+ * unregistered-type skip swallowed the whole props bag: any authored key
+ * produced ZERO findings from validate/build, and door 3 of the mcp
+ * canonical-envelope gate (#12269) had to carry a standing exemption for the
+ * type. Its row is strict and EMPTY — measured from the renderer's read
+ * points at the `.objectui-sha` pin, where the registration discards the
+ * schema node (`() => <ConnectAgent />`) and the component function takes no
+ * parameters — so EVERY authored key is a finding. Remove the map row and
+ * this loud test goes back to that silence.
+ */
+describe('validateComponentProps — mcp:connect-agent is dispatched (#12344)', () => {
+  it('reports any key authored on `mcp:connect-agent`, naming the zero-prop surface', () => {
+    const findings = validateComponentProps(
+      stackWith([{
+        type: 'mcp:connect-agent',
+        properties: { serverUrl: 'https://example.test/mcp' },
+      }]),
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(COMPONENT_PROPS_UNKNOWN_KEY);
+    expect(findings[0].where).toBe('page "probe_page" · mcp:connect-agent');
+    expect(findings[0].message).toContain('`serverUrl`');
+    expect(findings[0].message).toContain('mcp:connect-agent');
+  });
+
+  it('stays silent on the empty bag the plugin-shipped page authors', () => {
+    const findings = validateComponentProps(
+      stackWith([{ type: 'mcp:connect-agent', properties: {} }]),
+    );
+    expect(findings).toEqual([]);
+  });
+});
