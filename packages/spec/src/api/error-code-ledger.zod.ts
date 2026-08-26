@@ -290,6 +290,31 @@ export const ERROR_CODE_LEDGER = {
     // `errorFromThrown` (`action-execution.ts`). Reported by the #8087
     // dispatcher-vocabulary gate.
     'FLOW_FAILED',
+    // [#11504] the definition-level input-schema refusal: a node's static
+    // `config` violates the `inputSchema` its own flow definition declares, so
+    // the engine refused to dispatch — nothing ran, nothing was written, and
+    // the result carries NO `status` (the #9378 never-dispatched class, beside
+    // FLOW_DISABLED / FLOW_NO_START_NODE). The guard's verdict is a pure
+    // function of the flow definition (`validateNodeInputSchemas` reads
+    // `node.inputSchema` against the static `node.config`; its variables
+    // parameter is deliberately unused), so re-running it cannot change the
+    // answer — ruled NON-RETRYABLE by #10025 (maintainer, 2026-08-20, Option B
+    // taken whole): ONE refusal row carrying this code instead of
+    // 1 + maxRetries identical `status: 'failed'` rows re-deriving a
+    // certainty. Answered 422 like FLOW_NO_START_NODE — understood request,
+    // existing flow, unexecutable definition — and deliberately distinct from
+    // it: that one says the definition has nothing to dispatch, this one says
+    // a node's config contradicts the schema the definition itself declares.
+    // Not a VALIDATION_ERROR synonym: the REQUEST is well-formed — what fails
+    // is the stored definition. Registered ahead of its producer by design
+    // (the #10413 → #10576 split shape, applied to #10025 → #11504): the
+    // emitting half — `execute()`'s catch short-circuiting before
+    // `retryExecution` in `@objectstack/service-automation` — is #10025's,
+    // blocked on this row, and asserts this exact string by value. Registered
+    // HERE and not under the engine's package for the same reason as its
+    // three FLOW_* siblings: the trigger door, not the producer, is where the
+    // wire vocabulary is named.
+    'FLOW_INPUT_SCHEMA_INVALID',
     // [#9415] the trigger door refused a flow whose stored definition has no
     // `start` node — there is nothing to dispatch, so the run never began.
     // Answered 422 by `respondToFlowTrigger`: understood request, existing

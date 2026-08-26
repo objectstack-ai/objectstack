@@ -248,12 +248,30 @@ export interface AutomationResult {
      *    retrying. Distinct from `'FLOW_DISABLED'` on purpose: one is a
      *    reversible operational state, the other a malformed definition, and
      *    collapsing them tells an operator to flip a switch that will not help.
+     *  - `'FLOW_INPUT_SCHEMA_INVALID'` — a node's static `config` violates the
+     *    `inputSchema` its own flow definition declares, so the
+     *    definition-level guard refused to dispatch. The verdict is a pure
+     *    function of the flow definition — re-running the guard cannot produce
+     *    a different answer — so the refusal is NON-RETRYABLE (#10025,
+     *    maintainer ruling 2026-08-20: Option B taken whole): the engine
+     *    refuses once instead of burning the whole retry budget re-deriving a
+     *    certainty into 1 + maxRetries identical failed rows. A transport maps
+     *    it to **422**, exactly as `'FLOW_NO_START_NODE'`: the stored
+     *    definition cannot be executed, an authoring defect retrying cannot
+     *    fix. Distinct from it on purpose: that one says the definition has
+     *    nothing to dispatch, this one says a node's config contradicts the
+     *    schema the definition itself declares. This member is the ruling's
+     *    contract half; the engine begins stamping it when #10025's services
+     *    half (the `execute()` catch short-circuit) lands.
      *
-     * Both are the remaining two rows of the #9378 trigger-status ruling; the
-     * union stays closed (the #9384 ruling), so these members were added
-     * deliberately, from measured need, rather than minted at a call site.
+     * `'FLOW_DISABLED'` / `'FLOW_NO_START_NODE'` are the remaining two rows of
+     * the #9378 trigger-status ruling; `'FLOW_INPUT_SCHEMA_INVALID'` joined
+     * the never-dispatched class under the #10025 ruling. The union stays
+     * closed (the #9384 ruling), so each member was added deliberately, from
+     * measured need — and by the spec seat — rather than minted at a call
+     * site.
      */
-    code?: 'PERMISSION_DENIED' | 'INVALID_SIGNAL' | 'RUN_NOT_FOUND' | 'STORE_UNAVAILABLE' | 'RESUME_IN_PROGRESS' | 'INVALID_SCREEN_INPUT' | 'FLOW_DISABLED' | 'FLOW_NO_START_NODE';
+    code?: 'PERMISSION_DENIED' | 'INVALID_SIGNAL' | 'RUN_NOT_FOUND' | 'STORE_UNAVAILABLE' | 'RESUME_IN_PROGRESS' | 'INVALID_SCREEN_INPUT' | 'FLOW_DISABLED' | 'FLOW_NO_START_NODE' | 'FLOW_INPUT_SCHEMA_INVALID';
     /**
      * Lifecycle status. `'paused'` means the run suspended at a node (e.g.
      * an Approval node awaiting a human decision, ADR-0019) and can be
