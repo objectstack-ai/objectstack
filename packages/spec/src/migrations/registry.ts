@@ -5433,6 +5433,53 @@ const step18: MigrationStep = {
         + 'byte-identically (`safeParse` green, `required` unrewritten).',
     },
     {
+      id: 'cli-command-contribution-retired',
+      surface:
+        'kernel.cliCommandContribution (the orphan exported schema of '
+        + '`cli-extension.zod.ts` — 1 def, 2 exported names: '
+        + '`CLICommandContributionSchema` / `CLICommandContribution`)',
+      replacement:
+        '(removed — there is no declarative replacement, because no declarative '
+        + 'surface ever carried it. CLI commands are registered through oclif\'s '
+        + 'native plugin discovery: the plugin package declares an `oclif` '
+        + 'section in its own `package.json` — `OclifPluginConfigSchema` in the '
+        + 'same module describes that live surface and SURVIVES, as does the '
+        + 'module docblock\'s Commander.js migration record, which the '
+        + '`manifest.contributes.commands` tombstone cites)',
+      reason:
+        'ADR-0049 enforce-or-remove; #12007, the exported orphan-value-schema '
+        + 'class (#3950: an exported schema with no consumer reads as a '
+        + 'capability). The schema described a "CLI Command Contribution '
+        + 'declaration in the manifest" and claimed retention "for describing '
+        + 'command metadata in plugin manifests" — but after #10724 tombstoned '
+        + '`manifest.contributes.commands` (protocol 17), no manifest surface '
+        + 'could legally carry these entries: the export advertised a shape whose '
+        + 'only declared carrier rejects it. The manifest never referenced this '
+        + 'schema even before the tombstone — its inline `commands` item schema '
+        + 'was an independent duplicate. Zero consumers outside spec\'s own test '
+        + 'and generated artifacts, measured at the retirement\'s base commit '
+        + '(146f448a5) with positive controls in objectstack, objectui (pinned '
+        + 'sha) and cloud. With no carrier key and no authored document there is '
+        + 'nothing to tombstone and no seam for a D2 conversion: route 3, the '
+        + '#11825 / #8715 shape — RETIRED_DEFS_BY_MAJOR plus this entry ARE the '
+        + 'declaration.',
+      acceptanceCriteria:
+        'No code imports `CLICommandContributionSchema` or '
+        + '`CLICommandContribution` from `@objectstack/spec` or '
+        + '`@objectstack/spec/kernel` — both are TS2305 after upgrade, on every '
+        + 'public entry (pinned by resolved symbol identity in '
+        + '`kernel/cli-command-contribution-retirement.test.ts`). No metadata '
+        + 'document needs editing: the def was reachable from no metadata-type '
+        + 'binding, stack collection or manifest embed — the only surface that '
+        + 'ever claimed to carry command contributions '
+        + '(`manifest.contributes.commands`) already rejects the key with the '
+        + '#10724 prescription, which is unchanged by this retirement. '
+        + '`OclifPluginConfigSchema` / `OclifPluginConfig` survive on `./kernel` '
+        + '(same pin). ⚠️ Runtime behaviour is deliberately UNCHANGED: the CLI '
+        + 'never resolved commands from this declaration — commands are '
+        + 'oclif-auto-discovered, before and after.',
+    },
+    {
       id: 'dashboard-header-modal-target-page-only',
       surface:
         'dashboard `header.actions[]` entries with `actionType: \'modal\'` — an `actionUrl` naming '
@@ -8553,6 +8600,32 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // narrowings ride minor releases) and the prescription lives at the major
     // boundary where `migrate meta` users look (the #8586 / PR #8702 precedent).
     'kernel/AdvancedPluginLifecycleConfig',
+    // #12007 — kernel/cli-extension.zod.ts
+    // `CLICommandContributionSchema` / `CLICommandContribution`, retired whole
+    // (ADR-0049 enforce-or-remove; triage graded 2026-08-25, the exported
+    // orphan-value-schema class — #3950). The pair described a "CLI Command
+    // Contribution declaration in the manifest" and claimed retention "for
+    // describing command metadata in plugin manifests" — but after #10724
+    // tombstoned `manifest.contributes.commands`, no manifest surface could
+    // legally carry these entries: the exported schema advertised a shape whose
+    // only declared carrier rejects it. The manifest never referenced this schema
+    // even before the tombstone (its inline `commands` item schema was an
+    // independent duplicate). Zero consumers outside spec's own test and
+    // generated artifacts, measured at the retirement's base commit (146f448a5)
+    // with positive controls in objectstack, objectui (pinned sha) and cloud.
+    // What ACTUALLY registers CLI commands is oclif's native plugin discovery —
+    // `OclifPluginConfigSchema` (same module, live `package.json` `oclif`
+    // section) SURVIVES, as does the module docblock's Commander.js migration
+    // prose, which the `contributes.commands` tombstone cites. Route 3: no
+    // carrier key, no authored document for a D2 conversion to rewrite, so no
+    // tombstone and no conversion — this table plus the D3 semantic entry
+    // `cli-command-contribution-retired` ARE the declaration.
+    //
+    // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
+    // removal ships on the 17.x line (launch-window convention: accept-set
+    // narrowings ride minor releases) and the prescription lives at the major
+    // boundary where `migrate meta` users look (the #8586 / PR #8702 precedent).
+    'kernel/CLICommandContribution',
     // #12340 — kernel/plugin-lifecycle-advanced.zod.ts
     // `DistributedStateConfigSchema`, retired whole (ADR-0049 enforce-or-remove).
     //
