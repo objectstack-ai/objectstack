@@ -643,6 +643,23 @@ export const ERROR_CODE_LEDGER = {
     'SUGGESTION_NOT_FOUND',
     'SUGGESTION_STATE',           // suggestion exists but is not in a confirmable/dismissable state
   ],
+  '@objectstack/driver-sql': [
+    // [#11991] The #11756 ruling's refusal (maintainer, 2026-08-25, verbatim
+    // 「同意」 on 「C，但 pgnative 归入 Postgres 家族」): a knex client this
+    // driver recognises on the PostgreSQL WIRE — `redshift`, `cockroachdb` —
+    // reached the DDL path, where emitting Postgres DDL would have built a
+    // table of the wrong shape rather than failing. 501, the status
+    // `HttpStatusErrorCodeMap` already names for "this server does not do
+    // that": the request is well-formed and nothing faulted.
+    //
+    // Registered — not left driver-local like `MULTI_TENANT_UNSUPPORTED_CODE`
+    // — because it IS wire-reachable: publishing a drafted object calls
+    // `engine.syncObjectSchema` → `SqlDriver.syncSchema` → the DDL gate, on a
+    // server already serving HTTP. That is the exact test #8035 applied when
+    // it UNregistered `MONGODB_MULTI_TENANT_UNSUPPORTED` for failing it.
+    // Producer: `packages/drivers/driver-sql/src/dialect-emission-refusal.ts`.
+    'SQL_DIALECT_EMISSION_UNSUPPORTED',
+  ],
   '@objectstack/spec': [
     'CONNECTOR_UPSTREAM_UNAVAILABLE',
     'EXTERNAL_SCHEMA_MISMATCH',
