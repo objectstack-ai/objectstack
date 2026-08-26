@@ -2,9 +2,11 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * check-cli-test-child-env (#11341, #11595) -- a `packages/cli/test` file that
- * SPAWNS a child may not build that child's environment from `process.env` as a
- * whole (#11341), and may not leave that environment UNDECLARED either (#11595).
+ * check-cli-test-child-env (#11341, #11595, #11464) -- a `packages/cli/test`
+ * file that SPAWNS a child may not build that child's environment from
+ * `process.env` as a whole (#11341), may not leave that environment UNDECLARED
+ * (#11595), and -- when the child is the BUILT CLI -- may not hand it a
+ * `NODE_ENV` that sends oclif's command lookup back to `src/` (#11464).
  *
  *   node scripts/check-cli-test-child-env.mjs              # audit the population
  *   node scripts/check-cli-test-child-env.mjs --list       # print the census
@@ -172,9 +174,87 @@
  * wrapper of a wrapper is not followed, and that limit is named here rather
  * than discovered: it would read as a green call site.
  *
- * ## The two registries, and why they are different KINDS
+ * ## What counts as a finding, third rule: a built-entrypoint spawn whose
+ * child resolves from src/ (#11464)
  *
- * {@link DELIBERATE} is a DECLARATION registry: the sites that copy the whole
+ * A test that spawns `packages/cli/bin/run.js` is asking for the BUILT CLI --
+ * the shipped entrypoint, whose commands are declared in `dist/`. A child whose
+ * `NODE_ENV` is `development` or `test` is asking `@oclif/core` to resolve those
+ * commands from `src/` instead and transpile them on the way. Asking for both
+ * is a no-op with a false comment attached: `dist/` is never executed, the
+ * suite stays green, and the comment claiming the built entry stays plausible.
+ *
+ * `@oclif/core@4.13.3` skips its TypeScript path lookup only when `isProd()`,
+ * which `lib/util/util.js:66` defines as a NEGATED membership test -- a leading
+ * logical-NOT over `['development', 'test'].includes(process.env.NODE_ENV ?? '')`.
+ * Measured directly against `Config.load()` on `packages/cli`, with
+ * `packages/cli/dist` present, reading back the root plugin's `commandsDir`:
+ *
+ *   | child NODE_ENV | resolved commandsDir        |
+ *   |----------------|-----------------------------|
+ *   | unset          | packages/cli/dist/commands  |
+ *   | production     | packages/cli/dist/commands  |
+ *   | development    | packages/cli/src/commands   |
+ *   | test           | packages/cli/src/commands   |
+ *
+ * ⭐ **Silence is the dangerous half, not the explicit value.** vitest exports
+ * `NODE_ENV=test` on its worker, and `childEnv()` deliberately does not strip it
+ * (its own header says why). So a spawner that names `bin/run.js` and simply
+ * says NOTHING about `NODE_ENV` lands in the rerouted leg by inheritance. The
+ * failure does not require anyone to set the variable on purpose, which is why
+ * an undeclared `NODE_ENV` at a built-entrypoint spawn is a finding here even
+ * though rule 2 is already satisfied by a declared `env`.
+ *
+ * Negative, like the two above: the rule states that a built-entrypoint spawn's
+ * child must be READABLY outside `development`/`test`. It ⛔ names no helper, and
+ * ⛔ demands no particular spelling -- `NODE_ENV: undefined` is what the
+ * population happens to write, `production` is equally green, and a call that
+ * builds its environment some other readable way is green too. A rule saying
+ * "must call `childEnv({ NODE_ENV: undefined })`" would stop meaning anything
+ * the day the choke point is wrapped.
+ *
+ * ## Membership is anchored to the CALL, and that is the expensive half
+ *
+ * Naming `bin/run.js` and SPAWNING it are different acts, and conflating them
+ * is not hypothetical: this rule was dispatched with a census listing six
+ * spawners, two of which spawn the tsx shim and merely mention the built path.
+ * `invocation-loudness.e2e.test.ts` resolves it in order to assert it appears in
+ * a diagnostic; `helpers/serve-process.ts` and `login-json-noninteractive` name
+ * it in prose while spawning `bin/run-dev.js`. A file-anchored membership test
+ * would pull all three into a population they do not belong to and then measure
+ * the wrong thing loudly. So membership asks whether the built path is reachable
+ * from THIS call's argv -- a literal, or a same-file binding holding one.
+ *
+ * `bin/run-dev.js` cannot collide with the `bin/run.js` suffix, which matters:
+ * the shim is the entrypoint that is SUPPOSED to reach `src/`, and it sets
+ * `NODE_ENV=development` itself, before argv is parsed. Spawning it is the
+ * repair for a test that wants source, not a violation.
+ *
+ * ## Why this rule follows one hop when rule 1 refuses to
+ *
+ * Rule 1 is file-anchored because it cannot chase a value built three functions
+ * away, and its header says so. Rule 3 cannot make that trade. Every one of the
+ * four built-entrypoint spawns in the population is written
+ * `childEnv({ ..., NODE_ENV: undefined, ...env })`, where `env` is the enclosing
+ * helper's PARAMETER. Without following that spread, all four are unreadable and
+ * the rule reports four findings that say only "this scan gave up" -- a gate
+ * that resolves to zero readable sites inside its own population, which is the
+ * vacuity this file refuses everywhere else. So the spread is resolved ONE hop,
+ * same file, to the arguments its enclosing function is called with, and the
+ * finding is reported at the CALLER -- where the value was actually chosen.
+ *
+ * ⚠️ ONE hop, and the limits are named here rather than discovered: a caller
+ * that forwards its own parameter, a caller argument that is not an object
+ * literal, a caller literal carrying its own spread, and a helper with no
+ * same-file call sites are each reported as UNREADABLE. Never as green.
+ *
+ * ⛔ There is NO baseline for this rule and there is not going to be one. A site
+ * whose ts-path-enabling `NODE_ENV` is the POINT is a {@link DELIBERATE_REROUTE}
+ * entry carrying its reason, reviewed by the PR that needs it.
+ *
+ * ## The registries, and why they are different KINDS
+ *
+ * {@link DELIBERATE} and {@link DELIBERATE_REROUTE} are DECLARATION registries: the sites that copy the whole
  * environment ON PURPOSE. It is not a ratchet and it is not shrink-only -- an
  * entry is the correct outcome for a site whose bulk copy is the point. It is
  * pinned in BOTH directions: an entry that stops matching FAILS. That is not
@@ -843,7 +923,7 @@ function spawnsBuiltEntrypoint(node, entryBindings) {
  * READABLE way is green, and one this scan cannot follow is a finding.
  *
  * @returns {{state: 'literal', node: ts.ObjectLiteralExpression}
- *   | {state: 'empty'} | {state: 'unreadable'} | {state: 'absent'}}
+ *   | {state: 'unreadable'} | {state: 'absent'}}
  */
 function childEnvLiteral(node) {
   const args = node.arguments ?? [];
@@ -865,9 +945,12 @@ function childEnvLiteral(node) {
         const inner = unwrapValue(arg);
         return inner && ts.isObjectLiteralExpression(inner);
       });
-      // `childEnv()` with no overrides declares nothing about NODE_ENV: the
-      // choke point copies it through from the vitest worker on purpose.
-      if (objects.length === 0) return { state: 'empty' };
+      // ⛔ A call with no readable overrides is UNREADABLE, not "inherits".
+      // Reading it as inheritance would mean assuming the callee behaves like
+      // childEnv() -- knowledge of a helper this rule deliberately does not
+      // name. Both are findings; only an unreadable one says the honest thing
+      // about what was measured.
+      if (objects.length === 0) return { state: 'unreadable' };
       return { state: 'literal', node: unwrapValue(objects[objects.length - 1]) };
     }
     return { state: 'unreadable' };
@@ -1024,7 +1107,7 @@ export function builtEntrypointSpawns(fileName, source) {
         spawns += 1;
         const env = childEnvLiteral(node);
         if (env.state === 'unreadable') report(node, api, REROUTE.OPAQUE);
-        else if (env.state === 'absent' || env.state === 'empty') report(node, api, REROUTE.INHERITED);
+        else if (env.state === 'absent') report(node, api, REROUTE.INHERITED);
         else {
           const base = declaredNodeEnv(env.node);
           const spreads = overridingSpreads(env.node);
@@ -1888,6 +1971,229 @@ export function selfTest() {
         && /wreck\.ts/.test(`${wreck.stderr}${wreck.stdout}`),
       JSON.stringify({ status: wreck.status, err: (wreck.stderr || '').slice(0, 200) }));
 
+    // -- (16) RULE 3 (#11464): the built entrypoint and a rerouting NODE_ENV --
+    //    Two halves, pinned apart: MEMBERSHIP (does this call spawn the built
+    //    entrypoint at all) and the RULE over the members. Getting membership
+    //    wrong is the more expensive error -- it is what puts a file that only
+    //    NAMES bin/run.js into a population it does not belong to, which is the
+    //    census error this card was dispatched with.
+
+    /**
+     * A file that binds the BUILT entrypoint and spawns it -- the population's
+     * real shape, down to the `resolve(HERE, '../bin/run.js')` spelling.
+     */
+    const built = (envExpr, tail = '') =>
+      'import { spawn } from \'node:child_process\';\n'
+      + 'import { resolve } from \'node:path\';\n'
+      + 'const CLI = resolve(HERE, \'../bin/run.js\');\n'
+      + 'export function boot(env: Record<string, string | undefined>) {\n'
+      + `  return spawn(process.execPath, [CLI, 'serve'], { cwd: '.', env: ${envExpr} });\n`
+      + '}\n' + tail;
+
+    /** The rule-3 findings of a one-file tree in the population's shape. */
+    const reroutes = (name, envExpr, tail = '') =>
+      audit(tree(name, { 'a.e2e.test.ts': built(envExpr, tail) }), DELIBERATE, {}).rerouted ?? [];
+    const rerouteReasons = (name, envExpr, tail = '') => reroutes(name, envExpr, tail).map((row) => row.reason);
+    /** The whole population count, which is what membership cases are about. */
+    const memberCount = (name, sources) => audit(tree(name, sources), DELIBERATE, {}).builtSpawns;
+
+    // -- membership --------------------------------------------------------
+    t('a spawn through a const bound to bin/run.js is in the population',
+      memberCount('member-binding', { 'a.e2e.test.ts': built('childEnv({ NODE_ENV: undefined })') }) === 1);
+    t('a spawn naming bin/run.js as a bare literal in argv is in the population too',
+      memberCount('member-literal', {
+        'a.e2e.test.ts': 'import { spawn } from \'node:child_process\';\nexport function boot() {\n'
+          + '  return spawn(process.execPath, [\'../bin/run.js\', \'serve\'], { env: childEnv({ NODE_ENV: undefined }) });\n}\n',
+      }) === 1);
+
+    // ⭐ THE membership case, and the one the card's own census got wrong:
+    //    resolving the path in order to ASSERT on it is not spawning it.
+    t('a file that resolves bin/run.js but only ASSERTS on it is NOT in the population',
+      memberCount('member-string-only', {
+        ...COMPANION,
+        'a.e2e.test.ts': 'import { execFile } from \'node:child_process\';\nimport { resolve } from \'node:path\';\n'
+          + 'const BIN = resolve(HERE, \'../bin/run.js\');\nconst CLI = resolve(HERE, \'../bin/run-dev.js\');\n'
+          + 'export function boot() {\n  expect(out).toContain(BIN);\n'
+          + '  return execFile(TSX, [CLI], { env: childEnv() });\n}\n',
+      }) === 0);
+    t('bin/run-dev.js is the OTHER entrypoint and never matches the built one',
+      memberCount('member-dev-shim', {
+        ...COMPANION,
+        'a.e2e.test.ts': 'import { spawn } from \'node:child_process\';\nimport { resolve } from \'node:path\';\n'
+          + 'const CLI = resolve(HERE, \'../bin/run-dev.js\');\nexport function boot() {\n'
+          + '  return spawn(TSX, [CLI, \'serve\'], { env: childEnv() });\n}\n',
+      }) === 0);
+    t('a bin/run.js named only in a COMMENT is not a spawn of it',
+      memberCount('member-prose', {
+        ...COMPANION,
+        'a.e2e.test.ts': 'import { spawn } from \'node:child_process\';\n// the bin/run.js spawners pass it in env\n'
+          + 'export function boot() {\n  return spawn(TSX, [CLI], { env: childEnv() });\n}\n',
+      }) === 0);
+
+    // -- the rule over the members -----------------------------------------
+    t('NODE_ENV: undefined -- what the population says today -- stays GREEN',
+      reroutes('rule-unset', 'childEnv({ NO_COLOR: \'1\', NODE_ENV: undefined })').length === 0);
+    t('NODE_ENV: void 0 is the same value with different punctuation',
+      reroutes('rule-void', 'childEnv({ NODE_ENV: void 0 })').length === 0);
+    t('NODE_ENV: \'production\' stays GREEN -- isProd() is true, so the reroute is off',
+      reroutes('rule-production', 'childEnv({ NODE_ENV: \'production\' })').length === 0);
+
+    t('NODE_ENV: \'development\' REDS',
+      JSON.stringify(rerouteReasons('rule-development', 'childEnv({ NODE_ENV: \'development\' })'))
+        === JSON.stringify([REROUTE.REROUTED]));
+    t('NODE_ENV: \'test\' REDS -- the value vitest exports, and the one inheritance supplies',
+      JSON.stringify(rerouteReasons('rule-test', 'childEnv({ NODE_ENV: \'test\' })'))
+        === JSON.stringify([REROUTE.REROUTED]));
+
+    // ⭐ SILENCE. The card's headline: the failure does not require anyone to
+    //    set the variable on purpose, because childEnv() passes the vitest
+    //    worker's NODE_ENV=test straight through.
+    t('saying NOTHING about NODE_ENV REDS -- the vitest worker\'s NODE_ENV=test reaches the child',
+      JSON.stringify(rerouteReasons('rule-silent', 'childEnv({ NO_COLOR: \'1\' })'))
+        === JSON.stringify([REROUTE.INHERITED]));
+    // A helper call with no readable overrides REDS as OPAQUE rather than as
+    // inherited: calling it inheritance would assume the callee behaves like
+    // childEnv(), and this rule ⛔ does not know that helper's name.
+    t('a helper call with no readable overrides REDS as opaque, not as inherited',
+      JSON.stringify(rerouteReasons('rule-bare-helper', 'childEnv()'))
+        === JSON.stringify([REROUTE.OPAQUE]));
+    t('a built-entrypoint spawn with NO options object REDS as inherited',
+      JSON.stringify(audit(tree('rule-no-options', {
+        'a.e2e.test.ts': 'import { spawn } from \'node:child_process\';\nimport { resolve } from \'node:path\';\n'
+          + 'const CLI = resolve(HERE, \'../bin/run.js\');\nexport function boot() {\n'
+          + '  return spawn(process.execPath, [CLI, \'serve\']);\n}\n',
+      }), DELIBERATE, {}).rerouted.map((row) => row.reason)) === JSON.stringify([REROUTE.INHERITED]));
+
+    // The rule names no helper: a plain object literal is just as readable.
+    t('a plain env object literal is read directly -- the rule does not name childEnv()',
+      reroutes('rule-plain-literal', '{ NODE_ENV: undefined }').length === 0);
+    t('...and the same plain literal with development REDS',
+      JSON.stringify(rerouteReasons('rule-plain-red', '{ NODE_ENV: \'development\' }'))
+        === JSON.stringify([REROUTE.REROUTED]));
+
+    t('an env this scan cannot read REDS as opaque, never as green',
+      JSON.stringify(rerouteReasons('rule-opaque-env', 'buildEnv()'))
+        === JSON.stringify([REROUTE.OPAQUE]));
+    t('a NODE_ENV whose VALUE is not a literal REDS as opaque too',
+      JSON.stringify(rerouteReasons('rule-opaque-value', 'childEnv({ NODE_ENV: mode })'))
+        === JSON.stringify([REROUTE.OPAQUE]));
+
+    // -- the one-hop spread resolution -------------------------------------
+    //    Every real site in the population is `childEnv({ ..., NODE_ENV:
+    //    undefined, ...env })`, so without this hop the rule reads NOTHING it
+    //    is meant to read and reports four "gave up" findings instead.
+    const SPREAD = 'childEnv({ NODE_ENV: undefined, ...env })';
+
+    t('a trailing spread resolved to a caller that overrides NOTHING stays GREEN',
+      reroutes('hop-clean', SPREAD, 'export const a = boot({ OS_DATABASE_URL: \':memory:\' });').length === 0);
+    t('a trailing spread resolved to a caller passing {} stays GREEN',
+      reroutes('hop-empty', SPREAD, 'export const a = boot({});').length === 0);
+
+    // ⭐ THE case: the live shape, and the two sites it finds on this tree.
+    t('a caller that overrides NODE_ENV with development REDS through the hop',
+      JSON.stringify(rerouteReasons('hop-red', SPREAD, 'export const a = boot({ NODE_ENV: \'development\' });'))
+        === JSON.stringify([REROUTE.REROUTED]));
+
+    t('the finding is reported at the CALLER site, where the value was chosen',
+      JSON.stringify(reroutes('hop-site', SPREAD,
+        'it(\'explicit development\', () => {\n  boot({ NODE_ENV: \'development\' });\n});\n')
+        .map((row) => row.fn)) === names('it("explicit development")'));
+
+    t('two callers, one dirty, produce exactly ONE finding named after the dirty block',
+      JSON.stringify(reroutes('hop-siblings', SPREAD,
+        'it(\'unset\', () => {\n  boot({});\n});\nit(\'development\', () => {\n  boot({ NODE_ENV: \'development\' });\n});\n')
+        .map((row) => row.fn)) === names('it("development")'));
+
+    t('a spread BEFORE the NODE_ENV entry cannot override it, so it stays GREEN',
+      reroutes('hop-leading-spread', 'childEnv({ ...env, NODE_ENV: undefined })',
+        'export const a = boot({ NODE_ENV: \'development\' });').length === 0);
+
+    t('a spread of something that is not a parameter REDS as opaque',
+      reroutes('hop-not-param', 'childEnv({ NODE_ENV: undefined, ...extras })').map((r) => r.reason)[0]
+        === REROUTE.OPAQUE);
+    t('a helper with NO call sites in the file REDS as opaque -- the hop resolved nothing',
+      reroutes('hop-uncalled', SPREAD).map((r) => r.reason)[0] === REROUTE.OPAQUE);
+    t('a caller passing an identifier rather than a literal REDS as opaque',
+      reroutes('hop-opaque-arg', SPREAD, 'export const a = boot(overrides);').map((r) => r.reason)[0]
+        === REROUTE.OPAQUE);
+    t('a SECOND hop is not followed -- a caller literal with its own spread REDS as opaque',
+      reroutes('hop-second', SPREAD, 'export const a = boot({ ...more });').map((r) => r.reason)[0]
+        === REROUTE.OPAQUE);
+    t('a base that says nothing and a caller that says nothing REDS as inherited, not opaque',
+      reroutes('hop-both-silent', 'childEnv({ NO_COLOR: \'1\', ...env })', 'export const a = boot({});')
+        .map((r) => r.reason)[0] === REROUTE.INHERITED);
+    t('...and a caller that supplies a SAFE value satisfies a silent base',
+      reroutes('hop-caller-fixes', 'childEnv({ NO_COLOR: \'1\', ...env })',
+        'export const a = boot({ NODE_ENV: \'production\' });').length === 0);
+
+    // -- the declaration registry, site-scoped like DELIBERATE -------------
+    const rerouteTree = tree('reroute-registry', {
+      'a.e2e.test.ts': built(SPREAD,
+        'it(\'first\', () => {\n  boot({ NODE_ENV: \'development\' });\n});\n'
+        + 'it(\'second\', () => {\n  boot({ NODE_ENV: \'test\' });\n});\n'),
+    });
+    const declaredOne = audit(rerouteTree, DELIBERATE, {
+      'packages/cli/test/a.e2e.test.ts::it("first")': { why: 'synthetic' },
+    });
+    t('a DELIBERATE_REROUTE entry for ONE block silences THAT block and leaves its sibling a finding',
+      JSON.stringify({
+        declared: declaredOne.deliberateReroute.map((row) => row.fn),
+        rerouted: declaredOne.rerouted.map((row) => row.fn),
+      }) === JSON.stringify({ declared: ['it("first")'], rerouted: ['it("second")'] }),
+      JSON.stringify(declaredOne.rerouted.map((row) => row.fn)));
+
+    t('a DELIBERATE_REROUTE entry that no longer matches FAILS as stale',
+      judge([], allDeliberate, {}, []).missingReroute.length === Object.keys(DELIBERATE_REROUTE).length
+        && judge([], allDeliberate, {}, Object.keys(DELIBERATE_REROUTE).map((key) => {
+          const [file, fn] = key.split('::');
+          return { file, fn, line: 1, text: 'x' };
+        })).missingReroute.length === 0);
+
+    // -- the three rules are INDEPENDENT ------------------------------------
+    const onlyRule3 = audit(tree('independent-3', {
+      'a.e2e.test.ts': built('childEnv({ NODE_ENV: \'development\' })'),
+    }), DELIBERATE, {});
+    t('rule 3 reds while rules 1 and 2 stay green on the same call',
+      onlyRule3.rerouted.length === 1 && onlyRule3.findings.length === 0 && onlyRule3.envless.length === 0,
+      JSON.stringify({ r3: onlyRule3.rerouted.length, r1: onlyRule3.findings.length, r2: onlyRule3.envless.length }));
+
+    const bulkAtBuilt = audit(tree('independent-1', {
+      'a.e2e.test.ts': built('{ ...process.env, NODE_ENV: undefined }'),
+    }), DELIBERATE, {});
+    t('...and a bulk copy at a built-entrypoint spawn reds rule 1 while rule 3 stays green',
+      bulkAtBuilt.findings.length === 1 && bulkAtBuilt.rerouted.length === 0,
+      JSON.stringify({ r1: bulkAtBuilt.findings.length, r3: bulkAtBuilt.rerouted.length }));
+
+    // An env-less built-entrypoint spawn reds BOTH, which is correct rather
+    // than duplicated: rule 2 says the environment is illegible, rule 3 says
+    // what that illegibility DOES to this particular child.
+    const bothTwoThree = audit(tree('independent-23', {
+      'a.e2e.test.ts': 'import { spawn } from \'node:child_process\';\nimport { resolve } from \'node:path\';\n'
+        + 'const CLI = resolve(HERE, \'../bin/run.js\');\nexport function boot() {\n'
+        + '  return spawn(process.execPath, [CLI, \'serve\'], { cwd: \'.\' });\n}\n',
+    }), DELIBERATE, {});
+    t('an env-less BUILT-entrypoint spawn reds rule 2 AND rule 3, each for its own reason',
+      bothTwoThree.envless.length === 1 && bothTwoThree.rerouted.length === 1
+        && bothTwoThree.rerouted[0].reason === REROUTE.INHERITED);
+
+    // -- OUT OF PROCESS: rule 3 can actually fail a run --------------------
+    const rerouteRoot = tree('oop-reroute', {
+      'a.e2e.test.ts': built('childEnv({ NODE_ENV: \'development\' })'),
+    });
+    const rerouteRun = spawnSync(process.execPath, [SELF, '--audit-root', rerouteRoot], { encoding: 'utf8' });
+    t('OUT OF PROCESS: a built-entrypoint spawn with NODE_ENV=development exits NON-ZERO and names the site',
+      rerouteRun.status === 1 && /a\.e2e\.test\.ts:\d+/.test(`${rerouteRun.stderr}${rerouteRun.stdout}`)
+        && /rerouted=1/.test(`${rerouteRun.stderr}${rerouteRun.stdout}`),
+      JSON.stringify({ status: rerouteRun.status, err: (rerouteRun.stderr || '').slice(0, 200) }));
+
+    const rerouteGreenRoot = tree('oop-reroute-green', {
+      'a.e2e.test.ts': built('childEnv({ NODE_ENV: undefined })'),
+    });
+    const rerouteGreen = spawnSync(process.execPath, [SELF, '--audit-root', rerouteGreenRoot], { encoding: 'utf8' });
+    t('OUT OF PROCESS: ...while NODE_ENV: undefined through the same entry point exits ZERO',
+      rerouteGreen.status === 0 && /built=1/.test(rerouteGreen.stdout) && /rerouted=0/.test(rerouteGreen.stdout),
+      JSON.stringify({ status: rerouteGreen.status, out: (rerouteGreen.stdout || '').trim() }));
+
     // -- (14) wiring. Unwiring the gate must redden HERE, not go quiet. ----
     const pkg = JSON.parse(readFileSync(join(REPO_ROOT, 'package.json'), 'utf8'));
     const alias = pkg.scripts?.['check:cli-test-child-env'] ?? '';
@@ -1912,13 +2218,44 @@ export function selfTest() {
       live.refusal === null && live.envless.length === 0,
       JSON.stringify(live.envless?.map((row) => `${row.file}:${row.line} ${row.reason}`)));
 
-    const liveJudgement = live.refusal ? null : judge(live.findings, live.deliberate, readBaseline());
+    // Rule 3's anti-vacuity pin, the same shape as rule 2's: an empty `rerouted`
+    // reads identically whether every built-entrypoint spawn is sound or the
+    // ENTRYPOINT resolution stopped resolving anything. The population count is
+    // what separates those, so it is asserted rather than merely printed.
+    t('the live tree resolves real BUILT-entrypoint spawns, so rule 3 is measuring something',
+      live.refusal === null && live.builtSpawns > 0, JSON.stringify({ builtSpawns: live.builtSpawns }));
+    t('...and every one of them keeps its child out of development/test',
+      live.refusal === null && live.rerouted.length === 0,
+      JSON.stringify(live.rerouted?.map((row) => `${row.file}:${row.line} ${row.reason}`)));
+
+    // ⭐ The census, pinned. This card was dispatched with a table naming SIX
+    // spawners of bin/run.js, of which two spawn the tsx shim instead -- the
+    // exact shape of number that still reads as measured after it has stopped
+    // being true. Pinned as the SET of files holding a built-entrypoint spawn,
+    // so a file joining or leaving the population has to be seen by a PR.
+    const builtFiles = walkSources(join(REPO_ROOT, POPULATION_ROOT))
+      .filter((abs) => /child_process|worker_threads/.test(readFileSync(abs, 'utf8')))
+      .filter((abs) => builtEntrypointSpawns(abs, readFileSync(abs, 'utf8')).spawns > 0)
+      .map((abs) => relative(REPO_ROOT, abs).split(sep).join('/'))
+      .sort();
+    t('the built-entrypoint population is exactly the four files that spawn bin/run.js',
+      JSON.stringify(builtFiles) === JSON.stringify([
+        'packages/cli/test/serve-mcp-capability-collision.e2e.test.ts',
+        'packages/cli/test/serve-mcp-stdio-answers.e2e.test.ts',
+        'packages/cli/test/serve-node-env-production-default.e2e.test.ts',
+        'packages/cli/test/serve-stdio-stdout-purity.e2e.test.ts',
+      ]), JSON.stringify(builtFiles));
+
+    const liveJudgement = live.refusal ? null : judge(live.findings, live.deliberate, readBaseline(), live.deliberateReroute);
     t('the checked-in ratchet is neither short nor stale against the live tree',
       liveJudgement !== null && liveJudgement.over.length === 0 && liveJudgement.under.length === 0,
       JSON.stringify(liveJudgement && { over: liveJudgement.over, under: liveJudgement.under }));
     t('every DELIBERATE site is still on disk',
       liveJudgement !== null && liveJudgement.missing.length === 0,
       JSON.stringify(liveJudgement && liveJudgement.missing));
+    t('every DELIBERATE_REROUTE site is still on disk',
+      liveJudgement !== null && liveJudgement.missingReroute.length === 0,
+      JSON.stringify(liveJudgement && liveJudgement.missingReroute));
 
     // The two sources #11441 reported missing from the hand-built worklist that
     // preceded this gate. A gate has no worklist, so they are members of the
@@ -1966,6 +2303,9 @@ export function selfTest() {
     + 'a legitimate non-spawner bulk copy stays green and the same body reds once the file spawns; '
     + 'every member read stays green; the two rules red independently of each other; the carve-out is site-scoped, '
     + 'and a callback arrow is named after its CALL so two it() blocks in one file cannot share a registry key; '
+    + 'a built-entrypoint spawn reds out of process when its child lands in development/test -- whether the value is '
+    + 'set at the call, arrives through a resolved one-hop override, or is merely INHERITED from the vitest worker -- '
+    + 'while the tsx shim and a file that only NAMES bin/run.js stay out of that population; '
     + 'the ratchet fails in both directions; and all four refusals are paired with a tree that still returns a verdict).',
   );
   return 0;
