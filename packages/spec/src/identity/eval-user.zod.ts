@@ -2,6 +2,7 @@
 
 import { z } from 'zod';
 import { lazySchema } from '../shared/lazy-schema';
+import type { PermissionSet } from '../security/permission.zod';
 
 /**
  * EvalUser — the one user-context contract (ADR-0068 D1).
@@ -58,6 +59,72 @@ export type BuiltinIdentityName = (typeof BUILTIN_IDENTITY_NAMES)[number];
  * `viewAllRecords`/`modifyAllRecords`).
  */
 export const ADMIN_FULL_ACCESS = 'admin_full_access';
+
+/**
+ * [#11663 Choice 6A] The kernel platform-admin CAPABILITY DECLARATION — the
+ * capability content (object grants + `systemPermissions`) of the
+ * {@link ADMIN_FULL_ACCESS} permission set, declared ONCE here in the contract
+ * package so exactly one copy exists:
+ *
+ * - `@objectstack/plugin-security`'s `admin_full_access` declaration
+ *   (`objects/default-permission-sets.ts`) spreads this object into its
+ *   `PermissionSetSchema.parse({ name, label, ... })` entry — the metadata
+ *   declaration that wins at enforcement time.
+ * - `@objectstack/core`'s platform-admin derivation (the re-anchor's L2 leg)
+ *   reads the same list to fill `grants.systemPermissions`, so the derived
+ *   envelope and the declared set can never drift apart.
+ *
+ * Shape note: these are the two capability-bearing fields of the authored
+ * permission-set contract (`PermissionSetSchema`); `name`/`label` remain with
+ * the declaring package. Behaviour-neutral by construction — the values are
+ * byte-for-byte the ones previously inlined in plugin-security, pinned by
+ * `objects/default-permission-sets.test.ts` there.
+ */
+export const ADMIN_FULL_ACCESS_CAPABILITIES: Pick<PermissionSet, 'objects' | 'systemPermissions'> = {
+  objects: {
+    '*': {
+      allowRead: true,
+      allowCreate: true,
+      allowEdit: true,
+      allowDelete: true,
+      viewAllRecords: true,
+      modifyAllRecords: true,
+      // [#3544] Export is an OPT-IN grant and is deliberately NOT implied by
+      // the super-user bits — "may see all data" and "may take a bulk copy of
+      // it" are separable on purpose (SAP S_GUI 61 / segregation of duties).
+      //
+      // [#8681] NO `allowExport` HERE, and it is not an oversight. This set
+      // shipped `allowExport: true` on the wildcard through 17.0.0 GA, which
+      // made the export axis undeniable for anyone holding it: an app could
+      // declare an object exportable by nobody and the platform exported it
+      // anyway, with no supported opt-out (editing a code-package set answers
+      // `403 [not_overridable]`, and the admin holds no app-authored set to
+      // put the per-object `false` into). Measured on GA, hotcrm#1152: an org
+      // owner exported three objects no app set grants export on, 200 with
+      // full rows. Maintainer ruling (2026-08-15) removes the grant — the
+      // export axis's half of #5491, which removed `member_default`'s CRUD
+      // wildcard for the identical "a wildcard nobody can get under" reason.
+      //
+      // ⛔ Do not restore it, and do not restore a NARROWER wildcard either —
+      // "which platform objects should ship an explicit export grant" is an
+      // OPEN question the ruling deliberately left to a separate decision, and
+      // any `'*'` export grant here re-opens the hole for every object the
+      // platform does not know about. Where admin export is intended, grant
+      // `allowExport` per object in an APP permission set.
+    },
+  },
+  systemPermissions: [
+    'manage_users',
+    'manage_metadata',
+    'manage_platform_settings',
+    // [ADR-0111 D9] Sharing administration — gates the sharing-rule surface
+    // and (in the DEPTH extension) non-owner share management.
+    'manage_sharing',
+    'setup.access',
+    'setup.write',
+    'studio.access',
+  ],
+};
 
 /**
  * Permission-set name whose grant is the source of truth for the `TENANT_ADMIN`
