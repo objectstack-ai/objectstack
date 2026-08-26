@@ -2705,6 +2705,59 @@ export function rootTsProgramExcludedDirs() {
 }
 
 /**
+ * Every file the discovered gate families RESOLVE TO — the gate scripts — as a
+ * Set, memoised per process.
+ *
+ * Derived from `discoverFamilies`, never listed, which is the same
+ * derived-never-listed contract `coveringKey` states for the identity key it
+ * already reads off `entry.files`: a gate script added tomorrow is in this set
+ * on the next run with nothing to update here. Deriving it also means this
+ * helper grows no module-body path literal, so it adds nothing to this file's
+ * own watch-hint set (the `inherited-population` declaration at the top of the
+ * module body stays true).
+ */
+let gateScriptFiles = null;
+export function gateFamilyFiles(families = null) {
+  if (families) {
+    const derived = new Set();
+    for (const [, entry] of families) for (const f of entry.files ?? []) derived.add(f);
+    return derived;
+  }
+  gateScriptFiles ??= gateFamilyFiles([...discoverFamilies().byCheck]);
+  return gateScriptFiles;
+}
+
+/**
+ * Is this input path a gate script — a file some discovered family RUNS?
+ *
+ * ⛔ Deliberately NOT a filename test. The obvious spelling of this kind is a
+ * `check-*` regex over `scripts/`, and it is the wrong instrument in BOTH
+ * directions — measured on this tree rather than assumed:
+ *
+ *   - it FABRICATES 10 leads. `check-dts-emitted.mjs`, `check-platform-
+ *     checklist.mjs`, `check-regen-pending.d.mts` and `check-test-typecheck.mts`
+ *     wear the name and are run by no family; three more are `.test.ts` files
+ *     ABOUT a gate. Neither sweep below ever opens one of them, so naming them
+ *     is the fabricated lead `hintCovers`' docblock prices above a missing one.
+ *   - it MISSES 31 real gate scripts, because a gate is not obliged to be
+ *     called `check-` anything: the ten `packages/spec/scripts/build-*.ts`
+ *     generators are gates, and so is a `.sh`.
+ *
+ * 93.3% precision and 81.8% recall, against 100/100 for the identity test —
+ * which needs no heuristic at all, because the question "will these sweeps open
+ * my file?" is answered by the same `entry.files` the sweeps themselves walk.
+ *
+ * A leading `./` is tolerated for the reason `isInRootTsProgram` tolerates one:
+ * a seat pastes paths as its shell printed them.
+ *
+ * @param {string} path
+ * @param {Set<string>} files
+ */
+export function isGateScriptPath(path, files) {
+  return files.has(path.replace(/^\.\//, ''));
+}
+
+/**
  * Does this input path reach a metadata form module?
  *
  * A card's surface is named before its code exists, so a directory argument
@@ -3011,6 +3064,22 @@ export function reachesMetadataFormModule(path, modulePaths) {
  *     this entry is redundant. Growing more measured coupling constants does
  *     NOT qualify: each names one file, and this entry exists for the files
  *     that have no constant yet, which is every new one.
+ *   - gate-script entry: when BOTH gates it names declare the population they
+ *     judge in a form this derivation can read, the ordinary path match names
+ *     them and this entry is redundant. Neither can today, and the reasons
+ *     differ, so the criterion is met only when both move:
+ *     `bare-root-worklist` walks every family's own files and declares nothing
+ *     (deliberately — recognising its species needs a heuristic over constant
+ *     NAMES, and #10705 refused to put one on the path that derives every PR's
+ *     gate list, which is why this entry names the gate rather than importing
+ *     its verdicts); `check:pm-dispatch-gates` declares three tracked FILES,
+ *     an artifact roster this tool itself flags as "the shape that reads as a
+ *     clearance and is not", so it reaches a card by gate-script identity
+ *     alone. ⛔ Growing more roster entries does NOT qualify — that is what it
+ *     already has. ⛔ Nor does either gate happening to go quiet: three of the
+ *     five measured instances involved a green that proved nothing, because a
+ *     sweep that cannot see your file is not evidence about your file.
+ *
  *
  *   Delete an entry the day its criterion is met, not before.
  */
@@ -3066,6 +3135,20 @@ export const CHANGE_KIND_GATES = [
       {
         name: 'check:i18n',
         why: "the metadataForms half of the bundles is registry-driven, so a form's sections, field labels, helpText or placeholder are extracted into ONE package's committed bundles — platform-objects today — and a form edit drifts them from a package your diff never touches. This is the edge PR #9113 paid a CI round for. Same repair as the entry above: regenerate with `node scripts/check-i18n-bundles.mjs --write` and commit the moved bundles",
+      },
+    ],
+  },
+  {
+    kind: 'adds or edits a GATE SCRIPT (a file some discovered check family runs)',
+    matches: (path) => isGateScriptPath(path, gateFamilyFiles()),
+    gates: [
+      {
+        name: 'scripts/pm/bare-root-worklist.mjs --self-test',
+        why: 'a gate whose population is spelled as a BARE top-level word (a separator-less string such as the one naming the package root) builds no watch hint at all, so it lands unnameable by every dispatch brief — and this self-test refuses the tree until a verdict for it is RECORDED. That obligation is a ledger row, not a command, so no amount of running the families you were given surfaces it: four devs learned it from red CI instead, twice within one hour, each AFTER reporting. Three directions bite, which is why an EDIT counts and not only an add: FRESH (a new invisible population, unjudged), STALE (a recorded verdict whose row you renamed or removed), CONTRADICTED (you declared a hint on a gate whose recorded verdict says the population cannot be spelled). The remedy is the one the failure text names: REFUSE-WIDE, REFUSE-UNSPELLABLE, or the subtree-glob idiom beside the constant. ⛔ Declaring a root the gate does not really read is the costlier error, and ⛔ the map is shrink-only, so a new row is never a remedy for a stale one',
+      },
+      {
+        name: 'check:pm-dispatch-gates',
+        why: 'the SECOND obligation of the same shape, in this tool, and the one it cannot name for you: a gate that declares a bare top-level word the tree HAS joins the escapable-literal species, and this gate refuses the tree until the literal is either respelled or recorded. It reaches your card by gate-script IDENTITY only — its own declared literals are an artifact roster rather than a population — so a card that merely INCURS the obligation is never named by the path derivation, which is measured, not suspected. Two remedies and which is right depends on what your gate actually READS: it really does walk that root, so declare the subtree spelling beside the literal; or it does not, so respell the literal to say what the predicate means. ⛔ Do not reach for the first by default, and ⛔ the ledger is shrink-only',
       },
     ],
   },
@@ -5819,7 +5902,83 @@ function selfTest() {
   const rootLine = rootKind.find((l) => l.includes('- pnpm check:type-check-debt   —')) ?? '';
   t('the root-program line refuses the baseline raise and states the real repair', /shrink-only/.test(rootLine) && /maintainer-only/.test(rootLine));
   t('and carries the built-closure prerequisite, like the other ratchet line', /closure BUILT/.test(rootLine) && rootLine.includes('turbo run build'));
-  t('a checker script beside it still emits nothing', changeKindLines(['scripts/check-type-check-coverage.mjs'], resolved).length === 0);
+  // Re-pointed rather than deleted (#12074). This case pinned one property —
+  // a `.mjs` checker script is NOT in the ROOT tsc program, unlike the `.mts`
+  // bench file above — and the gate-script kind below now makes the same path
+  // emit a DIFFERENT section. So the property is asserted where it still lives:
+  // the root-program heading and its ratchet stay absent, and what does render
+  // is named, so a future kind that starts firing here reddens instead of
+  // hiding inside a `length` this case no longer checks.
+  const checkerKind = changeKindLines(['scripts/check-type-check-coverage.mjs'], resolved);
+  t('a checker script is still outside the ROOT tsc program', !checkerKind.some((l) => l.includes('ROOT tsc program')));
+  t('…and the root ratchet is not named for it', !checkerKind.some((l) => l.includes('- pnpm check:type-check-debt   —')));
+  t('…and the ONE section it does emit is the gate-script kind', checkerKind.length === 3 && checkerKind[0].includes('GATE SCRIPT'));
+
+  // -- The GATE SCRIPT entry (#12074) --------------------------------------
+  //
+  // The card: a new gate carries LANDING OBLIGATIONS that no derivation
+  // enumerates, so they are learned from red CI after the dev has already
+  // reported -- which costs the reviewing seat a correction on a verdict it had
+  // issued. Measured at four devs and two obligations, twice inside one hour.
+  //
+  // The obligations are real gates that already know how to detect their own
+  // omission; what was missing is a pre-CI channel that ASKS them. This entry is
+  // that channel, and it is a KIND rather than a path derivation for the reason
+  // #10542 gives for check:cross-package-test-inputs: neither gate declares the
+  // population it judges. Both DISCOVER it -- they open exactly the files the
+  // families resolve to -- so the honest trigger is that same identity, and the
+  // precision is 100% by construction rather than by estimate.
+  const gateFiles = gateFamilyFiles();
+  t('the gate-script population is derived and non-empty (this kind is not vacuous)', gateFiles.size > 50);
+  t('a gate script is one', isGateScriptPath('scripts/check-type-check-coverage.mjs', gateFiles));
+  t('a leading ./ does not hide one', isGateScriptPath('./scripts/check-type-check-coverage.mjs', gateFiles));
+  t('an ordinary source file is not', !isGateScriptPath('packages/objectql/src/engine.ts', gateFiles));
+  // The two directions that make the FILENAME spelling wrong, pinned as
+  // directions rather than as counts, so they redden if someone swaps the
+  // identity test for the `check-*` regex the card proposed. Both were measured
+  // on this tree: the regex fabricates 10 leads and misses 31 real gate scripts,
+  // 93.3% precision and 81.8% recall against 100/100 here.
+  t('a name-shaped script no family runs is NOT a gate script — the fabrication direction',
+    !isGateScriptPath('scripts/check-dts-emitted.mjs', gateFiles));
+  t('…and a real gate that is not called check-anything IS one — the recall direction',
+    isGateScriptPath('packages/spec/scripts/build-schemas.ts', gateFiles));
+  // The two instances this card measured. They are the whole reason the entry
+  // exists, so they are pinned as paths rather than described.
+  t('the first measured CI red is in the kind', isGateScriptPath('scripts/check-objectql-double-limit.mjs', gateFiles));
+  t('the second measured CI red is in the kind', isGateScriptPath('scripts/check-i18n-stale-fill.mjs', gateFiles));
+
+  // The rendered section, anchored on the delimiters for the reason the entries
+  // above state at length: a bare `includes` survives a prefix-preserving
+  // rename, the one rot class the STALE branch exists to report.
+  const gateKind = changeKindLines(['scripts/check-objectql-double-limit.mjs'], resolved);
+  t('a gate-script path emits the convention section', gateKind.length === 3 && gateKind[0].includes('GATE SCRIPT'));
+  t('and it names the bare-root self-test, runnably',
+    gateKind.some((l) => l.includes('- pnpm scripts/pm/bare-root-worklist.mjs --self-test   —')));
+  t('and it names this tool own gate too — the SECOND obligation, which no path derivation reaches',
+    gateKind.some((l) => l.includes('- pnpm check:pm-dispatch-gates   —')));
+  // Each `why` has to carry the half a dev cannot re-derive, or the lead is a
+  // command with no obligation attached to it.
+  const bareLine = gateKind.find((l) => l.includes('bare-root-worklist')) ?? '';
+  const escLine = gateKind.find((l) => l.includes('- pnpm check:pm-dispatch-gates   —')) ?? '';
+  t('the bare-root line states that an EDIT counts, by naming all three directions',
+    /FRESH/.test(bareLine) && /STALE/.test(bareLine) && /CONTRADICTED/.test(bareLine));
+  t('…and refuses the two wrong repairs the failure text warns about',
+    /shrink-only/.test(bareLine) && /costlier error/.test(bareLine));
+  t('the escapable-literal line states that identity is its ONLY route, so the silence is not a clearance',
+    /artifact roster/.test(escLine) && /IDENTITY/.test(escLine));
+  t('…and refuses reaching for the declare remedy by default', /shrink-only/.test(escLine) && /by default/.test(escLine));
+  // Both names pinned individually beside the census guard's own reasoning: a
+  // count alone stays green if one is dropped and another added.
+  t('the bare-root self-test is a live family, so naming it is not a guess',
+    [...discoverFamilies().byCheck.keys()].includes('scripts/pm/bare-root-worklist.mjs --self-test'));
+  // A non-gate script in no other kind still emits nothing — the genuine zero
+  // this block took over from the re-pointed case above. Read FROM THE TREE
+  // rather than spelled, so it cannot rot into a path that quietly became a
+  // gate and turned this case vacuous.
+  const nonGate = trackedFiles().find((f) => f.startsWith('scripts/') && f.endsWith('.mjs') && !gateFiles.has(f));
+  t('a non-gate script exists to probe the zero with', Boolean(nonGate));
+  t('…and it emits no convention section at all', changeKindLines([nonGate], resolved).length === 0);
+
 
   // i18n change-kind derivation — the pure judgments first, each mirroring one
   // line of the gate's own `findConfigs`.
