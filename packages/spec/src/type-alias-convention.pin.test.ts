@@ -849,7 +849,7 @@ export type Iso384 = Assert<Eq< z.input< typeof M78.ConnectorStatusSchema >, z.i
 export type Iso718 = Assert<Eq< z.input< typeof M78.ConnectorActionEffectSchema >, z.infer< typeof M78.ConnectorActionEffectSchema > >>;
 
 // kernel/cli-extension.zod.ts
-export type Iso385 = Assert<Eq< z.input< typeof M79.CLICommandContributionSchema >, z.infer< typeof M79.CLICommandContributionSchema > >>;
+// Iso385 (`CLICommandContributionSchema`) left with the #12007 retirement.
 export type Iso386 = Assert<Eq< z.input< typeof M79.OclifPluginConfigSchema >, z.infer< typeof M79.OclifPluginConfigSchema > >>;
 
 // kernel/cluster.zod.ts
