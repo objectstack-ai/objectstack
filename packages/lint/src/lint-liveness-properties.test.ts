@@ -2,6 +2,7 @@
 
 import { describe, it, expect } from 'vitest';
 import {
+  authorWarnedProperties,
   lintLivenessProperties,
   // #10262 test seam — package-internal (not re-exported by `src/index.ts`, not
   // in the package's `exports` map). See the block below `getNested` in the
@@ -1042,5 +1043,50 @@ describe('dead / experimental / planned verdicts are distinct, and unknown statu
         oneEntry({ status: 'live', authorWarn: true }),
       ),
     ).toThrow(/live/);
+  });
+});
+
+// ── #11624: the warn set, exported so a second surface reads ONE verdict ──
+//
+// `os lint` runs this rule AND the CLI's i18n coverage walker in one pass. The
+// walker demanded `flows.*` translation keys for a group whose row is `planned`
+// + `authorWarn`, so omitting them drew `i18n/missing-flow` and authoring them
+// drew `liveness-planned-property` — same run, same keys, opposite directions.
+// The walker now asks THIS function which groups are warned instead of reading
+// the same JSON a second time. These pins hold the two readings equal.
+describe('authorWarnedProperties', () => {
+  it('reports the `flows` translation group as warned (the row the CLI gate reads)', () => {
+    expect(authorWarnedProperties('translation').has('flows')).toBe(true);
+  });
+
+  it('can say no — a live group in the same ledger is absent', () => {
+    // The negative half of the instrument: `objects` is `live` and sits in the
+    // same file as the positive above, so a set that swallowed everything or
+    // returned everything would fail one of the two.
+    const warned = authorWarnedProperties('translation');
+    expect(warned.has('objects')).toBe(false);
+    expect(warned.has('pages')).toBe(false);
+  });
+
+  it('agrees with the rule itself on every path it names — the anti-drift pin', () => {
+    // The whole point of exporting this is that the demand side and the warn
+    // side cannot disagree. So: authoring each warned top-level group in a
+    // locale bundle must actually produce a finding naming that group. A path
+    // this set reports but the rule stays silent on is the drift that reopens
+    // the collision from the other end.
+    for (const path of authorWarnedProperties('translation')) {
+      if (path.includes('.')) continue; // container rows only — see getNested
+      const findings = lintLivenessProperties({
+        translations: [{ 'zh-CN': { [path]: { probe: { label: 'x' } } } }],
+      });
+      expect(findings.map((f) => f.message).join('\n')).toContain(`sets \`${path}\``);
+    }
+  });
+
+  it('returns the empty set for a type with no ledger, rather than throwing', () => {
+    // The fail-quiet path both halves share: no ledger ⇒ this rule warns on
+    // nothing and the CLI gates nothing. They go silent together; the state
+    // that must never happen is one of them speaking alone.
+    expect([...authorWarnedProperties('no-such-metadata-type')]).toEqual([]);
   });
 });

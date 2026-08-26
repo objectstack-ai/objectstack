@@ -259,6 +259,17 @@ Honest limits worth knowing before you plan around them:
   screen field has no help text to translate (it declares none), and the
   runner's own chrome — the Cancel and Submit buttons — belongs to the
   console's message catalog rather than your app's bundle.
+
+  **So the tooling does not ask you for these keys either.** `os lint` does not
+  report `flows.*` as missing translations, and `os i18n extract` does not
+  scaffold them into your bundle — both read the same `planned` row. Without
+  that, the two halves of a single `os lint` run contradicted each other:
+  omitting the keys was reported as a coverage gap, and adding them was reported
+  as authoring a group nothing reads. If you author the copy anyway you get the
+  liveness warning and nothing else — it is telling you the truth, not asking
+  you to delete a key you will need later. The day the runner lands and the row
+  flips to `live`, both the coverage report and the extract skeleton pick the
+  group up on their own; there is no flag to turn on.
 - **No ICU MessageFormat** — plural/gender formatting isn't available;
   interpolation is always simple `{variable}` substitution.
 - **Runtime authoring is process-wide.** The authored layer is synced across all
