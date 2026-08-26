@@ -36,7 +36,7 @@ const STORED_BOOKKEEPING_GUIDANCE =
   'This is the metadata layer\'s own storage bookkeeping, not endpoint vocabulary. It is written onto '
   + 'the stored ROW by `register` / `publishPackage` and peeled off before this schema sees a body '
   + '(#5309), so writing it on a declaration configures nothing. Remove it — publication state is '
-  + 'managed by `objectstack publish`, not authored.';
+  + 'managed by `os package publish`, not authored.';
 
 /**
  * API Endpoint Schema
