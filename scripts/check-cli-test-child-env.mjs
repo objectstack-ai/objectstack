@@ -391,11 +391,66 @@ function isBulkUse(node) {
 }
 
 /**
+ * The name a call-argument arrow takes from the call it is passed to:
+ * `it("boots the child")`, or `beforeAll` when the call carries no title.
+ *
+ * DOUBLE quotes around the title, deliberately: the product is a
+ * {@link DELIBERATE} key, and this file's string literals are single-quoted, so
+ * a key pasted into that registry needs no escaping.
+ */
+function callbackSiteName(owner) {
+  if (!owner || !ts.isCallExpression(owner) || !ts.isIdentifier(owner.expression)) return null;
+  const callee = owner.expression.text;
+  const title = owner.arguments.find((arg) => ts.isStringLiteralLike(arg));
+  return title ? `${callee}("${title.text.replace(/\s+/g, ' ').trim()}")` : callee;
+}
+
+/**
  * The nearest enclosing named function, which is the stable half of a site key.
  *
  * A line number is not: any edit above a site moves it, so a registry keyed by
  * line would go stale on unrelated changes and teach its readers to re-run
  * `--update` without looking.
+ *
+ * ## Why a call-argument arrow is named after its CALL (#12531)
+ *
+ * The four shapes below -- a function declaration, a method, and an
+ * arrow/function expression bound to a variable or to a property -- miss the
+ * one that dominates a TEST directory: an arrow passed DIRECTLY as a call
+ * argument. `it('boots the child', async () => { ... })`, `beforeAll(async () =>
+ * { ... })` and `describe(...)` match none of them, so the walk ran straight
+ * past the callback to the source file and attributed the site to
+ * `(top-level)`.
+ *
+ * That was never merely an ugly label. {@link siteKey} is `file::fn` and
+ * {@link DELIBERATE} is keyed by it, so two deliberate bulk copies in two
+ * `it()` blocks of ONE file both keyed to `<file>::(top-level)` -- and a single
+ * registry entry would have silenced BOTH, leaving the second unreviewed by the
+ * PR that needed it. That is exactly the carve-out-by-accident shape this
+ * file's header says the registry exists to prevent. ⚠️ It was LATENT and not
+ * live when it was found: both entries in the registry name real functions
+ * (`childEnv`, `leakedEnv`), so nothing was ever mis-keyed. What is closed here
+ * is the NEXT entry's problem.
+ *
+ * So an arrow whose parent is a call with an IDENTIFIER callee is named after
+ * that callee plus its first string-literal argument, falling back to the
+ * callee alone when there is no literal. Sibling blocks in one file therefore
+ * key differently, which is the whole repair -- and rule 2, which has no
+ * registry to mis-key, gets the same site in its MESSAGES for free.
+ *
+ * ⚠️ Three limits, named here so they are pinned rather than discovered:
+ *
+ *   1. The callee must be an IDENTIFIER. `it.skip('...')` and
+ *      `it.each(table)('...')` call through a property access or through
+ *      another call, and still walk past to `(top-level)`. That is a choice:
+ *      widening to a property-access callee would also capture
+ *      `promise.then(() => ...)` and `rows.map(() => ...)`, whose callee is a
+ *      WORSE site name than the enclosing test block the walk reaches today.
+ *   2. The title's whitespace is collapsed so the name stays one line, but it
+ *      is ⛔ never truncated -- two long titles sharing a prefix would collide
+ *      again, which is the defect being closed.
+ *   3. The nearest NAMED binding still wins, unchanged: a helper declared
+ *      inside an `it()` block is named after the helper, not after the block.
  */
 export function enclosingFunctionName(node, sourceFile) {
   let cursor = node.parent;
@@ -407,6 +462,8 @@ export function enclosingFunctionName(node, sourceFile) {
       if (owner && ts.isVariableDeclaration(owner) && owner.name) return owner.name.getText(sourceFile);
       if (owner && ts.isPropertyAssignment(owner) && owner.name) return owner.name.getText(sourceFile);
       if (cursor.name) return cursor.name.text;
+      const called = callbackSiteName(owner);
+      if (called) return called;
     }
     cursor = cursor.parent;
   }
@@ -658,8 +715,16 @@ export const siteKey = (row) => `${row.file}::${row.fn}`;
  * never an empty finding list standing in for a population it could not read.
  *
  * @param {string} root  A directory containing the population root.
+ * @param {Record<string, {why: string}>} registry  The declaration registry to
+ *   classify against. Defaults to {@link DELIBERATE}, which is what every
+ *   caller but the self-test uses. The parameter exists because the property
+ *   the site key has to hold -- that ONE entry silences ONE site -- cannot be
+ *   asserted against the live registry, whose two entries sit in two different
+ *   files and name real functions. A synthesised registry is what lets the
+ *   #12531 collision be shown GONE through the real classification path,
+ *   rather than read off a key string.
  */
-export function audit(root) {
+export function audit(root, registry = DELIBERATE) {
   const populationDir = join(root, POPULATION_ROOT);
   let exists = false;
   try {
@@ -705,7 +770,7 @@ export function audit(root) {
     spawners += 1;
     for (const hit of bulkEnvReferences(abs, source)) {
       const row = { file: rel, ...hit };
-      (Object.hasOwn(DELIBERATE, siteKey(row)) ? deliberate : findings).push(row);
+      (Object.hasOwn(registry, siteKey(row)) ? deliberate : findings).push(row);
     }
     const calls = envlessSpawnCalls(abs, source);
     spawnCalls += calls.calls;
@@ -980,6 +1045,13 @@ export function selfTest() {
   const spawner = (body) => `import { execFile } from 'node:child_process';\n\nexport function runCli(cwd: string) {\n${body}\n}\n`;
   /** The same body in a file that imports nothing that spawns. */
   const plain = (body) => `export function helper(cwd: string) {\n  void cwd;\n${body}\n}\n`;
+  /**
+   * A spawner file whose body sits at TOP LEVEL rather than inside a named
+   * function -- the shape a real test file has, and the one the site-naming
+   * cases below need: wrapping them in `runCli` would name every site `runCli`
+   * and measure nothing about the walk.
+   */
+  const suite = (body) => `import { execFile } from 'node:child_process';\nvoid execFile;\n${body}\n`;
 
   /** Findings from a one-file spawner tree. */
   const scan = (name, sources) => {
@@ -1104,6 +1176,85 @@ export function selfTest() {
       carvedNeighbour.findings?.length === 1 && carvedNeighbour.findings[0].fn === 'somethingElse',
       JSON.stringify(carvedNeighbour.findings));
 
+    // -- (8b) SITE NAMING (#12531): a callback arrow is named after its CALL
+    //    An arrow passed DIRECTLY as a call argument matches none of the four
+    //    shapes the walk recognises, so before this it ran past `it(...)` and
+    //    `beforeAll(...)` to the source file and reported `(top-level)`.
+
+    /** The site names a one-file spawner tree attributes its bulk copies to. */
+    const siteNames = (name, sources) => JSON.stringify(scan(name, sources).findings?.map((row) => row.fn));
+    const names = (...expected) => JSON.stringify(expected);
+    const BULK = '  const e = { ...process.env };\n  void e;';
+
+    t('a bulk copy inside an it() block is named after the BLOCK, not (top-level)',
+      siteNames('site-it', { 'a.e2e.test.ts': suite(`it('boots the child', () => {\n${BULK}\n});`) })
+        === names('it("boots the child")'));
+    t('a callback with no string-literal title falls back to the callee alone',
+      siteNames('site-beforeall', { 'a.e2e.test.ts': suite(`beforeAll(async () => {\n${BULK}\n});`) })
+        === names('beforeAll'));
+
+    // ⭐ THE case. Two sibling blocks in ONE file must not share a key.
+    t('two it() blocks in one file get TWO DISTINCT names -- the collision this closes',
+      siteNames('site-siblings', {
+        'a.e2e.test.ts': suite(`it('first', () => {\n${BULK}\n});\nit('second', () => {\n${BULK}\n});`),
+      }) === names('it("first")', 'it("second")'));
+
+    t('the NEAREST block wins inside a describe()',
+      siteNames('site-nested', {
+        'a.e2e.test.ts': suite(`describe('outer', () => {\n  it('inner', () => {\n${BULK}\n  });\n});`),
+      }) === names('it("inner")'));
+    t('a named helper declared inside an it() block still wins over the block',
+      siteNames('site-helper', {
+        'a.e2e.test.ts': suite(`it('x', () => {\n  function build() {\n    return { ...process.env };\n  }\n  void build;\n});`),
+      }) === names('build'));
+    t('a variable-bound arrow inside an it() block still wins too',
+      siteNames('site-arrow-binding', {
+        'a.e2e.test.ts': suite(`it('x', () => {\n  const build = () => ({ ...process.env });\n  void build;\n});`),
+      }) === names('build'));
+    t('a bulk copy at TOP LEVEL is still (top-level) -- the fallback survives',
+      siteNames('site-top', { 'a.e2e.test.ts': suite('export const e = { ...process.env };') })
+        === names('(top-level)'));
+
+    t('a template-literal title is a string literal too',
+      siteNames('site-template', { 'a.e2e.test.ts': suite(`it(\`boots\`, () => {\n${BULK}\n});`) })
+        === names('it("boots")'));
+    t('...but a title with SUBSTITUTIONS is not, so the callee alone names it',
+      siteNames('site-template-sub', { 'a.e2e.test.ts': suite(`it(\`boots \${n}\`, () => {\n${BULK}\n});`) })
+        === names('it'));
+    t('a title spanning lines is collapsed to one line, and never truncated',
+      siteNames('site-title-wrap', { 'a.e2e.test.ts': suite(`it(\`boots\nthe child\`, () => {\n${BULK}\n});`) })
+        === names('it("boots the child")'));
+
+    // The named limit, pinned rather than discovered: a property-access callee
+    // is deliberately NOT captured, because `promise.then(...)` and `rows.map(
+    // ...)` would be worse site names than the test block the walk reaches.
+    t('an it.skip() callee is a property access, not an identifier, so it still reads (top-level)',
+      siteNames('site-property-callee', { 'a.e2e.test.ts': suite(`it.skip('x', () => {\n${BULK}\n});`) })
+        === names('(top-level)'));
+
+    // ⭐ The collision END TO END, through the real classification path in
+    //    audit(). One synthesised entry, two sibling blocks. Before this fix
+    //    both rows keyed to `<file>::(top-level)`, so ONE entry classified BOTH
+    //    as deliberate and the second was never reviewed by the PR that needed
+    //    it -- the carve-out-by-accident this file's header names.
+    const siblingRoot = tree('carve-siblings', {
+      'a.e2e.test.ts': suite(`it('first', () => {\n${BULK}\n});\nit('second', () => {\n${BULK}\n});`),
+    });
+    const fnsOf = (result) => JSON.stringify({
+      deliberate: result.deliberate.map((row) => row.fn),
+      findings: result.findings.map((row) => row.fn),
+    });
+
+    const onlyFirst = audit(siblingRoot, { 'packages/cli/test/a.e2e.test.ts::it("first")': { why: 'synthetic' } });
+    t('a registry entry for ONE it() block silences THAT block and leaves its sibling a finding',
+      fnsOf(onlyFirst) === JSON.stringify({ deliberate: ['it("first")'], findings: ['it("second")'] }),
+      fnsOf(onlyFirst));
+
+    const topLevelEntry = audit(siblingRoot, { 'packages/cli/test/a.e2e.test.ts::(top-level)': { why: 'synthetic' } });
+    t('...and a (top-level) entry silences NEITHER -- before this fix that ONE entry silenced BOTH',
+      fnsOf(topLevelEntry) === JSON.stringify({ deliberate: [], findings: ['it("first")', 'it("second")'] }),
+      fnsOf(topLevelEntry));
+
     // -- (9) RULE 2 (#11595): a spawn CALL that leaves its env undeclared ---
     //    The reds here are the whole point of the rule, so they are pinned by
     //    REASON as well as by count: "reds for some reason" would still pass if
@@ -1198,6 +1349,14 @@ export function selfTest() {
       undeclared('envless-uncalled', { ...COMPANION, 'a.e2e.test.ts': spawner('  void cwd;') }).length === 0);
     t('a commented-out env-less spawn is not a call site',
       undeclared('envless-prose', { ...COMPANION, 'a.e2e.test.ts': spawner('  // execFile(\'x\', []);\n  void cwd;') }).length === 0);
+
+    // Rule 2 has no registry, so it cannot MIS-KEY -- but it names sites in its
+    // messages, and `(top-level)` was as unhelpful there. Both rules read the
+    // same walk, so this is ONE change and not two (#12531).
+    t('rule 2 names the it() block too, so an undeclared env is not reported at (top-level)',
+      JSON.stringify(undeclared('envless-in-it', {
+        'a.e2e.test.ts': suite('it(\'spawns a probe\', () => {\n  execFile(\'x\', []);\n});'),
+      }).map((row) => row.fn)) === names('it("spawns a probe")'));
 
     // -- (10) the ratchet, in every direction it must move -----------------
     const one = [{ file: 'packages/cli/test/a.ts', fn: 'runCli', line: 1, text: 'x' }];
@@ -1361,7 +1520,8 @@ export function selfTest() {
     + '(a bare spread in a spawner reds OUT OF PROCESS and the childEnv() form exits zero through the same entry point; '
     + 'an env-less spawn reds out of process too, by reason, through every spelling that reaches a spawn API; '
     + 'a legitimate non-spawner bulk copy stays green and the same body reds once the file spawns; '
-    + 'every member read stays green; the two rules red independently of each other; the carve-out is site-scoped; '
+    + 'every member read stays green; the two rules red independently of each other; the carve-out is site-scoped, '
+    + 'and a callback arrow is named after its CALL so two it() blocks in one file cannot share a registry key; '
     + 'the ratchet fails in both directions; and all four refusals are paired with a tree that still returns a verdict).',
   );
   return 0;
