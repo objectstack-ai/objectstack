@@ -39,15 +39,22 @@
  * ## Types are deliberately loose at the edges
  *
  * Where the real parameter/return types are `packages/objectql`-local
- * (`ServiceObject`, `HookContext`, `InstalledPackage`), the contract says
- * `unknown`/`any` rather than importing them — spec must not depend on the
- * engine package. Consumers that need the shape narrow at the call site, as
- * they always have.
+ * (`HookContext`, `InstalledPackage`), the contract says `unknown`/`any`
+ * rather than importing them — spec must not depend on the engine package.
+ * Consumers that need the shape narrow at the call site, as they always
+ * have. ⚠️ That rationale is a live predicate, not a blanket: a type that
+ * MOVES into spec loses the excuse. `ServiceObject` was on the original
+ * list, migrated to `data/object.zod.ts` (`z.input<typeof
+ * ObjectSchemaBase>`), and left `getObject` returning an `unknown` that
+ * three consumer packages were re-narrowing through private structural
+ * re-declarations — repaired by #12248 (the #11833 ruling's fork 3): the
+ * member now returns the spec's own registered-object type.
  */
 
 import type { IDataEngine } from './data-engine';
 import type { IDataDriver } from './data-driver';
 import type { FlowFunctionEffect, FlowFunctionEntry } from '../automation/flow-function.zod';
+import type { ServiceObject } from '../data/object.zod';
 
 /**
  * The engine's schema-registry view — the members reached through the
@@ -69,8 +76,18 @@ import type { FlowFunctionEffect, FlowFunctionEntry } from '../automation/flow-f
  * because no `tsc` ever read the caller.
  */
 export interface EngineSchemaRegistryView {
-    /** The registered object schema, or `undefined`. */
-    getObject(name: string): unknown;
+    /**
+     * The registered object schema, or `undefined`.
+     *
+     * [#12248] Returns the spec's own registered-object type (the #11833
+     * ruling's fork 3, "anything but leave as is"): `SchemaRegistry.getObject`
+     * has always answered `ServiceObject | undefined`, and while this view
+     * said `unknown`, registry-view consumers (`plugin-pinyin-search`'s
+     * companion projection, `plugin-sharing`'s share cascade) re-narrowed
+     * through `any`. Authored state (`z.input`, ADR-0122) deliberately: the
+     * registry stores what was registered.
+     */
+    getObject(name: string): ServiceObject | undefined;
     /** Every registered object schema, optionally scoped to one package. */
     getAllObjects(packageId?: string): unknown[];
     /** Every registered app, nav contributions merged — the `/me/apps` authority. */
@@ -172,8 +189,22 @@ export interface IObjectQLEngine extends IDataEngine {
     // ── Schema access ────────────────────────────────────────────────────
     /** The registered schema for an object, or `undefined` — the write guards' `managedBy` source. */
     getSchema(objectName: string): unknown;
-    /** Engine-level alias of {@link EngineSchemaRegistryView.getObject} (the migration-flag reader's shape). */
-    getObject(name: string): unknown;
+    /**
+     * Engine-level alias of {@link EngineSchemaRegistryView.getObject} (the
+     * migration-flag reader's shape).
+     *
+     * [#12248] Typed as the spec's registered-object type — the #11833
+     * ruling's fork 3. `ObjectQL.getObject` has always returned
+     * `ServiceObject | undefined` (it aliases `getSchema`), and `ServiceObject`
+     * lives in spec (`data/object.zod.ts`), so the header's "engine-local
+     * type" rationale for `unknown` no longer applied here. While it said
+     * `unknown`, at least three consumer packages re-invented the return
+     * structurally to read `fields` / `external` off it (`service-analytics`'s
+     * `DataEngineLike.getObject?`, `service-storage`'s `FileReferenceEngine`,
+     * the registry-view readers above) — the #4251 drift shape this contract
+     * exists to end.
+     */
+    getObject(name: string): ServiceObject | undefined;
     /** The schema registry — see {@link EngineSchemaRegistryView}. */
     readonly registry: EngineSchemaRegistryView;
 
