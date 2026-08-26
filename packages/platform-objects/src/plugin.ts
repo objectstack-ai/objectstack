@@ -2,6 +2,7 @@
 
 import { SetupAppTranslations } from './apps/translations/index.js';
 import { MetadataFormsTranslations } from './metadata-translations/index.js';
+import { SysMetadataActivation } from './system/sys-metadata-activation.object.js';
 import { SysMigration } from './system/sys-migration.object.js';
 import { SysMigrationJournal } from './system/sys-migration-journal.object.js';
 import { SysSecret } from './system/sys-secret.object.js';
@@ -47,6 +48,36 @@ import { SEED_SETTLEMENT_SERVICE } from '@objectstack/spec/contracts';
  *    service-settings registered it, a kernel composed without settings
  *    hard-failed every secret-field write with an error that blamed
  *    platform-objects. Registered here, that error message is true.
+ *  - **`sys_metadata_activation`** — the packaged-metadata activation
+ *    ledger (ADR-0126 §4). Same story a third time, and the ruling that
+ *    moved it here is recorded verbatim on #12359 (maintainer, 2026-08-26,
+ *    「同意」): registration follows the DECLARATION. Until then the only
+ *    registrant was the automation service's manifest, because flows were
+ *    the ledger's first and only consumer; the moment packaged ACTIONS
+ *    became the second, the consult and write path moved to the ObjectQL
+ *    engine — present in every composition that can execute an action —
+ *    while the object it needs was still gated on an unrelated service.
+ *    Measured cost of that gap: a `bootStack(showcaseStack)` boot (actions,
+ *    no automation service) answered the activation door 503
+ *    SERVICE_UNAVAILABLE, correctly but permanently. Registered here, every
+ *    composition carrying platform-objects has the ledger, so packaged
+ *    disable works without the automation service and each future ADR-0126
+ *    §8 consumer (`tool`, `skill`, `position`) inherits it.
+ *
+ *    ⚠️ MOVE, not add — **single owner, one registration**. The automation
+ *    service no longer names this object in its own manifest. The triage that
+ *    raised #12359 left "is a double registration benign?" unmeasured; it is
+ *    measured now, and it is NOT: `SchemaRegistry.registerObject` throws
+ *    `Object "sys_metadata_activation" is already owned by package
+ *    "com.objectstack.service-automation"` the moment a second code package
+ *    claims the same name (ADR-0029 D3's single-owner invariant, D7's
+ *    contributor kinds). Adding a registrant would have been a boot failure,
+ *    not a duplicate — so MOVE was the only shape available, whichever way
+ *    the ownership question was answered.
+ *
+ *    ⚠️ It rides its OWN manifest, not the one above, and that is a
+ *    smooth-upgrade requirement rather than tidiness — see
+ *    {@link ACTIVATION_LEDGER_MANIFEST}.
  *  - **Fresh-datastore attestation** (#3438, ADR-0104 2026-07-30) —
  *    travels with the ledger registration: a store this boot created from
  *    empty is attested once that boot's own data has settled
@@ -75,6 +106,63 @@ import { SEED_SETTLEMENT_SERVICE } from '@objectstack/spec/contracts';
  * Structurally typed against `@objectstack/core`'s `Plugin` contract so
  * this package does not need to depend on the kernel at compile time.
  */
+/**
+ * [#12359 / ADR-0126 §4] The manifest the activation ledger is registered
+ * under — this plugin's, but SEPARATE from the one carrying `sys_migration` /
+ * `sys_migration_journal` / `sys_secret`, and carrying the automation
+ * manifest's `scope` / `namespace` / `defaultDatasource` triple verbatim.
+ *
+ * ## Why a second manifest rather than a fourth entry in the first one
+ *
+ * Because a manifest is not only a list of objects — it is also a ROUTING
+ * decision, and #12359's ruling was about registration, not about where the
+ * rows live. `ObjectQL.resolveDatasourceBinding` step 4 routes an object by
+ * its OWNING PACKAGE's `defaultDatasource`, so the registrar carries the
+ * table's datasource with it. Measured on a real engine holding a default
+ * driver plus one named `cloud`, registering the same object definition under
+ * each manifest in turn:
+ *
+ *     owner com.objectstack.service-automation (defaultDatasource: 'cloud')
+ *       -> resolveEffectiveDatasource('sys_metadata_activation') === 'cloud'
+ *     owner com.objectstack.platform-objects  (no defaultDatasource)
+ *       -> resolveEffectiveDatasource('sys_metadata_activation') === undefined
+ *          (i.e. rides the global default driver — a DIFFERENT database)
+ *
+ * The ledger table already exists in live databases. On any deployment that
+ * registers a datasource named `cloud`, folding the object into the manifest
+ * above would leave its rows in one database and start reading the other:
+ * every artifact an administrator had switched off would silently re-arm,
+ * which is precisely the failure ADR-0126 §6 wall 3 exists to close, arriving
+ * through a door nobody was watching. So the routing is carried across
+ * unchanged and the move is a no-op for existing data — the smooth-upgrade
+ * wall this card was given, discharged by preserving the status quo rather
+ * than by asserting it.
+ *
+ * ⛔ The three siblings are deliberately NOT given this triple. They ride the
+ * project database today and moving them is a different, larger question.
+ * ⛔ And it is NOT spelled as `datasource: 'cloud'` on the object itself: that
+ * is binding step 1, which answers even when no such driver is registered, so
+ * `getDriver` would throw `Datasource 'cloud' … is not registered` on every
+ * deployment that has no control plane. Step 4 is conditional on the driver
+ * existing, which is exactly the behaviour this object has today.
+ *
+ * ⚠️ Which datasource this ledger SHOULD live on is a real question and this
+ * constant does not answer it — it only refuses to answer it by accident. A
+ * card that wants to move it must move the rows too.
+ */
+const ACTIVATION_LEDGER_MANIFEST = {
+  id: 'com.objectstack.platform-objects.activation-ledger',
+  name: 'Packaged-Metadata Activation Ledger',
+  version: '1.0.0',
+  type: 'plugin',
+  // The same three the automation service's manifest carried. `scope: 'system'`
+  // packages are documented as also setting `defaultDatasource: 'cloud'`
+  // (`manifest.zod.ts`), and this one does — which is the whole point.
+  scope: 'system',
+  defaultDatasource: 'cloud',
+  namespace: 'sys',
+} as const;
+
 export class PlatformObjectsPlugin {
   readonly name = 'com.objectstack.platform-objects';
   readonly type = 'standard';
@@ -98,10 +186,16 @@ export class PlatformObjectsPlugin {
         scope: 'system',
         objects: [SysMigration, SysMigrationJournal, SysSecret],
       });
+      ctx?.getService?.('manifest')?.register?.({
+        ...ACTIVATION_LEDGER_MANIFEST,
+        objects: [SysMetadataActivation],
+      });
     } catch {
       // No manifest service (lean / i18n-only kernels) — the ledger stays
-      // unregistered (every flag reader answers "not verified") and the
-      // secret store stays unregistered (secret-field writes fail closed).
+      // unregistered (every flag reader answers "not verified"), the secret
+      // store stays unregistered (secret-field writes fail closed), and the
+      // activation ledger stays unregistered (every enable/disable door
+      // refuses loudly with 503 rather than keeping a bit that reverts).
     }
   }
 

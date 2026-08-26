@@ -611,7 +611,7 @@ Sort field and direction pair
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **types** | `Enum<'comment' \| 'field_change' \| 'task' \| 'event' \| 'email' \| 'call' \| 'note' \| 'file' \| 'record_create' \| 'record_delete' \| 'approval' \| 'sharing' \| 'system'>[]` | optional | Feed item types to show (default: all) |
+| **types** | `(Enum<'comment' \| 'field_change' \| 'task' \| 'event' \| 'email' \| 'call' \| 'note' \| 'file' \| 'record_create' \| 'record_delete' \| 'approval' \| 'sharing' \| 'system'> \| string)[]` | optional | Feed item kinds to show (default: all). Open vocabulary: the FeedItemType members are the platform built-in kinds, and author-contributed activity kinds (open sys_activity.type vocabulary, ADR-0052 §5b.2) are equally legal — entries are never validated against the built-in set. |
 | **filterMode** | `Enum<'all' \| 'comments_only' \| 'changes_only' \| 'tasks_only'>` | optional (default: `"all"`) | Default activity filter |
 | **showFilterToggle** | `boolean` | optional (default: `true`) | Show filter dropdown in panel header |
 | **limit** | `integer` | optional (default: `20`) | Number of items to load per page |
@@ -684,14 +684,14 @@ Sort field and direction pair
 | **width** | `string \| number` | optional | Panel width (e.g., "350px", "30%") — side positions (`right`/`left`) only. |
 | **collapsible** | `boolean` | optional | Whether the panel can be collapsed (renderer default: off). |
 | **defaultCollapsed** | `boolean` | optional | Whether the panel starts collapsed (renderer default: off; only meaningful with `collapsible`). |
-| **feed** | `{ types?: Enum<'comment' \| 'field_change' \| 'task' \| 'event' \| 'email' \| 'call' \| 'note' \| …>[]; filterMode: Enum<'all' \| 'comments_only' \| 'changes_only' \| 'tasks_only'>; showFilterToggle: boolean; limit: integer; … }` | optional | Embedded activity feed configuration |
+| **feed** | `{ types?: (Enum<'comment' \| 'field_change' \| 'task' \| 'event' \| 'email' \| 'call' \| 'note' \| …> \| string)[]; filterMode: Enum<'all' \| 'comments_only' \| 'changes_only' \| 'tasks_only'>; showFilterToggle: boolean; limit: integer; … }` | optional | Embedded activity feed configuration |
 | **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
 
 ### Nested Shape: `RecordChatterProps.feed`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **types** | `Enum<'comment' \| 'field_change' \| 'task' \| 'event' \| 'email' \| 'call' \| 'note' \| …>[]` | optional | Feed item types to show (default: all) |
+| **types** | `(Enum<'comment' \| 'field_change' \| 'task' \| 'event' \| 'email' \| 'call' \| 'note' \| …> \| string)[]` | optional | Feed item kinds to show (default: all). Open vocabulary: the FeedItemType members are the platform built-in kinds, and author-contributed activity kinds (open sys_activity.type vocabulary, ADR-0052 §5b.2) are equally legal — entries are never validated against the built-in set. |
 | **filterMode** | `Enum<'all' \| 'comments_only' \| 'changes_only' \| 'tasks_only'>` | optional (default: `"all"`) | Default activity filter |
 | **showFilterToggle** | `boolean` | optional (default: `true`) | Show filter dropdown in panel header |
 | **limit** | `integer` | optional (default: `20`) | Number of items to load per page |

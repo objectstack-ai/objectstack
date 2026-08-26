@@ -43,11 +43,14 @@ pnpm add @objectstack/client
   React Hooks block — the three that stand alone. What is not: every block that
   continues Quick Start's implied context. Quick Start establishes `client`
   once and each later block reads it, so a marker there reds with TS2304
-  "Cannot find name 'client'"; the error-handling blocks additionally read a
-  `catch` binding that is `unknown` (TS18046). Making those compile would mean
-  hand-declaring the SDK's own types or injecting casts into prose whose
-  subject IS the real API — pinning each example to itself and teaching worse
-  code than the page teaches now.
+  "Cannot find name 'client'". The two Error Handling blocks USED to add
+  TS18046 ("'error' is of type 'unknown'") on top of that; they now narrow the
+  `catch` binding through a guard the first block declares, which is what a
+  reader's own strict project needs anyway. That leaves only the page-wide
+  TS2304 convention between them and a marker — still unmarked here because
+  the marker question is its own card, so nothing compiles these two blocks.
+  The remaining unnarrowed `catch` is inside the API-surface tour block
+  (`automation.execute`), which is a fragment for other reasons.
 
   Measured with all 13 fences marked, then reverted: 114 diagnostics, TS2304 /
   TS18046 / TS18004 / TS2591, spread over the nine continuation blocks — and
@@ -584,12 +587,35 @@ message in `errors[0].message`), records ride `row.data` when
 
 ## Error Handling
 
-All errors follow a standardized format:
+All errors follow a standardized format. The SDK throws a real `Error` with
+those fields attached to it, so under `strict` (which implies
+`useUnknownInCatchVariables`) the `catch` binding is `unknown` and you must
+narrow before reading them — the SDK exports no type guard of its own, so
+declare the shape you rely on and test for it:
 
 ```typescript
+/**
+ * What the SDK attaches to the `Error` it throws for a non-2xx response.
+ * `httpStatus` is always set; the rest are present only when the server
+ * sent them.
+ */
+interface ObjectStackApiError extends Error {
+  httpStatus: number;
+  code?: string;
+  category?: string;
+  retryable?: boolean;
+  details?: unknown;
+  fields?: { field: string; code: string; message: string }[];
+}
+
+function isApiError(error: unknown): error is ObjectStackApiError {
+  return error instanceof Error && 'httpStatus' in error;
+}
+
 try {
   await client.data.create('todo_task', { subject: '' });
 } catch (error) {
+  if (!isApiError(error)) throw error;  // not a server response — rethrow
   console.error(error.code);       // 'VALIDATION_FAILED'
   console.error(error.httpStatus); // 400
   console.error(error.category);   // optional — set only when the server sent it
@@ -598,10 +624,18 @@ try {
 }
 ```
 
-`error.code` is always the **semantic** code as a string — the numeric HTTP
-status lives on `error.httpStatus` and nowhere else. This holds regardless of
-which server surface answered: the REST server replies with a flat
-`{ error, code, fields }` body and the runtime dispatcher replies with a wrapped
+`httpStatus` is the discriminator because the client sets it on **every** error
+it throws for a server response, and on none of the errors it throws before one
+(a runtime without `Response.body`, a missing `environmentId`). Do not narrow to
+the exported `StandardError` interface: that type describes the server's error
+envelope, its `code` is the closed `StandardErrorCode` enum (which does not
+contain the ledger-registered `VALIDATION_FAILED` these examples branch on),
+and it carries no `fields`.
+
+`error.code` is the **semantic** code as a string whenever the server sent one —
+the numeric HTTP status lives on `error.httpStatus` and nowhere else, and is set
+even when no code was. This holds regardless of which server surface answered:
+the REST server replies with a flat `{ error, code, fields }` body and the runtime dispatcher replies with a wrapped
 `{ success, error: { code, message, httpStatus, details } }` body, and the
 client normalizes both before throwing. (Dispatcher bodies from servers older
 than #3842 put the status in `error.code` and the semantic code in
@@ -617,6 +651,7 @@ offending field, ready to attach to the inputs that produced them:
 try {
   await client.data.create('contact', { email: 'not-an-email' });
 } catch (error) {
+  if (!isApiError(error)) throw error;
   if (error.code === 'VALIDATION_FAILED') {
     for (const f of error.fields ?? []) {
       showFieldError(f.field, f.message);   // 'email', 'email must be a valid email address'

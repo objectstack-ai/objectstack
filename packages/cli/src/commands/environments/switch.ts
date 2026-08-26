@@ -15,7 +15,7 @@ import { readAuthConfig, writeAuthConfig } from '../../utils/auth-config.js';
  * project.
  */
 export default class EnvironmentsSwitch extends Command {
-  static override description = 'Activate a project for subsequent CLI calls';
+  static override description = 'Activate an environment for subsequent CLI calls';
 
   static override examples = [
     '$ os environments switch 00000000-0000-0000-0000-000000000001',
@@ -23,7 +23,7 @@ export default class EnvironmentsSwitch extends Command {
   ];
 
   static override args = {
-    id: Args.string({ description: 'Project id to activate', required: true }),
+    id: Args.string({ description: 'Environment id to activate', required: true }),
   };
 
   static override flags = {
@@ -47,7 +47,7 @@ export default class EnvironmentsSwitch extends Command {
       const lookup = await client.projects.get(args.id);
       const project = lookup?.project;
       if (!project?.id) {
-        throw new Error(`Project ${args.id} not found`);
+        throw new Error(`Environment ${args.id} not found`);
       }
 
       if (flags.remote) {
@@ -59,7 +59,7 @@ export default class EnvironmentsSwitch extends Command {
       cfg.lastUsedAt = new Date().toISOString();
       await writeAuthConfig(cfg);
 
-      console.log(`\n✓ Active project: ${project.display_name ?? project.id}`);
+      console.log(`\n✓ Active environment: ${project.display_name ?? project.id}`);
       console.log(`  id: ${project.id}`);
       if (!flags.remote) {
         console.log('  (local only — server session unchanged)');

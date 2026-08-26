@@ -15,7 +15,7 @@ import { readAuthConfig, writeAuthConfig } from '../../utils/auth-config.js';
  * (unless `--no-activate` is passed).
  */
 export default class EnvironmentsCreate extends Command {
-  static override description = 'Provision a new project';
+  static override description = 'Provision a new environment';
 
   static override examples = [
     '$ os environments create --org 00000000-0000-0000-0000-000000000000 --name Staging',
@@ -39,11 +39,11 @@ export default class EnvironmentsCreate extends Command {
     // the App Marketplace instead (`os package install`, `sys_package` with
     // `is_starter = true`).
     artifact: Flags.string({
-      description: 'Path to a locally-compiled objectstack.json artifact to bind into this project',
+      description: 'Path to a locally-compiled objectstack.json artifact to bind into this environment',
     }),
-    'clone-from': Flags.string({ description: 'Clone schema from an existing project id' }),
+    'clone-from': Flags.string({ description: 'Clone schema from an existing environment id' }),
     activate: Flags.boolean({
-      description: 'Activate the new project for subsequent CLI calls',
+      description: 'Activate the new environment for subsequent CLI calls',
       default: true,
       allowNo: true,
     }),
@@ -111,9 +111,9 @@ export default class EnvironmentsCreate extends Command {
         await formatOutput(res, 'yaml');
       } else {
         const p = res?.project ?? {};
-        console.log(`\n✓ Project created: ${p.display_name ?? p.id} (${p.id})`);
+        console.log(`\n✓ Environment created: ${p.display_name ?? p.id} (${p.id})`);
         if (flags.activate) {
-          console.log(`  active project set to ${p.id}`);
+          console.log(`  active environment set to ${p.id}`);
         }
         console.log('');
       }

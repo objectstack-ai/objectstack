@@ -175,6 +175,39 @@ function describe(entry: LedgerEntry): { kind: string; rule: string; defaultHint
   );
 }
 
+/**
+ * The property paths of `type`'s ledger that warn an author for authoring them
+ * — i.e. exactly the set {@link lintLivenessProperties} raises a finding on for
+ * that type, exposed as a decision procedure.
+ *
+ * WHY THIS IS EXPORTED RATHER THAN RE-DERIVED. A second tool wanted the same
+ * fact and the first attempt at it re-read the ledger itself, which is how the
+ * two halves of one `os lint` run came to point in opposite directions: the
+ * CLI's i18n coverage walker demanded `flows.*` translation keys for a group
+ * whose ledger row is `planned` + `authorWarn`, so omitting the keys drew
+ * `i18n/missing-flow` and authoring them drew `liveness-planned-property` — in
+ * the SAME run, with no third option for the author. A demand side and a warn
+ * side that disagree can only be kept honest by reading ONE verdict, so this
+ * returns the very map `checkItem` iterates rather than a parallel reading of
+ * the same JSON.
+ *
+ * Keys are the ledger's own property paths, `children` flattened one level as
+ * `parent.child` — the shape `checkItem` resolves. Unreadable or absent ledger
+ * ⇒ the empty set, which is also the state in which `lintLivenessProperties`
+ * warns on nothing: the two sides go quiet together rather than one of them
+ * going quiet alone.
+ *
+ * Deliberately NOT memoized, for the same reason `lintLivenessProperties`
+ * re-reads on every call: a cached verdict outlives the ledger edit that
+ * changes it, and a stale "nothing warns here" is the silent state this whole
+ * family exists to prevent.
+ */
+export function authorWarnedProperties(type: string): ReadonlySet<string> {
+  const dir = resolveLivenessDir();
+  if (!dir) return new Set<string>();
+  return new Set<string>(loadWarnMap(dir, type).keys());
+}
+
 /** Check one metadata item's set properties against its type's warn-map. */
 function checkItem(
   type: string,

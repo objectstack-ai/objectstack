@@ -8,7 +8,7 @@
  * WHY THIS EXISTS. `MetadataPlugin.start()` resolves the
  * `http.server`/`http-server` service, takes the Hono handle through
  * `getRawApp()`, and hands it to `registerMetadataHmrRoutes()`
- * (`plugin.ts:468`), which registers the HMR endpoints straight on it. That
+ * (`plugin.ts:485`), which registers the HMR endpoints straight on it. That
  * mount is outside every ledger the platform had, and outside the reach of the
  * #7526 live-mount parity gate as well: that gate reads
  * `IHttpServer.getMountedRoutes()`, and "routes an adapter mounts on its
@@ -21,12 +21,23 @@
  * SCOPE, re-derived on `origin/main` @ 2ba4329e rather than inherited from the
  * filing: two routes, one registrar module, one wire path served by both verbs.
  *
+ * BOTH ROWS ARE NOW CONDITIONAL, and the condition is part of each row's
+ * disposition rather than a footnote to it (#12140). `registerMetadataHmrRoutes`
+ * refuses to mount anything unless the process runs an explicit
+ * `NODE_ENV=development` posture, so on every production-shaped boot this
+ * package's mounted-route census is EMPTY. A census that describes what is
+ * mounted has to say when: this ledger describes the development posture, which
+ * is the only posture in which either route exists. The conformance guard reads
+ * SOURCE TEXT rather than a live mount (see its header for why), so it keeps
+ * accounting for both rows on either side of the gate — the gate changes what a
+ * running server serves, not what this module mounts on the line the scan reads.
+ *
  * THE PATH HAS A CONFIGURABLE SEAM, AND IT IS UNUSED. `registerMetadataHmrRoutes`
  * accepts `options.path` and falls back to `/api/v1/dev/metadata-events`
- * (`routes/hmr-routes.ts:74`). Both rows below carry the DEFAULT, and that is
+ * (`routes/hmr-routes.ts:163`). Both rows below carry the DEFAULT, and that is
  * exact rather than approximate, because the seam is unreachable from outside
  * this package: `registerMetadataHmrRoutes` is not re-exported from `index.ts`
- * or `node.ts`, and its sole in-repo caller — `plugin.ts:468` — passes no
+ * or `node.ts`, and its sole in-repo caller — `plugin.ts:485` — passes no
  * options at all. The guard asserts both halves, so the day the seam is
  * exported or a caller starts passing a path, these rows stop being the whole
  * truth loudly rather than quietly.
@@ -100,7 +111,12 @@ export const METADATA_ROUTE_LEDGER: readonly MetadataRouteLedgerEntry[] = [
             + 'anonymous browser surface: grepped for a session/principal/401 gate in `routes/hmr-routes.ts` and there is '
             + 'none. Not SDK surface: the consumer is an EventSource in the Studio shell, and `@objectstack/client` models '
             + 'request/response calls, not long-lived SSE subscriptions (its realtime channel is a separate transport). '
-            + 'Zero hits for `metadata-events` anywhere in the client package.',
+            + 'Zero hits for `metadata-events` anywhere in the client package. POSTURE (#12140): `public` is scoped by an '
+            + 'environment gate — the registrar mounts this route only under an explicit `NODE_ENV=development`, so the '
+            + 'anonymous surface exists on a dev workstation and on no production-shaped boot. It stays anonymous WHEN '
+            + 'mounted, deliberately: the consumer is an EventSource, which cannot set an `Authorization` header, and the '
+            + 'gate rather than a credential is what bounds who can reach it. Worth naming because the frames carry a '
+            + '`path` field holding a server-side filesystem path.',
     },
     {
         route: 'POST /api/v1/dev/metadata-events',
@@ -112,10 +128,17 @@ export const METADATA_ROUTE_LEDGER: readonly MetadataRouteLedgerEntry[] = [
             + 'package header names the caller: `os dev` watching TS sources. Who builds this URL instead, measured: the '
             + 'CLI, not the SDK (`packages/cli/src/commands/dev.ts:553` documents the endpoint as the one it drives). A '
             + 'build-tool loopback is deliberately not application SDK surface. POSTURE, recorded because a ledger row is '
-            + 'where it becomes reviewable: this door carries NO authentication and MetadataPlugin applies no environment '
-            + 'gate of its own — the plugin mounts it whenever a raw-app-capable HTTP server is present, and the only '
-            + '`isDev` guard in the tree is on the CLI\'s SUPPLEMENTARY composition in `serve.ts`, not on this mount. The '
-            + 'plugin\'s own comment states the posture as "production deployments simply won\'t have a CLI POSTing to this '
-            + 'endpoint", which is a claim about who calls it, not a gate that stops them.',
+            + 'where it becomes reviewable — and CHANGED by #12140, so this row moved with it. What this row used to say: '
+            + 'the door carried no authentication and MetadataPlugin applied no environment gate of its own, mounting it '
+            + 'whenever a raw-app-capable HTTP server was present, while the only `isDev` guard in the tree sat on the '
+            + 'CLI\'s SUPPLEMENTARY composition in `serve.ts` and never reached this mount. That was measured to be '
+            + 'reachable rather than theoretical: the official image runs `os start` under `NODE_ENV=production`, that '
+            + 'boot reaches `createStandaloneStack`, and the stack composes MetadataPlugin unconditionally onto a kernel '
+            + 'that registers the Hono server whenever it serves. What it says now: `registerMetadataHmrRoutes` mounts '
+            + 'nothing and returns `null` unless `NODE_ENV` is exactly `development` (unset reads as production, per the '
+            + 'maintainer\'s 2026-08-06 ruling), so this write-shaped door exists only on a boot that declared itself a '
+            + 'development one. Still no authentication WHEN mounted, and that is the deliberate half: an environment gate '
+            + 'closes the door instead of putting a lock on it, because promoting a build-tool loopback into an '
+            + 'authenticated production surface would widen what this endpoint is rather than harden it.',
     },
 ];

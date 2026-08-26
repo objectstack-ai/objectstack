@@ -29,7 +29,37 @@
 // the spec-exported key face` test below pins list↔walker on this side, so a
 // hand-copied list here fails rather than silently offering a key nothing reads.
 
-import { describe, it, expect } from 'vitest';
+// ## Why this file simulates a `live` ledger row (#11624)
+//
+// Everything below is the behaviour of the flow bucket ITSELF — which keys the
+// walker harvests, how the coverage report attributes them, what the skeleton
+// looks like. None of it changed in #11624. What changed is WHEN it runs: the
+// `flows` row in `@objectstack/spec/liveness/translation.json` is `planned` +
+// `authorWarn`, and `os lint` runs this bucket in the SAME pass as
+// `lintLivenessProperties`, so demanding the keys while the ledger warns
+// authors for writing them left the author with no move that satisfies both.
+// The bucket is now gated on that row, and it turns itself back on the day an
+// objectui screen-flow runner lands and the row flips.
+//
+// So these pins are re-anchored, not retired: the mock below is the ledger
+// warning on nothing, i.e. exactly the post-flip world. Retiring them instead
+// would have left the flip with no proof the bucket still works, and a pin that
+// "passes" because the walker now emits nothing is the worst of both. The
+// GATED half — that none of this reaches an author while the row is `planned`
+// — is pinned next door in `i18n-flow-liveness-gate.test.ts`, against the real
+// shipped ledger.
+//
+// The mock is fail-loud: if it stopped applying, every `expect(...).toContain`
+// below would go red rather than silently assert over an empty walk.
+
+import { describe, it, expect, vi } from 'vitest';
+
+vi.mock('@objectstack/lint', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@objectstack/lint')>()),
+  // The post-flip ledger: no translation group warns an author any more.
+  authorWarnedProperties: () => new Set<string>(),
+}));
+
 import { collectExpectedEntries, extractTranslations } from '../src/utils/i18n-extract.js';
 import { computeI18nCoverage, type CoverageIssue, type CoverageReport } from '../src/utils/i18n-coverage.js';
 import {

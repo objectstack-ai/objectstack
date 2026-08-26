@@ -250,7 +250,9 @@ describe('#9232 §3 — the halves that must not move', () => {
             expect(status).toBe(arm.status);
             expect(body.code).toBeUndefined();
             expect(body.declaredCode).toBeUndefined();
-            // ADR-0112 says the PRODUCER names the condition, so a
+            // ADR-0112 D4 governs the semantic-CODE channel — the producer
+            // names the condition on the CODE axis, and the ADR rules no HTTP
+            // status for an undeclared throw — so a
             // half-declaration is honoured for the half that was declared.
             // Narrowing the vocabulary must not start ADDING codes to bodies
             // that carried none.

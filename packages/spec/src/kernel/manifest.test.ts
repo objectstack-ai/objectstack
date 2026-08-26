@@ -453,22 +453,57 @@ describe('contributes dead-member retirement (#10724, ADR-0049 — tombstoned, n
     );
   });
 
-  it('still parses the two survivors — `kinds` registers, `routes` is untouched (#10726 fork)', () => {
+  it('still parses the surviving `kinds` member — `routes` retired separately (#10726)', () => {
     const parsed = ManifestSchema.parse({
       ...base,
       contributes: {
         kinds: [{ id: 'sys.bi.report', description: 'BI report kind' }],
-        routes: [{ prefix: '/api/v1/example', service: 'example' }],
       },
     });
     expect(parsed.contributes!.kinds).toHaveLength(1);
-    expect(parsed.contributes!.routes).toHaveLength(1);
   });
 
   it('parses cleanly with the retired keys simply absent', () => {
     const parsed = ManifestSchema.parse({ ...base, contributes: {} });
     expect(parsed.contributes).toEqual({});
     expect(parsed.contributes).not.toHaveProperty('commands');
+  });
+});
+
+describe('contributes.routes retirement (#10726, ADR-0049 — maintainer-ruled Option B 2026-08-22)', () => {
+  // The one `contributes` member split onto its own card: zero readers like
+  // its nine #10724 siblings (#10627's controlled census, cloud leg closed
+  // clean by #10812), but four published surfaces taught it as THE way to
+  // serve a code-handler endpoint, so removal needed its own ruling. Neither
+  // `ManifestSchema` nor the `contributes` object is `.strict()`, so the
+  // removal is a `retiredKey()` tombstone; the pin asserts the SPECIFIC zod
+  // issue — located at the key, carrying the removal record and the
+  // imperative `http.server` fix — never just "it threw".
+  const base = { id: 'com.example.routes', version: '1.0.0', type: 'plugin', name: 'Routes' };
+
+  it('REJECTS an authored `contributes.routes` with the prescription as the issue', () => {
+    const result = ManifestSchema.safeParse({
+      ...base,
+      contributes: { routes: [{ prefix: '/api/v1/example', service: 'example' }] },
+    });
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    const issue = result.error.issues.find(
+      (i) => i.path[0] === 'contributes' && i.path[1] === 'routes',
+    );
+    expect(issue).toBeDefined();
+    expect(issue!.message).toMatch(
+      /manifest\.contributes\.routes.*removed in @objectstack\/spec 17.*#10726.*Delete the key.*http\.server/s,
+    );
+  });
+
+  it('still parses the surviving `kinds` member with `routes` simply absent', () => {
+    const parsed = ManifestSchema.parse({
+      ...base,
+      contributes: { kinds: [{ id: 'sys.bi.report' }] },
+    });
+    expect(parsed.contributes!.kinds).toHaveLength(1);
+    expect(parsed.contributes).not.toHaveProperty('routes');
   });
 });
 

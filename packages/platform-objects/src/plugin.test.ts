@@ -10,7 +10,7 @@ import { describe, it, expect } from 'vitest';
 // the predicate into a package that depends on neither side.
 import { assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import { PlatformObjectsPlugin } from './plugin.js';
-import { SysMigration, SysMigrationJournal, SysSecret } from './system/index.js';
+import { SysMetadataActivation, SysMigration, SysMigrationJournal, SysSecret } from './system/index.js';
 
 /**
  * Hand-rolled fake PluginContext (mirrors the service-plugin tests) — this
@@ -53,11 +53,11 @@ describe('PlatformObjectsPlugin: platform-infrastructure object registration (#4
 
     await new PlatformObjectsPlugin().init(ctx);
 
-    expect(manifests).toHaveLength(1);
-    expect(manifests[0].id).toBe('com.objectstack.platform-objects');
-    expect(manifests[0].scope).toBe('system');
-    expect(manifests[0].objects).toEqual([SysMigration, SysMigrationJournal, SysSecret]);
-    expect(manifests[0].objects.map((o: any) => o.name)).toEqual([
+    const infra = manifests.find((m) => m.id === 'com.objectstack.platform-objects');
+    expect(infra).toBeDefined();
+    expect(infra.scope).toBe('system');
+    expect(infra.objects).toEqual([SysMigration, SysMigrationJournal, SysSecret]);
+    expect(infra.objects.map((o: any) => o.name)).toEqual([
       'sys_migration',
       // ADR-0119 D2 (#4617). Registered UNCONDITIONALLY, alongside the flag
       // ledger rather than by the migration CLI that writes it: recovery has
@@ -66,6 +66,52 @@ describe('PlatformObjectsPlugin: platform-infrastructure object registration (#4
       'sys_migration_journal',
       'sys_secret',
     ]);
+    // ⛔ The three above must NOT acquire the ledger's routing triple. They
+    // ride the project database today; moving them is a different question.
+    expect(infra.defaultDatasource).toBeUndefined();
+  });
+
+  /**
+   * [#12359 ruling, 2026-08-26 — 「同意」] ADR-0126 §4's activation ledger.
+   * Registration follows the DECLARATION: the object is declared in this
+   * package, so this plugin registers it. Until the ruling its only registrant
+   * was the automation service's manifest — which made packaged-ACTION
+   * disable, whose consult and write path live on the ObjectQL engine,
+   * unavailable in every actions-and-no-automation composition (measured on a
+   * real boot: 503 SERVICE_UNAVAILABLE on the flip).
+   */
+  it('registers SysMetadataActivation under its OWN manifest, carrying the routing verbatim', async () => {
+    const ctx = makeCtx();
+    const manifests: any[] = [];
+    ctx.registerService('manifest', { register: (m: any) => manifests.push(m) });
+
+    await new PlatformObjectsPlugin().init(ctx);
+
+    const ledger = manifests.find((m) => m.objects?.some((o: any) => o.name === 'sys_metadata_activation'));
+    expect(ledger, 'no manifest registers sys_metadata_activation').toBeDefined();
+    expect(ledger.objects).toEqual([SysMetadataActivation]);
+
+    // The load-bearing half. `ObjectQL.resolveDatasourceBinding` step 4 routes
+    // an object by its OWNING PACKAGE's `defaultDatasource`, so a registrar
+    // carries the table's datasource with it. The ledger table already exists
+    // in live databases; dropping this triple would leave its rows in one
+    // database and start reading another on any deployment that registers a
+    // `cloud` datasource — every disabled artifact silently re-arming, which is
+    // the ADR-0126 §6 wall 3 failure through an unwatched door. Measured on a
+    // real engine: owner `com.objectstack.service-automation` resolves 'cloud',
+    // owner `com.objectstack.platform-objects` resolves undefined (the global
+    // default driver — a different database).
+    expect(ledger.scope).toBe('system');
+    expect(ledger.namespace).toBe('sys');
+    expect(ledger.defaultDatasource).toBe('cloud');
+
+    // Exactly one manifest claims it. Two would not be a duplicate, it would be
+    // a boot FAILURE — `registerObject` throws `Object "…" is already owned by
+    // package "…"` (ADR-0029 D3 single owner). Measured, because the triage
+    // that raised #12359 left it as the open question.
+    expect(
+      manifests.filter((m) => m.objects?.some((o: any) => o.name === 'sys_metadata_activation')),
+    ).toHaveLength(1);
   });
 
   /**

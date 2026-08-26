@@ -1617,7 +1617,8 @@ export function collapseHint(hint) {
  * refused, because the narrowing would be the false statement.
  */
 export function hintCovers(hint, inputPath) {
-  if (globInNonFinalSegment(hint)) return triggerCovers(hint, inputPath);
+  if (globInNonFinalSegment(hint))
+    return zeroSegmentForms(hint).some((form) => triggerCovers(form, inputPath));
   const plain = collapseHint(hint);
   if (plain.length < 2) return false;
   // `hint`, not `plain`: glob collapse destroys the separator this refusal is
@@ -1642,6 +1643,132 @@ export function globInNonFinalSegment(hint) {
   const segments = hint.split('/');
   for (let i = 0; i < segments.length - 1; i++) if (segments[i].includes('*')) return true;
   return false;
+}
+
+/**
+ * How many `**` segments one hint may carry before the enumeration below stops
+ * being exhaustive. The forms are a power set, so the bound is what keeps a
+ * pathological hint from costing 2^n comparisons per file. Measured over all
+ * 764 distinct hints in the fleet, the maximum any hint carries is ONE; the cap
+ * is headroom, not a live constraint, and the self-test pins what a hint above
+ * it still gets.
+ */
+export const ZERO_SEGMENT_STAR_CAP = 8;
+
+/**
+ * ## `a/**\/b` must reach `a/b` — the spellings a hint author writes, not the
+ * ## ones CI's trigger language happens to share
+ *
+ * Every spelling of a hint that carries a glob in a non-final segment is judged
+ * by `triggerCovers`, which is `triggerPatternRegex` and therefore GitHub's
+ * filter-pattern language verbatim: there `**` is a CHARACTER wildcard ("zero
+ * or more of any character, `/` included"), so the `/` written after it is a
+ * literal that must still appear. The consequence is segment-wise arithmetic no
+ * hint author expects — `scripts/**\/*.d.mts` compiles to
+ * `^scripts/.*\/[^/]*\.d\.mts$`, which needs at least one intervening
+ * segment, so `**` there means ONE OR MORE and a top-level file is unreachable
+ * BY CONSTRUCTION:
+ *
+ *   scripts/check-regen-pending.d.mts   ← 3 tracked files, the natural
+ *   scripts/invoked-as.d.mts              spelling for them reaches 0 of them
+ *   scripts/js-comment-mask.d.mts
+ *
+ * That is the same dead-hint species #12246 was filed for, arriving through the
+ * branch that fixed it: a hint that matches nothing while looking like an
+ * ordinary literal, which `unreachableClass` then files as "THE LAYOUT MOVED …
+ * a real miss, worth triaging" — the wrong-classification-plus-wrong-evidence
+ * row this output calls the worst one it can print.
+ *
+ * ## Why the repair is HERE and not in `triggerPatternRegex`
+ *
+ * `triggerPatternRegex` is the CI mirror. `triggerListCovers`/`coveringTrigger`
+ * evaluate real workflow `paths:` lists with it, and its docblock's whole claim
+ * is that it reads the trigger language rather than approximating it. Teaching
+ * `**` to swallow its own separator THERE would change what this file says CI
+ * does — a fleet-wide semantic change, and a lie about a `paths:` list, for
+ * every workflow (`validate-deps.yml`'s `'**\/package.json'` is the live
+ * specimen). So the character-wildcard translation stays exactly as it is, and
+ * the difference is confined to the side that actually differs: a HINT is a
+ * glob a gate author wrote to describe what the gate reads, not a filter GitHub
+ * will evaluate, and in that language `a/**\/b` covers `a/b`.
+ *
+ * ## The rule
+ *
+ * A hint's forms are itself plus every spelling reachable by deleting some
+ * subset of its whole-`**` non-final segments — the power set, because each
+ * `**` means "zero or more" independently of the others. A match against ANY
+ * form is a match. Deliberately narrow in three ways:
+ *
+ *   - only a segment that is EXACTLY `**` is droppable. `packages/client*` and
+ *     `*.d.mts` are partial-segment globs and keep the meaning they have;
+ *   - only NON-FINAL segments, so nothing that reaches the collapse is touched;
+ *   - a single `*` is never droppable — `a/*\/b` means exactly one segment in
+ *     every glob language, `skills/*\/references/_index.md` included.
+ *
+ * ## Measured, both directions, on 174 families × 764 distinct hints × 6861
+ * ## tracked files
+ *
+ * The blast radius is enumerable rather than estimated: four of the six live
+ * hints with a glob in a non-final segment carry a whole-`**` segment, and the
+ * form this rule adds for each reaches nothing the tree has.
+ *
+ *   packages/**\/*.ts          + packages/*.ts          4718 → 4718
+ *   packages/**\/*.object.ts   + packages/*.object.ts     79 →   79
+ *   src/**\/*                  + src/*                     0 →    0
+ *   src/**\/*.zod.ts           + src/*.zod.ts              0 →    0
+ *   skills/*\/references/_index.md   no `**` segment        9 →    9
+ *   spec/src/*\/index.ts            no `**` segment        0 →    0
+ *
+ *   watch-hint (gate, file) pairs   70188 → 70188 (ZERO change)
+ *   families gaining or losing coverage                    0
+ *   (check, hint) newly live 0; newly inert 0
+ *   hints reaching zero tracked files                388 → 388
+ *
+ * Zero is the expected reading, not a disappointing one: `packages/` holds no
+ * file at its top level, and the two `src/**` hints are package-relative module
+ * specifiers that were never repo paths. What the rule buys is that the natural
+ * spelling for a top-level population STOPS BEING A TRAP — `scripts/**\/*.d.mts`
+ * goes 0 → 3 the moment a gate declares it, instead of being recorded as an
+ * unspellable population.
+ *
+ * The `ROOT_DIR_WATCH_HINTS` idiom #12300 measured at −7404 pairs on each of
+ * three gates if widened wrongly is untouched, because no trailing glob reaches
+ * this function at all: `packages/*` 5253, `examples/*` 241, `skills/**` 50,
+ * `content/**` 442, `scripts/**` 272, all unchanged, and the three gates hold
+ * at check:test-source-alias 5534, check:type-source-resolution 5534,
+ * check:published-files 5535.
+ *
+ * ## What this deliberately does NOT fix
+ *
+ * The sibling spelling `scripts/*.d.mts` is dead too, by the OLDER route: a
+ * glob in the LAST segment still goes through `collapseHint`, which deletes the
+ * `*` and yields `scripts/.d.mts` — a path no tree holds. That is a different
+ * species (deletion-collapse mangling a final segment whose glob carries a
+ * literal SUFFIX, next door to the DECIDED partial-segment trade), it is not
+ * the zero-segment question, and it is left exactly as it was. Pinned below so
+ * the asymmetry reads as recorded rather than overlooked.
+ */
+export function zeroSegmentForms(hint) {
+  const segments = hint.split('/');
+  const droppable = [];
+  for (let i = 0; i < segments.length - 1; i++) if (segments[i] === '**') droppable.push(i);
+  if (droppable.length === 0) return [hint];
+  // Above the cap the power set is refused rather than truncated arbitrarily:
+  // the two forms that carry meaning are the hint as written (every `**` at one
+  // or more) and the hint fully reduced (every `**` at zero).
+  const dropSets =
+    droppable.length > ZERO_SEGMENT_STAR_CAP
+      ? [[], droppable]
+      : Array.from({ length: 1 << droppable.length }, (_, mask) =>
+          droppable.filter((_, k) => (mask >> k) & 1),
+        );
+  const forms = [];
+  for (const drop of dropSets) {
+    const dropped = new Set(drop);
+    const form = segments.filter((_, i) => !dropped.has(i)).join('/');
+    if (form.length > 0 && !forms.includes(form)) forms.push(form);
+  }
+  return forms;
 }
 
 /**
@@ -2578,6 +2705,66 @@ export function rootTsProgramExcludedDirs() {
 }
 
 /**
+ * Every file the discovered gate families RESOLVE TO — the gate scripts — as a
+ * Set, memoised per process.
+ *
+ * Derived from `discoverFamilies`, never listed, which is the same
+ * derived-never-listed contract `coveringKey` states for the identity key it
+ * already reads off `entry.files`: a gate script added tomorrow is in this set
+ * on the next run with nothing to update here. Deriving it also means this
+ * helper grows no module-body path literal, so it adds nothing to this file's
+ * own watch-hint set (the `inherited-population` declaration at the top of the
+ * module body stays true).
+ */
+let gateScriptFiles = null;
+export function gateFamilyFiles(families = null) {
+  if (families) {
+    const derived = new Set();
+    for (const [, entry] of families) for (const f of entry.files ?? []) derived.add(f);
+    return derived;
+  }
+  gateScriptFiles ??= gateFamilyFiles([...discoverFamilies().byCheck]);
+  return gateScriptFiles;
+}
+
+/**
+ * Is this input path a gate script — a file some discovered family RUNS?
+ *
+ * ⛔ Deliberately NOT a filename test. The obvious spelling of this kind is a
+ * `check-*` regex over `scripts/`, and it is the wrong instrument in BOTH
+ * directions — measured on this tree rather than assumed:
+ *
+ *   - it FABRICATES 10 leads — files no discovered family RESOLVES to, which
+ *     is NOT the same as dead, and the difference is the whole trap. Three of
+ *     the ten are healthy and running: `check-dts-emitted.mjs` is invoked by
+ *     about eleven packages' own build scripts, and `check:platform-checklist`
+ *     is maintainer-run by design and says so where CI would otherwise run it.
+ *     `check-regen-pending.d.mts` and `check-test-typecheck.mts` wear the name
+ *     too; three more are test files ABOUT a gate. Neither sweep below ever
+ *     OPENS one of them, because both walk `entry.files` — so naming them is
+ *     the fabricated lead `hintCovers`' docblock prices above a missing one,
+ *     however alive the script itself is. ⚠ Measured, not assumed: a survey
+ *     scoped to the root manifest and the workflows reads the first of them as
+ *     unwired, and the per-package manifests say otherwise.
+ *   - it MISSES 31 real gate scripts, because a gate is not obliged to be
+ *     called `check-` anything: the ten `packages/spec/scripts/build-*.ts`
+ *     generators are gates, and so is a `.sh`.
+ *
+ * 93.3% precision and 81.8% recall, against 100/100 for the identity test —
+ * which needs no heuristic at all, because the question "will these sweeps open
+ * my file?" is answered by the same `entry.files` the sweeps themselves walk.
+ *
+ * A leading `./` is tolerated for the reason `isInRootTsProgram` tolerates one:
+ * a seat pastes paths as its shell printed them.
+ *
+ * @param {string} path
+ * @param {Set<string>} files
+ */
+export function isGateScriptPath(path, files) {
+  return files.has(path.replace(/^\.\//, ''));
+}
+
+/**
  * Does this input path reach a metadata form module?
  *
  * A card's surface is named before its code exists, so a directory argument
@@ -2884,6 +3071,22 @@ export function reachesMetadataFormModule(path, modulePaths) {
  *     this entry is redundant. Growing more measured coupling constants does
  *     NOT qualify: each names one file, and this entry exists for the files
  *     that have no constant yet, which is every new one.
+ *   - gate-script entry: when BOTH gates it names declare the population they
+ *     judge in a form this derivation can read, the ordinary path match names
+ *     them and this entry is redundant. Neither can today, and the reasons
+ *     differ, so the criterion is met only when both move:
+ *     `bare-root-worklist` walks every family's own files and declares nothing
+ *     (deliberately — recognising its species needs a heuristic over constant
+ *     NAMES, and #10705 refused to put one on the path that derives every PR's
+ *     gate list, which is why this entry names the gate rather than importing
+ *     its verdicts); `check:pm-dispatch-gates` declares three tracked FILES,
+ *     an artifact roster this tool itself flags as "the shape that reads as a
+ *     clearance and is not", so it reaches a card by gate-script identity
+ *     alone. ⛔ Growing more roster entries does NOT qualify — that is what it
+ *     already has. ⛔ Nor does either gate happening to go quiet: three of the
+ *     five measured instances involved a green that proved nothing, because a
+ *     sweep that cannot see your file is not evidence about your file.
+ *
  *
  *   Delete an entry the day its criterion is met, not before.
  */
@@ -2939,6 +3142,20 @@ export const CHANGE_KIND_GATES = [
       {
         name: 'check:i18n',
         why: "the metadataForms half of the bundles is registry-driven, so a form's sections, field labels, helpText or placeholder are extracted into ONE package's committed bundles — platform-objects today — and a form edit drifts them from a package your diff never touches. This is the edge PR #9113 paid a CI round for. Same repair as the entry above: regenerate with `node scripts/check-i18n-bundles.mjs --write` and commit the moved bundles",
+      },
+    ],
+  },
+  {
+    kind: 'adds or edits a GATE SCRIPT (a file some discovered check family runs)',
+    matches: (path) => isGateScriptPath(path, gateFamilyFiles()),
+    gates: [
+      {
+        name: 'scripts/pm/bare-root-worklist.mjs --self-test',
+        why: 'a gate whose population is spelled as a BARE top-level word (a separator-less string such as the one naming the package root) builds no watch hint at all, so it lands unnameable by every dispatch brief — and this self-test refuses the tree until a verdict for it is RECORDED. That obligation is a ledger row, not a command, so no amount of running the families you were given surfaces it: four devs learned it from red CI instead, twice within one hour, each AFTER reporting. Three directions bite, which is why an EDIT counts and not only an add: FRESH (a new invisible population, unjudged), STALE (a recorded verdict whose row you renamed or removed), CONTRADICTED (you declared a hint on a gate whose recorded verdict says the population cannot be spelled). The remedy is the one the failure text names: REFUSE-WIDE, REFUSE-UNSPELLABLE, or the subtree-glob idiom beside the constant. ⛔ Declaring a root the gate does not really read is the costlier error, and ⛔ the map is shrink-only, so a new row is never a remedy for a stale one',
+      },
+      {
+        name: 'check:pm-dispatch-gates',
+        why: 'the SECOND obligation of the same shape, in this tool, and the one it cannot name for you: a gate that declares a bare top-level word the tree HAS joins the escapable-literal species, and this gate refuses the tree until the literal is either respelled or recorded. It reaches your card by gate-script IDENTITY only — its own declared literals are an artifact roster rather than a population — so a card that merely INCURS the obligation is never named by the path derivation, which is measured, not suspected. Two remedies and which is right depends on what your gate actually READS: it really does walk that root, so declare the subtree spelling beside the literal; or it does not, so respell the literal to say what the predicate means. ⛔ Do not reach for the first by default, and ⛔ the ledger is shrink-only',
       },
     ],
   },
@@ -5006,6 +5223,49 @@ function selfTest() {
   t('and so is a trailing single `*`', hintCovers('examples/*', 'examples/app-showcase/src/x.ts'));
   t('the DECIDED partial-segment trade still refuses the sibling', !hintCovers('packages/client*', 'packages/client-react/src/index.ts'));
 
+  // ── `**` covers ZERO segments too (#12329) ───────────────────────────────
+  //
+  // The branch above judges these hints with `triggerCovers`, i.e. with
+  // GitHub's filter-pattern language, where `**` is a CHARACTER wildcard and
+  // the `/` written after it is a literal that must still appear. That makes
+  // `**` mean ONE OR MORE segments, so the natural spelling for a top-level
+  // population reaches none of it. Read from the real corpus, not a fixture: a
+  // fixture cannot show that the tree still has the shape the trap needs.
+  const topLevelMirrors = trackedFiles().filter((f) => /^scripts\/[^/]+\.d\.mts$/.test(f));
+  t('the tree really does hold top-level `.d.mts` files under a root', topLevelMirrors.length >= 3);
+  t('a `**` root reaches the top-level files under it', topLevelMirrors.every((f) => hintCovers('scripts/**/*.d.mts', f)));
+  t('and claims nothing else in the whole tree', trackedFiles().filter((f) => hintCovers('scripts/**/*.d.mts', f)).length === topLevelMirrors.length);
+  t('the ONE-OR-MORE reading it used to have is still there', hintCovers('scripts/**/*.d.mts', 'scripts/pm/x.d.mts'));
+  t('at any depth', hintCovers('scripts/**/*.d.mts', 'scripts/a/b/x.d.mts'));
+  t('the extension the glob names is still honoured at the top level', !hintCovers('scripts/**/*.d.mts', 'scripts/invoked-as.mjs'));
+  t('and a directory surface above it still derives the gate', hintCovers('scripts/**/*.d.mts', 'scripts'));
+  // The forms are itself first, then the reductions — the original spelling is
+  // never lost, which is what keeps the one-or-more cases above passing.
+  t('the forms of a `**` hint are the hint and its zero-segment reduction', zeroSegmentForms('scripts/**/*.d.mts').join(' ') === 'scripts/**/*.d.mts scripts/*.d.mts');
+  t('each `**` drops independently, so two of them give the power set', zeroSegmentForms('a/**/b/**/c').join(' ') === 'a/**/b/**/c a/b/**/c a/**/b/c a/b/c');
+  t('a hint with no `**` segment has exactly one form', zeroSegmentForms('skills/*/references/_index.md').join(' ') === 'skills/*/references/_index.md');
+  t('and so does a hint with no glob at all', zeroSegmentForms('packages/spec/src/index.ts').join(' ') === 'packages/spec/src/index.ts');
+  t('a hint above the cap keeps its written and fully-reduced forms only', zeroSegmentForms('a/**/**/**/**/**/**/**/**/**/z').length === 2);
+  // ⛔ Deliberately NOT droppable — three refusals that keep this narrow.
+  t('a single `*` segment is not a zero-segment wildcard', !hintCovers('skills/*/references/_index.md', 'skills/references/_index.md'));
+  t('nor is a `**` that is only PART of a segment', zeroSegmentForms('packages/a**/b.ts').join(' ') === 'packages/a**/b.ts');
+  t('and a trailing `**` never reaches this rule at all', hintCovers('packages/**', 'packages/spec/src/index.ts') && !globInNonFinalSegment('packages/**'));
+  // The CI mirror is untouched, which is the whole reason the repair lives in
+  // `hintCovers` and not in `triggerPatternRegex`: a hint is a glob a gate
+  // author wrote, a trigger is a filter GitHub will evaluate, and this file
+  // must keep saying what GitHub does. `validate-deps.yml` declares
+  // `'**/package.json'` and is the live specimen.
+  t('the trigger language still reads `**` as the character wildcard GitHub documents', !triggerCovers('**/package.json', 'package.json'));
+  t('while the same spelling as a HINT covers the root file', hintCovers('**/package.json', 'package.json'));
+  // ⛔ The sibling spelling is dead by the OLDER route and is NOT repaired
+  // here: a glob in the LAST segment still goes through `collapseHint`, which
+  // yields `scripts/.d.mts`. A different species (deletion-collapse mangling a
+  // final segment whose glob carries a literal SUFFIX), next door to the
+  // DECIDED partial-segment trade. Pinned so the asymmetry reads as recorded
+  // rather than overlooked — see zeroSegmentForms' docblock.
+  t('the final-segment spelling of the same population is still dead', collapseHint('scripts/*.d.mts') === 'scripts/.d.mts');
+  t('and still reaches none of the files it names', !topLevelMirrors.some((f) => hintCovers('scripts/*.d.mts', f)));
+
   // The trailing-separator strip is ONE call, not two: `/\/+$/` is greedy and
   // anchored, so nothing survives for a second `/\/$/` to remove. Measured at
   // zero of 754 hints; pinned on the probes that could tell them apart, so a
@@ -5649,7 +5909,83 @@ function selfTest() {
   const rootLine = rootKind.find((l) => l.includes('- pnpm check:type-check-debt   —')) ?? '';
   t('the root-program line refuses the baseline raise and states the real repair', /shrink-only/.test(rootLine) && /maintainer-only/.test(rootLine));
   t('and carries the built-closure prerequisite, like the other ratchet line', /closure BUILT/.test(rootLine) && rootLine.includes('turbo run build'));
-  t('a checker script beside it still emits nothing', changeKindLines(['scripts/check-type-check-coverage.mjs'], resolved).length === 0);
+  // Re-pointed rather than deleted (#12074). This case pinned one property —
+  // a `.mjs` checker script is NOT in the ROOT tsc program, unlike the `.mts`
+  // bench file above — and the gate-script kind below now makes the same path
+  // emit a DIFFERENT section. So the property is asserted where it still lives:
+  // the root-program heading and its ratchet stay absent, and what does render
+  // is named, so a future kind that starts firing here reddens instead of
+  // hiding inside a `length` this case no longer checks.
+  const checkerKind = changeKindLines(['scripts/check-type-check-coverage.mjs'], resolved);
+  t('a checker script is still outside the ROOT tsc program', !checkerKind.some((l) => l.includes('ROOT tsc program')));
+  t('…and the root ratchet is not named for it', !checkerKind.some((l) => l.includes('- pnpm check:type-check-debt   —')));
+  t('…and the ONE section it does emit is the gate-script kind', checkerKind.length === 3 && checkerKind[0].includes('GATE SCRIPT'));
+
+  // -- The GATE SCRIPT entry (#12074) --------------------------------------
+  //
+  // The card: a new gate carries LANDING OBLIGATIONS that no derivation
+  // enumerates, so they are learned from red CI after the dev has already
+  // reported -- which costs the reviewing seat a correction on a verdict it had
+  // issued. Measured at four devs and two obligations, twice inside one hour.
+  //
+  // The obligations are real gates that already know how to detect their own
+  // omission; what was missing is a pre-CI channel that ASKS them. This entry is
+  // that channel, and it is a KIND rather than a path derivation for the reason
+  // #10542 gives for check:cross-package-test-inputs: neither gate declares the
+  // population it judges. Both DISCOVER it -- they open exactly the files the
+  // families resolve to -- so the honest trigger is that same identity, and the
+  // precision is 100% by construction rather than by estimate.
+  const gateFiles = gateFamilyFiles();
+  t('the gate-script population is derived and non-empty (this kind is not vacuous)', gateFiles.size > 50);
+  t('a gate script is one', isGateScriptPath('scripts/check-type-check-coverage.mjs', gateFiles));
+  t('a leading ./ does not hide one', isGateScriptPath('./scripts/check-type-check-coverage.mjs', gateFiles));
+  t('an ordinary source file is not', !isGateScriptPath('packages/objectql/src/engine.ts', gateFiles));
+  // The two directions that make the FILENAME spelling wrong, pinned as
+  // directions rather than as counts, so they redden if someone swaps the
+  // identity test for the `check-*` regex the card proposed. Both were measured
+  // on this tree: the regex fabricates 10 leads and misses 31 real gate scripts,
+  // 93.3% precision and 81.8% recall against 100/100 here.
+  t('a name-shaped script no family runs is NOT a gate script — the fabrication direction',
+    !isGateScriptPath('scripts/check-dts-emitted.mjs', gateFiles));
+  t('…and a real gate that is not called check-anything IS one — the recall direction',
+    isGateScriptPath('packages/spec/scripts/build-schemas.ts', gateFiles));
+  // The two instances this card measured. They are the whole reason the entry
+  // exists, so they are pinned as paths rather than described.
+  t('the first measured CI red is in the kind', isGateScriptPath('scripts/check-objectql-double-limit.mjs', gateFiles));
+  t('the second measured CI red is in the kind', isGateScriptPath('scripts/check-i18n-stale-fill.mjs', gateFiles));
+
+  // The rendered section, anchored on the delimiters for the reason the entries
+  // above state at length: a bare `includes` survives a prefix-preserving
+  // rename, the one rot class the STALE branch exists to report.
+  const gateKind = changeKindLines(['scripts/check-objectql-double-limit.mjs'], resolved);
+  t('a gate-script path emits the convention section', gateKind.length === 3 && gateKind[0].includes('GATE SCRIPT'));
+  t('and it names the bare-root self-test, runnably',
+    gateKind.some((l) => l.includes('- pnpm scripts/pm/bare-root-worklist.mjs --self-test   —')));
+  t('and it names this tool own gate too — the SECOND obligation, which no path derivation reaches',
+    gateKind.some((l) => l.includes('- pnpm check:pm-dispatch-gates   —')));
+  // Each `why` has to carry the half a dev cannot re-derive, or the lead is a
+  // command with no obligation attached to it.
+  const bareLine = gateKind.find((l) => l.includes('bare-root-worklist')) ?? '';
+  const escLine = gateKind.find((l) => l.includes('- pnpm check:pm-dispatch-gates   —')) ?? '';
+  t('the bare-root line states that an EDIT counts, by naming all three directions',
+    /FRESH/.test(bareLine) && /STALE/.test(bareLine) && /CONTRADICTED/.test(bareLine));
+  t('…and refuses the two wrong repairs the failure text warns about',
+    /shrink-only/.test(bareLine) && /costlier error/.test(bareLine));
+  t('the escapable-literal line states that identity is its ONLY route, so the silence is not a clearance',
+    /artifact roster/.test(escLine) && /IDENTITY/.test(escLine));
+  t('…and refuses reaching for the declare remedy by default', /shrink-only/.test(escLine) && /by default/.test(escLine));
+  // Both names pinned individually beside the census guard's own reasoning: a
+  // count alone stays green if one is dropped and another added.
+  t('the bare-root self-test is a live family, so naming it is not a guess',
+    [...discoverFamilies().byCheck.keys()].includes('scripts/pm/bare-root-worklist.mjs --self-test'));
+  // A non-gate script in no other kind still emits nothing — the genuine zero
+  // this block took over from the re-pointed case above. Read FROM THE TREE
+  // rather than spelled, so it cannot rot into a path that quietly became a
+  // gate and turned this case vacuous.
+  const nonGate = trackedFiles().find((f) => f.startsWith('scripts/') && f.endsWith('.mjs') && !gateFiles.has(f));
+  t('a non-gate script exists to probe the zero with', Boolean(nonGate));
+  t('…and it emits no convention section at all', changeKindLines([nonGate], resolved).length === 0);
+
 
   // i18n change-kind derivation — the pure judgments first, each mirroring one
   // line of the gate's own `findConfigs`.

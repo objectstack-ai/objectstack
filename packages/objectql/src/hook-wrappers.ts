@@ -498,6 +498,8 @@ export function wrapDeclarativeHook(
  * of any other key fall through to `data`. Writes always go to `data`
  * (creating it if missing) so the engine's downstream `input.data`
  * read picks up mutations made by user code as `input.field = value`.
+ * "Writes" means every mutation JS has, not assignment alone: `delete` and
+ * `Object.defineProperty` route into `data` too (#12277).
  */
 function installFlatInput(ctx: HookContext): () => void {
   const raw: any = ctx.input ?? {};
@@ -531,6 +533,59 @@ function installFlatInput(ctx: HookContext): () => void {
       }
       ensureData()[prop as string] = value;
       return true;
+    },
+    // [#12277] The mutation traps are a SET, not a list: every operation JS
+    // offers for changing a property has to land in `data`, because `data` is
+    // the object the engine persists. `set` alone was trapped, so
+    // `delete input.x` and `Object.defineProperty(input, 'x', …)` fell through
+    // to `Reflect.*` on the WRAPPER — one level above the record — and did
+    // nothing to the row while reporting success.
+    //
+    // The two gaps had different shapes, and the worse-shaped one is the one
+    // nobody reported:
+    //
+    //   - `delete input.x` returned `true` and changed nothing. The other
+    //     read-backs stayed HONEST (`'x' in input`, `input.x`,
+    //     `Object.keys(input)` all still showed the key), so the lie was
+    //     confined to `delete`'s own return value.
+    //   - `Object.defineProperty(input, 'x', …)` defined on the wrapper, and
+    //     the `get` trap's fall-through to the wrapper then READ IT BACK — so
+    //     `input.x` confirmed a write that never reached `data`. That is the
+    //     shape with no instrument to catch it from inside a hook.
+    //
+    // Measured cost of the `delete` half before this landed: a guest-intake
+    // app stripped the fields an anonymous submitter must not write with 15
+    // `delete` statements, every one inert, and its unit tests stayed green
+    // because they drive the handler with a plain object.
+    //
+    // `deleteProperty` deliberately does NOT call `ensureData()`: with no
+    // `data` on the wrapper, `get` reads fall through to the wrapper itself,
+    // so that is where the key would live and where the delete belongs.
+    // Materialising an empty `data` just to delete out of it would be a write
+    // performed by a removal.
+    deleteProperty(target, prop) {
+      if (prop === 'id' || prop === 'options' || prop === 'ast' || prop === 'data') {
+        return Reflect.deleteProperty(target, prop);
+      }
+      const data = target.data;
+      if (data && typeof data === 'object') {
+        return Reflect.deleteProperty(data as object, prop);
+      }
+      return Reflect.deleteProperty(target, prop);
+    },
+    // Routed for the same reason `set` is. One inherited JS invariant is worth
+    // naming: a proxy may not report success for an explicitly
+    // `configurable: false` descriptor the TARGET does not carry, so
+    // `Object.defineProperty(input, 'x', { value: 1, configurable: false })`
+    // now throws a TypeError where it used to silently define on the wrapper.
+    // A throw is a diagnosis; the silence was not. Omitting `configurable`
+    // entirely (the common spelling, and every spelling `Object.assign` and
+    // spread produce) is unaffected.
+    defineProperty(target, prop, desc) {
+      if (prop === 'id' || prop === 'options' || prop === 'ast' || prop === 'data') {
+        return Reflect.defineProperty(target, prop, desc);
+      }
+      return Reflect.defineProperty(ensureData(), prop, desc);
     },
     has(target, prop) {
       if (prop === 'id' || prop === 'options' || prop === 'ast' || prop === 'data') {

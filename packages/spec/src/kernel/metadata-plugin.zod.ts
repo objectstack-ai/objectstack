@@ -116,15 +116,17 @@ export const MetadataTypeSchema = lazySchema(() => z.enum([
   'external_catalog', // Cached remote schema snapshot for federated datasources (ADR-0015) — RUNTIME-CREATED by the Sync wizard (ADR-0062/0088); packages never ship one
   'translation', // i18n resources (TranslationSchema)
   // ADR-0088: `router`/`function`/`service` are NOT metadata kinds — they are
-  // code contributions: declarative `apis:` (router — `contributes.routes`
-  // parses but serves nothing, #10726), `defineStack({ functions })`
-  // (function — `contributes.functions` was retired unread, #10724), and the
+  // code contributions: imperative `http.server` mounts + declarative `apis:`
+  // (router — the manifest `contributes.routes` spelling never delivered and
+  // was retired, #10726), `defineStack({ functions })` (function —
+  // `contributes.functions` was retired unread, #10724), and the
   // plugin/service registry itself (service).
   //
   // [#5271, part of #5206] `api` is the ONE declarative endpoint ITEM kind, and
   // it is NOT a reversal of the `router` retirement above: `router` was retired
-  // as a KIND because its delivered forms (`contributes.routes`, imperative
-  // `http.server` mounts) are code contributions. A single `ApiEndpoint` — a
+  // as a KIND because its delivered form (the imperative `http.server` mount;
+  // the `contributes.routes` spelling never delivered and was retired, #10726)
+  // is a code contribution. A single `ApiEndpoint` — a
   // stable URL plus a policy layer over an existing pipeline — is a declarative
   // artifact, and it passes all three clauses of ADR-0088's admission test:
   //   1. INDEPENDENT LIFECYCLE — the endpoint matcher indexes, invalidates and

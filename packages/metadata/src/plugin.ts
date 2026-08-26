@@ -447,8 +447,22 @@ export class MetadataPlugin implements Plugin {
         //    external watch-recompile pipeline POSTs to the same endpoint
         //    after rebuilding the artifact, and we reload it here before
         //    broadcasting.
-        // Production deployments simply won't have a CLI POSTing to this
-        // endpoint and won't surface the route to clients.
+        // [#12140] PRODUCTION BOOTS DO NOT GET THIS DOOR, and that is now
+        // enforced rather than predicted. This comment used to read
+        // "production deployments simply won't have a CLI POSTing to this
+        // endpoint and won't surface the route to clients" — a claim about who
+        // is on the network, which is exactly the shape #9391 closed for
+        // `datasource-admin`. It was also false in the half that mattered: the
+        // official image runs `os start` under `NODE_ENV=production`
+        // (`docker/Dockerfile`), that boot reaches `createStandaloneStack`,
+        // and the stack composes this plugin UNCONDITIONALLY
+        // (`packages/runtime/src/standalone-stack.ts` gates only `artifactWatch`
+        // on NODE_ENV) onto a kernel that registers `HonoServerPlugin` whenever
+        // it serves. Both routes were therefore mounted, unauthenticated, on a
+        // production-shaped boot. The gate lives in the registrar — see
+        // `isDevMetadataEndpointEnabled` in `routes/hmr-routes.ts` — so the
+        // decision cannot be bypassed by a second caller; here we only handle
+        // its answer.
         try {
             // [#4251] Both names are the SAME instance; `http.server` is the
             // canonical one (the only name every provider registers), read
@@ -465,11 +479,14 @@ export class MetadataPlugin implements Plugin {
             const httpServer = readServer('http.server') ?? readServer('http-server');
             if (httpServer && typeof httpServer.getRawApp === 'function') {
                 const { registerMetadataHmrRoutes } = await import('./routes/hmr-routes.js');
+                // `null` when the environment gate refused: nothing was
+                // mounted, so there is no hub, no POST handler to wire, and
+                // nothing to broadcast to.
                 const hub = registerMetadataHmrRoutes(httpServer.getRawApp(), this.manager);
                 // Wire POST → re-load the artifact from disk (when in
                 // local-file artifact mode) so subsequent reads see fresh
                 // metadata. The broadcast happens after the handler returns.
-                hub.setOnPostReload(async (body: { reason?: string; changed?: string[] } = {}) => {
+                hub?.setOnPostReload(async (body: { reason?: string; changed?: string[] } = {}) => {
                     const src = this.options.artifactSource;
                     if (src?.mode === 'local-file') {
                         try {
@@ -525,7 +542,14 @@ export class MetadataPlugin implements Plugin {
                             pending = true;
                             try {
                                 await this._reloadAndAnnounce(ctx, src, [src.path]);
-                                hub.broadcastReload('artifact-file-changed', [src.path]);
+                                // Optional for the same reason the wiring
+                                // above is: with the door closed there are no
+                                // SSE clients to tell. The RELOAD still
+                                // happened — `_reloadAndAnnounce` above is
+                                // unconditional, so the server-side artifact
+                                // watcher keeps working exactly as before on
+                                // every boot shape that had it.
+                                hub?.broadcastReload('artifact-file-changed', [src.path]);
                                 ctx.logger.info('[MetadataPlugin] artifact auto-reloaded (file watcher)', {
                                     path: src.path,
                                 });
@@ -544,8 +568,21 @@ export class MetadataPlugin implements Plugin {
                         ctx.logger.warn('[MetadataPlugin] artifact watcher failed to start', { error: e?.message });
                     }
                 }
-                // eslint-disable-next-line no-console
-                console.log('[MetadataPlugin] HMR endpoint registered at /api/v1/dev/metadata-events');
+                if (hub) {
+                    // eslint-disable-next-line no-console
+                    console.log('[MetadataPlugin] HMR endpoint registered at /api/v1/dev/metadata-events');
+                } else {
+                    // Printed on every non-development boot, deliberately: a
+                    // closed door that says nothing is indistinguishable from a
+                    // door that was never asked about, and this line is what an
+                    // operator greps when the Studio preview stops
+                    // auto-reloading.
+                    // eslint-disable-next-line no-console
+                    console.log(
+                        '[MetadataPlugin] dev metadata-HMR endpoints NOT mounted — they require '
+                        + `NODE_ENV=development (this process: ${process.env.NODE_ENV ? `NODE_ENV=${process.env.NODE_ENV}` : 'NODE_ENV unset, treated as production'})`,
+                    );
+                }
             } else {
                 // eslint-disable-next-line no-console
                 console.log('[MetadataPlugin] HTTP server with getRawApp() not available — skipping HMR endpoint');

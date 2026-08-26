@@ -717,6 +717,32 @@ to `unhealthy` only once `failureThreshold` of them accumulate. A check that
 **throws** — including one that exceeds `timeout` — is the separate `failed`
 status, applied immediately with no threshold.
 
+Recovery is the mirror of that half, and `successThreshold` is its counter: the
+number of **consecutive** passing rounds a plugin needs before the monitor
+reports it `healthy` again. The count is consulted from every status that
+records an observed failure — `degraded`, `unhealthy`, `failed` and `recovering`
+alike — and while it accumulates the plugin sits in `recovering`, which is
+therefore a *reported* status and not merely a vocabulary entry. `healthy` and
+`unknown` are the two statuses the count is **not** consulted from: neither
+records a failure to recover from, so a passing round promotes straight to
+`healthy`. `unknown` is what `registerPlugin` writes before any check has run,
+which is why a freshly registered plugin reads `healthy` on its first passing
+round however high `successThreshold` is declared.
+
+"Consecutive" is strict, and it is the failing round that enforces it: any
+failure resets the success count to zero — both routes included — so a throw
+part-way through a recovery starts the next attempt at one rather than resuming
+where it left off. The symmetry holds the other way too: a passing round resets
+the failure count, so `failureThreshold` likewise counts only an unbroken run.
+A successful auto-restart lands the plugin in `recovering` with **both**
+counters cleared, so a restarted plugin still owes a full `successThreshold` of
+passing rounds before it reads `healthy`.
+
+At the default `successThreshold: 1` none of this is observable: the first
+passing round satisfies the count from every status, and `recovering` is never
+the status a check leaves behind. The distinction appears only once a config
+declares a value above `1`.
+
 The monitor keeps one report per plugin rather than one aggregate document. Each
 round of checks builds a `PluginHealthReport` (`@objectstack/spec/kernel`,
 constructed in `packages/core/src/health-monitor.ts`) and stores it under the

@@ -1731,7 +1731,7 @@ Install package request
 | **datasources** | `string[]` | optional | Glob patterns for Datasource definitions |
 | **dependencies** | `Record<string, string>` | optional | Package dependencies |
 | **configuration** | `{ title?: string; properties: Record<string, object> }` | optional | Plugin configuration settings |
-| **contributes** | `{ kinds?: object[]; routes?: object[] }` | optional | Platform contributions |
+| **contributes** | `{ kinds?: object[] }` | optional | Platform contributions |
 | **data** | `{ object: string; externalId?: string \| string[]; mode?: Enum<'insert' \| 'update' \| 'upsert' \| 'replace' \| 'ignore'>; env?: Enum<'prod' \| 'dev' \| 'test'>[]; … }[]` | optional | Initial seed data (prefer top-level data field) |
 | **capabilities** | `{ implements?: object[]; provides?: object[]; requires?: object[]; extensionPoints?: object[]; … }` | optional | Plugin capability declarations for interoperability |
 | **extensions** | `Record<string, any>` | optional | Extension points and contributions |

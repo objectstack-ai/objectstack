@@ -13,7 +13,7 @@ import { formatOutput } from '../../utils/output-formatter.js';
  * consistent DX.
  */
 export default class EnvironmentsList extends Command {
-  static override description = 'List projects visible to the current session';
+  static override description = 'List environments visible to the current session';
 
   static override examples = [
     '$ os environments list',
@@ -25,7 +25,7 @@ export default class EnvironmentsList extends Command {
     url: Flags.string({ char: 'u', description: 'Server URL', env: 'OS_CLOUD_URL' }),
     token: Flags.string({ char: 't', description: 'Authentication token', env: 'OS_TOKEN' }),
     org: Flags.string({ description: 'Filter by organization id' }),
-    status: Flags.string({ description: 'Filter by project status (active|provisioning|failed|…)' }),
+    status: Flags.string({ description: 'Filter by environment status (active|provisioning|failed|…)' }),
     format: Flags.string({
       char: 'f',
       description: 'Output format',
@@ -57,9 +57,9 @@ export default class EnvironmentsList extends Command {
       } else if (flags.format === 'yaml') {
         await formatOutput(res, 'yaml');
       } else {
-        console.log(`\nProjects (${projects.length}):\n`);
+        console.log(`\nEnvironments (${projects.length}):\n`);
         if (projects.length === 0) {
-          console.log('  (no projects)');
+          console.log('  (no environments)');
         } else {
           for (const p of projects) {
             const active = p.id === activeId ? ' ★' : '';

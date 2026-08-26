@@ -110,7 +110,8 @@ export function sendOk(res: EnvelopeResponse, data: unknown, status = 200): void
  * ## `extra` is `ApiError`'s own optional fields, not a `Record`
  *
  * Merged into `error`, and typed as exactly what `ApiErrorSchema` declares
- * beside `code` and `message` — `details`, `category`, `requestId`, `httpStatus`.
+ * beside `code` and `message` — `details`, `category`, `requestId`,
+ * `httpStatus`, `declaredCode`.
  * `details` is the slot for structured context: `package-routes` puts a partial
  * delete's per-item failures there, `settings-routes` the whole
  * `SettingsActionResult`.
@@ -126,13 +127,43 @@ export function sendOk(res: EnvelopeResponse, data: unknown, status = 200): void
  * Closing it at the shared builder is the part that lasts: an undeclared sibling
  * is now a compile error in every module at once, rather than a key that quietly
  * evaporates at the schema boundary in whichever module reintroduces it.
+ *
+ * ## `declaredCode` — declared by the schema, barred by this writer
+ *
+ * ADR-0112's 2026-08-17 amendment (#9106, extended to the flat `/data` door by
+ * #9232) rules the demote at EVERY door: `code` stays the closed vocabulary,
+ * and a thrown code that is not a member is demoted to a declared sibling,
+ * `ApiError.declaredCode` — the open, author-authored channel that carries a
+ * metadata app's OWN `.code` across the QuickJS boundary (#7867) and onto the
+ * wire.
+ *
+ * `ApiErrorSchema` has declared that field since #9106 and the flat door emits
+ * it, but it was absent from the `Pick` above — so it was a COMPILE ERROR for
+ * any route answering the NESTED envelope to pass one, and every such route
+ * dropped the producer's spelling. Nothing invalid shipped (the closed `code`
+ * still carried the derived member), which is what made the loss silent and
+ * one-directional: the author's spelling gone, and a consumer told by the ADR
+ * to read `declaredCode` finding nothing there. Declared-but-unemittable is a
+ * `declared = enforced` gap, and admitting the field closes it at the ONE
+ * writer rather than in each module that later notices.
+ *
+ * ⛔ Presence MEANS demotion, and this writer does not re-derive that — the
+ * CALLER does, with `demotedDeclaredCode` (`thrown-http-error.ts`, one file
+ * over), exactly as the flat door's `thrownCodeFields` already does. That
+ * helper answers `undefined` when the producer's spelling IS the vocabulary
+ * member already sitting in `code`, which is what stops a registered refusal
+ * from carrying two spellings of one fact — `ApiErrorSchema.declaredCode`'s
+ * documented invariant. Passing a raw `thrown.declaredCode` re-opens exactly
+ * that, and no type here can catch it: vocabulary and position stay two
+ * decisions (#9232), so the demotion rule stays with the resolver that owns
+ * it rather than being restated in the envelope writer.
  */
 export function sendError(
   res: EnvelopeResponse,
   status: number,
   code: ErrorCode,
   message: string,
-  extra?: Pick<ApiError, 'category' | 'httpStatus' | 'details' | 'requestId'>,
+  extra?: Pick<ApiError, 'category' | 'httpStatus' | 'details' | 'requestId' | 'declaredCode'>,
 ): void {
   res.status(status).json({ success: false, error: { code, message, ...extra } });
 }

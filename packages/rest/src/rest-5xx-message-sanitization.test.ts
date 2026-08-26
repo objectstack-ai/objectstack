@@ -379,8 +379,10 @@ describe('[#5437] the 5xx envelope: status and code survive, the prose does not'
 
         expect(res.statusCode).toBe(500);
         expect(res.body.error).toBe(INTERNAL_ERROR_MESSAGE);
-        // No `code` was declared, so none is invented here — ADR-0112 says the
-        // PRODUCER names the condition.
+        // No `code` was declared, so none is invented here — ADR-0112 D4
+        // governs the semantic-CODE channel (the producer names the condition
+        // on the CODE axis; the ADR rules no HTTP status for an undeclared
+        // throw).
         expect(res.body.code).toBeUndefined();
         expect(loggedText('does not exist')).toBe(true);
     }, 60_000);
