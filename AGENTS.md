@@ -240,9 +240,8 @@ localStorage / auth gotchas.
     repo**, so sibling repos (`objectui`/`cloud`) you touch are covered too (deliberate non-task override:
     `OS_ALLOW_MAIN_EDITS=1`, one switch for both). The Bash guard is precision-first: it never blocks reads, and any
     shape it cannot resolve with confidence (`bash -c …`, `xargs`, `node -e`, a `$VAR`/glob target) is allowed through
-    — the rule still outranks the hook. **The one thing a worktree does *not* isolate is the stash** — `refs/stash`
-    lives in the **common** `.git`, shared by every worktree; a third hook (`guard-shared-stash.sh`, `OS_ALLOW_STASH=1`)
-    blocks the mutating forms, and the collision-free replacements are in Multi-agent discipline below.
+    — the rule still outranks the hook. **A worktree isolates neither the stash nor the build cache** — the
+    third hook (`guard-shared-stash.sh`, `OS_ALLOW_STASH=1`) and the replacements live in Multi-agent discipline below.
 12. **Contract-first — fix the metadata, not the runtime.** This is a metadata-driven framework: `packages/spec` is
     the one contract between metadata *producers* and the runtime/renderers that *consume* it. When a piece of metadata
     "doesn't work," ask **first**: *is it spec-compliant? is this the long-term-correct direction?* If the metadata is
@@ -367,12 +366,8 @@ localStorage / auth gotchas.
 
 ## Multi-agent working discipline
 
-This repo is worked on by **multiple agents in parallel**. **Use one git worktree per
-agent/task** (`git fetch origin main && git worktree add ../objectstack-<task> -b <branch>
-origin/main`; run `pnpm install` in the new tree) so file systems are physically isolated —
-mandatory, not a preference (Prime Directive #11), and hook-enforced. Working in the shared `main` checkout is *not* a
-supported fallback: branches get switched and shared files — including ones you just wrote
-— get reset *under you* mid-task (full sessions were silently reverted before enforcement).
+This repo is worked on by **multiple agents in parallel**, one worktree per task —
+mandatory, hook-enforced, and specified in **Prime Directive #11**. What it does not cover:
 
 **⛔ `git stash` is the sharpest thing the worktree does NOT isolate — never run a bare
 `git stash push`/`pop`.** `refs/stash` lives in the **common** `.git` directory, so every
@@ -413,6 +408,11 @@ ref's content by occurrence counts on disk; fetch into a ref you own (`git fetch
 <branch>:refs/<ns>/<id> -f`) and read that; diff restored paths against `BASE` before
 staging. ⛔ **No hook backs this one** — safe and unsafe spellings are both ordinary
 `git checkout` / `git fetch`, so a mechanical block would fire on correct usage.
+
+**⛔ Nor the build cache** — turbo resolves the repo root through the **common** dir, so every
+worktree replays ONE `.turbo/cache`. Symptom: a typecheck failing on a package your diff never
+touched, unrepaired by a plain rebuild because that rebuild is a cache **HIT** — force-rebuild
+that package. Ablating a build tool is a sanctioned producer; `--force` writes the whole closure.
 
 **Doing reverse verification ("revert the fix, watch the diagnostics")? Commit the fix
 FIRST.** Committed, restoring is `git checkout <your-branch> -- <path>`, out of a commit
