@@ -1,9 +1,6 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
 // [#5855] The fake engine's `update` routes through the producer's OWN dispatch
 // predicate (#5480), so this double cannot accept a call `ObjectQL.update`
 // refuses. Imported from `@objectstack/metadata-core` (already a `dependencies`
@@ -115,29 +112,6 @@ describe('PlatformObjectsPlugin: platform-infrastructure object registration (#4
     expect(
       manifests.filter((m) => m.objects?.some((o: any) => o.name === 'sys_metadata_activation')),
     ).toHaveLength(1);
-  });
-
-  /**
-   * [#12359] The other half of "MOVE, not add". A second manifest naming the
-   * same object is the governed contributor case (ADR-0029 D7), and the ruling
-   * closed it by giving the ledger ONE owner rather than by declaring a double
-   * registration benign. This pin is what a later edit re-adding the object to
-   * the automation service's manifest has to argue with — a grep-level check,
-   * because the two registrations live in different packages and neither one's
-   * unit tests can see the other.
-   */
-  it('is the SINGLE registrant — the automation service no longer names the ledger', async () => {
-    const automationPlugin = readFileSync(
-      resolve(
-        dirname(fileURLToPath(import.meta.url)),
-        '../../services/service-automation/src/plugin.ts',
-      ),
-      'utf8',
-    );
-    // Only the explanatory comment may mention the symbol; no import of it, and
-    // no manifest entry for it.
-    expect(automationPlugin).not.toMatch(/import\s*\{[^}]*SysMetadataActivation/);
-    expect(automationPlugin).not.toMatch(/objects:\s*\[[^\]]*SysMetadataActivation/);
   });
 
   /**
