@@ -1367,13 +1367,98 @@ describe('FormFieldSchema', () => {
 
   it('should accept valid colSpan values (1-4)', () => {
     const validColSpans = [1, 2, 3, 4];
-    
+
     validColSpans.forEach(colSpan => {
       const field: FormField = {
         field: 'test_field',
         colSpan,
       };
       expect(() => FormFieldSchema.parse(field)).not.toThrow();
+    });
+  });
+
+  /**
+   * #12174 — the form-field row's constraint keys converge on the value shape
+   * #11566/#11949 (`maxLength`/`minLength`: positive integer) and #8321
+   * (`precision`/`scale`: non-negative integer) landed on the object-field
+   * surface. All six keys are LIVE on this row (objectui's spec bridge
+   * `form-view.ts` mapField and plugin-form `sectionFields.ts` copy every one
+   * onto the runtime field; FormPage merges `override.maxLength` onto the
+   * input; the fields package builds validation rules from them), so a
+   * malformed value flowed to the DOM — `maxLength: 0` rendered an input
+   * that accepts nothing. Deliberately NO type-conditional gate on this
+   * surface: a form row usually omits `type`, so the referenced object
+   * field's type is invisible at parse time (see the schema comment).
+   * `min`/`max` stay bare numbers — any numeric bound is a legal value,
+   * exactly as on the object-field surface.
+   */
+  describe('malformed constraint values are refused at authoring (#12174)', () => {
+    const lengthCases: Array<[value: number, code: string]> = [
+      [0, 'too_small'],     // vacuous "no minimum" / accepts-nothing maximum
+      [-5, 'too_small'],
+      [12.5, 'invalid_type'], // non-integer count
+    ];
+    for (const key of ['maxLength', 'minLength'] as const) {
+      for (const [value, code] of lengthCases) {
+        it(`refuses ${key}: ${value} with a ${code} issue at [${key}]`, () => {
+          const result = FormFieldSchema.safeParse({ field: 'title', [key]: value });
+          expect(result.success).toBe(false);
+          if (!result.success) {
+            const issue = result.error.issues.find((i) => i.path[0] === key);
+            expect(issue?.code).toBe(code);
+            // Message substance, not just a throw: the refusal names the
+            // legal shape (int / >=1), so an AI author can fix it.
+            expect(issue?.message).toMatch(code === 'invalid_type' ? /expected int/ : />=1/);
+          }
+        });
+      }
+    }
+
+    const digitCases: Array<[value: number, code: string]> = [
+      [-1, 'too_small'],
+      [2.5, 'invalid_type'],
+    ];
+    for (const key of ['precision', 'scale'] as const) {
+      for (const [value, code] of digitCases) {
+        it(`refuses ${key}: ${value} with a ${code} issue at [${key}]`, () => {
+          const result = FormFieldSchema.safeParse({ field: 'amount', [key]: value });
+          expect(result.success).toBe(false);
+          if (!result.success) {
+            const issue = result.error.issues.find((i) => i.path[0] === key);
+            expect(issue?.code).toBe(code);
+            expect(issue?.message).toMatch(code === 'invalid_type' ? /expected int/ : />=0/);
+          }
+        });
+      }
+    }
+
+    it('accepts the legal shapes: positive-integer lengths, zero digit counts, any numeric min/max', () => {
+      const result = FormFieldSchema.safeParse({
+        field: 'amount',
+        maxLength: 255,
+        minLength: 1,   // the lower bound is 1, not 2
+        precision: 0,   // 0 is a legal digit count (unlike the length pair)
+        scale: 0,
+        min: -10.5,     // min/max are VALUES, not counts — negatives and fractions are legal
+        max: 99.9,
+      });
+      expect(result.success).toBe(true);
+      if (result.success) {
+        const parsed = result.data as Record<string, unknown>;
+        expect(parsed.maxLength).toBe(255);
+        expect(parsed.minLength).toBe(1);
+        expect(parsed.precision).toBe(0);
+        expect(parsed.scale).toBe(0);
+        expect(parsed.min).toBe(-10.5);
+        expect(parsed.max).toBe(99.9);
+      }
+    });
+
+    it('absent constraint keys stay absent — no default materializes', () => {
+      const parsed = FormFieldSchema.parse({ field: 'title' }) as Record<string, unknown>;
+      for (const key of ['maxLength', 'minLength', 'min', 'max', 'precision', 'scale']) {
+        expect(key in parsed).toBe(false);
+      }
     });
   });
 });

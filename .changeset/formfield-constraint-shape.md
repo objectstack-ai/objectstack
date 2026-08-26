@@ -1,0 +1,9 @@
+---
+'@objectstack/spec': minor
+---
+
+`FormFieldSchema`'s constraint keys converge on the value shapes the object-field surface landed (#12174): `maxLength`/`minLength` tighten from bare `z.number()` to `z.number().int().min(1)` (the #11566/#11949 template — a character length is a positive integer, and `minLength: 0` is a vacuous always-true declaration refused loudly; "no minimum" is expressed by omitting the key), and `precision`/`scale` tighten to `z.number().int().min(0)` (the #8321 template — digit counts). `min`/`max` are unchanged: they are values, not counts, exactly as on the object-field surface.
+
+The row keys are live, measured in objectui: the spec bridge (`form-view.ts` mapField, objectui#5898) and plugin-form (`sectionFields.ts`) copy all six onto the runtime field, the console FormPage merges `override.maxLength ?? def.maxLength` onto the rendered input (objectui#5595), the fields package builds validation rules from `minLength`/`maxLength`/`min`/`max`, and `precision`/`scale` drive the number widgets — so `maxLength: 0` on a form row reached the DOM as an input that accepts nothing, and `GET /forms/:slug` serves the rows verbatim to anonymous renderers. What newly gets rejected: `0` (length pair only), negative and non-integer values on the four count-shaped keys. Unlike the object-field twins there is no type-conditional applicability gate: a form row references its object field by name and usually omits `type`, so the referenced field's type is invisible at parse time — value shape is checkable here, key placement stays the object field's own schema's job. Already-legal declarations round-trip byte-identically, and absence stays absence — no default materializes.
+
+<!-- adr-0087: registered ui-form-field-length-malformed-refused, ui-form-field-precision-scale-integer-refused -->
