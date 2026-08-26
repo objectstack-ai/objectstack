@@ -213,19 +213,16 @@ const FIXTURE_EXEMPTIONS = [
  * follow in the owning lane, which is the same order `check-cli-test-child-env` shipped in
  * and for the same reason: sweeping without the gate restates a convention instead of
  * enforcing it.
+ *
+ * EMPTY, and that is the design working rather than a list nobody kept. The gate shipped
+ * with exactly one entry -- the `objectstack publish` refusal message in
+ * `packages/spec/src/api/endpoint.zod.ts` (#12223) -- and it retired ITSELF: fixing the
+ * string to `os package publish` made the entry stop reproducing, the `stale` check below
+ * RED, and deleting it the only way back to green. A baseline here cannot outlive its
+ * defect, so this list stays a record of work in flight and never becomes a silent
+ * exemption. Add to it only under the rule above: a real defect, filed and linked.
  */
-const BASELINED_VIOLATIONS = [
-  {
-    file: 'packages/spec/src/api/endpoint.zod.ts',
-    text: 'objectstack publish',
-    why: 'STALE. `os publish` was retired with the direct-to-environment path (#11465 measured '
-      + 'it against the built oclif Config: the registered publish ids are `package publish` and '
-      + '`plugin publish`). This is a present-tense AUTHOR-FACING refusal message -- "publication '
-      + 'state is managed by `objectstack publish`" -- so an author who trips it is sent to a '
-      + 'command that does not exist. Correct spelling: `os package publish`.',
-    issue: '#12223',
-  },
-];
+const BASELINED_VIOLATIONS = [];
 
 const isExempt = (file, text) =>
   FIXTURE_EXEMPTIONS.some((e) => e.file === file && e.text === text)
