@@ -132,8 +132,24 @@ const NOTIFY_KEY_GUIDANCE: Readonly<Record<string, string>> = {
  *  - **Localization contract (#9205, ruled 「走 emailTemplates 路线」):**
  *    `template` names a `sys_email_template` bundle
  *    (`EmailTemplateDefinitionSchema`, `system/email-template.zod.ts`), and the
- *    delivery path resolves `(name, recipient locale)` per recipient at
- *    delivery time via `IEmailService.sendTemplate({ template, locale })`.
+ *    delivery path resolves `(name, locale)` at delivery time via
+ *    `IEmailService.sendTemplate({ template, locale })`.
+ *
+ *    That `locale` is **ONE value for the whole notification, not one per
+ *    recipient** — declared here exactly as the delivery path enforces it
+ *    (`service-messaging/src/email-channel.ts`, which says the same thing at
+ *    its own `getDefaultTemplateLocale`). It is `payload.locale` when the
+ *    producer set one — interpolated ONCE, before fan-out, so every recipient
+ *    of a node gets that single value — and otherwise the **deployment
+ *    default**, `II18nService.getDefaultLocale()`, the same ruled source the
+ *    auth emails use (#8195). The platform has no per-user locale to read:
+ *    `sys_user` carries no locale column, and request-scoped locale
+ *    (`Accept-Language` → `ExecutionContext.requestLocale`) does not exist at
+ *    async delivery time. Per the maintainer ruling of **2026-08-13** a
+ *    per-user locale is DEFERRED until measured pull; when it lands it layers
+ *    in as an override at that same seam. So do not author on the belief that
+ *    two recipients with different personal languages will receive different
+ *    rows — today they receive the same one.
  *    Inline `title`/`message` are the NON-localizable path — raw strings sent
  *    to every recipient verbatim. The two paths are mutually exclusive on one
  *    node (see the `superRefine` below): runtime precedence would silently
@@ -178,14 +194,22 @@ export const NotifyConfigSchema = lazySchema(() => strictObject({
     .describe('Notification body, sent verbatim like `title` (not localizable). Only valid with inline `title`, never with `template`.'),
   /**
    * The localizable content path (#9205): name of a `sys_email_template`
-   * bundle. Resolved by `(name, recipient locale)` AT DELIVERY TIME —
-   * `IEmailService.sendTemplate({ template, locale })` picks the recipient
-   * locale's row with the documented en-US fallback ladder. Read RAW like
-   * `topic`/`channels`: a static metadata cross-reference, never interpolated.
-   * Mutually exclusive with inline `title`/`message`.
+   * bundle. Resolved by `(name, locale)` AT DELIVERY TIME —
+   * `IEmailService.sendTemplate({ template, locale })` picks that locale's row
+   * with the documented en-US fallback ladder.
+   *
+   * The `locale` is ONE value for the whole notification, NOT one per
+   * recipient: `payload.locale` when the producer set one (interpolated once,
+   * before fan-out), else the DEPLOYMENT DEFAULT —
+   * `II18nService.getDefaultLocale()`. There is no per-user locale to read
+   * (`sys_user` has no locale column); the 2026-08-13 ruling defers one until
+   * measured pull, and it layers in as an override when it lands.
+   *
+   * Read RAW like `topic`/`channels`: a static metadata cross-reference, never
+   * interpolated. Mutually exclusive with inline `title`/`message`.
    */
   template: z.string().optional()
-    .describe('Email template name (`sys_email_template.name`, e.g. `crm.large_deal_won`) — the localizable content path: the delivery path resolves `(name, recipient locale)` at delivery time and renders subject/body per recipient. Mutually exclusive with inline `title`/`message`, which are the non-localizable path. Read raw — no `{token}` interpolation.'),
+    .describe('Email template name (`sys_email_template.name`, e.g. `crm.large_deal_won`) — the localizable content path: the delivery path resolves `(name, locale)` against sys_email_template at delivery time and renders subject/body from that row. The locale is ONE value for the whole notification, not one per recipient: `payload.locale` if the producer set one, else the deployment default (`II18nService.getDefaultLocale()`) — the platform has no per-user locale, so recipients with different personal languages all receive the same row (deferred by the 2026-08-13 ruling; it layers in as an override when it lands). Mutually exclusive with inline `title`/`message`, which are the non-localizable path. Read raw — no `{token}` interpolation.'),
   /**
    * Render context for the referenced template's `{{var}}` holes. Values are
    * interpolated per run (`{record.x}` resolves), so flow state can feed the
@@ -248,7 +272,8 @@ export const NotifyConfigSchema = lazySchema(() => strictObject({
       path: ['template'],
       message:
         '`template` cannot be combined with inline `title`/`message` — pick ONE content path: '
-        + '`template` (localizable: resolves `(name, recipient locale)` from sys_email_template at delivery) '
+        + '`template` (localizable: resolves `(name, locale)` from sys_email_template at delivery, the locale being '
+        + '`payload.locale` or the deployment default — one locale per notification, not per recipient) '
         + 'or inline `title` + `message` (sent verbatim, not localizable). To localize, keep `template`, move '
         + 'the text into the template bundle\'s rows, and delete `title`/`message`; runtime precedence would '
         + 'silently ignore one of them.',
@@ -269,8 +294,9 @@ export const NotifyConfigSchema = lazySchema(() => strictObject({
       path: ['title'],
       message:
         'A notify node needs one content source: inline `title` (+ optional `message`), or a `template` '
-        + 'reference resolving a sys_email_template bundle per recipient locale at delivery. Neither was given, '
-        + 'so there is nothing to deliver.',
+        + 'reference resolving a sys_email_template bundle at delivery in the notification\'s locale '
+        + '(`payload.locale` or the deployment default — one locale per notification, not per recipient). '
+        + 'Neither was given, so there is nothing to deliver.',
     });
   }
 }));
