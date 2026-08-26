@@ -20,7 +20,7 @@
 //     the ADR-0078 defect this card closes.
 
 import { describe, it, expect, vi } from 'vitest';
-import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/objectql';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/objectql';
 import { ERROR_CODE_LEDGER } from '@objectstack/spec/api';
 import { AuthManager } from './auth-manager';
 import {
@@ -77,6 +77,7 @@ const createMemoryEngine = () => {
       return { ...row };
     },
     async findOne(name: string, q: any = {}) {
+      assertEngineFindOnePredicate(name, q);
       const row = rows(name).find((r) => matches(r, q.where));
       return row ? project(row, q.fields) : null;
     },

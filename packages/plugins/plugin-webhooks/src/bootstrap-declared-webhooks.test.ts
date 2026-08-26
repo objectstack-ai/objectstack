@@ -13,6 +13,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { AutoEnqueuer, type HttpEnqueueFn } from './auto-enqueuer.js';
 import { bootstrapDeclaredWebhooks } from './bootstrap-declared-webhooks.js';
 import { bindWebhookProvenanceStamp } from './webhook-provenance.js';
+import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 
 // ---------------------------------------------------------------------------
 // Fakes
@@ -65,6 +66,7 @@ class FakeEngine {
     return typeof q?.limit === 'number' ? out.slice(0, q.limit) : out;
   }
   async findOne(name: string, q?: any): Promise<any> {
+    assertEngineFindOnePredicate(name, q);
     return (await this.find(name, q))[0] ?? null;
   }
   async insert(name: string, data: any): Promise<any> {

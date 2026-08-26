@@ -38,7 +38,7 @@
  * the signal to re-pick the fixture, not to delete the assertion.
  */
 import { describe, expect, it } from 'vitest';
-import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, hashSpec } from '@objectstack/metadata-core';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, hashSpec, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { PLURAL_TO_SINGULAR } from '@objectstack/spec/shared';
 import { ObjectStackProtocolImplementation } from './index.js';
 
@@ -109,6 +109,7 @@ function makeStubEngine(opts: { historyError?: () => Error } = {}) {
             return (tables[table] ?? []).filter((r) => matches(r, o.where));
         },
         async findOne(table: string, o: { where: Record<string, unknown> }) {
+            assertEngineFindOnePredicate(table, o);
             return (tables[table] ?? []).find((r) => matches(r, o.where)) ?? null;
         },
         async insert() { return { id: 'stub' }; },

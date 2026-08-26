@@ -29,7 +29,7 @@ import { describe, expect, it, vi } from 'vitest';
 // The engine-double contract (#4434 / #5619): a fake engine's update/delete
 // must be exactly as strict as ObjectQL's dispatch, or a dead route ships with
 // its suite green. Both predicates live in metadata-core.
-import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate, type EngineFindOneQueryInput } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { RestServer } from './rest-server.js';
 
@@ -42,7 +42,8 @@ function stubEngine() {
     return {
         rows,
         engine: {
-            async findOne() { return null; },
+            async findOne(object: string, query?: EngineFindOneQueryInput) {
+                              assertEngineFindOnePredicate(object, query); return null; },
             async find() { return rows.slice(); },
             async insert(table: string, data: Record<string, any>) {
                 if (table === 'sys_metadata_audit') return { id: 'audit_skip' };

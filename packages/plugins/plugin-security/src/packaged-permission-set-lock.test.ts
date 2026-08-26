@@ -75,7 +75,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { PermissionSetSchema } from '@objectstack/spec/security';
-import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { SysPermissionSet } from './objects/sys-permission-set.object.js';
 import {
   createPermissionSetWriteThrough,
@@ -143,6 +143,7 @@ function makeQl(declared: any[] | null = null) {
       return typeof q?.limit === 'number' ? hit.slice(0, q.limit) : hit;
     },
     async findOne(object: string, q: any) {
+      assertEngineFindOnePredicate(object, q);
       const rows = tableFor(object);
       return rows?.find((r) => matches(r, q?.where)) ?? null;
     },

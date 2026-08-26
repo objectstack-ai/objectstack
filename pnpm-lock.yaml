@@ -2339,6 +2339,9 @@ importers:
       '@objectstack/driver-sqlite-wasm':
         specifier: workspace:*
         version: link:../../drivers/driver-sqlite-wasm
+      '@objectstack/metadata-core':
+        specifier: workspace:*
+        version: link:../../metadata-core
       '@objectstack/plugin-hono-server':
         specifier: workspace:*
         version: link:../../plugins/plugin-hono-server

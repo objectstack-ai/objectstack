@@ -82,7 +82,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 // #5480 update), so the fake engine below cannot accept a call ObjectQL
 // refuses. Imported from `@objectstack/metadata-core` and not from
 // `@objectstack/objectql`, which depends on this package.
-import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 import { SysMetadataRepository, resetEnvWritableMetadataTypes } from './sys-metadata-repository.js';
@@ -174,6 +174,7 @@ function makeSession(opts: {
 
     const engine: any = {
         async findOne(table: string, o: { where: Record<string, unknown> }) {
+            assertEngineFindOnePredicate(table, o);
             if (table === 'sys_metadata_history') {
                 return historyRows.find((h) => matchesWhere(h, o.where)) ?? null;
             }
@@ -590,6 +591,7 @@ describe('#6960 — SysMetadataRepository: the delete verb diverges, the put ver
         const historyRows: Array<Record<string, unknown>> = [];
         const engine: any = {
             async findOne(table: string, o: { where: Record<string, unknown> }) {
+                assertEngineFindOnePredicate(table, o);
                 if (table === 'sys_metadata_history') {
                     return historyRows.find((h) => matchesWhere(h, o.where)) ?? null;
                 }

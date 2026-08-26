@@ -29,7 +29,7 @@
 import { describe, it, expect } from 'vitest';
 // The engine-double contract gate: a fake looser than ObjectQL's own verb
 // dispatch is how #4434 shipped a dead route with its suite green.
-import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { SysMetadataRepository } from './sys-metadata-repository.js';
 
 interface Row {
@@ -65,6 +65,7 @@ function makeFakeEngine(seed: Row[] = []) {
     rows,
     history,
     async findOne(table: string, q: { where: Record<string, unknown> }) {
+      assertEngineFindOnePredicate(table, q);
       return tableOf(table).find((r) => matches(r, q.where)) ?? null;
     },
     async find(table: string, q: { where: Record<string, unknown> }) {

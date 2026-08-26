@@ -21,7 +21,7 @@
 // (revert the fix → these tests go red) mean anything.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/objectql';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/objectql';
 import { AuthManager } from './auth-manager';
 import { inviteForAudienceGate } from './audience-gate-test-support';
 
@@ -93,6 +93,7 @@ const createMemoryEngine = () => {
       return { ...row };
     },
     async findOne(name: string, q: any = {}) {
+      assertEngineFindOnePredicate(name, q);
       const found = rows(name).find((r) => matches(r, q.where));
       return found ? { ...found } : null;
     },

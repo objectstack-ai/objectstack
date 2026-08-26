@@ -60,6 +60,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { ObjectStackProtocolImplementation } from './protocol.js';
+import { assertEngineFindOnePredicate, type EngineFindOneQueryInput } from '@objectstack/metadata-core';
 
 const PKG = 'com.acme.showcase';
 const OTHER_PKG = 'com.acme.partner';
@@ -118,7 +119,8 @@ function makeEngine(opts: { items?: any[]; rows?: Row[] } = {}) {
                 return true;
             });
         },
-        async findOne() { return null; },
+        async findOne(object: string, query?: EngineFindOneQueryInput) {
+                          assertEngineFindOnePredicate(object, query); return null; },
     } as any;
 }
 

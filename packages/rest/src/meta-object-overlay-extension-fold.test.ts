@@ -39,7 +39,7 @@
 // `prefolded` and `bridged` hosts here are what hold that.
 
 import { describe, it, expect, vi } from 'vitest';
-import { SchemaRegistry } from '@objectstack/objectql';
+import { SchemaRegistry, assertEngineFindOnePredicate } from '@objectstack/objectql';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { RestServer } from './rest-server.js';
 
@@ -243,7 +243,7 @@ async function measure(opts: {
         find: async (table: string, q: { where: Record<string, unknown> }) =>
             table === 'sys_metadata' ? rows.filter((r) => matches(r, q.where)) : [],
         findOne: async (table: string, q: { where: Record<string, unknown> }) =>
-            table === 'sys_metadata' ? rows.find((r) => matches(r, q.where)) : undefined,
+            { assertEngineFindOnePredicate(table, q); return table === 'sys_metadata' ? rows.find((r) => matches(r, q.where)) : undefined; },
     };
 
     const services = new Map<string, unknown>();

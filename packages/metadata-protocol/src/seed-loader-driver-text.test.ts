@@ -79,7 +79,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { validationFailureDetails } from '@objectstack/types';
 import { SeedLoaderService } from './seed-loader.js';
 import type { IDataEngine, IMetadataService } from '@objectstack/spec/contracts';
-import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate, type EngineFindOneQueryInput } from '@objectstack/metadata-core';
 
 // ---------------------------------------------------------------------------
 // The physical conditions
@@ -145,7 +145,7 @@ function createMetadata(): IMetadataService {
 function failingEngine(thrown: () => unknown): IDataEngine {
     return {
         find: vi.fn(async () => []),
-        findOne: vi.fn(async () => null),
+        findOne: vi.fn(async (object: string, query?: EngineFindOneQueryInput) => { assertEngineFindOnePredicate(object, query); return null; }),
         insert: vi.fn(async () => { throw thrown(); }),
         update: vi.fn(async (_o: string, data: any, options?: any) => {
             assertEngineUpdateDispatch(data, options);
@@ -221,6 +221,7 @@ describe('[#8442] raw driver text is withheld from the seed `errors[].message`',
                     : rows;
             }),
             findOne: vi.fn(async (o: string, q?: any) => {
+                assertEngineFindOnePredicate(o, q);
                 const rows = await (engine.find as any)(o, q);
                 return rows[0] ?? null;
             }),

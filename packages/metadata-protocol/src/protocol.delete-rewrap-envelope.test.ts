@@ -75,7 +75,7 @@
  * cannot be tested against a harness that mocks `deleteMetaItem`.
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { ErrorCode } from '@objectstack/spec/api';
 import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';
 import { ObjectStackProtocolImplementation } from './protocol.js';
@@ -173,6 +173,7 @@ function makeSession(opts: {
 
     const engine: any = {
         async findOne(table: string, o: { where: Record<string, unknown> }) {
+            assertEngineFindOnePredicate(table, o);
             if (table === 'sys_metadata_history') {
                 return historyRows.find((h) => matchesWhere(h, o.where)) ?? null;
             }

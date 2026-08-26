@@ -35,6 +35,7 @@ import type { PluginContext } from '@objectstack/core';
 import { AUDIENCE_POSTURES } from '@objectstack/spec/system';
 import { AuthPlugin } from './auth-plugin.js';
 import { AuthManager } from './auth-manager.js';
+import { assertEngineFindOnePredicate, type EngineFindOneQueryInput } from '@objectstack/objectql';
 
 const SECRET = 'test-secret-at-least-32-chars-long';
 
@@ -45,7 +46,7 @@ function makeEngine() {
   return {
     insert: vi.fn(async (_object: string, row: any) => row),
     find: vi.fn(async () => []),
-    findOne: vi.fn(async () => null),
+    findOne: vi.fn(async (object: string, query?: EngineFindOneQueryInput) => { assertEngineFindOnePredicate(object, query); return null; }),
   };
 }
 

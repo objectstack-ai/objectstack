@@ -56,7 +56,7 @@ import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 // The producer's OWN write-verb dispatch decisions, so the fake engine below
 // cannot accept a call ObjectQL refuses. From `@objectstack/metadata-core`,
 // never from `@objectstack/objectql` — that import would close a cycle.
-import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 
 interface Row {
@@ -155,6 +155,7 @@ function makeStubEngine(options?: { liveObjects?: unknown[]; livePermissions?: u
 
     const engine: any = {
         async findOne(table: string, opts: { where: Record<string, unknown> }) {
+            assertEngineFindOnePredicate(table, opts);
             if (table === 'sys_metadata_history') {
                 return historyRows.find((h) => matchesHistory(h, opts.where)) ?? null;
             }

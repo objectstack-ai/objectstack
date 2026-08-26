@@ -31,7 +31,7 @@ import {
   assertEngineUpdateDispatch,
   resolveEngineDeleteDispatch,
   ENGINE_DELETE_REJECT_MESSAGE,
-  ENGINE_UPDATE_REJECT_MESSAGE,
+  ENGINE_UPDATE_REJECT_MESSAGE, assertEngineFindOnePredicate,
 } from '@objectstack/metadata-core';
 import { SharingService, buildSharingMiddleware } from '@objectstack/plugin-sharing';
 import { PermissionSetSchema } from '@objectstack/spec/security';
@@ -128,6 +128,7 @@ function makeEngine() {
       return rows.filter((r) => matches(r, options.filter ?? options.where)).slice(0, options.limit ?? 1000);
     },
     async findOne(object: string, options: any = {}) {
+      assertEngineFindOnePredicate(object, options);
       const rows = await this.find(object, { ...options, limit: 1 });
       return rows[0] ?? null;
     },

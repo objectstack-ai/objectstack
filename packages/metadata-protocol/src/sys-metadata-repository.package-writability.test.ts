@@ -58,7 +58,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 // refuses. Imported from `@objectstack/metadata-core` and not from
 // `@objectstack/objectql`: objectql DEPENDS ON this package, so that import
 // would close a dependency cycle turbo rejects outright.
-import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import type { MetaRef } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 import { SysMetadataRepository, resetEnvWritableMetadataTypes } from './sys-metadata-repository.js';
@@ -125,6 +125,7 @@ function makeFakeEngine() {
       return Array.from(rows.values());
     },
     async findOne(table: string, opts: { where: Record<string, unknown> }) {
+      assertEngineFindOnePredicate(table, opts);
       if (table === 'sys_metadata_history') return historyRows.find((h) => matchesHistory(h, opts.where)) ?? null;
       return findRow(opts.where)?.row ?? null;
     },

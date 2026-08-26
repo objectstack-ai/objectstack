@@ -51,7 +51,7 @@
 // what THIS file owns is the consumer half: which outcomes widen, which do not,
 // and that everything that is not a literal `admit` leaves the refusal intact.
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/objectql';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/objectql';
 import { SharingService, type SharingSecurityProbe } from './sharing-service.js';
 import { buildSharingMiddleware } from './sharing-plugin.js';
 
@@ -204,6 +204,7 @@ function makeEngine() {
       return rows.filter((r) => matches(r, options.filter ?? options.where)).slice(0, options.limit ?? 1000);
     },
     async findOne(object: string, options: any = {}) {
+      assertEngineFindOnePredicate(object, options);
       const rows = await this.find(object, { ...options, limit: 1 });
       return rows[0] ?? null;
     },

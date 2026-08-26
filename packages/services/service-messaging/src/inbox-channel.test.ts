@@ -3,6 +3,7 @@
 import { describe, it, expect } from 'vitest';
 import { createInboxChannel, INBOX_OBJECT, RECEIPT_OBJECT } from './inbox-channel.js';
 import type { Delivery } from './channel.js';
+import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 
 function silentCtx() {
     return { logger: { info: () => {}, warn: () => {}, error: () => {} } };
@@ -41,6 +42,7 @@ function fakeData(
             },
             async find() { return []; },
             async findOne(object: string, query: any) {
+                assertEngineFindOnePredicate(object, query);
                 findOnes.push({ object, query });
                 return findOneImpl ? findOneImpl(object, query) : null;
             },

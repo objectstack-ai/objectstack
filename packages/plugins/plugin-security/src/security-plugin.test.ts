@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect, vi } from 'vitest';
-import { assertEngineUpdateDispatch } from '@objectstack/metadata-core';
+import { assertEngineUpdateDispatch, assertEngineFindOnePredicate, type EngineFindOneQueryInput } from '@objectstack/metadata-core';
 import { SecurityPlugin } from './security-plugin.js';
 import { PermissionEvaluator, crudBucketForOperation } from './permission-evaluator.js';
 import { FieldMasker } from './field-masker.js';
@@ -119,7 +119,7 @@ describe('SecurityPlugin', () => {
     const ql: any = {
       registerMiddleware: (mw: any) => middlewares.push(mw),
       find: vi.fn(async () => []),
-      findOne: vi.fn(async () => null),
+      findOne: vi.fn(async (object: string, query?: EngineFindOneQueryInput) => { assertEngineFindOnePredicate(object, query); return null; }),
       insert: vi.fn(async (_o: string, d: any) => ({ id: d?.id ?? 'x' })),
       // Opens with the PRODUCER's own dispatch predicate, never a hand-mirrored
       // guard (check:engine-double-contract) — same shape as the makeQl double
@@ -3551,7 +3551,7 @@ describe('SecurityPlugin — ADR-0066 D3 field-level requiredPermissions', () =>
     const ql: any = {
       registerMiddleware: (mw: any) => { if (!middleware) middleware = mw; },
       getSchema: () => schema,
-      findOne: async () => null,
+      findOne: async (object: string, query?: EngineFindOneQueryInput) => { assertEngineFindOnePredicate(object, query); return null; },
       find: async () => [],
     };
     const metadata = { get: async () => schema, list: async () => sets };
@@ -3655,6 +3655,7 @@ describe('explainAccessForCaller (ADR-0090 D6/D12)', () => {
         return typeof opts?.limit === 'number' ? rows.slice(0, opts.limit) : rows;
       },
       async findOne(object: string, opts: any) {
+        assertEngineFindOnePredicate(object, opts);
         const rows = (tables[object] ?? []).filter((r) => matches(r, opts?.where));
         return rows[0] ?? null;
       },
@@ -3779,6 +3780,7 @@ describe('SecurityPlugin — ADR-0090 D10 agent intersection', () => {
         return typeof o?.limit === 'number' ? rows.slice(0, o.limit) : rows;
       },
       async findOne(object: string, o: any) {
+        assertEngineFindOnePredicate(object, o);
         if (object.startsWith('sys_')) {
           return (tables[object] ?? []).filter((r) => matches(r, o?.where))[0] ?? null;
         }
@@ -3960,7 +3962,7 @@ describe('managed-object write denies wiring (#3325)', () => {
     const ql: any = {
       registerMiddleware: vi.fn(),
       getSchema: () => undefined,
-      findOne: async () => null,
+      findOne: async (object: string, query?: EngineFindOneQueryInput) => { assertEngineFindOnePredicate(object, query); return null; },
       find: async () => [],
       count: async () => 0,
       insert: async (_o: string, d: any) => ({ id: d?.id ?? 'x' }),

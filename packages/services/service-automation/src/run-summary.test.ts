@@ -8,7 +8,7 @@
 // all read.
 
 import { describe, it, expect } from 'vitest';
-import { assertEngineDeleteDispatch } from '@objectstack/objectql';
+import { assertEngineDeleteDispatch, assertEngineFindOnePredicate, type EngineFindOneQueryInput } from '@objectstack/objectql';
 import { AutomationEngine } from './engine.js';
 import type { StepLogEntry, NodeExecutor, RunRecord } from './engine.js';
 import { summarizeRun, formatRunSummaryLine } from './run-summary.js';
@@ -200,7 +200,8 @@ function sweepEngine(rows: Array<Record<string, unknown>>, logger = makeLogger()
     let seq = 0;
     const data: any = {
         async find() { return rows; },
-        async findOne() { return rows[0] ?? null; },
+        async findOne(object: string, query?: EngineFindOneQueryInput) {
+                          assertEngineFindOnePredicate(object, query); return rows[0] ?? null; },
         async insert(obj: string, fields: any) { seq += 1; const r = { id: `${obj}_${seq}`, ...fields }; written.push(r); return r; },
         async update() { return 0; },
         async delete() { return 0; },
@@ -396,7 +397,8 @@ describe('node executors report what they touched', () => {
         const logger = makeLogger();
         const data: any = {
             async find() { return []; },
-            async findOne() { return null; },
+            async findOne(object: string, query?: EngineFindOneQueryInput) {
+                              assertEngineFindOnePredicate(object, query); return null; },
             async insert(_o: string, f: any) { return { id: 'x', ...f }; },
             async update() { return 7; }, // driver.updateMany contract: Promise<number>
             async delete() { return 0; },
@@ -501,7 +503,8 @@ describe('node executors report what they touched', () => {
         const written: any[] = [];
         const data: any = {
             async find() { return []; },
-            async findOne() { return null; },
+            async findOne(object: string, query?: EngineFindOneQueryInput) {
+                              assertEngineFindOnePredicate(object, query); return null; },
             async insert(o: string, f: any) { const r = { id: `${o}_1`, ...f }; written.push(r); return r; },
         };
         const ctx: any = { logger, getService: (n: string) => (n === 'data' ? data : undefined) };
@@ -544,7 +547,8 @@ describe('map rolls its per-item child runs up', () => {
         const written: any[] = [];
         const data: any = {
             async find() { return []; },
-            async findOne() { return null; },
+            async findOne(object: string, query?: EngineFindOneQueryInput) {
+                              assertEngineFindOnePredicate(object, query); return null; },
             async insert(o: string, f: any) { const r = { id: `${o}_${written.length + 1}`, ...f }; written.push(r); return r; },
         };
         const ctx: any = { logger, getService: (n: string) => (n === 'data' ? data : undefined) };
@@ -594,7 +598,8 @@ describe('a child run that PAUSED still counts toward its parent', () => {
         const written: any[] = [];
         const data: any = {
             async find() { return []; },
-            async findOne() { return null; },
+            async findOne(object: string, query?: EngineFindOneQueryInput) {
+                              assertEngineFindOnePredicate(object, query); return null; },
             async insert(o: string, f: any) { const r = { id: `${o}_${written.length + 1}`, ...f }; written.push(r); return r; },
         };
         const ctx: any = { logger, getService: (n: string) => (n === 'data' ? data : undefined) };

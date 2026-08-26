@@ -55,7 +55,7 @@ import { describe, it, expect, afterEach } from 'vitest';
 import {
   assertEngineDeleteDispatch,
   assertEngineUpdateDispatch,
-  hashSpec,
+  hashSpec, assertEngineFindOnePredicate,
 } from '@objectstack/metadata-core';
 import { runRepositoryContractTests } from '@objectstack/metadata-core/testing';
 import type { MetadataEvent, WatchFilter } from '@objectstack/metadata-core';
@@ -109,6 +109,7 @@ function makeFakeEngine() {
       return typeof opts.limit === 'number' ? hits.slice(0, opts.limit) : hits;
     },
     async findOne(table: string, opts: { where: Record<string, unknown> }): Promise<Row | null> {
+      assertEngineFindOnePredicate(table, opts);
       return tableOf(table).find((r) => matches(r, opts.where)) ?? null;
     },
     async insert(table: string, data: Record<string, unknown>): Promise<{ id: string }> {

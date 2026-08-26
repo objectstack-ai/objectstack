@@ -4,6 +4,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { AutomationEngine } from '../engine.js';
 import { registerCrudNodes } from './crud-nodes.js';
 import { interpolateFilter } from './template.js';
+import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 
 /**
  * framework#3810 — a flow filter must never silently widen.
@@ -30,7 +31,8 @@ function fakeData() {
     const seen: { find?: any; update?: any; delete?: any } = {};
     const service = {
         find: async (_o: string, q: any) => { seen.find = q.where; return []; },
-        findOne: async (_o: string, q: any) => { seen.find = q.where; return null; },
+        findOne: async (_o: string, q: any) => {
+                                                 assertEngineFindOnePredicate(_o, q); seen.find = q.where; return null; },
         update: async (_o: string, _d: any, o: any) => { seen.update = o?.where; return { modified: 1 }; },
         delete: async (_o: string, o: any) => { seen.delete = o?.where; return { deleted: 1 }; },
         getObject: () => ({ name: 'deal', fields: {} }),

@@ -22,6 +22,7 @@ import { SecurityPlugin } from './security-plugin.js';
 import { FieldMasker, maskFieldValue, MASK_CHAR } from './field-masker.js';
 import type { PermissionSet } from '@objectstack/spec/security';
 import type { FieldMaskingRule } from '@objectstack/spec/data';
+import { assertEngineFindOnePredicate, type EngineFindOneQueryInput } from '@objectstack/metadata-core';
 
 // ---------------------------------------------------------------------------
 // maskFieldValue — the preset + keepHead/keepTail transforms
@@ -189,7 +190,7 @@ describe('SecurityPlugin — maskingRule middleware enforcement (#8993)', () => 
     const ql: any = {
       registerMiddleware: (mw: any) => { if (!middleware) middleware = mw; },
       getSchema: () => schema,
-      findOne: async () => null,
+      findOne: async (object: string, query?: EngineFindOneQueryInput) => { assertEngineFindOnePredicate(object, query); return null; },
       find: async () => [],
     };
     const metadata = { get: async () => schema, list: async () => sets };
@@ -304,7 +305,7 @@ describe('SecurityPlugin — maskingRule middleware enforcement (#8993)', () => 
     const ql: any = {
       registerMiddleware: (mw: any) => { if (!middleware) middleware = mw; },
       getSchema: () => badSchema,
-      findOne: async () => null,
+      findOne: async (object: string, query?: EngineFindOneQueryInput) => { assertEngineFindOnePredicate(object, query); return null; },
       find: async () => [],
     };
     const metadata = { get: async () => badSchema, list: async () => [setNoCap] };

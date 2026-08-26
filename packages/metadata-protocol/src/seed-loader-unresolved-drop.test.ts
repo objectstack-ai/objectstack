@@ -8,7 +8,7 @@ import { describe, it, expect, vi } from 'vitest';
 // tests; this one is the one tsc can actually read.
 import { SeedLoaderService } from './seed-loader.js';
 import type { IDataEngine, IMetadataService } from '@objectstack/spec/contracts';
-import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 
 /**
  * framework#4997: a record DROPPED because its reference cannot be resolved —
@@ -56,6 +56,7 @@ function createFaithfulEngine(): { engine: IDataEngine; store: Record<string, an
       return records;
     }),
     findOne: vi.fn(async (objectName: string, query?: any) => {
+      assertEngineFindOnePredicate(objectName, query);
       const rows = await (engine.find as any)(objectName, { ...query, limit: 1 });
       return rows[0] ?? null;
     }),
