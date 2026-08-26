@@ -600,15 +600,21 @@ export async function selfTest() {
   // plus, since #10178, the two @objectstack/rest declarations it added: the
   // state-machine doc page, covered only through the `content/**` root #10015
   // added, and the automation skill file, covered only through its own
-  // single-file `crosspkg` entry the way #10848's SKILL.md is. Ten plus one
-  // plus two: the rollback now uncovers thirteen. This pin is judged over the
-  // LIVE declaration table on purpose: a declaration added under a root the
-  // rollback keeps leaves the count alone, one under a new root moves it and
-  // is recorded here by name.
+  // single-file `crosspkg` entry the way #10848's SKILL.md is. Plus, since
+  // #12201, the one declaration under the `skills/**` root that card added
+  // (the export-list corpus gate reads the published catalog from inside
+  // @objectstack/spec). Ten plus one plus two plus one: the rollback now
+  // uncovers fourteen. This pin is judged over the LIVE declaration table on
+  // purpose: a declaration added under a root the rollback keeps leaves the
+  // count alone, one under a new root moves it and is recorded here by name.
   const preFix = judge(fixtureWorkflow({ core: real.filters?.core, crosspkg: ['scripts/**'] }), CROSS_PACKAGE_TEST_INPUTS);
   assert(
-    new Set(uncoveredGlobs(preFix)).size === 13,
-    `rolling \`crosspkg\` back to its pre-#10015 list uncovers the ten it fixed plus #10848's one plus #10178's two -- got ${new Set(uncoveredGlobs(preFix)).size}`,
+    new Set(uncoveredGlobs(preFix)).size === 14,
+    `rolling \`crosspkg\` back to its pre-#10015 list uncovers the ten it fixed plus #10848's one plus #10178's two plus #12201's one -- got ${new Set(uncoveredGlobs(preFix)).size}`,
+  );
+  assert(
+    uncoveredGlobs(preFix).includes('skills/**'),
+    `-- and #12201 added the published-catalog root the export-list corpus gate reads, by name`,
   );
   assert(
     uncoveredGlobs(preFix).includes('.claude/skills/spec-property-retirement/SKILL.md'),
@@ -646,8 +652,8 @@ export async function selfTest() {
       `same-root-different-file case observed failing and then covered by naming the file, a glob covered by ` +
       `\`core\`, one covered only by \`crosspkg\` and one covered by neither judged separately in one table, the ` +
       `stale-entry direction, seven refusals over subjects that could not be read, the checked-in ci.yml, the ` +
-      `pre-#10015 rollback uncovering the ten it fixed plus #10848's one plus #10178's two, and the CI wiring ` +
-      `read out of lint.yml.`,
+      `pre-#10015 rollback uncovering the ten it fixed plus #10848's one plus #10178's two plus #12201's one, ` +
+      `and the CI wiring read out of lint.yml.`,
   );
   return 0;
 }
