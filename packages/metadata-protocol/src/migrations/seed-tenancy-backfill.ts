@@ -105,8 +105,37 @@
  * rolled-back transaction, rows deleted since). Taking the counter high-water
  * mark can only ever skip numbers; taking the data max could re-issue one that
  * a burned allocation already handed out.
+ *
+ * ## The handoff writes BEFORE it deletes (#12394)
+ *
+ * The first implementation of the merge lost the very mark the paragraph above
+ * insists on. It ran an `UPDATE` of the organization-scoped counter row and then
+ * a `DELETE` of the `__global__` one, as two independent statements — and on a
+ * FRESH install, which is the normal shape rather than an edge case, there is no
+ * organization-scoped row yet: no API create has happened. The `UPDATE` matched
+ * nothing, which is a SUCCESS on every dialect; the `DELETE` ran regardless; and
+ * `_objectstack_sequences` was left empty. `SqlDriver.getNextSequenceValue` then
+ * re-entered the one-time `MAX(data)` bootstrap its own docstring reserves for
+ * first allocation, re-derived the counter from the surviving rows, and handed a
+ * business identifier out A SECOND TIME — measured on 17.1.0: `ACC-000009` on
+ * two different records, because one number had been burned.
+ *
+ * So the handoff is now one ordered decision instead of two hopeful statements:
+ * write the merged mark (INSERT when the destination row is absent, UPDATE when
+ * it is not), READ IT BACK, and only then retire the `__global__` row — per
+ * scope, since a scoped format runs one counter row per rendered prefix. See
+ * {@link mergeSplitCounter}.
+ *
+ * ⛔ What this deliberately does NOT do is teach the allocator to notice that it
+ * is bootstrapping a second time. Reaching `if (!existing)` is not evidence of
+ * lost state: a brand-new tenant, a new day, a new `{field}` group each reach it
+ * legitimately, on a mature install, constantly — and a destroyed counter leaves
+ * no row behind to tell the two apart. A guard there would fire on the hot path
+ * and still not detect this defect. The repair belongs where the state is
+ * destroyed, which is here.
  */
 
+import { createHash } from 'node:crypto';
 import { resolveTenancyPosture } from '@objectstack/types';
 import { postureEnforcesWall } from '@objectstack/spec/security';
 import { DATA_MIGRATION_FLAG_OBJECT, type DataMigrationFlag } from '@objectstack/spec/system';
@@ -657,13 +686,226 @@ export function buildGlobalCounterDeleteSql(client?: string): string {
   );
 }
 
-/** The organization-scoped counter rows for one split object/field. */
-function buildOrgCounterProbeSql(client?: string): string {
+/**
+ * SHA-256 of the composite counter key — the `_objectstack_sequences` primary
+ * key, exactly as `SqlDriver.sequenceKeyHash` computes it (#12394).
+ *
+ * Re-spelled here rather than imported, for the same reason {@link GLOBAL_TENANT}
+ * is: `metadata-protocol` must not depend on a driver. The duplication is real,
+ * and it is the reason this module used to DELETE the `__global__` row rather
+ * than move it — "a hash spelled two ways is a counter the driver cannot find".
+ * That objection was right about the hazard and wrong about the remedy: deleting
+ * the row hands the merged high-water mark to nobody, and the driver's one-time
+ * `MAX(data)` bootstrap then re-derives a number it has ALREADY handed out.
+ *
+ * So the duplication is kept and CONTROLLED instead. `packages/runtime`'s
+ * `seed-tenancy-autonumber-split.integration.test.ts` drives the real
+ * `SeedLoaderService`, a real `ObjectQL` and a real `SqlDriver` across a BURNED
+ * number, on a fixed-prefix and on a `{field}`-scoped format: a hash disagreeing
+ * with the driver's by one byte leaves a row the driver never reads, the driver
+ * re-enters its bootstrap, and the burned number is re-issued — which is exactly
+ * what those two cases assert does not happen. Divergence is a red test, not a
+ * silent counter.
+ *
+ * The separator is the ASCII unit separator, spelled as the escape \u001f and never as a raw control byte — the driver spells it the same way.
+ */
+function sequenceKeyHash(object: string, tenantId: string, field: string, scope: string): string {
+  return createHash('sha256')
+    .update(`${object}\u001f${tenantId}\u001f${field}\u001f${scope}`)
+    .digest('hex');
+}
+
+/**
+ * Does the counter table carry the current `key_hash` primary key?
+ *
+ * The one question that decides how a counter row is KEYED — and therefore how a
+ * missing organization-scoped row has to be created. The driver answers it for
+ * itself with an in-process flag (`SqlDriver.sequencesHasKeyHash`) this module
+ * cannot see, so it is asked of the DATABASE, in the same `WHERE 1 = 0` idiom
+ * {@link buildSequencesPresenceSql} already uses: a table without the column
+ * refuses the statement, and the refusal IS the answer.
+ *
+ * `key_hash` implies `scope` — `createSequencesTable` has only ever created the
+ * two together — so one probe settles both. A table without it is one whose
+ * `ensureSequencesKeyHashShape` rebuild has not run or did not succeed; the
+ * driver keys those by `(object, tenant_id, field)` and refuses per-scope
+ * formats outright. Matching that here is not a fallback dialect — it is the
+ * same key the driver itself uses against the same table.
+ */
+export function buildSequencesKeyShapeProbeSql(client?: string): string {
+  return `SELECT ${quoteIdent('key_hash', client)} FROM ${quoteIdent(SEQUENCES_TABLE, client)} WHERE 1 = 0`;
+}
+
+/**
+ * The `__global__` counter rows for one split object/field — one per scope.
+ *
+ * The sibling of {@link buildCounterRowProbeSql}, and the row this migration
+ * actually has to MOVE. It reads the STORED `key_hash` rather than recomputing
+ * it, so each row is retired by its own identity: a scope this module spelled
+ * wrong can then never delete a row it did not just merge.
+ */
+export function buildGlobalCounterProbeSql(hasKeyHash: boolean, client?: string): string {
   const q = (name: string) => quoteIdent(name, client);
+  const columns = hasKeyHash
+    ? `${q('key_hash')}, ${q('scope')}, ${q('last_value')}`
+    : q('last_value');
   return (
-    `SELECT ${q('tenant_id')}, ${q('last_value')} FROM ${q(SEQUENCES_TABLE)} ` +
-    `WHERE ${q('object')} = ? AND ${q('field')} = ? AND ${q('tenant_id')} <> ?`
+    `SELECT ${columns} FROM ${q(SEQUENCES_TABLE)} ` +
+    `WHERE ${q('object')} = ? AND ${q('field')} = ? AND ${q('tenant_id')} = ?`
   );
+}
+
+/**
+ * Read ONE counter row by the key the driver uses on this table shape.
+ *
+ * Called twice per scope, for two different jobs: to decide INSERT vs UPDATE,
+ * and — after the write — to VERIFY that the merged mark actually landed, before
+ * anything is deleted. The second read is the guard the original handoff never
+ * had: an `UPDATE` matching no row is a SUCCESS on every dialect, so "the
+ * statement did not throw" was never evidence that the mark had been written.
+ */
+export function buildCounterRowProbeSql(hasKeyHash: boolean, client?: string): string {
+  const q = (name: string) => quoteIdent(name, client);
+  const where = hasKeyHash
+    ? `${q('key_hash')} = ?`
+    : `${q('object')} = ? AND ${q('field')} = ? AND ${q('tenant_id')} = ?`;
+  return `SELECT ${q('last_value')} FROM ${q(SEQUENCES_TABLE)} WHERE ${where}`;
+}
+
+/** Raise an EXISTING organization-scoped counter row, addressed by `key_hash`. */
+export function buildCounterMergeByKeyHashSql(client?: string): string {
+  const q = (name: string) => quoteIdent(name, client);
+  // `last_value` unqualified is an `ER_PARSE_ERROR` on MySQL 8.0 — the reserved
+  // `LAST_VALUE()` window function there. See {@link buildCounterMergeSql}.
+  return (
+    `UPDATE ${q(SEQUENCES_TABLE)} SET ${q('last_value')} = ?, ` +
+    `${q('updated_at')} = CURRENT_TIMESTAMP WHERE ${q('key_hash')} = ?`
+  );
+}
+
+/**
+ * Create the organization-scoped counter row AT the merged high-water mark.
+ *
+ * The statement this handoff was missing. On a FRESH install — the normal first
+ * boot, not an edge case — there is no organization-scoped row to raise, because
+ * no API create has happened yet; the `UPDATE` matched nothing, reported success,
+ * and the mark was then deleted with the `__global__` row.
+ *
+ * `updated_at` is left to the column default rather than named here: it is
+ * defaulted in every shape of this table, and naming it would be one more column
+ * to be wrong about on a legacy install.
+ */
+export function buildCounterInsertSql(hasKeyHash: boolean, client?: string): string {
+  const q = (name: string) => quoteIdent(name, client);
+  const columns = hasKeyHash
+    ? [q('key_hash'), q('object'), q('tenant_id'), q('field'), q('scope'), q('last_value')]
+    : [q('object'), q('tenant_id'), q('field'), q('last_value')];
+  return (
+    `INSERT INTO ${q(SEQUENCES_TABLE)} (${columns.join(', ')}) ` +
+    `VALUES (${columns.map(() => '?').join(', ')})`
+  );
+}
+
+/**
+ * Move one object/field's `__global__` high-water mark INTO the organization,
+ * and only then retire the row it came from (#12394).
+ *
+ * ## The order, and why every step of it is load-bearing
+ *
+ * The handoff this replaces did two independent things and hoped they added up:
+ * it `UPDATE`d the organization-scoped counter row, then `DELETE`d the
+ * `__global__` one unconditionally. On a fresh install — the normal shape, right
+ * after the first sign-up — there IS no organization-scoped row yet, so the
+ * UPDATE matched nothing (a success, on every dialect), the DELETE ran anyway,
+ * and the counter table was left EMPTY. The driver then re-entered its one-time
+ * `MAX(data)` bootstrap and re-issued an identifier that had already been handed
+ * out: measured on 17.1.0, `ACC-000009` minted twice, to two different records.
+ *
+ * So the three steps are ordered and each is verified:
+ *
+ *  1. **Write, per scope.** A scoped format (`{YYYYMMDD}`, `{field}`, per-parent)
+ *     runs one counter row per rendered prefix, so the mark is moved scope by
+ *     scope, keyed the way the driver keys it. `INSERT` when the destination row
+ *     is absent, `UPDATE` when it exists — the absent case is the FIRST-BOOT
+ *     case, not an edge one.
+ *  2. **Read it back.** "The statement did not throw" is not evidence that a row
+ *     was written: an `UPDATE` matching zero rows throws nowhere, and that is
+ *     precisely the defect above. The destination row is re-read and must hold at
+ *     least the merged value.
+ *  3. **Then delete** — the `__global__` row, by its own stored `key_hash`, so
+ *     the retirement can only ever hit the row whose mark was just merged.
+ *
+ * A throw at any point leaves this object's `__global__` row in place, which is
+ * the state the next boot's split probe detects and retries. Partial progress is
+ * safe for the same reason: a scope already merged and retired is simply no
+ * longer split.
+ *
+ * The merge rule itself is unchanged and is the ruling's: the greater of the two
+ * COUNTERS, never the data max — a counter is allowed to sit ahead of its rows,
+ * and that gap is exactly what must survive the handoff.
+ */
+async function mergeSplitCounter(
+  exec: SeedTenancyExec,
+  client: string | undefined,
+  hasKeyHash: boolean,
+  object: string,
+  field: string,
+  organizationId: string,
+): Promise<void> {
+  const globalRows = await selectRows(exec, buildGlobalCounterProbeSql(hasKeyHash, client), [
+    object,
+    field,
+    GLOBAL_TENANT,
+  ]);
+  for (const globalRow of globalRows) {
+    const scope = hasKeyHash && globalRow.scope != null ? String(globalRow.scope) : '';
+    const globalValue = toNumber(globalRow.last_value);
+    // How the DRIVER addresses the destination row on this table shape.
+    const orgKey = hasKeyHash
+      ? [sequenceKeyHash(object, organizationId, field, scope)]
+      : [object, field, organizationId];
+
+    const probe = buildCounterRowProbeSql(hasKeyHash, client);
+    const existing = await selectRows(exec, probe, orgKey);
+    const merged = Math.max(globalValue, existing.length > 0 ? toNumber(existing[0].last_value) : 0);
+
+    if (existing.length > 0) {
+      await exec(
+        hasKeyHash ? buildCounterMergeByKeyHashSql(client) : buildCounterMergeSql(client),
+        hasKeyHash ? [merged, ...orgKey] : [merged, object, field, organizationId],
+      );
+    } else {
+      await exec(
+        buildCounterInsertSql(hasKeyHash, client),
+        hasKeyHash
+          ? [orgKey[0], object, organizationId, field, scope, merged]
+          : [object, organizationId, field, merged],
+      );
+    }
+
+    const landed = await selectRows(exec, probe, orgKey);
+    const landedValue = landed.length > 0 ? toNumber(landed[0].last_value) : -1;
+    if (landedValue < merged) {
+      throw new Error(
+        `the organization-scoped counter for ${object}.${field}` +
+          (scope === '' ? '' : ` (scope ${JSON.stringify(scope)})`) +
+          ` reads ${landedValue < 0 ? 'ABSENT' : String(landedValue)} after the merge, expected at ` +
+          `least ${merged} — the '${GLOBAL_TENANT}' row is NOT retired`,
+      );
+    }
+
+    if (hasKeyHash) {
+      await exec(buildGlobalCounterDeleteByKeyHashSql(client), [String(globalRow.key_hash)]);
+    } else {
+      await exec(buildGlobalCounterDeleteSql(client), [object, field, GLOBAL_TENANT]);
+    }
+  }
+}
+
+/** Retire ONE `__global__` counter row, by its own stored `key_hash`. */
+export function buildGlobalCounterDeleteByKeyHashSql(client?: string): string {
+  const q = (name: string) => quoteIdent(name, client);
+  return `DELETE FROM ${q(SEQUENCES_TABLE)} WHERE ${q('key_hash')} = ?`;
 }
 
 function toNumber(value: unknown): number {
@@ -1081,6 +1323,17 @@ export async function backfillSeedTenancy(
     }
   }
 
+  // The counter table's key shape, asked ONCE — it is a property of the
+  // database, not of a split, and it decides how every write below is addressed.
+  // Unreadable for any reason reads as the legacy shape, which is the
+  // conservative answer: it is the key the driver falls back to as well.
+  let hasKeyHash = false;
+  try {
+    hasKeyHash = isResultSet(await exec(buildSequencesKeyShapeProbeSql(client)));
+  } catch {
+    hasKeyHash = false;
+  }
+
   for (const split of splits) {
     // A counter that describes a partition the rows never reached would be a
     // false receipt — the exact shape the stamp-then-merge ordering exists to
@@ -1088,38 +1341,16 @@ export async function backfillSeedTenancy(
     // same split and retries the whole repair.
     if (stampFailures.includes(split.object)) continue;
     try {
-      const orgRows = await selectRows(exec, buildOrgCounterProbeSql(client), [
-        split.object,
-        split.field,
-        GLOBAL_TENANT,
-      ]);
-      for (const row of orgRows) {
-        const tenantId = row.tenant_id == null ? '' : String(row.tenant_id);
-        if (!tenantId) continue;
-        // The ruling's merge rule: the greater of the two COUNTERS, never the
-        // data max — a counter is allowed to sit ahead of its rows.
-        const merged = Math.max(split.globalLastValue, toNumber(row.last_value));
-        await exec(buildCounterMergeSql(client), [merged, split.object, split.field, tenantId]);
-      }
-      // Retire the `__global__` counter last.
-      //
-      // When there was NO organization-scoped counter (the fresh-install case,
-      // `orgRows` empty) this delete is the whole reconciliation, and it is
-      // deliberately a delete rather than an insert of a replacement row. The
-      // driver keys counters by a `key_hash` it computes in app code, so writing
-      // a new row from here would mean re-spelling that hash in a second place —
-      // and a hash spelled two ways is a counter the driver cannot find.
-      //
-      // Deleting instead hands the job to the driver's own first-allocation
-      // bootstrap, which is already exactly right: `getNextSequenceValue` sees no
-      // row, scans `scanMaxNumericTail` SCOPED TO THE RESOLVED TENANT — which, the
-      // stamp above having just run, now includes the adopted seed rows — and
-      // starts at that max + 1. One tested code path, no duplicated hashing.
-      await exec(buildGlobalCounterDeleteSql(client), [split.object, split.field, GLOBAL_TENANT]);
+      // Re-entrant by construction: the `__global__` rows this reads are the
+      // ones it retires, so a second pass over a duplicated (object, field) —
+      // which the split probe produces whenever an object holds several scopes —
+      // finds nothing left to move.
+      await mergeSplitCounter(exec, client, hasKeyHash, split.object, split.field, organizationId);
     } catch (e) {
       logger?.warn?.(
         `[metadata-protocol] seed tenancy backfill could not merge the counter for ` +
-          `${split.object}.${split.field} (#8686)`,
+          `${split.object}.${split.field} (#8686) — the '${GLOBAL_TENANT}' counter is left in ` +
+          `place, so the high-water mark is intact and the next boot retries the repair`,
         { error: (e as Error).message },
       );
     }

@@ -36,6 +36,12 @@ import {
   buildStampSql,
   buildCounterMergeSql,
   buildGlobalCounterDeleteSql,
+  buildSequencesKeyShapeProbeSql,
+  buildGlobalCounterProbeSql,
+  buildCounterRowProbeSql,
+  buildCounterMergeByKeyHashSql,
+  buildCounterInsertSql,
+  buildGlobalCounterDeleteByKeyHashSql,
   buildSequencesPresenceSql,
   SEQUENCES_TABLE,
   GLOBAL_TENANT,
@@ -132,6 +138,72 @@ describe('#8686 SQL builders', () => {
   it('the presence probe reads no rows', () => {
     expect(buildSequencesPresenceSql()).toContain('WHERE 1 = 0');
   });
+
+  // ── #12394 — the handoff writes before it deletes ─────────────────────────
+  //
+  // The old merge was an UPDATE against a row that does not exist on a fresh
+  // install, followed by an unconditional DELETE. These pin the two statements
+  // that make the write REACH somewhere, and the key they are addressed by.
+
+  it('the key-shape probe reads no rows and names key_hash', () => {
+    expect(buildSequencesKeyShapeProbeSql()).toContain('WHERE 1 = 0');
+    expect(buildSequencesKeyShapeProbeSql()).toContain('"key_hash"');
+  });
+
+  it('the counter INSERT names every column the current table shape requires', () => {
+    const modern = buildCounterInsertSql(true);
+    // `key_hash` is NOT NULL with no default — an INSERT that omitted it could
+    // not land at all — and `scope` is what keeps a per-day/per-group counter
+    // from collapsing into another scope's row.
+    for (const column of ['key_hash', 'object', 'tenant_id', 'field', 'scope', 'last_value']) {
+      expect(modern).toContain(`"${column}"`);
+    }
+    expect(modern).toContain('VALUES (?, ?, ?, ?, ?, ?)');
+    // `updated_at` is left to the column default: one less column to be wrong
+    // about on a table shape this module did not create.
+    expect(modern).not.toContain('"updated_at"');
+  });
+
+  it('the legacy shape is addressed by the three columns the driver falls back to', () => {
+    // A table whose `key_hash` rebuild has not run or did not succeed. The
+    // driver keys those by (object, tenant_id, field); so does this.
+    const legacy = buildCounterInsertSql(false);
+    expect(legacy).toContain('VALUES (?, ?, ?, ?)');
+    expect(legacy).not.toContain('"key_hash"');
+    expect(legacy).not.toContain('"scope"');
+    expect(buildCounterRowProbeSql(false)).toContain(
+      'WHERE "object" = ? AND "field" = ? AND "tenant_id" = ?',
+    );
+    expect(buildGlobalCounterProbeSql(false)).not.toContain('"scope"');
+  });
+
+  it('the modern shape is addressed by key_hash alone, and so is the retirement', () => {
+    expect(buildCounterRowProbeSql(true)).toContain('WHERE "key_hash" = ?');
+    expect(buildCounterMergeByKeyHashSql()).toContain('WHERE "key_hash" = ?');
+    // The `__global__` row is retired by its OWN stored hash — read back, never
+    // recomputed — so a scope spelled wrong cannot delete a row it did not merge.
+    expect(buildGlobalCounterDeleteByKeyHashSql()).toContain('DELETE FROM "_objectstack_sequences"');
+    expect(buildGlobalCounterDeleteByKeyHashSql()).toContain('WHERE "key_hash" = ?');
+    expect(buildGlobalCounterProbeSql(true)).toContain('"key_hash"');
+    expect(buildGlobalCounterProbeSql(true)).toContain('"scope"');
+  });
+
+  it('every new counter statement binds its values and names no literal tenant', () => {
+    for (const sql of [
+      buildSequencesKeyShapeProbeSql(),
+      buildGlobalCounterProbeSql(true),
+      buildGlobalCounterProbeSql(false),
+      buildCounterRowProbeSql(true),
+      buildCounterRowProbeSql(false),
+      buildCounterMergeByKeyHashSql(),
+      buildCounterInsertSql(true),
+      buildCounterInsertSql(false),
+      buildGlobalCounterDeleteByKeyHashSql(),
+    ]) {
+      expect(sql).not.toContain(GLOBAL_TENANT);
+      expect(sql).toContain(SEQUENCES_TABLE);
+    }
+  });
 });
 
 describe('#8686 identifier gate', () => {
@@ -192,6 +264,15 @@ describe('#9381 dialect-aware statement text', () => {
           buildStampSql('crm_case', ['case_number'], client),
           buildCounterMergeSql(client),
           buildGlobalCounterDeleteSql(client),
+          buildSequencesKeyShapeProbeSql(client),
+          buildGlobalCounterProbeSql(true, client),
+          buildGlobalCounterProbeSql(false, client),
+          buildCounterRowProbeSql(true, client),
+          buildCounterRowProbeSql(false, client),
+          buildCounterMergeByKeyHashSql(client),
+          buildCounterInsertSql(true, client),
+          buildCounterInsertSql(false, client),
+          buildGlobalCounterDeleteByKeyHashSql(client),
         ];
         for (const sql of statements) {
           expect(sql).not.toContain('"');
@@ -206,9 +287,19 @@ describe('#9381 dialect-aware statement text', () => {
       it('quotes `last_value` — a RESERVED word on MySQL 8.0 — wherever it is unqualified', () => {
         // `LAST_VALUE()` is a window function there, so a bare `last_value` is a
         // parse error even when the table name is spelled correctly. Measured.
-        const merge = buildCounterMergeSql(client);
-        expect(merge).toContain(`SET ${bt('last_value')} = ?`);
-        expect(merge).not.toMatch(/(?<![`\w])last_value(?![`\w])/);
+        for (const merge of [buildCounterMergeSql(client), buildCounterMergeByKeyHashSql(client)]) {
+          expect(merge).toContain(`SET ${bt('last_value')} = ?`);
+          expect(merge).not.toMatch(/(?<![`\w])last_value(?![`\w])/);
+        }
+        // The reads and the INSERT name it too, and a bare one is the same
+        // parse error there.
+        for (const sql of [
+          buildGlobalCounterProbeSql(true, client),
+          buildCounterRowProbeSql(true, client),
+          buildCounterInsertSql(true, client),
+        ]) {
+          expect(sql).not.toMatch(/(?<![`\w])last_value(?![`\w])/);
+        }
       });
 
       it('routes the stamp guard through a derived table (MySQL rejects the self-reference)', () => {
@@ -234,6 +325,15 @@ describe('#9381 dialect-aware statement text', () => {
         buildStampSql('crm_case', ['case_number'], client),
         buildCounterMergeSql(client),
         buildGlobalCounterDeleteSql(client),
+        buildSequencesKeyShapeProbeSql(client),
+        buildGlobalCounterProbeSql(true, client),
+        buildGlobalCounterProbeSql(false, client),
+        buildCounterRowProbeSql(true, client),
+        buildCounterRowProbeSql(false, client),
+        buildCounterMergeByKeyHashSql(client),
+        buildCounterInsertSql(true, client),
+        buildCounterInsertSql(false, client),
+        buildGlobalCounterDeleteByKeyHashSql(client),
       ];
       for (const sql of statements) {
         expect(sql).not.toContain(BACKTICK);
@@ -275,11 +375,17 @@ describe('#9381 dialect-aware statement text', () => {
 describe('#9451 the seed-tenancy repair leaves a durable receipt', () => {
   /** One split object, one organization, no collisions — drives the repair to `applied`. */
   function fakeSeamExec(overrides: { collisions?: Record<string, unknown>[] } = {}) {
-    return async (sql: string, _params?: unknown[]): Promise<unknown> => {
+    // The organization-scoped counter row, held as a one-row store. #12394's
+    // handoff WRITES the merged high-water mark and READS IT BACK before it
+    // retires the `__global__` row, so a fixture that answered the read-back
+    // with nothing would be modelling a database that silently dropped the
+    // write — and the repair would correctly refuse to delete anything.
+    let orgCounter: Record<string, unknown> | undefined;
+    return async (sql: string, params?: unknown[]): Promise<unknown> => {
       // Dispatched on the statements the module actually compiles, so a builder
       // that changed shape breaks this fixture rather than silently turning it
       // into a healthy install.
-      if (sql.includes('WHERE 1 = 0')) return []; // presence probe
+      if (sql.includes('WHERE 1 = 0')) return []; // presence + key-shape probes
       if (sql.includes('LEFT JOIN')) {
         return [
           {
@@ -292,8 +398,20 @@ describe('#9451 the seed-tenancy repair leaves a durable receipt', () => {
       }
       if (sql.includes(ORGANIZATION_TABLE)) return [{ id: 'org_a' }];
       if (sql.includes('rows_holding')) return overrides.collisions ?? [];
+      if (sql.startsWith('INSERT')) {
+        orgCounter = { last_value: Number(params?.[5]) };
+        return [];
+      }
+      if (sql.startsWith('UPDATE') && sql.includes(SEQUENCES_TABLE)) {
+        orgCounter = { last_value: Number(params?.[0]) };
+        return [];
+      }
       if (sql.startsWith('UPDATE') || sql.startsWith('DELETE')) return [];
-      if (sql.includes('tenant_id')) return [{ tenant_id: 'org_a', last_value: 1 }];
+      // The organization-scoped row, addressed the way the driver addresses it.
+      if (sql.includes('"key_hash" = ?')) return orgCounter ? [orgCounter] : [];
+      // The `__global__` rows for one object/field — one per scope, carrying the
+      // stored hash the retirement is addressed by.
+      if (sql.includes('tenant_id')) return [{ key_hash: 'hash-global', scope: '', last_value: 38 }];
       return [];
     };
   }
