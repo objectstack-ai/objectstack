@@ -278,7 +278,6 @@ async function example() {
     // Hot reload
     hotReload: {
       enabled: true,
-      watchPatterns: ['plugins/my-plugin/**/*.ts'],
       debounceDelay: 1000,
       preserveState: true,
       stateStrategy: 'memory',

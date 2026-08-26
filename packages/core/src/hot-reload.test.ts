@@ -328,3 +328,136 @@ describe('[#12340] stateStrategy refusal', () => {
     });
   }
 });
+
+
+// ── [#12428] The watching placeholder refuses instead of reporting success ───
+//
+// Before this card `startWatching` contained NO watcher: a guard plus
+// `logger.info('File watching started', { patterns })` above an in-source note
+// saying real watching "would require chokidar or similar". An operator who set
+// `enabled: true` with `watchPatterns` and read that INFO line had been told the
+// opposite of the truth. `watchHandles` was only ever read, deleted, iterated
+// and cleared and NEVER set, so `stopWatching`'s cleanup branch and the teardown
+// loop over its keys were structurally unreachable, not merely untaken.
+//
+// The last two tests are the behaviour-PRESERVATION pins for those removals:
+// what left was unreachable, and what stayed still works.
+describe('[#12428] startWatching refusal and the watch-handle removal', () => {
+  const liveConfig = (overrides: Record<string, unknown> = {}): HotReloadConfigParsed =>
+    ({
+      enabled: true,
+      debounceDelay: 1000,
+      preserveState: false,
+      stateStrategy: 'memory',
+      shutdownTimeout: 1000,
+      ...overrides,
+    }) as unknown as HotReloadConfigParsed;
+
+  let mgr: HotReloadManager;
+  beforeEach(() => {
+    mgr = new HotReloadManager(createRecordingLogger([]));
+  });
+
+  it('refuses startWatching with an ADR-0112 envelope and the prescription', () => {
+    mgr.registerPlugin('p', liveConfig());
+
+    let caught: (Error & { code?: string; status?: number }) | undefined;
+    try {
+      mgr.startWatching('p');
+    } catch (e) {
+      caught = e as Error & { code?: string; status?: number };
+    }
+
+    // The envelope, not merely "it threw": a bare toThrow() would stay green
+    // against any unrelated failure on this path.
+    expect(caught, 'startWatching must be refused').toBeDefined();
+    expect(caught?.code).toBe('VALIDATION_ERROR');
+    expect(caught?.status).toBe(400);
+
+    // The prescription's load-bearing facts, by CONTENT — this message is the
+    // whole migration document for whoever hits it.
+    const m = caught?.message ?? '';
+    expect(m).toContain('#12428');
+    expect(m).toContain('ADR-0049');
+    expect(m).toContain('never watched');
+    expect(m).toContain('scheduleReload');
+    expect(m).toContain('p'); // locates the offending plugin
+  });
+
+  it('refuses startWatching for an UNREGISTERED plugin too', () => {
+    // The old body early-returned when the plugin was unknown or disabled, so
+    // the lie was conditional. The refusal must not be: the method never
+    // worked for anyone, in any state.
+    expect(() => mgr.startWatching('never-registered')).toThrow(/#12428/);
+  });
+
+  it('refuses a leftover watchPatterns at registration', () => {
+    // The schema is not .strict(), so zod would STRIP this key on any parse
+    // path — a clean parse and a setting that never takes effect. Route 3 left
+    // no parse-time prescription (nothing parses the schema), so THIS is the
+    // door that keeps the removal honest for the audience that exists.
+    let caught: (Error & { code?: string; status?: number }) | undefined;
+    try {
+      mgr.registerPlugin('p', liveConfig({ watchPatterns: ['src/**/*.ts'] }));
+    } catch (e) {
+      caught = e as Error & { code?: string; status?: number };
+    }
+    expect(caught).toBeDefined();
+    expect(caught?.code).toBe('VALIDATION_ERROR');
+    expect(caught?.status).toBe(400);
+    expect(caught?.message).toContain('watchPatterns');
+    expect(caught?.message).toContain('#12428');
+    expect(caught?.message).toContain('nothing ever read it');
+  });
+
+  it('refuses watchPatterns even when hot reload is disabled', () => {
+    // The door must not depend on `enabled` — a false declaration is false
+    // whether or not the feature is switched on.
+    expect(() =>
+      mgr.registerPlugin('p', liveConfig({ enabled: false, watchPatterns: ['a/**'] }))
+    ).toThrow(/#12428/);
+  });
+
+  it('still registers a config that does not carry the retired key', () => {
+    // Anti-vacuity for the door: the refusals above must be about the key, not
+    // about registration having broken.
+    expect(() => mgr.registerPlugin('p', liveConfig())).not.toThrow();
+  });
+
+  it('stopWatching still cancels a pending debounced reload', () => {
+    // Behaviour preservation for the `watchHandles` removal. What left was the
+    // unreachable cleanup branch; the half that always did something — clearing
+    // the debounce timer armed by `scheduleReload` — is untouched.
+    vi.useFakeTimers();
+    try {
+      mgr.registerPlugin('p', liveConfig());
+      let ran = 0;
+      mgr.scheduleReload('p', async () => { ran++; });
+
+      mgr.stopWatching('p');
+      vi.advanceTimersByTime(5000);
+      expect(ran, 'the scheduled reload must have been cancelled').toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('shutdown still clears pending timers without the dead teardown loop', () => {
+    // The removed loop iterated `watchHandles.keys()` and therefore ran zero
+    // times; every timer it could have reached is cleared by the
+    // `reloadTimers` loop that follows it. This pins that equivalence.
+    vi.useFakeTimers();
+    try {
+      mgr.registerPlugin('p', liveConfig());
+      let ran = 0;
+      mgr.scheduleReload('p', async () => { ran++; });
+
+      mgr.shutdown();
+      vi.advanceTimersByTime(5000);
+      expect(ran, 'shutdown must leave no pending reload behind').toBe(0);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

@@ -228,7 +228,7 @@
     "kernel/HotReloadConfig:preserveState",
     "kernel/HotReloadConfig:shutdownTimeout",
     "kernel/HotReloadConfig:stateStrategy",
-    "kernel/HotReloadConfig:watchPatterns",
+    "kernel/HotReloadConfig:watchPatterns [RETIRED]",
     "kernel/InstallPackageRequest:enableOnInstall",
     "kernel/InstallPackageRequest:manifest",
     "kernel/InstallPackageRequest:platformVersion",

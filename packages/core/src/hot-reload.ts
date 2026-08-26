@@ -60,7 +60,7 @@ const RETIRED_STATE_STRATEGY_GUIDANCE =
  * threw". `VALIDATION_ERROR` is the standard catalog's generic
  * argument-validation code, following `metadata-service-contract.ts`.
  */
-function stateStrategyRefusal(message: string): Error & { code: string; status: number } {
+function hotReloadRefusal(message: string): Error & { code: string; status: number } {
   const err = new Error(message) as Error & { code: string; status: number };
   err.code = 'VALIDATION_ERROR';
   err.status = 400;
@@ -82,7 +82,7 @@ function assertHonouredStateStrategy(pluginName: string, strategy: unknown): voi
   }
   const shown = typeof strategy === 'string' ? `'${strategy}'` : String(strategy);
   const retired = strategy === 'disk' || strategy === 'distributed';
-  throw stateStrategyRefusal(
+  throw hotReloadRefusal(
     `[HotReload] Plugin '${pluginName}': unsupported stateStrategy ${shown}. `
     + `Honoured values are ${HONOURED_STATE_STRATEGIES.map((v) => `'${v}'`).join(' and ')}. `
     + (retired
@@ -92,29 +92,56 @@ function assertHonouredStateStrategy(pluginName: string, strategy: unknown): voi
 }
 
 /**
- * Refuse a `distributedConfig` left over from before #12340.
+ * Keys removed from `HotReloadConfig` that a host may still be passing.
  *
- * `HotReloadConfigSchema` is not `.strict()`, so zod would silently STRIP this
- * key on the parse paths that exist — a clean parse and a setting that never
- * takes effect, which is the exact failure the authorable-surface gate names.
- * The key was removed rather than tombstoned (route 3: nothing in the tree
- * parses this schema, so a parse-time prescription reaches nobody), and this
- * is the door that makes that route honest for the audience that DOES exist —
- * a host handing the object straight to the class.
+ * `HotReloadConfigSchema` is not `.strict()`, so zod would silently STRIP each
+ * of these on the parse paths that exist — a clean parse and a setting that
+ * never takes effect, which is the exact failure the authorable-surface gate
+ * names. Both keys were removed rather than tombstoned (route 3: nothing in
+ * the tree parses this schema, so a parse-time prescription reaches nobody),
+ * and this table is the door that makes that route honest for the audience
+ * that DOES exist — a host handing the object straight to the class.
+ *
+ * Each entry is the guidance clause; the `[HotReload] Plugin '<name>': `
+ * prefix is added at throw time. #12340's `distributedConfig` message is
+ * carried across byte-for-byte — its pins assert content, and this
+ * generalisation must not move them.
  */
-function assertNoRetiredDistributedConfig(pluginName: string, config: object): void {
-  if (!Object.prototype.hasOwnProperty.call(config, 'distributedConfig')) {
-    return;
-  }
-  throw stateStrategyRefusal(
-    `[HotReload] Plugin '${pluginName}': 'distributedConfig' was removed from `
+const RETIRED_HOT_RELOAD_KEYS: ReadonlyArray<readonly [string, string]> = [
+  [
+    'distributedConfig',
+    "'distributedConfig' was removed from "
     + 'HotReloadConfig in @objectstack/spec 18 (#12340, ADR-0049 '
     + 'enforce-or-remove) — nothing ever read it. A provider, endpoints, a key '
     + 'prefix, a TTL and a replication factor could all be declared and no '
     + "connection was ever opened. It left with the stateStrategy: 'distributed' "
     + 'value it was documented as being required for. Delete the key; there is no '
-    + 'in-tree replacement for distributed plugin state — persist it in the host.'
-  );
+    + 'in-tree replacement for distributed plugin state — persist it in the host.',
+  ],
+  [
+    'watchPatterns',
+    "'watchPatterns' was removed from HotReloadConfig in @objectstack/spec 18 "
+    + '(#12428, ADR-0049 enforce-or-remove) — nothing ever read it. Its only two '
+    + 'uses were log lines: no watcher was ever constructed from it, so an author '
+    + 'could declare a glob and no file change ever triggered a reload. File '
+    + 'watching is the HOST\'s job in this host-driven library. Delete the key, '
+    + 'declare your globs wherever your own watcher reads them, and call '
+    + '`HotReloadManager.scheduleReload(pluginName, reloadFn)` when one matches — '
+    + 'that is the debounced integration point this class does implement.',
+  ],
+];
+
+/**
+ * Refuse a key this library removed, at the moment the host hands the config
+ * over. First match wins; the order is the order they were retired.
+ */
+function assertNoRetiredKeys(pluginName: string, config: object): void {
+  for (const [key, guidance] of RETIRED_HOT_RELOAD_KEYS) {
+    if (!Object.prototype.hasOwnProperty.call(config, key)) {
+      continue;
+    }
+    throw hotReloadRefusal(`[HotReload] Plugin '${pluginName}': ${guidance}`);
+  }
 }
 
 /**
@@ -242,7 +269,6 @@ export class HotReloadManager {
   private logger: ObjectLogger;
   private stateManager: PluginStateManager;
   private reloadConfigs = new Map<string, HotReloadConfigParsed>();
-  private watchHandles = new Map<string, any>();
   private reloadTimers = new Map<string, NodeJS.Timeout>();
 
   constructor(logger: ObjectLogger) {
@@ -260,7 +286,7 @@ export class HotReloadManager {
     // would let the false declaration through on exactly the configs nobody
     // is watching.
     assertHonouredStateStrategy(pluginName, config.stateStrategy);
-    assertNoRetiredDistributedConfig(pluginName, config);
+    assertNoRetiredKeys(pluginName, config);
 
     if (!config.enabled) {
       this.logger.debug('Hot reload disabled for plugin', { plugin: pluginName });
@@ -270,40 +296,57 @@ export class HotReloadManager {
     this.reloadConfigs.set(pluginName, config);
     this.logger.info('Plugin registered for hot reload', { 
       plugin: pluginName,
-      watchPatterns: config.watchPatterns,
       stateStrategy: config.stateStrategy
     });
   }
 
   /**
-   * Start watching for changes (requires file system integration)
+   * Refuse the file-watching call this class never implemented (#12428).
+   *
+   * The body used to be a guard plus `logger.info('File watching started')`
+   * over an in-source note saying real watching "would require chokidar or
+   * similar". Nothing was ever watched, so an operator who set
+   * `enabled: true` and read that line at INFO had been told the opposite of
+   * the truth — positive confirmation of a capability that did not exist.
+   * ADR-0049 leaves three states and this surface qualified for none of the
+   * other two: no runtime composes this class, so ENFORCE would build for a
+   * caller that does not exist, and no roadmap entry anywhere claims the
+   * feature, so EXPERIMENTAL would be a promise nobody made.
+   *
+   * Kept as a throwing door rather than deleted: removing the method leaves a
+   * JavaScript host a bare `TypeError: not a function` with no prescription,
+   * and this is the one place a caller of the old placeholder is guaranteed
+   * to arrive. The refusal carries an ADR-0112 envelope so it can be asserted
+   * rather than merely caught.
    */
-  startWatching(pluginName: string): void {
-    const config = this.reloadConfigs.get(pluginName);
-    if (!config || !config.enabled) {
-      return;
-    }
-
-    // Note: Actual file watching would require chokidar or similar
-    // This is a placeholder for the integration point
-    this.logger.info('File watching started', { 
-      plugin: pluginName,
-      patterns: config.watchPatterns 
-    });
+  startWatching(pluginName: string): never {
+    throw hotReloadRefusal(
+      `[HotReload] Plugin '${pluginName}': startWatching() never watched `
+      + 'anything and was removed in @objectstack/core 18 (#12428, ADR-0049 '
+      + "enforce-or-remove). It logged 'File watching started' at info level "
+      + 'while no watcher was ever constructed, so no file change could ever '
+      + 'trigger a reload. File watching is the HOST\'s job in this '
+      + 'host-driven library: run your own watcher and call '
+      + '`HotReloadManager.scheduleReload(pluginName, reloadFn)` when a file '
+      + 'changes — that is the debounced integration point this class does '
+      + 'implement. `HotReloadConfig.watchPatterns` was removed in '
+      + '@objectstack/spec 18 for the same reason; declare your globs where '
+      + 'your watcher reads them.'
+    );
   }
 
   /**
-   * Stop watching for changes
+   * Cancel a pending debounced reload for a plugin.
+   *
+   * The name is historical (#12428). This never stopped a watcher, because
+   * nothing in this class ever started one: its `watchHandles` cleanup branch
+   * read a Map that had no writer anywhere in the tree, so the branch was
+   * structurally unreachable rather than merely untaken, and it left with
+   * `startWatching`'s placeholder. What survives is the half that always did
+   * something — the debounce timer armed by `scheduleReload` is cleared, so a
+   * reload that was scheduled but has not fired yet is cancelled.
    */
   stopWatching(pluginName: string): void {
-    const handle = this.watchHandles.get(pluginName);
-    if (handle) {
-      // Stop watching (would call chokidar close())
-      this.watchHandles.delete(pluginName);
-      this.logger.info('File watching stopped', { plugin: pluginName });
-    }
-
-    // Clear any pending reload timers
     const timer = this.reloadTimers.get(pluginName);
     if (timer) {
       clearTimeout(timer);
@@ -489,18 +532,12 @@ export class HotReloadManager {
    * Shutdown hot reload manager
    */
   shutdown(): void {
-    // Stop all watching
-    for (const pluginName of this.watchHandles.keys()) {
-      this.stopWatching(pluginName);
-    }
-
     // Clear all timers
     for (const timer of this.reloadTimers.values()) {
       clearTimeout(timer);
     }
 
     this.reloadConfigs.clear();
-    this.watchHandles.clear();
     this.reloadTimers.clear();
     this.stateManager.shutdown();
     

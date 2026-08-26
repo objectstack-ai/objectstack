@@ -121,7 +121,10 @@ describe('Plugin Lifecycle Advanced Schemas', () => {
     it('should validate custom hot reload configuration', () => {
       const config = {
         enabled: true,
-        watchPatterns: ['src/**/*.ts', 'config/**/*.json'],
+        // [#12428] `watchPatterns` REMOVED from this fixture — declared, not a
+        // quiet edit. It used to be listed here and asserted via toEqual below,
+        // an assertion that passed precisely BECAUSE the key parsed and did
+        // nothing. The key's departure is pinned as a STRIP in its own test.
         debounceDelay: 2000,
         preserveState: false,
         stateStrategy: 'memory' as const,
@@ -184,6 +187,31 @@ describe('Plugin Lifecycle Advanced Schemas', () => {
         distributedConfig: { provider: 'redis', endpoints: ['redis://localhost:6379'] },
       } as Record<string, unknown>);
       expect(result).not.toHaveProperty('distributedConfig');
+    });
+
+    it('refuses watchPatterns with the retirement prescription (#12428)', () => {
+      // Unlike the distributedConfig pin above, this one asserts a REFUSAL, not
+      // a strip: `watchPatterns` is `retiredKey()`-tombstoned. A bare deletion
+      // was tried first and `gen:schema` gate (a) refused it — this object is
+      // not `.strict()`, so deleting the key would be a silent strip (#3733,
+      // ADR-0104), which is the very defect being retired.
+      const result = HotReloadConfigSchema.safeParse({
+        enabled: true,
+        watchPatterns: ['src/**/*.ts'],
+      } as Record<string, unknown>);
+      expect(result.success, 'watchPatterns must no longer parse').toBe(false);
+
+      // The message IS the contract — it is the whole migration document for
+      // whoever hits it. Assert the load-bearing clauses, not the byte string.
+      const message = result.success ? '' : result.error.issues[0]?.message ?? '';
+      expect(message).toContain('was removed');
+      expect(message).toContain('#12428');
+      expect(message).toContain('ADR-0049');
+      expect(message).toContain('scheduleReload');
+
+      // Anti-vacuity: the surrounding keep still parses, so the refusal above
+      // is about this key and not about the schema having broken.
+      expect(HotReloadConfigSchema.safeParse({ enabled: true }).success).toBe(true);
     });
   });
 
