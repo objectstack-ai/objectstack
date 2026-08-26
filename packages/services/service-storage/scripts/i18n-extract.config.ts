@@ -15,9 +15,14 @@
  *     --source-hashes \
  *     --out=packages/services/service-storage/src/translations
  *
- * `--source-hashes` also emits `<locale>.source-hashes.generated.ts` — the
- * provenance companion from maintainer ruling #12069 Option A (#11671), rolled
- * out to this bundle set by #12559. Without it every generated leaf here is
+ * The `source-hashes` flag on the command above also emits
+ * `<locale>.source-hashes.generated.ts` — the provenance companion from
+ * maintainer ruling #12069 Option A (#11671), rolled out to this bundle set by
+ * #12559. It is named here WITHOUT its leading dashes on purpose:
+ * `flagsFromDocstring` (scripts/i18n-bundle-surface.mjs) harvests every
+ * recognised flag spelling out of this whole comment, so a second spelling in
+ * prose would keep the opt-in switched on after someone deleted it from the
+ * command — the command block is the one place that decides. Without it every generated leaf here is
  * LEGACY-TRUSTED: a leaf filled from the source and then left behind when the
  * source was revised is indistinguishable BY VALUE from a real translation, so
  * it publishes a superseded draft under a green `check:i18n` forever, and
