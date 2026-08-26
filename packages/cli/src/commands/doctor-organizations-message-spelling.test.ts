@@ -21,11 +21,20 @@
  *
  * That deletion condition has since been met. `doctor.ts` no longer declares
  * `ORGANIZATIONS_RUNTIME_PKG` or its own hint table: both moved to
- * `../utils/tenancy-posture-hints.ts`, which `os serve` reads too, so the
- * literal is now declared twice (the roster key and that module) instead of
- * three times. These pins moved with the declaration — ⛔ none of them was
- * dropped, because what they measure did not change: what `os doctor` RENDERS.
- * Leg (ii) especially, which is the load-bearing one (see below).
+ * `../utils/tenancy-posture-hints.ts`, which `os serve` reads too. These pins
+ * moved with the declaration — ⛔ none of them was dropped, because what they
+ * measure did not change: what `os doctor` RENDERS. Leg (ii) especially, which
+ * is the load-bearing one (see below).
+ *
+ * ⚠️ The literal is still declared three times, not two: the roster key, the
+ * shared module this file now reads, and `Serve.ORGANIZATIONS_RUNTIME_PKG`,
+ * which must stay a string LITERAL in `serve.ts` or the host-anchoring sweep in
+ * `serve-cluster-host-resolution.test.ts` can no longer resolve which package
+ * that command's `import()` names. What changed is that no copy can drift in
+ * silence any more: the serve↔shared pair is pinned equal by site 8 of
+ * `serve-organizations-message-spelling.test.ts`, and each copy is separately
+ * pinned as a roster key. Ending the duplication needs that sweep's resolver to
+ * follow one more hop — a file this card does not own.
  *
  * ── Three legs, and the second is the point ──────────────────────────────
  *

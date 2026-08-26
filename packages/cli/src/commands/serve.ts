@@ -53,11 +53,7 @@ import { BootLogCapture, isVerboseBootLevel } from '../utils/boot-log-capture.js
 import { graftAuthoredRuntimeMembers, isAppPluginLike } from '../utils/graft-runtime-hooks.js';
 import { redactConnectionUrl, describeDriverConnection } from '../utils/connection-display.js';
 // The posture prose `os serve` and `os doctor` BOTH print, declared once (#12492).
-// Aliased on the way in only so the static re-export below reads unambiguously.
-import {
-  ORGANIZATIONS_RUNTIME_PKG as SHARED_ORGANIZATIONS_RUNTIME_PKG,
-  TENANCY_POSTURE_FIX_HINTS,
-} from '../utils/tenancy-posture-hints.js';
+import { TENANCY_POSTURE_FIX_HINTS } from '../utils/tenancy-posture-hints.js';
 // Shared with @objectstack/verify and the dogfood multi-org probes (#4700) —
 // node-only, hence the `/node` subpath rather than the edge-safe root export.
 import {
@@ -501,7 +497,7 @@ export default class Serve extends Command {
 
   /**
    * The `plugins[]`-wired multi-org runtime this command loads when the
-   * resolved tenancy posture is walled (ADR-0105 D12).
+   * resolved tenancy posture is walled (ADR-0105 D12) — declared ONCE, here.
    *
    * `serve` is the only runtime that prints this package name AT OPERATORS (the
    * install remedy, the fatal refusal, the degraded-boot warning), and the
@@ -520,21 +516,36 @@ export default class Serve extends Command {
    * Exposed as a static for the same reason ALWAYS_ON_CAPABILITIES above is:
    * one declaration, two readers — the boot path and the pin.
    *
-   * ⚠️ Since #12492 this is a RE-EXPORT, not the declaration. The literal now
-   * lives in `../utils/tenancy-posture-hints.ts`, beside the posture prose that
-   * interpolates it, because `os doctor` prints that same name and needed a
-   * source it could read WITHOUT depending on a `serve` command's export. It is
-   * kept as a static for the same reason ALWAYS_ON_CAPABILITIES above is kept as
-   * one: `Serve.ORGANIZATIONS_RUNTIME_PKG` is the stable handle the boot path
-   * and two sibling pins (`serve-capability-vocabulary.test.ts`,
-   * `serve-cluster-host-resolution.test.ts`) already address, and a re-export
-   * keeps every one of those readings pointed at one declaration.
+   * ⛔ This MUST stay a string LITERAL in this file — do not turn it into a
+   * re-export of `../utils/tenancy-posture-hints.ts`, however tempting that is
+   * now that the posture hints live there (#12492).
+   *
+   * `serve-cluster-host-resolution.test.ts` sweeps this file for every dynamic
+   * `import()` and proves each app-declarable one is host-anchored. To do that
+   * it must know WHICH package a load site names, and the organizations load is
+   * spelled `const organizationsPkg = Serve.ORGANIZATIONS_RUNTIME_PKG;` — so the
+   * sweep resolves the identifier one hop, to this static, and then reads the
+   * literal. Written as `= SOME_IMPORTED_CONST`, the literal is no longer in
+   * this file, the specifier becomes unresolvable, and that load drops OUT of
+   * the swept population rather than failing inside it. That is the exact
+   * silent-vacuity failure #11614 already paid for once; the named half of that
+   * sweep's vacuity guard is what catches it, and it does (measured on this
+   * card, which tried the re-export and was refused by it).
+   *
+   * The consequence is that the spelling is declared twice inside this package
+   * — here, and in the shared hints module `os doctor` also reads. That
+   * duplication is CHECKED, not silent: `serve-organizations-message-spelling.test.ts`
+   * asserts the two are equal, and each is independently pinned as a key of the
+   * spec-owned roster (here via `test/serve-capability-vocabulary.test.ts`,
+   * there via `doctor-organizations-message-spelling.test.ts`). Single-sourcing
+   * it properly needs that sweep's resolver to follow one more hop, into a
+   * sibling module — an edit to a file this card does not own.
    *
    * This single-sources the SPELLING and nothing else. Which postures load the
    * runtime, and what each of the two failure stages means, stay exactly where
    * they are; the roster is deliberately not a resolution registry.
    */
-  static readonly ORGANIZATIONS_RUNTIME_PKG = SHARED_ORGANIZATIONS_RUNTIME_PKG;
+  static readonly ORGANIZATIONS_RUNTIME_PKG = '@objectstack/organizations';
 
   /**
    * Auto-registered plugin tiers. Plugins explicitly listed in

@@ -19,6 +19,10 @@
  * here together. Single-sourcing only `isolated` would have closed the half that
  * was already covered and left the other two exactly as silent as before.
  *
+ * What moved is the TABLE. The package name the `isolated` sentence interpolates
+ * is declared here too, but `serve.ts` still holds its own copy for a reason
+ * recorded at that const below — read it before "finishing the job".
+ *
  * ── Why this is CLI-INTERNAL and not `packages/spec` ─────────────────────
  *
  * `packages/spec` owns the posture VOCABULARY (`TENANCY_POSTURES`,
@@ -53,29 +57,50 @@
 
 /**
  * The `plugins[]`-wired multi-org runtime both commands NAME in their posture
- * advice, spelled once (#11614 → #12464 → #12492).
+ * advice, spelled once FOR THIS TABLE (#11614 → #12464 → #12492).
  *
- * ⚠️ This is now the SECOND declaration of the literal, down from three, and the
- * remaining duplicate is load-bearing: the other is the KEY of the spec-owned
- * `PLATFORM_PLUGIN_WIRED_RUNTIMES` roster, and the roster cannot supply the
- * name. It is keyed BY package name and its row type `PlatformPluginWiredRuntime`
- * carries no `package` field — deliberately, so the name "cannot be `null` and
- * cannot drift from a duplicate field" — and its own header records that it is
- * "not a resolution registry". Both organization rows are `edition: 'enterprise'`,
- * so nothing machine-readable selects this one. The roster VALIDATES a name you
- * already hold; it does not hand you one. That is why the pins over this value
- * read it as a roster KEY CHECK, the only first-class read the roster offers.
+ * ⚠️ This is not the only declaration of the literal inside `packages/cli`, and
+ * that is a measured constraint rather than an oversight. `serve.ts` keeps its
+ * own `Serve.ORGANIZATIONS_RUNTIME_PKG` literal because
+ * `serve-cluster-host-resolution.test.ts` sweeps `serve.ts` for every dynamic
+ * `import()` and resolves the organizations load site through that static to a
+ * LITERAL IN THAT FILE. Rewrite the static as a re-export of this const and the
+ * specifier stops resolving, so that load drops OUT of the host-anchoring sweep
+ * instead of failing inside it — the silent-vacuity mode #11614 already paid
+ * for. This card tried exactly that and the sweep's named vacuity guard refused
+ * it, by name, which is the guard working.
  *
- * `Serve.ORGANIZATIONS_RUNTIME_PKG` is no longer a third declaration — it reads
- * this one. It stays a static because `serve`'s boot path and two sibling pins
- * (`serve-capability-vocabulary.test.ts`, `serve-cluster-host-resolution.test.ts`)
- * address it there, and because a command's own resolution seam is a reasonable
- * thing for that command to expose. `doctor.ts` no longer declares it at all:
- * the const #12464 added carried its deletion condition in its own docblock,
- * naming this card, and that condition is met here. Doctor reads this module
- * rather than `serve.ts` — the coupling that const's docblock ⛔ ruled out was a
- * diagnostic command depending on a `serve` command's export, not on a neutral
- * utility both commands sit above.
+ * ⭐ So the spelling is declared twice in this package, and both copies are
+ * CHECKED rather than silent — a duplicate that can drift unnoticed and one
+ * that cannot are different things:
+ *
+ *   · `serve-organizations-message-spelling.test.ts` asserts the two are EQUAL.
+ *   · this one is a key of the spec-owned `PLATFORM_PLUGIN_WIRED_RUNTIMES`
+ *     (`doctor-organizations-message-spelling.test.ts`, leg (ii)).
+ *   · serve's is a key of the same roster (`test/serve-capability-vocabulary.test.ts`).
+ *
+ * Ending the duplication for real needs that sweep's `resolveIdentifier()` to
+ * follow one further hop — an import alias into a sibling module — which is an
+ * edit to a file #12492 does not own, and which was in flight elsewhere when
+ * this landed. It is a two-line change to a resolver whose own docblock records
+ * that resolving one hop further "strictly WIDENS what the sweep judges; it can
+ * never excuse a load".
+ *
+ * ⛔ Do NOT close the gap by importing `Serve.ORGANIZATIONS_RUNTIME_PKG` here
+ * instead: this module is read by `os doctor`, and a diagnostic command taking a
+ * dependency on a `serve` command's export in order to spell a package name is
+ * a worse coupling than the duplication it removes (#12464's ruling, unchanged).
+ *
+ * ── Why neither copy can read the name from the spec roster ──────────────
+ *
+ * Because the roster cannot supply it. `PLATFORM_PLUGIN_WIRED_RUNTIMES` is keyed
+ * BY package name and its row type `PlatformPluginWiredRuntime` carries no
+ * `package` field — deliberately, so the name "cannot be `null` and cannot drift
+ * from a duplicate field" — and its own header records that it is "not a
+ * resolution registry". Both organization rows are `edition: 'enterprise'`, so
+ * nothing machine-readable selects this one. The roster VALIDATES a name you
+ * already hold; it does not hand you one. That is why every pin over this value
+ * reads it as a roster KEY CHECK, the only first-class read the roster offers.
  */
 export const ORGANIZATIONS_RUNTIME_PKG = '@objectstack/organizations';
 

@@ -40,15 +40,23 @@
  * ── Widened by #12492, not rewritten ─────────────────────────────────────
  *
  * `serve.ts` and `doctor.ts` each carried a byte-identical `TENANCY_POSTURE_FIX_HINTS`
- * table. It now lives once, in `../utils/tenancy-posture-hints.ts`, and
- * `Serve.ORGANIZATIONS_RUNTIME_PKG` re-exports that module's declaration rather
- * than declaring the literal itself — so every pin above still reads ONE
- * declaration, through the handle `serve` exposes. ⛔ Nothing here was dropped.
+ * table. It now lives once, in `../utils/tenancy-posture-hints.ts`, which both
+ * commands read. ⛔ Nothing here was dropped; two pins were added.
  *
- * Site 7 is new and is the reading that makes the sharing REAL rather than
- * textual: it asserts that the bullets `serve` renders come from that shared
- * table, `single` and `group` included — the two entries that touch no roster
- * and that, before #12492, nothing at either command ever read.
+ * **Site 7** is the reading that makes the sharing REAL rather than textual: the
+ * bullets `serve` renders come from that shared table, `single` and `group`
+ * included — the two entries that touch no roster and that, before #12492,
+ * nothing at either command ever read.
+ *
+ * **Site 8** covers what the shared table could NOT absorb.
+ * `Serve.ORGANIZATIONS_RUNTIME_PKG` deliberately stays a string LITERAL in
+ * `serve.ts` (its docblock says why: `serve-cluster-host-resolution.test.ts`
+ * resolves the organizations `import()` through that static and needs the
+ * literal in that file, or the load drops out of the host-anchoring sweep
+ * silently). So the spelling is declared twice inside `packages/cli`, and site 8
+ * is what keeps that duplication CHECKED instead of silent — it asserts the two
+ * declarations are equal. Each is separately pinned as a roster key, here via
+ * `test/serve-capability-vocabulary.test.ts` and there via doctor's leg (ii).
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -57,7 +65,10 @@ import { TENANCY_POSTURES } from '@objectstack/spec/security';
 
 // The table `doctor` renders too (#12492). Read here so site 7 measures the
 // SHARING, not this command talking to itself.
-import { TENANCY_POSTURE_FIX_HINTS } from '../utils/tenancy-posture-hints.js';
+import {
+  ORGANIZATIONS_RUNTIME_PKG as SHARED_ORGANIZATIONS_RUNTIME_PKG,
+  TENANCY_POSTURE_FIX_HINTS,
+} from '../utils/tenancy-posture-hints.js';
 
 import Serve, {
   formatDegradedTenancyWarning,
@@ -70,11 +81,11 @@ import Serve, {
 /**
  * The one declaration, read through the handle `serve` exposes.
  *
- * Since #12492 this static is a RE-EXPORT of
- * `../utils/tenancy-posture-hints.ts`'s `ORGANIZATIONS_RUNTIME_PKG`, so this is
- * still one declaration and not a copy of one. Reading it as `Serve.…` is
- * deliberate: what these pins are about is what THIS COMMAND puts in front of an
- * operator, and the static is the seam the boot path and the roster pin address.
+ * Reading it as `Serve.…` is deliberate: what these pins are about is what THIS
+ * COMMAND puts in front of an operator, and the static is the seam the boot path
+ * and the roster pin already address. It is a literal in `serve.ts`, not a
+ * re-export of the shared hints module — site 8 below is what holds the two
+ * equal.
  */
 const PKG = Serve.ORGANIZATIONS_RUNTIME_PKG;
 
@@ -229,6 +240,24 @@ describe('serve — the posture description an operator reads names the declarat
     expect(TENANCY_POSTURES).toContain('single');
     expect(TENANCY_POSTURES).toContain('group');
     expect(TENANCY_POSTURES).toContain('isolated');
+  });
+
+  // #12492. The one thing the shared table could not absorb: the package name is
+  // declared twice inside `packages/cli` on purpose — see
+  // `Serve.ORGANIZATIONS_RUNTIME_PKG`'s docblock, and the shared module's. This
+  // is the assertion that makes that duplication a CHECKED one. Drift either
+  // copy and `os serve` and `os doctor` start naming different packages at
+  // operators; without this, nothing anywhere would say so.
+  it('site 8 — serve\'s literal and the shared hints module declare the SAME package', () => {
+    expect(
+      PKG,
+      'Serve.ORGANIZATIONS_RUNTIME_PKG and the shared tenancy-hints module disagree about the '
+        + 'multi-org runtime, so `os serve` and `os doctor` now name different packages at operators',
+    ).toBe(SHARED_ORGANIZATIONS_RUNTIME_PKG);
+
+    // …and the isolated hint an operator reads is built from the shared copy, so
+    // the equality above is load-bearing rather than a spare assertion.
+    expect(TENANCY_POSTURE_FIX_HINTS.isolated).toContain(SHARED_ORGANIZATIONS_RUNTIME_PKG);
   });
 });
 
