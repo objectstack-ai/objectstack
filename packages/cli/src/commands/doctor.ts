@@ -523,12 +523,6 @@ export function environmentSourcesCheck(
 // ─── Tenancy Posture ────────────────────────────────────────────────
 
 /**
- * One-line descriptions of the accepted postures, keyed by the vocabulary
- * `@objectstack/spec/security` owns. A posture declared there but not described
- * here is still listed by the fix list (bare, without prose) rather than
- * silently dropped — the advice can go terse, never stale.
- */
-/**
  * The `plugins[]`-wired multi-org runtime this command NAMES in its posture
  * advice, spelled once so the sentence below cannot drift in silence (#12464).
  *
@@ -576,6 +570,12 @@ export function environmentSourcesCheck(
  */
 export const ORGANIZATIONS_RUNTIME_PKG = '@objectstack/organizations';
 
+/**
+ * One-line descriptions of the accepted postures, keyed by the vocabulary
+ * `@objectstack/spec/security` owns. A posture declared there but not described
+ * here is still listed by the fix list (bare, without prose) rather than
+ * silently dropped — the advice can go terse, never stale.
+ */
 const TENANCY_POSTURE_FIX_HINTS: Readonly<Record<string, string>> = {
   single: 'one organization, no organization wall — the default',
   group: 'organization wall enforced by the open engine, one shared database',
