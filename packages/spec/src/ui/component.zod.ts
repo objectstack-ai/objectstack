@@ -1137,8 +1137,23 @@ export const RecordActivityProps = strictObject({
   history: PROPS_HISTORY,
   guidanceSets: COMPONENT_LEVEL_GUIDANCE,
 }, {
-  /** Activity types to display (unified enum including comment, field_change, etc.) */
-  types: z.array(FeedItemType).optional().describe('Feed item types to show (default: all)'),
+  /**
+   * Feed/activity kinds to show — an OPEN vocabulary (#11658, executing the
+   * 2026-08-24 maintainer ruling on #11507: `sys_activity.type` is
+   * author-extensible and "every closed map over this vocabulary is now the
+   * bug"). The `FeedItemType` union branch is guidance only — it keeps the
+   * built-in kinds visible in editor autocomplete and as an `anyOf` member of
+   * the generated JSON Schema — while the open-string branch keeps every
+   * author-contributed activity kind nameable (sanctioned authoring channel:
+   * `activityMilestones[].type`, ADR-0052 §5b.2; built-in set published as
+   * `SYS_ACTIVITY_BUILTIN_TYPES` in `../data/feed.zod.ts`). The union accepts
+   * exactly what a bare `z.string().min(1)` accepts — nothing is validated
+   * against the built-in set, so a typo'd built-in is no longer rejected by
+   * name; the ruling accepted that cost rather than re-close the vocabulary.
+   */
+  types: z.array(z.union([FeedItemType, z.string().min(1)])).optional().describe(
+    'Feed item kinds to show (default: all). Open vocabulary: the FeedItemType members are the platform built-in kinds, and author-contributed activity kinds (open sys_activity.type vocabulary, ADR-0052 §5b.2) are equally legal — entries are never validated against the built-in set.',
+  ),
   /** Default filter mode (Airtable-style dropdown) */
   filterMode: FeedFilterMode.default('all').describe('Default activity filter'),
   /** Allow user to switch filter modes */
