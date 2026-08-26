@@ -396,6 +396,36 @@ Sort field and direction pair
 | **data** | `{ provider: 'object'; object: string } \| { provider: 'api'; read?: object; write?: object } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }` | optional | Data source binding (ViewDataSchema — discriminated on `provider`: object \| api \| value \| schema). Static inline rows live at `{ provider: 'value', items: [...] }`; the bare-array shortcut is refused — see migration `object-grid-data-view-data-converged` |
 | **staticData** | `any[]` | optional | Deprecated bare-array static-rows shortcut the renderer still reads. Prefer `data: { provider: 'value', items: [...] }` |
 
+### Nested Shape: `ObjectGridProps.data[provider='object']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **provider** | `'object'` | ✅ |  |
+| **object** | `string` | ✅ | Target object name |
+
+### Nested Shape: `ObjectGridProps.data[provider='api']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **provider** | `'api'` | ✅ |  |
+| **read** | `{ url: string; method: Enum<'GET' \| 'POST' \| 'PUT' \| 'PATCH' \| 'DELETE'>; headers?: Record<string, string>; params?: Record<string, any>; … }` | optional | Configuration for fetching data |
+| **write** | `{ url: string; method: Enum<'GET' \| 'POST' \| 'PUT' \| 'PATCH' \| 'DELETE'>; headers?: Record<string, string>; params?: Record<string, any>; … }` | optional | Configuration for submitting data (for forms/editable tables) |
+
+### Nested Shape: `ObjectGridProps.data[provider='value']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **provider** | `'value'` | ✅ |  |
+| **items** | `any[]` | ✅ | Static data array |
+
+### Nested Shape: `ObjectGridProps.data[provider='schema']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **provider** | `'schema'` | ✅ |  |
+| **schemaId** | `string` | ✅ | Schema identifier — typically the metadata type name |
+| **schema** | `Record<string, any>` | optional | Inline JSON Schema (Draft 2020-12). Optional when schemaId is resolvable. |
+
 
 ---
 

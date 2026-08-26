@@ -106,6 +106,27 @@ const result = ActionSchema.parse(data);
 | **_packageVersion** | `string` | optional | Owning package version. |
 | **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
 
+### Nested Shape: `Action.body[language='expression']`
+
+L1 expression body — pure formula, no IO
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **language** | `'expression'` | ✅ |  |
+| **source** | `string` | ✅ | Formula expression source |
+
+### Nested Shape: `Action.body[language='js']`
+
+L2 sandboxed JS body — runs inside an isolated VM with declared capabilities
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **language** | `'js'` | ✅ |  |
+| **source** | `string` | ✅ | Function body source |
+| **capabilities** | `Enum<'api.read' \| 'api.write' \| 'api.transaction' \| 'crypto.uuid' \| 'log'>[]` | optional (default: `[]`) | Granted capability tokens |
+| **timeoutMs** | `integer` | optional | Per-invocation timeout (ms) |
+| **memoryMb** | `integer` | optional | Per-invocation memory cap (MB) |
+
 ### Nested Shape: `Action.params[number]`
 
 | Property | Type | Required | Description |

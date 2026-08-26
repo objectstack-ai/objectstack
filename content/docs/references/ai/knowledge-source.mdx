@@ -87,6 +87,24 @@ const result = FileKnowledgeSourceSchema.parse(data);
 | **refresh** | `{ onRecordChange?: boolean; cron?: string }` | optional (default: `{}`) |  |
 | **aiExposed** | `boolean` | optional (default: `true`) |  |
 
+### Nested Shape: `KnowledgeSource.source[kind='object']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **kind** | `'object'` | ✅ |  |
+| **object** | `string` | ✅ | Short object name to index |
+| **contentFields** | `string[]` | ✅ | Fields contributing to document content |
+| **metadataFields** | `string[]` | optional (default: `[]`) |  |
+| **where** | `Record<string, any>` | optional |  |
+
+### Nested Shape: `KnowledgeSource.source[kind='file']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **kind** | `'file'` | ✅ |  |
+| **prefix** | `string` | ✅ | Storage prefix |
+| **mimeTypes** | `string[]` | optional (default: `[]`) |  |
+
 ### Nested Shape: `KnowledgeSource.embedding`
 
 | Property | Type | Required | Description |
