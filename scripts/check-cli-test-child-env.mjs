@@ -2,8 +2,9 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * check-cli-test-child-env (#11341) -- a `packages/cli/test` file that SPAWNS a
- * child may not build that child's environment from `process.env` as a whole.
+ * check-cli-test-child-env (#11341, #11595) -- a `packages/cli/test` file that
+ * SPAWNS a child may not build that child's environment from `process.env` as a
+ * whole (#11341), and may not leave that environment UNDECLARED either (#11595).
  *
  *   node scripts/check-cli-test-child-env.mjs              # audit the population
  *   node scripts/check-cli-test-child-env.mjs --list       # print the census
@@ -70,10 +71,15 @@
  * distinction is the whole rule -- `childEnv({ HOME: process.env.HOME })` is
  * exactly right and stays green.
  *
- * The rule is deliberately NEGATIVE ("no bulk copy reaches a child") rather
- * than positive ("every spawn must call `childEnv()`"). A positive rule would
- * force every unit test that spawns `tsx` on a probe script through a helper it
- * has no need for, and would go stale the moment the choke point is renamed.
+ * Both rules here are deliberately NEGATIVE -- "no bulk copy reaches a child",
+ * "no spawn leaves its child's environment undeclared" -- rather than positive
+ * ("every spawn must call `childEnv()`"). The distinction is not cosmetic: a
+ * positive rule names the choke point, so it goes stale the moment the choke
+ * point is renamed, and it says nothing at all about a call that reaches for
+ * some OTHER helper. The negative pair reaches the same place from the other
+ * side. Rule 2 demands an `env` option; rule 1 refuses the one spelling of that
+ * option which copies the environment wholesale. What is left is an environment
+ * the reader can see, whatever it is built by.
  *
  * ## Why the site is not anchored to the spawn CALL
  *
@@ -95,22 +101,76 @@
  * beyond the two in {@link DELIBERATE}. A new one is a `DELIBERATE` entry
  * carrying its reason, reviewed as part of the PR that needs it.
  *
- * FALSE NEGATIVE, three of them, each measured rather than supposed:
+ * FALSE NEGATIVE, two of them, each measured rather than supposed. (A third --
+ * a spawn with NO `env` option at all -- was named here and is now CLOSED by
+ * rule 2 above; the eight call sites it covered were repaired in the change
+ * that closed it.)
  *
- *   1. **A spawn with NO `env` option at all** inherits `process.env` verbatim
- *      -- the same leak, in a purer form, and this gate is silent on it.
- *      8 such call sites exist in the population today. It is out of scope
- *      deliberately: whether a `tsx`-on-a-probe-script unit test owes the
- *      `childEnv()` convention at all is a question about the CONVENTION's
- *      reach, not about this defect, and widening a gate past its convention is
- *      how a gate gets carved out. Filed separately.
- *   2. **A bulk copy built in a non-spawner file** and handed to a spawner
+ *   1. **A bulk copy built in a non-spawner file** and handed to a spawner
  *      (`runServe(cwd, args, { env })` re-adds whatever it is given AFTER the
  *      strip). Contrived rather than accidental -- nobody writes it by reaching
  *      for the neighbouring file's shape -- but it is a hole and it is named.
- *   3. **A bulk copy laundered through something this scan cannot see as
+ *   2. **A bulk copy laundered through something this scan cannot see as
  *      `process.env`** -- read out of a module that re-exports it, or rebuilt
  *      key by key. Any text scan or AST scan has this edge.
+ *
+ * ## What counts as a finding, second rule: a spawn CALL with no `env` (#11595)
+ *
+ * A spawn that passes no `env` option hands the child `process.env` VERBATIM --
+ * `TEST=true`, `VITEST=true`, `VITEST_WORKER_ID`, the lot. That is the same
+ * leak as rule 1 in a purer form: `{ ...process.env, NO_COLOR: '1' }` at least
+ * lets the author SEE the inheritance they are asking for, while an omitted
+ * `env` inherits everything with nothing on the page to read.
+ *
+ * This rule was this gate's FIRST named false negative and shipped as one,
+ * because closing it is a decision about the CONVENTION's reach rather than
+ * about the defect: it asserts that every child spawned under
+ * `packages/cli/test/**` owes a declared environment, including a `tsx`-on-a-
+ * probe-script unit test whose child reads nothing from it. That decision was
+ * made, on the record, and it is ⛔ not a per-call judgement any more: the
+ * convention's product is not a stripped variable, it is that a child's
+ * environment is LEGIBLE AT THE CALL SITE, and that value does not depend on
+ * whether this particular child happens to read `VITEST`. Exempting "probes
+ * that read nothing from the environment" would put the gate's population back
+ * in the hands of whoever writes the next spawn, which is the shape both cards
+ * were filed about.
+ *
+ * So there is ⛔ NO registry for this rule and ⛔ no baseline: the eight sites
+ * that predated it were repaired in the SAME change that landed it, precisely
+ * so no baseline had to exist. The eight were latent rather than live -- every
+ * one spawns `tsx` on a probe or a non-`serve` command, so nothing in those
+ * children read `TEST` or `VITEST` -- and that is why they could be repaired
+ * outright instead of ratcheted.
+ *
+ * The site is anchored to the CALL here, which rule 1 deliberately is not (see
+ * above). The two anchors are answering different questions and neither
+ * substitutes for the other: rule 1 asks "does a bulk copy exist in a file that
+ * spawns", which survives the copy being built three functions away; rule 2
+ * asks "does THIS call declare an env", which is a property of the call and of
+ * nothing else. Rule 2's interprocedural blind spot is therefore not a silent
+ * zero -- an options object it cannot read is a FINDING, not a pass:
+ *
+ *   - `spawn(cmd, args)`                   -- no options object at all
+ *   - `spawn(cmd, args, { cwd })`          -- options, no `env` key
+ *   - `spawn(cmd, args, { env: undefined })` -- an `env` key that still means
+ *     "inherit everything": Node omits `undefined`-valued entries, so this is
+ *     the omission wearing the repair's clothes. Zero instances today, flagged
+ *     so the class is closed for the NEXT spelling rather than the last one.
+ *   - `spawn(cmd, args, opts)` / `{ ...opts }` -- an options object this scan
+ *     cannot read. Reported rather than skipped, and the repair is the same
+ *     one the convention already asks for: say what the child's environment is
+ *     WHERE THE CHILD IS SPAWNED.
+ *
+ * The options object is located as the last OBJECT LITERAL among the call's
+ * arguments rather than by position, because every API on the roster takes a
+ * string or path first, an argv array second and a callback last -- so the only
+ * object literal is the options -- while a positional table would need one
+ * entry per API and would rot the day the roster grows.
+ *
+ * `promisify(execFile)` wrappers are resolved one level, which is every
+ * spelling in the population (`const execFileP = promisify(execFile)`). A
+ * wrapper of a wrapper is not followed, and that limit is named here rather
+ * than discovered: it would read as a green call site.
  *
  * ## The two registries, and why they are different KINDS
  *
@@ -138,8 +198,11 @@
  * repairs are not in the PR that landed this gate is that two of the baselined
  * files were held by another card in flight at the time.
  *
- * The sibling gap this gate does NOT cover -- a spawn passing no `env` option
- * at all, which inherits the whole environment in a purer form -- is #11595.
+ * ⛔ Neither registry has anything to say about rule 2. The baseline holds
+ * per-file counts of BULK references and nothing else, and adding an env-less
+ * call to it would not silence rule 2 -- which is the point: the sibling gap
+ * this gate once named as out of scope (#11595) is closed above, with its eight
+ * sites repaired rather than baselined.
  *
  * ## Why every unreadable state is a REFUSAL, not a quiet pass
  *
@@ -373,6 +436,220 @@ export function bulkEnvReferences(fileName, source) {
   return found;
 }
 
+// ---------------------------------------------------------------------------
+// Rule 2 (#11595): the CALL-anchored scan -- every spawn declares its env
+// ---------------------------------------------------------------------------
+
+/** Every process-creating API on the roster, flattened. */
+const SPAWN_APIS = new Set(Object.values(SPAWN_MODULES).flat());
+
+/** Why a call was reported. Exported so the self-test names them, not strings. */
+export const ENVLESS = {
+  MISSING: 'no options object at all -- the child inherits process.env verbatim',
+  NO_ENV: 'an options object with no `env` key -- the child inherits process.env verbatim',
+  UNDEFINED: '`env: undefined`, which Node OMITS -- the child still inherits process.env verbatim',
+  OPAQUE: 'an options object this scan cannot read (not a literal, or an unresolvable spread)',
+};
+
+/** The same value wearing punctuation or a type assertion. */
+function unwrapValue(node) {
+  let cursor = node;
+  while (cursor && (ts.isParenthesizedExpression(cursor) || ts.isAsExpression(cursor) || ts.isNonNullExpression(cursor))) {
+    cursor = cursor.expression;
+  }
+  return cursor;
+}
+
+/** A property's static name, or `null` when it is computed from something dynamic. */
+function propertyKey(prop) {
+  if (ts.isShorthandPropertyAssignment(prop)) return prop.name.text;
+  const name = prop.name;
+  if (!name) return null;
+  if (ts.isIdentifier(name) || ts.isStringLiteralLike(name)) return name.text;
+  if (ts.isComputedPropertyName(name) && ts.isStringLiteralLike(name.expression)) return name.expression.text;
+  return null;
+}
+
+/** `promisify(execFile)` -- resolved ONE level, which is every spelling in the population. */
+function promisifiedApi(initializer, ctx) {
+  const call = unwrapValue(initializer);
+  if (!call || !ts.isCallExpression(call) || call.arguments.length !== 1) return null;
+  const callee = unwrapValue(call.expression);
+  const isPromisify = (ts.isIdentifier(callee) && ctx.promisifiers.has(callee.text))
+    || (ts.isPropertyAccessExpression(callee) && ts.isIdentifier(callee.expression)
+      && ctx.utilNamespaces.has(callee.expression.text) && callee.name.text === 'promisify');
+  if (!isPromisify) return null;
+  const arg = unwrapValue(call.arguments[0]);
+  if (ts.isIdentifier(arg)) return ctx.direct.get(arg.text) ?? null;
+  if (ts.isPropertyAccessExpression(arg) && ts.isIdentifier(arg.expression)
+    && ctx.namespaces.has(arg.expression.text) && SPAWN_APIS.has(arg.name.text)) {
+    return arg.name.text;
+  }
+  return null;
+}
+
+/**
+ * Every local name in one source that reaches a process-creating API.
+ *
+ * `direct` maps a callable identifier to the roster API behind it -- a named
+ * import, an aliased one (`execFile as ef`), or a `promisify()` wrapper of
+ * either. `namespaces` holds the bindings that stand for a whole spawn module,
+ * so `cp.spawn(...)` resolves too.
+ */
+export function spawnBindings(sourceFile) {
+  const direct = new Map();
+  const namespaces = new Set();
+  const promisifiers = new Set();
+  const utilNamespaces = new Set();
+
+  const visitImports = (node) => {
+    if (ts.isImportDeclaration(node) && ts.isStringLiteralLike(node.moduleSpecifier)) {
+      const clause = node.importClause;
+      if (!clause) return;
+      const mod = bareModuleName(node.moduleSpecifier.text);
+      const roster = SPAWN_MODULES[mod];
+      const named = clause.namedBindings;
+      if (roster) {
+        if (clause.name) namespaces.add(clause.name.text);
+        if (named && ts.isNamespaceImport(named)) namespaces.add(named.name.text);
+        if (named && ts.isNamedImports(named)) {
+          for (const el of named.elements) {
+            if (el.isTypeOnly) continue;
+            const original = (el.propertyName ?? el.name).text;
+            if (roster.includes(original)) direct.set(el.name.text, original);
+          }
+        }
+      }
+      if (mod === 'util') {
+        if (clause.name) utilNamespaces.add(clause.name.text);
+        if (named && ts.isNamespaceImport(named)) utilNamespaces.add(named.name.text);
+        if (named && ts.isNamedImports(named)) {
+          for (const el of named.elements) {
+            if (el.isTypeOnly) continue;
+            if ((el.propertyName ?? el.name).text === 'promisify') promisifiers.add(el.name.text);
+          }
+        }
+      }
+      return;
+    }
+    ts.forEachChild(node, visitImports);
+  };
+  visitImports(sourceFile);
+
+  const ctx = { direct, namespaces, promisifiers, utilNamespaces };
+  const visitWrappers = (node) => {
+    if (ts.isVariableDeclaration(node) && node.name && ts.isIdentifier(node.name) && node.initializer) {
+      const api = promisifiedApi(node.initializer, ctx);
+      if (api) direct.set(node.name.text, api);
+    }
+    ts.forEachChild(node, visitWrappers);
+  };
+  visitWrappers(sourceFile);
+
+  return { direct, namespaces };
+}
+
+/** Which roster API does this call or `new` reach, if any? */
+function spawnApiOf(node, bindings) {
+  const callee = unwrapValue(node.expression);
+  if (!callee) return null;
+  if (ts.isIdentifier(callee)) return bindings.direct.get(callee.text) ?? null;
+  if (ts.isPropertyAccessExpression(callee) && ts.isIdentifier(callee.expression)
+    && bindings.namespaces.has(callee.expression.text) && SPAWN_APIS.has(callee.name.text)) {
+    return callee.name.text;
+  }
+  if (ts.isElementAccessExpression(callee) && ts.isIdentifier(callee.expression)
+    && bindings.namespaces.has(callee.expression.text)
+    && callee.argumentExpression && ts.isStringLiteralLike(callee.argumentExpression)
+    && SPAWN_APIS.has(callee.argumentExpression.text)) {
+    return callee.argumentExpression.text;
+  }
+  return null;
+}
+
+/** An argument whose SHAPE rules it out as the options object. */
+function cannotBeOptions(arg) {
+  const node = unwrapValue(arg);
+  if (!node) return false;
+  return ts.isStringLiteralLike(node) || ts.isTemplateExpression(node) || ts.isArrayLiteralExpression(node)
+    || ts.isArrowFunction(node) || ts.isFunctionExpression(node);
+}
+
+/**
+ * Does this spawn call declare its child's environment? `null` when it does.
+ *
+ * The options object is the LAST object literal among the arguments -- see the
+ * header for why that beats a positional table.
+ */
+export function undeclaredEnvReason(node) {
+  const args = node.arguments ?? [];
+  const literals = args.filter((arg) => {
+    const value = unwrapValue(arg);
+    return value && ts.isObjectLiteralExpression(value);
+  });
+  if (literals.length === 0) {
+    const couldBeOptions = args.some((arg, index) => index > 0 && !cannotBeOptions(arg));
+    return couldBeOptions ? ENVLESS.OPAQUE : ENVLESS.MISSING;
+  }
+  const options = unwrapValue(literals[literals.length - 1]);
+  let spread = false;
+  for (const prop of options.properties) {
+    if (ts.isSpreadAssignment(prop)) {
+      spread = true;
+      continue;
+    }
+    if (propertyKey(prop) !== 'env') continue;
+    if (!ts.isPropertyAssignment(prop)) return null;
+    const value = unwrapValue(prop.initializer);
+    if (value && ((ts.isIdentifier(value) && value.text === 'undefined') || ts.isVoidExpression(value))) {
+      return ENVLESS.UNDEFINED;
+    }
+    return null;
+  }
+  return spread ? ENVLESS.OPAQUE : ENVLESS.NO_ENV;
+}
+
+/**
+ * The spawn CALLS in one source, and which of them leave the child's
+ * environment undeclared.
+ *
+ * `calls` is returned alongside `undeclared` because an empty `undeclared` on
+ * its own is indistinguishable from a scan that resolved no calls at all --
+ * the same vacuity this gate refuses everywhere else. It is not a REFUSAL here
+ * (a file that imports `execFile` and never calls it is an ordinary, legal
+ * state) but it IS reported, counted across the tree, and pinned against the
+ * live population by the self-test.
+ *
+ * @returns {{calls: number, undeclared: Array<{line: number, fn: string, api: string, reason: string, text: string}>}}
+ */
+export function envlessSpawnCalls(fileName, source) {
+  const sourceFile = parseSourceFile(fileName, source, scriptKindFor(fileName));
+  const bindings = spawnBindings(sourceFile);
+  const found = [];
+  let calls = 0;
+  const visit = (node) => {
+    if (ts.isCallExpression(node) || ts.isNewExpression(node)) {
+      const api = spawnApiOf(node, bindings);
+      if (api) {
+        calls += 1;
+        const reason = undeclaredEnvReason(node);
+        if (reason) {
+          found.push({
+            line: sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile)).line + 1,
+            fn: enclosingFunctionName(node, sourceFile),
+            api,
+            reason,
+            text: node.getText(sourceFile).replace(/\s+/g, ' ').slice(0, 72),
+          });
+        }
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
+  return { calls, undeclared: found };
+}
+
 /** The site key a registry entry is written against. */
 export const siteKey = (row) => `${row.file}::${row.fn}`;
 
@@ -391,17 +668,19 @@ export function audit(root) {
     exists = false;
   }
   if (!exists) {
-    return { files: 0, spawners: 0, findings: [], deliberate: [], refusal: `the population root ${POPULATION} does not resolve to a directory under ${root}` };
+    return { files: 0, spawners: 0, spawnCalls: 0, findings: [], deliberate: [], envless: [], refusal: `the population root ${POPULATION} does not resolve to a directory under ${root}` };
   }
 
   const files = walkSources(populationDir);
   if (files.length === 0) {
-    return { files: 0, spawners: 0, findings: [], deliberate: [], refusal: `${POPULATION} resolved to a directory containing no TypeScript source` };
+    return { files: 0, spawners: 0, spawnCalls: 0, findings: [], deliberate: [], envless: [], refusal: `${POPULATION} resolved to a directory containing no TypeScript source` };
   }
 
   const findings = [];
   const deliberate = [];
+  const envless = [];
   let spawners = 0;
+  let spawnCalls = 0;
   for (const abs of files) {
     const rel = relative(root, abs).split(sep).join('/');
     let source;
@@ -411,8 +690,10 @@ export function audit(root) {
       return {
         files: files.length,
         spawners,
+        spawnCalls,
         findings: [],
         deliberate: [],
+        envless: [],
         refusal: `${rel} could not be read (${error.code ?? error.message}) -- a source this gate cannot read is not a source with nothing to report`,
       };
     }
@@ -426,19 +707,24 @@ export function audit(root) {
       const row = { file: rel, ...hit };
       (Object.hasOwn(DELIBERATE, siteKey(row)) ? deliberate : findings).push(row);
     }
+    const calls = envlessSpawnCalls(abs, source);
+    spawnCalls += calls.calls;
+    for (const hit of calls.undeclared) envless.push({ file: rel, ...hit });
   }
 
   if (spawners === 0) {
     return {
       files: files.length,
       spawners: 0,
+      spawnCalls: 0,
       findings: [],
       deliberate: [],
+      envless: [],
       refusal: `${files.length} source(s) under ${POPULATION} and not one of them spawns a child -- the population is unresolvable, which is not the same as clean`,
     };
   }
 
-  return { files: files.length, spawners, findings, deliberate, refusal: null };
+  return { files: files.length, spawners, spawnCalls, findings, deliberate, envless, refusal: null };
 }
 
 /** Per-file counts, the shape the ratchet holds. */
@@ -484,13 +770,46 @@ function readBaseline(root = REPO_ROOT) {
 // ---------------------------------------------------------------------------
 
 function main() {
-  const { files, spawners, findings, deliberate, refusal } = audit(REPO_ROOT);
+  const { files, spawners, spawnCalls, findings, deliberate, envless, refusal } = audit(REPO_ROOT);
   if (refusal) {
     console.error(`❌  check:cli-test-child-env -- REFUSING to report a verdict: ${refusal}.`);
     console.error(
       '\n    A gate that computes its own population can pass while reading nothing,'
       + '\n    and an empty finding list is indistinguishable from a clean one. This'
       + '\n    exits non-zero instead. Restore the population or fix the tool.',
+    );
+    return 1;
+  }
+
+  if (envless.length) {
+    console.error(`❌  check:cli-test-child-env -- ${envless.length} spawn call(s) leave the child's environment UNDECLARED:\n`);
+    for (const row of envless) {
+      console.error(`  ${row.file}:${row.line}  [${row.fn}]  ${row.api}  ${row.text}`);
+      console.error(`    ${row.reason}`);
+    }
+    console.error(
+      '\n    A spawn with no `env` option hands the child THIS process\'s environment'
+      + '\n    verbatim -- under vitest that is the worker\'s: TEST=true, VITEST=true and'
+      + '\n    the VITEST_* family. It is the same leak a bare { ...process.env } spread'
+      + '\n    is, in a purer form: the spread at least lets the author SEE the'
+      + '\n    inheritance they are asking for, while an omitted `env` inherits'
+      + '\n    everything with nothing on the page to read.'
+      + '\n'
+      + '\n    The repair is the same choke point:'
+      + '\n'
+      + '\n      import { childEnv } from \'./helpers/serve-process.js\';'
+      + '\n      execFileSync(TSX, [probe], { cwd, env: childEnv() });'
+      + '\n'
+      + '\n    ⛔ There is NO baseline and NO carve-out for this rule, and "this child'
+      + '\n    reads nothing from the environment" is not one. Every spawned child under'
+      + `\n    ${POPULATION} owes a DECLARED environment: the convention\'s product is that`
+      + '\n    a child\'s environment is legible AT THE CALL SITE, which does not depend on'
+      + '\n    what this particular child happens to read. Exempting the quiet ones puts'
+      + '\n    the population back in the hands of whoever writes the next spawn.'
+      + '\n'
+      + '\n    This rule asks only that `env` be DECLARED -- it does not name childEnv(),'
+      + '\n    so a child that genuinely needs something else can say so. What it may not'
+      + '\n    be declared as is the whole of process.env: that is the rule above.',
     );
     return 1;
   }
@@ -568,7 +887,7 @@ function main() {
   const remaining = Object.values(baseline).reduce((a, b) => a + b, 0);
   console.log(
     `✓ check:cli-test-child-env: ${spawners} spawner source(s) among ${files} under ${POPULATION}; `
-    + `no new bulk process.env copy reaches a spawned child `
+    + `no new bulk process.env copy reaches a spawned child, and all ${spawnCalls} spawn call(s) declare their child's env `
     + `(${remaining} baselined in ${Object.keys(baseline).length} file(s), ⛔ SHRINK-ONLY; ${held} deliberate site(s) still pinned).`,
   );
   return 0;
@@ -576,10 +895,13 @@ function main() {
 
 /** `--list`: the whole census, for burning the ratchet down. */
 function list() {
-  const { files, spawners, findings, deliberate, refusal } = audit(REPO_ROOT);
+  const { files, spawners, spawnCalls, findings, deliberate, envless, refusal } = audit(REPO_ROOT);
   if (refusal) {
     console.error(`REFUSED: ${refusal}`);
     return 1;
+  }
+  for (const row of envless.sort((a, b) => siteKey(a).localeCompare(siteKey(b)))) {
+    console.log(`undeclared  ${row.file}:${row.line}  [${row.fn}]  ${row.api}  ${row.text}`);
   }
   for (const row of deliberate.sort((a, b) => siteKey(a).localeCompare(siteKey(b)))) {
     console.log(`deliberate  ${row.file}:${row.line}  [${row.fn}]`);
@@ -587,7 +909,10 @@ function list() {
   for (const row of findings.sort((a, b) => siteKey(a).localeCompare(siteKey(b)))) {
     console.log(`baselined   ${row.file}:${row.line}  [${row.fn}]  ${row.text}`);
   }
-  console.log(`\n${spawners} spawner source(s) in ${files}; ${findings.length} bulk copy/copies, ${deliberate.length} deliberate.`);
+  console.log(
+    `\n${spawners} spawner source(s) in ${files}; ${spawnCalls} spawn call(s), ${envless.length} undeclared; `
+    + `${findings.length} bulk copy/copies, ${deliberate.length} deliberate.`,
+  );
   console.log(JSON.stringify(countByFile(findings), null, 2));
   return 0;
 }
@@ -600,17 +925,18 @@ function list() {
  * the behaviour being asserted and cannot be observed from inside it.
  */
 function auditRoot(root) {
-  const { files, spawners, findings, deliberate, refusal } = audit(root);
+  const { files, spawners, spawnCalls, findings, deliberate, envless, refusal } = audit(root);
   if (refusal) {
     console.error(`REFUSED: ${refusal}`);
     return 1;
   }
-  if (findings.length) {
+  if (findings.length || envless.length) {
     for (const f of findings) console.error(`  ${f.file}:${f.line}  [${f.fn}]  ${f.text}`);
-    console.error(`FOUND files=${files} spawners=${spawners} findings=${findings.length}`);
+    for (const f of envless) console.error(`  ${f.file}:${f.line}  [${f.fn}]  ${f.api}  ${f.reason}`);
+    console.error(`FOUND files=${files} spawners=${spawners} calls=${spawnCalls} findings=${findings.length} envless=${envless.length}`);
     return 1;
   }
-  console.log(`OK files=${files} spawners=${spawners} findings=0 deliberate=${deliberate.length}`);
+  console.log(`OK files=${files} spawners=${spawners} calls=${spawnCalls} findings=0 envless=0 deliberate=${deliberate.length}`);
   return 0;
 }
 
@@ -672,10 +998,17 @@ export function selfTest() {
    * one-file non-spawner tree would answer `undefined` instead of `0` and the
    * case would pass for the wrong reason. The companion makes the population
    * resolvable, which is what lets "the subject contributed nothing" be read as
-   * a measurement. (It also spawns with NO `env` option at all -- the leak this
-   * gate deliberately does not cover, and it stays green here too.)
+   * a measurement.
+   *
+   * ⚠️ It declares its child's `env`. The first revision of this companion
+   * spawned with NO `env` option, carrying a comment that this was "the leak
+   * this gate deliberately does not cover" -- true when it was written, and
+   * false the moment rule 2 (#11595) landed. A companion that itself violates
+   * the rule under test contributes a finding to every fixture it is added to,
+   * which would make each of those cases fail for a reason that has nothing to
+   * do with its subject.
    */
-  const COMPANION = { 'companion.e2e.test.ts': spawner('  execFile(\'x\', [], { cwd });') };
+  const COMPANION = { 'companion.e2e.test.ts': spawner('  execFile(\'x\', [], { cwd, env: childEnv() });') };
 
   try {
     // -- (1) the positive control: a bare spread in a spawner REDS ----------
@@ -771,7 +1104,102 @@ export function selfTest() {
       carvedNeighbour.findings?.length === 1 && carvedNeighbour.findings[0].fn === 'somethingElse',
       JSON.stringify(carvedNeighbour.findings));
 
-    // -- (9) the ratchet, in every direction it must move ------------------
+    // -- (9) RULE 2 (#11595): a spawn CALL that leaves its env undeclared ---
+    //    The reds here are the whole point of the rule, so they are pinned by
+    //    REASON as well as by count: "reds for some reason" would still pass if
+    //    the classifier collapsed every shape into one.
+    const undeclared = (name, sources) => audit(tree(name, sources)).envless ?? [];
+    const reasons = (name, sources) => undeclared(name, sources).map((row) => row.reason);
+
+    t('a spawn with an options object but NO env key REDS',
+      JSON.stringify(reasons('envless-no-env', { 'a.e2e.test.ts': spawner('  execFile(\'x\', [], { cwd });') }))
+        === JSON.stringify([ENVLESS.NO_ENV]));
+    t('a spawn with NO options object at all REDS',
+      JSON.stringify(reasons('envless-no-options', { 'a.e2e.test.ts': spawner('  execFile(\'x\', []);') }))
+        === JSON.stringify([ENVLESS.MISSING]));
+    t('...and the childEnv() form stays GREEN under rule 2',
+      undeclared('envless-declared', { 'a.e2e.test.ts': spawner('  execFile(\'x\', [], { cwd, env: childEnv() });') }).length === 0);
+    t('a callback after the options object does not hide it',
+      undeclared('envless-callback', {
+        'a.e2e.test.ts': spawner('  execFile(\'x\', [], { cwd, env: childEnv() }, (e) => { void e; });'),
+      }).length === 0);
+
+    // `env: undefined` is the omission wearing the repair's clothes -- Node
+    // omits undefined-valued entries, so the child inherits everything anyway.
+    t('`env: undefined` REDS -- Node omits it and the child inherits anyway',
+      JSON.stringify(reasons('envless-undefined', { 'a.e2e.test.ts': spawner('  execFile(\'x\', [], { cwd, env: undefined });') }))
+        === JSON.stringify([ENVLESS.UNDEFINED]));
+    t('`env: void 0` is the same value with different punctuation',
+      JSON.stringify(reasons('envless-void', { 'a.e2e.test.ts': spawner('  execFile(\'x\', [], { cwd, env: void 0 });') }))
+        === JSON.stringify([ENVLESS.UNDEFINED]));
+
+    // An options object this scan cannot read is a FINDING, never a quiet pass
+    // -- rule 2's blind spot is the one place a call-anchored rule could go
+    // silent, which is the defect this rule exists to close.
+    t('an options object passed as an identifier REDS as unreadable, not green',
+      JSON.stringify(reasons('envless-opaque-ident', { 'a.e2e.test.ts': spawner('  execFile(\'x\', [], opts);') }))
+        === JSON.stringify([ENVLESS.OPAQUE]));
+    t('an options literal whose env might come from a SPREAD REDS as unreadable',
+      JSON.stringify(reasons('envless-opaque-spread', { 'a.e2e.test.ts': spawner('  execFile(\'x\', [], { ...opts, cwd });') }))
+        === JSON.stringify([ENVLESS.OPAQUE]));
+    t('...but a spread ALONGSIDE an explicit env is declared, so it stays GREEN',
+      undeclared('envless-spread-with-env', {
+        'a.e2e.test.ts': spawner('  execFile(\'x\', [], { ...opts, env: childEnv() });'),
+      }).length === 0);
+
+    t('a shorthand `{ env }` is a declaration',
+      undeclared('envless-shorthand', { 'a.e2e.test.ts': spawner('  execFile(\'x\', [], { cwd, env });') }).length === 0);
+    t("a computed `{ ['env']: e }` is a declaration too",
+      undeclared('envless-computed', { 'a.e2e.test.ts': spawner('  execFile(\'x\', [], { cwd, [\'env\']: e });') }).length === 0);
+
+    // The two rules are INDEPENDENT, in both directions. Neither substitutes
+    // for the other, and a fix for one must not read as a fix for the other.
+    const bothRules = scan('envless-vs-bulk', {
+      'a.e2e.test.ts': spawner('  execFile(\'x\', [], { cwd, env: { ...process.env } });'),
+    });
+    t('a bulk spread DECLARES an env, so rule 2 is green on it while rule 1 reds',
+      bothRules.findings?.length === 1 && audit(tree('envless-vs-bulk-2', {
+        'a.e2e.test.ts': spawner('  execFile(\'x\', [], { cwd, env: { ...process.env } });'),
+      })).envless.length === 0);
+    t('...and an env-less spawn holds no bulk reference, so rule 1 is green while rule 2 reds',
+      count('bulk-vs-envless', { 'a.e2e.test.ts': spawner('  execFile(\'x\', [], { cwd });') }) === 0);
+
+    // Every spelling that reaches a spawn API has to reach rule 2 as well.
+    t('an ALIASED import is resolved (execFile as ef)',
+      undeclared('envless-alias', {
+        'a.e2e.test.ts': 'import { execFile as ef } from \'node:child_process\';\nexport function runCli(cwd: string) {\n  ef(\'x\', [], { cwd });\n}\n',
+      }).length === 1);
+    t('a NAMESPACE call is resolved (cp.execFile)',
+      undeclared('envless-namespace', {
+        'a.e2e.test.ts': 'import * as cp from \'node:child_process\';\nexport function runCli(cwd: string) {\n  cp.execFile(\'x\', [], { cwd });\n}\n',
+      }).length === 1);
+    t('a promisify() WRAPPER is resolved one level (const execFileP = promisify(execFile))',
+      undeclared('envless-promisify', {
+        'a.e2e.test.ts': 'import { execFile } from \'node:child_process\';\nimport { promisify } from \'node:util\';\n'
+          + 'const execFileP = promisify(execFile);\nexport async function runCli(cwd: string) {\n  await execFileP(\'x\', [], { cwd });\n}\n',
+      }).length === 1);
+    t('...and the same wrapper with a declared env stays GREEN',
+      undeclared('envless-promisify-ok', {
+        'a.e2e.test.ts': 'import { execFile } from \'node:child_process\';\nimport { promisify } from \'node:util\';\n'
+          + 'const execFileP = promisify(execFile);\nexport async function runCli(cwd: string) {\n  await execFileP(\'x\', [], { cwd, env: childEnv() });\n}\n',
+      }).length === 0);
+    t('a worker takes the same inherited env, so `new Worker(file)` REDS',
+      undeclared('envless-worker', {
+        'a.e2e.test.ts': 'import { Worker } from \'node:worker_threads\';\nexport function runCli(file: string) {\n  new Worker(file);\n}\n',
+      }).length === 1);
+    t('...and `new Worker(file, { env: childEnv() })` stays GREEN',
+      undeclared('envless-worker-ok', {
+        'a.e2e.test.ts': 'import { Worker } from \'node:worker_threads\';\nexport function runCli(file: string) {\n  new Worker(file, { env: childEnv() });\n}\n',
+      }).length === 0);
+
+    // A spawn API that is imported but never CALLED is not a call site, and an
+    // AST is what keeps prose out of the population.
+    t('importing a spawn API without calling it is not a call site',
+      undeclared('envless-uncalled', { ...COMPANION, 'a.e2e.test.ts': spawner('  void cwd;') }).length === 0);
+    t('a commented-out env-less spawn is not a call site',
+      undeclared('envless-prose', { ...COMPANION, 'a.e2e.test.ts': spawner('  // execFile(\'x\', []);\n  void cwd;') }).length === 0);
+
+    // -- (10) the ratchet, in every direction it must move -----------------
     const one = [{ file: 'packages/cli/test/a.ts', fn: 'runCli', line: 1, text: 'x' }];
     const two = [...one, { file: 'packages/cli/test/a.ts', fn: 'runOther', line: 2, text: 'x' }];
     const allDeliberate = Object.keys(DELIBERATE).map((key) => {
@@ -793,7 +1221,7 @@ export function selfTest() {
       judge([], [], {}).missing.length === Object.keys(DELIBERATE).length
         && judge([], allDeliberate, {}).missing.length === 0);
 
-    // -- (10) every refusal, each PAIRED with a tree that still answers -----
+    // -- (11) every refusal, each PAIRED with a tree that still answers ----
     const emptyRoot = tree('refuse-empty', { 'README.md': 'not a source\n' });
     t('a population with no TypeScript source REFUSES, while a readable tree still answers',
       audit(emptyRoot).refusal !== null && audit(tree('refuse-empty-pair', READABLE)).refusal === null,
@@ -818,7 +1246,7 @@ export function selfTest() {
         && audit(tree('refuse-unreadable-pair', READABLE)).refusal === null,
       JSON.stringify(unreadable.refusal));
 
-    // -- (11) THE anti-vacuity leg: the real entry point, out of process ----
+    // -- (12) THE anti-vacuity leg: the real entry point, out of process ---
     //    "exits non-zero on a violation" is the claim, and a process cannot
     //    observe its own exit status. These two run the real CLI.
     const redRoot = tree('oop-red', {
@@ -829,15 +1257,24 @@ export function selfTest() {
       red.status === 1 && /a\.e2e\.test\.ts:\d+/.test(`${red.stderr}${red.stdout}`),
       JSON.stringify({ status: red.status, err: (red.stderr || '').slice(0, 200) }));
 
+    const envlessRoot = tree('oop-envless', {
+      'a.e2e.test.ts': spawner('  execFile(\'x\', [], { cwd });'),
+    });
+    const envlessRun = spawnSync(process.execPath, [SELF, '--audit-root', envlessRoot], { encoding: 'utf8' });
+    t('OUT OF PROCESS: a spawn with NO env option exits NON-ZERO and names the site',
+      envlessRun.status === 1 && /a\.e2e\.test\.ts:\d+/.test(`${envlessRun.stderr}${envlessRun.stdout}`)
+        && /envless=1/.test(`${envlessRun.stderr}${envlessRun.stdout}`),
+      JSON.stringify({ status: envlessRun.status, err: (envlessRun.stderr || '').slice(0, 200) }));
+
     const greenRoot = tree('oop-green', {
       'a.e2e.test.ts': spawner('  execFile(\'x\', [], { cwd, env: childEnv({ NO_COLOR: \'1\' }) });'),
     });
     const green = spawnSync(process.execPath, [SELF, '--audit-root', greenRoot], { encoding: 'utf8' });
     t('OUT OF PROCESS: ...while the childEnv() form through the same entry point exits ZERO',
-      green.status === 0 && /findings=0/.test(green.stdout),
+      green.status === 0 && /findings=0/.test(green.stdout) && /envless=0/.test(green.stdout),
       JSON.stringify({ status: green.status, out: (green.stdout || '').trim() }));
 
-    // -- (12) the unparseable leg: ts-parse ends the PROCESS ----------------
+    // -- (13) the unparseable leg: ts-parse ends the PROCESS ---------------
     const wreckRoot = tree('oop-wreck', {
       ...READABLE,
       'wreck.ts': 'import { spawn } from \'node:child_process\';\n<<<<<<< HEAD\nvoid spawn;\n=======\nvoid 0;\n>>>>>>> other\n',
@@ -848,7 +1285,7 @@ export function selfTest() {
         && /wreck\.ts/.test(`${wreck.stderr}${wreck.stdout}`),
       JSON.stringify({ status: wreck.status, err: (wreck.stderr || '').slice(0, 200) }));
 
-    // -- (13) wiring. Unwiring the gate must redden HERE, not go quiet. -----
+    // -- (14) wiring. Unwiring the gate must redden HERE, not go quiet. ----
     const pkg = JSON.parse(readFileSync(join(REPO_ROOT, 'package.json'), 'utf8'));
     const alias = pkg.scripts?.['check:cli-test-child-env'] ?? '';
     t('a package.json alias invokes this script', /check-cli-test-child-env\.mjs/.test(alias), alias);
@@ -856,11 +1293,21 @@ export function selfTest() {
     const lintYml = readFileSync(join(REPO_ROOT, '.github/workflows/lint.yml'), 'utf8');
     t('a lint job runs the alias', lintYml.includes('pnpm check:cli-test-child-env'));
 
-    // -- (14) the live tree, as a case rather than as the run's only evidence
+    // -- (15) the live tree, as a case rather than as the run's only evidence
     const live = audit(REPO_ROOT);
     t('the live tree resolves a real population (not zero, not a refusal)',
       live.refusal === null && live.files > 0 && live.spawners > 0,
       JSON.stringify({ refusal: live.refusal, files: live.files, spawners: live.spawners }));
+
+    // Rule 2's anti-vacuity pin. An empty `envless` proves nothing on its own:
+    // it reads identically whether every call declares an env or the call
+    // resolution stopped resolving calls. The call COUNT is what separates
+    // those two, so it is asserted here rather than merely printed.
+    t('the live tree resolves real spawn CALLS, so rule 2 is measuring something',
+      live.refusal === null && live.spawnCalls > 0, JSON.stringify({ spawnCalls: live.spawnCalls }));
+    t('...and every one of them declares its child\'s env',
+      live.refusal === null && live.envless.length === 0,
+      JSON.stringify(live.envless?.map((row) => `${row.file}:${row.line} ${row.reason}`)));
 
     const liveJudgement = live.refusal ? null : judge(live.findings, live.deliberate, readBaseline());
     t('the checked-in ratchet is neither short nor stale against the live tree',
@@ -912,9 +1359,10 @@ export function selfTest() {
   console.log(
     `✓ check-cli-test-child-env self-test: ${cases.length} cases pass `
     + '(a bare spread in a spawner reds OUT OF PROCESS and the childEnv() form exits zero through the same entry point; '
+    + 'an env-less spawn reds out of process too, by reason, through every spelling that reaches a spawn API; '
     + 'a legitimate non-spawner bulk copy stays green and the same body reds once the file spawns; '
-    + 'every member read stays green; the carve-out is site-scoped; the ratchet fails in both directions; '
-    + 'and all four refusals are paired with a tree that still returns a verdict).',
+    + 'every member read stays green; the two rules red independently of each other; the carve-out is site-scoped; '
+    + 'the ratchet fails in both directions; and all four refusals are paired with a tree that still returns a verdict).',
   );
   return 0;
 }
