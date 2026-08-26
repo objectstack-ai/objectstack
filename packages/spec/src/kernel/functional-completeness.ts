@@ -121,6 +121,9 @@ export function checkFieldCompleteness(def: unknown): CompletenessFinding[] {
   const out: CompletenessFinding[] = [];
 
   if (type === 'summary' && !isRec(def.summaryOperations)) {
+    // Internal anchor: the founding incident for this rule is cloud#687. It sits
+    // here rather than in the message — the message is printed to a customer who
+    // has neither repo's tracker; ADR-0078 is the reference that travels.
     out.push({
       rule: FIELD_SUMMARY_WITHOUT_OPERATIONS,
       severity: 'error',
@@ -129,7 +132,7 @@ export function checkFieldCompleteness(def: unknown): CompletenessFinding[] {
         'A `summary` field with no `summaryOperations` computes nothing: the engine\'s '
         + 'summary index skips it (`engine.ts` — `if (!d.summaryOperations) continue`), so it '
         + 'reads 0/null everywhere and anything derived from it is stuck at 0 — while every '
-        + 'authoring surface reports success. This is the cloud#687 shape ADR-0078 was written for.',
+        + 'authoring surface reports success. This is the shape ADR-0078 was written for.',
       fix: "summaryOperations: { object: '<child_object>', field: '<child_field>', function: 'sum' }",
     });
   }
@@ -278,7 +281,7 @@ export function checkWebhookCompleteness(webhook: unknown): CompletenessFinding[
     message:
       'A webhook with no `triggers` never fires on any path. The auto-enqueuer drops it while '
       + 'building its subscription cache (`auto-enqueuer.ts` — `if (triggers.size === 0) … return '
-      + 'null`), and there is no manual fire path to reach it either: `webhook.zod.ts` (#3196) '
+      + 'null`), and there is no manual fire path to reach it either: `webhook.zod.ts` '
       + 'records that the `api` trigger was removed because "no manual fire path exists — the only '
       + 'webhook HTTP surface re-queues already-failed deliveries". The webhook materializes into '
       + '`sys_webhook`, looks armed in Setup, and delivers nothing. To disable a webhook use '

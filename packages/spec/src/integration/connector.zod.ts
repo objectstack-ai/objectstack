@@ -935,7 +935,7 @@ export const DeclarativeConnectorEntrySchema = lazySchema(() =>
         path: ['authentication'],
         message: isInstance
           ? `Provider-bound connector instance '${entry.name}' must not inline secrets via \`authentication\`; reference credentials with \`auth: { type, credentialRef }\` instead (ADR-0097 §3).`
-          : `Connector '${entry.name}' must not inline secrets via \`authentication\` — a published connector row is stored whole in \`sys_metadata\`, so the credential would land in cleartext (#7990). A catalog descriptor holds no live credentials: drop \`authentication\` (or set \`{ type: 'none' }\`) and describe the auth scheme in \`description\`. A dispatchable instance declares \`provider\` and references its credential with \`auth: { type, credentialRef }\` (ADR-0097 §3).`,
+          : `Connector '${entry.name}' must not inline secrets via \`authentication\` — a published connector row is stored whole in \`sys_metadata\`, so the credential would land in cleartext. A catalog descriptor holds no live credentials: drop \`authentication\` (or set \`{ type: 'none' }\`) and describe the auth scheme in \`description\`. A dispatchable instance declares \`provider\` and references its credential with \`auth: { type, credentialRef }\` (ADR-0097 §3).`,
       });
     }
     if (!isInstance) {

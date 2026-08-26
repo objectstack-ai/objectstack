@@ -1509,8 +1509,8 @@ export const ActionSchema = lazySchema(() => actionObject().refine((data) => {
     'An action that declares `confirmText` beside a non-empty `params` shows the user TWO dialogs '
     + 'for one decision — the confirm, then the param prompt, with nothing sent until the second. '
     + "Carry the confirm question in the action's top-level `description` instead (it renders under "
-    + 'the param dialog\'s title) and drop `confirmText`: one condition, one wording, one dialog '
-    + '(#7278). Not `ai.description` — that is the LLM-facing tool contract. `confirmText` stays '
+    + 'the param dialog\'s title) and drop `confirmText`: one condition, one wording, one dialog. '
+    + 'Not `ai.description` — that is the LLM-facing tool contract. `confirmText` stays '
     + 'correct for a param-LESS action, where the confirm IS the only dialog, and for a view\'s '
     + '`bulkActionDefs`, where the pair renders one dialog by that schema\'s own contract.',
   path: ['confirmText'],
@@ -1555,6 +1555,10 @@ export const ActionSchema = lazySchema(() => actionObject().refine((data) => {
   // Scoped to `type: 'script'` — the ruled sentence. `opensInNewTab: false`
   // is not the marker (it declares the channel is NOT in use). The corpus was
   // measured at zero doubled producers (#11519), so nothing legal breaks.
+  //
+  // Internal anchor for the "interim precedence" the message names: objectui#5933
+  // is where the renderer-side precedence was ruled. It lives here rather than in
+  // the message, which is printed to a customer who has neither repo's tracker.
   if (data.type === 'script' && data.onSuccess && data.opensInNewTab === true) {
     return false;
   }
@@ -1564,9 +1568,9 @@ export const ActionSchema = lazySchema(() => actionObject().refine((data) => {
     "A `type: 'script'` action declaring BOTH `onSuccess` and `opensInNewTab: true` carries two "
     + 'post-success destinations for one success: `opensInNewTab` pre-opens a tab for the '
     + 'HANDLER-RETURNED `{ redirectUrl }`, while `onSuccess.navigate` declares the hop in '
-    + 'metadata. A renderer can perform only one — under the interim precedence (objectui#5933) '
+    + 'metadata. A renderer can perform only one — under the interim precedence '
     + "the declared `onSuccess` wins and the handler's `redirectUrl` is silently ignored — so the "
-    + 'doubled declaration is refused at authoring time (#11519). Keep `onSuccess` and drop '
+    + 'doubled declaration is refused at authoring time. Keep `onSuccess` and drop '
     + '`opensInNewTab` (and stop returning `redirectUrl` from the handler), or keep '
     + '`opensInNewTab` + the handler redirect and drop `onSuccess`. There is no `precedence` '
     + 'field, by ruling: one destination, declared in one place.',
@@ -1602,7 +1606,7 @@ export const ActionSchema = lazySchema(() => actionObject().refine((data) => {
     + 'otherwise, so without the flag it would parse clean and never run (ADR-0078). If a '
     + 'pre-opened tab is intended, add `opensInNewTab: true`; otherwise drop `newTabUrl` '
     + '(behavior is unchanged — the lone key was never read). For a STATIC url action, new-tab '
-    + 'behavior is `openIn: "new-tab"`, not this pair (#11842).',
+    + 'behavior is `openIn: "new-tab"`, not this pair.',
   path: ['newTabUrl'],
 }).transform((data, ctx) => lowerRequiresFeature(data, ctx)));
 
