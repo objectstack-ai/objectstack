@@ -52,35 +52,45 @@ export const SysOauthClientResource = ObjectSchema.create({
     resource_id: Field.text({
       label: 'Resource ID',
       required: true,
-      // [#11701] Narrowed 1024 → 768 so the declared `[resource_id]` index can
-      // exist at all. At 1024 the column stays TEXT on MySQL and the index is
-      // refused (`ER_BLOB_KEY_WITHOUT_LENGTH`), taking the whole object's
-      // schema-sync down with it; 768 characters is the widest utf8mb4 value a
-      // MySQL key part can hold (768 × 4 = 3072 bytes, exactly the ceiling).
+      // [#12313] Narrowed 768 -> 255, taking the referent's sourced bound.
       //
-      // ⚠️ This is the one bound in the family that does NOT simply take its
-      // referenced column's width: `sys_oauth_resource.identifier` declares
-      // 1024. Narrowing below the referent is safe here because the
-      // (768, 1024] band holds nothing the PRODUCING contract can emit. The
-      // value is an RFC 8707 resource-indicator URI, and upstream better-auth
-      // 1.7.1 — the sole writer of this table (`managedBy: 'better-auth'`) —
-      // stores that same identifier in `oauthResource.identifier` as
-      // **varchar(255)** on MySQL (`better-auth/dist/db/get-migration.mjs`,
-      // `getType`: a unique string column → varchar(255)) and this referring
-      // column as varchar(36) (its `field.references` branch). A resource
-      // whose identifier exceeded 768 characters could never have been
-      // registered upstream in the first place.
+      // #11701 chose 768 as the SMALLEST narrowing that made the declared
+      // `[resource_id]` index expressible on MySQL at all (768 x 4 = 3072
+      // bytes, exactly the utf8mb4 key-part ceiling; at 1024 the column stayed
+      // TEXT and the index was refused with `ER_BLOB_KEY_WITHOUT_LENGTH`,
+      // taking the object's whole schema-sync down). It deliberately did NOT
+      // source that number -- sourcing the referent was a separate ruling.
+      // That ruling landed: `sys_oauth_resource.identifier` is now 255, taken
+      // from better-auth 1.7.1's own varchar(255) emission, and a referencing
+      // column takes the referenced column's bound -- the same derivation
+      // `client_id` above uses. 255 is still <= 768, so the index stays
+      // expressible and this column keeps the live access path #11701 kept it
+      // for (`findOne({ clientId, resourceId })`).
       //
-      // 768 rather than upstream's 255 on purpose: it is the SMALLEST
-      // narrowing that makes the index expressible, so it rejects the least of
-      // the referent's declared domain. Guessing a tighter number to make a
-      // key fit is what `sys_account.issuer` refuses to do.
+      // What the narrowing REJECTS: values in (255, 768] moved from "the
+      // referrer accepts, the referent accepts" to "both refuse". Nothing
+      // legitimate lived there -- the sole writer cannot emit an identifier
+      // that long (see the referent's citation).
       //
-      // ⛔ Unlike `sys_verification.value`, this index is NOT removable: this
-      // is the FK side of `sys_oauth_resource.identifier` and upstream reads it
-      // as a predicate (`findOne({ clientId, resourceId })` on the client
-      // registration collision path), so it is a live access path.
-      maxLength: 768,
+      // ⚠️ Upstream's OWN referring column is narrower still, and is
+      // deliberately NOT copied. Measured by running better-auth 1.7.1's
+      // migration generator against live MySQL 8.0.46 and reading
+      // `information_schema.COLUMNS` as its own query,
+      // `oauthClientResource.resourceId` lands as **varchar(191)** -- NOT the
+      // varchar(36) that `getType`'s `field.references` arm would suggest.
+      // That arm never runs for this column: `resourceId` participates in
+      // table-level indexes, so `getType` receives a `tableIndexStringLength`
+      // argument, which takes precedence over every `field.*` arm, and
+      // `getDatabaseIndexStringLength` seeds its reduce at MySQL's
+      // 191-character default and can only shrink from there.
+      //
+      // 191 is therefore an artifact of upstream's index budget on upstream's
+      // own physical schema. ObjectStack emits its own schema and owns its own
+      // key budget, so this column inherits the REFERENT's 255 rather than
+      // upstream's key-budget rounding -- which is also what keeps the pair
+      // symmetric: referent and referrer now accept exactly the same domain,
+      // and the silent register-then-never-authorize dead-end is closed.
+      maxLength: 255,
       description: 'Foreign key to sys_oauth_resource.identifier',
     }),
 

@@ -43,7 +43,33 @@ export const SysOauthResource = ObjectSchema.create({
     identifier: Field.text({
       label: 'Identifier',
       required: true,
-      maxLength: 1024,
+      // [#12313] Narrowed 1024 -> 255, and sourced from the PRODUCER. The old
+      // 1024 cited nothing: it arrived with the object wholesale (#3080) as
+      // generous slack for "a URI", derived from no upstream contract. An
+      // uncited bound is the defect here, so a narrowing that landed without a
+      // citation would only reproduce it at a smaller number.
+      //
+      // better-auth 1.7.1 is the sole writer (`managedBy: 'better-auth'`,
+      // `protection.lock: 'full'`), and it emits this column as
+      // **varchar(255)** on MySQL: `oauthResource.identifier` is declared
+      // `{ type: 'string', required: true, unique: true }`, and `getType` in
+      // `better-auth/dist/db/get-migration.mjs` takes the `field.unique ->
+      // 'varchar(255)'` arm of its mysql string branch. `oauthResource`
+      // declares no table-level `indexes`, so the `tableIndexStringLength`
+      // argument that precedes that arm is undefined here.
+      //
+      // Measured, not just read: running that generator against live MySQL
+      // 8.0.46 (utf8mb4/InnoDB) and reading `information_schema.COLUMNS` as its
+      // own query gives `oauthResource.identifier = varchar(255)`, 1020 octets.
+      // So an identifier longer than 255 characters cannot be registered
+      // upstream at all, and the discarded (255, 1024] band held nothing the
+      // producing contract can emit.
+      //
+      // Physical consequence, stated rather than left to be discovered: 255 is
+      // at or under `SqlDriver.MAX_KEYABLE_VARCHAR_CHARS` (768), so the UNIQUE
+      // index below is now carried DIRECTLY on `varchar(255)` and this object
+      // LEAVES the #11627/#12198 hash-shadow route it was on at 1024.
+      maxLength: 255,
       description: 'Resource indicator URI presented in the RFC 8707 resource parameter',
     }),
 

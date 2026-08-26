@@ -49,7 +49,8 @@ import * as PlatformObjects from './index';
  * UNIQUE index is the only kind #11627's hash shadow can carry.
  *
  * A bound may legitimately exceed 768 chars (the utf8mb4 index-key ceiling —
- * e.g. `sys_account.issuer` at 2048, the oauth token columns at 1024): the
+ * e.g. `sys_account.issuer` at 2048, the oauth TOKEN columns at 1024 —
+ * `sys_oauth_resource.identifier` is no longer among them, see #12313): the
  * column then stays TEXT and its index still cannot exist on MySQL directly.
  * That debt was #11627's, and #11627 discharged it for the UNIQUE half — such
  * an index is now carried on a hash-shadow column. The first `describe` below
@@ -77,6 +78,15 @@ import * as PlatformObjects from './index';
  *     of `sys_oauth_resource.identifier`), so its bound was narrowed
  *     1024 → 768 instead. See the field's own comment for the evidence that
  *     nothing legitimate lives in the discarded band.
+ *
+ *     ⚠️ UPDATED by #12313: that bound is now **255**, not 768. #11701 picked
+ *     768 as the smallest narrowing that made the index expressible and left
+ *     the number unsourced on purpose; #12313 sourced the REFERENT
+ *     (`sys_oauth_resource.identifier`, 1024 → 255, from better-auth 1.7.1's
+ *     own varchar(255) emission) and this column follows it, as a referencing
+ *     column takes the referenced column's bound. 255 ≤ 768, so the #11701
+ *     rule below is still satisfied — it is the same disposition at a sourced
+ *     number, not a different one.
  *
  * The pin below is the executable form of "the class is closed": it does not
  * name those two, it enumerates the whole package, so a THIRD member arriving
@@ -284,8 +294,10 @@ describe('platform non-unique text indexes are keyable on MySQL (#11701)', () =>
     // comes back, it comes back with a live reader and a keyable bound, or it
     // fails here and in the rule below.
     expect(columns).not.toContain('sys_verification.value');
-    // Kept: a live access path (FK side of sys_oauth_resource.identifier),
-    // narrowed 1024 → 768 so the index can exist at all.
+    // Kept: a live access path (FK side of sys_oauth_resource.identifier).
+    // #11701 narrowed it 1024 → 768 so the index could exist at all; #12313
+    // narrowed it again 768 → 255 to follow the now-sourced referent. Still
+    // keyable, so it stays in this set and the rule below still holds it.
     expect(columns).toContain('sys_oauth_client_resource.resource_id');
   });
 
