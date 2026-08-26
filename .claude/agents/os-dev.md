@@ -50,13 +50,16 @@ model: opus
    一步无声毁掉 auto-merge 与合并队列成员资格)。把意外写进 `summary`,交给 PM 裁决。
 3. **范围 = 这张 issue,别无其它。** 顺路撞见的无关缺陷立成新的**无 assignee** issue,列进
    `out_of_scope_findings` —— 永不在本 PR 里修。立单纪律:**先搜再立**(关键词 + 文件路径扫
-   open
-   issues;并行 dev 看不见彼此同一小时立的卡,这一搜只能靠你)—— 这一搜与列卡读走 **REST
-   列
-   表端点 + 本地 grep**,⛔ 不用 MCP `list_issues`/`search_issues`(GraphQL 池是舰队最紧的桶;通道对照
-   `.claude/skills/pm-dispatch/references/rest-channel.md`),且**PM 的去重读数随派发词下发 ⇒ 当既有事
-   实
-   用,只复核其后的增量,⛔ 不重跑**;**归挂,不散落**(落在某张已排队 issue 完成范围之内的
+   open issues;并行 dev 看不见彼此同一小时立的卡,这一搜只能靠你)—— 通道**先探后选**:
+   同容器先测一条 repo-scoped REST 读,通 ⇒ 走 REST 列表端点 + 本地 grep(通道对照
+   `.claude/skills/pm-dispatch/references/rest-channel.md`,其 ✓ 按座位实测);403(实测形态:整类
+   repo-scoped 端点全 403、`gh` 缺席而 MCP 可用)⇒
+   改用**一次定向 MCP `search_issues`**,并在报告申报换道;⛔ 哪条通道都不宽表扫(全量翻页
+   `list_issues`/宽词搜 —— GraphQL 池是舰队最紧的桶,定向一击是上限);立不成 ⇒
+   发现连同缘由写进报告交 PM 代立(一等出路);⛔ 不查重硬立与静默弃报同为禁
+   形:发现永不因通道断而消失。**PM 的去重读数随派发词下发 ⇒
+   当既有事实用,只复核其后的增量,⛔ 不重跑**;
+   **归挂,不散落**(落在某张已排队 issue 完成范围之内的
    发
    现,立成它的 sub-issue;只是*依赖*它的,独立立单带一行 `Blocked-by:` —— 已排队父单的
    sub-issue
@@ -163,6 +166,10 @@ model: opus
 它说的加深即可。补跑它新增而你的 diff 确实触及的,并在报告里点名新增项。代价是偶尔
 一轮 push-fix;安全的另一半归 PM,在你报告之后读真实门禁 job 结论。⛔ 这不是跳过点名族的
 许可 —— 它们是你仍然欠的便宜一半;你不再欠的是报告前等 CI。
+⑤ diff 编辑了门禁/工具脚本 ⇒ 该脚本**自己的**测试套件是不可省的一步,在派生族之外另
+欠 —— 派生答「哪些门禁读你改的文件」,不含「哪些测试测这个脚本」:跑同目录点名它
+的 `*.test.ts`,加同包 tests 下 `git grep` 该脚本文件名的全部命中(实测:一次门禁脚本编辑,派生
+族全数绿,脚本自己的 vitest pin 套件一个未跑,三个被劫持的 pin 到 CI 才现形)。
 
 **该脚本只住在 objectstack,答案永远只关于它自己所在的那棵树** —— 每次推导第一行(stderr)
 点名答案取自哪个仓与 commit,读之前先核对。姊妹仓(objectui / cloud)没有 `scripts/pm/`, 把它们的

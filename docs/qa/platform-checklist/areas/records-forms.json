@@ -2,6 +2,63 @@
   "$comment": "Standing platform test checklist — area ledger. Hand-edited, append-only; validated by scripts/check-platform-checklist.mjs (pnpm check:platform-checklist). Authoring rules: docs/qa/platform-checklist/README.md · execution protocol: RUNNER.md.",
   "area": "records-forms",
   "title": "Records, lists, detail pages, forms",
+  "fixtures": {
+    "$comment": "AREA-LEVEL standing fixtures. An item opts in with fixtures.provisioning = { use: \"<key>\", why: \"…\" }; the recipe is written ONCE here so several items do not carry drifting copies of the same sequence. Recipes are runtime-provisioned (no repo file is touched, nothing to seed, nothing to un-seed beyond the teardown line) and every call below is grounded in framework source at the cited file:line — replay them literally, and if one 4xxs, re-read the citation before assuming the recipe rotted.",
+    "qa-feeds-disabled": {
+      "title": "Scratch feeds-DISABLED parent (qa_nofeeds) — the FEEDS_DISABLED probe target",
+      "why": "Stock showcase declares NO object with `enable.feeds: false`. Feeds is opt-OUT (spec default true, packages/spec/src/data/object.zod.ts:290), so every showcase object has comments ON and there is no naturally-occurring disabled parent to borrow — the opposite of the files case, where opt-IN (default false) leaves most objects files-disabled incidentally and attachments-storage could probe showcase_account before qa_nofiles existed. Without this recipe BOTH FEEDS_DISABLED clauses of record-discussion-mentions are blocked(fixture) and the code survives in that item's `negative` list alone — named but never driven, which is the gap #12118 was filed against.",
+      "provenance": "#12118 — the gap was measured from PR #12116 (the files-side twin, which added the FILES_DISABLED update-verb probe and reported this one rather than widening). Recipe shape copied from qa-scratch-authz in areas/attachments-storage.json (#7716/#7670) rather than invented.",
+      "app": "showcase",
+      "requires": [
+        "an admin session that holds the `manage_metadata` capability — PUT /api/v1/meta/:type/:name is capability-gated per ADR-0066 D1 (#6603), so a bare authenticated session is NOT enough (packages/rest/src/rest-route-ledger.ts:174, the `PUT /api/v1/meta/:type/:name` row)",
+        "an isolated boot (own port + file DB, dogfood skill §0) — this recipe authors metadata into the running app",
+        "AuditPlugin active in the boot: it owns sys_comment AND registers the enable.feeds capability gate (packages/plugins/plugin-audit/src/audit-writers.ts:1456-1457). A boot without it accepts every comment and both probes go green for the wrong reason — confirm the gate is live before scoring either clause."
+      ],
+      "sequence": [
+        {
+          "step": 1,
+          "call": "POST /api/v1/packages",
+          "body": {
+            "manifest": {
+              "id": "com.objectstack.qa.feeds",
+              "name": "QA feeds fixture",
+              "version": "1.0.0",
+              "type": "app"
+            },
+            "enableOnInstall": true
+          },
+          "expect": "2xx with the installed package echoed back. A re-run against a live DB 409s on the duplicate id — send `overwrite: true` deliberately rather than adding it by reflex (the guard exists so a second install never silently clobbers the first).",
+          "source": "POST /api/v1/packages is the dispatcher install route (packages/rest/src/rest-route-ledger.ts:312 note; client `packages.install`); the body shape { manifest, enableOnInstall?, overwrite? } is URL- and body-pinned in packages/client/src/client.test.ts:2144-2166"
+        },
+        {
+          "step": 2,
+          "call": "PUT /api/v1/meta/objects/qa_nofeeds?package=com.objectstack.qa.feeds",
+          "body": {
+            "name": "qa_nofeeds",
+            "label": "QA No Feeds",
+            "sharingModel": "public_read_write",
+            "enable": {
+              "feeds": false
+            },
+            "fields": {
+              "name": {
+                "type": "text",
+                "label": "Name",
+                "required": true
+              }
+            }
+          },
+          "expect": "2xx. `enable.feeds` is stated EXPLICITLY false — unlike files it cannot be omitted, because omission means the spec default `true` (object.zod.ts:290) and would give a feeds-ENABLED object that scores both probes green for the wrong reason. `sharingModel` is public_read_write ON PURPOSE: the probes must be refused by the CAPABILITY gate, not by record access, and a caller who can read and edit this parent isolates FEEDS_DISABLED from the sibling RECORD_NOT_ACCESSIBLE refusal (packages/plugins/plugin-audit/src/comment-access-hooks.ts:132).",
+          "source": "`enable.feeds` is the #2707 opt-out, default true (packages/spec/src/data/object.zod.ts:290: 'Record comments/collaboration feed. Default on; explicit false hides the feed UI and rejects any write that makes a comment target this object (403 FEEDS_DISABLED) — a new comment and an update that re-threads an existing one alike'). `sharingModel` is a TOP-LEVEL object key, enum ['private','public_read','public_read_write','controlled_by_parent'] (packages/spec/src/data/object.zod.ts:2144; ADR-0090 D4). `?package=` is read as `query.package` and threaded to saveMetaItem as packageId (packages/runtime/src/domains/meta.ts)"
+        }
+      ],
+      "teardown": "DELETE /api/v1/packages/com.objectstack.qa.feeds (client `packages.uninstall`, ledgered at rest-route-ledger.ts:317) — or simply discard the isolated file DB, which is the cheaper path and the one an isolated boot makes free. Any throwaway qa_nofeeds record and any sys_comment row created against it go with the package.",
+      "knownGaps": [
+        "The recipe lands the OBJECT only. Each probe inserts its own throwaway qa_nofeeds record inline (it needs that record's id in the thread_id), exactly as attachments-storage's clause 5 does with qa_nofiles — no standing rows here.",
+        "This recipe provisions the SERVER-side probe target. The `feeds:false must HIDE the panel` half of the negative is a console/objectui assertion: to score it, navigate to the qa_nofeeds record detail and confirm no discussion panel mounts and no sys_comment fetch is issued. If the console has no route for a scratch object in the running build, record that half blocked(fixture) and score the two API clauses — do not infer the UI half from the API refusal."
+      ]
+    }
+  },
   "items": [
     {
       "id": "records-forms.crud-roundtrip",
@@ -2242,7 +2299,7 @@
       "title": "Record discussion: an @mention comment reconciles optimistically, persists to sys_comment, interleaves with activity, and pings the mentioned user's bell",
       "since": "v16",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -2255,8 +2312,13 @@
           "a showcase object with feeds enabled (default — enable.feeds !== false) so the discussion panel mounts and sys_comment writes are accepted (packages/spec/src/data/object.zod.ts feeds default true; plugin-audit enforceFeedsCapability)",
           "a record to comment on (e.g. a seeded showcase_task or showcase_account)"
         ],
+        "provisioning": {
+          "use": "qa-feeds-disabled",
+          "why": "unblocks acceptance clauses 6 and 7 — the create-side and re-thread-side FEEDS_DISABLED probes. Without the recipe there is no feeds-disabled parent anywhere in showcase (feeds is opt-out, default true), so both clauses score blocked(fixture) and FEEDS_DISABLED survives in this item's `negative` list alone: named, never driven. That is the exact gap #12118 records, one area over from the files-side twin #12116 repaired."
+        },
         "knownGaps": [
-          "the @mention TARGET and the bell/notification clauses need a SECOND signed-up user — a fresh single-user boot cannot exercise them; record those clauses blocked(fixture) and run the optimistic-reconcile + sys_comment + activity-interleave clauses as the single author"
+          "the @mention TARGET and the bell/notification clauses need a SECOND signed-up user — a fresh single-user boot cannot exercise them; record those clauses blocked(fixture) and run the optimistic-reconcile + sys_comment + activity-interleave clauses as the single author",
+          "CLOSED by the qa-feeds-disabled recipe (#12118) for the two FEEDS_DISABLED clauses: before it, no showcase object declared enable.feeds:false and there was no scratch recipe for this area, so the code appeared only in `negative`. Fall back to the pinned engine/API suites named in `automated` ONLY if the recipe cannot be replayed on the boot under test — and when you do, record WHICH of the two the verdict rests on, because the pins run against their own fixtures (cmt_nofeeds / lead_walled) and not against the showcase surface this item otherwise drives."
         ]
       },
       "steps": [
@@ -2267,7 +2329,10 @@
         "read sys_comment over the API: GET /api/v1/data/sys_comment?$filter for the record's thread_id, ordered by created_at asc — the posted comment is present",
         "perform an attributable change on the record (e.g. an edit) and confirm the resulting sys_activity row interleaves into the SAME feed, oldest-first",
         "as the mentioned second user, open the notification bell — it gains the mention notification with a deep link back to the record; unreadCount increments; mark-as-read drops it",
-        "confirm a NON-mentioned user's bell does NOT gain the notification (recipient scoping)"
+        "confirm a NON-mentioned user's bell does NOT gain the notification (recipient scoping)",
+        "CREATE-SIDE FEEDS_DISABLED probe — as admin, POST one throwaway qa_nofeeds record ({ name: 'qa-nofeeds-probe' }) for a real parent_id (qa_nofeeds is a scratch OBJECT from the qa-feeds-disabled recipe with no standing rows), then POST /api/v1/data/sys_comment with { thread_id: 'qa_nofeeds:<that record id>', body: 'should be refused by the feeds gate' } and capture the refusal. Admin can read AND edit that record (public_read_write), which is what isolates the refusal from the sibling RECORD_NOT_ACCESSIBLE code",
+        "RE-THREAD (UPDATE-SIDE) FEEDS_DISABLED probe — take the sys_comment row posted earlier against the feeds-ENABLED record and PATCH /api/v1/data/sys_comment/<its id> with { thread_id: 'qa_nofeeds:<the throwaway record id>' } as admin, capturing the refusal. This is the UPDATE half of the #10170 gate (enforceFeedsCapability registered on beforeUpdate as well as beforeInsert, packages/plugins/plugin-audit/src/audit-writers.ts:1456-1457): re-read the comment afterward and confirm its thread_id is UNCHANGED",
+        "control for both probes — repeat the same two calls against a feeds-ENABLED parent (the seeded showcase record used above) and confirm they SUCCEED. A 403 that also fires on the enabled parent is measuring access, not the capability gate, and neither clause may be scored from it"
       ],
       "acceptance": [
         {
@@ -2299,12 +2364,26 @@
           "oracle": "dom",
           "verify": "the mentioned user sees it; a second, non-mentioned session does not (useMentionNotifications recipient gate)",
           "evidence": "both users' bells"
+        },
+        {
+          "clause": "a NEW comment targeting a feeds-DISABLED parent is refused authoritatively: POST /api/v1/data/sys_comment with a qa_nofeeds thread_id answers 403 with code FEEDS_DISABLED, and no sys_comment row lands — the refusal is the oracle, and a silent no-op that returns 2xx while writing nothing is equally a FAIL",
+          "oracle": "api",
+          "verify": "the POST returns status 403 and a body whose `code` is exactly \"FEEDS_DISABLED\" (plugin-audit enforceFeedsCapability throws { code: 'FEEDS_DISABLED', status: 403, object } and the REST layer forwards .status verbatim — packages/plugins/plugin-audit/src/audit-writers.ts:1440-1456), AND a follow-up GET /api/v1/data/sys_comment filtered by that thread_id returns ZERO rows. The same call against the feeds-ENABLED control parent must return 2xx, or the 403 is not attributable to the capability gate",
+          "evidence": "the 403 response body showing the code, the zero-row thread read, and the 2xx control"
+        },
+        {
+          "clause": "RE-THREADING an existing comment onto a feeds-disabled parent is refused identically — the flag is a property of the TARGET OBJECT, not of the verb that made a row point at it (#10170) — and the stored thread_id is UNCHANGED after the refusal",
+          "oracle": "api",
+          "verify": "the PATCH re-threading an existing sys_comment onto the qa_nofeeds record answers 403 FEEDS_DISABLED, and a re-read of that sys_comment row shows thread_id still naming the ORIGINAL feeds-enabled parent — same authoritative-rejection rule as the create clause above. Grounded engine-side by the #10170 pin describe '[#10170] enable.feeds is asked on the UPDATE verb too' (packages/plugins/plugin-audit/src/capability-gate-update-verb.test.ts:341), which covers the by-id and predicate shapes; this clause is the REST-surface half that pin does not reach. Note the deliberate boundary: an update that carries NO thread_id is not a re-thread and stays allowed, so an ordinary body edit on a grandfathered row must still succeed",
+          "evidence": "the 403 response body, the unchanged-thread_id re-read, and the body-edit control"
         }
       ],
       "negative": [
         "an optimistic comment that stays as a SECOND row after the server row lands (dupe) or vanishes entirely (phantom) is a FAIL — mergeFeedRows exists to keep exactly one",
         "a mention notification delivered to a NON-mentioned user is a FAIL — the recipientId gate is the boundary",
-        "feeds:false must HIDE the panel, SKIP the sys_comment fetch, AND the server must reject new comments with 403 FEEDS_DISABLED — a silent no-op that accepts a comment nowhere-readable is a FAIL"
+        "feeds:false must HIDE the panel, SKIP the sys_comment fetch, AND the server must reject new comments with 403 FEEDS_DISABLED — a silent no-op that accepts a comment nowhere-readable is a FAIL. The two server halves are now DRIVEN by acceptance clauses 6 and 7 against the qa-feeds-disabled recipe's qa_nofeeds parent; until #12118 this bullet was the only place the code appeared in this area, which made it read as covered while nothing provoked it",
+        "a re-thread that is refused but LEAVES the row moved (or is accepted outright) is a FAIL — #10170 registered the gate on beforeUpdate precisely because a caller barred from creating a comment on a feeds-disabled object could otherwise re-point an existing one into it",
+        "scoring either FEEDS_DISABLED clause from the ENABLED control alone is a FAIL — the control exists to prove the refusal is attributable to the capability gate rather than to record access (RECORD_NOT_ACCESSIBLE, comment-access-hooks.ts:132), so a run that reports the 403 without the 2xx control has not measured the gate"
       ],
       "traps": [
         "hydration-race",
@@ -2315,14 +2394,25 @@
         "objectui: packages/plugin-detail/src/{RecordChatterPanel,CommentInput,MentionAutocomplete,extractMentions}.tsx (compose + @mention)",
         "objectui: packages/app-shell/src/views/RecordDetailView.tsx (mergeFeedRows union-by-id, sys_comment + sys_activity fetch/merge, mentionSuggestions), packages/plugin-detail/src/renderers/recordActivityFeed.ts (activity→feed map)",
         "objectui: packages/collaboration/src/useMentionNotifications.ts (recipient-scoped bell, unreadCount)",
-        "framework: packages/spec/src/data/object.zod.ts (enable.feeds default true → FEEDS_DISABLED); PENDING-GAPS §B record-discussion-mentions"
+        "framework: packages/spec/src/data/object.zod.ts:290 (enable.feeds default true → FEEDS_DISABLED, 'a new comment and an update that re-threads an existing one alike'); PENDING-GAPS §B record-discussion-mentions",
+        "framework: packages/plugins/plugin-audit/src/audit-writers.ts:1440-1457 (enforceFeedsCapability, registered on beforeInsert AND beforeUpdate per #10170), packages/plugins/plugin-audit/src/comment-access-hooks.ts:132 (RECORD_NOT_ACCESSIBLE — the sibling refusal the probes isolate against), packages/plugins/plugin-audit/src/objects/sys-comment.object.ts:9 (thread_id is conventionally `{object}:{record_id}`)"
       ],
+      "automated": {
+        "kind": "api",
+        "ref": "The FEEDS_DISABLED clauses (6, 7) have engine/API pins that predate this item's coverage of them: packages/plugins/plugin-audit/src/capability-gate-update-verb.test.ts:341 (describe '[#10170] enable.feeds is asked on the UPDATE verb too' — by-id and predicate re-thread onto `lead_walled`, plus the insert-verb control at :206 and the absent-thread_id boundary at :393) and packages/qa/dogfood/test/comments-permission-matrix.dogfood.test.ts:317 (the create side over real REST against the `cmt_nofeeds` fixture, packages/qa/dogfood/test/fixtures/comments-fixture.ts:69-76). ⚠️ Those pins run against their OWN fixtures and the objectql/REST seams — they do NOT reach the console half of the negative (panel hidden, sys_comment fetch skipped), and they never exercised the showcase surface, which is why clauses 6 and 7 still carry their own steps and the qa-feeds-disabled recipe. The remaining clauses (1-5: optimistic reconcile, activity interleave, mention bell) are browser-only and have no pin."
+      },
       "history": [
         {
           "revision": 1,
           "date": "2026-08-08",
           "change": "initial — deep-test the record discussion: optimistic reconcile, sys_comment persistence, activity interleave, recipient-scoped mention bell",
           "ref": "claude/platform-test-checklist-ocwugl"
+        },
+        {
+          "revision": 2,
+          "date": "2026-08-25",
+          "change": "drove the FEEDS_DISABLED case this item only NAMED. The code appeared in one `negative` bullet with no step and no acceptance clause, and nothing in the area — or in stock showcase, where feeds is opt-out and therefore on everywhere — provided a feeds-disabled parent to provoke it, so an auditor grepping records-forms.json read coverage that was never driven. Added the area's first area-level fixtures block (recipe qa-feeds-disabled, landing a scratch qa_nofeeds object with an EXPLICIT enable.feeds:false, modelled on qa-scratch-authz #7670), opted this item into it, and added three steps + acceptance clauses 6 and 7: the create-side probe (POST sys_comment onto qa_nofeeds → 403 FEEDS_DISABLED, zero rows) and the re-thread probe (PATCH an existing comment's thread_id onto it → 403, thread_id unchanged), each with a feeds-ENABLED control that makes the refusal attributable to the capability gate rather than to RECORD_NOT_ACCESSIBLE. Added `automated` naming the pre-existing engine/API pins (#10170 capability-gate-update-verb.test.ts, the cmt_nofeeds dogfood probe) and stating precisely what they do NOT reach, so the next auditor does not have to re-derive it. Structural twin of #12116, which repaired the same shape for FILES_DISABLED one area over and reported this side rather than widening.",
+          "ref": "#12118"
         }
       ]
     },

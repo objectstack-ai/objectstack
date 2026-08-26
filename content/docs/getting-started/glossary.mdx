@@ -80,6 +80,33 @@ Reusable error maps, suggestions, and metadata normalization utilities.
 
 ## Architecture Concepts
 
+### Business Ontology
+The enterprise-AI category's name for the thing these docs otherwise call **typed
+metadata**, the **single source of truth**, or the **app contract**: one machine-readable
+definition of a business domain — its objects and fields, the relations between them, the
+permissions that govern them, and the flows and actions that operate on them. If you
+arrived from that vocabulary, this is the term's referent here: the **Source** you author
+(`objectstack.config.ts`) and the **Artifact** it compiles to (`objectstack.json`), from
+which the runtime derives the database schema, REST API, UI, and MCP server. See
+[Metadata-Driven Development](/docs/concepts/metadata-driven).
+
+The word is worth stating explicitly because ObjectStack's differs from the hosted
+ontologies the category otherwise means by it, on two points:
+
+* **You own the definition.** It lives in your repository as ordinary TypeScript,
+  versioned in your VCS and reviewable as a diff, in a format specified and licensed
+  Apache-2.0 — not as a graph held inside a vendor's system and reachable only through
+  that vendor's console.
+* **It is executed, not merely described.** The same definition is enforced at authoring
+  time by Zod schemas and the validation gate, and at runtime on every call — RBAC, FLS,
+  and audit included (see **Agent-Ready Boundaries** below). It is not a descriptive map
+  of behaviour implemented somewhere else, so it cannot drift from the system it
+  describes.
+
+Distinct from **semantic layer**, which in these docs means the narrower analytics
+`dataset` layer (ADR-0021) that reports and dashboards bind to — see
+[Analytics & Datasets](/docs/data-modeling/analytics).
+
 ### Protocol-Driven
 A development paradigm where logic is defined in static, declarative data formats (JSON/YAML) with Zod schemas rather than imperative code. The goal is to separate the **Intent** (Business Logic) from the **Implementation** (Tech Stack).
 

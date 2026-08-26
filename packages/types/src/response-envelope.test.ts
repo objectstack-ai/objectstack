@@ -23,8 +23,9 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { BaseResponseSchema, envelopeViolations } from '@objectstack/spec/api';
+import { ApiErrorSchema, BaseResponseSchema, envelopeViolations } from '@objectstack/spec/api';
 import { sendOk, sendError, type EnvelopeResponse } from './response-envelope.js';
+import { resolveThrownHttpError, demotedDeclaredCode } from './thrown-http-error.js';
 
 /** Captures what a route would have put on the wire. */
 function capture() {
@@ -131,5 +132,116 @@ describe('sendError', () => {
         const { res } = capture();
         // @ts-expect-error 'NOT_A_REGISTERED_CODE' is not in the ADR-0112 union.
         sendError(res, 400, 'NOT_A_REGISTERED_CODE', 'invented');
+    });
+});
+
+/**
+ * The ADR-0112 open channel on the NESTED envelope (#9106, #9232).
+ *
+ * `ApiErrorSchema` has declared `declaredCode` since #9106 and the flat `/data`
+ * door emits it, but `sendError`'s `extra` did not admit the field — so putting
+ * a demoted producer spelling on a nested-envelope route was a COMPILE ERROR,
+ * and the author's own code was dropped while the derived closed member shipped
+ * in its place. Nothing invalid went on the wire, which is exactly what made the
+ * loss silent.
+ *
+ * These drive the REAL pipeline rather than asserting the type: a thrown error
+ * shaped like a sandboxed hook's refusal goes through `resolveThrownHttpError`
+ * and `demotedDeclaredCode` — the one rule both doors read — and the body is
+ * parsed by the real `ApiErrorSchema`. A type-level assertion would have passed
+ * against a schema that declares nothing.
+ */
+describe('sendError — the `declaredCode` open channel', () => {
+    /**
+     * The reachable producer ADR-0112's amendment names: a metadata app's own
+     * `.code` crossing the QuickJS boundary (#7867) on a hook refusal. It is
+     * NOT a member of `StandardErrorCode ∪ ERROR_CODE_LEDGER`, so the closed
+     * slot cannot hold it.
+     */
+    const tenantAuthored = () => Object.assign(
+        new Error('Quota exceeded for this app.'),
+        { code: 'crm.quota_exceeded', status: 403 },
+    );
+
+    it('carries the producer spelling beside the derived closed member', () => {
+        const { res, seen } = capture();
+        const thrown = resolveThrownHttpError(tenantAuthored());
+        const demoted = demotedDeclaredCode(thrown);
+
+        sendError(res, thrown.status, thrown.code, thrown.message, {
+            ...(demoted !== undefined ? { declaredCode: demoted } : {}),
+        });
+
+        expect(seen.status).toBe(403);
+        expect(seen.body).toEqual({
+            success: false,
+            error: {
+                // Derived from the status, because the spelling is unregistered.
+                code: 'PERMISSION_DENIED',
+                message: 'Quota exceeded for this app.',
+                // …and the author's own spelling survives, verbatim.
+                declaredCode: 'crm.quota_exceeded',
+            },
+        });
+    });
+
+    it('emits a body the REAL schemas accept, with the field still on it', () => {
+        // `.success` alone would not have caught this: `ApiErrorSchema` is a
+        // plain `z.object`, so an UNDECLARED sibling parses clean by being
+        // STRIPPED. The reading that means something is that the field is still
+        // there AFTER the parse — i.e. the schema declares it.
+        const { res, seen } = capture();
+        const thrown = resolveThrownHttpError(tenantAuthored());
+        sendError(res, thrown.status, thrown.code, thrown.message, {
+            declaredCode: demotedDeclaredCode(thrown)!,
+        });
+
+        const body = seen.body as { error: unknown };
+        expect(BaseResponseSchema.safeParse(seen.body).success).toBe(true);
+        expect(envelopeViolations(seen.body)).toEqual([]);
+
+        const parsed = ApiErrorSchema.safeParse(body.error);
+        expect(parsed.success).toBe(true);
+        expect((parsed as { data: { declaredCode?: string } }).data.declaredCode)
+            .toBe('crm.quota_exceeded');
+    });
+
+    it('the survives-the-parse reading can say NO — an undeclared sibling is stripped', () => {
+        // The control for the assertion above, on a term that is not a
+        // substring of the one under test. `ApiErrorSchema` strips rather than
+        // rejects, so "parsed clean" is worthless on its own; this pins that the
+        // instrument distinguishes a DECLARED field from a tolerated one.
+        const parsed = ApiErrorSchema.safeParse({
+            code: 'PERMISSION_DENIED',
+            message: 'denied',
+            declaredCode: 'crm.quota_exceeded',
+            namespace: 'branding',
+        });
+
+        expect(parsed.success).toBe(true);
+        const data = (parsed as { data: Record<string, unknown> }).data;
+        expect(data.declaredCode).toBe('crm.quota_exceeded');
+        expect('namespace' in data).toBe(false);
+    });
+
+    it('stays ABSENT when the producer spelled a registered code', () => {
+        // `ApiErrorSchema.declaredCode`'s documented invariant: presence MEANS
+        // demotion. A registered spelling is already in `code`, and repeating it
+        // would make one refusal carry two spellings of one fact. The writer does
+        // not re-derive that — `demotedDeclaredCode` does, for both doors.
+        const { res, seen } = capture();
+        const thrown = resolveThrownHttpError(
+            Object.assign(new Error('denied'), { code: 'PERMISSION_DENIED', status: 403 }),
+        );
+        const demoted = demotedDeclaredCode(thrown);
+
+        expect(demoted).toBeUndefined();
+
+        sendError(res, thrown.status, thrown.code, thrown.message, {
+            ...(demoted !== undefined ? { declaredCode: demoted } : {}),
+        });
+
+        expect(Object.keys((seen.body as { error: object }).error))
+            .toEqual(['code', 'message']);
     });
 });

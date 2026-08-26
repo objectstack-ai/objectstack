@@ -8,15 +8,12 @@
 批次选择只保证同批 file-disjoint,管不到先后两单都碰生成物(协议变更几乎必然)。
 `merge=os-regen` 路径清单**当场读**:`grep os-regen .gitattributes`(唯一权威清
 单,⛔ 不抄进派发令当常量 —— 散文没法被类型检查;文档产物同在清单、同样被吞)。
-该驱动 merge exit 0、零冲突标记,却**静默丢掉一侧改动** —— 只有重新生成才暴露。
 
-四步序已机械化:`bash scripts/pm/os-regen-merge.sh` —— ① `git merge origin/main`
-(⛔ 禁 rebase / force-push);② 生成物 `git checkout origin/main -- <路径>`;③
-**先 commit 掉 merge**;④ 整链重生成 + 生成物门禁全绿。顺序防的陷阱:
+四步序已机械化:`bash scripts/pm/os-regen-merge.sh`(⛔ 禁 rebase / force-push;
+步骤以脚本自身为权威)。顺序防的陷阱:
 
-- **MERGE 状态下跑 `gen:schema` 会把 authorable-surface 锚点静默倒退回旧分叉点**
-  (HEAD 仍是合并前分支 tip),倒退后的锚点**依然 authentic**、全部门放行 ——「先
-  commit 再重生成」的由来。
+- **MERGE 状态下跑 `gen:schema` 会把 authorable-surface 锚点静默倒退回旧分叉点**,
+  且全部门放行 ——「先 commit 再重生成」的由来。
 
 重生成后**断言所有兄弟单的条目都还在**;更硬的旁证是查**上一单的实现体**完好(带
 引号精确名 `git grep … origin/main -- <实现文件>`)—— 条目是索引,实现体才是被吞
@@ -27,19 +24,16 @@
 ## B. 跟到 MERGED 为止;入队后的看护归车道 PM 落地窗口
 
 车道 PM 的权责:验收(复核清单);**首次入队** —— ACCEPT 后挂 6–9 分钟 flip 定点,到点核门禁
-job 结论(承载门禁族的 job `completed: success`),绿即转 ready + 挂 auto-merge,未绿阶梯重挂;
-CI success webhook 不可靠,⛔ 不坐等不忙轮询;定点文本照定时器写法纪律(幂等开头、只写判
-据);确认 **MERGED** —— 每轮同时读队列分支与 `origin/main` 两个读数。ready 与 auto-merge 顺
-序不可反(转回 draft 会同时掉 auto-merge 与队列成员资格)。**契约复审链 PASS 落地的 PR 到窗
-口时已 ready + auto-merge 在挂**(清标与落地同一笔,见 `contract-review.md`)—— 窗口自身权责
-不变:跟到 MERGED、踢出处置、落地后对账。
+job 结论,绿即转 ready + 挂 auto-merge,未绿阶梯重挂;CI success webhook 不可靠,⛔ 不坐等不忙
+轮询;定点文本照定时器写法纪律;确认 **MERGED** —— 每轮同时读队列分支与 `origin/main` 两个
+读数。**契约复审链 PASS 落地的 PR 到窗口时已 ready + auto-merge 在挂**(清标与落地同一笔,见
+`contract-review.md`)—— 窗口自身权责不变:跟到 MERGED、踢出处置、落地后对账。
 
-**转 ready / 挂 auto-merge 之前先读 `mergeable_state`**:`dirty` ⇒ 先 merge `origin/main`
-(生成物在面上按 A 的固定序)再挂;`unknown` ⇒ 重读一次(惰性计算,事实行见平台读数)。
-**ready + 全绿 ≠ 已入队 —— 队列从不主动拉 PR,入队是显式动作。**零 `enqueued` 事件按序查:
-① `mergeable_state` 是否 `dirty`;② enable-auto-merge 调用根本没落地(GraphQL、吃配额、回显
-两向不可靠,按既有陷阱行重发一次,以 timeline 事件验证,⛔ 不看 `auto_merge` 字段);③ PR
-碰 `.github/workflows/**` 而 token 缺 workflows 权限。
+**转 ready / 挂 auto-merge 之前先读 `mergeable_state`**(事实行见平台读数):`dirty` ⇒ 先 merge
+`origin/main`(生成物在面上按 A 的固定序)再挂。**ready + 全绿 ≠ 已入队 —— 队列从不
+主动拉 PR,入队是显式动作。**零 `enqueued` 事件按序查:① `mergeable_state` 是否 `dirty`;
+② enable-auto-merge 调用根本没落地(重发与效果验证序列见平台读数);③ PR 碰
+`.github/workflows/**` 而 token 缺 workflows 权限。
 
 **确认 MERGED 的同一动作里给 `Part of` 卡收口**(`Fixes` 卡 GitHub 代关、标签随
 卡离开在飞视图):`Part of` 卡开着不摘 `pm:dispatched`,就把无在飞物的卡永远算在
@@ -61,12 +55,18 @@ CI success webhook 不可靠,⛔ 不坐等不忙轮询;定点文本照定时器�
 告已收复核,⛔ 合并前不归档(活会话是 dirty 自救的执行手;误归档可 unarchive,但
 容器现场已失,宁晚勿早);暂停/交接把在挂订阅清点进座位贴,⛔ 不留孤儿订阅。
 
+**main-red 事故两条约定**:① **p0 fix-forward 允许跳队**(维护者 2026-08-25「同意」):main 红的
+止血 PR(p0、机械、根因已核实)可跳队(GitHub 队列自带 jump-the-queue),或按既有 governed
+例外由维护者人工直合一行修复 —— 排在事故自己堵住的队列后面是具名反模式;仅限
+main-red 修复,⛔ 不放宽其它任何 PR 的 queue-only 落地。② **一个失败 check 只锚一张卡**(维
+护者 2026-08-25「同意」):main-red 事故按失败 check 名锚一张卡,先立者赢;后见者把读数评论
+到锚卡上,⛔ 不另立。
+
 ## C. 依赖前棒才能转绿的 PR:draft 停放 + 签名级预期红清单
 
-串行链里后棒常常先行实现。这种 PR **停在 draft**,PR body 写两样:**精确的预期红
-清单**(逐条失败测试名 + 报错签名 ——「几条测试会红」不够用)与**解除条件**(「依
-赖 PR #N 合入」)。每个 CI-failure 事件与清单比对 —— 签名匹配静默跳过,**新签名才
-是真问题**。依赖合入后:最后一轮同步 → 红清零 → 转 ready → 入队。
+这种 PR **停在 draft**,PR body 写两样:**精确的预期红清单**(逐条失败测试名 + 报错签名)与
+**解除条件**(「依赖 PR #N 合入」)。每个 CI-failure 事件与清单比对 —— 签名匹配静默跳过,
+**新签名才是真问题**。依赖合入后:最后一轮同步 → 红清零 → 转 ready → 入队。
 
 ## D. 串行接力:多个已实现 PR 全碰生成物时,一次只放行一个
 
