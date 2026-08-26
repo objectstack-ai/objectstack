@@ -41,6 +41,55 @@ import {
 
 const DEFAULT_ID_LENGTH = 16;
 
+/**
+ * Drop every own key whose value is `undefined` (#9276).
+ *
+ * Structural twin of `withoutUndefinedOwnKeys` in
+ * `@objectstack/driver-memory`'s `memory-driver.ts`, which carries the
+ * CANONICAL statement of the rule — a row says either "the key is absent" or
+ * "the key holds a value", and an own key holding `undefined` is neither, so
+ * every consumer downstream has to invent a reading of it. Duplicated rather
+ * than imported for the same reason `toStorageForms` is duplicated across the
+ * two driver packages: they share no code, and neither depends on the other.
+ *
+ * ## What this driver did, measured, and why it is worse than the memory one
+ *
+ * The defect here is a SPLIT between two doors of the same driver. `create`
+ * returns the object it built in process, so an explicitly-`undefined` field
+ * came back as an own key holding `undefined`; but the MongoClient default is
+ * `ignoreUndefined: false` (this driver sets no override), so what BSON stored
+ * for that same field was `null` — a value. Measured on `origin/main`:
+ * `create()` said own-key-`undefined` (which CEL reads as absent) and a
+ * subsequent `find()` said `null` (which CEL reads as a present key holding
+ * null). One write, two answers, from one driver.
+ *
+ * Dropping the key on the INSERT doors closes both halves at once: nothing
+ * ambiguous is returned, and nothing is stored for a field that was given no
+ * value, so `create()` and `find()` agree and both match a row where the field
+ * was simply never written.
+ *
+ * ⚠️ Scope is the insert doors ONLY. `$set`-shaped patches (`update`,
+ * `updateMany`, `bulkUpdate`, and the `$set` half of `upsert`) neither emit
+ * this shape nor could be changed without answering "what does a patch
+ * carrying `undefined` mean" — clear the field, or leave it standing — which
+ * is a storage-contract question, not this normalisation's to settle.
+ *
+ * Filter behaviour is unaffected: `$null: true` lowers to `$eq: null` and
+ * `$null: false` to `$ne: null`, and MongoDB matches a missing field and a
+ * stored `null` identically under both.
+ *
+ * Returns the input unchanged (same reference) when there is nothing to drop.
+ */
+function withoutUndefinedOwnKeys<T extends Record<string, unknown>>(record: T): T {
+  let out: Record<string, unknown> | undefined;
+  for (const key of Object.keys(record)) {
+    if (record[key] !== undefined) continue;
+    out ??= { ...record };
+    delete out[key];
+  }
+  return (out as T) ?? record;
+}
+
 // ── Configuration ────────────────────────────────────────────────────────────
 
 /**
@@ -332,7 +381,7 @@ export class MongoDBDriver implements IDataDriver {
     const session = this.getSession(options);
 
     const { _id, ...rest } = data;
-    const toInsert: Record<string, unknown> = { ...this.toStorageForms(object, rest) };
+    const toInsert: Record<string, unknown> = withoutUndefinedOwnKeys({ ...this.toStorageForms(object, rest) });
 
     // Assign ID
     if (toInsert.id === undefined) {
@@ -370,7 +419,7 @@ export class MongoDBDriver implements IDataDriver {
       { session, projection: { _id: 0 } },
     );
 
-    return (updated as Record<string, unknown>) || { id: String(id), ...updateData };
+    return (updated as Record<string, unknown>) || withoutUndefinedOwnKeys({ id: String(id), ...updateData });
   }
 
   async upsert(object: string, data: Record<string, unknown>, conflictKeys?: string[], options?: DriverOptions): Promise<Record<string, unknown>> {
@@ -410,7 +459,7 @@ export class MongoDBDriver implements IDataDriver {
       { session, projection: { _id: 0 } },
     );
 
-    return (result as Record<string, unknown>) || toUpsert;
+    return (result as Record<string, unknown>) || withoutUndefinedOwnKeys(toUpsert);
   }
 
   async delete(object: string, id: string | number, options?: DriverOptions): Promise<boolean> {
@@ -440,7 +489,7 @@ export class MongoDBDriver implements IDataDriver {
     const now = new Date();
     const docs = dataArray.map((data) => {
       const { _id, ...rest } = data;
-      const doc: Record<string, unknown> = { ...this.toStorageForms(object, rest) };
+      const doc: Record<string, unknown> = withoutUndefinedOwnKeys({ ...this.toStorageForms(object, rest) });
       if (doc.id === undefined) doc.id = nanoid(DEFAULT_ID_LENGTH);
       if (doc.created_at === undefined) doc.created_at = now;
       if (doc.updated_at === undefined) doc.updated_at = now;
