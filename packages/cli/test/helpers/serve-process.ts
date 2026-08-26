@@ -11,6 +11,7 @@
  */
 
 import { execFileSync, spawn } from 'node:child_process';
+import { createServer, type Server } from 'node:net';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -150,6 +151,38 @@ export function portIsFree(port: number | string): boolean {
 }
 
 /**
+ * Bind `0.0.0.0:0` and KEEP it bound — the instrument for a test that needs a
+ * port to be genuinely UNAVAILABLE, rather than merely believed to be.
+ *
+ * Resolves with the port and its closer; `release()` resolves once the listener
+ * is fully closed, so a test can prove the negative arm and then the positive
+ * one on the same number.
+ *
+ * ⚠️ It lives HERE, in the shared helper, because two files need it now
+ * (`serve-port-bind-probe.test.ts` and `serve-port-readback.e2e.test.ts`) and
+ * this directory has already paid once for duplicating a port instrument: the
+ * three independent blind draws over two overlapping ranges that `reservePort()`
+ * above replaced. A second copy is how they drift.
+ */
+export function holdPort(): Promise<{ port: number; release: () => Promise<void> }> {
+  return new Promise((resolveHold, rejectHold) => {
+    const server: Server = createServer();
+    server.on('error', rejectHold);
+    server.listen(0, '0.0.0.0', () => {
+      const address = server.address();
+      if (address === null || typeof address === 'string') {
+        rejectHold(new Error(`listen(0) produced no numeric address: ${String(address)}`));
+        return;
+      }
+      resolveHold({
+        port: address.port,
+        release: () => new Promise<void>((done) => server.close(() => done())),
+      });
+    });
+  });
+}
+
+/**
  * `reservePort()` as a string, for the call sites that pass a port straight
  * into a `spawn()` argument list.
  *
@@ -220,6 +253,217 @@ export function portContentionError(
     + '⛔ This is a HOST race, not a verdict about the code under test. Do not spend a round '
     + 'deciding whether your change caused it — re-run this file in isolation. If it '
     + 'reproduces there, the port is genuinely held and the message above names it.\n'
+    + `--- child output ---\n${output}`,
+  );
+}
+
+/**
+ * ANSI colour, removed before the banner is read.
+ *
+ * `runServe()` pins `NO_COLOR=1` and a piped stderr is not a TTY, so a child
+ * spawned through this helper prints plain text either way. The strip is here
+ * because `opts.env` is applied AFTER those defaults, so a caller CAN turn
+ * colour back on — and it keeps the `API:` row quotable in the message below
+ * rather than echoing escape sequences at the reader.
+ *
+ * ⛔ The escape is BUILT (`String.fromCharCode(27)`), never typed. A raw
+ * control byte in a source file is what `pnpm check:nul-bytes` exists to stop:
+ * it renders as nothing and matches neither spelling in a search, so the next
+ * person greps for it and finds a file that looks fine.
+ */
+const ANSI_SGR = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, 'g');
+
+function stripAnsi(text: string): string {
+  return text.replace(ANSI_SGR, '');
+}
+
+/**
+ * The banner's own `API:` row — the ONE line of a healthy boot that names the
+ * address the child is reachable at.
+ *
+ * ⚠️ It carries the bound PORT only conditionally, which is why the read-back
+ * below has an `unreadable` state rather than a boolean. `serve.ts` builds the
+ * row from `resolveAuthBaseUrl(port).baseOrigin`, whose chain is `OS_AUTH_URL`
+ * → `BETTER_AUTH_URL` → `OS_BASE_URL` → `http://localhost:<port>`. So a child
+ * carrying any of those three prints an origin that is NOT what it bound, and
+ * an unparseable one prints paths with no origin at all. Measured on this tree
+ * (`f28f00fbd`): nothing under `packages/cli/test` and nothing in the runner
+ * environment sets any of the three, so every `runServe()` child today prints
+ * the `http://localhost:<port>` default.
+ */
+const BANNER_API_ROW = /^[^\n]*\bAPI:[^\n]*$/m;
+
+/**
+ * The banner's LAST line — the marker that says the WHOLE banner is in the
+ * buffer, which is what makes this read-back deterministic rather than racy.
+ *
+ * `printServerReady` prints the `API:` row first and this line last, both with
+ * `console.error`, and writes to one stream are ordered. So keying on the TAIL
+ * means: if this matched, the `API:` row is in the buffer, full stop. Keying on
+ * the HEAD (`Server is ready`) instead would make the read-back depend on
+ * whether the rest of the banner happened to land in the same pipe chunk — and
+ * a check that goes blind at random is worse than no check at all, because its
+ * silence reads as a pass.
+ */
+const BANNER_TAIL = /Press Ctrl\+C to stop/;
+
+/**
+ * The banner's FIRST line, used to bound the search rather than to trigger it.
+ *
+ * `runServe()` hands the whole captured buffer over — boot log included — and
+ * the `API:` row is matched by a line pattern, so a kernel line mentioning an
+ * API earlier in the boot would otherwise be found FIRST and answered on. The
+ * parse therefore looks only at the text from the banner's head onward.
+ */
+const BANNER_HEAD = 'Server is ready';
+
+/** What a child's ready banner says about the port it actually bound. */
+export type BannerPortReadback =
+  /** No COMPLETE ready banner in the output — the boot died, or never got there. */
+  | { state: 'no-banner' }
+  /** A complete banner whose `API:` row does not name a localhost port. */
+  | { state: 'unreadable'; apiRow: string }
+  /** The port the child is serving on, read out of its own banner. */
+  | { state: 'bound'; port: number };
+
+/**
+ * ⭐ Read the child's REAL bound port back out of its ready banner (#12525).
+ *
+ * ## The false green this removes
+ *
+ * `runServe()` spawns through `bin/run-dev.js`, which sets
+ * `process.env.NODE_ENV = 'development'` before argv is even parsed. That makes
+ * `serve.ts`'s `portAutoShiftAllowed` (`flags.dev || NODE_ENV ===
+ * 'development'`) TRUE for **every child this helper spawns**, and on that
+ * branch a taken port is not an error at all: `getAvailablePort()` walks to the
+ * next free port and the boot SUCCEEDS.
+ *
+ * ## ⚠️ The LOUD column is far narrower than it looks — measured, because the
+ * obvious reading of it is wrong
+ *
+ * `serve.ts:1318` is `flags.dev || process.env.NODE_ENV === 'development'`, and
+ * **either half alone opens the auto-shift branch**. So "spawned `bin/run.js`
+ * with `NODE_ENV` unset" does NOT put a spawner in the loud column — passing
+ * `--dev` re-opens it whatever the variable says (and `serve.ts:1300` then sets
+ * `NODE_ENV=development` in-process anyway). What a spawner needs to be loud is
+ * BOTH halves false:
+ *
+ *     spawn shape                                   taken port ⇒
+ *     no `--dev`, NODE_ENV not 'development'        hard exit 1 — loud, and
+ *                                                   `portContentionError()`
+ *                                                   above names it
+ *     `--dev`, whatever NODE_ENV                    SILENT drift, GREEN boot
+ *     `bin/run-dev.js` (NODE_ENV pinned at :28)     SILENT drift, GREEN boot
+ *
+ * Measured on this tree: `serve-node-env-production-default.e2e.test.ts` is the
+ * ONLY file in this directory that is in the loud row. Every `runServe()` child
+ * is in the silent one by the third route, and the three `serve-mcp-*` /
+ * `serve-stdio-*` spawners are in it by the second — they pass `--dev`, so the
+ * `bin/run.js` entry buys them nothing. ⛔ Do not restate the older reading
+ * ("`bin/run.js` + unset `NODE_ENV` ⇒ loud"): it is the sentence that made this
+ * population look half its real size, and it survived because `--dev` on those
+ * spawn lines predates the cards blamed for it and was simply never read.
+ *
+ * And the port `runServe()` hands over is an opaque element of an argv list, so
+ * until this read-back the harness never learned the child's real one. A test
+ * that then talks to the port it ASKED for reaches whatever else is holding it
+ * — on the container this fleet develops in, plausibly a neighbouring agent's
+ * dev server. So the port is read out of the CHILD's own banner and never
+ * inferred from what the harness passed in: that value is exactly what is wrong
+ * when a drift happens.
+ *
+ * ⛔ This is NOT an argument to make `os serve` stricter. Auto-shifting in
+ * development is correct and deliberate (#11113 pins the production half for
+ * its own reasons). The defect was that the test harness could not tell the
+ * difference.
+ */
+export function boundPortFromBanner(output: string): BannerPortReadback {
+  const text = stripAnsi(output);
+  const head = text.lastIndexOf(BANNER_HEAD);
+  // Falling back to the whole buffer when the head is missing is deliberate: it
+  // can only produce a LOUD `unreadable`, never a silent skip.
+  const banner = head === -1 ? text : text.slice(head);
+  if (!BANNER_TAIL.test(banner)) return { state: 'no-banner' };
+  const row = BANNER_API_ROW.exec(banner);
+  if (row === null) return { state: 'unreadable', apiRow: '(no `API:` row at all)' };
+  const address = /http:\/\/localhost:(\d+)\b/.exec(row[0]);
+  if (address === null) return { state: 'unreadable', apiRow: row[0].trim() };
+  return { state: 'bound', port: Number(address[1]) };
+}
+
+/**
+ * ⭐ The verdict half of the read-back: an `Error` when the child did not bind
+ * the port it was asked for — or when its banner cannot say — else `null`.
+ *
+ * Shaped like `portContentionError()` above and used at the same place, because
+ * it is the same host race seen through the other entrypoint: something took
+ * the port between this harness's bind probe and the child's `listen()`. The
+ * production column dies loudly and gets `portContentionError()`; the
+ * development column drifts and gets this.
+ *
+ * ## Why `unreadable` is an ERROR and not a skip
+ *
+ * A skip there would restore the exact shape this check removes: the harness
+ * looks, finds nothing, and hands back a green. An instrument that cannot
+ * answer has to SAY it could not answer. The one shape that reaches it today is
+ * a child carrying `OS_AUTH_URL` / `BETTER_AUTH_URL` / `OS_BASE_URL` (see
+ * `BANNER_API_ROW`), and the message names them.
+ *
+ * ## What it deliberately does NOT cover
+ *
+ * A boot that never printed a complete banner — it died, or the caller's
+ * `waitFor` matched something earlier, as `serve-no-artifact`'s
+ * `/Nothing to serve/` case does. Such a child announced no bound port, so
+ * there is nothing to compare and this returns `null`. Every `runServe()`
+ * caller that boots successfully today waits for `Press Ctrl+C to stop` — the
+ * banner tail — so all of them are covered.
+ */
+export function portDriftError(
+  output: string,
+  what: string,
+  requestedPort?: string | number,
+): Error | null {
+  if (requestedPort === undefined) return null;
+  const requested = Number(requestedPort);
+  // A non-numeric `--port` is `serve`'s own parse to complain about, not this
+  // harness's: there is no number to compare, so there is no verdict to give.
+  if (!Number.isInteger(requested)) return null;
+
+  const readback = boundPortFromBanner(output);
+  if (readback.state === 'no-banner') return null;
+
+  if (readback.state === 'unreadable') {
+    return new Error(
+      `CANNOT READ BACK THE BOUND PORT: \`${what}\` printed a ready banner whose \`API:\` row `
+      + 'does not name a `http://localhost:<port>` address, so this harness cannot tell whether '
+      + `the child bound the ${requested} it was asked for.\n`
+      + `  API row: ${readback.apiRow}\n`
+      + 'That row is `resolveAuthBaseUrl(port).baseOrigin` (`serve.ts`), so a child carrying '
+      + 'OS_AUTH_URL, BETTER_AUTH_URL or OS_BASE_URL prints THAT origin instead of the address it '
+      + 'bound — and this read-back channel goes with it.\n'
+      + '⛔ Reported rather than skipped on purpose (#12525): a silent skip here is the same '
+      + 'false green the read-back exists to remove.\n'
+      + `--- child output ---\n${output}`,
+    );
+  }
+
+  if (readback.port === requested) return null;
+
+  return new Error(
+    `PORT DRIFT on \`${what}\`: this harness asked for port ${requested} and the child BOUND `
+    + `port ${readback.port} — read back from the child's own ready banner.\n`
+    + '`bin/run-dev.js` pins `NODE_ENV=development` before argv is parsed, so `serve.ts`\'s '
+    + '`portAutoShiftAllowed` is true for every child spawned through this helper: a taken port '
+    + 'is not an error there, it is a hop to the next free one, and the boot then SUCCEEDS.\n'
+    + `So something else took ${requested} between this harness's bind probe and the child's `
+    + 'listen — the same residual close-to-spawn race `portContentionError()` above names when '
+    + 'the child is in production posture and dies loudly instead.\n'
+    + '⛔ This is a HOST race, not a verdict about the code under test. Re-run this file in '
+    + 'isolation.\n'
+    + '⛔ And do not answer it by relaxing this check. Without it the run is a FALSE GREEN: the '
+    + 'child boots, every assertion on its output passes, and anything that afterwards talks to '
+    + `port ${requested} reaches whatever else is holding it — on this container, plausibly a `
+    + 'neighbouring agent\'s dev server.\n'
     + `--- child output ---\n${output}`,
   );
 }
@@ -417,10 +661,18 @@ export interface ServeRun {
  * The port a caller asked for, read back out of its own `args`.
  *
  * `runServe` takes the port as an opaque argv element rather than a parameter,
- * so this is how it learns which port it probed — for the message only, never
- * for the verdict (`portContentionError` reads the contended port out of the
- * child's own diagnostic). `undefined` when the caller passed no `--port`,
- * which just drops one sentence from the message.
+ * so this is how it learns which port it asked for. `undefined` when the caller
+ * passed no `--port`.
+ *
+ * ⚠️ The two consumers use it for OPPOSITE things, and the difference is the
+ * whole point of #12525:
+ *
+ *   • `portContentionError` — for the MESSAGE only. The contended port is read
+ *     out of the child's own diagnostic, because whatever the harness thought
+ *     it reserved, the number the child printed is the one that was contended.
+ *   • `portDriftError` — as the EXPECTATION to check the child's banner
+ *     against. It is the one thing a drift makes wrong, which is exactly why it
+ *     is compared with the child's real port rather than trusted as it.
  */
 function portOf(args: string[]): string | undefined {
   for (const flag of ['--port', '-p']) {
@@ -437,13 +689,23 @@ function portOf(args: string[]): string | undefined {
  * A boot that DIES still has to have said why, so an early exit resolves rather
  * than rejects — the caller's assertions read what it printed on the way down.
  *
- * ⭐ ONE narrow exception to that, and it is deliberate (#12441): a boot that
- * died because it could not BIND rejects, with `portContentionError()`'s
- * message. That death says nothing about the code under test, and letting it
- * resolve hands the caller an output buffer whose assertions then fail on
- * whatever marker is missing — which is the illegible shape the card measured.
- * No test in this directory drives a deliberately-busy port, so nothing is
- * asserting on the resolved form of it.
+ * ⭐ TWO narrow exceptions to that, both deliberate, and they are the same host
+ * race seen from the two sides of `serve`'s port policy:
+ *
+ *   • A boot that DIED because it could not bind rejects with
+ *     `portContentionError()`'s message (#12441). That death says nothing about
+ *     the code under test, and letting it resolve hands the caller an output
+ *     buffer whose assertions then fail on whatever marker is missing — the
+ *     illegible shape that card measured.
+ *   • A boot that SUCCEEDED on a port other than the one it was asked for
+ *     rejects with `portDriftError()`'s message (#12525). Children spawned here
+ *     run with `NODE_ENV=development` pinned by `bin/run-dev.js`, so this is the
+ *     branch they actually take when the port is taken: `serve` hops to the next
+ *     free port and boots clean. Read the docblock there for why a green is the
+ *     more expensive outcome of the two.
+ *
+ * Only the SECOND needs the caller to have passed `--port`; both read the
+ * child's own output for the port they name, never the harness's expectation.
  *
  * `waitFor` is matched against **stdout and stderr together** (#7915). `serve`
  * writes every human line — banner, boot progress, kernel logs — to stderr now,
@@ -499,13 +761,19 @@ export function runServe(
         rejectRun(err);
         return;
       }
-      const contended = portContentionError(
-        stdout + stderr,
-        'os serve (bin/run-dev.js, via runServe)',
-        portOf(args),
-      );
+      const what = 'os serve (bin/run-dev.js, via runServe)';
+      const contended = portContentionError(stdout + stderr, what, portOf(args));
       if (contended) {
         rejectRun(contended);
+        return;
+      }
+      // ⭐ #12525 — the child may equally have bound a DIFFERENT port and
+      // succeeded. `bin/run-dev.js` pins `NODE_ENV=development`, so the branch
+      // above (a loud refusal to bind) is not the one these children take; this
+      // is. See `portDriftError`.
+      const drifted = portDriftError(stdout + stderr, what, portOf(args));
+      if (drifted) {
+        rejectRun(drifted);
         return;
       }
       resolveRun({ stdout, stderr });
