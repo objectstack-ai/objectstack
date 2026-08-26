@@ -204,16 +204,39 @@ function packageNameOf(specifier: string): string | undefined {
 }
 
 /**
- * Resolve one level of `const X = '<literal>'` — the idiom `serve.ts` uses
- * everywhere to keep `tsc` from statically resolving an optional package
- * (`const i18nPkg = '@objectstack/service-i18n'`). Without this the sweep would
- * see only an identifier and classify every optional load as unknowable.
+ * Resolve `const X = '<literal>'` — the idiom `serve.ts` uses everywhere to keep
+ * `tsc` from statically resolving an optional package
+ * (`const i18nPkg = '@objectstack/service-i18n'`) — and one further hop,
+ * `const X = Serve.MEMBER`, where `MEMBER` is a `static readonly` string on the
+ * command class in this same file. Without this the sweep sees only an
+ * identifier and classifies the load as unknowable.
+ *
+ * The second hop is not a convenience. #11614 single-sourced the
+ * `@objectstack/organizations` spelling onto `Serve.ORGANIZATIONS_RUNTIME_PKG`
+ * so the spec-owned provenance roster could pin it, and a resolver that stops
+ * one hop short turns that load from "app-declarable, host-anchored, checked"
+ * into "unknowable" — SILENTLY, because an unresolved specifier drops OUT of
+ * `APP_DECLARABLE_LOADS` rather than into it. The named half of the vacuity
+ * guard below is what caught that, and is why it names packages instead of only
+ * counting them. Resolving one hop further strictly WIDENS what the sweep
+ * judges; it can never excuse a load.
  */
 function resolveIdentifier(code: string, name: string): string | undefined {
-  const m = code.match(
+  const direct = code.match(
     new RegExp(`\\bconst\\s+${name}\\s*(?::\\s*string\\s*)?=\\s*(['"\`])([^'"\`]*)\\1`),
   );
-  return m?.[2];
+  if (direct) return direct[2];
+
+  // `const organizationsPkg = Serve.ORGANIZATIONS_RUNTIME_PKG;` (#11614)
+  const viaStatic = code.match(
+    new RegExp(`\\bconst\\s+${name}\\s*(?::\\s*string\\s*)?=\\s*Serve\\.([A-Za-z_$][\\w$]*)\\s*;`),
+  );
+  if (!viaStatic) return undefined;
+
+  const member = code.match(
+    new RegExp(`\\bstatic\\s+readonly\\s+${viaStatic[1]}\\s*(?::\\s*string\\s*)?=\\s*(['"\`])([^'"\`]*)\\1`),
+  );
+  return member?.[2];
 }
 
 /** Every dynamic load in `serve.ts`, bare or host-anchored. */
@@ -453,14 +476,18 @@ describe('os serve → every app-declarable optional load is host-anchored', () 
       "packages/cli's manifest read as empty — every package would look app-declarable",
     ).toBeGreaterThan(20);
 
-    // Named, not just counted: this proves the resolver still handles all three
-    // spellings serve.ts uses — a `const` binding, a template prefix, and the
-    // manifest cross-check that decides app-declarable at all.
+    // Named, not just counted: this proves the resolver still handles every
+    // spelling serve.ts uses — a `const` binding, a template prefix, a `const`
+    // bound to a class static, and the manifest cross-check that decides
+    // app-declarable at all. Naming them is what caught #11614: the
+    // organizations spelling moved onto a static, the resolver stopped one hop
+    // short, and that load dropped OUT of the swept population — which the
+    // count-only floor of >20 absorbed without a word.
     const found = new Set(APP_DECLARABLE_LOADS.map((s) => s.packageName));
     for (const pkg of [
       '@objectstack/service-cluster',    // const binding   (#10645)
       '@objectstack/service-cluster-',   // template prefix (#10645, the driver)
-      '@objectstack/organizations',      // const binding   (cloud#1013)
+      '@objectstack/organizations',      // const <- static (cloud#1013, #11614)
       '@objectstack/service-i18n',       // const binding   (#10769)
     ]) {
       expect(found, `the sweep no longer sees the ${pkg} load`).toContain(pkg);

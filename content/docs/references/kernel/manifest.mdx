@@ -52,6 +52,91 @@ const result = ManifestSchema.parse(data);
 | **packaging** | `Enum<'bundled' \| 'manifest-deps'>` | optional | Dependency packaging strategy (ADR-0025 §3.3) |
 | **integrity** | `Record<string, string>` | optional | Per-file content digests of the plugin artifact (ADR-0025 §3.2) |
 
+### Nested Shape: `Manifest.permissions`
+
+Structured plugin permission grants (ADR-0025 §3.2)
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **services** | `string[]` | optional | Platform services the plugin may resolve (e.g. "object", "http") |
+| **hooks** | `string[]` | optional | Lifecycle hooks the plugin may register (e.g. "record.beforeInsert") |
+| **network** | `string[]` | optional | Network hosts the plugin may reach (e.g. "api.acme.com") |
+| **fs** | `string[]` | optional | Filesystem paths the plugin may access |
+
+### Nested Shape: `Manifest.configuration`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **title** | `string` | optional |  |
+| **properties** | `Record<string, { type: Enum<'string' \| 'number' \| 'boolean' \| 'array' \| 'object'>; default?: any; description?: string; required?: boolean; … }>` | ✅ | Map of configuration keys to their definitions |
+
+### Nested Shape: `Manifest.contributes`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **kinds** | `{ id: string; description?: string }[]` | optional | Metadata kind identifiers this package registers |
+| **events** | `never` | optional | [REMOVED] `manifest.contributes.events` was removed in @objectstack/spec 17 (#10724, ADR-0049 enforce-or-remove) — nothing ever read the list: its only in-repo author already subscribed imperatively in plugin code, so the declaration was decorative. Delete the key. Subscribe to system events in the plugin itself — `ctx.hook('kernel:ready', …)` (or the events service) from `init`/`start` is the enforced channel; record lifecycle hooks register on the data engine. |
+| **menus** | `never` | optional | [REMOVED] `manifest.contributes.menus` was removed in @objectstack/spec 17 (#10724, ADR-0049 enforce-or-remove) — no renderer ever read it; two alias maps already redirected this spelling to `navigation`. Delete the key. Declare navigation in the app's `navigation` tree, or inject items into another package's app via `manifest.navigationContributions` (ADR-0029 D7), which the engine registers. |
+| **themes** | `never` | optional | [REMOVED] `manifest.contributes.themes` was removed in @objectstack/spec 17 (#10724, ADR-0049 enforce-or-remove) — it never had an effect: theme registration reaches the registry only through the stack-level `themes` collection (a `ThemeSchema` surface, unrelated to this `{ id, label, path }` shape), never through `contributes.themes`. Delete the key; declare themes in the stack `themes` collection instead. |
+| **translations** | `never` | optional | [REMOVED] `manifest.contributes.translations` was removed in @objectstack/spec 17 (#10724, ADR-0049 enforce-or-remove) — no loader ever read these `{ locale, path }` entries; authoring them registered no translations. Delete the key. Declare translations as `translation` metadata: `defineTranslationBundle({ … })` in the stack's `translations` collection (`defineStack({ translations: […] })`), which the engine registers and the i18n pipeline serves. |
+| **actions** | `never` | optional | [REMOVED] `manifest.contributes.actions` was removed in @objectstack/spec 17 (#10724, ADR-0049 enforce-or-remove) — nothing ever read it; actions declared here were never invocable. Delete the key. Declare actions in the stack `actions` collection (registered by the engine) or register imperatively via `engine.registerAction`. |
+| **drivers** | `never` | optional | [REMOVED] `manifest.contributes.drivers` was removed in @objectstack/spec 17 (#10724, ADR-0049 enforce-or-remove) — it never had an effect: a storage driver is wired by registering a kernel SERVICE named `driver.*` (the objectql plugin picks it up and calls `registerDriver`), and its only in-repo author was registered that way, not by this declaration. Delete the key. |
+| **fieldTypes** | `never` | optional | [REMOVED] `manifest.contributes.fieldTypes` was removed in @objectstack/spec 17 (#10724, ADR-0049 enforce-or-remove) — there is no `registerFieldType` seam anywhere: the declaration advertised an extension point the platform does not have, so authoring it configured nothing. Delete the key. The field-type vocabulary is the spec `FieldType` enum; extending it is a spec change, not a manifest declaration. |
+| **functions** | `never` | optional | [REMOVED] `manifest.contributes.functions` was removed in @objectstack/spec 17 (#10724, ADR-0049 enforce-or-remove) — nothing ever read it; ObjectQL functions declared here were never registered. Delete the key. Declare functions on the stack (`defineStack({ functions: […] })`), which the hook binder registers via `engine.registerFunction`. |
+| **routes** | `{ prefix: string; service: string; methods?: string[] }[]` | optional | API route contributions to HttpDispatcher |
+| **commands** | `never` | optional | [REMOVED] `manifest.contributes.commands` was removed in @objectstack/spec 17 (#10724, ADR-0049 enforce-or-remove) — the CLI never resolved commands from this declaration: commands are auto-discovered through oclif's native plugin system (the plugin package declares an `oclif` section in its own `package.json`; see `cli-extension.zod.ts`), and the `objectstack.config.ts` plugins array no longer determines CLI commands. Delete the key. |
+
+### Nested Shape: `Manifest.data[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **object** | `string` | ✅ | Target Object Name |
+| **externalId** | `string \| string[]` | optional (default: `"name"`) | Field (or composite list of fields) matched for the uniqueness check |
+| **mode** | `Enum<'insert' \| 'update' \| 'upsert' \| 'replace' \| 'ignore'>` | optional (default: `"upsert"`) | Conflict resolution strategy |
+| **env** | `Enum<'prod' \| 'dev' \| 'test'>[]` | optional (default: `["prod","dev","test"]`) | Applicable environments |
+| **records** | `Record<string, any>[]` | ✅ | Data records |
+| **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
+| **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
+| **_lockSource** | `Enum<'artifact' \| 'package' \| 'env-forced'>` | optional | Layer that set _lock (artifact \| package \| env-forced). |
+| **_provenance** | `Enum<'package' \| 'org' \| 'env-forced'>` | optional | Origin of the item (package \| org \| env-forced). |
+| **_packageId** | `string` | optional | Owning package machine id. |
+| **_packageVersion** | `string` | optional | Owning package version. |
+| **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
+
+### Nested Shape: `Manifest.capabilities`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **implements** | `{ protocol: object; conformance?: Enum<'full' \| 'partial' \| 'experimental' \| 'deprecated'>; implementedFeatures?: string[]; features?: object[]; … }[]` | optional | List of protocols this plugin conforms to |
+| **provides** | `{ id: string; name: string; description?: string; version: object; … }[]` | optional | Services/APIs this plugin offers to others |
+| **requires** | `{ pluginId: string; version: string; optional?: boolean; reason?: string; … }[]` | optional | Required plugins and their capabilities |
+| **extensionPoints** | `{ id: string; name: string; description?: string; type: Enum<'action' \| 'hook' \| 'widget' \| 'provider' \| 'transformer' \| 'validator' \| 'decorator'>; … }[]` | optional | Points where other plugins can extend this plugin |
+| **extensions** | `{ targetPluginId: string; extensionPointId: string; implementation: string; priority?: integer }[]` | optional | Extensions contributed to other plugins |
+
+### Nested Shape: `Manifest.navigationContributions[number]`
+
+A navigation contribution: a package injecting nav items into an app it does not own (ADR-0029 D7)
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **app** | `string` | ✅ | Target app name to contribute navigation into (e.g. "setup") |
+| **group** | `string` | optional | Target group nav-item id to append into (e.g. "group_integrations"); omit to append at the app top level |
+| **priority** | `integer` | optional (default: `200`) | Merge priority within the target group — lower applied first (matches object extender priority) |
+| **items** | `({ id: string; label: string \| Record<string, string>; icon?: string; order?: number; … } \| { type: 'separator'; id?: string; order?: number } \| … +7 more)[]` | ✅ | Navigation items contributed into the target app/group |
+
+### Nested Shape: `Manifest.engine`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **objectstack** | `string` | ✅ | ObjectStack platform version requirement (SemVer range, e.g. ">=3.0.0") |
+
+### Nested Shape: `Manifest.engines`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **platform** | `string` | optional | ObjectStack platform release range (SemVer, e.g. ">=4.0 &lt;5") |
+| **protocol** | `string` | optional | Runtime/metadata protocol range, checked first (ADR §3.10 #3) |
+
 
 ---
 

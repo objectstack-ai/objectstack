@@ -3,8 +3,6 @@ title: Client SDK
 description: The official TypeScript client for ObjectStack — auto-discovery, typed metadata, CRUD, batch operations, and service-aware feature detection.
 ---
 
-# Client SDK
-
 The `@objectstack/client` is the official TypeScript client for ObjectStack. It provides a typed, protocol-aware interface that automatically adapts to your server's available services.
 
 ## Features
@@ -26,42 +24,48 @@ pnpm add @objectstack/client
 ```
 
 {/*
-  CONTRIBUTOR NOTE — none of this page's TypeScript fences carries an
-  `os:check` marker, and that is a recorded decision rather than an omission.
+  CONTRIBUTOR NOTE — three of this page's fences carry an `os:check` marker and
+  are compiled by `check:skill-examples` against the real SDK declarations; the
+  rest deliberately do not. Both halves are measured, not assumed.
 
-  `check:skill-examples` compiles marked blocks per SURFACE. `content/docs/**`
-  belongs to the "skills + docs" surface, whose resolution dir and `paths` map
-  are derived from `@objectstack/spec` alone — and `@objectstack/spec` does not
-  depend on `@objectstack/client`. So a marker on any fence that imports the SDK
-  reds with TS2307 "Cannot find module '@objectstack/client'" — a
-  surface-resolution gap, not doc-vs-SDK drift.
+  This page belongs to the client-SDK SURFACE, not to the broad
+  `content/docs/**` one. That surface resolves `@objectstack/client`,
+  `@objectstack/client-react` and react's real types, so a marked block here
+  imports the SDK exactly as a reader's own code does. It was not always so:
+  `content/docs/**` resolves against `@objectstack/spec` alone, spec does not
+  depend on the client, and every SDK import here used to red with TS2307
+  "Cannot find module '@objectstack/client'". The page is carved out by name
+  (`SDK_DOCS_PAGES` in packages/spec/scripts/check-skill-examples.ts) — moving
+  or renaming it without updating that list fails the gate loudly rather than
+  silently returning the page to the surface that cannot resolve it.
 
-  Every other fence is a deliberate continuation fragment: Quick Start
-  establishes `client` once and each later block continues that implied context,
-  so a marker there reds with TS2304 "Cannot find name 'client'". Making either
-  class compile would mean hand-declaring the SDK's own types, or injecting
-  casts into prose whose subject IS the real API — pinning each example to
-  itself and teaching worse code than the page teaches now.
+  What IS marked: Quick Start, the `createFilter()` builder chain, and the
+  React Hooks block — the three that stand alone. What is not: every block that
+  continues Quick Start's implied context. Quick Start establishes `client`
+  once and each later block reads it, so a marker there reds with TS2304
+  "Cannot find name 'client'"; the error-handling blocks additionally read a
+  `catch` binding that is `unknown` (TS18046). Making those compile would mean
+  hand-declaring the SDK's own types or injecting casts into prose whose
+  subject IS the real API — pinning each example to itself and teaching worse
+  code than the page teaches now.
 
-  Measured on this page (all 13 fences marked, then reverted): 128 diagnostics,
-  every one TS2307 / TS2304 / TS18004 / TS18046 / TS2591 / TS7006 / TS7026 /
-  TS2875. Not one was a doc-vs-SDK divergence.
+  Measured with all 13 fences marked, then reverted: 114 diagnostics, TS2304 /
+  TS18046 / TS18004 / TS2591, spread over the nine continuation blocks — and
+  ZERO TS2307. Before the carve-out the same sweep produced 128 diagnostics
+  including TS2307 on every SDK import. Not one diagnostic in either sweep was
+  a doc-vs-SDK divergence; that is what the three marked blocks now hold.
 
-  The React Hooks block near the end is fenced tsx, not typescript, because it
-  IS JSX: the gate writes every block out with its fence's own extension, and
-  JSX in a .ts file is a syntax error. That reaches past this page — tsc stops
-  at syntax errors and never runs the semantic pass, so one such block would
-  suppress type-checking for every marked block across skills/ and
-  content/docs/ (measured here: 128 semantic diagnostics collapse to 0). Please
-  do not retag it back.
-
-  The marker becomes worth adding here the day the docs surface can resolve
-  `@objectstack/client` — the same condition recorded in
-  content/docs/kernel/runtime-services/data-service.mdx.
+  The React Hooks block is fenced tsx, not typescript, because it IS JSX: the
+  gate writes every block out with its fence's own extension, and JSX in a .ts
+  file is a syntax error. That reaches past this page — tsc stops at syntax
+  errors and never runs the semantic pass, so one such block would suppress
+  type-checking for every marked block on its whole surface. Please do not
+  retag it back.
 */}
 
 ## Quick Start
 
+{/* os:check */}
 ```typescript
 import { ObjectStackClient } from '@objectstack/client';
 
@@ -515,6 +519,7 @@ const results = await client.data.query('account', query);
 
 The `FilterBuilder` provides a rich set of filter methods:
 
+{/* os:check */}
 ```typescript
 import { createFilter } from '@objectstack/client';
 
@@ -671,6 +676,7 @@ For React applications, use `@objectstack/client-react`:
 pnpm add @objectstack/client-react
 ```
 
+{/* os:check */}
 ```tsx
 import { ObjectStackProvider, useClient, useQuery } from '@objectstack/client-react';
 import { ObjectStackClient } from '@objectstack/client';

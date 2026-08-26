@@ -132,6 +132,11 @@ export type {
   PackagedSetVerdict,
   LayeredProbe,
 } from './packaged-permission-set-lock.js';
+// [#11843 — maintainer ruling 2026-08-25, option B] The lock's METADATA-door
+// registration: the pre-persistence authoring-gate seam consults the SAME
+// classifier and throws the SAME error classes as the data door above.
+export { registerPackagedPermissionSetLockGate } from './packaged-permission-set-lock-gate.js';
+export type { PermissionSetLockGateContext } from './packaged-permission-set-lock-gate.js';
 export {
   OVERLAY_PAGE_LIMIT,
   detectPackagedPermissionSetOverlays,

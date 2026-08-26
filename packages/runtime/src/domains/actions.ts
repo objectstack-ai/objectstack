@@ -14,6 +14,16 @@
  *  - `POST /actions/:object/:action/:recordId`    — record-scoped action with id in URL
  *  - `POST /actions/global/:action`               — object-less ("global") action
  *  - `POST /actions//:action`                     — object-less action, empty segment
+ *  - `POST /actions/_activation/:object/:action`  — [ADR-0126 §8] enable/disable
+ *      the PACKAGED action: one `sys_metadata_activation` row, gated by
+ *      `manage_metadata` + the §5 platform-operator posture rule. The only
+ *      non-invocation shape here, and the only one whose first segment cannot
+ *      be a name (machine names cannot start with `_`).
+ *
+ * Every invocation shape above consults that ledger once the declaration is
+ * resolved: a packaged action switched off for this installation is refused
+ * `409 ACTION_DISABLED` before anything dispatches (`disabledActionRefusal`,
+ * `../action-execution.ts`, which the MCP `run_action` bridge calls too).
  *
  * The route dispatches on the declared action TYPE (#3915), the same way the
  * MCP `run_action` bridge does — `script` through the handler registry,
@@ -53,9 +63,281 @@ import {
 } from '@objectstack/core';
 import * as actionExec from '../action-execution.js';
 import { actorUserFromExecutionContext, resolveActorDisplayName } from '../security/actor-user.js';
-import { validationFailureDetails } from '../validation-failure.js';
+import { validationFailure, validationFailureDetails, VALIDATION_FAILED_STATUS } from '../validation-failure.js';
+// [ADR-0126 §5] The shared activation write-authority gates — the same two
+// tiers `/automation`'s toggle door passes, one implementation.
+import {
+    refuseUngrantedActivationWrite,
+    refuseUngrantedActivationAuthoring,
+    ACTION_ACTIVATION_SUBJECT,
+} from './activation-gate.js';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
+
+/**
+ * [ADR-0126 §8 item 2] The reserved first segment of the activation door,
+ * `POST /actions/_activation/:object/:action`.
+ *
+ * ## Why a leading underscore, and why the FIRST segment
+ *
+ * Every other shape this domain serves is an INVOCATION, and the segments are
+ * caller-supplied names: `/:object/:action`, `/:object/:action/:recordId`. A
+ * door spelled as a deeper segment (`/:object/:action/toggle`) would sit in the
+ * `recordId` position, where the value is an arbitrary string — so a record
+ * whose id is literally `toggle` would collide with it, and the collision would
+ * be silent. The first segment cannot collide with anything: object and action
+ * machine names are `SnakeCaseIdentifierSchema`, `^[a-z][a-z0-9_]*$`, which
+ * cannot begin with `_`. So `_activation` is unreachable as an object name, and
+ * `/actions/_activation` is unreachable as an object-less invocation of an
+ * action named `_activation`.
+ *
+ * The predicate has **no upper bound on depth**, deliberately, and matches the
+ * arm exactly: the `/automation` toggle gate records what a mismatch costs — "a
+ * gate narrower than its route is a bypass and a gate wider than its route is
+ * an over-block". Everything under `_activation` is gated here; the arm itself
+ * refuses a wrong-shaped path with a 400 that names the shape.
+ */
+const ACTION_ACTIVATION_SEGMENT = '_activation';
+
+function isActionActivationWrite(parts: string[], method: string): boolean {
+    return method === 'POST' && parts[0] === ACTION_ACTIVATION_SEGMENT;
+}
+
+/**
+ * [ADR-0126 §8 item 2] `POST /actions/_activation/:object/:action` — flip one
+ * packaged action's install-level activation row.
+ *
+ * ## What this door writes, and what it deliberately does not
+ *
+ * One `sys_metadata_activation` row: `metadata_type: 'action'`, the action's
+ * declarative NAME, its package, `active`. ⛔ No definition is touched (§6 wall
+ * 2: `sys_metadata` stays the sole definition ledger), ⛔ no clone is created —
+ * the action-clone half is NOT chartered (§8 item 2), so this door has no
+ * sibling that authors anything.
+ *
+ * ## Order of operations, and why each step is where it is
+ *
+ *  1. **Both authority gates, first.** `manage_metadata` (#10243: switching a
+ *     shipped artifact off is functionally equivalent to deleting it), then the
+ *     ADR-0126 §5 posture gate. Ahead of the body checks and ahead of any
+ *     lookup, so a refused caller writes nothing and learns nothing — neither
+ *     the body contract nor whether the named action exists here.
+ *  2. **Body contract.** `{ enabled?: boolean }`, unknown keys refused. The
+ *     flow toggle's #3899 lesson verbatim: on an unchecked body `{"enable":
+ *     false}` — one letter off — ENABLED the artifact and answered 200, and the
+ *     caller trying to switch something OFF is exactly the caller this must not
+ *     silently invert.
+ *  3. **Declaration**, through the SAME `resolveRouteActionDeclaration` the
+ *     invocation door uses, so the two can never disagree about which actions
+ *     exist. Unknown → 404 (the #7535 shape: a typo must not read as a server
+ *     fault), metadata plane unavailable → 503 (an outage is not a verdict).
+ *  4. **Ambiguity refusal.** The ledger addresses an artifact by machine name
+ *     (§4). Two objects declaring the same action name therefore address ONE
+ *     row, so this refuses instead of silently switching both off.
+ *  5. **The durable write**, through the engine, which writes the row before
+ *     touching its projection.
+ *
+ * ⛔ It does not require the action to be PACKAGED. Neither does the flow
+ * toggle: a row for a runtime-authored artifact is harmless (absence means
+ * active, and the row records a real administrator choice), while a
+ * provenance test here would refuse the flip for anything the registry cannot
+ * classify — failing closed on the wrong axis.
+ */
+async function handleActionActivationWrite(
+    deps: DomainHandlerDeps,
+    ql: any,
+    parts: string[],
+    body: any,
+    context: HttpProtocolContext,
+): Promise<HttpDispatcherResult> {
+    // ── 1. authority ────────────────────────────────────────────────────────
+    const authoringRefusal = refuseUngrantedActivationAuthoring(deps, context, ACTION_ACTIVATION_SUBJECT);
+    if (authoringRefusal) return authoringRefusal;
+    const postureRefusal = await refuseUngrantedActivationWrite(deps, context, ACTION_ACTIVATION_SUBJECT);
+    if (postureRefusal) return postureRefusal;
+
+    // The shape, refused with the shape named. `parts` is
+    // `['_activation', object, action]` — the object segment is mandatory even
+    // for an object-less action, which spells it `global` exactly as the
+    // invocation door does (#3913).
+    if (parts.length !== 3 || !parts[1] || !parts[2]) {
+        return {
+            handled: true,
+            response: deps.error(
+                'Path must be /actions/_activation/:object/:action (use `global` for an object-less action)',
+                400,
+            ),
+        };
+    }
+    const objectName = parts[1];
+    const actionName = parts[2];
+
+    // ── 2. body ─────────────────────────────────────────────────────────────
+    // Built through the shared `validationFailure` constructor and its own
+    // `details` reader, so this door's 400s carry the same `VALIDATION_FAILED`
+    // envelope and `fields[]` shape as every other one — ⛔ never a hand-rolled
+    // details literal that agrees with them by eye (#3878/#3899).
+    const invalidBody = (
+        message: string,
+        fields: Array<{ field: string; code: string; message: string }>,
+    ): HttpDispatcherResult => ({
+        handled: true,
+        response: deps.error(message, VALIDATION_FAILED_STATUS, validationFailureDetails(validationFailure(message, fields))),
+    });
+
+    const toggleBody = body ?? {};
+    if (typeof toggleBody !== 'object' || Array.isArray(toggleBody)) {
+        return invalidBody('Invalid activation body — expected { enabled?: boolean }', [
+            { field: '(body)', code: 'invalid_type', message: 'expected an object' },
+        ]);
+    }
+    const unknownKeys = Object.keys(toggleBody).filter((k) => k !== 'enabled');
+    if (unknownKeys.length > 0) {
+        return invalidBody(
+            `Unknown key${unknownKeys.length > 1 ? 's' : ''} ${unknownKeys.map((k) => `\`${k}\``).join(', ')} — the activation body is { enabled?: boolean }`,
+            // `unknown_field` — the ADR-0114 catalog member for "a key the
+            // target does not declare".
+            unknownKeys.map((k) => ({
+                field: k,
+                code: 'unknown_field',
+                message: 'not an activation field — did you mean `enabled`?',
+            })),
+        );
+    }
+    if ('enabled' in toggleBody && typeof (toggleBody as Record<string, unknown>).enabled !== 'boolean') {
+        return invalidBody('`enabled` must be a boolean (JSON true/false, not a string)', [
+            { field: 'enabled', code: 'invalid_type', message: 'expected a boolean' },
+        ]);
+    }
+    const enabled = (toggleBody as { enabled?: boolean }).enabled ?? true;
+
+    // ── 3. declaration ──────────────────────────────────────────────────────
+    const declaration = await actionExec.resolveRouteActionDeclaration(deps, context, {
+        ql,
+        objectName,
+        actionName,
+        envId: context?.environmentId,
+    });
+    if (declaration.degraded) {
+        return {
+            handled: true,
+            response: deps.error(
+                `Cannot verify the declaration for action '${actionName}' on '${objectName}' — the metadata plane is ` +
+                `unavailable (${declaration.reason ?? 'unknown failure'}). Refusing rather than writing an activation ` +
+                `row for an action nobody can confirm exists.`,
+                503,
+            ),
+        };
+    }
+    if (!declaration.action) {
+        return {
+            handled: true,
+            response: deps.error(
+                `Action '${actionName}' on '${objectName}' has no declaration — there is nothing to switch ` +
+                `${enabled ? 'on' : 'off'}. The activation ledger addresses DECLARED actions (ADR-0126 §4).`,
+                404,
+            ),
+        };
+    }
+
+    // ── 4. ambiguity ────────────────────────────────────────────────────────
+    const ambiguity = await refuseAmbiguousActionActivation(deps, context, actionName, objectName);
+    if (ambiguity) return ambiguity;
+
+    // ── 5. the durable write ────────────────────────────────────────────────
+    const packageId = String(
+        (declaration.action as { _packageId?: unknown })?._packageId ??
+        (declaration.obj as { _packageId?: unknown } | undefined)?._packageId ??
+        '',
+    );
+    if (typeof ql.setActionActive !== 'function') {
+        // An engine too old to carry the projection cannot make this durable,
+        // and a 200 here would report a switch that never existed.
+        return {
+            handled: true,
+            response: deps.error(
+                `This deployment's data engine does not implement the packaged-metadata activation ledger ` +
+                `(ADR-0126 §8), so a packaged action cannot be switched off here.`,
+                501,
+            ),
+        };
+    }
+    try {
+        await ql.setActionActive({ name: actionName, packageId, active: enabled });
+    } catch (err: any) {
+        // The engine declares its own class for the one refusal it raises (no
+        // ledger attached → 503 SERVICE_UNAVAILABLE); anything else is a store
+        // failure, and a failed write must never read as a successful flip.
+        const status = typeof err?.status === 'number' ? err.status : 503;
+        const code = typeof err?.code === 'string' ? err.code : 'SERVICE_UNAVAILABLE';
+        return {
+            handled: true,
+            response: deps.error(err?.message ?? String(err), status, { code }),
+        };
+    }
+    return { handled: true, response: deps.success({ name: actionName, objectName, enabled }) };
+}
+
+/**
+ * [ADR-0126 §4] Refuse a flip whose NAME does not identify one action.
+ *
+ * The ledger's row identity is `(metadata_type, name, organization_id)` — one
+ * row per machine name — and ADR-0110 D1 says the same about actions: identity
+ * is the declarative `name`. Two objects may nevertheless declare the same
+ * action name, and then one row would address both. The three ways out were
+ * weighed and only this one is honest:
+ *
+ *   - encoding `<object>:<name>` into the `name` column puts two facts in a
+ *     column declared to hold one, and the ADR is explicit that a new dimension
+ *     is an ADDITIVE column later, never a smuggled encoding (§4, §5);
+ *   - disabling both is a silent cross-artifact effect — the class of failure
+ *     this whole regime exists to close;
+ *   - refusing names the conflict at the moment of the attempt, which is the
+ *     posture §5 already prescribes for the per-org case ("refuses loudly at
+ *     the moment of the attempt, naming the trigger type — never a silent
+ *     fallback").
+ *
+ * Measured before choosing: name collisions across objects are rare in the
+ * platform's own catalog, so this refuses an edge case rather than the common
+ * path. `RESOURCE_CONFLICT` is the standard-catalog member for it — ⛔ no new
+ * error code is minted for a case that already has one.
+ *
+ * Best-effort by construction: the collection needs a metadata service, and a
+ * deployment without one cannot enumerate declarations at all. It then flips
+ * the row the caller asked for rather than inventing a conflict — the same
+ * posture `resolveActionByName` takes when it cannot see a second declaration.
+ */
+async function refuseAmbiguousActionActivation(
+    deps: DomainHandlerDeps,
+    context: HttpProtocolContext,
+    actionName: string,
+    objectName: string,
+): Promise<HttpDispatcherResult | undefined> {
+    let declarations: Array<{ action: any; objectName: string }> = [];
+    try {
+        const meta = await deps.resolveService(context, 'metadata', context?.environmentId);
+        if (!meta) return undefined;
+        declarations = await actionExec.collectActionDeclarations(deps, meta);
+    } catch {
+        return undefined; // cannot enumerate → no conflict can be asserted
+    }
+    const owners = [...new Set(
+        declarations.filter((d) => d.action?.name === actionName).map((d) => d.objectName),
+    )];
+    if (owners.length < 2) return undefined;
+
+    return {
+        handled: true,
+        response: deps.error(
+            `Action '${actionName}' is declared on ${owners.length} objects (${owners.map((o) => `'${o}'`).join(', ')}), ` +
+            `and the activation ledger addresses an action by its machine name (ADR-0126 §4) — one row would switch ` +
+            `every one of them, not just the one on '${objectName}'. Refusing rather than changing artifacts you did ` +
+            `not name. Give the actions distinct machine names, or leave them armed.`,
+            409,
+            { code: 'RESOURCE_CONFLICT' },
+        ),
+    };
+}
 
 export function createActionsDomain(deps: DomainHandlerDeps): DomainRoute {
     return {
@@ -170,6 +452,23 @@ export async function handleActionsRequest(deps: DomainHandlerDeps, path: string
         return { handled: true, response: deps.error('Data engine not available', 503) };
     }
 
+    // [ADR-0126 §8 item 2] THE ACTIVATION WRITE DOOR — enable/disable one
+    // packaged action, which is a `sys_metadata_activation` row and nothing
+    // else. Answered before the invocation path derives an object/action pair,
+    // so `_activation` can never be read as a name (it cannot BE one — see the
+    // predicate above).
+    //
+    // Placed after the engine resolution rather than ahead of it, unlike
+    // `/automation`'s gates: what sits above is the SAME "data engine not
+    // available" answer every caller of this domain already gets, so it
+    // fingerprints nothing an unentitled caller could not learn by invoking any
+    // action at all. Everything that IS an oracle — the body contract, whether
+    // a given action is declared here, whether it is switched off — stays
+    // behind the two gates inside.
+    if (isActionActivationWrite(parts, method.toUpperCase())) {
+        return handleActionActivationWrite(deps, ql, parts, body, _context);
+    }
+
     // [ADR-0066 D4] Dual-surface action gate — the server is the source of
     // truth. Resolve the action's declared `requiredPermissions` from the
     // object schema and reject (403) when the caller's systemPermissions
@@ -255,6 +554,28 @@ export async function handleActionsRequest(deps: DomainHandlerDeps, path: string
         const gateError = actionExec.actionPermissionError(deps, actionDef, _context?.executionContext, objectName);
         if (gateError) {
             return { handled: true, response: deps.error(gateError, 403) };
+        }
+
+        // [ADR-0126 §8 item 2] ACTIVATION CONSULT — door 1 of 2 (the MCP
+        // `run_action` bridge is the other; see `disabledActionRefusal`, which
+        // both call, for why the consult sits at the DECLARATION and not at
+        // the handler-key seam below).
+        //
+        // Deliberately AFTER the D4 capability gate — an unentitled caller must
+        // not learn which packaged actions this installation switched off — and
+        // BEFORE the type branch, the param contract and the record load: a
+        // disabled action runs nothing, discloses no param shape, and reads no
+        // record. It applies to every declared type, so a `flow` action is
+        // refused by its OWN switch regardless of what its target flow's
+        // ledger row says.
+        const activationRefusal = actionExec.disabledActionRefusal(deps, ql, actionDef);
+        if (activationRefusal) {
+            return {
+                handled: true,
+                response: deps.error(activationRefusal.message, activationRefusal.status, {
+                    code: activationRefusal.code,
+                }),
+            };
         }
     }
 

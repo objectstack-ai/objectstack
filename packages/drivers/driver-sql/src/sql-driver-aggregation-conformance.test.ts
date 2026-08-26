@@ -170,7 +170,11 @@ import {
 const CONFORMANCE_OBJECT = {
   name: 'conformance_agg',
   fields: {
-    id: { type: 'text', name: 'id' },
+    // [#12015] `id` is NOT declared here on purpose: the platform owns the
+    // column (`table.string('id').primary()`), so a declaration under that
+    // name is discarded by every DDL path — and now says so out loud at
+    // load time. The rows still carry `id`, and the ordering below still
+    // reads it; what is gone is a declaration that never bound anything.
     region: { type: 'text', name: 'region' },
     // Nullable, and it must stay that way — see `AggregationRow.stage`.
     stage: { type: 'text', name: 'stage' },

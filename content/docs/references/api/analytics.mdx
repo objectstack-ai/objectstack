@@ -48,6 +48,28 @@ const result = AnalyticsEndpoint.parse(data);
 | **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
 | **data** | `{ name: string; title?: string; measures: object[]; dimensions: object[] }[]` | ✅ | Available cubes, each as the `CubeMeta` discovery projection — the cube name, its title, and the measures/dimensions a client may name in a query. A bare array: there is no `cubes` wrapper object, and no cube `sql` is published. |
 
+### Nested Shape: `AnalyticsMetadataResponse.error`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>` | ✅ | Error code (e.g. VALIDATION_ERROR; StandardErrorCode ∪ the ledger the serving side registers — ERROR_CODE_LEDGER for framework packages) |
+| **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112, #9106) |
+| **message** | `string` | ✅ | Readable error message |
+| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim (#9934). Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution (#3821) for anything unmarked. Status-agnostic; never replaces `message`. |
+| **category** | `string` | optional | Error category (e.g. validation, authorization) |
+| **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
+| **details** | `any` | optional | Additional error context (e.g. field validation errors) |
+| **requestId** | `string` | optional | Request ID for tracking |
+
+### Nested Shape: `AnalyticsMetadataResponse.data[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Cube name |
+| **title** | `string` | optional | Human-readable cube title |
+| **measures** | `{ name: string; type: string; title?: string }[]` | ✅ | Measures this cube accepts in `/analytics/query` |
+| **dimensions** | `{ name: string; type: string; title?: string }[]` | ✅ | Dimensions this cube accepts in `/analytics/query` |
+
 
 ---
 
@@ -83,6 +105,27 @@ const result = AnalyticsEndpoint.parse(data);
 | **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
 | **data** | `{ rows: Record<string, any>[]; fields: object[]; sql?: string }` | ✅ |  |
 
+### Nested Shape: `AnalyticsResultResponse.error`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>` | ✅ | Error code (e.g. VALIDATION_ERROR; StandardErrorCode ∪ the ledger the serving side registers — ERROR_CODE_LEDGER for framework packages) |
+| **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112, #9106) |
+| **message** | `string` | ✅ | Readable error message |
+| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim (#9934). Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution (#3821) for anything unmarked. Status-agnostic; never replaces `message`. |
+| **category** | `string` | optional | Error category (e.g. validation, authorization) |
+| **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
+| **details** | `any` | optional | Additional error context (e.g. field validation errors) |
+| **requestId** | `string` | optional | Request ID for tracking |
+
+### Nested Shape: `AnalyticsResultResponse.data`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **rows** | `Record<string, any>[]` | ✅ | Result rows |
+| **fields** | `{ name: string; type: string }[]` | ✅ | Column metadata |
+| **sql** | `string` | optional | Executed SQL (if debug enabled) |
+
 
 ---
 
@@ -96,6 +139,19 @@ const result = AnalyticsEndpoint.parse(data);
 | **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>; declaredCode?: string; message: string; userMessage?: string; … }` | optional | Error details if success is false |
 | **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
 | **data** | `{ sql: string; params: any[] }` | ✅ |  |
+
+### Nested Shape: `AnalyticsSqlResponse.error`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>` | ✅ | Error code (e.g. VALIDATION_ERROR; StandardErrorCode ∪ the ledger the serving side registers — ERROR_CODE_LEDGER for framework packages) |
+| **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112, #9106) |
+| **message** | `string` | ✅ | Readable error message |
+| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim (#9934). Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution (#3821) for anything unmarked. Status-agnostic; never replaces `message`. |
+| **category** | `string` | optional | Error category (e.g. validation, authorization) |
+| **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
+| **details** | `any` | optional | Additional error context (e.g. field validation errors) |
+| **requestId** | `string` | optional | Request ID for tracking |
 
 
 ---

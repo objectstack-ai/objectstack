@@ -23,6 +23,15 @@
  * drifts three times, and the three commands are how a human learns the server
  * disagrees with them.
  *
+ * (`datasource` is a TOPIC, not a runnable command id: the three subcommands
+ * are `datasource introspect`, `datasource list-tables` and `datasource
+ * validate` — verified against the built oclif `Config`, where `datasource`
+ * appears among the topics and not among the commands. The prose above names
+ * the topic, and naming it is correct; a sweep over the documented CLI
+ * invocations in this package flags `os datasource` as unresolved, and that
+ * flag is a false positive — do not rewrite the sentence around one
+ * subcommand, which would say something narrower and untrue.)
+ *
  * ## Why an unreadable body is an ERROR here, never an empty payload
  *
  * That is the same defect generalised. The severe half was never the crash on

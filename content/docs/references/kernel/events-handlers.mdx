@@ -39,6 +39,14 @@ const result = EventHandlerSchema.parse(data);
 | **timeoutMs** | `integer` | optional | Handler timeout in milliseconds |
 | **filter** | `any` | optional | Optional filter to determine if handler should execute |
 
+### Nested Shape: `EventHandler.retry`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **maxRetries** | `integer` | optional (default: `3`) | Maximum retry attempts |
+| **backoffMs** | `integer` | optional (default: `1000`) | Initial backoff delay |
+| **backoffMultiplier** | `number` | optional (default: `2`) | Backoff multiplier |
+
 
 ---
 

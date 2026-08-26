@@ -37,8 +37,8 @@
  *
  * A one-sided pin ("toggle says the new thing") would sit green if someone
  * later reworded the SHARED constant to match — option C, which was considered
- * and declined because it degrades the sentence for the three definition writes
- * that read correctly today. So each arm asserts its own sentence AND the
+ * and declined because it degrades the sentence for the authoring writes that
+ * read correctly today. So each arm asserts its own sentence AND the
  * absence of the other's.
  *
  * ## Driven through the registered route, not the shortcut
@@ -236,6 +236,36 @@ describe('#11666 — the enablement door refuses in its own words', () => {
 
             expect(statusOf(result)).toBe(403);
             expect(messageOf(result)).toBe(AUTHORING_SENTENCE);
+            expect(h.registerFlow).not.toHaveBeenCalled();
+        });
+
+        it('POST /:name/clone — the arm that arrived AFTER this card — still reads "Authoring …"', async () => {
+            // [#12156] The clone door joined `isFlowAuthoringWrite` on `main`
+            // while this branch held the file. This case could not have existed
+            // when the ones above were written; the merge created the
+            // population, so the merge owes the pin.
+            //
+            // A clone AUTHORS a flow — it registers a new definition under a new
+            // name — so the shared sentence is the correct one for it. It is also
+            // the arm most able to inherit the WRONG one: like the enablement
+            // door it is a two-segment POST whose verb lives in `parts[1]`, so a
+            // future loosening of `isFlowEnablementWrite` (dropping
+            // `parts[1] === 'toggle'`, or reading only the method and the depth)
+            // would hand it "Enabling or disabling an automation flow …" — this
+            // card's own defect, reproduced on the arm that arrived after it.
+            const h = boot();
+            const result = await h.dispatch('POST', `/automation/${FLOW}/clone`, {
+                name: 'lead_auto_assignment_copy',
+                label: 'Lead Auto Assignment (copy)',
+            });
+
+            expect(messageOf(result)).toBe(AUTHORING_SENTENCE);
+            // The other direction, as every arm here does it: the enablement
+            // wording must not bleed onto an authoring write.
+            expect(messageOf(result)).not.toContain('Enabling or disabling');
+            expect(messageOf(result)).not.toBe(ENABLEMENT_SENTENCE);
+            expect(statusOf(result)).toBe(403);
+            expect(codeOf(result)).toBe('PERMISSION_DENIED');
             expect(h.registerFlow).not.toHaveBeenCalled();
         });
     });

@@ -119,13 +119,10 @@ const DOORS: readonly Door[] = [
         protocolMethod: 'rollbackMetaItem',
         params: { type: 'object', name: 'account' }, body: { toVersion: 1 },
     },
-    {
-        label: 'PUT /meta/:type/:section/:name — compound-name save',
-        method: 'PUT', path: `${META}/:type/:section/:name`,
-        protocolMethod: 'saveMetaItem',
-        params: { type: 'object', section: 'views', name: 'all_leads' },
-        body: { name: 'all_leads' },
-    },
+    // [#12195] `PUT /meta/:type/:section/:name — compound-name save` was
+    // enumerated here until its arity was retired. It reached the same
+    // `saveMetaItem` as the single-segment save above and carried the same
+    // capability gate, so the door set loses a spelling, not a capability.
 ];
 
 /** Every protocol method any door reaches — all present, so 501 is never the answer. */

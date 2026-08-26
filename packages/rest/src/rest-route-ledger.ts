@@ -187,22 +187,34 @@ export const REST_ROUTE_LEDGER: readonly RestRouteLedgerEntry[] = [
   // so the SDK guard (#3642) certified them off a DECLARATION while they died
   // at runtime. Both are `route-manager` mounts here now.
   //
-  // Order is load-bearing and pinned by `meta-route-registration-order.test.ts`:
-  // `/state/:field` precedes the compound `/published` twin (they collide only
-  // on a field literally named `published`), and BOTH `/published` rows precede
-  // `GET /api/v1/meta/:type/:section/:name` — a three-segment literal
-  // registered after that catch-all is mounted and unreachable.
+  // [#12195] The ordering constraint this note used to carry is DISCHARGED,
+  // not merely unstated: the compound `/:type/:section/:name` arities are
+  // retired (stage 3 of #12176), and they were the three-segment catch-all
+  // that every literal three-segment sibling had to be registered above. The
+  // four-segment `/state/:field` collision with the compound `/published`
+  // twin is gone with it. `meta-route-registration-order.test.ts` still pins
+  // the surviving constraint — a literal-prefixed route above the
+  // `:type`-parameterised route it shares a segment count with.
   { route: 'GET /api/v1/meta/object/:name/state/:field', family: 'metadata', source: 'route-manager', disposition: 'sdk', client: 'meta.getLegalNextStates',
     note: 'ADR-0020 D3.3 legal-next-state introspection. `next: null` = no state_machine governs the field, `next: []` = a declared dead end. #9180 step 2 retired the plural `/api/v1/meta/objects/:name/state/:field` twin that used to carry this `sdk` disposition, and the SDK now spells the segment `object` — the `/meta` type segment is singular, always. The retired twin was a DECLARED registration, not a `META_URL_TO_SINGULAR` fold tolerance (this route matches a literal segment and never consulted the fold), so the boundary accept set is unchanged. ⚠ What the retirement did NOT make universal, because an author reading only this row would assume it did: the legacy dispatcher `/meta` if-chain in `packages/runtime/src/domains/meta.ts` still matches BOTH literals, so the plural is refused HERE and still answered wherever `dispatch()` fronts the request instead of this server. That is deliberate, by the maintainer re-weigh of 2026-08-17 (item 3: no new refusals beyond step 1; the external break deferred with no scheduled window), and it is recorded with its provenance on the dispatcher ledger row plus `runtime/src/domains/meta-state-plural-tolerance.test.ts` (#10179)' },
   { route: 'GET /api/v1/meta/:type/:name/published', family: 'metadata', source: 'route-manager', disposition: 'sdk', client: 'meta.getPublished',
     note: 'ADR-0033 published snapshot; 404s for a name that does not exist, which the pre-#7526 fall-through into the compound-name route structurally could not do (it answered a protection-envelope stub identical before publish and for a bogus name)' },
-  { route: 'GET /api/v1/meta/:type/:section/:name/published', family: 'metadata', source: 'route-manager', disposition: 'sdk', client: 'meta.getPublished',
-    note: 'compound-name arity of the row above — the SDK documents getPublished(\'lead\', \'views/all_leads\'), the same unencoded pass-through getItem/saveItem carry' },
 
-  { route: 'GET /api/v1/meta/:type/:section/:name', family: 'metadata', source: 'route-manager', disposition: 'sdk', client: 'meta.getItem',
-    note: 'compound names pass through getItem unencoded (URL-pinned in client.test.ts); only deleteItem encodes' },
-  { route: 'PUT /api/v1/meta/:type/:section/:name', family: 'metadata', source: 'route-manager', disposition: 'sdk', client: 'meta.saveItem',
-    note: 'compound names pass through saveItem unencoded (URL-pinned in client.test.ts). [#7019] gated on `manage_metadata` (ADR-0066 D1), identical to the single-name PUT — it was MEASURED that with #6603 in place the same ADR-0106 masked round trip still deleted fields through this door. [#11095] reads `?force=true` too — the fourth divergence from its single-segment twin closed on #7019\'s reason (after that capability gate, #8805\'s write-side organization and #7035\'s 501 envelope): the Phase 3a-destructive `409 DESTRUCTIVE_CHANGE` prescribes that parameter, and until this card the prescription was true of the twin and false here. Repeated `?force` is refused (#6877) in the same stroke — an array falls to `!!raw`, turning a doubled opt-OUT into force ON' },
+  // [#12195] THREE ROWS RETIRED HERE — `GET /api/v1/meta/:type/:section/:name`,
+  // `PUT` on the same path, and `GET …/:section/:name/published`. They were the
+  // compound-name arities: `section` and `name` folded back into one
+  // slash-bearing key the protocol layer treated as a single opaque string.
+  // Stage 1 (#12194) made every such name unwritable at the publish door, so
+  // the arities addressed only names that can no longer be created.
+  //
+  // No `client:` disposition moved to `absent` as a result: `meta.getItem`,
+  // `meta.saveItem` and `meta.getPublished` are all still ledgered above on
+  // their single-segment rows, which is the door the SDK now uses for EVERY
+  // name — it percent-encodes, and `%2F` matches the single-segment pattern
+  // with the parameter decoded back to the stored spelling. That is what keeps
+  // a pre-grammar residue row readable, writable and deletable after the
+  // removal, per #12194's "any stored junk name remains listable and
+  // clearable".
 
   // ── ui ────────────────────────────────────────────────────────────────────
   { route: 'GET /api/v1/ui/view/:object/:type', family: 'ui', source: 'route-manager', disposition: 'sdk', client: 'meta.getView',
@@ -253,7 +265,9 @@ export const REST_ROUTE_LEDGER: readonly RestRouteLedgerEntry[] = [
   // its `note`, and re-point the platform-checklist item that this comment's
   // counterpart clause sends to the platform path
   // (`access-security.capability-declaration-lifecycle`).
-  { route: 'POST /api/v1/data/:object/:id/clone', family: 'data-actions', source: 'route-manager', disposition: 'sdk', client: 'data.clone' },
+  { route: 'POST /api/v1/data/:object/:id/clone', family: 'data-actions', source: 'route-manager', disposition: 'sdk', client: 'data.clone',
+    responseSchema: 'CloneDataResponseSchema',
+    note: '[#11924] answers BARE with 201 (res.status(201).json(result), no envelope), so the named schema is the whole body. Filled with its conformance coverage: search-clone-route-schema-conformance.test.ts drives this mount, and metadata-protocol\'s search-clone-schema-conformance.test.ts parses the real cloneData producer' },
   { route: 'POST /api/v1/data/:object/import', family: 'data-actions', source: 'route-manager', disposition: 'sdk', client: 'data.import' },
   { route: 'POST /api/v1/data/:object/import/jobs', family: 'data-actions', source: 'route-manager', disposition: 'sdk', client: 'data.createImportJob' },
   { route: 'POST /api/v1/data/import/jobs/:jobId/cancel', family: 'data-actions', source: 'route-manager', disposition: 'sdk', client: 'data.cancelImportJob' },
@@ -265,7 +279,9 @@ export const REST_ROUTE_LEDGER: readonly RestRouteLedgerEntry[] = [
     note: 'file-stream response; the SDK returns the raw Response rather than a JSON envelope' },
 
   // ── search ────────────────────────────────────────────────────────────────
-  { route: 'GET /api/v1/search', family: 'search', source: 'route-manager', disposition: 'sdk', client: 'search' },
+  { route: 'GET /api/v1/search', family: 'search', source: 'route-manager', disposition: 'sdk', client: 'search',
+    responseSchema: 'SearchAllResponseSchema',
+    note: '[#11924] answers BARE (res.json(result), no envelope), so the named schema is the whole body. ⚠️ NOT `SearchResult` — that exported contract types the per-object ISearchService.search (hits of score/document), the #8140 near-miss trap. Filled with its conformance coverage: search-clone-route-schema-conformance.test.ts drives this mount, and metadata-protocol\'s search-clone-schema-conformance.test.ts parses the real searchAll producer' },
 
   // ── email ─────────────────────────────────────────────────────────────────
   { route: 'POST /api/v1/email/send', family: 'email', source: 'route-manager', disposition: 'sdk', client: 'email.send' },

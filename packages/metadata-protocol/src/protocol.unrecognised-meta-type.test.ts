@@ -38,11 +38,14 @@
  *    works, or the accumulation this card was filed about would become
  *    unremovable.
  *
- * The last two describe blocks pin the two exemptions the first cut lacked, each
- * paired with the refusal that must survive it: the COMPOUND arity (whose
- * `:type` segment carries an OBJECT name) and an already-stored namespace (which
- * is not being minted by definition). `protocol.stored-residue-resave.test.ts`
- * carries the production paths that made the second one necessary.
+ * The last two describe blocks pin the door's remaining exemption and the fate
+ * of the one it used to have: an already-stored namespace (which is not being
+ * minted by definition — `protocol.stored-residue-resave.test.ts` carries the
+ * production paths that made it necessary) still passes, while the COMPOUND
+ * arity exemption (skip the verdict when the name contains a slash) is GONE —
+ * #12194's item-name grammar refuses every slash-bearing name BEFORE this
+ * verdict runs, so the request that needed it can no longer arrive
+ * (`protocol.item-name-grammar.test.ts` is that door's own suite).
  *
  * Harness: the real `saveMetaItem` write path over a stub engine, the shape
  * `protocol.code-only-types.test.ts` uses. A gate INSIDE `saveMetaItem` cannot
@@ -293,42 +296,45 @@ describe('#8421 — the refusal is scoped to the door that MINTS', () => {
     });
 });
 
-describe('#8421 — the COMPOUND arity carries an OBJECT name, not a type claim', () => {
+describe('#8421/#12194 — the COMPOUND arity is refused at the grammar gate, not exempted here', () => {
     // `/metadata/lead/views/all_leads` → `type='lead'`, `name='views/all_leads'`.
-    // One operation, one `saveMetaItem`; the runtime dispatcher's `/meta` branch
-    // and `rest`'s `PUBLISHED_COMPOUND` route both document that shape verbatim.
-    // `lead` is an OBJECT — runtime data no static contract can enumerate — so
-    // a type verdict applied to that segment refuses every object name that is
-    // not coincidentally a metadata type. Measured as a regression of the first
-    // cut in two packages; the ruling this card implements is about metadata
-    // TYPE names like `fieldz`.
+    // Until #12194 this door EXEMPTED that shape (skip the type verdict when
+    // the name contains a slash) because `lead` is an OBJECT name no static
+    // contract can enumerate — and the exemption's residue was that
+    // `PUT /meta/fieldz/a/b` minted a namespace. The item-name grammar now
+    // refuses every slash-bearing name BEFORE this verdict runs (maintainer
+    // ruling 2026-08-25, #12176 stage 1), so the exemption is gone and the
+    // compound write is refused outright — for the GRAMMAR reason, with the
+    // dotted qualified spelling as the prescription.
     const VIEW_BODY = { name: 'all_leads', label: 'All Leads', columns: ['name'] };
 
-    it('saves a sub-resource under an object name the static contract cannot know', async () => {
+    it('refuses the compound-arity write with the grammar prescription (was the exemption)', async () => {
         const { protocol, rows } = makeProtocol();
 
-        const result = await protocol.saveMetaItem({
-            type: 'lead', name: 'views/all_leads', item: VIEW_BODY,
-        });
-
-        expect(result.success).toBe(true);
-        // The compound name is ONE key — not split, not truncated to its last
-        // segment — which is what makes this the same operation the two
-        // transports document rather than a lookalike.
-        expect(metaRows(rows)).toHaveLength(1);
-        expect(metaRows(rows)[0]).toMatchObject({ type: 'lead', name: 'views/all_leads' });
+        await expect(
+            protocol.saveMetaItem({ type: 'lead', name: 'views/all_leads', item: VIEW_BODY }),
+        ).rejects.toMatchObject({ code: 'INVALID_REQUEST', status: 400 });
+        await expect(
+            protocol.saveMetaItem({ type: 'lead', name: 'views/all_leads', item: VIEW_BODY }),
+        ).rejects.toThrow(/is not a legal metadata item name/);
+        // And nothing is persisted — the acceptance this replaces stored the
+        // compound name as one opaque key.
+        expect(metaRows(rows)).toHaveLength(0);
     });
 
-    it('and the exemption is the ARITY, not the name — `lead` alone is still refused', async () => {
-        // ANTI-VACUITY, and the line between the two fixes: at the simple arity
-        // the `:type` segment IS a type claim, so the same string that is a
-        // legal owner above is an illegal type here. Without this case the
-        // exemption above would be indistinguishable from "stop refusing".
+    it('and a grammatical name under the same string reaches the TYPE verdict — `lead` is still refused as a type', async () => {
+        // ANTI-VACUITY, and the line between the two verdicts: `all_leads`
+        // passes the grammar, so the refusal that fires here is #8421's own —
+        // the `:type` segment IS a type claim at this arity, and `lead` is not
+        // a metadata type.
         const { protocol, rows } = makeProtocol();
 
         await expect(
             protocol.saveMetaItem({ type: 'lead', name: 'all_leads', item: VIEW_BODY }),
         ).rejects.toMatchObject({ code: 'INVALID_REQUEST', status: 400 });
+        await expect(
+            protocol.saveMetaItem({ type: 'lead', name: 'all_leads', item: VIEW_BODY }),
+        ).rejects.toThrow(/'lead' is not a metadata type/);
         expect(metaRows(rows)).toHaveLength(0);
     });
 });

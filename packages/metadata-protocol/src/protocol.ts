@@ -69,7 +69,7 @@ import {
     type QueryAliasConflict, type QueryAliasSlot,
     type DroppedFieldsEvent, type QueryAST, type EngineQueryOptionsParsed,
 } from '@objectstack/spec/data';
-import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL, canonicalMetaUrlType, metaUrlSpellingRefusal, unrecognisedMetaTypeRefusal } from '@objectstack/spec/shared';
+import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL, canonicalMetaUrlType, metaUrlSpellingRefusal, unrecognisedMetaTypeRefusal, METADATA_ITEM_NAME_PATTERN } from '@objectstack/spec/shared';
 import { applyConversionsToStoredItem, type ConversionNotice } from '@objectstack/spec';
 import { type FormView, isAggregatedViewContainer, expandViewContainer } from '@objectstack/spec/ui';
 // [#11350] Emitted-specifier pin. This module's inferred public declarations
@@ -13018,6 +13018,60 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
+     * [#12194] The item-name grammar verdict — stage 1 of the #12176
+     * maintainer-ruled retirement of compound `<section>/<name>` addressing
+     * (2026-08-25). Refuse, on the doors that MINT or PROMOTE a `sys_metadata`
+     * row, an item name outside the declared grammar: lowercase snake_case
+     * segments, optionally dot-qualified (`METADATA_ITEM_NAME_PATTERN`,
+     * `@objectstack/spec/shared` — the one segment source, shared with
+     * `ViewItemNameSchema`'s dot-required arity).
+     *
+     * What this closes, measured on the #12176 census before this landed:
+     * `''`, `'//'`, `'a/b/c'`, `'Views/All Leads'` were all accepted and
+     * stored as item names, and a slash in the name BYPASSED
+     * {@link refuseUnmintableMetaType} entirely (`type=fieldz name='a'` →
+     * 400, `type=fieldz name='a/b'` → accepted and stored). The compound
+     * REST/dispatcher arities still fold `:section/:name` into one
+     * slash-joined string; a write arriving that way is now refused here with
+     * the dotted spelling as the prescription (their retirement is D3,
+     * #12195 — this door does not wait for it).
+     *
+     * Scoping, deliberate and parallel to {@link refuseUnmintableMetaType}:
+     *
+     *  - **`saveMetaItem` and `publishMetaItem` only** — the door that mints
+     *    a row and the door that promotes one to `active`.
+     *  - **Read doors and `deleteMetaItem` stay open**: residue rows written
+     *    before this grammar existed must remain listable and clearable, or
+     *    the accumulation becomes one nobody can clear.
+     *  - **`migrateStoredMetadata` is NOT exempt.** Its per-row rewrite calls
+     *    this same door with the STORED name, so an off-grammar stored row's
+     *    in-place rewrite is refused — recorded loudly as that row's
+     *    `outcome: 'failed'` with this refusal's text on the migration
+     *    report, never silently. That is the ruled shape: a stored slash row
+     *    is D2 reopening as its own card, not something to rewrite quietly
+     *    under its junk name. A future name-changing conversion writes under
+     *    its NEW (grammatical) name and passes this door untouched.
+     *
+     * Static, answerable from the request alone — no store read — which is
+     * why it runs before the {@link refuseUnmintableMetaType} probe.
+     */
+    private refuseUngrammaticalMetaItemName(request: { type: string, name: string }): void {
+        if (METADATA_ITEM_NAME_PATTERN.test(request.name)) return;
+        const err = new Error(
+            `[invalid_request] ${JSON.stringify(request.name)} is not a legal metadata item name. `
+            + `Item names are lowercase snake_case segments, optionally dot-qualified — `
+            + `/^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)*$/ — e.g. 'crm_lead' or 'crm_lead.pipeline'. `
+            + `No slashes, spaces, uppercase, empty segments, or leading/trailing dots. `
+            + `The compound '<section>/<name>' spelling is retired: qualify with a dot `
+            + `('crm_lead.pipeline') and express containment structurally, never with a `
+            + `separator inside the identity string.`,
+        );
+        (err as any).code = 'INVALID_REQUEST';
+        (err as any).status = 400;
+        throw err;
+    }
+
+    /**
      * [#8421] The SECOND `/meta` verdict: refuse a `:type` segment that is not
      * a metadata type AT ALL, on the one entry point that MINTS a
      * `sys_metadata` namespace.
@@ -13048,25 +13102,22 @@ export class ObjectStackProtocolImplementation implements
      *    permanently — turning the accumulation this card was filed about into
      *    an accumulation nobody can clear.
      *
-     * ## …and why two shapes reaching THIS door are exempt (#8421 rework)
+     * ## …and why one shape reaching THIS door is exempt (#8421 rework, revised by #12194)
      *
-     * Both were regressions in the first cut, both measured on the three
-     * consumer packages the first cut never ran:
+     * The first cut had TWO exemptions, both regressions measured on the three
+     * consumer packages the first cut never ran. The FIRST — skip the verdict
+     * when the name contains a slash, because the compound arity puts an
+     * OBJECT name in the `:type` segment (`/metadata/lead/views/all_leads` is
+     * `type='lead'`, `name='views/all_leads'`, and `lead` is runtime data no
+     * static contract can enumerate) — is GONE (#12194): the item-name
+     * grammar verdict ({@link refuseUngrammaticalMetaItemName}) runs before
+     * this probe and refuses every slash-bearing name outright, so no request
+     * that needed the exemption can reach this door any more. That also
+     * closes the residue the exemption used to document: `PUT
+     * /meta/fieldz/a/b` was accepted and minted `type='fieldz'`; it is now
+     * refused at the grammar gate, and this verdict applies to every name
+     * that gets past it.
      *
-     *  1. **The COMPOUND arity puts an OBJECT name in the `:type` segment.**
-     *     `/metadata/lead/views/all_leads` is `type='lead'`,
-     *     `name='views/all_leads'` — one operation reaching one
-     *     `saveMetaItem`, documented verbatim in the runtime dispatcher's own
-     *     `/meta` branch and in `rest`'s `PUBLISHED_COMPOUND` route. `lead` is
-     *     an object, i.e. RUNTIME DATA, and no static contract can enumerate
-     *     the objects a deployment carries — so applying a static type verdict
-     *     to that segment refuses every object name that is not coincidentally
-     *     a metadata type. The maintainer's ruling is about metadata TYPE names
-     *     like `fieldz`; this was not a narrowing anyone approved.
-     *     ⚠️ Residue, stated rather than hidden: `PUT /meta/fieldz/a/b` is
-     *     therefore still accepted, because at that arity `fieldz` is a claim
-     *     about an object and the alternative is a live-registry check — option
-     *     C, ruled out on this very card.
      *  2. **A namespace that ALREADY EXISTS is not being minted.** Two
      *     production paths re-save a row taking its type from an existing
      *     `sys_metadata` row: {@link migrateStoredMetadata} (`source:
@@ -13090,9 +13141,9 @@ export class ObjectStackProtocolImplementation implements
     private async refuseUnmintableMetaType(request: { type: string, name: string }): Promise<void> {
         const unrecognised = unrecognisedMetaTypeRefusal(request.type);
         if (!unrecognised) return;
-        // Exemption 1 — the compound arity. Cheap, and first: it is a statement
-        // about the REQUEST SHAPE and needs no store at all.
-        if (request.name.includes('/')) return;
+        // The old exemption 1 (skip when the name contains a slash) was
+        // removed by #12194 — the grammar verdict upstream refuses every
+        // slash-bearing name before this probe runs. See the header.
         // Exemption 2 — the namespace predates this write.
         if (await this.metaTypeNamespaceExists(unrecognised.type)) return;
         const err = new Error(
@@ -13182,10 +13233,15 @@ export class ObjectStackProtocolImplementation implements
         }
         // #4432 — CANONICAL TYPE KEY. See {@link canonicalMetaType}.
         request = canonicalizeMetaRequestType(request);
+        // [#12194] The item-name grammar verdict — static, request-only, so it
+        // runs before the store-backed type probe below. Closes the measured
+        // slash bypass: a slash-bearing name used to skip the #8421 refusal
+        // entirely. See {@link refuseUngrammaticalMetaItemName}.
+        this.refuseUngrammaticalMetaItemName(request);
         // [#8421] …and the second verdict, on the door that MINTS. Kept here
         // rather than inside the fold above because it is not answerable from
         // the request alone — see {@link refuseUnmintableMetaType} for the
-        // scoping, its two exemptions, and the measurements behind both.
+        // scoping, its exemption, and the measurements behind it.
         await this.refuseUnmintableMetaType(request);
         // What the history row, the audit row and the watch event record as the
         // origin of this write. Defaults to this method — the ordinary Studio /
@@ -14822,6 +14878,13 @@ export class ObjectStackProtocolImplementation implements
         // rewrites it on upgrade). Different input class, different map; see
         // {@link canonicalMetaType}'s header for why the two are not one fold.
         request = canonicalizeMetaRequestType(request);
+        // [#12194] The item-name grammar verdict, same as `saveMetaItem`'s:
+        // the promotion door writes an `active` row under this name, so an
+        // off-grammar name is refused here too rather than promoted. With the
+        // save door closed no such draft can exist any more; for pre-grammar
+        // residue drafts the refusal (rather than a promotion) is the ruled
+        // direction, and `deleteMetaItem` stays open to clear them.
+        this.refuseUngrammaticalMetaItemName(request);
         // [#10219] Then resolve WHICH SCOPE's draft this publish means. The
         // caller states the scope it is IN; the draft may live env-wide. See
         // {@link resolveDraftOrgScopeForPublish} — the single-item twin of the

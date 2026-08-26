@@ -194,6 +194,62 @@ const result = ActionContributionSchema.parse(data);
 | **panels** | `{ id: string; label: string; icon?: string; location: Enum<'bottom' \| 'right' \| 'modal'> }[]` | optional (default: `[]`) |  |
 | **commands** | `{ id: string; label: string; shortcut?: string; icon?: string }[]` | optional (default: `[]`) |  |
 
+### Nested Shape: `StudioPluginContributions.metadataViewers[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ | Unique viewer identifier |
+| **metadataTypes** | `string[]` | ✅ | Metadata types this viewer can handle |
+| **label** | `string` | ✅ | Viewer display label |
+| **priority** | `number` | optional (default: `0`) | Viewer priority (higher wins) |
+| **modes** | `Enum<'preview' \| 'design' \| 'code' \| 'data' \| 'history'>[]` | optional (default: `["preview"]`) | Supported view modes |
+
+### Nested Shape: `StudioPluginContributions.sidebarGroups[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **key** | `string` | ✅ | Unique group key |
+| **label** | `string` | ✅ | Group display label |
+| **icon** | `string` | optional | Lucide icon name |
+| **metadataTypes** | `string[]` | ✅ | Metadata types in this group |
+| **order** | `number` | optional (default: `100`) | Sort order (lower = higher) |
+
+### Nested Shape: `StudioPluginContributions.actions[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ | Unique action identifier |
+| **label** | `string` | ✅ | Action display label |
+| **icon** | `string` | optional | Lucide icon name |
+| **location** | `Enum<'toolbar' \| 'contextMenu' \| 'commandPalette'>` | ✅ | UI location |
+| **metadataTypes** | `string[]` | optional (default: `[]`) | Applicable metadata types |
+
+### Nested Shape: `StudioPluginContributions.metadataIcons[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **metadataType** | `string` | ✅ | Metadata type |
+| **label** | `string` | ✅ | Display label |
+| **icon** | `string` | ✅ | Lucide icon name |
+
+### Nested Shape: `StudioPluginContributions.panels[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ | Unique panel identifier |
+| **label** | `string` | ✅ | Panel display label |
+| **icon** | `string` | optional | Lucide icon name |
+| **location** | `Enum<'bottom' \| 'right' \| 'modal'>` | optional (default: `"bottom"`) | Panel location |
+
+### Nested Shape: `StudioPluginContributions.commands[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ | Unique command identifier |
+| **label** | `string` | ✅ | Command display label |
+| **shortcut** | `string` | optional | Keyboard shortcut |
+| **icon** | `string` | optional | Lucide icon name |
+
 
 ---
 

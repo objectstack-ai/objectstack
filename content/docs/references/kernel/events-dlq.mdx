@@ -38,6 +38,23 @@ const result = DeadLetterQueueEntrySchema.parse(data);
 | **lastFailedAt** | `string` | ✅ | When event last failed |
 | **failedHandler** | `string` | optional | Handler ID that failed |
 
+### Nested Shape: `DeadLetterQueueEntry.event`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | optional | Unique event identifier |
+| **name** | `string` | ✅ | Event name (lowercase with dots, e.g., user.created, order.paid) |
+| **payload** | `any` | ✅ | Event payload schema |
+| **metadata** | `{ source: string; timestamp: string; userId?: string; tenantId?: string; … }` | ✅ | Event metadata |
+
+### Nested Shape: `DeadLetterQueueEntry.error`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **message** | `string` | ✅ | Error message |
+| **stack** | `string` | optional | Error stack trace |
+| **code** | `string` | optional | Error code |
+
 
 ---
 
@@ -54,6 +71,24 @@ const result = DeadLetterQueueEntrySchema.parse(data);
 | **receivedAt** | `string` | ✅ | When event was received |
 | **processedAt** | `string` | optional | When event was processed |
 | **totalDurationMs** | `integer` | optional | Total processing time |
+
+### Nested Shape: `EventLogEntry.event`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | optional | Unique event identifier |
+| **name** | `string` | ✅ | Event name (lowercase with dots, e.g., user.created, order.paid) |
+| **payload** | `any` | ✅ | Event payload schema |
+| **metadata** | `{ source: string; timestamp: string; userId?: string; tenantId?: string; … }` | ✅ | Event metadata |
+
+### Nested Shape: `EventLogEntry.handlersExecuted[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **handlerId** | `string` | ✅ | Handler identifier |
+| **status** | `Enum<'success' \| 'failed' \| 'timeout'>` | ✅ | Handler execution status |
+| **durationMs** | `integer` | optional | Execution duration |
+| **error** | `string` | optional | Error message if failed |
 
 
 ---

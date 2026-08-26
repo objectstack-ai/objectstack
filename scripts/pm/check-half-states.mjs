@@ -936,8 +936,28 @@ export function h1DispatchedNoAssignee(issue) {
  * prose containing "claim" is not a claim comment. No `g` flag — a shared
  * regex carrying `lastIndex` between callers is a state bug waiting for its
  * second reader.
+ *
+ * ## The separator is ONE character, and that is a maintainer ruling (2026-08-11)
+ *
+ * `.claude/skills/pm-dispatch/SKILL.md` records it verbatim: 「首行以字面
+ * `Claim:` 开头是机器判据(维护者 2026-08-11 裁定;巡查谓词只认这一个拼写且保持
+ * 严格,修法是全舰队向文档拼写收敛,⛔ 不放宽谓词)」. So a dash-written or
+ * fullwidth-written claim is a MALFORMED claim, not an unrecognised dialect,
+ * and the repair direction is the WRITE side. ⛔ Do not widen this class to
+ * accept another separator — that is the one change the ruling closes. What
+ * the patrol gained instead is visibility: `h34ClaimShapedNonCanonicalSeparator`
+ * reports the near miss on its own row without redefining what a claim IS.
+ *
+ * ⚠️ The class was `[::]` until #12090 — U+003A written TWICE, not "ASCII or
+ * fullwidth" as three separate readers (this file's own H33 note, the filing
+ * card's body, and a grading comment) each assumed from its shape. U+FF1A has
+ * never matched here, measured by codepoint and by a live probe over 172
+ * dispatched cards (0 fullwidth claims). Collapsed to a single `:` so the code
+ * stops implying an affordance it never honored; behaviour is byte-identical,
+ * and the fullwidth spelling now surfaces on the H34 row like every other
+ * non-canonical separator.
  */
-export const CLAIM_COMMENT_MARKER = /^\s*>?\s*Claim(?:ed)?\s*[::]/mi;
+export const CLAIM_COMMENT_MARKER = /^\s*>?\s*Claim(?:ed)?\s*:/mi;
 
 export function h2AssigneeNoClaimComment(issue, commentBodies) {
   const labels = labelNames(issue);
@@ -3338,11 +3358,18 @@ export const H20_BRANCH_LIST_CAP = 5;
  * tolerated — 「Branch: `claude/issue-10312-…`」 is the natural markdown for a
  * line meant to be grepped, and the same decorated-directive lesson H4 paid
  * for (#10102) applies verbatim here.
+ *
+ * ⚠️ The separator class here carried the SAME duplicated-U+003A typo the claim
+ * marker did (`[::]`, two ASCII colons, never the fullwidth U+FF1A its shape
+ * implied) and is collapsed with it in #12090 — byte-identical behaviour, one
+ * fewer place where the code reads as if it honoured a spelling it does not.
+ * See `CLAIM_COMMENT_MARKER`'s note for the codepoint reading and the live
+ * probe behind it.
  */
 export function claimedBranches(body) {
   const out = [];
   const text = String(body ?? '');
-  for (const line of text.matchAll(/^\s*>?\s*Branch(?:es)?\s*[::]\s*(.*)$/gim)) {
+  for (const line of text.matchAll(/^\s*>?\s*Branch(?:es)?\s*:\s*(.*)$/gim)) {
     for (const hit of String(line[1] ?? '').matchAll(CLAIM_BRANCH_SHAPE)) {
       if (!out.includes(hit[0])) out.push(hit[0]);
     }
@@ -5336,29 +5363,37 @@ export function isTriageRulingComment(body) {
  *
  * That narrowing is right for H20/H27, whose whole question is about the branch
  * a claim names. It would be wrong here and would silently empty this row's
- * population: the measured claim census carries 「Claim: PM loop round R6」,
- * 「Claim — domain:cli lane execution seat, session …, round R36」 and 「Claim
- * pointer: folded into the 11678 family dispatch」 — real claims, correctly
- * formed, naming no branch of their own. What this row needs from a claim is
- * only WHEN it was written.
+ * population: the measured claim census carries 「Claim: PM loop round R6」 and
+ * 「Claim pointer: folded into the 11678 family dispatch」 — well-formed claims
+ * naming no branch of their own. What this row needs from a claim is only WHEN
+ * it was written.
  *
- * ## ⚠️ The inherited blind spot, measured
+ * ## ⚠️ The inherited blind spot, and what it is NOT (#12090)
  *
- * `CLAIM_COMMENT_MARKER` requires a COLON after the word, and a large minority
- * of live claims do not have one: 24 of the 54 open `pm:dispatched` cards on
- * the 2026-08-25 board carry 「Claim — <seat>, session …」 with an EM DASH,
- * which the marker does not match. Those cards are invisible to this row.
+ * `CLAIM_COMMENT_MARKER` requires the canonical colon, and some live claims are
+ * written with an em dash instead (「Claim — <seat>, session …」), which the
+ * marker does not match. Those cards are invisible to this row.
+ *
+ * ⛔ They are NOT well-formed claims in a dialect this file fails to read. The
+ * maintainer's 2026-08-11 ruling makes the literal `Claim:` the single machine
+ * criterion and closes the widening explicitly (SKILL.md step 4, quoted in full
+ * at `CLAIM_COMMENT_MARKER`), so a dash-written claim is MALFORMED and the
+ * repair is the write side. This paragraph used to call them 「real claims,
+ * correctly formed」 — a straight contradiction of the protocol this file
+ * enforces, and the exact shape of drift the strictness exists to prevent.
  *
  * Inherited on purpose rather than patched here. Defining a second, WIDER
  * notion of "a claim" for H33 alone would leave the file disagreeing with
- * itself about what a claim IS — H2 would go on calling those 24 cards
- * claimless while H33 read their claims off the same threads — and a file that
+ * itself about what a claim IS — H2 would go on calling those cards claimless
+ * while H33 read their claims off the same threads — and a file that
  * contradicts itself about its own vocabulary is a worse defect than the gap.
  * The consequence here is UNDER-reporting, which is the direction this file
  * takes on every unrecognised spelling (H17's extractor, H20's branch shape),
- * never a fabricated row. The marker's own coverage has a wider blast radius —
- * it is also why H2 reports those 24 cards as carrying no claim comment at all
- * — so it is filed as its own card rather than folded in here.
+ * never a fabricated row.
+ *
+ * Where those claims DO surface is H34, which reports the near miss as its own
+ * observation and points the seat at the canonical spelling — visibility
+ * without redefining the vocabulary.
  *
  * @param {{ body?: string, created_at?: string }[]} commentRows
  * @returns {{ createdAt: string|null } | null}
@@ -5427,6 +5462,217 @@ export function h33ClaimPredatesRuling(issue, commentRows) {
     'so on the card so the dev is not left arbitrating between two orders. ⛔ This is not a new rule: the ' +
     're-read step exists, and the same session it failed on had already been saved by it twice that day. ' +
     'Report-only: ⛔ never a label written from this script.'
+  );
+}
+
+// ---------------------------------------------------------------------------
+// H34 — a claim-shaped comment with a NON-CANONICAL SEPARATOR (#12090).
+//
+// The card that filed this measured 24 of 54 open `pm:dispatched` cards
+// carrying 「Claim — <seat>, session …」 with an EM DASH, invisible to
+// `CLAIM_COMMENT_MARKER`, and proposed widening the class. That proposal is
+// CLOSED, and this row is what was taken instead.
+//
+// ## Why the predicate is not widened — the ruling, verbatim
+//
+// `.claude/skills/pm-dispatch/SKILL.md` (step 4 of the claim protocol) records
+// 「首行以字面 `Claim:` 开头是机器判据(维护者 2026-08-11 裁定;巡查谓词只认这
+// 一个拼写且保持严格,修法是全舰队向文档拼写收敛,⛔ 不放宽谓词)」. Under that
+// ruling a dash-written claim is a MALFORMED claim, H2's row on it is a CORRECT
+// report, and the repair is the write side converging on the documented
+// spelling. Widening the reader would make the enforced protocol drift away
+// from the written one permanently — the declared-≠-enforced shape this repo
+// treats as a defect everywhere else — and would do it by editing a maintainer
+// ruling's own text, which is not a patrol script's call.
+//
+// ## …and why the gap is nevertheless real, which is what this row closes
+//
+// The cost the card found is not only H2's loudness. `governingClaim` gates on
+// the same marker before reading `Branch:`, so a card claimed with a dash buys
+// no ref probe and can never produce an H20 「no remote ref」 or H27 「dead
+// claim」 row: it sits OUTSIDE dispatch-liveness entirely, silently, for as long
+// as it is in flight. H33 inherits the same blindness. So the malformed claim
+// costs one noisy row and three quiet ones, and the quiet ones are the
+// expensive direction.
+//
+// This row makes the malformed spelling VISIBLE without redefining what a claim
+// is. `Claim:` stays the single machine criterion — H2/H20/H27/H33 are
+// untouched, byte for byte — and the near miss is reported as its own,
+// separately-named observation whose remedy points at the canonical spelling.
+// The file therefore never disagrees with itself about its own vocabulary,
+// which is the objection that kept the gap open.
+//
+// ## Measured, fresh, at dispatch time (2026-08-25 ~15:00Z)
+//
+// Over the LIVE open `pm:dispatched` population (45 cards): 40 colon-form,
+// 1 dash-only, 0 hyphen, 0 fullwidth, 4 with no claim in any spelling. The
+// filing card's 24-of-54 has already decayed to 1-of-45 in a day — the
+// maintainer's prescribed convergence is working, which is precisely why the
+// widening was not worth a ruling. Over the 128 `pm:dispatched` cards closed
+// since 2026-08-24 the shape is recurring rather than historical: 13 dash-only
+// claims, clustered in identifiable seat batches. So this row's expected steady
+// state is quiet — H23's register, not H30's — and its value is that a seat
+// writing the wrong spelling learns about it while the card is still in flight,
+// which is how a fleet converges.
+//
+// ## Deliberately NOT the whole near-miss space
+//
+// Two suppressions, both under-reporting on purpose (H17's and H20's standing
+// direction — a fabricated row sends a reader to check something that was never
+// there):
+//
+//   • A thread that ALSO carries a canonical claim is silent here. That card is
+//     machine-visible, so the row would have no remedy to offer. The residual
+//     it accepts: a RE-claim written with a dash over an older colon claim
+//     leaves `governingClaim` reading the stale one. Narrower than the shape
+//     this row is for, and naming it would cost a row on every card that ever
+//     wrote a dash claim once.
+//   • A claim-shaped line whose remainder carries none of the protocol's own
+//     content (a session reference, the word "seat", or a protocol-shaped
+//     branch anywhere in the comment) is silent. 「Claim - see above」 in prose
+//     is not evidence that a claim was attempted.
+// ---------------------------------------------------------------------------
+
+/**
+ * The separators a claim-shaped line is measured to carry INSTEAD of the
+ * canonical colon, each with the name the row prints. Codepoints are spelled
+ * out rather than pasted: these characters are visually near-identical to each
+ * other and to the colon, and a row that says 「EM DASH (U+2014)」 tells a seat
+ * what to search for in a way a rendered glyph cannot.
+ *
+ * U+FF1A is here, and it is the reason it can be: the claim marker's class
+ * looked like it accepted it for the whole of this file's life and never did
+ * (see `CLAIM_COMMENT_MARKER`). In a protocol whose own SKILL.md is written in
+ * Chinese, 「Claim：」 is a plausible spelling; it was invisible to every reader
+ * and is now merely non-canonical, which is a state a seat can act on.
+ */
+export const NON_CANONICAL_CLAIM_SEPARATORS = [
+  ['—', 'EM DASH (U+2014)'],
+  ['–', 'EN DASH (U+2013)'],
+  ['-', 'HYPHEN-MINUS (U+002D)'],
+  ['：', 'FULLWIDTH COLON (U+FF1A)'],
+];
+
+/**
+ * A claim-shaped opening whose separator is not the canonical colon.
+ *
+ * Mirrors `CLAIM_COMMENT_MARKER`'s strictness deliberately — same optional
+ * blockquote, same must-BEGIN-with-the-word anchor, same absence of `g` — so
+ * that the two markers partition claim-shaped openings rather than overlapping.
+ * The prose control the strictness was paid for (#7488) is still excluded here
+ * for the same reason it is there: 「the next seat should claim: only after the
+ * ruling lands」 does not BEGIN with the word.
+ *
+ * ⚠️ `[ \t]*`, NOT `\s*`, on both sides of the word. `\s` matches a NEWLINE, so
+ * `Claim\n- something` would put a markdown BULLET's hyphen in the separator
+ * position and read an ordinary list as a malformed claim — and a hyphen is the
+ * commonest line-opening character in this repo's comment bodies, where the
+ * colon marker never had to care (a line starting with `:` is not a thing
+ * anyone writes).
+ *
+ * Stated precisely, because it is easy to over-claim: `nearMissClaimSeparators`
+ * already runs this regex per SPLIT LINE, so the reader below is safe either
+ * way and the character class is not what saves it. What the class protects is
+ * this constant AS AN EXPORT — it is `m`-flagged and reusable, and a future
+ * caller doing `CLAIM_NEAR_MISS_MARKER.test(body)` over a whole comment gets
+ * the right answer only because of it. Both properties are pinned separately in
+ * the self-test, at the regex and at the reader, so neither can go green on the
+ * other's behalf.
+ *
+ * Capture groups: 1 = the separator, 2 = the rest of the line.
+ */
+export const CLAIM_NEAR_MISS_MARKER = new RegExp(
+  `^[ \\t]*>?[ \\t]*Claim(?:ed)?[ \\t]*([${NON_CANONICAL_CLAIM_SEPARATORS.map(([ch]) => `\\u${ch.codePointAt(0).toString(16).padStart(4, '0')}`).join('')}])[ \\t]*(.*)$`,
+  'mi'
+);
+
+/**
+ * Does this line's remainder carry the claim protocol's own content?
+ *
+ * The conservative half of the detection. The protocol's claim comment is
+ * required to name a session ID and a branch, and the measured dash claims do:
+ * 「Claim — skills seat `session_01RM…`. Folded dispatch …」 and 「Claim —
+ * domain:cli lane execution seat, session 019siH5jDmk5hrayvfyojUqR, round
+ * R36」. Requiring one of those tokens is what separates an attempted claim
+ * from a line that merely opens with the word.
+ *
+ * A protocol-shaped branch is accepted from ANYWHERE in the comment rather than
+ * from the opening line, because the template puts `Branch:` on its own line —
+ * the same reason `claimedBranches` reads a directive line rather than the
+ * first one.
+ */
+export function looksLikeClaimContent(remainder, body) {
+  if (/\bsessions?\b|\bseat\b/iu.test(String(remainder ?? ''))) return true;
+  return claimedBranches(body).length > 0;
+}
+
+/**
+ * Which non-canonical separators this comment body opens a claim-shaped line
+ * with — de-duplicated, in the order declared, empty when none does.
+ *
+ * @param {string} body
+ * @returns {string[]} the printable separator NAMES
+ */
+export function nearMissClaimSeparators(body) {
+  const text = String(body ?? '');
+  const found = [];
+  for (const line of text.split('\n')) {
+    const hit = CLAIM_NEAR_MISS_MARKER.exec(line);
+    if (!hit) continue;
+    if (!looksLikeClaimContent(hit[2], text)) continue;
+    const name = NON_CANONICAL_CLAIM_SEPARATORS.find(([ch]) => ch === hit[1])?.[1];
+    if (name && !found.includes(name)) found.push(name);
+  }
+  return found;
+}
+
+/**
+ * H34 — null when clean, else the finding sentence.
+ *
+ * Gated on the SAME population H2 judges (pm-tracked, assigned) and read off
+ * the SAME comment bodies that branch already fetched, so the row costs no
+ * request at all. It fires only where H2 fires — no canonical claim on the
+ * thread — which makes every H34 row a companion that EXPLAINS its card's H2
+ * row rather than a second accusation about the same fact.
+ *
+ * The residual that gate accepts, stated rather than dropped: an UNASSIGNED
+ * `pm:dispatched` card buys no comment fetch here and so is never judged. That
+ * card is H1's finding in its own right, and its dispatch is already the thing
+ * being questioned.
+ *
+ * @param {object} issue — an OPEN issue.
+ * @param {(string|null|undefined)[]} commentBodies
+ */
+export function h34ClaimShapedNonCanonicalSeparator(issue, commentBodies) {
+  const labels = labelNames(issue ?? {});
+  const pmTracked = labels.some((l) => l === 'pm:queue' || l === 'pm:dispatched');
+  if (!pmTracked || (issue?.assignees ?? []).length === 0) return null;
+  if (!Array.isArray(commentBodies)) return null;
+  // A card with a readable claim is machine-visible; the row has no remedy for it.
+  if (commentBodies.some((b) => CLAIM_COMMENT_MARKER.test(String(b ?? '')))) return null;
+
+  const separators = [];
+  let lines = 0;
+  for (const body of commentBodies) {
+    const names = nearMissClaimSeparators(body);
+    if (names.length === 0) continue;
+    lines += 1;
+    for (const name of names) if (!separators.includes(name)) separators.push(name);
+  }
+  if (separators.length === 0) return null;
+
+  return (
+    `a claim-shaped comment whose separator is NOT the canonical colon — ${lines} comment(s), ` +
+    `${separators.join(' + ')} where the protocol writes \`Claim:\` — and NO comment on this thread ` +
+    'matches the marker. So this card reads as CLAIMLESS to H2 (its row on this card is correct, not a ' +
+    'false positive) and sits outside dispatch-liveness entirely: `governingClaim` gates on the same ' +
+    'marker before reading `Branch:`, so H20 can never report a missing remote ref for it and H27 can ' +
+    'never report a dead claim — the two rows that exist to catch an abandoned dispatch. Remedy, and it ' +
+    'is the WRITE side: the claiming seat re-posts (or edits) the claim so its FIRST line begins with ' +
+    'the literal `Claim:`, per SKILL.md step 4 — 「首行以字面 `Claim:` 开头是机器判据(维护者 ' +
+    '2026-08-11 裁定;巡查谓词只认这一个拼写且保持严格,修法是全舰队向文档拼写收敛,⛔ 不放宽谓词)」. ' +
+    '⛔ The patrol predicate is NOT widened to accept the separator this card used; that is the one ' +
+    'repair the ruling closes. Report-only: ⛔ never a label written from this script.'
   );
 }
 
@@ -6973,6 +7219,13 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
       if (h2AssigneeNoClaimComment(issue, comments)) {
         findings.push([issue, 'H2', 'assignee set but no claim comment on the thread']);
       }
+      // H34 (#12090) — the same bodies, asked WHY H2 is firing. Free by
+      // construction: it reads the page already in hand, on exactly H2's
+      // population, and fires only on cards H2 is already reporting. Judged
+      // here rather than in the dispatched loop below so a `pm:queue` claim
+      // written with a dash is covered too, and so the two rows land together.
+      const nearMiss = h34ClaimShapedNonCanonicalSeparator(issue, comments);
+      if (nearMiss) findings.push([issue, 'H34', nearMiss]);
     }
 
     // H17 — the trigger-file index. Gathering only: the card's own body plus
@@ -10834,18 +11087,112 @@ function selfTest() {
   t('H33 claim: a non-array is null', latestClaimComment(null), null);
   // ⚠️ A KNOWN, MEASURED blind spot, pinned here so it is visible in the suite
   // rather than discovered again from a silent row. `CLAIM_COMMENT_MARKER`
-  // requires a COLON, and 24 of the 54 open `pm:dispatched` cards on the
-  // 2026-08-25 board carry a well-formed claim written with an EM DASH
-  // (「Claim — skills seat `session_…`」), which the marker cannot see. H33
-  // inherits that blindness deliberately rather than defining a second, wider
-  // notion of "claim" than H2/H20/H27 use — a file that disagrees with itself
-  // about what a claim IS would be the worse defect. The consequence is
-  // UNDER-reporting, which is this file's standing direction for an
-  // unrecognised spelling (H17/H20), never a fabricated row. The marker itself
-  // is a separate defect with a wider blast radius (it also makes H2 report
-  // those 24 cards as claimless) and is filed on its own card.
-  t('H33 claim: an EM-DASH claim is invisible to the shared marker (known gap)', latestClaimComment([row33(CLAIM_AT, 'Claim — skills seat `session_x`.')]), null);
+  // requires the canonical colon, and some live `pm:dispatched` cards carry a
+  // claim written with an EM DASH (「Claim — skills seat `session_…`」), which
+  // the marker cannot see. ⛔ Those are MALFORMED claims, not a dialect: the
+  // 2026-08-11 maintainer ruling makes `Claim:` the single machine criterion
+  // and closes the widening (⛔ 不放宽谓词). H33 therefore inherits the
+  // blindness rather than defining a second, wider notion of "claim" than
+  // H2/H20/H27 use — a file that disagrees with itself about what a claim IS
+  // would be the worse defect. The consequence is UNDER-reporting, this file's
+  // standing direction for an unrecognised spelling (H17/H20), never a
+  // fabricated row. Where the malformed claim becomes VISIBLE is H34 (#12090),
+  // whose cases sit below.
+  t('H33 claim: an EM-DASH claim is invisible to the shared marker (malformed, by ruling)', latestClaimComment([row33(CLAIM_AT, 'Claim — skills seat `session_x`.')]), null);
   t('H33: …so a card claimed that way under-reports rather than fabricating', h33ClaimPredatesRuling(dispatched33(), [row33(CLAIM_AT, 'Claim — skills seat `session_x`.'), rulingRow33]), null);
+
+  // -- H34 — a claim-shaped comment with a non-canonical separator (#12090) ---
+  // The acceptance pair for this row is the FOUR-WAY split below: the marker's
+  // verdict and H34's verdict are asserted on the same specimen every time, so
+  // no case can go green by quietly redefining what a claim is.
+  const tracked34 = (labels = ['pm:dispatched']) => issue(labels, ['os-zhuang']);
+  // ⚠️ `?? ''` rather than a bare `.includes` on the predicate's return. A row
+  // that goes NULL under a mutation must report a NAMED failing case, not throw
+  // and abort the suite before the remaining 200 cases run — measured while
+  // reverse-verifying this row: widening the marker turned a red suite into a
+  // TypeError whose message named neither the row nor the mutation.
+  const h34row = (...args) => String(h34ClaimShapedNonCanonicalSeparator(...args) ?? '');
+  const DASH_CLAIM = 'Claim — skills seat `session_01RM`. Folded dispatch, patrol-predicates pack.';
+  const COLON_CLAIM = 'Claim: skills seat `session_01RM`.\nBranch: `claude/issue-12090-x`';
+  const PROSE_CONTROL = 'the next seat should claim: only after the ruling lands';
+  const FULLWIDTH_CLAIM = 'Claim：skills seat `session_01RM`, round R36.';
+
+  // 1. dash claim -> the near-miss row fires AND the marker stays false.
+  t('H34: an EM-DASH claim fires the near-miss row', typeof h34ClaimShapedNonCanonicalSeparator(tracked34(), [DASH_CLAIM]), 'string');
+  t('H34: …and CLAIM_COMMENT_MARKER is still false on it (⛔ 不放宽谓词)', CLAIM_COMMENT_MARKER.test(DASH_CLAIM), false);
+  t('H34: …and the row NAMES the separator by codepoint', h34row(tracked34(), [DASH_CLAIM]).includes('EM DASH (U+2014)'), true);
+  t('H34: …and points the remedy at the canonical spelling', h34row(tracked34(), [DASH_CLAIM]).includes('begins with the literal `Claim:`'), true);
+  t('H34: …and says the predicate is NOT widened', h34row(tracked34(), [DASH_CLAIM]).includes('NOT widened'), true);
+  // …and H2 still reports the card, correctly, as claimless.
+  t('H34: H2 still fires on the same card, and that row is CORRECT', h2AssigneeNoClaimComment(tracked34(), [DASH_CLAIM]), true);
+
+  // 2. colon claim -> the marker is true and the near-miss row is silent.
+  t('H34: a COLON claim leaves the near-miss row silent', h34ClaimShapedNonCanonicalSeparator(tracked34(), [COLON_CLAIM]), null);
+  t('H34: …because the marker reads it', CLAIM_COMMENT_MARKER.test(COLON_CLAIM), true);
+  t('H34: …and H2 is clean', h2AssigneeNoClaimComment(tracked34(), [COLON_CLAIM]), false);
+
+  // 3. the #7488 prose control -> NEITHER reader sees a claim.
+  t('H34: the prose control fires neither reader (H34)', h34ClaimShapedNonCanonicalSeparator(tracked34(), [PROSE_CONTROL]), null);
+  t('H34: …nor the marker', CLAIM_COMMENT_MARKER.test(PROSE_CONTROL), false);
+
+  // 4. fullwidth colon -> a near miss, which is what the collapsed `[::]` class
+  // makes honest: U+FF1A never matched the marker and now says so out loud.
+  t('H34: a FULLWIDTH-COLON claim fires the near-miss row', typeof h34ClaimShapedNonCanonicalSeparator(tracked34(), [FULLWIDTH_CLAIM]), 'string');
+  t('H34: …named as such', h34row(tracked34(), [FULLWIDTH_CLAIM]).includes('FULLWIDTH COLON (U+FF1A)'), true);
+  t('H34: …and the marker has never matched it (behaviour unchanged by #12090)', CLAIM_COMMENT_MARKER.test(FULLWIDTH_CLAIM), false);
+
+  // The remaining separators, each pinned by name.
+  t('H34: an EN DASH is a near miss', nearMissClaimSeparators('Claim – skills seat, session 019x').join(','), 'EN DASH (U+2013)');
+  t('H34: a HYPHEN-MINUS is a near miss', nearMissClaimSeparators('Claim - skills seat, session 019x').join(','), 'HYPHEN-MINUS (U+002D)');
+  t('H34: `Claimed —` is one too', nearMissClaimSeparators('Claimed — by the skills seat, session 019x').join(','), 'EM DASH (U+2014)');
+  t('H34: a BLOCKQUOTED near miss reads (the template is a blockquote)', nearMissClaimSeparators('> Claim — skills seat, session 019x').join(','), 'EM DASH (U+2014)');
+
+  // ⚠️ The `[ \t]*` decision, pinned TWICE and deliberately: once on the
+  // exported regex (where the character class is what answers) and once on the
+  // reader (where the per-line split answers). A single case would let the
+  // regex be relaxed to `\s*` with the suite still green — measured: the
+  // reader-level case alone survives that mutation untouched.
+  t('H34: the exported marker does not span lines (the class, not the split)', CLAIM_NEAR_MISS_MARKER.test('Claim\n- skills seat, session 019x'), false);
+  t('H34: a markdown bullet on the NEXT line is not a separator', nearMissClaimSeparators('Claim\n- skills seat, session 019x').length, 0);
+  t('H34: …the same shape with a colon claim is unaffected', CLAIM_COMMENT_MARKER.test('Claim\n- skills seat'), false);
+
+  // The conservative content half: a claim-shaped opening with none of the
+  // protocol's own content is NOT evidence that a claim was attempted.
+  t('H34: a contentless claim-shaped line is silent', nearMissClaimSeparators('Claim - see above').length, 0);
+  t('H34: …but a `Branch:` line elsewhere in the comment is content', nearMissClaimSeparators('Claim - see above\nBranch: `claude/issue-12090-x`').join(','), 'HYPHEN-MINUS (U+002D)');
+
+  // Suppression: a thread that ALSO carries a readable claim is machine-visible,
+  // so the row has no remedy to offer and stays quiet.
+  t('H34: a thread carrying BOTH spellings is silent', h34ClaimShapedNonCanonicalSeparator(tracked34(), [DASH_CLAIM, COLON_CLAIM]), null);
+  // Gates, mirroring H2's exactly — same population, same declines.
+  t('H34: `pm:queue` is in scope too', typeof h34ClaimShapedNonCanonicalSeparator(tracked34(['pm:queue']), [DASH_CLAIM]), 'string');
+  t('H34: an untracked card is out of scope', h34ClaimShapedNonCanonicalSeparator(issue(['domain:skills'], ['os-zhuang']), [DASH_CLAIM]), null);
+  t('H34: an UNASSIGNED card is out of scope (H1 owns that card)', h34ClaimShapedNonCanonicalSeparator(issue(['pm:dispatched']), [DASH_CLAIM]), null);
+  t('H34: an unconsulted thread declines', h34ClaimShapedNonCanonicalSeparator(tracked34(), undefined), null);
+  t('H34: an unreadable thread declines', h34ClaimShapedNonCanonicalSeparator(tracked34(), null), null);
+  t('H34: an empty thread is clean', h34ClaimShapedNonCanonicalSeparator(tracked34(), []), null);
+  t('H34: a null body among the comments does not throw', h34ClaimShapedNonCanonicalSeparator(tracked34(), [null, DASH_CLAIM]) !== null, true);
+  // Two malformed comments, two separators, counted and de-duplicated.
+  const twoNearMiss = h34row(tracked34(), [DASH_CLAIM, 'Claim – other seat, session 019y']);
+  t('H34: multiple malformed comments are counted', twoNearMiss.includes('2 comment(s)'), true);
+  t('H34: …and both separators named', twoNearMiss.includes('EM DASH (U+2014) + EN DASH (U+2013)'), true);
+  t('H34: a separator is named once, not per comment', h34row(tracked34(), [DASH_CLAIM, DASH_CLAIM]).includes('EM DASH (U+2014) + EM DASH'), false);
+  // No `g` flag on the shared marker — the state bug the colon marker's header
+  // names, asserted here because this regex is exported and reused per line.
+  t('H34: the near-miss marker carries no `g` flag', CLAIM_NEAR_MISS_MARKER.global, false);
+  t('H34: …so repeated reads of one line agree', nearMissClaimSeparators(DASH_CLAIM).join() === nearMissClaimSeparators(DASH_CLAIM).join(), true);
+
+  // -- The `[::]` collapse (#12090): behaviour-preserving, asserted as such ---
+  // The class held U+003A TWICE, never the fullwidth U+FF1A its shape implied.
+  // These cases pin that the collapse changed nothing a reader could observe.
+  t('claim marker: the canonical colon still matches', CLAIM_COMMENT_MARKER.test('Claim: PM loop round R6'), true);
+  t('claim marker: `Claimed:` still matches', CLAIM_COMMENT_MARKER.test('Claimed: PM loop round R6'), true);
+  t('claim marker: a blockquoted claim still matches', CLAIM_COMMENT_MARKER.test('> Claim: PM loop round R6'), true);
+  t('claim marker: whitespace before the colon is still tolerated', CLAIM_COMMENT_MARKER.test('Claim : PM loop round R6'), true);
+  t('claim marker: the FULLWIDTH colon does not match, and never did', CLAIM_COMMENT_MARKER.test('Claim：PM loop round R6'), false);
+  t('branch line: the canonical colon still reads', claimedBranches('Branch: `claude/issue-12090-x`').join(','), 'claude/issue-12090-x');
+  t('branch line: `Branches:` still reads', claimedBranches('Branches: `claude/issue-12090-x`').join(','), 'claude/issue-12090-x');
+  t('branch line: a FULLWIDTH colon does not read, and never did', claimedBranches('Branch：`claude/issue-12090-x`').length, 0);
 
   // -- resolveSweepRepo: the parameterisation that makes a verbatim sibling
   // -- install correct rather than a green report about the wrong board (#11217)

@@ -96,6 +96,34 @@ const result = FlowRegionSchema.parse(data);
 | **nodes** | `{ id: string; type: string; label: string; config?: Record<string, any>; … }[]` | ✅ | Region body nodes (single-entry/single-exit sub-graph) |
 | **edges** | `{ id: string; source: string; target: string; condition?: string \| object; … }[]` | optional | Region body edges |
 
+### Nested Shape: `FlowRegion.nodes[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ | Node unique ID |
+| **type** | `string` | ✅ | Action type — a built-in FlowNodeAction id or a plugin-registered node type. Validated against the live action registry at registerFlow() (ADR-0018), not by a closed enum. |
+| **label** | `string` | ✅ | Node label |
+| **config** | `Record<string, any>` | optional | Node configuration |
+| **connectorConfig** | `{ connectorId: string; actionId: string; input?: Record<string, any> }` | optional |  |
+| **position** | `{ x: number; y: number }` | optional |  |
+| **timeoutMs** | `integer` | optional | Maximum execution time for this node in milliseconds |
+| **inputSchema** | `Record<string, { type: Enum<'string' \| 'number' \| 'boolean' \| 'object' \| 'array'>; required?: boolean; description?: string }>` | optional | Input parameter schema for this node |
+| **outputSchema** | `never` | optional | [REMOVED] `flow.nodes[].outputSchema` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — it was never validated: the engine does not check node outputs against it, so it documented a contract nothing enforced. Delete the key. Downstream nodes read prior outputs via expressions (`{{nodeId.field}}`) regardless of any declaration. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
+| **waitEventConfig** | `{ eventType: Enum<'timer' \| 'signal' \| 'webhook' \| 'manual' \| 'condition'>; timerDuration?: string; signalName?: string }` | optional | Configuration for wait node event resumption |
+| **boundaryConfig** | `{ attachedToNodeId: string; eventType: Enum<'error' \| 'timer' \| 'signal' \| 'cancel'>; interrupting?: boolean; errorCode?: string; … }` | optional | Configuration for boundary events attached to host nodes |
+
+### Nested Shape: `FlowRegion.edges[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ | Edge unique ID |
+| **source** | `string` | ✅ | Source Node ID |
+| **target** | `string` | ✅ | Target Node ID |
+| **condition** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Predicate (CEL) returning boolean used for branching. |
+| **type** | `Enum<'default' \| 'fault' \| 'conditional' \| 'back'>` | optional (default: `"default"`) | Connection type: default (normal flow), fault (error path), conditional (expression-guarded), or back (ADR-0044 declared back-edge — traversed normally at run time, but excluded from DAG cycle validation so a revise/rework loop can re-enter an earlier node) |
+| **label** | `string` | optional | Label on the connector |
+| **isDefault** | `boolean` | optional (default: `false`) | BPMN default flow: traverse this edge only when no sibling conditional edge of the same source node matched. Mutually exclusive with `condition`; at most one per source node. |
+
 
 ---
 
@@ -111,6 +139,13 @@ const result = FlowRegionSchema.parse(data);
 | **maxIterations** | `integer` | optional | Hard cap on iterations (clamped to the engine ceiling) |
 | **body** | `{ nodes: object[]; edges?: object[] }` | optional | Loop body region (omit for legacy flat-graph loops) |
 
+### Nested Shape: `LoopConfig.body`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **nodes** | `{ id: string; type: string; label: string; config?: Record<string, any>; … }[]` | ✅ | Region body nodes (single-entry/single-exit sub-graph) |
+| **edges** | `{ id: string; source: string; target: string; condition?: string \| object; … }[]` | optional | Region body edges |
+
 
 ---
 
@@ -124,6 +159,34 @@ const result = FlowRegionSchema.parse(data);
 | **nodes** | `{ id: string; type: string; label: string; config?: Record<string, any>; … }[]` | ✅ | Branch body nodes |
 | **edges** | `{ id: string; source: string; target: string; condition?: string \| object; … }[]` | optional | Branch body edges |
 
+### Nested Shape: `ParallelBranch.nodes[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ | Node unique ID |
+| **type** | `string` | ✅ | Action type — a built-in FlowNodeAction id or a plugin-registered node type. Validated against the live action registry at registerFlow() (ADR-0018), not by a closed enum. |
+| **label** | `string` | ✅ | Node label |
+| **config** | `Record<string, any>` | optional | Node configuration |
+| **connectorConfig** | `{ connectorId: string; actionId: string; input?: Record<string, any> }` | optional |  |
+| **position** | `{ x: number; y: number }` | optional |  |
+| **timeoutMs** | `integer` | optional | Maximum execution time for this node in milliseconds |
+| **inputSchema** | `Record<string, { type: Enum<'string' \| 'number' \| 'boolean' \| 'object' \| 'array'>; required?: boolean; description?: string }>` | optional | Input parameter schema for this node |
+| **outputSchema** | `never` | optional | [REMOVED] `flow.nodes[].outputSchema` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — it was never validated: the engine does not check node outputs against it, so it documented a contract nothing enforced. Delete the key. Downstream nodes read prior outputs via expressions (`{{nodeId.field}}`) regardless of any declaration. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
+| **waitEventConfig** | `{ eventType: Enum<'timer' \| 'signal' \| 'webhook' \| 'manual' \| 'condition'>; timerDuration?: string; signalName?: string }` | optional | Configuration for wait node event resumption |
+| **boundaryConfig** | `{ attachedToNodeId: string; eventType: Enum<'error' \| 'timer' \| 'signal' \| 'cancel'>; interrupting?: boolean; errorCode?: string; … }` | optional | Configuration for boundary events attached to host nodes |
+
+### Nested Shape: `ParallelBranch.edges[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ | Edge unique ID |
+| **source** | `string` | ✅ | Source Node ID |
+| **target** | `string` | ✅ | Target Node ID |
+| **condition** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Predicate (CEL) returning boolean used for branching. |
+| **type** | `Enum<'default' \| 'fault' \| 'conditional' \| 'back'>` | optional (default: `"default"`) | Connection type: default (normal flow), fault (error path), conditional (expression-guarded), or back (ADR-0044 declared back-edge — traversed normally at run time, but excluded from DAG cycle validation so a revise/rework loop can re-enter an earlier node) |
+| **label** | `string` | optional | Label on the connector |
+| **isDefault** | `boolean` | optional (default: `false`) | BPMN default flow: traverse this edge only when no sibling conditional edge of the same source node matched. Mutually exclusive with `condition`; at most one per source node. |
+
 
 ---
 
@@ -134,6 +197,14 @@ const result = FlowRegionSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **branches** | `{ name?: string; nodes: object[]; edges?: object[] }[]` | ✅ | Branch regions executed concurrently; implicit join at block end |
+
+### Nested Shape: `ParallelConfig.branches[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | optional | Branch label |
+| **nodes** | `{ id: string; type: string; label: string; config?: Record<string, any>; … }[]` | ✅ | Branch body nodes |
+| **edges** | `{ id: string; source: string; target: string; condition?: string \| object; … }[]` | optional | Branch body edges |
 
 
 ---
@@ -164,6 +235,31 @@ const result = FlowRegionSchema.parse(data);
 | **catch** | `{ nodes: object[]; edges?: object[] }` | optional | Handler region run when the try region fails |
 | **errorVariable** | `string` | optional (default: `"$error"`) | Variable holding the caught error in the catch region |
 | **retry** | `{ maxRetries?: integer; backoffMs?: integer; backoffMultiplier?: number; maxRetryDelayMs?: integer; … }` | optional | Optional retry policy for the try region |
+
+### Nested Shape: `TryCatchConfig.try`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **nodes** | `{ id: string; type: string; label: string; config?: Record<string, any>; … }[]` | ✅ | Region body nodes (single-entry/single-exit sub-graph) |
+| **edges** | `{ id: string; source: string; target: string; condition?: string \| object; … }[]` | optional | Region body edges |
+
+### Nested Shape: `TryCatchConfig.catch`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **nodes** | `{ id: string; type: string; label: string; config?: Record<string, any>; … }[]` | ✅ | Region body nodes (single-entry/single-exit sub-graph) |
+| **edges** | `{ id: string; source: string; target: string; condition?: string \| object; … }[]` | optional | Region body edges |
+
+### Nested Shape: `TryCatchConfig.retry`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **maxRetries** | `integer` | optional (default: `0`) | Retry attempts after the initial one. 0 (the default) means no retry — state a count to opt in. |
+| **backoffMs** | `integer` | optional (default: `1000`) | Base delay before the first retry (ms); subsequent delays multiply by backoffMultiplier |
+| **backoffMultiplier** | `number` | optional (default: `1`) | Exponential backoff multiplier; 1 (the default) keeps the delay flat |
+| **maxRetryDelayMs** | `integer` | optional (default: `30000`) | Ceiling for a single backoff delay (ms) |
+| **jitter** | `boolean` | optional (default: `false`) | Randomize each delay within [50%, 100%] of its computed value — spreads a thundering herd of simultaneous retries |
+| **retryDelayMs** | `never` | optional | [REMOVED] `retryDelayMs` was removed in @objectstack/spec 17.0.0 (#4661, #4964) — the retry policy now has ONE spelling for its base delay across every surface that carries it: `job.retryPolicy`, a `try_catch` node's `retry` and `flow.errorHandling`. Rename the key to `backoffMs`; the value (milliseconds before the first retry) is unchanged. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
 
 
 ---

@@ -110,6 +110,44 @@ ADR-0095 D2 posture rung — PLATFORM_ADMIN crosses the tenant wall where object
 | **record** | `{ recordId: string; visible: boolean; decidedBy?: Enum<'tenant_isolation' \| 'principal' \| 'required_permissions' \| 'object_crud' \| …> }` | optional | Row-level verdict for the specific record; set only for singular record-grained requests. |
 | **records** | `{ recordId: string; visible: boolean; decidedBy?: Enum<'tenant_isolation' \| 'principal' \| 'required_permissions' \| 'object_crud' \| …> }[]` | optional | Per-record verdicts for a batch request — records[i] answers recordIds[i]; set only when the request carried recordIds. |
 
+### Nested Shape: `ExplainDecision.principal`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **userId** | `string \| null` | ✅ |  |
+| **positions** | `string[]` | optional (default: `[]`) |  |
+| **permissionSets** | `string[]` | optional (default: `[]`) |  |
+| **principalKind** | `Enum<'human' \| 'agent' \| 'service' \| 'guest' \| 'system'>` | optional |  |
+| **onBehalfOf** | `{ userId: string }` | optional |  |
+| **posture** | `Enum<'PLATFORM_ADMIN' \| 'TENANT_ADMIN' \| 'MEMBER' \| 'EXTERNAL'>` | optional | ADR-0095 D2 posture rung — PLATFORM_ADMIN crosses the tenant wall where object posture permits; TENANT_ADMIN sees all rows in the org; MEMBER gets business RLS; EXTERNAL sees only explicitly shared rows. |
+
+### Nested Shape: `ExplainDecision.layers[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **layer** | `Enum<'tenant_isolation' \| 'principal' \| 'required_permissions' \| 'object_crud' \| …>` | ✅ |  |
+| **kernelTier** | `Enum<'layer_0_tenant' \| 'layer_1_business'>` | optional | ADR-0095 kernel layer: layer_0_tenant = the always-first org wall; layer_1_business = business RLS/sharing/ownership. |
+| **verdict** | `Enum<'grants' \| 'denies' \| 'narrows' \| 'widens' \| 'neutral' \| 'not_applicable'>` | ✅ |  |
+| **detail** | `string` | ✅ |  |
+| **contributors** | `{ kind: Enum<'permission_set' \| 'position' \| 'system'>; name: string; via?: string; state?: Enum<'active' \| 'expired' \| 'deactivated'> }[]` | optional (default: `[]`) |  |
+| **record** | `{ outcome: Enum<'admitted' \| 'excluded' \| 'not_evaluated'>; rowFilter?: any; matchesRecord?: boolean; rules: object[]; … }` | optional | Row-level determination for the specific record under explanation; set only for record-grained requests. |
+
+### Nested Shape: `ExplainDecision.record`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **recordId** | `string` | ✅ | The concrete record id this verdict is about (echoes the request recordId or recordIds[i]). |
+| **visible** | `boolean` | ✅ | Whether the operation is permitted on this specific record after all layers. |
+| **decidedBy** | `Enum<'tenant_isolation' \| 'principal' \| 'required_permissions' \| 'object_crud' \| …>` | optional | The pipeline layer that decided the record-level outcome (excluded it, or last admitted it); omitted for a missing record. |
+
+### Nested Shape: `ExplainDecision.records[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **recordId** | `string` | ✅ | The concrete record id this verdict is about (echoes the request recordId or recordIds[i]). |
+| **visible** | `boolean` | ✅ | Whether the operation is permitted on this specific record after all layers. |
+| **decidedBy** | `Enum<'tenant_isolation' \| 'principal' \| 'required_permissions' \| 'object_crud' \| …>` | optional | The pipeline layer that decided the record-level outcome (excluded it, or last admitted it); omitted for a missing record. |
+
 
 ---
 
@@ -125,6 +163,16 @@ ADR-0095 D2 posture rung — PLATFORM_ADMIN crosses the tenant wall where object
 | **detail** | `string` | ✅ |  |
 | **contributors** | `{ kind: Enum<'permission_set' \| 'position' \| 'system'>; name: string; via?: string; state?: Enum<'active' \| 'expired' \| 'deactivated'> }[]` | optional (default: `[]`) |  |
 | **record** | `{ outcome: Enum<'admitted' \| 'excluded' \| 'not_evaluated'>; rowFilter?: any; matchesRecord?: boolean; rules: object[]; … }` | optional | Row-level determination for the specific record under explanation; set only for record-grained requests. |
+
+### Nested Shape: `ExplainLayer.record`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **outcome** | `Enum<'admitted' \| 'excluded' \| 'not_evaluated'>` | ✅ | This layer's row-level outcome for the record: admitted, excluded, or not_evaluated (skipped/not row-scoped). |
+| **rowFilter** | `any` | optional | The effective row predicate this layer contributed for the record set (null = unrestricted, __deny_all__ = zero rows). |
+| **matchesRecord** | `boolean` | optional | Whether the specific record satisfies rowFilter — the judgement behind outcome. |
+| **rules** | `{ kind: Enum<'tenant_filter' \| 'owd_baseline' \| 'ownership' \| 'record_share' \| 'sharing_rule' \| …>; name: string; grants?: Enum<'read' \| 'edit' \| 'full'>; via?: string; … }[]` | optional (default: `[]`) | Concrete rules, shares, or policies this layer evaluated against the record, in evaluation order. |
+| **detail** | `string` | optional | Human-readable, record-specific explanation of this layer's outcome. |
 
 
 ---
@@ -172,6 +220,17 @@ ADR-0095 D2 posture rung — PLATFORM_ADMIN crosses the tenant wall where object
 | **matchesRecord** | `boolean` | optional | Whether the specific record satisfies rowFilter — the judgement behind outcome. |
 | **rules** | `{ kind: Enum<'tenant_filter' \| 'owd_baseline' \| 'ownership' \| 'record_share' \| 'sharing_rule' \| …>; name: string; grants?: Enum<'read' \| 'edit' \| 'full'>; via?: string; … }[]` | optional (default: `[]`) | Concrete rules, shares, or policies this layer evaluated against the record, in evaluation order. |
 | **detail** | `string` | optional | Human-readable, record-specific explanation of this layer's outcome. |
+
+### Nested Shape: `ExplainRecordAttribution.rules[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **kind** | `Enum<'tenant_filter' \| 'owd_baseline' \| 'ownership' \| 'record_share' \| 'sharing_rule' \| …>` | ✅ | The row-visibility source kind evaluated for this record at this layer. |
+| **name** | `string` | ✅ | Stable identifier of the concrete rule, share, or policy that was evaluated. |
+| **grants** | `Enum<'read' \| 'edit' \| 'full'>` | optional | Access level a sharing source grants on the record (authorable: read/edit; `full` appears only for legacy rows pending normalisation). |
+| **via** | `string` | optional | How the rule reached the principal — recipient group/position, ownership, or the matching criteria. |
+| **predicate** | `any` | optional | The row predicate this rule contributed, when it is filter-shaped (null = unrestricted). |
+| **effect** | `Enum<'admits' \| 'excludes' \| 'neutral'>` | ✅ | The rule's effect on THIS record: admits, excludes, or neutral. |
 
 
 ---

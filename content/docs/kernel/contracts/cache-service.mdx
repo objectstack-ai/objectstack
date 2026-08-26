@@ -3,8 +3,6 @@ title: ICacheService Contract
 description: Reference for the Cache Service contract — key-value caching with TTL support
 ---
 
-# ICacheService Contract
-
 The Cache Service provides a **key-value caching** layer used throughout ObjectStack for metadata caching, query result caching, and rate limiting. Implementations can range from in-memory Maps to Redis clusters. It does **not** store sessions: the session of record is always the `sys_session` table, because ADR-0069 D4's session controls (idle timeout, absolute lifetime, concurrent-session cap) revoke a session by writing that row. A host may opt in explicitly with `cacheSecondaryStorage()` from `@objectstack/plugin-auth`, but should know what it buys: better-auth then answers session lookups from the cached snapshot without reading the database, so **opting in disables all three D4 session controls** — a revoked session stays usable until its cached copy expires.
 
 <Callout type="info">

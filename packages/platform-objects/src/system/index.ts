@@ -5,12 +5,14 @@
  *
  * Cross-cutting system-level objects that don't belong to identity,
  * security, audit, or integration. Hosts the generic settings K/V store
- * backing ADR-0007 (Settings Manifest + K/V Store + Resolver) and the
- * deployment-level data-migration flags (#3617).
+ * backing ADR-0007 (Settings Manifest + K/V Store + Resolver), the
+ * deployment-level data-migration flags (#3617), and the packaged-metadata
+ * activation ledger (ADR-0126 §4).
  */
 
 export { SysSetting } from './sys-setting.object.js';
 export { SysSecret } from './sys-secret.object.js';
+export { SysMetadataActivation } from './sys-metadata-activation.object.js';
 export { SysSettingAudit } from './sys-setting-audit.object.js';
 export { SysMigration } from './sys-migration.object.js';
 export { SysMigrationJournal } from './sys-migration-journal.object.js';

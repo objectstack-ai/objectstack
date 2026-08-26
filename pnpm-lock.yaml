@@ -1115,6 +1115,9 @@ importers:
         specifier: ^4.4.3
         version: 4.4.3
     devDependencies:
+      '@objectstack/lint':
+        specifier: workspace:*
+        version: link:../lint
       '@objectstack/metadata-core':
         specifier: workspace:*
         version: link:../metadata-core
@@ -1758,6 +1761,9 @@ importers:
       '@objectstack/driver-sql':
         specifier: workspace:*
         version: link:../../drivers/driver-sql
+      '@objectstack/metadata-protocol':
+        specifier: workspace:*
+        version: link:../../metadata-protocol
       '@objectstack/objectql':
         specifier: workspace:*
         version: link:../../objectql
@@ -2202,6 +2208,9 @@ importers:
       '@objectstack/metadata-core':
         specifier: workspace:*
         version: link:../../metadata-core
+      '@objectstack/platform-objects':
+        specifier: workspace:*
+        version: link:../../platform-objects
       '@objectstack/spec':
         specifier: workspace:*
         version: link:../../spec

@@ -45,6 +45,14 @@ App compatibility check result
 | **compatible** | `boolean` | ✅ | Whether the app is compatible |
 | **issues** | `{ severity: Enum<'error' \| 'warning'>; message: string; category: Enum<'kernel_version' \| 'object_conflict' \| 'dependency_missing' \| 'quota_exceeded'> }[]` | optional (default: `[]`) | Compatibility issues |
 
+### Nested Shape: `AppCompatibilityCheck.issues[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **severity** | `Enum<'error' \| 'warning'>` | ✅ | Issue severity |
+| **message** | `string` | ✅ | Issue description |
+| **category** | `Enum<'kernel_version' \| 'object_conflict' \| 'dependency_missing' \| 'quota_exceeded'>` | ✅ | Issue category |
+
 
 ---
 

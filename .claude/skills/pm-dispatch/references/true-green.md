@@ -30,5 +30,5 @@
 - 本地 preflight:`preflight-workspace-dist`(workspace 依赖的 dist 新鲜度守卫)——
   按其自身输出的提示跑,先建再测。
 - 严格区 `check-test-typecheck` 的失败**不以 `error TS` 行出现在 CI 日志**:turbo 汇总
-  只写 `#typecheck` failed —— 要看到台账消息必须本地跑该包自己的 `typecheck` 脚本;
-  对 CI 日志 grep `error TS` 的阴性读数在这一族上不成立。
+  只写 `#typecheck` failed —— 要看到台账消息必须本地跑该包自己的 `typecheck` 脚本;对 CI 日志
+  grep `error TS` 的阴性读数在这一族上不成立。

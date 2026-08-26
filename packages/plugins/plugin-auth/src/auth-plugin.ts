@@ -4,6 +4,10 @@ import { Plugin, PluginContext, IHttpServer } from '@objectstack/core';
 import type { BetterAuthOptions } from 'better-auth';
 import {
   AuthConfig,
+  type AudienceConfig,
+  AUDIENCE_POSTURES,
+  audiencePermitsSelfRegistration,
+  isAudiencePosture,
   type SocialProviderConfig,
   type SettingsChangeHandler,
   type SettingsUnsubscribe,
@@ -64,7 +68,7 @@ import {
   isDevAdminSeedArmed,
   warnIfWalledOwnerCannotVerify,
 } from './walled-owner-verification-path.js';
-import { judgePlatformAdmin, type PlatformAdminActor } from './platform-admin-gate.js';
+import { judgePlatformAdmin, isPlatformAdminUser, type PlatformAdminActor } from './platform-admin-gate.js';
 import {
   runAdminBanUser,
   runAdminUnbanUser,
@@ -1531,6 +1535,94 @@ export class AuthPlugin implements Plugin {
         if (Object.keys(patch).length > 0) {
           this.authManager.applyConfigPatch(patch);
         }
+
+        // [#11768] Audience posture (#11739) — the console switch for
+        // `invite_only | email_domain | open`. The three `audience_*` keys are
+        // ONE atomic declaration mapped to ONE `applyConfigPatch({ audience })`
+        // (the #11767 contract: the patch replaces the WHOLE audience object
+        // and validates the MERGED result), applied AFTER the main patch so
+        // that validation judges the audience against the `emailAndPassword`
+        // state this same pass just applied — an explicit
+        // `require_email_verification: false` beside a self-registration
+        // posture is a contradiction `assertAudienceConfig` refuses.
+        //
+        // #5152's rules, exactly as `membership_policy` above:
+        //   - EXPLICIT-only. The manifest default (`invite_only`) is a UI
+        //     default and must not mask a deployment that declared its
+        //     audience in stack config at boot.
+        //   - An off-vocabulary posture is REFUSED loudly, never coerced —
+        //     a coerced value on this setting fails OPEN (an operator who
+        //     typed `invite-only` believing the wall is up while sign-ups
+        //     ride whatever posture the coercion picked).
+        //
+        // Composition rule: the declaration carries only the keys the
+        // explicitly selected posture READS (the spec marks the siblings
+        // "only read under" their postures). In particular, switching BACK to
+        // `invite_only` sends `{ posture: 'invite_only' }` alone — leftover
+        // text in the (hidden) domain-list field must never make CLOSING the
+        // wall refusable, because that refusal would leave the previous, more
+        // open posture ruling: the one direction that must not fail.
+        // Missing required siblings are NOT guessed: the patch goes out
+        // without them and `applyConfigPatch` refuses the merged result
+        // (standing config keeps ruling — refusing to OPEN fails closed).
+        const audienceKeys = [
+          'audience_posture',
+          'audience_allowed_email_domains',
+          'audience_self_registration_permission_set',
+        ];
+        if (audienceKeys.some((key) => isExplicit(key))) {
+          const rawPosture = values.audience_posture;
+          if (!isExplicit('audience_posture')) {
+            ctx.logger.error(
+              '[auth] audience settings IGNORED — a domain list or permission set is declared without a posture. ' +
+                `The standing posture ('${this.authManager.getAudience().posture}') keeps ruling. ` +
+                `Set auth.audience_posture (or OS_AUTH_AUDIENCE_POSTURE) to one of: ${AUDIENCE_POSTURES.join(', ')}.`,
+            );
+          } else if (!isAudiencePosture(rawPosture)) {
+            ctx.logger.error(
+              `[auth] audience_posture '${String(rawPosture)}' is not a recognized audience posture — IGNORED, the deployment keeps its ` +
+                `current posture ('${this.authManager.getAudience().posture}') and self-registration continues to follow it. ` +
+                `Set auth.audience_posture (or OS_AUTH_AUDIENCE_POSTURE) to one of: ${AUDIENCE_POSTURES.join(', ')}.`,
+            );
+          } else {
+            const audience: AudienceConfig = { posture: rawPosture };
+            if (rawPosture === 'email_domain' && isExplicit('audience_allowed_email_domains')) {
+              const rawDomains = typeof values.audience_allowed_email_domains === 'string'
+                ? values.audience_allowed_email_domains
+                : '';
+              // Same textarea convention as `allowed_ip_ranges`: newline- or
+              // comma-separated. Entries are NOT filtered for shape here —
+              // a malformed domain must be refused loudly by the validator,
+              // never silently dropped from the allowlist it was typed into.
+              audience.allowedEmailDomains = rawDomains
+                .split(/[\n,]+/)
+                .map((d) => d.trim())
+                .filter(Boolean);
+            }
+            if (
+              audiencePermitsSelfRegistration(rawPosture) &&
+              isExplicit('audience_self_registration_permission_set')
+            ) {
+              const set = asTrimmedString(values.audience_self_registration_permission_set);
+              if (set !== undefined) audience.selfRegistrationPermissionSet = set;
+            }
+            try {
+              this.authManager.applyConfigPatch({ audience });
+            } catch (audienceErr: any) {
+              // The merged-result validation refused the declaration (empty
+              // domain list, missing/forbidden permission set, verification
+              // contradiction, …). The standing config keeps ruling — report
+              // with the validator's own remedy-bearing message. `error`, not
+              // `warn`, for the #5152 reason: the console shows the saved
+              // values while the runtime refused them, so nothing else looks
+              // broken afterwards.
+              ctx.logger.error(
+                `[auth] audience settings REFUSED — the standing posture ('${this.authManager.getAudience().posture}') keeps ruling. ` +
+                  String(audienceErr?.message ?? audienceErr),
+              );
+            }
+          }
+        }
       } catch (err: any) {
         ctx.logger.warn('Auth: failed to apply auth settings: ' + (err?.message ?? err));
       }
@@ -2248,6 +2340,82 @@ export class AuthPlugin implements Plugin {
         } catch (error) {
           const err = error instanceof Error ? error : new Error(String(error));
           ctx.logger.error('[AuthPlugin] admin/remove-user failed', err);
+          return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: err.message } }, 500);
+        }
+      });
+
+      // ── #11900: /admin/has-permission — a QUERY answered from the ADR-0068
+      // predicate, everything else delegated byte-for-byte ────────────────
+      //
+      // The vendor evaluates this permission QUERY on the legacy
+      // `user.role === 'admin'` scalar ADR-0068 D2 stopped synthesizing, so a
+      // genuine platform admin was told `200 {"success":false}` —
+      // byte-identical to a plain member's answer. Not a refusal like the
+      // #9652 family: a confident WRONG ANSWER on a published
+      // authorization-answer surface. Maintainer ruling 2026-08-25 (option B
+      // per the card body's lettering): shade it, answering from the
+      // ADR-0068 predicate.
+      //
+      // ⚠️ Unlike `remove-user` above, gate-then-delegate CANNOT carry this
+      // fix: delegation preserves the vendor's answer, and here the vendor's
+      // answer to the admitted caller IS the defect. And unlike `ban-user`,
+      // gate-then-reimplement cannot either: `gateAdmin`'s 403 would replace
+      // the plain member's own `200 {"error":null,"success":false}` — the
+      // correct negative ANSWER to a permission question, pinned by the
+      // non-admin dogfood sweep (a `true` there would be the leak, but so
+      // would turning the answer into a refusal). So this mount branches on
+      // the predicate WITHOUT refusing anyone:
+      //
+      //   platform admin + a body the vendor would evaluate
+      //     → answered here, from the vendor's own access-control statements
+      //       with only the identity signal replaced (an ungranted or unknown
+      //       permission still answers `false` — see
+      //       admin-has-permission-endpoint.ts for why unconditional `true`
+      //       would be a new wrong-200);
+      //   everyone and everything else — anonymous (enveloped 401), plain
+      //   member (its own negative), any body the vendor refuses (vendor
+      //   400, vendor ordering)
+      //     → delegated through `handleRequest`, native bytes standing.
+      //
+      // Ledger: `POST /api/v1/auth/admin/has-permission` stays a
+      // `BETTER_AUTH_MOUNTED_SURFACE` row; `check:auth-mount-ledger` accounts
+      // for this mount as "shadowing a vendor-declared path" (the #12029
+      // worked reading — a shadow is accounted for, not a new row).
+      //
+      // Pinned by `admin-has-permission-endpoint.test.ts` (both directions,
+      // full table) and the two dogfood sweeps (admin standing + non-admin
+      // negative).
+      rawApp.post(`${basePath}/admin/has-permission`, async (c: any) => {
+        try {
+          const authApi = await this.authManager!.getApi();
+          const session = await (authApi as any).getSession({ headers: c.req.raw.headers });
+          const user = (session as { user?: { id?: unknown } } | null | undefined)?.user;
+          if (user?.id && isPlatformAdminUser(user)) {
+            const { readEvaluatedPermissionQuery, answerPermissionQueryAsAdmin } = await import(
+              './admin-has-permission-endpoint.js'
+            );
+            // Parse from a CLONE: on the delegate path below the original
+            // request body must reach the vendor undisturbed.
+            let body: unknown;
+            try {
+              body = await c.req.raw.clone().json();
+            } catch {
+              body = undefined; // unreadable → the vendor's own 400, below
+            }
+            const query = readEvaluatedPermissionQuery(body);
+            if (query) {
+              const answer = await answerPermissionQueryAsAdmin(
+                { getAuthContext: () => this.authManager!.getAuthContext() },
+                String(user.id),
+                query,
+              );
+              return c.json(answer, 200);
+            }
+          }
+          return await this.authManager!.handleRequest(c.req.raw);
+        } catch (error) {
+          const err = error instanceof Error ? error : new Error(String(error));
+          ctx.logger.error('[AuthPlugin] admin/has-permission failed', err);
           return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: err.message } }, 500);
         }
       });

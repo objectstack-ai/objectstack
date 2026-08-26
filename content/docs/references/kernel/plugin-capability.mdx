@@ -58,6 +58,14 @@ Level of protocol conformance
 | **contract** | `{ input?: string; output?: string; signature?: string }` | optional |  |
 | **cardinality** | `Enum<'single' \| 'multiple'>` | optional (default: `"multiple"`) | Whether multiple extensions can register to this point |
 
+### Nested Shape: `ExtensionPoint.contract`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **input** | `string` | optional | Input type/schema |
+| **output** | `string` | optional | Output type/schema |
+| **signature** | `string` | optional | Function signature if applicable |
+
 
 ---
 
@@ -75,6 +83,26 @@ Level of protocol conformance
 | **certified** | `boolean` | optional (default: `false`) | Has passed official conformance tests |
 | **certificationDate** | `string` | optional |  |
 
+### Nested Shape: `PluginCapability.protocol`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ | Unique protocol identifier (e.g., com.objectstack.protocol.storage.v1) |
+| **label** | `string` | ✅ |  |
+| **version** | `{ major: integer; minor: integer; patch: integer }` | ✅ | Semantic version of the protocol |
+| **specification** | `string` | optional | URL or path to protocol specification |
+| **description** | `string` | optional |  |
+
+### Nested Shape: `PluginCapability.features[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Feature identifier within the protocol |
+| **enabled** | `boolean` | optional (default: `true`) |  |
+| **description** | `string` | optional |  |
+| **sinceVersion** | `string` | optional | Version when this feature was added |
+| **deprecatedSince** | `string` | optional | Version when deprecated |
+
 
 ---
 
@@ -89,6 +117,60 @@ Level of protocol conformance
 | **requires** | `{ pluginId: string; version: string; optional: boolean; reason?: string; … }[]` | optional | Required plugins and their capabilities |
 | **extensionPoints** | `{ id: string; name: string; description?: string; type: Enum<'action' \| 'hook' \| 'widget' \| 'provider' \| 'transformer' \| 'validator' \| 'decorator'>; … }[]` | optional | Points where other plugins can extend this plugin |
 | **extensions** | `{ targetPluginId: string; extensionPointId: string; implementation: string; priority: integer }[]` | optional | Extensions contributed to other plugins |
+
+### Nested Shape: `PluginCapabilityManifest.implements[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **protocol** | `{ id: string; label: string; version: object; specification?: string; … }` | ✅ |  |
+| **conformance** | `Enum<'full' \| 'partial' \| 'experimental' \| 'deprecated'>` | optional (default: `"full"`) | Level of protocol conformance |
+| **implementedFeatures** | `string[]` | optional | List of implemented feature names |
+| **features** | `{ name: string; enabled: boolean; description?: string; sinceVersion?: string; … }[]` | optional |  |
+| **metadata** | `Record<string, any>` | optional |  |
+| **certified** | `boolean` | optional (default: `false`) | Has passed official conformance tests |
+| **certificationDate** | `string` | optional |  |
+
+### Nested Shape: `PluginCapabilityManifest.provides[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ | Unique interface identifier |
+| **name** | `string` | ✅ |  |
+| **description** | `string` | optional |  |
+| **version** | `{ major: integer; minor: integer; patch: integer }` | ✅ | Semantic version of the protocol |
+| **methods** | `{ name: string; description?: string; parameters?: object[]; returnType?: string; … }[]` | ✅ |  |
+| **events** | `{ name: string; description?: string; payload?: string }[]` | optional |  |
+| **stability** | `Enum<'stable' \| 'beta' \| 'alpha' \| 'experimental'>` | optional (default: `"stable"`) |  |
+
+### Nested Shape: `PluginCapabilityManifest.requires[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **pluginId** | `string` | ✅ | Required plugin identifier |
+| **version** | `string` | ✅ | Semantic version constraint |
+| **optional** | `boolean` | optional (default: `false`) |  |
+| **reason** | `string` | optional |  |
+| **requiredCapabilities** | `string[]` | optional | Protocol IDs the dependency must support |
+
+### Nested Shape: `PluginCapabilityManifest.extensionPoints[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ | Unique extension point identifier |
+| **name** | `string` | ✅ |  |
+| **description** | `string` | optional |  |
+| **type** | `Enum<'action' \| 'hook' \| 'widget' \| 'provider' \| 'transformer' \| 'validator' \| 'decorator'>` | ✅ |  |
+| **contract** | `{ input?: string; output?: string; signature?: string }` | optional |  |
+| **cardinality** | `Enum<'single' \| 'multiple'>` | optional (default: `"multiple"`) | Whether multiple extensions can register to this point |
+
+### Nested Shape: `PluginCapabilityManifest.extensions[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **targetPluginId** | `string` | ✅ | Plugin ID being extended |
+| **extensionPointId** | `string` | ✅ | Extension point identifier |
+| **implementation** | `string` | ✅ | Path to implementation module |
+| **priority** | `integer` | optional (default: `100`) | Registration priority (lower = higher priority) |
 
 
 ---
@@ -121,6 +203,24 @@ Level of protocol conformance
 | **methods** | `{ name: string; description?: string; parameters?: object[]; returnType?: string; … }[]` | ✅ |  |
 | **events** | `{ name: string; description?: string; payload?: string }[]` | optional |  |
 | **stability** | `Enum<'stable' \| 'beta' \| 'alpha' \| 'experimental'>` | optional (default: `"stable"`) |  |
+
+### Nested Shape: `PluginInterface.methods[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Method name |
+| **description** | `string` | optional |  |
+| **parameters** | `{ name: string; type: string; required: boolean; description?: string }[]` | optional |  |
+| **returnType** | `string` | optional | Return value type |
+| **async** | `boolean` | optional (default: `false`) | Whether method returns a Promise |
+
+### Nested Shape: `PluginInterface.events[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Event name |
+| **description** | `string` | optional |  |
+| **payload** | `string` | optional | Event payload type |
 
 
 ---

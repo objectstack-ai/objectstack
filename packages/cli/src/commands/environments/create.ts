@@ -36,7 +36,7 @@ export default class EnvironmentsCreate extends Command {
     // the `blank`/`crm`/`todo` registry it named died with the `apps/server`
     // templates route. Removed in #3731: an accepted-and-dropped flag reports
     // success for work that never happened. Starter content is installed from
-    // the App Marketplace instead (`os packages install`, `sys_package` with
+    // the App Marketplace instead (`os package install`, `sys_package` with
     // `is_starter = true`).
     artifact: Flags.string({
       description: 'Path to a locally-compiled objectstack.json artifact to bind into this project',

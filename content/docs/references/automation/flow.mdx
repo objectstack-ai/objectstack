@@ -63,6 +63,65 @@ const result = FlowSchema.parse(data);
 | **_packageVersion** | `string` | optional | Owning package version. |
 | **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
 
+### Nested Shape: `Flow.variables[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Variable name |
+| **type** | `string` | ✅ | Data type (text, number, boolean, object, list) |
+| **isInput** | `boolean` | optional (default: `false`) | Is input parameter |
+| **isOutput** | `boolean` | optional (default: `false`) | Is output parameter |
+| **defaultValue** | `any` | optional | Value bound at run start when no parameter supplies one — this is what makes a declared variable always bound. An explicitly supplied param wins, including `false` and `null`; the boundary is `params[name] !== undefined`. |
+
+### Nested Shape: `Flow.nodes[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ | Node unique ID |
+| **type** | `string` | ✅ | Action type — a built-in FlowNodeAction id or a plugin-registered node type. Validated against the live action registry at registerFlow() (ADR-0018), not by a closed enum. |
+| **label** | `string` | ✅ | Node label |
+| **config** | `Record<string, any>` | optional | Node configuration |
+| **connectorConfig** | `{ connectorId: string; actionId: string; input?: Record<string, any> }` | optional |  |
+| **position** | `{ x: number; y: number }` | optional |  |
+| **timeoutMs** | `integer` | optional | Maximum execution time for this node in milliseconds |
+| **inputSchema** | `Record<string, { type: Enum<'string' \| 'number' \| 'boolean' \| 'object' \| 'array'>; required?: boolean; description?: string }>` | optional | Input parameter schema for this node |
+| **outputSchema** | `never` | optional | [REMOVED] `flow.nodes[].outputSchema` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — it was never validated: the engine does not check node outputs against it, so it documented a contract nothing enforced. Delete the key. Downstream nodes read prior outputs via expressions (`{{nodeId.field}}`) regardless of any declaration. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
+| **waitEventConfig** | `{ eventType: Enum<'timer' \| 'signal' \| 'webhook' \| 'manual' \| 'condition'>; timerDuration?: string; signalName?: string }` | optional | Configuration for wait node event resumption |
+| **boundaryConfig** | `{ attachedToNodeId: string; eventType: Enum<'error' \| 'timer' \| 'signal' \| 'cancel'>; interrupting?: boolean; errorCode?: string; … }` | optional | Configuration for boundary events attached to host nodes |
+
+### Nested Shape: `Flow.edges[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ | Edge unique ID |
+| **source** | `string` | ✅ | Source Node ID |
+| **target** | `string` | ✅ | Target Node ID |
+| **condition** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Predicate (CEL) returning boolean used for branching. |
+| **type** | `Enum<'default' \| 'fault' \| 'conditional' \| 'back'>` | optional (default: `"default"`) | Connection type: default (normal flow), fault (error path), conditional (expression-guarded), or back (ADR-0044 declared back-edge — traversed normally at run time, but excluded from DAG cycle validation so a revise/rework loop can re-enter an earlier node) |
+| **label** | `string` | optional | Label on the connector |
+| **isDefault** | `boolean` | optional (default: `false`) | BPMN default flow: traverse this edge only when no sibling conditional edge of the same source node matched. Mutually exclusive with `condition`; at most one per source node. |
+
+### Nested Shape: `Flow.errorHandling`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **strategy** | `Enum<'fail' \| 'retry' \| 'continue'>` | optional (default: `"fail"`) | How to handle node execution errors. 'retry' governs ONE synchronous dispatch: a durable pause (approval/screen/wait) ends the retry-governed segment, so a failure after the run resumes is not retried. |
+| **maxRetries** | `integer` | optional (default: `0`) | Retry attempts after the initial one. Read only under strategy: 'retry', which requires >= 1; 0 (the default) means no retry. |
+| **backoffMs** | `integer` | optional (default: `1000`) | Base delay before the first retry (ms); subsequent delays multiply by backoffMultiplier |
+| **backoffMultiplier** | `number` | optional (default: `1`) | Exponential backoff multiplier; 1 (the default) keeps the delay flat |
+| **maxRetryDelayMs** | `integer` | optional (default: `30000`) | Ceiling for a single backoff delay (ms) |
+| **jitter** | `boolean` | optional (default: `false`) | Randomize each delay within [50%, 100%] of its computed value — spreads a thundering herd of simultaneous retries |
+| **retryDelayMs** | `never` | optional | [REMOVED] `retryDelayMs` was removed in @objectstack/spec 17.0.0 (#4661, #4964) — the retry policy now has ONE spelling for its base delay across every surface that carries it: `job.retryPolicy`, a `try_catch` node's `retry` and `flow.errorHandling`. Rename the key to `backoffMs`; the value (milliseconds before the first retry) is unchanged. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
+| **fallbackNodeId** | `never` | optional | [REMOVED] `flow.errorHandling.fallbackNodeId` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — the engine routes unrecoverable node errors via per-node fault edges (an edge with type: 'fault'), and never read this key: a fallback configured here silently did not exist. Delete the key and draw a fault edge from the failing node to the handler node instead. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
+
+### Nested Shape: `Flow.protection`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | ✅ | Lock policy — none \| no-overlay \| no-delete \| full. |
+| **reason** | `string` | ✅ | User-visible reason shown when the lock blocks an action. |
+| **docsUrl** | `string` | optional | Optional URL the Studio banner links to for more context. |
+
 
 ---
 
@@ -100,6 +159,43 @@ const result = FlowSchema.parse(data);
 | **outputSchema** | `never` | optional | [REMOVED] `flow.nodes[].outputSchema` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — it was never validated: the engine does not check node outputs against it, so it documented a contract nothing enforced. Delete the key. Downstream nodes read prior outputs via expressions (`{{nodeId.field}}`) regardless of any declaration. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
 | **waitEventConfig** | `{ eventType: Enum<'timer' \| 'signal' \| 'webhook' \| 'manual' \| 'condition'>; timerDuration?: string; signalName?: string }` | optional | Configuration for wait node event resumption |
 | **boundaryConfig** | `{ attachedToNodeId: string; eventType: Enum<'error' \| 'timer' \| 'signal' \| 'cancel'>; interrupting?: boolean; errorCode?: string; … }` | optional | Configuration for boundary events attached to host nodes |
+
+### Nested Shape: `FlowNode.connectorConfig`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **connectorId** | `string` | ✅ | Registered connector name |
+| **actionId** | `string` | ✅ | Action key declared by the connector |
+| **input** | `Record<string, any>` | optional | Mapped inputs for the action |
+
+### Nested Shape: `FlowNode.inputSchema[string]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `Enum<'string' \| 'number' \| 'boolean' \| 'object' \| 'array'>` | ✅ | Parameter type |
+| **required** | `boolean` | optional (default: `false`) | Whether the parameter is required |
+| **description** | `string` | optional | Parameter description |
+
+### Nested Shape: `FlowNode.waitEventConfig`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **eventType** | `Enum<'timer' \| 'signal' \| 'webhook' \| 'manual' \| 'condition'>` | ✅ | What kind of event resumes the execution |
+| **timerDuration** | `string` | optional | ISO 8601 duration (e.g., "PT1H") or wait time for timer events |
+| **signalName** | `string` | optional | Named signal or webhook event to wait for |
+| **timeoutMs** | `never` | optional | [REMOVED] `waitEventConfig.timeoutMs` was removed in @objectstack/spec 17 (#4158). It documented a timeout guard that never existed: nothing ever failed or resumed a wait on a deadline. Its only reader treated it as the timer DURATION when `timerDuration` was absent, so use `timerDuration` — but QUOTE the number: the key is a string, and a bare numeric string is read as milliseconds, making `timeoutMs: 60000` and `timerDuration: '60000'` the same wait (`timerDuration: 'PT1M'` is the ISO 8601 spelling of that same 60s). Stored flows are converted automatically — the conversion does the quoting for you. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
+| **onTimeout** | `never` | optional | [REMOVED] `waitEventConfig.onTimeout` was removed in @objectstack/spec 17 (#4158). It had no readers at all — no code path ever inspected it, so neither `fail` nor `continue` ever happened. Delete the key. There is no replacement: `wait` has no timeout, and a wait node resumes only when its timer elapses or its signal arrives. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
+
+### Nested Shape: `FlowNode.boundaryConfig`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **attachedToNodeId** | `string` | ✅ | Host node ID this boundary event monitors |
+| **eventType** | `Enum<'error' \| 'timer' \| 'signal' \| 'cancel'>` | ✅ | Boundary event trigger type |
+| **interrupting** | `boolean` | optional (default: `true`) | If true, the host activity is cancelled when this event fires |
+| **errorCode** | `string` | optional | Specific error code to catch (empty = catch all errors) |
+| **timerDuration** | `string` | optional | ISO 8601 duration for timer boundary events |
+| **signalName** | `string` | optional | Named signal to catch |
 
 
 ---
@@ -159,6 +255,34 @@ const result = FlowSchema.parse(data);
 | **createdAt** | `string` | ✅ | When this version was created |
 | **createdBy** | `string` | optional | User who created this version |
 | **changeNote** | `string` | optional | Description of what changed in this version |
+
+### Nested Shape: `FlowVersionHistory.definition`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Machine name |
+| **label** | `string` | ✅ | Flow label |
+| **description** | `string` | optional |  |
+| **successMessage** | `string` | optional | Message carried on AutomationResult for every terminal run (not only screen flows); the screen-flow UI shows it as a toast instead of a generic "Done". |
+| **errorMessage** | `string` | optional | Message carried on AutomationResult for every terminal run (not only screen flows); the screen-flow UI shows it as a toast instead of the raw error. |
+| **version** | `integer` | optional (default: `1`) | Version number |
+| **status** | `Enum<'draft' \| 'active' \| 'obsolete' \| 'invalid'>` | optional (default: `"draft"`) | Deployment status |
+| **template** | `never` | optional | [REMOVED] `flow.template` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — no designer or engine path ever read it, so flagging a flow as a template/subflow did nothing. Delete the key. Shared logic is invoked via a subflow NODE referencing the flow by name. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
+| **type** | `Enum<'autolaunched' \| 'record_change' \| 'schedule' \| 'screen' \| 'api'>` | ✅ | Flow type |
+| **variables** | `{ name: string; type: string; isInput?: boolean; isOutput?: boolean; … }[]` | optional | Flow variables |
+| **nodes** | `{ id: string; type: string; label: string; config?: Record<string, any>; … }[]` | ✅ | Flow nodes |
+| **edges** | `{ id: string; source: string; target: string; condition?: string \| object; … }[]` | ✅ | Flow connections |
+| **active** | `never` | optional | [REMOVED] `flow.active` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — it never had an effect: the engine arms flows from `status`, and `active: false` did NOT stop a flow (worse, the default read as disabled while the engine treated unset as enabled). Delete the key. Use `status: 'obsolete'` (or 'invalid') to unbind and disable a flow, `status: 'active'` to arm it. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
+| **runAs** | `Enum<'system' \| 'user'>` | optional (default: `"user"`) | Execution identity for the run: system = elevated (bypasses RLS), user = the triggering user (RLS-respecting). A run with no trigger user has no identity to scope to, so under user its data operations are REFUSED — declare system to make the elevation explicit. This covers schedule/time-relative/api triggers AND any record-change flow fired by a write that carried no user. |
+| **errorHandling** | `{ strategy?: Enum<'fail' \| 'retry' \| 'continue'>; maxRetries?: integer; backoffMs?: integer; backoffMultiplier?: number; … }` | optional | Flow-level error handling configuration. A durable pause ends the retry-governed segment: strategy: 'retry' describes one synchronous dispatch, so a run that parks on an approval/screen/wait node and later resumes gets one attempt for anything that fails after the pause. Protect the post-pause half with its own failure handling in the flow — a try_catch node's retry around the post-resume work, or fault edges to a handler node. |
+| **protection** | `{ lock: Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>; reason: string; docsUrl?: string }` | optional | Package author protection block — lock policy for this flow. |
+| **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
+| **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
+| **_lockSource** | `Enum<'artifact' \| 'package' \| 'env-forced'>` | optional | Layer that set _lock (artifact \| package \| env-forced). |
+| **_provenance** | `Enum<'package' \| 'org' \| 'env-forced'>` | optional | Origin of the item (package \| org \| env-forced). |
+| **_packageId** | `string` | optional | Owning package machine id. |
+| **_packageVersion** | `string` | optional | Owning package version. |
+| **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
 
 
 ---

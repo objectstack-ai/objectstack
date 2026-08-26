@@ -134,6 +134,15 @@ const POPULATION_CONSTANT = /^(?:[A-Z0-9_]*_ROOTS?|[A-Z0-9_]*_DIRS?|POPULATION|[
  * other row still carries the numbers from the pass that wrote it, because its
  * gate exports no walk to drive and reproducing the filter by hand would be the
  * estimate this docblock refuses.
+ *
+ * The `check:runner-env-posture SCANNED_ROOTS packages` row was then re-derived
+ * AGAIN later the same day, after #12300 changed how `hintCovers` judges a glob
+ * in a non-final segment and left that row's stated mechanism describing a
+ * collapse the function no longer performs (#12289). Its whole `why` — ratio,
+ * coverage and cost alike — is one reading of the tree at that later point,
+ * which is why its denominator is larger than the two SCANNED_ROOTS siblings
+ * recorded beside it. That is the drift this docblock permits and not the
+ * mixed-terms defect it forbids: no term of that row was refreshed alone.
  */
 const TRIAGE = new Map([
   // ── Taken: a strictly narrower subtree ────────────────────────────────────
@@ -303,14 +312,41 @@ const TRIAGE = new Map([
     why: 'one named file per child directory, 11 of 50 (22%). It already reaches its own cards '
       + 'through the artifact roster it names file by file, so the miss is smaller than the row',
   }],
+  ['check:skill-docs SKILLS_DIR skills', {
+    verdict: 'REFUSE-UNSPELLABLE',
+    why: 'one named file per child directory plus the root README — 12 of 50 (24%). '
+      + 'build-skill-docs.ts:221 readdirSync-es the bare root and reconciles the listing against '
+      + 'DISPLAY in both directions (:227-228), so a new or removed objectstack-*/SKILL.md moves '
+      + 'the verdict and no fixed list can name it; but :222 admits a child only if it CARRIES '
+      + 'SKILL.md, so the population is that filename filter, not the root. Recorded to match the '
+      + 'check-skills-token-ratchet row above, which reads the SAME root the same way at the same '
+      + 'scale — one root answered one way',
+  }],
+  ['check:skill-refs SKILLS_DIR skills', {
+    verdict: 'REFUSE-UNSPELLABLE',
+    why: 'a named subdirectory per child, enumerated and pruned wholesale — 12 of 50 (24%), 9 of '
+      + 'them the _index.md it emits. It never reads the bare root: build-skill-references.ts:304 '
+      + 'iterates the authored SKILL_MAP (:43-127), resolves skills/<name>/, and manages '
+      + 'skills/<name>/references/ via manageDir/ownsReferenceEntry (:288-294). The true population '
+      + 'is skills/*/references/**, which collapseHint reduces to skills//references/** — a double '
+      + 'slash no tree can hold (#12246) — so the only spellable claim left is the bare root',
+  }],
   ['check:runner-env-posture SCANNED_ROOTS packages', {
     verdict: 'REFUSE-UNSPELLABLE',
-    why: 'non-test source beneath a `src` SEGMENT — 1794 of 5185 (35%). The segment is what makes '
-      + 'this unspellable rather than merely wide: `packages/**/src/**` is the true population and '
-      + 'collapseHint reduces it to `packages`, so the only spellable claim also names every '
-      + 'package manifest, changelog, fixture and the 2746 test files this gate deliberately skips. '
-      + 'Its nearest neighbour check:authz-resolver is REFUSE-WIDE at a similar 39% because ITS '
-      + 'population really is every non-test source under the root; this one is not',
+    why: 'non-test source beneath a `src` SEGMENT — 1812 of 5241 (35%), re-derived from the gate '
+      + 'own collectFiles() walk together with every number below, so the row holds ONE tree. What '
+      + 'is unspellable here is the file-KIND filter, NOT the segment. Since #12300 a glob in a '
+      + 'non-final segment is MATCHED rather than collapsed, so `packages/**/src/**` is a live '
+      + 'hint that reaches all 1812 of them; the earlier reading that collapseHint reduced it to '
+      + '`packages` described a collapse hintCovers no longer performs for this shape, and the '
+      + 'refusal never rested on it. It covers 4291 tracked files to reach those 1812, and 2466 '
+      + 'of the 2479 it over-names are the test files this gate deliberately skips — the one '
+      + 'filter no glob idiom can spell. So the narrowest LIVE spelling is 42% true where the '
+      + 'bare root is 35%: the segment buys seven points, not a precise claim, and both spellings '
+      + 'are false about the same non-test filter. Its nearest neighbour check:authz-resolver is '
+      + 'REFUSE-WIDE at a similar 39% because ITS population really is every non-test source '
+      + 'under the root, so the bare-root declaration there is TRUE and refused only for width; '
+      + 'here the bare root is FALSE, and so is every narrower spelling the idiom offers',
   }],
   ['check:runner-env-posture SCANNED_ROOTS examples', {
     verdict: 'REFUSE-UNSPELLABLE',
@@ -565,6 +601,53 @@ function selfTest() {
     + 'check-examples-live-imports.mjs, check-driver-conformance.mjs). ⛔ Declaring a root the '
     + 'gate does not read wholesale is the costlier error.' : ''}`, fresh.length === 0);
 
+  // CONTRADICTED: a refusal that outlived the reachability it refused. This is
+  // the THIRD direction of the same coupling, and the one neither assertion
+  // above can see, because both audit the KEY SET. A row whose gate later
+  // declares its root is STILL A ROW, so its verdict is not stale; and it has
+  // left `open`, so it is not fresh either. Both halves stay satisfied while
+  // `report` prints REACHABLE directly above a recorded reason saying the
+  // population cannot be spelled — one row asserting both that it is now
+  // reachable and that it is not. This was PREDICTED in #11155's dev report and
+  // then MEASURED on PR #12061, by declaring a hint on a gate carrying a
+  // REFUSE-UNSPELLABLE verdict: the modified and unmodified trees both exited 0
+  // here, which is why a green self-test could not be read as evidence.
+  //
+  // The pairing is general rather than restricted to the two refusals, because
+  // EVERY verdict this file defines presupposes an UNCOVERED row: the refusals
+  // say a declaration was refused, and DECLARED-NARROWER says in as many words
+  // that the bare root is still not covered.
+  //
+  // ⛔ So the remedy is NOT "move the row to DECLARED-NARROWER". That is the
+  // obvious repair, it is what the reporting card proposed, and it is wrong —
+  // measured here rather than assumed. `covered` asks whether a hint reaches an
+  // ARBITRARY file at the top of the root, so it turns true ONLY for the
+  // spellings that collapse back to the bare word itself; every genuinely
+  // narrower subtree, and every deeper segment filter, leaves the row uncovered.
+  // A covered row is therefore the bare root wearing a separator or a glob,
+  // which is the one thing DECLARED-NARROWER states it is not. No covered row
+  // can honestly wear any of the three, and choosing between the two honest
+  // resolutions RE-DECIDES a verdict on a shrink-only map — not something this
+  // assertion may do quietly, so it names both and picks neither.
+  const contradicted = rows
+    .filter((r) => r.covered && TRIAGE.has(r.key))
+    .map((r) => `${r.key} [recorded ${TRIAGE.get(r.key).verdict}]`)
+    .sort();
+  t(`no recorded verdict sits on a row the sweep now finds REACHABLE${contradicted.length
+    ? ` — CONTRADICTED: ${contradicted.join(' · ')}. That gate now declares a hint reaching an `
+      + 'arbitrary file at the top of the root, so the row claims BOTH that the population is '
+      + 'reachable by declaration and, in its own recorded reason, that it is not. Two honest '
+      + 'resolutions, differing in WHICH half is wrong. Withdraw the DECLARATION, if the recorded '
+      + 'reason still holds and the hint names the gate for files it never opens — the usual '
+      + 'answer under REFUSE-UNSPELLABLE, whose whole reason is that a wholesale hint would be '
+      + 'FALSE, and the costlier error by the price hintCovers records. Or withdraw the VERDICT, '
+      + 'if the declaration is deliberate and overrides the refusal, leaving the row to print '
+      + 'REACHABLE with no reason beneath it: that is the shrink this map already permits, and the '
+      + 'seven reachable rows carrying no verdict today are its live shape. ⛔ Do NOT re-point the '
+      + 'row at DECLARED-NARROWER: that verdict is defined for a row that stays UNCOVERED, and a '
+      + 'covered row is the bare root wearing a glob, not a narrower subtree.'
+    : ''}`, contradicted.length === 0);
+
   // The spelling rule the triage docblock states, held mechanically: a key
   // spelled as a bare path would enter this file's own declared population.
   const asHints = (s) => extractWatchHints(`const L = ${JSON.stringify(s)};`);
@@ -579,6 +662,48 @@ function selfTest() {
   const own = extractWatchHints(readFileSync(fileURLToPath(import.meta.url), 'utf8'));
   t(`this tool declares no population of its own${own.length ? ` — it names ${own.join(', ')}` : ''}`,
     own.length === 0);
+
+  // ── The MECHANISM a repaired reason turns on, held mechanically ───────────
+  //
+  // A `why` is prose this tool never reads, so a recorded verdict can keep its
+  // key, its reachability and its verdict while the DERIVATION moves out from
+  // under the reason it states. #12300 did exactly that: it taught `hintCovers`
+  // to MATCH a glob in a non-final segment instead of collapsing it, and every
+  // row that refused on the grounds "the narrow spelling collapses to a double
+  // separator and reaches nothing" was left describing a defect the tree no
+  // longer has — silently, with this self-test green, because it audits keys and
+  // verdicts and never what a `why` SAYS. The rows that still cite that collapse
+  // are recorded in #12289 and deliberately left standing here: their reasons
+  // died with the defect, so what they need is a re-decided VERDICT, which is
+  // not something this file may change quietly under cover of a prose fix.
+  //
+  // ⛔ Deliberately NOT a prose scanner. Lifting the quoted values out of `why`
+  // and re-running `collapseHint` over them was considered and refused twice
+  // over: it wants a parser over English inside a governance tool, and it would
+  // check the WRONG function — these reasons are REACHABILITY claims, which
+  // `hintCovers` decides, so a collapseHint-equality check stays GREEN through
+  // the very change that falsifies them. What is pinned instead is the DIRECTION
+  // the repaired row depends on, in the terms `hintCovers` judges by. Segments
+  // are joined rather than spelled, for the same reason the probes above take
+  // their root from the tree: a glob literal here would hand this file a
+  // population of its own.
+  const PKG = 'packages';
+  const seg = (f) => f.split('/');
+  const underPkg = files.filter((f) => seg(f)[0] === PKG);
+  const isTestPath = (f) => seg(f).pop().split('.').includes('test');
+  const srcSegmentGlob = [PKG, '**', 'src', '**'].join('/');
+  const srcSegmentHit = files.filter((f) => hintCovers(srcSegmentGlob, f));
+  t('the check:runner-env-posture packages reason holds: its `src`-segment spelling is a LIVE '
+    + 'hint, not the dead collapse that row used to cite', srcSegmentHit.length > 0);
+  t('…and it is a real NARROWING rather than the bare root wearing a glob',
+    underPkg.length > 0 && srcSegmentHit.length < underPkg.length);
+  t('…and the segment is genuinely matched, not waved through: no packages file outside a '
+    + '`src` segment is covered',
+    underPkg.some((f) => !seg(f).includes('src'))
+      && !srcSegmentHit.some((f) => !seg(f).includes('src')));
+  t('…and it still OVER-NAMES the file kind the gate skips, which is what keeps the row '
+    + 'REFUSED rather than declarable — the half of the reason a live hint does not settle',
+    srcSegmentHit.some(isTestPath));
 
   // Every verdict must be one of the three the docblock defines, and every
   // refusal must carry its measured reason — a bare verdict is the allowlist row

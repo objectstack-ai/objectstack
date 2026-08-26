@@ -71,6 +71,15 @@
 //               covered, for a driver that no longer exists, or for a case-set
 //               that no longer exists, is an error. A ledger that can only
 //               accrete rots into a list nobody trusts.
+//   DIALECTED   every conformance suite in a dialect-capable driver SAYS which
+//               dialects it runs on -- see the dialect-axis block below.
+//   MATRIXED    every dialect-scored cell has at least one MATRIX-ROUTED suite
+//               (#12136). DIALECTED asks each FILE to state a stance; a tree can
+//               satisfy it with every suite honestly declaring `sqlite`, and
+//               then ADR-0053 D-A3's `Postgres at minimum` is enforced nowhere.
+//               This is the invariant that makes the census ENFORCE D-A3 rather
+//               than report it, and it is deliberately not buyable from the
+//               dialect ledger -- see the ledger's own note.
 //
 // ## What "covered" means, and what it deliberately does not
 //
@@ -80,6 +89,18 @@
 // (route-ownership rule 3). What it can do is make the absence loud, which is
 // the failure mode that actually happened: three drivers silently not running a
 // standard three changesets said they were held to.
+//
+// A MENTION is not a reference (#12135). The scan reads CODE: every file is
+// passed through `scripts/js-comment-mask.mjs` before the import-and-reference
+// rule is applied, so a docblock that names a marker cannot make a cell green.
+// It used to be able to, and the shape was live on this tree -- `sql-driver.ts`
+// and `mongodb-filter.ts` are driver IMPLEMENTATIONS that name
+// `FILTER_LOGIC_CASES` only in prose, and both were scored as covering files.
+// It changed no cell's verdict, because both cells are genuinely covered by a
+// real suite as well; that is precisely why it had to be fixed on a day it was
+// harmless. Delete a driver's only suite for a case-set and leave the sentence
+// that describes it, and the cell stayed green -- a coverage claim satisfied by
+// prose, which is the declared-not-enforced shape this gate exists to close.
 //
 // ## DEBT is frozen debt, not a permission slip
 //
@@ -113,6 +134,7 @@
 
 import { mkdirSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
+import { stripComments } from './js-comment-mask.mjs';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -499,6 +521,130 @@ const CASE_SETS = [
 const LEDGER = [];
 
 
+// ── The DIALECT axis (ADR-0053 D-A3) ────────────────────────────────────────
+//
+// Everything above scores `driver x case-set`. That is two axes of a matrix the
+// ADR declares with three: D-A3 states the matrix is
+// `driver {SQLite, Postgres at minimum}` x case-set. The third axis was enforced
+// only from INSIDE a suite — by routing through
+// `driver-sql/src/live-dialect-matrix.testkit.ts`, and by
+// `OS_EXPECT_LIVE_DIALECT_MATRIX=1` turning an unprovisioned cell into a named
+// red. Both are OPT-IN: they fire only for a file that already opted in, so a
+// suite that hard-codes `client: 'better-sqlite3'` was invisible to every gate
+// in the repo, counted here as a covered cell, with nothing anywhere saying it
+// measured one dialect of three.
+//
+// ## The cost is measured, not hypothetical (#11456)
+//
+// `sql-driver-aggregation-conformance.test.ts` hard-coded SQLite. On `main` and
+// on every PR it was green. Converted to the matrix and measured on live
+// PG 16.13, `sum`/`avg`/`min`/`max` over a boolean column threw SQLSTATE 42883.
+// The suite's name said conformance; its coverage said SQLite. This gate could
+// not tell the difference, and its headline number said 45 either way.
+//
+// ## What this axis asserts, and what it deliberately does NOT
+//
+// It asserts that a conformance suite SAYS which dialects it runs on. It does
+// not decide whether that answer is good enough — "deliberately single-dialect"
+// and "accidentally single-dialect" were spelled identically before this, and
+// making them distinguishable is the whole of the fix.
+// `sql-driver-11321-sqlite-audit-default-canonical.test.ts` is about SQLite BY
+// NAME; a gate that read a hard-coded client as a defect would be wrong about
+// it, and about most of its neighbours. Measured on this tree: 105 files under
+// `driver-sql/src` carry a literal `client: 'better-sqlite3'`. Those are not
+// 105 defects and this gate does not treat them as any. It scores only the
+// files that make a cell of THIS census covered — the suites whose coverage
+// this script's own headline is asserting.
+//
+// ## MATRIXED: the measurement, promoted (#12136)
+//
+// "Every dialect-scored cell has at least one matrix-routed suite" was printed
+// here as a number (`8 of 9`) before it was enforced. It could not be promoted
+// in the same change that started measuring it, because exactly one cell failed
+// it -- `FILTER_COMPARAND_TYPE`, whose own CASE_SETS entry says the accepted
+// types "compile EVERYWHERE" while it ran on SQLite alone -- and clearing that
+// red meant editing a TEST, which is a change to what the suite asserts rather
+// than to what the census can see. A gate that ships red is worse than one that
+// ships honest, so the promotion waited for the population to reach zero.
+//
+// #12136 converted that suite to the matrix and measured it on live PG 16.13
+// (all eight executed cases answered the case-set's row ids), which took the
+// count to `9 of 9` and made the promotion free. DIALECTED and MATRIXED are two
+// different questions and both are needed: DIALECTED is per FILE and asks for a
+// STATED stance, MATRIXED is per CELL and asks that the stance somewhere on that
+// cell actually be the matrix. A tree where every suite honestly declares
+// `dialectCell('sqlite')` passes DIALECTED completely while enforcing D-A3
+// nowhere; MATRIXED is what closes that.
+//
+// ## Declared, not detected — so it cannot be respelled around
+//
+// The population is defined by the PRESENCE OF A DECLARATION, never by the
+// absence of a client literal. A detector keyed on `client: '...'` sees only the
+// spellings it knows: move the config into a local helper, or behind a
+// `beforeAll`, and the literal is gone while the coverage is exactly as narrow.
+// So a suite passes by NAMING a stance symbol from its driver's dialect-matrix
+// testkit, and nothing else counts.
+
+/**
+ * Naming one of these means the suite iterates the whole cell list — every
+ * dialect the driver speaks, with the unprovisioned ones reported rather than
+ * omitted. This is the D-A3 shape.
+ */
+const DIALECT_MATRIX_SYMBOLS = ['DIALECT_CELLS', 'LIVE_DIALECT_CELLS'];
+
+/**
+ * Naming one of these — and none of the above — means the suite is deliberately
+ * about NAMED cells: `dialectCell('sqlite')`, `PG_CELL`, `MYSQL_CELL`, or
+ * `declareDialectCell(MYSQL_CELL, …)`.
+ *
+ * `declareDialectCell` / `declareUnprovisionedCell` sit HERE rather than with
+ * the matrix symbols, and the precedence matters: they are per-cell helpers, so
+ * `declareDialectCell(PG_CELL, …)` is one deliberate cell and not a matrix. A
+ * file that iterates the list imports `DIALECT_CELLS` too, which is what
+ * promotes it — measured on this tree, all five matrix-routed suites do.
+ */
+const DIALECT_CELL_SYMBOLS = ['dialectCell', 'PG_CELL', 'MYSQL_CELL', 'declareDialectCell', 'declareUnprovisionedCell'];
+
+/** The export that identifies a package's dialect-matrix testkit, found on disk. */
+const DIALECT_TESTKIT_EXPORT = 'DIALECT_CELLS';
+
+// ── The dialect ledger ─────────────────────────────────────────
+//
+// One entry per conformance suite that declares no stance. Same discipline as
+// LEDGER above: every entry is MEASURED against `main`, and clearing one means
+// giving the suite a stance and deleting the row in the same PR. RECONCILED runs
+// in both directions, so a row for a suite that now declares — or that no longer
+// covers a cell — is an error rather than residue.
+//
+// EMPTY, and empty is the intended steady state (#12136). It was seeded with two
+// rows on the day the axis was added — the population as it stood, not newly
+// written looseness — and both are now resolved rather than excused:
+//
+//   comparand-type   CONVERTED to the matrix. Its case-set claims the six
+//                    accepted types "compile everywhere", and that sentence had
+//                    been measured on one dialect; it is now measured on the
+//                    cells `DIALECT_CELLS` offers, live PG 16.13 included.
+//   icontains        MARKED `dialectCell('sqlite')`. Measured BY OPERATOR rather
+//                    than by file before marking: the seven text operators it
+//                    reaches are exactly the seven `FILTER_TEXT_CASES` reaches,
+//                    and `sql-driver-text-case-conformance.test.ts` runs that
+//                    whole table once per cell — so the narrowness costs no
+//                    dialect coverage, and its residue (GLOB's escape class, the
+//                    `lower(…) GLOB lower(…)` construct) is about SQLite BY
+//                    CONSTRUCTION.
+//
+// ⛔ What this ledger can NO LONGER do, now that MATRIXED is enforced. A row
+// here excuses an undeclared FILE. It does not — and must not be expected to —
+// clear MATRIXED, which is about a CELL: a ledgered suite is not a matrix-routed
+// suite, so if the ledgered file is the ONLY suite over its cell, that cell is
+// red whatever this list says. The ledger therefore reaches exactly one shape
+// now: a second suite over a cell some sibling already routes through the
+// matrix. That is a real narrowing of the escape hatch and it is deliberate —
+// the promotion exists so D-A3 is enforced rather than excused.
+
+const DIALECT_LEDGER = [];
+
+
 // ── The ratchet-remedy authority convention (#8435) ─────────────────────────
 //
 // The rule above is the authority rule, and until now it was written only here
@@ -536,6 +682,27 @@ const RATCHET_EXPANSION_OFFER = new RegExp(
 );
 
 /**
+ * The same detector for the DIALECT ledger's offer. A second ledger is a second
+ * way to buy green, so it carries the same authority label — and gets its own
+ * detector rather than a widened one, so a rewording of either offer fails the
+ * self-test that names IT rather than silently disarming the other.
+ */
+const DIALECT_RATCHET_EXPANSION_OFFER = new RegExp(
+  `add a measured entry to the dialect ledger in\\s+${LEDGER_REL.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`,
+);
+
+/**
+ * As {@link ratchetRemedyCarriesAuthority}, for the dialect ledger's offer.
+ *
+ * @param {string} message
+ * @returns {boolean}
+ */
+function dialectRemedyCarriesAuthority(message) {
+  if (!DIALECT_RATCHET_EXPANSION_OFFER.test(message)) return true;
+  return message.includes(RATCHET_AUTHORITY_MARKER);
+}
+
+/**
  * The convention: a message that hands the author the ledger-expanding path must
  * say in the same breath that the path is not theirs. A message offering no such
  * path is unaffected — this is an authority label, not a vocabulary ban.
@@ -568,6 +735,64 @@ function consumedMessage(driver, caseSet) {
   );
 }
 
+/**
+ * DIALECTED's text, named and pure for the same reason {@link consumedMessage}
+ * is: a message built inline is a message no assertion can reach.
+ *
+ * @param {string} driver
+ * @param {string} relFile repo-relative path of the undeclared suite
+ * @param {string[]} markers the case-set markers this suite makes covered
+ * @param {{specifier: string, cellIds: string[]}} kit the driver's dialect testkit
+ * @returns {string}
+ */
+function dialectedMessage(driver, relFile, markers, kit) {
+  return (
+    `DIALECTED: ${driver}'s ${relFile} is what makes ${markers.join(', ')} a covered cell, but it `
+    + `never says which of this driver's dialects (${kit.cellIds.join(', ')}) it runs on. ADR-0053 `
+    + 'D-A3 declares the matrix as driver x {SQLite, Postgres at minimum}; a suite that names no '
+    + `cell is counted here as covered while measuring an unknown fraction of that. Import a stance `
+    + `from '${kit.specifier}' and use it: ${DIALECT_MATRIX_SYMBOLS[0]} to run every cell, or `
+    + `${DIALECT_CELL_SYMBOLS[0]}('<id>') / PG_CELL / MYSQL_CELL to say it is deliberately about `
+    + 'named cells. That is the fix, and the only one of the two you can take on your own. '
+    + `${RATCHET_AUTHORITY_MARKER}, NOT a co-equal option: add a measured entry to the dialect `
+    + `ledger in ${LEDGER_REL} saying why the suite's dialect coverage cannot be stated. A ledger `
+    + 'entry is a MEASURED, tracked exception the maintainer has agreed to, never the cheaper half '
+    + 'of "say what this suite runs on" — do not take this path to get CI green.'
+  );
+}
+
+
+/**
+ * MATRIXED's text, named and pure for the same reason {@link consumedMessage}
+ * and {@link dialectedMessage} are.
+ *
+ * It deliberately offers NO ledger path. The dialect ledger accounts for a FILE
+ * that cannot state a stance; this error is about a CELL that no suite routes
+ * through the matrix, and a ledger row cannot make one appear. Saying so in the
+ * message is the point — an author who went looking for the escape hatch the
+ * sibling errors offer would otherwise add a row, watch this stay red, and
+ * conclude the gate is broken.
+ *
+ * @param {string} driver
+ * @param {string} marker the case-set whose cell has no matrix-routed suite
+ * @param {{file: string, stance: string}[]} suites the suites covering that cell
+ * @param {{specifier: string, cellIds: string[]}} kit the driver's dialect testkit
+ * @returns {string}
+ */
+function matrixedMessage(driver, marker, suites, kit) {
+  const listed = suites.map((s) => `${s.file.split('/').pop()} (${s.stance})`).join(', ');
+  return (
+    `MATRIXED: ${driver}'s ${marker} cell is covered, but no suite over it runs the dialect `
+    + `matrix — ${suites.length} covering suite(s): ${listed}. ADR-0053 D-A3 declares the matrix `
+    + `as driver x {SQLite, Postgres at minimum}, so a cell whose every suite names one dialect `
+    + `is a cell where "Postgres at minimum" is enforced nowhere. Route one of those suites `
+    + `through ${DIALECT_MATRIX_SYMBOLS[0]} from '${kit.specifier}' — it iterates every cell this `
+    + `driver speaks (${kit.cellIds.join(', ')}) and reports an unprovisioned one by name rather `
+    + `than omitting it. Note this is NOT ledgerable: the dialect ledger excuses a FILE that `
+    + 'cannot state a stance, and this is a CELL with no matrix-routed suite anywhere, which no '
+    + 'ledger row can supply.'
+  );
+}
 
 // ── Discovery ───────────────────────────────────────────────────────────────
 
@@ -762,25 +987,245 @@ function walkTsInto(dir, out) {
 }
 
 /**
- * Does this driver package drive `marker`?
+ * One `import … from '<specifier>'` STATEMENT: its clause, its specifier, and
+ * the span it occupies. The unit BOTH halves of {@link drivenFrom} are read in.
  *
- * Requires BOTH an import naming it from `@objectstack/spec/data` and a
- * reference outside that import — an unused import is not coverage, and it is
- * the shape a half-finished suite leaves behind.
+ * ## The false green this bounds (#12320)
+ *
+ * The import half used to be one roaming regex over the whole file:
+ *
+ *   import[\s\S]*?\bSYMBOL\b[\s\S]*?from\s+['"]SPECIFIER['"]
+ *
+ * Both `[\s\S]*?` are unbounded, so the three parts it wants never had to come
+ * from the same STATEMENT. `#12135`'s comment masking removed the *prose*
+ * assembly path and not this one: the `import` keyword, the symbol and the
+ * `from '@objectstack/spec/data'` can be three different lines of live code.
+ *
+ *   import { AGGREGATION_CASES } from './local-fixture.js';
+ *   import { TEMPORAL_CASES } from '@objectstack/spec/data';
+ *   for (const c of AGGREGATION_CASES) {}
+ *
+ * The marker is imported from a LOCAL module and never from the shared one, and
+ * the cell scored as covered. That defeats the rule the self-test already pins
+ * one spelling of — a locally re-declared fixture is not the shared standard —
+ * by IMPORTING the local fixture instead of declaring it with `const`. Both
+ * directions are pinned below.
+ *
+ * ## Why a bounded regex and not a real parse
+ *
+ * `scripts/ts-parse.mjs` is this repo's answer to "did this source parse?" and
+ * `check-parse-guard` enforces routing through it, so an AST read of the import
+ * clauses is the obvious alternative. Measured on this tree before choosing:
+ * it is CORRECT (it refuses the synthetic above and accepts a genuine import),
+ * it found 0 unparseable files among the 296 driver sources, and it costs
+ * 911ms for one pass — against ~0.4s for this whole gate today, and 4.5s at the
+ * per-(file x marker) rate this scan actually runs at. The decisive cost is not
+ * the milliseconds: `ts-parse.mjs` imports `typescript`, so adopting it trades
+ * a gate that runs in a FRESH WORKTREE WITH NO `node_modules` for one that
+ * refuses until `pnpm install` has run. This gate's only dependency is
+ * `js-comment-mask.mjs`, and that is worth keeping for a question this narrow.
+ *
+ * The objection a bounded regex has to answer is that it is a second roaming
+ * regex next to the first. It is not, and the clause class is what makes it so:
+ * `[^;'"]` cannot cross a statement terminator OR a string literal, so a match
+ * that starts at one `import` keyword cannot reach the `from` of a later
+ * statement — every intervening specifier is quoted. That is also why this is
+ * the ONLY import matcher in the file: the reference half used to carry its own
+ * roaming `import[\s\S]*?from…` for stripping, and leaving it would have left
+ * the smell the fix exists to remove.
+ *
+ * Two shapes this deliberately does NOT count, both narrowings from the loose
+ * form, both measured to move no cell on this tree: a bare re-export
+ * (`export { X } from '@objectstack/spec/data'` — a driver that re-exports the
+ * cases is not running them), and a side-effect import (no clause, no symbol).
+ */
+const IMPORT_STATEMENT = /\bimport\b\s*([^;'"]*?)\s*from\s*['"]([^'"]+)['"]/g;
+
+/** Every import statement in `src`, in source order. */
+function importStatements(src) {
+  return [...src.matchAll(IMPORT_STATEMENT)].map((m) => ({
+    clause: m[1],
+    specifier: m[2],
+    start: m.index,
+    end: m.index + m[0].length,
+  }));
+}
+
+/** `src` with the spans of `statements` cut out, rebuilt from their offsets. */
+function withoutImportStatements(src, statements) {
+  let out = '';
+  let last = 0;
+  for (const s of statements) {
+    out += src.slice(last, s.start);
+    last = s.end;
+  }
+  return out + src.slice(last);
+}
+
+/**
+ * Is `symbol` imported from `specifier` AND referenced outside that import?
+ *
+ * The two-part shape is the one {@link consumes} has always used — an unused
+ * import is not coverage, and it is the shape a half-finished suite leaves
+ * behind. Extracted so the dialect axis asserts a stance the same way this
+ * script asserts a case-set, rather than inventing a second idiom next to it.
+ *
+ * The import half is bounded to ONE statement (#12320) — see
+ * {@link IMPORT_STATEMENT} for the false green that requires it and for why
+ * this is not an AST read.
+ *
+ * @param {string} src file text. This function reads whatever TEXT it is given
+ *   and has no opinion about comments — both callers strip first, because on
+ *   both axes a comment mentioning the symbol must not count
+ *   ({@link coveringFiles} via {@link codeOf}, `dialectStance` via its own
+ *   `stripComments`). Kept comment-agnostic rather than stripping in here so
+ *   that `dialectStance`, which already holds stripped text and applies this
+ *   rule to several symbols in a row, does not re-mask the same text per
+ *   symbol.
+ */
+function drivenFrom(src, symbol, specifier) {
+  if (!src.includes(symbol)) return false;
+  const named = new RegExp(`\\b${symbol}\\b`);
+  const statements = importStatements(src);
+  const imported = statements.some((s) => s.specifier === specifier && named.test(s.clause));
+  if (!imported) return false;
+  return named.test(withoutImportStatements(src, statements));
+}
+
+/**
+ * EVERY file under this driver's `src/` that drives `marker`, in walk order.
+ *
+ * `consumes` answers "is this cell covered" and needs only the first. The
+ * dialect axis needs them ALL: a cell can be covered by two suites with
+ * different dialect stances, and scoring only the first would let an
+ * undeclared one hide behind a matrix-routed sibling — which is exactly the
+ * arrangement FILTER_TEXT_CASES is in on this tree.
+ *
+ * Read through {@link codeOf}, so a marker named only in PROSE is not coverage
+ * (#12135). Measured when that was added, over 5 drivers x 9 case-sets: the
+ * covered-cell count did not move (45 -> 45) and no cell changed hands, because
+ * the two files whose answer flipped are driver implementations whose cells are
+ * covered by a real suite too. What moved is WHICH files this returns, which
+ * the dialect axis scores and which `consumes` quotes back to the author.
+ */
+function coveringFiles(driverDir, marker) {
+  const hits = [];
+  for (const file of walkTs(join(driverDir, 'src'))) {
+    if (drivenFrom(codeOf(file), marker, '@objectstack/spec/data')) hits.push(file);
+  }
+  return hits;
+}
+
+/**
+ * This file's text with its COMMENT spans gone — the only form the coverage
+ * scan is allowed to read.
+ *
+ * `stripComments` rather than `maskComments`, on the discriminator
+ * `js-comment-mask.mjs` documents rather than on which one was already
+ * imported: pick `maskComments` when the caller reports a LINE or a byte offset
+ * into the original text, `stripComments` when it feeds a scanner and reports
+ * neither. This axis reports FILES — `consumes` returns a path, the RECONCILED
+ * and CONSUMED messages quote a path — so nothing downstream can be made wrong
+ * by the offsets moving, and the deleting form is the one that stays cheap
+ * (the same module records a gate that took 51x longer on `maskComments`,
+ * because a scan over the whitespace runs blanking leaves is quadratic in the
+ * comment bytes).
+ *
+ * Deliberately NOT memoised per path, though the walk is per (driver x marker)
+ * and so re-reads each file once per marker. A cache here is a correctness
+ * hazard for the only caller that rewrites a file between two calls — the
+ * self-test, which writes three different bodies to one `a.test.ts` path and
+ * asserts a different verdict for each. A stale entry would make those three
+ * assertions read the first body and pass in a way no refactor could disturb,
+ * which is the failure this file's own #4930 note is about: a guard reporting a
+ * verdict it did not measure. Measured cost of not caching: the whole gate runs
+ * in ~0.4s over this tree.
+ */
+function codeOf(file) {
+  return stripComments(readFileSync(file, 'utf8'));
+}
+
+/**
+ * Does this driver package drive `marker`? The covering file, or `null`.
+ *
+ * Delegates to {@link coveringFiles} so there is one detector rather than two
+ * that can drift; the walk order is unchanged, so the file this returns is the
+ * file it always returned.
  */
 function consumes(driverDir, marker) {
+  return coveringFiles(driverDir, marker)[0] ?? null;
+}
+
+// ── The dialect axis: detectors ─────────────────────────────────────────────
+//
+// The stance is read off source TEXT, so a MENTION must not count as a
+// declaration — and on this tree the mentions are everywhere, because the files
+// that were FIXED describe the fix in prose:
+//
+//   sql-driver-aggregation-conformance.test.ts  the #11456 conversion. Its head
+//       note says "It used to construct `client: 'better-sqlite3'` as a literal",
+//       and quotes the import it now uses — so a reader of raw text finds a whole
+//       import statement inside a comment and scores the file by its own
+//       changelog.
+//   sql-driver.ts  names `FILTER_LOGIC_CASES` and `client: 'postgres'` in
+//       comments only. Measured: 5 of this driver's 8 covering files change their
+//       client-literal answer between raw and masked text.
+//
+// Separating the two is `scripts/js-comment-mask.mjs`, which exists because
+// gates kept answering it privately and the copies drifted into two silent
+// families — a naive regex that opens a phantom comment on a `/*` inside a
+// string, and a string-aware scanner that opens a phantom string on a quote
+// inside a regex character class. This gate deliberately does NOT grow a third
+// copy. `stripComments` is the right projection of the two it offers: this
+// caller feeds the result to a scanner and reports neither a line number nor a
+// byte offset, which is the documented discriminator.
+
+/**
+ * This driver's dialect-matrix testkit, or `null` when the package has none.
+ *
+ * Discovered from disk by its `DIALECT_CELLS` export — never a hardcoded package
+ * name, for the reason both other axes are read off disk: a list written here is
+ * a list that goes stale the day a second driver grows a dialect matrix, and it
+ * goes stale SILENTLY (one fewer scored package, still green).
+ *
+ * A package with no such testkit is single-backend — `driver-memory`,
+ * `driver-mongodb`, `driver-sqlite-wasm` and `driver-turso` all are — and has no
+ * dialect axis to score. That is reported as a count rather than skipped in
+ * silence.
+ *
+ * @returns {{file: string, specifier: string, cellIds: string[]} | null}
+ */
+function discoverDialectTestkit(driverDir) {
   for (const file of walkTs(join(driverDir, 'src'))) {
     const src = readFileSync(file, 'utf8');
-    if (!src.includes(marker)) continue;
-    const imported = new RegExp(
-      `import[\\s\\S]*?\\b${marker}\\b[\\s\\S]*?from\\s+['"]@objectstack/spec/data['"]`,
-    ).test(src);
-    if (!imported) continue;
-    // Count references outside the import statement(s).
-    const withoutImports = src.replace(/import[\s\S]*?from\s+['"][^'"]+['"];?/g, '');
-    if (new RegExp(`\\b${marker}\\b`).test(withoutImports)) return file;
+    if (!new RegExp(`^export const ${DIALECT_TESTKIT_EXPORT}\\b`, 'm').test(src)) continue;
+    const base = file.slice(driverDir.length + 1).replace(/\\/g, '/').replace(/^src\//, '');
+    // The ids come from the array BODY, not the whole file: `id:` is a common
+    // enough key that a file-wide scan would collect unrelated ones and report a
+    // dialect list the driver does not speak. Bounded by the array's own
+    // terminator, so a second `id:`-bearing export below it cannot leak in.
+    const body = stripComments(src).split(new RegExp(`^export const ${DIALECT_TESTKIT_EXPORT}\\b`, 'm'))[1] ?? '';
+    const cellIds = [...(body.split(/^\]/m)[0] ?? '').matchAll(/\bid:\s*'([a-z0-9_-]+)'/g)].map((m) => m[1]);
+    return { file, specifier: `./${base.replace(/\.ts$/, '.js')}`, cellIds };
   }
   return null;
+}
+
+/**
+ * What does this suite SAY it runs on? `matrix`, `cell`, or `undeclared`.
+ *
+ * Read from comment-stripped text, and by the same import-plus-reference rule
+ * `consumes` uses — a stance mentioned in a comment, or imported and never used,
+ * is not a stance.
+ *
+ * @param {string} src file text (raw; stripped here)
+ * @param {string} specifier the testkit's module specifier for this package
+ */
+function dialectStance(src, specifier) {
+  const clean = stripComments(src);
+  if (DIALECT_MATRIX_SYMBOLS.some((s) => drivenFrom(clean, s, specifier))) return 'matrix';
+  if (DIALECT_CELL_SYMBOLS.some((s) => drivenFrom(clean, s, specifier))) return 'cell';
+  return 'undeclared';
 }
 
 // ── The run ─────────────────────────────────────────────────────────────────
@@ -821,10 +1266,19 @@ function audit() {
 
   // CONSUMED + collect the matrix.
   const ledgerHit = new Set();
+  /** driver -> (covering file -> the markers it covers), for the dialect axis. */
+  const coveringByDriver = new Map();
   for (const driver of drivers) {
     const dir = join(DRIVERS_DIR, driver);
     for (const c of CASE_SETS) {
-      const where = consumes(dir, c.marker);
+      const covering = coveringFiles(dir, c.marker);
+      const where = covering[0] ?? null;
+      for (const f of covering) {
+        if (!coveringByDriver.has(driver)) coveringByDriver.set(driver, new Map());
+        const perFile = coveringByDriver.get(driver);
+        if (!perFile.has(f)) perFile.set(f, []);
+        perFile.get(f).push(c.marker);
+      }
       const entry = LEDGER.find((l) => l.driver === driver && l.marker === c.marker);
       if (entry) ledgerHit.add(`${driver}::${c.marker}`);
 
@@ -854,7 +1308,108 @@ function audit() {
     }
   }
 
-  return { drivers, rows, errors };
+  // DIALECTED — the third axis. Runs last because it scores the covering files
+  // the CONSUMED pass just collected.
+  const dialect = dialectAudit(drivers, coveringByDriver, errors);
+
+  return { drivers, rows, errors, dialect };
+}
+
+/**
+ * DIALECTED: every conformance suite in a dialect-capable driver declares which
+ * dialects it runs on, or carries a measured dialect-ledger entry.
+ *
+ * Judged PER FILE rather than per cell, deliberately. A cell can be covered by
+ * two suites, and scoring the cell would let an undeclared suite hide behind a
+ * matrix-routed sibling — the arrangement FILTER_TEXT_CASES is in on this tree,
+ * and the one that lets the population accrete while the census stays green.
+ *
+ * @param {string[]} drivers
+ * @param {Map<string, Map<string, string[]>>} coveringByDriver
+ * @param {string[]} errors appended to in place, as the other invariants do
+ * @param {{driversDir?: string, root?: string, ledger?: typeof DIALECT_LEDGER}} [over]
+ *   parameterised for the same reason `discoverDrivers` is: so the self-test
+ *   drives THIS function over a synthetic tree rather than a re-implementation
+ *   of it, which is the only kind of self-test a refactor cannot neuter.
+ */
+function dialectAudit(drivers, coveringByDriver, errors, over = {}) {
+  const driversDir = over.driversDir ?? DRIVERS_DIR;
+  const root = over.root ?? ROOT;
+  const ledger = over.ledger ?? DIALECT_LEDGER;
+  const scored = [];
+  const singleBackend = [];
+  const notExecutable = [];
+  const kits = new Map();
+  const ledgerHit = new Set();
+
+  for (const driver of drivers) {
+    const kit = discoverDialectTestkit(join(driversDir, driver));
+    if (!kit) {
+      singleBackend.push(driver);
+      continue;
+    }
+    kits.set(driver, kit);
+    for (const [file, markers] of coveringByDriver.get(driver) ?? new Map()) {
+      const rel = file.slice(root.length + 1);
+      // Only a test file executes, so only a test file has a dialect to declare.
+      // Counted and named in the report rather than filtered away in silence.
+      if (!/\.test\.tsx?$/.test(file)) {
+        notExecutable.push(rel);
+        continue;
+      }
+      const stance = dialectStance(readFileSync(file, 'utf8'), kit.specifier);
+      const entry = ledger.find((l) => l.driver === driver && l.file === rel);
+      if (entry) ledgerHit.add(rel);
+      if (stance === 'undeclared' && !entry) {
+        errors.push(dialectedMessage(driver, rel, markers, kit));
+      } else if (stance !== 'undeclared' && entry) {
+        errors.push(
+          `RECONCILED: ${rel} now declares a dialect stance (${stance}), but the dialect ledger `
+            + 'still carries an entry for it. Delete the entry.',
+        );
+      }
+      scored.push({ driver, file: rel, markers, stance: entry && stance === 'undeclared' ? 'ledger' : stance });
+    }
+  }
+
+  // MATRIXED — the per-CELL invariant (#12136), promoted from the measurement
+  // this axis used to only print. Computed HERE rather than in `report()` so
+  // there is ONE derivation: the numbers the report prints and the numbers this
+  // invariant enforces cannot disagree, which is the failure a second copy
+  // would eventually produce silently.
+  const scoredCells = new Set();
+  const matrixCells = new Set();
+  for (const s of scored) {
+    for (const m of s.markers) {
+      scoredCells.add(`${s.driver}::${m}`);
+      if (s.stance === 'matrix') matrixCells.add(`${s.driver}::${m}`);
+    }
+  }
+  for (const cellKey of [...scoredCells].filter((c) => !matrixCells.has(c))) {
+    const [driver, marker] = cellKey.split('::');
+    const suites = scored
+      .filter((s) => s.driver === driver && s.markers.includes(marker))
+      .map((s) => ({ file: s.file, stance: s.stance }));
+    errors.push(matrixedMessage(driver, marker, suites, kits.get(driver)));
+  }
+
+  // RECONCILED, the reverse direction — a dialect-ledger row must still point at
+  // a conformance suite in a dialect-capable driver.
+  for (const entry of ledger) {
+    if (!kits.has(entry.driver)) {
+      errors.push(
+        `RECONCILED: dialect-ledger entry for ${entry.driver}, which is not a driver package with `
+          + 'a dialect matrix.',
+      );
+    } else if (!ledgerHit.has(entry.file)) {
+      errors.push(
+        `RECONCILED: dialect-ledger entry for ${entry.file}, which no longer covers a case-set `
+          + 'cell (moved, renamed, deleted, or its case-set import is gone). Delete the entry.',
+      );
+    }
+  }
+
+  return { scored, singleBackend, kits, notExecutable, scoredCells, matrixCells };
 }
 
 function reportDeadRoots(err) {
@@ -880,7 +1435,7 @@ function report() {
     process.exit(1);
     return;
   }
-  const { drivers, rows, errors } = audited;
+  const { drivers, rows, errors, dialect } = audited;
 
   const covered = rows.filter((r) => r.state === 'covered').length;
   const debt = rows.filter((r) => r.state === 'debt').length;
@@ -901,6 +1456,38 @@ function report() {
   }
   console.log('');
 
+  // ── The dialect axis ──────────────────────────────────────────────────────
+  // Printed BEFORE the error block so a red run still shows the measurement:
+  // the number this axis exists to make visible is most wanted on the run where
+  // something is wrong.
+  // Read from `dialectAudit`, never recomputed: MATRIXED enforces these exact
+  // two sets, and a second derivation here could print `9 of 9` beside an error
+  // saying otherwise.
+  const { scoredCells, matrixCells } = dialect;
+  const singleBackendCells = rows.filter(
+    (r) => r.state === 'covered' && dialect.singleBackend.includes(r.driver),
+  ).length;
+
+  for (const [driver, kit] of dialect.kits) {
+    console.log(`dialect axis (ADR-0053 D-A3) — ${driver} speaks {${kit.cellIds.join(', ')}}\n`);
+    const suites = dialect.scored.filter((s) => s.driver === driver);
+    const w = Math.max(...suites.map((s) => s.file.split('/').pop().length), 5);
+    for (const s of suites.sort((a, b) => a.file.localeCompare(b.file))) {
+      // Padded to the widest glyph so the columns hold on a RED run too — the
+      // run where this table is most worth reading.
+      const glyph = { matrix: 'matrix', cell: 'cell', ledger: 'LEDGER', undeclared: 'UNDECLARED' }[s.stance];
+      console.log(
+        `  ${glyph.padEnd(10)}  ${s.file.split('/').pop().padEnd(w)}  ${s.markers.map((m) => m.replace(/_CASES$/, '')).join(', ')}`,
+      );
+    }
+    console.log('');
+  }
+  for (const rel of dialect.notExecutable) {
+    console.log(`  note  ${rel} covers a cell but is not a test file — nothing executes, so it`);
+    console.log('        carries no dialect stance and is not scored on this axis.');
+  }
+  if (dialect.notExecutable.length) console.log('');
+
   if (errors.length) {
     for (const e of errors) console.error(`  x ${e}`);
     console.error(`\ncheck-driver-conformance: ${errors.length} problem(s).\n`);
@@ -917,9 +1504,29 @@ function report() {
   }
   if (LEDGER.length) console.log('');
 
+  for (const entry of DIALECT_LEDGER) {
+    console.log(`  DIALECT-DEBT  ${entry.driver} × ${entry.file.split('/').pop()}`);
+    console.log(`        ${entry.why}`);
+    if (entry.issue) console.log(`        tracked: ${entry.issue}`);
+  }
+  if (DIALECT_LEDGER.length) console.log('');
+
   console.log(
     `check-driver-conformance: OK — ${covered} covered cell(s), ${debt} in the DEBT ledger, `
-      + `${exempt} exempt.\n`,
+      + `${exempt} exempt.`,
+  );
+  // The second line is the one #12014 is about: the first says 45 whether a
+  // suite ran on one dialect or three, and said 45 before and after #11456
+  // converted one from the former to the latter.
+  console.log(
+    `check-driver-conformance: dialect axis — ${dialect.scored.length} conformance suite(s) across `
+      + `${dialect.kits.size} dialect-capable driver(s): `
+      + `${dialect.scored.filter((s) => s.stance === 'matrix').length} run the matrix, `
+      + `${dialect.scored.filter((s) => s.stance === 'cell').length} declare named cell(s), `
+      + `${dialect.scored.filter((s) => s.stance === 'ledger').length} in the DIALECT ledger. `
+      + `${matrixCells.size} of ${scoredCells.size} dialect-scored cell(s) have a matrix-routed `
+      + `suite. ${singleBackendCells} covered cell(s) belong to ${dialect.singleBackend.length} `
+      + 'single-backend driver(s), which have no dialect axis.\n',
   );
 }
 
@@ -934,6 +1541,22 @@ function selfTest() {
   const expect = (label, cond) => {
     if (!cond) failures.push(label);
   };
+
+  /**
+   * The import rule as it stood BEFORE #12320 bounded it to one statement —
+   * unbounded `[\s\S]*?` on both sides of the symbol.
+   *
+   * Spelled out here rather than reached through `drivenFrom`, because the
+   * cases that use it assert what the OLD rule accepted, and a probe that calls
+   * the live detector stops measuring that the moment the live detector is
+   * fixed. That is not hypothetical: the #12135 falsifiability probe was
+   * written as `drivenFrom(proseOnly, …)` and #12320's bound turned it from a
+   * statement about masking into a statement about the bound. Keeping the
+   * superseded rule as text is what lets both pins stay falsifiable against the
+   * thing they are actually about.
+   */
+  const roamingRule = (symbol) =>
+    new RegExp(`import[\\s\\S]*?\\b${symbol}\\b[\\s\\S]*?from\\s+['"]@objectstack/spec/data['"]`);
 
   // CONSUMED: an unused import must not count as coverage.
   const tmp = join(ROOT, 'node_modules', '.check-driver-conformance-selftest');
@@ -959,6 +1582,186 @@ function selfTest() {
     expect(
       'local re-declaration must not count as coverage',
       consumes(tmp, 'PAGINATION_CASES') === null,
+    );
+
+    // #12135 — a marker named only in PROSE must not count as coverage.
+    //
+    // The fixture is the shape that was LIVE on this tree, not an invented one:
+    // real imports from the case-set module at the top, the marker mentioned in
+    // a line comment among them and again in a docblock far below, and no
+    // reference to it anywhere in the code. `sql-driver.ts` and
+    // `mongodb-filter.ts` — two driver implementations, neither a suite — both
+    // scored as covering files for FILTER_LOGIC_CASES this way.
+    //
+    // The first assertion is what keeps the second one falsifiable. A fixture
+    // the old detector would ALSO have rejected pins nothing: it would go green
+    // the day someone reverts `codeOf`, and the case would read as a guard
+    // while guarding nothing. So the raw text is asserted to be a case the
+    // unmasked rule ACCEPTS, and only then is the real detector asserted to
+    // refuse it. Revert the masking and this pair fails on the second line.
+    const proseOnly = [
+      "import { TEMPORAL_CASES } from '@objectstack/spec/data';",
+      "// The `PAGINATION_CASES` table this driver's conformance suite runs; this",
+      '// file only compiles the paging clause it exercises.',
+      "import { FILTER_LOGIC_CASES } from '@objectstack/spec/data';",
+      '',
+      'export function compile() { return [TEMPORAL_CASES, FILTER_LOGIC_CASES]; }',
+      '',
+      '/**',
+      ' * Kept in step with the `PAGINATION_CASES` table above.',
+      ' */',
+      'export const VERSION = 1;',
+      '',
+    ].join('\n');
+    writeFileSync(join(tmp, 'src', 'a.test.ts'), proseOnly);
+    expect(
+      '#12135 — the prose-only fixture IS accepted by the roaming rule (else the case below '
+        + 'pins nothing and would survive a revert)',
+      roamingRule('PAGINATION_CASES').test(proseOnly),
+    );
+    expect(
+      '#12135 — a marker mentioned only in a comment must not count as coverage',
+      consumes(tmp, 'PAGINATION_CASES') === null,
+    );
+    expect(
+      '#12135 — and the file is not returned as a covering file either (the dialect axis scores '
+        + 'these, and `consumes` quotes one back to the author)',
+      coveringFiles(tmp, 'PAGINATION_CASES').length === 0,
+    );
+
+    // The mirror: prose about the marker does not DISARM a genuine reference.
+    // Over-masking would be the quiet direction to fail in here — every cell
+    // still green, coverage now judged by a rule that cannot see a suite whose
+    // author documented it.
+    writeFileSync(
+      join(tmp, 'src', 'a.test.ts'),
+      proseOnly
+        + "import { PAGINATION_CASES } from '@objectstack/spec/data';\n"
+        + 'for (const c of PAGINATION_CASES) {}\n',
+    );
+    expect(
+      '#12135 — a real driving reference still counts when the same file also discusses the '
+        + 'marker in prose',
+      consumes(tmp, 'PAGINATION_CASES') !== null,
+    );
+
+    // #12135's OTHER half, which #12320's statement bound made load-bearing.
+    //
+    // The fixture above is now refused for TWO independent reasons: the marker
+    // is named only in prose (masking), and it is not in any import clause (the
+    // #12320 bound). That is a stronger tree and a WEAKER pin — the bound alone
+    // refuses it, so it can no longer witness that masking does anything, which
+    // is why the probe above had to be re-spelled against the roaming rule it
+    // was really talking about.
+    //
+    // Masking is still load-bearing, on the shape where the two rules come
+    // apart: the marker is GENUINELY imported from the shared module, so the
+    // bound is satisfied, and the only thing standing between this file and a
+    // covered cell is that its sole mention of the marker is a docblock. This
+    // is the residue of the real #12135 shape — `sql-driver.ts` and
+    // `mongodb-filter.ts` were driver implementations that named a marker in
+    // prose — and it is measured, not assumed: unmasked this fixture is
+    // coverage, masked it is not. Delete the `codeOf` strip and this pair fails
+    // on the second line.
+    const importedButProseOnly = [
+      "import { PAGINATION_CASES } from '@objectstack/spec/data';",
+      '',
+      '/**',
+      ' * This driver compiles the paging clause that `PAGINATION_CASES` exercises;',
+      ' * the suite that actually runs the table lives next door.',
+      ' */',
+      'export const VERSION = 1;',
+      '',
+    ].join('\n');
+    expect(
+      '#12135 — an imported-but-prose-only marker IS coverage before masking (else the case '
+        + 'below pins nothing, now that the #12320 bound refuses the older fixture on its own)',
+      drivenFrom(importedButProseOnly, 'PAGINATION_CASES', '@objectstack/spec/data'),
+    );
+    expect(
+      '#12135 — and is NOT coverage after it: a docblock cannot be the only reference',
+      !drivenFrom(stripComments(importedButProseOnly), 'PAGINATION_CASES', '@objectstack/spec/data'),
+    );
+
+    // #12320: the cross-statement false green. A marker imported from a LOCAL
+    // module, never from the shared one, used to score as covered because the
+    // import scan roamed across statements to borrow a SIBLING import's
+    // specifier. This is the same rule the re-declared-fixture case above pins
+    // — "a local imitation is not the shared standard" — reached by importing
+    // the local fixture instead of declaring it with `const`.
+    //
+    // The pair is falsifiable the way the #12135 pair is. The first assertion
+    // holds the fixture to being a case the ROAMING rule accepts, so a revert
+    // of the bound fails HERE rather than quietly leaving a green guard over
+    // nothing; only then is the real detector asserted to refuse it. The
+    // roaming rule is spelled out locally on purpose: quoting the deleted regex
+    // is what makes "the old rule accepted this" a measurement rather than a
+    // claim about code that no longer exists.
+    const localFixture = [
+      "import { AGGREGATION_CASES } from './local-fixture.js';",
+      "import { TEMPORAL_CASES } from '@objectstack/spec/data';",
+      '',
+      'export function run() { return [AGGREGATION_CASES, TEMPORAL_CASES]; }',
+      '',
+    ].join('\n');
+    expect(
+      '#12320 — the locally-imported fixture IS accepted by the roaming rule (else the case '
+        + 'below pins nothing and would survive a revert of the statement bound)',
+      roamingRule('AGGREGATION_CASES').test(localFixture),
+    );
+    expect(
+      '#12320 — a marker imported from a LOCAL module is not shared-standard coverage, even '
+        + 'when a sibling statement imports something else from the shared module',
+      !drivenFrom(localFixture, 'AGGREGATION_CASES', '@objectstack/spec/data'),
+    );
+    writeFileSync(join(tmp, 'src', 'a.test.ts'), localFixture);
+    expect(
+      '#12320 — and the cell it would have covered is uncovered, through the real scan',
+      consumes(tmp, 'AGGREGATION_CASES') === null,
+    );
+    expect(
+      '#12320 — while the sibling that IS a genuine shared import still counts, so the bound '
+        + 'narrowed the import scan and not the case-set axis',
+      consumes(tmp, 'TEMPORAL_CASES') !== null,
+    );
+
+    // The mirror, on the shape a bound is most likely to break: a genuine
+    // shared import is still coverage when it is one of several statements,
+    // when the clause spans lines, and when a LOCAL import of a DIFFERENT
+    // symbol sits between it and the reference. Over-narrowing is the quiet
+    // direction to fail in here — every previously covered cell would go red,
+    // and the DEBT ledger is where that pressure gets absorbed.
+    const genuine = [
+      "import { helper } from './helper.js';",
+      'import {',
+      '  PAGINATION_CASES,',
+      '  PAGINATION_ZERO_LIMIT_CASES,',
+      "} from '@objectstack/spec/data';",
+      "import type { Driver } from './types.js';",
+      '',
+      'export function run(d: Driver) {',
+      '  helper(d);',
+      '  for (const c of PAGINATION_CASES) {}',
+      '  for (const c of PAGINATION_ZERO_LIMIT_CASES) {}',
+      '}',
+      '',
+    ].join('\n');
+    expect(
+      '#12320 — a multi-line clause among sibling statements is still a shared-standard import',
+      drivenFrom(genuine, 'PAGINATION_CASES', '@objectstack/spec/data'),
+    );
+    expect(
+      '#12320 — and so is its second named binding',
+      drivenFrom(genuine, 'PAGINATION_ZERO_LIMIT_CASES', '@objectstack/spec/data'),
+    );
+    expect(
+      '#12320 — an IMPORTED-but-unreferenced marker is still not coverage (the bound must not '
+        + 'have cost the second half of the rule)',
+      !drivenFrom(
+        "import { FILTER_TEXT_CASES } from '@objectstack/spec/data';\nexport const V = 1;\n",
+        'FILTER_TEXT_CASES',
+        '@objectstack/spec/data',
+      ),
     );
   } finally {
     rmSync(tmp, { recursive: true, force: true });
@@ -1166,17 +1969,301 @@ function selfTest() {
   expect('the declared form is NOT a scan-root value',
     !ROOT_DIR_WATCH_HINTS.some((h) => h === driversRel || h === DRIVERS_DIR));
 
+  // ── The DIALECT axis (#12014) ──────────────────────────────────────────────
+  //
+  // The axis is a source-text reading, so every way a reading can be wrong gets
+  // a named assertion: the stripper (a mention must not count), the stance
+  // classifier (both directions, plus the precedence), the testkit discovery,
+  // and the invariant itself red-then-green over a synthetic tree.
+
+  // -- The comment mask, as THIS gate uses it. --
+  // The mask's own contract — every literal form, both phantom-span families —
+  // is pinned by `node scripts/js-comment-mask.mjs --self-test` and by
+  // `check-comment-mask-corpus.mjs`, which diffs it against
+  // @typescript-eslint/parser over the whole tree in CI. Re-testing it here
+  // would be a second copy of the answer this gate deliberately does not keep.
+  // What IS asserted here is that this gate routes through it at all: the two
+  // cases below are the ones a private `stripComments` got wrong, so they name
+  // the failure family rather than re-deriving the fix.
+  expect('a comment cannot declare anything', !stripComments('const a = 1; // DIALECT_CELLS\n').includes('DIALECT_CELLS'));
+  expect('and a quote inside a regex character class does not swallow the code after it (the '
+    + 'phantom-string family, which is why this gate uses the shared mask rather than its own)',
+    stripComments('function f(s) { return /[\'"]/.test(s); }\nconst KEEP = 1;\n').includes('KEEP'));
+
+  // -- dialectStance: what a suite SAYS it runs on. --
+  const KIT_SPEC = './kit.testkit.js';
+  expect('iterating the cell list is the matrix stance',
+    dialectStance("import { DIALECT_CELLS } from './kit.testkit.js';\nfor (const c of DIALECT_CELLS) {}\n", KIT_SPEC) === 'matrix');
+  expect('naming one cell is the cell stance',
+    dialectStance("import { dialectCell } from './kit.testkit.js';\nconst c = dialectCell('sqlite');\n", KIT_SPEC) === 'cell');
+  // The precedence, which is the whole reason the two symbol lists are split:
+  // `declareDialectCell` is a PER-CELL helper, so using it on one named cell is
+  // one deliberate cell and must not be read as a matrix.
+  expect('declareDialectCell on a named cell is one cell, NOT a matrix',
+    dialectStance("import { declareDialectCell, PG_CELL } from './kit.testkit.js';\ndeclareDialectCell(PG_CELL, 'm', () => {});\n", KIT_SPEC) === 'cell');
+  expect('a hard-coded client declares nothing',
+    dialectStance("const d = new SqlDriver({ client: 'better-sqlite3' });\n", KIT_SPEC) === 'undeclared');
+  expect('an imported but unused stance is not a stance (the `consumes` rule, applied here)',
+    dialectStance("import { DIALECT_CELLS } from './kit.testkit.js';\nconst x = 1;\n", KIT_SPEC) === 'undeclared');
+
+  {
+    // THE non-vacuity assertion for the stripper. This fixture is the real shape
+    // on this tree: `sql-driver-aggregation-conformance.test.ts` describes its
+    // own #11456 conversion in prose, so a detector reading raw text finds a
+    // whole import statement inside a comment. Without stripping this reads as
+    // `matrix` — the file would be scored by its head note rather than its code.
+    const proseOnly =
+      '/*\n * Converted by #11456. It now does\n *   import { DIALECT_CELLS } from '
+      + "'./kit.testkit.js';\n * and iterates DIALECT_CELLS for every dialect.\n */\n"
+      + "const driver = new SqlDriver({ client: 'better-sqlite3' });\n";
+    // if/else for the #8435 reason: a fixture that stopped being recognisable as
+    // a stance in RAW text could no longer test the stripper at all, and that
+    // failure must name itself rather than masquerading as a passing check.
+    if (!DIALECT_MATRIX_SYMBOLS.some((s) => drivenFrom(proseOnly, s, KIT_SPEC))) {
+      expect('#12014 — the prose-only fixture is no longer a stance even UNSTRIPPED, so it cannot '
+        + 'test the stripper. Re-spell it so raw text reads as `matrix`', false);
+    } else {
+      expect('#12014 — a stance that appears ONLY in a comment is not a stance (proves the '
+        + 'stripper is load-bearing, not decoration)',
+        dialectStance(proseOnly, KIT_SPEC) === 'undeclared');
+    }
+  }
+
+  // -- discoverDialectTestkit + dialectAudit, over a synthetic tree. --
+  const tmpDialect = join(ROOT, 'node_modules', '.check-driver-conformance-selftest-dialect');
+  try {
+    const dsrc = (d) => join(tmpDialect, d, 'src');
+    mkdirSync(dsrc('driver-x'), { recursive: true });
+    writeFileSync(join(tmpDialect, 'driver-x', 'package.json'), '{}\n');
+    writeFileSync(
+      join(dsrc('driver-x'), 'kit.testkit.ts'),
+      "export const DIALECT_CELLS = [\n  { id: 'sqlite' },\n  { id: 'pg' },\n] as const;\n",
+    );
+    const undeclaredFile = join(dsrc('driver-x'), 'a.test.ts');
+    const declaredFile = join(dsrc('driver-x'), 'b.test.ts');
+    writeFileSync(undeclaredFile, "const d = new SqlDriver({ client: 'better-sqlite3' });\n");
+    writeFileSync(declaredFile, "import { DIALECT_CELLS } from './kit.testkit.js';\nfor (const c of DIALECT_CELLS) {}\n");
+    // [#12136] A suite that declares HONESTLY and narrowly — the shape MATRIXED
+    // exists for. DIALECTED is satisfied by it; D-A3 is not.
+    const cellFile = join(dsrc('driver-x'), 'd.test.ts');
+    writeFileSync(cellFile, "import { dialectCell } from './kit.testkit.js';\nconst c = dialectCell('sqlite');\n");
+    mkdirSync(dsrc('driver-y'), { recursive: true });   // no testkit: single-backend
+    writeFileSync(join(tmpDialect, 'driver-y', 'package.json'), '{}\n');
+    writeFileSync(join(dsrc('driver-y'), 'c.test.ts'), 'const x = 1;\n');
+
+    const kit = discoverDialectTestkit(join(tmpDialect, 'driver-x'));
+    expect('a package with a DIALECT_CELLS export is dialect-capable', kit !== null);
+    expect('the specifier is derived from the file on disk, not spelled here', kit?.specifier === './kit.testkit.js');
+    expect('the cell ids are read off the testkit', kit?.cellIds.join(',') === 'sqlite,pg');
+    expect('a package without one is not', discoverDialectTestkit(join(tmpDialect, 'driver-y')) === null);
+
+    const coveringOf = (files) => new Map([
+      ['driver-x', new Map(files)],
+      ['driver-y', new Map([[join(dsrc('driver-y'), 'c.test.ts'), ['PAGINATION_CASES']]])],
+    ]);
+    const drive = (files, ledger) => {
+      const errs = [];
+      const out = dialectAudit(['driver-x', 'driver-y'], coveringOf(files), errs, {
+        driversDir: tmpDialect, root: tmpDialect, ledger,
+      });
+      return { errs, out };
+    };
+
+    // RED: an undeclared conformance suite, with an empty ledger. Two errors
+    // since #12136, and they are two different findings about one file: it
+    // states no stance (DIALECTED), and its cell has no matrix-routed suite
+    // (MATRIXED). Asserted separately so a regression in either is named.
+    const red = drive([[undeclaredFile, ['PAGINATION_CASES']]], []);
+    const redDialected = red.errs.find((e) => e.startsWith('DIALECTED:'));
+    const redMatrixed = red.errs.find((e) => e.startsWith('MATRIXED:'));
+    expect('an undeclared conformance suite is an error', red.errs.length === 2);
+    expect('DIALECTED names the suite', /a\.test\.ts/.test(redDialected ?? ''));
+    expect('DIALECTED names the dialects it could have declared', /sqlite, pg/.test(redDialected ?? ''));
+    expect('#12136 — MATRIXED also fires, naming the CELL rather than the file',
+      /PAGINATION_CASES/.test(redMatrixed ?? ''));
+
+    // GREEN: the same suite, declared. Same tree, same call — so the red above
+    // was caused by the missing stance and nothing else.
+    const green = drive([[declaredFile, ['PAGINATION_CASES']]], []);
+    expect('declaring a stance clears it', green.errs.length === 0);
+    expect('and the stance is recorded as matrix', green.out.scored[0]?.stance === 'matrix');
+
+    // GREEN by ledger, for DIALECTED — and REPORTED as ledgered rather than as
+    // covered-and-fine. Since #12136 the ledger clears DIALECTED and NOTHING
+    // ELSE: this file is the only suite over its cell, so MATRIXED still fires.
+    // That narrowing is the promotion's whole point (a ledger row must not be a
+    // way to buy D-A3 green), so it is pinned here rather than left to be
+    // discovered by someone adding a row and finding it did not work.
+    const ledgered = drive([[undeclaredFile, ['PAGINATION_CASES']]],
+      [{ driver: 'driver-x', file: 'driver-x/src/a.test.ts', why: 'measured', issue: '#0' }]);
+    expect('a ledger entry accounts for an undeclared suite (no DIALECTED error)',
+      !ledgered.errs.some((e) => e.startsWith('DIALECTED:')));
+    expect('and it is REPORTED as ledgered, never as declared', ledgered.out.scored[0]?.stance === 'ledger');
+    expect('#12136 — but a ledger row does NOT clear MATRIXED: a ledgered suite is not a '
+      + 'matrix-routed one, so its cell is still uncovered on the dialect axis',
+      ledgered.errs.length === 1 && ledgered.errs[0].startsWith('MATRIXED:'));
+    expect('#12136 — and MATRIXED says so, so nobody adds a second row expecting it to work',
+      /NOT ledgerable/.test(ledgered.errs[0] ?? ''));
+
+    // -- MATRIXED, both directions, over the same synthetic tree. --
+    //
+    // The direction that matters: a suite can satisfy DIALECTED completely and
+    // still leave D-A3 enforced nowhere. This is the tree #12136 promotes the
+    // invariant against.
+    const honestlyNarrow = drive([[cellFile, ['PAGINATION_CASES']]], []);
+    expect('#12136 — a named-cell suite states a stance, so DIALECTED is satisfied',
+      !honestlyNarrow.errs.some((e) => e.startsWith('DIALECTED:')));
+    expect('#12136 — and its stance is recorded as cell', honestlyNarrow.out.scored[0]?.stance === 'cell');
+    expect('#12136 — but MATRIXED is RED: the cell has no matrix-routed suite',
+      honestlyNarrow.errs.length === 1 && honestlyNarrow.errs[0].startsWith('MATRIXED:'));
+    expect('#12136 — and the message names the covering suite and its stance',
+      /d\.test\.ts \(cell\)/.test(honestlyNarrow.errs[0] ?? ''));
+
+    // GREEN: the same narrow suite, beside a matrix-routed sibling over the SAME
+    // cell — the arrangement FILTER_TEXT is in on the real tree. MATRIXED is per
+    // CELL, so the sibling satisfies it and the narrow suite is not an error.
+    const narrowWithSibling = drive(
+      [[cellFile, ['PAGINATION_CASES']], [declaredFile, ['PAGINATION_CASES']]], []);
+    expect('#12136 — a matrix-routed sibling over the same cell clears MATRIXED',
+      narrowWithSibling.errs.length === 0);
+    expect('#12136 — and the cell is counted once, as matrix-covered',
+      narrowWithSibling.out.matrixCells.size === 1 && narrowWithSibling.out.scoredCells.size === 1);
+
+    // RECONCILED, all three directions.
+    const stale = drive([[declaredFile, ['PAGINATION_CASES']]],
+      [{ driver: 'driver-x', file: 'driver-x/src/b.test.ts', why: 'measured', issue: '#0' }]);
+    expect('a ledger entry for a suite that now declares is an error',
+      stale.errs.length === 1 && /now declares a dialect stance/.test(stale.errs[0]));
+    const orphan = drive([[declaredFile, ['PAGINATION_CASES']]],
+      [{ driver: 'driver-x', file: 'driver-x/src/gone.test.ts', why: 'measured', issue: '#0' }]);
+    expect('a ledger entry for a suite that covers nothing is an error',
+      orphan.errs.length === 1 && /no longer covers a case-set cell/.test(orphan.errs[0]));
+    const wrongDriver = drive([[declaredFile, ['PAGINATION_CASES']]],
+      [{ driver: 'driver-y', file: 'driver-y/src/c.test.ts', why: 'measured', issue: '#0' }]);
+    expect('a ledger entry for a driver with no dialect matrix is an error',
+      wrongDriver.errs.length === 1 && /not a driver package with a dialect matrix/.test(wrongDriver.errs[0]));
+
+    // A single-backend package is REPORTED, not silently dropped.
+    expect('a package with no dialect matrix is counted as single-backend',
+      green.out.singleBackend.join(',') === 'driver-y');
+    expect('and its covering files are not scored on this axis',
+      green.out.scored.every((s) => s.driver === 'driver-x'));
+
+    // A non-test covering file carries no stance, and is named rather than dropped.
+    const implFile = join(dsrc('driver-x'), 'impl.ts');
+    writeFileSync(implFile, '// mentions PAGINATION_CASES\n');
+    const nonTest = drive([[implFile, ['PAGINATION_CASES']]], []);
+    expect('a non-test covering file raises no stance error', nonTest.errs.length === 0);
+    expect('and is reported by name rather than filtered away in silence',
+      nonTest.out.notExecutable.join(',') === 'driver-x/src/impl.ts');
+  } finally {
+    rmSync(tmpDialect, { recursive: true, force: true });
+  }
+
+  // -- coveringFiles returns ALL of them, which is what the axis needs. --
+  const tmpMulti = join(ROOT, 'node_modules', '.check-driver-conformance-selftest-covering');
+  try {
+    mkdirSync(join(tmpMulti, 'src'), { recursive: true });
+    const drivenSrc = "import { PAGINATION_CASES } from '@objectstack/spec/data';\nfor (const c of PAGINATION_CASES) {}\n";
+    writeFileSync(join(tmpMulti, 'src', 'a.test.ts'), drivenSrc);
+    writeFileSync(join(tmpMulti, 'src', 'b.test.ts'), drivenSrc);
+    expect('coveringFiles returns every suite over a case-set, not just the first (an undeclared '
+      + 'suite must not be able to hide behind a declared sibling)',
+      coveringFiles(tmpMulti, 'PAGINATION_CASES').length === 2);
+    expect('consumes still answers with the first of them, unchanged',
+      consumes(tmpMulti, 'PAGINATION_CASES') === coveringFiles(tmpMulti, 'PAGINATION_CASES')[0]);
+  } finally {
+    rmSync(tmpMulti, { recursive: true, force: true });
+  }
+
+  // -- The #8435 authority convention, for the dialect ledger's own offer. --
+  const dialected = dialectedMessage(
+    'driver-example', 'packages/drivers/driver-example/src/a.test.ts', ['PAGINATION_CASES'],
+    { specifier: './kit.testkit.js', cellIds: ['sqlite', 'pg'] },
+  );
+  expect('#12014 — the dialect ratchet-offer DETECTOR still matches DIALECTED (else the check '
+    + 'below is vacuous)',
+    DIALECT_RATCHET_EXPANSION_OFFER.test(dialected));
+  expect(`#12014 — DIALECTED marks the dialect-ledger path ${RATCHET_AUTHORITY_MARKER} (a second `
+    + 'ledger is a second way to buy green, so it carries the same authority as the first)',
+    dialectRemedyCarriesAuthority(dialected));
+  {
+    const unmarkedDialectOffer =
+      'DIALECTED: driver-example/src/a.test.ts never says which dialects it runs on. Route it '
+      + `through the matrix, or add a measured entry to the dialect ledger in ${LEDGER_REL} saying `
+      + 'why not.';
+    if (!DIALECT_RATCHET_EXPANSION_OFFER.test(unmarkedDialectOffer)) {
+      expect('#12014 — the synthetic unmarked dialect-offer fixture is no longer recognised as an '
+        + 'offer, so it cannot test discrimination. Re-spell it to match '
+        + 'DIALECT_RATCHET_EXPANSION_OFFER', false);
+    } else {
+      expect('#12014 — dialectRemedyCarriesAuthority() REJECTS an offer carrying no marker',
+        !dialectRemedyCarriesAuthority(unmarkedDialectOffer));
+    }
+  }
+
+  // -- The real tree: the axis is WIRED IN, not merely defined. --
+  const liveKit = discoverDialectTestkit(join(DRIVERS_DIR, 'driver-sql'));
+  expect('driver-sql is discovered as dialect-capable from disk', liveKit !== null);
+  expect('and D-A3\'s two minimum dialects are both cells of it ("SQLite, Postgres at minimum")',
+    ['sqlite', 'pg'].every((id) => liveKit?.cellIds.includes(id)));
+  // `[].every()` is TRUE, so with the ledger at its intended empty steady state
+  // this assertion measures nothing — the shape #12136 had to decide about
+  // rather than leave as a green that had quietly stopped checking. Both facts
+  // are asserted, and which one is live is stated in its own label, so a future
+  // row is checked and today's emptiness is not read as a passing file check.
+  if (DIALECT_LEDGER.length === 0) {
+    expect('#12136 — the dialect ledger is EMPTY, which is the steady state the promoted '
+      + 'MATRIXED invariant assumes (a row cannot clear it, so a non-empty ledger means a cell '
+      + 'is being excused that this gate no longer excuses)', true);
+  } else {
+    expect('every row of the dialect ledger points at a file that exists',
+      DIALECT_LEDGER.every((e) => {
+        try { return statSync(join(ROOT, e.file)).isFile(); } catch { return false; }
+      }));
+  }
+  // The real tree must actually satisfy the invariant this script now enforces —
+  // asserted here as well as in `report()`, so `--self-test` cannot pass on a
+  // tree whose census is red.
+  {
+    const errs = [];
+    const live = audit();
+    expect('#12136 — MATRIXED holds on the real tree: every dialect-scored cell has a '
+      + 'matrix-routed suite', live.dialect.scoredCells.size === live.dialect.matrixCells.size);
+    expect('#12136 — and that population is not empty (an axis that scored nothing would '
+      + 'satisfy the invariant vacuously)', live.dialect.scoredCells.size > 0);
+    expect('#12136 — the real tree raises no MATRIXED error',
+      !live.errors.some((e) => e.startsWith('MATRIXED:')) && errs.length === 0);
+  }
+
   if (failures.length) {
     for (const f of failures) console.error(`  x self-test: ${f}`);
     console.error(`\ncheck-driver-conformance --self-test: ${failures.length} failure(s).\n`);
     process.exit(1);
   }
   console.log(
-    'OK  self-test: detects driven / unused / re-declared fixtures, discovers both axes, accounts for '
+    'OK  self-test: detects driven / unused / re-declared / locally-imported / prose-only fixtures '
+      + '(#12135 — a marker named only in a comment is not coverage, proven on the fixture where '
+      + 'masking is what decides it, and a documented suite is still coverage; #12320 — the import '
+      + 'scan is bounded to ONE statement, so a marker imported from a LOCAL module is not '
+      + 'shared-standard coverage even with a sibling statement importing from the shared one, '
+      + 'proven against a fixture the roaming rule accepts, while multi-line clauses among sibling '
+      + 'statements still are and an imported-but-unreferenced marker still is not), discovers both '
+      + 'axes, accounts for '
       + 'every entry under DRIVERS_DIR (a dropped or manifestless row is red, not a smaller matrix), '
       + 'holds the dead-root hard error (red when a scan root is renamed, green when restored), and '
       + 'keeps CONSUMED\'s ledger offer marked maintainer-only (#8435). It also declares the driver '
-      + 'subtree dispatch-gates derives from, refusing the bare root and the case-set dir by name.',
+      + 'subtree dispatch-gates derives from, refusing the bare root and the case-set dir by name. '
+      + 'And it holds the DIALECT axis (#12014): comments cannot declare a stance while strings and '
+      + 'regexes survive stripping, a matrix / named-cell / undeclared reading is pinned in all '
+      + 'three directions, an undeclared conformance suite is RED and declaring one is GREEN over '
+      + 'the same synthetic tree, the dialect ledger reconciles in all three directions, and its '
+      + 'offer is marked maintainer-only too. And it holds MATRIXED (#12136), the per-CELL '
+      + 'invariant: a suite that declares HONESTLY and narrowly satisfies DIALECTED while leaving '
+      + 'its cell without a matrix-routed suite, which is RED; a matrix-routed sibling over the '
+      + 'same cell is GREEN; a dialect-ledger row does NOT clear it, and the message says so; and '
+      + 'the invariant is asserted against the real tree over a non-empty population, so it cannot '
+      + 'pass vacuously.',
   );
 }
 

@@ -117,7 +117,7 @@ const PLAIN_OBJECT = {
     created_at: { type: 'datetime' },
     approvals: {
       type: 'lookup',
-      reference_to: 'leave_approval',
+      reference: 'leave_approval',
       relatedList: true,
       relatedListFilter: { created_at: { $gte: 'last_30_days' } },
     },

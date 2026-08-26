@@ -50,6 +50,72 @@ const result = DashboardSchema.parse(data);
 | **_packageVersion** | `string` | optional | Owning package version. |
 | **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
 
+### Nested Shape: `Dashboard.header`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **showTitle** | `boolean` | optional (default: `true`) | Show dashboard title in header |
+| **showDescription** | `boolean` | optional (default: `true`) | Show dashboard description in header |
+| **actions** | `{ label: string \| Record<string, string>; actionUrl: string; actionType?: Enum<'script' \| 'url' \| 'modal' \| 'flow' \| 'api' \| 'form'>; icon?: string }[]` | optional | Header action buttons |
+
+### Nested Shape: `Dashboard.widgets[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ | Unique widget identifier (snake_case) |
+| **title** | `string \| Record<string, string>` | optional | Widget title |
+| **description** | `string \| Record<string, string>` | optional | Widget description text below the header |
+| **type** | `Enum<'bar' \| 'horizontal-bar' \| 'column' \| 'line' \| 'area' \| 'pie' \| 'donut' \| …>` | optional (default: `"metric"`) | Visualization type |
+| **chartConfig** | `{ type: Enum<'bar' \| 'horizontal-bar' \| 'column' \| 'line' \| 'area' \| 'pie' \| 'donut' \| …>; title?: string \| Record<string, string>; subtitle?: string \| Record<string, string>; description?: string \| Record<string, string>; … }` | optional | Chart visualization configuration |
+| **colorVariant** | `Enum<'default' \| 'blue' \| 'teal' \| 'orange' \| 'purple' \| 'success' \| 'warning' \| 'danger'>` | optional | Widget color variant for theming |
+| **requiresObject** | `string` | optional | Hide the widget unless the named object is registered |
+| **requiresService** | `string` | optional | Hide the widget unless the named kernel service is registered |
+| **actionUrl** | `never` | optional | [REMOVED] `dashboard.widgets[].actionUrl` was removed in @objectstack/spec 17.0.0 (#5010, ADR-0049 enforce-or-remove) — a dashboard widget has NO action button, and never had one. No renderer draws per-widget chrome for it: every action the dashboard dispatches comes from `header.actions[]`. The three keys `actionUrl` / `actionType` / `actionIcon` went together; delete all three. Put the affordance on the dashboard header instead — `header: { actions: [{ label, actionUrl, actionType, icon }] }` — which IS dispatched (`DashboardHeaderAction`, same vocabulary, and `icon` is the header spelling of `actionIcon`). For a per-ROW affordance, the widget to reach for is a `table`/`pivot` bound to a dataset: its rows are clickable and drill through the semantic layer. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
+| **actionType** | `never` | optional | [REMOVED] `dashboard.widgets[].actionType` was removed in @objectstack/spec 17.0.0 (#5010, ADR-0049 enforce-or-remove) — a dashboard widget has NO action button, and never had one. No renderer draws per-widget chrome for it: every action the dashboard dispatches comes from `header.actions[]`. The three keys `actionUrl` / `actionType` / `actionIcon` went together; delete all three. Put the affordance on the dashboard header instead — `header: { actions: [{ label, actionUrl, actionType, icon }] }` — which IS dispatched (`DashboardHeaderAction`, same vocabulary, and `icon` is the header spelling of `actionIcon`). For a per-ROW affordance, the widget to reach for is a `table`/`pivot` bound to a dataset: its rows are clickable and drill through the semantic layer. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
+| **actionIcon** | `never` | optional | [REMOVED] `dashboard.widgets[].actionIcon` was removed in @objectstack/spec 17.0.0 (#5010, ADR-0049 enforce-or-remove) — a dashboard widget has NO action button, and never had one. No renderer draws per-widget chrome for it: every action the dashboard dispatches comes from `header.actions[]`. The three keys `actionUrl` / `actionType` / `actionIcon` went together; delete all three. Put the affordance on the dashboard header instead — `header: { actions: [{ label, actionUrl, actionType, icon }] }` — which IS dispatched (`DashboardHeaderAction`, same vocabulary, and `icon` is the header spelling of `actionIcon`). For a per-ROW affordance, the widget to reach for is a `table`/`pivot` bound to a dataset: its rows are clickable and drill through the semantic layer. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
+| **filter** | `any` | optional | Presentation-scope filter (runtimeFilter) |
+| **compareTo** | `{ kind: Enum<'previousPeriod' \| 'previousYear'>; dimension?: string }` | optional | Period-over-period comparison window (`{ kind, dimension? }`) |
+| **dataset** | `string` | ✅ | Dataset name to bind (ADR-0021) |
+| **dimensions** | `string[]` | optional | Dimension names — X/group/split |
+| **values** | `string[]` | ✅ | Measure names — Y (at least one) |
+| **layout** | `{ x: number; y: number; w: number; h: number }` | optional | Grid layout position (auto-flowed when omitted) |
+| **options** | `{ dateGranularity?: Enum<'day' \| 'week' \| 'month' \| 'quarter' \| 'year'>; sortBy?: string; sortOrder?: Enum<'asc' \| 'desc'>; limit?: integer; … } & Record<string, any>` | optional | Widget specific configuration |
+| **filterBindings** | `Record<string, string \| false>` | optional | Per-widget dashboard-filter bindings: filter name → this widget's field, or false to opt out |
+| **suppressWarnings** | `string[]` | optional | Build diagnostic rule ids suppressed on this widget |
+| **responsive** | `never` | optional | [REMOVED] `dashboard.widgets[].responsive` was removed in @objectstack/spec 17.0.0 (#4876, ADR-0049 D2) — no renderer ever read it, so per-widget breakpoint overrides were never applied: the value parsed, validated, and then did nothing. The dashboard grid reflows by its own layout rules (`columns` + `gap` on the dashboard, the `layout` box on each widget). Delete the key. This message used to point at `page.components[].responsive` as the live home of the shared `ResponsiveConfig` shape; that key was measured equally unread and removed with the shape in #11027. For breakpoint behaviour that IS applied, use `responsiveStyles` on a page component (ADR-0065) — per-breakpoint CSS maps compiled to id-scoped CSS at render. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
+| **aria** | `never` | optional | [REMOVED] `dashboard.widgets[].aria` was removed in @objectstack/spec 17.0.0 (#5010, ADR-0049 D2) — no renderer ever applied it, so ARIA attributes declared on a widget silently did not reach the DOM: the key promised accessibility compliance it did not deliver. This is the same removal the dashboard-level `aria` got in 17.0.0 (#3896). Delete the key. The dashboard renderer emits its own `aria-*` attributes for the widget grid; author a `title` (and `description`) on the widget instead — those ARE what the renderer labels the card with. The shared `AriaProps` shape is NOT gone: it stays live on `page.aria`, `page.components[].aria` and the list view `aria`. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
+
+### Nested Shape: `Dashboard.dateRange`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **field** | `string` | optional | Default date field name for time-based filtering |
+| **defaultRange** | `Enum<'today' \| 'yesterday' \| 'this_week' \| 'last_week' \| 'this_month' \| 'last_month' \| …>` | optional (default: `"this_month"`) | Default date range preset |
+| **allowCustomRange** | `boolean` | optional (default: `true`) | Allow users to pick a custom date range |
+
+### Nested Shape: `Dashboard.globalFilters[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | optional | Stable filter name (variable key); defaults to field |
+| **field** | `string` | ✅ | Field name to filter on |
+| **object** | `string` | optional | Object whose `fields.<object>.<field>` translation-bundle entry resolves this filter's field label and option labels (#7804) |
+| **label** | `string \| Record<string, string>` | optional | Display label for the filter |
+| **type** | `Enum<'text' \| 'select' \| 'date' \| 'number' \| 'lookup'>` | optional | Filter input type |
+| **options** | `{ value: string \| number \| boolean; label: string \| Record<string, string> }[]` | optional | Static filter options |
+| **optionsFrom** | `{ object: string; valueField: string; labelField: string; filter?: any }` | optional | Dynamic filter options from object |
+| **defaultValue** | `string \| number \| boolean` | optional | Default filter value |
+| **scope** | `Enum<'dashboard' \| 'widget'>` | optional (default: `"dashboard"`) | Filter application scope |
+| **targetWidgets** | `string[]` | optional | Widget IDs to apply this filter to |
+
+### Nested Shape: `Dashboard.protection`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | ✅ | Lock policy — none \| no-overlay \| no-delete \| full. |
+| **reason** | `string` | ✅ | User-visible reason shown when the lock blocks an action. |
+| **docsUrl** | `string` | optional | Optional URL the Studio banner links to for more context. |
+
 
 ---
 
@@ -64,6 +130,17 @@ Dashboard header configuration
 | **showTitle** | `boolean` | optional (default: `true`) | Show dashboard title in header |
 | **showDescription** | `boolean` | optional (default: `true`) | Show dashboard description in header |
 | **actions** | `{ label: string \| Record<string, string>; actionUrl: string; actionType?: Enum<'script' \| 'url' \| 'modal' \| 'flow' \| 'api' \| 'form'>; icon?: string }[]` | optional | Header action buttons |
+
+### Nested Shape: `DashboardHeader.actions[number]`
+
+Dashboard header action
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **label** | `string \| Record<string, string>` | ✅ | Action button label |
+| **actionUrl** | `string` | ✅ | URL or target for the action |
+| **actionType** | `Enum<'script' \| 'url' \| 'modal' \| 'flow' \| 'api' \| 'form'>` | optional | Type of action |
+| **icon** | `string` | optional | Icon identifier for the action button |
 
 
 ---
@@ -136,6 +213,42 @@ Dashboard header action
 * `table`
 * `pivot`
 
+### Nested Shape: `DashboardWidget.chartConfig`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `Enum<'bar' \| 'horizontal-bar' \| 'column' \| 'line' \| 'area' \| 'pie' \| 'donut' \| …>` | ✅ |  |
+| **title** | `string \| Record<string, string>` | optional | Chart title |
+| **subtitle** | `string \| Record<string, string>` | optional | Chart subtitle |
+| **description** | `string \| Record<string, string>` | optional | Accessibility description — announced to screen readers as the chart’s label |
+| **xAxis** | `{ field: string; title?: string \| Record<string, string>; format?: string; min?: number; … }` | optional | X-Axis configuration |
+| **yAxis** | `{ field: string; title?: string \| Record<string, string>; format?: string; min?: number; … }[]` | optional | Y-Axis configuration (support dual axis) |
+| **series** | `{ name: string; label?: string \| Record<string, string>; type?: Enum<'bar' \| 'horizontal-bar' \| 'column' \| 'line' \| 'area' \| 'pie' \| 'donut' \| …>; color?: string; … }[]` | optional | Defined series configuration |
+| **colors** | `string[] \| Record<string, string>` | optional | Color palette (string[]) or value→color map (`{ value: color }`) |
+| **height** | `number` | optional | Fixed plot height in pixels (overrides the container default) |
+| **showLegend** | `boolean` | optional (default: `true`) | Display legend |
+| **showDataLabels** | `boolean` | optional (default: `false`) | Display data labels |
+| **annotations** | `{ type: Enum<'line' \| 'region'>; axis: Enum<'x' \| 'y'>; value: number \| string; endValue?: number \| string; … }[]` | optional | Reference lines/bands drawn over the plot: `{ type: "line" \| "region", axis: "x" \| "y", value, endValue?, color?, label?, style? }` |
+| **interaction** | `{ tooltips: boolean; brush: boolean }` | optional | Interaction toggles: `{ tooltips?, brush? }` |
+| **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
+
+### Nested Shape: `DashboardWidget.compareTo`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **kind** | `Enum<'previousPeriod' \| 'previousYear'>` | ✅ | Comparison window: previousPeriod (equal-length, immediately before) or previousYear (−1 calendar year) |
+| **dimension** | `string` | optional | Time dimension to shift; omit when the selection has exactly one dated time dimension |
+
+### Nested Shape: `DashboardWidget.options`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **dateGranularity** | `Enum<'day' \| 'week' \| 'month' \| 'quarter' \| 'year'>` | optional | Bucket selected date dimensions (day/week/month/quarter/year) |
+| **sortBy** | `string` | optional | Dimension/measure name to order by |
+| **sortOrder** | `Enum<'asc' \| 'desc'>` | optional | Sort direction for sortBy |
+| **limit** | `integer` | optional | Max rows (applied after ordering) |
+| **stageOrder** | `(string \| number \| boolean)[]` | optional | Explicit category order for funnel/pyramid stages (stored values) |
+
 
 ---
 
@@ -172,6 +285,22 @@ Widget configuration — declared query keys + open renderer extras
 | **defaultValue** | `string \| number \| boolean` | optional | Default filter value |
 | **scope** | `Enum<'dashboard' \| 'widget'>` | optional (default: `"dashboard"`) | Filter application scope |
 | **targetWidgets** | `string[]` | optional | Widget IDs to apply this filter to |
+
+### Nested Shape: `GlobalFilter.options[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **value** | `string \| number \| boolean` | ✅ | Option value |
+| **label** | `string \| Record<string, string>` | ✅ | Display label — the default-language string, or an inline locale map (`{ en, "zh-CN" }`) resolved at render time |
+
+### Nested Shape: `GlobalFilter.optionsFrom`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **object** | `string` | ✅ | Source object name |
+| **valueField** | `string` | ✅ | Field to use as option value |
+| **labelField** | `string` | ✅ | Field to use as option label |
+| **filter** | `any` | optional | Filter to apply to source object |
 
 
 ---

@@ -38,6 +38,42 @@ const result = BaseEngineOptionsSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **context** | `{ userId?: string; actor?: string; attributedUserId?: string; email?: string; … }` | optional |  |
 
+### Nested Shape: `BaseEngineOptions.context`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **userId** | `string` | optional |  |
+| **actor** | `string` | optional |  |
+| **attributedUserId** | `string` | optional |  |
+| **email** | `string` | optional |  |
+| **tenantId** | `string` | optional |  |
+| **timezone** | `string` | optional |  |
+| **locale** | `string` | optional |  |
+| **currency** | `string` | optional |  |
+| **positions** | `string[]` | optional (default: `[]`) |  |
+| **principalKind** | `Enum<'human' \| 'agent' \| 'service' \| 'guest' \| 'system'>` | optional |  |
+| **audience** | `Enum<'internal' \| 'external'>` | optional |  |
+| **posture** | `Enum<'PLATFORM_ADMIN' \| 'TENANT_ADMIN' \| 'MEMBER' \| 'EXTERNAL'>` | optional | ADR-0095 D2 posture rung — PLATFORM_ADMIN crosses the tenant wall where object posture permits; TENANT_ADMIN sees all rows in the org; MEMBER gets business RLS; EXTERNAL sees only explicitly shared rows. |
+| **authGate** | `{ code: string; message: string }` | optional | ADR-0069 authentication-policy gate: present only while the principal is blocked from protected resources until they remediate (expired password, enforced MFA), absent for every healthy session. `code` is the stable machine code the client branches on (PASSWORD_EXPIRED / MFA_REQUIRED) and `message` is what the blocked user reads; both are required because the transport seam renders them as the 403 body. AUTHENTICATION, not authorization — it suspends access entirely rather than narrowing it, and nothing in the permission/RLS path reads it, while the allow-listed remediation endpoints stay reachable. Server-constructed only, never client-supplied; a guest/anonymous principal never carries one. |
+| **onBehalfOf** | `{ userId: string; principalKind?: Enum<'human' \| 'agent' \| 'service' \| 'guest' \| 'system'> }` | optional |  |
+| **permissions** | `string[]` | optional (default: `[]`) |  |
+| **systemPermissions** | `string[]` | optional |  |
+| **tabPermissions** | `Record<string, Enum<'visible' \| 'hidden' \| 'default_on' \| 'default_off'>>` | optional |  |
+| **org_user_ids** | `string[]` | optional |  |
+| **accessible_org_ids** | `string[]` | optional |  |
+| **rlsMembership** | `Record<string, string[]>` | optional |  |
+| **isSystem** | `boolean` | optional (default: `false`) |  |
+| **flowRunId** | `string` | optional |  |
+| **skipTriggers** | `boolean` | optional |  |
+| **skipAutomations** | `boolean` | optional |  |
+| **seedReplay** | `boolean` | optional |  |
+| **skipStateMachine** | `boolean` | optional |  |
+| **preserveAudit** | `boolean` | optional | Historical import: preserve the ORIGINAL audit timeline for this write instead of stamping it "now" (#3493). Opt-in and server-constructed only, never client-supplied. On the UPDATE path it admits a whitelist — the audit/timestamp family (created_at / created_by / updated_at / updated_by) plus author-declared business `readonly` fields — while platform-managed `system` columns (tenancy, generated) stay stripped. On INSERT the exemption does NOT apply (#6640): a create is stripped earlier, at the DataProtocol ingress, whose only exemption is `context.isSystem`, so a non-system create carrying `preserveAudit` still has those fields stripped and is warned (WARN) that the exemption is UPDATE-only — replaying archival readonly facts on create requires a system context. Permissions / RLS / field-level security are unaffected. |
+| **oauthScopes** | `string[]` | optional |  |
+| **accessToken** | `string` | optional |  |
+| **transaction** | `any` | optional |  |
+| **traceId** | `string` | optional |  |
+
 
 ---
 
@@ -54,6 +90,42 @@ Options for DataEngine.aggregate operations
 | **groupBy** | `string[]` | optional |  |
 | **aggregations** | `{ field: string; method: Enum<'count' \| 'sum' \| 'avg' \| 'min' \| 'max' \| 'count_distinct'>; alias?: string }[]` | optional |  |
 
+### Nested Shape: `DataEngineAggregateOptions.context`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **userId** | `string` | optional |  |
+| **actor** | `string` | optional |  |
+| **attributedUserId** | `string` | optional |  |
+| **email** | `string` | optional |  |
+| **tenantId** | `string` | optional |  |
+| **timezone** | `string` | optional |  |
+| **locale** | `string` | optional |  |
+| **currency** | `string` | optional |  |
+| **positions** | `string[]` | optional (default: `[]`) |  |
+| **principalKind** | `Enum<'human' \| 'agent' \| 'service' \| 'guest' \| 'system'>` | optional |  |
+| **audience** | `Enum<'internal' \| 'external'>` | optional |  |
+| **posture** | `Enum<'PLATFORM_ADMIN' \| 'TENANT_ADMIN' \| 'MEMBER' \| 'EXTERNAL'>` | optional | ADR-0095 D2 posture rung — PLATFORM_ADMIN crosses the tenant wall where object posture permits; TENANT_ADMIN sees all rows in the org; MEMBER gets business RLS; EXTERNAL sees only explicitly shared rows. |
+| **authGate** | `{ code: string; message: string }` | optional | ADR-0069 authentication-policy gate: present only while the principal is blocked from protected resources until they remediate (expired password, enforced MFA), absent for every healthy session. `code` is the stable machine code the client branches on (PASSWORD_EXPIRED / MFA_REQUIRED) and `message` is what the blocked user reads; both are required because the transport seam renders them as the 403 body. AUTHENTICATION, not authorization — it suspends access entirely rather than narrowing it, and nothing in the permission/RLS path reads it, while the allow-listed remediation endpoints stay reachable. Server-constructed only, never client-supplied; a guest/anonymous principal never carries one. |
+| **onBehalfOf** | `{ userId: string; principalKind?: Enum<'human' \| 'agent' \| 'service' \| 'guest' \| 'system'> }` | optional |  |
+| **permissions** | `string[]` | optional (default: `[]`) |  |
+| **systemPermissions** | `string[]` | optional |  |
+| **tabPermissions** | `Record<string, Enum<'visible' \| 'hidden' \| 'default_on' \| 'default_off'>>` | optional |  |
+| **org_user_ids** | `string[]` | optional |  |
+| **accessible_org_ids** | `string[]` | optional |  |
+| **rlsMembership** | `Record<string, string[]>` | optional |  |
+| **isSystem** | `boolean` | optional (default: `false`) |  |
+| **flowRunId** | `string` | optional |  |
+| **skipTriggers** | `boolean` | optional |  |
+| **skipAutomations** | `boolean` | optional |  |
+| **seedReplay** | `boolean` | optional |  |
+| **skipStateMachine** | `boolean` | optional |  |
+| **preserveAudit** | `boolean` | optional | Historical import: preserve the ORIGINAL audit timeline for this write instead of stamping it "now" (#3493). Opt-in and server-constructed only, never client-supplied. On the UPDATE path it admits a whitelist — the audit/timestamp family (created_at / created_by / updated_at / updated_by) plus author-declared business `readonly` fields — while platform-managed `system` columns (tenancy, generated) stay stripped. On INSERT the exemption does NOT apply (#6640): a create is stripped earlier, at the DataProtocol ingress, whose only exemption is `context.isSystem`, so a non-system create carrying `preserveAudit` still has those fields stripped and is warned (WARN) that the exemption is UPDATE-only — replaying archival readonly facts on create requires a system context. Permissions / RLS / field-level security are unaffected. |
+| **oauthScopes** | `string[]` | optional |  |
+| **accessToken** | `string` | optional |  |
+| **transaction** | `any` | optional |  |
+| **traceId** | `string` | optional |  |
+
 
 ---
 
@@ -66,6 +138,18 @@ Options for DataEngine.aggregate operations
 | **method** | `'aggregate'` | ✅ |  |
 | **object** | `string` | ✅ |  |
 | **query** | `{ context?: object; where?: Record<string, any> \| any; groupBy?: (string \| object)[]; aggregations?: object[]; … }` | ✅ |  |
+
+### Nested Shape: `DataEngineAggregateRequest.query`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **context** | `{ userId?: string; actor?: string; attributedUserId?: string; email?: string; … }` | optional |  |
+| **where** | `Record<string, any> \| any` | optional |  |
+| **groupBy** | `(string \| { field: string; dateGranularity?: Enum<'day' \| 'week' \| 'month' \| 'quarter' \| 'year'>; alias?: string })[]` | optional | GROUP BY targets (strings or `{field, dateGranularity?}` objects for date bucketing) |
+| **aggregations** | `{ function: Enum<'count' \| 'sum' \| 'avg' \| 'min' \| 'max' \| 'count_distinct'>; field?: string; alias: string; filter?: any }[]` | optional |  |
+| **having** | `any` | optional | HAVING — filter over the aggregated rows (aggregation aliases + groupBy projections); applied engine-side after aggregation |
+| **timezone** | `string` | optional |  |
+| **filter** | `Record<string, any> \| any` | optional | Data Engine query filter conditions |
 
 
 ---
@@ -81,6 +165,42 @@ Options for DataEngine.count operations
 | **context** | `{ userId?: string; actor?: string; attributedUserId?: string; email?: string; … }` | optional |  |
 | **filter** | `Record<string, any> \| any` | optional | Data Engine query filter conditions |
 
+### Nested Shape: `DataEngineCountOptions.context`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **userId** | `string` | optional |  |
+| **actor** | `string` | optional |  |
+| **attributedUserId** | `string` | optional |  |
+| **email** | `string` | optional |  |
+| **tenantId** | `string` | optional |  |
+| **timezone** | `string` | optional |  |
+| **locale** | `string` | optional |  |
+| **currency** | `string` | optional |  |
+| **positions** | `string[]` | optional (default: `[]`) |  |
+| **principalKind** | `Enum<'human' \| 'agent' \| 'service' \| 'guest' \| 'system'>` | optional |  |
+| **audience** | `Enum<'internal' \| 'external'>` | optional |  |
+| **posture** | `Enum<'PLATFORM_ADMIN' \| 'TENANT_ADMIN' \| 'MEMBER' \| 'EXTERNAL'>` | optional | ADR-0095 D2 posture rung — PLATFORM_ADMIN crosses the tenant wall where object posture permits; TENANT_ADMIN sees all rows in the org; MEMBER gets business RLS; EXTERNAL sees only explicitly shared rows. |
+| **authGate** | `{ code: string; message: string }` | optional | ADR-0069 authentication-policy gate: present only while the principal is blocked from protected resources until they remediate (expired password, enforced MFA), absent for every healthy session. `code` is the stable machine code the client branches on (PASSWORD_EXPIRED / MFA_REQUIRED) and `message` is what the blocked user reads; both are required because the transport seam renders them as the 403 body. AUTHENTICATION, not authorization — it suspends access entirely rather than narrowing it, and nothing in the permission/RLS path reads it, while the allow-listed remediation endpoints stay reachable. Server-constructed only, never client-supplied; a guest/anonymous principal never carries one. |
+| **onBehalfOf** | `{ userId: string; principalKind?: Enum<'human' \| 'agent' \| 'service' \| 'guest' \| 'system'> }` | optional |  |
+| **permissions** | `string[]` | optional (default: `[]`) |  |
+| **systemPermissions** | `string[]` | optional |  |
+| **tabPermissions** | `Record<string, Enum<'visible' \| 'hidden' \| 'default_on' \| 'default_off'>>` | optional |  |
+| **org_user_ids** | `string[]` | optional |  |
+| **accessible_org_ids** | `string[]` | optional |  |
+| **rlsMembership** | `Record<string, string[]>` | optional |  |
+| **isSystem** | `boolean` | optional (default: `false`) |  |
+| **flowRunId** | `string` | optional |  |
+| **skipTriggers** | `boolean` | optional |  |
+| **skipAutomations** | `boolean` | optional |  |
+| **seedReplay** | `boolean` | optional |  |
+| **skipStateMachine** | `boolean` | optional |  |
+| **preserveAudit** | `boolean` | optional | Historical import: preserve the ORIGINAL audit timeline for this write instead of stamping it "now" (#3493). Opt-in and server-constructed only, never client-supplied. On the UPDATE path it admits a whitelist — the audit/timestamp family (created_at / created_by / updated_at / updated_by) plus author-declared business `readonly` fields — while platform-managed `system` columns (tenancy, generated) stay stripped. On INSERT the exemption does NOT apply (#6640): a create is stripped earlier, at the DataProtocol ingress, whose only exemption is `context.isSystem`, so a non-system create carrying `preserveAudit` still has those fields stripped and is warned (WARN) that the exemption is UPDATE-only — replaying archival readonly facts on create requires a system context. Permissions / RLS / field-level security are unaffected. |
+| **oauthScopes** | `string[]` | optional |  |
+| **accessToken** | `string` | optional |  |
+| **transaction** | `any` | optional |  |
+| **traceId** | `string` | optional |  |
+
 
 ---
 
@@ -93,6 +213,14 @@ Options for DataEngine.count operations
 | **method** | `'count'` | ✅ |  |
 | **object** | `string` | ✅ |  |
 | **query** | `{ context?: object; where?: Record<string, any> \| any; filter?: Record<string, any> \| any }` | optional |  |
+
+### Nested Shape: `DataEngineCountRequest.query`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **context** | `{ userId?: string; actor?: string; attributedUserId?: string; email?: string; … }` | optional |  |
+| **where** | `Record<string, any> \| any` | optional |  |
+| **filter** | `Record<string, any> \| any` | optional | Data Engine query filter conditions |
 
 
 ---
@@ -109,6 +237,42 @@ Options for DataEngine.delete operations
 | **filter** | `Record<string, any> \| any` | optional | Data Engine query filter conditions |
 | **multi** | `boolean` | optional (default: `false`) |  |
 
+### Nested Shape: `DataEngineDeleteOptions.context`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **userId** | `string` | optional |  |
+| **actor** | `string` | optional |  |
+| **attributedUserId** | `string` | optional |  |
+| **email** | `string` | optional |  |
+| **tenantId** | `string` | optional |  |
+| **timezone** | `string` | optional |  |
+| **locale** | `string` | optional |  |
+| **currency** | `string` | optional |  |
+| **positions** | `string[]` | optional (default: `[]`) |  |
+| **principalKind** | `Enum<'human' \| 'agent' \| 'service' \| 'guest' \| 'system'>` | optional |  |
+| **audience** | `Enum<'internal' \| 'external'>` | optional |  |
+| **posture** | `Enum<'PLATFORM_ADMIN' \| 'TENANT_ADMIN' \| 'MEMBER' \| 'EXTERNAL'>` | optional | ADR-0095 D2 posture rung — PLATFORM_ADMIN crosses the tenant wall where object posture permits; TENANT_ADMIN sees all rows in the org; MEMBER gets business RLS; EXTERNAL sees only explicitly shared rows. |
+| **authGate** | `{ code: string; message: string }` | optional | ADR-0069 authentication-policy gate: present only while the principal is blocked from protected resources until they remediate (expired password, enforced MFA), absent for every healthy session. `code` is the stable machine code the client branches on (PASSWORD_EXPIRED / MFA_REQUIRED) and `message` is what the blocked user reads; both are required because the transport seam renders them as the 403 body. AUTHENTICATION, not authorization — it suspends access entirely rather than narrowing it, and nothing in the permission/RLS path reads it, while the allow-listed remediation endpoints stay reachable. Server-constructed only, never client-supplied; a guest/anonymous principal never carries one. |
+| **onBehalfOf** | `{ userId: string; principalKind?: Enum<'human' \| 'agent' \| 'service' \| 'guest' \| 'system'> }` | optional |  |
+| **permissions** | `string[]` | optional (default: `[]`) |  |
+| **systemPermissions** | `string[]` | optional |  |
+| **tabPermissions** | `Record<string, Enum<'visible' \| 'hidden' \| 'default_on' \| 'default_off'>>` | optional |  |
+| **org_user_ids** | `string[]` | optional |  |
+| **accessible_org_ids** | `string[]` | optional |  |
+| **rlsMembership** | `Record<string, string[]>` | optional |  |
+| **isSystem** | `boolean` | optional (default: `false`) |  |
+| **flowRunId** | `string` | optional |  |
+| **skipTriggers** | `boolean` | optional |  |
+| **skipAutomations** | `boolean` | optional |  |
+| **seedReplay** | `boolean` | optional |  |
+| **skipStateMachine** | `boolean` | optional |  |
+| **preserveAudit** | `boolean` | optional | Historical import: preserve the ORIGINAL audit timeline for this write instead of stamping it "now" (#3493). Opt-in and server-constructed only, never client-supplied. On the UPDATE path it admits a whitelist — the audit/timestamp family (created_at / created_by / updated_at / updated_by) plus author-declared business `readonly` fields — while platform-managed `system` columns (tenancy, generated) stay stripped. On INSERT the exemption does NOT apply (#6640): a create is stripped earlier, at the DataProtocol ingress, whose only exemption is `context.isSystem`, so a non-system create carrying `preserveAudit` still has those fields stripped and is warned (WARN) that the exemption is UPDATE-only — replaying archival readonly facts on create requires a system context. Permissions / RLS / field-level security are unaffected. |
+| **oauthScopes** | `string[]` | optional |  |
+| **accessToken** | `string` | optional |  |
+| **transaction** | `any` | optional |  |
+| **traceId** | `string` | optional |  |
+
 
 ---
 
@@ -122,6 +286,15 @@ Options for DataEngine.delete operations
 | **object** | `string` | ✅ |  |
 | **id** | `string \| number` | optional | ID for single delete, or use where in options |
 | **options** | `{ context?: object; where?: Record<string, any> \| any; multi?: boolean; filter?: Record<string, any> \| any }` | optional |  |
+
+### Nested Shape: `DataEngineDeleteRequest.options`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **context** | `{ userId?: string; actor?: string; attributedUserId?: string; email?: string; … }` | optional |  |
+| **where** | `Record<string, any> \| any` | optional |  |
+| **multi** | `boolean` | optional (default: `false`) |  |
+| **filter** | `Record<string, any> \| any` | optional | Data Engine query filter conditions |
 
 
 ---
@@ -172,6 +345,28 @@ Reference: any
 | **object** | `string` | ✅ |  |
 | **query** | `{ context?: object; where?: Record<string, any> \| any; fields?: string[]; orderBy?: object[]; … }` | optional |  |
 
+### Nested Shape: `DataEngineFindOneRequest.query`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **context** | `{ userId?: string; actor?: string; attributedUserId?: string; email?: string; … }` | optional |  |
+| **where** | `Record<string, any> \| any` | optional |  |
+| **fields** | `string[]` | optional |  |
+| **orderBy** | `{ field: string; order?: Enum<'asc' \| 'desc'> }[]` | optional |  |
+| **limit** | `number` | optional |  |
+| **offset** | `number` | optional |  |
+| **top** | `number` | optional |  |
+| **cursor** | `never` | optional | [REMOVED] `query.cursor` was removed in @objectstack/spec 17 (#4286, ADR-0049) — no driver ever implemented keyset pagination, so the cursor was accepted and ignored and every page came back identical (a caller looping "until hasMore is false" never terminates). Delete the key; `QueryBuilder.cursor()` was removed with it. Express the keyset as an ordinary `where` predicate on your sort key — `where: { created_at: { $gt: last.created_at } }` with the matching `orderBy` — which every driver executes with canonicalised comparands. A first-class cursor, if ever built, will be a response-minted opaque token, not this caller-built record. |
+| **search** | `string \| { query: string; fields?: string[]; fuzzy?: boolean; operator?: Enum<'and' \| 'or'>; … }` | optional |  |
+| **searchFields** | `string[]` | optional |  |
+| **expand** | `Record<string, { object: string; fields?: string[]; where?: any; search?: string \| object; … }>` | optional |  |
+| **distinct** | `never` | optional | [REMOVED] `query.distinct` was removed in @objectstack/spec 17 (#4286, ADR-0049 / ADR-0078) — no driver ever rendered SELECT DISTINCT; the flag's only observable effect was MIS-WIRED: the REST list path treated a distinct query as not countable and silently degraded `total`/`hasMore` to a page-local estimate while still returning duplicate rows. Delete the key; `QueryBuilder.distinct()` was removed with it, and the count suppression is gone (`total` is truthful again). For unique values of one column use the SQL/memory drivers' `distinct(object, field)` door; for unique combinations, `groupBy`; for a deduplicated count, the `count_distinct` aggregation. |
+| **filter** | `Record<string, any> \| any` | optional | Data Engine query filter conditions |
+| **select** | `string[]` | optional |  |
+| **sort** | `Record<string, Enum<'asc' \| 'desc'>> \| Record<string, 1 \| -1> \| { field: string; order?: Enum<'asc' \| 'desc'> }[]` | optional | Sort order definition |
+| **skip** | `integer` | optional |  |
+| **populate** | `string[]` | optional |  |
+
 
 ---
 
@@ -184,6 +379,28 @@ Reference: any
 | **method** | `'find'` | ✅ |  |
 | **object** | `string` | ✅ |  |
 | **query** | `{ context?: object; where?: Record<string, any> \| any; fields?: string[]; orderBy?: object[]; … }` | optional |  |
+
+### Nested Shape: `DataEngineFindRequest.query`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **context** | `{ userId?: string; actor?: string; attributedUserId?: string; email?: string; … }` | optional |  |
+| **where** | `Record<string, any> \| any` | optional |  |
+| **fields** | `string[]` | optional |  |
+| **orderBy** | `{ field: string; order?: Enum<'asc' \| 'desc'> }[]` | optional |  |
+| **limit** | `number` | optional |  |
+| **offset** | `number` | optional |  |
+| **top** | `number` | optional |  |
+| **cursor** | `never` | optional | [REMOVED] `query.cursor` was removed in @objectstack/spec 17 (#4286, ADR-0049) — no driver ever implemented keyset pagination, so the cursor was accepted and ignored and every page came back identical (a caller looping "until hasMore is false" never terminates). Delete the key; `QueryBuilder.cursor()` was removed with it. Express the keyset as an ordinary `where` predicate on your sort key — `where: { created_at: { $gt: last.created_at } }` with the matching `orderBy` — which every driver executes with canonicalised comparands. A first-class cursor, if ever built, will be a response-minted opaque token, not this caller-built record. |
+| **search** | `string \| { query: string; fields?: string[]; fuzzy?: boolean; operator?: Enum<'and' \| 'or'>; … }` | optional |  |
+| **searchFields** | `string[]` | optional |  |
+| **expand** | `Record<string, { object: string; fields?: string[]; where?: any; search?: string \| object; … }>` | optional |  |
+| **distinct** | `never` | optional | [REMOVED] `query.distinct` was removed in @objectstack/spec 17 (#4286, ADR-0049 / ADR-0078) — no driver ever rendered SELECT DISTINCT; the flag's only observable effect was MIS-WIRED: the REST list path treated a distinct query as not countable and silently degraded `total`/`hasMore` to a page-local estimate while still returning duplicate rows. Delete the key; `QueryBuilder.distinct()` was removed with it, and the count suppression is gone (`total` is truthful again). For unique values of one column use the SQL/memory drivers' `distinct(object, field)` door; for unique combinations, `groupBy`; for a deduplicated count, the `count_distinct` aggregation. |
+| **filter** | `Record<string, any> \| any` | optional | Data Engine query filter conditions |
+| **select** | `string[]` | optional |  |
+| **sort** | `Record<string, Enum<'asc' \| 'desc'>> \| Record<string, 1 \| -1> \| { field: string; order?: Enum<'asc' \| 'desc'> }[]` | optional | Sort order definition |
+| **skip** | `integer` | optional |  |
+| **populate** | `string[]` | optional |  |
 
 
 ---
@@ -198,6 +415,42 @@ Options for DataEngine.insert operations
 | :--- | :--- | :--- | :--- |
 | **context** | `{ userId?: string; actor?: string; attributedUserId?: string; email?: string; … }` | optional |  |
 | **returning** | `boolean` | optional (default: `true`) |  |
+
+### Nested Shape: `DataEngineInsertOptions.context`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **userId** | `string` | optional |  |
+| **actor** | `string` | optional |  |
+| **attributedUserId** | `string` | optional |  |
+| **email** | `string` | optional |  |
+| **tenantId** | `string` | optional |  |
+| **timezone** | `string` | optional |  |
+| **locale** | `string` | optional |  |
+| **currency** | `string` | optional |  |
+| **positions** | `string[]` | optional (default: `[]`) |  |
+| **principalKind** | `Enum<'human' \| 'agent' \| 'service' \| 'guest' \| 'system'>` | optional |  |
+| **audience** | `Enum<'internal' \| 'external'>` | optional |  |
+| **posture** | `Enum<'PLATFORM_ADMIN' \| 'TENANT_ADMIN' \| 'MEMBER' \| 'EXTERNAL'>` | optional | ADR-0095 D2 posture rung — PLATFORM_ADMIN crosses the tenant wall where object posture permits; TENANT_ADMIN sees all rows in the org; MEMBER gets business RLS; EXTERNAL sees only explicitly shared rows. |
+| **authGate** | `{ code: string; message: string }` | optional | ADR-0069 authentication-policy gate: present only while the principal is blocked from protected resources until they remediate (expired password, enforced MFA), absent for every healthy session. `code` is the stable machine code the client branches on (PASSWORD_EXPIRED / MFA_REQUIRED) and `message` is what the blocked user reads; both are required because the transport seam renders them as the 403 body. AUTHENTICATION, not authorization — it suspends access entirely rather than narrowing it, and nothing in the permission/RLS path reads it, while the allow-listed remediation endpoints stay reachable. Server-constructed only, never client-supplied; a guest/anonymous principal never carries one. |
+| **onBehalfOf** | `{ userId: string; principalKind?: Enum<'human' \| 'agent' \| 'service' \| 'guest' \| 'system'> }` | optional |  |
+| **permissions** | `string[]` | optional (default: `[]`) |  |
+| **systemPermissions** | `string[]` | optional |  |
+| **tabPermissions** | `Record<string, Enum<'visible' \| 'hidden' \| 'default_on' \| 'default_off'>>` | optional |  |
+| **org_user_ids** | `string[]` | optional |  |
+| **accessible_org_ids** | `string[]` | optional |  |
+| **rlsMembership** | `Record<string, string[]>` | optional |  |
+| **isSystem** | `boolean` | optional (default: `false`) |  |
+| **flowRunId** | `string` | optional |  |
+| **skipTriggers** | `boolean` | optional |  |
+| **skipAutomations** | `boolean` | optional |  |
+| **seedReplay** | `boolean` | optional |  |
+| **skipStateMachine** | `boolean` | optional |  |
+| **preserveAudit** | `boolean` | optional | Historical import: preserve the ORIGINAL audit timeline for this write instead of stamping it "now" (#3493). Opt-in and server-constructed only, never client-supplied. On the UPDATE path it admits a whitelist — the audit/timestamp family (created_at / created_by / updated_at / updated_by) plus author-declared business `readonly` fields — while platform-managed `system` columns (tenancy, generated) stay stripped. On INSERT the exemption does NOT apply (#6640): a create is stripped earlier, at the DataProtocol ingress, whose only exemption is `context.isSystem`, so a non-system create carrying `preserveAudit` still has those fields stripped and is warned (WARN) that the exemption is UPDATE-only — replaying archival readonly facts on create requires a system context. Permissions / RLS / field-level security are unaffected. |
+| **oauthScopes** | `string[]` | optional |  |
+| **accessToken** | `string` | optional |  |
+| **transaction** | `any` | optional |  |
+| **traceId** | `string` | optional |  |
 
 
 ---
@@ -233,6 +486,42 @@ Query options for IDataEngine.find() operations
 | **top** | `integer` | optional |  |
 | **populate** | `string[]` | optional |  |
 
+### Nested Shape: `DataEngineQueryOptions.context`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **userId** | `string` | optional |  |
+| **actor** | `string` | optional |  |
+| **attributedUserId** | `string` | optional |  |
+| **email** | `string` | optional |  |
+| **tenantId** | `string` | optional |  |
+| **timezone** | `string` | optional |  |
+| **locale** | `string` | optional |  |
+| **currency** | `string` | optional |  |
+| **positions** | `string[]` | optional (default: `[]`) |  |
+| **principalKind** | `Enum<'human' \| 'agent' \| 'service' \| 'guest' \| 'system'>` | optional |  |
+| **audience** | `Enum<'internal' \| 'external'>` | optional |  |
+| **posture** | `Enum<'PLATFORM_ADMIN' \| 'TENANT_ADMIN' \| 'MEMBER' \| 'EXTERNAL'>` | optional | ADR-0095 D2 posture rung — PLATFORM_ADMIN crosses the tenant wall where object posture permits; TENANT_ADMIN sees all rows in the org; MEMBER gets business RLS; EXTERNAL sees only explicitly shared rows. |
+| **authGate** | `{ code: string; message: string }` | optional | ADR-0069 authentication-policy gate: present only while the principal is blocked from protected resources until they remediate (expired password, enforced MFA), absent for every healthy session. `code` is the stable machine code the client branches on (PASSWORD_EXPIRED / MFA_REQUIRED) and `message` is what the blocked user reads; both are required because the transport seam renders them as the 403 body. AUTHENTICATION, not authorization — it suspends access entirely rather than narrowing it, and nothing in the permission/RLS path reads it, while the allow-listed remediation endpoints stay reachable. Server-constructed only, never client-supplied; a guest/anonymous principal never carries one. |
+| **onBehalfOf** | `{ userId: string; principalKind?: Enum<'human' \| 'agent' \| 'service' \| 'guest' \| 'system'> }` | optional |  |
+| **permissions** | `string[]` | optional (default: `[]`) |  |
+| **systemPermissions** | `string[]` | optional |  |
+| **tabPermissions** | `Record<string, Enum<'visible' \| 'hidden' \| 'default_on' \| 'default_off'>>` | optional |  |
+| **org_user_ids** | `string[]` | optional |  |
+| **accessible_org_ids** | `string[]` | optional |  |
+| **rlsMembership** | `Record<string, string[]>` | optional |  |
+| **isSystem** | `boolean` | optional (default: `false`) |  |
+| **flowRunId** | `string` | optional |  |
+| **skipTriggers** | `boolean` | optional |  |
+| **skipAutomations** | `boolean` | optional |  |
+| **seedReplay** | `boolean` | optional |  |
+| **skipStateMachine** | `boolean` | optional |  |
+| **preserveAudit** | `boolean` | optional | Historical import: preserve the ORIGINAL audit timeline for this write instead of stamping it "now" (#3493). Opt-in and server-constructed only, never client-supplied. On the UPDATE path it admits a whitelist — the audit/timestamp family (created_at / created_by / updated_at / updated_by) plus author-declared business `readonly` fields — while platform-managed `system` columns (tenancy, generated) stay stripped. On INSERT the exemption does NOT apply (#6640): a create is stripped earlier, at the DataProtocol ingress, whose only exemption is `context.isSystem`, so a non-system create carrying `preserveAudit` still has those fields stripped and is warned (WARN) that the exemption is UPDATE-only — replaying archival readonly facts on create requires a system context. Permissions / RLS / field-level security are unaffected. |
+| **oauthScopes** | `string[]` | optional |  |
+| **accessToken** | `string` | optional |  |
+| **transaction** | `any` | optional |  |
+| **traceId** | `string` | optional |  |
+
 
 ---
 
@@ -254,6 +543,28 @@ This schema accepts one of the following structures:
 | **object** | `string` | ✅ |  |
 | **query** | `{ context?: object; where?: Record<string, any> \| any; fields?: string[]; orderBy?: object[]; … }` | optional |  |
 
+### Nested Shape: `DataEngineRequest.query`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **context** | `{ userId?: string; actor?: string; attributedUserId?: string; email?: string; … }` | optional |  |
+| **where** | `Record<string, any> \| any` | optional |  |
+| **fields** | `string[]` | optional |  |
+| **orderBy** | `{ field: string; order?: Enum<'asc' \| 'desc'> }[]` | optional |  |
+| **limit** | `number` | optional |  |
+| **offset** | `number` | optional |  |
+| **top** | `number` | optional |  |
+| **cursor** | `never` | optional | [REMOVED] `query.cursor` was removed in @objectstack/spec 17 (#4286, ADR-0049) — no driver ever implemented keyset pagination, so the cursor was accepted and ignored and every page came back identical (a caller looping "until hasMore is false" never terminates). Delete the key; `QueryBuilder.cursor()` was removed with it. Express the keyset as an ordinary `where` predicate on your sort key — `where: { created_at: { $gt: last.created_at } }` with the matching `orderBy` — which every driver executes with canonicalised comparands. A first-class cursor, if ever built, will be a response-minted opaque token, not this caller-built record. |
+| **search** | `string \| { query: string; fields?: string[]; fuzzy?: boolean; operator?: Enum<'and' \| 'or'>; … }` | optional |  |
+| **searchFields** | `string[]` | optional |  |
+| **expand** | `Record<string, { object: string; fields?: string[]; where?: any; search?: string \| object; … }>` | optional |  |
+| **distinct** | `never` | optional | [REMOVED] `query.distinct` was removed in @objectstack/spec 17 (#4286, ADR-0049 / ADR-0078) — no driver ever rendered SELECT DISTINCT; the flag's only observable effect was MIS-WIRED: the REST list path treated a distinct query as not countable and silently degraded `total`/`hasMore` to a page-local estimate while still returning duplicate rows. Delete the key; `QueryBuilder.distinct()` was removed with it, and the count suppression is gone (`total` is truthful again). For unique values of one column use the SQL/memory drivers' `distinct(object, field)` door; for unique combinations, `groupBy`; for a deduplicated count, the `count_distinct` aggregation. |
+| **filter** | `Record<string, any> \| any` | optional | Data Engine query filter conditions |
+| **select** | `string[]` | optional |  |
+| **sort** | `Record<string, Enum<'asc' \| 'desc'>> \| Record<string, 1 \| -1> \| { field: string; order?: Enum<'asc' \| 'desc'> }[]` | optional | Sort order definition |
+| **skip** | `integer` | optional |  |
+| **populate** | `string[]` | optional |  |
+
 ---
 
 #### Option 2
@@ -265,6 +576,28 @@ This schema accepts one of the following structures:
 | **method** | `'findOne'` | ✅ |  |
 | **object** | `string` | ✅ |  |
 | **query** | `{ context?: object; where?: Record<string, any> \| any; fields?: string[]; orderBy?: object[]; … }` | optional |  |
+
+### Nested Shape: `DataEngineRequest.query`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **context** | `{ userId?: string; actor?: string; attributedUserId?: string; email?: string; … }` | optional |  |
+| **where** | `Record<string, any> \| any` | optional |  |
+| **fields** | `string[]` | optional |  |
+| **orderBy** | `{ field: string; order?: Enum<'asc' \| 'desc'> }[]` | optional |  |
+| **limit** | `number` | optional |  |
+| **offset** | `number` | optional |  |
+| **top** | `number` | optional |  |
+| **cursor** | `never` | optional | [REMOVED] `query.cursor` was removed in @objectstack/spec 17 (#4286, ADR-0049) — no driver ever implemented keyset pagination, so the cursor was accepted and ignored and every page came back identical (a caller looping "until hasMore is false" never terminates). Delete the key; `QueryBuilder.cursor()` was removed with it. Express the keyset as an ordinary `where` predicate on your sort key — `where: { created_at: { $gt: last.created_at } }` with the matching `orderBy` — which every driver executes with canonicalised comparands. A first-class cursor, if ever built, will be a response-minted opaque token, not this caller-built record. |
+| **search** | `string \| { query: string; fields?: string[]; fuzzy?: boolean; operator?: Enum<'and' \| 'or'>; … }` | optional |  |
+| **searchFields** | `string[]` | optional |  |
+| **expand** | `Record<string, { object: string; fields?: string[]; where?: any; search?: string \| object; … }>` | optional |  |
+| **distinct** | `never` | optional | [REMOVED] `query.distinct` was removed in @objectstack/spec 17 (#4286, ADR-0049 / ADR-0078) — no driver ever rendered SELECT DISTINCT; the flag's only observable effect was MIS-WIRED: the REST list path treated a distinct query as not countable and silently degraded `total`/`hasMore` to a page-local estimate while still returning duplicate rows. Delete the key; `QueryBuilder.distinct()` was removed with it, and the count suppression is gone (`total` is truthful again). For unique values of one column use the SQL/memory drivers' `distinct(object, field)` door; for unique combinations, `groupBy`; for a deduplicated count, the `count_distinct` aggregation. |
+| **filter** | `Record<string, any> \| any` | optional | Data Engine query filter conditions |
+| **select** | `string[]` | optional |  |
+| **sort** | `Record<string, Enum<'asc' \| 'desc'>> \| Record<string, 1 \| -1> \| { field: string; order?: Enum<'asc' \| 'desc'> }[]` | optional | Sort order definition |
+| **skip** | `integer` | optional |  |
+| **populate** | `string[]` | optional |  |
 
 ---
 
@@ -293,6 +626,17 @@ This schema accepts one of the following structures:
 | **id** | `string \| number` | optional | ID for single update, or use where in options |
 | **options** | `{ context?: object; where?: Record<string, any> \| any; multi?: boolean; returning?: boolean; … }` | optional |  |
 
+### Nested Shape: `DataEngineRequest.options`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **context** | `{ userId?: string; actor?: string; attributedUserId?: string; email?: string; … }` | optional |  |
+| **where** | `Record<string, any> \| any` | optional |  |
+| **upsert** | `never` | optional | [REMOVED] `update.options.upsert` was removed in @objectstack/spec 17 (#8057, ADR-0049) — it was declared and allowlisted but never implemented: no engine or driver path ever read it, so `{ upsert: true }` was accepted and silently dropped and the update stayed a plain update. Delete the key. Express create-if-absent explicitly: a by-id update whose id names no row throws RECORD_NOT_FOUND (#7867's not-found gate) rather than inserting, so read the row first (`findOne`) and call `insert` or `update` on what you find. A first-class upsert, if ever built, must reconcile with that gate by design rather than through this silent flag. |
+| **multi** | `boolean` | optional (default: `false`) |  |
+| **returning** | `boolean` | optional (default: `false`) |  |
+| **filter** | `Record<string, any> \| any` | optional | Data Engine query filter conditions |
+
 ---
 
 #### Option 5
@@ -306,6 +650,15 @@ This schema accepts one of the following structures:
 | **id** | `string \| number` | optional | ID for single delete, or use where in options |
 | **options** | `{ context?: object; where?: Record<string, any> \| any; multi?: boolean; filter?: Record<string, any> \| any }` | optional |  |
 
+### Nested Shape: `DataEngineRequest.options`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **context** | `{ userId?: string; actor?: string; attributedUserId?: string; email?: string; … }` | optional |  |
+| **where** | `Record<string, any> \| any` | optional |  |
+| **multi** | `boolean` | optional (default: `false`) |  |
+| **filter** | `Record<string, any> \| any` | optional | Data Engine query filter conditions |
+
 ---
 
 #### Option 6
@@ -318,6 +671,14 @@ This schema accepts one of the following structures:
 | **object** | `string` | ✅ |  |
 | **query** | `{ context?: object; where?: Record<string, any> \| any; filter?: Record<string, any> \| any }` | optional |  |
 
+### Nested Shape: `DataEngineRequest.query`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **context** | `{ userId?: string; actor?: string; attributedUserId?: string; email?: string; … }` | optional |  |
+| **where** | `Record<string, any> \| any` | optional |  |
+| **filter** | `Record<string, any> \| any` | optional | Data Engine query filter conditions |
+
 ---
 
 #### Option 7
@@ -329,6 +690,18 @@ This schema accepts one of the following structures:
 | **method** | `'aggregate'` | ✅ |  |
 | **object** | `string` | ✅ |  |
 | **query** | `{ context?: object; where?: Record<string, any> \| any; groupBy?: (string \| object)[]; aggregations?: object[]; … }` | ✅ |  |
+
+### Nested Shape: `DataEngineRequest.query`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **context** | `{ userId?: string; actor?: string; attributedUserId?: string; email?: string; … }` | optional |  |
+| **where** | `Record<string, any> \| any` | optional |  |
+| **groupBy** | `(string \| { field: string; dateGranularity?: Enum<'day' \| 'week' \| 'month' \| 'quarter' \| 'year'>; alias?: string })[]` | optional | GROUP BY targets (strings or `{field, dateGranularity?}` objects for date bucketing) |
+| **aggregations** | `{ function: Enum<'count' \| 'sum' \| 'avg' \| 'min' \| 'max' \| 'count_distinct'>; field?: string; alias: string; filter?: any }[]` | optional |  |
+| **having** | `any` | optional | HAVING — filter over the aggregated rows (aggregation aliases + groupBy projections); applied engine-side after aggregation |
+| **timezone** | `string` | optional |  |
+| **filter** | `Record<string, any> \| any` | optional | Data Engine query filter conditions |
 
 ---
 
@@ -406,6 +779,42 @@ Options for DataEngine.update operations
 | **multi** | `boolean` | optional (default: `false`) |  |
 | **returning** | `boolean` | optional (default: `false`) |  |
 
+### Nested Shape: `DataEngineUpdateOptions.context`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **userId** | `string` | optional |  |
+| **actor** | `string` | optional |  |
+| **attributedUserId** | `string` | optional |  |
+| **email** | `string` | optional |  |
+| **tenantId** | `string` | optional |  |
+| **timezone** | `string` | optional |  |
+| **locale** | `string` | optional |  |
+| **currency** | `string` | optional |  |
+| **positions** | `string[]` | optional (default: `[]`) |  |
+| **principalKind** | `Enum<'human' \| 'agent' \| 'service' \| 'guest' \| 'system'>` | optional |  |
+| **audience** | `Enum<'internal' \| 'external'>` | optional |  |
+| **posture** | `Enum<'PLATFORM_ADMIN' \| 'TENANT_ADMIN' \| 'MEMBER' \| 'EXTERNAL'>` | optional | ADR-0095 D2 posture rung — PLATFORM_ADMIN crosses the tenant wall where object posture permits; TENANT_ADMIN sees all rows in the org; MEMBER gets business RLS; EXTERNAL sees only explicitly shared rows. |
+| **authGate** | `{ code: string; message: string }` | optional | ADR-0069 authentication-policy gate: present only while the principal is blocked from protected resources until they remediate (expired password, enforced MFA), absent for every healthy session. `code` is the stable machine code the client branches on (PASSWORD_EXPIRED / MFA_REQUIRED) and `message` is what the blocked user reads; both are required because the transport seam renders them as the 403 body. AUTHENTICATION, not authorization — it suspends access entirely rather than narrowing it, and nothing in the permission/RLS path reads it, while the allow-listed remediation endpoints stay reachable. Server-constructed only, never client-supplied; a guest/anonymous principal never carries one. |
+| **onBehalfOf** | `{ userId: string; principalKind?: Enum<'human' \| 'agent' \| 'service' \| 'guest' \| 'system'> }` | optional |  |
+| **permissions** | `string[]` | optional (default: `[]`) |  |
+| **systemPermissions** | `string[]` | optional |  |
+| **tabPermissions** | `Record<string, Enum<'visible' \| 'hidden' \| 'default_on' \| 'default_off'>>` | optional |  |
+| **org_user_ids** | `string[]` | optional |  |
+| **accessible_org_ids** | `string[]` | optional |  |
+| **rlsMembership** | `Record<string, string[]>` | optional |  |
+| **isSystem** | `boolean` | optional (default: `false`) |  |
+| **flowRunId** | `string` | optional |  |
+| **skipTriggers** | `boolean` | optional |  |
+| **skipAutomations** | `boolean` | optional |  |
+| **seedReplay** | `boolean` | optional |  |
+| **skipStateMachine** | `boolean` | optional |  |
+| **preserveAudit** | `boolean` | optional | Historical import: preserve the ORIGINAL audit timeline for this write instead of stamping it "now" (#3493). Opt-in and server-constructed only, never client-supplied. On the UPDATE path it admits a whitelist — the audit/timestamp family (created_at / created_by / updated_at / updated_by) plus author-declared business `readonly` fields — while platform-managed `system` columns (tenancy, generated) stay stripped. On INSERT the exemption does NOT apply (#6640): a create is stripped earlier, at the DataProtocol ingress, whose only exemption is `context.isSystem`, so a non-system create carrying `preserveAudit` still has those fields stripped and is warned (WARN) that the exemption is UPDATE-only — replaying archival readonly facts on create requires a system context. Permissions / RLS / field-level security are unaffected. |
+| **oauthScopes** | `string[]` | optional |  |
+| **accessToken** | `string` | optional |  |
+| **transaction** | `any` | optional |  |
+| **traceId** | `string` | optional |  |
+
 
 ---
 
@@ -420,6 +829,17 @@ Options for DataEngine.update operations
 | **data** | `Record<string, any>` | ✅ |  |
 | **id** | `string \| number` | optional | ID for single update, or use where in options |
 | **options** | `{ context?: object; where?: Record<string, any> \| any; multi?: boolean; returning?: boolean; … }` | optional |  |
+
+### Nested Shape: `DataEngineUpdateRequest.options`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **context** | `{ userId?: string; actor?: string; attributedUserId?: string; email?: string; … }` | optional |  |
+| **where** | `Record<string, any> \| any` | optional |  |
+| **upsert** | `never` | optional | [REMOVED] `update.options.upsert` was removed in @objectstack/spec 17 (#8057, ADR-0049) — it was declared and allowlisted but never implemented: no engine or driver path ever read it, so `{ upsert: true }` was accepted and silently dropped and the update stayed a plain update. Delete the key. Express create-if-absent explicitly: a by-id update whose id names no row throws RECORD_NOT_FOUND (#7867's not-found gate) rather than inserting, so read the row first (`findOne`) and call `insert` or `update` on what you find. A first-class upsert, if ever built, must reconcile with that gate by design rather than through this silent flag. |
+| **multi** | `boolean` | optional (default: `false`) |  |
+| **returning** | `boolean` | optional (default: `false`) |  |
+| **filter** | `Record<string, any> \| any` | optional | Data Engine query filter conditions |
 
 
 ---
@@ -471,6 +891,60 @@ QueryAST-aligned options for DataEngine.aggregate operations
 | **having** | `any` | optional | HAVING — filter over the aggregated rows (aggregation aliases + groupBy projections); applied engine-side after aggregation |
 | **timezone** | `string` | optional |  |
 
+### Nested Shape: `EngineAggregateOptions.context`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **userId** | `string` | optional |  |
+| **actor** | `string` | optional |  |
+| **attributedUserId** | `string` | optional |  |
+| **email** | `string` | optional |  |
+| **tenantId** | `string` | optional |  |
+| **timezone** | `string` | optional |  |
+| **locale** | `string` | optional |  |
+| **currency** | `string` | optional |  |
+| **positions** | `string[]` | optional (default: `[]`) |  |
+| **principalKind** | `Enum<'human' \| 'agent' \| 'service' \| 'guest' \| 'system'>` | optional |  |
+| **audience** | `Enum<'internal' \| 'external'>` | optional |  |
+| **posture** | `Enum<'PLATFORM_ADMIN' \| 'TENANT_ADMIN' \| 'MEMBER' \| 'EXTERNAL'>` | optional | ADR-0095 D2 posture rung — PLATFORM_ADMIN crosses the tenant wall where object posture permits; TENANT_ADMIN sees all rows in the org; MEMBER gets business RLS; EXTERNAL sees only explicitly shared rows. |
+| **authGate** | `{ code: string; message: string }` | optional | ADR-0069 authentication-policy gate: present only while the principal is blocked from protected resources until they remediate (expired password, enforced MFA), absent for every healthy session. `code` is the stable machine code the client branches on (PASSWORD_EXPIRED / MFA_REQUIRED) and `message` is what the blocked user reads; both are required because the transport seam renders them as the 403 body. AUTHENTICATION, not authorization — it suspends access entirely rather than narrowing it, and nothing in the permission/RLS path reads it, while the allow-listed remediation endpoints stay reachable. Server-constructed only, never client-supplied; a guest/anonymous principal never carries one. |
+| **onBehalfOf** | `{ userId: string; principalKind?: Enum<'human' \| 'agent' \| 'service' \| 'guest' \| 'system'> }` | optional |  |
+| **permissions** | `string[]` | optional (default: `[]`) |  |
+| **systemPermissions** | `string[]` | optional |  |
+| **tabPermissions** | `Record<string, Enum<'visible' \| 'hidden' \| 'default_on' \| 'default_off'>>` | optional |  |
+| **org_user_ids** | `string[]` | optional |  |
+| **accessible_org_ids** | `string[]` | optional |  |
+| **rlsMembership** | `Record<string, string[]>` | optional |  |
+| **isSystem** | `boolean` | optional (default: `false`) |  |
+| **flowRunId** | `string` | optional |  |
+| **skipTriggers** | `boolean` | optional |  |
+| **skipAutomations** | `boolean` | optional |  |
+| **seedReplay** | `boolean` | optional |  |
+| **skipStateMachine** | `boolean` | optional |  |
+| **preserveAudit** | `boolean` | optional | Historical import: preserve the ORIGINAL audit timeline for this write instead of stamping it "now" (#3493). Opt-in and server-constructed only, never client-supplied. On the UPDATE path it admits a whitelist — the audit/timestamp family (created_at / created_by / updated_at / updated_by) plus author-declared business `readonly` fields — while platform-managed `system` columns (tenancy, generated) stay stripped. On INSERT the exemption does NOT apply (#6640): a create is stripped earlier, at the DataProtocol ingress, whose only exemption is `context.isSystem`, so a non-system create carrying `preserveAudit` still has those fields stripped and is warned (WARN) that the exemption is UPDATE-only — replaying archival readonly facts on create requires a system context. Permissions / RLS / field-level security are unaffected. |
+| **oauthScopes** | `string[]` | optional |  |
+| **accessToken** | `string` | optional |  |
+| **transaction** | `any` | optional |  |
+| **traceId** | `string` | optional |  |
+
+### Nested Shape: `EngineAggregateOptions.groupBy[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **field** | `string` | ✅ | Field to group by |
+| **dateGranularity** | `Enum<'day' \| 'week' \| 'month' \| 'quarter' \| 'year'>` | optional | Bucket date values into uniform periods (day/week/month/quarter/year) |
+| **alias** | `string` | optional | Alias for the projected group value |
+
+### Nested Shape: `EngineAggregateOptions.aggregations[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **function** | `Enum<'count' \| 'sum' \| 'avg' \| 'min' \| 'max' \| 'count_distinct'>` | ✅ | Aggregation function |
+| **field** | `string` | optional | Field to aggregate (optional for COUNT(*)) |
+| **alias** | `string` | ✅ | Result column alias |
+| **distinct** | `never` | optional | [REMOVED] `query.aggregations[].distinct` was removed in @objectstack/spec 17 (#6815, ADR-0049) — exactly ONE of the six faces that read an aggregation honoured it. The objectql in-memory fallback deduplicated the values before applying the function, while `driver-sql`, `driver-turso`, `driver-mongodb`, `driver-memory` and the service-analytics SQL builder all ignored it — so `{ function: 'sum', field: 'amount', distinct: true }` answered a DEDUPLICATED sum when the engine fell back in memory and an ordinary sum on every SQL datasource: one query, two numbers, chosen by which backend happened to serve it. Both answers are plausible, so nothing surfaced the divergence. Delete the key. For a deduplicated COUNT the live spelling is the `count_distinct` aggregation function, which every SQL face compiles to `COUNT(DISTINCT field)` (#6409) and the in-memory fallback computes identically. `SUM(DISTINCT …)` / `AVG(DISTINCT …)` get no replacement: no backend ever computed them here, and a per-row measure that needs deduplicating is a modelling problem to fix in the data, not a flag on the read. |
+| **filter** | `any` | optional | Per-aggregation filter (SQL FILTER (WHERE …) semantics): narrows the source rows THIS aggregation reads, leaving sibling aggregations unfiltered. Enforced by engine.aggregate (#10576): lowered in memory for drivers without native conditional aggregation; a driver reached directly refuses rather than silently dropping it. |
+
 
 ---
 
@@ -484,6 +958,42 @@ QueryAST-aligned options for DataEngine.count operations
 | :--- | :--- | :--- | :--- |
 | **context** | `{ userId?: string; actor?: string; attributedUserId?: string; email?: string; … }` | optional |  |
 | **where** | `Record<string, any> \| any` | optional |  |
+
+### Nested Shape: `EngineCountOptions.context`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **userId** | `string` | optional |  |
+| **actor** | `string` | optional |  |
+| **attributedUserId** | `string` | optional |  |
+| **email** | `string` | optional |  |
+| **tenantId** | `string` | optional |  |
+| **timezone** | `string` | optional |  |
+| **locale** | `string` | optional |  |
+| **currency** | `string` | optional |  |
+| **positions** | `string[]` | optional (default: `[]`) |  |
+| **principalKind** | `Enum<'human' \| 'agent' \| 'service' \| 'guest' \| 'system'>` | optional |  |
+| **audience** | `Enum<'internal' \| 'external'>` | optional |  |
+| **posture** | `Enum<'PLATFORM_ADMIN' \| 'TENANT_ADMIN' \| 'MEMBER' \| 'EXTERNAL'>` | optional | ADR-0095 D2 posture rung — PLATFORM_ADMIN crosses the tenant wall where object posture permits; TENANT_ADMIN sees all rows in the org; MEMBER gets business RLS; EXTERNAL sees only explicitly shared rows. |
+| **authGate** | `{ code: string; message: string }` | optional | ADR-0069 authentication-policy gate: present only while the principal is blocked from protected resources until they remediate (expired password, enforced MFA), absent for every healthy session. `code` is the stable machine code the client branches on (PASSWORD_EXPIRED / MFA_REQUIRED) and `message` is what the blocked user reads; both are required because the transport seam renders them as the 403 body. AUTHENTICATION, not authorization — it suspends access entirely rather than narrowing it, and nothing in the permission/RLS path reads it, while the allow-listed remediation endpoints stay reachable. Server-constructed only, never client-supplied; a guest/anonymous principal never carries one. |
+| **onBehalfOf** | `{ userId: string; principalKind?: Enum<'human' \| 'agent' \| 'service' \| 'guest' \| 'system'> }` | optional |  |
+| **permissions** | `string[]` | optional (default: `[]`) |  |
+| **systemPermissions** | `string[]` | optional |  |
+| **tabPermissions** | `Record<string, Enum<'visible' \| 'hidden' \| 'default_on' \| 'default_off'>>` | optional |  |
+| **org_user_ids** | `string[]` | optional |  |
+| **accessible_org_ids** | `string[]` | optional |  |
+| **rlsMembership** | `Record<string, string[]>` | optional |  |
+| **isSystem** | `boolean` | optional (default: `false`) |  |
+| **flowRunId** | `string` | optional |  |
+| **skipTriggers** | `boolean` | optional |  |
+| **skipAutomations** | `boolean` | optional |  |
+| **seedReplay** | `boolean` | optional |  |
+| **skipStateMachine** | `boolean` | optional |  |
+| **preserveAudit** | `boolean` | optional | Historical import: preserve the ORIGINAL audit timeline for this write instead of stamping it "now" (#3493). Opt-in and server-constructed only, never client-supplied. On the UPDATE path it admits a whitelist — the audit/timestamp family (created_at / created_by / updated_at / updated_by) plus author-declared business `readonly` fields — while platform-managed `system` columns (tenancy, generated) stay stripped. On INSERT the exemption does NOT apply (#6640): a create is stripped earlier, at the DataProtocol ingress, whose only exemption is `context.isSystem`, so a non-system create carrying `preserveAudit` still has those fields stripped and is warned (WARN) that the exemption is UPDATE-only — replaying archival readonly facts on create requires a system context. Permissions / RLS / field-level security are unaffected. |
+| **oauthScopes** | `string[]` | optional |  |
+| **accessToken** | `string` | optional |  |
+| **transaction** | `any` | optional |  |
+| **traceId** | `string` | optional |  |
 
 
 ---
@@ -499,6 +1009,42 @@ QueryAST-aligned options for DataEngine.delete operations
 | **context** | `{ userId?: string; actor?: string; attributedUserId?: string; email?: string; … }` | optional |  |
 | **where** | `Record<string, any> \| any` | optional |  |
 | **multi** | `boolean` | optional (default: `false`) |  |
+
+### Nested Shape: `EngineDeleteOptions.context`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **userId** | `string` | optional |  |
+| **actor** | `string` | optional |  |
+| **attributedUserId** | `string` | optional |  |
+| **email** | `string` | optional |  |
+| **tenantId** | `string` | optional |  |
+| **timezone** | `string` | optional |  |
+| **locale** | `string` | optional |  |
+| **currency** | `string` | optional |  |
+| **positions** | `string[]` | optional (default: `[]`) |  |
+| **principalKind** | `Enum<'human' \| 'agent' \| 'service' \| 'guest' \| 'system'>` | optional |  |
+| **audience** | `Enum<'internal' \| 'external'>` | optional |  |
+| **posture** | `Enum<'PLATFORM_ADMIN' \| 'TENANT_ADMIN' \| 'MEMBER' \| 'EXTERNAL'>` | optional | ADR-0095 D2 posture rung — PLATFORM_ADMIN crosses the tenant wall where object posture permits; TENANT_ADMIN sees all rows in the org; MEMBER gets business RLS; EXTERNAL sees only explicitly shared rows. |
+| **authGate** | `{ code: string; message: string }` | optional | ADR-0069 authentication-policy gate: present only while the principal is blocked from protected resources until they remediate (expired password, enforced MFA), absent for every healthy session. `code` is the stable machine code the client branches on (PASSWORD_EXPIRED / MFA_REQUIRED) and `message` is what the blocked user reads; both are required because the transport seam renders them as the 403 body. AUTHENTICATION, not authorization — it suspends access entirely rather than narrowing it, and nothing in the permission/RLS path reads it, while the allow-listed remediation endpoints stay reachable. Server-constructed only, never client-supplied; a guest/anonymous principal never carries one. |
+| **onBehalfOf** | `{ userId: string; principalKind?: Enum<'human' \| 'agent' \| 'service' \| 'guest' \| 'system'> }` | optional |  |
+| **permissions** | `string[]` | optional (default: `[]`) |  |
+| **systemPermissions** | `string[]` | optional |  |
+| **tabPermissions** | `Record<string, Enum<'visible' \| 'hidden' \| 'default_on' \| 'default_off'>>` | optional |  |
+| **org_user_ids** | `string[]` | optional |  |
+| **accessible_org_ids** | `string[]` | optional |  |
+| **rlsMembership** | `Record<string, string[]>` | optional |  |
+| **isSystem** | `boolean` | optional (default: `false`) |  |
+| **flowRunId** | `string` | optional |  |
+| **skipTriggers** | `boolean` | optional |  |
+| **skipAutomations** | `boolean` | optional |  |
+| **seedReplay** | `boolean` | optional |  |
+| **skipStateMachine** | `boolean` | optional |  |
+| **preserveAudit** | `boolean` | optional | Historical import: preserve the ORIGINAL audit timeline for this write instead of stamping it "now" (#3493). Opt-in and server-constructed only, never client-supplied. On the UPDATE path it admits a whitelist — the audit/timestamp family (created_at / created_by / updated_at / updated_by) plus author-declared business `readonly` fields — while platform-managed `system` columns (tenancy, generated) stay stripped. On INSERT the exemption does NOT apply (#6640): a create is stripped earlier, at the DataProtocol ingress, whose only exemption is `context.isSystem`, so a non-system create carrying `preserveAudit` still has those fields stripped and is warned (WARN) that the exemption is UPDATE-only — replaying archival readonly facts on create requires a system context. Permissions / RLS / field-level security are unaffected. |
+| **oauthScopes** | `string[]` | optional |  |
+| **accessToken** | `string` | optional |  |
+| **transaction** | `any` | optional |  |
+| **traceId** | `string` | optional |  |
 
 
 ---
@@ -524,6 +1070,77 @@ QueryAST-aligned query options for IDataEngine.find() operations
 | **expand** | `Record<string, { object: string; fields?: string[]; where?: any; search?: string \| object; … }>` | optional |  |
 | **distinct** | `never` | optional | [REMOVED] `query.distinct` was removed in @objectstack/spec 17 (#4286, ADR-0049 / ADR-0078) — no driver ever rendered SELECT DISTINCT; the flag's only observable effect was MIS-WIRED: the REST list path treated a distinct query as not countable and silently degraded `total`/`hasMore` to a page-local estimate while still returning duplicate rows. Delete the key; `QueryBuilder.distinct()` was removed with it, and the count suppression is gone (`total` is truthful again). For unique values of one column use the SQL/memory drivers' `distinct(object, field)` door; for unique combinations, `groupBy`; for a deduplicated count, the `count_distinct` aggregation. |
 
+### Nested Shape: `EngineQueryOptions.context`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **userId** | `string` | optional |  |
+| **actor** | `string` | optional |  |
+| **attributedUserId** | `string` | optional |  |
+| **email** | `string` | optional |  |
+| **tenantId** | `string` | optional |  |
+| **timezone** | `string` | optional |  |
+| **locale** | `string` | optional |  |
+| **currency** | `string` | optional |  |
+| **positions** | `string[]` | optional (default: `[]`) |  |
+| **principalKind** | `Enum<'human' \| 'agent' \| 'service' \| 'guest' \| 'system'>` | optional |  |
+| **audience** | `Enum<'internal' \| 'external'>` | optional |  |
+| **posture** | `Enum<'PLATFORM_ADMIN' \| 'TENANT_ADMIN' \| 'MEMBER' \| 'EXTERNAL'>` | optional | ADR-0095 D2 posture rung — PLATFORM_ADMIN crosses the tenant wall where object posture permits; TENANT_ADMIN sees all rows in the org; MEMBER gets business RLS; EXTERNAL sees only explicitly shared rows. |
+| **authGate** | `{ code: string; message: string }` | optional | ADR-0069 authentication-policy gate: present only while the principal is blocked from protected resources until they remediate (expired password, enforced MFA), absent for every healthy session. `code` is the stable machine code the client branches on (PASSWORD_EXPIRED / MFA_REQUIRED) and `message` is what the blocked user reads; both are required because the transport seam renders them as the 403 body. AUTHENTICATION, not authorization — it suspends access entirely rather than narrowing it, and nothing in the permission/RLS path reads it, while the allow-listed remediation endpoints stay reachable. Server-constructed only, never client-supplied; a guest/anonymous principal never carries one. |
+| **onBehalfOf** | `{ userId: string; principalKind?: Enum<'human' \| 'agent' \| 'service' \| 'guest' \| 'system'> }` | optional |  |
+| **permissions** | `string[]` | optional (default: `[]`) |  |
+| **systemPermissions** | `string[]` | optional |  |
+| **tabPermissions** | `Record<string, Enum<'visible' \| 'hidden' \| 'default_on' \| 'default_off'>>` | optional |  |
+| **org_user_ids** | `string[]` | optional |  |
+| **accessible_org_ids** | `string[]` | optional |  |
+| **rlsMembership** | `Record<string, string[]>` | optional |  |
+| **isSystem** | `boolean` | optional (default: `false`) |  |
+| **flowRunId** | `string` | optional |  |
+| **skipTriggers** | `boolean` | optional |  |
+| **skipAutomations** | `boolean` | optional |  |
+| **seedReplay** | `boolean` | optional |  |
+| **skipStateMachine** | `boolean` | optional |  |
+| **preserveAudit** | `boolean` | optional | Historical import: preserve the ORIGINAL audit timeline for this write instead of stamping it "now" (#3493). Opt-in and server-constructed only, never client-supplied. On the UPDATE path it admits a whitelist — the audit/timestamp family (created_at / created_by / updated_at / updated_by) plus author-declared business `readonly` fields — while platform-managed `system` columns (tenancy, generated) stay stripped. On INSERT the exemption does NOT apply (#6640): a create is stripped earlier, at the DataProtocol ingress, whose only exemption is `context.isSystem`, so a non-system create carrying `preserveAudit` still has those fields stripped and is warned (WARN) that the exemption is UPDATE-only — replaying archival readonly facts on create requires a system context. Permissions / RLS / field-level security are unaffected. |
+| **oauthScopes** | `string[]` | optional |  |
+| **accessToken** | `string` | optional |  |
+| **transaction** | `any` | optional |  |
+| **traceId** | `string` | optional |  |
+
+### Nested Shape: `EngineQueryOptions.search`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **query** | `string` | ✅ | Search query text |
+| **fields** | `string[]` | optional | Fields to search in (if not specified, searches all text fields) |
+| **fuzzy** | `boolean` | optional (default: `false`) | [EXPERIMENTAL — not enforced] Fuzzy matching (tolerate typos). The ADR-0061 expansion reads only `query` + `fields`; no executor receives this flag (#4286). |
+| **operator** | `Enum<'and' \| 'or'>` | optional (default: `"or"`) | [EXPERIMENTAL — not enforced] Logical operator between terms. The ADR-0061 expansion applies its own term semantics; no executor receives this flag (#4286). |
+| **boost** | `Record<string, number>` | optional | [EXPERIMENTAL — not enforced] Field-specific relevance boosting (field name -> boost factor). No executor scores results (#4286). |
+| **minScore** | `number` | optional | [EXPERIMENTAL — not enforced] Minimum relevance score threshold. No executor scores results (#4286). |
+| **language** | `string` | optional | [EXPERIMENTAL — not enforced] Language for text analysis (e.g., "en", "zh", "es"). No executor selects an analyzer (#4286). |
+| **highlight** | `boolean` | optional (default: `false`) | [EXPERIMENTAL — not enforced] Search result highlighting. No executor emits highlights (#4286). |
+
+### Nested Shape: `EngineQueryOptions.expand[string]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **object** | `string` | ✅ | Object name (e.g. account) |
+| **fields** | `string[]` | optional | Fields to retrieve — names of the queried object's OWN columns. A dotted path (`owner.name`) is not a projection: no driver resolves one, and the ingress refuses it with `400 INVALID_FIELD` (#7532). Related data is read with `expand`, whose nested QueryAST both filters (`where`) and selects (`fields`) the related record's columns. The projection must RETAIN the foreign-key column: `fields: ['title']` with `expand: 'project_id'` resolves nothing, because the relation is carried by that key — add `'project_id'` and it works. Where the value is wanted on the queried object itself, denormalise it onto that object (a stored field, written when the source changes), the same remedy the sort axis prescribes (#6924). |
+| **where** | `any` | optional | Filtering criteria (WHERE) |
+| **search** | `string \| { query: string; fields?: string[]; fuzzy: boolean; operator: Enum<'and' \| 'or'>; … }` | optional | Full-text search — the query text (canonical, ADR-0061 D1), or a structured FullTextSearch configuration |
+| **searchFields** | `string[]` | optional | Narrow the search to these fields (server-intersected with the allowed searchable set — can only narrow, never widen; ADR-0061 D1) |
+| **orderBy** | `{ field: string; order: Enum<'asc' \| 'desc'> }[]` | optional | Sorting instructions (ORDER BY) |
+| **limit** | `number` | optional | Max records to return (LIMIT) |
+| **offset** | `number` | optional | Records to skip (OFFSET) |
+| **top** | `number` | optional | Alias for limit (OData compatibility) |
+| **cursor** | `never` | optional | [REMOVED] `query.cursor` was removed in @objectstack/spec 17 (#4286, ADR-0049) — no driver ever implemented keyset pagination, so the cursor was accepted and ignored and every page came back identical (a caller looping "until hasMore is false" never terminates). Delete the key; `QueryBuilder.cursor()` was removed with it. Express the keyset as an ordinary `where` predicate on your sort key — `where: { created_at: { $gt: last.created_at } }` with the matching `orderBy` — which every driver executes with canonicalised comparands. A first-class cursor, if ever built, will be a response-minted opaque token, not this caller-built record. |
+| **joins** | `never` | optional | [REMOVED] `query.joins` was removed in @objectstack/spec 17 (#4286, ADR-0049) — no engine or driver ever read it: a query carrying `joins` behaved exactly as if the key were absent, while its name squatted on the reserved REST parameter set. Delete the key. Related records are read through `expand` — `expand: { owner_id: { object: 'user', fields: ['name'] } }` — which the engine resolves via batch $in queries, and whose nested query selects the related record's own columns. Keep the foreign key in your own projection (`fields: ['title', 'owner_id']`): the relation is carried by that column, so projecting it away leaves expansion nothing to resolve. A dotted `fields` path is NOT a replacement — no driver ever resolved one and the ingress refuses it (`400 INVALID_FIELD`, #7532). |
+| **aggregations** | `{ function: Enum<'count' \| 'sum' \| 'avg' \| 'min' \| 'max' \| 'count_distinct'>; field?: string; alias: string; filter?: any }[]` | optional | Aggregation functions |
+| **groupBy** | `(string \| { field: string; dateGranularity?: Enum<'day' \| 'week' \| 'month' \| 'quarter' \| 'year'>; alias?: string })[]` | optional | GROUP BY targets (strings or `{field, dateGranularity?}` objects for date bucketing) |
+| **having** | `any` | optional | HAVING — filter over the AGGREGATED rows (aggregation aliases + groupBy projections); applied engine-side after aggregation |
+| **windowFunctions** | `never` | optional | [REMOVED] `query.windowFunctions` was removed in @objectstack/spec 17 (#4286, ADR-0049) — `find()` never applied it: no engine or driver read the key on the query path, so every OVER clause it declared was silently dropped. Delete the key. Window functions are a SQL-driver capability behind `SqlDriver.findWithWindowFunctions(object, query)` (embedder-level; not on the `IDataDriver` contract or the REST surface); request-level analytics are `aggregations` + `groupBy`. |
+| **distinct** | `never` | optional | [REMOVED] `query.distinct` was removed in @objectstack/spec 17 (#4286, ADR-0049 / ADR-0078) — no driver ever rendered SELECT DISTINCT; the flag's only observable effect was MIS-WIRED: the REST list path treated a distinct query as not countable and silently degraded `total`/`hasMore` to a page-local estimate while still returning duplicate rows. Delete the key; `QueryBuilder.distinct()` was removed with it, and the count suppression is gone (`total` is truthful again). For unique values of one column use the SQL/memory drivers' `distinct(object, field)` door; for unique combinations, `groupBy`; for a deduplicated count, the `count_distinct` aggregation. |
+| **expand** | `Record<string, { object: string; fields?: string[]; where?: any; search?: string \| object; … }>` | optional | Recursive relation loading map. Keys are lookup/master_detail field names; values are nested QueryAST objects that control select (`fields`) and filter (`where`, AND-merged with the batch $in), plus further expansion on the related object. The engine resolves expand via batch $in queries (driver-agnostic) with a default max depth of 3; per-parent `limit`/`offset`/`orderBy` are NOT applied on this path. |
+
 
 ---
 
@@ -540,6 +1157,42 @@ QueryAST-aligned options for DataEngine.update operations
 | **upsert** | `never` | optional | [REMOVED] `update.options.upsert` was removed in @objectstack/spec 17 (#8057, ADR-0049) — it was declared and allowlisted but never implemented: no engine or driver path ever read it, so `{ upsert: true }` was accepted and silently dropped and the update stayed a plain update. Delete the key. Express create-if-absent explicitly: a by-id update whose id names no row throws RECORD_NOT_FOUND (#7867's not-found gate) rather than inserting, so read the row first (`findOne`) and call `insert` or `update` on what you find. A first-class upsert, if ever built, must reconcile with that gate by design rather than through this silent flag. |
 | **multi** | `boolean` | optional (default: `false`) |  |
 | **returning** | `boolean` | optional (default: `false`) |  |
+
+### Nested Shape: `EngineUpdateOptions.context`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **userId** | `string` | optional |  |
+| **actor** | `string` | optional |  |
+| **attributedUserId** | `string` | optional |  |
+| **email** | `string` | optional |  |
+| **tenantId** | `string` | optional |  |
+| **timezone** | `string` | optional |  |
+| **locale** | `string` | optional |  |
+| **currency** | `string` | optional |  |
+| **positions** | `string[]` | optional (default: `[]`) |  |
+| **principalKind** | `Enum<'human' \| 'agent' \| 'service' \| 'guest' \| 'system'>` | optional |  |
+| **audience** | `Enum<'internal' \| 'external'>` | optional |  |
+| **posture** | `Enum<'PLATFORM_ADMIN' \| 'TENANT_ADMIN' \| 'MEMBER' \| 'EXTERNAL'>` | optional | ADR-0095 D2 posture rung — PLATFORM_ADMIN crosses the tenant wall where object posture permits; TENANT_ADMIN sees all rows in the org; MEMBER gets business RLS; EXTERNAL sees only explicitly shared rows. |
+| **authGate** | `{ code: string; message: string }` | optional | ADR-0069 authentication-policy gate: present only while the principal is blocked from protected resources until they remediate (expired password, enforced MFA), absent for every healthy session. `code` is the stable machine code the client branches on (PASSWORD_EXPIRED / MFA_REQUIRED) and `message` is what the blocked user reads; both are required because the transport seam renders them as the 403 body. AUTHENTICATION, not authorization — it suspends access entirely rather than narrowing it, and nothing in the permission/RLS path reads it, while the allow-listed remediation endpoints stay reachable. Server-constructed only, never client-supplied; a guest/anonymous principal never carries one. |
+| **onBehalfOf** | `{ userId: string; principalKind?: Enum<'human' \| 'agent' \| 'service' \| 'guest' \| 'system'> }` | optional |  |
+| **permissions** | `string[]` | optional (default: `[]`) |  |
+| **systemPermissions** | `string[]` | optional |  |
+| **tabPermissions** | `Record<string, Enum<'visible' \| 'hidden' \| 'default_on' \| 'default_off'>>` | optional |  |
+| **org_user_ids** | `string[]` | optional |  |
+| **accessible_org_ids** | `string[]` | optional |  |
+| **rlsMembership** | `Record<string, string[]>` | optional |  |
+| **isSystem** | `boolean` | optional (default: `false`) |  |
+| **flowRunId** | `string` | optional |  |
+| **skipTriggers** | `boolean` | optional |  |
+| **skipAutomations** | `boolean` | optional |  |
+| **seedReplay** | `boolean` | optional |  |
+| **skipStateMachine** | `boolean` | optional |  |
+| **preserveAudit** | `boolean` | optional | Historical import: preserve the ORIGINAL audit timeline for this write instead of stamping it "now" (#3493). Opt-in and server-constructed only, never client-supplied. On the UPDATE path it admits a whitelist — the audit/timestamp family (created_at / created_by / updated_at / updated_by) plus author-declared business `readonly` fields — while platform-managed `system` columns (tenancy, generated) stay stripped. On INSERT the exemption does NOT apply (#6640): a create is stripped earlier, at the DataProtocol ingress, whose only exemption is `context.isSystem`, so a non-system create carrying `preserveAudit` still has those fields stripped and is warned (WARN) that the exemption is UPDATE-only — replaying archival readonly facts on create requires a system context. Permissions / RLS / field-level security are unaffected. |
+| **oauthScopes** | `string[]` | optional |  |
+| **accessToken** | `string` | optional |  |
+| **transaction** | `any` | optional |  |
+| **traceId** | `string` | optional |  |
 
 
 ---

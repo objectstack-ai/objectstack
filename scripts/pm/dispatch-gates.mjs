@@ -182,6 +182,25 @@ export { isExtractConfigPath, isMetadataFormModulePath };
 
 const ROOT = new URL('../..', import.meta.url).pathname;
 
+// ── What a gate that IMPORTS this module inherits (#11556) ─────────────────
+//
+// This module is importable and is NOT a discovered gate file — `check:pm-dispatch-gates`
+// resolves to `check-dispatch-gates.mjs`, which reaches the tool by `spawnSync`, so the
+// follow's "never open a module that is itself a gate file" rule does not cover it. A gate
+// that imports it therefore inherits its module-body literals as watch hints. Measured on
+// c48d46d70a, over 6840 tracked files: nine literals, covering 2660 of them. Exactly ONE is
+// a population this file opens (the workflow directory `discoverFamilies` readdirs, 28
+// files); the other eight are the package-manifest join bases `discoverFamilies` builds
+// paths FROM and the tier globs `MANDATORY_TIER_GLOBS`/`SUSPECT_TIER_GLOBS` declare — 2632
+// pairs of population no caller reads.
+//
+// Until now the only thing standing between that and a dispatch prompt was prose in ONE
+// caller's header (`check-dispatch-gates.mjs`, #8162): a convention held by the caller that
+// remembered, not a property of this module. The line below makes it the module's own
+// declaration, read fresh on every run and held to a subset of what this file really spells
+// — see `declaredInheritedPopulation`.
+// dispatch-gates: inherited-population .github/workflows -- the workflow directory this tool readdirs; every other module-body literal here is a package-manifest join base or a tier glob, not a path this file opens (#11556)
+
 // ---------------------------------------------------------------------------
 // Extraction — pure functions over file contents, self-testable offline.
 // ---------------------------------------------------------------------------
@@ -663,6 +682,84 @@ export function declaredNoPathPopulation(scriptSource) {
 }
 
 /**
+ * A FOLLOWED MODULE's own declaration of which of its module-body literals are
+ * a population a gate INHERITS by importing it — a whole-line comment anywhere
+ * in the module's source:
+ *
+ *   // dispatch-gates: inherited-population <path> [<path> ...] -- <reason>
+ *   #  dispatch-gates: inherited-population <path> [<path> ...] -- <reason>
+ *
+ * ## What it is for (#11556)
+ *
+ * `firstPartyImportTargets` opens a gate's first-party imports and appends the
+ * imported module's hints to the gate's own, because a population MOVED out of
+ * a gate and into a shared module must not stop being declared. That is right
+ * for a module whose literals ARE a population. It is wrong for a module whose
+ * literals are join bases it builds paths from, or a declaration table it
+ * exports for some other purpose: the importer never opens those trees, so
+ * every pair they contribute is a fabricated lead in the column a dispatch
+ * prompt pastes.
+ *
+ * The follow already refuses one case of this — a module that is itself a
+ * discovered gate file (firstPartyImportTargets' docblock carries the +4014
+ * measurement that decided it). That refusal keys on a property the derivation
+ * can SEE. This marker is for the case it cannot see: an ordinary module,
+ * followable by construction, whose author knows which of its literals a caller
+ * would be reading and which it would not.
+ *
+ * ## Why a marker IN the module, never a roster in this script
+ *
+ * Same reason as the two markers above: a roster here is a second copy of a
+ * fact that belongs on the thing it describes, and it rots silently — the
+ * module grows a real population, or is renamed, and the roster keeps vouching
+ * for it. It is also the exact failure this card was filed against: the guard
+ * that existed was prose in one CALLER, so it protected that caller and no
+ * other. A declaration the module carries protects every caller, including the
+ * one written next year.
+ *
+ * ## Narrowing only — a declaration can never INVENT a population
+ *
+ * Every declared path must be one the module's own source really spells: the
+ * declaration is checked against `extractWatchHints` of that same source and
+ * REFUSES (throws) on a path that is not there. So the marker can only ever
+ * remove leads a caller would otherwise inherit, never add one — an opt-out
+ * that could also opt IN would be a hand-written path map, which is the drift
+ * this file's whole contract refuses. A marker carrying no path at all does not
+ * parse as a declaration — it reads as no marker, so the module keeps
+ * contributing everything it spells. That is the safe direction: a blanket
+ * "inherit nothing" reads identically to a placeholder nobody will revisit, and
+ * a module with no literals needs no marker to contribute none.
+ *
+ * The reason is REQUIRED, and separated from the path list by a SPACE-delimited
+ * `--`: a bare `--` would split a path that legitimately contains one.
+ *
+ * Returns `{ population, reason }`, or null when the module declares nothing.
+ */
+const INHERITED_POPULATION_MARKER =
+  /^[ \t]*(?:\/\/|#)[ \t]*dispatch-gates:[ \t]*inherited-population[ \t]+(\S.*?)[ \t]+--[ \t]+(\S.*)$/m;
+
+export function declaredInheritedPopulation(moduleSource, hints = null) {
+  const source = String(moduleSource);
+  const m = INHERITED_POPULATION_MARKER.exec(source);
+  if (!m) return null;
+  // The path list is non-empty by construction: the marker pattern requires a
+  // non-space before the ` -- `, so a marker carrying only a reason does not
+  // parse as a declaration at all — it reads as no marker, which is the safe
+  // direction (inherit everything) rather than a silent blanket opt-out.
+  const population = m[1].trim().split(/[ \t]+/).filter(Boolean);
+  const reason = m[2].trim();
+  const spelled = new Set(hints ?? extractWatchHints(source));
+  const invented = population.filter((h) => !spelled.has(h));
+  if (invented.length > 0) {
+    throw new Error(
+      `dispatch-gates: inherited-population declares ${invented.length} path(s) this module does not spell: ` +
+        `${invented.join(', ')} — the declaration may only NARROW what a caller inherits, never invent it`,
+    );
+  }
+  return { population, reason };
+}
+
+/**
  * The workflows (by filename) that violate the #9187 coverage invariant:
  *
  *   Every workflow that declares a `paths:` filter either discovers at least
@@ -697,12 +794,174 @@ export function checkFamilyCoverageGaps(workflowEntries) {
   return out;
 }
 
-/** Resolve a `check:x` script name to the script files it runs, via a package.json `scripts` map. */
-export function resolveCheckToFiles(checkName, scriptsMap) {
+/**
+ * Resolve a `check:x` script name to the TRACKED PATHS of the script files it
+ * runs, via a `package.json` `scripts` map. `dir` is the directory that
+ * manifest lives in, repo-relative — `''` for the root manifest.
+ *
+ * ## The extensions, and why the list was wrong (#12107)
+ *
+ * The alternation used to read `mjs|cjs|js|sh`. A gate whose npm script names a
+ * `.ts` / `.mts` / `.cts` file matched nothing, so `entry.files` stayed empty
+ * and `discoverFamilies` never opened the source — no watch hints, no
+ * first-party import following, no `declaredNoPathPopulation` read, and no
+ * entry in `gateFiles`. Such a family scores `undetermined` for every card in
+ * the tree, and the output cannot tell that apart from a gate whose author
+ * declined to declare a population: in the first case the declaration was
+ * never READ, in the second there is none to read. Measured on this tree at
+ * the fix: 24 of 167 families resolved to zero files; 23 of them were this
+ * defect, all `tsx`-run TypeScript gates.
+ *
+ * The 24th, `check:app-nav-i18n`, is NOT this defect and is deliberately still
+ * zero-file: its root script is `pnpm --filter @objectstack/cli run
+ * check:app-nav-i18n`, a composite that names a PACKAGE and a SCRIPT NAME
+ * rather than a path. No extension list can reach it — resolving it means
+ * following a `pnpm --filter … run …` hop into another manifest, which is a
+ * different mechanism and a different card. A fix here that reported zero
+ * remaining would have absorbed it by accident.
+ *
+ * ## Why `dir`, and why the climb prefix is part of the match (#12107, point 1)
+ *
+ * A package manifest spells its script relative to ITSELF, and one of the 23
+ * climbs out of its own package: `packages/client`'s alias is
+ * `tsx ../../scripts/check-exported-any-returns.mts …`. The caller used to
+ * prepend the package prefix to whatever came back, which is correct for the
+ * 22 in-package spellings (`packages/spec` + `scripts/build-docs.ts`) and
+ * wrong for the climbing one.
+ *
+ * ⚠️ It is wrong in a way the card that filed this predicted the shape of but
+ * not the mechanism of, and the difference decides the fix. The card expected
+ * `packages/client/../../scripts/…` — a path that resolves on disk but is not
+ * a tracked-path spelling. That is not what happens: the pattern was anchored
+ * on the literal `scripts/`, so the match SILENTLY DROPPED the `../../` and
+ * produced the bare `scripts/check-exported-any-returns.mts`, leaving `join`
+ * nothing to normalise. Prepending the package prefix then yields
+ * `packages/client/scripts/check-exported-any-returns.mts`, which does not
+ * exist. Measured with the extension list widened and this normalisation NOT
+ * yet in place: the family leaves the zero-file set and stops scoring
+ * `undetermined`, while `existsSync` still refuses the file so it reads
+ * **zero hints** — the card's own trigger gate, still silent, now silent
+ * behind a confident phantom identity key instead of an honest bucket. That
+ * is a strictly worse output than the bug being fixed, so the climb prefix is
+ * matched here and normalised through `join` against the manifest's own
+ * directory.
+ *
+ * A spelling that climbs clear of the repo root is dropped rather than
+ * returned: `join` cannot normalise it into a tracked path, and a lead no
+ * `hintCovers` can ever match is the fabricated-lead direction this file
+ * refuses everywhere.
+ *
+ * ## Why the extension needs a right-hand boundary, and why that is part of
+ * ## this widening rather than a tidy-up beside it
+ *
+ * The alternation was never anchored on its right, so an extension that is a
+ * PREFIX of a longer one matched as itself and the rest of the word was
+ * dropped. That was already live before this change — a `scripts/**.json`
+ * argument matched as `…/pins.js` through the `js` branch — but admitting `ts`
+ * adds the common one: `scripts/render.tsx` would match as
+ * `scripts/render.ts`. Both produce the same output, and it is the worst one
+ * this function has: a gate file that does not exist, which `existsSync` then
+ * refuses to open, so the family carries an identity key `coveringKey` prints
+ * as a `gate script` match over a file nothing ever read. That is the same
+ * phantom the package-relative case above produces, reached by a second route,
+ * so it is closed in the same edit and pinned by the same live assertion
+ * ("every gate file the derivation names exists on disk").
+ *
+ * Measured: adding the boundary changes nothing on this tree — no live command
+ * names a `scripts/…` argument whose extension merely starts with one of these
+ * — so it costs zero recall today and closes the class before the first `.tsx`
+ * or `.json` argument arrives.
+ *
+ * ## What it costs, measured in BOTH directions (the deliverable, not the code)
+ *
+ * This is a WIDENING, and this file prices widenings by measurement rather
+ * than by argument — `firstPartyImportTargets`' docblock above is the standard
+ * this section is written to. Over 167 discovered families x 6763 tracked
+ * files, at the commit that lands it:
+ *
+ *   watch-hint (gate, file) pairs   73278 -> 74481   (+1203, and ZERO lost)
+ *   zero-file families              24 -> 1
+ *   families gaining coverage       19
+ *   families losing coverage        0
+ *   gate files naming nothing       0 -> 0
+ *   existing matches re-attributed  4
+ *
+ * The +1203 is concentrated in three families that declare real corpora —
+ * check:skill-examples (+495), check:docs (+440), check:generated (+234) —
+ * with check:template-manifests (+14) and check:react-blocks (+3) next; the
+ * remaining fourteen gain 1 or 2 each, which is the identity match on their
+ * own source and, for most of them, nothing more. That distribution is the
+ * honest shape of the fix: what these families were missing was mostly the
+ * ability to be named AT ALL, not a large population.
+ *
+ * The 4 re-attributions are the one number that differs from the precedent's
+ * (which reports 0), so it is reported rather than rounded: check:liveness,
+ * check:empty-state, check:variant-docs and check:strictness-ledger each
+ * matched their OWN source file already, through the `paths:` filter of
+ * spec-liveness-check.yml, and now match it through identity instead. The via
+ * label changes from `CI trigger in spec-liveness-check.yml` to `gate script`;
+ * no path enters or leaves any family's matched list. That direction is
+ * `coveringKey`'s own declared ordering — identity outranks a trigger because
+ * it is the stronger provenance — so these are re-attributions UP, not the
+ * silent key churn the precedent was guarding against.
+ *
+ * ## The SUBTRACTION direction, which is the half an addition count hides
+ *
+ * Admitting these sources also makes them GATE FILES, and `discoverFamilies`
+ * refuses to follow a module that is itself a gate file. Any family that used
+ * to inherit a hint from one of the 23 would silently stop — and a lead that
+ * stops appearing is indistinguishable from one that was never earned, so
+ * nothing in the output would say so.
+ *
+ *   import-follow edges suppressed  0
+ *   inherited hints lost            0
+ *
+ * Zero, and for a structural reason rather than by luck: `firstPartyImportTargets`
+ * admits only relative specifiers that resolve INSIDE the root `scripts/` dir,
+ * and 22 of the 23 live under `packages/spec/scripts/`, which no first-party
+ * follow can reach. The 23rd, `scripts/check-exported-any-returns.mts`, does
+ * live there and is imported by nothing. The live half of the self-test
+ * asserts this rather than trusting it, because a future TypeScript gate in
+ * the root `scripts/` dir could make it false.
+ *
+ * The mirror question, asked because it is the one that could FABRICATE:
+ * opening 23 files that were never opened also means following their imports
+ * one level, which is how a gate inherits a population it does not read. Also
+ * measured at 0 new edges. The 22 under `packages/spec/scripts/` are out of
+ * reach for the same rule; the root-dir one imports `./check-regen-pending.mjs`
+ * and `./invoked-as.mjs`, and BOTH are already discovered gate files, so the
+ * pre-existing narrowing refuses them. This change therefore adds nothing to
+ * the inheritable-literal surface #11556 records for this module: measured on
+ * this tree, `extractWatchHints` over this file yields the same 9 hints
+ * covering the same 2642 tracked files before and after.
+ *
+ * ## What the fix does NOT buy, stated because the number invites the reading
+ *
+ * `check:exported-any-returns` — the gate this card was filed from — resolves
+ * its source now and still contributes no watch hints, because that source
+ * declares no path literals and carries no `no-path-population` marker. It
+ * scores `undetermined` before and after. The difference is the whole point of
+ * the card and none of it is visible in a pair count: before, the declaration
+ * was never READ; now it has been read and there is nothing there. The first
+ * is a defect in this derivation, the second is a missing declaration on that
+ * gate, and only the second can be acted on by its author.
+ */
+export function resolveCheckToFiles(checkName, scriptsMap, { dir = '' } = {}) {
   const cmd = scriptsMap[checkName];
   if (!cmd) return [];
-  // The conventional script shape names its file twice (`--self-test && run`) — dedupe.
-  return [...new Set([...cmd.matchAll(/(scripts\/[\w./-]+\.(?:mjs|cjs|js|sh))/g)].map((m) => m[1]))];
+  // The conventional script shape names its file twice (`--self-test && run`) —
+  // dedupe, and dedupe on the NORMALISED path so two spellings of one file
+  // (`scripts/x.mts` from the root, `../../scripts/x.mts` from a package)
+  // cannot both be returned.
+  const out = new Set();
+  for (const m of cmd.matchAll(/((?:\.\.\/)*scripts\/[\w./-]+\.(?:mjs|cjs|js|sh|ts|mts|cts))(?![\w-])/g)) {
+    const tracked = join(dir, m[1]);
+    // Climbed clear of the repo root: unnameable as a tracked path, so it is
+    // not a lead at all.
+    if (tracked === '..' || tracked.startsWith('../')) continue;
+    out.add(tracked);
+  }
+  return [...out];
 }
 
 /**
@@ -1224,17 +1483,141 @@ export function runnableInvocation({ check, filter, direct }) {
  */
 /**
  * A hint with its globs collapsed and its trailing separators dropped — the
- * form `hintCovers` compares against, extracted so the reachability sweep can
- * describe a dead hint in the SAME terms the comparison judged it by. The
- * transformation is carried verbatim from where it was written inline; a
- * second, separately-maintained copy of it is exactly the drift this file
- * refuses everywhere else.
+ * form `hintCovers` compares against for every hint whose globs are TRAILING,
+ * extracted so the reachability sweep can describe a dead hint in the SAME
+ * terms the comparison judged it by. The transformation is carried verbatim
+ * from where it was written inline; a second, separately-maintained copy of it
+ * is exactly the drift this file refuses everywhere else.
+ *
+ * One strip, not two. The trailing-separator cleanup used to be written
+ * `.replace(/\/+$/, '').replace(/\/$/, '')`, and the second call was
+ * unreachable: `/\/+$/` is greedy and anchored, so after it runs no trailing
+ * separator survives for the second to find. Measured over all 754 distinct
+ * hints in the fleet — and over every probe string the shape admits (`a///`,
+ * `a/`, `a//`, `a/**\/`, `**\/`, `/`) — it changed the answer for zero of them.
+ * Deleted here rather than left as decoration, because a redundant strip reads
+ * as defence against a case the first one misses and there is no such case:
+ * what the anchored strips genuinely cannot touch is a separator left in the
+ * MIDDLE, which is the defect the branch below fixes rather than one more
+ * trailing pass would.
  */
 export function collapseHint(hint) {
-  return hint.replace(/\*\*?/g, '').replace(/\/+$/, '').replace(/\/$/, '');
+  return hint.replace(/\*\*?/g, '').replace(/\/+$/, '');
 }
 
+/**
+ * ## A glob in a NON-FINAL segment is not collapsible, and must not be collapsed
+ *
+ * Collapse-by-deletion is sound for a glob in the LAST segment, which is every
+ * shape the idioms above use: `packages/**` → `packages`, `packages/spec/src/**`
+ * → `packages/spec/src`, `packages/client*` → `packages/client`. Each names a
+ * subtree root the tree really has, and `ROOT_DIR_WATCH_HINTS` depends on
+ * exactly that reduction (`scripts/check-published-files.mjs:215-248` declares
+ * the workspace globs VERBATIM so "the glob collapse reduces each back to the
+ * root it names", justified there at 91.3%).
+ *
+ * A glob in a non-final segment is the one case where deletion does not reduce
+ * — it MANGLES. `skills/*\/references/_index.md` collapses to
+ * `skills//references/_index.md`, a double separator no tree can hold, so the
+ * hint matches nothing BY CONSTRUCTION while looking like an ordinary literal.
+ * `check:skill-refs` was the live specimen: `packages/spec/scripts/
+ * build-skill-references.ts` generates nine `_index.md` files, `git ls-files
+ * 'skills/*\/references/_index.md'` returns those nine, and the derivation
+ * reached zero of them.
+ *
+ * It also produced the worst row this output can print. `unreachableClass`
+ * calls a family "THE LAYOUT MOVED … a real miss, worth triaging" when a dead
+ * hint's `deepest` differs from its collapsed form, and the mangled form makes
+ * that true for a gate whose layout did not move at all — with the three
+ * "reasons" printed beside it drawn from OTHER inert hints, TypeScript
+ * `paths`-mapped module specifiers that were never repo paths. Both halves of
+ * the row were wrong: the classification and its evidence.
+ *
+ * No spelling of `collapseHint` can fix this, which is why the branch is here
+ * rather than there, and the impossibility is structural rather than a matter
+ * of a cleverer string. For a family to be classed "by construction" its dead
+ * hint needs `deepest(P) === P`, i.e. P must be a tracked prefix — but any
+ * tracked prefix P makes the three comparisons below reach every file beneath
+ * it, so the hint goes LIVE and never enters `dead` to be classified at all.
+ * The two requirements are mutually exclusive. Re-checked on this tree against
+ * every candidate P the specimen admits: `skills` is a tracked prefix and
+ * reaches 50 files (live, never classified); `skills/*`,
+ * `skills/*\/references`, `skills/*\/references/_index.md`, `skills/references`
+ * and the mangled `skills//references/_index.md` are none of them tracked
+ * prefixes and all reach 0.
+ *
+ * ## The rule, and why it reuses `triggerCovers`
+ *
+ * When — and ONLY when — a glob sits in a non-final segment, the hint is
+ * matched as the filter pattern it visibly is, through `triggerCovers`. That is
+ * not a second matching language: `triggerCovers` is `triggerPatternRegex` plus
+ * the literal-prefix directory reach, both of which already live in this file
+ * for this exact job, and the docblock above refuses a second one on principle.
+ * It also lines the two directions up with the ones the collapse gives: the
+ * regex answers "does this pattern match the file" (`plain`-equality and
+ * subtree descent), and the literal prefix answers "is the input a DIRECTORY
+ * the pattern reaches into" (reverse containment).
+ *
+ * ## Measured, both directions, on 170 families × 754 distinct hints × 6816
+ * ## tracked files
+ *
+ * Exactly SIX distinct hints in the whole fleet carry a glob in a non-final
+ * segment, so the blast radius is enumerable rather than estimated:
+ *
+ *   packages/**\/*.ts             0 → 4693   check:cross-package-test-inputs (+2)
+ *   packages/**\/*.object.ts      0 →   79   the same three families
+ *   skills/*\/references/_index.md 0 →    9   check:skill-refs
+ *   src/**\/*                     0 →    0   check:type-source-resolution
+ *   spec/src/*\/index.ts          0 →    0   check:type-source-resolution
+ *   src/**\/*.zod.ts              0 →    0   check:published-files
+ *
+ *   watch-hint (gate, file) pairs   72482 → 86807
+ *   families gaining coverage       4 rows / 3 gates, listed above; ZERO losing
+ *   (check, hint) newly live        7; newly inert 0
+ *   unreachable families            12 → 11, and "layout moved" 1 → 0
+ *   `skills/*\/references/_index.md` claims the 9 real files and 0 others
+ *
+ * The narrower rule is deliberate. Matching ALL whole-segment globs this way
+ * was measured and REFUSED: it takes `check:test-source-alias` 7511 → 107,
+ * `check:type-source-resolution` 8682 → 1278 and `check:published-files` 7407 →
+ * 3 (−7404 each), because it stops collapsing the trailing `**` the
+ * `ROOT_DIR_WATCH_HINTS` idiom is built on. That is a regression, not a
+ * correction, and this branch keeps the idiom bit-for-bit: `packages/*` 5228,
+ * `examples/*` 241, `skills/**` 50, `content/**` 442, all unchanged. So is the
+ * DECIDED partial-segment trade — `packages/client*` still refuses
+ * `packages/client-react/src/index.ts` and still covers `packages/client`,
+ * because a partial-segment glob in the LAST segment is not this case.
+ *
+ * ## What the +14325 pairs are, and why they are not a widening
+ *
+ * All of the residual cost is two hints: `packages/**\/*.ts` and
+ * `packages/**\/*.object.ts`, declared in `scripts/cross-package-test-inputs.mjs`
+ * and inherited by three family rows. They reach 0 today ONLY because of this
+ * defect, so the question is not whether to widen a gate but whether a
+ * declaration that finally means what it says is wanted — and it is, checked at
+ * the declaration site rather than assumed: `packages/**\/*.ts` is held by
+ * `packages/core/src/security/operation-private-keys.pin.test.ts`, whose scan
+ * surface is spelled `git ls-files` over "every `.ts`/`.tsx` file under
+ * `packages/`", and `packages/**\/*.object.ts` by the two repo-wide
+ * `*.object.ts` walkers in `packages/spec`. Those tests really do read every
+ * matching file, so every recovered pair is a TRUE lead, not a fabricated one —
+ * which is the provenance criterion the docblock above prices, never volume.
+ *
+ * Its derivation cost was measured rather than feared, because "22 leads is the
+ * same as none" is the failure this file exists to avoid. Reading each tracked
+ * file as a one-file card surface: `check:cross-package-test-inputs` is named by
+ * 3323 cards today and 5561 after — 2238 additional cards, 32.8% of the tree.
+ * It is NOT "nearly every card touching `packages/**`": of the 4693
+ * `packages/**\/*.ts` files, 2455 already name the family through some other
+ * hint and 2238 do not. Mean matched families per card goes 12.05 → 13.51 for a
+ * `packages/**\/*.ts` card and 11.99 → 12.89 fleet-wide — about one extra
+ * lead, against the +139084-pair explosion that took one card from 7 families
+ * to 34 and is the number this file calls unaffordable. So the two hints stay
+ * as declared; narrowing them at their declaration site was considered and is
+ * refused, because the narrowing would be the false statement.
+ */
 export function hintCovers(hint, inputPath) {
+  if (globInNonFinalSegment(hint)) return triggerCovers(hint, inputPath);
   const plain = collapseHint(hint);
   if (plain.length < 2) return false;
   // `hint`, not `plain`: glob collapse destroys the separator this refusal is
@@ -1245,6 +1628,20 @@ export function hintCovers(hint, inputPath) {
     inputPath.startsWith(`${plain}/`) ||
     plain.startsWith(`${inputPath}/`)
   );
+}
+
+/**
+ * Does a glob sit anywhere but this hint's LAST segment? The one question that
+ * decides which of the two rules above judges a hint, kept as its own named
+ * predicate so the branch reads as the case it is rather than as an inline
+ * condition. Segment-wise on purpose: `packages/client*` is a glob in the last
+ * segment and stays with the collapse (the DECIDED trade), while
+ * `packages/**\/*.ts` is not.
+ */
+export function globInNonFinalSegment(hint) {
+  const segments = hint.split('/');
+  for (let i = 0; i < segments.length - 1; i++) if (segments[i].includes('*')) return true;
+  return false;
 }
 
 /**
@@ -2445,6 +2842,32 @@ export function reachesMetadataFormModule(path, modulePaths) {
  *     path each already carries is their own output, and a card editing a
  *     baseline matches through it today without making the gate derivable for
  *     anybody else.
+ *
+ *     ⚠ "A literal naming their POPULATION" is the whole of that criterion,
+ *     and one gate in this kind now fails it while READING as satisfied.
+ *     Measured on this tree (#11199, the day PR #12300 landed): of the 2773
+ *     tracked test files, the hint route names `check:cross-package-test-
+ *     inputs` for 2760 of them — 99.5%, against 0–3.3% for its five siblings
+ *     in this same kind — because #12300 taught `hintCovers` to read a glob in
+ *     a non-final segment and the deep `packages` glob for TypeScript files
+ *     came back to life. (That glob is not spelled here: its own wildcard
+ *     closes a block comment.) The hint
+ *     is neither this gate's population nor even its own literal: it is
+ *     INHERITED from the declaration table the gate imports, where it is ONE
+ *     package's declared turbo `inputs` glob (`@objectstack/core`'s, wide
+ *     because a single pin test there walks the whole repo with `git
+ *     ls-files`). It is a row the gate JUDGES, not a population the gate
+ *     DECLARES — so it narrows the day that package's declaration narrows,
+ *     which is the direction the gate's own repair advice pushes. And even at
+ *     99.5% it reaches no test file outside `packages/**` (10 tracked today,
+ *     all under `examples/**`), none with a `.tsx` suffix (3 today, all in
+ *     client-react), and none under `apps/**` the day one arrives — while
+ *     the KIND reaches every one of them, because the trigger really is "a
+ *     test file's content changed, full stop". Both routes are kept (two
+ *     routes to one gate is redundancy, not a defect); the KIND is the
+ *     load-bearing one. The residue and the inheritance are pinned in the
+ *     self-test, so the next reader re-points a red case instead of
+ *     re-deriving this paragraph.
  *   - i18n entry: when `check-i18n-bundles.mjs` stops discovering its targets
  *     at runtime and names its POPULATION in its own source — a literal each
  *     owning package path starts with — the path half matches and this entry
@@ -3019,17 +3442,26 @@ export function residueLines(
  * ## One measured side effect of putting a path in a MODULE BODY
  *
  * Comment masking cannot reach a module-body string, so these globs — and the
- * suspect glob below — are watch hints of this file's own source: re-measured
- * after the 2026-08-20 narrowing, `extractWatchHints` yields 8 hints here
- * against 4 on the base, the new ones being the four globs themselves. They are
- * inert today because no check family resolves to THIS file — the gate that
- * covers it is `check:pm-dispatch-gates`, which resolves to
- * `check-dispatch-gates.mjs` and matches this file through that file's one
- * constant. If the tool is ever wired as its own gate (a shape
- * `check-dispatch-gates.mjs`'s header measures and refuses), this hint would
- * start printing that gate as MATCHED for every card editing the PM skill —
- * a fabricated lead. The refusal already recorded there is what keeps it inert;
- * this note is so the next reader knows the cost is known, not unnoticed.
+ * suspect glob below — are watch hints of this file's own source. Re-measured
+ * on c48d46d70a over 6840 tracked files: `extractWatchHints` yields 9 hints
+ * here, and the four globs of these two tables cover 1026 files between them
+ * (1023 of that is the suspect glob's contract surface).
+ *
+ * They stay inert against a gate that RESOLVES to this file, because no check
+ * family does — `check:pm-dispatch-gates` resolves to `check-dispatch-gates.mjs`
+ * and matches this file through that file's one constant. If the tool is ever
+ * wired as its own gate (a shape `check-dispatch-gates.mjs`'s header measures
+ * and refuses), this hint would start printing that gate as MATCHED for every
+ * card editing the PM skill — a fabricated lead the refusal recorded there is
+ * what prevents.
+ *
+ * They are inert against a gate that IMPORTS this module for a second reason
+ * now, and that one is structural rather than remembered: the module's own
+ * `inherited-population` declaration (top of the module body, #11556) names the
+ * single population a follower inherits, and these globs are not in it. That
+ * closes the class rather than these four literals — a tier glob added tomorrow
+ * inherits nothing without someone widening the declaration, and the declaration
+ * cannot be widened to a path this file does not spell.
  *
  * The authority for the policy is the maintainer ruling quoted in the PM
  * dispatch skill (2026-08-10 three-tier ruling, clause ① of its 强制条款, as
@@ -3246,8 +3678,13 @@ export function discoverFamilies() {
         const p = join(ROOT, base, pkgDirGuess, 'package.json');
         if (existsSync(p)) {
           const pkgScripts = JSON.parse(readFileSync(p, 'utf8')).scripts ?? {};
+          // The manifest's own directory goes IN, and tracked paths come back
+          // out — a package script may climb out of its package
+          // (`tsx ../../scripts/x.mts`), and prefixing the result here instead
+          // was measured to misattribute exactly that spelling to the package
+          // (#12107; resolveCheckToFiles' docblock carries the measurement).
           files = files.concat(
-            resolveCheckToFiles(entry.check, pkgScripts).map((f) => join(base, pkgDirGuess, f)),
+            resolveCheckToFiles(entry.check, pkgScripts, { dir: join(base, pkgDirGuess) }),
           );
         }
       }
@@ -3264,7 +3701,15 @@ export function discoverFamilies() {
   const moduleHints = new Map();
   const hintsOfModule = (rel) => {
     if (!moduleHints.has(rel)) {
-      moduleHints.set(rel, extractWatchHints(readFileSync(join(ROOT, rel), 'utf8')));
+      // ONE read, two answers — the module's literals and its own declaration of
+      // which of them a caller INHERITS — so the pair cannot describe different
+      // revisions of a file, the same discipline the trigger paths take above.
+      // A module that declares nothing contributes everything it spells, which
+      // is the behaviour every followed module had before the marker existed.
+      const source = readFileSync(join(ROOT, rel), 'utf8');
+      const spelled = extractWatchHints(source);
+      const declared = declaredInheritedPopulation(source, spelled);
+      moduleHints.set(rel, declared ? declared.population : spelled);
     }
     return moduleHints.get(rel);
   };
@@ -4116,6 +4561,40 @@ function selfTest() {
     (bareRootEntry?.hints ?? []).length === 0 && (bareRootEntry?.hintOrigin?.size ?? 0) === 0,
   );
 
+  // The SECOND guard, on the same live specimen (#11556). The narrowing above
+  // is invocation-shaped: it holds for a `--self-test` family and nothing else,
+  // so a `check-` gate importing the same modules was untouched by it. What
+  // covers that caller is the module's OWN inherited-population declaration,
+  // and this measures it through the follow's rule rather than through the raw
+  // extractor the case above uses.
+  const inheritableFromImports = importedByBareRoot.flatMap((m) => {
+    const src = readFileSync(join(ROOT, m), 'utf8');
+    const spelled = extractWatchHints(src);
+    return declaredInheritedPopulation(src, spelled)?.population ?? spelled;
+  });
+  t(
+    `a gate that IMPORTS the same modules inherits ${inheritableFromImports.length} of those ${wouldHaveInherited.length} literal(s)`,
+    inheritableFromImports.length > 0 && inheritableFromImports.length < wouldHaveInherited.length,
+  );
+  const inhSweep = trackedFiles();
+  const inhCovered = (hs) => inhSweep.filter((f) => hs.some((h) => hintCovers(h, f))).length;
+  t(
+    `and the price of that import drops from ${inhCovered(wouldHaveInherited)} tracked files to ${inhCovered(inheritableFromImports)}`,
+    inhCovered(inheritableFromImports) < inhCovered(wouldHaveInherited),
+  );
+  // The direction that could SUBTRACT, asserted rather than argued: a
+  // declaration is a narrowing, and a narrowing that took the real population
+  // with it would read exactly like this one — fewer pairs, every gate green.
+  // The tool DOES readdir the workflow tree, so every file in it must stay
+  // reachable through what a follower inherits.
+  t(
+    'and it is not a coverage cut — every workflow file the tool really readdirs is still reachable through the declaration',
+    inhSweep.filter((f) => f.startsWith('.github/workflows/')).length > 0
+      && inhSweep
+        .filter((f) => f.startsWith('.github/workflows/'))
+        .every((f) => inheritableFromImports.some((h) => hintCovers(h, f))),
+  );
+
   // The direction that could SUBTRACT, and the reason it is asserted rather
   // than argued: admitting these nine makes six previously-followable modules
   // GATE FILES, and `discoverFamilies` refuses to follow a gate file. Any
@@ -4142,6 +4621,87 @@ function selfTest() {
     `promoting ${promoted.length} module(s) to gate files subtracts no inherited hint from any other family`
       + `${subtracted.length ? ` — LOST: ${subtracted.join(' · ')}` : ''}`,
     subtracted.length === 0,
+  );
+
+  // #12107, the live half — three claims about THIS tree, each one a thing the
+  // fix buys that a fixture cannot show.
+  const tsLiveFamilies = [...discoverFamilies().byCheck];
+
+  // 1. No gate file the derivation NAMES is a path that does not exist. This is
+  //    the invariant the package-relative normalisation buys, and it is the one
+  //    that catches the near-miss: widening the extensions WITHOUT normalising
+  //    produced `packages/client/scripts/check-exported-any-returns.mts` — a
+  //    phantom identity key that `coveringKey` would print as a `gate script`
+  //    match while `existsSync` kept the file closed and the family kept
+  //    reading zero hints. Measured on this tree at the fix: 0 phantoms.
+  const phantomGateFiles = tsLiveFamilies.flatMap(([check, e]) =>
+    (e.files ?? []).filter((f) => !existsSync(join(ROOT, f))).map((f) => `${check} -> ${f}`),
+  );
+  t(
+    `every gate file the derivation names exists on disk${phantomGateFiles.length ? ` — PHANTOM: ${phantomGateFiles.join(' · ')}` : ''}`,
+    phantomGateFiles.length === 0,
+  );
+
+  // 2. The TypeScript families really do resolve now, on the live tree rather
+  //    than through a fixture — and the climbing one resolves to the ROOT path.
+  const anyReturns = tsLiveFamilies.find(([c]) => c === 'check:exported-any-returns')?.[1];
+  t(
+    'the live TypeScript gate that climbs out of its package resolves to the tracked root path',
+    (anyReturns?.files ?? []).join() === 'scripts/check-exported-any-returns.mts',
+  );
+  const tsFamilies = tsLiveFamilies.filter(([, e]) =>
+    (e.files ?? []).some((f) => /\.(?:ts|mts|cts)$/.test(f)),
+  );
+  t(`the live tree resolves TypeScript-authored gates at all (${tsFamilies.length} families)`, tsFamilies.length >= 20);
+
+  // 3. What is LEFT zero-file, and why it must stay that way. `resolveCheckToFiles`
+  //    reads PATHS out of a command string; a family whose script names a package
+  //    and a script NAME instead (`pnpm --filter @objectstack/cli run check:…`)
+  //    carries no path for any extension list to match. It is a different
+  //    mechanism and a different card, so the assertion is that every remaining
+  //    zero-file family is one of those composites — never that the count is
+  //    zero, which would mean this fix had absorbed a family it cannot honestly
+  //    resolve.
+  const rootScriptsMap = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')).scripts ?? {};
+  const zeroFile = tsLiveFamilies.filter(([, e]) => (e.files ?? []).length === 0);
+  const unexplained = zeroFile
+    .map(([check]) => [check, rootScriptsMap[check] ?? ''])
+    .filter(([, cmd]) => !/\bpnpm\b[^&|]*?(?:--filter|--recursive|-r)\b[^&|]*?\brun\b/.test(cmd))
+    .map(([check, cmd]) => `${check} (${cmd || 'no root script'})`);
+  t(
+    `every zero-file family left is a pnpm workspace composite, not an unmatched extension${unexplained.length ? ` — UNEXPLAINED: ${unexplained.join(' · ')}` : ''}`,
+    unexplained.length === 0,
+  );
+  t('and there is still at least one, so the assertion above is not vacuous', zeroFile.length > 0);
+
+  // 4. The SUBTRACTION direction, asserted the way the self-test families'
+  //    promotion above asserts its own: admitting these sources makes them GATE
+  //    FILES, and `discoverFamilies` refuses to follow a gate file. A family
+  //    that used to inherit a hint from one of them would silently stop, and a
+  //    lead that stops appearing is indistinguishable from one never earned.
+  //    Measured on this tree: none of the newly admitted sources is imported by
+  //    any gate at all — all 12 modules this tree follows live in the root
+  //    `scripts/` dir, and 22 of the 23 admitted sources live under
+  //    `packages/spec/scripts/`. The 23rd (`scripts/check-exported-any-returns.mts`)
+  //    is imported by nothing.
+  const admittedTs = tsLiveFamilies.flatMap(([, e]) => (e.files ?? []).filter((f) => /\.(?:ts|mts|cts)$/.test(f)));
+  const tsSubtracted = [];
+  for (const [check, entry] of tsLiveFamilies) {
+    if (entry.selfTest) continue;
+    for (const f of entry.files ?? []) {
+      if (/\.(?:ts|mts|cts)$/.test(f)) continue;
+      if (!existsSync(join(ROOT, f))) continue;
+      for (const mod of firstPartyImportTargets(f, readFileSync(join(ROOT, f), 'utf8'))) {
+        if (!admittedTs.includes(mod)) continue;
+        const lost = extractWatchHints(readFileSync(join(ROOT, mod), 'utf8'));
+        if (lost.length > 0) tsSubtracted.push(`${check} <- ${mod} (${lost.join(', ')})`);
+      }
+    }
+  }
+  t(
+    `admitting ${admittedTs.length} TypeScript gate source(s) subtracts no inherited hint from any other family`
+      + `${tsSubtracted.length ? ` — LOST: ${tsSubtracted.join(' · ')}` : ''}`,
+    tsSubtracted.length === 0,
   );
 
   // `runCommandTexts` on its own: one entry per step, in file order.
@@ -4219,6 +4779,47 @@ function selfTest() {
   const scripts = { 'check:foo': 'node scripts/check-foo.mjs --self-test && node scripts/check-foo.mjs' };
   t('resolves script file from package.json', resolveCheckToFiles('check:foo', scripts).join() === 'scripts/check-foo.mjs');
   t('unknown check resolves to nothing', resolveCheckToFiles('check:bar', scripts).length === 0);
+
+  // #12107 — the extension list. Each of the three TypeScript spellings is a
+  // case the OLD alternation (`mjs|cjs|js|sh`) resolved to nothing, which is
+  // why they are pinned separately rather than as one representative: the
+  // defect was an alternation, and an alternation regresses one branch at a
+  // time.
+  const tsScripts = {
+    'check:ts': 'tsx scripts/check-generated.ts',
+    'check:mts': 'tsx scripts/check-variant-docs.mts',
+    'check:cts': 'tsx scripts/check-legacy.cts',
+    'check:mixed': 'node scripts/pre.mjs && tsx scripts/check-generated.ts',
+  };
+  t('resolves a .ts gate script — zero-file under the old alternation', resolveCheckToFiles('check:ts', tsScripts).join() === 'scripts/check-generated.ts');
+  t('resolves a .mts gate script', resolveCheckToFiles('check:mts', tsScripts).join() === 'scripts/check-variant-docs.mts');
+  t('resolves a .cts gate script', resolveCheckToFiles('check:cts', tsScripts).join() === 'scripts/check-legacy.cts');
+  t('a command naming both an .mjs and a .ts file yields both', resolveCheckToFiles('check:mixed', tsScripts).join() === 'scripts/pre.mjs,scripts/check-generated.ts');
+  // The negative half of the alternation: widening it must not admit every
+  // extension. A `.json` argument is data the gate READS, not a file it runs,
+  // and the hint scan is what places those.
+  t('a data file argument is still not a gate script', resolveCheckToFiles('check:x', { 'check:x': 'tsx scripts/check-x.mts scripts/fixtures/pins.json' }, { dir: '' }).join() === 'scripts/check-x.mts');
+  t('nor a .tsx file, the one this widening would newly have mis-matched as .ts', resolveCheckToFiles('check:x', { 'check:x': 'tsx scripts/render.tsx' }).length === 0);
+  t('while the extension it is a prefix of still resolves', resolveCheckToFiles('check:x', { 'check:x': 'tsx scripts/render.ts' }).join() === 'scripts/render.ts');
+
+  // #12107 point 1 — a package manifest spells its script relative to ITSELF,
+  // so the manifest's directory is an input to the resolution, not a prefix
+  // the caller staples on afterwards.
+  const pkgScripts = {
+    'check:in-package': 'tsx scripts/build-docs.ts --check',
+    'check:climbing': 'tsx ../../scripts/check-exported-any-returns.mts --self-test && tsx ../../scripts/check-exported-any-returns.mts --package packages/client',
+    'check:escaping': 'tsx ../../../../scripts/check-elsewhere.mjs',
+  };
+  t('a package-local spelling lands under the package that declares it', resolveCheckToFiles('check:in-package', pkgScripts, { dir: 'packages/spec' }).join() === 'packages/spec/scripts/build-docs.ts');
+  t('a spelling that climbs out of its package normalises to the tracked repo path', resolveCheckToFiles('check:climbing', pkgScripts, { dir: 'packages/client' }).join() === 'scripts/check-exported-any-returns.mts');
+  // The regression this normalisation exists for, stated as the wrong answer
+  // rather than only as the right one: with the extensions widened and the
+  // climb prefix dropped, this resolved to a path that does not exist, and the
+  // family left the honest `undetermined` bucket while still reading no hints.
+  t('and never to the package-prefixed path that does not exist', !resolveCheckToFiles('check:climbing', pkgScripts, { dir: 'packages/client' }).includes('packages/client/scripts/check-exported-any-returns.mts'));
+  t('the twice-named climbing script is ONE file, deduped on the normalised path', resolveCheckToFiles('check:climbing', pkgScripts, { dir: 'packages/client' }).length === 1);
+  t('a spelling that climbs clear of the repo root is dropped, not returned unnameable', resolveCheckToFiles('check:escaping', pkgScripts, { dir: 'packages/client' }).length === 0);
+  t('an absent dir leaves a root-manifest spelling exactly as it was', resolveCheckToFiles('check:foo', scripts).join() === 'scripts/check-foo.mjs');
 
   const src = [
     "const DIR = '.claude/agents';",
@@ -4371,6 +4972,48 @@ function selfTest() {
   t('a collapsed partial-segment glob does NOT reach the sibling it would match as a glob', !hintCovers('packages/client*', 'packages/client-react/src/index.ts'));
   t('the same glob still covers the package it names', hintCovers('packages/client*', 'packages/client/src/index.ts'));
   t('a segment-boundary glob is untouched by the trade', hintCovers('packages/client/**', 'packages/client/src/index.ts'));
+
+  // ── A glob in a NON-FINAL segment is matched, not collapsed (#12246) ──────
+  //
+  // Collapse-by-deletion mangles this one shape into a double separator no tree
+  // can hold, so the hint matched nothing BY CONSTRUCTION and its family was
+  // then misfiled as "THE LAYOUT MOVED". Both halves are pinned: what the rule
+  // now reaches, and — the larger half — everything it deliberately does NOT
+  // disturb, because the refused alternative (matching ALL whole-segment globs)
+  // breaks the ROOT_DIR_WATCH_HINTS idiom by −7404 pairs on each of three gates.
+  t('the predicate reads the LAST segment, so a trailing glob is not this case', !globInNonFinalSegment('packages/**'));
+  t('nor is a partial-segment glob in the last segment', !globInNonFinalSegment('packages/client*'));
+  t('a glob in a middle segment IS', globInNonFinalSegment('skills/*/references/_index.md'));
+  t('and a `**` in a middle segment IS', globInNonFinalSegment('packages/**/*.ts'));
+  // The live specimen: `packages/spec/scripts/build-skill-references.ts` emits
+  // these nine files and the derivation reached zero of them. If the skills
+  // layout ever changes, re-point this case at whatever mid-segment glob the
+  // fleet then declares rather than deleting it.
+  t('a mid-segment glob reaches the file it names', hintCovers('skills/*/references/_index.md', 'skills/objectstack-formula/references/_index.md'));
+  t('and does NOT claim the rest of the subtree it passes through', !hintCovers('skills/*/references/_index.md', 'skills/objectstack-formula/SKILL.md'));
+  t('a `**` crosses separators, a single `*` does not', hintCovers('packages/**/*.ts', 'packages/spec/src/data/filter.zod.ts'));
+  t('so a single `*` segment matches exactly one segment', !hintCovers('skills/*/references/_index.md', 'skills/a/b/references/_index.md'));
+  t('the extension the glob names is honoured', !hintCovers('packages/**/*.object.ts', 'packages/spec/src/index.ts'));
+  // Reverse containment, the direction a coarse card surface needs: the literal
+  // prefix before the first wildcard still reaches back to a directory surface,
+  // exactly as the collapsed form used to.
+  t('a directory surface above the glob still derives the gate', hintCovers('skills/*/references/_index.md', 'skills'));
+  t('but an unrelated root does not', !hintCovers('skills/*/references/_index.md', 'packages'));
+  // ⛔ The refused alternative, pinned as the loss it would be. Each of these
+  // is a trailing glob and MUST keep going through the collapse.
+  t('a trailing `**` still collapses to the root it names', hintCovers('packages/**', 'packages/spec/src/index.ts'));
+  t('the ROOT_DIR_WATCH_HINTS idiom is untouched', hintCovers('skills/**', 'skills/objectstack-formula/SKILL.md'));
+  t('and so is a trailing single `*`', hintCovers('examples/*', 'examples/app-showcase/src/x.ts'));
+  t('the DECIDED partial-segment trade still refuses the sibling', !hintCovers('packages/client*', 'packages/client-react/src/index.ts'));
+
+  // The trailing-separator strip is ONE call, not two: `/\/+$/` is greedy and
+  // anchored, so nothing survives for a second `/\/$/` to remove. Measured at
+  // zero of 754 hints; pinned on the probes that could tell them apart, so a
+  // future reader does not restore the redundant call as defence-in-depth.
+  t('the greedy trailing strip removes every trailing separator', collapseHint('a///') === 'a');
+  t('including the one a trailing `**` leaves behind', collapseHint('a/**/') === 'a');
+  t('and a hint that is nothing but separators collapses to empty', collapseHint('**/') === '');
+  t('what it cannot touch is a separator left in the MIDDLE', collapseHint('skills/*/references/_index.md') === 'skills//references/_index.md');
 
   // ── A declared SUBTREE is not a bare word (#9626) ─────────────────────────
   //
@@ -5504,6 +6147,59 @@ function selfTest() {
     liveFamilies.has('check:cross-package-test-inputs'),
   );
 
+  // ── The test-file entry's deletion criterion, MEASURED (#11199) ───────────
+  //
+  // The card behind these cases reported that no local derivation ever named
+  // `check:cross-package-test-inputs` for an edited test file. That is closed —
+  // the entry above has been in the table since #10542 — and the reason these
+  // cases exist rather than a seventh entry is what the re-measurement found:
+  // the entry now READS redundant against its own stated deletion criterion,
+  // and it is not. The full measurement is in that criterion's bullet in this
+  // table's docblock; what is pinned here is every load-bearing half of it, so
+  // the claim reddens instead of ageing.
+  //
+  // Both directions matter. The positive case keeps the redundancy honest (the
+  // hint route really does reach an ordinary packages test file — Zone rule:
+  // two routes to one gate is redundancy, never a bug, and neither may be
+  // deleted BECAUSE of the other). The negative cases are the residue: a class
+  // the hint route cannot reach in principle, with live tracked specimens.
+  const XPKG = 'check:cross-package-test-inputs';
+  const xpkgEntry = discoverFamilies().byCheck.get(XPKG);
+  // Live specimens, one per residue reason. If either file is ever deleted or
+  // renamed, re-point the case at another member of its class — and if a class
+  // ever EMPTIES, that is the measurement to redo, not a case to drop.
+  const OUTSIDE_PACKAGES = 'examples/app-crm/test/smoke.test.ts';   // not under packages/**
+  const TSX_TEST = 'packages/client-react/src/realtime-hooks.test.tsx'; // not *.ts
+  const APPS_TEST = 'apps/docs/src/x.test.ts';                      // no tracked member today
+  t('the gate is discovered with hints at all, so these cases are not vacuous', (xpkgEntry?.hints ?? []).length > 0);
+  t('both residue specimens are real tracked files, so the negatives are live rather than a pair of matching strings',
+    existsSync(join(ROOT, OUTSIDE_PACKAGES)) && existsSync(join(ROOT, TSX_TEST)));
+  t('the hint route really does reach an ordinary packages test file — the redundancy #12300 recovered is real',
+    covers(xpkgEntry.hints, 'packages/spec/src/x.test.ts'));
+  t('but no hint of this gate reaches a test file outside packages/**', !covers(xpkgEntry.hints, OUTSIDE_PACKAGES));
+  t('nor a .tsx test file inside it', !covers(xpkgEntry.hints, TSX_TEST));
+  t('nor one under apps/**, the class with no tracked member to lose', !covers(xpkgEntry.hints, APPS_TEST));
+  // The entry itself, anchored on both sides of the rendered name the way the
+  // STALE cases above are: a bare substring test stays green if some other
+  // gate's `why` ever quotes this gate's name.
+  t('the KIND names the gate for every one of them — delete the entry and this reddens',
+    [OUTSIDE_PACKAGES, TSX_TEST, APPS_TEST].every((p) =>
+      changeKindLines([p], (n) => n).some((l) => l.includes(`- ${XPKG}   —`))));
+  // The fragility half: the covering hint is INHERITED from the declaration
+  // table this gate imports (one package's declared turbo `inputs` glob), not
+  // declared by the gate as its own population. `hintOrigin` carries exactly
+  // that provenance, and it is what the output prints as `gate source via …`.
+  const xpkgCovering = xpkgEntry.hints.find((h) => hintCovers(h, 'packages/spec/src/x.test.ts'));
+  t('and that covering hint is inherited from a module the gate imports, not a population the gate declares',
+    Boolean(xpkgEntry.hintOrigin?.get(xpkgCovering)));
+  // The class-level claim, against the real corpus rather than two specimens:
+  // while ANY tracked test file is unreachable by every hint this gate has, the
+  // entry's deletion criterion is unmet. The day this reddens, re-measure the
+  // criterion and either retire the entry with these cases or re-point them.
+  const xpkgResidue = trackedFiles().filter((f) => isTestFilePath(f) && !covers(xpkgEntry.hints, f));
+  t(`the tree still holds test files no hint of this gate reaches (${xpkgResidue.length}), so the entry is not redundant`,
+    xpkgResidue.length > 0);
+
   // ── The check-family coverage guard (#9187) ───────────────────────────────
   //
   // `docs-drift-check.yml` declared a `paths:` filter and ran a real self-test
@@ -5616,6 +6312,139 @@ function selfTest() {
   t(
     'the marker must be its OWN line — a mention inside prose is a discussion of the convention, not a declaration under it',
     declaredNoPathPopulation('// see the dispatch-gates: no-path-population -- marker for how to opt out\n') === null,
+  );
+
+  // ── The followed-module inherited-population declaration (#11556) ─────────
+  //
+  // The two markers above are a GATE's declarations about itself. This one is a
+  // followed MODULE's declaration about what a gate inherits by importing it —
+  // the half that had no mechanism at all, only prose in the one caller that
+  // remembered to spawn instead of import.
+  const inhFixture = [
+    "const WF = '.github/workflows';",
+    "const BASE = 'packages/plugins';",
+    '// dispatch-gates: inherited-population .github/workflows -- the only tree this module opens',
+  ].join('\n');
+  t(
+    'a followed module declares the population a caller inherits, and the reason reads back',
+    (() => {
+      const d = declaredInheritedPopulation(inhFixture);
+      return d.population.length === 1
+        && d.population[0] === '.github/workflows'
+        && d.reason === 'the only tree this module opens';
+    })(),
+  );
+  t(
+    'and the literal it did NOT declare stops being inheritable, while still being a literal it spells',
+    extractWatchHints(inhFixture).includes('packages/plugins')
+      && !declaredInheritedPopulation(inhFixture).population.includes('packages/plugins'),
+  );
+  t(
+    'the shell comment spelling is read too (a followed module can be a shell helper)',
+    declaredInheritedPopulation("X='.github/workflows'\n# dispatch-gates: inherited-population .github/workflows -- shell reason\n")
+      ?.reason === 'shell reason',
+  );
+  t(
+    'several paths may be declared, space separated',
+    (() => {
+      const src = ["const A = '.github/workflows';", "const B = 'packages/spec/src/**';",
+        '// dispatch-gates: inherited-population .github/workflows packages/spec/src/** -- two real reads'].join('\n');
+      return declaredInheritedPopulation(src).population.length === 2;
+    })(),
+  );
+  t('no marker present reads as no declaration — the module contributes everything it spells', declaredInheritedPopulation("const A = '.github/workflows';\n") === null);
+  t(
+    'a marker carrying only a reason does not parse as a declaration (it reads as no marker, so the module keeps contributing — never a silent blanket opt-out)',
+    declaredInheritedPopulation("const A = '.github/workflows';\n// dispatch-gates: inherited-population -- everything here is a join base\n") === null,
+  );
+  t(
+    'the marker must be its OWN line here too — a mention inside prose is a discussion of the convention, not a declaration under it',
+    declaredInheritedPopulation("const A = '.github/workflows';\n// see dispatch-gates: inherited-population .github/workflows -- for how a module opts out\n") === null,
+  );
+  // NARROWING ONLY. This is the load-bearing invariant: an opt-out that could
+  // also opt IN would be the hand-written path map this file's contract exists
+  // to refuse, and it would be invisible — a declared path nothing spells reads
+  // exactly like a real one in the MATCHED column.
+  t(
+    'a declared path the module does not spell is REFUSED, not silently inherited',
+    (() => {
+      try {
+        declaredInheritedPopulation("const A = '.github/workflows';\n// dispatch-gates: inherited-population packages/spec/src/** -- invented\n");
+        return false;
+      } catch (e) {
+        return /may only NARROW/.test(String(e.message));
+      }
+    })(),
+  );
+  t(
+    'and the refusal names every invented path, not just the first',
+    (() => {
+      try {
+        declaredInheritedPopulation("const A = '.github/workflows';\n// dispatch-gates: inherited-population packages/a packages/b -- invented\n");
+        return false;
+      } catch (e) {
+        return /packages\/a, packages\/b/.test(String(e.message));
+      }
+    })(),
+  );
+  // The `--` separator is SPACE-delimited on purpose: a bare `--` would split a
+  // path that legitimately carries one.
+  t(
+    'a declared path containing a double dash survives the reason separator',
+    (() => {
+      const src = ["const A = 'packages/a--b/src';", '// dispatch-gates: inherited-population packages/a--b/src -- a real subtree'].join('\n');
+      const d = declaredInheritedPopulation(src);
+      return d.population.length === 1 && d.population[0] === 'packages/a--b/src' && d.reason === 'a real subtree';
+    })(),
+  );
+  // ── LIVE: this file's own declaration ─────────────────────────────────────
+  //
+  // Pinned against the real source, because the whole value of the marker is
+  // that it holds for THIS module — the one measured specimen. Delete the
+  // marker line and these cases redden instead of 2632 fabricated pairs coming
+  // back silently for the next gate that imports the tool.
+  const ownToolSource = readFileSync(join(ROOT, 'scripts/pm/dispatch-gates.mjs'), 'utf8');
+  const ownDeclared = declaredInheritedPopulation(ownToolSource);
+  // Read through `?.` on purpose: deleting the marker line must render as a
+  // NAMED failing case, not as a TypeError that aborts the run and takes every
+  // case after this one with it — a self-test that crashes reports one defect
+  // where the tree may hold several.
+  const ownPopulation = ownDeclared?.population ?? [];
+  t('this module declares what a follower inherits', (ownDeclared?.reason ?? '').length > 0);
+  t(
+    'it declares exactly the workflow tree it readdirs',
+    ownPopulation.length === 1 && ownPopulation[0] === '.github/workflows',
+  );
+  t('so a follower still reaches the workflow files this tool really opens', covers(ownPopulation, '.github/workflows/lint.yml'));
+  // The four fabricating classes the card measured, each pinned as SPELLED but
+  // NOT INHERITED — the two halves have to be asserted together, because the
+  // literal disappearing from the file would also pass "not inherited" while
+  // silently deleting the tier declaration this table is.
+  for (const fabricated of ['packages/plugins', 'packages/drivers', 'packages/services', 'packages/spec/src/**']) {
+    t(
+      `the module still spells ${fabricated} (join base / tier glob) but no follower inherits it`,
+      ownHints.includes(fabricated) && !ownPopulation.includes(fabricated),
+    );
+  }
+  t(
+    'and the tier-table file globs are not inheritable either',
+    ownPopulation.length > 0
+      && !ownPopulation.includes('.claude/agents/os-dev.md')
+      && !ownPopulation.includes('skills/objectstack-pm-dispatch/SKILL.md'),
+  );
+  // Cost of the mechanism on this tree, pinned so it cannot grow unnoticed: the
+  // marker is an opt-out, and an opt-out that spreads is how a real population
+  // goes quiet. Exactly one module in the scripts tree declares one today.
+  t(
+    'exactly one module in the scripts tree carries the declaration — this one',
+    (() => {
+      const declaring = trackedFiles()
+        .filter((f) => f.startsWith('scripts/') && /\.(mjs|mts|js|sh)$/.test(f))
+        // Read from the MODULE BODY, so the fixture markers above — which live
+        // inside this very self-test — are not counted as live declarations.
+        .filter((f) => INHERITED_POPULATION_MARKER.test(maskSelfTests(readFileSync(join(ROOT, f), 'utf8'))));
+      return declaring.length === 1 && declaring[0] === 'scripts/pm/dispatch-gates.mjs';
+    })(),
   );
   // The residue count that carries it refuses a missing or impossible value in
   // the same shape as every other count in that line: a subset that could go

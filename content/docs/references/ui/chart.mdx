@@ -38,6 +38,14 @@ Inline aggregation for an object-bound chart
 | **function** | `Enum<'count' \| 'sum' \| 'avg' \| 'min' \| 'max'>` | ✅ | Aggregation function |
 | **groupBy** | `string \| { field: string; dateGranularity?: Enum<'day' \| 'week' \| 'month' \| 'quarter' \| 'year'>; alias?: string }` | ✅ | Field the rows are grouped by — the chart category axis |
 
+### Nested Shape: `ChartAggregate.groupBy`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **field** | `string` | ✅ | Field to group by |
+| **dateGranularity** | `Enum<'day' \| 'week' \| 'month' \| 'quarter' \| 'year'>` | optional | Bucket date values into uniform periods |
+| **alias** | `string` | optional | Alias for the projected group value (defaults to `field`) — this becomes the category column |
+
 
 ---
 
@@ -133,6 +141,75 @@ Inline aggregation for an object-bound chart
 * `radar`
 * `table`
 * `pivot`
+
+### Nested Shape: `ChartConfig.xAxis`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **field** | `string` | ✅ | Data field key |
+| **title** | `string \| Record<string, string>` | optional | Axis display title |
+| **format** | `string` | optional | Value format string (e.g., "$0,0.00") |
+| **min** | `number` | optional | Minimum value |
+| **max** | `number` | optional | Maximum value |
+| **stepSize** | `number` | optional | Step size for ticks |
+| **showGridLines** | `boolean` | optional (default: `true`) |  |
+| **position** | `Enum<'left' \| 'right' \| 'top' \| 'bottom'>` | optional | Axis position |
+| **logarithmic** | `boolean` | optional (default: `false`) |  |
+
+### Nested Shape: `ChartConfig.yAxis[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **field** | `string` | ✅ | Data field key |
+| **title** | `string \| Record<string, string>` | optional | Axis display title |
+| **format** | `string` | optional | Value format string (e.g., "$0,0.00") |
+| **min** | `number` | optional | Minimum value |
+| **max** | `number` | optional | Maximum value |
+| **stepSize** | `number` | optional | Step size for ticks |
+| **showGridLines** | `boolean` | optional (default: `true`) |  |
+| **position** | `Enum<'left' \| 'right' \| 'top' \| 'bottom'>` | optional | Axis position |
+| **logarithmic** | `boolean` | optional (default: `false`) |  |
+
+### Nested Shape: `ChartConfig.series[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Field name or series identifier |
+| **label** | `string \| Record<string, string>` | optional | Series display label |
+| **type** | `Enum<'bar' \| 'horizontal-bar' \| 'column' \| 'line' \| 'area' \| 'pie' \| 'donut' \| …>` | optional | Override chart type for this series |
+| **color** | `string` | optional | Series color (hex/rgb/token) |
+| **stack** | `string` | optional | Stack identifier to group series |
+| **yAxis** | `Enum<'left' \| 'right'>` | optional (default: `"left"`) | Bind to specific Y-Axis |
+| **variant** | `Enum<'primary' \| 'comparison'>` | optional (default: `"primary"`) | Series visual role |
+| **dashArray** | `string` | optional | SVG stroke-dasharray override |
+| **opacity** | `number` | optional | Series opacity override |
+
+### Nested Shape: `ChartConfig.annotations[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `Enum<'line' \| 'region'>` | optional (default: `"line"`) |  |
+| **axis** | `Enum<'x' \| 'y'>` | optional (default: `"y"`) |  |
+| **value** | `number \| string` | ✅ | Start value |
+| **endValue** | `number \| string` | optional | End value for regions |
+| **color** | `string` | optional |  |
+| **label** | `string \| Record<string, string>` | optional | Display label — the default-language string, or an inline locale map (`{ en, "zh-CN" }`) resolved at render time |
+| **style** | `Enum<'solid' \| 'dashed' \| 'dotted'>` | optional (default: `"dashed"`) |  |
+
+### Nested Shape: `ChartConfig.interaction`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **tooltips** | `boolean` | optional (default: `true`) | Show the hover tooltip |
+| **brush** | `boolean` | optional (default: `false`) | Show the range selector under the plot |
+
+### Nested Shape: `ChartConfig.aria`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **ariaLabel** | `string \| Record<string, string>` | optional | Accessible label for screen readers (WAI-ARIA aria-label). Plain string, or an inline locale map — no translation-bundle slot addresses this key, so a plain string is announced in the source language. |
+| **ariaDescribedBy** | `string` | optional | ID of element providing additional description (WAI-ARIA aria-describedby) |
+| **role** | `string` | optional | WAI-ARIA role attribute (e.g., "dialog", "navigation", "alert") |
 
 
 ---

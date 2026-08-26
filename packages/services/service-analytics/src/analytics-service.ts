@@ -16,13 +16,24 @@ import type { Dataset } from '@objectstack/spec/ui';
 // differently from objectui's `pickLocalized` with neither end erroring.
 import { resolveI18nLabel } from '@objectstack/spec/ui';
 import type { Logger } from '@objectstack/spec/contracts';
-import { createLogger, getEnv, bucketKeyToCalendarRange, zonedDateStartToUtcMs } from '@objectstack/core';
+import {
+  createLogger,
+  getEnv,
+  bucketKeyToCalendarRange,
+  zonedDateStartToUtcMs,
+  // [#12230] The ONE evaluator of the `{token}` filter vocabulary
+  // (framework#3582) — imported, never re-implemented, so the analytics doors
+  // and the ObjectQL engine cannot disagree about what a placeholder means.
+  filterTokenContextFrom,
+  resolveFilterTokens,
+  type FilterTokenResolutionContext,
+} from '@objectstack/core';
 // [#6615] The Postgres `"x" of relation "y"` phrase, owned once. This is the
 // only reason this package depends on `@objectstack/types` — see the module's
 // docblock for why the edge is acyclic and why it was worth adding.
 import { matchMissingColumnOfRelation } from '@objectstack/types';
 import { CubeRegistry } from './cube-registry.js';
-import type { AnalyticsStrategy, AnalyticsDriverCapabilities, StrategyContext, DatasetScopedStrategyContext } from './strategies/types.js';
+import type { AnalyticsStrategy, AnalyticsDriverCapabilities, StrategyContext, DatasetScopedStrategyContext, DatasetScope } from './strategies/types.js';
 import { NativeSQLStrategy } from './strategies/native-sql-strategy.js';
 import { ObjectQLStrategy } from './strategies/objectql-strategy.js';
 // [#5669] The `where` source-field gate reads the filter tree through the SAME
@@ -778,14 +789,25 @@ export class AnalyticsService implements IAnalyticsService {
    */
   private async callCtx(
     query: AnalyticsQuery,
-    context?: ExecutionContext,
+    context: ExecutionContext | undefined,
+    tokenCtx: FilterTokenResolutionContext,
   ): Promise<DatasetScopedStrategyContext> {
+    // [#12230] The dataset-scope channel (#10298) hands the strategy the
+    // REGISTRY's compiled filter/measureFilters — shared across requests, so
+    // it still carries the authored `{current_user_id}` literally. On the
+    // dashboard door `DatasetExecutor` resolves its OWN copy into `where`, and
+    // the strategy then ANDed the registry's unresolved twin as a conjunct:
+    // `owner = $viewer AND owner = '{current_user_id}'` selects nothing —
+    // #10298's "redundant and idempotent" claim holds only for token-free
+    // filters. Resolve the channel per request, with the SAME instant as the
+    // query's own fields.
+    const getDatasetScope = this.resolvedDatasetScopeGetter(tokenCtx);
     // #3602 — `context` rides along unconditionally. It is the ENGINE-side belt
     // (forwarded to `engine.aggregate`, where the middleware chain applies its
     // own RLS), so it must not be gated on the analytics-side belt being wired:
     // a deployment with no `getReadScope` provider is exactly the one that most
     // needs the engine to scope for it.
-    if (!this.readScopeProvider) return { ...this.baseCtx, context };
+    if (!this.readScopeProvider) return { ...this.baseCtx, context, getDatasetScope };
     // Pre-resolve the read scope for every object the strategy will scan (base
     // + all declared joins) BEFORE the synchronous SQL builder runs, since the
     // provider may be async (the production `security.getReadFilter` bridge).
@@ -794,7 +816,61 @@ export class AnalyticsService implements IAnalyticsService {
     return {
       ...this.baseCtx,
       context,
+      getDatasetScope,
       getReadScope: (objectName: string) => scopes.get(objectName) ?? null,
+    };
+  }
+
+  /**
+   * [#12230] Copy-on-write expansion of filter placeholders across everything
+   * a DIRECT analytics query compares on: `where` and each time dimension's
+   * `dateRange` — the same positions `DatasetExecutor.resolveSelectionTokens`
+   * covers for the dashboard door, minus the dataset-only channels it alone
+   * carries (measure filters ride the dataset-scope getter below).
+   *
+   * The input is never mutated: a query object can be caller-owned metadata
+   * (a saved report definition, a flow node's config) reused across requests,
+   * and resolving in place would bake one request's user id into every later
+   * render. Returns the SAME object when nothing resolved.
+   */
+  private resolveQueryTokens(
+    query: AnalyticsQuery,
+    tokenCtx: FilterTokenResolutionContext,
+  ): AnalyticsQuery {
+    const where = resolveFilterTokens(query.where, tokenCtx);
+    const timeDimensions = query.timeDimensions?.map((td) => {
+      if (td.dateRange == null) return td;
+      const dateRange = resolveFilterTokens(td.dateRange, tokenCtx);
+      return dateRange === td.dateRange ? td : { ...td, dateRange };
+    });
+    const tdChanged =
+      timeDimensions !== undefined &&
+      timeDimensions.some((td, i) => td !== query.timeDimensions![i]);
+    if (where === query.where && !tdChanged) return query;
+    const out = { ...query };
+    if (where !== query.where) out.where = where;
+    if (tdChanged) out.timeDimensions = timeDimensions;
+    return out;
+  }
+
+  /**
+   * [#12230] A per-request `getDatasetScope` whose answers have their filter
+   * placeholders resolved against THIS caller. See `callCtx` for why the
+   * registry's copy cannot be handed out raw. Token-free scopes pass through
+   * by reference — `resolveFilterTokens` returns its input unchanged when the
+   * tree holds no placeholder, so the common case allocates nothing.
+   */
+  private resolvedDatasetScopeGetter(
+    tokenCtx: FilterTokenResolutionContext,
+  ): (cubeName: string) => DatasetScope | undefined {
+    return (cubeName: string) => {
+      const scope = this.baseCtx.getDatasetScope?.(cubeName);
+      if (!scope) return scope;
+      const filter = resolveFilterTokens(scope.filter, tokenCtx);
+      const measureFilters = resolveFilterTokens(scope.measureFilters, tokenCtx);
+      return filter === scope.filter && measureFilters === scope.measureFilters
+        ? scope
+        : { filter, measureFilters };
     };
   }
 
@@ -863,13 +939,26 @@ export class AnalyticsService implements IAnalyticsService {
    * aggregate bridge) instead of failing — or worse, fabricating empty rows.
    * Any other error propagates untouched.
    */
-  async query(query: AnalyticsQuery, context?: ExecutionContext): Promise<AnalyticsResult> {
-    if (!query.cube) {
+  async query(queryInput: AnalyticsQuery, context?: ExecutionContext): Promise<AnalyticsResult> {
+    if (!queryInput.cube) {
       throw new Error('Cube name is required in analytics query');
     }
 
+    // [#12230] Expand `{current_user_id}` / date-macro placeholders at THIS
+    // seam — before strategy selection — so every strategy compiles the same
+    // resolved values. The ObjectQL strategy's engine bridge resolves tokens
+    // itself (framework#3582), but `NativeSQLStrategy` compiles a raw
+    // `SELECT … WHERE` and bound the literal text: one vocabulary, two
+    // verdicts, and the losing verdict was a plausible zero ("you have no
+    // work") on every user-scoped widget. One instant for the whole call —
+    // query fields and the dataset-scope channel below must not straddle a
+    // period boundary. An unresolvable placeholder throws the resolver's
+    // `FILTER_TOKEN_*` 400 instead of charting zero.
+    const tokenCtx = filterTokenContextFrom(context, new Date());
+    const query = this.resolveQueryTokens(queryInput, tokenCtx);
+
     this.ensureCube(query);
-    const ctx = await this.callCtx(query, context);
+    const ctx = await this.callCtx(query, context, tokenCtx);
     let skip: Set<AnalyticsStrategy> | undefined;
     for (;;) {
       const strategy = this.resolveStrategy(query, ctx, skip);
@@ -1368,13 +1457,20 @@ export class AnalyticsService implements IAnalyticsService {
   /**
    * Generate SQL for a query without executing it (dry-run).
    */
-  async generateSql(query: AnalyticsQuery, context?: ExecutionContext): Promise<{ sql: string; params: unknown[] }> {
-    if (!query.cube) {
+  async generateSql(queryInput: AnalyticsQuery, context?: ExecutionContext): Promise<{ sql: string; params: unknown[] }> {
+    if (!queryInput.cube) {
       throw new Error('Cube name is required for SQL generation');
     }
 
+    // [#12230] Same token seam as `query()` — the dry-run door must show the
+    // statement that would actually run (a resolved user id in the params, or
+    // the same `FILTER_TOKEN_*` refusal), never a literal `{current_user_id}`
+    // the real execution would not bind.
+    const tokenCtx = filterTokenContextFrom(context, new Date());
+    const query = this.resolveQueryTokens(queryInput, tokenCtx);
+
     this.ensureCube(query);
-    const ctx = await this.callCtx(query, context);
+    const ctx = await this.callCtx(query, context, tokenCtx);
     const strategy = this.resolveStrategy(query, ctx);
     this.logger.debug(`[Analytics] generateSql on cube "${query.cube}" → ${strategy.name}`);
 

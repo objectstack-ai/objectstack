@@ -52,7 +52,35 @@ export const SysOauthClientResource = ObjectSchema.create({
     resource_id: Field.text({
       label: 'Resource ID',
       required: true,
-      maxLength: 1024,
+      // [#11701] Narrowed 1024 → 768 so the declared `[resource_id]` index can
+      // exist at all. At 1024 the column stays TEXT on MySQL and the index is
+      // refused (`ER_BLOB_KEY_WITHOUT_LENGTH`), taking the whole object's
+      // schema-sync down with it; 768 characters is the widest utf8mb4 value a
+      // MySQL key part can hold (768 × 4 = 3072 bytes, exactly the ceiling).
+      //
+      // ⚠️ This is the one bound in the family that does NOT simply take its
+      // referenced column's width: `sys_oauth_resource.identifier` declares
+      // 1024. Narrowing below the referent is safe here because the
+      // (768, 1024] band holds nothing the PRODUCING contract can emit. The
+      // value is an RFC 8707 resource-indicator URI, and upstream better-auth
+      // 1.7.1 — the sole writer of this table (`managedBy: 'better-auth'`) —
+      // stores that same identifier in `oauthResource.identifier` as
+      // **varchar(255)** on MySQL (`better-auth/dist/db/get-migration.mjs`,
+      // `getType`: a unique string column → varchar(255)) and this referring
+      // column as varchar(36) (its `field.references` branch). A resource
+      // whose identifier exceeded 768 characters could never have been
+      // registered upstream in the first place.
+      //
+      // 768 rather than upstream's 255 on purpose: it is the SMALLEST
+      // narrowing that makes the index expressible, so it rejects the least of
+      // the referent's declared domain. Guessing a tighter number to make a
+      // key fit is what `sys_account.issuer` refuses to do.
+      //
+      // ⛔ Unlike `sys_verification.value`, this index is NOT removable: this
+      // is the FK side of `sys_oauth_resource.identifier` and upstream reads it
+      // as a predicate (`findOne({ clientId, resourceId })` on the client
+      // registration collision path), so it is a live access path.
+      maxLength: 768,
       description: 'Foreign key to sys_oauth_resource.identifier',
     }),
 

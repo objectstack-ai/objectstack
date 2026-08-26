@@ -87,6 +87,37 @@ const result = ApiMethod.parse(data);
 | **archive** | `{ after: string; to: string; keep?: string }` | optional | Cold-store archival (LifecycleService Archiver) — audit-class hot→cold hand-off. |
 | **reclaim** | `boolean` | optional | Run driver space reclamation (SQLite incremental_vacuum) after sweeping this object. Default true for non-record classes. |
 
+### Nested Shape: `Lifecycle.retention`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **maxAge** | `string` | ✅ | Rows older than this (by created_at) are deleted by the Reaper — or archived first when `archive` is set. |
+| **onlyWhen** | `Record<string, string \| number \| boolean \| { $in: (string \| number)[] } \| { $null: boolean }>` | optional | Row filter the retention applies to — per-field equality, `{$in: [...]}` or the null predicate `{$null: true\|false}` (e.g. `{ status: { $in: ["completed", "failed"] } }`). Rows OUTSIDE the filter are retained regardless of age: for tables that interleave live workflow state with terminal history (sys_automation_run). Incompatible with rotation storage and archive, which act on whole shards / age alone. |
+
+### Nested Shape: `Lifecycle.ttl`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **field** | `string` | ✅ | Timestamp field the TTL is measured from (e.g. created_at, expires_at). |
+| **expireAfter** | `string` | ✅ | Rows expire this long after `field` and are deleted by the Reaper. |
+| **onlyWhen** | `Record<string, string \| number \| boolean \| { $in: (string \| number)[] } \| { $null: boolean }>` | optional | Row filter the TTL reap applies to — per-field equality, `{$in: [...]}` or the null predicate `{$null: true\|false}` (e.g. `{ revoked_at: { $null: true } }`). Rows OUTSIDE the filter are retained regardless of expiry: for tables that interleave live rows with terminal history a TTL keyed on the same timestamp would otherwise destroy (a sys_session audit tombstone backdates expires_at, so a naive TTL reaps tombstones first). Incompatible with rotation storage, which DROPs whole shards, and with archive, which selects rows by the ttl cutoff alone and does not apply this filter. |
+
+### Nested Shape: `Lifecycle.storage`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **strategy** | `'rotation'` | ✅ | Time-shard the table. The retained window (`shards` × `unit`) is the same on every dialect; the reclamation is not — SQLite DROPs the oldest shard whole (O(1) reclaim), other dialects reap that same window by age from `created_at`. |
+| **shards** | `integer` | ✅ | Number of shards retained; total window = shards × unit. |
+| **unit** | `Enum<'day' \| 'week' \| 'month'>` | ✅ | Time width of one shard. |
+
+### Nested Shape: `Lifecycle.archive`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **after** | `string` | ✅ | Rows older than this are copied to the archive datasource before hot deletion. |
+| **to** | `string` | ✅ | Target datasource name for cold storage. When it is not registered, the Archiver skips (audit rows are then retained, never dropped unarchived). |
+| **keep** | `string` | optional | How long archived rows are kept in cold storage (undefined = forever). |
+
 
 ---
 
@@ -153,6 +184,313 @@ const result = ApiMethod.parse(data);
 | **_packageVersion** | `string` | optional | Owning package version. |
 | **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
 
+### Nested Shape: `Object.userActions`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **create** | `boolean \| { enabled?: boolean; visibleWhen?: string \| object; disabledWhen?: string \| object }` | optional | Show generic "New" button. Boolean, or an object adding visibleWhen/disabledWhen CEL predicates evaluated once per toolbar against the record in scope (the host record on a related list). |
+| **import** | `boolean \| { enabled?: boolean; visibleWhen?: string \| object; disabledWhen?: string \| object }` | optional | Show CSV import wizard entry. Boolean, or an object adding visibleWhen/disabledWhen CEL predicates evaluated once per toolbar against the record in scope (the host record on a related list). |
+| **edit** | `boolean \| { enabled?: boolean; visibleWhen?: string \| object; disabledWhen?: string \| object }` | optional | Allow inline / form edit of existing rows. Boolean, or an object adding per-record visibleWhen/disabledWhen CEL predicates. |
+| **delete** | `boolean \| { enabled?: boolean; visibleWhen?: string \| object; disabledWhen?: string \| object }` | optional | Show row-level delete + bulk delete. Boolean, or an object adding per-record visibleWhen/disabledWhen CEL predicates. |
+| **exportCsv** | `boolean` | optional | Show CSV export entry. |
+
+### Nested Shape: `Object.systemFields`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **tenant** | `boolean` | optional | Inject the organization_id column. Default true (the column is always provisioned; the multi-tenant flag governs only its index). |
+| **audit** | `boolean` | optional | Inject the audit columns (created_at/created_by/updated_at/updated_by). Default true. |
+
+### Nested Shape: `Object.external`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **remoteName** | `string` | optional | Remote table/view name. Defaults to object.name. |
+| **remoteSchema** | `string` | optional | Remote schema/database qualifier. |
+| **writable** | `boolean` | optional (default: `false`) | Per-object write opt-in (also requires datasource.external.allowWrites). |
+| **columnMap** | `Record<string, string>` | optional | Remote column name → local field name. |
+| **introspectedAt** | `string` | optional | Set by `os datasource introspect`; informational. |
+| **ignoreColumns** | `string[]` | optional | Remote columns to skip during validation (dev convenience). |
+
+### Nested Shape: `Object.fields[string]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | optional | Machine name (snake_case) |
+| **label** | `string` | optional | Human readable label |
+| **type** | `Enum<'text' \| 'textarea' \| 'email' \| 'url' \| 'phone' \| 'password' \| 'secret' \| …>` | ✅ | Field Data Type |
+| **description** | `string` | optional | Tooltip/Help text |
+| **format** | `string` | optional | Format string (e.g. email, phone) |
+| **required** | `boolean` | optional (default: `false`) | Write-time contract (ADR-0113): an insert must provide a non-null value, and an update may not null it out. On a multi-value lookup (`multiple: true`) required means NON-EMPTY array — an emptied required set fails validation loudly; `[]` does not satisfy it (#9447, maintainer ruling 2026-08-18). NOT a column constraint — the physical NOT NULL is a separate explicit opt-in (`storage.notNull`), so tightening this on a deployed object is safe: existing null rows stay readable, and editable as long as the write does not touch this field. |
+| **storage** | `{ notNull?: boolean }` | optional | Physical storage constraints (ADR-0113). Owns the DDL the write contract deliberately does not imply. Absent = no storage-level constraint requested. |
+| **searchable** | `boolean` | optional (default: `false`) | Is searchable |
+| **multiple** | `boolean` | optional (default: `false`) | Allow multiple values (Stores as Array/JSON). Applicable for select, lookup, file, image. An emptied multi-value lookup reads back as `[]`, never `null` — the rule binds every writer (cascade repair, form clears, API writes), not just cascade repair (#9447, maintainer ruling 2026-08-18). |
+| **unique** | `boolean \| 'global' \| 'organization'` | optional (default: `false`) | Unique constraint and its scope (ADR-0120). 'organization' = one holder per organization (NULL-safe composite with the organization key part on organization-scoped objects) — prefer this explicit spelling in new code; true = same per-organization scope (positional synonym, stays valid); 'global' = one holder across the whole installation. 'tenant'/'org' are rejected — the word is 'organization' |
+| **defaultValue** | `any` | optional | Default applied on INSERT when the field is omitted or null (`''` is a real value, not absence). Three legal shapes (#7127), discriminated in the engine's own order: a CEL Expression envelope `{ dialect: 'cel', source: 'today()' }` (accepted structurally; result type is a runtime concern); a runtime TOKEN — `NOW()` on `datetime`/`date`/`time` only, `current_user` on `user` or `lookup` with `reference: 'sys_user'` only, neither on a multi-value field; or a LITERAL, which must satisfy this field's own stored value contract (ADR-0104 D1 `valueSchemaFor`). Anything else is refused at parse time with a prescriptive message. |
+| **maxLength** | `integer` | optional | Max character length (positive integer). Only authorable on types that store a bounded string: text, textarea, email, url, phone, password, markdown, html, richtext, code, signature, qrcode. |
+| **minLength** | `integer` | optional | Min character length (positive integer; `minLength: 0` is refused — express "no minimum" by omitting the key). Only authorable on types that store a bounded string: text, textarea, email, url, phone, password, markdown, html, richtext, code, signature, qrcode. |
+| **precision** | `integer` | optional | Total digits (non-negative integer) |
+| **scale** | `integer` | optional | Decimal places (non-negative integer) |
+| **min** | `number` | optional | Minimum value |
+| **max** | `number` | optional | Maximum value |
+| **useGrouping** | `boolean` | optional | Digit-grouping presentation hint for `number` fields (#7768) — maps to `Intl.NumberFormat`'s `useGrouping`. Absent = renderer decides (interim heuristic today, locale default eventually); `false` = author opts out of grouping (e.g. a year or other ordinal/identifier integer); `true` = author pins grouping on. |
+| **accept** | `string[]` | optional | Permitted upload types for media fields, as MIME types or extensions (e.g. ["image/*", ".pdf"]). Offered to the file picker AND enforced on write. |
+| **maxSize** | `integer` | optional | Maximum permitted file size in BYTES for media fields. Enforced on write against the stored file size, not just checked in the browser. |
+| **options** | `{ label: string; value: string; color?: string; default?: boolean; … }[]` | optional | Static options for select/multiselect |
+| **reference** | `string` | optional | Target object name (snake_case) for lookup/master_detail fields. Required for relationship types. Used by $expand to resolve foreign key IDs into full objects. |
+| **referenceVia** | `string` | optional | Declares this text field as the id half of a polymorphic pointer pair (ADR-0052 §5 ActivityPointer): the value is a record id of the object named by the SIBLING FIELD this key names — e.g. `record_id` with `referenceVia: 'object_name'`. The sibling must be a declared field on the same object holding an object machine name. Text fields only; mutually exclusive with `reference` (a static and a per-record target contradict). Enforced today at seed load: the value resolves as a natural key against the object the sibling column names, and an unresolvable pointer is refused loudly instead of stored verbatim. Adds no referential integrity or $expand behavior. |
+| **deleteBehavior** | `Enum<'set_null' \| 'cascade' \| 'restrict'>` | optional (default: `"set_null"`) | What happens if referenced record is deleted |
+| **inlineEdit** | `boolean \| Enum<'grid' \| 'form'>` | optional | Edit these child records inline within the parent's form (atomic master-detail). true = auto-pick grid/form by child shape; 'grid' = editable line-item grid; 'form' = list + per-row full form. |
+| **inlineTitle** | `string` | optional | Title for the inline master-detail grid |
+| **inlineColumns** | `{ name: string; label?: string; type?: Enum<'text' \| 'number' \| 'currency' \| 'date' \| 'datetime' \| 'time' \| 'select' \| 'lookup' \| 'file'>; width?: number; … }[]` | optional | Explicit columns for the inline grid (derived from the child object when omitted). Each entry is a strict, name-keyed column (`{ name, label?, type?, … }` — objectui GridColumn, #3951); identity-only entries (`{ name }`) hydrate everything else from the child object's fields. Unknown keys and the retired `field` spelling are refused at parse. |
+| **inlineAmountField** | `string` | optional | Numeric child field summed for the inline grid total |
+| **relatedList** | `boolean \| 'primary'` | optional | Show this child collection as a related list on the parent's detail page (read-side mirror of inlineEdit). false = suppress; true/absent = shown (stacked under the shared "Related" tab); 'primary' = core relationship, promoted to its own tab. Prominence intent, not a layout switch (ADR-0085). |
+| **relatedListTitle** | `string` | optional | Title for the detail-page related list |
+| **relatedListColumns** | `string[]` | optional | Explicit columns for the detail-page related list, as child field names (e.g. ['name', 'status']); derived from the child object (highlightFields → field walk) when omitted. Strings only — labels, cell types and formatting always derive from the child object's field definitions; column objects are refused at parse. |
+| **relatedListFilter** | `any` | optional | Declarative default filter for the detail-page related list: AND-composed with the parent-relationship condition `{ [referenceField]: parentId }` — an authored constraint, never a user-editable suggestion. The related-list tab badge count honors the same composed filter, so counts match the visible rows. Canonical Query-DSL FilterCondition (the same dialect as a query `where`), e.g. `{ status: { $ne: 'deleted' } }` to hide soft-deleted children. |
+| **displayField** | `string` | optional | Field shown as each candidate's label in the picker/popover (defaults to the referenced object's name/title). |
+| **descriptionField** | `string` | optional | Secondary field shown under the label in the quick-select popover. |
+| **lookupColumns** | `(string \| { field: string; label?: string; width?: string; type?: string })[]` | optional | Explicit columns for the record-picker table; auto-derived from the referenced object when omitted. |
+| **lookupPageSize** | `integer` | optional | Rows per page in the record-picker dialog (default 10). |
+| **lookupFilters** | `{ field: string; operator: Enum<'eq' \| 'ne' \| 'gt' \| 'lt' \| 'gte' \| 'lte' \| 'contains' \| 'in' \| 'notIn'>; value: any }[]` | optional | Base filters restricting which records are selectable (e.g. only active). The structured, picker-honoured lookup filter. |
+| **dependsOn** | `(string \| { field: string; param?: string })[]` | optional | Declares that this field's available values depend on the value of other field(s) on the same record — the form gates the field until they are set and re-evaluates as they change. For `lookup`/`master_detail` it scopes the candidate query (string = same local/remote key; `{field,param}` when the remote filter key differs — the `{field,param}` form is lookup-only). For `select`/`multiselect`/`radio` the actual per-option rule lives in each option's `visibleWhen`; list the referenced fields here (string form) so the option list gates and refreshes with the parent. |
+| **allowCreate** | `boolean` | optional | Allow inline quick-create from the record picker: when no match exists the user can create a record from the typed text (optimistic dataSource.create with the display field). Best for simple objects whose only required field is the display field. |
+| **expression** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Formula expression (CEL). e.g. F`record.amount * 0.1` |
+| **returnType** | `Enum<'number' \| 'text' \| 'boolean' \| 'date'>` | optional | Inferred value type of a formula field (number/text/boolean/date) |
+| **summaryOperations** | `{ object: string; field: string; function: Enum<'count' \| 'sum' \| 'min' \| 'max' \| 'avg'>; relationshipField?: string; … }` | optional | Roll-up summary definition. The engine recomputes the value when child records are inserted/updated/deleted. |
+| **language** | `string` | optional | Programming language for syntax highlighting (e.g., javascript, python, sql) |
+| **step** | `number` | optional | Step increment for slider (default: 1) |
+| **currencyConfig** | `{ precision?: integer; currencyMode?: Enum<'dynamic' \| 'fixed'>; defaultCurrency?: string }` | optional | Configuration for currency field type |
+| **dimensions** | `integer` | optional | Vector dimensionality (e.g., 1536 for OpenAI embeddings) |
+| **trackHistory** | `boolean` | optional | Render this field's value changes as human-readable entries on the record activity timeline (ADR-0052 §5b). Opt-in per field. |
+| **group** | `string` | optional | Field group name for organizing fields in forms and layouts (e.g., "contact_info", "billing", "system") |
+| **visibleWhen** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Predicate (CEL) — field is shown only when TRUE (else hidden). e.g. P`record.type == 'invoice'` |
+| **readonlyWhen** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Predicate (CEL) — field is read-only when TRUE. e.g. P`record.status == 'paid'` |
+| **requiredWhen** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Predicate (CEL) — field is required when TRUE. The only slot; the `conditionalRequired` alias was removed in protocol 17 (#3855). |
+| **conditionalRequired** | `never` | optional | [REMOVED] `conditionalRequired` was removed in @objectstack/spec 17 (#3855) — use `requiredWhen`. Rename the key; the value (a CEL predicate) is unchanged. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
+| **widget** | `string` | optional | Form widget override — names a registered field component (resolved as `field:<widget>`) to render this field instead of the `type` default. Degrades to the `type` renderer when unregistered. e.g. "object-ref", "filter-condition", "recipient-picker". |
+| **hidden** | `boolean` | optional (default: `false`) | Hidden from default UI |
+| **internal** | `boolean` | optional | [#7728] Never return this field's value on the generic data path — the engine OMITS the key from `find`/`findOne` results, the 201 create body and the by-id update body, on the default projection AND when a client names the field in `?select=`. Storage, filtering and indexing are untouched, so a server-side verifier can still match on the column and a purpose-built mint route can still return the value once at creation. The read protection for ADR-0100's third credential channel (auth-subsystem one-way hashes on `text` columns). Omission, not masking: a mask signals 'a value is set', which carries no information on a `required` column. |
+| **readonly** | `boolean` | optional (default: `false`) | Read-only — never editable in forms, AND server-enforced on BOTH write paths: a non-system write to this field is silently dropped from the payload on UPDATE (#2948/#3003) and on INSERT (#3043; a create can no longer directly seed e.g. `approval_status: "approved"`), symmetric with `readonlyWhen`. A stripped INSERT field still falls back to its `defaultValue`. Exempt from the strip on BOTH paths: `isSystem` writes (seed replay, migration). Exempt on the UPDATE path ONLY: an opt-in "historical" import (`preserveAudit`, #3493) — which admits a whitelist (the audit/timestamp family plus author-declared business `readonly` fields). On INSERT the exemption does NOT apply (#6640): a non-system create that requests `preserveAudit` still has its readonly fields stripped, and is warned loudly that the exemption is UPDATE-only — replaying archival readonly facts on create requires a system context. A normal (non-system) import is NOT system-context and still strips. |
+| **requiredPermissions** | `string[]` | optional | [ADR-0066 D3] Capabilities required to read/edit this field (mask on read, deny on write; AND-gate). |
+| **maskingRule** | `Enum<'phone' \| 'id_card' \| 'bank_account' \| 'email' \| 'name'> \| { keepHead: integer; keepTail: integer }` | optional | [#8993] Partial masking rule enforced by the runtime FieldMasker (single channel — API, UI, export and AI context all see the same masked value). A named preset ('phone' 138****5678, 'id_card' keep 6+4, 'bank_account' keep last 4, 'email' j***@example.com, 'name' keep first char) or `{ keepHead, keepTail }`. Masked for every non-system caller unless the field's `requiredPermissions` are ALL held (that evaluation is the unmask gate); a permission set marking the field non-readable still deletes it entirely. Deterministic, length-preserving output; masked callers cannot filter/sort/group/aggregate on the field. |
+| **ackPlaintextMasking** | `boolean` | optional | [ADR-0100] Affirm a generic `password` field's plaintext-at-rest / masked-on-read contract is intended, silencing the author-time warning (#3420). No effect on non-password fields. |
+| **system** | `boolean` | optional | Auto-injected system/audit field (e.g. created_at, updated_by, organization_id). Tools that surface system fields separately from author-declared business fields should branch on this flag. |
+| **sortable** | `boolean` | optional (default: `true`) | Whether field is sortable in list views |
+| **inlineHelpText** | `string` | optional | Help text displayed below the field in forms |
+| **placeholder** | `string` | optional | Placeholder text rendered inside the empty input (the HTML placeholder attribute); disappears once a value is entered. Distinct from `inlineHelpText` (always-visible help rendered beside/under the input) and `description` (tooltip/developer documentation). |
+| **autonumberFormat** | `string` | optional (default: `"{0000}"`) | Auto-number format: literal text + `{0000}` counter, `{YYYY}`/`{MM}`/`{DD}`/`{YYYYMMDD}` date tokens (business tz), and `{field_name}` interpolation. Counter resets per rendered prefix (e.g. AD`{YYYYMMDD}``{0000}` resets daily). Omitted on an `autonumber` field ⇒ the contract default `{0000}` (#6555). |
+| **externalId** | `boolean` | optional (default: `false`) | Is external ID for upsert operations |
+| **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
+| **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
+| **_lockSource** | `Enum<'artifact' \| 'package' \| 'env-forced'>` | optional | Layer that set _lock (artifact \| package \| env-forced). |
+| **_provenance** | `Enum<'package' \| 'org' \| 'env-forced'>` | optional | Origin of the item (package \| org \| env-forced). |
+| **_packageId** | `string` | optional | Owning package machine id. |
+| **_packageVersion** | `string` | optional | Owning package version. |
+| **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
+
+### Nested Shape: `Object.indexes[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | optional | Index name (auto-generated if not provided) |
+| **fields** | `string[]` | ✅ | Fields included in the index |
+| **unique** | `boolean \| 'global' \| 'organization'` | optional (default: `false`) | Whether the index enforces uniqueness, and at which scope (ADR-0120). 'global' = materialized over exactly `fields`, no organization column injected — one holder across the whole installation; 'organization' = the driver prepends the NULL-safe organization key part (COALESCE(organization_id, '__global__')) at registration — one holder per organization; bare true = deprecated positional spelling of 'global' (warned in 17.x by lint unique/unscoped-declared-index, rejected at protocol 18, #5082) — state the scope. 'tenant'/'org' are rejected — the word is 'organization' |
+| **type** | `never` | optional | [REMOVED] `indexes[].type` was removed in @objectstack/spec 17.0.0 (#5248, ADR-0049) — no driver ever read it. `SqlDriver.syncDeclaredIndexes` creates every declared index through knex's `table.index()` / `table.unique()`, which cannot express an access method, so the value changed no DDL; its `.default('btree')` merely made an inert knob show up in every parse output. Delete the key. The index method is the driver/dialect's decision (Postgres defaults to B-tree; `gin`/`gist`/`fulltext` are dialect-specific and are chosen by a database-layer migration when a workload actually needs one). Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
+| **partial** | `never` | optional | [REMOVED] `indexes[].partial` was removed in @objectstack/spec 17.0.0 (#5248, #4943, ADR-0049) — no driver ever emitted the `WHERE` clause, so a declared partial index was materialized as a FULL index and the predicate silently did nothing. Delete the key. Partial indexes are built at the database layer, not the declaration surface: issue `CREATE [UNIQUE] INDEX … WHERE <predicate>` from a runtime migration (this is what `metadata-protocol`'s `ensureOverlayIndex` already does for `sys_metadata`). Drift detection is unaffected — it reads partiality back from the database's own DDL, never from this key. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
+
+### Nested Shape: `Object.fieldGroups[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **key** | `string` | ✅ | Group machine key (snake_case). Referenced by Field.group. |
+| **label** | `string` | ✅ | Group display label |
+| **icon** | `string` | optional | Icon name (Lucide/Material) for the group header |
+| **description** | `string` | optional | Optional description shown under the group header |
+| **collapse** | `Enum<'none' \| 'expanded' \| 'collapsed'>` | optional (default: `"none"`) | [ADR-0085] Section collapse behaviour: 'none' (always open, no toggle), 'expanded' (collapsible, starts open), 'collapsed' (collapsible, starts closed). |
+| **defaultExpanded** | `boolean` | optional | [DEPRECATED → collapse] true → 'expanded', false → 'collapsed'. |
+| **collapsible** | `boolean` | optional | [DEPRECATED → collapse] Boolean pair with `collapsed`; use the `collapse` enum. |
+| **collapsed** | `boolean` | optional | [DEPRECATED → collapse] Boolean pair with `collapsible`; use the `collapse` enum. |
+
+### Nested Shape: `Object.tenancy`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **enabled** | `boolean` | ✅ | Enable multi-tenancy for this object |
+| **tenantField** | `string` | optional | Column this object is tenant-scoped by. Omit it unless the tenant column genuinely is not the platform's: when undeclared the driver falls back to `organization_id`, the kernel-injected column the RLS predicates and `tenantPolicy()` also assume. A declared name is honoured only when the object really has that field — otherwise the same `organization_id` fallback applies. No default is materialized here on purpose (#5315). |
+| **organizationField** | `string` | optional | STAMP-ONLY (#8778, widened by cloud#1395): column carrying the organization a row is ABOUT, consulted by the three sanctioned platform-row writers — audit stamping, the approval-row writer (`plugin-approvals`), and the automation-run recorder (`service-automation`) — via the shared `resolveRecordOrganizationField` resolver in `@objectstack/metadata-core`. It does NOT tenant-scope anything — no read path (`applyTenantScope`, `injectTenantOnInsert`, `computeTenantLayer0Filter`) reads it, so declaring it never walls the object and never hides rows. Declare it only when the organization a row belongs to lives under a column that deliberately is NOT the tenant column: `sys_api_key` is the shipped example — a credential table that must stay unwalled (`enabled: false`) while history/revocation audit rows stamp the organization of the key they describe (`active_organization_id`). Ordinary tenant objects omit it; their stamp column is resolved from `tenantField` / `organization_id` already. Honoured only when the object really has the field, like `tenantField`. |
+
+### Nested Shape: `Object.access`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **default** | `Enum<'public' \| 'private'>` | optional (default: `"public"`) | Default exposure posture: public (covered by wildcard grants) \| private (needs explicit grant; exempt from wildcard RLS). |
+
+### Nested Shape: `Object.requiredPermissions`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **read** | `string[]` | optional | Capabilities required to read (find/findOne/count/aggregate). |
+| **create** | `string[]` | optional | Capabilities required to create (insert). |
+| **update** | `string[]` | optional | Capabilities required to update (update/transfer/restore). |
+| **delete** | `string[]` | optional | Capabilities required to delete (delete/purge). |
+
+### Nested Shape: `Object.lifecycle`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **class** | `Enum<'record' \| 'audit' \| 'telemetry' \| 'transient' \| 'event'>` | ✅ | Persistence contract: record (business truth, permanent) \| audit (compliance ledger) \| telemetry (high-freq log) \| transient (ephemeral state) \| event (bus messages). |
+| **retention** | `{ maxAge: string; onlyWhen?: Record<string, string \| number \| boolean \| object \| object> }` | optional | Age-based retention window enforced by the LifecycleService Reaper. |
+| **ttl** | `{ field: string; expireAfter: string; onlyWhen?: Record<string, string \| number \| boolean \| object \| object> }` | optional | Per-row TTL auto-expiry (transient/event classes). |
+| **storage** | `{ strategy: 'rotation'; shards: integer; unit: Enum<'day' \| 'week' \| 'month'> }` | optional | Physical storage strategy for high-frequency telemetry (LifecycleService Rotator). |
+| **archive** | `{ after: string; to: string; keep?: string }` | optional | Cold-store archival (LifecycleService Archiver) — audit-class hot→cold hand-off. |
+| **reclaim** | `boolean` | optional | Run driver space reclamation (SQLite incremental_vacuum) after sweeping this object. Default true for non-record classes. |
+
+### Nested Shape: `Object.activityMilestones[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **field** | `string` | ✅ | Field to watch (typically a status/stage select). |
+| **value** | `string` | ✅ | The value the field must transition INTO to fire the milestone. |
+| **summary** | `string` | ✅ | Activity summary template; `{field}` tokens interpolate the record value. e.g. "Deal won: `{name}`". |
+| **type** | `string` | optional | Activity type for the emitted row (default "completed"). |
+
+### Nested Shape: `Object.listViews[string]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | optional | Internal view name (lowercase snake_case) |
+| **label** | `string \| Record<string, string>` | optional | Display label — the default-language string, or an inline locale map (`{ en, "zh-CN" }`) resolved at render time |
+| **type** | `Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>` | optional (default: `"grid"`) |  |
+| **data** | `{ provider: 'object'; object: string } \| { provider: 'api'; read?: object; write?: object } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }` | optional | Data source configuration (defaults to "object" provider) |
+| **columns** | `string[] \| { field: string; label?: string \| Record<string, string>; width?: number; align?: Enum<'left' \| 'center' \| 'right'>; … }[]` | ✅ | Fields to display as columns |
+| **filter** | `{ field: string; operator?: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Filter criteria (JSON Rules) |
+| **sort** | `string \| { field: string; order: Enum<'asc' \| 'desc'> }[]` | optional |  |
+| **searchableFields** | `string[]` | optional | Fields enabled for search |
+| **filterableFields** | `string[]` | optional | Legacy shorthand for userFilters.fields — bare field names enabled for end-user filtering. Prefer userFilters |
+| **resizable** | `boolean` | optional | Enable column resizing |
+| **compactToolbar** | `boolean` | optional | Collapse Group/Color/Density/Hide-fields into a single View settings popover |
+| **selection** | `{ type?: Enum<'none' \| 'single' \| 'multiple'> }` | optional | Row selection configuration |
+| **navigation** | `{ mode?: Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>; view?: string; preventNavigation?: boolean; openNewTab?: boolean; … }` | optional | Configuration for item click navigation (page, drawer, modal, etc.) |
+| **pagination** | `{ pageSize?: integer; pageSizeOptions?: integer[] }` | optional | Pagination configuration |
+| **kanban** | `{ groupByField: string; summarizeField?: string; columns: string[] }` | optional | Kanban-board configuration — applies when the view renders as a kanban layout |
+| **calendar** | `{ startDateField: string; endDateField?: string; titleField: string; colorField?: string }` | optional | Calendar configuration — applies when the view renders as a calendar layout |
+| **gantt** | `{ startDateField: string; endDateField: string; titleField: string; progressField?: string; … } & Record<string, any>` | optional | Gantt-timeline configuration — applies when the view renders as a gantt layout |
+| **gallery** | `{ coverField?: string; coverFit?: Enum<'cover' \| 'contain'>; cardSize?: Enum<'small' \| 'medium' \| 'large'>; titleField?: string; … }` | optional | Gallery/card view configuration |
+| **timeline** | `{ startDateField: string; endDateField?: string; titleField: string; groupByField?: string; … }` | optional | Timeline view configuration |
+| **chart** | `{ chartType?: Enum<'bar' \| 'line' \| 'pie' \| 'area' \| 'scatter'>; dataset: string; dimensions?: string[]; values: string[] }` | optional | List chart view configuration |
+| **map** | `{ latitudeField?: string; longitudeField?: string; locationField?: string; titleField?: string; … }` | optional | Map configuration — applies when the view renders as a map layout |
+| **tree** | `{ parentField?: string; labelField?: string; fields?: string[]; defaultExpandedDepth?: integer } & Record<string, any>` | optional | Tree/hierarchy configuration — applies when the view renders as a tree layout |
+| **description** | `string \| Record<string, string>` | optional | View description for documentation/tooltips |
+| **sharing** | `{ type?: Enum<'personal' \| 'collaborative'>; lockedBy?: string }` | optional | View sharing and access configuration |
+| **rowHeight** | `Enum<'compact' \| 'short' \| 'medium' \| 'tall' \| 'extra_tall'>` | optional | Row height / density setting |
+| **grouping** | `{ fields: object[] }` | optional | Group records by one or more fields |
+| **rowColor** | `{ field: string; colors?: Record<string, string> }` | optional | Color rows based on field value |
+| **hiddenFields** | `string[]` | optional | Fields to hide in this specific view |
+| **fieldOrder** | `string[]` | optional | Explicit field display order for this view |
+| **rowActions** | `string[]` | optional | Actions available for individual row items |
+| **bulkActions** | `string[]` | optional | Actions available when multiple rows are selected |
+| **bulkActionDefs** | `{ name: string; label?: string; icon?: string; variant?: Enum<'primary' \| 'secondary' \| 'danger' \| 'ghost' \| 'outline'>; … }[]` | optional | Rich bulk action definitions (schema-driven, executed via BulkActionDialog). Use a def for a mass data-plane mutation ('update' with a `patch` / 'delete') that no action expresses, or for an `operation: 'custom'` + `execution: 'aggregate'` entry (objectui#3139) that dispatches the action it NAMES once for the whole selection — the renderer injects `params._selectedIds: string[]` (read that on the server, not `recordId`) so a single call can produce one aggregate artifact (zip of QR codes, merged PDF, batch print). Aggregate results are all-or-nothing: a handler that cannot cover the whole selection must reject, and per-row retry is replaced by re-running the action. `batchSize` does not apply (the call is never chunked); set `maxRecords` on defs whose server work is expensive. For the PER-RECORD dispatch use `bulkActions: ['<name>']` instead — the bare-string form, promoted with the action's own label, params and `visible`; a 'custom' def without `execution: 'aggregate'` has no dispatcher and is refused at parse time (#4457). Toolbar url/api actions can also interpolate the current selection via `${ctx.selection.ids}` / `${ctx.selection.count}`. |
+| **conditionalFormatting** | `{ condition: string \| object; style: Record<string, string> }[]` | optional | Conditional formatting rules for list rows |
+| **inlineEdit** | `boolean` | optional | Allow inline editing of records directly in the list view |
+| **exportOptions** | `Enum<'csv' \| 'xlsx' \| 'json'>[] \| { formats?: Enum<'csv' \| 'xlsx' \| 'json'>[]; maxRecords?: integer; includeHeaders?: boolean; fileNamePrefix?: string; … }` | optional | Export configuration for the list toolbar export menu: `{ formats?, maxRecords?, includeHeaders?, fileNamePrefix?, streaming? }`. A bare format array is the legacy spelling and lifts to `{ formats: [...] }` at parse. |
+| **userActions** | `{ sort?: boolean; search?: boolean; filter?: boolean; refresh?: boolean; … }` | optional | User action toggles for the view toolbar |
+| **appearance** | `{ showDescription?: boolean; allowedVisualizations?: Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>[] }` | optional | Appearance and visualization configuration |
+| **tabs** | `{ name: string; label?: string \| Record<string, string>; icon?: string; view?: string; … }[]` | optional | Tab definitions for multi-tab view interface |
+| **addRecord** | `{ enabled?: boolean; position?: Enum<'top' \| 'bottom' \| 'both'>; mode?: Enum<'inline' \| 'form' \| 'modal'>; formView?: string }` | optional | Add record entry point configuration |
+| **showRecordCount** | `boolean` | optional | Show record count at the bottom of the list |
+| **allowPrinting** | `boolean` | optional | Allow users to print the view |
+| **emptyState** | `{ title?: string \| Record<string, string>; message?: string \| Record<string, string>; icon?: string }` | optional | Empty state configuration when no records found |
+| **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes for the list view |
+| **responsive** | `never` | optional | [REMOVED] `view.responsive` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — no renderer ever read it; the grid is responsive by its own layout rules. Delete the key. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
+| **performance** | `never` | optional | [REMOVED] `view.performance` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — no renderer or runtime read it; list-view performance tuning was never implemented. Delete the key. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
+| **striped** | `never` | optional | [REMOVED] `view.striped` was removed in @objectstack/spec 17.0.0 (#7176, ADR-0049 enforce-or-remove) — every measured reader only copied it forward and no renderer ever applied it, so authoring it was a parse-clean no-op. There is no authorable striped-rows switch; delete the key. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
+| **bordered** | `never` | optional | [REMOVED] `view.bordered` was removed in @objectstack/spec 17.0.0 (#7176, ADR-0049 enforce-or-remove) — every measured reader only copied it forward and no renderer ever applied it (the grid frame is the renderer's own constant, not authorable). Delete the key. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
+| **virtualScroll** | `never` | optional | [REMOVED] `view.virtualScroll` was removed in @objectstack/spec 17.0.0 (#7176, ADR-0049 enforce-or-remove) — every measured reader only copied it forward and no grid ever virtualized off it; authoring it was a parse-clean no-op. Delete the key; large datasets page via `pagination`. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
+| **userFilters** | `{ element?: Enum<'dropdown' \| 'toggle'>; fields?: object[] }` | optional |  |
+
+### Nested Shape: `Object.enable`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **trackHistory** | `boolean` | optional (default: `false`) | Show the record History tab (audit-trail UI). Pair with per-field trackHistory to pick which field diffs are summarized; audit capture itself is always on for compliance |
+| **searchable** | `boolean` | optional (default: `true`) | Index records for global search |
+| **apiEnabled** | `boolean` | optional (default: `true`) | Expose object via automatic APIs |
+| **apiMethods** | `Enum<'get' \| 'list' \| 'create' \| 'update' \| 'delete' \| 'bulk'>[]` | optional | Whitelist of allowed API operations (six primitives; undefined = all, [] = none) |
+| **files** | `boolean` | optional (default: `false`) | Generic record Attachments panel (sys_attachment). Opt-in: true surfaces the panel and permits attachments to target this object; otherwise any write that makes an attachment target it is rejected (403 FILES_DISABLED) — a create and an update that re-points an existing attachment alike. Field.file/Field.image are independent |
+| **feeds** | `boolean` | optional (default: `true`) | Record comments/collaboration feed. Default on; explicit false hides the feed UI and rejects any write that makes a comment target this object (403 FEEDS_DISABLED) — a new comment and an update that re-threads an existing one alike |
+| **activities** | `boolean` | optional (default: `true`) | Record activity timeline (sys_activity mirror of CRUD). Default on; explicit false stops mirroring and hides the timeline |
+| **clone** | `boolean` | optional (default: `true`) | Allow record deep cloning |
+
+### Nested Shape: `Object.publicSharing`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **enabled** | `boolean` | optional (default: `false`) | Allow records of this object to be published via share link |
+| **allowedAudiences** | `Enum<'public' \| 'link_only' \| 'signed_in' \| 'email'>[]` | optional | Audiences callers may select when creating a link |
+| **allowedPermissions** | `Enum<'view' \| 'comment' \| 'edit'>[]` | optional | Permission levels selectable on the share dialog |
+| **maxExpiryDays** | `integer` | optional | Reject links with expiry beyond this many days |
+| **redactFields** | `string[]` | optional | Field names removed from records served via a share token |
+| **eligibility** | `string` | optional | CEL expression that must evaluate to true on the target record |
+
+### Nested Shape: `Object.actions[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Machine name (lowercase snake_case) |
+| **label** | `string \| Record<string, string>` | ✅ | Display label |
+| **description** | `string \| Record<string, string>` | optional | Explanatory line shown under the title in the action's param dialog. Carries the confirm question for an action that collects params (one dialog, not two — #7278). Not the LLM-facing `ai.description`. |
+| **objectName** | `string` | optional | Target object this action belongs to. When set, the action is auto-merged into the object's actions array by defineStack(). |
+| **icon** | `string` | optional | Icon name |
+| **locations** | `Enum<'list_toolbar' \| 'list_item' \| 'record_header' \| 'record_more' \| …>[]` | optional | Locations where this action is visible |
+| **component** | `Enum<'action:button' \| 'action:icon' \| 'action:menu' \| 'action:group'>` | optional | Visual component override |
+| **type** | `Enum<'script' \| 'url' \| 'modal' \| 'flow' \| 'api' \| 'form'>` | optional (default: `"script"`) | Action functionality type |
+| **target** | `string` | optional | URL, Script Name, Flow ID, or API Endpoint. Supports $`{param.X}` and $`{ctx.X}` interpolation. |
+| **openIn** | `Enum<'self' \| 'new-tab'>` | optional | For type:'url' — where to open `target`. 'new-tab' opens a new browser tab; 'self' navigates in place. When omitted, external/absolute URLs open in a new tab and relative URLs navigate in place. Static execution option — keep it OUT of `params` (which is user-input-collection only). |
+| **body** | `{ language: 'expression'; source: string } \| { language: 'js'; source: string; capabilities?: Enum<'api.read' \| 'api.write' \| 'api.transaction' \| 'crypto.uuid' \| 'log'>[]; timeoutMs?: integer; … }` | optional | Action body — expression (L1) or sandboxed JS (L2). Only used when type is `script`. |
+| **execute** | `never` | optional | [REMOVED] `execute` was removed in @objectstack/spec 17 (#3855) — use `target`. Rename the key; the value (a handler / flow / URL ref) is unchanged. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
+| **params** | `{ name?: string; field?: string; objectOverride?: string; label?: string \| Record<string, string>; … }[]` | optional | Input parameters required from user — an ActionParam[] DEFINITION array, never a payload map (a static request body goes in `bodyExtra`). |
+| **variant** | `Enum<'primary' \| 'secondary' \| 'danger' \| 'ghost' \| 'link'>` | optional | Button visual variant for styling (primary = highlighted, danger = destructive, ghost = transparent) |
+| **order** | `number` | optional | Sort order within a location group (lower = higher). Promotes/demotes an action toward the record_header primary button; stable, so actions without `order` keep their registration order. |
+| **confirmText** | `string \| Record<string, string>` | optional | Confirmation message before execution. On a registered action, pairing this with a non-empty `params` is refused (#7428) — that opens a second dialog for one decision; put the question on `description` instead. Correct on a param-LESS action, where the confirm is the only dialog there is. |
+| **successMessage** | `string \| Record<string, string>` | optional | Success message to show after execution |
+| **errorMessage** | `string \| Record<string, string>` | optional | Error message to show when the action fails (overrides the raw error). |
+| **refreshAfter** | `boolean` | optional (default: `false`) | Refresh view after execution |
+| **undoable** | `boolean` | optional | Offer an Undo affordance after this single-record update action succeeds. |
+| **resultDialog** | `{ title?: string \| Record<string, string>; description?: string \| Record<string, string>; acknowledge?: string \| Record<string, string>; format?: Enum<'qrcode' \| 'code-list' \| 'secret' \| 'text' \| 'json'>; … }` | optional | Render API response in a one-shot reveal dialog (suppresses successMessage when set). |
+| **visible** | `boolean \| string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate — `true`/`false` literal, CEL string, or `{dialect, source}` envelope. The action is offered when it evaluates TRUE. Omit = always visible. |
+| **requiresFeature** | `Enum<'twoFactor' \| 'organization' \| 'multiOrgEnabled' \| 'degradedTenancy' \| …>` | optional | Public auth feature flag gating this action; lowered into `visible` at parse time. |
+| **disabled** | `boolean \| string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Disabled predicate — `true`/`false` literal, CEL string, or `{dialect, source}` envelope. The action is shown but refused when it evaluates TRUE. Omit = never disabled. |
+| **requiredPermissions** | `string[]` | optional | [ADR-0066 D4] Capabilities required to invoke this action. Enforced with 403 on the platform action route (script/flow/modal + MCP) and mirrored as a UI hide; a `type: api` action pointed at a custom endpoint must re-check it there. |
+| **shortcut** | `never` | optional | [REMOVED] `action.shortcut` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — it never triggered anything: no keydown listener feeds ActionEngine.getShortcuts(), and objectui's keyboard stack (useKeyboardShortcuts) is hand-registered and never consults action metadata. Delete the key. For a real shortcut, register the key in the Console keyboard stack and have its handler invoke the action by name. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
+| **bulkEnabled** | `never` | optional | [REMOVED] `action.bulkEnabled` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — the multi-select toolbar is driven by the LIST VIEW's `bulkActions` / `bulkActionDefs`, never by this flag, so setting it changed nothing. Delete the key and declare the action in the view's `bulkActions` instead. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
+| **ai** | `{ exposed?: boolean; description?: string; category?: Enum<'data' \| 'action' \| 'flow' \| 'integration' \| 'vector_search' \| 'analytics' \| 'utility'>; paramHints?: Record<string, object>; … }` | optional | AI exposure (opt-in). Set ai.exposed=true + ai.description to make this callable by agents. |
+| **recordIdParam** | `string` | optional | Body key to inject the row id into when running from a list_item context. |
+| **recordIdField** | `string` | optional | Row field whose value seeds recordIdParam. Defaults to "id". |
+| **bodyShape** | `'flat' \| { wrap: string }` | optional | Body wrapping: flat (default) or `{ wrap: key }` to nest user-collected params under a key. |
+| **method** | `Enum<'POST' \| 'PATCH' \| 'PUT' \| 'DELETE'>` | optional | HTTP method for type:"api" actions. Defaults to POST. |
+| **bodyExtra** | `Record<string, any>` | optional | Static request-body fields for a type:"api" action, merged last (overrides user params). `{{page.<var>}}` tokens are resolved by the runtime. This — not `params` — is where a payload goes. |
+| **mode** | `Enum<'create' \| 'edit' \| 'delete' \| 'custom'>` | optional | Semantic mode of the action. |
+| **opensInNewTab** | `boolean` | optional | Open the action result in a new tab. The renderer pre-opens the tab synchronously on click (popup-blocker-safe) and navigates it to the handler's redirectUrl. |
+| **newTabUrl** | `string` | optional | Direct new-tab URL template (`{recordId}` placeholder). When set with opensInNewTab, the renderer navigates the pre-opened tab here immediately — no action POST. The endpoint must enforce auth itself. |
+| **onSuccess** | `{ navigate: string; openIn?: Enum<'self' \| 'newTab'> }` | optional | Post-success navigation for type:'api' and type:'script' actions (#9566/#9474). `navigate` is a route/URL template interpolating $`{param.*}`, $`{ctx.*}` and $`{result.*}` (the server response); `openIn` defaults 'self'. The handler-return convention (`{ redirectUrl }` without openIn) keeps its 17.0.0 new-tab behavior. |
+| **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
+| **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
+| **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
+| **_lockSource** | `Enum<'artifact' \| 'package' \| 'env-forced'>` | optional | Layer that set _lock (artifact \| package \| env-forced). |
+| **_provenance** | `Enum<'package' \| 'org' \| 'env-forced'>` | optional | Origin of the item (package \| org \| env-forced). |
+| **_packageId** | `string` | optional | Owning package machine id. |
+| **_packageVersion** | `string` | optional | Owning package version. |
+| **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
+
+### Nested Shape: `Object.protection`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | ✅ | Lock policy — none \| no-overlay \| no-delete \| full. |
+| **reason** | `string` | ✅ | User-visible reason shown when the lock blocks an action. |
+| **docsUrl** | `string` | optional | Optional URL the Studio banner links to for more context. |
+
 
 ---
 
@@ -199,6 +537,93 @@ const result = ApiMethod.parse(data);
 | **validations** | `any[]` | optional | Additional validation rules to merge into the target object |
 | **indexes** | `{ name?: string; fields: string[]; unique?: boolean \| 'global' \| 'organization' }[]` | optional | Additional indexes to merge into the target object |
 | **priority** | `integer` | optional (default: `200`) | Merge priority (higher = applied later) |
+
+### Nested Shape: `ObjectExtension.fields[string]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | optional | Machine name (snake_case) |
+| **label** | `string` | optional | Human readable label |
+| **type** | `Enum<'text' \| 'textarea' \| 'email' \| 'url' \| 'phone' \| 'password' \| 'secret' \| …>` | ✅ | Field Data Type |
+| **description** | `string` | optional | Tooltip/Help text |
+| **format** | `string` | optional | Format string (e.g. email, phone) |
+| **required** | `boolean` | optional (default: `false`) | Write-time contract (ADR-0113): an insert must provide a non-null value, and an update may not null it out. On a multi-value lookup (`multiple: true`) required means NON-EMPTY array — an emptied required set fails validation loudly; `[]` does not satisfy it (#9447, maintainer ruling 2026-08-18). NOT a column constraint — the physical NOT NULL is a separate explicit opt-in (`storage.notNull`), so tightening this on a deployed object is safe: existing null rows stay readable, and editable as long as the write does not touch this field. |
+| **storage** | `{ notNull?: boolean }` | optional | Physical storage constraints (ADR-0113). Owns the DDL the write contract deliberately does not imply. Absent = no storage-level constraint requested. |
+| **searchable** | `boolean` | optional (default: `false`) | Is searchable |
+| **multiple** | `boolean` | optional (default: `false`) | Allow multiple values (Stores as Array/JSON). Applicable for select, lookup, file, image. An emptied multi-value lookup reads back as `[]`, never `null` — the rule binds every writer (cascade repair, form clears, API writes), not just cascade repair (#9447, maintainer ruling 2026-08-18). |
+| **unique** | `boolean \| 'global' \| 'organization'` | optional (default: `false`) | Unique constraint and its scope (ADR-0120). 'organization' = one holder per organization (NULL-safe composite with the organization key part on organization-scoped objects) — prefer this explicit spelling in new code; true = same per-organization scope (positional synonym, stays valid); 'global' = one holder across the whole installation. 'tenant'/'org' are rejected — the word is 'organization' |
+| **defaultValue** | `any` | optional | Default applied on INSERT when the field is omitted or null (`''` is a real value, not absence). Three legal shapes (#7127), discriminated in the engine's own order: a CEL Expression envelope `{ dialect: 'cel', source: 'today()' }` (accepted structurally; result type is a runtime concern); a runtime TOKEN — `NOW()` on `datetime`/`date`/`time` only, `current_user` on `user` or `lookup` with `reference: 'sys_user'` only, neither on a multi-value field; or a LITERAL, which must satisfy this field's own stored value contract (ADR-0104 D1 `valueSchemaFor`). Anything else is refused at parse time with a prescriptive message. |
+| **maxLength** | `integer` | optional | Max character length (positive integer). Only authorable on types that store a bounded string: text, textarea, email, url, phone, password, markdown, html, richtext, code, signature, qrcode. |
+| **minLength** | `integer` | optional | Min character length (positive integer; `minLength: 0` is refused — express "no minimum" by omitting the key). Only authorable on types that store a bounded string: text, textarea, email, url, phone, password, markdown, html, richtext, code, signature, qrcode. |
+| **precision** | `integer` | optional | Total digits (non-negative integer) |
+| **scale** | `integer` | optional | Decimal places (non-negative integer) |
+| **min** | `number` | optional | Minimum value |
+| **max** | `number` | optional | Maximum value |
+| **useGrouping** | `boolean` | optional | Digit-grouping presentation hint for `number` fields (#7768) — maps to `Intl.NumberFormat`'s `useGrouping`. Absent = renderer decides (interim heuristic today, locale default eventually); `false` = author opts out of grouping (e.g. a year or other ordinal/identifier integer); `true` = author pins grouping on. |
+| **accept** | `string[]` | optional | Permitted upload types for media fields, as MIME types or extensions (e.g. ["image/*", ".pdf"]). Offered to the file picker AND enforced on write. |
+| **maxSize** | `integer` | optional | Maximum permitted file size in BYTES for media fields. Enforced on write against the stored file size, not just checked in the browser. |
+| **options** | `{ label: string; value: string; color?: string; default?: boolean; … }[]` | optional | Static options for select/multiselect |
+| **reference** | `string` | optional | Target object name (snake_case) for lookup/master_detail fields. Required for relationship types. Used by $expand to resolve foreign key IDs into full objects. |
+| **referenceVia** | `string` | optional | Declares this text field as the id half of a polymorphic pointer pair (ADR-0052 §5 ActivityPointer): the value is a record id of the object named by the SIBLING FIELD this key names — e.g. `record_id` with `referenceVia: 'object_name'`. The sibling must be a declared field on the same object holding an object machine name. Text fields only; mutually exclusive with `reference` (a static and a per-record target contradict). Enforced today at seed load: the value resolves as a natural key against the object the sibling column names, and an unresolvable pointer is refused loudly instead of stored verbatim. Adds no referential integrity or $expand behavior. |
+| **deleteBehavior** | `Enum<'set_null' \| 'cascade' \| 'restrict'>` | optional (default: `"set_null"`) | What happens if referenced record is deleted |
+| **inlineEdit** | `boolean \| Enum<'grid' \| 'form'>` | optional | Edit these child records inline within the parent's form (atomic master-detail). true = auto-pick grid/form by child shape; 'grid' = editable line-item grid; 'form' = list + per-row full form. |
+| **inlineTitle** | `string` | optional | Title for the inline master-detail grid |
+| **inlineColumns** | `{ name: string; label?: string; type?: Enum<'text' \| 'number' \| 'currency' \| 'date' \| 'datetime' \| 'time' \| 'select' \| 'lookup' \| 'file'>; width?: number; … }[]` | optional | Explicit columns for the inline grid (derived from the child object when omitted). Each entry is a strict, name-keyed column (`{ name, label?, type?, … }` — objectui GridColumn, #3951); identity-only entries (`{ name }`) hydrate everything else from the child object's fields. Unknown keys and the retired `field` spelling are refused at parse. |
+| **inlineAmountField** | `string` | optional | Numeric child field summed for the inline grid total |
+| **relatedList** | `boolean \| 'primary'` | optional | Show this child collection as a related list on the parent's detail page (read-side mirror of inlineEdit). false = suppress; true/absent = shown (stacked under the shared "Related" tab); 'primary' = core relationship, promoted to its own tab. Prominence intent, not a layout switch (ADR-0085). |
+| **relatedListTitle** | `string` | optional | Title for the detail-page related list |
+| **relatedListColumns** | `string[]` | optional | Explicit columns for the detail-page related list, as child field names (e.g. ['name', 'status']); derived from the child object (highlightFields → field walk) when omitted. Strings only — labels, cell types and formatting always derive from the child object's field definitions; column objects are refused at parse. |
+| **relatedListFilter** | `any` | optional | Declarative default filter for the detail-page related list: AND-composed with the parent-relationship condition `{ [referenceField]: parentId }` — an authored constraint, never a user-editable suggestion. The related-list tab badge count honors the same composed filter, so counts match the visible rows. Canonical Query-DSL FilterCondition (the same dialect as a query `where`), e.g. `{ status: { $ne: 'deleted' } }` to hide soft-deleted children. |
+| **displayField** | `string` | optional | Field shown as each candidate's label in the picker/popover (defaults to the referenced object's name/title). |
+| **descriptionField** | `string` | optional | Secondary field shown under the label in the quick-select popover. |
+| **lookupColumns** | `(string \| { field: string; label?: string; width?: string; type?: string })[]` | optional | Explicit columns for the record-picker table; auto-derived from the referenced object when omitted. |
+| **lookupPageSize** | `integer` | optional | Rows per page in the record-picker dialog (default 10). |
+| **lookupFilters** | `{ field: string; operator: Enum<'eq' \| 'ne' \| 'gt' \| 'lt' \| 'gte' \| 'lte' \| 'contains' \| 'in' \| 'notIn'>; value: any }[]` | optional | Base filters restricting which records are selectable (e.g. only active). The structured, picker-honoured lookup filter. |
+| **dependsOn** | `(string \| { field: string; param?: string })[]` | optional | Declares that this field's available values depend on the value of other field(s) on the same record — the form gates the field until they are set and re-evaluates as they change. For `lookup`/`master_detail` it scopes the candidate query (string = same local/remote key; `{field,param}` when the remote filter key differs — the `{field,param}` form is lookup-only). For `select`/`multiselect`/`radio` the actual per-option rule lives in each option's `visibleWhen`; list the referenced fields here (string form) so the option list gates and refreshes with the parent. |
+| **allowCreate** | `boolean` | optional | Allow inline quick-create from the record picker: when no match exists the user can create a record from the typed text (optimistic dataSource.create with the display field). Best for simple objects whose only required field is the display field. |
+| **expression** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Formula expression (CEL). e.g. F`record.amount * 0.1` |
+| **returnType** | `Enum<'number' \| 'text' \| 'boolean' \| 'date'>` | optional | Inferred value type of a formula field (number/text/boolean/date) |
+| **summaryOperations** | `{ object: string; field: string; function: Enum<'count' \| 'sum' \| 'min' \| 'max' \| 'avg'>; relationshipField?: string; … }` | optional | Roll-up summary definition. The engine recomputes the value when child records are inserted/updated/deleted. |
+| **language** | `string` | optional | Programming language for syntax highlighting (e.g., javascript, python, sql) |
+| **step** | `number` | optional | Step increment for slider (default: 1) |
+| **currencyConfig** | `{ precision?: integer; currencyMode?: Enum<'dynamic' \| 'fixed'>; defaultCurrency?: string }` | optional | Configuration for currency field type |
+| **dimensions** | `integer` | optional | Vector dimensionality (e.g., 1536 for OpenAI embeddings) |
+| **trackHistory** | `boolean` | optional | Render this field's value changes as human-readable entries on the record activity timeline (ADR-0052 §5b). Opt-in per field. |
+| **group** | `string` | optional | Field group name for organizing fields in forms and layouts (e.g., "contact_info", "billing", "system") |
+| **visibleWhen** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Predicate (CEL) — field is shown only when TRUE (else hidden). e.g. P`record.type == 'invoice'` |
+| **readonlyWhen** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Predicate (CEL) — field is read-only when TRUE. e.g. P`record.status == 'paid'` |
+| **requiredWhen** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Predicate (CEL) — field is required when TRUE. The only slot; the `conditionalRequired` alias was removed in protocol 17 (#3855). |
+| **conditionalRequired** | `never` | optional | [REMOVED] `conditionalRequired` was removed in @objectstack/spec 17 (#3855) — use `requiredWhen`. Rename the key; the value (a CEL predicate) is unchanged. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
+| **widget** | `string` | optional | Form widget override — names a registered field component (resolved as `field:<widget>`) to render this field instead of the `type` default. Degrades to the `type` renderer when unregistered. e.g. "object-ref", "filter-condition", "recipient-picker". |
+| **hidden** | `boolean` | optional (default: `false`) | Hidden from default UI |
+| **internal** | `boolean` | optional | [#7728] Never return this field's value on the generic data path — the engine OMITS the key from `find`/`findOne` results, the 201 create body and the by-id update body, on the default projection AND when a client names the field in `?select=`. Storage, filtering and indexing are untouched, so a server-side verifier can still match on the column and a purpose-built mint route can still return the value once at creation. The read protection for ADR-0100's third credential channel (auth-subsystem one-way hashes on `text` columns). Omission, not masking: a mask signals 'a value is set', which carries no information on a `required` column. |
+| **readonly** | `boolean` | optional (default: `false`) | Read-only — never editable in forms, AND server-enforced on BOTH write paths: a non-system write to this field is silently dropped from the payload on UPDATE (#2948/#3003) and on INSERT (#3043; a create can no longer directly seed e.g. `approval_status: "approved"`), symmetric with `readonlyWhen`. A stripped INSERT field still falls back to its `defaultValue`. Exempt from the strip on BOTH paths: `isSystem` writes (seed replay, migration). Exempt on the UPDATE path ONLY: an opt-in "historical" import (`preserveAudit`, #3493) — which admits a whitelist (the audit/timestamp family plus author-declared business `readonly` fields). On INSERT the exemption does NOT apply (#6640): a non-system create that requests `preserveAudit` still has its readonly fields stripped, and is warned loudly that the exemption is UPDATE-only — replaying archival readonly facts on create requires a system context. A normal (non-system) import is NOT system-context and still strips. |
+| **requiredPermissions** | `string[]` | optional | [ADR-0066 D3] Capabilities required to read/edit this field (mask on read, deny on write; AND-gate). |
+| **maskingRule** | `Enum<'phone' \| 'id_card' \| 'bank_account' \| 'email' \| 'name'> \| { keepHead: integer; keepTail: integer }` | optional | [#8993] Partial masking rule enforced by the runtime FieldMasker (single channel — API, UI, export and AI context all see the same masked value). A named preset ('phone' 138****5678, 'id_card' keep 6+4, 'bank_account' keep last 4, 'email' j***@example.com, 'name' keep first char) or `{ keepHead, keepTail }`. Masked for every non-system caller unless the field's `requiredPermissions` are ALL held (that evaluation is the unmask gate); a permission set marking the field non-readable still deletes it entirely. Deterministic, length-preserving output; masked callers cannot filter/sort/group/aggregate on the field. |
+| **ackPlaintextMasking** | `boolean` | optional | [ADR-0100] Affirm a generic `password` field's plaintext-at-rest / masked-on-read contract is intended, silencing the author-time warning (#3420). No effect on non-password fields. |
+| **system** | `boolean` | optional | Auto-injected system/audit field (e.g. created_at, updated_by, organization_id). Tools that surface system fields separately from author-declared business fields should branch on this flag. |
+| **sortable** | `boolean` | optional (default: `true`) | Whether field is sortable in list views |
+| **inlineHelpText** | `string` | optional | Help text displayed below the field in forms |
+| **placeholder** | `string` | optional | Placeholder text rendered inside the empty input (the HTML placeholder attribute); disappears once a value is entered. Distinct from `inlineHelpText` (always-visible help rendered beside/under the input) and `description` (tooltip/developer documentation). |
+| **autonumberFormat** | `string` | optional (default: `"{0000}"`) | Auto-number format: literal text + `{0000}` counter, `{YYYY}`/`{MM}`/`{DD}`/`{YYYYMMDD}` date tokens (business tz), and `{field_name}` interpolation. Counter resets per rendered prefix (e.g. AD`{YYYYMMDD}``{0000}` resets daily). Omitted on an `autonumber` field ⇒ the contract default `{0000}` (#6555). |
+| **externalId** | `boolean` | optional (default: `false`) | Is external ID for upsert operations |
+| **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
+| **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
+| **_lockSource** | `Enum<'artifact' \| 'package' \| 'env-forced'>` | optional | Layer that set _lock (artifact \| package \| env-forced). |
+| **_provenance** | `Enum<'package' \| 'org' \| 'env-forced'>` | optional | Origin of the item (package \| org \| env-forced). |
+| **_packageId** | `string` | optional | Owning package machine id. |
+| **_packageVersion** | `string` | optional | Owning package version. |
+| **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
+
+### Nested Shape: `ObjectExtension.indexes[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | optional | Index name (auto-generated if not provided) |
+| **fields** | `string[]` | ✅ | Fields included in the index |
+| **unique** | `boolean \| 'global' \| 'organization'` | optional (default: `false`) | Whether the index enforces uniqueness, and at which scope (ADR-0120). 'global' = materialized over exactly `fields`, no organization column injected — one holder across the whole installation; 'organization' = the driver prepends the NULL-safe organization key part (COALESCE(organization_id, '__global__')) at registration — one holder per organization; bare true = deprecated positional spelling of 'global' (warned in 17.x by lint unique/unscoped-declared-index, rejected at protocol 18, #5082) — state the scope. 'tenant'/'org' are rejected — the word is 'organization' |
+| **type** | `never` | optional | [REMOVED] `indexes[].type` was removed in @objectstack/spec 17.0.0 (#5248, ADR-0049) — no driver ever read it. `SqlDriver.syncDeclaredIndexes` creates every declared index through knex's `table.index()` / `table.unique()`, which cannot express an access method, so the value changed no DDL; its `.default('btree')` merely made an inert knob show up in every parse output. Delete the key. The index method is the driver/dialect's decision (Postgres defaults to B-tree; `gin`/`gist`/`fulltext` are dialect-specific and are chosen by a database-layer migration when a workload actually needs one). Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
+| **partial** | `never` | optional | [REMOVED] `indexes[].partial` was removed in @objectstack/spec 17.0.0 (#5248, #4943, ADR-0049) — no driver ever emitted the `WHERE` clause, so a declared partial index was materialized as a FULL index and the predicate silently did nothing. Delete the key. Partial indexes are built at the database layer, not the declaration surface: issue `CREATE [UNIQUE] INDEX … WHERE <predicate>` from a runtime migration (this is what `metadata-protocol`'s `ensureOverlayIndex` already does for `sys_metadata`). Drift detection is unaffected — it reads partiality back from the database's own DDL, never from this key. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
 
 
 ---

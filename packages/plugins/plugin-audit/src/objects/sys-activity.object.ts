@@ -173,11 +173,37 @@ export const SysActivity = ObjectSchema.create({
       group: 'Target',
     }),
 
+    // [#11374 route A] The value is a record id of the object `object_name`
+    // names — written by `audit-writers.ts` (`record_id: recordId`, the id of
+    // the very row the mutation touched). The bound is derived by
+    // referenced-column transitivity from the id itself, never guessed:
+    // `driver-sql` creates every table's primary key as
+    // `table.string('id').primary()` — knex's `varchar(255)`, which the driver
+    // spells out as `DEFAULT_STRING_VARCHAR_CHARS = 255` and names in its own
+    // error text as "built-in `id` (a varchar(255))". No id this column can
+    // receive is wider than the column the id lives in.
+    //
+    // The seed path cannot widen it either: an unresolvable pointer is
+    // "refused loudly, never stored verbatim" (`metadata-protocol`'s
+    // seed-loader), so `referenceVia` resolves a natural key to a real record
+    // id BEFORE it is stored — a raw external key never lands in this column.
+    //
+    // 255 rather than the 100 that `plugin-sharing` and `plugin-approvals`
+    // chose for their own `record_id`: those narrow below what the id column
+    // itself accepts, which is safe only for their own writers. 255 is the
+    // transitive ceiling, so it refuses nothing that is storable today.
+    // It is also <= the 768-character utf8mb4 key ceiling, so the
+    // `(object_name, record_id)` index below is expressible on MySQL — which is
+    // the whole point: unbounded, this column was emitted TEXT, MySQL refused
+    // the index with `ER_BLOB_KEY_WITHOUT_LENGTH`, and the object landed
+    // registered-but-broken with the ActivityPointer lookup the read path
+    // assumes (ADR-0052 §5) silently absent.
     record_id: Field.text({
       label: 'Record ID',
       required: false,
       readonly: true,
       searchable: true,
+      maxLength: 255,
       // [#11339] The id half of the ActivityPointer pair (ADR-0052 §5): a
       // record id of the object `object_name` names on the same row. Declaring
       // it makes the pair seedable — a packaged app's seed writes the target's

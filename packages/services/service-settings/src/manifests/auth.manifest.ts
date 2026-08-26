@@ -73,6 +73,57 @@ const manifest = {
         'Automatic binds every new user to this deployment\'s default organization. Invitation only grants membership solely through an explicit act — creating a workspace, accepting an invitation, being added by an admin, or SSO just-in-time provisioning. Applies to the backfill of pre-existing member-less users too.',
     },
 
+    // [#11768] Audience posture (#11739, epic #11723) — who may BECOME a user
+    // of this environment's apps. Like `membership` above, deliberately its
+    // OWN group and never gated on `email_password_enabled`: the posture
+    // judges every self-serve creation path (email sign-up AND social-provider
+    // OAuth), so a social-login-only deployment still needs the switch. The
+    // three keys are ONE atomic declaration — `bindAuthSettings` writes the
+    // full audience object in one stroke (the #11767 contract: the patch
+    // replaces the whole object and validates the MERGED result), so the
+    // domain list and permission set only apply together with an explicitly
+    // selected posture.
+    {
+      type: 'group',
+      id: 'audience',
+      label: 'Audience',
+      required: false,
+      description:
+        'Who may become a user of this environment\'s apps. Postures other than invitation-only force email verification on. Invitations, admin-created users, SCIM provisioning, and enterprise SSO are admitted under every posture.',
+    },
+    {
+      type: 'select',
+      key: 'audience_posture',
+      label: 'Self-registration audience',
+      required: false,
+      default: 'invite_only',
+      options: [
+        { value: 'invite_only', label: 'Invitation only — no self-registration (default)' },
+        { value: 'email_domain', label: 'Allowlisted email domains only' },
+        { value: 'open', label: 'Open — anyone may self-register' },
+      ],
+      description:
+        'invite_only closes self-registration: users come into existence only through an operator-side act (invitation, admin create/import, SCIM, enterprise SSO). email_domain opens it to the allowlisted domains below. open admits anyone. Any posture other than invite_only forces email verification on and requires the self-registration permission set below.',
+    },
+    {
+      type: 'textarea',
+      key: 'audience_allowed_email_domains',
+      label: 'Allowed email domains',
+      required: false,
+      description:
+        'Bare domains, one per line or comma-separated (e.g. acme.com). Matching is exact and case-insensitive; subdomains need their own entries; no wildcards. Required (non-empty) when the audience is allowlisted email domains.',
+      visible: "${data.audience_posture === 'email_domain'}",
+    },
+    {
+      type: 'text',
+      key: 'audience_self_registration_permission_set',
+      label: 'Self-registration permission set',
+      required: false,
+      description:
+        'sys_permission_set name granted to each self-registrant (declaring member_default explicitly is fine; admin_full_access is refused). Required whenever the posture permits self-registration.',
+      visible: "${data.audience_posture === 'email_domain' || data.audience_posture === 'open'}",
+    },
+
     {
       type: 'group',
       id: 'password_policy',

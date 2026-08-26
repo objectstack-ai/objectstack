@@ -143,6 +143,15 @@ const result = CacheControlSchema.parse(data);
 | **ifModifiedSince** | `string` | optional | Timestamp for conditional request (If-Modified-Since header) |
 | **cacheControl** | `{ directives: Enum<'public' \| 'private' \| 'no-cache' \| 'no-store' \| 'must-revalidate' \| 'max-age'>[]; maxAge?: number; staleWhileRevalidate?: number; staleIfError?: number }` | optional | Client cache control preferences |
 
+### Nested Shape: `MetadataCacheRequest.cacheControl`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **directives** | `Enum<'public' \| 'private' \| 'no-cache' \| 'no-store' \| 'must-revalidate' \| 'max-age'>[]` | ✅ | Cache control directives |
+| **maxAge** | `number` | optional | Maximum cache age in seconds |
+| **staleWhileRevalidate** | `number` | optional | Allow serving stale content while revalidating (seconds) |
+| **staleIfError** | `number` | optional | Allow serving stale content on error (seconds) |
+
 
 ---
 
@@ -158,6 +167,22 @@ const result = CacheControlSchema.parse(data);
 | **cacheControl** | `{ directives: Enum<'public' \| 'private' \| 'no-cache' \| 'no-store' \| 'must-revalidate' \| 'max-age'>[]; maxAge?: number; staleWhileRevalidate?: number; staleIfError?: number }` | optional | Cache control directives |
 | **notModified** | `boolean` | optional (default: `false`) | True if resource has not been modified (304 response) |
 | **version** | `string` | optional | Metadata version identifier |
+
+### Nested Shape: `MetadataCacheResponse.etag`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **value** | `string` | ✅ | ETag value (hash or version identifier) |
+| **weak** | `boolean` | optional (default: `false`) | Whether this is a weak ETag |
+
+### Nested Shape: `MetadataCacheResponse.cacheControl`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **directives** | `Enum<'public' \| 'private' \| 'no-cache' \| 'no-store' \| 'must-revalidate' \| 'max-age'>[]` | ✅ | Cache control directives |
+| **maxAge** | `number` | optional | Maximum cache age in seconds |
+| **staleWhileRevalidate** | `number` | optional | Allow serving stale content while revalidating (seconds) |
+| **staleIfError** | `number` | optional | Allow serving stale content on error (seconds) |
 
 
 ---

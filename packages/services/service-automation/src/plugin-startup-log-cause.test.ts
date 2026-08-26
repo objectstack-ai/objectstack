@@ -376,9 +376,24 @@ describe('#5661 — the startup probe error is ONE stderr record', () => {
 
         const mine = lines.filter((l) => l.includes(PROBE_PREFIX));
         expect(mine, 'reported exactly once').toHaveLength(1);
-        expect(lines, 'one call, one physical line').toHaveLength(1);
+        // [ADR-0126 §7.2] Deliberately NOT `expect(lines).toHaveLength(1)` any
+        // more. An unreadable datasource now fails TWO independent boot probes
+        // — this one and the activation ledger's (`sys_metadata_activation`) —
+        // and each states its own distinct consequence, so a count over ALL of
+        // stderr pins the existence of an unrelated seam rather than anything
+        // about this record.
+        //
+        // What #5661 is actually about is that a driver's MULTI-LINE failure
+        // must not become N log records of which only the first carries a level
+        // head. That property is asserted directly here, and it is strictly
+        // stronger than the count it replaces: every captured line must be a
+        // well-formed record, so an escaped continuation fragment fails this
+        // even in a boot that emits several legitimate records.
+        for (const line of lines) {
+            expect(classifyLine(line), `orphan continuation line escaped: ${line}`).not.toBeNull();
+        }
 
-        const record = JSON.parse(lines[0]) as { level: string; msg: string; error?: string; issues?: unknown };
+        const record = JSON.parse(mine[0]) as { level: string; msg: string; error?: string; issues?: unknown };
         expect(record.level).toBe('error');
         expect(record.msg).not.toContain('\n');
         // #4632 demands both of these IN the record's own first line, and moving

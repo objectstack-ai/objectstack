@@ -221,13 +221,6 @@ async function itemOf(rest: RestServer, type: string, name: string) {
     return lastBody(res);
 }
 
-async function compoundOf(rest: RestServer, type: string, section: string, name: string) {
-    const res = mockRes();
-    await routeFor(rest, '/api/v1/meta/:type/:section/:name').handler(
-        { method: 'GET', params: { type, section, name }, query: {}, body: {}, headers: ZH }, res,
-    );
-    return lastBody(res);
-}
 
 /** First element of whichever list shape `getMetaItems` produced. */
 const firstItem = (body: any) => (Array.isArray(body) ? body : body?.items ?? [])[0];
@@ -335,23 +328,27 @@ describe('#6349 §2 single item `GET /meta/:type/:name`', () => {
 });
 
 // ---------------------------------------------------------------------------
-// §3 — compound name: GET /meta/:type/:section/:name
+// §3 — [#12195] the compound-name read is RETIRED
 // ---------------------------------------------------------------------------
 
-describe('#6349 §3 compound name `GET /meta/:type/:section/:name`', () => {
-    it('translates the plural spelling, identically to the singular', async () => {
-        const rest = makeRest(baseProtocol({
-            getMetaItem: vi.fn(async ({ type, name }: any) => ({
-                type: canonicalType(type), name, item: documentFor(type), lock: 'none',
-            })),
-        }));
-
-        const singular = await compoundOf(rest, 'page', 'portal', 'home');
-        const plural = await compoundOf(rest, 'pages', 'portal', 'home');
-
-        expect(singular.item).toMatchObject({ label: '首页' });
-        expect(plural.item).toMatchObject({ label: '首页', description: '门户首页' });
-        expect(plural).toEqual(singular);
+describe('#6349 §3 — the compound-name arity no longer exists', () => {
+    /**
+     * This section drove `GET /meta/:type/:section/:name` and asserted the
+     * plural type spelling translated identically to the singular there. The
+     * arity is retired (#12176 stage 3), so the translation surface it covered
+     * is served by §2's single-item read — which folds the type through the
+     * same `canonicalMetaUrlType` and runs the same translator.
+     *
+     * What is left to pin is the absence, so a re-mounted compound arity cannot
+     * quietly reappear WITHOUT the plural fold (the #6349 defect: one spelling
+     * translated, the other not).
+     */
+    it('mounts no compound `:section` arity to translate', () => {
+        const rest = makeRest(baseProtocol());
+        const compound = (rest as any).getRoutes()
+            .map((r: any) => String(r.path))
+            .filter((path: string) => path.includes(':section'));
+        expect(compound).toEqual([]);
     });
 });
 

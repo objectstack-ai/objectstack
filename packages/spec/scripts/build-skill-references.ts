@@ -16,7 +16,7 @@
  * 2. Recursively resolves local `import … from` dependencies (so the index
  *    surfaces shared schemas an agent will need to follow)
  * 3. Writes `skills/{name}/references/_index.md` with pointers + one-line
- *    descriptions extracted from each file's leading JSDoc comment
+ *    descriptions taken from each file's own MODULE doc block
  *
  * Usage:
  *   tsx scripts/build-skill-references.ts            # write
@@ -25,6 +25,7 @@
 
 import fs from 'fs';
 import path from 'path';
+import { findModuleDocBlock } from './lib/file-description';
 import { createSink, type Owns } from './lib/generated-output';
 
 // ── Paths ────────────────────────────────────────────────────────────────────
@@ -192,13 +193,31 @@ function resolveAll(entryFiles: string[]): { files: string[]; missing: string[] 
   return { files: shipped.sort(), missing };
 }
 
-// ── JSDoc description extractor ──────────────────────────────────────────────
+// ── Module description extractor ─────────────────────────────────────────────
 
+/**
+ * The pointer row's one-line description: the first sentence of the module's
+ * OWN doc block, or `Exports: …` when the module has none.
+ *
+ * WHICH block that is comes from the shared `findModuleDocBlock()` — the same
+ * selector `build-docs.ts` uses, imported rather than restated so one rule
+ * serves both surfaces. This generator used to take the first doc block
+ * anywhere in the file: a rule about ORDERING, not about descriptions, so
+ * whichever declaration sat nearest the top donated its comment to a
+ * customer-facing page (`system/translation.zod.ts` published the comment on
+ * its private `TRANSLATION_HISTORY` const). `check:skill-refs` cannot see that
+ * — it compares the artifact against the generator, which reproduced the wrong
+ * block faithfully.
+ *
+ * A module with no doc block of its own falls through to the export list
+ * rather than refusing: that line states a true fact about the file, where the
+ * wrong block asserted a false one about its subject.
+ */
 function extractDescription(filePath: string): string {
   const content = fs.readFileSync(filePath, 'utf-8');
-  const jsdocMatch = content.match(/\/\*\*\s*\n([\s\S]*?)\*\//);
-  if (jsdocMatch) {
-    const lines = jsdocMatch[1]
+  const moduleBlock = findModuleDocBlock(content);
+  if (moduleBlock !== null) {
+    const lines = moduleBlock
       .split('\n')
       .map((line) => line.replace(/^\s*\*\s?/, '').trim())
       .filter((line) => line && !line.startsWith('@') && !line.startsWith('```'));

@@ -43,6 +43,13 @@ const result = MiddlewareConfigSchema.parse(data);
 | **config** | `Record<string, any>` | optional | Middleware configuration object |
 | **paths** | `{ include?: string[]; exclude?: string[] }` | optional | Path filtering |
 
+### Nested Shape: `MiddlewareConfig.paths`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **include** | `string[]` | optional | Include path patterns (glob) |
+| **exclude** | `string[]` | optional | Exclude path patterns (glob) |
+
 
 ---
 
@@ -72,6 +79,23 @@ const result = MiddlewareConfigSchema.parse(data);
 | **handler** | `string` | ✅ | Handler identifier or name |
 | **metadata** | `{ summary?: string; description?: string; tags?: string[]; operationId?: string }` | optional |  |
 | **security** | `{ authRequired: boolean; permissions?: string[]; rateLimit?: string }` | optional |  |
+
+### Nested Shape: `RouteHandlerMetadata.metadata`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **summary** | `string` | optional | Route summary for documentation |
+| **description** | `string` | optional | Route description |
+| **tags** | `string[]` | optional | Tags for grouping |
+| **operationId** | `string` | optional | Unique operation identifier |
+
+### Nested Shape: `RouteHandlerMetadata.security`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **authRequired** | `boolean` | optional (default: `true`) | Require authentication |
+| **permissions** | `string[]` | optional | Required permissions |
+| **rateLimit** | `string` | optional | Rate limit policy override |
 
 
 ---

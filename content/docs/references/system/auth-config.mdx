@@ -39,6 +39,14 @@ Advanced / low-level Better-Auth options
 | **disableCSRFCheck** | `boolean` | optional | ⚠ Disable CSRF check — security risk, use with caution |
 | **cookiePrefix** | `string` | optional | Prefix for auth cookie names |
 
+### Nested Shape: `AdvancedAuthConfig.crossSubDomainCookies`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **enabled** | `boolean` | ✅ | Enable cross-subdomain cookies |
+| **additionalCookies** | `string[]` | optional | Extra cookies shared across subdomains |
+| **domain** | `string` | optional | Cookie domain override — defaults to root domain derived from baseUrl |
+
 
 ---
 
@@ -77,6 +85,117 @@ Advanced / low-level Better-Auth options
 | **advanced** | `{ crossSubDomainCookies?: object; useSecureCookies?: boolean; disableCSRFCheck?: boolean; cookiePrefix?: string }` | optional | Advanced / low-level Better-Auth options |
 | **ssoOnlyMode** | `boolean` | optional | SSO-only login: hide the local password form + self-registration (the break-glass password endpoint stays enabled) |
 | **mutualTls** | `{ enabled: boolean; clientCertRequired: boolean; trustedCAs: string[]; crlUrl?: string; … }` | optional | Mutual TLS (mTLS) configuration |
+
+### Nested Shape: `AuthConfig.providers[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ | Provider ID (github, google) |
+| **clientId** | `string` | ✅ | OAuth Client ID |
+| **clientSecret** | `string` | ✅ | OAuth Client Secret |
+| **scope** | `string[]` | optional | Requested permissions |
+
+### Nested Shape: `AuthConfig.plugins`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **organization** | `boolean` | optional (default: `true`) | Enable Organization/Teams support (frontend AuthProvider expects this enabled) |
+| **twoFactor** | `boolean` | optional (default: `false`) | Enable 2FA |
+| **passkeys** | `boolean` | optional (default: `false`) | Enable Passkey support |
+| **passwordRejectBreached** | `boolean` | optional (default: `false`) | Reject passwords found in the Have I Been Pwned breach corpus (enables better-auth's haveibeenpwned plugin) |
+| **magicLink** | `boolean` | optional (default: `false`) | Enable Magic Link login |
+| **oidcProvider** | `boolean` | optional (default: `false`) | Enable the OpenID Connect provider plugin (acts as an OIDC IdP) |
+| **dynamicClientRegistration** | `boolean` | optional | Allow unauthenticated RFC 7591 Dynamic Client Registration (default: follows OS_MCP_SERVER_ENABLED) |
+| **deviceAuthorization** | `boolean` | optional (default: `false`) | Enable RFC 8628 Device Authorization Grant (CLI / TV-style login) |
+| **admin** | `boolean` | optional (default: `false`) | Enable platform admin operations (ban/unban, set-password, impersonate, set-role) |
+| **phoneNumber** | `boolean` | optional (default: `false`) | Enable phone-number sign-in (phone + password; OTP sign-in/reset when an SMS service is configured) |
+
+### Nested Shape: `AuthConfig.session`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **expiresIn** | `number` | optional (default: `604800`) | Session duration in seconds |
+| **updateAge** | `number` | optional (default: `86400`) | Session update frequency |
+
+### Nested Shape: `AuthConfig.socialProviders[string]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **clientId** | `string` | ✅ | OAuth Client ID |
+| **clientSecret** | `string` | ✅ | OAuth Client Secret |
+| **enabled** | `boolean` | optional (default: `true`) | Enable this provider (default: true) |
+| **scope** | `string[]` | optional | Additional OAuth scopes |
+
+### Nested Shape: `AuthConfig.oidcProviders[number]`
+
+OIDC / Generic OAuth2 provider configuration for enterprise SSO
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **providerId** | `string` | ✅ | Unique identifier for this provider (e.g., okta, azure-ad) |
+| **name** | `string` | optional | Display name shown in the UI (defaults to providerId) |
+| **discoveryUrl** | `string` | optional | OIDC discovery URL (.well-known/openid-configuration). When provided, authorizationUrl/tokenUrl/userInfoUrl are fetched automatically. |
+| **issuer** | `string` | optional | Expected issuer identifier for token validation |
+| **authorizationUrl** | `string` | optional | OAuth2 authorization endpoint (optional if discoveryUrl is set) |
+| **tokenUrl** | `string` | optional | OAuth2 token endpoint (optional if discoveryUrl is set) |
+| **userInfoUrl** | `string` | optional | OAuth2 userinfo endpoint (optional if discoveryUrl is set) |
+| **clientId** | `string` | ✅ | OAuth2 client ID |
+| **clientSecret** | `string` | ✅ | OAuth2 client secret |
+| **scopes** | `string[]` | optional | Requested scopes (default: openid email profile) |
+| **pkce** | `boolean` | optional | Enable PKCE (recommended for public clients) |
+
+### Nested Shape: `AuthConfig.emailAndPassword`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **enabled** | `boolean` | optional (default: `true`) | Enable email/password auth |
+| **disableSignUp** | `boolean` | optional | Disable new user registration via email/password |
+| **requireEmailVerification** | `boolean` | optional | Require email verification before creating a session |
+| **minPasswordLength** | `number` | optional | Minimum password length (default 8) |
+| **maxPasswordLength** | `number` | optional | Maximum password length (default 128) |
+| **resetPasswordTokenExpiresIn** | `number` | optional | Reset-password token TTL in seconds (default 3600) |
+| **autoSignIn** | `boolean` | optional | Auto sign-in after sign-up (default true) |
+| **revokeSessionsOnPasswordReset** | `boolean` | optional | Revoke all other sessions on password reset |
+
+### Nested Shape: `AuthConfig.emailVerification`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **sendOnSignUp** | `boolean` | optional | Automatically send verification email after sign-up |
+| **sendOnSignIn** | `boolean` | optional | Send verification email on sign-in when not yet verified |
+| **autoSignInAfterVerification** | `boolean` | optional | Auto sign-in the user after email verification |
+| **expiresIn** | `number` | optional | Verification token TTL in seconds (default 3600) |
+
+### Nested Shape: `AuthConfig.audience`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **posture** | `Enum<'invite_only' \| 'email_domain' \| 'open'>` | optional (default: `"invite_only"`) | Who may self-register into this environment: invite_only (default — operator acts only), email_domain (allowlisted email domains), or open (anyone). Any posture other than invite_only forces email verification on. |
+| **allowedEmailDomains** | `string[]` | optional | Email domains admitted to self-register under posture email_domain (exact, case-insensitive match; subdomains need their own entries). Required non-empty for email_domain; refused under other postures. |
+| **selfRegistrationPermissionSet** | `string` | optional | sys_permission_set name granted to each self-registrant. Required when posture is email_domain or open; refused for invite_only. admin_full_access is refused. |
+
+### Nested Shape: `AuthConfig.advanced`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **crossSubDomainCookies** | `{ enabled: boolean; additionalCookies?: string[]; domain?: string }` | optional | Share auth cookies across subdomains (critical for *.example.com multi-tenant) |
+| **useSecureCookies** | `boolean` | optional | Force Secure flag on cookies |
+| **disableCSRFCheck** | `boolean` | optional | ⚠ Disable CSRF check — security risk, use with caution |
+| **cookiePrefix** | `string` | optional | Prefix for auth cookie names |
+
+### Nested Shape: `AuthConfig.mutualTls`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **enabled** | `boolean` | optional (default: `false`) | Enable mutual TLS authentication |
+| **clientCertRequired** | `boolean` | optional (default: `false`) | Require client certificates for all connections |
+| **trustedCAs** | `string[]` | ✅ | PEM-encoded CA certificates or file paths |
+| **crlUrl** | `string` | optional | Certificate Revocation List (CRL) URL |
+| **ocspUrl** | `string` | optional | Online Certificate Status Protocol (OCSP) URL |
+| **certificateValidation** | `Enum<'strict' \| 'relaxed' \| 'none'>` | ✅ | Certificate validation strictness level |
+| **allowedCNs** | `string[]` | optional | Allowed Common Names (CN) on client certificates |
+| **allowedOUs** | `string[]` | optional | Allowed Organizational Units (OU) on client certificates |
+| **pinning** | `{ enabled: boolean; pins: string[] }` | optional | Certificate pinning configuration |
 
 
 ---
@@ -166,6 +285,13 @@ Email verification options forwarded to better-auth
 | **allowedCNs** | `string[]` | optional | Allowed Common Names (CN) on client certificates |
 | **allowedOUs** | `string[]` | optional | Allowed Organizational Units (OU) on client certificates |
 | **pinning** | `{ enabled: boolean; pins: string[] }` | optional | Certificate pinning configuration |
+
+### Nested Shape: `MutualTLSConfig.pinning`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **enabled** | `boolean` | ✅ | Enable certificate pinning |
+| **pins** | `string[]` | ✅ | Pinned certificate hashes |
 
 
 ---

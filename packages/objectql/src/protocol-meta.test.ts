@@ -603,14 +603,17 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
 
             it('validates types via the central spec registry (e.g. app)', async () => {
                 // Every overlay-allowed built-in type now has a canonical Zod
-                // schema registered in `getMetadataTypeSchema()`. An app
-                // payload with a non-snake_case `name` must be rejected.
+                // schema registered in `getMetadataTypeSchema()`. The probe
+                // breaks `label`, not `name`: an ungrammatical item name is
+                // refused by the #12194 grammar door (INVALID_REQUEST 400)
+                // before the registry runs, so a bad name can no longer reach
+                // — and therefore cannot prove — the schema gate under test.
                 let caught: any;
                 try {
                     await protocol.saveMetaItem({
                         type: 'app',
-                        name: 'BadApp',
-                        item: { name: 'BadApp', label: 'X' }, // name violates snake_case
+                        name: 'bad_app',
+                        item: { name: 'bad_app', label: 123 }, // label violates z.string()
                     });
                 } catch (e) { caught = e; }
 

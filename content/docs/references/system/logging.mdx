@@ -113,6 +113,17 @@ HTTP destination configuration
 | **retry** | `{ maxAttempts: integer; initialDelay: integer; backoffMultiplier: number }` | optional |  |
 | **timeout** | `integer` | optional (default: `30000`) |  |
 
+### Nested Shape: `HttpDestinationConfig.auth`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `Enum<'basic' \| 'bearer' \| 'api_key'>` | ✅ | Auth type |
+| **username** | `string` | optional |  |
+| **password** | `string` | optional |  |
+| **token** | `string` | optional |  |
+| **apiKey** | `string` | optional |  |
+| **apiKeyHeader** | `string` | optional (default: `"X-API-Key"`) |  |
+
 
 ---
 
@@ -134,6 +145,27 @@ Log destination configuration
 | **externalService** | `{ endpoint?: string; region?: string; credentials?: object; logGroup?: string; … }` | optional | External service destination configuration |
 | **format** | `Enum<'json' \| 'text' \| 'pretty'>` | optional (default: `"json"`) |  |
 | **filterId** | `string` | optional | Filter function identifier |
+
+### Nested Shape: `LogDestination.file`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **path** | `string` | ✅ | Log file path |
+| **rotation** | `{ maxSize: string; maxFiles: integer; compress: boolean; interval?: Enum<'hourly' \| 'daily' \| 'weekly' \| 'monthly'> }` | optional |  |
+| **encoding** | `string` | optional (default: `"utf8"`) |  |
+| **append** | `boolean` | optional (default: `true`) |  |
+
+### Nested Shape: `LogDestination.http`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **url** | `string` | ✅ | HTTP endpoint URL |
+| **method** | `Enum<'POST' \| 'PUT'>` | optional (default: `"POST"`) |  |
+| **headers** | `Record<string, string>` | optional |  |
+| **auth** | `{ type: Enum<'basic' \| 'bearer' \| 'api_key'>; username?: string; password?: string; token?: string; … }` | optional |  |
+| **batch** | `{ maxSize: integer; flushInterval: integer }` | optional |  |
+| **retry** | `{ maxAttempts: integer; initialDelay: integer; backoffMultiplier: number }` | optional |  |
+| **timeout** | `integer` | optional (default: `30000`) |  |
 
 
 ---
@@ -268,6 +300,60 @@ Logging configuration
 | **buffer** | `{ enabled: boolean; size: integer; flushInterval: integer; flushOnShutdown: boolean }` | optional |  |
 | **performance** | `{ async: boolean; workers: integer }` | optional |  |
 
+### Nested Shape: `LoggingConfig.default`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | optional | Logger name identifier |
+| **level** | `Enum<'debug' \| 'info' \| 'warn' \| 'error' \| 'fatal' \| 'silent'>` | optional (default: `"info"`) | Log severity level |
+| **format** | `Enum<'json' \| 'text' \| 'pretty'>` | optional (default: `"json"`) | Log output format |
+| **redact** | `string[]` | optional (default: `["password","token","secret","key"]`) | Keys to redact from log context |
+| **sourceLocation** | `boolean` | optional (default: `false`) | Include file and line number |
+| **file** | `string` | optional | Path to log file |
+| **rotation** | `{ maxSize: string; maxFiles: number }` | optional |  |
+
+### Nested Shape: `LoggingConfig.loggers[string]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | optional | Logger name identifier |
+| **level** | `Enum<'debug' \| 'info' \| 'warn' \| 'error' \| 'fatal' \| 'silent'>` | optional (default: `"info"`) | Log severity level |
+| **format** | `Enum<'json' \| 'text' \| 'pretty'>` | optional (default: `"json"`) | Log output format |
+| **redact** | `string[]` | optional (default: `["password","token","secret","key"]`) | Keys to redact from log context |
+| **sourceLocation** | `boolean` | optional (default: `false`) | Include file and line number |
+| **file** | `string` | optional | Path to log file |
+| **rotation** | `{ maxSize: string; maxFiles: number }` | optional |  |
+
+### Nested Shape: `LoggingConfig.destinations[number]`
+
+Log destination configuration
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Destination name (snake_case) |
+| **type** | `Enum<'console' \| 'file' \| 'syslog' \| 'elasticsearch' \| 'cloudwatch' \| 'stackdriver' \| …>` | ✅ | Destination type |
+| **level** | `Enum<'trace' \| 'debug' \| 'info' \| 'warn' \| 'error' \| 'fatal'>` | optional (default: `"info"`) | Extended log severity level |
+| **enabled** | `boolean` | optional (default: `true`) |  |
+| **console** | `{ stream: Enum<'stdout' \| 'stderr'>; colors: boolean; prettyPrint: boolean }` | optional | Console destination configuration |
+| **file** | `{ path: string; rotation?: object; encoding: string; append: boolean }` | optional | File destination configuration |
+| **http** | `{ url: string; method: Enum<'POST' \| 'PUT'>; headers?: Record<string, string>; auth?: object; … }` | optional | HTTP destination configuration |
+| **externalService** | `{ endpoint?: string; region?: string; credentials?: object; logGroup?: string; … }` | optional | External service destination configuration |
+| **format** | `Enum<'json' \| 'text' \| 'pretty'>` | optional (default: `"json"`) |  |
+| **filterId** | `string` | optional | Filter function identifier |
+
+### Nested Shape: `LoggingConfig.enrichment`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **staticFields** | `Record<string, any>` | optional | Static fields added to every log |
+| **dynamicEnrichers** | `string[]` | optional | Dynamic enricher function IDs |
+| **addHostname** | `boolean` | optional (default: `true`) |  |
+| **addProcessId** | `boolean` | optional (default: `true`) |  |
+| **addEnvironment** | `boolean` | optional (default: `true`) |  |
+| **addTimestampFormats** | `{ unix: boolean; iso: boolean }` | optional |  |
+| **addCaller** | `boolean` | optional (default: `false`) |  |
+| **addCorrelationIds** | `boolean` | optional (default: `true`) |  |
+
 
 ---
 
@@ -292,6 +378,25 @@ Structured log entry
 | **request** | `{ id?: string; method?: string; path?: string; userAgent?: string; … }` | optional | Request context |
 | **labels** | `Record<string, string>` | optional | Custom labels |
 | **metadata** | `Record<string, any>` | optional | Additional metadata |
+
+### Nested Shape: `StructuredLogEntry.trace`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **traceId** | `string` | ✅ | Trace ID |
+| **spanId** | `string` | ✅ | Span ID |
+| **parentSpanId** | `string` | optional | Parent span ID |
+| **traceFlags** | `integer` | optional | Trace flags |
+
+### Nested Shape: `StructuredLogEntry.source`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **service** | `string` | optional | Service name |
+| **component** | `string` | optional | Component name |
+| **file** | `string` | optional | Source file |
+| **line** | `integer` | optional | Line number |
+| **function** | `string` | optional | Function name |
 
 
 ---

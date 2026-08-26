@@ -64,6 +64,19 @@ const result = VersionDefinitionSchema.parse(data);
 | **deprecated** | `string[]` | optional | Deprecated version identifiers |
 | **versions** | `{ version: string; status: Enum<'preview' \| 'current' \| 'supported' \| 'deprecated' \| 'retired'>; releasedAt: string; deprecatedAt?: string; … }[]` | optional | Full version definitions with lifecycle metadata |
 
+### Nested Shape: `VersionNegotiationResponse.versions[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **version** | `string` | ✅ | Version identifier (e.g., "v1", "v2beta1", "2025-01-01") |
+| **status** | `Enum<'preview' \| 'current' \| 'supported' \| 'deprecated' \| 'retired'>` | ✅ | Lifecycle status of this version |
+| **releasedAt** | `string` | ✅ | Release date (ISO 8601, e.g., "2025-01-15") |
+| **deprecatedAt** | `string` | optional | Deprecation date (ISO 8601). Only set for deprecated/retired versions |
+| **sunsetAt** | `string` | optional | Sunset date (ISO 8601). After this date, the version returns 410 Gone |
+| **migrationGuide** | `string` | optional | URL to migration guide for upgrading from this version |
+| **description** | `string` | optional | Human-readable description or release notes summary |
+| **breakingChanges** | `string[]` | optional | List of breaking changes (for preview/new versions) |
+
 
 ---
 
@@ -95,6 +108,29 @@ const result = VersionDefinitionSchema.parse(data);
 | **urlPrefix** | `string` | optional (default: `"/api"`) | URL prefix before version segment (urlPath strategy) |
 | **deprecation** | `{ warnHeader: boolean; sunsetHeader: boolean; linkHeader: boolean; rejectRetired: boolean; … }` | optional | Deprecation lifecycle behavior |
 | **includeInDiscovery** | `boolean` | optional (default: `true`) | Include version information in the API discovery endpoint |
+
+### Nested Shape: `VersioningConfig.versions[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **version** | `string` | ✅ | Version identifier (e.g., "v1", "v2beta1", "2025-01-01") |
+| **status** | `Enum<'preview' \| 'current' \| 'supported' \| 'deprecated' \| 'retired'>` | ✅ | Lifecycle status of this version |
+| **releasedAt** | `string` | ✅ | Release date (ISO 8601, e.g., "2025-01-15") |
+| **deprecatedAt** | `string` | optional | Deprecation date (ISO 8601). Only set for deprecated/retired versions |
+| **sunsetAt** | `string` | optional | Sunset date (ISO 8601). After this date, the version returns 410 Gone |
+| **migrationGuide** | `string` | optional | URL to migration guide for upgrading from this version |
+| **description** | `string` | optional | Human-readable description or release notes summary |
+| **breakingChanges** | `string[]` | optional | List of breaking changes (for preview/new versions) |
+
+### Nested Shape: `VersioningConfig.deprecation`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **warnHeader** | `boolean` | optional (default: `true`) | Include Deprecation header (RFC 8594) in responses |
+| **sunsetHeader** | `boolean` | optional (default: `true`) | Include Sunset header (RFC 8594) with retirement date |
+| **linkHeader** | `boolean` | optional (default: `true`) | Include Link header pointing to migration guide URL |
+| **rejectRetired** | `boolean` | optional (default: `true`) | Return 410 Gone for retired API versions |
+| **warningMessage** | `string` | optional | Custom warning message for deprecated version responses |
 
 
 ---

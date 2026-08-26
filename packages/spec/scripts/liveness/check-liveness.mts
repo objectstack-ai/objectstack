@@ -136,6 +136,14 @@ import {
   type VerificationReport,
 } from './verification.mts';
 import { checkCitationLines, checkEvidence, countLines, type EvidenceScan } from './evidence.mts';
+import {
+  KEY_MENTION_GUIDANCE,
+  findUnanchoredCitations,
+  leafKeyOf,
+  parseKeyMentionBaseline,
+  reconcileKeyMentions,
+  type UnanchoredCitation,
+} from './key-mention.mts';
 import { buildProducerReport, type ProducerEntry, type ProducerReport } from './producer.mts';
 import { ORPHAN_GUIDANCE, findOrphanEntries, type Orphan } from './orphans.mts';
 import {
@@ -442,6 +450,15 @@ const report: any = {
   // and the summary line reported it under "resolved".
   citationsChecked: 0, // local citations written `path:NNN` — the subset a line bound can falsify
   citationsOutOfRange: [] as string[], // ...of which this many name a line past EOF — FAILS the gate
+  // The WITHIN-file half (#11457). The two counters above bound a citation from
+  // the outside — the file exists, the line is in range — and a consumer that
+  // moves WITHIN the cited file satisfies both while pointing at nothing. This
+  // asks the complementary question: does the cited file name the property at
+  // all, in any of its camelCase/snake_case spellings?
+  keyMentionsChecked: 0, // resolvable (live entry, cited local file) pairs asked
+  keyMentionExempt: 0, // ...of which this many are recorded in the shrink-only baseline
+  keyMentionUnanchored: [] as string[], // ...and this many are NOT — FAILS the gate
+  keyMentionStale: [] as string[], // a baseline row whose pair now anchors — also FAILS
 };
 
 // Every classified entry, for the `verifiedAt` fold below. Collected during the
@@ -464,6 +481,20 @@ function lineCountOf(p: string): number | null {
   if (!existsSync(f)) return null;
   return countLines(readFileSync(f, 'utf8'));
 }
+
+/**
+ * The cited file's text, or `null` when it cannot be read — same contract, and
+ * same reason, as `lineCountOf` above: an unreadable path already has a verdict
+ * from the existence check and must not be reported a second time here.
+ */
+function contentOf(p: string): string | null {
+  const f = join(repoRoot, p);
+  if (!existsSync(f)) return null;
+  return readFileSync(f, 'utf8');
+}
+
+/** Unanchored (entry, cited path) pairs the walk observes, reconciled after it. */
+const unanchoredObserved: UnanchoredCitation[] = [];
 
 /**
  * Bound a scanned pointer's `path:NNN` citations by the cited files' lengths.
@@ -513,6 +544,19 @@ function classify(type: string, path: string, status: string, led: any, cat: any
     report.evidenceMissing += ev.missing.length;
     for (const miss of ev.missing) report.staleEvidence.push(`${type}/${path} → ${miss}`);
     collectOutOfRange(ev, `${type}/${path}`);
+    // The within-file question (#11457), asked of `evidence` ONLY — never of
+    // `producer`. That asymmetry is deliberate and is not the one
+    // `collectOutOfRange` deliberately refuses just above: a line bound applies
+    // to any citation that names a line, whoever wrote it, but `producer` cites
+    // *who supplies a second input* (#4837), which is by definition a call site
+    // and need not name the key at all. `seed.env`'s producer is a pointer at
+    // `resolveEnvConfig`, not at `env`. Demanding the key there would report the
+    // field's whole population as rot the day it was switched on.
+    const resolved = ev.local.filter((p) => !ev.missing.includes(p));
+    report.keyMentionsChecked += resolved.length;
+    unanchoredObserved.push(
+      ...findUnanchoredCitations(`${type}/${path}`, leafKeyOf(path), resolved, contentOf),
+    );
   }
   // ── ADR-0054 prove-it-runs ──
   const boundClass = BOUND_PROOF_PATHS.get(`${type}/${path}`);
@@ -645,6 +689,20 @@ function classifiedKeysAt(target: string): readonly string[] | null {
   return children ? Object.keys(children) : null;
 }
 
+// ── within-file citation anchoring: does the cited file name the key? ──
+// The complement of the line bound (#11457). Reconciled against a shrink-only
+// baseline so the day-one population is zero unexplained hits — the condition
+// `evidence.mts`'s header names as the difference between a check people read
+// and a warning list they learn to scroll past.
+const keyMentionBaselineFile = join(here, 'key-mention.baseline.json');
+const keyMention = reconcileKeyMentions({
+  observed: unanchoredObserved,
+  baseline: parseKeyMentionBaseline(JSON.parse(readFileSync(keyMentionBaselineFile, 'utf8'))).exemptions,
+});
+report.keyMentionUnanchored = keyMention.unanchored.map((c) => `${c.entry} → ${c.path}`);
+report.keyMentionStale = keyMention.stale;
+report.keyMentionExempt = keyMention.exempt;
+
 const coverage = reconcileContainerCoverage({
   observed: observedContainers,
   baseline: undrilledBaseline.containers,
@@ -754,6 +812,14 @@ const failed =
   // false-positive era to calibrate against — a line past EOF is arithmetic, and
   // the two shipped instances it found were both real (#11210).
   report.citationsOutOfRange.length > 0 ||
+  // ...and the within-file half (#11457). Red rather than ⚠ on the strength of
+  // the census that designed it: the signal was measured over the whole ledger
+  // BEFORE it was switched on, the seven real rots it found were repaired, the
+  // one structural false-positive class was folded into the matcher, and the
+  // single residual is an explicit baseline row. A check that starts at zero can
+  // be red; that is the whole reason the census came first.
+  report.keyMentionUnanchored.length > 0 ||
+  report.keyMentionStale.length > 0 ||
   report.orphanEntries.length > 0 ||
   report.verification.errors.length > 0 ||
   report.producers.errors.length > 0 ||
@@ -816,12 +882,34 @@ if (asJson) {
       '       ADR-0049 enforce-or-remove rather than repointing at a plausible survivor.\n\n' +
       '   A RANGE (`:12-34`) is bounded by its END: a range whose tail is past EOF overruns\n' +
       '   the file even when its head is inside.\n\n' +
-      '   What this check does NOT see: a consumer that moved WITHIN the file it is cited to.\n' +
-      '   The line still exists, so nothing here fires. That case needs a different signal\n' +
-      '   (does the cited file mention the property at all) whose false positives are a\n' +
-      '   design problem of their own — camelCase authoring keys are read as snake_case data\n' +
-      '   values throughout this platform, so a naive match on the key misses the consumer\n' +
-      '   for every persisted field. Measured, not assumed: see #11210.',
+      '   A consumer that moved WITHIN the file it is cited to leaves every line in range,\n' +
+      '   so nothing here fires — that complementary case is now the key-mention check\n' +
+      '   below, which the #11457 census designed rather than bolted on (a naive match on\n' +
+      '   the authoring key reports the whole camelCase→snake_case class as rot).',
+    );
+  }
+  // The within-file half. Two numbers again, and for the third time the same
+  // reason: "all anchored" over a population of zero is what a degraded parser
+  // prints too.
+  console.log(
+    `key-mention anchoring: ${report.keyMentionsChecked} (entry, cited file) pair(s) asked, ` +
+    `${report.keyMentionsChecked - report.keyMentionUnanchored.length - report.keyMentionExempt} anchored` +
+    (report.keyMentionExempt ? `, ${report.keyMentionExempt} exempt` : '') +
+    (report.keyMentionUnanchored.length ? `, ${report.keyMentionUnanchored.length} UNANCHORED` : '') + '.',
+  );
+  if (report.keyMentionUnanchored.length) {
+    console.log(`\n✗ ${report.keyMentionUnanchored.length} 'live' citation(s) name a file that never names the property:`);
+    report.keyMentionUnanchored.forEach((s: string) => console.log(`    ${s}`));
+    console.log('\n' + KEY_MENTION_GUIDANCE.split('\n').map((l) => (l ? `   ${l}` : '')).join('\n'));
+  }
+  if (report.keyMentionStale.length) {
+    console.log(`\n✗ ${report.keyMentionStale.length} stale key-mention exemption(s) — the pair anchors now:`);
+    report.keyMentionStale.forEach((s: string) => console.log(`    ${s}`));
+    console.log(
+      '\n   Delete the row from scripts/liveness/key-mention.baseline.json. The file is\n' +
+      '   shrink-only in BOTH directions on purpose: an exemption that cannot be lost is an\n' +
+      '   exemption nobody re-reads, and a debt that only ever fails while growing can be\n' +
+      '   overstated for free.',
     );
   }
   if (report.staleEvidence.length) {
@@ -1078,7 +1166,8 @@ if (asJson) {
       '\n✓ every governed-type property at the walk\'s one-level granularity is classified, every ' +
       'registered type is governed or explicitly pending, no ledger row outlives its property, ' +
       'every container inheritance is declared, every `live` entry\'s repo-local evidence path ' +
-      'resolves and every `path:NNN` citation names a line that file actually has, all bound ' +
+      'resolves, every `path:NNN` citation names a line that file actually has and every cited ' +
+      'file names the property it is evidence for (or is a recorded exemption), all bound ' +
       'high-risk proofs resolve, and the README state table carries a row ' +
       `for each of the ${report.readmeRowCount} governed type(s) it claims to index.`,
     );

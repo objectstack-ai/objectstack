@@ -761,6 +761,62 @@ export class QuickJSScriptRunner implements ScriptRunner {
     vm.setProp(vm.global, '__ctx', ctxObj);
     ctxObj.dispose();
 
+    // [#11552] Per-row dispatch signal + D2 options visibility. Grafted AFTER
+    // `__ctx` is bound, via evalCode, because both need property semantics the
+    // JSON marshalling above cannot express:
+    //
+    //  - `ctx.dispatch` must be FROZEN — the marker is the engine's verdict
+    //    (`hook.zod.ts` #6966: produced where the dispatch ladder decides,
+    //    never re-derived), so a body must not be able to drift its own copy;
+    //  - `input.options` must be NON-ENUMERABLE — invisible to
+    //    `Object.keys(ctx.input)` (the flat-record enumeration contract the
+    //    #7254 witness pins) and, load-bearingly, to `readCtxInputJson`'s
+    //    `JSON.stringify` dump, so the write-back path (`applyMutationsToInput`)
+    //    can never overwrite the engine's live options bag with a JSON copy.
+    //
+    // The snippet interpolates no caller data (values cross via setGlobalJson),
+    // so a failure here means the VM is broken — fatal, like the tx sugar.
+    if (ctx.dispatch !== undefined || ctx.inputOptions !== undefined) {
+      setGlobalJson(vm, '__dispatch', ctx.dispatch);
+      setGlobalJson(vm, '__inputOptions', ctx.inputOptions);
+      const graft = vm.evalCode(
+        `(function () {
+           var d = globalThis.__dispatch;
+           var o = globalThis.__inputOptions;
+           delete globalThis.__dispatch;
+           delete globalThis.__inputOptions;
+           var deepFreeze = function (v) {
+             if (v && typeof v === 'object') {
+               Object.getOwnPropertyNames(v).forEach(function (k) { deepFreeze(v[k]); });
+               Object.freeze(v);
+             }
+             return v;
+           };
+           if (d !== null && d !== undefined) {
+             Object.defineProperty(__ctx, 'dispatch', {
+               value: deepFreeze(d), enumerable: true, writable: false, configurable: false,
+             });
+           }
+           if (o !== null && o !== undefined) {
+             deepFreeze(o);
+             [globalThis.__input, __ctx.input].forEach(function (t) {
+               if (t && typeof t === 'object') {
+                 Object.defineProperty(t, 'options', {
+                   value: o, enumerable: false, writable: false, configurable: false,
+                 });
+               }
+             });
+           }
+         })();`,
+      );
+      if (graft.error) {
+        const msg = vm.dump(graft.error);
+        graft.error.dispose();
+        throw new SandboxError(`failed to install ctx.dispatch / ctx.input.options: ${formatErr(msg)}`);
+      }
+      graft.value.dispose();
+    }
+
     // VM-side sugar: `ctx.api.transaction(async () => { … })`. Begin runs
     // OUTSIDE the try so a begin failure (e.g. missing capability) propagates
     // without attempting a rollback there is no transaction for. The body's

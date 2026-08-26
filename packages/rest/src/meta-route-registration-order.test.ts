@@ -6,13 +6,17 @@
  * The `/meta` family is the one place on this server where a route's position
  * in the registration sequence decides whether it can ever run. Hono is
  * first-match-wins (measured in `plugin-hono-server`'s
- * `mounted-route-introspection.test.ts`), and this family carries two
+ * `mounted-route-introspection.test.ts`), and this family used to carry two
  * catch-alls that shadow their literal siblings:
  *
  *   * `GET /meta/:type` swallows every one-segment path — `diagnostics`,
  *     `_drafts`, `types` — that is not registered ahead of it;
- *   * `GET /meta/:type/:section/:name` swallows every three-segment path —
- *     `/history`, `/audit`, `/diff`, `/published` — likewise.
+ *   * `GET /meta/:type/:section/:name` swallowed every three-segment path —
+ *     `/history`, `/audit`, `/diff`, `/published` — likewise. [#12195] That
+ *     one is RETIRED with compound-name addressing, so the hazard is gone
+ *     rather than ordered around; the pin below inverted to match, because a
+ *     re-mount is how the hazard comes back and an order pin phrased against
+ *     the retired route would go green while the retirement is undone.
  *
  * `GET /meta/types` and `GET /meta/:type/:name/published` were both DEAD in
  * shipped builds for the second reason apiece: one was never registered at
@@ -90,10 +94,35 @@ describe('/meta registration order', () => {
     }
   });
 
-  it('registers every three-segment literal BEFORE the compound-name catch-all', () => {
+  // [#12195] The three compound arities are RETIRED, so the two pins that used
+  // to live here — "every three-segment literal precedes the compound-name
+  // catch-all" and "the FSM state read precedes the compound `/published`
+  // twin" — no longer have a second route to order against.
+  //
+  // ⛔ They are NOT deleted as satisfied. Both pinned a SHADOWING hazard, and
+  // the way that hazard returns is a compound arity being mounted again, at
+  // which point an order pin phrased against it would go green while the
+  // retirement it guards is undone. So the pin is INVERTED: the constraint is
+  // now that these paths are not registered AT ALL, which is the statement
+  // that actually holds after the removal and the one a re-mount breaks.
+  it('mounts NO compound `:section` arity — the retired catch-all stays retired', () => {
     const order = metaRoutesInOrder();
-    const catchAll = indexOf(order, 'GET /api/v1/meta/:type/:section/:name');
+    const compound = order.filter((key) => key.includes(':section'));
+    expect(
+      compound,
+      'a compound-name arity is mounted again. #12176 retired compound metadata '
+      + 'item names and #12194 refuses every slash-bearing name at the publish door, '
+      + 'so this route can only be reached by a name that cannot be created — and as '
+      + 'a three-segment catch-all it shadows /history, /audit, /diff, /published '
+      + 'and /layers on the way',
+    ).toEqual([]);
+  });
 
+  it('keeps every three-segment literal mounted after the catch-all above them went away', () => {
+    // The companion half: removing the shadowing route must not have removed
+    // the routes it used to shadow. Without this, the pin above is satisfied
+    // by deleting the whole family.
+    const order = metaRoutesInOrder();
     for (const literal of [
       'GET /api/v1/meta/:type/:name/published',
       'GET /api/v1/meta/:type/:name/history',
@@ -102,27 +131,18 @@ describe('/meta registration order', () => {
       'GET /api/v1/meta/:type/:name/references',
       'GET /api/v1/meta/:type/:name/layers',
     ]) {
-      expect(
-        indexOf(order, literal),
-        `${literal} is registered AFTER GET /api/v1/meta/:type/:section/:name and is therefore shadowed — `
-        + 'it answers the compound-name read instead, which for `published` was a stub identical '
-        + 'before publish AND for a bogus name',
-      ).toBeLessThan(catchAll);
+      expect(order, `${literal} is no longer registered`).toContain(literal);
     }
   });
 
-  it('registers the FSM state read before the compound `/published` twin they collide on', () => {
+  it('keeps the FSM state read mounted — it is now the ONLY reading of its path', () => {
     const order = metaRoutesInOrder();
-    // The single colliding path is `/meta/object/x/state/published`. Two
-    // literal segments beat one, so the state-machine reading must win it.
-    //
-    // #9180 step 2 deleted the plural twin's arm of this pin along with the
-    // plural registration — but NOT the pin: the collision is between the FSM
-    // read and the compound `/published` route, and it outlives the spelling
-    // that was retired. Deleting the whole pin would have un-guarded the
-    // surviving route against exactly the #7526 defect it exists to catch.
-    expect(indexOf(order, 'GET /api/v1/meta/object/:name/state/:field'))
-      .toBeLessThan(indexOf(order, 'GET /api/v1/meta/:type/:section/:name/published'));
+    // `/meta/object/x/state/published` used to be a collision: the compound
+    // `/published` twin read it as "the published version of the compound name
+    // object/x/state", and only the two literal segments winning kept the FSM
+    // reading. With the twin retired nothing else matches four segments.
+    indexOf(order, 'GET /api/v1/meta/object/:name/state/:field');
+    expect(order.filter((k) => k.includes(':section') && k.endsWith('/published'))).toEqual([]);
   });
 
   it('mounts the three routes #7526 found dead', () => {

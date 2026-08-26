@@ -89,6 +89,24 @@ const result = PackageInstallationSchema.parse(data);
 | **durationMs** | `number` | ✅ | Provisioning duration in milliseconds |
 | **warnings** | `string[]` | optional | Provisioning warnings |
 
+### Nested Shape: `ProvisionTenantResponse.tenant`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ | Unique tenant database identifier (UUID) |
+| **organizationId** | `string` | ✅ | Organization ID (foreign key to sys_organization) |
+| **databaseName** | `string` | ✅ | Database name (UUID-based) |
+| **databaseUrl** | `string` | ✅ | Full database URL |
+| **authToken** | `string` | ✅ | Encrypted tenant-specific auth token |
+| **status** | `Enum<'provisioning' \| 'active' \| 'suspended' \| 'archived' \| 'failed'>` | optional (default: `"provisioning"`) | Database status |
+| **region** | `string` | ✅ | Deployment region |
+| **plan** | `string` | optional (default: `"free"`) | Tenant plan tier |
+| **storageLimitMb** | `integer` | ✅ | Storage limit in megabytes |
+| **createdAt** | `string` | ✅ | Database creation timestamp |
+| **updatedAt** | `string` | ✅ | Last update timestamp |
+| **lastAccessedAt** | `string` | optional | Last accessed timestamp |
+| **metadata** | `Record<string, any>` | optional | Custom tenant configuration |
+
 
 ---
 

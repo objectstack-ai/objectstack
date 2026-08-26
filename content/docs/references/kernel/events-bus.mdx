@@ -50,6 +50,107 @@ const result = EventBusConfigSchema.parse(data);
 | **eventTypes** | `{ name: string; version: string; schema?: any; description?: string; … }[]` | optional | Event type definitions |
 | **handlers** | `{ id?: string; eventName: string; handler: any; priority: integer; … }[]` | optional | Global event handlers |
 
+### Nested Shape: `EventBusConfig.persistence`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **enabled** | `boolean` | optional (default: `false`) | Enable event persistence |
+| **retention** | `integer` | ✅ | Days to retain persisted events |
+| **filter** | `any` | optional | Optional filter function to select which events to persist |
+| **storage** | `Enum<'database' \| 'file' \| 's3' \| 'custom'>` | optional (default: `"database"`) | Storage backend for persisted events |
+
+### Nested Shape: `EventBusConfig.queue`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | optional (default: `"events"`) | Event queue name |
+| **concurrency** | `integer` | optional (default: `10`) | Max concurrent event handlers |
+| **retryPolicy** | `{ maxRetries: integer; backoffStrategy: Enum<'fixed' \| 'linear' \| 'exponential'>; initialDelayMs: integer; maxDelayMs: integer }` | optional | Default retry policy for events |
+| **deadLetterQueue** | `string` | optional | Dead letter queue name for failed events |
+| **priorityEnabled** | `boolean` | optional (default: `true`) | Process events based on priority |
+
+### Nested Shape: `EventBusConfig.eventSourcing`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **enabled** | `boolean` | optional (default: `false`) | Enable event sourcing |
+| **snapshotInterval** | `integer` | optional (default: `100`) | Create snapshot every N events |
+| **snapshotRetention** | `integer` | optional (default: `10`) | Number of snapshots to retain |
+| **retention** | `integer` | optional (default: `365`) | Days to retain events |
+| **aggregateTypes** | `string[]` | optional | Aggregate types to enable event sourcing for |
+| **storage** | `{ type: Enum<'database' \| 'file' \| 's3' \| 'eventstore'>; options?: Record<string, any> }` | optional | Event store configuration |
+
+### Nested Shape: `EventBusConfig.replay`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **enabled** | `boolean` | optional (default: `true`) | Enable event replay capability |
+
+### Nested Shape: `EventBusConfig.webhooks[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | optional | Unique webhook identifier |
+| **eventPattern** | `string` | ✅ | Event name pattern (supports wildcards) |
+| **url** | `string` | ✅ | Webhook endpoint URL |
+| **method** | `Enum<'GET' \| 'POST' \| 'PUT' \| 'PATCH'>` | optional (default: `"POST"`) | HTTP method |
+| **headers** | `Record<string, string>` | optional | HTTP headers |
+| **authentication** | `{ type: Enum<'none' \| 'bearer' \| 'basic' \| 'api-key'>; credentials?: Record<string, string> }` | optional | Authentication configuration |
+| **retryPolicy** | `{ maxRetries: integer; backoffStrategy: Enum<'fixed' \| 'linear' \| 'exponential'>; initialDelayMs: integer; maxDelayMs: integer }` | optional | Retry policy |
+| **timeoutMs** | `integer` | optional (default: `30000`) | Request timeout in milliseconds |
+| **transform** | `any` | optional | Transform event before sending |
+| **enabled** | `boolean` | optional (default: `true`) | Whether webhook is enabled |
+
+### Nested Shape: `EventBusConfig.messageQueue`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **provider** | `Enum<'kafka' \| 'rabbitmq' \| 'aws-sqs' \| 'redis-pubsub' \| 'google-pubsub' \| 'azure-service-bus'>` | ✅ | Message queue provider |
+| **topic** | `string` | ✅ | Topic or queue name |
+| **eventPattern** | `string` | optional (default: `"*"`) | Event name pattern to publish (supports wildcards) |
+| **partitionKey** | `string` | optional | JSON path for partition key (e.g., "metadata.tenantId") |
+| **format** | `Enum<'json' \| 'avro' \| 'protobuf'>` | optional (default: `"json"`) | Message serialization format |
+| **includeMetadata** | `boolean` | optional (default: `true`) | Include event metadata in message |
+| **compression** | `Enum<'none' \| 'gzip' \| 'snappy' \| 'lz4'>` | optional (default: `"none"`) | Message compression |
+| **batchSize** | `integer` | optional (default: `1`) | Batch size for publishing |
+| **flushIntervalMs** | `integer` | optional (default: `1000`) | Flush interval for batching |
+
+### Nested Shape: `EventBusConfig.realtime`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **enabled** | `boolean` | optional (default: `true`) | Enable real-time notifications |
+| **protocol** | `Enum<'websocket' \| 'sse' \| 'long-polling'>` | optional (default: `"websocket"`) | Real-time protocol |
+| **eventPattern** | `string` | optional (default: `"*"`) | Event pattern to broadcast |
+| **userFilter** | `boolean` | optional (default: `true`) | Filter events by user |
+| **tenantFilter** | `boolean` | optional (default: `true`) | Filter events by tenant |
+| **channels** | `{ name: string; eventPattern: string; filter?: any }[]` | optional | Named channels for event broadcasting |
+| **rateLimit** | `{ maxEventsPerSecond: integer; windowMs: integer }` | optional | Rate limiting configuration |
+
+### Nested Shape: `EventBusConfig.eventTypes[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Event type name (lowercase with dots) |
+| **version** | `string` | optional (default: `"1.0.0"`) | Event schema version |
+| **schema** | `any` | optional | JSON Schema for event payload validation |
+| **description** | `string` | optional | Event type description |
+| **deprecated** | `boolean` | optional (default: `false`) | Whether this event type is deprecated |
+| **tags** | `string[]` | optional | Event type tags |
+
+### Nested Shape: `EventBusConfig.handlers[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | optional | Unique handler identifier |
+| **eventName** | `string` | ✅ | Name of event to handle (supports wildcards like user.*) |
+| **handler** | `any` | ✅ | Handler function |
+| **priority** | `integer` | optional (default: `0`) | Execution priority (lower numbers execute first) |
+| **async** | `boolean` | optional (default: `true`) | Execute in background (true) or block (false) |
+| **retry** | `{ maxRetries: integer; backoffMs: integer; backoffMultiplier: number }` | optional | Retry policy for failed handlers |
+| **timeoutMs** | `integer` | optional | Handler timeout in milliseconds |
+| **filter** | `any` | optional | Optional filter to determine if handler should execute |
+
 
 ---
 

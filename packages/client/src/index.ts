@@ -77,6 +77,9 @@ import {
   CrossObjectBatchOperation,
   CrossObjectBatchRequest,
   CrossObjectBatchResponse,
+  // [#11924] The GLOBAL cross-object search body — NOT the per-object
+  // `SearchResult` in `@objectstack/spec/contracts` (the #8140 near-miss trap).
+  SearchAllResponse,
 } from '@objectstack/spec/api';
 import type {
   ApprovalRequestRow,
@@ -374,6 +377,20 @@ export interface CreateDataResult<T = any> {
   droppedFields?: DroppedFieldsEvent[];
 }
 
+/**
+ * Spec: CloneDataResponseSchema (#11924)
+ *
+ * `CreateDataResult`'s structural sibling plus `sourceId` — `id` names the NEW
+ * record, `sourceId` the record it was copied from. No `droppedFields`: unlike
+ * `createData`, the clone producer emits no write-observability event.
+ */
+export interface CloneDataResult<T = any> {
+  object: string;
+  id: string;
+  sourceId: string;
+  record: T;
+}
+
 /** Spec: UpdateDataResponseSchema */
 export interface UpdateDataResult<T = any> {
   object: string;
@@ -519,8 +536,14 @@ function normalizeActionResult<T>(payload: any): { success: boolean; data?: T; e
 }
 
 /**
- * Query-string options for `meta.saveItem` on BOTH clients — the unscoped
+ * Write options for `meta.saveItem` on BOTH clients — the unscoped
  * `ObjectStackClient.meta` and {@link ScopedProjectClient.meta}.
+ *
+ * Named for the WRITE, not for the query string: three members ride the query
+ * string and `ifMatch` rides a request HEADER (#11713). One bag per write
+ * whatever carrier each member takes — the same shape the other first-party
+ * client's `MetadataClientSaveOptions`
+ * (`@object-ui/data-objectstack`) already carries, and for the same reason.
  *
  * ONE exported type deliberately shared by the two declarations, rather than
  * an inline literal copied into each. The two `saveItem`s are the same method
@@ -529,7 +552,7 @@ function normalizeActionResult<T>(payload: any): { success: boolean; data?: T; e
  * it), and a bag spelled twice is a divergence waiting to be introduced by
  * whoever next extends only the copy they happened to open.
  *
- * ## Why these three, and why they are the ones that exist
+ * ## Why these three QUERY parameters, and why they are the ones that exist
  *
  * `PUT /api/v1/meta/:type/:name` reads exactly these three query parameters,
  * and until this type existed the SDK sent NONE of them — `saveItem` built a
@@ -558,6 +581,39 @@ function normalizeActionResult<T>(payload: any): { success: boolean; data?: T; e
  * repair this from the message side — the parameter had to become reachable.
  */
 export interface SaveMetaItemOptions {
+    /**
+     * `If-Match: <version>` — the ADR-0008 optimistic-concurrency token, and
+     * the one member here that is NOT a query parameter.
+     *
+     * Echo back the `version` a previous `saveItem` (or `publishItem`)
+     * resolved, and a concurrent edit is refused with `409
+     * metadata_conflict` instead of silently overwriting the other author's
+     * write. Omit for the last-write-wins behaviour every call had before
+     * this member existed — the pin is opt-in on the door too.
+     *
+     * Opaque: echo it verbatim, never parse it. `SaveMetaItemResponse.version`
+     * says so in the contract itself — currently `sha256:<64 hex chars>`, with
+     * the format explicitly not promised.
+     *
+     * Only a non-empty token reaches the wire. `undefined` and `''` both OMIT
+     * the header rather than sending an empty `If-Match`, which is not merely
+     * tidier: the door reads the header's PRESENCE as "pin this write", so an
+     * empty spelling would pin the write against the empty string and refuse
+     * every save with a 409 the caller never asked for.
+     *
+     * [#12195] There is ONE door now. The compound-name twin
+     * `PUT /meta/:type/:section/:name` — which this note used to pair with —
+     * is retired, and every name reaches `PUT /meta/:type/:name`
+     * percent-encoded, so `if-match` behaviour no longer varies by how the
+     * name is spelled.
+     *
+     * Same member name, same header, same truthy guard as the sibling
+     * first-party `@object-ui/data-objectstack` `MetadataClient.save`, whose
+     * read surface names this token `checksum` — one content hash, one
+     * behaviour, two clients. `data.update` / `data.delete` on this same
+     * client carry it under the same name too.
+     */
+    ifMatch?: string;
     /**
      * `?force=true` — acknowledge and proceed past the Phase 3a
      * destructive-change refusal (`409 DESTRUCTIVE_CHANGE`), whose message
@@ -589,21 +645,21 @@ export interface SaveMetaItemOptions {
      * on the wire that the server ignores. Same shape the first-party
      * `@object-ui/data-objectstack` `MetadataClient.save` already uses.
      *
-     * ⚠️ COMPOUND NAMES DO NOT STAGE. `mode` reaches only the single-segment
-     * `PUT /meta/:type/:name`. Its compound-name twin
-     * `PUT /meta/:type/:section/:name` — the door a `name` containing a slash
-     * lands on, e.g. `saveItem('object', 'views/all_leads', item)` — never
-     * reads this parameter, so `{ mode: 'draft' }` there is IGNORED and the
-     * write is PUBLISHED LIVE, answered 200. It is not refused; there is no
-     * signal at the call site. Filed as objectstack#11712 and deliberately not
-     * repaired from this side: threading it is the route's decision, and a
-     * client-side guess would be a second place the two doors disagree.
+     * [#12195] REACHES EVERY SAVE — the carve-out this note used to carry is
+     * GONE, and it is worth recording why rather than deleting it silently.
      *
-     * ⛔ Do not "fix" this by rejecting compound names here. `force` and
-     * `packageId` DO reach both doors (measured: the compound handler reads
-     * and threads `?force` since objectstack#11095 and `?package` alongside
-     * it), so refusing the whole bag on a compound name would break the two
-     * parameters that work in order to warn about the one that does not.
+     * `mode` used to reach only the single-segment `PUT /meta/:type/:name`.
+     * A `name` containing a slash landed on the compound-name twin
+     * `PUT /meta/:type/:section/:name`, which never read this parameter — so
+     * `{ mode: 'draft' }` there was IGNORED and the write was PUBLISHED LIVE,
+     * answered 200, with no signal at the call site (objectstack#11712).
+     *
+     * Two changes closed it at the source rather than from this side. Stage 1
+     * (#12194) made a slash-bearing name unwritable at all, and this stage
+     * retired the twin and unified this file on `encodeURIComponent`, so every
+     * save now arrives at the one door that reads `mode`. A name that would
+     * once have forked to the silent-publish door is now refused `400
+     * INVALID_REQUEST` by the grammar — loud, at the door, before any write.
      */
     mode?: 'draft' | 'publish';
 }
@@ -633,6 +689,29 @@ function metaSaveQuery(options?: SaveMetaItemOptions): string {
     if (options.mode === 'draft') params.set('mode', 'draft');
     const qs = params.toString();
     return qs ? `?${qs}` : '';
+}
+
+/**
+ * Compose the `meta.saveItem` request headers — the ONE builder both
+ * `saveItem` declarations call, for the same reason {@link metaSaveQuery} is
+ * one function: the twins must not be able to drift in what they put on the
+ * wire.
+ *
+ * Returns `undefined` (never `{}`) when nothing is set, so the call site can
+ * omit the `headers` key entirely and an options-less save stays
+ * BYTE-IDENTICAL to what it sent before this existed.
+ *
+ * ⛔ `ifMatch` must never be added to {@link metaSaveQuery}. It is a header;
+ * neither PUT door reads an `?ifMatch=` parameter, so a query spelling would
+ * look set at the call site and protect nothing — the exact failure #11713
+ * exists to close, one carrier over.
+ */
+function metaSaveHeaders(options?: SaveMetaItemOptions): Record<string, string> | undefined {
+    if (!options?.ifMatch) return undefined;
+    // Verbatim and UNQUOTED. The door tolerates ETag-style quotes by stripping
+    // them, but the token a save resolves carries none, and wrapping it here
+    // would put bytes on the wire the sibling first-party client does not send.
+    return { 'If-Match': String(options.ifMatch) };
 }
 
 export class ObjectStackClient {
@@ -832,7 +911,7 @@ export class ObjectStackClient {
         const params = new URLSearchParams();
         if (options?.packageId) params.set('package', options.packageId);
         const qs = params.toString();
-        const url = `${this.baseUrl}${route}/${type}/${name}${qs ? `?${qs}` : ''}`;
+        const url = `${this.baseUrl}${route}/${encodeURIComponent(type)}/${encodeURIComponent(name)}${qs ? `?${qs}` : ''}`;
         const res = await this.fetch(url);
         return this.unwrapResponse<GetMetaItemResponse>(res);
     },
@@ -844,9 +923,11 @@ export class ObjectStackClient {
      * @param item - The metadata content to save
      *
      * The resolved `version` is the ADR-0008 optimistic-concurrency token:
-     * echo it back as the `If-Match` request header on the next write to the
-     * same item and a concurrent edit is reported as 409 `metadata_conflict`
-     * instead of silently overwriting. It is nameable here only because
+     * pass it back as `options.ifMatch` on the next write to the same item —
+     * this method sends it as the `If-Match` request header — and a concurrent
+     * edit is reported as 409 `metadata_conflict` instead of silently
+     * overwriting. Until #11713 that instruction named a header the SDK had no
+     * argument for, so a first-party caller who followed it overwrote anyway. It is nameable here only because
      * `SaveMetaItemResponseSchema` declares the full body since #5745 — the
      * declaration used to stop at `{ success, message }`, and annotating
      * against that subset would have hidden the OCC carrier (#5545).
@@ -867,12 +948,24 @@ export class ObjectStackClient {
         // `…nameforce=true`. This value carries its `?`; the distinct name
         // says so without the reader having to go and look.
         const query = metaSaveQuery(options);
-        // `type`/`name` stay UNENCODED — a compound name's slash must survive
-        // so the request reaches `PUT /meta/:type/:section/:name` instead of
-        // collapsing onto the 3-segment route (pinned in client.test.ts).
-        const res = await this.fetch(`${this.baseUrl}${route}/${type}/${name}${query}`, {
+        // The OCC token rides a HEADER, not the query string — see
+        // {@link metaSaveHeaders}. `undefined` when unset, and the spread then
+        // omits the `headers` key altogether, so a save without `ifMatch`
+        // hands `fetch` the same `init` it always did.
+        const headers = metaSaveHeaders(options);
+        // [#12195] ENCODED, like every other `/meta` item address in this file.
+        // This site used to leave `type`/`name` RAW so a compound name's slash
+        // would survive into a separate path segment and reach
+        // `PUT /meta/:type/:section/:name`. That door is retired, and encoding
+        // is now the single spelling: a legal name (#12194's grammar — snake
+        // case, optionally dot-qualified) contains nothing `encodeURIComponent`
+        // alters, so this is byte-identical for every name that can be written,
+        // and a pre-grammar residue name reaches the single-segment door with
+        // its slash intact as `%2F` instead of forking the request.
+        const res = await this.fetch(`${this.baseUrl}${route}/${encodeURIComponent(type)}/${encodeURIComponent(name)}${query}`, {
             method: 'PUT',
-            body: JSON.stringify(item)
+            body: JSON.stringify(item),
+            ...(headers ? { headers } : {}),
         });
         return this.unwrapResponse<SaveMetaItemResponse>(res);
     },
@@ -1003,13 +1096,19 @@ export class ObjectStackClient {
      */
 
     /**
-     * ADR-0033: the published version of a metadata item. Compound names are
-     * passed through unencoded (e.g. `getPublished('lead', 'views/all_leads')`),
-     * matching how `getItem` addresses sub-resources.
+     * ADR-0033: the published version of a metadata item.
+     *
+     * [#12195] The name is percent-encoded, like every other `/meta` item
+     * address in this file. This docblock used to promise the opposite — that
+     * a compound name passed through UNENCODED, `getPublished('lead',
+     * 'views/all_leads')`, so its slash would reach the compound arity
+     * `GET /meta/:type/:section/:name/published`. That arity is retired and a
+     * slash-bearing name is refused at the publish door (#12194), so there is
+     * one spelling and one door.
      */
     getPublished: async (type: string, name: string) => {
         const route = this.getRoute('metadata');
-        const res = await this.fetch(`${this.baseUrl}${route}/${type}/${name}/published`);
+        const res = await this.fetch(`${this.baseUrl}${route}/${encodeURIComponent(type)}/${encodeURIComponent(name)}/published`);
         return this.unwrapResponse<any>(res);
     },
 
@@ -1090,7 +1189,7 @@ export class ObjectStackClient {
      */
     getReferences: async (type: string, name: string) => {
         const route = this.getRoute('metadata');
-        const res = await this.fetch(`${this.baseUrl}${route}/${type}/${name}/references`);
+        const res = await this.fetch(`${this.baseUrl}${route}/${encodeURIComponent(type)}/${encodeURIComponent(name)}/references`);
         return this.unwrapResponse<any>(res);
     },
 
@@ -1113,19 +1212,21 @@ export class ObjectStackClient {
     getAudit: async (type: string, name: string, opts?: { limit?: number }) => {
         const route = this.getRoute('metadata');
         const qs = opts?.limit !== undefined ? `?limit=${opts.limit}` : '';
-        const res = await this.fetch(`${this.baseUrl}${route}/${type}/${name}/audit${qs}`);
+        const res = await this.fetch(`${this.baseUrl}${route}/${encodeURIComponent(type)}/${encodeURIComponent(name)}/audit${qs}`);
         return this.unwrapResponse<any>(res);
     },
 
     /**
      * ADR-0033: promote a single item's pending draft overlay to live —
      * the per-item flow beside `packages.publishDrafts`' package-scoped one.
-     * 404 [no_draft] when there is nothing to publish. Compound names pass
-     * through unencoded, like `getItem`.
+     * 404 [no_draft] when there is nothing to publish. [#12195] The name is
+     * percent-encoded, like `getItem` — this line used to promise unencoded
+     * pass-through for compound names, whose arity is now retired.
      *
      * The resolved `version` is the ADR-0008 optimistic-concurrency token, the
-     * same carrier `saveItem` returns and with the same job: echo it back as
-     * `If-Match` on the next write to the item. It is nameable here only since
+     * same carrier `saveItem` returns and with the same job: pass it back as
+     * `saveItem`'s `options.ifMatch`, which sends it as `If-Match` on the next
+     * write to the item. It is nameable here only since
      * #7294, which declared `PublishMetaItemResponseSchema` — this method
      * resolved to `any` before that, because the publish door had no
      * declaration at all for a return type to point at.
@@ -1141,7 +1242,7 @@ export class ObjectStackClient {
         opts?: { message?: string },
     ): Promise<PublishMetaItemResponse> => {
         const route = this.getRoute('metadata');
-        const res = await this.fetch(`${this.baseUrl}${route}/${type}/${name}/publish`, {
+        const res = await this.fetch(`${this.baseUrl}${route}/${encodeURIComponent(type)}/${encodeURIComponent(name)}/publish`, {
             method: 'POST',
             body: JSON.stringify(opts?.message ? { message: opts.message } : {}),
         });
@@ -1153,7 +1254,7 @@ export class ObjectStackClient {
      */
     rollbackItem: async (type: string, name: string, toVersion: number, opts?: { message?: string }) => {
         const route = this.getRoute('metadata');
-        const res = await this.fetch(`${this.baseUrl}${route}/${type}/${name}/rollback`, {
+        const res = await this.fetch(`${this.baseUrl}${route}/${encodeURIComponent(type)}/${encodeURIComponent(name)}/rollback`, {
             method: 'POST',
             body: JSON.stringify({ toVersion, ...(opts?.message ? { message: opts.message } : {}) }),
         });
@@ -1170,7 +1271,7 @@ export class ObjectStackClient {
         if (opts?.from !== undefined) params.set('from', String(opts.from));
         if (opts?.to !== undefined) params.set('to', String(opts.to));
         const qs = params.toString();
-        const res = await this.fetch(`${this.baseUrl}${route}/${type}/${name}/diff${qs ? `?${qs}` : ''}`);
+        const res = await this.fetch(`${this.baseUrl}${route}/${encodeURIComponent(type)}/${encodeURIComponent(name)}/diff${qs ? `?${qs}` : ''}`);
         return this.unwrapResponse<any>(res);
     }
   };
@@ -1540,7 +1641,8 @@ export class ObjectStackClient {
      * single-item declaration; this method resolved to `any` before that.
      * The batch is all-or-nothing (ADR-0067 D2): `success: false` on a 200
      * means NOTHING landed — read `failed[]`. Each `published[]` element's
-     * `version` is the ADR-0008 OCC token (echo as `If-Match`), and the
+     * `version` is the ADR-0008 OCC token (pass to `saveItem` as
+     * `options.ifMatch`, which sends it as `If-Match`), and the
      * conditional receipts (`seedApplied` / `materializeApplied` /
      * `unhiddenApps` / `unhideError` / `rebindError`) each report their own
      * outcome: a 200 does not mean the data plane or the visibility flip
@@ -4238,28 +4340,27 @@ export class ObjectStackClient {
    * object the caller can read. 501s on kernels without `searchAll`.
    * (#3587 gap closure)
    *
-   * [#8140] ⛔ `Promise<any>` is DELIBERATE — a missing CONTRACT, not a
-   * missing annotation. The response shape
-   * (`{ query, hits, totalObjects, totalHits, truncated }`) is declared
-   * INLINE on the implementation (`@objectstack/metadata-protocol`'s
-   * `searchAll`), not in `@objectstack/spec`, and `metadata-protocol` is not
-   * a dependency of this package — so there is nothing reachable to bind.
-   * ⚠️ `SearchResult` (`@objectstack/spec/contracts`) is a NEAR-MISS trap: it
-   * types the per-object `ISearchService.search`, whose `hits` carry
+   * [#11924] Bound to `SearchAllResponse` (`@objectstack/spec/api`), the
+   * contract #8140 had to leave missing: the route answers the whole body
+   * BARE, relaying `searchAll`'s `{ query, hits, totalObjects, totalHits,
+   * truncated }` verbatim, and conformance coverage on both the producer and
+   * the mount is what entitles the declaration (#3877).
+   * ⚠️ `SearchResult` (`@objectstack/spec/contracts`) is STILL the near-miss
+   * trap: it types the per-object `ISearchService.search`, whose `hits` carry
    * `score`/`document`, not this route's `object`/`title`/`snippet`/`record`.
-   * Binding it would typecheck and be false.
+   * `return-type-precision.test.ts` pins the mismatch.
    */
   search = async (
       q: string,
       opts?: { objects?: string[]; limit?: number; perObject?: number },
-  ): Promise<any> => {
+  ): Promise<SearchAllResponse> => {
       const params = new URLSearchParams();
       params.set('q', q);
       if (opts?.objects?.length) params.set('objects', opts.objects.join(','));
       if (opts?.limit !== undefined) params.set('limit', String(opts.limit));
       if (opts?.perObject !== undefined) params.set('perObject', String(opts.perObject));
       const res = await this.fetch(`${this.baseUrl}/api/v1/search?${params.toString()}`);
-      return this.unwrapResponse<any>(res);
+      return this.unwrapResponse<SearchAllResponse>(res);
   };
 
   /**
@@ -5136,20 +5237,22 @@ export class ObjectStackClient {
      * `overrides` are applied on top of the copied values — e.g. a new name
      * or a cleared unique field. (#3587 gap closure)
      *
-     * [#8140] ⛔ `Promise<any>` is DELIBERATE — a missing CONTRACT. The route
-     * returns `{ object, id, sourceId, record }`, produced inline by
-     * `@objectstack/metadata-protocol`'s `cloneData` and declared nowhere in
-     * `@objectstack/spec`. It is the structural sibling of this file's own
-     * `CreateDataResult<T>` plus `sourceId`, but writing that equivalence
-     * here would mint an undeclared contract in a consumer.
+     * [#11924] Bound to `CloneDataResult<T>`, the declared mirror of
+     * `CloneDataResponseSchema` (`@objectstack/spec/api`) — the contract #8140
+     * had to leave missing. The route answers `{ object, id, sourceId,
+     * record }` BARE with 201, relaying `cloneData` verbatim; `id` is the NEW
+     * record's, `sourceId` the copied record's. The caller-supplied generic
+     * follows its `data.*` siblings (`T = any` — the payload is the caller's
+     * object shape); conformance coverage on both the producer and the mount
+     * is what entitles the declaration (#3877).
      */
-    clone: async (object: string, id: string, overrides?: Record<string, any>): Promise<any> => {
+    clone: async <T = any>(object: string, id: string, overrides?: Record<string, any>): Promise<CloneDataResult<T>> => {
         const route = this.getRoute('data');
         const res = await this.fetch(
             `${this.baseUrl}${route}/${encodeURIComponent(object)}/${encodeURIComponent(id)}/clone`,
             { method: 'POST', body: JSON.stringify(overrides ? { overrides } : {}) },
         );
-        return this.unwrapResponse<any>(res);
+        return this.unwrapResponse<CloneDataResult<T>>(res);
     },
 
     /**
@@ -5491,17 +5594,19 @@ export class ScopedProjectClient {
       const params = new URLSearchParams();
       if (options?.packageId) params.set('package', options.packageId);
       const qs = params.toString();
-      const res = await this.parent._fetch(this.url(`/meta/${type}/${name}${qs ? `?${qs}` : ''}`));
+      const res = await this.parent._fetch(this.url(`/meta/${encodeURIComponent(type)}/${encodeURIComponent(name)}${qs ? `?${qs}` : ''}`));
       return this.parent._unwrap<GetMetaItemResponse>(res);
     },
     /**
-     * Carries the ADR-0008 OCC token in `version` — see the unscoped twin.
+     * Carries the ADR-0008 OCC token in `version` — see the unscoped twin,
+     * and send it back here as `options.ifMatch`.
      *
      * `options` is the SAME {@link SaveMetaItemOptions} bag the unscoped twin
      * takes, and reaches the SAME handler: the scoped mount is not a second
      * implementation, it is one `registerForBase` call replayed against
      * `/environments/:environmentId` (see `RestServer`), so this door reads
-     * `?force` / `?package` / `?mode` byte-identically. A bag on only one of
+     * `?force` / `?package` / `?mode` — and the `If-Match` header —
+     * byte-identically. A bag on only one of
      * the two clients would be a fresh divergence of the kind #7019 rules
      * against, not half a fix.
      */
@@ -5513,9 +5618,13 @@ export class ScopedProjectClient {
     ): Promise<SaveMetaItemResponse> => {
       // `query`, not `qs` — it carries its own `?`; see the unscoped twin.
       const query = metaSaveQuery(options);
-      const res = await this.parent._fetch(this.url(`/meta/${type}/${name}${query}`), {
+      // Header half of the same bag, through the same one builder the twin
+      // calls — see {@link metaSaveHeaders}.
+      const headers = metaSaveHeaders(options);
+      const res = await this.parent._fetch(this.url(`/meta/${encodeURIComponent(type)}/${encodeURIComponent(name)}${query}`), {
         method: 'PUT',
         body: JSON.stringify(item),
+        ...(headers ? { headers } : {}),
       });
       return this.parent._unwrap<SaveMetaItemResponse>(res);
     },
@@ -5963,6 +6072,12 @@ export type {
   CrossObjectBatchOperation,
   CrossObjectBatchRequest,
   CrossObjectBatchResponse,
+  // [#11924] The global cross-object search body + hit — the RIGHT names to
+  // reach for on `client.search` (the same-named `SearchResult` in
+  // `@objectstack/spec/contracts` types the per-object `ISearchService.search`
+  // and is the wrong shape for this route — the #8140 near-miss trap).
+  SearchAllHit,
+  SearchAllResponse,
 } from '@objectstack/spec/api';
 
 // Approval runtime types (ADR-0019) — surfaced so SDK consumers can type the

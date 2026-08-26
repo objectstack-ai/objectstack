@@ -72,6 +72,19 @@ Security incident record per ISO 27001:2022 A.5.24–A.5.28
 * `policy_violation`
 * `other`
 
+### Nested Shape: `Incident.responsePhases[number]`
+
+Incident response phase with timing and assignment
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **phase** | `Enum<'identification' \| 'containment' \| 'eradication' \| 'recovery' \| 'lessons_learned'>` | ✅ | Response phase name |
+| **description** | `string` | ✅ | Phase description and objectives |
+| **assignedTo** | `string` | ✅ | Responsible team or role |
+| **targetHours** | `number` | ✅ | Target completion time in hours |
+| **completedAt** | `number` | optional | Actual completion timestamp |
+| **notes** | `string` | optional | Phase notes and findings |
+
 
 ---
 
@@ -105,6 +118,19 @@ Incident notification matrix with escalation policies
 | **rules** | `{ severity: Enum<'critical' \| 'high' \| 'medium' \| 'low'>; channels: Enum<'email' \| 'sms' \| 'slack' \| 'pagerduty' \| 'webhook'>[]; recipients: string[]; withinMinutes: number; … }[]` | ✅ | Notification rules by severity level |
 | **escalationTimeoutMinutes** | `number` | optional (default: `30`) | Auto-escalation timeout in minutes |
 | **escalationChain** | `string[]` | optional (default: `[]`) | Ordered escalation chain of roles |
+
+### Nested Shape: `IncidentNotificationMatrix.rules[number]`
+
+Incident notification rule per severity level
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **severity** | `Enum<'critical' \| 'high' \| 'medium' \| 'low'>` | ✅ | Minimum severity to trigger notification |
+| **channels** | `Enum<'email' \| 'sms' \| 'slack' \| 'pagerduty' \| 'webhook'>[]` | ✅ | Notification channels |
+| **recipients** | `string[]` | ✅ | Roles or teams to notify |
+| **withinMinutes** | `number` | ✅ | Notification deadline in minutes from detection |
+| **notifyRegulators** | `boolean` | optional (default: `false`) | Whether to notify regulatory authorities |
+| **regulatorDeadlineHours** | `number` | optional | Regulatory notification deadline in hours |
 
 
 ---
@@ -160,6 +186,14 @@ Organization-level incident response policy per ISO 27001:2022
 | **requirePostIncidentReview** | `boolean` | optional (default: `true`) | Require post-incident review for all incidents |
 | **regulatoryNotificationThreshold** | `Enum<'critical' \| 'high' \| 'medium' \| 'low'>` | optional (default: `"high"`) | Minimum severity requiring regulatory notification |
 | **retentionDays** | `number` | optional (default: `2555`) | Incident record retention period in days (default ~7 years) |
+
+### Nested Shape: `IncidentResponsePolicy.notificationMatrix`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **rules** | `{ severity: Enum<'critical' \| 'high' \| 'medium' \| 'low'>; channels: Enum<'email' \| 'sms' \| 'slack' \| 'pagerduty' \| 'webhook'>[]; recipients: string[]; withinMinutes: number; … }[]` | ✅ | Notification rules by severity level |
+| **escalationTimeoutMinutes** | `number` | optional (default: `30`) | Auto-escalation timeout in minutes |
+| **escalationChain** | `string[]` | optional (default: `[]`) | Ordered escalation chain of roles |
 
 
 ---

@@ -1,18 +1,16 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#11712] `?mode=draft` on the compound-name `PUT /api/v1/meta/:type/:section/:name`
- * — the FIFTH divergence closed on this door pair, and the first one whose
- * harmful direction is a silent WRITE rather than a silent refusal.
+ * [#11712 → #12195] `?mode=draft` on the `/meta` save doors — a two-door parity
+ * suite whose SECOND DOOR NO LONGER EXISTS.
  *
- * ## The defect, as measured
+ * ## What this file is now, and why it was not deleted
  *
- * ADR-0005's per-item lifecycle stages a write when the caller sends
- * `?mode=draft`; `POST /meta/:type/:name/publish` promotes it later. The
- * single-segment `PUT /meta/:type/:name` reads that parameter and threads it.
- * The compound-name twin built its `saveMetaItem` request field by field and
- * `mode` was not one of the fields, so it fell to `saveMetaItem`'s `'publish'`
- * default. Driven through the real registered handlers against one store:
+ * #11712 measured the fifth and worst divergence between
+ * `PUT /meta/:type/:name` and its compound-name twin
+ * `PUT /meta/:type/:section/:name`: the twin built its `saveMetaItem` request
+ * field by field, `mode` was not one of the fields, and it fell to the
+ * `'publish'` default. One name, spelled two ways:
  *
  * ```
  * COMPOUND  PUT /meta/object/crm/task?mode=draft  → 200 {"state":"active"}
@@ -22,34 +20,28 @@
  *   r_2           name=crm_task   state=draft   label=NEW_LABEL    ← staged
  * ```
  *
- * One name, spelled two ways, and the parameter is not refused at either door —
- * it is honoured at one and dropped at the other, with a `200` both times. The
- * caller asked for a staging buffer and got a publish.
+ * The caller asked for a staging buffer and got a publish, with a `200` and no
+ * signal at the call site.
  *
- * ## Why threading, and not refusing the parameter here
+ * #12176's maintainer ruling (2026-08-25) retired compound metadata item names
+ * outright. Stage 1 (#12194) declared the item-name grammar and refuses every
+ * slash-bearing name at the publish door; stage 3 (#12195) un-mounts the arity.
+ * So the divergence is not fixed — the door it needed is GONE.
  *
- * #7019's ruling, inherited with its reason for the fifth time: this route is
- * "word for word the same operation" as its twin — one generic `saveMetaItem`
- * reached by a name spelled in two segments — and every divergence found on the
- * pair has been closed on that finding (#6603/#7019's `manage_metadata` gate,
- * #8805's write-side organization, #7035's 501 envelope, #11095's `?force`).
- * #11095's carve-out is for the runtime DISPATCHER, which has no query string
- * at all; it does not describe this door, which has one and already reads two
- * parameters off it.
+ * ⛔ The file is REWORKED rather than deleted, deliberately. "The divergence is
+ * gone" and "the door is gone" are different facts, and only the second is
+ * true; a deleted file would take with it the guard against the arity being
+ * mounted again, which is precisely how the silent-live-publish returns. So:
  *
- * The fork triage left open — "the draft door may have a real reason to stay
- * single-segment only" — was measured and is CLOSED in the negative:
- *
- *  • `saveMetaItem` keys the draft on `type`/`name`/organization/package and
- *    passes `state` to `repo.put`. Nothing in that path reads the name's
- *    SHAPE, so `crm/task` is a draft key exactly like `crm_task` is.
- *  • The ADR-0033 read half is already mounted in BOTH arities —
- *    `GET /:type/:section/:name/published` (#7526), whose own comment cites the
- *    SDK's `getPublished('lead', 'views/all_leads')` and calls a compound name
- *    "how every other read on this surface addresses a sub-resource".
- *
- * A compound draft is a shape this surface already serves on the read side.
- * Only the write door was missing.
+ *  1. the compound arity is pinned ABSENT (§1) — the removal's own pin;
+ *  2. the surviving door keeps the FULL #11712 `?mode` contract, asserted per
+ *     spelling (§2) — these were the CONTROL half of the old parity cases and
+ *     are unchanged;
+ *  3. #6877's repeated-parameter guard is re-pinned on the surviving door (§3);
+ *  4. the slash-bearing name a caller would once have spelled compound is
+ *     pinned answering #12194's `400 INVALID_REQUEST` at the surviving door
+ *     (§4) — the capability that REPLACED the compound arity, and the case that
+ *     answered `200` + published-live before this retirement.
  *
  * ## Why the REAL protocol and not a double
  *
@@ -57,7 +49,7 @@
  * is what the write DID. A double that only recorded the request would pass
  * against a door that names `mode` and a store that ignores it; and a
  * status-only assertion passes against the UNFIXED door, which answers `200`
- * while publishing live — this card's defect exactly. So the gate is the real
+ * while publishing live — the original defect exactly. So the gate is the real
  * `ObjectStackProtocolImplementation` over a `sys_metadata`-backed engine and
  * every case reads the STORE: which row is live, which row is staged, and which
  * body each of them carries.
@@ -74,7 +66,8 @@
  * `meta-compound-save-force-parity.test.ts` documents. The `200` save answer is
  * the protocol's own `{ success, version, seq, state, message }`. The `400`
  * from `refuseRepeatedQueryParams` is hand-built by the route and NESTED:
- * `{ error: { code, message } }`.
+ * `{ error: { code, message } }`. #12194's grammar refusal is the ADR-0112
+ * envelope with a TOP-LEVEL `code` (`INVALID_REQUEST`).
  */
 
 import { describe, it, expect, vi } from 'vitest';
@@ -276,14 +269,28 @@ function boot() {
          * naming the outcome — see §5.
          */
         outcome: (name: string) => [labelOf(name, 'active'), labelOf(name, 'draft')] as const,
-        compoundOutcome: () => [labelOf(COMPOUND_NAME, 'active'), labelOf(COMPOUND_NAME, 'draft')] as const,
         singleOutcome: () => [labelOf(SINGLE_NAME, 'active'), labelOf(SINGLE_NAME, 'draft')] as const,
-        /** The door under test. */
-        compoundPut: (query: Record<string, unknown> = {}) =>
-            call(COMPOUND_PATH, { type: 'object', section: 'crm', name: 'task' }, query),
-        /** Its single-segment twin — the control, already correct before this card. */
+        /**
+         * [#12195] The compound door's REGISTRATION, not a call to it. This
+         * used to be `compoundPut()`, driving `PUT COMPOUND_PATH`; the arity is
+         * retired, so what is assertable now is that nothing is mounted there.
+         */
+        compoundRoute: () => route('PUT', COMPOUND_PATH),
+        /** Every `/meta` route key this server mounted, for absence sweeps. */
+        metaRouteKeys: () => (rest as any).getRoutes()
+            .map((r: any) => `${String(r.method).toUpperCase()} ${r.path}`)
+            .filter((k: string) => k.includes(META)),
+        /** The surviving door. */
         singlePut: (query: Record<string, unknown> = {}) =>
             call(SINGLE_PATH, { type: 'object', name: SINGLE_NAME }, query),
+        /**
+         * [#12195] The surviving door addressed with an ARBITRARY name — the
+         * shape a caller now uses for a slash-bearing one. Hono decodes `%2F`
+         * before the handler runs, so the handler sees the raw name and this
+         * helper hands it over directly, which is the same value.
+         */
+        singlePutNamed: (name: string, query: Record<string, unknown> = {}) =>
+            call(SINGLE_PATH, { type: 'object', name }, query),
     };
 }
 
@@ -293,255 +300,184 @@ const STAGED = [LIVE_LABEL, SUBMITTED_LABEL];
 const PUBLISHED = [SUBMITTED_LABEL, undefined];
 
 // ═══════════════════════════════════════════════════════════════════════════
-// 1. ⭐ The compound door, `?mode=draft` — the case that fails without the fix
+// 1. ⭐ [#12195] The compound door is GONE — the pin the removal owes
 // ═══════════════════════════════════════════════════════════════════════════
 
-describe('[#11712] compound-name PUT — `?mode=draft` stages instead of publishing', () => {
-    it('⭐ leaves the LIVE row alone and stages the edit beside it', async () => {
-        const stack = boot();
-
-        const answer = await stack.compoundPut({ mode: 'draft' });
-
-        expect(answer.status).toBe(200);
-        // ⛔ The status is NOT the pin. The unfixed door answers 200 here too —
-        // it accepts the parameter and ignores it. These two lines are the
-        // claim: the caller's edit is STAGED, and the live body is untouched.
-        expect(stack.compoundOutcome()).toEqual(STAGED);
-        // Pre-fix this read `['Edited label', undefined]`: the live row
-        // overwritten, nothing staged. A publish, answered 200, for a request
-        // that asked for a draft.
+describe('[#11712 / #12195] the compound-name `PUT` arity is retired', () => {
+    /**
+     * ⛔ This file's original subject — "`?mode=draft` is honoured at one door
+     * and dropped at the other" — is DISSOLVED, not fixed. #12176 retired
+     * compound metadata item names; #12194 refuses every slash-bearing name at
+     * the publish door; this stage un-mounts the arity that used to serve them.
+     *
+     * The pins are REWORKED rather than deleted, because "the divergence is
+     * gone" and "the door is gone" are different facts and only the second one
+     * is true. A deleted file would also delete the guard against the arity
+     * being mounted again — which is exactly how the #11712 defect (a silent
+     * live publish where the caller asked for a draft) would return.
+     */
+    it('⭐ mounts no `PUT /meta/:type/:section/:name` at all', () => {
+        expect(
+            boot().compoundRoute(),
+            'the compound PUT arity is mounted again — it cannot read `?mode`, so a '
+            + '`{ mode: "draft" }` save through it publishes LIVE and answers 200 (#11712)',
+        ).toBeUndefined();
     });
 
-    it('⭐ says so in the answer too — `state` is the staged one, not the live one', async () => {
+    it('⭐ mounts no compound `:section` arity of any method', () => {
+        expect(boot().metaRouteKeys().filter((k: string) => k.includes(':section'))).toEqual([]);
+    });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 2. The surviving door keeps the FULL #11712 contract — asserted per
+//    spelling, never assumed. These cases were the CONTROL half of the old
+//    parity suite and are unchanged.
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe('[#11712] the single-segment `PUT` honours every `?mode` spelling', () => {
+    it.each([
+        { label: 'no `mode`', query: {}, expected: PUBLISHED },
+        { label: '`mode=draft`', query: { mode: 'draft' }, expected: STAGED },
+        { label: '`mode=DRAFT`', query: { mode: 'DRAFT' }, expected: STAGED },
+        { label: '`mode=publish`', query: { mode: 'publish' }, expected: PUBLISHED },
+        { label: '`mode=staged` (unrecognised)', query: { mode: 'staged' }, expected: PUBLISHED },
+    ])('⭐ $label', async ({ query, expected }) => {
         const stack = boot();
 
-        const answer = await stack.compoundPut({ mode: 'draft' });
+        const answer = await stack.singlePut(query);
 
-        // The protocol's save answer carries the lifecycle state it wrote.
-        // Pre-fix this said `active` while reporting success — the silence the
-        // card is about, one field along from the store itself.
-        expect(answer.body?.state).toBe('draft');
+        expect(answer.status).toBe(200);
+        expect(stack.singleOutcome()).toEqual(expected);
     });
 
     it('threads `mode: \'draft\'` into the protocol request, and only when asked', async () => {
-        const stack = boot();
+        const staged = boot();
+        const published = boot();
 
-        await stack.compoundPut();
-        await stack.compoundPut({ mode: 'draft' });
+        await staged.singlePut({ mode: 'draft' });
+        await published.singlePut({});
 
-        // The seam itself. The pre-fix door reached `saveMetaItem` on BOTH of
-        // these calls — it simply never named `mode` in either request, which
-        // is why a request-shape assertion localises the defect that a
-        // status-only assertion cannot see at all.
-        expect(stack.seen).toHaveLength(2);
-        expect(stack.seen[0].mode).toBeUndefined();
-        expect(stack.seen[1].mode).toBe('draft');
-        // The rest of the request is untouched by this card — same face, same
-        // compound name assembled from the two segments.
-        expect(stack.seen[1].name).toBe(COMPOUND_NAME);
-        expect(stack.seen[1].writeFace).toBe('meta-envelope');
-    });
-
-    it('accepts the `DRAFT` spelling case-insensitively, byte-identically to the twin', async () => {
-        const stack = boot();
-
-        const answer = await stack.compoundPut({ mode: 'DRAFT' });
-
-        expect(answer.status).toBe(200);
-        expect(stack.compoundOutcome()).toEqual(STAGED);
+        expect(staged.seen).toHaveLength(1);
+        expect(staged.seen[0]).toMatchObject({
+            type: 'object', name: SINGLE_NAME, mode: 'draft', writeFace: 'meta-envelope',
+        });
+        // The default is the ABSENCE of the key, not `mode: 'publish'` — a save
+        // without the option must hand the protocol what it always did.
+        expect(published.seen).toHaveLength(1);
+        expect(published.seen[0].mode).toBeUndefined();
     });
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
-// 2. The fence — publishing is still the default, and still what everything
-//    that is not `draft` means. GREEN BOTH SIDES: a regression guard, not a
-//    red-before case.
+// 3. [#6877] The repeated-parameter guard on the surviving door. GREEN BOTH
+//    SIDES of this card — a regression guard, not evidence of the removal.
 // ═══════════════════════════════════════════════════════════════════════════
 
-describe('[#11712] the compound door still publishes when nothing asked for a draft', () => {
-    it.each([
-        { label: 'no `mode` at all', query: {} },
-        { label: 'an explicit `mode=publish`', query: { mode: 'publish' } },
-        { label: 'an unrecognised `mode=staged`', query: { mode: 'staged' } },
-        { label: 'an empty `mode=`', query: { mode: '' } },
-    ])('$label goes live — legacy semantics, unchanged', async ({ query }) => {
-        const stack = boot();
-
-        const answer = await stack.compoundPut(query);
-
-        expect(answer.status).toBe(200);
-        expect(stack.compoundOutcome()).toEqual(PUBLISHED);
-        expect(stack.seen[0].mode).toBeUndefined();
-    });
-});
-
-// ═══════════════════════════════════════════════════════════════════════════
-// 3. [#6877] The repeated-parameter guard — the second limb of this card
-// ═══════════════════════════════════════════════════════════════════════════
-
-describe('[#11712 / #6877] a REPEATED `?mode` is refused, never read as publish-anyway', () => {
+describe('[#11712 / #6877] a REPEATED query parameter is refused, never read as publish-anyway', () => {
     /**
-     * #6877's mechanism, unchanged, aimed at the parameter this card threads: a
-     * repeated `?mode=draft&mode=draft` arrives as an ARRAY, the
-     * `typeof req.query?.mode === 'string'` test is FALSE for it, and the save
-     * falls silently back to publishing live — the exact outcome this card
-     * exists to stop, re-entered through the door the fix opens. The twin has
-     * listed `mode` since #6877; this door listed two names because it read two
-     * parameters. Threading the third without naming it here would have shipped
-     * the guard gap on the same line as the repair.
-     *
-     * ⚠️ This narrows the accepted set: a repeated `mode` is answered 200 today
-     * and 400 after this card. That is the Clause-② limb the changeset states.
+     * #6877's mechanism: a repeated `?mode=draft&mode=draft` arrives as an
+     * ARRAY, `typeof req.query?.mode === 'string'` is FALSE for it, and the
+     * save would fall silently back to publishing live. The guard answers 400
+     * BEFORE the door, so nothing reaches `saveMetaItem`.
      */
     it('⛔ `?mode=draft&mode=draft` is a 400 — NOT a silent publish', async () => {
-        const stack = boot();
-
-        const answer = await stack.compoundPut({ mode: ['draft', 'draft'] });
-
-        expect(answer.status).toBe(400);
-        expect(answer.body?.error?.code).toBe('VALIDATION_ERROR');
-        // Stated as the assertion that would have caught the fall-back: the
-        // save must not have happened at all, let alone gone live.
-        expect(stack.seen).toHaveLength(0);
-        expect(stack.compoundOutcome()).toEqual([LIVE_LABEL, undefined]);
-    });
-
-    it('⛔ `?mode=draft&mode=publish` is refused too — multiplicity, not intent', async () => {
-        const stack = boot();
-
-        const answer = await stack.compoundPut({ mode: ['draft', 'publish'] });
-
-        expect(answer.status).toBe(400);
-        expect(answer.body?.error?.code).toBe('VALIDATION_ERROR');
-        expect(stack.compoundOutcome()).toEqual([LIVE_LABEL, undefined]);
-    });
-
-    it('one occurrence encoded as an array still stages — the guard unwraps, it does not blanket-refuse', async () => {
-        const stack = boot();
-
-        const answer = await stack.compoundPut({ mode: ['draft'] });
-
-        expect(answer.status).toBe(200);
-        expect(stack.compoundOutcome()).toEqual(STAGED);
-    });
-
-    it('the twin refuses a repeated `mode` the same way — it always did', async () => {
         const stack = boot();
 
         const answer = await stack.singlePut({ mode: ['draft', 'draft'] });
 
         expect(answer.status).toBe(400);
         expect(answer.body?.error?.code).toBe('VALIDATION_ERROR');
+        expect(stack.seen).toHaveLength(0);
+        expect(stack.singleOutcome()).toEqual([LIVE_LABEL, undefined]);
     });
-});
 
-// ═══════════════════════════════════════════════════════════════════════════
-// 4. The guard's existing entries must not have moved. GREEN BOTH SIDES —
-//    this describe block passes before and after the fix, and is reported as a
-//    regression guard rather than as evidence of the repair.
-// ═══════════════════════════════════════════════════════════════════════════
+    it('⛔ `?mode=draft&mode=publish` is refused too — multiplicity, not intent', async () => {
+        const stack = boot();
 
-describe('[#11712 / #11095] adding `mode` to the list did not disturb `force` or `package`', () => {
+        const answer = await stack.singlePut({ mode: ['draft', 'publish'] });
+
+        expect(answer.status).toBe(400);
+        expect(answer.body?.error?.code).toBe('VALIDATION_ERROR');
+        expect(stack.singleOutcome()).toEqual([LIVE_LABEL, undefined]);
+    });
+
+    it('one occurrence encoded as an array still REACHES the door — the guard unwraps, it does not blanket-refuse', async () => {
+        const stack = boot();
+
+        const answer = await stack.singlePut({ mode: ['draft'] });
+
+        expect(answer.status).toBe(200);
+        expect(stack.seen).toHaveLength(1);
+        expect(stack.seen[0].mode).toBe('draft');
+        expect(stack.singleOutcome()).toEqual(STAGED);
+    });
+
     it('⛔ a repeated `?force` is still a 400, and still writes nothing (#6877 inversion)', async () => {
         const stack = boot();
 
-        const answer = await stack.compoundPut({ force: ['false', 'false'] });
+        const answer = await stack.singlePut({ force: ['false', 'false'] });
 
         expect(answer.status).toBe(400);
         expect(answer.body?.error?.code).toBe('VALIDATION_ERROR');
         expect(stack.seen).toHaveLength(0);
-        expect(stack.compoundOutcome()).toEqual([LIVE_LABEL, undefined]);
+        expect(stack.singleOutcome()).toEqual([LIVE_LABEL, undefined]);
     });
 
     it('⛔ a repeated `?package` is still a 400 (#6877, where the guard started)', async () => {
         const stack = boot();
 
-        const answer = await stack.compoundPut({ package: ['pkg_a', 'pkg_b'] });
+        const answer = await stack.singlePut({ package: ['pkg_a', 'pkg_b'] });
 
         expect(answer.status).toBe(400);
         expect(answer.body?.error?.code).toBe('VALIDATION_ERROR');
         expect(stack.seen).toHaveLength(0);
-        expect(stack.compoundOutcome()).toEqual([LIVE_LABEL, undefined]);
+        expect(stack.singleOutcome()).toEqual([LIVE_LABEL, undefined]);
     });
 
     it('a single `?package` still binds the row, and composes with `?mode=draft`', async () => {
         const stack = boot();
 
-        await stack.compoundPut({ package: 'pkg_a', mode: 'draft' });
+        await stack.singlePut({ package: 'pkg_a', mode: 'draft' });
 
-        // Both parameters reached the protocol from the same query string: this
-        // card added a reader beside the two that were already here, it did not
-        // replace them.
         expect(stack.seen).toHaveLength(1);
-        expect(stack.seen[0]).toMatchObject({ packageId: 'pkg_a', mode: 'draft', name: COMPOUND_NAME });
+        expect(stack.seen[0]).toMatchObject({ packageId: 'pkg_a', mode: 'draft', name: SINGLE_NAME });
     });
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
-// 5. ⭐ [#7019] The twins agree — the ruling this card inherits, executable
+// 4. ⭐ [#12194] A slash-bearing name is refused at the GRAMMAR gate — the
+//    capability that replaced the compound door, pinned where callers meet it.
 // ═══════════════════════════════════════════════════════════════════════════
 
-describe('[#11712 / #7019] the two `PUT` doors answer `?mode` the same way', () => {
+describe('[#12194 / #12195] a slash-bearing name is refused at the surviving door', () => {
     /**
-     * ⛔ Deliberately literal-free on both sides: these cases assert that the
-     * two doors AGREE, never what they agree on. §1 names the outcome; this
-     * section names only the equality, so a future move on EITHER door reddens
-     * here independently of whichever literal §1 happens to pin. (#11731 §4 is
-     * the precedent — "every classified refusal gets the same status at both
-     * doors", with the status read off the other door rather than written down.)
+     * With the compound arity gone, `crm/task` reaches the single-segment door
+     * percent-encoded (`%2F`) — the spelling the SDK now sends for every name,
+     * and the one Hono decodes back to `crm/task` before the handler sees it.
+     * What answers is #12194's grammar refusal, with the ADR-0112 envelope.
      *
-     * The single-segment door is untouched by this card and is the control: its
-     * behaviour is asserted rather than assumed, which is the only shape in
-     * which "the twins agree" is a pin instead of a comment.
+     * This is the pin that makes the removal safe to read: the old compound
+     * door answered `200` and published live for this exact input.
      */
-    it.each([
-        { label: 'no `mode`', query: {} },
-        { label: '`mode=draft`', query: { mode: 'draft' } },
-        { label: '`mode=DRAFT`', query: { mode: 'DRAFT' } },
-        { label: '`mode=publish`', query: { mode: 'publish' } },
-        { label: '`mode=staged` (unrecognised)', query: { mode: 'staged' } },
-        { label: 'a repeated `mode`', query: { mode: ['draft', 'draft'] } },
-    ])('⭐ $label: same status, same lifecycle, same store outcome at both doors', async ({ query }) => {
-        const compoundStack = boot();
-        const singleStack = boot();
-
-        const compound = await compoundStack.compoundPut(query);
-        const single = await singleStack.singlePut(query);
-
-        // 1. The answer.
-        expect(compound.status).toBe(single.status);
-        expect(compound.body?.state).toBe(single.body?.state);
-        expect(compound.body?.error?.code).toBe(single.body?.error?.code);
-        // 2. What the write actually DID, as `[live label, staged label]`.
-        //    Pre-fix, `mode=draft` read `['Edited label', undefined]` on the
-        //    compound side and `['Live label', 'Edited label']` on the twin.
-        expect(compoundStack.compoundOutcome()).toEqual(singleStack.singleOutcome());
-    });
-
-    it('and the twin is UNTOUCHED — its request shape is what it always was', async () => {
+    it('⭐ answers 400 INVALID_REQUEST and stores NOTHING', async () => {
         const stack = boot();
 
-        await stack.singlePut({ mode: 'draft' });
+        const answer = await stack.singlePutNamed(COMPOUND_NAME, { mode: 'draft' });
 
-        // The fence. This card threads a parameter on the compound door; it must
-        // not have edited the door that was already right.
-        expect(stack.seen).toHaveLength(1);
-        expect(stack.seen[0]).toMatchObject({
-            type: 'object', name: SINGLE_NAME, mode: 'draft', writeFace: 'meta-envelope',
-        });
+        expect(answer.status).toBe(400);
+        expect(answer.body?.code).toBe('INVALID_REQUEST');
+        // The seeded compound row is untouched: refused before any write.
+        expect(stack.outcome(COMPOUND_NAME)).toEqual([LIVE_LABEL, undefined]);
     });
 
-    it('both doors reach ONE store, so a draft staged at either is the same draft', async () => {
+    it('and the twin\'s staging beside it is untouched — one store, one refusal', async () => {
         const stack = boot();
 
-        // Same fixture, both doors, both staging: the names differ, so the two
-        // drafts are two rows and neither door's staging leaks onto the other's
-        // live body. This is the claim "one generic `saveMetaItem`, reached by a
-        // name spelled in two segments" reduced to something executable.
-        await stack.compoundPut({ mode: 'draft' });
+        await stack.singlePutNamed(COMPOUND_NAME, { mode: 'draft' });
         await stack.singlePut({ mode: 'draft' });
 
-        expect(stack.outcome(COMPOUND_NAME)).toEqual(STAGED);
+        expect(stack.outcome(COMPOUND_NAME)).toEqual([LIVE_LABEL, undefined]);
         expect(stack.outcome(SINGLE_NAME)).toEqual(STAGED);
     });
 });

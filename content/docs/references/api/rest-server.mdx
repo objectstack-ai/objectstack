@@ -49,6 +49,15 @@ const result = BatchEndpointsConfigSchema.parse(data);
 | **operations** | `{ createMany: boolean; updateMany: boolean; deleteMany: boolean; upsertMany: boolean }` | optional | Enable/disable specific batch operations |
 | **defaultAtomic** | `boolean` | optional (default: `true`) | Default atomic/transaction mode for batch operations |
 
+### Nested Shape: `BatchEndpointsConfig.operations`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **createMany** | `boolean` | optional (default: `true`) | Enable POST /data/:object/createMany |
+| **updateMany** | `boolean` | optional (default: `true`) | Enable POST /data/:object/updateMany |
+| **deleteMany** | `boolean` | optional (default: `true`) | Enable POST /data/:object/deleteMany |
+| **upsertMany** | `boolean` | optional (default: `true`) | Enable POST /data/:object/upsertMany |
+
 
 ---
 
@@ -77,6 +86,25 @@ const result = BatchEndpointsConfigSchema.parse(data);
 | **dataPrefix** | `string` | optional (default: `"/data"`) | URL prefix for data endpoints |
 | **objectParamStyle** | `Enum<'path' \| 'query'>` | optional (default: `"path"`) | How object name is passed (path param or query param) |
 
+### Nested Shape: `CrudEndpointsConfig.operations`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **create** | `boolean` | optional (default: `true`) | Enable create operation |
+| **read** | `boolean` | optional (default: `true`) | Enable read operation |
+| **update** | `boolean` | optional (default: `true`) | Enable update operation |
+| **delete** | `boolean` | optional (default: `true`) | Enable delete operation |
+| **list** | `boolean` | optional (default: `true`) | Enable list operation |
+
+### Nested Shape: `CrudEndpointsConfig.patterns[string]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **method** | `Enum<'GET' \| 'POST' \| 'PUT' \| 'DELETE' \| 'PATCH' \| 'HEAD' \| 'OPTIONS'>` | ✅ | HTTP method |
+| **path** | `string` | ✅ | URL path pattern |
+| **summary** | `string` | optional | Operation summary |
+| **description** | `string` | optional | Operation description |
+
 
 ---
 
@@ -103,6 +131,42 @@ const result = BatchEndpointsConfigSchema.parse(data);
 | **total** | `integer` | ✅ | Total number of endpoints |
 | **byObject** | `Record<string, { id: string; method: Enum<'GET' \| 'POST' \| 'PUT' \| 'DELETE' \| 'PATCH' \| 'HEAD' \| 'OPTIONS'>; path: string; object: string; … }[]>` | optional | Endpoints grouped by object |
 | **byOperation** | `Record<string, { id: string; method: Enum<'GET' \| 'POST' \| 'PUT' \| 'DELETE' \| 'PATCH' \| 'HEAD' \| 'OPTIONS'>; path: string; object: string; … }[]>` | optional | Endpoints grouped by operation |
+
+### Nested Shape: `EndpointRegistry.endpoints[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ | Unique endpoint identifier |
+| **method** | `Enum<'GET' \| 'POST' \| 'PUT' \| 'DELETE' \| 'PATCH' \| 'HEAD' \| 'OPTIONS'>` | ✅ | HTTP method |
+| **path** | `string` | ✅ | Full URL path |
+| **object** | `string` | ✅ | Object name (snake_case) |
+| **operation** | `Enum<'create' \| 'read' \| 'update' \| 'delete' \| 'list'> \| string` | ✅ | Operation type |
+| **handler** | `string` | ✅ | Handler function identifier |
+| **metadata** | `{ summary?: string; description?: string; tags?: string[]; deprecated?: boolean }` | optional |  |
+
+### Nested Shape: `EndpointRegistry.byObject[string][number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ | Unique endpoint identifier |
+| **method** | `Enum<'GET' \| 'POST' \| 'PUT' \| 'DELETE' \| 'PATCH' \| 'HEAD' \| 'OPTIONS'>` | ✅ | HTTP method |
+| **path** | `string` | ✅ | Full URL path |
+| **object** | `string` | ✅ | Object name (snake_case) |
+| **operation** | `Enum<'create' \| 'read' \| 'update' \| 'delete' \| 'list'> \| string` | ✅ | Operation type |
+| **handler** | `string` | ✅ | Handler function identifier |
+| **metadata** | `{ summary?: string; description?: string; tags?: string[]; deprecated?: boolean }` | optional |  |
+
+### Nested Shape: `EndpointRegistry.byOperation[string][number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ | Unique endpoint identifier |
+| **method** | `Enum<'GET' \| 'POST' \| 'PUT' \| 'DELETE' \| 'PATCH' \| 'HEAD' \| 'OPTIONS'>` | ✅ | HTTP method |
+| **path** | `string` | ✅ | Full URL path |
+| **object** | `string` | ✅ | Object name (snake_case) |
+| **operation** | `Enum<'create' \| 'read' \| 'update' \| 'delete' \| 'list'> \| string` | ✅ | Operation type |
+| **handler** | `string` | ✅ | Handler function identifier |
+| **metadata** | `{ summary?: string; description?: string; tags?: string[]; deprecated?: boolean }` | optional |  |
 
 
 ---
@@ -136,6 +200,15 @@ const result = BatchEndpointsConfigSchema.parse(data);
 | **maskObjectFields** | `boolean` | optional (default: `true`) | [ADR-0106 D8] Mask served object schemas to the caller's readable fields |
 | **endpoints** | `{ types: boolean; items: boolean; item: boolean; schema: boolean }` | optional | Enable/disable specific endpoints |
 
+### Nested Shape: `MetadataEndpointsConfig.endpoints`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **types** | `boolean` | optional (default: `true`) | GET /meta - List all metadata types |
+| **items** | `boolean` | optional (default: `true`) | GET /meta/:type - List items of type |
+| **item** | `boolean` | optional (default: `true`) | GET /meta/:type/:name - Get specific item |
+| **schema** | `boolean` | optional (default: `true`) | GET /meta/:type/:name/schema - Get JSON schema |
+
 
 ---
 
@@ -160,6 +233,26 @@ const result = BatchEndpointsConfigSchema.parse(data);
 | **documentation** | `{ enabled: boolean; title: string; description?: string; version?: string; … }` | optional | OpenAPI/Swagger documentation config |
 | **responseFormat** | `{ envelope: boolean; includeMetadata: boolean; includePagination: boolean }` | optional | Response format options |
 
+### Nested Shape: `RestApiConfig.documentation`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **enabled** | `boolean` | optional (default: `true`) | Enable API documentation |
+| **title** | `string` | optional (default: `"ObjectStack API"`) | API documentation title |
+| **description** | `string` | optional | API description |
+| **version** | `string` | optional | Documentation version |
+| **termsOfService** | `string` | optional | Terms of service URL |
+| **contact** | `{ name?: string; url?: string; email?: string }` | optional |  |
+| **license** | `{ name: string; url?: string }` | optional |  |
+
+### Nested Shape: `RestApiConfig.responseFormat`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **envelope** | `boolean` | optional (default: `true`) | Wrap responses in standard envelope |
+| **includeMetadata** | `boolean` | optional (default: `true`) | Include response metadata (timestamp, requestId) |
+| **includePagination** | `boolean` | optional (default: `true`) | Include pagination info in list responses |
+
 
 ---
 
@@ -176,6 +269,62 @@ const result = BatchEndpointsConfigSchema.parse(data);
 | **routes** | `{ includeObjects?: string[]; excludeObjects?: string[]; nameTransform: Enum<'none' \| 'plural' \| 'kebab-case' \| 'camelCase'>; overrides?: Record<string, object> }` | optional | Route generation configuration |
 | **openApi31** | `never` | optional | [REMOVED] `RestServerConfig.openApi31` was removed in @objectstack/spec 17 (#4579, ADR-0049) — no runtime ever read it: the REST server forwards only `api`/`crud`/`metadata`/`batch`/`routes`, and the served /openapi.json is the pre-generated contract enriched with the live server URL and the registered objects, so webhook/callback definitions declared here never appeared in it. Delete the key. Config-driven OpenAPI 3.1 webhooks/callbacks documentation is a new capability and must arrive via the enforce route of ADR-0049 (a new ADR), not by re-declaring the key; for a real outbound webhook use `Webhook` from `@objectstack/spec/automation`. |
 
+### Nested Shape: `RestServerConfig.api`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **version** | `string` | optional (default: `"v1"`) | API version (e.g., v1, v2, 2024-01) |
+| **basePath** | `string` | optional (default: `"/api"`) | Base URL path for API |
+| **apiPath** | `string` | optional | Full API path (defaults to `{basePath}`/`{version}`) |
+| **enableCrud** | `boolean` | optional (default: `true`) | Enable automatic CRUD endpoint generation |
+| **enableMetadata** | `boolean` | optional (default: `true`) | Enable metadata API endpoints |
+| **enableUi** | `boolean` | optional (default: `true`) | Enable UI API endpoints (Views, Menus, Layouts) |
+| **enableBatch** | `boolean` | optional (default: `true`) | Enable batch operation endpoints |
+| **enableDiscovery** | `boolean` | optional (default: `true`) | Enable API discovery endpoint |
+| **enableOpenApi** | `boolean` | optional (default: `true`) | Enable OpenAPI 3.1 spec & docs viewer endpoints |
+| **enableProjectScoping** | `boolean` | optional (default: `false`) | Enable project-scoped routing for data/meta/AI APIs |
+| **projectResolution** | `Enum<'required' \| 'optional' \| 'auto'>` | optional (default: `"auto"`) | Project ID resolution strategy |
+| **requireAuth** | `never` | optional | [REMOVED] `api.requireAuth` was removed in @objectstack/spec 17 (#3963). Anonymous access to object data is now always denied — auth is a kernel concern, not a deployment posture. Delete the key. To publish something publicly, declare it: a public form view (`sharing.allowAnonymous`), a share link, or `book.audience: 'public'` — each derives its own narrow authorization instead of opening the whole data plane. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
+| **documentation** | `{ enabled: boolean; title: string; description?: string; version?: string; … }` | optional | OpenAPI/Swagger documentation config |
+| **responseFormat** | `{ envelope: boolean; includeMetadata: boolean; includePagination: boolean }` | optional | Response format options |
+
+### Nested Shape: `RestServerConfig.crud`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **operations** | `{ create: boolean; read: boolean; update: boolean; delete: boolean; … }` | optional | Enable/disable operations |
+| **patterns** | `Record<string, { method: Enum<'GET' \| 'POST' \| 'PUT' \| 'DELETE' \| 'PATCH' \| 'HEAD' \| 'OPTIONS'>; path: string; summary?: string; description?: string }>` | optional | Custom URL patterns for operations |
+| **dataPrefix** | `string` | optional (default: `"/data"`) | URL prefix for data endpoints |
+| **objectParamStyle** | `Enum<'path' \| 'query'>` | optional (default: `"path"`) | How object name is passed (path param or query param) |
+
+### Nested Shape: `RestServerConfig.metadata`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **prefix** | `string` | optional (default: `"/meta"`) | URL prefix for metadata endpoints |
+| **enableCache** | `boolean` | optional (default: `true`) | Enable HTTP cache headers (ETag, Last-Modified) |
+| **cacheTtl** | `integer` | optional (default: `3600`) | Cache TTL in seconds |
+| **maskObjectFields** | `boolean` | optional (default: `true`) | [ADR-0106 D8] Mask served object schemas to the caller's readable fields |
+| **endpoints** | `{ types: boolean; items: boolean; item: boolean; schema: boolean }` | optional | Enable/disable specific endpoints |
+
+### Nested Shape: `RestServerConfig.batch`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **maxBatchSize** | `integer` | optional (default: `200`) | Maximum records per batch operation |
+| **enableBatchEndpoint** | `boolean` | optional (default: `true`) | Enable POST /data/:object/batch endpoint |
+| **operations** | `{ createMany: boolean; updateMany: boolean; deleteMany: boolean; upsertMany: boolean }` | optional | Enable/disable specific batch operations |
+| **defaultAtomic** | `boolean` | optional (default: `true`) | Default atomic/transaction mode for batch operations |
+
+### Nested Shape: `RestServerConfig.routes`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **includeObjects** | `string[]` | optional | Specific objects to generate routes for (empty = all) |
+| **excludeObjects** | `string[]` | optional | Objects to exclude from route generation |
+| **nameTransform** | `Enum<'none' \| 'plural' \| 'kebab-case' \| 'camelCase'>` | optional (default: `"none"`) | Transform object names in URLs |
+| **overrides** | `Record<string, { enabled?: boolean; basePath?: string; operations?: Record<string, boolean> }>` | optional | Per-object route customization |
+
 
 ---
 
@@ -189,6 +338,14 @@ const result = BatchEndpointsConfigSchema.parse(data);
 | **excludeObjects** | `string[]` | optional | Objects to exclude from route generation |
 | **nameTransform** | `Enum<'none' \| 'plural' \| 'kebab-case' \| 'camelCase'>` | optional (default: `"none"`) | Transform object names in URLs |
 | **overrides** | `Record<string, { enabled?: boolean; basePath?: string; operations?: Record<string, boolean> }>` | optional | Per-object route customization |
+
+### Nested Shape: `RouteGenerationConfig.overrides[string]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **enabled** | `boolean` | optional | Enable/disable routes for this object |
+| **basePath** | `string` | optional | Custom base path |
+| **operations** | `Record<string, boolean>` | optional | Enable/disable specific operations |
 
 
 ---

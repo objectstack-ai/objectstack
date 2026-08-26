@@ -12,6 +12,10 @@
 import {
     shouldDenyAnonymous, ANONYMOUS_DENY_STATUS, ANONYMOUS_DENY_CODE, ANONYMOUS_DENY_MESSAGE,
 } from '@objectstack/core';
+// [ADR-0126 §5] The shared activation write-authority gate — one
+// implementation, one refusal envelope, per-door wording. See its header for
+// the posture rule and the #10243 measurement behind it.
+import { refuseUngrantedActivationWrite, FLOW_ACTIVATION_SUBJECT } from './activation-gate.js';
 import { CoreServiceName } from '@objectstack/spec/system';
 import type { IAutomationService, ISecurityService } from '@objectstack/spec/contracts';
 import { isServiceServeable } from '../service-serveable.js';
@@ -30,6 +34,14 @@ import {
     isPausedRun,
     FLOW_NOT_FOUND_STATUS,
 } from '../flow-dispatch-status.js';
+// [#12156] ADR-0126 §7.1 clone — the whole-definition copy, the keys it must
+// not carry forward, the same-name refusal and the references notice.
+import {
+    cloneFlowDefinition,
+    flowCloneNameTakenMessage,
+    FLOW_CLONE_NAME_TAKEN_STATUS,
+    FLOW_CLONE_NOTICE,
+} from '../flow-clone.js';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
 
@@ -311,9 +323,9 @@ const FLOW_WRITE_DENY_MESSAGE =
  * Shaped on {@link SCREEN_READ_DENY_MESSAGE} (#7968) one screen up: a second
  * constant for a second question, rather than a reworded shared one. Rewording
  * the shared sentence was considered and declined — it reads correctly for the
- * three definition writes that reach it (`POST /`, `PUT /:name`,
- * `DELETE /:name`), and widening it to cover both would degrade it for all
- * three in order to fix one.
+ * authoring writes that reach it (`POST /`, `PUT /:name`, `DELETE /:name`, and
+ * [#12156]'s `POST /:name/clone`), and widening it to cover both would degrade
+ * it for every one of them in order to fix one.
  *
  * It satisfies #7450 exactly as its sibling does: it names the capability that
  * would admit ANY caller, and nothing about this one.
@@ -413,9 +425,51 @@ function isFlowAuthoringWrite(parts: string[], method: string): boolean {
     // the refusal text now asks the same question; under this guard the helper
     // reduces to exactly the `parts[0] !== 'trigger'` it replaces.
     if (method === 'POST' && parts[1] === 'toggle') return isFlowEnablementWrite(parts, method);
+    // [#12156] `POST /automation/:name/clone` — the ADR-0126 §7.1 clone door.
+    //
+    // It CREATES a flow, so it belongs to this set for the same reason
+    // `POST /` does, and leaving it out would have been a bypass of the whole
+    // #10145 gate rather than a gap in it: the measured escalation there was a
+    // tenant org owner without `manage_metadata` registering flow metadata at
+    // ENVIRONMENT scope, and a clone door registers flow metadata at
+    // environment scope. An ungated clone reproduces that verbatim, with the
+    // extra twist that the caller does not even have to author a definition —
+    // it copies one the deployment already trusts.
+    //
+    // Matched exactly as the toggle arm above is, and for the identical
+    // reason: no upper bound on depth (the route arm tests `parts[1] ===
+    // 'clone'` with no length check, so a gate spelled `parts.length === 2`
+    // would leave `/:name/clone/anything` ungated), and `parts[0] !==
+    // 'trigger'` so that `POST /automation/trigger/clone` — the LEGACY
+    // EXECUTION door for a flow literally named `clone` — is not over-blocked.
+    if (method === 'POST' && parts[1] === 'clone') return parts[0] !== 'trigger';
     // `PUT /automation/:name` / `DELETE /automation/:name` — the update and
     // deregister doors. Exactly one segment: a deeper path is a run surface.
     if (method === 'PUT' || method === 'DELETE') return parts.length === 1;
+    return false;
+}
+
+/**
+ * [ADR-0126 §5] Which routes the ACTIVATION gate covers: the enable/disable
+ * door, and only it.
+ *
+ * A second predicate rather than an arm of {@link isFlowAuthoringWrite}
+ * because the two ask different questions and cover different route sets. That
+ * one asks "is this an authoring write?" (create / update / delete / toggle /
+ * clone → `manage_metadata`); this one asks "does this write an INSTALL-WIDE
+ * activation row?", which is true of the toggle alone. ⛔ `clone` is
+ * deliberately NOT here: a clone creates an ordinary new artifact under a new
+ * name (§7.1) and takes nothing away from any tenant, so gating it on the
+ * platform operator would refuse the very customization path this refusal
+ * message recommends.
+ *
+ * Spelled exactly like the toggle arm of the predicate above — no upper bound
+ * on depth, `parts[0] !== 'trigger'` — for the reasons documented there: a
+ * gate narrower than its route is a bypass, and a gate wider than its route
+ * over-blocks the legacy execution door.
+ */
+function isFlowActivationWrite(parts: string[], method: string): boolean {
+    if (method === 'POST' && parts[1] === 'toggle') return parts[0] !== 'trigger';
     return false;
 }
 
@@ -462,6 +516,25 @@ function isFlowAuthoringWrite(parts: string[], method: string): boolean {
  * measured — and (c) the definition contract is not enumerable by probing
  * 422s from outside the authoring cohort.
  */
+/**
+ * [ADR-0126 §5] THE WRITE-AUTHORITY GATE for the packaged-flow activation
+ * switch — `POST /automation/:name/toggle`.
+ *
+ * The gate itself now lives in `./activation-gate.ts`: ADR-0126 §8 item 2 put
+ * ACTIONS on the same ledger under the same §5 authority, and a second copy of
+ * a security gate is two policies that happen to agree today. Behaviour and
+ * refusal text here are unchanged — what this door supplies is the per-artifact
+ * clause ({@link FLOW_ACTIVATION_SUBJECT}), which is the only part that ever
+ * differed. The shared module's header carries the full rationale: why the
+ * operator test is a POSITION, why an absent posture fails open, and what
+ * #10243 measured.
+ */
+const refuseUngrantedFlowActivationWrite = (
+    deps: DomainHandlerDeps,
+    context: HttpProtocolContext,
+): Promise<HttpDispatcherResult | undefined> =>
+    refuseUngrantedActivationWrite(deps, context, FLOW_ACTIVATION_SUBJECT);
+
 function refuseUngrantedFlowWrite(
     deps: DomainHandlerDeps,
     context: HttpProtocolContext,
@@ -863,6 +936,15 @@ async function respondToFlowTrigger(
  *                                    unentitled toggle reached every organization
  *                                    ⚑ refused with its OWN sentence (#11666) —
  *                                    same capability, code and status
+ *   POST   /:name/clone          → clone the whole definition under a NEW machine
+ *                                  name (ADR-0126 §7.1, #12156). Body
+ *                                  `{ name, label }`, both mandatory; unknown source
+ *                                  → 404, target name already taken → 409
+ *                                  `RESOURCE_CONFLICT`. ⛔ No ancestry is recorded
+ *                                  or returned (amendment ruling 2), and references
+ *                                  are NOT re-pointed — the response says so (§9).
+ *                                  ⚑ authoring write — `manage_metadata`: it
+ *                                    registers flow metadata, like `POST /`
  *   GET    /:name/runs           → listRuns (query: limit, cursor — validated, #7300;
  *                                  status — validated AND honoured, #7359)
  *                                  ⚑ run-state read — `sys_automation_run` grant (#7900)
@@ -946,6 +1028,19 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
     // predicate rather than by adding a check here.
     if (isFlowAuthoringWrite(parts, m)) {
         const refusal = refuseUngrantedFlowWrite(deps, context, parts, m);
+        if (refusal) return refusal;
+    }
+
+    // [ADR-0126 §5] ACTIVATION-WRITE GATE — the install-wide enable/disable
+    // switch needs the platform operator in a walled posture. Placed directly
+    // AFTER the authoring gate and BEFORE the service probe / body checks, for
+    // the reasons that gate documents: an unentitled caller must not learn
+    // whether automation is mounted here, and must not get a body-validation
+    // answer that maps out the contract. Strictly narrower than the gate
+    // above, never a replacement for it — a caller must hold `manage_metadata`
+    // AND, in `group`/`isolated`, be the platform operator.
+    if (isFlowActivationWrite(parts, m)) {
+        const refusal = await refuseUngrantedFlowActivationWrite(deps, context);
         if (refusal) return refusal;
     }
 
@@ -1225,6 +1320,120 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
                 }
                 await automationService.toggleFlow(name, enabled);
                 return { handled: true, response: deps.success({ name, enabled }) };
+            }
+        }
+
+        // POST /:name/clone → clone the whole definition under a new machine
+        // name (ADR-0126 §7.1). The copy itself, the fields it mutates, the
+        // keys it must not carry forward and the notice it returns all live in
+        // `../flow-clone.ts` — see that module's header for the ADR and for
+        // #11703, the measurement that decides the copy's SHAPE.
+        //
+        // Built out of `getFlow` + `registerFlow`, not a new contract method:
+        // `IAutomationService` lives in `packages/spec`, and this door needs
+        // nothing the contract does not already offer. The clone therefore goes
+        // through the engine's own registration path, so it is canonicalized
+        // and validated exactly as a create is (`registerFlow` →
+        // `canonicalizeStoredFlow` + `validateNodeConfigKeys` +
+        // `validateFlowExpressions`) rather than by a second policy that agrees
+        // with the first only until one of them moves.
+        if (parts[1] === 'clone' && m === 'POST') {
+            if (typeof automationService.registerFlow === 'function' && typeof automationService.getFlow === 'function') {
+                // BODY FIRST, registry second — #3899's guarantee on this
+                // domain is that nothing reaches the service until the body is
+                // legal, and the toggle arm above keeps it the same way.
+                const cloneBody = body ?? {};
+                if (typeof cloneBody !== 'object' || Array.isArray(cloneBody)) {
+                    throw validationFailure('Invalid clone body — expected { name: string, label: string }', [
+                        { field: '(body)', code: 'invalid_type', message: 'expected an object' },
+                    ]);
+                }
+                const unknownKeys = Object.keys(cloneBody).filter((k) => k !== 'name' && k !== 'label');
+                if (unknownKeys.length > 0) {
+                    throw validationFailure(
+                        `Unknown key${unknownKeys.length > 1 ? 's' : ''} ${unknownKeys.map((k) => `\`${k}\``).join(', ')} — the clone body is { name: string, label: string }`,
+                        // `unknown_field` — the ADR-0114 catalog member for "a
+                        // key the target does not declare" (#8124).
+                        unknownKeys.map((k) => ({ field: k, code: 'unknown_field', message: 'not a clone field — the clone body is { name, label }' })),
+                    );
+                }
+                // The NEW MACHINE NAME IS MANDATORY (ADR-0126 §7.1, the #11513
+                // shape exactly). Refused here rather than defaulted, because
+                // every default a clone could pick is either the source's own
+                // name — the same-name clone the ADR bans outright — or a name
+                // this door invented on the admin's behalf and would then have
+                // to keep inventing consistently forever.
+                const targetName = (cloneBody as { name?: unknown }).name;
+                if (typeof targetName !== 'string' || targetName.trim() === '') {
+                    throw validationFailure(
+                        'A clone requires a new machine name — `name` is mandatory (ADR-0126 §7.1). '
+                        + 'The clone is a sibling flow, not a revision of the one it was copied from.',
+                        [{ field: 'name', code: targetName === undefined ? 'required' : 'invalid_type', message: 'expected a non-empty string' }],
+                    );
+                }
+                // `label` is mandatory too, mirroring the permission-set clone
+                // this action is shaped on (`sys-permission-set.object.ts`:
+                // both `label` and `name` are `required: true`). ADR-0126 §7.1
+                // lists `label` among the three fields a clone mutates, and a
+                // clone that silently kept the source's display name would put
+                // two identically-labelled flows on the packaged-automation
+                // page (§7.4) with nothing to tell them apart.
+                const targetLabel = (cloneBody as { label?: unknown }).label;
+                if (typeof targetLabel !== 'string' || targetLabel.trim() === '') {
+                    throw validationFailure(
+                        'A clone requires a new display name — `label` is mandatory. '
+                        + 'Two flows sharing one label are indistinguishable on the automation surface.',
+                        [{ field: 'label', code: targetLabel === undefined ? 'required' : 'invalid_type', message: 'expected a non-empty string' }],
+                    );
+                }
+
+                // The SOURCE must exist — the same existence probe `GET /:name`
+                // and the toggle arm use, so the three routes cannot disagree
+                // about which flows exist. 404, not 500: a typo'd source name
+                // is a caller mistake (#7535).
+                const source = await automationService.getFlow(name);
+                if (!source) {
+                    return { handled: true, response: deps.error(flowNotFoundMessage(name), FLOW_NOT_FOUND_STATUS) };
+                }
+
+                // ⛔ SAME-NAME REFUSAL, loudly, naming the sanctioned path.
+                // Checked against the same probe, so "already exists" means the
+                // same thing here as everywhere else on this domain. This also
+                // catches `name === <source>`, which is the case the ADR is
+                // actually about — see `flowCloneNameTakenMessage` for why a
+                // second definition under one bare name is a silent,
+                // order-dependent shadow rather than a storage error.
+                const collision = await automationService.getFlow(targetName);
+                if (collision) {
+                    return {
+                        handled: true,
+                        response: deps.error(flowCloneNameTakenMessage(targetName), FLOW_CLONE_NAME_TAKEN_STATUS),
+                    };
+                }
+
+                const clone = cloneFlowDefinition(source, { name: targetName, label: targetLabel });
+                // Engine verdicts are answered as a 400, not rethrown — the
+                // create arm's reasoning (`flowDefinitionRefusal`) applies
+                // verbatim, and it matters more here: a clone that the engine
+                // refuses must not leave a half-registered flow behind, and it
+                // must not read as a server fault when the source definition is
+                // simply one this deployment can no longer register.
+                try {
+                    automationService.registerFlow(targetName, clone);
+                } catch (e) {
+                    return {
+                        handled: true,
+                        response: deps.errorFromThrown(flowDefinitionRefusal(e), VALIDATION_FAILED_STATUS),
+                    };
+                }
+                // ⛔ NO ANCESTRY on the way out either (ADR-0126 amendment
+                // ruling 2, §9): the response names the flow that was created
+                // and says nothing about what it was copied from. There is no
+                // `clonedFrom` key here on purpose — a response field is the
+                // cheapest place for ancestry to reappear, and a UI that reads
+                // one starts displaying a lineage the platform has ruled it
+                // does not track.
+                return { handled: true, response: deps.success({ flow: clone, notice: FLOW_CLONE_NOTICE }) };
             }
         }
 

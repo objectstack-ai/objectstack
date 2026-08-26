@@ -377,6 +377,12 @@ const DISPATCHER_DOMAIN_DIR = 'packages/runtime/src/domains';
 
 const DISPATCHER_DOMAINS = {
   'actions.ts': { handBuilt: 0 },
+  // [#12160] Not a domain either — the ADR-0126 §5 activation write-authority
+  // gates, shared by the `/automation` toggle door and the `/actions`
+  // activation door so one security policy has one implementation. Like
+  // `unavailable.ts` it answers refusals through `deps.error`, which is this
+  // check's own thesis applied to a refusal that two domains emit.
+  'activation-gate.ts': { handBuilt: 0 },
   'analytics.ts': { handBuilt: 0 },
   'automation.ts': { handBuilt: 0 },
   'data.ts': { handBuilt: 0 },

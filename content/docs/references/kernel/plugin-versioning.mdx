@@ -81,6 +81,19 @@ Compatibility level between versions
 | **migrationScript** | `string` | optional | Path to migration script |
 | **testCoverage** | `number` | optional | Percentage of migration covered by tests |
 
+### Nested Shape: `CompatibilityMatrixEntry.breakingChanges[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **introducedIn** | `string` | ✅ | Version that introduced this breaking change |
+| **type** | `Enum<'api-removed' \| 'api-renamed' \| 'api-signature-changed' \| 'behavior-changed' \| …>` | ✅ |  |
+| **description** | `string` | ✅ |  |
+| **migrationGuide** | `string` | optional | How to migrate from old to new |
+| **deprecatedIn** | `string` | optional | Version where old API was deprecated |
+| **removedIn** | `string` | optional | Version where old API will be removed |
+| **automatedMigration** | `boolean` | optional (default: `false`) | Whether automated migration tool is available |
+| **severity** | `Enum<'critical' \| 'major' \| 'minor'>` | ✅ | Impact severity |
+
 
 ---
 
@@ -95,6 +108,14 @@ Compatibility level between versions
 | **description** | `string` | ✅ |  |
 | **resolutions** | `{ strategy: Enum<'upgrade' \| 'downgrade' \| 'replace' \| 'disable' \| 'manual'>; description: string; automaticResolution: boolean; riskLevel: Enum<'low' \| 'medium' \| 'high'> }[]` | optional |  |
 | **severity** | `Enum<'critical' \| 'error' \| 'warning' \| 'info'>` | ✅ |  |
+
+### Nested Shape: `DependencyConflict.plugins[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **pluginId** | `string` | ✅ |  |
+| **version** | `string` | ✅ |  |
+| **requirement** | `string` | optional | What this plugin requires |
 
 
 ---
@@ -127,6 +148,23 @@ Compatibility level between versions
 | **routing** | `{ condition: string \| object; version: string; priority?: integer }[]` | optional |  |
 | **rollout** | `{ enabled?: boolean; strategy: Enum<'percentage' \| 'blue-green' \| 'canary'>; percentage?: number; duration?: integer }` | optional |  |
 
+### Nested Shape: `MultiVersionSupport.routing[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **condition** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | ✅ | Routing predicate (CEL). |
+| **version** | `string` | ✅ | Version to use when condition matches |
+| **priority** | `integer` | optional (default: `100`) | Rule priority |
+
+### Nested Shape: `MultiVersionSupport.rollout`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **enabled** | `boolean` | optional (default: `false`) |  |
+| **strategy** | `Enum<'percentage' \| 'blue-green' \| 'canary'>` | ✅ |  |
+| **percentage** | `number` | optional | Percentage of traffic to new version |
+| **duration** | `integer` | optional | Rollout duration in milliseconds |
+
 
 ---
 
@@ -141,6 +179,29 @@ Compatibility level between versions
 | **compatibilityMatrix** | `{ from: string; to: string; compatibility: Enum<'fully-compatible' \| 'backward-compatible' \| 'deprecated-compatible' \| …>; breakingChanges?: object[]; … }[]` | ✅ |  |
 | **supportedVersions** | `{ version: string; supported: boolean; endOfLife?: string; securitySupport: boolean }[]` | ✅ |  |
 | **minimumCompatibleVersion** | `string` | optional | Oldest version that can be directly upgraded |
+
+### Nested Shape: `PluginCompatibilityMatrix.compatibilityMatrix[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **from** | `string` | ✅ | Version being upgraded from |
+| **to** | `string` | ✅ | Version being upgraded to |
+| **compatibility** | `Enum<'fully-compatible' \| 'backward-compatible' \| 'deprecated-compatible' \| …>` | ✅ | Compatibility level between versions |
+| **breakingChanges** | `{ introducedIn: string; type: Enum<'api-removed' \| 'api-renamed' \| 'api-signature-changed' \| 'behavior-changed' \| …>; description: string; migrationGuide?: string; … }[]` | optional |  |
+| **migrationRequired** | `boolean` | optional (default: `false`) |  |
+| **migrationComplexity** | `Enum<'trivial' \| 'simple' \| 'moderate' \| 'complex' \| 'major'>` | optional |  |
+| **estimatedMigrationTime** | `number` | optional |  |
+| **migrationScript** | `string` | optional | Path to migration script |
+| **testCoverage** | `number` | optional | Percentage of migration covered by tests |
+
+### Nested Shape: `PluginCompatibilityMatrix.supportedVersions[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **version** | `string` | ✅ |  |
+| **supported** | `boolean` | ✅ |  |
+| **endOfLife** | `string` | optional | End of support date |
+| **securitySupport** | `boolean` | optional (default: `false`) | Still receives security updates |
 
 
 ---
@@ -178,6 +239,63 @@ Compatibility level between versions
 | **securityFixes** | `{ cve?: string; severity: Enum<'critical' \| 'high' \| 'medium' \| 'low'>; description: string; fixedIn: string }[]` | optional |  |
 | **statistics** | `{ downloads?: integer; installations?: integer; ratings?: number }` | optional |  |
 | **support** | `{ status: Enum<'active' \| 'maintenance' \| 'deprecated' \| 'eol'>; endOfLife?: string; securitySupport: boolean }` | ✅ |  |
+
+### Nested Shape: `PluginVersionMetadata.version`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **major** | `integer` | ✅ | Major version (breaking changes) |
+| **minor** | `integer` | ✅ | Minor version (backward compatible features) |
+| **patch** | `integer` | ✅ | Patch version (backward compatible fixes) |
+| **preRelease** | `string` | optional | Pre-release identifier (alpha, beta, rc.1) |
+| **build** | `string` | optional | Build metadata |
+
+### Nested Shape: `PluginVersionMetadata.breakingChanges[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **introducedIn** | `string` | ✅ | Version that introduced this breaking change |
+| **type** | `Enum<'api-removed' \| 'api-renamed' \| 'api-signature-changed' \| 'behavior-changed' \| …>` | ✅ |  |
+| **description** | `string` | ✅ |  |
+| **migrationGuide** | `string` | optional | How to migrate from old to new |
+| **deprecatedIn** | `string` | optional | Version where old API was deprecated |
+| **removedIn** | `string` | optional | Version where old API will be removed |
+| **automatedMigration** | `boolean` | optional (default: `false`) | Whether automated migration tool is available |
+| **severity** | `Enum<'critical' \| 'major' \| 'minor'>` | ✅ | Impact severity |
+
+### Nested Shape: `PluginVersionMetadata.deprecations[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **feature** | `string` | ✅ | Deprecated feature identifier |
+| **deprecatedIn** | `string` | ✅ |  |
+| **removeIn** | `string` | optional |  |
+| **reason** | `string` | ✅ |  |
+| **alternative** | `string` | optional | What to use instead |
+| **migrationPath** | `string` | optional | How to migrate to alternative |
+
+### Nested Shape: `PluginVersionMetadata.compatibilityMatrix[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **from** | `string` | ✅ | Version being upgraded from |
+| **to** | `string` | ✅ | Version being upgraded to |
+| **compatibility** | `Enum<'fully-compatible' \| 'backward-compatible' \| 'deprecated-compatible' \| …>` | ✅ | Compatibility level between versions |
+| **breakingChanges** | `{ introducedIn: string; type: Enum<'api-removed' \| 'api-renamed' \| 'api-signature-changed' \| 'behavior-changed' \| …>; description: string; migrationGuide?: string; … }[]` | optional |  |
+| **migrationRequired** | `boolean` | optional (default: `false`) |  |
+| **migrationComplexity** | `Enum<'trivial' \| 'simple' \| 'moderate' \| 'complex' \| 'major'>` | optional |  |
+| **estimatedMigrationTime** | `number` | optional |  |
+| **migrationScript** | `string` | optional | Path to migration script |
+| **testCoverage** | `number` | optional | Percentage of migration covered by tests |
+
+### Nested Shape: `PluginVersionMetadata.securityFixes[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **cve** | `string` | optional | CVE identifier |
+| **severity** | `Enum<'critical' \| 'high' \| 'medium' \| 'low'>` | ✅ |  |
+| **description** | `string` | ✅ |  |
+| **fixedIn** | `string` | ✅ | Version where vulnerability was fixed |
 
 
 ---

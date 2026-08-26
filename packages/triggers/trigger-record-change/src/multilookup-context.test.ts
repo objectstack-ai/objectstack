@@ -56,6 +56,12 @@ function makeDriver(): any {
 
 describe('record-change context hydrates multi-lookup from input (#1872)', () => {
   it('fires a record-after-create flow gated on a multi-lookup the driver did not echo', async () => {
+    // [#11571] The blanket mute is kept here deliberately. With no datasource
+    // this boot emits one invariant 3-frame ERROR trio that neither predicate
+    // in `runtime/src/expected-read-refusal-noise.ts` can recognise, and the
+    // console-level capture proposed to reach it intercepts ZERO: ObjectLogger
+    // writes ERROR to `process.stderr`, never through `console`, under Node.
+    // See that module's closing section for the measurement.
     const kernel = new ObjectKernel({ logger: { level: 'silent' } });
     await kernel.use(new ObjectQLPlugin());
     await kernel.use(new AutomationServicePlugin());

@@ -89,6 +89,13 @@ jobs:
       # frozen while healthy. The guard refuses a turbo run without it.
       - name: Test suite — pass 1
         run: |
+          # Bound vitest's INNER worker pool (#11958). A no-op on a runner with
+          # <= 5 cores (it only ever LOWERS vitest's own `cores - 1` default);
+          # it exists so a larger runner cannot multiply turbo's outer
+          # --concurrency by a host-sized inner pool. Empty on failure, which is
+          # vitest's own "use the default" signal. Needs turbo.json's
+          # globalPassThroughEnv entry or turbo strips it — see the script header.
+          export VITEST_MAX_WORKERS="$(node scripts/vitest-worker-cap.mjs)"
           node scripts/run-with-stall-guard.mjs --log "$RUNNER_TEMP/rerun-pass1.log" --stall-minutes 15 -- \
             pnpm turbo run test --concurrency=4 --force --log-order=stream
 
@@ -112,6 +119,13 @@ jobs:
       # there. Keep the two verdicts apart.
       - name: Test suite — pass 2 (same working tree)
         run: |
+          # Bound vitest's INNER worker pool (#11958). A no-op on a runner with
+          # <= 5 cores (it only ever LOWERS vitest's own `cores - 1` default);
+          # it exists so a larger runner cannot multiply turbo's outer
+          # --concurrency by a host-sized inner pool. Empty on failure, which is
+          # vitest's own "use the default" signal. Needs turbo.json's
+          # globalPassThroughEnv entry or turbo strips it — see the script header.
+          export VITEST_MAX_WORKERS="$(node scripts/vitest-worker-cap.mjs)"
           status=0
           node scripts/run-with-stall-guard.mjs --log "$RUNNER_TEMP/rerun-pass2.log" --stall-minutes 15 -- \
             pnpm turbo run test --concurrency=4 --force --log-order=stream || status=$?

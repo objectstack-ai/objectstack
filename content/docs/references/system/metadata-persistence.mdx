@@ -107,6 +107,24 @@ Metadata file format
 | **total** | `integer` | ✅ |  |
 | **hasMore** | `boolean` | ✅ |  |
 
+### Nested Shape: `MetadataHistoryQueryResult.records[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ |  |
+| **name** | `string` | ✅ |  |
+| **type** | `string` | ✅ |  |
+| **version** | `number` | ✅ | Version number at this snapshot |
+| **operationType** | `Enum<'create' \| 'update' \| 'publish' \| 'revert' \| 'delete'>` | ✅ | Type of operation that created this history entry |
+| **metadata** | `string \| Record<string, any> \| null` | optional | Snapshot of metadata definition at this version (raw JSON string or parsed object) |
+| **checksum** | `string` | ✅ | SHA-256 checksum of metadata content |
+| **previousChecksum** | `string` | optional | Checksum of the previous version |
+| **changeNote** | `string` | optional | Description of changes made in this version |
+| **organizationId** | `string` | optional | Organization identifier for multi-tenant isolation |
+| **environmentId** | `string` | optional | Deprecated (ADR-0006 v4): legacy environment_id column. New writes leave unset. |
+| **recordedBy** | `string` | optional | User who made this change |
+| **recordedAt** | `string` | ✅ | Timestamp when this version was recorded |
+
 
 ---
 
@@ -183,6 +201,18 @@ Metadata file format
 | **notModified** | `boolean` | optional |  |
 | **loadTime** | `number` | optional |  |
 
+### Nested Shape: `MetadataLoadResult.stats`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **path** | `string` | optional |  |
+| **size** | `number` | optional |  |
+| **mtime** | `string` | optional |  |
+| **hash** | `string` | optional |  |
+| **etag** | `string` | optional |  |
+| **modifiedAt** | `string` | optional |  |
+| **format** | `Enum<'yaml' \| 'json' \| 'typescript' \| 'javascript'>` | optional | Metadata file format |
+
 
 ---
 
@@ -221,6 +251,37 @@ Metadata file format
 | **validation** | `{ strict: boolean; throwOnError: boolean }` | optional | Validation settings |
 | **loaderOptions** | `Record<string, any>` | optional | Loader-specific configuration |
 | **persistence** | `{ writable: boolean; overlayWritable: boolean }` | optional | Persistence write gates |
+
+### Nested Shape: `MetadataManagerConfig.cache`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **enabled** | `boolean` | optional (default: `true`) | Enable caching |
+| **ttl** | `integer` | optional (default: `3600`) | Cache TTL in seconds |
+| **maxSize** | `integer` | optional | Max cache size in bytes |
+| **databaseLoader** | `{ enabled: boolean; maxSize: integer; ttl: integer }` | optional | DatabaseLoader read-through cache |
+
+### Nested Shape: `MetadataManagerConfig.watchOptions`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **ignored** | `string[]` | optional | Patterns to ignore |
+| **persistent** | `boolean` | optional (default: `true`) | Keep process running |
+| **ignoreInitial** | `boolean` | optional (default: `true`) | Ignore initial add events |
+
+### Nested Shape: `MetadataManagerConfig.validation`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **strict** | `boolean` | optional (default: `true`) | Strict validation |
+| **throwOnError** | `boolean` | optional (default: `true`) | Throw on validation error |
+
+### Nested Shape: `MetadataManagerConfig.persistence`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **writable** | `boolean` | optional (default: `true`) | Allow base metadata writes via register() |
+| **overlayWritable** | `boolean` | optional (default: `true`) | Allow overlay writes via saveOverlay() |
 
 
 ---
@@ -295,6 +356,18 @@ Metadata file format
 | **saveTime** | `number` | optional |  |
 | **backupPath** | `string` | optional |  |
 
+### Nested Shape: `MetadataSaveResult.stats`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **path** | `string` | optional |  |
+| **size** | `number` | optional |  |
+| **mtime** | `string` | optional |  |
+| **hash** | `string` | optional |  |
+| **etag** | `string` | optional |  |
+| **modifiedAt** | `string` | optional |  |
+| **format** | `Enum<'yaml' \| 'json' \| 'typescript' \| 'javascript'>` | optional | Metadata file format |
+
 
 ---
 
@@ -364,6 +437,18 @@ Metadata file format
 | **data** | `any` | optional |  |
 | **timestamp** | `string` | optional |  |
 
+### Nested Shape: `MetadataWatchEvent.stats`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **path** | `string` | optional |  |
+| **size** | `number` | optional |  |
+| **mtime** | `string` | optional |  |
+| **hash** | `string` | optional |  |
+| **etag** | `string` | optional |  |
+| **modifiedAt** | `string` | optional |  |
+| **format** | `Enum<'yaml' \| 'json' \| 'typescript' \| 'javascript'>` | optional | Metadata file format |
+
 
 ---
 
@@ -379,6 +464,14 @@ Metadata file format
 | **publishedAt** | `string` | ✅ | Publish timestamp |
 | **itemsPublished** | `integer` | ✅ | Total metadata items published |
 | **validationErrors** | `{ type: string; name: string; message: string }[]` | optional | Validation errors if publish failed |
+
+### Nested Shape: `PackagePublishResult.validationErrors[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `string` | ✅ | Metadata type that failed validation |
+| **name** | `string` | ✅ | Item name that failed validation |
+| **message** | `string` | ✅ | Validation error message |
 
 
 ---

@@ -12,6 +12,45 @@ on:
   # the trigger alone is enough.
   merge_group:
 
+# ── MEASURED 2026-08-25 (#12211) — a NEGATIVE result, recorded so it is not
+# re-measured. After the stale-ledger outage the queue's check set was measured
+# rather than assumed, because two observations of that day read as
+# contradictory: a PR landing an inconsistent tree at 11:50Z (which looked like
+# "the consumer-gates lane does not run in the queue"), and five queue entries
+# dequeued 12:26-13:05Z while main was red (which looked like the opposite).
+#
+# Both halves were read, and there is NO merge_group coverage gap to close:
+#
+#   - STATIC. Every gate step in this workflow runs on merge_group; the claim
+#     three lines above is exact. The only event-conditioned step in the file is
+#     `Save Turbo cache (main only)`, which stores a cache and judges nothing.
+#     ci.yml is the same shape — its single merge_group exclusion sits on the
+#     paths filter, which on a queue build widens to "everything changed"
+#     rather than narrowing. All six required contexts live in these two
+#     merge_group-triggered workflows (scripts/check-required-contexts.mjs).
+#
+#   - DYNAMIC. 180 merge_group runs of this workflow were read across
+#     09:15-18:49Z. In run 32847794799 — a real queue build — the
+#     `Type Check · consumer gates` lane RAN and FAILED on
+#     `check:exported-any-returns`, and the required `TypeScript Type Check`
+#     aggregate carried that red into the queue. Tree-global ratchets do kick
+#     there; the 12:26-13:05Z dequeues are that gate, on innocent candidates,
+#     while main itself was red. CI was green on those same merge groups.
+#
+# What the 11:50Z landing actually was: that commit produced NO merge_group
+# build at all — 4 of the 29 PRs landing 09:20-12:10Z produced none — and its
+# PR-level required checks were green as measured at 07:20Z, ~3h before the
+# gate that would have refused it existed. The residual is therefore not a
+# trigger this file is missing. It is that a commit can reach main without a
+# queue build, plus `strict_required_status_checks_policy: false` on the `main`
+# ruleset (measured 2026-08-18, #9642). Both are repository SETTINGS and
+# maintainer-only; neither is reachable from this file.
+#
+# ⛔ So do not "close the gap" by adding merge_group to the advisory workflows
+# (check-links.yml, docs-drift-check.yml, validate-deps.yml, the patrols). A
+# non-required check on a queue build costs runners and blocks nothing, and
+# check-links.yml's own header already refuses it for that reason.
+
 # Same policy as ci.yml: superseded runs on the same PR/branch waste runners
 # and delay feedback; cancel them. Push runs to main group by commit ref, so an
 # in-flight main run is cancelled only by a newer main push.
@@ -314,6 +353,38 @@ jobs:
       # spawns; ~0.6s.
       - name: scripts/ TypeScript parses go through one module
         run: pnpm check:parse-guard
+
+      # The bash-3.2 floor, over every shell file the repo ships (#12221).
+      # `/usr/bin/env bash` is bash 3.2.57 on macOS -- Apple ships no bash 4+,
+      # for licensing reasons -- and THIS RUNNER IS BASH 5, where every construct
+      # the gate refuses works perfectly. So the class is invisible to a normal
+      # green run in both directions: the defect passes CI, and so does its
+      # repair. It is found by an operator on a Mac, at status 127, at the moment
+      # they most needed the script to work. Two incidents, four sites, both
+      # caught by hand and late; one of them turned the shared verify lock's
+      # bounded wait into an unbounded spin, because an unbound `EPOCHSECONDS`
+      # leaves the deadline EMPTY rather than erroring.
+      # What this step buys that a bash-5 runner cannot otherwise see is a static
+      # verdict: the gate reads the text, so it never needs the construct to be
+      # reachable, only written. Rationale, the construct table with a bash
+      # version per row, and the three exemption rules that tell a file HUNTING
+      # these tokens from a file USING one: the gate script's header. The short
+      # version, for whoever is reading this because the step just went red --
+      # there is deliberately NO filename allowlist, and no waiver comment; a
+      # legitimate mention is already exempt by being a full-line comment, a
+      # guarded `${VAR:-}` read, or a token outside command position.
+      # ⛔ This does not supersede the two file-scoped scans in
+      # `check:objectui-changeset` and the verify lock's own self-test. Those
+      # pair their scan with a SIMULATED 3.2 run (`enable -n mapfile readarray`
+      # via BASH_ENV, plus `unset` of the bash-5 variables), which reaches
+      # runtime-assembled commands a static scan cannot see and proves the real
+      # path COMPLETES without the builtins. Different instruments, one class.
+      # Scans 20 tracked shell files, no spawns in the production run; ~0.1s.
+      # The `--self-test` half spawns a handful of real bash children (the
+      # known-bad fixture tree, and the simulated-3.2 probe that proves the
+      # harness is not vacuous); ~1s.
+      - name: shell scripts hold the bash 3.2 floor
+        run: pnpm check:bash32-floor
 
       # The comment-mask CORPUS sweep (#10640) — the other instrument for the
       # module the two gates above delegate "is this span a comment, or code?"
@@ -1071,6 +1142,32 @@ jobs:
       - name: Docs anchors resolve to real headings
         run: pnpm check:doc-anchors
 
+      # #12236 one <h1> per doc page. `DocsTitle` renders the frontmatter `title`
+      # as the page's <h1> unconditionally (apps/docs/app/[lang]/docs/[[...slug]]/
+      # page.tsx), so a body-level `# ` heading compiles to a SECOND one inside
+      # `DocsBody`. Measured on the dev server at /docs/data-modeling/objects
+      # before the sweep: two <h1>, both reading "Object Metadata". 195 of the 403
+      # pages were in that state, 138 of them with the two <h1> identical.
+      #
+      # It lives next to check:doc-anchors because the two share the corpus and
+      # the heading model — this gate imports `stripFrontmatter` and
+      # `flattenHeadingText` from that one rather than re-modelling either, which
+      # is what makes the delete-vs-demote remedy right on the nine pages whose
+      # two headings differ only by inline code markup.
+      #
+      # The gate strips FENCED CODE before looking for a heading, and that is the
+      # load-bearing half: a naive `^# ` scan reports 205 files, ten of which are
+      # shell/YAML comments inside working examples. A fence-blind rule does not
+      # over-report by ten, it instructs the fixer to corrupt ten snippets.
+      #
+      # Two subtrees are excluded, each with a named owner (#12249 generated
+      # reference pages, #12250 release notes) and each self-retiring: the gate
+      # FAILS with DEAD-EXCLUSION when an excluded tree becomes clean, so the
+      # carve-outs cannot outlive their reasons. A run that judges zero pages
+      # fails too (#4690).
+      - name: One `<h1>` per docs page
+        run: pnpm check:docs-single-h1
+
       # #9014 docs redirects: `apps/docs/redirects.mjs` is a 92-entry table of
       # PERMANENT (308) redirects, and before this step nothing in the repo read
       # it — `dispatch-gates.mjs apps/docs/redirects.mjs` named no family over 99
@@ -1110,6 +1207,27 @@ jobs:
       # observed failing.
       - name: Docs redirect destinations resolve, and no chains
         run: pnpm check:docs-redirects
+
+      # The docs site's `app/[lang]/` is a catch-all that matches ANY single
+      # path segment, and `proxy.ts`'s matcher deliberately excludes dotted
+      # paths from locale rewriting — so before the guard landed, `/ads.txt`,
+      # `/security.txt`, `/sitemap_index.xml` and every other dotted
+      # single-segment URL rendered the full homepage under a 200 (measured on
+      # the dev server; the request log shows no `proxy.ts:` timing for those
+      # paths, and a probe printed `lang="ads.txt"`).
+      #
+      # It sits here rather than in a test because nothing else can see the
+      # regression: delete the three-line guard and every page still renders,
+      # every type still checks, every link still resolves. The only symptom is
+      # a 200 where a 404 belongs, on URLs no test requests.
+      #
+      # Runs its own --self-test first (via the pnpm script). Not ceremony: the
+      # live tree is green by construction after the fix, so a passing run over
+      # real data cannot distinguish a working gate from one that approves
+      # everything. The self-test is where every limb is observed failing, and
+      # where the proxy condition is observed flipping the requirement off.
+      - name: Docs locale catch-all rejects non-locale segments
+        run: pnpm check:docs-locale-catch-all
 
       # #11050 route spellings taught in prose: every /api/v1 wire-path
       # literal in the published corpora (content/docs/** minus releases/,
@@ -1170,6 +1288,17 @@ jobs:
       # back empty, is what stops a vacuous green from reading as coverage.
       - name: React pages honour the useAdapter() query and result contracts
         run: pnpm check:react-page-adapter-contract
+
+      # #11576 page discovery vs ground truth: what makes something a SERVED
+      # page is membership in a bundle's `pages:` array (the kernel reads it in
+      # `registerMetadataCollections`), not its type annotation — while the
+      # canonical-envelope gates (#11255, #11480) discover their population by
+      # export shape. #11480 measured that gap on a live page. This gate makes
+      # the approximation exact by construction: every identifier in a `pages:`
+      # array must be declared `export const X: Page =` or via `definePage()`,
+      # so a page can never again be served-but-uncovered.
+      - name: Kernel-reaching pages are declared in a discoverable shape
+        run: pnpm check:page-declaration-shape
 
       # #10830 form-section `name` in docs examples: the docs pages that TEACH
       # the i18n-anchor convention were the one surface where nothing enforced
@@ -1604,6 +1733,18 @@ jobs:
       - name: CLI test child-env guard
         run: pnpm check:cli-test-child-env
 
+      # #12016. A CLI command id spelled as a string literal OUTSIDE the CLI
+      # package has nothing tying it to the command file it names: rename the
+      # command, update the CLI and the docs, and the engine's own drift warning
+      # keeps printing a route that no longer exists — a stale hint inside an
+      # otherwise-correct message, which no suite reads as wrong because
+      # driver-sql's pin asserts the message contains the constant and the
+      # constant still matches itself. 274 such literals across 98 files were
+      # measured before the gate was written; the sibling sweep INSIDE
+      # packages/cli is #11465 / #12177, and the two populations do not overlap.
+      - name: CLI command-id literals resolve
+        run: pnpm check:cli-command-ids
+
       # #4093 follow-up. Discovery tells a consumer an absent capability is
       # absent AND what to install. The first half has been carefully honest
       # since #2462/#4000; the second was invented from the slot name, so ten
@@ -1708,9 +1849,11 @@ jobs:
       # it enforced nothing, while reading in `package.json` exactly like the
       # gates that do. That is #10574's defect one file over, and it is the only
       # thing this change repairs; the gate itself is untouched.
-      # Runs its own --self-test FIRST (13 cases, both directions, both
-      # narrowings pinned as counts), then the scan — 36 sink types, 15
-      # baselined shrink-only. AST over packages/**, no spawns; ~3.5 s.
+      # Runs its own --self-test FIRST (both directions, every narrowing pinned
+      # as a count), then the scan. Deliberately carries NO counts: the run
+      # prints its own census — self-test cases, sink-type population, and the
+      # baselined shrink-only total — so a copy here could only ever be a stale
+      # one, and was. AST over packages/**, no spawns; ~3.5 s.
       # No `paths:` filter, for the standard reason: a filter on `packages/**`
       # would go dormant on the PR that edits the baseline.
       - name: Optional-`error` sink contract
@@ -2406,6 +2549,27 @@ jobs:
           node scripts/check-declaration-mirrors.mjs --self-test
           node scripts/check-declaration-mirrors.mjs
 
+      # Published list mirrors (#10855). The cross-package gate above is a SOURCE
+      # SCAN: a path spelling it does not know yields no flag, so the escaping read
+      # goes undeclared SILENTLY. That is why its recognised set is published in
+      # AGENTS.md instead of living only in the implementation — and nothing held the
+      # two copies in step. It drifted three times (#10163, #10854, #10855); measured
+      # on 1a47a5368 the published block was short by 13 of the 24 lines, the two
+      # findUp ANCHOR seeds among them. ⭐ Twice the stale line was the stated REASON
+      # FOR A PROHIBITION, so a rotting mirror does not merely misinform — it launders
+      # an obsolete rule into a live one, and the fix has to derive a new true reason.
+      # This asserts line-for-line EQUALITY (not containment: a comment-only drift is
+      # invisible to containment, and the comments are where the prohibitions live),
+      # locates the block by heading + fence rather than line number, and REFUSES
+      # rather than passing empty when it cannot find it. ⛔ It can only ever go RED:
+      # AGENTS.md is governed (human-merge-only), so it prints the block to paste and
+      # never repairs. Invoked as `node` rather than a `pnpm check:*` alias for the
+      # same reason as the step above (#9465). Reads two files; milliseconds.
+      - name: Published list mirrors
+        run: |
+          node scripts/check-published-list-mirrors.mjs --self-test
+          node scripts/check-published-list-mirrors.mjs
+
       # The inventory of `packages/**` tests coupled to `examples/**` (#8754).
       # Sibling of the cross-package gate above, on the axis that gate does not
       # own. ⚠️ The line that used to stand here — "that one detects tests whose
@@ -2859,6 +3023,43 @@ jobs:
       # non-vacuity while the real population is zero.
       - name: No committed command forwards args to vitest through a bare --
         run: pnpm check:agent-test-spelling
+
+      # Every `<pkg>#<task>` override in turbo.json must name a package the
+      # workspace HAS and a script that package RUNS (#12046).
+      #
+      # ⛔ Turbo does NOT refuse either miss. Measured on turbo 2.10.10 against a
+      # fixture workspace, each case a real `turbo run <task> --dry=json`:
+      #
+      #     @fx/nope#build   (no such package)     -> exit 0, no diagnostic, key
+      #                                               never reaches the graph
+      #     @fx/a#typecheck  (package has no such
+      #                       script)              -> exit 0, task shown in the
+      #                                               dry-run graph, never runs
+      #
+      # So a task-graph edit meant to change what CI builds, orders or caches can
+      # configure NOTHING while every signal its author has — exit code, dry-run
+      # output, this whole workflow — reads as landed. The stale direction is the
+      # same silence: rename a package or drop a script and the entry that used
+      # to configure it goes quietly inert.
+      #
+      # `dependsOn` is deliberately out of scope here: turbo already refuses an
+      # unresolvable one loudly (exit 1, `x Could not find "@fx/a#prebuildxyz"`),
+      # and re-checking it would be this gate claiming a population the tool that
+      # owns it polices better — the #11556 failure this card was filed against.
+      #
+      # The gate is also the first thing in the repo that DECLARES turbo.json as
+      # a path population, in the `turbo.json/**` subtree spelling the dispatch
+      # derivation can match. Before it, a card whose surface was turbo.json
+      # derived zero gate families: the one gate that parses the file
+      # (check:cross-package-test-inputs) reaches it as a bare filename, which
+      # `extractWatchHints` refuses as too generic.
+      #
+      # Reads turbo.json and the workspace manifests. No build, no pnpm
+      # invocation, no network, sub-second. The `check:` key runs `--self-test`
+      # first: this gate's defect class is its matching rule, which a clean tree
+      # cannot distinguish from a rule that stopped matching.
+      - name: turbo.json package tasks name real packages and real scripts
+        run: pnpm check:turbo-task-graph
 
   # Lane 1 of 4 behind the required `TypeScript Type Check` context. The
   # aggregator job at the bottom of this file explains the split, holds the

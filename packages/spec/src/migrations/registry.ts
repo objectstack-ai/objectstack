@@ -5195,7 +5195,19 @@ const step18: MigrationStep = {
     'never consulted (zero value reads; the only non-test occurrences were the ' +
     'schema declaration and two type positions). The `kind` bucket itself and its ' +
     '`id` are untouched; file-type discovery stays single-channel on `filePatterns`. ' +
-    'D3 semantic `plugin-manifest-kind-globs-retired`, same no-seam reasoning.',
+    'D3 semantic `plugin-manifest-kind-globs-retired`, same no-seam reasoning. ' +
+    'Finally, it retires `object-grid`\'s `defaultSort` (#11805, ADR-0049 enforce-or-remove; ' +
+    'maintainer ruling 2026-08-25, decision-inbox batch 4 — the producer half of ' +
+    'objectui#5861, under the objectui#4869 「接受所有」 direction): the legacy second ' +
+    'spelling of `sort`, a single `{ field, order }` pair the renderer read only when ' +
+    '`sort` was absent (measured at the `.objectui-sha` pin `190fbd01d`, ' +
+    '`plugin-grid/src/ObjectGrid.tsx:1244-1246` and `:2847`, which wraps it ' +
+    '`[schema.defaultSort]` — the exact array shape `sort` carries). One intent, two ' +
+    'spellings; objectui\'s mirror schema is parity-test-only and parses nothing at ' +
+    'runtime, so only the spec strictObject can refuse the key. The mechanical ' +
+    'conversion carries the pair over — renamed to `sort` and wrapped in the array ' +
+    'shape — when `sort` is absent, and strips it as a pure lossless delete when ' +
+    '`sort` is present (the renderer\'s own precedence made it unread then).',
   conversionIds: [
     'field-malformed-scale-precision-removed',
     'record-chatter-position-vocabulary',
@@ -5208,6 +5220,7 @@ const step18: MigrationStep = {
     'mapping-lookup-params-removed',
     'translation-component-submit-label-removed',
     'page-component-responsive-removed',
+    'object-grid-default-sort-removed',
   ],
   semantic: [
     // One file per entry under `entries/semantic/`, concatenated here sorted by
@@ -6111,6 +6124,38 @@ const step18: MigrationStep = {
         'Every memory datasource parses with no `${…}` span in `persistence.path` or ' +
         '`persistence.key`; `initialData` record values containing literal `${…}` keep parsing ' +
         'byte-identically.',
+    },
+    {
+      id: 'metadata-item-name-grammar-enforced',
+      surface: 'metadata item names (the `name` half of the `type`/`name` addressing pair — '
+        + '`saveMetaItem` / `publishMetaItem`, `PUT /api/v1/meta/:type/:name` and the compound '
+        + '`:type/:section/:name` fold)',
+      replacement: 'lowercase snake_case segments, optionally dot-qualified — '
+        + 'the pattern family of METADATA_ITEM_NAME_PATTERN, i.e. one or more [a-z][a-z0-9_]* '
+        + 'segments joined by single dots (`crm_lead`, `crm_lead.pipeline`). A name that spelled '
+        + 'a sub-resource with a slash (`views/all_leads`) is re-authored with a dot qualifier '
+        + '(`crm_lead.pipeline` — the `ViewItemNameSchema` convention, now enforced with the '
+        + 'qualifier optional) or flattened with an underscore (`views_all_leads`); containment '
+        + 'is expressed by structure, never by a separator inside the identity string.',
+      reason:
+        'Maintainer ruling (2026-08-25): metadata item names must not contain `/` — '
+        + 'identity-with-separator is the measured root cause of a defect family (URL arity '
+        + 'mismatches, dual-arity route-mount obligations, route shadowing, a two-rule URL '
+        + 'spelling split in one SDK file). The grammar was entirely unconstrained at the door: '
+        + 'the empty string, `//` and `Views/All Leads` were all accepted and stored as item '
+        + 'names, and a slash in the name bypassed the unrecognised-metadata-type refusal '
+        + '(`type=fieldz name=a/b` was accepted while `type=fieldz name=a` was 400). Whether a '
+        + 'stored slash-name (out-of-repo deployments only — the in-repo census measured zero) '
+        + 'should be renamed, and to what, is a judgment the chain cannot make, so no mechanical '
+        + 'conversion ships with the narrowing.',
+      acceptanceCriteria:
+        'Every write through `saveMetaItem` / `publishMetaItem` whose name is lowercase '
+        + 'snake_case segments optionally joined by single dots succeeds exactly as before, flat '
+        + 'and dotted alike. Any other name — slash, empty, whitespace, uppercase, '
+        + 'leading/trailing/double dots — is refused `400 INVALID_REQUEST` with the grammar and '
+        + 'the dotted prescription in the message, and nothing is persisted. Reads and '
+        + '`deleteMetaItem` still answer for pre-grammar residue rows, so any stored junk name '
+        + 'remains listable and clearable.',
     },
     {
       id: 'metadata-plugin-additional-types-retired',
@@ -7447,6 +7492,29 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // `element-input-target-variable-removed` (a page component IS a stack
     // collection member, unlike the `kernel/Manifest:loading` family).
     'ui/ElementTextInputProps:targetVariable',
+    // #11805 — ADR-0049 enforce-or-remove (maintainer ruling 2026-08-25,
+    // decision-inbox batch 4: 「#11805 退役 defaultSort,不需要major」; the producer
+    // half of objectui#5861, under the objectui#4869 「接受所有」 direction).
+    // `defaultSort` was the legacy second spelling of `object-grid`'s `sort`: a
+    // single `{ field, order }` pair the renderer read only when `sort` was absent
+    // (measured at the `.objectui-sha` pin `190fbd01d`,
+    // `plugin-grid/src/ObjectGrid.tsx:1244-1246` fetch fallback and `:2847`, which
+    // wraps it `[schema.defaultSort]` — the exact array shape `sort` carries). One
+    // intent, two spellings; objectui's mirror schema is parity-test-only and
+    // parses nothing at runtime, so only this repo's strictObject can refuse the
+    // key. Zero authored occurrences in either repo's corpora (the card's
+    // measurement, re-run here at dispatch).
+    //
+    // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
+    // removal ships on the 17.x line (launch-window convention: accept-set
+    // narrowings ride minor releases) and the prescription lives at the major
+    // boundary where `migrate meta` users look (the #8495 / PR #8666 precedent,
+    // as `data/Metric:filters` before it). Tombstoned with `retiredKey()` in
+    // `ObjectGridPropsSchema` (the surface baseline line carries `[RETIRED]`);
+    // sources are rewritten by the D2 conversion `object-grid-default-sort-removed`
+    // (wrap-and-rename to `sort: [pair]` when `sort` is absent; a pure lossless
+    // delete when `sort` is present, since the fallback was never read then).
+    'ui/ObjectGridProps:defaultSort',
     // #11027 — ADR-0049 enforce-or-remove (maintainer ruling 2026-08-22, ruled B:
     // retire + repair the redirect texts in the same change). The LAST carrier of
     // the `ResponsiveConfig` layout block, and the destination the

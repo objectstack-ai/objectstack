@@ -109,14 +109,19 @@ describe('#7019 — dispatcher PUT /meta/:type/:name: the capability gate', () =
         expect(stack.storedLabel()).toBe('Account');
     });
 
-    it('refuses the compound-name form too — a name in two segments is the same operation', async () => {
-        // `/metadata/lead/views/all_leads` → type `lead`, name `views/all_leads`.
-        // The dispatcher reaches ONE `saveMetaItem` for both name shapes, so a
-        // gate that only covered single-segment names would be no gate at all.
+    it('[#12195] refuses the ENCODED spelling too — one name, one gate', async () => {
+        // This drove `/lead/views/all_leads`, the compound arity that folded
+        // the trailing segments into `views/all_leads`. That arity is retired
+        // (#12176 stage 3); the same name is addressed percent-encoded, which
+        // keeps the path at two segments and reaches the same `saveMetaItem`.
+        //
+        // The point of the case is unchanged: ONE gate covers every name shape.
+        // A gate that only covered names without a slash would be no gate at
+        // all for a pre-grammar residue row.
         const stack = boot();
 
         const res = await stack.dispatcher.handleMetadata(
-            '/lead/views/all_leads',
+            '/lead/views%2Fall_leads',
             ctx({ userId: 'u_portal', systemPermissions: [] }),
             'PUT',
             { density: 'compact' },

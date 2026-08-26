@@ -2203,7 +2203,8 @@ const FILTERS_TO_FILTER = { filters: 'filter' } as const;
  * `filter` (:739, lowered via `toFilterNode` to `$filter`), `defaultFilters`
  * (:922 — the LEGACY fallback read only when `filter` is absent; it is read,
  * so it stays declared — only the plural `filters` has zero read points),
- * `sort` (:741) / `defaultSort` (:943), `pagination`/`pageSize`/`showPagination`
+ * `sort` (:741) / `defaultSort` (:943 — RETIRED #11805, tombstoned below;
+ * objectui#5861 retires the read), `pagination`/`pageSize`/`showPagination`
  * (:567, :752, :2475-2480), `searchableFields`/`showSearch` (:959, :2484-2486),
  * `rowHeight` (:549), `grouping`/`aggregations` (:1076, :1136), `rowColor`
  * (:1052), `conditionalFormatting` (:884, :1061), `selection`/`selectable`
@@ -2233,8 +2234,36 @@ export const ObjectGridPropsSchema = lazySchema(() => strictObject({
   defaultFilters: z.unknown().optional()
     .describe('Legacy base-filter fallback, read only when `filter` is absent. Prefer `filter`'),
   sort: z.unknown().optional().describe('Initial sort (array of { field, order })'),
-  defaultSort: z.unknown().optional()
-    .describe('Legacy single-sort fallback ({ field, order }), read only when `sort` is absent. Prefer `sort`'),
+  /**
+   * REMOVED (#11805, maintainer ruling 2026-08-25, decision-inbox batch 4:
+   * 「#11805 退役 defaultSort,不需要major」 — the ADR-0049 enforce-or-remove
+   * half of the objectui#4869 「接受所有」 direction; objectui#5861 is the
+   * consumer half).
+   *
+   * The legacy second spelling of `sort`: a SINGLE `{ field, order }` pair the
+   * renderer read only when `sort` was absent — measured at the `.objectui-sha`
+   * pin (`190fbd01d`), `plugin-grid/src/ObjectGrid.tsx:1244-1246` (fetch path,
+   * `$orderby` fallback) and `:2847` (header arrows, where it is wrapped
+   * `[schema.defaultSort]` — the exact array shape `sort` carries). One intent,
+   * two spellings; only this repo's strictObject can refuse it (objectui's
+   * mirror schema is parity-test-only and parses nothing at runtime), so the
+   * retirement lands here and objectui#5861 retires the reads on its own
+   * schedule, exactly as `page:card.body` left the renderer's `body ??`
+   * fallback behind.
+   *
+   * The live mechanism is `sort` — the same pair, wrapped in an array. The
+   * protocol-18 conversion `object-grid-default-sort-removed` carries the
+   * mechanical rewrite (wrap-and-rename when `sort` is absent; a pure lossless
+   * delete when `sort` is present, since the fallback was never read then).
+   */
+  defaultSort: retiredKey(
+    '`object-grid` property `defaultSort` was removed in @objectstack/spec 17 (#11805, ADR-0049) — '
+    + 'it was the legacy second spelling of `sort`: a single `{ field, order }` pair read only when '
+    + '`sort` was absent, so one intent had two spellings and a grid authoring both silently ignored '
+    + 'this one. Rename the key to `sort` and wrap the value in an array (`defaultSort: { field, order }` '
+    + 'becomes `sort: [{ field, order }]`); the pair itself is unchanged. '
+    + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.',
+  ),
   pagination: z.unknown().optional()
     .describe('Pagination config ({ pageSize, pageSizeOptions, … }); its presence enables paging'),
   pageSize: z.number().optional().describe('Flat page-size shorthand; `pagination.pageSize` wins when both are set'),

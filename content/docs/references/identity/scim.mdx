@@ -114,6 +114,16 @@ const result = SCIMAddressSchema.parse(data);
 | **operations** | `{ method: Enum<'POST' \| 'PUT' \| 'PATCH' \| 'DELETE'>; path: string; bulkId?: string; data?: Record<string, any>; … }[]` | ✅ | Bulk operations to execute (minimum 1) |
 | **failOnErrors** | `integer` | optional | Stop processing after this many errors |
 
+### Nested Shape: `SCIMBulkRequest.operations[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **method** | `Enum<'POST' \| 'PUT' \| 'PATCH' \| 'DELETE'>` | ✅ | HTTP method for the bulk operation |
+| **path** | `string` | ✅ | Resource endpoint path (e.g. /Users, /Groups/`{id}`) |
+| **bulkId** | `string` | optional | Client-assigned ID for cross-referencing between operations |
+| **data** | `Record<string, any>` | optional | Request body for POST/PUT/PATCH operations |
+| **version** | `string` | optional | ETag for optimistic concurrency control |
+
 
 ---
 
@@ -125,6 +135,16 @@ const result = SCIMAddressSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **schemas** | `'urn:ietf:params:scim:api:messages:2.0:BulkResponse'[]` | optional (default: `["urn:ietf:params:scim:api:messages:2.0:BulkResponse"]`) | SCIM schema URIs (BulkResponse) |
 | **operations** | `{ method: Enum<'POST' \| 'PUT' \| 'PATCH' \| 'DELETE'>; bulkId?: string; location?: string; status: string; … }[]` | ✅ | Results for each bulk operation |
+
+### Nested Shape: `SCIMBulkResponse.operations[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **method** | `Enum<'POST' \| 'PUT' \| 'PATCH' \| 'DELETE'>` | ✅ | HTTP method that was executed |
+| **bulkId** | `string` | optional | Client-assigned bulk operation ID |
+| **location** | `string` | optional | URL of the created or modified resource |
+| **status** | `string` | ✅ | HTTP status code as string (e.g. "201", "400") |
+| **response** | `any` | optional | Response body (typically present for errors) |
 
 
 ---
@@ -171,6 +191,14 @@ const result = SCIMAddressSchema.parse(data);
 | **department** | `string` | optional | Department |
 | **manager** | `{ value: string; $ref?: string; displayName?: string }` | optional | Manager reference |
 
+### Nested Shape: `SCIMEnterpriseUser.manager`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **value** | `string` | ✅ | Manager ID |
+| **$ref** | `string` | optional | Manager URI |
+| **displayName** | `string` | optional | Manager name |
+
 
 ---
 
@@ -200,6 +228,25 @@ const result = SCIMAddressSchema.parse(data);
 | **displayName** | `string` | ✅ | Group display name (REQUIRED) |
 | **members** | `{ value: string; $ref?: string; type?: Enum<'User' \| 'Group'>; display?: string }[]` | optional | Group members |
 | **meta** | `{ resourceType?: string; created?: string; lastModified?: string; location?: string; … }` | optional | Resource metadata |
+
+### Nested Shape: `SCIMGroup.members[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **value** | `string` | ✅ | Member ID |
+| **$ref** | `string` | optional | URI reference to the member |
+| **type** | `Enum<'User' \| 'Group'>` | optional | Member type |
+| **display** | `string` | optional | Member display name |
+
+### Nested Shape: `SCIMGroup.meta`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **resourceType** | `string` | optional | Resource type |
+| **created** | `string` | optional | Creation timestamp |
+| **lastModified** | `string` | optional | Last modification timestamp |
+| **location** | `string` | optional | Resource location URI |
+| **version** | `string` | optional | Entity tag (ETag) for concurrency control |
 
 
 ---
@@ -300,6 +347,14 @@ const result = SCIMAddressSchema.parse(data);
 | **schemas** | `string[]` | optional (default: `["urn:ietf:params:scim:api:messages:2.0:PatchOp"]`) | SCIM schema URIs |
 | **Operations** | `{ op: Enum<'add' \| 'remove' \| 'replace'>; path?: string; value?: any }[]` | ✅ | Patch operations |
 
+### Nested Shape: `SCIMPatchRequest.Operations[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **op** | `Enum<'add' \| 'remove' \| 'replace'>` | ✅ | Operation type |
+| **path** | `string` | optional | Attribute path (optional for add) |
+| **value** | `any` | optional | Value to set |
+
 
 ---
 
@@ -349,6 +404,78 @@ const result = SCIMAddressSchema.parse(data);
 | **x509Certificates** | `{ value: string; type?: string; primary?: boolean }[]` | optional | X509 certificates |
 | **meta** | `{ resourceType?: string; created?: string; lastModified?: string; location?: string; … }` | optional | Resource metadata |
 | **urn:ietf:params:scim:schemas:extension:enterprise:2.0:User** | `{ employeeNumber?: string; costCenter?: string; organization?: string; division?: string; … }` | optional | Enterprise user attributes |
+
+### Nested Shape: `SCIMUser.name`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **formatted** | `string` | optional | Formatted full name |
+| **familyName** | `string` | optional | Family name (last name) |
+| **givenName** | `string` | optional | Given name (first name) |
+| **middleName** | `string` | optional | Middle name |
+| **honorificPrefix** | `string` | optional | Honorific prefix (Mr., Ms., Dr.) |
+| **honorificSuffix** | `string` | optional | Honorific suffix (Jr., Sr.) |
+
+### Nested Shape: `SCIMUser.emails[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **value** | `string` | ✅ | Email address |
+| **type** | `Enum<'work' \| 'home' \| 'other'>` | optional | Email type |
+| **display** | `string` | optional | Display label |
+| **primary** | `boolean` | optional (default: `false`) | Primary email indicator |
+
+### Nested Shape: `SCIMUser.phoneNumbers[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **value** | `string` | ✅ | Phone number |
+| **type** | `Enum<'work' \| 'home' \| 'mobile' \| 'fax' \| 'pager' \| 'other'>` | optional | Phone number type |
+| **display** | `string` | optional | Display label |
+| **primary** | `boolean` | optional (default: `false`) | Primary phone indicator |
+
+### Nested Shape: `SCIMUser.addresses[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **formatted** | `string` | optional | Formatted address |
+| **streetAddress** | `string` | optional | Street address |
+| **locality** | `string` | optional | City/Locality |
+| **region** | `string` | optional | State/Region |
+| **postalCode** | `string` | optional | Postal code |
+| **country** | `string` | optional | Country |
+| **type** | `Enum<'work' \| 'home' \| 'other'>` | optional | Address type |
+| **primary** | `boolean` | optional (default: `false`) | Primary address indicator |
+
+### Nested Shape: `SCIMUser.groups[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **value** | `string` | ✅ | Group ID |
+| **$ref** | `string` | optional | URI reference to the group |
+| **display** | `string` | optional | Group display name |
+| **type** | `Enum<'direct' \| 'indirect'>` | optional | Membership type |
+
+### Nested Shape: `SCIMUser.meta`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **resourceType** | `string` | optional | Resource type |
+| **created** | `string` | optional | Creation timestamp |
+| **lastModified** | `string` | optional | Last modification timestamp |
+| **location** | `string` | optional | Resource location URI |
+| **version** | `string` | optional | Entity tag (ETag) for concurrency control |
+
+### Nested Shape: `SCIMUser.urn:ietf:params:scim:schemas:extension:enterprise:2.0:User`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **employeeNumber** | `string` | optional | Employee number |
+| **costCenter** | `string` | optional | Cost center |
+| **organization** | `string` | optional | Organization |
+| **division** | `string` | optional | Division |
+| **department** | `string` | optional | Department |
+| **manager** | `{ value: string; $ref?: string; displayName?: string }` | optional | Manager reference |
 
 
 ---

@@ -338,7 +338,10 @@ const DISPOSITIONS: Record<string, Disposition> = {
   'DELETE /api/v1/meta/:type/:name': { kind: 'no-record-echo', why: 'Metadata plane: delete receipt.' },
   'POST /api/v1/meta/:type/:name/publish': { kind: 'no-record-echo', why: 'Metadata plane: publish receipt.' },
   'POST /api/v1/meta/:type/:name/rollback': { kind: 'no-record-echo', why: 'Metadata plane: rollback receipt.' },
-  'PUT /api/v1/meta/:type/:section/:name': { kind: 'no-record-echo', why: 'Metadata plane: compound metadata section.' },
+  // [#12195] `PUT /api/v1/meta/:type/:section/:name` had a disposition here
+  // until the compound-name arity was retired. Removed rather than kept: this
+  // file's own stale-entry check treats a disposition for a route that no
+  // longer exists as a defect, which is exactly the right reading.
 
   'POST /api/v1/email/send': { kind: 'no-record-echo', why: 'Send receipt (message id / status), no object row.' },
 

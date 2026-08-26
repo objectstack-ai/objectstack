@@ -5,6 +5,37 @@
  * specifier resolves from, and the anti-vacuity control written beside such a
  * test is vacuous too. This file is the executable record of that platform fact.
  *
+ * ── #11775 UPDATE: M1 is now switched OFF for `@objectstack/types` here ─────
+ *
+ * `packages/cli/vitest.config.ts` now carries
+ * `test.server.deps.external = [/packages[\/]types[\/]dist/]`, which takes this
+ * helper off Vite's inline path and hands its `import()` back to Node. The
+ * consequence for this file is that the two M1 cases below assert the OPPOSITE
+ * of what they asserted when it was written, and that inversion IS the fix
+ * landing — the in-process reading and the real-Node reading are now the same
+ * reading. The cases were not deleted, because "the anchor is restored" is only
+ * meaningful next to the real-Node baseline this file already measures.
+ *
+ * Two things that did NOT change, and both are load-bearing:
+ *
+ *   - **M1 remains true as a platform fact.** The entry names ONE dist path in
+ *     ONE package's config. Every other workspace dependency reached from these
+ *     tests is still inlined and still has its base flattened, so a new
+ *     in-process pin over a base claim still needs the treatment this file
+ *     documents. The M1 block says so where it can be read at the point of use.
+ *   - **M2 is untouched.** `NODE_PATH` reaching a spawned child, and CJS
+ *     honouring it, is not a Vite mechanism and no vitest config can reach it.
+ *
+ * ⚠️ Why the entry cannot collide with the source aliases in the same config
+ * (the question #11412 left open as an assumed tension): `resolve.alias` acts in
+ * the RESOLVE phase, so an aliased specifier is already an absolute `src/…`
+ * path by the time the externalise predicate is asked — and a `/dist/` pattern
+ * cannot match a `src/` path. `check:test-source-alias` is what keeps that
+ * true rather than merely likely: it FAILS any alias whose winning entry does
+ * not land under `src/`. Measured on #11775 rather than argued: with a source
+ * alias and a `/service-cache[\/]dist/` external both present for the same
+ * package, a marker existing only in `src` was the one that loaded.
+ *
  * It is a PRECONDITION pin in the sense `packages/types/src/node.test.ts` uses
  * the word: it asserts what the runner does, not what this repo's code does, so
  * that the day vitest/Vite changes the behaviour the repo is told — instead of
@@ -83,7 +114,7 @@ import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { pathToFileURL } from 'node:url';
 import { beforeAll, afterAll, describe, expect, it } from 'vitest';
-import { createHostImporter } from '@objectstack/types/node';
+import { createHostImporter, hostImportFailureKind } from '@objectstack/types/node';
 import { childEnv } from './helpers/serve-process.js';
 
 const execFileAsync = promisify(execFile);
@@ -191,7 +222,7 @@ describe('#11412 CONTROLS — the probe can return every answer it is asked to d
   });
 });
 
-describe('#11412 M1 — vitest flattens the resolution base an in-process test would measure', () => {
+describe('#11775 M1 — the `server.deps.external` entry restores the anchor for THIS package', () => {
   it('REAL NODE: the no-base importer cannot reach a CLI-declared package, and names its base', async () => {
     expect(clean.noBaseImporter).not.toBe('RESOLVED');
     expect(clean.noBaseImporter).toContain(`Cannot find package '${CLI_DECLARED}'`);
@@ -199,19 +230,56 @@ describe('#11412 M1 — vitest flattens the resolution base an in-process test w
     expect(clean.noBaseImporter).toMatch(/imported from .*[/\\]packages[/\\]types[/\\]/);
   });
 
-  it('UNDER VITEST: the identical call RESOLVES — so no in-process pin over it can fail', async () => {
-    await expect(createHostImporter(appRoot)(CLI_DECLARED)).resolves.toBeDefined();
+  it('UNDER VITEST: the identical call now REFUSES, with real Node’s base and envelope', async () => {
+    // THE PIN (#11775). Before the config entry this call RESOLVED, because the
+    // inlined package’s `import()` was rewritten to `__vite_ssr_dynamic_import__`
+    // and re-anchored at the vitest root. Externalising `packages/types/dist`
+    // hands the call back to Node, so the in-process reading and the real-Node
+    // reading above are now THE SAME READING.
+    //
+    // Asserted as an envelope, never as a bare `toThrow()`: an unfixed path that
+    // throws some other `Error` would satisfy `toThrow()` while failing the only
+    // property this file is about.
+    const err = await createHostImporter(appRoot)(CLI_DECLARED).then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+    expect(err).toBeInstanceOf(Error);
+    expect((err as { code?: string }).code).toBe('MODULE_NOT_FOUND');
+    expect(hostImportFailureKind(err)).toBe('undeclared');
+    // The load-bearing half: WHICH base failed. `packages/types` is the module
+    // that physically contains the `import()`, i.e. the anchor Node uses and
+    // vitest used to replace.
+    expect((err as Error).message).toContain(`Cannot find package '${CLI_DECLARED}'`);
+    expect((err as Error).message).toMatch(/imported from .*[/\\]packages[/\\]types[/\\]/);
+    // Same sentence real Node produced in the child, now produced in-process.
+    expect(clean.noBaseImporter).toMatch(/imported from .*[/\\]packages[/\\]types[/\\]/);
+
     // …and the same importer still refuses a specifier nothing satisfies, so the
-    // line above is the base collapsing, not "everything resolves in here".
+    // lines above are the anchor working, not "everything fails in here".
     await expect(createHostImporter(appRoot)(NOWHERE)).rejects.toThrow(
       `Cannot find package '${NOWHERE}'`,
     );
   });
 
-  it('the mechanism is Vite rewriting the inlined package’s dynamic import', () => {
-    // If this ever reads false, M1 is gone and the two cases above should be
-    // re-measured before anything is written on top of them.
-    expect(String(createHostImporter)).toContain('__vite_ssr_dynamic_import__');
+  it('the mechanism is the config entry — the helper is EXTERNAL, while this file is still inlined', () => {
+    // Absence-of-a-marker is a vacuous probe unless something proves the marker
+    // would have shown up. This file is itself an inlined module, so Vite
+    // rewrote the `import()` written right here — that is the positive control,
+    // and it is what makes the assertion below a measurement rather than a dead
+    // string search (a vitest upgrade that renamed the marker would fail HERE,
+    // loudly, instead of silently "confirming" the line under it).
+    const inlinedHere = async (s: string) => import(/* @vite-ignore */ s);
+    expect(String(inlinedHere)).toContain('__vite_ssr_dynamic_import__');
+
+    // The helper crossed the inline/external boundary; this file did not.
+    expect(String(createHostImporter)).not.toContain('__vite_ssr_dynamic_import__');
+
+    // ⚠️ M1 IS NOT GONE AS A PLATFORM FACT. It is switched off for exactly the
+    // paths matching `packages/types/dist` in THIS package’s vitest config
+    // (#11775) — every other workspace dependency here is still inlined and
+    // still has its resolution base flattened, and any new in-process pin over
+    // a base claim must still prove itself the way this file does.
   });
 });
 

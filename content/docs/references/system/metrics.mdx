@@ -43,6 +43,28 @@ Histogram bucket configuration
 | **exponential** | `{ start: number; factor: number; count: integer }` | optional |  |
 | **explicit** | `{ boundaries: number[] }` | optional |  |
 
+### Nested Shape: `HistogramBucketConfig.linear`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **start** | `number` | ✅ | Start value |
+| **width** | `number` | ✅ | Bucket width |
+| **count** | `integer` | ✅ | Number of buckets |
+
+### Nested Shape: `HistogramBucketConfig.exponential`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **start** | `number` | ✅ | Start value |
+| **factor** | `number` | ✅ | Growth factor |
+| **count** | `integer` | ✅ | Number of buckets |
+
+### Nested Shape: `HistogramBucketConfig.explicit`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **boundaries** | `number[]` | ✅ | Bucket boundaries |
+
 
 ---
 
@@ -58,6 +80,14 @@ Metric aggregation configuration
 | **window** | `{ size: integer; sliding: boolean; slideInterval?: integer }` | optional |  |
 | **groupBy** | `string[]` | optional | Group by label names |
 | **filters** | `Record<string, any>` | optional | Filter criteria |
+
+### Nested Shape: `MetricAggregationConfig.window`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **size** | `integer` | ✅ | Window size in seconds |
+| **sliding** | `boolean` | optional (default: `false`) |  |
+| **slideInterval** | `integer` | optional |  |
 
 
 ---
@@ -100,6 +130,22 @@ Metric data point
 | **labels** | `Record<string, string>` | optional | Metric labels |
 | **histogram** | `{ count: integer; sum: number; buckets: object[] }` | optional |  |
 | **summary** | `{ count: integer; sum: number; quantiles: object[] }` | optional |  |
+
+### Nested Shape: `MetricDataPoint.histogram`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **count** | `integer` | ✅ | Total count |
+| **sum** | `number` | ✅ | Sum of all values |
+| **buckets** | `{ upperBound: number; count: integer }[]` | ✅ | Histogram buckets |
+
+### Nested Shape: `MetricDataPoint.summary`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **count** | `integer` | ✅ | Total count |
+| **sum** | `number` | ✅ | Sum of all values |
+| **quantiles** | `{ quantile: number; value: number }[]` | ✅ | Summary quantiles |
 
 
 ---
@@ -145,6 +191,15 @@ Metric definition
 * `operations`
 * `custom`
 
+### Nested Shape: `MetricDefinition.histogram`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `Enum<'linear' \| 'exponential' \| 'explicit'>` | ✅ | Bucket type |
+| **linear** | `{ start: number; width: number; count: integer }` | optional |  |
+| **exponential** | `{ start: number; factor: number; count: integer }` | optional |  |
+| **explicit** | `{ boundaries: number[] }` | optional |  |
+
 
 ---
 
@@ -162,6 +217,16 @@ Metric export configuration
 | **batch** | `{ enabled: boolean; size: integer }` | optional |  |
 | **auth** | `{ type: Enum<'none' \| 'basic' \| 'bearer' \| 'api_key'>; username?: string; password?: string; token?: string; … }` | optional |  |
 | **config** | `Record<string, any>` | optional | Additional configuration |
+
+### Nested Shape: `MetricExportConfig.auth`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `Enum<'none' \| 'basic' \| 'bearer' \| 'api_key'>` | ✅ | Auth type |
+| **username** | `string` | optional |  |
+| **password** | `string` | optional |  |
+| **token** | `string` | optional |  |
+| **apiKey** | `string` | optional |  |
 
 
 ---
@@ -240,6 +305,77 @@ Metrics configuration
 | **retention** | `{ period?: integer; downsampling?: object[] }` | optional |  |
 | **cardinalityLimits** | `{ maxLabelCombinations?: integer; onLimitExceeded?: Enum<'drop' \| 'sample' \| 'alert'> }` | optional |  |
 
+### Nested Shape: `MetricsConfig.metrics[number]`
+
+Metric definition
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Metric name (snake_case) |
+| **label** | `string` | optional | Display label |
+| **type** | `Enum<'counter' \| 'gauge' \| 'histogram' \| 'summary'>` | ✅ | Metric type |
+| **unit** | `Enum<'nanoseconds' \| 'microseconds' \| 'milliseconds' \| 'seconds' \| 'minutes' \| …>` | optional | Metric unit |
+| **description** | `string` | optional | Metric description |
+| **labelNames** | `string[]` | optional (default: `[]`) | Label names |
+| **histogram** | `{ type: Enum<'linear' \| 'exponential' \| 'explicit'>; linear?: object; exponential?: object; explicit?: object }` | optional | Histogram bucket configuration |
+| **summary** | `{ quantiles?: number[]; maxAge?: integer; ageBuckets?: integer }` | optional |  |
+| **enabled** | `boolean` | optional (default: `true`) |  |
+
+### Nested Shape: `MetricsConfig.aggregations[number]`
+
+Metric aggregation configuration
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `Enum<'sum' \| 'avg' \| 'min' \| 'max' \| 'count' \| 'p50' \| 'p75' \| 'p90' \| 'p95' \| 'p99' \| …>` | ✅ | Aggregation type |
+| **window** | `{ size: integer; sliding?: boolean; slideInterval?: integer }` | optional |  |
+| **groupBy** | `string[]` | optional | Group by label names |
+| **filters** | `Record<string, any>` | optional | Filter criteria |
+
+### Nested Shape: `MetricsConfig.slis[number]`
+
+Service Level Indicator
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | SLI name (snake_case) |
+| **label** | `string` | ✅ | Display label |
+| **description** | `string` | optional | SLI description |
+| **metric** | `string` | ✅ | Base metric name |
+| **type** | `Enum<'availability' \| 'latency' \| 'throughput' \| 'error_rate' \| 'saturation' \| 'custom'>` | ✅ | SLI type |
+| **successCriteria** | `{ threshold: number; operator: Enum<'lt' \| 'lte' \| 'gt' \| 'gte' \| 'eq'>; percentile?: number } \| string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | ✅ | Success criteria — structured or CEL predicate |
+| **window** | `{ size: integer; rolling?: boolean }` | ✅ | Measurement window |
+| **enabled** | `boolean` | optional (default: `true`) |  |
+
+### Nested Shape: `MetricsConfig.slos[number]`
+
+Service Level Objective
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | SLO name (snake_case) |
+| **label** | `string` | ✅ | Display label |
+| **description** | `string` | optional | SLO description |
+| **sli** | `string` | ✅ | SLI name |
+| **target** | `number` | ✅ | Target percentage |
+| **period** | `{ type: Enum<'rolling' \| 'calendar'>; duration?: integer; calendar?: Enum<'daily' \| 'weekly' \| 'monthly' \| 'quarterly' \| 'yearly'> }` | ✅ | Time period |
+| **errorBudget** | `{ enabled?: boolean; alertThreshold?: number; burnRateWindows?: object[] }` | optional |  |
+| **alerts** | `{ name: string; severity: Enum<'info' \| 'warning' \| 'critical'>; condition: object }[]` | optional (default: `[]`) |  |
+| **enabled** | `boolean` | optional (default: `true`) |  |
+
+### Nested Shape: `MetricsConfig.exports[number]`
+
+Metric export configuration
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `Enum<'prometheus' \| 'openmetrics' \| 'graphite' \| 'statsd' \| 'influxdb' \| 'datadog' \| …>` | ✅ | Export type |
+| **endpoint** | `string` | optional | Export endpoint |
+| **interval** | `integer` | optional (default: `60`) |  |
+| **batch** | `{ enabled?: boolean; size?: integer }` | optional |  |
+| **auth** | `{ type: Enum<'none' \| 'basic' \| 'bearer' \| 'api_key'>; username?: string; password?: string; token?: string; … }` | optional |  |
+| **config** | `Record<string, any>` | optional | Additional configuration |
+
 
 ---
 
@@ -259,6 +395,13 @@ Service Level Indicator
 | **successCriteria** | `{ threshold: number; operator: Enum<'lt' \| 'lte' \| 'gt' \| 'gte' \| 'eq'>; percentile?: number } \| string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | ✅ | Success criteria — structured or CEL predicate |
 | **window** | `{ size: integer; rolling?: boolean }` | ✅ | Measurement window |
 | **enabled** | `boolean` | optional (default: `true`) |  |
+
+### Nested Shape: `ServiceLevelIndicator.window`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **size** | `integer` | ✅ | Window size in seconds |
+| **rolling** | `boolean` | optional (default: `true`) |  |
 
 
 ---
@@ -281,6 +424,22 @@ Service Level Objective
 | **alerts** | `{ name: string; severity: Enum<'info' \| 'warning' \| 'critical'>; condition: object }[]` | optional (default: `[]`) |  |
 | **enabled** | `boolean` | optional (default: `true`) |  |
 
+### Nested Shape: `ServiceLevelObjective.period`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `Enum<'rolling' \| 'calendar'>` | ✅ | Period type |
+| **duration** | `integer` | optional | Duration in seconds |
+| **calendar** | `Enum<'daily' \| 'weekly' \| 'monthly' \| 'quarterly' \| 'yearly'>` | optional |  |
+
+### Nested Shape: `ServiceLevelObjective.alerts[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Alert name |
+| **severity** | `Enum<'info' \| 'warning' \| 'critical'>` | ✅ | Alert severity |
+| **condition** | `{ type: Enum<'slo_breach' \| 'error_budget' \| 'burn_rate'>; threshold?: number }` | ✅ | Alert condition |
+
 
 ---
 
@@ -297,6 +456,16 @@ Time series
 | **dataPoints** | `{ timestamp: string; value: number; labels?: Record<string, string> }[]` | ✅ | Data points |
 | **startTime** | `string` | optional | Start time |
 | **endTime** | `string` | optional | End time |
+
+### Nested Shape: `TimeSeries.dataPoints[number]`
+
+Time series data point
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **timestamp** | `string` | ✅ | Timestamp |
+| **value** | `number` | ✅ | Value |
+| **labels** | `Record<string, string>` | optional | Labels |
 
 
 ---

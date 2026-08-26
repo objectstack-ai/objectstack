@@ -34,6 +34,14 @@ const result = AIChatWindowProps.parse(data);
 | **context** | `Record<string, any>` | optional | Contextual data to pass to the AI |
 | **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
 
+### Nested Shape: `AIChatWindowProps.aria`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **ariaLabel** | `string \| Record<string, string>` | optional | Accessible label for screen readers (WAI-ARIA aria-label). Plain string, or an inline locale map — no translation-bundle slot addresses this key, so a plain string is announced in the source language. |
+| **ariaDescribedBy** | `string` | optional | ID of element providing additional description (WAI-ARIA aria-describedby) |
+| **role** | `string` | optional | WAI-ARIA role attribute (e.g., "dialog", "navigation", "alert") |
+
 
 ---
 
@@ -51,6 +59,32 @@ const result = AIChatWindowProps.parse(data);
 | **disabled** | `boolean` | optional (default: `false`) | Disable the button |
 | **action** | `{ type?: Enum<'script' \| 'url' \| 'modal' \| 'flow' \| 'api' \| 'form'>; name?: string; label?: string \| Record<string, string>; target?: string; … }` | optional | Inline action executed on click |
 | **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
+
+### Nested Shape: `ElementButtonProps.action`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `Enum<'script' \| 'url' \| 'modal' \| 'flow' \| 'api' \| 'form'>` | optional (default: `"script"`) | Action functionality type |
+| **name** | `string` | optional | Machine name (lowercase snake_case) |
+| **label** | `string \| Record<string, string>` | optional | Display label |
+| **target** | `string` | optional | URL, Script Name, Flow ID, or API Endpoint. Supports $`{param.X}` and $`{ctx.X}` interpolation. |
+| **openIn** | `Enum<'self' \| 'new-tab'>` | optional | For type:'url' — where to open `target`. 'new-tab' opens a new browser tab; 'self' navigates in place. When omitted, external/absolute URLs open in a new tab and relative URLs navigate in place. Static execution option — keep it OUT of `params` (which is user-input-collection only). |
+| **method** | `Enum<'POST' \| 'PATCH' \| 'PUT' \| 'DELETE'>` | optional | HTTP method for type:"api" actions. Defaults to POST. |
+| **params** | `{ name?: string; field?: string; objectOverride?: string; label?: string \| Record<string, string>; … }[]` | optional | Input parameters required from user — an ActionParam[] DEFINITION array, never a payload map (a static request body goes in `bodyExtra`). |
+| **bodyExtra** | `Record<string, any>` | optional | Static request-body fields for a type:"api" action, merged last (overrides user params). `{{page.<var>}}` tokens are resolved by the runtime. This — not `params` — is where a payload goes. |
+| **confirmText** | `string \| Record<string, string>` | optional | Confirmation message before execution. On a registered action, pairing this with a non-empty `params` is refused (#7428) — that opens a second dialog for one decision; put the question on `description` instead. Correct on a param-LESS action, where the confirm is the only dialog there is. |
+| **successMessage** | `string \| Record<string, string>` | optional | Success message to show after execution |
+| **errorMessage** | `string \| Record<string, string>` | optional | Error message to show when the action fails (overrides the raw error). |
+| **refreshAfter** | `boolean` | optional (default: `false`) | Refresh view after execution |
+| **opensInNewTab** | `boolean` | optional | Open the action result in a new tab. The renderer pre-opens the tab synchronously on click (popup-blocker-safe) and navigates it to the handler's redirectUrl. |
+
+### Nested Shape: `ElementButtonProps.aria`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **ariaLabel** | `string \| Record<string, string>` | optional | Accessible label for screen readers (WAI-ARIA aria-label). Plain string, or an inline locale map — no translation-bundle slot addresses this key, so a plain string is announced in the source language. |
+| **ariaDescribedBy** | `string` | optional | ID of element providing additional description (WAI-ARIA aria-describedby) |
+| **role** | `string` | optional | WAI-ARIA role attribute (e.g., "dialog", "navigation", "alert") |
 
 
 ---
@@ -99,6 +133,14 @@ const result = AIChatWindowProps.parse(data);
 | **height** | `number` | optional | Fixed height in pixels |
 | **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
 
+### Nested Shape: `ElementImageProps.aria`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **ariaLabel** | `string \| Record<string, string>` | optional | Accessible label for screen readers (WAI-ARIA aria-label). Plain string, or an inline locale map — no translation-bundle slot addresses this key, so a plain string is announced in the source language. |
+| **ariaDescribedBy** | `string` | optional | ID of element providing additional description (WAI-ARIA aria-describedby) |
+| **role** | `string` | optional | WAI-ARIA role attribute (e.g., "dialog", "navigation", "alert") |
+
 
 ---
 
@@ -114,6 +156,14 @@ const result = AIChatWindowProps.parse(data);
 | **mode** | `Enum<'diagram' \| 'matrix' \| 'summary'>` | optional | Render form; defaults per type (diagram for flow/state_machine, matrix for permission) |
 | **detail** | `Enum<'business' \| 'technical'>` | optional (default: `"business"`) | Authoring altitude (ADR-0051 §3.4): business collapses technical flow nodes to business steps + approvals. NOT access (cf. book.audience); permission projection is automatic and render-time, never set here |
 | **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
+
+### Nested Shape: `ElementMetadataViewerProps.aria`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **ariaLabel** | `string \| Record<string, string>` | optional | Accessible label for screen readers (WAI-ARIA aria-label). Plain string, or an inline locale map — no translation-bundle slot addresses this key, so a plain string is announced in the source language. |
+| **ariaDescribedBy** | `string` | optional | ID of element providing additional description (WAI-ARIA aria-describedby) |
+| **role** | `string` | optional | WAI-ARIA role attribute (e.g., "dialog", "navigation", "alert") |
 
 
 ---
@@ -132,6 +182,14 @@ const result = AIChatWindowProps.parse(data);
 | **prefix** | `string` | optional | Prefix text (e.g. "$") |
 | **suffix** | `string` | optional | Suffix text (e.g. "%") |
 | **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
+
+### Nested Shape: `ElementNumberProps.aria`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **ariaLabel** | `string \| Record<string, string>` | optional | Accessible label for screen readers (WAI-ARIA aria-label). Plain string, or an inline locale map — no translation-bundle slot addresses this key, so a plain string is announced in the source language. |
+| **ariaDescribedBy** | `string` | optional | ID of element providing additional description (WAI-ARIA aria-describedby) |
+| **role** | `string` | optional | WAI-ARIA role attribute (e.g., "dialog", "navigation", "alert") |
 
 
 ---
@@ -157,6 +215,23 @@ const result = AIChatWindowProps.parse(data);
 | **multiple** | `never` | optional | [REMOVED] `element:record_picker` property `multiple` was removed in @objectstack/spec 17.0.0 (#5775, ADR-0049) — the picker is a single-select `Select` and the bound page variable holds one record id, so `multiple: true` selected nothing extra and reported success. Delete the key; multi-record selection is not implemented on this element. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
 | **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
 
+### Nested Shape: `ElementRecordPickerProps.sort[number]`
+
+Sort field and direction pair
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **field** | `string` | ✅ | Field name to sort by |
+| **order** | `Enum<'asc' \| 'desc'>` | ✅ | Sort direction |
+
+### Nested Shape: `ElementRecordPickerProps.aria`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **ariaLabel** | `string \| Record<string, string>` | optional | Accessible label for screen readers (WAI-ARIA aria-label). Plain string, or an inline locale map — no translation-bundle slot addresses this key, so a plain string is announced in the source language. |
+| **ariaDescribedBy** | `string` | optional | ID of element providing additional description (WAI-ARIA aria-describedby) |
+| **role** | `string` | optional | WAI-ARIA role attribute (e.g., "dialog", "navigation", "alert") |
+
 
 ---
 
@@ -176,6 +251,14 @@ const result = AIChatWindowProps.parse(data);
 | **targetVariable** | `never` | optional | [REMOVED] `element:text_input` property `targetVariable` was removed in @objectstack/spec 17 (#9198, ADR-0049) — it was a declarative hint no renderer ever read: the live binding runs the other direction, resolved from the page variable whose `source` names this component's `id`, so authoring only `targetVariable` bound nothing while reporting success. Delete the key; to bind the typed value, declare it on the variable — `variables: [{ name: '<var>', type: 'string', source: '<this component id>' }]`. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand. |
 | **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
 
+### Nested Shape: `ElementTextInputProps.aria`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **ariaLabel** | `string \| Record<string, string>` | optional | Accessible label for screen readers (WAI-ARIA aria-label). Plain string, or an inline locale map — no translation-bundle slot addresses this key, so a plain string is announced in the source language. |
+| **ariaDescribedBy** | `string` | optional | ID of element providing additional description (WAI-ARIA aria-describedby) |
+| **role** | `string` | optional | WAI-ARIA role attribute (e.g., "dialog", "navigation", "alert") |
+
 
 ---
 
@@ -189,6 +272,14 @@ const result = AIChatWindowProps.parse(data);
 | **variant** | `Enum<'heading' \| 'subheading' \| 'body' \| 'caption'>` | optional (default: `"body"`) | Text style variant |
 | **align** | `Enum<'left' \| 'center' \| 'right'>` | optional (default: `"left"`) | Text alignment |
 | **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
+
+### Nested Shape: `ElementTextProps.aria`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **ariaLabel** | `string \| Record<string, string>` | optional | Accessible label for screen readers (WAI-ARIA aria-label). Plain string, or an inline locale map — no translation-bundle slot addresses this key, so a plain string is announced in the source language. |
+| **ariaDescribedBy** | `string` | optional | ID of element providing additional description (WAI-ARIA aria-describedby) |
+| **role** | `string` | optional | WAI-ARIA role attribute (e.g., "dialog", "navigation", "alert") |
 
 
 ---
@@ -275,7 +366,7 @@ const result = AIChatWindowProps.parse(data);
 | **filter** | `any` | optional | Base query filter (ObjectQL filter array/AST) — lowered to the wire `$filter`. THE key #7750 misspelled as plural |
 | **defaultFilters** | `any` | optional | Legacy base-filter fallback, read only when `filter` is absent. Prefer `filter` |
 | **sort** | `any` | optional | Initial sort (array of `{ field, order }`) |
-| **defaultSort** | `any` | optional | Legacy single-sort fallback (`{ field, order }`), read only when `sort` is absent. Prefer `sort` |
+| **defaultSort** | `never` | optional | [REMOVED] `object-grid` property `defaultSort` was removed in @objectstack/spec 17 (#11805, ADR-0049) — it was the legacy second spelling of `sort`: a single `{ field, order }` pair read only when `sort` was absent, so one intent had two spellings and a grid authoring both silently ignored this one. Rename the key to `sort` and wrap the value in an array (`defaultSort: { field, order }` becomes `sort: [{ field, order }]`); the pair itself is unchanged. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand. |
 | **pagination** | `any` | optional | Pagination config (`{ pageSize, pageSizeOptions, … }`); its presence enables paging |
 | **pageSize** | `number` | optional | Flat page-size shorthand; `pagination.pageSize` wins when both are set |
 | **showPagination** | `boolean` | optional | Show the pager (read only when `pagination` is absent) |
@@ -394,6 +485,23 @@ const result = AIChatWindowProps.parse(data);
 | **variant** | `Enum<'flush' \| 'card'>` | optional (default: `"flush"`) | Panel framing: 'flush' draws a divider under each panel; 'card' leaves the border to each panel's own content |
 | **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
 
+### Nested Shape: `PageAccordionProps.items[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **label** | `string \| Record<string, string>` | ✅ | Display label — the default-language string, or an inline locale map (`{ en, "zh-CN" }`) resolved at render time |
+| **icon** | `string` | optional | Lucide icon name rendered in the panel trigger, left of the label. Read on this component — the renderer draws it via `LazyIcon`; contrast the item `value` beside it, which the renderer overwrites with `panel-<index>`. |
+| **collapsed** | `boolean` | optional (default: `false`) |  |
+| **children** | `any[]` | ✅ | Child components |
+
+### Nested Shape: `PageAccordionProps.aria`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **ariaLabel** | `string \| Record<string, string>` | optional | Accessible label for screen readers (WAI-ARIA aria-label). Plain string, or an inline locale map — no translation-bundle slot addresses this key, so a plain string is announced in the source language. |
+| **ariaDescribedBy** | `string` | optional | ID of element providing additional description (WAI-ARIA aria-describedby) |
+| **role** | `string` | optional | WAI-ARIA role attribute (e.g., "dialog", "navigation", "alert") |
+
 
 ---
 
@@ -410,6 +518,14 @@ const result = AIChatWindowProps.parse(data);
 | **body** | `never` | optional | [REMOVED] `page:card` property `body` was removed in @objectstack/spec 17.0.0 (#5775, ADR-0087 D2) — it was a second spelling of the composition slot every other container calls `children`, and the renderer reads both. Rename the key to `children`; the value (an array of child components) is unchanged. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
 | **footer** | `any[]` | optional | Card footer components (slot) |
 | **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
+
+### Nested Shape: `PageCardProps.aria`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **ariaLabel** | `string \| Record<string, string>` | optional | Accessible label for screen readers (WAI-ARIA aria-label). Plain string, or an inline locale map — no translation-bundle slot addresses this key, so a plain string is announced in the source language. |
+| **ariaDescribedBy** | `string` | optional | ID of element providing additional description (WAI-ARIA aria-describedby) |
+| **role** | `string` | optional | WAI-ARIA role attribute (e.g., "dialog", "navigation", "alert") |
 
 
 ---
@@ -443,6 +559,14 @@ const result = AIChatWindowProps.parse(data);
 | **mobileMaxVisible** | `integer` | optional | The `maxVisible` budget on mobile viewports (renderer default 1). |
 | **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
 
+### Nested Shape: `PageHeaderProps.aria`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **ariaLabel** | `string \| Record<string, string>` | optional | Accessible label for screen readers (WAI-ARIA aria-label). Plain string, or an inline locale map — no translation-bundle slot addresses this key, so a plain string is announced in the source language. |
+| **ariaDescribedBy** | `string` | optional | ID of element providing additional description (WAI-ARIA aria-describedby) |
+| **role** | `string` | optional | WAI-ARIA role attribute (e.g., "dialog", "navigation", "alert") |
+
 
 ---
 
@@ -458,6 +582,25 @@ const result = AIChatWindowProps.parse(data);
 | **alwaysShowStrip** | `boolean` | optional | Render the tab strip even when only one tab is visible (renderer default: a one-tab strip is hidden). |
 | **items** | `{ label: string \| Record<string, string>; icon?: string; visibleWhen?: string \| object; value?: string; … }[]` | ✅ |  |
 | **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
+
+### Nested Shape: `PageTabsProps.items[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **label** | `string \| Record<string, string>` | ✅ | Display label — the default-language string, or an inline locale map (`{ en, "zh-CN" }`) resolved at render time |
+| **icon** | `string` | optional | Lucide icon name rendered in the tab trigger, left of the label. Read on this component — the renderer draws it via `LazyIcon`; contrast the item `key` beside it, which no read point takes and which the alias table answers with `value`. |
+| **visibleWhen** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL) — the whole tab (header + panel) is omitted when FALSE; the renderer falls back to the first visible tab when the active one is hidden. Contract-bound roots: `record`, `current_user` (ADR-0068 aliases `user` / `ctx.user`), `page.<var>`. ⚠️ NOT the same environment as page-component `visibleWhen`: this surface's own evaluator binds `data` to the record ROW (not the data-source adapter) and also spreads the row's bare fields — renderer behaviour, NOT contract-guaranteed. ADR-0089 canonical name — `visible`/`showWhen`/`visibility`/`visibleOn` are all rejected here (not folded in), each with a pointer at this key. |
+| **value** | `string` | optional | Stable `?tab=` URL token for this tab (default: index-derived `tab-<i>`, which is not durable across item-list changes) |
+| **count** | `integer` | optional | Badge count shown next to the tab label (default: derived from `record:related_list` descendants) |
+| **children** | `any[]` | ✅ | Child components |
+
+### Nested Shape: `PageTabsProps.aria`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **ariaLabel** | `string \| Record<string, string>` | optional | Accessible label for screen readers (WAI-ARIA aria-label). Plain string, or an inline locale map — no translation-bundle slot addresses this key, so a plain string is announced in the source language. |
+| **ariaDescribedBy** | `string` | optional | ID of element providing additional description (WAI-ARIA aria-describedby) |
+| **role** | `string` | optional | WAI-ARIA role attribute (e.g., "dialog", "navigation", "alert") |
 
 
 ---
@@ -480,6 +623,14 @@ const result = AIChatWindowProps.parse(data);
 | **enableThreading** | `boolean` | optional (default: `false`) | Enable threaded replies on comments |
 | **showSubscriptionToggle** | `boolean` | optional (default: `true`) | Show bell icon for record-level notification subscription |
 | **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
+
+### Nested Shape: `RecordActivityProps.aria`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **ariaLabel** | `string \| Record<string, string>` | optional | Accessible label for screen readers (WAI-ARIA aria-label). Plain string, or an inline locale map — no translation-bundle slot addresses this key, so a plain string is announced in the source language. |
+| **ariaDescribedBy** | `string` | optional | ID of element providing additional description (WAI-ARIA aria-describedby) |
+| **role** | `string` | optional | WAI-ARIA role attribute (e.g., "dialog", "navigation", "alert") |
 
 
 ---
@@ -512,6 +663,14 @@ const result = AIChatWindowProps.parse(data);
 | **dismissible** | `boolean` | optional | Render an X control; dismissal is remembered per object/record in localStorage (renderer default: off). |
 | **dismissKey** | `string` | optional | Stable key the dismissal is remembered under, so reworded titles do not resurrect a dismissed banner (renderer default: the English resolution of `title`, else the severity). |
 
+### Nested Shape: `RecordAlertProps.action`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **actionName** | `string` | ✅ | Name of an action declared on this object (`actions[]`) — resolved from object metadata and run through the shared action engine, so confirm/param dialogs, toast and reload behave exactly as in `record:quick_actions`. |
+| **label** | `string \| Record<string, string>` | optional | CTA button label — a string or an inline locale map, resolved with the same pickLocalized chain as `title`/`body` (default: the action's own label). |
+| **variant** | `Enum<'default' \| 'destructive' \| 'outline' \| 'secondary' \| 'ghost' \| 'link'>` | optional | Button variant — the Button primitive's own vocabulary (renderer default: `destructive` when severity is `error`, else `default`). |
+
 
 ---
 
@@ -527,6 +686,31 @@ const result = AIChatWindowProps.parse(data);
 | **defaultCollapsed** | `boolean` | optional | Whether the panel starts collapsed (renderer default: off; only meaningful with `collapsible`). |
 | **feed** | `{ types?: Enum<'comment' \| 'field_change' \| 'task' \| 'event' \| 'email' \| 'call' \| 'note' \| …>[]; filterMode: Enum<'all' \| 'comments_only' \| 'changes_only' \| 'tasks_only'>; showFilterToggle: boolean; limit: integer; … }` | optional | Embedded activity feed configuration |
 | **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
+
+### Nested Shape: `RecordChatterProps.feed`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **types** | `Enum<'comment' \| 'field_change' \| 'task' \| 'event' \| 'email' \| 'call' \| 'note' \| …>[]` | optional | Feed item types to show (default: all) |
+| **filterMode** | `Enum<'all' \| 'comments_only' \| 'changes_only' \| 'tasks_only'>` | optional (default: `"all"`) | Default activity filter |
+| **showFilterToggle** | `boolean` | optional (default: `true`) | Show filter dropdown in panel header |
+| **limit** | `integer` | optional (default: `20`) | Number of items to load per page |
+| **showCompleted** | `boolean` | optional (default: `false`) | Include completed activities |
+| **unifiedTimeline** | `boolean` | optional (default: `true`) | Mix field changes and comments in one timeline (Airtable style) |
+| **showCommentInput** | `boolean` | optional (default: `true`) | Show "Leave a comment" input at the bottom |
+| **enableMentions** | `boolean` | optional (default: `true`) | Enable @mentions in comments |
+| **enableReactions** | `boolean` | optional (default: `false`) | Enable emoji reactions on feed items |
+| **enableThreading** | `boolean` | optional (default: `false`) | Enable threaded replies on comments |
+| **showSubscriptionToggle** | `boolean` | optional (default: `true`) | Show bell icon for record-level notification subscription |
+| **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
+
+### Nested Shape: `RecordChatterProps.aria`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **ariaLabel** | `string \| Record<string, string>` | optional | Accessible label for screen readers (WAI-ARIA aria-label). Plain string, or an inline locale map — no translation-bundle slot addresses this key, so a plain string is announced in the source language. |
+| **ariaDescribedBy** | `string` | optional | ID of element providing additional description (WAI-ARIA aria-describedby) |
+| **role** | `string` | optional | WAI-ARIA role attribute (e.g., "dialog", "navigation", "alert") |
 
 
 ---
@@ -545,6 +729,29 @@ const result = AIChatWindowProps.parse(data);
 | **inlineEdit** | `boolean` | optional | Allow inline field editing in the detail body (renderer default: on, where the object itself is editable — set `false` to force it off). |
 | **showHeader** | `boolean` | optional | Render the detail body's own heading (renderer default: off). |
 | **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
+
+### Nested Shape: `RecordDetailsProps.sections[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | optional | Stable section identifier for i18n lookup (snake_case) — resolves `objects.<object>._sections.<name>.label`; a nameless section renders its authored label in every locale |
+| **label** | `string \| Record<string, string>` | optional | Section heading (omit for an untitled, borderless section) |
+| **columns** | `integer` | optional | Field-grid columns for this section (1-4). Omitted → the renderer derives the width. |
+| **fields** | `string[]` | ✅ | Field names rendered in this section, in order |
+| **hideEmpty** | `boolean` | optional | Hide this section's empty fields (renderer default: on — and a section whose fields are ALL empty then renders nothing at all: no heading, no skeleton). Set `false` to render empty rows, keeping the section's label skeleton on an all-empty record (e.g. a brand-new one). |
+| **collapsible** | `boolean` | optional | Render this section as a collapsible card — the heading becomes a chevron toggle, initially expanded (renderer default: off). |
+| **showBorder** | `boolean` | optional | Draw this section's card chrome (renderer default: derived — on for a titled section, off for an untitled one). Set `false` for a borderless titled section, or `true` for a bordered untitled one. |
+| **defaultCollapsed** | `boolean` | optional | Start a `collapsible: true` section collapsed (renderer default: expanded). Consulted only when `collapsible` is on — a non-collapsible section never reads its collapse state. |
+| **icon** | `string` | optional | Heading icon, as a lucide icon name (kebab-case, e.g. `building-2`). A value that is not an ASCII identifier (emoji, CJK text) renders as literal text beside the heading instead. Shown where the section heading renders: a titled section, or any collapsible section. |
+| **description** | `string` | optional | Sub-heading text rendered under the section heading (plain string — the renderer applies no translation to it, unlike `label`). Renders on a titled or collapsible section; a collapsible section hides it while collapsed. |
+
+### Nested Shape: `RecordDetailsProps.aria`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **ariaLabel** | `string \| Record<string, string>` | optional | Accessible label for screen readers (WAI-ARIA aria-label). Plain string, or an inline locale map — no translation-bundle slot addresses this key, so a plain string is announced in the source language. |
+| **ariaDescribedBy** | `string` | optional | ID of element providing additional description (WAI-ARIA aria-describedby) |
+| **role** | `string` | optional | WAI-ARIA role attribute (e.g., "dialog", "navigation", "alert") |
 
 
 ---
@@ -589,6 +796,23 @@ Type: `string`
 | **layout** | `Enum<'horizontal' \| 'vertical'>` | optional (default: `"horizontal"`) | Layout orientation for highlight fields |
 | **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
 
+### Nested Shape: `RecordHighlightsProps.fields[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Field name on the record |
+| **label** | `string` | optional | Display label (overrides schema label) |
+| **type** | `string` | optional | Override cell renderer type (rare) |
+| **readonly** | `boolean` | optional | Render this chip read-only — suppresses inline editing on the highlight card. Use for hook/automation-maintained columns that must not be hand-edited from the record header. |
+
+### Nested Shape: `RecordHighlightsProps.aria`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **ariaLabel** | `string \| Record<string, string>` | optional | Accessible label for screen readers (WAI-ARIA aria-label). Plain string, or an inline locale map — no translation-bundle slot addresses this key, so a plain string is announced in the source language. |
+| **ariaDescribedBy** | `string` | optional | ID of element providing additional description (WAI-ARIA aria-describedby) |
+| **role** | `string` | optional | WAI-ARIA role attribute (e.g., "dialog", "navigation", "alert") |
+
 
 ---
 
@@ -614,6 +838,22 @@ Type: `string`
 | **statusField** | `string` | ✅ | Field name representing the current status/stage |
 | **stages** | `{ value: string; label: string \| Record<string, string>; terminal?: Enum<'won' \| 'lost'> }[]` | optional | Explicit stage definitions (if not using field metadata) |
 | **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
+
+### Nested Shape: `RecordPathProps.stages[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **value** | `string` | ✅ |  |
+| **label** | `string \| Record<string, string>` | ✅ | Display label — the default-language string, or an inline locale map (`{ en, "zh-CN" }`) resolved at render time |
+| **terminal** | `Enum<'won' \| 'lost'>` | optional | Mark this stage a terminus and its kind — overrides the renderer's value/label token heuristic |
+
+### Nested Shape: `RecordPathProps.aria`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **ariaLabel** | `string \| Record<string, string>` | optional | Accessible label for screen readers (WAI-ARIA aria-label). Plain string, or an inline locale map — no translation-bundle slot addresses this key, so a plain string is announced in the source language. |
+| **ariaDescribedBy** | `string` | optional | ID of element providing additional description (WAI-ARIA aria-describedby) |
+| **role** | `string` | optional | WAI-ARIA role attribute (e.g., "dialog", "navigation", "alert") |
 
 
 ---
@@ -644,6 +884,16 @@ Type: `string`
 | **entries** | `{ objectName: string; relationshipField: string; title?: string; limit?: integer; … }[]` | ✅ | Related collections to summarize — one compact card per entry (icon-less title, total-count badge, top-N preview rows). An empty rail renders nothing, so at least one entry is required. |
 | **hideEmpty** | `boolean` | optional | Fold entries whose related count is 0 into a single "+ N empty" expander chip (renderer default: on; set `false` to always render every card). |
 
+### Nested Shape: `RecordReferenceRailProps.entries[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **objectName** | `string` | ✅ | Related object name whose records this card summarizes (e.g. "task", "opportunity_quote") |
+| **relationshipField** | `string` | ✅ | Field on the related object that points back to this record (e.g. "account_id") |
+| **title** | `string` | optional | Literal card title. Rendered as-is in EVERY locale (no inline locale map — the rail renders it as a raw React child); omit to use the related object's localized label. |
+| **limit** | `integer` | optional | Preview rows per card, and the `$top` of the one query this entry issues (renderer default: 3). |
+| **displayField** | `string` | optional | Field of the related record rendered in each preview row (renderer fallback when omitted: name / title / subject / label / … / id). |
+
 
 ---
 
@@ -665,6 +915,32 @@ Type: `string`
 | **actions** | `string[]` | optional | Action IDs available for related records |
 | **add** | `{ picker: object; linkField?: string; label?: string \| Record<string, string> }` | optional | Add-existing-via-picker config (generic m2m/junction assignment). |
 | **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
+
+### Nested Shape: `RecordRelatedListProps.filter[number]`
+
+View filter rule
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **field** | `string` | ✅ | Field name to filter on |
+| **operator** | `Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>` | ✅ | Filter operator |
+| **value** | `string \| number \| boolean \| null \| (string \| number)[]` | optional | Filter value. The accepted SHAPE depends on the operator: `in` / `not_in` take an array (any length, including []), `between` takes exactly [min, max], every other operator takes a scalar. The unary operators (is_empty / is_not_empty / is_null / is_not_null) take their direction from the operator name and ignore this key. |
+
+### Nested Shape: `RecordRelatedListProps.add`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **picker** | `{ object: string; valueField: string; labelField?: string; filter?: object[] }` | ✅ | Where the Add affordance sources records from. |
+| **linkField** | `string` | optional | Field on `objectName` that stores the picked record id (junction case). Omit for a 1:m re-parent. |
+| **label** | `string \| Record<string, string>` | optional | Label for the Add button (default "Add"). |
+
+### Nested Shape: `RecordRelatedListProps.aria`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **ariaLabel** | `string \| Record<string, string>` | optional | Accessible label for screen readers (WAI-ARIA aria-label). Plain string, or an inline locale map — no translation-bundle slot addresses this key, so a plain string is announced in the source language. |
+| **ariaDescribedBy** | `string` | optional | ID of element providing additional description (WAI-ARIA aria-describedby) |
+| **role** | `string` | optional | WAI-ARIA role attribute (e.g., "dialog", "navigation", "alert") |
 
 
 ---

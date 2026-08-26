@@ -138,6 +138,13 @@ const result = DecisionConditionSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **conditions** | `{ label: string; expression: string }[]` | optional | Ordered decision branches (first true expression wins; omit to branch purely on edge conditions) |
 
+### Nested Shape: `DecisionConfig.conditions[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **label** | `string` | ✅ | Branch label; the winning branch resumes down the out-edge with this label (no match → the out-edge marked isDefault, or one labelled 'default') |
+| **expression** | `string` | ✅ | Bare CEL predicate deciding this branch |
+
 
 ---
 

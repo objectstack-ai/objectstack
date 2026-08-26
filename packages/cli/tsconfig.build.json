@@ -25,5 +25,29 @@
   // `packages/cli/.objectstack` residue survived a fix to the source: the run
   // was still executing the pre-fix compiled duplicate. It also means a source
   // test could be edited to pass while its stale twin asserted the old thing.
-  "exclude": ["src/**/*.test.ts", "src/**/*.spec.ts", "src/**/__tests__/**"]
+  //
+  // `console-route-ledger.ts` joins them for the same reason one step over
+  // (#11882). It is a REVIEW RECORD, not runtime code: the audited disposition
+  // of every route this package mounts on the host Hono app, read only by
+  // `console-route-ledger.conformance.test.ts` — which is itself already
+  // excluded by the test globs above. Nothing in the shipped CLI imports it, so
+  // without this line `tsc` emitted ~10KB of permanently dead module into the
+  // published tarball. This package compiles its whole `include` program rather
+  // than an entry graph, which is why its two sibling ledgers
+  // (`cloud-connection`, `metadata`) needed no such line: `tsup` bundles from
+  // `src/index.ts` and never reached them. The exclusion makes this package's
+  // END STATE match theirs.
+  //
+  // Safe against a future import, and that is a measured property rather than a
+  // hope: `exclude` filters the `include` glob, it does NOT remove a file that
+  // an included file imports — TypeScript still pulls such a file in through
+  // the module graph and emits it. So if shipped code ever imports this ledger,
+  // it comes back into the build automatically; this line can under-exclude,
+  // never dangle.
+  "exclude": [
+    "src/**/*.test.ts",
+    "src/**/*.spec.ts",
+    "src/**/__tests__/**",
+    "src/utils/console-route-ledger.ts"
+  ]
 }

@@ -160,6 +160,63 @@ Unified security context governance configuration
 | **enforceOnRead** | `boolean` | optional (default: `true`) | Enforce masking and audit requirements on data read operations |
 | **failOpen** | `boolean` | optional (default: `false`) | When false (default), deny access if security context cannot be evaluated |
 
+### Nested Shape: `SecurityContextConfig.complianceAuditRequirements[number]`
+
+Compliance framework audit event requirements
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **framework** | `Enum<'gdpr' \| 'hipaa' \| 'sox' \| 'pci_dss' \| 'ccpa' \| 'iso27001'>` | ✅ | Compliance framework identifier |
+| **requiredEvents** | `string[]` | ✅ | Audit event types required by this framework (e.g., "data.delete", "auth.login") |
+| **retentionDays** | `number` | ✅ | Minimum audit log retention period required by this framework (in days) |
+| **alertOnMissing** | `boolean` | optional (default: `true`) | Raise alert if a required audit event is not being captured |
+
+### Nested Shape: `SecurityContextConfig.complianceEncryptionRequirements[number]`
+
+Compliance framework encryption requirements
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **framework** | `Enum<'gdpr' \| 'hipaa' \| 'sox' \| 'pci_dss' \| 'ccpa' \| 'iso27001'>` | ✅ | Compliance framework identifier |
+| **dataClassifications** | `Enum<'pii' \| 'phi' \| 'pci' \| 'financial' \| 'confidential' \| 'internal' \| 'public'>[]` | ✅ | Data classifications that must be encrypted under this framework |
+| **minimumAlgorithm** | `Enum<'aes-256-gcm' \| 'aes-256-cbc' \| 'chacha20-poly1305'>` | optional (default: `"aes-256-gcm"`) | Minimum encryption algorithm strength required |
+| **keyRotationMaxDays** | `number` | optional (default: `90`) | Maximum key rotation interval required (in days) |
+
+### Nested Shape: `SecurityContextConfig.maskingVisibility[number]`
+
+Masking visibility and audit rule per data classification
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **dataClassification** | `Enum<'pii' \| 'phi' \| 'pci' \| 'financial' \| 'confidential' \| 'internal' \| 'public'>` | ✅ | Data classification this rule applies to |
+| **defaultMasked** | `boolean` | optional (default: `true`) | Whether data is masked by default |
+| **unmaskRoles** | `string[]` | optional | Roles allowed to view unmasked data |
+| **auditUnmask** | `boolean` | optional (default: `true`) | Log an audit event when data is unmasked |
+| **requireApproval** | `boolean` | optional (default: `false`) | Require explicit approval before unmasking |
+| **approvalRoles** | `string[]` | optional | Roles that can approve unmasking requests |
+
+### Nested Shape: `SecurityContextConfig.dataClassifications[number]`
+
+Security policy for a specific data classification level
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **classification** | `Enum<'pii' \| 'phi' \| 'pci' \| 'financial' \| 'confidential' \| 'internal' \| 'public'>` | ✅ | Data classification level |
+| **requireEncryption** | `boolean` | optional (default: `false`) | Encryption required for this classification |
+| **requireMasking** | `boolean` | optional (default: `false`) | Masking required for this classification |
+| **requireAudit** | `boolean` | optional (default: `false`) | Audit trail required for access to this classification |
+| **retentionDays** | `number` | optional | Data retention limit in days (for compliance) |
+
+### Nested Shape: `SecurityContextConfig.eventCorrelation`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **enabled** | `boolean` | optional (default: `true`) | Enable cross-subsystem security event correlation |
+| **correlationId** | `boolean` | optional (default: `true`) | Inject a shared correlation ID into audit, encryption, and masking events |
+| **linkAuthToAudit** | `boolean` | optional (default: `true`) | Link authentication events to subsequent data operation audit trails |
+| **linkEncryptionToAudit** | `boolean` | optional (default: `true`) | Log encryption/decryption operations in the audit trail |
+| **linkMaskingToAudit** | `boolean` | optional (default: `true`) | Log masking/unmasking operations in the audit trail |
+
 
 ---
 

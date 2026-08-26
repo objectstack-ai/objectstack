@@ -284,13 +284,18 @@ describe('[#5352 → #5367] the message-sniffing fallback is GONE', () => {
   // So the same input is asserted the other way round — and the bare form, which
   // is what the list used to rescue, is asserted too. Between them they pin that
   // no message test survives anywhere in this catch.
-  it('read-scope-sql: the DECLARED 500 → 500 ANALYTICS_QUERY_FAILED, policy content withheld', async () => {
+  it('read-scope-sql: the DECLARED 500 → 500 READ_SCOPE_COMPILE_FAILED, policy content withheld', async () => {
     const message = '[read-scope-sql] unsupported operator "$regex" on "owner_email" (fail-closed).';
     const err = Object.assign(new Error(message), { code: 'READ_SCOPE_COMPILE_FAILED', status: 500 });
     const route = buildRoute(async () => ({ queryDataset: vi.fn().mockRejectedValue(err) }));
     const res = await post(route, { dataset, selection });
     expect(res.statusCode).toBe(500);
-    expect(res.body.code).toBe('ANALYTICS_QUERY_FAILED');
+    // [#11718] The declared code is RELAYED now, not overwritten — see this
+    // file's sibling `analytics-read-scope-refusal-envelope.test.ts` header.
+    // The status this test is really about is untouched: still 500, still not
+    // the sniffed 400 the deleted message list used to produce.
+    expect(res.body.code).toBe('READ_SCOPE_COMPILE_FAILED');
+    expect(res.body.code).not.toBe('DATASET_INVALID');
     // The disclosure half: an RLS policy's field name must not come back.
     expect(String(res.body.error)).not.toMatch(/owner_email/);
     expect(String(res.body.error)).not.toMatch(/read-scope-sql/);
@@ -380,19 +385,56 @@ describe('[#5352] reading the envelope did not turn every failure into a 400', (
     expect(res.body.code).toBe('ANALYTICS_QUERY_FAILED');
   });
 
-  it('a 5xx-status error is NOT passed through — an internal fault keeps the 500 envelope, message withheld', async () => {
-    // Deliberate asymmetry: the passthrough is 4xx-only, so a producer cannot
-    // re-label a server fault with a code of its own and slip past the
-    // `logError` line that makes it visible to operators.
+  it('[#11718 — INVERTED] a declared 5xx IS relayed, and is still logged and still withheld', async () => {
+    // ── This pin asserted the collapse. It is inverted, not deleted ─────────
+    //
+    // What it asserted, verbatim: "a 5xx-status error is NOT passed through —
+    // an internal fault keeps the 500 envelope, message withheld", reasoned as
+    // "the passthrough is 4xx-only, so a producer cannot re-label a server
+    // fault with a code of its own and slip past the `logError` line that makes
+    // it visible to operators."
+    //
+    // That REASON is answered rather than overruled, and answering it is what
+    // made the repair safe: `logError` runs BEFORE the relay branch and is
+    // unconditional, so every declared 5xx is still on the operator's line with
+    // its full original text. Asserted here, not assumed — the argument for the
+    // old behaviour is only retired if its concern is actually covered.
+    //
+    // What was NOT answerable was the collapse itself. `/data` relays a declared
+    // 5xx's status and code (#5582: `502`/`503` are `isExpectedDataStatus`
+    // lifecycle outcomes proxies and retry policies read differently from a
+    // `500`), and so does the sibling `/analytics/query`. Measured door-to-door
+    // in `rest-hook-refusal-message-parity.test.ts` §8f.
     const err = Object.assign(new Error('upstream analytics warehouse is unavailable'), {
       code: 'WAREHOUSE_UNAVAILABLE',
       status: 503,
     });
     const route = buildRoute(async () => ({ queryDataset: vi.fn().mockRejectedValue(err) }));
-    const res = await post(route, { dataset, selection });
+    const logSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    let res: any;
+    let logged: string;
+    try {
+      res = await post(route, { dataset, selection });
+      // Read the calls BEFORE restoring: `mockRestore` resets the recorded
+      // calls as well as the implementation, so reading after it reports an
+      // empty log for a route that logged perfectly well.
+      logged = logSpy.mock.calls.map((args) => args.map(String).join(' ')).join('\n');
+    } finally {
+      logSpy.mockRestore();
+    }
 
-    expect(res.statusCode).toBe(500);
-    expect(res.body.code).toBe('ANALYTICS_QUERY_FAILED');
+    expect(res.statusCode).toBe(503);
+    expect(res.statusCode).not.toBe(500);
+    // [#9232] `WAREHOUSE_UNAVAILABLE` is not an ADR-0112 member, so it is
+    // DEMOTED to `declaredCode` beside the code the status derives — the same
+    // answer `/data` gives it, which is the whole point of importing that arm
+    // instead of hand-building a second envelope here.
+    expect(res.body.code).toBe('SERVICE_UNAVAILABLE');
+    expect(res.body.declaredCode).toBe('WAREHOUSE_UNAVAILABLE');
+    expect(res.body.code).not.toBe('ANALYTICS_QUERY_FAILED');
+    // The operator still has the whole thing — the concern the old pin named.
+    expect(logged).toContain('Analytics dataset query error');
+    expect(logged).toContain('upstream analytics warehouse is unavailable');
     // [#5367] Second half of the asymmetry, added with the read-scope ruling: a
     // producer that DECLARES a server fault has declared that the detail is the
     // operator's, so the message is withheld here and kept in `logError`. This

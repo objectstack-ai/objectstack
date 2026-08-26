@@ -1,8 +1,18 @@
+import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import { blog } from '@/lib/source';
 import { getMDXComponents } from '@/mdx-components';
 import { HomeLayout } from 'fumadocs-ui/layouts/home';
 import { baseOptions } from '@/lib/layout.shared';
+import { absoluteUrl, HERO_COVER } from '@/lib/site';
+import {
+  compact,
+  JsonLd,
+  type JsonLdNode,
+  ORGANIZATION,
+  ORGANIZATION_REF,
+  sitemapLastModified,
+} from '@/lib/structured-data';
 import Link from 'next/link';
 import { ArrowLeft } from 'lucide-react';
 
@@ -17,6 +27,66 @@ interface BlogPostData {
 }
 
 const components = getMDXComponents() as any;
+
+/**
+ * `frontmatter.date` as an ISO 8601 instant, or `undefined`.
+ *
+ * The field is declared `z.coerce.string()` in `source.config.ts`, so its type
+ * says nothing about its shape. Measured against the rendered page rather than
+ * assumed: what arrives is the plain `2026-07-17` written in the MDX — the same
+ * string this route already puts in `<time dateTime={...}>` — which `new Date()`
+ * reads as UTC midnight, giving a value that does not move with the build host's
+ * timezone.
+ *
+ * The guard is still not decoration: `z.coerce.string()` accepts *any* string, so
+ * a post written with `date: last Tuesday` would type-check and reach here. An
+ * unparseable date yields no `datePublished` at all rather than a string
+ * schema.org cannot read.
+ */
+function isoDate(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? undefined : parsed.toISOString();
+}
+
+/**
+ * `BlogPosting` for one post, built from the same `page` object
+ * `generateMetadata()` reads — same title, same description, same canonical URL,
+ * same shared card as the Open Graph image.
+ *
+ * `dateModified` comes from `app/sitemap.ts`'s own output, so a post's date in the
+ * JSON-LD and its `<lastmod>` in `/sitemap.xml` are the same value by construction
+ * rather than by two derivations agreeing.
+ *
+ * ⚠️ `author` is emitted as an `Organization`. The frontmatter field is a bare
+ * string with nothing distinguishing a person from a team, and every value in
+ * `content/blog` today is `ObjectStack Team` — a team. Guessing `Person` would be
+ * wrong for all three current posts; a field that can say which is a content-schema
+ * change, not a JSON-LD one.
+ */
+function postGraph(url: string, data: BlogPostData): JsonLdNode[] {
+  const canonical = absoluteUrl(url);
+
+  return [
+    ORGANIZATION,
+    compact({
+      '@type': 'BlogPosting',
+      '@id': `${canonical}#article`,
+      headline: data.title,
+      name: data.title,
+      description: data.description,
+      url: canonical,
+      mainEntityOfPage: canonical,
+      inLanguage: 'en',
+      image: absoluteUrl(HERO_COVER.url),
+      datePublished: isoDate(data.date),
+      dateModified: sitemapLastModified(url),
+      keywords: data.tags,
+      author: data.author ? { '@type': 'Organization', name: data.author } : ORGANIZATION_REF,
+      publisher: ORGANIZATION_REF,
+    }),
+  ];
+}
 
 export default async function BlogPage({
   params,
@@ -120,7 +190,8 @@ export default async function BlogPage({
   return (
     <HomeLayout {...baseOptions()}>
       <main className="container max-w-4xl mx-auto px-4 py-16">
-        <Link 
+        <JsonLd graph={postGraph(page.url, pageData)} />
+        <Link
           href="/blog"
           className="inline-flex items-center gap-2 text-sm text-fd-foreground/70 hover:text-fd-foreground mb-8 transition-colors"
         >
@@ -180,29 +251,82 @@ export async function generateStaticParams() {
   }));
 }
 
+const BLOG_INDEX_TITLE = 'Blog';
+const BLOG_INDEX_DESCRIPTION =
+  'Insights, updates, and best practices from the ObjectStack team.';
+
+/**
+ * Metadata for the blog index and for every post.
+ *
+ * The social card in both branches is the shared hero cover, `HERO_COVER` from
+ * `lib/site.ts` — the same image the homepage presents itself with, and the same
+ * one `postGraph()` above puts in the `BlogPosting` node. It used to be a literal
+ * spelled here and again on the homepage; one declaration now, so a re-encode
+ * cannot leave half the site pointing at a file that no longer exists.
+ *
+ * ⚠️ The card generator at `app/og/docs/[...slug]/route.tsx` is docs-only: it
+ * renders from `source` (the `content/docs` loader) and has no branch for `blog`,
+ * so there is no per-post card to reference and this card is shared by the index
+ * and every post. Giving posts their own generated cards is a separate decision,
+ * not a gap in this wiring — it would mean a second `app/og/**` route.
+ */
 export async function generateMetadata({
   params,
 }: {
   params: Promise<{ slug?: string[] }>;
-}) {
+}): Promise<Metadata> {
   const { slug } = await params;
-  
+
   // If no slug, return default metadata for blog index
   if (!slug || slug.length === 0) {
+    // The index has no MDX file behind it, so its route is spelled out here — the
+    // same literal `app/sitemap.ts` lists it under.
+    const canonical = absoluteUrl('/blog');
+
     return {
-      title: 'Blog',
-      description: 'Insights, updates, and best practices from the ObjectStack team.',
+      title: BLOG_INDEX_TITLE,
+      description: BLOG_INDEX_DESCRIPTION,
+      alternates: { canonical },
+      openGraph: {
+        type: 'website',
+        title: BLOG_INDEX_TITLE,
+        description: BLOG_INDEX_DESCRIPTION,
+        url: canonical,
+        images: [HERO_COVER],
+      },
+      twitter: {
+        card: 'summary_large_image',
+        title: BLOG_INDEX_TITLE,
+        description: BLOG_INDEX_DESCRIPTION,
+        images: [HERO_COVER.url],
+      },
     };
   }
-  
+
   const page = blog.getPage(slug);
 
   if (!page) {
     notFound();
   }
 
+  const canonical = absoluteUrl(page.url);
+
   return {
     title: page.data.title,
     description: page.data.description,
+    alternates: { canonical },
+    openGraph: {
+      type: 'article',
+      title: page.data.title,
+      description: page.data.description,
+      url: canonical,
+      images: [HERO_COVER],
+    },
+    twitter: {
+      card: 'summary_large_image',
+      title: page.data.title,
+      description: page.data.description,
+      images: [HERO_COVER.url],
+    },
   };
 }

@@ -192,15 +192,33 @@ describe('#8848 — an unsupported verb on /metadata/:type/:name', () => {
             expect(JSON.stringify(res.response?.body)).not.toContain('fields');
         });
 
-        it('the compound-name form too — a name in two segments is the same address', async () => {
+        it('[#12195] the ENCODED spelling too — a slash-bearing name is one address', async () => {
             const stack = boot();
 
+            // This drove `/meta/lead/views/all_leads`, the compound arity. It
+            // is retired (#12176 stage 3), so the same name is addressed
+            // percent-encoded — two segments, same verb dispatch.
             const res = await stack.dispatcher.dispatch(
-                'DELETE', '/meta/lead/views/all_leads', undefined, {}, SESSION(),
+                'DELETE', '/meta/lead/views%2Fall_leads', undefined, {}, SESSION(),
             );
 
             expect(res.response?.status).toBe(405);
             expect(res.response?.body?.error?.code).toBe('METHOD_NOT_ALLOWED');
+            expect(stack.getMetaItem).not.toHaveBeenCalled();
+        });
+
+        it('[#12195] and the retired compound spelling answers ROUTE_NOT_FOUND, not 405', async () => {
+            const stack = boot();
+
+            // The two refusals are different facts and must stay
+            // distinguishable: 405 says "this address exists, that verb does
+            // not"; 404 ROUTE_NOT_FOUND says "there is no such address".
+            const res = await stack.dispatcher.dispatch(
+                'DELETE', '/meta/lead/views/all_leads', undefined, {}, SESSION(),
+            );
+
+            expect(res.response?.status).toBe(404);
+            expect(res.response?.body?.error?.code).toBe('ROUTE_NOT_FOUND');
             expect(stack.getMetaItem).not.toHaveBeenCalled();
         });
 

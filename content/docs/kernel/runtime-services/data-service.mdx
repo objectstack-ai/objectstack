@@ -3,8 +3,6 @@ title: services.data
 description: CRUD runtime helper API for records (`query`, `get`, `find`, `create`, `update`, `delete`).
 ---
 
-# `services.data`
-
 - **Stability:** `stable`
 - **Canonical source:** `packages/client/src/index.ts` — the `ObjectStackClient.data`
   surface (see [Canonical source](#canonical-source) for why this page names the SDK
@@ -148,6 +146,7 @@ Call these methods from code that **holds** the binding — a managed runtime ha
 a hook body: a hook has no `services` key to reach through (see above), and reads other
 objects via `ctx.api`.
 
+{/* os:check */}
 ```ts
 import type { ObjectStackClient } from '@objectstack/client';
 
@@ -181,11 +180,17 @@ export async function recentOrdersForContact(data: DataService, contactId: strin
 }
 ```
 
-The block carries no `{/* os:check */}` marker, and that is a measurement rather than an
-omission: `check:skill-examples` compiles marked blocks against the built
-`@objectstack/spec` declarations only — its `paths` map is derived from that package's own
-`exports`, and `@objectstack/spec` does not depend on `@objectstack/client`. A marked
-block here would therefore have to hand-declare `DataService` instead of importing it,
-which pins the example to itself and nothing else. The marker becomes worth adding the day
-this surface has a spec-side contract to import (see the
-[Canonical source](#canonical-source) note).
+The block carries an `{/* os:check */}` marker, so `check:skill-examples` compiles it
+against the real `@objectstack/client` declarations on every CI run: if `data.get` /
+`data.find` / `data.query` change shape, this example reds rather than rotting. It used to
+carry no marker, and that was a measurement rather than an omission — marked blocks under
+`content/docs/**` were compiled against `@objectstack/spec` alone, which does not depend
+on `@objectstack/client`, so importing `ObjectStackClient` here red with TS2307 and
+hand-declaring `DataService` instead would have pinned the example to itself and nothing
+else. This page is now carved out by name to the client-SDK surface (`SDK_DOCS_PAGES` in
+`packages/spec/scripts/check-skill-examples.ts`), which resolves the SDK; renaming or
+moving the page without updating that list fails the gate rather than silently dropping
+the check.
+
+The signature listing under [Methods](#methods) stays unmarked: it is a listing of method
+shapes, not a compilable statement, and it cannot parse at all.

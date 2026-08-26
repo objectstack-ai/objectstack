@@ -56,6 +56,37 @@ const result = MetadataFallbackStrategySchema.parse(data);
 | **loaderOptions** | `Record<string, any>` | optional | Loader-specific configuration |
 | **persistence** | `{ writable: boolean; overlayWritable: boolean }` | optional | Persistence write gates |
 
+### Nested Shape: `MetadataManagerConfig.cache`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **enabled** | `boolean` | optional (default: `true`) | Enable caching |
+| **ttl** | `integer` | optional (default: `3600`) | Cache TTL in seconds |
+| **maxSize** | `integer` | optional | Max cache size in bytes |
+| **databaseLoader** | `{ enabled: boolean; maxSize: integer; ttl: integer }` | optional | DatabaseLoader read-through cache |
+
+### Nested Shape: `MetadataManagerConfig.watchOptions`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **ignored** | `string[]` | optional | Patterns to ignore |
+| **persistent** | `boolean` | optional (default: `true`) | Keep process running |
+| **ignoreInitial** | `boolean` | optional (default: `true`) | Ignore initial add events |
+
+### Nested Shape: `MetadataManagerConfig.validation`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **strict** | `boolean` | optional (default: `true`) | Strict validation |
+| **throwOnError** | `boolean` | optional (default: `true`) | Throw on validation error |
+
+### Nested Shape: `MetadataManagerConfig.persistence`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **writable** | `boolean` | optional (default: `true`) | Allow base metadata writes via register() |
+| **overlayWritable** | `boolean` | optional (default: `true`) | Allow overlay writes via saveOverlay() |
+
 
 ---
 

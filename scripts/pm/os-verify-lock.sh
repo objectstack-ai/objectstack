@@ -125,6 +125,81 @@
 # exactly what they were.
 #
 # ---------------------------------------------------------------------------
+# WHAT `command-exit` CERTIFIES, AND WHY A BATCH GETS A DIFFERENT WORD
+#
+# Measured 2026-08-25 (#12288), against this wrapper, in this container:
+#
+#     os-verify-lock.sh -c 'echo one; sh -c "exit 1"; echo three'
+#     → VERDICT command-exit 0
+#
+# A failure in the MIDDLE of that batch is announced as a pass. Nothing is red
+# anywhere: the lock was held, the command ran, the verdict says 0. And
+# `VERDICT command-exit N` is the exact line every dispatch brief tells a dev to
+# quote as proof a suite passed -- so this instrument failed in the GREEN
+# direction, on the one line a reviewer is instructed to trust. Same family as
+# the restore-leg hazards (#11539, #11648, #12204): an instrument that reports
+# success while measuring the wrong thing.
+#
+# The mechanism is not a defect in the acquisition path. `-c '<string>'` runs
+# the string in a shell, and a shell's exit status is its LAST command's. The
+# wrapper reported the wrapped command's own exit code, exactly as the contract
+# at the top of this file says it does. What was wrong was the WORD:
+# `command-exit` reads as a verdict on everything the caller passed, and for a
+# `;`-sequenced string it is a verdict on the tail of it.
+#
+# The card offered three remedies. The two NOT taken are recorded here because
+# both look better than they are:
+#
+#   AGGREGATE THE PER-COMMAND EXITS AND REPORT THE WORST -- rejected twice over.
+#   This wrapper never sees per-command exits: it is handed ONE opaque string
+#   and hands it to a shell, so aggregating means parsing shell, and a partial
+#   shell parser that got `;` inside quotes or a `case` arm wrong would itself
+#   be an instrument answering confidently and wrongly -- this card's own
+#   defect, shipped by the fix for it. And "worst" is undefined: exit codes are
+#   not ordered by severity (is 2 worse than 1? is 143 -- SIGTERM -- worse than
+#   either?), and 99 here is not a failure at all but NOT MEASURED. A max() over
+#   that set is a number with no meaning.
+#
+#   MAKE THE STRING'S EXIT MEAN "ALL OF IT PASSED" -- inject `set -e`, or an ERR
+#   trap, into the caller's string. Rejected: it changes what the caller's
+#   command DOES (`set -e` truncates the batch at the first failure, so the rest
+#   of a deliberate sequence never runs), and `set -e`'s own footguns -- an
+#   arithmetic expression evaluating to 0, an assignment from a failing
+#   substitution -- would turn correct green runs RED. An ERR trap avoids the
+#   truncation but not the holes: a failure inside a pipeline's non-final
+#   element never fires it, so it would certify the `pnpm test | tee log` case
+#   while missing exactly the failure it claimed to catch. This wrapper does not
+#   change the meaning of the command it is given.
+#
+# REFUSING THE BATCH OUTRIGHT (the card's remedy 3) was the closer call, and the
+# reason against it is precedent in this file rather than taste. Where this
+# wrapper cannot deliver its full guarantee, the maintainer's 2026-08-22 ruling
+# on declared unlocked mode chose a LOUD DECLARED DEGRADATION over a refusal
+# that leaves the agent with no route -- and the filter preflight below refuses
+# only what is CERTAINLY worthless (a command that will measure nothing at all),
+# fail-open in every other direction. A batch is not worthless: it runs real
+# verification, and only the one-line summary is uncertifiable. A blanket
+# refusal would also block correct work -- `-c 'export CI=1; pnpm --filter x
+# test'` is sequenced and perfectly answerable -- and this file's doctrine is
+# that a wrong refusal is worse than a miss.
+#
+# So: the run is unchanged, the exit code is unchanged, and the WORD changes.
+# A string whose exit status can only be 0 if every part of it exited 0 keeps
+# `command-exit`. Anything else prints `batch-last-exit`, which says on its own
+# line that it is the last part's exit and not a verdict on the whole, and names
+# the repair (`&&`). Neither line can be misquoted as the other -- which is what
+# makes the `--self-test` pin possible at all: a mid-batch failure must never
+# print `command-exit 0`.
+#
+# WHAT IS CERTIFIED, STATED NARROWLY SO IT CANNOT BE OVER-READ. `command-exit`
+# means: the string is one command, or a chain joined only by `&&`, so bash's
+# documented short-circuit semantics make a 0 impossible unless every element of
+# that chain exited 0. It does NOT mean no failure can hide anywhere. An element
+# that is itself a shell (`bash -c 'a; b'`), a subshell `(a; b)`, or a pipeline
+# inside an element still reports only its own last status, and this wrapper
+# cannot see inside it. That limit is declared here rather than papered over:
+# the whole defect being repaired was a line that claimed more than it measured.
+# ---------------------------------------------------------------------------
 # THE BASH 3.2 FLOOR, AND WHY A MISSING BUILTIN IS THE WORST FAILURE HERE
 #
 # `/usr/bin/env bash` is bash 3.2.57 on macOS. A bash 4+/5+ construct in this
@@ -193,12 +268,36 @@ FLOCK_BIN="${OS_VERIFY_LOCK_FLOCK:-flock}"
 
 QUEUE_DIR="${LOCK_FILE}.q"
 HOLDER_FILE="${LOCK_FILE}.holder"
+# `OS_VERIFY_LOCK_LEDGER` exists for the same reason `OS_VERIFY_LOCK_FILE` does:
+# so --self-test can exercise the recording without writing fixtures into the
+# fleet's real measurement record. Pointing real verification at a private
+# ledger just makes its runs invisible to `--report`; don't.
+LEDGER_FILE="${OS_VERIFY_LOCK_LEDGER:-${LOCK_FILE}.ledger}"
 readonly TICKET_MAX_AGE_S=$((HARD_CAP_S + 300))
+
+# How long a PARKED slot keeps the arrival stamp it is holding a place with.
+# Three budgets: long enough that an agent doing lock-free work between
+# attempts still finds its place, short enough that the priority a slot carries
+# over later arrivals is bounded and declared rather than indefinite.
+readonly SLOT_MAX_AGE_S=$((HARD_CAP_S * 3))
+
+# Past this the ledger stops growing. A record is ~150 bytes, so this is tens
+# of thousands of runs; `--report` says so rather than silently reporting on a
+# truncated population.
+readonly LEDGER_MAX_BYTES=8388608
 
 SELF="${BASH_SOURCE[0]}"
 TICKET=""
 HOLDING=0
 BUDGET_NOTE=""
+SLOT_SLUG=""
+ARRIVAL_DEPTH=-1
+LEDGER_WRITTEN=0
+LABEL_FOR_LEDGER="?"
+# Which word this run's verdict may use. Decided once, from the command
+# string, before anything runs -- see the certification block at the top.
+VERDICT_WORD="command-exit"
+CERTIFIABLE_NOTE=""
 
 log() { printf 'os-verify-lock: %s\n' "$*" >&2; }
 
@@ -348,36 +447,168 @@ queue_usable() {
 }
 
 # ticket file: "<pid> <starttime> <arrival-epoch> <label>"
-ticket_alive() {
-  local file="$1" pid start stamp now
-  read -r pid start stamp _ < "$file" 2> /dev/null || return 1
-  case "$pid$start$stamp" in '' | *[!0-9]*) return 1 ;; esac
-  pid_alive "$pid" || return 1
-  [[ "$(proc_starttime "$pid" 2> /dev/null || echo x)" == "$start" ]] || return 1
-  now="$(now_s)" || return 1
-  ((now - stamp <= TICKET_MAX_AGE_S)) || return 1
-  return 0
+#
+# A PARKED slot writes pid 0 and starttime 0 -- there is no process behind it,
+# which is the whole point -- so pid 0 is what tells the two kinds apart. It is
+# not a value a real ticket can carry: no waiter here runs as pid 0.
+#
+# Three states, not two, and the third is why this is a classifier rather than
+# the predicate it replaced. `dead` is removed from disk, `active` is queued,
+# and `parked` is RETAINED but not queued: retained because its arrival stamp
+# is the place it is keeping, not queued because nobody is waiting behind it.
+# Collapsing parked into either of the others loses one of those two halves --
+# into `dead` and the place is gone, into `active` and a caller that walked
+# away blocks the head.
+ticket_state() {
+  local file="$1" pid start stamp now age
+  read -r pid start stamp _ < "$file" 2> /dev/null || {
+    printf 'dead'
+    return 0
+  }
+  case "$pid$start$stamp" in
+    '' | *[!0-9]*)
+      printf 'dead'
+      return 0
+      ;;
+  esac
+  now="$(now_s)" || {
+    # No clock: say nothing is dead rather than pruning the whole queue on a
+    # reading we could not take. Over-retention costs a slower scan; the
+    # opposite would delete every waiter's place, our own included.
+    printf 'parked'
+    return 0
+  }
+  age=$((now - stamp))
+  if [[ "$pid" == 0 ]]; then
+    ((age <= SLOT_MAX_AGE_S)) && {
+      printf 'parked'
+      return 0
+    }
+    printf 'dead'
+    return 0
+  fi
+  if ! pid_alive "$pid" || [[ "$(proc_starttime "$pid" 2> /dev/null || echo x)" != "$start" ]]; then
+    # The process behind this ticket is gone. For an ORDINARY ticket that is
+    # the end of it -- prune. For a SLOT it is a DEMOTION to parked, and this
+    # is the case that matters most in practice rather than an edge one.
+    #
+    # Parking is written by the EXIT trap, and a trap is exactly what the real
+    # killer here does not run. Measured while building this: a foreground
+    # agent turn holding a queued call was killed at its ~10-minute ceiling,
+    # the wait was ~210s in, and the ticket was reaped as an ordinary dead one
+    # -- so the call that most needed its place kept was the one that lost it.
+    # SIGTERM leaves through the trap; SIGKILL, and a harness that kills the
+    # process group, do not. A mechanism that only survives the polite exit
+    # would advertise a guarantee it does not have.
+    #
+    # A slot whose owner died IS a place whose owner walked away, which is
+    # already exactly what parked means -- so the state is READ from the file's
+    # identity rather than requiring the dying process to have written it. It
+    # costs nothing and wedges nothing: parked blocks nobody, and the ageing
+    # bound below is the same one every other parked place is held to.
+    case "${file##*/}" in
+      *-s?*)
+        ((age <= SLOT_MAX_AGE_S)) && {
+          printf 'parked'
+          return 0
+        }
+        ;;
+    esac
+    printf 'dead'
+    return 0
+  fi
+  ((age <= TICKET_MAX_AGE_S)) || {
+    printf 'dead'
+    return 0
+  }
+  printf 'active'
 }
 
-# Live tickets, FIFO order, pruning the dead ones on the way past.
+# Kept for the self-test's liveness cases and for any caller that only wants
+# the yes/no: a ticket is "alive" when a process is really waiting behind it.
+ticket_alive() {
+  [[ "$(ticket_state "$1")" == active ]]
+}
+
+# Live tickets, FIFO order, pruning the dead ones on the way past. Parked slots
+# are skipped WITHOUT being removed -- they hold a place, they do not hold up a
+# queue.
 queue_live() {
   local file
   shopt -s nullglob
   for file in "$QUEUE_DIR"/*; do
     [[ -f "$file" ]] || continue
-    if ticket_alive "$file"; then
-      printf '%s\n' "$file"
-    else
-      rm -f "$file" 2> /dev/null || true
-    fi
+    case "$(ticket_state "$file")" in
+      active) printf '%s\n' "$file" ;;
+      parked) ;;
+      *) rm -f "$file" 2> /dev/null || true ;;
+    esac
   done
   shopt -u nullglob
 }
 
+# Parked slots only, for --status. A place being kept is fleet state, and state
+# nobody can see is how the last mechanism in this file came to need a dispatch
+# seat to correlate it by hand.
+queue_parked() {
+  local file
+  shopt -s nullglob
+  for file in "$QUEUE_DIR"/*; do
+    [[ -f "$file" ]] || continue
+    [[ "$(ticket_state "$file")" == parked ]] && printf '%s\n' "$file"
+  done
+  shopt -u nullglob
+}
+
+# Find this call's parked slot, if it left one behind on an earlier turn. The
+# slot name lives in the FILENAME rather than the file body so that finding it
+# is a glob and not a scan -- and the arrival stamp stays the filename's
+# prefix, so a resumed slot keeps sorting exactly where it did.
+slot_ticket_path() {
+  local file out=''
+  shopt -s nullglob
+  for file in "$QUEUE_DIR"/*-s"$1"; do
+    [[ -f "$file" ]] && out="$file"
+  done
+  shopt -u nullglob
+  [[ -n "$out" ]] && printf '%s' "$out"
+}
+
 take_ticket() {
-  local label="$1" start
-  start="$(proc_starttime "$$" 2> /dev/null || echo 0)"
-  TICKET="${QUEUE_DIR}/$(now_stamp)-$$"
+  local label="$1" start existing pid0 start0 stamp0
+  start="$(proc_starttime "$$" 2> /dev/null || true)"
+
+  # Resume a place kept on an earlier foreground call, if there is one and it
+  # has not aged out. The arrival stamp is read back from the ticket and
+  # written again unchanged: that field is the place, so re-stamping it here
+  # would silently send the caller to the back while reporting a resume.
+  if [[ -n "$SLOT_SLUG" ]]; then
+    existing="$(slot_ticket_path "$SLOT_SLUG")"
+    if [[ -n "$existing" && "$(ticket_state "$existing")" != dead ]]; then
+      read -r pid0 start0 stamp0 _ < "$existing" 2> /dev/null || stamp0=''
+      case "$stamp0" in
+        '' | *[!0-9]*) ;;
+        *)
+          if printf '%s %s %s %s\n' "$$" "$start" "$stamp0" "$label" > "$existing" 2> /dev/null; then
+            TICKET="$existing"
+            local kept
+            kept="$(now_s 2> /dev/null)" || kept=''
+            case "$kept" in
+              '' | *[!0-9]*) log "resumed slot '${SLOT_SLUG}' — keeping the place it already held" ;;
+              *) log "resumed slot '${SLOT_SLUG}' — keeping the place it took $(human_s $((kept - stamp0))) ago" ;;
+            esac
+            return 0
+          fi
+          ;;
+      esac
+    fi
+  fi
+
+  if [[ -n "$SLOT_SLUG" ]]; then
+    TICKET="${QUEUE_DIR}/$(now_stamp)-s${SLOT_SLUG}"
+  else
+    TICKET="${QUEUE_DIR}/$(now_stamp)-$$"
+  fi
   printf '%s %s %s %s\n' "$$" "$start" "$(now_s)" "$label" > "$TICKET" 2> /dev/null || {
     TICKET=""
     return 1
@@ -385,8 +616,29 @@ take_ticket() {
   return 0
 }
 
+# Turn our ticket into a kept place instead of deleting it. Writing pid 0 is
+# what makes it parked; the arrival stamp is preserved verbatim.
+park_ticket() {
+  local pid0 start0 stamp0 label0
+  [[ -n "$TICKET" && -f "$TICKET" ]] || return 1
+  read -r pid0 start0 stamp0 label0 < "$TICKET" 2> /dev/null || return 1
+  case "$stamp0" in '' | *[!0-9]*) return 1 ;; esac
+  printf '0 0 %s %s\n' "$stamp0" "${label0:-?}" > "$TICKET" 2> /dev/null || return 1
+  return 0
+}
+
+# Runs on EVERY exit from the acquisition path, the killed ones included --
+# which is the case that matters most here. A call cut short by the harness's
+# foreground ceiling while queued is precisely the caller that should not lose
+# its place, and it has no chance to ask for that on the way out.
 cleanup() {
-  [[ -n "$TICKET" ]] && rm -f "$TICKET" 2> /dev/null
+  if [[ -n "$TICKET" ]]; then
+    if ((HOLDING == 0)) && [[ -n "$SLOT_SLUG" ]] && park_ticket; then
+      : # place kept
+    else
+      rm -f "$TICKET" 2> /dev/null
+    fi
+  fi
   if ((HOLDING == 1)); then rm -f "$HOLDER_FILE" 2> /dev/null; fi
   return 0
 }
@@ -396,7 +648,7 @@ cleanup() {
 # holder file: "<pid> <starttime> <acquired-epoch> <label>"
 write_holder() {
   local label="$1" start
-  start="$(proc_starttime "$$" 2> /dev/null || echo 0)"
+  start="$(proc_starttime "$$" 2> /dev/null || true)"
   printf '%s %s %s %s\n' "$$" "$start" "$(now_s)" "$label" > "$HOLDER_FILE" 2> /dev/null || true
 }
 
@@ -452,6 +704,109 @@ human_s() {
   if ((s >= 60)); then printf '%ss (%dm%02ds)' "$s" $((s / 60)) $((s % 60)); else printf '%ss' "$s"; fi
 }
 
+# --- the ledger -------------------------------------------------------------
+#
+# WHY A LEDGER AND NOT MORE STDERR.
+#
+# Every number this wrapper already knows -- how long a call queued, how long
+# it held, how deep the queue was when it arrived -- is printed to the stderr
+# of ONE agent and then gone. That is the reason contention on this lock could
+# only ever be characterised anecdotally: each agent sees its own bad luck, and
+# establishing that the bad luck is systemic took a dispatch seat correlating
+# three devs' reports by hand across one shift. A per-run line that nobody
+# keeps cannot answer "which command dominates hold time", which is the only
+# question that says where a fix should go.
+#
+# So each terminal outcome appends ONE record here, and `--report` aggregates
+# them. Two properties are deliberate:
+#
+#   - IT RECORDS THE NON-RUNS TOO. A `queue-timeout` and a `lock-unusable` are
+#     the records that matter most, because they are the ones whose evidence
+#     otherwise vanishes: the run produced no output to keep, and the next
+#     reader is left with whatever older artifact is lying around. A ledger
+#     that only recorded successful acquisitions would make the fleet look
+#     healthier the more it starved.
+#
+#   - IT NEVER FAILS THE CALL. Every write is best-effort and its failure is
+#     swallowed. This file exists to measure verification, and a measurement
+#     apparatus that can redden a gate has become part of the thing it
+#     measures. An unwritable /tmp loses records; it does not lose runs.
+#
+# Format: one line, space-separated `key=value` with the free-text label LAST,
+# so a label containing spaces cannot displace a field. Appends are a single
+# short `printf` to an O_APPEND fd, which is atomic on Linux for writes this
+# size -- concurrent agents interleave records, never characters.
+ledger_append() {
+  local outcome="$1" waited="$2" held="$3" rc="$4" label="$5" ts size
+  ((LEDGER_WRITTEN == 1)) && return 0
+  LEDGER_WRITTEN=1
+  ts="$(now_s 2> /dev/null)" || ts=0
+  case "$ts" in '' | *[!0-9]*) ts=0 ;; esac
+  if [[ -f "$LEDGER_FILE" ]]; then
+    size="$(wc -c < "$LEDGER_FILE" 2> /dev/null | tr -d ' ')"
+    case "$size" in
+      '' | *[!0-9]*) ;;
+      *) ((size > LEDGER_MAX_BYTES)) && return 0 ;;
+    esac
+  fi
+  # Newlines and tabs would break the one-record-per-line contract; the label
+  # is a command string and can contain either.
+  label="$(printf '%s' "$label" | tr '\n\t' '  ' | cut -c1-200)"
+  printf '%s outcome=%s waited=%s held=%s depth=%s rc=%s pid=%s label=%s\n' \
+    "$ts" "$outcome" "$waited" "$held" "$ARRIVAL_DEPTH" "$rc" "$$" "$label" \
+    >> "$LEDGER_FILE" 2> /dev/null || true
+  chmod 666 "$LEDGER_FILE" 2> /dev/null || true
+  return 0
+}
+
+# --- slots: keeping a place across foreground calls -------------------------
+#
+# THE PROBLEM THIS SOLVES, STATED EXACTLY, BECAUSE IT IS NOT THE OBVIOUS ONE.
+#
+# An agent's call runs inside a foreground turn with a hard wall-clock ceiling
+# (~10 minutes, imposed by the harness -- nothing in this script can change
+# that, and this mechanism does not pretend to). The acquisition budget is
+# capped at 540s precisely so a queued wait fits inside one such turn. When the
+# budget is spent, the caller is told to go do lock-free work and come back.
+#
+# The trap is what "come back" used to cost. A ticket is removed when its
+# process exits, so the returning caller minted a FRESH ticket with a FRESH
+# arrival stamp and went to the BACK of the queue -- behind every agent that
+# arrived while it was away. That is waiter asymmetry (mechanism 1 at the top
+# of this file) reappearing one level up: the caller that obeys the cap and
+# leaves is overtaken by the caller that sits resident, so obeying the cap is
+# again the losing strategy. Measured on this container: an agent whose job ran
+# for 8.3 seconds spent 7 minutes at the head of the queue, and a 9-minute
+# request never acquired at all.
+#
+# `OS_VERIFY_LOCK_SLOT=<name>` makes leaving cheap. A call that never acquires
+# PARKS its ticket instead of deleting it, and the next call naming the same
+# slot RESUMES that ticket -- keeping the ORIGINAL arrival stamp, so it sits
+# where it was rather than at the back.
+#
+# ⚠️ THE INVARIANT THAT KEEPS THIS FROM BEING A STARVATION MECHANISM: a parked
+# slot HOLDS A PLACE BUT BLOCKS NOBODY. Parked tickets are retained on disk and
+# excluded from the live queue, so the head of the queue is always a ticket
+# with a live process actually waiting behind it. A caller that parks and never
+# returns therefore costs the fleet exactly nothing -- which is the whole
+# difference between this and simply letting a dead ticket linger. The price is
+# stated rather than hidden: a slot CAN be overtaken while parked, because
+# while parked it was not waiting. It resumes its place among the callers
+# waiting now, which is the honest meaning of the place it kept.
+#
+# And the priority a slot carries is bounded: the retained arrival stamp ages
+# out at SLOT_MAX_AGE_S from the ORIGINAL arrival, after which the slot is
+# pruned like any dead ticket and the caller starts a fresh one at the back.
+# Without that bound a long-lived slot would cut ahead of newer arrivals
+# indefinitely, which is the same unfairness in the other direction.
+#
+# ⛔ None of this touches `flock`. Slots are advisory ordering only, exactly as
+# the ticket queue is; exclusion, the budget and the hard cap are untouched,
+# and a slot cannot acquire, hold or release anything.
+slot_slug() {
+  printf '%s' "$1" | tr -c 'A-Za-z0-9_.-' '_' | cut -c1-40
+}
+
 # The ORDINARY refusal: the budget elapsed and we never got the lock. One
 # function because more than one check can be the one that notices, and a
 # timeout that describes itself differently depending on WHICH check noticed is
@@ -464,6 +819,40 @@ verdict_queue_timeout() {
     log "VERDICT queue-timeout (exit 99) · never acquired · waited $(human_s "$waited") · ${note} · $(holder_line)"
   else
     log "VERDICT queue-timeout (exit 99) · never acquired · waited $(human_s "$waited") · $(holder_line)"
+  fi
+  not_measured_note
+  ledger_append queue-timeout "$waited" 0 99 "${LABEL_FOR_LEDGER:-?}"
+}
+
+# What exit 99 MEANS, said in the one place a reader is already looking.
+#
+# ⚠️ The wording is the whole of this: 99 is neither a pass nor a failure, and
+# both misreadings have a cost. Read as a failure, it sends an agent hunting a
+# regression that no run ever observed -- and the worst version of that is
+# someone "fixing" a ratchet baseline to make an imaginary red go green. Read
+# as a pass, it puts an unrun gate into a green count, which is the failure
+# this fleet's whole verification discipline is built to prevent.
+#
+# ⛔ This does not replace the discipline; three devs in the shift that made
+# this a card read exit 99 correctly with no help from the wrapper at all, and
+# that was good practice rather than good wording. It removes the excuse, not
+# the obligation. Worth exactly what it costs, which is nothing -- and it is
+# NOT a substitute for shortening the wait, which is what the other half of
+# this change is for.
+not_measured_note() {
+  log "  ⇒ NOT MEASURED. Exit 99 means this call never got a turn: nothing was built, nothing"
+  log "    was tested, and no gate was decided. It is NOT a failure and NOT a pass — record it"
+  log "    as NOT MEASURED, ⛔ never as a red, and ⛔ never inside a green count."
+  log "    If an ablation or a mutation was in flight, its restore is YOUR trap, not this"
+  log "    wrapper's: \`trap '<restore>' EXIT INT TERM\` — a call killed mid-mutation leaves a"
+  log "    mutated tree, and the next gate run on it returns a well-formed wrong answer."
+  if [[ -n "$SLOT_SLUG" ]]; then
+    log "    Your place is KEPT as slot '${SLOT_SLUG}'. Re-run with the same OS_VERIFY_LOCK_SLOT"
+    log "    to resume it instead of starting again at the back of the queue."
+  else
+    log "    Set OS_VERIFY_LOCK_SLOT=<name> to keep your place across calls: come back with the"
+    log "    same name and you resume where you were, rather than behind everyone who arrived"
+    log "    while you were away."
   fi
 }
 
@@ -610,6 +999,131 @@ filter_preflight() {
   return 1
 }
 
+# --- can this exit code certify the whole command? ---------------------------
+#
+# Why this exists: see "WHAT `command-exit` CERTIFIES" at the top of this file.
+# The question here is deliberately small, and it is the only one asked: can the
+# exit status of the string we are about to hand to a shell be 0 ONLY IF every
+# part of it succeeded? True for a single command, and for a chain joined by
+# `&&` -- which short-circuits, so a 0 at the end proves every link ran and
+# passed. False for `;` and for a newline (the exit is the tail's), for `|` (the
+# exit is the right-hand end's, so `pnpm test | tee log` is green when the test
+# is red), for `||` (the exit is the fallback's, which is the point of `||`),
+# and for `&`.
+#
+# It is a SCANNER, not a shell parser, and that difference is what makes it
+# trustworthy rather than clever. It tracks three states of quoting and a
+# parenthesis depth, decides one question, and can only ever err toward
+# `batch-last-exit`: over-labelling costs a warning on a run nobody had to act
+# on, while under-labelling would be the very defect this repairs. So anything
+# it cannot read with confidence -- a backtick substitution, an unbalanced quote
+# -- comes out uncertified by construction rather than by analysis.
+#
+# Operators count only at parenthesis depth 0 and outside quotes, and that is
+# correctness rather than leniency: a `;` inside `$(echo a; echo b)`, or inside
+# a quoted argument, belongs to one ELEMENT of the chain and not to the chain,
+# and the element's own exit status is what the chain sees either way.
+#
+# Sets CERTIFIABLE_NOTE to the reason when it answers no; returns 0 for yes.
+exit_certifiable() {
+  local kind="$1" s="$2" n i ch nx sq=0 dq=0 depth=0
+  CERTIFIABLE_NOTE=""
+
+  # `-- argv` never reaches a shell: one command, its own exit, nothing to scan.
+  [[ "$kind" == argv ]] && return 0
+
+  n=${#s}
+  i=0
+  while ((i < n)); do
+    ch="${s:i:1}"
+
+    # Inside single quotes nothing is special but the closing quote.
+    if ((sq == 1)); then
+      [[ "$ch" == "'" ]] && sq=0
+      i=$((i + 1))
+      continue
+    fi
+    # Inside double quotes a backslash still escapes, so it is honoured here or
+    # a `\"` would be read as the end of the string.
+    if ((dq == 1)); then
+      case "$ch" in
+        '\') i=$((i + 2)) && continue ;;
+        '"') dq=0 ;;
+      esac
+      i=$((i + 1))
+      continue
+    fi
+
+    case "$ch" in
+      "'") sq=1 ;;
+      '"') dq=1 ;;
+      '\') i=$((i + 2)) && continue ;;
+      '`')
+        CERTIFIABLE_NOTE="it contains a backtick substitution, which this scanner does not read"
+        return 1
+        ;;
+      '(') depth=$((depth + 1)) ;;
+      ')') ((depth > 0)) && depth=$((depth - 1)) ;;
+      ';')
+        ((depth == 0)) && {
+          CERTIFIABLE_NOTE="its parts are sequenced with ';'"
+          return 1
+        }
+        ;;
+      $'\n')
+        ((depth == 0)) && {
+          CERTIFIABLE_NOTE="its parts are on separate lines"
+          return 1
+        }
+        ;;
+      '&')
+        # `&&` is the one joiner that certifies, so it is consumed, not flagged.
+        nx="${s:i+1:1}"
+        if [[ "$nx" == '&' ]]; then
+          i=$((i + 2))
+          continue
+        fi
+        ((depth == 0)) && {
+          CERTIFIABLE_NOTE="a part of it is backgrounded with '&'"
+          return 1
+        }
+        ;;
+      '|')
+        if ((depth == 0)); then
+          nx="${s:i+1:1}"
+          if [[ "$nx" == '|' ]]; then
+            CERTIFIABLE_NOTE="its parts are joined with '||', so a 0 can be the fallback's"
+          else
+            CERTIFIABLE_NOTE="it is a pipeline, so the exit is the RIGHT-HAND end's"
+          fi
+          return 1
+        fi
+        ;;
+    esac
+    i=$((i + 1))
+  done
+
+  # A string this scanner did not read to the end is not one it may certify.
+  if ((sq == 1 || dq == 1)); then
+    CERTIFIABLE_NOTE="it has an unbalanced quote, which this scanner does not read"
+    return 1
+  fi
+  return 0
+}
+
+# The ONE place the verdict word and its caveat become text, so the locked and
+# the unlocked verdict lines cannot drift apart -- and so the caveat travels
+# with the number rather than sitting on a line above it that a quote would
+# leave behind.
+verdict_head() {
+  if [[ "$VERDICT_WORD" == command-exit ]]; then
+    printf 'VERDICT command-exit %s' "$1"
+    return 0
+  fi
+  printf "VERDICT batch-last-exit %s · ⚠ NOT A VERDICT ON THE WHOLE COMMAND — %s, so this number is the LAST part's exit and a failure in an earlier part is NOT in it · join the parts with '&&' to get a verdict that covers all of them" \
+    "$1" "$CERTIFIABLE_NOTE"
+}
+
 # --- modes ------------------------------------------------------------------
 
 usage() {
@@ -619,14 +1133,40 @@ usage:
   os-verify-lock.sh -- <argv...>            same, without a shell
   os-verify-lock.sh --status                who holds the lock, for how long, who is queued
   os-verify-lock.sh --show-budget           the acquisition budget this call would use
+  os-verify-lock.sh --report                aggregate the ledger: waits, holds, queue depth,
+                                            and which commands own the lock-seconds
   os-verify-lock.sh --self-test             verify this script
 
 There is deliberately no -w / --timeout: the acquisition budget is capped at the
 call site. OS_VERIFY_LOCK_WAIT may LOWER it; a value above the cap is clamped.
 
+KEEPING YOUR PLACE ACROSS CALLS. An acquisition wait is capped so it fits inside
+one foreground agent turn; nothing here can stop that turn's own ceiling from
+counting the wait, so the remedy is not to spend a second turn re-queueing from
+the back. Set OS_VERIFY_LOCK_SLOT=<name> and a call that never acquires PARKS its
+place instead of losing it; the next call with the same name resumes it. A parked
+slot BLOCKS NOBODY -- it can be overtaken while you are away, which is the honest
+meaning of a place kept by someone who was not waiting -- and its priority ages
+out, so it cannot cut the line indefinitely. Being killed mid-wait parks it too.
+
+EXIT 99 IS NOT A RESULT. It means this call never got a turn: nothing built,
+nothing tested, no gate decided. Record it as NOT MEASURED -- never as a red
+(there is no observed failure to explain, and a ratchet baseline "fixed" against
+one is a real regression written to make an imaginary one go away), and never
+inside a green count. If you are mid-ablation, the restore is your own
+`trap '<restore>' EXIT INT TERM`: this wrapper cannot un-mutate your tree.
+
 A `pnpm --filter <name>` that matches no project is refused BEFORE the lock is
 taken, because pnpm exits 0 on it and the run would measure nothing (#10853).
 OS_VERIFY_LOCK_NO_FILTER_CHECK=1 skips that check for one call.
+
+A verdict says `command-exit` only when the exit status can CERTIFY the command:
+one command, or a chain joined by `&&`. A string sequenced with `;` or newlines,
+a pipeline, `||`, or `&` gets `batch-last-exit` instead — the run, the exit code
+and this wrapper's behaviour are unchanged, but that number is the LAST part's,
+so a failure earlier in the string is not in it and it must not be quoted as
+proof the whole command passed (#12288). Join the parts with `&&` for a verdict
+that covers all of them.
 Exit 99 means this call never acquired the lock; every run prints a VERDICT line
 — including the refusals: `lock-unusable` (this host cannot operate the lock at
 all) and `usage-error`. A run that prints no verdict is a bug in this script.
@@ -710,7 +1250,8 @@ run_unlocked() {
   ended="$(now_s 2> /dev/null)"
   case "$ended" in '' | *[!0-9]*) ended="$started" ;; esac
   ran=$((ended - started))
-  log "VERDICT command-exit ${rc} · UNLOCKED (declared) · no usable \`${FLOCK_BIN}\` on this host, so the shared verify lock was NEVER taken and NOTHING was serialized · ran $(human_s "$ran") · declare it in the PR body · ${label}"
+  log "$(verdict_head "$rc") · UNLOCKED (declared) · no usable \`${FLOCK_BIN}\` on this host, so the shared verify lock was NEVER taken and NOTHING was serialized · ran $(human_s "$ran") · declare it in the PR body · ${label}"
+  ledger_append unlocked 0 "$ran" "$rc" "$label"
   exit "$rc"
 }
 
@@ -749,6 +1290,113 @@ mode_status() {
     done < <(queue_live)
   fi
   ((n == 0)) && printf 'queue: empty (entry-point waiters only — a free-hand flock waiter takes no ticket)\n'
+  # Parked slots are shown APART from the queue, and the line says they block
+  # nobody. Listed among the waiters they would read as a deeper queue than
+  # there is; omitted entirely, a place being kept would be invisible fleet
+  # state — and invisible state on this lock is what took a whole shift to
+  # characterise last time.
+  local p=0 pfile
+  if [[ -d "$QUEUE_DIR" ]]; then
+    while IFS= read -r pfile; do
+      [[ -n "$pfile" ]] || continue
+      read -r pid start stamp label < "$pfile" 2> /dev/null || continue
+      p=$((p + 1))
+      printf 'parked %d: slot %s, place kept %ss (blocks nobody) — %s\n' \
+        "$p" "$(basename "$pfile" | sed 's/^[0-9]*-s//')" "$(($(now_s) - stamp))" "${label:-?}"
+    done < <(queue_parked)
+  fi
+  if [[ -f "$LEDGER_FILE" ]]; then
+    printf 'ledger: %s (%s records) — `--report` aggregates it\n' \
+      "$LEDGER_FILE" "$(wc -l < "$LEDGER_FILE" 2> /dev/null | tr -d ' ')"
+  else
+    printf 'ledger: %s (no records yet)\n' "$LEDGER_FILE"
+  fi
+  return 0
+}
+
+# --- report -----------------------------------------------------------------
+
+# Percentile of a numeric column, by sorting it. `sort -n` rather than an awk
+# array so this stays bash-3.2/POSIX-awk clean (`asort` is a gawk extension and
+# would fail on exactly the hosts this file's portability block is about).
+pct_of() {
+  local file="$1" want="$2" n idx
+  n="$(wc -l < "$file" 2> /dev/null | tr -d ' ')"
+  case "$n" in '' | *[!0-9]* | 0) printf '-'; return 0 ;; esac
+  idx=$(((n * want + 99) / 100))
+  ((idx < 1)) && idx=1
+  ((idx > n)) && idx="$n"
+  sed -n "${idx}p" "$file"
+}
+
+# The standing answer to "where does the hold time go", which until now could
+# only be assembled by hand from several agents' reports after the fact.
+mode_report() {
+  local tmp field
+  printf 'ledger: %s\n' "$LEDGER_FILE"
+  if [[ ! -f "$LEDGER_FILE" ]]; then
+    printf 'no records yet — every run through this entry point appends one.\n'
+    return 0
+  fi
+  tmp="$(mktemp -d "${TMPDIR:-/tmp}/os-verify-lock-report.XXXXXX")" || return 1
+  # shellcheck disable=SC2064
+  trap "rm -rf '$tmp'" EXIT
+
+  local total first last
+  total="$(wc -l < "$LEDGER_FILE" 2> /dev/null | tr -d ' ')"
+  first="$(awk 'NR==1{print $1}' "$LEDGER_FILE" 2> /dev/null)"
+  last="$(awk 'END{print $1}' "$LEDGER_FILE" 2> /dev/null)"
+  case "$first$last" in
+    '' | *[!0-9]*) printf 'records: %s\n' "$total" ;;
+    *) printf 'records: %s, spanning %s\n' "$total" "$(human_s $((last - first)))" ;;
+  esac
+  local size
+  size="$(wc -c < "$LEDGER_FILE" 2> /dev/null | tr -d ' ')"
+  case "$size" in
+    '' | *[!0-9]*) ;;
+    *) ((size > LEDGER_MAX_BYTES)) && printf '⚠ the ledger has reached its %s-byte bound and is NO LONGER RECORDING — the figures below describe the runs up to that point only, not the fleet since.\n' "$LEDGER_MAX_BYTES" ;;
+  esac
+
+  printf '\noutcomes:\n'
+  awk '{ for (i = 2; i <= NF; i++) if (substr($i, 1, 8) == "outcome=") { c[substr($i, 9)]++; break } }
+       END { for (k in c) printf "  %-24s %6d\n", k, c[k] }' "$LEDGER_FILE" 2> /dev/null | sort -k2 -rn
+  printf '  ⇒ queue-timeout and lock-unusable are NOT MEASURED runs: no gate was decided by them.\n'
+
+  # waits and holds, as distributions rather than a single mean -- the tail is
+  # the whole complaint on this lock, and a mean hides it.
+  for field in waited held depth; do
+    awk -v f="$field=" '{ for (i = 2; i <= NF; i++) if (index($i, f) == 1) { v = substr($i, length(f) + 1); if (v ~ /^[0-9]+$/ && v > 0) print v; break } }' \
+      "$LEDGER_FILE" 2> /dev/null | sort -n > "${tmp}/${field}"
+  done
+  printf '\nacquisition wait, over runs that waited at all (seconds):\n'
+  printf '  n=%s  p50=%s  p90=%s  max=%s\n' \
+    "$(wc -l < "${tmp}/waited" | tr -d ' ')" "$(pct_of "${tmp}/waited" 50)" \
+    "$(pct_of "${tmp}/waited" 90)" "$(pct_of "${tmp}/waited" 100)"
+  printf 'lock hold, over runs that acquired (seconds):\n'
+  printf '  n=%s  p50=%s  p90=%s  max=%s\n' \
+    "$(wc -l < "${tmp}/held" | tr -d ' ')" "$(pct_of "${tmp}/held" 50)" \
+    "$(pct_of "${tmp}/held" 90)" "$(pct_of "${tmp}/held" 100)"
+  printf 'queue depth on arrival (waiters already ahead):\n'
+  printf '  n=%s  p50=%s  p90=%s  max=%s\n' \
+    "$(wc -l < "${tmp}/depth" | tr -d ' ')" "$(pct_of "${tmp}/depth" 50)" \
+    "$(pct_of "${tmp}/depth" 90)" "$(pct_of "${tmp}/depth" 100)"
+
+  # ⭐ The table this whole mechanism exists for. Ranked by TOTAL seconds held,
+  # not by the worst single run: the command that decides how much the fleet
+  # queues is the one that owns the most lock-seconds, which a per-run maximum
+  # can point away from entirely.
+  printf '\nlock-seconds held, by command (top 10 — this is where hold time actually goes):\n'
+  awk '{
+         h = ""; lbl = ""
+         for (i = 2; i <= NF; i++) {
+           if (index($i, "held=") == 1) h = substr($i, 6)
+           else if (index($i, "label=") == 1) { lbl = substr($i, 7); for (j = i + 1; j <= NF; j++) lbl = lbl " " $j; break }
+         }
+         if (h ~ /^[0-9]+$/ && lbl != "") { tot[lbl] += h; runs[lbl]++ }
+       }
+       END { for (k in tot) printf "%8d %5d %s\n", tot[k], runs[k], k }' "$LEDGER_FILE" 2> /dev/null \
+    | sort -rn | head -10 \
+    | awk '{ t = $1; r = $2; $1 = ""; $2 = ""; sub(/^  /, ""); printf "  %6ss total  %3s run(s)  %s\n", t, r, substr($0, 1, 96) }'
   return 0
 }
 
@@ -763,6 +1411,8 @@ mode_show_budget() {
 mode_run() {
   local kind="$1" label="$2"
   shift 2
+  LABEL_FOR_LEDGER="$label"
+  [[ -n "${OS_VERIFY_LOCK_SLOT:-}" ]] && SLOT_SLUG="$(slot_slug "${OS_VERIFY_LOCK_SLOT}")"
 
   # Refuse before waiting. A caller is told to read the VERDICT line, so the
   # host-is-wrong path prints one too — that is the whole difference between
@@ -774,6 +1424,7 @@ mode_run() {
       [[ -n "$problem" ]] && log "  · $problem"
     done <<< "$PREFLIGHT_PROBLEMS"
     log "VERDICT lock-unusable (exit 99) · never acquired · refused before waiting · nothing was built or tested · ${label}"
+    ledger_append lock-unusable 0 0 99 "$label"
     exit 99
   fi
 
@@ -783,7 +1434,28 @@ mode_run() {
   # silent green.
   if ! filter_preflight "$label"; then
     log "VERDICT filter-matches-nothing (exit 2) · never acquired · refused before waiting · nothing was built or tested · ${label}"
+    ledger_append filter-matches-nothing 0 0 2 "$label"
     exit 2
+  fi
+
+
+  # Which word this run's verdict may use, decided from the command string and
+  # said at second zero as well as in the verdict itself. The placement is
+  # chosen twice over: AFTER the refusals above, because a refused run prints a
+  # different verdict entirely and an instrument that predicts the wrong one is
+  # this card's own defect in miniature; and BEFORE the wait, because a dev
+  # about to spend the fleet's lock on a string whose result cannot be quoted
+  # should learn it while the repair still costs nothing.
+  VERDICT_WORD="command-exit"
+  if ! exit_certifiable "$kind" "$label"; then
+    VERDICT_WORD="batch-last-exit"
+    log "⚠ THIS COMMAND'S EXIT CODE CANNOT CERTIFY IT — ${CERTIFIABLE_NOTE}."
+    log "⚠   A shell string's exit status is its LAST part's, so a failure in an earlier"
+    log "⚠   part exits 0 and reads as a pass (#12288). If this run reaches a verdict it"
+    log "⚠   will therefore read batch-last-exit, not command-exit, and that number must"
+    log "⚠   NOT be quoted as proof that the whole command passed."
+    log "⚠   Join the parts with '&&' instead and the verdict certifies every one of them."
+    log "⚠   Nothing here refuses, truncates or alters your command — only the word changes."
   fi
 
   # No usable flock on this host: the declared unlocked run, and it never
@@ -807,7 +1479,13 @@ mode_run() {
   trap cleanup EXIT
   trap 'cleanup; exit 130' INT TERM HUP
   if liveness_usable && queue_usable && take_ticket "$label"; then
-    : # ordered acquisition; our ticket decides when we may call flock
+    # Queue depth AT ARRIVAL, recorded once. It is the number that turns "I
+    # waited a long time" into "N of us were waiting", which is the difference
+    # between an anecdote and a measurement of contention — and it has to be
+    # read here, because by the time this call finishes the queue it arrived
+    # into is gone.
+    ARRIVAL_DEPTH="$(queue_live | wc -l | tr -d ' ')"
+    case "$ARRIVAL_DEPTH" in '' | *[!0-9]*) ARRIVAL_DEPTH=-1 ;; esac
   else
     ordered=0
     log "⚠ ticket queue at ${QUEUE_DIR} is unusable — falling back to unordered acquisition (the cap and the lock itself are unaffected)."
@@ -842,6 +1520,7 @@ mode_run() {
     passes=$((passes + 1))
     now="$(now_s)" || {
       log "VERDICT lock-unusable (exit 99) · never acquired · the seconds clock stopped answering mid-wait · refusing to spin · nothing was built or tested"
+      ledger_append lock-unusable 0 0 99 "$label"
       exit 99
     }
     elapsed=$((now - started))
@@ -852,6 +1531,7 @@ mode_run() {
     if ((passes > max_passes)); then
       if clock_disagrees $((passes * POLL_S)) "$elapsed"; then
         log "VERDICT lock-unusable (exit 99) · never acquired · the queue loop ran ${passes} passes, each sleeping ${POLL_S}s, while the clock this script polls advanced only ${elapsed}s over the same stretch — the two accounts disagree, so the ${BUDGET}s deadline could never expire · refusing to spin · nothing was built or tested"
+        ledger_append lock-unusable 0 0 99 "$label"
         exit 99
       fi
       verdict_queue_timeout "$elapsed" "gave up after ${passes} queue passes inside a ${BUDGET}s budget"
@@ -945,11 +1625,13 @@ mode_run() {
   exec 9>> "$LOCK_FILE" || {
     log "✗ cannot open ${LOCK_FILE} for locking."
     log "VERDICT lock-unusable (exit 99) · never acquired · ${LOCK_FILE} could not be opened for locking · nothing was built or tested"
+    ledger_append lock-unusable 0 0 99 "$label"
     exit 99
   }
   while :; do
     now="$(now_s)" || {
       log "VERDICT lock-unusable (exit 99) · never acquired · the seconds clock stopped answering mid-wait · refusing to spin · nothing was built or tested"
+      ledger_append lock-unusable 0 0 99 "$label"
       exit 99
     }
     remaining=$((deadline - now))
@@ -971,6 +1653,7 @@ mode_run() {
     # over.
     if ((flock_rc == 126 || flock_rc == 127)); then
       log "VERDICT lock-unusable (exit 99) · never acquired · \`${FLOCK_BIN}\` exited ${flock_rc} (not found / not executable) · nothing was built or tested"
+      ledger_append lock-unusable 0 0 99 "$label"
       exit 99
     fi
     slices_spent=$((slices_spent + remaining))
@@ -979,6 +1662,7 @@ mode_run() {
     # below the default explanation for an ordinary full-budget wait.
     now="$(now_s)" || {
       log "VERDICT lock-unusable (exit 99) · never acquired · the seconds clock stopped answering mid-wait · refusing to spin · nothing was built or tested"
+      ledger_append lock-unusable 0 0 99 "$label"
       exit 99
     }
     elapsed=$((now - started))
@@ -989,6 +1673,7 @@ mode_run() {
     if ((slices_spent >= BUDGET)); then
       if clock_disagrees "$slices_spent" "$elapsed"; then
         log "VERDICT lock-unusable (exit 99) · never acquired · spent ${slices_spent}s of a ${BUDGET}s budget in flock slices while the clock this script polls advanced only ${elapsed}s over the same stretch — the two accounts disagree, so the deadline could never expire · refusing to spin · nothing was built or tested · $(holder_line)"
+        ledger_append lock-unusable 0 0 99 "$label"
         exit 99
       fi
       # The count is spent and the clock agrees it is: an ordinary timeout that
@@ -1030,7 +1715,8 @@ mode_run() {
   held=$(($(now_s) - acquired_at))
   HOLDING=0
   rm -f "$HOLDER_FILE" 2> /dev/null || true
-  log "VERDICT command-exit ${rc} · held the lock $(human_s "$held") · waited $(human_s "$waited")"
+  log "$(verdict_head "$rc") · held the lock $(human_s "$held") · waited $(human_s "$waited")"
+  ledger_append "$VERDICT_WORD" "$waited" "$held" "$rc" "$label"
   if ((held >= LONG_HOLD_WARN_S)); then
     log "⚠ THIS RUN held the shared verify lock for $(human_s "$held"). Every sibling agent"
     log "⚠ in this container queued behind it, and a long holder lengthens every cycle for"
@@ -1064,9 +1750,11 @@ mode_self_test() {
   # globals redirect the helpers called IN THIS PROCESS. Without the second, a
   # self-test would serialise the real fleet behind its own fixtures.
   export OS_VERIFY_LOCK_FILE="$L"
+  export OS_VERIFY_LOCK_LEDGER="${L}.ledger"
   LOCK_FILE="$L"
   QUEUE_DIR="${L}.q"
   HOLDER_FILE="${L}.holder"
+  LEDGER_FILE="${L}.ledger"
 
   printf 'os-verify-lock --self-test\n'
 
@@ -1331,6 +2019,158 @@ mode_self_test() {
   st_case 'a usage error prints a verdict too' \
     "$(bash "$SELF" -w 3000 -c true 2>&1 | grep -c 'VERDICT usage-error (exit 2)')" 1
 
+  # --- the exit-99 wording --------------------------------------------------
+  #
+  # Asserted on the OUTPUT OF A REAL TIMEOUT, not by grepping this file for the
+  # sentence. A message that exists in the source and never reaches a caller is
+  # the phantom-check shape, and it is the one this particular fix could most
+  # easily be: the whole value of the wording is that it appears at the moment
+  # somebody is deciding what a 99 meant.
+  st_case 'a real queue-timeout says NOT MEASURED in so many words' \
+    "$([[ "$ordout" == *'NOT MEASURED'* ]] && echo yes || echo no)" yes
+  st_case 'and rules out BOTH misreadings, not just the failure one' \
+    "$([[ "$ordout" == *'NOT a failure and NOT a pass'* ]] && echo yes || echo no)" yes
+  st_case 'and points at the trap the caller owns, since this wrapper cannot restore a tree' \
+    "$([[ "$ordout" == *'EXIT INT TERM'* ]] && echo yes || echo no)" yes
+  st_case 'and tells a caller with no slot how to keep its place next time' \
+    "$([[ "$ordout" == *OS_VERIFY_LOCK_SLOT* ]] && echo yes || echo no)" yes
+
+  # --- the ledger -----------------------------------------------------------
+  #
+  # The two directions that matter, and the second is the one a ledger gets
+  # wrong: it must record the runs that MEASURED NOTHING as well as the ones
+  # that ran. A ledger of successes only would make the fleet read healthier
+  # exactly as it starved.
+  local realled="${L}.ledger"
+  rm -f "$realled"
+  bash "$SELF" -c true > /dev/null 2>&1
+  st_case 'an acquiring run appends a ledger record' \
+    "$(grep -c 'outcome=command-exit' "$realled" 2> /dev/null || true)" 1
+  st_case 'and the record carries the wait, the hold and the queue depth' \
+    "$(grep -c 'waited=[0-9]* held=[0-9]* depth=' "$realled" 2> /dev/null || true)" 1
+  st_case 'and exactly one record per run, not one per verdict line' \
+    "$(wc -l < "$realled" | tr -d ' ')" 1
+
+  local ledhold ledbefore
+  ledbefore="$(grep -c 'outcome=queue-timeout' "$realled" 2> /dev/null || true)"
+  # A missing file makes grep print NOTHING (rather than 0), and an empty
+  # operand is an arithmetic syntax error rather than a zero.
+  case "$ledbefore" in '' | *[!0-9]*) ledbefore=0 ;; esac
+  bash "$SELF" -c 'sleep 5' > /dev/null 2>&1 &
+  ledhold=$!
+  sleep 1.5
+  OS_VERIFY_LOCK_WAIT=2 bash "$SELF" -c true > /dev/null 2>&1
+  kill "$ledhold" 2> /dev/null
+  wait "$ledhold" 2> /dev/null
+  st_case 'a run that NEVER acquired is recorded too — the non-runs are the point' \
+    "$(ledafter="$(grep -c 'outcome=queue-timeout' "$realled" 2> /dev/null || true)"
+       case "$ledafter" in '' | *[!0-9]*) ledafter=0 ;; esac
+       echo $((ledafter > ledbefore)))" 1
+  st_case '--report reads the ledger back and names where hold time goes' \
+    "$(bash "$SELF" --report 2>&1 | grep -c 'lock-seconds held, by command')" 1
+  st_case 'and --report labels the non-runs as NOT MEASURED rather than counting them' \
+    "$(bash "$SELF" --report 2>&1 | grep -c 'NOT MEASURED')" 1
+  # A measurement apparatus that can redden a gate has become part of the thing
+  # it measures. This is the case that keeps it out of the way.
+  st_case 'an unwritable ledger loses records, never runs' \
+    "$(OS_VERIFY_LOCK_LEDGER=/proc/nonexistent/nope bash "$SELF" -c true > /dev/null 2>&1; echo $?)" 0
+
+  # --- slots: keeping a place across calls ----------------------------------
+  #
+  # Four properties, and the middle two are the ones that make this safe rather
+  # than merely useful. A place that blocks nobody is the difference between
+  # place-keeping and a starvation mechanism; a place that ages out is the
+  # difference between priority and a permanent line-cut.
+  local sq="${L}.q"
+  rm -rf "$sq"
+  bash "$SELF" -c 'sleep 6' > /dev/null 2>&1 &
+  local slotholder=$!
+  sleep 1.5
+  OS_VERIFY_LOCK_SLOT=probe-slot OS_VERIFY_LOCK_WAIT=2 bash "$SELF" -c true > /dev/null 2>&1
+  local parked_n parked_file parked_stamp
+  parked_n=0
+  for parked_file in "$sq"/*-sprobe-slot; do
+    [[ -f "$parked_file" ]] && parked_n=$((parked_n + 1))
+  done
+  st_case 'a timed-out call with a slot PARKS its ticket instead of losing it' "$parked_n" 1
+  read -r _ _ parked_stamp _ < "$sq"/*-sprobe-slot 2> /dev/null || parked_stamp=''
+  st_case 'and the parked ticket carries pid 0 — nobody is waiting behind it' \
+    "$(awk '{print $1}' "$sq"/*-sprobe-slot 2> /dev/null)" 0
+
+  # THE SAFETY INVARIANT. Another caller must acquire straight past the parked
+  # place while the lock is free — if a parked slot could hold the head, one
+  # walked-away agent would stall the whole container.
+  wait "$slotholder" 2> /dev/null
+  local past0 past1
+  past0="$(now_s)"
+  OS_VERIFY_LOCK_WAIT=5 bash "$SELF" -c true > /dev/null 2>&1
+  local pastrc=$?
+  past1="$(now_s)"
+  st_case 'a parked slot blocks nobody — an unrelated call acquires normally' "$pastrc" 0
+  st_case 'and is not made to wait by it' "$((past1 - past0 <= 3))" 1
+
+  # And the place really is the ORIGINAL one: resuming must not re-stamp
+  # arrival, or the caller is quietly sent to the back while being told it
+  # resumed.
+  OS_VERIFY_LOCK_SLOT=probe-slot bash "$SELF" -c true > /dev/null 2>&1
+  st_case 'resuming a slot consumes it once acquired' \
+    "$(ls "$sq"/*-sprobe-slot 2> /dev/null | wc -l | tr -d ' ')" 0
+
+  # ⭐ THE KILL THIS MECHANISM EXISTS FOR, and the one the EXIT trap cannot
+  # cover. A queued agent turn does not usually end by timing out politely; it
+  # ends when the harness's foreground ceiling kills it, and a SIGKILL (or a
+  # kill delivered to the whole process group) runs no trap at all. Measured
+  # while building this: a real queued call was killed at its ceiling ~210s
+  # into the wait and its ticket was reaped as an ordinary dead one -- the call
+  # that most needed its place kept was precisely the one that lost it.
+  #
+  # So the place must survive a killed owner, and an ORDINARY ticket must still
+  # be reaped exactly as before. Both directions are asserted: a mechanism that
+  # kept every dead ticket would be a queue that never drains.
+  rm -rf "$sq"
+  bash "$SELF" -c 'sleep 8' > /dev/null 2>&1 &
+  local killholder=$!
+  sleep 1.5
+  OS_VERIFY_LOCK_SLOT=kill-slot OS_VERIFY_LOCK_WAIT=30 bash "$SELF" -c true > /dev/null 2>&1 &
+  local killwaiter=$!
+  sleep 2
+  kill -9 "$killwaiter" 2> /dev/null
+  wait "$killwaiter" 2> /dev/null
+  local killed_n=0 kf
+  for kf in "$sq"/*-skill-slot; do
+    [[ -f "$kf" ]] && killed_n=$((killed_n + 1))
+  done
+  st_case 'a slot whose owner was SIGKILLed keeps its place (no trap ran)' "$killed_n" 1
+  st_case 'and the queue scan reads it as parked, not as a waiter' \
+    "$(ticket_state "$(slot_ticket_path kill-slot)")" parked
+  st_case 'and it is not counted as waiting' "$(queue_live | wc -l | tr -d ' ')" 0
+  st_case 'while an ORDINARY killed ticket is still reaped as dead' \
+    "$(printf '999999 12345 %s ordinary\n' "$(now_s)" > "${sq}/00000000000000000011-999999"
+       ticket_state "${sq}/00000000000000000011-999999")" dead
+  kill "$killholder" 2> /dev/null
+  wait "$killholder" 2> /dev/null
+  rm -rf "$sq"
+  mkdir -p "$sq"
+
+  # Ageing: a place older than SLOT_MAX_AGE_S is pruned like any dead ticket,
+  # so the priority it carries is bounded rather than indefinite.
+  mkdir -p "$sq"
+  printf '0 0 %s stale-slot\n' "$(($(now_s) - SLOT_MAX_AGE_S - 60))" > "${sq}/00000000000000000009-sstale"
+  printf '0 0 %s fresh-slot\n' "$(now_s)" > "${sq}/00000000000000000010-sfresh"
+  st_case 'an over-age parked slot is dead' "$(ticket_state "${sq}/00000000000000000009-sstale")" dead
+  st_case 'a fresh parked slot is parked, not active and not dead' \
+    "$(ticket_state "${sq}/00000000000000000010-sfresh")" parked
+  queue_live > /dev/null 2>&1
+  st_case 'and a queue scan removes the stale one' \
+    "$([[ -e "${sq}/00000000000000000009-sstale" ]] && echo yes || echo no)" no
+  st_case 'while RETAINING the live parked place it scanned past' \
+    "$([[ -e "${sq}/00000000000000000010-sfresh" ]] && echo yes || echo no)" yes
+  st_case 'a parked place is never counted as a waiter' \
+    "$(queue_live | wc -l | tr -d ' ')" 0
+  st_case 'but --status still shows it, with the fact that it blocks nobody' \
+    "$(bash "$SELF" --status 2>&1 | grep -c 'blocks nobody')" 1
+  rm -rf "$sq"
+
   QUEUE_DIR="${tmp}/q"
   HOLDER_FILE="${tmp}/holder"
   mkdir -p "$QUEUE_DIR"
@@ -1442,6 +2282,65 @@ mode_self_test() {
   wait
   st_case 'three staggered waiters acquire in arrival order' "$(< "$order")" ABC
 
+  # (g2) the verdict WORD: what an exit code may and may not claim (#12288).
+  #
+  # The defect these pin: a batch whose MIDDLE command failed printed
+  # `VERDICT command-exit 0` — a pass, on the one line every dispatch brief
+  # tells a dev to quote. It failed in the GREEN direction, which is why it
+  # survived: nothing anywhere was red.
+  #
+  # Pinned from BOTH directions on purpose, because only the pair is a pin. The
+  # batch must not print the certified word, AND an ordinary command must still
+  # print it — a "fix" that labelled every run a batch would pass the first
+  # case alone while destroying the meaning of the line for everyone.
+  local batchout batchrc bled
+  bled="${tmp}/batch.ledger"
+  rm -f "$bled"
+  batchout="$(OS_VERIFY_LOCK_LEDGER="$bled" bash "$SELF" -c 'echo one; sh -c "exit 1"; echo three' 2>&1)"
+  batchrc=$?
+  st_case 'a mid-batch failure does NOT print the certified verdict word' \
+    "$(printf '%s' "$batchout" | grep -c 'VERDICT command-exit 0')" 0
+  st_case 'it prints batch-last-exit instead, so the number names what it is' \
+    "$(printf '%s' "$batchout" | grep -c 'VERDICT batch-last-exit 0')" 1
+  st_case 'and the verdict LINE ITSELF says it is not a verdict on the whole command' \
+    "$([[ "$batchout" == *'NOT A VERDICT ON THE WHOLE COMMAND'* ]] && echo yes || echo no)" yes
+  st_case 'and names the repair, so the caller can get a certified verdict instead' \
+    "$([[ "$batchout" == *"join the parts with '&&'"* ]] && echo yes || echo no)" yes
+  st_case 'and warns BEFORE the lock is spent, not only after the run' \
+    "$([[ "$batchout" == *'CANNOT CERTIFY IT'* ]] && echo yes || echo no)" yes
+  # The three invariants that keep this a LABEL and not a behaviour change.
+  st_case 'the batch still ran in full — nothing is refused or truncated' \
+    "$([[ "$batchout" == *one* && "$batchout" == *three* ]] && echo yes || echo no)" yes
+  st_case "and the command's own exit code still passes through untouched" "$batchrc" 0
+  st_case 'and the ledger records the uncertified run as such, so it is findable later' \
+    "$(grep -c 'outcome=batch-last-exit' "$bled" 2> /dev/null || true)" 1
+
+  # The other direction, and the forms in between. Each one is a claim about
+  # what the exit status can prove, not about how the string looks.
+  st_case 'an ordinary single command still gets the certified word' \
+    "$(bash "$SELF" -c true 2>&1 | grep -c 'VERDICT command-exit 0')" 1
+  st_case 'an && chain is certified — short-circuit means a 0 proves every link passed' \
+    "$(bash "$SELF" -c 'true && true' 2>&1 | grep -c 'VERDICT command-exit 0')" 1
+  st_case 'an && chain that fails is certified too, and reports the failing exit' \
+    "$(bash "$SELF" -c 'sh -c "exit 3" && true' 2>&1 | grep -c 'VERDICT command-exit 3')" 1
+  st_case 'a pipeline is NOT certified — a red left-hand side exits 0 through it' \
+    "$(bash "$SELF" -c 'sh -c "exit 1" | cat' 2>&1 | grep -c 'VERDICT batch-last-exit 0')" 1
+  st_case 'nor is a || fallback, whose 0 can be the fallback speaking' \
+    "$(bash "$SELF" -c 'sh -c "exit 1" || true' 2>&1 | grep -c 'VERDICT batch-last-exit 0')" 1
+  st_case 'nor a newline-separated sequence, which is a `;` by another spelling' \
+    "$(bash "$SELF" -c 'sh -c "exit 1"
+true' 2>&1 | grep -c 'VERDICT batch-last-exit 0')" 1
+  # Quoting decides whether an operator belongs to the CHAIN or to one element
+  # of it, and a scanner that got this wrong would refuse to certify ordinary
+  # commands — the over-labelling that would make the word meaningless.
+  st_case 'a ; inside quotes is an ARGUMENT, not a sequence, and stays certified' \
+    "$(bash "$SELF" -c 'printf "%s" "a; b" > /dev/null' 2>&1 | grep -c 'VERDICT command-exit 0')" 1
+  local subcmd='printf "%s" "$(echo x; echo y)" > /dev/null'
+  st_case 'a ; inside a substitution is one element, not a chain, and stays certified' \
+    "$(bash "$SELF" -c "$subcmd" 2>&1 | grep -c 'VERDICT command-exit 0')" 1
+  st_case 'argv mode never reaches a shell, so it is certified by construction' \
+    "$(bash "$SELF" -- true 2>&1 | grep -c 'VERDICT command-exit 0')" 1
+
   # (h) the filter preflight (#10853). BOTH directions, because a guard shown
   # only to red could be a guard that reds on everything -- which here would
   # block the fleet's verification. The commands are `echo`, so what is measured
@@ -1471,7 +2370,10 @@ mode_self_test() {
   # The other direction: a REAL package name must sail straight through, run,
   # and report an ordinary command-exit verdict.
   : > "${fp_ran}.live"
-  out="$(cd "$repo_root" && bash "$SELF" -c "echo pnpm --filter @objectstack/hono test; : > '${fp_ran}.liveran'" 2>&1)"
+  # `&&`, not `;`: this case asserts the CERTIFIED verdict word, and a `;` would
+  # make the fixture itself a batch (#12288). `echo` cannot fail, so the marker
+  # is written either way and what the case tests is unchanged.
+  out="$(cd "$repo_root" && bash "$SELF" -c "echo pnpm --filter @objectstack/hono test && : > '${fp_ran}.liveran'" 2>&1)"
   st_case 'a filter naming a REAL package is not refused' "$?" 0
   st_case 'and its command actually ran' \
     "$([[ -e "${fp_ran}.liveran" ]] && echo ran || echo 'did not run')" ran
@@ -1536,6 +2438,10 @@ main() {
       ;;
     --show-budget)
       mode_show_budget
+      exit 0
+      ;;
+    --report)
+      mode_report
       exit 0
       ;;
     -h | --help)

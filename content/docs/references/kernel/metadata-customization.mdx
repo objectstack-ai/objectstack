@@ -122,6 +122,26 @@ const result = CustomizationOriginSchema.parse(data);
 | **autoResolved** | `{ path: string; resolution: string; description?: string }[]` | optional | Summary of auto-resolved changes |
 | **stats** | `{ totalFields: integer; unchanged: integer; autoResolved: integer; conflicts: integer }` | optional |  |
 
+### Nested Shape: `MergeResult.conflicts[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **path** | `string` | ✅ | JSON path to the conflicting field |
+| **baseValue** | `any` | ✅ | Value in the old package version |
+| **incomingValue** | `any` | ✅ | Value in the new package version |
+| **customValue** | `any` | ✅ | Customer customized value |
+| **suggestedResolution** | `Enum<'keep-custom' \| 'accept-incoming' \| 'manual'>` | ✅ | Suggested resolution strategy |
+| **reason** | `string` | optional | Explanation for the suggested resolution |
+
+### Nested Shape: `MergeResult.stats`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **totalFields** | `integer` | ✅ | Total fields evaluated |
+| **unchanged** | `integer` | ✅ | Fields with no changes |
+| **autoResolved** | `integer` | ✅ | Fields auto-resolved |
+| **conflicts** | `integer` | ✅ | Fields with conflicts |
+
 
 ---
 
@@ -160,6 +180,16 @@ const result = CustomizationOriginSchema.parse(data);
 | **createdBy** | `string` | optional |  |
 | **updatedAt** | `string` | optional |  |
 | **updatedBy** | `string` | optional |  |
+
+### Nested Shape: `MetadataOverlay.changes[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **path** | `string` | ✅ | JSON path to the changed field |
+| **originalValue** | `any` | optional | Original value from the package |
+| **currentValue** | `any` | ✅ | Current customized value |
+| **changedBy** | `string` | optional | User or admin who made this change |
+| **changedAt** | `string` | optional | Timestamp of the change |
 
 
 ---

@@ -569,7 +569,11 @@ describe('#10503 the dispatcher /metadata transport decides org scope on the FOL
             plural: 'translations',
             singular: 'translation',
             item: {
-                name: 'zh-CN',
+                // [#12194] The addressing name is snake_case — the item-name
+                // grammar refuses `zh-CN` as an ADDRESSING key (uppercase +
+                // dash). The BCP-47 spelling lives in `locale`, which is this
+                // type's required identity; the name was always free to choose.
+                name: 'zh_cn',
                 label: 'Chinese (Simplified)',
                 locale: 'zh-CN',
                 messages: { greeting: '你好' },

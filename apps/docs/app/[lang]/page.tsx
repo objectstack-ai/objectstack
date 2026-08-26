@@ -4,6 +4,21 @@ import { ArrowRight, Check } from 'lucide-react';
 import { Bricolage_Grotesque, IBM_Plex_Mono } from 'next/font/google';
 import { HomeLayout } from 'fumadocs-ui/layouts/home';
 import { baseOptions, gitConfig } from '@/lib/layout.shared';
+import { absoluteUrl, HERO_COVER } from '@/lib/site';
+import {
+  APACHE_2_0_URL,
+  GITHUB_REPO_URL,
+  JsonLd,
+  ORGANIZATION,
+  ORGANIZATION_REF,
+  SOFTWARE_ID,
+  YOUTUBE_CHANNEL_URL,
+  type JsonLdNode,
+} from '@/lib/structured-data';
+import { YouTubeEmbed } from '@/components/youtube-embed';
+
+/** The 90-second overview — the same video the README's hero cover links to. */
+const OVERVIEW_VIDEO_ID = 'CX_FlOoOtr0';
 
 const display = Bricolage_Grotesque({
   subsets: ['latin'],
@@ -16,13 +31,96 @@ const mono = IBM_Plex_Mono({
   variable: '--font-l-mono',
 });
 
+const HOME_TITLE = 'Metadata framework for AI-written apps';
+const HOME_DESCRIPTION =
+  'ObjectStack turns the whole app — data model, UI, workflows, permissions — into typed metadata: a complete CRM in under 150k tokens, one context window.';
+
+/**
+ * The homepage's metadata. Its social card is the shared hero cover,
+ * `HERO_COVER` from `lib/site.ts` — the same image the video poster below uses.
+ *
+ * ⚠️ Deliberately NOT the docs card generator. `app/og/docs/[...slug]/route.tsx`
+ * renders from a `source.getPage()` result, and the homepage has no MDX file
+ * behind it — there is no slug to hand it. It reuses the hero cover instead,
+ * which is already shipped and already the video poster on this page, so the
+ * shared card costs no extra bytes and no extra route.
+ *
+ * The path used to be spelled as a literal here, again in the blog's card, and a
+ * third time as the `poster` further down this file — with a note asking whoever
+ * added a third consumer to hoist it. That happened; it lives in `lib/site.ts`
+ * now, and the reasons a re-encode has to be careful live with it.
+ *
+ * Left site-relative: `metadataBase` in `app/layout.tsx` absolutises it.
+ */
 export const metadata: Metadata = {
-  title: {
-    absolute: 'ObjectStack — Apps small enough for AI to hold whole.',
+  title: HOME_TITLE,
+  description: HOME_DESCRIPTION,
+  /**
+   * `/` is the one indexable spelling of the homepage: `proxy.ts` rewrites `/` to
+   * this route internally, and the prefixed form `/en` 307s back to `/`. Every
+   * other spelling a crawler reaches it by — query strings, tracking parameters —
+   * points here.
+   */
+  alternates: { canonical: absoluteUrl('/') },
+  openGraph: {
+    type: 'website',
+    title: HOME_TITLE,
+    description: HOME_DESCRIPTION,
+    // Same absolute URL as the canonical link — see the docs route for why the
+    // two must not drift.
+    url: absoluteUrl('/'),
+    images: [HERO_COVER],
   },
-  description:
-    'ObjectStack turns the whole app — data model, UI, workflows, permissions — into typed metadata: a complete CRM in under 150k tokens, one context window. Agents read it whole, reason it whole, refactor it whole. The business logic alone — every object, workflow and permission — is under 100k tokens; the UI adds just 50k more. That metadata is your business ontology — an open, versioned definition you own. Strict TypeScript, Zod, and a validation gate catch the agent\'s mistakes at authoring time, and the runtime derives the database, REST API, UI, and MCP server, enforcing permissions and audit on every call.',
+  twitter: {
+    card: 'summary_large_image',
+    title: HOME_TITLE,
+    description: HOME_DESCRIPTION,
+    images: [HERO_COVER.url],
+  },
 };
+
+/**
+ * The homepage's structured data.
+ *
+ * ⚠️ **`SoftwareSourceCode`, not `SoftwareApplication`.** Both are `CreativeWork`
+ * subtypes that carry `license`, so either satisfies the card; the choice is
+ * about what the validator does with it. Google's Software App rich result
+ * *requires* `offers`, `aggregateRating` or `review` — ObjectStack is an
+ * Apache-2.0 runtime with no price, no store listing and no ratings, so a
+ * `SoftwareApplication` node here would report missing-required-property errors
+ * in the very test this card is accepted against, in exchange for a rich result
+ * it can never be eligible for. `SoftwareSourceCode` has no Google rich-result
+ * feature and therefore no required properties, and `codeRepository` /
+ * `programmingLanguage` / `runtimePlatform` describe what this project actually
+ * is.
+ *
+ * Every field is drawn from something already on this page or in `lib/`: the
+ * title and description are the same constants `metadata` uses, the image is
+ * `HERO_COVER`, the licence is the repo's own, and the two `sameAs` links are the
+ * GitHub organisation and the YouTube channel this page links to in its hero.
+ */
+function homeGraph(): JsonLdNode[] {
+  return [
+    ORGANIZATION,
+    {
+      '@type': 'SoftwareSourceCode',
+      '@id': SOFTWARE_ID,
+      name: 'ObjectStack',
+      url: absoluteUrl('/'),
+      // Same two strings `metadata` above emits, so the page cannot describe
+      // itself one way to a crawler and another way to a social card.
+      headline: HOME_TITLE,
+      description: HOME_DESCRIPTION,
+      image: absoluteUrl(HERO_COVER.url),
+      codeRepository: GITHUB_REPO_URL,
+      programmingLanguage: 'TypeScript',
+      runtimePlatform: 'Node.js',
+      license: APACHE_2_0_URL,
+      author: ORGANIZATION_REF,
+      maintainer: ORGANIZATION_REF,
+    },
+  ];
+}
 
 const VOCABULARY: { tag: string; title: string; copy: string }[] = [
   { tag: 'object', title: 'Objects & fields', copy: 'Typed schemas with relations, validation, formulas, and files.' },
@@ -81,6 +179,7 @@ function DiffLine({ children, plain }: { children: React.ReactNode; plain?: bool
 export default function HomePage() {
   return (
     <HomeLayout {...baseOptions()}>
+      <JsonLd graph={homeGraph()} />
       <div
         className={`${display.variable} ${mono.variable} relative overflow-hidden`}
         style={{
@@ -105,72 +204,140 @@ export default function HomePage() {
         />
 
         {/* ── hero ─────────────────────────────────────────────── */}
-        <section className="relative mx-auto grid w-full max-w-6xl items-center gap-12 px-6 pt-20 pb-16 md:grid-cols-[1.05fr_0.95fr] md:pt-28 md:pb-24">
-          <div>
-            <p className="text-xs font-medium tracking-[0.18em] text-fd-muted-foreground uppercase" style={{ fontFamily: 'var(--l-mono)' }}>
-              Open protocol &amp; runtime · Apache-2.0
-            </p>
-            <h1
-              className="mt-5 text-[2.6rem]/[1.06] font-bold tracking-tight text-balance md:text-6xl/[1.04]"
-              style={{ fontFamily: 'var(--l-display)' }}
+        <section className="relative mx-auto w-full max-w-5xl px-6 pt-16 text-center md:pt-20">
+          <p className="text-xs font-medium tracking-[0.18em] text-fd-muted-foreground uppercase" style={{ fontFamily: 'var(--l-mono)' }}>
+            Open protocol &amp; runtime · Apache-2.0
+          </p>
+          <h1
+            className="mx-auto mt-5 max-w-3xl text-[2.6rem]/[1.06] font-bold tracking-tight text-balance md:text-6xl/[1.04]"
+            style={{ fontFamily: 'var(--l-display)' }}
+          >
+            Apps small enough{' '}
+            <span className="block bg-gradient-to-r from-indigo-500 to-purple-500 bg-clip-text text-transparent dark:from-indigo-400 dark:to-purple-400">
+              for AI to hold whole.
+            </span>
+          </h1>
+          <p className="mx-auto mt-6 max-w-2xl text-lg text-fd-muted-foreground text-pretty">
+            ObjectStack turns the whole app — data model, UI, workflows, permissions — into
+            typed metadata: a complete CRM in under 150k tokens, one context window. Agents
+            read it whole, reason it whole, refactor it whole.
+          </p>
+          <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
+            <Link
+              href="/docs/getting-started"
+              className="inline-flex items-center gap-2 rounded-lg bg-fd-primary px-5 py-2.5 text-sm font-medium text-fd-primary-foreground transition-colors hover:bg-fd-primary/90"
             >
-              Apps small enough{' '}
-              <span className="block bg-gradient-to-r from-indigo-500 to-purple-500 bg-clip-text text-transparent dark:from-indigo-400 dark:to-purple-400">
-                for AI to hold whole.
-              </span>
-            </h1>
-            <p className="mt-6 max-w-xl text-lg text-fd-muted-foreground text-pretty">
-              ObjectStack turns the whole app — data model, UI, workflows, permissions — into
-              typed metadata: a complete CRM in under 150k tokens, one context window. Agents
-              read it whole, reason it whole, refactor it whole.
-            </p>
-            <p className="mt-4 max-w-xl text-lg text-fd-muted-foreground text-pretty">
+              Get started
+              <ArrowRight className="size-4" />
+            </Link>
+            <Link
+              href="/docs"
+              className="inline-flex items-center rounded-lg border border-fd-border px-5 py-2.5 text-sm font-medium transition-colors hover:bg-fd-accent hover:text-fd-accent-foreground"
+            >
+              Documentation
+            </Link>
+            <a
+              href={`https://github.com/${gitConfig.user}/${gitConfig.repo}`}
+              target="_blank"
+              rel="noreferrer noopener"
+              className="inline-flex items-center rounded-lg border border-fd-border px-5 py-2.5 text-sm font-medium transition-colors hover:bg-fd-accent hover:text-fd-accent-foreground"
+            >
+              GitHub
+            </a>
+            <a
+              href={YOUTUBE_CHANNEL_URL}
+              target="_blank"
+              rel="noreferrer noopener"
+              className="inline-flex items-center rounded-lg border border-fd-border px-5 py-2.5 text-sm font-medium transition-colors hover:bg-fd-accent hover:text-fd-accent-foreground"
+            >
+              YouTube
+            </a>
+          </div>
+          <div
+            className="mt-8 flex flex-wrap items-center justify-center gap-x-3 gap-y-2 text-[13px] text-fd-muted-foreground"
+            style={{ fontFamily: 'var(--l-mono)' }}
+          >
+            <span>Fits in an agent&apos;s context</span>
+            <span aria-hidden className="text-fd-border">|</span>
+            <span>Typed, validated, governed</span>
+            <span aria-hidden className="text-fd-border">|</span>
+            <span>Self-host anywhere</span>
+          </div>
+        </section>
+
+        {/* ── the 90-second overview — the page's first visual ──── */}
+        <section className="relative mx-auto w-full max-w-5xl px-6 pt-12 md:pt-14">
+          <figure className="relative">
+            <YouTubeEmbed
+              videoId={OVERVIEW_VIDEO_ID}
+              title="ObjectStack in 90 Seconds"
+              poster={HERO_COVER.url}
+            />
+            <figcaption
+              className="mt-3 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-[12px] text-fd-muted-foreground"
+              style={{ fontFamily: 'var(--l-mono)' }}
+            >
+              <span>▶ ObjectStack in 90 Seconds</span>
+              <a
+                href={YOUTUBE_CHANNEL_URL}
+                target="_blank"
+                rel="noreferrer noopener"
+                className="inline-flex items-center gap-1 text-fd-foreground underline underline-offset-4 transition-colors hover:text-fd-primary"
+              >
+                More videos on YouTube
+                <ArrowRight className="size-3" />
+              </a>
+            </figcaption>
+          </figure>
+        </section>
+
+        {/* ── the claim the video makes, in prose ──────────────── */}
+        <section className="relative mx-auto w-full max-w-5xl px-6 pt-12 md:pt-14">
+          <div className="grid gap-8 md:grid-cols-2">
+            <p className="text-lg text-fd-muted-foreground text-pretty">
               The business logic alone — every object, workflow and permission — is under 100k
               tokens; the UI adds just 50k more.
             </p>
-            <p className="mt-4 max-w-xl text-base text-fd-muted-foreground text-pretty">
+            <p className="text-base text-fd-muted-foreground text-pretty">
               That metadata is your business ontology — an open, versioned definition you own.
-              Strict TypeScript, Zod schemas, and a validation gate catch the agent's mistakes
+              Strict TypeScript, Zod schemas, and a validation gate catch the agent&apos;s mistakes
               at authoring time, and the runtime derives the database, REST API, UI, and MCP
               server — permissions and audit enforced on every call.
             </p>
-            <div className="mt-8 flex flex-wrap items-center gap-3">
-              <Link
-                href="/docs/getting-started"
-                className="inline-flex items-center gap-2 rounded-lg bg-fd-primary px-5 py-2.5 text-sm font-medium text-fd-primary-foreground transition-colors hover:bg-fd-primary/90"
-              >
-                Get started
-                <ArrowRight className="size-4" />
-              </Link>
-              <Link
-                href="/docs"
-                className="inline-flex items-center rounded-lg border border-fd-border px-5 py-2.5 text-sm font-medium transition-colors hover:bg-fd-accent hover:text-fd-accent-foreground"
-              >
-                Documentation
-              </Link>
-              <a
-                href={`https://github.com/${gitConfig.user}/${gitConfig.repo}`}
-                target="_blank"
-                rel="noreferrer noopener"
-                className="inline-flex items-center rounded-lg border border-fd-border px-5 py-2.5 text-sm font-medium transition-colors hover:bg-fd-accent hover:text-fd-accent-foreground"
-              >
-                GitHub
-              </a>
-            </div>
-            <div
-              className="mt-8 flex flex-wrap items-center gap-x-3 gap-y-2 text-[13px] text-fd-muted-foreground"
-              style={{ fontFamily: 'var(--l-mono)' }}
-            >
-              <span>Fits in an agent's context</span>
-              <span aria-hidden className="text-fd-border">|</span>
-              <span>Typed, validated, governed</span>
-              <span aria-hidden className="text-fd-border">|</span>
-              <span>Self-host anywhere</span>
-            </div>
+          </div>
+        </section>
+
+        {/* ── 01 · the loop ────────────────────────────────────── */}
+        <section className="relative mx-auto w-full max-w-6xl px-6 py-16 md:py-20">
+          <div className="flex items-baseline gap-4 border-t border-fd-border pt-8">
+            <span className="text-xs tracking-[0.18em] text-fd-muted-foreground uppercase" style={{ fontFamily: 'var(--l-mono)' }}>
+              01 · The loop
+            </span>
+          </div>
+          <h2 className="mt-4 max-w-2xl text-3xl font-bold tracking-tight md:text-4xl" style={{ fontFamily: 'var(--l-display)' }}>
+            From requirement to running app
+          </h2>
+          <div className="mt-10 grid gap-8 md:grid-cols-3">
+            {STEPS.map((s) => (
+              <div key={s.num} className="group relative">
+                <div className="flex items-center gap-3">
+                  <span className="text-sm text-fd-muted-foreground" style={{ fontFamily: 'var(--l-mono)' }}>{s.num}</span>
+                  <div className="h-px flex-1 bg-fd-border" aria-hidden />
+                </div>
+                <h3 className="mt-4 text-lg font-semibold" style={{ fontFamily: 'var(--l-display)' }}>{s.title}</h3>
+                <p
+                  className="mt-2 inline-block rounded-md border border-fd-border bg-fd-muted/50 px-2.5 py-1 text-[12.5px] text-fd-muted-foreground"
+                  style={{ fontFamily: 'var(--l-mono)' }}
+                >
+                  {s.cmd}
+                </p>
+                <p className="mt-3 text-[15px] text-fd-muted-foreground text-pretty">{s.copy}</p>
+              </div>
+            ))}
           </div>
 
           {/* the artifact card — requirement → metadata → gate → preview */}
-          <figure className="relative">
+          <figure className="relative mx-auto mt-12 max-w-2xl">
             <div className="overflow-hidden rounded-xl border border-fd-border bg-fd-card shadow-[0_24px_60px_-24px_rgb(0_0_0/0.35)]">
               <div className="border-b border-fd-border px-4 py-3" style={{ fontFamily: 'var(--l-mono)' }}>
                 <p className="text-[11px] tracking-wider text-fd-muted-foreground uppercase">you → claude code</p>
@@ -215,36 +382,6 @@ export default function HomePage() {
               one definition → tables · REST API · Console UI · MCP tools
             </figcaption>
           </figure>
-        </section>
-
-        {/* ── 01 · the loop ────────────────────────────────────── */}
-        <section className="relative mx-auto w-full max-w-6xl px-6 py-16 md:py-20">
-          <div className="flex items-baseline gap-4 border-t border-fd-border pt-8">
-            <span className="text-xs tracking-[0.18em] text-fd-muted-foreground uppercase" style={{ fontFamily: 'var(--l-mono)' }}>
-              01 · The loop
-            </span>
-          </div>
-          <h2 className="mt-4 max-w-2xl text-3xl font-bold tracking-tight md:text-4xl" style={{ fontFamily: 'var(--l-display)' }}>
-            From requirement to running app
-          </h2>
-          <div className="mt-10 grid gap-8 md:grid-cols-3">
-            {STEPS.map((s) => (
-              <div key={s.num} className="group relative">
-                <div className="flex items-center gap-3">
-                  <span className="text-sm text-fd-muted-foreground" style={{ fontFamily: 'var(--l-mono)' }}>{s.num}</span>
-                  <div className="h-px flex-1 bg-fd-border" aria-hidden />
-                </div>
-                <h3 className="mt-4 text-lg font-semibold" style={{ fontFamily: 'var(--l-display)' }}>{s.title}</h3>
-                <p
-                  className="mt-2 inline-block rounded-md border border-fd-border bg-fd-muted/50 px-2.5 py-1 text-[12.5px] text-fd-muted-foreground"
-                  style={{ fontFamily: 'var(--l-mono)' }}
-                >
-                  {s.cmd}
-                </p>
-                <p className="mt-3 text-[15px] text-fd-muted-foreground text-pretty">{s.copy}</p>
-              </div>
-            ))}
-          </div>
         </section>
 
         {/* ── 02 · four gates ──────────────────────────────────── */}
