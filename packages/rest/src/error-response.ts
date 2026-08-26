@@ -391,8 +391,19 @@ function declaredHttpStatus(error: any): number | undefined {
  *    of `declaredCode` means demotion, exactly as `ApiErrorSchema.declaredCode`
  *    documents for the nested envelope.
  *  - the producer spelled NO string code → `{}`. Nothing is invented: ADR-0112
- *    says the PRODUCER names the condition, so a half-declaration is honoured
- *    for the half that was declared. That is the answer this file already gave
+ *    D4 governs the semantic-CODE channel — `error.code` closed at every door,
+ *    the producer's own spelling honoured beside it as `declaredCode` — so a
+ *    half-declaration is honoured for the half that was DECLARED.
+ *
+ *    ⚠️ Axis, stated once here because the other sites echo this file: the
+ *    ADR rules the CODE. It does not rule what HTTP status an undeclared
+ *    throw deserves, and "the PRODUCER names the condition" is this file's
+ *    own prose for the code rule — the sentence does not appear in
+ *    ADR-0112 and must not be cited as though it ruled the status axis.
+ *    Read unqualified it was taken for a status ruling once already, and
+ *    argued for a `500` on a contract question the ADR is silent on.
+ *
+ *    That is the answer this file already gave
  *    (see the 5xx arm of {@link mapDataError}) and it is deliberately preserved
  *    — narrowing the vocabulary must not start ADDING codes to bodies that
  *    carried none.
@@ -920,9 +931,14 @@ function classifyDataError(error: any, object?: string): { status: number; body:
         // empty string from landing on the wire as an ADR-0112 code.
         //
         // A 5xx with NO code passes its status through carrying no code at all,
-        // deliberately: ADR-0112 says the PRODUCER names the condition, so a
+        // deliberately: ADR-0112 D4 governs the semantic-CODE channel — the
+        // producer names the condition on the CODE axis (see the
+        // `resolveThrownHttpError` docblock above for why the phrase is this
+        // file's own prose and not an ADR quotation) — so a
         // half-declaration is honoured for the half that was declared and
-        // nothing is invented for the half that was not. That is the answer
+        // nothing is invented for the half that was not. The status half is
+        // kept on #5582/#7525's rule, not the ADR's: ADR-0112 rules no HTTP
+        // status here. That is the answer
         // `resolveErrorResponse` already gives the same shape
         // (`rest-5xx-message-sanitization.test.ts` §"a dynamically-assigned
         // status is treated identically"), and inventing `INTERNAL_ERROR` here
