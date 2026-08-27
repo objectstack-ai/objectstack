@@ -3,6 +3,7 @@
   "entry": ".",
   "exports": [
     "ADMIN_FULL_ACCESS (const)",
+    "ADMIN_FULL_ACCESS_CAPABILITIES (const)",
     "ALL_CONVERSIONS (const)",
     "ASSEMBLED_VIEW_ITEMS_KEY (const)",
     "AUDIENCE_ANCHOR_POSITIONS (const)",

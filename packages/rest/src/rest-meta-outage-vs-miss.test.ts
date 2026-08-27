@@ -95,7 +95,7 @@ let errorSpy: ReturnType<typeof vi.spyOn>;
 beforeEach(() => { errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {}); });
 afterEach(() => { errorSpy.mockRestore(); });
 
-const loggedText = () => errorSpy.mock.calls.map((c) => JSON.stringify(c.map(String))).join('\n');
+const loggedText = () => errorSpy.mock.calls.map((c: unknown[]) => JSON.stringify(c.map(String))).join('\n');
 
 describe('[#5532] an unreadable metadata store reaches the client as a retryable 503', () => {
     it('503 + SERVICE_UNAVAILABLE, and the prose is withheld', async () => {

@@ -40,7 +40,7 @@ export type {
 // pull applies this; exported so a host that assembles its own flow list (or a
 // test) collapses contenders the same deterministic way instead of inventing a
 // second precedence.
-export { resolveFlowPrecedence, describeFlowContender } from './flow-precedence.js';
+export { resolveFlowPrecedence, describeFlowContender, renderFlowContender } from './flow-precedence.js';
 export type { FlowPrecedenceWinner } from './flow-precedence.js';
 
 // Per-run summary (#4354): the fold that turns a run's step log into

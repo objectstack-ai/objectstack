@@ -398,7 +398,26 @@ export async function bootstrapPlatformAdmin(
   // it is the earliest user and steals the platform-admin promotion, leaving
   // the real admin login without `setup.access` / `studio.access` (Setup and
   // Studio then stay invisible even though login succeeds).
-  const isHumanUser = (u: any) => u && u.id !== SystemUserId.SYSTEM && u.role !== 'system';
+  //
+  // [#12515] The `typeof` guard mirrors `isHumanUserRow`
+  // (`plugin-auth/src/audience-posture.ts`) — the #11767-consolidated owner of
+  // this same question — rather than inventing a stricter rule of its own.
+  // Without it a truthy NON-object input (`'usr_alice'`, a number, `true`)
+  // scores HUMAN here: `.id` and `.role` are both `undefined` on a non-object,
+  // so both comparisons pass. `isHumanUserRow` calls that same input non-human,
+  // and this is the copy that PERFORMS the platform-admin promotion — so the
+  // divergence failed OPEN on the security-critical side, which is why this
+  // copy moves rather than the other. `!!` completes the mirror: both now
+  // return a real boolean instead of echoing a falsy input back.
+  //
+  // Direction checked before tightening, because over-tightening here would
+  // mean an install unable to promote its first admin: every row a real
+  // `sys_user` read yields is a plain object, so the guard changes no
+  // reachable answer. The identical read (`sys_user`, `where: {}`, `limit: 50`,
+  // system context) is already filtered by `isHumanUserRow` in `plugin-auth`'s
+  // dev-admin seed, so this guard is the incumbent on this very population.
+  const isHumanUser = (u: any) =>
+    !!u && typeof u === 'object' && u.id !== SystemUserId.SYSTEM && u.role !== 'system';
   const oldestOf = (users: any[]) =>
     [...users].sort((a, b) => {
       const ta = a.created_at ? new Date(a.created_at).getTime() : 0;

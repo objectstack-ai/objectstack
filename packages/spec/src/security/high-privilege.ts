@@ -62,7 +62,15 @@ export function describeHighPrivilegeBits(def: any): string | null {
     for (const [objName, rawPerm] of Object.entries(objects)) {
       const p: any = rawPerm ?? {};
       if (p.viewAllRecords || p.modifyAllRecords) return `View/Modify All Data on '${objName}'`;
-      if (p.allowDelete || p.allowPurge || p.allowTransfer) return `delete/purge/transfer on '${objName}'`;
+      // The class message keeps the D5 name "delete/purge/transfer", but the
+      // `allowPurge` READ is gone (#12497): the bit is a retiredKey tombstone —
+      // no authored or freshly-parsed set can carry it, and a legacy stored row
+      // that still does grants nothing (no `purge` operation exists, and the
+      // evaluator's mapping row retired with the bit), so flagging it guarded
+      // nothing real. When the M2 batch restores the bit and its gate row,
+      // restore the read here in the same PR — anchor bindings are re-checked
+      // at boot, so a legacy value regains no privilege silently.
+      if (p.allowDelete || p.allowTransfer) return `delete/purge/transfer on '${objName}'`;
       if (p.allowExport) return `bulk export on '${objName}'`;
     }
   }

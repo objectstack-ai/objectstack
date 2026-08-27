@@ -808,3 +808,148 @@ describe('#9451 the seed-tenancy repair leaves a durable receipt', () => {
     expect(resolveSeedTenancyLedger({ getObject: () => ({}), find: async () => [] })).toBeUndefined();
   });
 });
+
+describe('#12395 zero organizations is a third state, not the ambiguous one', () => {
+  /**
+   * The contract these cases pin is a DISCRIMINATION, not a wording:
+   * `organizationCount: 0` must not warn, and `organizationCount: 2` must still
+   * warn. Both arms are asserted in every case that can carry both, because a
+   * diagnostic silenced in both directions would pass a one-armed test while
+   * being strictly worse than the line it replaced.
+   *
+   * NOTE ON EXISTING ASSERTIONS: none were changed. The two pins that already
+   * existed on `skipped-ambiguous-organization` — `null-seam.test.ts` and
+   * runtime's `seed-tenancy-autonumber-split.integration.test.ts` — both drive
+   * the TWO-organization arm (`org_a`/`org_b`, `org_second`), which keeps its
+   * status and its warning here. No test covered the zero arm before this one.
+   */
+  function spy() {
+    const warn: Array<[string, unknown]> = [];
+    const info: Array<[string, unknown]> = [];
+    return {
+      warn,
+      info,
+      logger: {
+        info: (m: string, p?: unknown) => void info.push([m, p]),
+        warn: (m: string, p?: unknown) => void warn.push([m, p]),
+        error: () => {},
+      },
+    };
+  }
+
+  /** A seam holding one `__global__` counter and `orgs` organizations. */
+  function seam(orgs: string[], opts: { organizationProbeThrows?: boolean } = {}) {
+    const sql: string[] = [];
+    const exec = async (statement: string) => {
+      sql.push(statement);
+      if (statement.includes('WHERE 1 = 0')) return [];
+      if (statement.includes('LEFT JOIN')) {
+        return [
+          {
+            object: 'crm_case',
+            field: 'case_number',
+            global_last_value: 38,
+            // No organization-scoped row exists: the LEFT JOIN yields NULL here.
+            organization_last_value: null,
+          },
+        ];
+      }
+      if (statement.includes(ORGANIZATION_TABLE)) {
+        if (opts.organizationProbeThrows) throw new Error('connection reset by peer');
+        return orgs.map((id) => ({ id }));
+      }
+      return [];
+    };
+    return { seam: { exec, client: 'better-sqlite3' as const }, sql };
+  }
+
+  const HAZARD = 'can mint the same "unique" identifier twice';
+
+  it('[zero] does NOT warn, and reports its own state instead of the ambiguous one', async () => {
+    const log = spy();
+    const { seam: s } = seam([]);
+    const result = await backfillSeedTenancy(s, log.logger as any);
+
+    // The discrimination, arm 1.
+    expect(log.warn).toHaveLength(0);
+    expect(log.info).toHaveLength(1);
+    expect(result.status).toBe('no-organization-yet');
+    expect(log.info[0][1]).toMatchObject({ organizationCount: 0 });
+
+    // Still VISIBLE — silenced about harm, not about the observation.
+    expect(result.splits).toEqual([
+      { object: 'crm_case', field: 'case_number', globalLastValue: 38, organizationLastValue: 0 },
+    ]);
+  });
+
+  it('[several] still warns, and still names the hazard', async () => {
+    const log = spy();
+    const { seam: s } = seam(['org_a', 'org_b']);
+    const result = await backfillSeedTenancy(s, log.logger as any);
+
+    // The discrimination, arm 2 — unchanged from before this card.
+    expect(log.warn).toHaveLength(1);
+    expect(log.info).toHaveLength(0);
+    expect(result.status).toBe('skipped-ambiguous-organization');
+    expect(log.warn[0][1]).toMatchObject({ organizationCount: 2 });
+    expect(log.warn[0][0]).toContain(HAZARD);
+  });
+
+  it('[the claim moved with the state] only the ambiguous arm asserts the minting hazard', async () => {
+    // The card's actual complaint: the line claimed two live counters and an
+    // active duplicate-minting risk at a moment when exactly one counter
+    // existed. Asserting BOTH arms is what keeps this from going green on a
+    // rewrite that simply deletes the sentence everywhere.
+    const zero = spy();
+    await backfillSeedTenancy(seam([]).seam, zero.logger as any);
+    const several = spy();
+    await backfillSeedTenancy(seam(['org_a', 'org_b']).seam, several.logger as any);
+
+    expect(zero.info[0][0]).not.toContain(HAZARD);
+    expect(several.warn[0][0]).toContain(HAZARD);
+    // And the benign line says why it is benign, in the counter's own terms.
+    expect(zero.info[0][0]).toContain('exactly ONE counter');
+  });
+
+  it('[no writes] the zero state touches no data — the repair threshold is unchanged', async () => {
+    // Clause-② evidence in executable form: the set of inputs on which this
+    // migration MODIFIES data is exactly what it was — `length === 1` — so the
+    // zero arm must still issue reads only.
+    const { seam: s, sql } = seam([]);
+    const result = await backfillSeedTenancy(s, spy().logger as any);
+
+    expect(result.objectsStamped).toBe(0);
+    const writes = sql.filter((q) => /^\s*(UPDATE|DELETE|INSERT)/i.test(q));
+    expect(writes).toEqual([]);
+  });
+
+  it('[#9261] an organization probe that FAILED is not read as "no organizations yet"', async () => {
+    // The probe returns the same empty array for "none" and for "could not
+    // ask". Folding the second into the benign path would convert an outage
+    // into a reassuring info line — the confusion objectql already fixed in
+    // `resolveSystemWriteOrganization`. Unknown is not zero.
+    const log = spy();
+    const { seam: s } = seam([], { organizationProbeThrows: true });
+    const result = await backfillSeedTenancy(s, log.logger as any);
+
+    expect(result.status).toBe('skipped-ambiguous-organization');
+    expect(log.info).toHaveLength(0);
+    expect(log.warn).toHaveLength(1);
+    expect(log.warn[0][1]).toMatchObject({ organizationProbeError: 'connection reset by peer' });
+    expect(log.warn[0][0]).toContain('probe FAILED');
+  });
+
+  it('[snapshot] every list-bearing branch says the list is a probe-time snapshot', async () => {
+    // Problem 2. The affected list is read at `kernel:ready`, which a boot can
+    // reach while an over-budget inline seed is still writing — measured at 3
+    // objects named where the settled database held 9. Stated rather than
+    // reordered away; see SNAPSHOT_CAVEAT's comment for why boot does not wait.
+    const zero = spy();
+    await backfillSeedTenancy(seam([]).seam, zero.logger as any);
+    const several = spy();
+    await backfillSeedTenancy(seam(['org_a', 'org_b']).seam, several.logger as any);
+
+    expect(zero.info[0][0]).toContain('snapshot taken when the probe ran');
+    expect(several.warn[0][0]).toContain('snapshot taken when the probe ran');
+  });
+});

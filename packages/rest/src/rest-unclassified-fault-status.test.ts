@@ -118,7 +118,7 @@ beforeEach(() => { errorSpy = vi.spyOn(console, 'error').mockImplementation(() =
 afterEach(() => { errorSpy.mockRestore(); });
 
 /** Everything the error channel printed, flattened for substring searching. */
-const loggedText = () => errorSpy.mock.calls.map((c) => JSON.stringify(c.map(String))).join('\n');
+const loggedText = () => errorSpy.mock.calls.map((c: unknown[]) => JSON.stringify(c.map(String))).join('\n');
 
 // ---------------------------------------------------------------------------
 // The unit: mapDataError's terminal branch

@@ -6,7 +6,6 @@
     "kernel/ArtifactFileEntry",
     "kernel/ArtifactSignature",
     "kernel/BreakingChange",
-    "kernel/CLICommandContribution",
     "kernel/CapabilityConformanceLevel",
     "kernel/ClusterCapabilityConfig",
     "kernel/ClusterDriver",

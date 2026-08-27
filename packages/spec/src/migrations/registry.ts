@@ -5207,7 +5207,22 @@ const step18: MigrationStep = {
     'runtime, so only the spec strictObject can refuse the key. The mechanical ' +
     'conversion carries the pair over — renamed to `sort` and wrapped in the array ' +
     'shape — when `sort` is absent, and strips it as a pure lossless delete when ' +
-    '`sort` is present (the renderer\'s own precedence made it unread then).',
+    '`sort` is present (the renderer\'s own precedence made it unread then). ' +
+    'Finally, it retires the object-permission lifecycle bits `allowRestore` and ' +
+    '`allowPurge` (#12497, ADR-0049 enforce-or-remove; maintainer ruling 2026-08-26, ' +
+    'decision-inbox batch 5, accepting #1883\'s recommendation B): the `restore` / ' +
+    '`purge` ObjectQL operations the bits claimed to gate have never existed — no ' +
+    'destructive lifecycle verb is in the engine\'s dispatch vocabulary (#8106 pin) — ' +
+    'so granting the bits delivered nothing, and an author who declared ' +
+    '`allowPurge: false` believed a lock on GDPR hard-deletion existed when the ' +
+    'operation itself did not. Both keys are retiredKey tombstones; the evaluator\'s ' +
+    'pre-mapping rows retired in the same batch (a dispatched `restore`/`purge` stays ' +
+    'denied fail-closed via the DESTRUCTIVE_OPERATIONS backstop, so there is no ' +
+    'ungated window), and the mechanical conversion strips the keys from every object ' +
+    'grant in `permissions[].objects` (pure lossless delete — they never had an ' +
+    'effect to lose). `allowTransfer` is ENFORCED (#3004) and stays. The keys return ' +
+    'with the M2 lifecycle initiative (feature + RBAC in one batch); #1883 stays ' +
+    'open as the anchor.',
   conversionIds: [
     'field-malformed-scale-precision-removed',
     'record-chatter-position-vocabulary',
@@ -5221,6 +5236,7 @@ const step18: MigrationStep = {
     'translation-component-submit-label-removed',
     'page-component-responsive-removed',
     'object-grid-default-sort-removed',
+    'permission-allow-restore-purge-removed',
   ],
   semantic: [
     // One file per entry under `entries/semantic/`, concatenated here sorted by
@@ -5431,6 +5447,53 @@ const step18: MigrationStep = {
         + '`ObjectSchema.create(...): field ... declares required: false on a master_detail '
         + 'reference under sharingModel: controlled_by_parent`. Stored metadata keeps loading '
         + 'byte-identically (`safeParse` green, `required` unrewritten).',
+    },
+    {
+      id: 'cli-command-contribution-retired',
+      surface:
+        'kernel.cliCommandContribution (the orphan exported schema of '
+        + '`cli-extension.zod.ts` — 1 def, 2 exported names: '
+        + '`CLICommandContributionSchema` / `CLICommandContribution`)',
+      replacement:
+        '(removed — there is no declarative replacement, because no declarative '
+        + 'surface ever carried it. CLI commands are registered through oclif\'s '
+        + 'native plugin discovery: the plugin package declares an `oclif` '
+        + 'section in its own `package.json` — `OclifPluginConfigSchema` in the '
+        + 'same module describes that live surface and SURVIVES, as does the '
+        + 'module docblock\'s Commander.js migration record, which the '
+        + '`manifest.contributes.commands` tombstone cites)',
+      reason:
+        'ADR-0049 enforce-or-remove; #12007, the exported orphan-value-schema '
+        + 'class (#3950: an exported schema with no consumer reads as a '
+        + 'capability). The schema described a "CLI Command Contribution '
+        + 'declaration in the manifest" and claimed retention "for describing '
+        + 'command metadata in plugin manifests" — but after #10724 tombstoned '
+        + '`manifest.contributes.commands` (protocol 17), no manifest surface '
+        + 'could legally carry these entries: the export advertised a shape whose '
+        + 'only declared carrier rejects it. The manifest never referenced this '
+        + 'schema even before the tombstone — its inline `commands` item schema '
+        + 'was an independent duplicate. Zero consumers outside spec\'s own test '
+        + 'and generated artifacts, measured at the retirement\'s base commit '
+        + '(146f448a5) with positive controls in objectstack, objectui (pinned '
+        + 'sha) and cloud. With no carrier key and no authored document there is '
+        + 'nothing to tombstone and no seam for a D2 conversion: route 3, the '
+        + '#11825 / #8715 shape — RETIRED_DEFS_BY_MAJOR plus this entry ARE the '
+        + 'declaration.',
+      acceptanceCriteria:
+        'No code imports `CLICommandContributionSchema` or '
+        + '`CLICommandContribution` from `@objectstack/spec` or '
+        + '`@objectstack/spec/kernel` — both are TS2305 after upgrade, on every '
+        + 'public entry (pinned by resolved symbol identity in '
+        + '`kernel/cli-command-contribution-retirement.test.ts`). No metadata '
+        + 'document needs editing: the def was reachable from no metadata-type '
+        + 'binding, stack collection or manifest embed — the only surface that '
+        + 'ever claimed to carry command contributions '
+        + '(`manifest.contributes.commands`) already rejects the key with the '
+        + '#10724 prescription, which is unchanged by this retirement. '
+        + '`OclifPluginConfigSchema` / `OclifPluginConfig` survive on `./kernel` '
+        + '(same pin). ⚠️ Runtime behaviour is deliberately UNCHANGED: the CLI '
+        + 'never resolved commands from this declaration — commands are '
+        + 'oclif-auto-discovered, before and after.',
     },
     {
       id: 'dashboard-header-modal-target-page-only',
@@ -7872,6 +7935,89 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // registration-time refusal in `PluginHealthMonitor.registerPlugin` is the door
     // for the audience that exists.
     'kernel/PluginHealthCheck:restartBackoff',
+    // #12497 — the RESPONSE-side face of `security/ObjectPermission:allowPurge`
+    // (see that entry for the full rationale: ADR-0049 enforce-or-remove,
+    // maintainer ruling 2026-08-26 accepting #1883's recommendation B; the key
+    // returns with the M2 lifecycle initiative). `EffectiveObjectPermissionSchema`
+    // is `ObjectPermissionSchema.extend({ apiOperations }).strip()` — the clone
+    // shares the authoring shape's per-property schema instances, so the
+    // `retiredKey()` tombstone rides into the effective surface and this def's
+    // walked shape carries the same `[RETIRED]` row. Registered so the aging clock
+    // (#5898) has an exact-key entry for BOTH rows the tombstone produces. The
+    // effective surface is server-resolved, never authored, so no D2 conversion
+    // clause targets it — the authoring-side strip in
+    // `permission-allow-restore-purge-removed` is the only source rewrite that
+    // exists to do.
+    'security/EffectiveObjectPermission:allowPurge',
+    // #12497 — the RESPONSE-side face of `security/ObjectPermission:allowRestore`
+    // (see that entry for the full rationale: ADR-0049 enforce-or-remove,
+    // maintainer ruling 2026-08-26 accepting #1883's recommendation B; the key
+    // returns with the M2 lifecycle initiative). `EffectiveObjectPermissionSchema`
+    // is `ObjectPermissionSchema.extend({ apiOperations }).strip()` — the clone
+    // shares the authoring shape's per-property schema instances, so the
+    // `retiredKey()` tombstone rides into the effective surface and this def's
+    // walked shape carries the same `[RETIRED]` row. Registered so the aging clock
+    // (#5898) has an exact-key entry for BOTH rows the tombstone produces. The
+    // effective surface is server-resolved, never authored, so no D2 conversion
+    // clause targets it — the authoring-side strip in
+    // `permission-allow-restore-purge-removed` is the only source rewrite that
+    // exists to do.
+    'security/EffectiveObjectPermission:allowRestore',
+    // #12497 — ADR-0049 enforce-or-remove (maintainer ruling 2026-08-26, decision-
+    // inbox batch 5, accepting #1883's recommendation B). `allowPurge` claimed to
+    // gate a `purge` (hard-delete / GDPR erase) ObjectQL operation that has never
+    // existed: no destructive lifecycle verb is in the engine's dispatch
+    // vocabulary (pinned by objectql's
+    // `engine-middleware-operation-vocabulary.test.ts`, #8106). This was ADR-0049's
+    // worst false-compliance shape — an admin who set `allowPurge: false` believed
+    // a lock on permanent deletion existed, when the operation itself did not.
+    // The permission evaluator's pre-mapping row (`OPERATION_TO_PERMISSION`
+    // purge→allowPurge) retired in the same batch: with the bit unwritable, a
+    // mapping onto it was a claim about a surface that rejects authoring. A
+    // dispatched `purge` stays denied fail-closed via the evaluator's
+    // `DESTRUCTIVE_OPERATIONS` backstop — there is no ungated window in either
+    // direction. THE KEY RETURNS with the M2 lifecycle initiative (feature + RBAC
+    // in one batch, maintainer 2026-08-03); anchor card #1883 stays open.
+    //
+    // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
+    // removal ships on the 17.x line (launch-window convention: accept-set
+    // narrowings ride minor releases) and the prescription lives at the major
+    // boundary where `migrate meta` users look (the #8495 / PR #8666 precedent).
+    // ObjectPermissionSchema is `strictObject` but the def is reachable from the
+    // `permission` metadata root, so the route is the `retiredKey()` tombstone
+    // (the `rls.priority` posture) — the key stays in the walked shape as
+    // `[RETIRED]`, and authoring it is a tsc error and a parse error carrying the
+    // prescription. Sources are rewritten by the D2 conversion
+    // `permission-allow-restore-purge-removed`, which strips the key from every
+    // object grant in `permissions[].objects`.
+    'security/ObjectPermission:allowPurge',
+    // #12497 — ADR-0049 enforce-or-remove (maintainer ruling 2026-08-26, decision-
+    // inbox batch 5, accepting #1883's recommendation B). `allowRestore` claimed to
+    // gate a `restore` (undelete) ObjectQL operation that has never existed: no
+    // destructive lifecycle verb is in the engine's dispatch vocabulary (pinned by
+    // objectql's `engine-middleware-operation-vocabulary.test.ts`, #8106), so
+    // authoring the bit granted nothing — an AI author who declared it believed a
+    // recycle-bin capability boundary existed, and the failure was silent. The
+    // permission evaluator's pre-mapping row (`OPERATION_TO_PERMISSION`
+    // restore→allowRestore) retired in the same batch: with the bit unwritable, a
+    // mapping onto it was a claim about a surface that rejects authoring. A
+    // dispatched `restore` stays denied fail-closed via the evaluator's
+    // `DESTRUCTIVE_OPERATIONS` backstop — there is no ungated window in either
+    // direction. THE KEY RETURNS with the M2 lifecycle initiative (feature + RBAC
+    // in one batch, maintainer 2026-08-03); anchor card #1883 stays open.
+    //
+    // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
+    // removal ships on the 17.x line (launch-window convention: accept-set
+    // narrowings ride minor releases) and the prescription lives at the major
+    // boundary where `migrate meta` users look (the #8495 / PR #8666 precedent).
+    // ObjectPermissionSchema is `strictObject` but the def is reachable from the
+    // `permission` metadata root, so the route is the `retiredKey()` tombstone
+    // (the `rls.priority` posture) — the key stays in the walked shape as
+    // `[RETIRED]`, and authoring it is a tsc error and a parse error carrying the
+    // prescription. Sources are rewritten by the D2 conversion
+    // `permission-allow-restore-purge-removed`, which strips the key from every
+    // object grant in `permissions[].objects`.
+    'security/ObjectPermission:allowRestore',
     // #9220 — ADR-0049 enforce-or-remove at ELEMENT grain. `element:filter` never
     // had a renderer or reader anywhere: objectui registers none (its
     // renderers/basic/elements.tsx header deferred the element to "owning plugins"
@@ -8553,6 +8699,32 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // narrowings ride minor releases) and the prescription lives at the major
     // boundary where `migrate meta` users look (the #8586 / PR #8702 precedent).
     'kernel/AdvancedPluginLifecycleConfig',
+    // #12007 — kernel/cli-extension.zod.ts
+    // `CLICommandContributionSchema` / `CLICommandContribution`, retired whole
+    // (ADR-0049 enforce-or-remove; triage graded 2026-08-25, the exported
+    // orphan-value-schema class — #3950). The pair described a "CLI Command
+    // Contribution declaration in the manifest" and claimed retention "for
+    // describing command metadata in plugin manifests" — but after #10724
+    // tombstoned `manifest.contributes.commands`, no manifest surface could
+    // legally carry these entries: the exported schema advertised a shape whose
+    // only declared carrier rejects it. The manifest never referenced this schema
+    // even before the tombstone (its inline `commands` item schema was an
+    // independent duplicate). Zero consumers outside spec's own test and
+    // generated artifacts, measured at the retirement's base commit (146f448a5)
+    // with positive controls in objectstack, objectui (pinned sha) and cloud.
+    // What ACTUALLY registers CLI commands is oclif's native plugin discovery —
+    // `OclifPluginConfigSchema` (same module, live `package.json` `oclif`
+    // section) SURVIVES, as does the module docblock's Commander.js migration
+    // prose, which the `contributes.commands` tombstone cites. Route 3: no
+    // carrier key, no authored document for a D2 conversion to rewrite, so no
+    // tombstone and no conversion — this table plus the D3 semantic entry
+    // `cli-command-contribution-retired` ARE the declaration.
+    //
+    // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
+    // removal ships on the 17.x line (launch-window convention: accept-set
+    // narrowings ride minor releases) and the prescription lives at the major
+    // boundary where `migrate meta` users look (the #8586 / PR #8702 precedent).
+    'kernel/CLICommandContribution',
     // #12340 — kernel/plugin-lifecycle-advanced.zod.ts
     // `DistributedStateConfigSchema`, retired whole (ADR-0049 enforce-or-remove).
     //

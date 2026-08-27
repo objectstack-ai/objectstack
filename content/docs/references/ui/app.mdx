@@ -111,6 +111,160 @@ const result = ActionNavItemSchema.parse(data);
 | **logo** | `string` | optional | Custom logo URL for this app |
 | **favicon** | `string` | optional | Custom favicon URL for this app |
 
+### Nested Shape: `App.navigation[number][type='object']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ | Unique identifier for this navigation item (lowercase snake_case) |
+| **label** | `string \| Record<string, string>` | ✅ | Display proper label |
+| **icon** | `string` | optional | Icon name |
+| **order** | `number` | optional | Sort order within the same level (lower = first) |
+| **badge** | `string \| number` | optional | Badge text or count displayed on the item |
+| **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit #1878/#1891/#1894). |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
+| **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
+| **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
+| **type** | `'object'` | ✅ |  |
+| **objectName** | `string` | ✅ | Target object name |
+| **viewName** | `string` | optional | Default list view to open. Defaults to "all". Ignored when `recordId` is set. |
+| **recordId** | `string` | optional | Navigate directly to this record id instead of the list view. Supports template vars: `{current_user_id}`, `{current_org_id}`. |
+| **recordMode** | `Enum<'view' \| 'edit'>` | optional | Open the record in view (default) or edit mode. Only meaningful when `recordId` is set. |
+| **filters** | `Record<string, string>` | optional | URL filter conditions — targets the /:objectName/data bare surface via filter[`<field>`]=`<value>` params instead of a saved view. Values support template vars `{current_user_id}`, `{current_org_id}`. Mutually exclusive with recordId/viewName. |
+| **runAction** | `string` | optional | Auto-run this declared action once on arrival at the object's list surface (deep-link "navigate = run action", #4848). Must name an action defined in the stack; validated by defineStack and lint. Not combinable with recordId. |
+| **children** | `({ id: string; label: string \| Record<string, string>; icon?: string; order?: number; … } \| { type: 'separator'; id?: string; order?: number } \| … +7 more)[]` | optional | Child navigation items (e.g. specific views) |
+
+### Nested Shape: `App.navigation[number][type='dashboard']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ | Unique identifier for this navigation item (lowercase snake_case) |
+| **label** | `string \| Record<string, string>` | ✅ | Display proper label |
+| **icon** | `string` | optional | Icon name |
+| **order** | `number` | optional | Sort order within the same level (lower = first) |
+| **badge** | `string \| number` | optional | Badge text or count displayed on the item |
+| **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit #1878/#1891/#1894). |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
+| **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
+| **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
+| **type** | `'dashboard'` | ✅ |  |
+| **dashboardName** | `string` | ✅ | Target dashboard name |
+
+### Nested Shape: `App.navigation[number][type='page']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ | Unique identifier for this navigation item (lowercase snake_case) |
+| **label** | `string \| Record<string, string>` | ✅ | Display proper label |
+| **icon** | `string` | optional | Icon name |
+| **order** | `number` | optional | Sort order within the same level (lower = first) |
+| **badge** | `string \| number` | optional | Badge text or count displayed on the item |
+| **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit #1878/#1891/#1894). |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
+| **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
+| **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
+| **type** | `'page'` | ✅ |  |
+| **pageName** | `string` | ✅ | Target custom page component name |
+| **params** | `Record<string, any>` | optional | Parameters passed to the page context |
+
+### Nested Shape: `App.navigation[number][type='url']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ | Unique identifier for this navigation item (lowercase snake_case) |
+| **label** | `string \| Record<string, string>` | ✅ | Display proper label |
+| **icon** | `string` | optional | Icon name |
+| **order** | `number` | optional | Sort order within the same level (lower = first) |
+| **badge** | `string \| number` | optional | Badge text or count displayed on the item |
+| **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit #1878/#1891/#1894). |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
+| **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
+| **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
+| **type** | `'url'` | ✅ |  |
+| **url** | `string` | ✅ | Target external URL |
+| **target** | `Enum<'_self' \| '_blank'>` | optional (default: `"_self"`) | Link target window |
+
+### Nested Shape: `App.navigation[number][type='report']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ | Unique identifier for this navigation item (lowercase snake_case) |
+| **label** | `string \| Record<string, string>` | ✅ | Display proper label |
+| **icon** | `string` | optional | Icon name |
+| **order** | `number` | optional | Sort order within the same level (lower = first) |
+| **badge** | `string \| number` | optional | Badge text or count displayed on the item |
+| **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit #1878/#1891/#1894). |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
+| **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
+| **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
+| **type** | `'report'` | ✅ |  |
+| **reportName** | `string` | ✅ | Target report name |
+
+### Nested Shape: `App.navigation[number][type='action']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ | Unique identifier for this navigation item (lowercase snake_case) |
+| **label** | `string \| Record<string, string>` | ✅ | Display proper label |
+| **icon** | `string` | optional | Icon name |
+| **order** | `number` | optional | Sort order within the same level (lower = first) |
+| **badge** | `string \| number` | optional | Badge text or count displayed on the item |
+| **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit #1878/#1891/#1894). |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
+| **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
+| **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
+| **type** | `'action'` | ✅ |  |
+| **actionDef** | `{ actionName: string; params?: Record<string, any> }` | ✅ | Action definition to execute when clicked |
+
+### Nested Shape: `App.navigation[number][type='component']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ | Unique identifier for this navigation item (lowercase snake_case) |
+| **label** | `string \| Record<string, string>` | ✅ | Display proper label |
+| **icon** | `string` | optional | Icon name |
+| **order** | `number` | optional | Sort order within the same level (lower = first) |
+| **badge** | `string \| number` | optional | Badge text or count displayed on the item |
+| **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit #1878/#1891/#1894). |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
+| **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
+| **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
+| **type** | `'component'` | ✅ |  |
+| **componentRef** | `string` | ✅ | Component registry key (e.g. "metadata:directory") |
+| **params** | `Record<string, any>` | optional | Props passed to the component |
+
+### Nested Shape: `App.navigation[number][type='separator']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `'separator'` | ✅ |  |
+| **id** | `string` | optional | Optional id for the separator |
+| **order** | `number` | optional | Sort order within the same level (lower = first) |
+
+### Nested Shape: `App.navigation[number][type='group']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ | Unique identifier for this navigation item (lowercase snake_case) |
+| **label** | `string \| Record<string, string>` | ✅ | Display proper label |
+| **icon** | `string` | optional | Icon name |
+| **order** | `number` | optional | Sort order within the same level (lower = first) |
+| **badge** | `string \| number` | optional | Badge text or count displayed on the item |
+| **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit #1878/#1891/#1894). |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
+| **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
+| **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
+| **type** | `'group'` | ✅ |  |
+| **expanded** | `boolean` | optional (default: `false`) | Default expansion state in sidebar |
+| **children** | `({ id: string; label: string \| Record<string, string>; icon?: string; order?: number; … } \| { type: 'separator'; id?: string; order?: number } \| … +7 more)[]` | ✅ | Child navigation items |
+
 ### Nested Shape: `App.areas[number]`
 
 | Property | Type | Required | Description |
@@ -261,6 +415,160 @@ const result = ActionNavItemSchema.parse(data);
 | **description** | `string \| Record<string, string>` | optional | Area description |
 | **navigation** | `({ id: string; label: string \| Record<string, string>; icon?: string; order?: number; … } \| { type: 'separator'; id?: string; order?: number } \| … +7 more)[]` | ✅ | Navigation items within this area |
 
+### Nested Shape: `NavigationArea.navigation[number][type='object']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ | Unique identifier for this navigation item (lowercase snake_case) |
+| **label** | `string \| Record<string, string>` | ✅ | Display proper label |
+| **icon** | `string` | optional | Icon name |
+| **order** | `number` | optional | Sort order within the same level (lower = first) |
+| **badge** | `string \| number` | optional | Badge text or count displayed on the item |
+| **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit #1878/#1891/#1894). |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
+| **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
+| **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
+| **type** | `'object'` | ✅ |  |
+| **objectName** | `string` | ✅ | Target object name |
+| **viewName** | `string` | optional | Default list view to open. Defaults to "all". Ignored when `recordId` is set. |
+| **recordId** | `string` | optional | Navigate directly to this record id instead of the list view. Supports template vars: `{current_user_id}`, `{current_org_id}`. |
+| **recordMode** | `Enum<'view' \| 'edit'>` | optional | Open the record in view (default) or edit mode. Only meaningful when `recordId` is set. |
+| **filters** | `Record<string, string>` | optional | URL filter conditions — targets the /:objectName/data bare surface via filter[`<field>`]=`<value>` params instead of a saved view. Values support template vars `{current_user_id}`, `{current_org_id}`. Mutually exclusive with recordId/viewName. |
+| **runAction** | `string` | optional | Auto-run this declared action once on arrival at the object's list surface (deep-link "navigate = run action", #4848). Must name an action defined in the stack; validated by defineStack and lint. Not combinable with recordId. |
+| **children** | `({ id: string; label: string \| Record<string, string>; icon?: string; order?: number; … } \| { type: 'separator'; id?: string; order?: number } \| … +7 more)[]` | optional | Child navigation items (e.g. specific views) |
+
+### Nested Shape: `NavigationArea.navigation[number][type='dashboard']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ | Unique identifier for this navigation item (lowercase snake_case) |
+| **label** | `string \| Record<string, string>` | ✅ | Display proper label |
+| **icon** | `string` | optional | Icon name |
+| **order** | `number` | optional | Sort order within the same level (lower = first) |
+| **badge** | `string \| number` | optional | Badge text or count displayed on the item |
+| **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit #1878/#1891/#1894). |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
+| **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
+| **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
+| **type** | `'dashboard'` | ✅ |  |
+| **dashboardName** | `string` | ✅ | Target dashboard name |
+
+### Nested Shape: `NavigationArea.navigation[number][type='page']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ | Unique identifier for this navigation item (lowercase snake_case) |
+| **label** | `string \| Record<string, string>` | ✅ | Display proper label |
+| **icon** | `string` | optional | Icon name |
+| **order** | `number` | optional | Sort order within the same level (lower = first) |
+| **badge** | `string \| number` | optional | Badge text or count displayed on the item |
+| **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit #1878/#1891/#1894). |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
+| **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
+| **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
+| **type** | `'page'` | ✅ |  |
+| **pageName** | `string` | ✅ | Target custom page component name |
+| **params** | `Record<string, any>` | optional | Parameters passed to the page context |
+
+### Nested Shape: `NavigationArea.navigation[number][type='url']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ | Unique identifier for this navigation item (lowercase snake_case) |
+| **label** | `string \| Record<string, string>` | ✅ | Display proper label |
+| **icon** | `string` | optional | Icon name |
+| **order** | `number` | optional | Sort order within the same level (lower = first) |
+| **badge** | `string \| number` | optional | Badge text or count displayed on the item |
+| **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit #1878/#1891/#1894). |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
+| **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
+| **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
+| **type** | `'url'` | ✅ |  |
+| **url** | `string` | ✅ | Target external URL |
+| **target** | `Enum<'_self' \| '_blank'>` | optional (default: `"_self"`) | Link target window |
+
+### Nested Shape: `NavigationArea.navigation[number][type='report']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ | Unique identifier for this navigation item (lowercase snake_case) |
+| **label** | `string \| Record<string, string>` | ✅ | Display proper label |
+| **icon** | `string` | optional | Icon name |
+| **order** | `number` | optional | Sort order within the same level (lower = first) |
+| **badge** | `string \| number` | optional | Badge text or count displayed on the item |
+| **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit #1878/#1891/#1894). |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
+| **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
+| **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
+| **type** | `'report'` | ✅ |  |
+| **reportName** | `string` | ✅ | Target report name |
+
+### Nested Shape: `NavigationArea.navigation[number][type='action']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ | Unique identifier for this navigation item (lowercase snake_case) |
+| **label** | `string \| Record<string, string>` | ✅ | Display proper label |
+| **icon** | `string` | optional | Icon name |
+| **order** | `number` | optional | Sort order within the same level (lower = first) |
+| **badge** | `string \| number` | optional | Badge text or count displayed on the item |
+| **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit #1878/#1891/#1894). |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
+| **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
+| **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
+| **type** | `'action'` | ✅ |  |
+| **actionDef** | `{ actionName: string; params?: Record<string, any> }` | ✅ | Action definition to execute when clicked |
+
+### Nested Shape: `NavigationArea.navigation[number][type='component']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ | Unique identifier for this navigation item (lowercase snake_case) |
+| **label** | `string \| Record<string, string>` | ✅ | Display proper label |
+| **icon** | `string` | optional | Icon name |
+| **order** | `number` | optional | Sort order within the same level (lower = first) |
+| **badge** | `string \| number` | optional | Badge text or count displayed on the item |
+| **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit #1878/#1891/#1894). |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
+| **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
+| **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
+| **type** | `'component'` | ✅ |  |
+| **componentRef** | `string` | ✅ | Component registry key (e.g. "metadata:directory") |
+| **params** | `Record<string, any>` | optional | Props passed to the component |
+
+### Nested Shape: `NavigationArea.navigation[number][type='separator']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `'separator'` | ✅ |  |
+| **id** | `string` | optional | Optional id for the separator |
+| **order** | `number` | optional | Sort order within the same level (lower = first) |
+
+### Nested Shape: `NavigationArea.navigation[number][type='group']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ | Unique identifier for this navigation item (lowercase snake_case) |
+| **label** | `string \| Record<string, string>` | ✅ | Display proper label |
+| **icon** | `string` | optional | Icon name |
+| **order** | `number` | optional | Sort order within the same level (lower = first) |
+| **badge** | `string \| number` | optional | Badge text or count displayed on the item |
+| **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit #1878/#1891/#1894). |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
+| **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
+| **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
+| **type** | `'group'` | ✅ |  |
+| **expanded** | `boolean` | optional (default: `false`) | Default expansion state in sidebar |
+| **children** | `({ id: string; label: string \| Record<string, string>; icon?: string; order?: number; … } \| { type: 'separator'; id?: string; order?: number } \| … +7 more)[]` | ✅ | Child navigation items |
+
 
 ---
 
@@ -276,6 +584,160 @@ A navigation contribution: a package injecting nav items into an app it does not
 | **group** | `string` | optional | Target group nav-item id to append into (e.g. "group_integrations"); omit to append at the app top level |
 | **priority** | `integer` | optional (default: `200`) | Merge priority within the target group — lower applied first (matches object extender priority) |
 | **items** | `({ id: string; label: string \| Record<string, string>; icon?: string; order?: number; … } \| { type: 'separator'; id?: string; order?: number } \| … +7 more)[]` | ✅ | Navigation items contributed into the target app/group |
+
+### Nested Shape: `NavigationContribution.items[number][type='object']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ | Unique identifier for this navigation item (lowercase snake_case) |
+| **label** | `string \| Record<string, string>` | ✅ | Display proper label |
+| **icon** | `string` | optional | Icon name |
+| **order** | `number` | optional | Sort order within the same level (lower = first) |
+| **badge** | `string \| number` | optional | Badge text or count displayed on the item |
+| **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit #1878/#1891/#1894). |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
+| **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
+| **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
+| **type** | `'object'` | ✅ |  |
+| **objectName** | `string` | ✅ | Target object name |
+| **viewName** | `string` | optional | Default list view to open. Defaults to "all". Ignored when `recordId` is set. |
+| **recordId** | `string` | optional | Navigate directly to this record id instead of the list view. Supports template vars: `{current_user_id}`, `{current_org_id}`. |
+| **recordMode** | `Enum<'view' \| 'edit'>` | optional | Open the record in view (default) or edit mode. Only meaningful when `recordId` is set. |
+| **filters** | `Record<string, string>` | optional | URL filter conditions — targets the /:objectName/data bare surface via filter[`<field>`]=`<value>` params instead of a saved view. Values support template vars `{current_user_id}`, `{current_org_id}`. Mutually exclusive with recordId/viewName. |
+| **runAction** | `string` | optional | Auto-run this declared action once on arrival at the object's list surface (deep-link "navigate = run action", #4848). Must name an action defined in the stack; validated by defineStack and lint. Not combinable with recordId. |
+| **children** | `({ id: string; label: string \| Record<string, string>; icon?: string; order?: number; … } \| { type: 'separator'; id?: string; order?: number } \| … +7 more)[]` | optional | Child navigation items (e.g. specific views) |
+
+### Nested Shape: `NavigationContribution.items[number][type='dashboard']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ | Unique identifier for this navigation item (lowercase snake_case) |
+| **label** | `string \| Record<string, string>` | ✅ | Display proper label |
+| **icon** | `string` | optional | Icon name |
+| **order** | `number` | optional | Sort order within the same level (lower = first) |
+| **badge** | `string \| number` | optional | Badge text or count displayed on the item |
+| **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit #1878/#1891/#1894). |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
+| **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
+| **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
+| **type** | `'dashboard'` | ✅ |  |
+| **dashboardName** | `string` | ✅ | Target dashboard name |
+
+### Nested Shape: `NavigationContribution.items[number][type='page']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ | Unique identifier for this navigation item (lowercase snake_case) |
+| **label** | `string \| Record<string, string>` | ✅ | Display proper label |
+| **icon** | `string` | optional | Icon name |
+| **order** | `number` | optional | Sort order within the same level (lower = first) |
+| **badge** | `string \| number` | optional | Badge text or count displayed on the item |
+| **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit #1878/#1891/#1894). |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
+| **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
+| **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
+| **type** | `'page'` | ✅ |  |
+| **pageName** | `string` | ✅ | Target custom page component name |
+| **params** | `Record<string, any>` | optional | Parameters passed to the page context |
+
+### Nested Shape: `NavigationContribution.items[number][type='url']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ | Unique identifier for this navigation item (lowercase snake_case) |
+| **label** | `string \| Record<string, string>` | ✅ | Display proper label |
+| **icon** | `string` | optional | Icon name |
+| **order** | `number` | optional | Sort order within the same level (lower = first) |
+| **badge** | `string \| number` | optional | Badge text or count displayed on the item |
+| **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit #1878/#1891/#1894). |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
+| **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
+| **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
+| **type** | `'url'` | ✅ |  |
+| **url** | `string` | ✅ | Target external URL |
+| **target** | `Enum<'_self' \| '_blank'>` | optional (default: `"_self"`) | Link target window |
+
+### Nested Shape: `NavigationContribution.items[number][type='report']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ | Unique identifier for this navigation item (lowercase snake_case) |
+| **label** | `string \| Record<string, string>` | ✅ | Display proper label |
+| **icon** | `string` | optional | Icon name |
+| **order** | `number` | optional | Sort order within the same level (lower = first) |
+| **badge** | `string \| number` | optional | Badge text or count displayed on the item |
+| **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit #1878/#1891/#1894). |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
+| **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
+| **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
+| **type** | `'report'` | ✅ |  |
+| **reportName** | `string` | ✅ | Target report name |
+
+### Nested Shape: `NavigationContribution.items[number][type='action']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ | Unique identifier for this navigation item (lowercase snake_case) |
+| **label** | `string \| Record<string, string>` | ✅ | Display proper label |
+| **icon** | `string` | optional | Icon name |
+| **order** | `number` | optional | Sort order within the same level (lower = first) |
+| **badge** | `string \| number` | optional | Badge text or count displayed on the item |
+| **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit #1878/#1891/#1894). |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
+| **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
+| **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
+| **type** | `'action'` | ✅ |  |
+| **actionDef** | `{ actionName: string; params?: Record<string, any> }` | ✅ | Action definition to execute when clicked |
+
+### Nested Shape: `NavigationContribution.items[number][type='component']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ | Unique identifier for this navigation item (lowercase snake_case) |
+| **label** | `string \| Record<string, string>` | ✅ | Display proper label |
+| **icon** | `string` | optional | Icon name |
+| **order** | `number` | optional | Sort order within the same level (lower = first) |
+| **badge** | `string \| number` | optional | Badge text or count displayed on the item |
+| **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit #1878/#1891/#1894). |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
+| **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
+| **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
+| **type** | `'component'` | ✅ |  |
+| **componentRef** | `string` | ✅ | Component registry key (e.g. "metadata:directory") |
+| **params** | `Record<string, any>` | optional | Props passed to the component |
+
+### Nested Shape: `NavigationContribution.items[number][type='separator']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `'separator'` | ✅ |  |
+| **id** | `string` | optional | Optional id for the separator |
+| **order** | `number` | optional | Sort order within the same level (lower = first) |
+
+### Nested Shape: `NavigationContribution.items[number][type='group']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ | Unique identifier for this navigation item (lowercase snake_case) |
+| **label** | `string \| Record<string, string>` | ✅ | Display proper label |
+| **icon** | `string` | optional | Icon name |
+| **order** | `number` | optional | Sort order within the same level (lower = first) |
+| **badge** | `string \| number` | optional | Badge text or count displayed on the item |
+| **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit #1878/#1891/#1894). |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
+| **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
+| **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
+| **type** | `'group'` | ✅ |  |
+| **expanded** | `boolean` | optional (default: `false`) | Default expansion state in sidebar |
+| **children** | `({ id: string; label: string \| Record<string, string>; icon?: string; order?: number; … } \| { type: 'separator'; id?: string; order?: number } \| … +7 more)[]` | ✅ | Child navigation items |
 
 
 ---

@@ -3012,11 +3012,11 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
   sys_secret: {
     label: "Secreto",
     pluralLabel: "Secretos",
-    description: "Almacén cifrado al que hacen referencia los identificadores de sys_setting. Nunca contiene texto sin formato.",
+    description: "Almacén cifrado escrito por tres productores privilegiados (véase managedBy); cada uno guarda su identificador en su propia columna. Nunca contiene texto sin formato.",
     fields: {
       id: {
         label: "ID",
-        help: "Identificador opaco al que hace referencia `sys_setting.value_enc`."
+        help: "Identificador opaco. La referencia vive en la columna propia del productor que lo escribió — `sys_setting.value_enc`, una referencia `secret:` en una fila de negocio o el `credentialsRef` de un origen de datos —, de modo que una fila no referenciada por `sys_setting` no está por ello sin referencias."
       },
       created_at: {
         label: "Creado el",
@@ -3028,11 +3028,11 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       namespace: {
         label: "Espacio de nombres",
-        help: "Espacio de nombres de ajustes al que pertenece este secreto."
+        help: "Etiqueta acotada al productor, no un espacio de nombres de ajustes en general: `SettingsService` escribe el espacio de nombres de ajustes, el cifrado de campos `secret` del motor escribe el nombre del objeto y el vinculador de orígenes de datos escribe el ámbito indicado por quien lo llama (por defecto `datasource`). Véase managedBy."
       },
       key: {
         label: "Clave",
-        help: "Clave del especificador dentro del espacio de nombres."
+        help: "Etiqueta acotada al productor y emparejada con `namespace`: la clave del especificador de ajustes, el nombre del campo `secret` cifrado o el nombre del origen de datos. El par registra cómo el productor direccionó el valor; no identifica qué productor escribió la fila."
       },
       kms_key_id: {
         label: "ID de clave KMS",

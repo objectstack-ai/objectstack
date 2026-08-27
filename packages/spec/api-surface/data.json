@@ -630,9 +630,15 @@
     "UnknownAuthoringKeyFinding (interface)",
     "UnorderedPaginationConformanceCase (interface)",
     "VALID_AST_OPERATORS (const)",
+    "VALUE_ROUNDTRIP_CASES (const)",
+    "VALUE_ROUNDTRIP_COLLISION_PAIRS (const)",
+    "VALUE_ROUNDTRIP_FIELDS (const)",
+    "VALUE_ROUNDTRIP_ROWS (const)",
     "ValidationRule (type)",
     "ValidationRuleSchema (const)",
     "ValueForm (type)",
+    "ValueRoundTripCase (interface)",
+    "ValueRoundTripColumn (type)",
     "ValueShapeFieldDef (interface)",
     "ZeroLimitConformanceCase (interface)",
     "apiExposureDenialReason (function)",
@@ -769,6 +775,7 @@
     "urlUserinfoUsername (function)",
     "utcInstantMs (function)",
     "validateDriverConfig (function)",
+    "valueRoundTripDivergence (function)",
     "valueSchemaFor (function)"
   ]
 }
