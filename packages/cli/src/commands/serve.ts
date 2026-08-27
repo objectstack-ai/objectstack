@@ -221,6 +221,27 @@ type PortProbe = (port: number) => Promise<boolean>;
  * skip**. ⚠️ Nearby cards have described this search as hopping over ports; it
  * does not, and a diagnostic written from that reading would be wrong.
  */
+export class PortSearchExhaustedError extends Error {
+  /** The first port probed — the walk's own record of it, not the caller's. */
+  readonly startPort: number;
+  /** The last port probed. Inclusive, and derived from {@link PORT_SEARCH_SPAN}. */
+  readonly lastPort: number;
+  /** How many ports were probed: every one of them, and every one busy. */
+  readonly probedCount: number;
+
+  constructor(startPort: number) {
+    // ⭐ The message is UNCHANGED from the plain `Error` this replaces. It is
+    // the sentence the notice carries verbatim, so it is not the class's to
+    // reword — the type is added to say WHICH failure this is, not to say it
+    // differently.
+    super(`Could not find an available port starting from ${startPort}`);
+    this.name = 'PortSearchExhaustedError';
+    this.startPort = startPort;
+    this.lastPort = startPort + PORT_SEARCH_SPAN;
+    this.probedCount = PORT_SEARCH_SPAN + 1;
+  }
+}
+
 export const getAvailablePort = async (
   startPort: number,
   probe: PortProbe = isPortAvailable,
@@ -229,7 +250,7 @@ export const getAvailablePort = async (
   while (!(await probe(port))) {
     port++;
     if (port > startPort + PORT_SEARCH_SPAN) {
-      throw new Error(`Could not find an available port starting from ${startPort}`);
+      throw new PortSearchExhaustedError(startPort);
     }
   }
   return port;
@@ -278,17 +299,40 @@ export const getAvailablePort = async (
 export function formatExhaustedPortSearchNotice(requestedPort: number, cause: unknown): string {
   // ⭐ The thrown text, carried — not restated. See the docblock.
   const thrown = cause instanceof Error ? cause.message : String(cause);
-  const lastProbed = requestedPort + PORT_SEARCH_SPAN;
-  const probedCount = PORT_SEARCH_SPAN + 1;
+
+  // ⚠️ The `catch` this feeds catches EVERY rejection, not only an exhausted
+  // walk, and the two cannot share a body. `isPortAvailable` rejects
+  // synchronously with `ERR_SOCKET_BAD_PORT` whenever it is handed a port
+  // outside 0–65535 — reachable two ways: a walk that starts high enough to
+  // cross the ceiling, and `--port` text that `parseInt` turns into `NaN`. On
+  // those paths nothing was exhausted, so a body claiming a probed range would
+  // print `NaN–NaN` and assert a search that never ran. A diagnostic that
+  // exists to be accurate does not get to guess, so the span sentence is
+  // reached only through the error that actually carries the span.
+  if (!(cause instanceof PortSearchExhaustedError)) {
+    return (
+      '\n'
+      + chalk.yellow(`  ⚠ ${thrown}\n`)
+      + chalk.dim('     The development port search could not run to completion, so this server\n')
+      + chalk.dim(`     is falling back to the port it was asked for (${requestedPort}). If that port is\n`)
+      + chalk.dim('     taken the bind that follows will fail with a raw EADDRINUSE from the\n')
+      + chalk.dim('     kernel, and this notice is the only place that says why.')
+    );
+  }
+
+  // Every number below is the ERROR's own, recorded by the walk that failed —
+  // never re-derived here from `requestedPort`, which is a second source that
+  // could disagree with the first.
+  const { startPort, lastPort, probedCount } = cause;
   return (
     '\n'
     + chalk.yellow(`  ⚠ ${thrown}\n`)
-    + chalk.dim(`     Development auto-shift probed ${probedCount} ports (${requestedPort}–${lastProbed}) and every\n`)
-    + chalk.dim(`     one was busy, so this server is falling back to ${requestedPort} — the port the\n`)
+    + chalk.dim(`     Development auto-shift probed ${probedCount} ports (${startPort}–${lastPort}) and every\n`)
+    + chalk.dim(`     one was busy, so this server is falling back to ${startPort} — the port the\n`)
     + chalk.dim('     search has just proven is taken. The bind that follows will almost\n')
     + chalk.dim('     certainly fail with a raw EADDRINUSE from the kernel, and this notice\n')
     + chalk.dim('     is the only place that says why.\n')
-    + chalk.dim(`     Free a port in ${requestedPort}–${lastProbed}, or pick another via PORT=<port> (or --port <port>).`)
+    + chalk.dim(`     Free a port in ${startPort}–${lastPort}, or pick another via PORT=<port> (or --port <port>).`)
   );
 }
 

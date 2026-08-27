@@ -143,7 +143,7 @@ describe('#12620: an exhausted port search is announced, in the words the search
 
   it('ARM 1 — the width it reports is the width it actually probed, endpoints included', async () => {
     const { probe, probed } = alwaysBusy();
-    await getAvailablePort(START, probe).catch((err: unknown) => err);
+    const thrown = await getAvailablePort(START, probe).catch((err: unknown) => err);
 
     // ⚠️ The search is a plain contiguous `port++` walk. A neighbouring card
     // described it as skipping ports; it does not, and a notice written from
@@ -159,8 +159,39 @@ describe('#12620: an exhausted port search is announced, in the words the search
     // that exists to be accurate would be this card's own defect. BOTH terms
     // are measured here — how many ports the walk touched, and the last one it
     // reached.
-    const notice = plain(formatExhaustedPortSearchNotice(START, new Error('x')));
+    const notice = plain(formatExhaustedPortSearchNotice(START, thrown));
     expect(notice).toContain(`${probed.length} ports (${START}–${probed[probed.length - 1]})`);
+  });
+
+  it('makes NO span claim for a rejection that is not an exhausted walk', async () => {
+    // ⚠️ The `catch` in serve.ts catches every rejection, not only exhaustion.
+    // `isPortAvailable` rejects synchronously with ERR_SOCKET_BAD_PORT for any
+    // port outside 0–65535 — reachable when the walk crosses the ceiling, and
+    // when `--port` text parses to NaN. Measured, not supposed: `net`'s
+    // `listen()` throws for both, inside the probe's promise executor.
+    //
+    // ⭐ On those paths nothing was probed, so a body claiming a range would
+    // print `NaN–NaN` and assert a search that never ran — an inaccurate
+    // diagnostic inside the diagnostic added to stop exactly that.
+    const badPort = new RangeError('options.port should be >= 0 and < 65536. Received NaN.');
+    const notice = plain(formatExhaustedPortSearchNotice(Number.NaN, badPort));
+
+    // The thrown text is still carried — that ruling does not bend by branch.
+    expect(notice).toContain(badPort.message);
+    // …but the claim that is false here is simply not made.
+    expect(notice, 'a span was claimed for a search that never walked one').not.toMatch(
+      /probed \d+ ports/,
+    );
+    expect(notice, 'the notice printed a NaN range').not.toContain('NaN–');
+
+    // Anti-vacuity for the two negatives above: the real exhausted notice DOES
+    // make both claims, so their absence here is a discrimination and not a
+    // regex that stopped matching anything.
+    const { probe } = alwaysBusy();
+    const real = await getAvailablePort(START, probe).catch((err: unknown) => err);
+    const exhausted = plain(formatExhaustedPortSearchNotice(START, real));
+    expect(exhausted).toMatch(/probed \d+ ports/);
+    expect(exhausted).toContain(`${START}–`);
   });
 
   it('ARM 2 — a search that SUCCEEDS returns, so the notice is unreachable on the drift path', async () => {
@@ -226,13 +257,10 @@ describe('#12620: an exhausted port search is announced, in the words the search
     );
   });
 
-  it('MUTUAL EXCLUSION — the three notices cannot be mistaken for one another', () => {
-    const notice = plain(
-      formatExhaustedPortSearchNotice(
-        START,
-        new Error(`Could not find an available port starting from ${START}`),
-      ),
-    );
+  it('MUTUAL EXCLUSION — the three notices cannot be mistaken for one another', async () => {
+    const { probe } = alwaysBusy();
+    const thrown = await getAvailablePort(START, probe).catch((err: unknown) => err);
+    const notice = plain(formatExhaustedPortSearchNotice(START, thrown));
 
     expect(notice, "the exhausted notice reads as #12543's drift notice").not.toMatch(DRIFT_NOTICE);
 
