@@ -240,6 +240,37 @@
 //               to an issue that is now closed with nothing left to read there
 //               (#11497).
 //
+//               SWEPT LEDGER-WIDE at ead731756 (#12723), which is the first time
+//               all 31 entries were re-measured to answer the surplus question
+//               rather than one entry noticed in passing. 4 carried slack, worth
+//               118 raw errors: objectql 354 -> 251, runtime 227 -> 217,
+//               plugin-auth 97 -> 94, plugin-approvals 347 -> 345. The shape of
+//               that result is the part worth keeping, and it is not the one the
+//               card predicted. ALL FOUR ARE TEST_DEBT; not one of the 13 DEBT
+//               entries had moved, each measuring its recorded number to the
+//               unit. That asymmetry has a mechanical cause rather than a moral
+//               one: a DEBT entry's number is what the package's OWN `typecheck`
+//               would report if it had one, so ordinary repair work in those
+//               packages is visible to whoever does it, while a TEST_DEBT number
+//               is only ever produced by the temp project this file generates --
+//               nothing a contributor runs reports it, so fixing a test-layer
+//               type error here moves a number NOBODY SEES until the next
+//               re-measure. The surplus is therefore not evenly distributed
+//               noise; it accumulates in exactly the layer whose measurement is
+//               invisible outside this gate.
+//
+//               ⛔ Read that 118 as a measurement of ONE MOMENT, not as a
+//               standing property. It is what four months of ordinary repair
+//               work banked between sweeps, and the entries above sit at their
+//               measurement again as of that sha -- so the next reader must
+//               re-measure rather than quote this paragraph, exactly as the
+//               bootstrap-margin roster above must not be read as a current
+//               inventory. What the number IS good for is sizing the open
+//               design question: whether a surplus should additionally make this
+//               gate RED (a self-tightening ratchet). #6376 decided not to when
+//               the mechanism was built, and this sweep is the first evidence
+//               about what that costs in practice.
+//
 //               What drifts is not only the NUMBER but the note's COMPOSITION:
 //               service-automation's note named `engine.test.ts:2547/2577` as
 //               the whole debt while three TS2341 in a different file, from an
@@ -778,9 +809,13 @@ const EXEMPT = {
 // import a test file gains.
 const TEST_DEBT = {
   '@objectstack/plugin-approvals': {
-    errors: 347,
+    errors: 345,
     note: 'TS2339 x296, TS2550 x20, TS2345 x16, TS18048 x10, plus 5 singletons (TS2554 x2, TS1470, '
-      + 'TS2352, TS6133). Lowered 348 -> 347 at 0e0bf8049 (#11497): tsc against that tree reports the '
+      + 'TS2352, TS6133). LOWERED 347 -> 345 at ead731756 (#12723), in a sweep that re-measured all 31 '
+      + 'ledger entries at once and found 4 of them carrying slack. The tally above was taken at 347 and '
+      + 'is NOT re-tallied here: that sweep measured per-entry TOTALS only, so the -2 is unattributed, '
+      + 'and an admitted gap beats an invented composition. '
+      + 'Lowered 348 -> 347 at 0e0bf8049 (#11497): tsc against that tree reports the '
       + 'same seven codes at the same counts as the prior 348 composition, TO THE UNIT, minus the sole '
       + 'TS2353 -- a fully attributable single-error retirement, not a rescale. '
       + 'Was 547 (re-measured at 5ab08428, up from 467; TS2345 x213 then). '
@@ -800,11 +835,16 @@ const TEST_DEBT = {
       + 'away. Still entirely test-only (src is clean), so nothing but this ledger has ever seen it.',
   },
   '@objectstack/objectql': {
-    errors: 354,
+    errors: 251,
     note: 'code-tier 300 (TS2339 x115, TS2554 x113 wrong arity, TS2345 x24, TS2749 x14, TS2322 x14, '
       + 'TS18048 x8, TS2353 x4, plus 8 singletons); config-tier 8 (TS2550 x8, `Array.prototype.at` '
       + 'against a `lib` older than es2022); noise 46 (TS7006 x36, TS6133 x9, '
-      + 'TS6196 x1). LOWERED 355 -> 354 in #10779, and the note RE-TALLIED rather than declared stale '
+      + 'TS6196 x1). LOWERED 354 -> 251 at ead731756 (#12723) -- the largest single surplus the 31-entry '
+      + 'sweep found, and 103 of the 118 raw errors of slack it found in total. The itemisation above was '
+      + 'tallied at 354 and is NOT re-tallied here: that sweep measured per-entry TOTALS only, so the '
+      + '-103 is unattributed, and inventing a composition for errors that are gone is the one thing this '
+      + 'ledger is written against. '
+      + 'LOWERED 355 -> 354 in #10779, and the note RE-TALLIED rather than declared stale '
       + 'because the delta is exactly attributable: the retired error is the TS6059 this itemisation '
       + 'used to name (src/dry-run-hash-compat.test.ts importing scripts/dry-run-hash-compat.ts from '
       + 'outside rootDir), which was never this package\'s debt -- it was the generated re-measure '
@@ -841,17 +881,21 @@ const TEST_DEBT = {
       + 'description of this entry today. This is the one of the five that was never lowered, and it did '
       + 'not need to be: the margin was not handed back, it was SPENT. Real growth carried the '
       + 'measurement 345 -> 355 while the slack absorbed it, so the recorded number stood still and the '
-      + 'measurement rose to meet it, and this entry now measures its recorded 355 EXACTLY (62b2655d8). '
+      + 'measurement rose to meet it, and this entry measured its then-recorded 355 EXACTLY at 62b2655d8. '
       + 'Read the distinction, because both routes end in the same place and only one of them shows up '
       + 'as a lowering in the history: the other four were TIGHTENED onto their measurement, this one '
-      + 'was OVERTAKEN by its own. There is no slack here today, and the next new error in this package '
-      + 'goes red on arrival exactly as it would on an entry that had been tightened '
-      + '(#5278 option A).',
+      + 'was OVERTAKEN by its own. There was no slack at that measurement, and the next new error in this '
+      + 'package went red on arrival exactly as it would on an entry that had been tightened '
+      + '(#5278 option A). That sentence is history too: the entry had drifted 103 below its ceiling by '
+      + 'ead731756, which is what the lowering at the top of this note closed.',
   },
   '@objectstack/runtime': {
-    errors: 227,
+    errors: 217,
     note: 'TS18048 x98 (possibly-undefined), TS2345 x26, TS18046 x20, TS2339 x16, TS2493 x15, TS2835 x11, '
-      + 'TS2554 x11. Src '
+      + 'TS2554 x11. LOWERED 227 -> 217 at ead731756 (#12723) -- the entry that card was filed on, where '
+      + 'the slack turned out to be 10 rather than the 1 it reported: the 226 it quoted was itself a '
+      + 'reading taken days earlier, which is the card\'s own point about a number that drifts. The tally '
+      + 'above was taken at 227 and is NOT re-tallied here; that sweep measured per-entry TOTALS only. Src '
       + 'graduated in #4311 (declares `typecheck`); this is purely the hidden test layer. Measured 220 -> '
       + '218 (5ab08428, one of only two entries that ever shrank; TS6133 x25 collapsed to x7 while '
       + 'possibly-undefined grew, so that net -2 hid a much larger churn in both directions) -> 227 '
@@ -893,13 +937,16 @@ const TEST_DEBT = {
       + 'it should go red rather than be absorbed.',
   },
   '@objectstack/plugin-auth': {
-    errors: 97,
-    note: 'RE-TALLIED from tsc at the 97 below (#10615), measured at cea8c7d867 with the workspace closure '
+    errors: 94,
+    note: 'LOWERED 97 -> 94 at ead731756 (#12723), in a sweep that re-measured all 31 ledger entries at '
+      + 'once. Everything below -- the tally, the per-file split, the 97 they sum to -- was taken at 97 '
+      + 'and is NOT re-tallied here: that sweep measured per-entry TOTALS only, so the -3 is unattributed. '
+      + 'RE-TALLIED from tsc at the 97 below (#10615), measured at cea8c7d867 with the workspace closure '
       + 'built by the same command lint.yml runs before this gate, so the composition, the per-file split '
       + 'and the total are ONE measurement rather than a rescale: TS2493 x36 (tuple index out of range), '
       + 'TS18048 x24, TS2322 x11, TS2532 x9, TS2345 x4, TS2339 x3, TS2554 x3, TS2741 x3, TS7006 x2, '
-      + 'TS2769 x1, TS6133 x1 = 97, the recorded number EXACTLY -- no margin, so the next new error here '
-      + 'goes red immediately. The per-file split is COMPLETE at this measurement rather than a top-four: '
+      + 'TS2769 x1, TS6133 x1 = 97, the number recorded at THAT time EXACTLY. The per-file split is '
+      + 'COMPLETE at this measurement rather than a top-four: '
       + '43 in src/auth-manager.test.ts, 18 in src/admin-user-endpoints.test.ts, 12 in '
       + 'src/auth-plugin.test.ts, 11 in src/admin-import-users.test.ts, 3 each in '
       + 'src/objectql-adapter.test.ts and src/sso-client-secret-at-rest.test.ts, 2 each in '
