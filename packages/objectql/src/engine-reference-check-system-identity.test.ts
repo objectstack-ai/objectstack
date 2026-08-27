@@ -122,7 +122,7 @@ describe('#12166 — the reference check is elevated, sudo()-shaped', () => {
         const { driver } = makeStubDriver();
         engine.registerDriver(driver, true);
         await engine.init();
-        for (const o of [acct, note, task]) engine.registry.registerObject(o as any);
+        for (const o of [acct, note, task]) engine.registry.registerObject(o as any, 'test');
         seen = [];
         engine.registerMiddleware(async (ctx: any, next: any) => {
             seen.push({ operation: ctx.operation, object: ctx.object, context: ctx.context });
@@ -173,7 +173,7 @@ describe('#12166 constraint 1 — nothing ELSE on the delete path changes identi
         const { driver } = makeStubDriver();
         engine.registerDriver(driver, true);
         await engine.init();
-        for (const o of [acct, note, task]) engine.registry.registerObject(o as any);
+        for (const o of [acct, note, task]) engine.registry.registerObject(o as any, 'test');
         seen = [];
         engine.registerMiddleware(async (ctx: any, next: any) => {
             seen.push({ operation: ctx.operation, object: ctx.object, context: ctx.context });

@@ -230,7 +230,7 @@ async function boot(sets: PermissionSet[] = [LINE_LEAD]) {
   const { driver, stores } = makeStubDriver();
   engine.registerDriver(driver, true);
   await engine.init();
-  for (const o of [PRODUCT, ANDON, BATCH]) engine.registry.registerObject(o as any);
+  for (const o of [PRODUCT, ANDON, BATCH]) engine.registry.registerObject(o as any, 'test');
 
   const schemas: Record<string, unknown> = {
     os_ehr_product: PRODUCT, os_ehr_andon_record: ANDON, os_ehr_batch: BATCH,
