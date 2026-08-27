@@ -43,33 +43,92 @@
  * draw is not a property of the CWD either and this file used to carry its own
  * second, overlapping one.
  *
- * ── ⚠️ The port apparatus here is INERT, and that is measured, not assumed ──
+ * ── ⚠️ What this file MEASURES: the resolution, and now the BOOT behind it ──
+ *
+ * Until #12567 the two happy-path cases stopped at the two marker lines. They
+ * proved `serve` RESOLVES both app-local packages; the fixture driver then
+ * registered nothing, so `serve` walked on to `Cluster driver "redis" is not
+ * registered` and the child exited 1 about 5.6s in, having never called
+ * `listen()`. Nothing here proved `serve` BOOTS with an app-local cluster
+ * driver — while the test names and the `Press Ctrl+C to stop` settle
+ * alternative both read as though a boot were in scope.
+ *
+ * ⭐ #12567's ruling was to sweep the repo for something that DID prove it
+ * before changing anything here, because if something did, this file should
+ * have been renamed to say `resolves` instead. The answer was NOTHING — not
+ * "nothing better", nothing at all:
+ *
+ *   - `serve.ts`'s entire cluster block sits behind `if (__clusterDriver &&
+ *     __clusterDriver !== 'memory')`, and THIS FILE is the only test in the
+ *     workspace that sets `OS_CLUSTER_DRIVER` on a child. The one other test
+ *     that names the variable, `serve-cluster-host-resolution.test.ts`, names it
+ *     in prose and spawns nothing. So no other banner-reaching test loads a
+ *     cluster package at all.
+ *   - `registerClusterDriver` occurs in ZERO of the 2823 test files in the
+ *     workspace — reverse-checked against `checkMultiNodeAllowed` (5 files) and
+ *     `defineCluster` (2), both present in that same population.
+ *   - `packages/qa/**` — dogfood plus every conformance suite — holds ZERO
+ *     occurrences of `cluster`, reverse-checked against `dogfood` (86 files of
+ *     190) and `serve` (74).
+ *
+ * ⇒ the boot coverage had to be built HERE or it would not exist anywhere. That
+ * is a decision being recorded, not a repair being described: this file measures
+ * strictly more than it did, on purpose.
+ *
+ * ── ⚠️ ONE claim of #12567's that this file does NOT repeat ───────────────
+ *
+ * The card read the old happy path as a CLOSED LOOP that "cannot fail", on the
+ * ground that `toContain(DRIVER_MARK)` was also one of `SETTLED`'s alternatives.
+ * Measured on this tree the "cannot fail" half does not hold, and the record is
+ * kept here so nobody re-derives it: `finish()` has FOUR call sites and only ONE
+ * is gated on `waitFor` — the others are the child's `exit`, its `error` and the
+ * timeout — so a run reaches the assertions whether or not `waitFor` ever
+ * matched. A `serve` that re-anchored at the CWD prints `does not declare it`
+ * for the DECLARED app, settles on THAT alternative, and the marker assertions
+ * go red. Verified by replaying this harness's settle structure against a child
+ * that prints nothing matching: it resolves via `exit`, and the assertion is
+ * RED.
+ *
+ * ⭐ What WAS true is narrower and is the defect actually repaired here: both
+ * markers are printed MID-BOOT, so waking on one handed the assertions a process
+ * that had not finished — and, before the driver registered, one that was about
+ * to die. ⛔ So the mechanical rule this file now keeps is: `SETTLED` may match
+ * only TERMINAL outcomes, never mid-boot progress. Each alternative it carries
+ * is an outcome one test asserts and another test is turned RED by, which is
+ * what makes waiting on them a discriminator rather than a restatement.
+ *
+ * ── ⚠️ The port apparatus: one LIVE instrument, one insurance ─────────────
  *
  * #12548 wired the drift read-back into this file as the sibling of
- * `serve-process-child-env.e2e.test.ts`. On this tree it is SILENT for every run
- * this file makes, and saying so is the point of this paragraph — a reader who
- * takes it for a live instrument would be reading a green that was never a
- * measurement.
+ * `serve-process-child-env.e2e.test.ts`, and #12565 recorded HERE that it was
+ * SILENT on every run this file made. That was true of the tree it was written
+ * on and is not true of this one, so the note is UPDATED rather than deleted: a
+ * reader who meets a live instrument described as silent misreads its greens
+ * exactly as badly as the reverse.
  *
- * Measured on `52a982388`: the fixture driver below only PRINTS its marker, so
- * `serve` walks on to `Cluster driver "redis" is not registered` and the child
- * exits 1 — 5.6s in, having never called `listen()`. The undeclared leg dies
- * earlier still. So no child spawned by this file ever prints a ready banner,
- * `boundPortFromBanner()` answers `no-banner` on all three runs, and
- * `portDriftError()` returns `null`.
+ *   `portDriftError()`      ⭐ LIVE since #12567 on the two happy-path runs.
+ *                           They print a complete banner, so
+ *                           `boundPortFromBanner()` answers `bound` and the port
+ *                           this harness asked for is really compared against
+ *                           the one the child bound. Still `null` on the
+ *                           undeclared leg, which dies before `listen()` — the
+ *                           helper's own stated contract, not a gap.
  *
- * ⇒ this file's exposure is not merely LOWER than the security file's, it is
- * nil in both directions: it issues no HTTP request, and its children never bind
- * a port there is anything to drift off. The same measurement retires
- * `portContentionError()` above to insurance — these children spawn through
- * `bin/run-dev.js`, so `serve`'s auto-shift branch is open and a taken port
- * never produces the bind failure that helper reads for.
+ *   `portContentionError()` STILL INSURANCE — and ⛔ not for the reason the old
+ *                           note gave. Its silence never depended on the banner:
+ *                           these children spawn through `bin/run-dev.js`, which
+ *                           pins `NODE_ENV=development` before argv is parsed,
+ *                           so `serve`'s auto-shift branch is open and a taken
+ *                           port is a hop to the next free one, never the bind
+ *                           failure that helper reads for. That is a property of
+ *                           the SPAWN POSTURE, so booting to a banner cannot
+ *                           make it fire. It stays because the helper is the
+ *                           shared shape and a spawn posture can change;
+ *                           ⛔ do not read its green as a look.
  *
- * ⛔ Do not "make the read-back live" by gating resolution on the banner the way
- * `serve-process-child-env.e2e.test.ts` does: no child here prints one and the
- * gate would hang out its timeout. Both calls stay as they are because the day
- * this fixture registers a real driver and boots to a banner, a drift must not
- * be silent — not because either has been observed firing.
+ * ⇒ this file's exposure is still narrower than the security file's — it issues
+ * no HTTP request — but its happy-path children now DO bind a port there is
+ * something to drift off, which is the half that used to be nil.
  *
  * ── The anti-vacuity floor ───────────────────────────────────────────────
  *
@@ -79,15 +138,35 @@
  * fixtures are written to a temp directory with a fake `index.js` no build
  * produces. A pass therefore cannot come from the CLI's own resolution by
  * accident: the marker line these fixtures print is reachable only across the
- * boundary the card is about.
+ * boundary the card is about. Re-measured for #12567 from this very directory:
+ * `createRequire('packages/cli/test/…').resolve('@objectstack/service-cluster')`
+ * answers `MODULE_NOT_FOUND`.
+ *
+ * ⚠️ #12567 hands the DRIVER fixture the ONE thing it cannot get from the app:
+ * the ESM entry of the framework's OWN `@objectstack/service-cluster`, so its
+ * `registerClusterDriver()` writes to the Map that `@objectstack/runtime`
+ * actually reads. The registry is module-scope state, and registering into this
+ * app's fixture COPY of that package would write to a Map nothing ever reads —
+ * a fixture that looks right, boots nothing, and blames `serve`. A real
+ * deployment gets the single-instance property for free, because the app
+ * declares the cluster packages and the runtime out of one `node_modules`; a
+ * fixture app in `os.tmpdir()` has to be handed it.
+ *
+ * ⛔ It does not lower the floor, which is about who can PRINT the marker lines:
+ * nothing in the workspace prints them, and the framework's cluster package has
+ * no idea these fixtures exist. ⛔ And do not "simplify" it by pointing the
+ * app's `@objectstack/service-cluster` fixture at the real package instead —
+ * THAT substitutes workspace resolution for app resolution and is exactly the
+ * vacuous shape this floor refuses.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { spawn } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { childEnv, portContentionError, portDriftError, randomPort } from './helpers/serve-process.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -114,8 +193,16 @@ const WHAT = 'os serve (bin/run-dev.js \u21d2 NODE_ENV=development)';
 
 /** The gate package `serve` loads first when OS_CLUSTER_DRIVER is set. */
 const CLUSTER = '@objectstack/service-cluster';
+/**
+ * What `OS_CLUSTER_DRIVER` is set to below — ONE spelling, because it names
+ * three things that have to agree: the env var, the driver package `serve`
+ * derives from it, and the registry key the fixture driver registers under. A
+ * boot reaches its banner only when all three match, so three literals would buy
+ * a failure mode with no upside.
+ */
+const DRIVER_NAME = 'redis';
 /** The driver it loads next, named from the env var. */
-const DRIVER = '@objectstack/service-cluster-redis';
+const DRIVER = `@objectstack/service-cluster-${DRIVER_NAME}`;
 
 const CLUSTER_MARK = '[fixture] app-local @objectstack/service-cluster loaded';
 const DRIVER_MARK = '[fixture] app-local @objectstack/service-cluster-redis loaded';
@@ -130,9 +217,96 @@ console.error(${JSON.stringify(CLUSTER_MARK)});
 export function checkMultiNodeAllowed() { return { allowed: true }; }
 `;
 
-const FAKE_DRIVER = `
+/**
+ * Stand-in for a shipped remote driver — and, since #12567, a REGISTERING one.
+ *
+ * Before #12567 this printed its marker and stopped, so `serve` walked on to
+ * `Cluster driver "redis" is not registered` and the child died without ever
+ * calling `listen()`. Registering makes the runtime's own
+ * `defineCluster({ driver: DRIVER_NAME })` resolve, so the boot completes and
+ * this file measures the BOOT as well as the two resolutions.
+ *
+ * `frameworkClusterEsm` is the framework's own `@objectstack/service-cluster`,
+ * found by `frameworkClusterEsmEntry()` below — see the anti-vacuity note in
+ * this file's header for why the registry has to be THAT module's, and why
+ * handing it over does not weaken the floor.
+ *
+ * The factory delegates to the `memory` driver rather than standing anything
+ * remote up: this file measures WHERE `serve` resolved a driver from and that
+ * the boot completed with it, never the driver's transport. A real Redis would
+ * add a service dependency and measure nothing extra. The composed service
+ * therefore reports `driver: 'memory'`, which is the honest answer — ⛔ do not
+ * relabel it `redis` to make a boot log read better: the split-brain guard
+ * (ADR-0010) keys off exactly that string, and a fixture that lies about it is a
+ * fixture that can walk past the guard.
+ */
+function fakeDriver(frameworkClusterEsm: string): string {
+  return `
 console.error(${JSON.stringify(DRIVER_MARK)});
+
+const { defineCluster, registerClusterDriver } = await import(${JSON.stringify(frameworkClusterEsm)});
+registerClusterDriver(${JSON.stringify(DRIVER_NAME)}, (config) => defineCluster({
+  driver: 'memory',
+  nodeId: config.nodeId,
+}));
 `;
+}
+
+/**
+ * The framework's OWN `@objectstack/service-cluster`, as the ESM entry the
+ * runtime's graph really loads — reached by SPECIFIER, with ⛔ no assumption
+ * about where this workspace keeps its packages.
+ *
+ * Three steps, and none is interchangeable with the obvious shorter spelling:
+ *
+ *   1. `packages/cli` cannot resolve `@objectstack/service-cluster` at all — it
+ *      deliberately does not declare it, which is what makes the package
+ *      app-declarable in the first place, and `serve-host-fallback-base.e2e.
+ *      test.ts` carries that measurement (`MODULE_NOT_FOUND`, re-measured from
+ *      this directory for #12567). `@objectstack/runtime` IS declared here and
+ *      DOES declare the cluster package, and runtime is the module whose
+ *      registry decides this boot — so runtime is the vantage to resolve from.
+ *
+ *   2. `createRequire().resolve()` answers with the `require` condition, so it
+ *      hands back `dist/index.cjs`. ⚠️ The CJS twin is a DIFFERENT module
+ *      instance with a DIFFERENT registry Map: a driver registered into it is
+ *      registered where the ESM runtime never looks, and the boot then dies
+ *      blaming `serve`. So that answer is used only to FIND the package, and
+ *      the package's own manifest is asked which file `import` selects.
+ *
+ *   3. The climb to that manifest is verified by `name` rather than counted in
+ *      directory levels, so it cannot quietly answer with a neighbour's
+ *      `package.json` the day the layout moves.
+ *
+ * ⛔ Deliberately NOT a child process asking `import.meta.resolve`. That answer
+ * would be authoritative too, but every spawn under `packages/cli/test` owes a
+ * declared environment (`check:cli-test-child-env`), and this needs no process
+ * of its own: a package's manifest is the authority on its own entry points.
+ */
+function frameworkClusterEsmEntry(): string {
+  const runtimeEntry = createRequire(import.meta.url).resolve('@objectstack/runtime');
+  const clusterEntry = createRequire(runtimeEntry).resolve(CLUSTER);
+  let dir = dirname(clusterEntry);
+  for (;;) {
+    let manifest: { name?: string; exports?: Record<string, { import?: string }> } | undefined;
+    try {
+      manifest = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8'));
+    } catch { /* not a package root, or unreadable — keep climbing */ }
+    if (manifest?.name === CLUSTER) {
+      const entry = manifest.exports?.['.']?.import;
+      if (typeof entry !== 'string') {
+        throw new Error(
+          `${CLUSTER} at ${dir} declares no \`exports["."].import\` — there is no ESM entry to `
+          + 'hand the fixture driver, and registering into the CJS twin would be silent.',
+        );
+      }
+      return pathToFileURL(realpathSync(resolve(dir, entry))).href;
+    }
+    const up = dirname(dir);
+    if (up === dir) throw new Error(`no ${CLUSTER} package.json above ${clusterEntry}`);
+    dir = up;
+  }
+}
 
 function writeAppLocalPackage(nodeModules: string, name: string, body: string): void {
   const dir = join(nodeModules, ...name.split('/'));
@@ -152,7 +326,7 @@ function writeAppLocalPackage(nodeModules: string, name: string, body: string): 
  * undeclared must still be refused (#4719 — reachability is not a declaration,
  * and moving the resolution base must not quietly widen what `serve` accepts).
  */
-function writeApp(prefix: string, declare: boolean): string {
+function writeApp(prefix: string, declare: boolean, frameworkClusterEsm: string): string {
   const dir = mkdtempSync(join(tmpdir(), prefix));
   writeFileSync(join(dir, 'objectstack.config.ts'), CONFIG, 'utf8');
   writeFileSync(
@@ -171,11 +345,24 @@ function writeApp(prefix: string, declare: boolean): string {
   );
   const nodeModules = join(dir, 'node_modules');
   writeAppLocalPackage(nodeModules, CLUSTER, FAKE_CLUSTER);
-  writeAppLocalPackage(nodeModules, DRIVER, FAKE_DRIVER);
+  writeAppLocalPackage(nodeModules, DRIVER, fakeDriver(frameworkClusterEsm));
   return dir;
 }
 
-interface Run { stdout: string; stderr: string; both: string }
+/**
+ * How a run ENDED — a fact about the harness, not a string in the child's
+ * buffer.
+ *
+ * ⭐ This is what lets a happy-path case assert that the boot COMPLETED without
+ * asserting the banner text that woke it (#12567). `matched` means a terminal
+ * outcome named by `SETTLED` was observed; `exited` means the child was gone
+ * first; `timeout` means neither happened inside the budget. That last one is
+ * the case no string assertion below can reach: a child that printed both
+ * markers and then HUNG short of `listen()` satisfies every one of them.
+ */
+type RunOutcome = 'matched' | 'exited' | 'timeout';
+
+interface Run { stdout: string; stderr: string; both: string; outcome: RunOutcome }
 
 /**
  * Boot `serve` with an explicit `cwd` and an explicit config argument, collect
@@ -226,7 +413,7 @@ function runServeFrom(
     let stdout = '';
     let stderr = '';
     let settled = false;
-    const finish = () => {
+    const finish = (outcome: RunOutcome) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
@@ -236,32 +423,52 @@ function runServeFrom(
         rejectRun(contended);
         return;
       }
-      // ⭐ The read-back half (#12548). ⚠️ Structurally silent here — see this
-      // file's header for the measurement, and ⛔ do not read a green run as
-      // evidence that it looked.
+      // ⭐ The read-back half (#12548), LIVE here since #12567: the happy-path
+      // children print a complete banner, so this really compares the port the
+      // harness asked for against the one the child bound. ⛔ Still not a look
+      // on the undeclared leg, which dies before `listen()` — this file's
+      // header carries both halves of that measurement.
       const drifted = portDriftError(stdout + stderr, WHAT, port);
       if (drifted) {
         rejectRun(drifted);
         return;
       }
-      resolveRun({ stdout, stderr, both: stdout + stderr });
+      resolveRun({ stdout, stderr, both: stdout + stderr, outcome });
     };
-    const timer = setTimeout(finish, timeoutMs);
+    const timer = setTimeout(() => finish('timeout'), timeoutMs);
     const onData = (chunk: unknown, stream: 'out' | 'err') => {
       if (stream === 'out') stdout += String(chunk); else stderr += String(chunk);
-      if (waitFor.test(stdout + stderr)) finish();
+      if (waitFor.test(stdout + stderr)) finish('matched');
     };
     child.stdout.on('data', (d) => onData(d, 'out'));
     child.stderr.on('data', (d) => onData(d, 'err'));
-    child.on('exit', finish);
-    child.on('error', finish);
+    child.on('exit', () => finish('exited'));
+    // A spawn that never ran is `exited` for this purpose: the child is gone
+    // without having reached a terminal outcome, which is what the caller has
+    // to be able to tell apart from a boot that finished.
+    child.on('error', () => finish('exited'));
   });
 }
 
-/** Matches either outcome, so a run never waits out its timeout. */
-const SETTLED = new RegExp(
-  `${DRIVER_MARK.replace(/[[\]]/g, '\\$&')}|does not declare it|Press Ctrl\\+C to stop`,
-);
+/**
+ * The TERMINAL outcomes, so a run never waits out its timeout — and ⛔ nothing
+ * else.
+ *
+ * ⭐ Since #12567 neither marker is in here. Both are printed MID-BOOT, so
+ * waking on one handed the assertions a process that had not finished — and,
+ * before the fixture driver registered, one that was about to die. The banner
+ * tail is the honest wake for a file that measures a boot, and it is now a thing
+ * that HAPPENS rather than an alternative advertising a boot that never did.
+ * ⛔ Do not put a marker back in to make a run finish sooner: those seconds are
+ * the boot, and the boot is what this file exists to measure.
+ *
+ * The two alternatives are the two outcomes the cases below discriminate
+ * between — each is asserted by one case and turns another case RED — which is
+ * what keeps waiting on them from being a restatement of the assertion. A child
+ * that dies printing neither still resolves through the `exit` handler above and
+ * is judged by the same assertions.
+ */
+const SETTLED = /Press Ctrl\+C to stop|does not declare it/;
 
 let declaredApp: string;
 let undeclaredApp: string;
@@ -269,8 +476,11 @@ let undeclaredApp: string;
 let neutralCwd: string;
 
 beforeAll(() => {
-  declaredApp = writeApp('os-anchored-declared-', true);
-  undeclaredApp = writeApp('os-anchored-undeclared-', false);
+  // Resolved ONCE and handed to both apps: the fixture driver registers into the
+  // framework's registry, and this is the only thing that can find it.
+  const frameworkClusterEsm = frameworkClusterEsmEntry();
+  declaredApp = writeApp('os-anchored-declared-', true, frameworkClusterEsm);
+  undeclaredApp = writeApp('os-anchored-undeclared-', false, frameworkClusterEsm);
   neutralCwd = mkdtempSync(join(tmpdir(), 'os-anchored-neutral-cwd-'));
 });
 
@@ -282,7 +492,7 @@ afterAll(() => {
 
 describe('os serve → optional service resolution is anchored at the app (#11185)', () => {
   it(
-    'loads an app-local-only optional package when the CWD is NOT the app',
+    'BOOTS on an app-local-only optional package when the CWD is NOT the app',
     async () => {
       const run = await runServeFrom(neutralCwd, join(declaredApp, 'objectstack.config.ts'), SETTLED);
       const seen = `\n--- stdout ---\n${run.stdout.slice(-4000)}\n--- stderr ---\n${run.stderr.slice(-4000)}`;
@@ -295,12 +505,21 @@ describe('os serve → optional service resolution is anchored at the app (#1118
       expect(run.both, `serve refused a package the app DOES declare${seen}`).not.toContain(
         'does not declare it',
       );
+
+      // ⭐ The boot half (#12567). Both markers print mid-boot, so on their own
+      // they cannot tell a completed boot from the child that printed them and
+      // then died on an unregistered driver — these two can, and neither is the
+      // text that woke the run.
+      expect(run.both, `serve never registered the app's cluster driver${seen}`).not.toContain(
+        'is not registered',
+      );
+      expect(run.outcome, `serve never reached a ready banner${seen}`).toBe('matched');
     },
     300_000,
   );
 
   it(
-    'still loads it when the CWD IS the app (the shape #10645 fixed stays fixed)',
+    'still BOOTS on it when the CWD IS the app (the shape #10645 fixed stays fixed)',
     async () => {
       // Passes on both trees: it is the control that proves the fixture and the
       // boot path are real, so a failure in the test above is the BASE and not a
@@ -309,6 +528,13 @@ describe('os serve → optional service resolution is anchored at the app (#1118
       const seen = `\n--- stdout ---\n${run.stdout.slice(-4000)}\n--- stderr ---\n${run.stderr.slice(-4000)}`;
       expect(run.both, `the cluster gate was not loaded from the app${seen}`).toContain(CLUSTER_MARK);
       expect(run.both, `the cluster driver was not loaded from the app${seen}`).toContain(DRIVER_MARK);
+      expect(run.both, `serve refused a package the app DOES declare${seen}`).not.toContain(
+        'does not declare it',
+      );
+      expect(run.both, `serve never registered the app's cluster driver${seen}`).not.toContain(
+        'is not registered',
+      );
+      expect(run.outcome, `serve never reached a ready banner${seen}`).toBe('matched');
     },
     300_000,
   );
