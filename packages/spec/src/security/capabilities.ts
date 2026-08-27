@@ -41,6 +41,25 @@ export const PLATFORM_CAPABILITIES: readonly PlatformCapability[] = [
   { name: 'manage_users', label: 'Manage Users', description: 'Create, edit, and deactivate users across the platform.', scope: 'platform' },
   { name: 'manage_org_users', label: 'Manage Organization Users', description: 'Manage members within the caller’s organization.', scope: 'org' },
   { name: 'manage_metadata', label: 'Manage Metadata', description: 'Author and publish object/view/flow and other metadata.', scope: 'platform' },
+  // [#12702] The org-scoped SUBSET key beside `manage_metadata` — presentation
+  // authoring authority bounded to the caller's own organization. It admits
+  // `/meta` item writes ONLY when the target type's registry entry declares
+  // `allowOrgOverride: true` (ADR-0005 tier A: view / dashboard / report /
+  // translation / email_template today — the REGISTRY is the authority, this
+  // comment merely names today's members) AND the write is org-scoped to the
+  // session's active organization. Never a tier-B reach, never an env-wide
+  // (`organization_id NULL`) write, never another organization's partition —
+  // enforced by `metaWriteCapabilityVerdict` (`@objectstack/metadata-core`),
+  // the one predicate every `/meta` write door runs. It exists so a
+  // walled-posture (single-DB SaaS) operator can let a tenant org admin
+  // customize presentation overlays without handing them platform-wide
+  // `manage_metadata`, whose reach includes env-wide tier-B authoring
+  // (maintainer direction 2026-08-27, quoted in #12701). Deliberately granted
+  // by NO shipped permission set: the operator grants it per deployment, so
+  // existing postures — `single` included — are byte-unchanged by its
+  // existence. ⛔ Never add it to `PLATFORM_ADMIN_ONLY_CAPABILITIES`
+  // (`plugin-security`): it is precisely NOT a platform-admin marker.
+  { name: 'manage_org_presentation', label: 'Manage Organization Presentation', description: 'Author per-organization presentation overlays — the metadata types whose registry entry declares allowOrgOverride — scoped to the caller’s own organization.', scope: 'org' },
   { name: 'manage_platform_settings', label: 'Manage Platform Settings', description: 'Configure global platform settings (mail, storage, AI, licensing, …) and platform-only Setup pages.', scope: 'platform' },
   { name: 'setup.access', label: 'Setup Access', description: 'Enter the Setup app shell.', scope: 'platform' },
   // [Finding-1] The write counterpart to `setup.access`: saving changes to

@@ -29,6 +29,11 @@ import {
     // [#8805] Moved to `metadata-core` so the REST `/meta` write doors decide
     // this the same way rather than through a second copy. Behaviour unchanged.
     organizationIdForMetaWrite,
+    // [#12702] The capability half of the same decision, from the same home
+    // and for the same no-second-copy reason: `manage_metadata` as before,
+    // plus `manage_org_presentation` for org-overridable types written
+    // org-scoped to the caller's own active organization.
+    metaWriteCapabilityVerdict,
 } from '@objectstack/metadata-core';
 import { buildApiError } from '../error-envelope.js';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
@@ -442,14 +447,39 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
             // refusal. `manage_metadata` is ADR-0066 D1's authoring capability;
             // engine self-invocation (`isSystem`) bypasses, matching
             // `actionPermissionError` and the migrate-stored gate below.
+            //
+            // [#12702] The gate is the shared `metaWriteCapabilityVerdict`
+            // (`@objectstack/metadata-core` — the same home as the org-scope
+            // predicate below, for the same no-second-copy reason): beside
+            // `manage_metadata` it admits `manage_org_presentation`, ONLY for
+            // a type whose registry entry declares `allowOrgOverride: true`
+            // AND a session with an active organization — which is exactly the
+            // organization `organizationIdForMetaWrite` threads below, so an
+            // admitted write can only land org-scoped in the caller's own
+            // partition, never env-wide and never another org's. The active
+            // organization is resolved HERE, once, and reused by the write
+            // threading below — authorization and scope read one value (the
+            // single-resolution shape the REST doors carry, #8919). Resolving
+            // it is a session read, not a protocol probe: the 403-vs-501
+            // discipline above is untouched.
             const ec: any = _context.executionContext;
-            if (!ec?.isSystem && !new Set<string>(ec?.systemPermissions ?? []).has('manage_metadata')) {
+            // [#10503] Folded at the boundary, once — the verdict and the
+            // scope decision below must read the same spelling.
+            const canonicalType = canonicalMetaUrlType(type);
+            const activeOrganizationId = await deps.resolveActiveOrganizationId(_context);
+            const verdict = metaWriteCapabilityVerdict({
+                isSystem: ec?.isSystem === true,
+                systemPermissions: ec?.systemPermissions,
+                canonicalType,
+                activeOrganizationId,
+                operation: 'save',
+            });
+            if (!verdict.allowed) {
+                // `deps.error(msg, 403)` derives the code from the status —
+                // `PERMISSION_DENIED`, this transport's pinned spelling.
                 return {
                     handled: true,
-                    response: deps.error(
-                        'Saving a metadata item requires the `manage_metadata` capability.',
-                        403,
-                    ),
+                    response: deps.error(verdict.message, 403),
                 };
             }
 
@@ -482,7 +512,10 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
                     // for why the predicate is the static registry flag and not
                     // `isOverlayAllowed` — and, since #8805, why it lives there:
                     // the REST `/meta` write doors run the same one.
-                    const activeOrganizationId = await deps.resolveActiveOrganizationId(_context);
+                    //
+                    // [#12702] `activeOrganizationId` is the ONE resolution the
+                    // capability gate above already made — scope and
+                    // authorization read the same value by construction.
                     //
                     // [#10503] The segment is FOLDED before the scope decision
                     // — the correction #10340 landed for the REST `/meta`
@@ -511,7 +544,7 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
                     // pre-folds would hide a drift between them from the
                     // protocol's own tests.
                     const organizationId = organizationIdForMetaWrite(
-                        canonicalMetaUrlType(type), activeOrganizationId,
+                        canonicalType, activeOrganizationId,
                     );
                     // [#10888] Server-stated face: this branch answers through
                     // `deps.errorFromThrown`, which carries the refusal's
@@ -831,6 +864,12 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
         // `manage_metadata` is the ADR-0066 D1 capability for authoring and
         // publishing metadata, which is exactly what a rewrite is; engine
         // self-invocation (`isSystem`) bypasses, matching `actionPermissionError`.
+        //
+        // [#12702] Deliberately NOT `metaWriteCapabilityVerdict`: an
+        // install-wide stored-metadata rewrite is env-wide by definition, so
+        // `manage_org_presentation`'s "org-scoped to the caller's own active
+        // organization" condition can never hold here. `manage_metadata`-only,
+        // unchanged — do not copy the item doors' acceptance in.
         const ec: any = _context.executionContext;
         if (!ec?.isSystem && !new Set<string>(ec?.systemPermissions ?? []).has('manage_metadata')) {
             return {

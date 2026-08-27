@@ -41,6 +41,12 @@ import {
     // `metadata-core`.
     organizationIdForMetaRead,
     organizationIdForMetaWrite,
+    // [#12702] The capability half of the same decision, from the same home:
+    // `manage_metadata` as before, plus `manage_org_presentation` for
+    // org-overridable types written org-scoped to the caller's own active
+    // organization. One predicate for every `/meta` item write door on both
+    // transports — never a REST-local restatement.
+    metaWriteCapabilityVerdict,
 } from '@objectstack/metadata-core';
 import { RouteManager, type RouteEntry } from './route-manager.js';
 // [#6877] Query-parameter multiplicity. `IHttpRequest.query` declares
@@ -4235,6 +4241,13 @@ export class RestServer {
                         // capability, and a canonicalization rewrite is
                         // authoring; `isSystem` bypasses, matching every other
                         // capability gate on the platform.
+                        //
+                        // [#12702] Deliberately NOT `metaWriteCapabilityVerdict`:
+                        // an install-wide stored-metadata rewrite is env-wide by
+                        // definition, so `manage_org_presentation`'s "org-scoped
+                        // to the caller's own active organization" condition can
+                        // never hold here. `manage_metadata`-only, unchanged —
+                        // do not copy the item doors' acceptance in.
                         const ctx = await this.resolveExecCtx(environmentId, req).catch(() => undefined);
                         const held = new Set<string>(
                             Array.isArray(ctx?.systemPermissions) ? ctx!.systemPermissions : [],
@@ -5589,18 +5602,36 @@ export class RestServer {
                     // ADR-0066 D1's authoring capability and saving a metadata
                     // item is authoring; `isSystem` bypasses, matching every
                     // other capability gate on the platform.
+                    //
+                    // [#12702] The gate is the shared `metaWriteCapabilityVerdict`
+                    // (`@objectstack/metadata-core`, beside the org-scope
+                    // predicate this door already runs): beside `manage_metadata`
+                    // it admits `manage_org_presentation`, ONLY for a type whose
+                    // registry entry declares `allowOrgOverride: true` AND a
+                    // session with an active organization — `ctx.tenantId`, the
+                    // very value `organizationIdForMetaWrite` threads below, so
+                    // an admitted write can only land org-scoped in the caller's
+                    // own partition: never env-wide, never another org's.
                     const ctx = await this.resolveExecCtx(environmentId, req).catch(() => undefined);
-                    const held = new Set<string>(
-                        Array.isArray(ctx?.systemPermissions) ? ctx!.systemPermissions : [],
-                    );
-                    if (!ctx?.isSystem && !held.has('manage_metadata')) {
-                        res.status(403).json({
-                            error: {
-                                code: 'FORBIDDEN',
-                                message: 'Saving a metadata item requires the `manage_metadata` capability.',
-                            },
+                    {
+                        const verdict = metaWriteCapabilityVerdict({
+                            isSystem: ctx?.isSystem === true,
+                            systemPermissions: ctx?.systemPermissions,
+                            // [#10340] Folded at the boundary — the verdict and
+                            // the scope decision below read one spelling.
+                            canonicalType: canonicalMetaUrlType(req.params.type),
+                            activeOrganizationId: ctx?.tenantId,
+                            operation: 'save',
                         });
-                        return;
+                        if (!verdict.allowed) {
+                            res.status(403).json({
+                                error: {
+                                    code: 'FORBIDDEN',
+                                    message: verdict.message,
+                                },
+                            });
+                            return;
+                        }
                     }
                     const p = await this.resolveProtocol(environmentId, req);
                     if (!p.saveMetaItem) {
@@ -5803,18 +5834,34 @@ export class RestServer {
                     // still intact. A gate that answers 403 after
                     // `deleteMetaItem` has run would still be the bug.
                     // `isSystem` bypasses, as everywhere else.
+                    //
+                    // [#12702] Same shared verdict as the PUT door. On THIS
+                    // verb the org condition is also what bounds the blast
+                    // radius: an admitted org-presentation reset threads the
+                    // caller's own organization, and `orgId` selects the
+                    // overlay repository — so the only row such a caller can
+                    // discard is their own org's overlay, never the env-wide
+                    // one (see the [#8805] comment below). `?dropStorage=true`
+                    // is `object`-only, and `object` is not org-overridable,
+                    // so the org capability can never reach it.
                     const ctx = await this.resolveExecCtx(environmentId, req).catch(() => undefined);
-                    const held = new Set<string>(
-                        Array.isArray(ctx?.systemPermissions) ? ctx!.systemPermissions : [],
-                    );
-                    if (!ctx?.isSystem && !held.has('manage_metadata')) {
-                        res.status(403).json({
-                            error: {
-                                code: 'FORBIDDEN',
-                                message: 'Resetting a metadata item requires the `manage_metadata` capability.',
-                            },
+                    {
+                        const verdict = metaWriteCapabilityVerdict({
+                            isSystem: ctx?.isSystem === true,
+                            systemPermissions: ctx?.systemPermissions,
+                            canonicalType: canonicalMetaUrlType(req.params.type),
+                            activeOrganizationId: ctx?.tenantId,
+                            operation: 'reset',
                         });
-                        return;
+                        if (!verdict.allowed) {
+                            res.status(403).json({
+                                error: {
+                                    code: 'FORBIDDEN',
+                                    message: verdict.message,
+                                },
+                            });
+                            return;
+                        }
                     }
                     const p = await this.resolveProtocol(environmentId, req);
                     if (!p.deleteMetaItem) {
@@ -6133,18 +6180,33 @@ export class RestServer {
                     // which kernels implement publishing, and so nothing is promoted
                     // before the refusal. `isSystem` bypasses, matching every other
                     // capability gate on the platform.
+                    //
+                    // [#12702] Same shared verdict as the save door, because
+                    // promotion is the second half of the save→publish loop: a
+                    // caller admitted to author an org-scoped draft must be able
+                    // to promote it, and the SAME conditions bound what a
+                    // promotion can reach — `promoteDraftForPublish` resolves
+                    // the draft through `getOverlayRepo(orgId)`, so an admitted
+                    // org-presentation publish promotes only the caller's own
+                    // org partition.
                     const ctx = await this.resolveExecCtx(environmentId, req).catch(() => undefined);
-                    const held = new Set<string>(
-                        Array.isArray(ctx?.systemPermissions) ? ctx!.systemPermissions : [],
-                    );
-                    if (!ctx?.isSystem && !held.has('manage_metadata')) {
-                        res.status(403).json({
-                            error: {
-                                code: 'FORBIDDEN',
-                                message: 'Publishing a metadata item requires the `manage_metadata` capability.',
-                            },
+                    {
+                        const verdict = metaWriteCapabilityVerdict({
+                            isSystem: ctx?.isSystem === true,
+                            systemPermissions: ctx?.systemPermissions,
+                            canonicalType: canonicalMetaUrlType(req.params.type),
+                            activeOrganizationId: ctx?.tenantId,
+                            operation: 'publish',
                         });
-                        return;
+                        if (!verdict.allowed) {
+                            res.status(403).json({
+                                error: {
+                                    code: 'FORBIDDEN',
+                                    message: verdict.message,
+                                },
+                            });
+                            return;
+                        }
                     }
                     const p = await this.resolveProtocol(environmentId, req);
                     if (!p.publishMetaItem) {
@@ -6312,18 +6374,32 @@ export class RestServer {
                     // Gate FIRST — before the protocol is resolved — so 403-vs-501
                     // leaks no kernel capability and nothing is restored before the
                     // refusal. `isSystem` bypasses, as everywhere else.
+                    //
+                    // [#12702] Same shared verdict as the sibling doors. The
+                    // org condition bounds this verb too: `rollbackMetaItem`
+                    // resolves the row AND its history through the organization
+                    // (see the [#8805] comment below), so an admitted
+                    // org-presentation rollback restores only a version of the
+                    // caller's own org overlay — the env-wide row and its
+                    // history stay out of reach.
                     const ctx = await this.resolveExecCtx(environmentId, req).catch(() => undefined);
-                    const held = new Set<string>(
-                        Array.isArray(ctx?.systemPermissions) ? ctx!.systemPermissions : [],
-                    );
-                    if (!ctx?.isSystem && !held.has('manage_metadata')) {
-                        res.status(403).json({
-                            error: {
-                                code: 'FORBIDDEN',
-                                message: 'Rolling back a metadata item requires the `manage_metadata` capability.',
-                            },
+                    {
+                        const verdict = metaWriteCapabilityVerdict({
+                            isSystem: ctx?.isSystem === true,
+                            systemPermissions: ctx?.systemPermissions,
+                            canonicalType: canonicalMetaUrlType(req.params.type),
+                            activeOrganizationId: ctx?.tenantId,
+                            operation: 'rollback',
                         });
-                        return;
+                        if (!verdict.allowed) {
+                            res.status(403).json({
+                                error: {
+                                    code: 'FORBIDDEN',
+                                    message: verdict.message,
+                                },
+                            });
+                            return;
+                        }
                     }
                     const p = await this.resolveProtocol(environmentId, req);
                     if (!(p as any).rollbackMetaItem) {

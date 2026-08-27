@@ -291,3 +291,119 @@ describe('#6603 — the exempt authoring caller is unaffected', () => {
         expect(stack.storedLabel()).toBe('Account (renamed)');
     });
 });
+
+/**
+ * [#12702] `manage_org_presentation` on this door — the org-scoped
+ * presentation capability. A subset key beside `manage_metadata`: admitted
+ * ONLY for a type whose registry entry declares `allowOrgOverride: true` AND a
+ * session with an active organization (`ctx.tenantId` — the very value the
+ * door threads as the write's organization). Both directions pinned: the
+ * tier-A admission with the threaded organization ASSERTED, and the tier-B /
+ * env-wide / foreign-scope refusals with the protocol never entered.
+ */
+describe('#12702 — PUT /meta/:type/:name: `manage_org_presentation`, org-scoped tier-A admission', () => {
+    const ORG = 'org_a';
+
+    /** A lean boot for driving the door with arbitrary `:type` params. */
+    function bootDoor(context: Record<string, unknown> | undefined) {
+        const saveMetaItem = vi.fn(async ({ type, name }: any) => ({ success: true, type, name }));
+        const protocol: any = {
+            getDiscovery: vi.fn().mockResolvedValue({ version: 'v0', routes: { data: '', metadata: '', ui: '', auth: '/auth' } }),
+            getMetaTypes: vi.fn().mockResolvedValue([]),
+            getMetaItems: vi.fn().mockResolvedValue([]),
+            getMetaItem: vi.fn().mockResolvedValue({ type: 'view', name: 'org_grid', item: {}, lock: 'none' }),
+            findData: vi.fn().mockResolvedValue([]),
+            getData: vi.fn().mockResolvedValue({}),
+            createData: vi.fn().mockResolvedValue({ id: '1' }),
+            updateData: vi.fn().mockResolvedValue({}),
+            deleteData: vi.fn().mockResolvedValue({ success: true }),
+            saveMetaItem,
+        };
+        const rest = new RestServer(
+            mockServer() as any,
+            protocol as any,
+            { api: { requireAuth: false } } as any,
+        );
+        (rest as any).resolveExecCtx = async () => context;
+        rest.registerRoutes();
+        const route = (rest as any).getRoutes().find(
+            (r: any) => r.method === 'PUT' && r.path === SINGLE_PATH,
+        );
+        return {
+            saveMetaItem,
+            put: async (type: string, name: string, item: unknown, query: Record<string, unknown> = {}) => {
+                const res = mockRes();
+                await route!.handler({ params: { type, name }, query, headers: {}, body: item }, res);
+                return { res, body: res.json.mock.calls.at(-1)?.[0] };
+            },
+        };
+    }
+
+    const HOLDER = { userId: 'u_orgadmin', systemPermissions: ['manage_org_presentation'], tenantId: ORG };
+
+    it('admits an org-scoped tier-A save, threaded to the caller\'s OWN organization', async () => {
+        const stack = bootDoor(HOLDER);
+        const write = await stack.put('view', 'org_grid', { name: 'org_grid', label: 'Org Grid' });
+        expect(write.res.statusCode).toBe(200);
+        expect(stack.saveMetaItem).toHaveBeenCalledTimes(1);
+        // The threading IS the wall: the only organization an admitted write
+        // can carry is the caller's own active one.
+        expect(stack.saveMetaItem.mock.calls[0][0]).toMatchObject({
+            type: 'view', name: 'org_grid', organizationId: ORG,
+        });
+    });
+
+    it('[#10340] the URL-only spelling is folded BEFORE the verdict — `email_templates` is tier-A here too', async () => {
+        const stack = bootDoor(HOLDER);
+        const write = await stack.put('email_templates', 'welcome', { name: 'welcome', subject: 'Hi' });
+        expect(write.res.statusCode).toBe(200);
+        expect(stack.saveMetaItem.mock.calls[0][0]).toMatchObject({
+            type: 'email_templates', name: 'welcome', organizationId: ORG,
+        });
+    });
+
+    it.each([
+        ['object'],
+        ['flow'],
+    ])('refuses the SAME holder a tier-B `%s` write — nothing is written', async (type) => {
+        const stack = bootDoor(HOLDER);
+        const write = await stack.put(type, 'account', { label: 'x' });
+        expect(write.res.statusCode).toBe(403);
+        expect(write.body).toMatchObject({ error: { code: 'FORBIDDEN' } });
+        // The tier-B sentence is byte-identical to the pre-#12702 one: the
+        // message varies on the request's tier, never on the caller's own
+        // grants (#7450).
+        expect(write.body.error.message).toBe('Saving a metadata item requires the `manage_metadata` capability.');
+        expect(stack.saveMetaItem).not.toHaveBeenCalled();
+    });
+
+    it('refuses the SAME holder a tier-A write when the session has NO active organization — env-wide is walled', async () => {
+        const stack = bootDoor({ userId: 'u_orgadmin', systemPermissions: ['manage_org_presentation'] });
+        const write = await stack.put('view', 'org_grid', { name: 'org_grid' });
+        expect(write.res.statusCode).toBe(403);
+        expect(write.body).toMatchObject({ error: { code: 'FORBIDDEN' } });
+        expect(String(write.body.error.message)).toContain('active organization');
+        expect(stack.saveMetaItem).not.toHaveBeenCalled();
+    });
+
+    it('a foreign organization is not expressible: query/body-smuggled organization ids do not move the threading', async () => {
+        const stack = bootDoor(HOLDER);
+        const write = await stack.put(
+            'view', 'org_grid',
+            { name: 'org_grid', organization_id: 'org_b', organizationId: 'org_b' },
+            { organizationId: 'org_b' },
+        );
+        expect(write.res.statusCode).toBe(200);
+        // The save request is built field by field from named `req` values:
+        // the write still carries the CALLER's organization.
+        expect(stack.saveMetaItem.mock.calls[0][0]).toMatchObject({ organizationId: ORG });
+    });
+
+    it('control: `manage_metadata` with no active organization still saves a view env-wide, as today', async () => {
+        const stack = bootDoor({ userId: 'u_author', systemPermissions: ['manage_metadata'] });
+        const write = await stack.put('view', 'org_grid', { name: 'org_grid' });
+        expect(write.res.statusCode).toBe(200);
+        expect(stack.saveMetaItem).toHaveBeenCalledTimes(1);
+        expect(stack.saveMetaItem.mock.calls[0][0].organizationId).toBeUndefined();
+    });
+});
