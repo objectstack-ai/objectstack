@@ -564,11 +564,30 @@ enforcement.
 
 Every cluster primitive selects its implementation from `cluster.driver`.
 When the field is absent, `Runtime` auto-registers the in-memory, single-node
-driver (pass `cluster: false` to skip registration entirely). No production
+driver (pass `cluster: false` to skip that auto-registration). No production
 warning is emitted for that case. There *is* a split-brain guard: if the
 operator declares a multi-node topology via `OS_EXPECT_MULTI_NODE=true` or
 `OS_CLUSTER_REPLICAS` > 1 while the resolved driver is `memory`, startup
 **throws** — override with `OS_ALLOW_MEMORY_CLUSTER_MULTINODE=true`.
+
+<Callout type="warn">
+  **`cluster: false` does not mean `@objectstack/service-cluster` contributes
+  nothing.** It skips the two *cluster* plugins — `ClusterServicePlugin` and
+  `MetadataClusterBridgePlugin`. One plugin from that package is registered
+  **unconditionally**, `false` included: `AuthzClusterBridgePlugin`, the
+  authorization-cache posture bridge.
+
+  That is deliberate. The bridge exists to announce, at boot, an authorization
+  grants cache running with **no invalidation bus** — a permission that can be
+  honoured past its revocation. "No cluster service at all" is the loudest case
+  that check has, so `cluster: false` is exactly when you most want to hear it,
+  not a reason for the platform to go quiet.
+
+  It costs you no behaviour on the shipped default: with
+  `OS_AUTHZ_GRANTS_CACHE_TTL_MS` at `0` nothing caches authorization answers, so
+  the plugin attaches nothing, publishes nothing and logs nothing above `debug`.
+  Only the plugin *count* changes — which is worth knowing if you assert on it.
+</Callout>
 
 ### 8.1 Driver matrix
 
