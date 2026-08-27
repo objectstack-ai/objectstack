@@ -49,14 +49,21 @@
  * nothing at either command ever read.
  *
  * **Site 8** covers what the shared table could NOT absorb.
- * `Serve.ORGANIZATIONS_RUNTIME_PKG` deliberately stays a string LITERAL in
- * `serve.ts` (its docblock says why: `serve-cluster-host-resolution.test.ts`
- * resolves the organizations `import()` through that static and needs the
- * literal in that file, or the load drops out of the host-anchoring sweep
- * silently). So the spelling is declared twice inside `packages/cli`, and site 8
- * is what keeps that duplication CHECKED instead of silent — it asserts the two
- * declarations are equal. Each is separately pinned as a roster key, here via
+ * `Serve.ORGANIZATIONS_RUNTIME_PKG` is still a string LITERAL in `serve.ts`, so
+ * the spelling is declared twice inside `packages/cli`, and site 8 is what keeps
+ * that duplication CHECKED instead of silent — it asserts the two declarations
+ * are equal. Each is separately pinned as a roster key, here via
  * `test/serve-capability-vocabulary.test.ts` and there via doctor's leg (ii).
+ *
+ * ⚠️ This paragraph used to say the literal HAD to stay, because
+ * `serve-cluster-host-resolution.test.ts` resolved the organizations `import()`
+ * through that static and needed the literal in that file or the load dropped
+ * out of the host-anchoring sweep silently. ⭐ That reason died at `1ca763b60`
+ * (#12533): the sweep now follows an import alias into a sibling module. Site 8
+ * never rested on it — while there are two declarations the pin has a subject,
+ * whichever way the open decision at #12579 goes — so ⛔ do not delete site 8 to
+ * "finish" that decision. It falls with its subject or not at all. The reading
+ * of what survives the hop is on `Serve.ORGANIZATIONS_RUNTIME_PKG`'s docblock.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';

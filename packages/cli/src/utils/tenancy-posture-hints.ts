@@ -59,16 +59,19 @@
  * The `plugins[]`-wired multi-org runtime both commands NAME in their posture
  * advice, spelled once FOR THIS TABLE (#11614 → #12464 → #12492).
  *
- * ⚠️ This is not the only declaration of the literal inside `packages/cli`, and
- * that is a measured constraint rather than an oversight. `serve.ts` keeps its
- * own `Serve.ORGANIZATIONS_RUNTIME_PKG` literal because
- * `serve-cluster-host-resolution.test.ts` sweeps `serve.ts` for every dynamic
- * `import()` and resolves the organizations load site through that static to a
- * LITERAL IN THAT FILE. Rewrite the static as a re-export of this const and the
- * specifier stops resolving, so that load drops OUT of the host-anchoring sweep
- * instead of failing inside it — the silent-vacuity mode #11614 already paid
- * for. This card tried exactly that and the sweep's named vacuity guard refused
- * it, by name, which is the guard working.
+ * ⚠️ This is not the only declaration of the literal inside `packages/cli`:
+ * `serve.ts` keeps its own `Serve.ORGANIZATIONS_RUNTIME_PKG` literal. ⛔ Do not
+ * read that as a live constraint on this file. It WAS one — the host-anchoring
+ * sweep in `serve-cluster-host-resolution.test.ts` resolved the organizations
+ * load site through that static to a LITERAL IN THAT FILE, so rewriting the
+ * static as a re-export of this const stopped the specifier resolving and
+ * dropped that load OUT of the sweep instead of failing inside it (#11614's
+ * silent-vacuity mode; #12492 tried it and the sweep's named vacuity guard
+ * refused it, by name). ⭐ That reason died at `1ca763b60` (#12533, PR #12582):
+ * the sweep now follows an import alias into a sibling module of the same
+ * package, and it pins that hop against THIS FILE by name. The full reading
+ * lives on `Serve.ORGANIZATIONS_RUNTIME_PKG`; ⛔ do not restate it here — it is
+ * one reason, and #12579 exists because it had four copies.
  *
  * ⭐ So the spelling is declared twice in this package, and both copies are
  * CHECKED rather than silent — a duplicate that can drift unnoticed and one
@@ -79,12 +82,12 @@
  *     (`doctor-organizations-message-spelling.test.ts`, leg (ii)).
  *   · serve's is a key of the same roster (`test/serve-capability-vocabulary.test.ts`).
  *
- * Ending the duplication for real needs that sweep's `resolveIdentifier()` to
- * follow one further hop — an import alias into a sibling module — which is an
- * edit to a file #12492 does not own, and which was in flight elsewhere when
- * this landed. It is a two-line change to a resolver whose own docblock records
- * that resolving one hop further "strictly WIDENS what the sweep judges; it can
- * never excuse a load".
+ * Ending the duplication for real is now POSSIBLE — the further hop it was
+ * waiting on landed, and single-sourcing the spelling into this module is the
+ * only live consumer it would have. ⛔ Possible is not decided: PR #12532
+ * shipped this duplication deliberately with the reasoning at both ends, so
+ * reversing it is a maintainer-facing call. It is open at #12579, which carries
+ * the list of what would have to move in one diff.
  *
  * ⛔ Do NOT close the gap by importing `Serve.ORGANIZATIONS_RUNTIME_PKG` here
  * instead: this module is read by `os doctor`, and a diagnostic command taking a
