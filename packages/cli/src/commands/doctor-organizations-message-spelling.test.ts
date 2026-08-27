@@ -27,14 +27,18 @@
  * is the load-bearing one (see below).
  *
  * ⚠️ The literal is still declared three times, not two: the roster key, the
- * shared module this file now reads, and `Serve.ORGANIZATIONS_RUNTIME_PKG`,
- * which must stay a string LITERAL in `serve.ts` or the host-anchoring sweep in
- * `serve-cluster-host-resolution.test.ts` can no longer resolve which package
- * that command's `import()` names. What changed is that no copy can drift in
- * silence any more: the serve↔shared pair is pinned equal by site 8 of
+ * shared module this file now reads, and `Serve.ORGANIZATIONS_RUNTIME_PKG` in
+ * `serve.ts`. ⛔ That third copy is no longer REQUIRED, and this paragraph is
+ * the fourth place that said it was. It used to read: it must stay a string
+ * LITERAL or the host-anchoring sweep in `serve-cluster-host-resolution.test.ts`
+ * can no longer resolve which package that command's `import()` names. ⭐ That
+ * died at `1ca763b60` (#12533), which taught the sweep to follow an import alias
+ * into a sibling module; whether to end the duplication is now an open,
+ * maintainer-facing decision at #12579. ⛔ None of it changes what THIS file
+ * measures. What holds either way is that no copy can drift in silence: the
+ * serve↔shared pair is pinned equal by site 8 of
  * `serve-organizations-message-spelling.test.ts`, and each copy is separately
- * pinned as a roster key. Ending the duplication needs that sweep's resolver to
- * follow one more hop — a file this card does not own.
+ * pinned as a roster key.
  *
  * ── Three legs, and the second is the point ──────────────────────────────
  *

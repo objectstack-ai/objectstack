@@ -339,12 +339,26 @@ describe('[#8136] a real sys_metadata failure, walked in process through this do
 // same `sendThrownError`.
 //
 // This site is nevertheless left driving the GATE, deliberately: the resolver
-// throw is the one path that reaches the outer catch on this route regardless of
-// what either data source does, so it keeps proving the DOOR rather than one
-// source — `refusePackageRequest` calls `options.resolveExecutionContext(req)`,
-// and a resolver that throws SYNCHRONOUSLY throws before the
+// throw reaches the outer catch on this route regardless of what either data
+// source does, so it exercises the CATCH SITE rather than one source —
+// `refusePackageRequest` calls `options.resolveExecutionContext(req)`, and a
+// resolver that throws SYNCHRONOUSLY throws before the
 // `.catch(() => undefined)` is attached. The list door's durable-read arm is
 // pinned separately in `package-list-durable-read-refusal.test.ts`.
+//
+// ⚠️ TEST-ONLY INJECTION POINT. This note used to end "so it keeps proving the
+// DOOR rather than one source", which reads as a claim about a PRODUCTION path.
+// It is not one: no production throw of any kind reaches this catch through
+// this seam. What the site proves is how the door answers a SYNCHRONOUS gate
+// throw — coverage of the catch site, never a claim about producers. ⛔ Do not
+// read it as evidence that a production resolver can deliver a throw here.
+//
+// The derivation is stated ONCE — in the `Seam census` block of
+// `package-door-declared-code.test.ts`, and the same conclusion is recorded in
+// `package-door-user-message.test.ts`'s reachability section. Stable anchors:
+// #12537, #12647. ⛔ It is deliberately NOT restated here. ⛔ The case is KEPT,
+// not deleted: `reached()` keeps it from going vacuous, and its 5xx-withhold
+// assertions still pin real door behaviour.
 //
 // ⚠️ [#11376] The sentence here used to add: "Still true of the REGISTRY
 // source: `protocol.getMetaItems` keeps its own inner catch, which #11063

@@ -14,8 +14,7 @@
 
 ## 席内分派参考
 
-(维护者 2026-08-16 裁定合并车道:原 spec-surface / spec-tooling 标签已退役,三面
-同归 `domain:spec` 一席,锚定规则双射恢复;以下判据降为席内分派与定价依据。)
+(维护者 2026-08-16 裁定合并车道;以下判据降为席内分派与定价依据。)
 
 - 语义/文本按「合法元数据集合变没变」分 —— 改动前能过校验的输入,改动后逐字节同
   判 ⇒ 文本面(changeset 恒 patch,默认 sweep-first),否则语义面;**任何改变接
@@ -35,11 +34,12 @@
   —— ① 码的存在已在归属卡裁过(ADR-0112 令注册强制);② 纯增量:不动 schema 形状/既有条
   目/ledger 机制,只落追加方自己的包分节;③ 兜底不变:条款②路径肢照命中,入队前仍过契约
   复核。出类(新 ledger 字段、重构、别道条目、准入/拒收语义)⇒ 本席卡,不论谁需要它。
+- **分支信息测试**(2026-08-26 裁决原文不译):"Does this defect give a consumer a branch it could act on
+  differently? No ⇒ widen the existing member's comment/message; yes ⇒ new code under the pre-approved class."
 - **待命巡逻每次做整车道全交集读**(delta 扫描有尾隙:扫描后、波次边界前入队的卡
   谁都看不见;全交集读是安全网)。
 - **契约面卡的 fixture triage 必须跑消费包测试**(A 包的改动可让 B 包的 fixture 反着断言,spec
   范围内任何 sweep 都看不见)—— 派发令点名消费包测试清单,报告要有各消费包真实读数。
-- 派发前触发文件必查照 SKILL.md 标签纪律执行(读锚 H17 索引相交)。
 
 ## 席内判断
 

@@ -516,30 +516,55 @@ export default class Serve extends Command {
    * Exposed as a static for the same reason ALWAYS_ON_CAPABILITIES above is:
    * one declaration, two readers — the boot path and the pin.
    *
-   * ⛔ This MUST stay a string LITERAL in this file — do not turn it into a
-   * re-export of `../utils/tenancy-posture-hints.ts`, however tempting that is
-   * now that the posture hints live there (#12492).
+   * ── A ⛔ stood here, and the constraint it named no longer exists ─────────
    *
-   * `serve-cluster-host-resolution.test.ts` sweeps this file for every dynamic
-   * `import()` and proves each app-declarable one is host-anchored. To do that
-   * it must know WHICH package a load site names, and the organizations load is
-   * spelled `const organizationsPkg = Serve.ORGANIZATIONS_RUNTIME_PKG;` — so the
-   * sweep resolves the identifier one hop, to this static, and then reads the
-   * literal. Written as `= SOME_IMPORTED_CONST`, the literal is no longer in
-   * this file, the specifier becomes unresolvable, and that load drops OUT of
-   * the swept population rather than failing inside it. That is the exact
-   * silent-vacuity failure #11614 already paid for once; the named half of that
-   * sweep's vacuity guard is what catches it, and it does (measured on this
-   * card, which tried the re-export and was refused by it).
+   * ⚠️ Until #12579 this read: MUST stay a string LITERAL in this file, because
+   * `serve-cluster-host-resolution.test.ts` sweeps `serve.ts` for every dynamic
+   * `import()`, resolves the organizations load — spelled
+   * `const organizationsPkg = Serve.ORGANIZATIONS_RUNTIME_PKG;` — one hop to
+   * this static and then reads the literal. Written as `= SOME_IMPORTED_CONST`
+   * the specifier stopped resolving and that load dropped OUT of the swept
+   * population rather than failing inside it: the silent-vacuity failure #11614
+   * paid for once. That was not reasoned, it was MEASURED — #12492 tried exactly
+   * that rewrite and the named half of the sweep's vacuity guard refused it, by
+   * name.
    *
-   * The consequence is that the spelling is declared twice inside this package
-   * — here, and in the shared hints module `os doctor` also reads. That
-   * duplication is CHECKED, not silent: `serve-organizations-message-spelling.test.ts`
-   * asserts the two are equal, and each is independently pinned as a key of the
-   * spec-owned roster (here via `test/serve-capability-vocabulary.test.ts`,
-   * there via `doctor-organizations-message-spelling.test.ts`). Single-sourcing
-   * it properly needs that sweep's resolver to follow one more hop, into a
-   * sibling module — an edit to a file this card does not own.
+   * ⭐ It stopped being true at `1ca763b60` (#12533, PR #12582), which taught
+   * `resolveIdentifier()` a third hop: an import alias to a literal in a sibling
+   * module of the SAME package. `= SOME_IMPORTED_CONST` is now a shape it
+   * resolves, and that is pinned rather than inferred — against the REAL
+   * `../utils/tenancy-posture-hints.ts` read through this file's own scan
+   * context, in the case named "resolves an alias to a literal in a REAL sibling
+   * module of packages/cli", and again in "resolves `static readonly MEMBER =
+   * <alias>` — the shape the refactor writes".
+   *
+   * ⛔ Both halves are recorded rather than the whole note deleted, because a
+   * reader who meets neither re-derives the dead constraint from the duplication
+   * and puts the ⛔ back. ⛔ Nor is that hop dead code for having no live caller:
+   * delete it and this file is one refactor away from emptying the sweep again.
+   *
+   * ── What holds today, which is less than a prohibition ───────────────────
+   *
+   * The spelling is declared twice inside this package — here, and in the shared
+   * hints module `os doctor` also reads. That duplication is CHECKED, not
+   * silent: `serve-organizations-message-spelling.test.ts` site 8 asserts the two
+   * are EQUAL, and each is independently pinned as a key of the spec-owned
+   * roster (here via `test/serve-capability-vocabulary.test.ts`, there via
+   * `doctor-organizations-message-spelling.test.ts`). All three read this
+   * static's VALUE, never this file's source text, so none of them is a reason
+   * for the literal — and #12579 measured that the sweep was the only thing in
+   * the tree that ever read this file's source for a package spelling.
+   *
+   * ⚠️ So the honest state is that nothing forbids single-sourcing this any
+   * more, and ⛔ that is still not a licence to do it in passing. PR #12532
+   * shipped the duplication deliberately with the reasoning at both ends, which
+   * makes ending it a maintainer-facing decision — open at #12579, where what
+   * would have to move together is written down. Two things outlive that
+   * decision either way: this static keeps its NAME (the roster pins address
+   * `Serve.ORGANIZATIONS_RUNTIME_PKG`, and only a spelling may move), and the
+   * gap is ⛔ never closed in the other direction — see the ⛔ on
+   * `ORGANIZATIONS_RUNTIME_PKG` in `../utils/tenancy-posture-hints.ts`, whose
+   * reason (#12464) the hop did not touch.
    *
    * This single-sources the SPELLING and nothing else. Which postures load the
    * runtime, and what each of the two failure stages means, stay exactly where

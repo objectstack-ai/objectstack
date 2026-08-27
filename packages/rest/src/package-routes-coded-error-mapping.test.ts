@@ -30,16 +30,46 @@
  * ## What reaches each catch
  *
  * Three of the four have a service call directly under the `try`, so a throwing
- * `PackageService` drives them. `GET /packages` is different BY DESIGN: both of
- * its data sources sit in their own inner `try { … } catch {}` (a missing
- * protocol or a failed database read degrades to the other source rather than
- * failing the request), so nothing below it reaches the outer catch. What does
- * is the gate: `refusePackageRequest` calls
- * `options.resolveExecutionContext(req)`, and a resolver that throws
- * SYNCHRONOUSLY throws before the `.catch(() => undefined)` is attached. That
- * is not a contrived lever — the composition wires it to the `RestServer`'s own
- * identity/RBAC resolution, which is exactly the kind of code that raises a
- * coded 401/403.
+ * `PackageService` drives them. The fourth drives the GATE:
+ * `refusePackageRequest` calls `options.resolveExecutionContext(req)`, and a
+ * resolver that throws SYNCHRONOUSLY throws before the `.catch(() => undefined)`
+ * is attached.
+ *
+ * ⚠️ That fourth seam is a TEST-ONLY INJECTION POINT. This block used to argue
+ * the opposite — *"That is not a contrived lever — the composition wires it to
+ * the `RestServer`'s own identity/RBAC resolution, which is exactly the kind of
+ * code that raises a coded 401/403"*. The first clause is true; the conclusion
+ * does not follow. Precisely BECAUSE that resolution is reached through an
+ * `async` method, the coded 401/403s it raises are REJECTIONS — swallowed
+ * before this door sees anything, landing on the anonymous-deny 401 floor. The
+ * lever is exactly as contrived as that sentence denied. ⛔ Do not read this
+ * site as evidence that a production throw arrives here.
+ *
+ * The derivation is stated ONCE — in the `Seam census` block of
+ * `package-door-declared-code.test.ts`, and the same conclusion is recorded in
+ * `package-door-user-message.test.ts`'s reachability section. Stable anchors:
+ * #12537, #12647. ⛔ It is deliberately NOT restated here; a third copy is the
+ * defect those cards exist to end. The tell is already in the SITES table
+ * below, and was there before anyone read it that way: the three production
+ * seams inject `async () => { throw error; }` — a rejection — while this one
+ * injects a non-`async` `() => { throw error; }`, because a rejection here
+ * answers 401 instead of reaching this catch at all.
+ *
+ * ⛔ The case is KEPT, not deleted. It still pins how this door answers a
+ * synchronous gate throw, and `reached()` keeps it from going vacuous. Its
+ * value is coverage of the CATCH SITE, never a claim about producers.
+ *
+ * ⚠️ The block's OTHER reason for driving the gate here is stale as well. It
+ * read: *"`GET /packages` is different BY DESIGN: both of its data sources sit
+ * in their own inner `try { … } catch {}` … so nothing below it reaches the
+ * outer catch"*. #11063 and #11130 removed both inner catches —
+ * `package-routes.ts` now marks each read `NOT wrapped in a catch,
+ * deliberately` — so those arms DO reach this outer catch, and are pinned in
+ * `package-list-durable-read-refusal.test.ts` and
+ * `package-list-registry-read-refusal.test.ts`. The gate site stays because it
+ * reaches this catch independently of either data source, which is the reason
+ * the sibling `package-door-5xx-message-sanitization.test.ts` gives at its own
+ * SITES table.
  */
 
 import { describe, it, expect, vi } from 'vitest';

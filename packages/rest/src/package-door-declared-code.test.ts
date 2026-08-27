@@ -52,18 +52,72 @@
  *    into `PackageRoutesOptions`, and `resolveExecutionContext` is handed in by
  *    the composition step. The door forwards whatever they throw, so the
  *    demote fires on any spelling outside `@objectstack/spec`'s ledger.
- *    Section 1 drives all four seams through the real registrar.
+ *    Section 1 drives all four seams through the real registrar — but
+ *    ⚠️ only THREE of the four are production producers; the
+ *    `resolveExecutionContext` seam is a TEST-ONLY injection point. See
+ *    **Seam census** below, which is the one place that reason is stated.
  *
  *  - **The framework's OWN producers do not populate it, by GATE.**
  *    `pnpm check:dispatcher-error-vocabulary` (`dispatcher-error-vocabulary.ts`)
  *    fails on an unswept platform producer precisely so a platform semantic
  *    code cannot silently demote off the wire. Measured on this checkout: every
- *    status-declaring coded throw reachable at these four seams spells a
- *    REGISTERED code. That is the point of the gate, not an argument that the
+ *    status-declaring coded throw reachable at the three PRODUCTION seams
+ *    (**Seam census** below) spells a REGISTERED code. That is the point of the gate, not an argument that the
  *    channel is dead — it leaves `declaredCode`'s live population as the limb
  *    no ledger can enumerate: a metadata app's own thrown `.code` across the
  *    QuickJS boundary (#7867) and a downstream repo's codes, which the ledger's
  *    federation ruling (2026-08-03/09) keeps out of this ledger BY DESIGN.
+ *
+ * ## ⭐ Seam census: THREE production seams, plus ONE test-only injection
+ *
+ * `SITES` below drives FOUR seams. Three are producers a deployment can
+ * actually reach; the fourth is an injection point that exists only in a test.
+ * Stated ONCE here and cited from the sites that depend on it, rather than
+ * restated at each.
+ *
+ * Measured on `origin/main` @ `aa5994e17` by reading the composition rather
+ * than inferring it:
+ *
+ *  - `rest-api-plugin.ts:471` is the ONLY production supplier of this option,
+ *    repo-wide: `resolveExecutionContext: (req) =>
+ *    restServer.resolvePackageRouteExecutionContext(req)`.
+ *  - `rest-server.ts:1481` — `resolvePackageRouteExecutionContext` is NOT
+ *    `async`. Its whole body is an optional-chained
+ *    `req?.params?.environmentId` read, then `return
+ *    this.resolveExecCtx(environmentId, req).catch(() => undefined)`.
+ *  - `rest-server.ts:1453` — `private async resolveExecCtx(...)`. Being
+ *    `async`, calling it cannot throw SYNCHRONOUSLY; it always returns a
+ *    promise.
+ *  - `package-routes.ts:81` — the consumer then `await`s
+ *    `options.resolveExecutionContext(req).catch(() => undefined)`, swallowing
+ *    a rejection a SECOND time.
+ *
+ * ⇒ A production resolver delivers exactly two things: a context, or
+ * `undefined`. Its rejections are swallowed twice and land on the
+ * anonymous-deny floor as a 401 — they never reach `sendThrownError`. The
+ * ONLY route from this seam to `sendThrownError` is a SYNCHRONOUS throw (it
+ * happens before `.catch` is attached, so it rejects `refusePackageRequest`
+ * itself and the handler's `try` catches it) — and the production wrapper
+ * above has no statement that can make one.
+ *
+ * ⚠️ Nor can an embedder reach it: `registerPackageRoutes` and
+ * `PackageRoutesOptions` are NOT exported from `packages/rest/src/index.ts`
+ * (the package publishes a single `.` entry, and `direct-mount-composition.ts`
+ * is their only importer), so no downstream composition can supply a resolver
+ * of its own here either.
+ *
+ * ⛔ The `resolveExecutionContext` case is KEPT anyway, deliberately. It
+ * pins something real — how this door answers when an injected resolver
+ * throws synchronously — and `reached()` keeps it from going vacuous. It
+ * simply is not evidence about a PRODUCTION path, so nothing in this file may
+ * cite it as one. Deleting a test to make a census true would be the census
+ * lying in the other direction.
+ *
+ * ⛔ Whether that double swallow SHOULD exist at all is a different
+ * question — it would change what a public door emits — and it is open
+ * at #12537, deliberately not answered here. Note for whoever takes it: the
+ * swallow is documented at NEITHER site, so "deliberate" is not established by
+ * the code as it stands.
  *
  * Section 5 is the second fact stated as a test: a REAL `ObjectQL`, a REAL
  * `ObjectStackProtocolImplementation` and a failing driver, driven through the
@@ -198,6 +252,10 @@ const MANIFEST = { id: 'com.acme.crm', version: '1.0.0' };
  * `package-routes-coded-error-mapping.test.ts`, for the same reason: a case
  * that silently never reached the seam would otherwise "pass" on a body it got
  * for a completely different reason.
+ *
+ * ⚠️ Four seams, THREE of them production. The
+ * `resolveExecutionContext` entry is the test-only one — see **Seam census**
+ * in the module docblock, the single place that reason is stated.
  */
 interface Site {
   name: string;
@@ -219,6 +277,14 @@ const SITES: Site[] = [
     },
   },
   {
+    // ⚠️ TEST-ONLY INJECTION POINT — NOT a production seam, and ⛔ not to
+    // be counted as one. A production resolver cannot throw synchronously and
+    // its rejections are swallowed twice before this door sees them; the
+    // measurement is in **Seam census** in the module docblock. Kept because
+    // it pins real door behaviour (and `reached()` keeps it honest).
+    // ⚠️ The `vi.fn` below is deliberately NOT `async`: an `async` one
+    // would REJECT, and `package-routes.ts:81` would swallow that into the
+    // 401 anonymous-deny floor instead of reaching `sendThrownError`.
     name: 'GET /packages — the capability gate resolver throws',
     run: async (error: unknown) => {
       const resolveExecutionContext = vi.fn(() => { throw error; });
@@ -259,7 +325,8 @@ const SITES: Site[] = [
 ];
 
 // ---------------------------------------------------------------------------
-// 1. The demote reaches the wire, at every seam this door has
+// 1. The demote reaches the wire, at every seam this suite drives
+//    (three production producers + one test-only injection — Seam census)
 // ---------------------------------------------------------------------------
 
 describe('[#12405] an UNREGISTERED producer spelling rides `declaredCode`', () => {
@@ -478,9 +545,10 @@ describe('[#12405] the demote is not withheld by the 5xx message sanitiser', () 
    * merely consistent, because of a fact about the producers, and that fact is
    * recorded here because it can rot and is written down nowhere else:
    *
-   *   **No producer reaching these four seams can put a driver errno in
-   *   `declaredCode` today, because `PackageService` discriminates on the
-   *   STATUS channel and never on `.code`.**
+   *   **No producer reaching the three PRODUCTION seams can put a driver
+   *   errno in `declaredCode` today, because `PackageService` discriminates on
+   *   the STATUS channel and never on `.code`.** (Three, not four — **Seam
+   *   census** in the module docblock.)
    *
    * `packages/services/service-package/src/index.ts` is explicit about why:
    * `publish` and `delete` re-throw only what `declaresHttpAnswer(error)`
@@ -502,13 +570,22 @@ describe('[#12405] the demote is not withheld by the 5xx message sanitiser', () 
    * here measures that shape, because nothing produces it.
    *
    * ⛔ **The falsifier, stated so the next reader inherits a measurement
-   * instead of an argument:** a producer that reaches any of these four seams
-   * carrying a driver errno as its `.code` — a `PackageService` implementation
-   * that re-throws on `.code` rather than on status, a `protocol` slice that
-   * lets a raw driver error out of `deletePackage`, or a
-   * `resolveExecutionContext` that throws one synchronously. On that day the
-   * disclosure becomes live, this block's premise is false, and the fork has to
-   * be RE-OPENED rather than re-derived from the consistency half above.
+   * instead of an argument:** a producer that reaches any of the three
+   * PRODUCTION seams carrying a driver errno as its `.code` — a
+   * `PackageService` implementation that re-throws on `.code` rather than on
+   * status, or a `protocol` slice that lets a raw driver error out of
+   * `deletePackage`. On that day the disclosure becomes live, this block's
+   * premise is false, and the fork has to be RE-OPENED rather than re-derived
+   * from the consistency half above.
+   *
+   * ⚠️ This list carried a THIRD limb — "or a `resolveExecutionContext`
+   * that throws one synchronously" — retired here rather than reworded,
+   * because it is unreachable BY CONSTRUCTION and not merely unobserved
+   * (**Seam census** in the module docblock). A falsifier that cannot be
+   * reached is not a falsifier: it reads as a live way to test this block,
+   * and costs the reader who tries it the time to discover it cannot happen.
+   * If the swallow at `rest-server.ts:1483` is ever un-done — the half of
+   * #12537 still open — this limb becomes real again and belongs back here.
    *
    * Ruled A by the `domain:cli` PM seat on 2026-08-26 on exactly this ground —
    * ⛔ not option B (suppress the demote when the message was withheld), which

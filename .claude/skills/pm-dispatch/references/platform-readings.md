@@ -5,11 +5,10 @@
 
 ## 队列成员资格与 auto-merge
 
-- **「本仓是否强制队列」是仓库 ruleset 事实**:`grep merge_group` 答的是另一个问题 (队列内是
-  否重跑 CI),两者独立、缺席不构成反证(实测:某仓 ruleset 强制而无 trigger,队列照收 PR、由 PR
-  上下文的 check run 满足);权威读数 = 合并尝试本身(回 405
-  `Changes must be made through the merge queue`)或 rulesets API;姊妹仓不一致(objectos 2026-08-18 起有队
-  列,hotcrm 只有 ruleset)⇒ 新仓落地约定靠实测确立,⛔ 不由缺席推断(2026-08-20 实测)。
+- **「本仓是否强制队列」是仓库 ruleset 事实**:`grep merge_group` 答的是另一个问题(队列内是否
+  重跑 CI),两者独立、缺席不构成反证(实测:某仓 ruleset 强制而无 trigger,队列照收 PR);权威读
+  数 = 合并尝试本身(回 405 `Changes must be made through the merge queue`)或 rulesets API;姊妹仓不一
+  致(objectos 2026-08-18 起有队列,hotcrm 只有 ruleset)⇒ 新仓靠实测,⛔ 不由缺席推断(2026-08-20)。
 - 判「在不在合并队列」看 timeline 事件 `added_to_merge_queue`(REST
   `GET /repos/{owner}/{repo}/issues/{pr}/timeline`),⛔ 不看 `auto_merge` 字段 —— 入队后它回落为 off,零
   信息量(维护者 2026-08-11 裁定)。队列分支(ls-remote 拼写见「零成本等价物」)正命中即已入
@@ -22,32 +21,38 @@
   交**,`git merge-base --is-ancestor <pr-head> origin/main` 对已完全合入的 PR 答 NO(非浅检出),而同
   一 PR 的 `list_pull_requests` 实测回过自相矛盾的行:`merged: false` 与 `merged_at` 有值并存 ——
   只读布尔的一切判据把已落地读成「没合」(2026-08-23 落地时刻实测)。
-- **`mergeable_state` 惰性计算**:首次 GET 可能回 `unknown` —— 重读一次拿真值; `dirty` 即队列入
-  口否决(冲突对象是**当前** main);draft PR 恒回 `draft` (「draft+clean」组合不存在);本地试合并
-  随 fetch 老化,该字段不老化。只在入队决策点 `get` 一次:挂了 flip 定点(landing-operations)就到
-  点再读,⛔「又查又等」双份支出。
+- **`mergeable_state` 惰性计算,`unknown` 不是读数**(2026-08-25 实测:头已 dirty 的 PR 整窗答
+  unknown,席位误读「auto-merge 被清」在脏头上重挂 —— 挂 unknown = 挂在可能脏的头上);`dirty`
+  即队列入口否决(冲突对象是**当前** main);draft PR 恒回 `draft`;判头脏的决断读数是零配额本
+  地试合并:fetch PR ref 后 `git merge-tree --write-tree origin/main <ref>`(冲突文件直接列出;随 fetch
+  老化,重跑先 fetch;与 enable 序列的队列 ref/update-branch 探针互补,彼答入队与暗冲突、此在挂
+  前答头脏)。入队决策点才 `get` 一次:挂了 flip 定点(landing-operations)到点读,⛔ 不又查又等。
 - **状态核验用最小字段**(search/list + `fields`)或等事件,整对象 `get` 留给入队决策点;门禁放行
   判据 = 承载门禁族 job 的 conclusion,聚合(`blocked`/`dirty`)只作阴性筛查再定位,放行按名定向读
   单条 job,⛔ 不拉全表(按名定位失败才拉)。
-- **PR 转回 draft 同时掉 auto-merge 与队列成员资格,均不自动恢复**(转正后重新挂);要真踢出队
-  列只有转 draft —— `disable_pr_auto_merge` 单独调用**不解除队列成员资格**,PR 照样落地。
-- **undraft 的可用路径只有 MCP 一条**:`update_pull_request` 传 `draft: false` 落地(2026-08-24 三张 PR 逐
-  张回读确认);**裸 GraphQL 会话内被拒**(回「only the pinned set of PR-review operations is served」,它建
-  议的「改用 REST」对 undraft **是错的**);**裸 REST `PATCH /pulls/{n}` 传 `draft: false` 回 200 而无操
-  作**。⚠️ 与探针无关,是接口自身性质 ⇒ undraft 没有 REST 对应物,池为 0 时只能等重置。
-- **`enable_pr_auto_merge` 一律显式传 `mergeMethod: "SQUASH"`**(不传时静默退回被禁的 merge-commit 方式
-  = 无操作),但**该参数本身实测惰性** —— 传 SQUASH 后 REST 回读 `auto_merge.merge_method` 仍是
-  `merge`(2026-08-24 两张 PR、其中一张 disable→enable 复验同值)⇒ ⛔ 不为它翻转空转;**在本仓无
-  害**:合并由队列执行、方法归队列,本仓 `allow_merge_commit:false`,落地无一例外单亲
-  squash。**回显两向不可靠,空回显≠未挂上**(实测:队列路径回显空字段而入队照发、正常落
-  地;显式传 SQUASH 回显 `MERGE`,落地仍每 PR 一提交)⇒ ⛔ 不拿回显当任何方向的证据 ——
-  「空字段 = 静默空转签名」的旧读法已被推翻,权威信号见下两条。
+- **转 draft 不是可靠的踢队手段 —— 两向都有实测,处置按最坏走**:本仓测得转 draft 同时掉
+  auto-merge 与队列成员资格(均不自动恢复,转正后重新挂);objectui 2026-08-25 测得相反 —— 已入
+  队 PR 转 draft 后条目保位、~40 分钟后队列照样合并,彼时 `disable_pr_auto_merge` 已拒绝(仓别/时
+  机差异未分辨)。共同支持的补救:转 draft + disable 都做(本仓测得 disable 单独不踢队、objectui
+  彼时径直拒绝),**验队列 ref 与未落地**(拼写见「零成本等价物」),⛔ 不据单读数报补救。
+- **`update_pull_request` 不管传不传都发送 `draft` 位 ⇒ 对 draft PR 的任何调用必须显式带
+  `draft: true`**(reviewers/title/body/labels 单字段调用同坑;objectui 2026-08-25 实测:一次只传
+  reviewers 的请审把治理面 draft 发布进合并队列,后果见上条);请审免碰 draft 位的专用路 = REST
+  `POST /pulls/{n}/requested_reviewers`(文档载明、未实测:载荷只有 reviewers/team_reviewers;门开席位优
+  先,MCP-only 席才用 update + 显式 `draft: true`)。undraft 可用路径只有 MCP 这条:传 `draft: false`
+  落地(2026-08-24 三张 PR 逐张回读确认);**裸 GraphQL 会话内被拒**(回「only the pinned set of
+  PR-review operations is served」,它建议的「改用 REST」对 undraft **是错的**);**裸 REST
+  `PATCH /pulls/{n}` 传 `draft: false` 回 200 而无操作** —— 接口性质 ⇒ 池 0 只能等重置。
+- **`enable_pr_auto_merge` 一律显式传 `mergeMethod: "SQUASH"`**(不传时静默退回被禁的 merge-commit =
+  无操作);**回显两向不可靠,空回显≠未挂上**:传 SQUASH 后回读 `auto_merge.merge_method` 仍
+  `merge`(2026-08-24 两张 PR、一张 disable→enable 复验同值)、队列路径回显空字段而入队照发,落
+  地仍无一例外单亲 squash(方法归队列,本仓 `allow_merge_commit:false`)⇒ ⛔ 不拿回显当任何方向
+  的证据、不为它翻转空转;「空字段=静默空转签名」旧读法已推翻,权威信号见下两条。
 - **配额枯竭时 `enable_pr_auto_merge` 回成功而挂载根本没发生**(实测:一次「成功」后 2.5 小时
-  零动静,同期别的 PR 正常合入;配额恢复后同一调用 ~1 分钟内落地)⇒ **验效果,不验回
-  应**:按下条序列以队列分支 / timeline 入队事件确认,⛔ 不拿成功报文收工。「回读
-  `auto_merge` 非空」本接口给不了:`pull_request_read` 与 `fields` 枚举都无该成员(armed 与未 armed
-  读回逐字节相同)⇒ 效果读数只有队列分支、timeline 入队事件、最终落地三种。已死假说:
-  auto-merge 不会在已绿 PR 上静默空转(恢复窗口里两个全绿 PR 挂上即合)。
+  零动静,同期别的 PR 正常合入;配额恢复后同一调用 ~1 分钟内落地)⇒ **验效果,不验回应**,
+  按下条序列以队列分支/timeline 入队事件确认,⛔ 不拿成功报文收工;回读 `auto_merge` 非空
+  本接口给不了(`pull_request_read` 与 `fields` 枚举都无该成员,armed 与否读回逐字节相同)⇒ 效果
+  读数只有队列分支、timeline 入队事件、最终落地三种;已死假说:已绿 PR 会静默空转。
 - enable 后的验证序列(2026-08-25 增补):① 先验队列分支
   `git ls-remote origin 'refs/heads/gh-readonly-queue/*'`(零配额,给条目 ~20–30s 建出;正命中即已入队,
   在 PR 读数发僵时仍决断 —— 实测人工合并后 PR 照答 open/merged:false 达 ~15 分钟,队列 ref
@@ -113,10 +118,9 @@
 - **两个「瘦身参数」都不省池**:`fields` 省载荷不省池 —— MCP list/search 服务器端无条件抓
   Project field_values,池枯竭时**最小字段请求同样全体失败**(报错串
   `failed to fetch issue field values: API rate limit already exceeded`);⛔ **`minimal_output: true` 不裁
-  `list_issues` 的 `body`**(2026-08-22 实测:返回字段仍含 `body`,首条 3258 字符仍超单次工具输出上
-  限被落盘)—— 工具描述的反向暗示为假,**永不当省额度手段写进任何 skill**;没有参数能
-  关掉 `body`:要么接受整表 107 点,要么换窄接口(点数未测)。⚠️ 站得住的证据是直接观察
-  `body` 在,不是前后体积对比(两次调用相隔数小时、population 已变)。
+  `list_issues` 的 `body`**(2026-08-22 实测:返回字段仍含 `body`),**永不当省额度手段写进任何
+  skill**;没有参数能关掉 `body`:要么整表 107 点要么换窄接口(点数未测)。⚠️ 站得住的证据
+  是直接观察 `body` 在,不是前后体积对比(两次调用相隔数小时、population 已变)。
 - **git 先行**:本地检出 / `git log` / `ls-remote` 不花配额,断粮期分支存在性检查照常可用,PR 文
   件读取同走 git(REST PR files 端点实测可瞬态 404)。**零成本等价物四条**(API 两次挂掉期间实
   测可用):合并队列 `git ls-remote origin 'refs/heads/gh-readonly-queue/*'`;是否落地
@@ -127,8 +131,7 @@
   再派 —— 中途撞限流的 dev **完不成强制查重**,只能把发现交回 PM 代为归档,⛔ 不盲目开
   卡。打满时:待执行写**排成有序清单挂进巡逻词**(不靠记忆),恢复窗口按序连清;重试对齐
   整点(REST core 整点重置)优于指数退避,⛔ 绝不忙轮询;search 与 core 独立计,一侧打满另一侧
-  可作退路;REST core 共享身份下同样会打满;文档载明、未实测:条件请求答 `304` 不计 core
-  池。
+  可作退路;REST core 共享身份下同样会打满;文档载明未实测:条件请求答 `304` 不计 core 池。
 - **公开仓零配额读法两档,payload 档优先**:单卡页 `/issues/N` 内嵌 JSON 载**原始 body + 全评
   论**,精确、零配额 —— 取含 `bodyHTML` 的 `script[type="application/json"]` 块,读
   `payload.preloadedQueries[0].result.data.repository.issue.body` 与 `frontTimelineItems`/`backTimelineItems`;
@@ -149,13 +152,10 @@
   按右尺寸规则;`GET /search/issues` **不是**退路 —— 出口代理按设计只放 repo-scoped 路径),403
   走降级梯 MCP 档(单标签一次读全 + 本地求交 —— ⛔ **不是翻页手扫**:极易半途而废,实测
   226 张 open 只扫了 100 张,**不完整枚举比零结果更危险**)。⛔ 已推翻的候选机理别再追:
-  「限定符打零」两次实测反证(带 `repo:` 的控制词回 5;`is:open` 对照回 1 精确命中),限定符
-  只**收窄**不破坏;归零机理仍未定(scope 过滤层静默清空 / search 桶 403 被吞成空结果),要定
-  它须在复现会话里抓原始响应。
+  「限定符打零」两次实测反证,限定符只收窄不破坏;归零机理未定,定它须抓原始响应。
 - **`search_issues` 不可靠地返回分钟级新卡**:同轮发现的东西查重,搜索之外必须按创建时间列
-  近期 issue(`list_issues` + `orderBy: CREATED_AT`)—— 实测一张 ~7 分钟大的同实例卡被关键词与语
-  义搜索双双漏掉,靠按日期列表才逮到;边界:两次观察,断言只到「search 可能漏掉分钟级
-  issue」(2026-08-20 实测)。
+  近期 issue(`list_issues` + `orderBy: CREATED_AT`)—— 实测一张 ~7 分钟大的同实例卡被关键词与
+  语义搜索双漏,靠日期列表才逮到;边界:两次观察,断言只到可能漏分钟级(2026-08-20 实测)。
 - **会话中途轮换凭据把 GitHub MCP 服务器杀到不可恢复**:此后一切 `mcp__github__*` 回
   `Streamable HTTP error: invalid session`,只有新会话重绑 —— 轮换前提醒维护者:在飞席位丢整条
   GitHub 通道;配额池按身份计,换身份即清零燃烧,共享身份结构不变。

@@ -1476,6 +1476,49 @@ export function renderSourceHashModule(
 }
 
 /**
+ * Narrow a provenance table to the generated sections a run actually COMMITS
+ * (#12559).
+ *
+ * {@link extractTranslations} computes the table over every generated section it
+ * built — `objects` and `metadataForms` both — because the rule that fills it
+ * (`collectFilledFromHashes`) is a statement about generated leaves, not about
+ * files. Which of those sections becomes a committed bundle is the command
+ * layer's decision, and the two must agree: a record describes the leaf sitting
+ * in a bundle beside it, so a record for a section this package does not commit
+ * describes nothing that exists there.
+ *
+ * The mismatch is measured, not hypothetical. A package that owns only its own
+ * objects passes `--no-metadata-forms`, and the emitter's own note says why:
+ * "without it, `--check` demands a baseline copy the package deliberately does
+ * not commit". Its `metadataForms` subtree is built anyway, and — having no
+ * entry in that package's merge baseline — arrives as a fresh `--fill=default`
+ * copy of `en`, so EVERY leaf of it satisfies `value === currentSource` and is
+ * recorded. Measured on `@objectstack/plugin-audit` while rolling the companion
+ * out in #12559: 763 records, of which **2** were its own objects and 761 were
+ * digests of the Studio metadata-form baseline `@objectstack/platform-objects`
+ * owns — unreadable in that package (no `metadataForms` bundle exists there for
+ * them to be about) and re-written in all three of its companions every time an
+ * unrelated `*.form.ts` in `packages/spec` moved. That is the cross-package
+ * coupling ADR-0029 D8 and each package's `bundle-ownership.test.ts` keep out of
+ * the committed bundles; the companion is not exempt from it.
+ *
+ * A section is named by a leaf path's FIRST dotted segment — the same identity
+ * `collectGeneratedLeaves` seeds its walk with, so the two cannot disagree about
+ * what section a path belongs to. Callers pass the sections they are committing;
+ * this function invents none, so a set that commits both (`platform-objects` is
+ * the one today) keeps every record it had.
+ */
+export function narrowToCommittedSections(
+  hashes: Record<string, string>,
+  committedSections: Iterable<string>,
+): Record<string, string> {
+  const committed = new Set(committedSections);
+  return Object.fromEntries(
+    Object.entries(hashes).filter(([leafPath]) => committed.has(leafPath.split('.', 1)[0])),
+  );
+}
+
+/**
  * Read a committed `<locale>.source-hashes.generated.ts` back into a table.
  *
  * The module body is written by {@link renderSourceHashModule}, which quotes

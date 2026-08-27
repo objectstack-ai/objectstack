@@ -1024,9 +1024,75 @@ filter_preflight() {
 # a quoted argument, belongs to one ELEMENT of the chain and not to the chain,
 # and the element's own exit status is what the chain sees either way.
 #
+# ---------------------------------------------------------------------------
+# A REDIRECTION IS NOT AN OPERATOR, AND `&` / `|` EACH APPEAR IN BOTH ROLES
+#
+# Only one of the two roles joins parts, so the scanner carries ONE CHARACTER of
+# look-behind -- the redirection operator it just passed. Look-behind, because
+# the character that disambiguates these tokens is the one BEFORE them, not the
+# one after: in `2>&1` the `&` is followed by `1`, exactly as a backgrounding
+# `&` before a next command would be.
+#
+#   2>&1  >&2  >&/dev/null  2>&-  <&0  <&-  2>&1-     the `&` follows `>` or `<`
+#   &>log                                              the `&` is followed by `>`
+#   >|log                                              the `|` follows `>`
+#
+# Read off bash's own parser rather than assumed -- `declare -f` re-prints a
+# function body from the parsed AST, so it says what bash DID with each token
+# (bash 5.2.21; `bash -c` is what runs the string here, so bash's grammar, not
+# POSIX sh's, is the authority):
+#
+#   f() { true 2>&1 && true; }    ->  true 2>&1 && true       redirection
+#   f() { true&>/dev/null; }      ->  true &> /dev/null       redirection
+#   f() { true & > /dev/null; }   ->  true & > /dev/null      BACKGROUND
+#   f() { echo \>&true; }         ->  echo \> & true          BACKGROUND
+#   f() { printf "a>"&true; }     ->  printf "a>" & true      BACKGROUND
+#   f() { true 2>&1& true; }      ->  true 2>&1 & true        one of each
+#   f() { true |& cat; }          ->  true 2>&1 | cat         a PIPELINE
+#
+# Three consequences, and each is why this is scanner STATE and not a look-back
+# into the raw string at `i-1`:
+#
+#   - The `>` must be UNESCAPED and UNQUOTED. `echo \>&true` and
+#     `printf "a>"&true` both background, and in both the character at `i-1` is
+#     a `>`. Only the scanner's own quote and escape state separates them, so
+#     every path that skips a character clears the look-behind as it goes.
+#   - `&>` must be ADJACENT. `true &> log` redirects; `true & > log`
+#     backgrounds. The test is therefore the next CHARACTER, never the next
+#     token.
+#   - Consuming a redirection's `&` must not swallow a later backgrounding one.
+#     `true 2>&1& true` carries both, in that order, and the second still flags.
+#
+# `|&` needs no case of its own: bash rewrites it to `2>&1 |`, so it really is a
+# pipeline and the `|` branch below already answers it correctly. `<|` is a bash
+# syntax error, so the `>|` case is guarded on `>` alone.
+#
+# THE APPEND-BOTH FORM IS DELIBERATELY LEFT UNCERTIFIED, and it is the one place
+# here where the answer is not a property of the string. An `&` before a DOUBLED
+# `>` appends both streams on bash 4.0+, but this file is held to a 3.2 floor
+# (`/usr/bin/env bash` is 3.2.57 on macOS, and `bash -c` is what runs the string
+# — so the host's bash, not this script's reading, decides), and 3.2 parses it
+# as `&` then `>>`: it really is backgrounded there. A token whose meaning
+# depends on the host is exactly what "cannot be read with confidence" means, so
+# it takes the uncertified exit this scanner reserves for that, with a note
+# naming the portable spelling (`>> file 2>&1`) — which this scanner certifies.
+# ⚠️ There is no `st_case` for it, and that is not an oversight: writing the
+# token in this repo's shell is itself a `check:bash32-floor` violation (it
+# fires on quoted occurrences too, measured on the first draft of this change),
+# so the gate that forbids the spelling is also what keeps the pin unwritable.
+# The same reason removed a `|&` case — `|&` is bash 4.0 as well.
+#
+# The direction of the old defect is worth keeping in view: it labelled a
+# `&&`-joined command `batch-last-exit` and told the caller to join the parts
+# with `&&` -- a remedy already satisfied, so no action could clear it. That is
+# how a banner stops being read, including on the `;` / `|` / `&` cases where it
+# is right. Over-labelling is the cheap direction of this scanner's error, but
+# it is not free.
+# ---------------------------------------------------------------------------
+#
 # Sets CERTIFIABLE_NOTE to the reason when it answers no; returns 0 for yes.
 exit_certifiable() {
-  local kind="$1" s="$2" n i ch nx sq=0 dq=0 depth=0
+  local kind="$1" s="$2" n i ch nx sq=0 dq=0 depth=0 prev_redir=''
   CERTIFIABLE_NOTE=""
 
   # `-- argv` never reaches a shell: one command, its own exit, nothing to scan.
@@ -1040,6 +1106,7 @@ exit_certifiable() {
     # Inside single quotes nothing is special but the closing quote.
     if ((sq == 1)); then
       [[ "$ch" == "'" ]] && sq=0
+      prev_redir=''
       i=$((i + 1))
       continue
     fi
@@ -1047,9 +1114,14 @@ exit_certifiable() {
     # a `\"` would be read as the end of the string.
     if ((dq == 1)); then
       case "$ch" in
-        '\') i=$((i + 2)) && continue ;;
+        '\')
+          prev_redir=''
+          i=$((i + 2))
+          continue
+          ;;
         '"') dq=0 ;;
       esac
+      prev_redir=''
       i=$((i + 1))
       continue
     fi
@@ -1057,7 +1129,13 @@ exit_certifiable() {
     case "$ch" in
       "'") sq=1 ;;
       '"') dq=1 ;;
-      '\') i=$((i + 2)) && continue ;;
+      '\')
+        # The escaped character is a literal, so a `\>` never arms the
+        # look-behind: `echo \>&true` really does background.
+        prev_redir=''
+        i=$((i + 2))
+        continue
+        ;;
       '`')
         CERTIFIABLE_NOTE="it contains a backtick substitution, which this scanner does not read"
         return 1
@@ -1080,8 +1158,35 @@ exit_certifiable() {
         # `&&` is the one joiner that certifies, so it is consumed, not flagged.
         nx="${s:i+1:1}"
         if [[ "$nx" == '&' ]]; then
+          prev_redir=''
           i=$((i + 2))
           continue
+        fi
+        # A redirection's `&` joins nothing, so it is consumed too -- `2>&1`,
+        # `>&2`, `2>&-`, `<&0` (the `&` follows `>` or `<`) and `&>log` (the `&`
+        # is followed by a single `>`). See the block above this function for
+        # the bash parses these are read off.
+        if [[ "$prev_redir" == '>' || "$prev_redir" == '<' ]]; then
+          prev_redir=''
+          i=$((i + 1))
+          continue
+        fi
+        if [[ "$nx" == '>' ]]; then
+          # ... but an `&` before a DOUBLED `>` is the append-both form, which
+          # is bash 4.0. On the 3.2 floor this file is held to, bash parses it
+          # as `&` then `>>` -- it really does background there. Its meaning is
+          # therefore a property of the host's bash, which is the definition of
+          # something this scanner cannot read with confidence, so it comes out
+          # uncertified BY CONSTRUCTION rather than guessed either way.
+          if [[ "${s:i+2:1}" != '>' ]]; then
+            prev_redir=''
+            i=$((i + 1))
+            continue
+          fi
+          ((depth == 0)) && {
+            CERTIFIABLE_NOTE="it appends both streams with an '&' before a doubled '>', which bash 3.2 (this repo's floor) parses as backgrounding — write '>> file 2>&1' instead"
+            return 1
+          }
         fi
         ((depth == 0)) && {
           CERTIFIABLE_NOTE="a part of it is backgrounded with '&'"
@@ -1089,6 +1194,14 @@ exit_certifiable() {
         }
         ;;
       '|')
+        # `>|` is the noclobber-override REDIRECTION, not a pipeline. Guarded on
+        # `>` alone because `<|` is a bash syntax error, so there is no input
+        # form to admit here.
+        if [[ "$prev_redir" == '>' ]]; then
+          prev_redir=''
+          i=$((i + 1))
+          continue
+        fi
         if ((depth == 0)); then
           nx="${s:i+1:1}"
           if [[ "$nx" == '|' ]]; then
@@ -1099,6 +1212,14 @@ exit_certifiable() {
           return 1
         fi
         ;;
+    esac
+    # One character of look-behind for the redirection cases above. Maintained
+    # HERE, at the end of the unquoted path, so it can only ever be armed by a
+    # `>` or `<` this scanner read as an operator: every path that skips over a
+    # quoted or escaped character clears it on the way past instead.
+    case "$ch" in
+      '>' | '<') prev_redir="$ch" ;;
+      *) prev_redir='' ;;
     esac
     i=$((i + 1))
   done
@@ -2375,6 +2496,66 @@ true' 2>&1 | grep -c 'VERDICT batch-last-exit 0')" 1
     "$(bash "$SELF" -c "$subcmd" 2>&1 | grep -c 'VERDICT command-exit 0')" 1
   st_case 'argv mode never reaches a shell, so it is certified by construction' \
     "$(bash "$SELF" -- true 2>&1 | grep -c 'VERDICT command-exit 0')" 1
+
+  # (g3) a REDIRECTION is not an operator (#12518).
+  #
+  # The defect these pin: the `&` in a `2>&1` redirection was read as a
+  # backgrounding `&`, so a correctly `&&`-joined command was downgraded to
+  # `batch-last-exit` — and the banner told the caller to "join the parts with
+  # '&&'", a repair that command had ALREADY made. A warning whose remedy is
+  # already satisfied cannot be acted on, and that is how a banner stops being
+  # read at all — including on the `;` / `|` / `&` cases where it is right. It
+  # also misfired on exactly the shape this repo's gate docs prescribe
+  # (`cmd > out.log 2>&1 && next`, the redirect-then-capture that keeps `$?`
+  # from being `tail`'s), and it spent a true label on a false positive.
+  #
+  # Pinned from BOTH directions, and the second direction is the load-bearing
+  # one: a "fix" that merely stopped flagging `&` would pass every certified
+  # case here while deleting the check these sit next to.
+  st_case 'a 2>&1 redirection is not a background operator — the reported case' \
+    "$(bash "$SELF" -c 'true > /dev/null 2>&1 && true' 2>&1 | grep -c 'VERDICT command-exit 0')" 1
+  st_case 'nor is the >&2 form, where the fd number is on the left' \
+    "$(bash "$SELF" -c 'true >&2 && true' 2>&1 | grep -c 'VERDICT command-exit 0')" 1
+  st_case 'nor >&word, which redirects both streams with the & on the RIGHT of >' \
+    "$(bash "$SELF" -c 'true >& /dev/null && true' 2>&1 | grep -c 'VERDICT command-exit 0')" 1
+  st_case 'nor &>word, the same redirection with the & on the LEFT' \
+    "$(bash "$SELF" -c 'true &> /dev/null && true' 2>&1 | grep -c 'VERDICT command-exit 0')" 1
+  # The append-both form has NO case here on purpose — it stays uncertified
+  # because its meaning depends on the host's bash version, and the token itself
+  # is a `check:bash32-floor` violation in this repo's shell, quoted or not. The
+  # block above `exit_certifiable` carries the whole reading.
+  st_case 'nor a >&- fd close' \
+    "$(bash "$SELF" -c 'true 2>&- && true' 2>&1 | grep -c 'VERDICT command-exit 0')" 1
+  st_case 'nor a <& input duplication, which the > alone would have missed' \
+    "$(bash "$SELF" -c 'true <&0 && true' 2>&1 | grep -c 'VERDICT command-exit 0')" 1
+  st_case 'nor several redirections in one command' \
+    "$(bash "$SELF" -c 'true 3>&1 4>&2 && true' 2>&1 | grep -c 'VERDICT command-exit 0')" 1
+  st_case 'and >| is the noclobber REDIRECTION, not a pipeline' \
+    "$(bash "$SELF" -c 'true >| /dev/null && true' 2>&1 | grep -c 'VERDICT command-exit 0')" 1
+  st_case 'the redirect-then-capture shape the gate docs prescribe is certified' \
+    "$(bash "$SELF" -c "true > '${tmp}/rtc.log' 2>&1 && true" 2>&1 | grep -c 'VERDICT command-exit 0')" 1
+  st_case 'and a redirected chain that FAILS still reports the failing exit' \
+    "$(bash "$SELF" -c 'sh -c "exit 3" 2>&1 && true' 2>&1 | grep -c 'VERDICT command-exit 3')" 1
+
+  # The other direction. Every case below contains a `>` or a `<` somewhere near
+  # an `&`, and in every one bash backgrounds — verified against bash's own
+  # parser (`declare -f` re-prints from the AST), not assumed. If any of these
+  # goes green the scanner has been widened into a hole, which is the failure
+  # direction that cannot be seen from a passing run.
+  st_case 'a REAL background & is still uncertified' \
+    "$(bash "$SELF" -c 'sleep 1 &' 2>&1 | grep -c 'VERDICT batch-last-exit')" 1
+  st_case 'and still says so in the banner, with backgrounding named' \
+    "$([[ "$(bash "$SELF" -c 'sleep 1 &' 2>&1)" == *"backgrounded with '&'"* ]] && echo yes || echo no)" yes
+  st_case 'a redirection FOLLOWED by a background & still flags the background one' \
+    "$(bash "$SELF" -c 'true 2>&1 & true' 2>&1 | grep -c 'VERDICT batch-last-exit')" 1
+  st_case 'a spaced `& >` is backgrounding, not the adjacent &> redirection' \
+    "$(bash "$SELF" -c 'true & true > /dev/null' 2>&1 | grep -c 'VERDICT batch-last-exit')" 1
+  st_case 'an ESCAPED > before the & does not arm the redirection reading' \
+    "$(bash "$SELF" -c 'echo \>&true' 2>&1 | grep -c 'VERDICT batch-last-exit')" 1
+  st_case 'nor does a QUOTED > before it' \
+    "$(bash "$SELF" -c 'printf "a>"&true' 2>&1 | grep -c 'VERDICT batch-last-exit')" 1
+  st_case 'and a pipeline whose LEFT side is red still exits 0 through it, uncertified' \
+    "$(bash "$SELF" -c 'sh -c "exit 1" 2>&1 | cat' 2>&1 | grep -c 'VERDICT batch-last-exit 0')" 1
 
   # (h) the filter preflight (#10853). BOTH directions, because a guard shown
   # only to red could be a guard that reds on everything -- which here would

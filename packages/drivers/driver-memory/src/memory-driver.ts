@@ -96,6 +96,65 @@ export interface InMemoryDriverConfig {
 }
 
 /**
+ * Drop every own key whose value is `undefined` (#9276).
+ *
+ * ## The rule, and why the driver owes it
+ *
+ * A row has exactly two states to say about a field, and each has a defined
+ * meaning: **the key is absent** ("no value was ever written") or **the key
+ * holds a value**. An own key holding `undefined` is NEITHER, so every consumer
+ * downstream has to pick a reading of it, and measured on `origin/main` they do
+ * not agree — `has(record.f)` on the real `@objectstack/formula` CEL engine and
+ * `materializeDeclaredFields` both read it as ABSENT, while a bare `f in row`
+ * reads it as PRESENT. That disagreement is the whole cost: a third state that
+ * nothing declares, that no consumer can resolve locally, and that only a
+ * JS-backed driver can even emit (a SQL NULL arrives as `null`, which is a
+ * value).
+ *
+ * This driver ALREADY holds "a value of `undefined` means the key is not
+ * emitted" in two of its own places, which is why normalising here is
+ * convergence rather than a new rule:
+ *
+ *  - `projectFields` skips `undefined` values, so the same stored row answered
+ *    `'status' in row === false` under a projection and `true` without one;
+ *  - the matcher reads it as absent — measured, `{ status: { $exists: true } }`
+ *    excludes it and `{ status: { $null: true } }` includes it, exactly as for
+ *    a row that never carried the key at all.
+ *
+ * So the returned row was the only surface still claiming the key was present.
+ *
+ * ## Where it is applied, and what that preserves
+ *
+ * On the way INTO the backing table (see {@link InMemoryDriver.toStoredRecord}
+ * and the `initialData` seeding door), which is post-merge on the update path.
+ * That placement is load-bearing: `update(id, { f: undefined })` today merges
+ * an own key holding `undefined` over the stored value, and every measured
+ * consumer reads the result as "the field is absent". Dropping the key AFTER
+ * the merge keeps that reading byte for byte; dropping it BEFORE would make the
+ * same call a no-op that leaves the prior value standing, which is a different
+ * answer to "what does a patch carrying `undefined` mean" — a storage-contract
+ * question this normalisation deliberately does not reopen.
+ *
+ * Returns the input unchanged (same reference) when there is nothing to drop,
+ * so the common case allocates nothing — the same convention
+ * {@link InMemoryDriver.toStorageForms} follows.
+ *
+ * `@objectstack/driver-mongodb` carries a structural twin of this function on
+ * its insert doors, for the same reason its `toStorageForms` is a twin rather
+ * than an import: the two driver packages share no code. This doc comment is
+ * the canonical statement of the rule; that copy defers to it.
+ */
+function withoutUndefinedOwnKeys<T extends Record<string, any>>(record: T): T {
+  let out: Record<string, any> | undefined;
+  for (const key of Object.keys(record)) {
+    if (record[key] !== undefined) continue;
+    out ??= { ...record };
+    delete out[key];
+  }
+  return (out as T) ?? record;
+}
+
+/**
  * Snapshot for in-memory transactions.
  */
 interface MemoryTransaction {
@@ -252,7 +311,7 @@ export class InMemoryDriver implements IDataDriver {
         const table = this.getTable(objectName);
         for (const record of records) {
           const id = (record as any).id || this.generateId(objectName);
-          table.push({ ...record, id });
+          table.push(withoutUndefinedOwnKeys({ ...record, id }));
         }
       }
       this.logger.info('InMemory Database Connected with initial data', {
@@ -399,7 +458,7 @@ export class InMemoryDriver implements IDataDriver {
     
     const table = this.getTable(object);
     
-    const newRecord = this.toStorageForms(object, {
+    const newRecord = this.toStoredRecord(object, {
       id: data.id || this.generateId(object),
       ...data,
       created_at: data.created_at || new Date().toISOString(),
@@ -426,7 +485,7 @@ export class InMemoryDriver implements IDataDriver {
       return null;
     }
 
-    const updatedRecord = this.toStorageForms(object, {
+    const updatedRecord = this.toStoredRecord(object, {
       ...table[index],
       ...data,
       id: table[index].id, // Preserve original ID
@@ -525,7 +584,7 @@ export class InMemoryDriver implements IDataDriver {
       for (const record of targetRecords) {
           const index = table.findIndex(r => r.id === record.id);
           if (index !== -1) {
-              const updated = this.toStorageForms(object, {
+              const updated = this.toStoredRecord(object, {
                   ...table[index],
                   ...data,
                   updated_at: new Date().toISOString()
@@ -1465,6 +1524,18 @@ export class InMemoryDriver implements IDataDriver {
    */
   filterSubstringPattern(value: unknown): RegExp {
     return new RegExp(this.escapeRegex(value as string));
+  }
+
+  /**
+   * The form a record takes in the backing table: no own key holding
+   * `undefined`, then every declared temporal field in its storage form.
+   *
+   * Every write door goes through here rather than through
+   * {@link toStorageForms} directly, so the two normalisations cannot drift
+   * apart door by door.
+   */
+  private toStoredRecord<T extends Record<string, any>>(object: string, record: T): T {
+    return this.toStorageForms(object, withoutUndefinedOwnKeys(record));
   }
 
   /**

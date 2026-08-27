@@ -6030,6 +6030,464 @@ export function h35GateRemovalWithoutEvidence(removal, gateEvents, options = {})
 }
 
 // ---------------------------------------------------------------------------
+// H36 — two open PRs holding the same changed file, one side already ACCEPTED
+// or armed (#12286).
+//
+// ## The incident, and what exactly went unheld
+//
+// Two open PRs edited one runtime source file across lanes for ~4h. The
+// later-opened one merged first; the earlier — reviewed, ACCEPTED, 32/32
+// checks green — was left in a silent merge conflict. Nothing mechanical
+// objected, and the single-claim gate was RIGHT not to: its header forbids
+// per-incident growth of `SINGLE_CLAIM_PATHS`, and its declared scope held.
+// What is unheld is LEGIBILITY: the same-file fence lives in a claim comment
+// in one lane's thread, so a second seat that never asks the cross-lane
+// question gets no signal from anywhere. The platform volunteers nothing
+// either: `mergeable_state` stayed `unknown` throughout (computed lazily), so
+// the seat's first reading was wrong and it armed auto-merge on a dirty head.
+//
+// ## What this row is — patrol INPUT, never a verdict
+//
+// A pair sharing a changed file is often perfectly fine (the incident's own
+// two sides were additive and semantically safe). The row does not judge the
+// pair; it makes the hold visible on the anchor every seat already reads, so
+// the cross-lane walk the claim shape requires has a mechanical backstop for
+// the case where a seat skipped or misjudged it — which is exactly the
+// two-possibility fork the incident could not distinguish after the fact.
+// Report-only like everything here: the remedy is a PROBE — fetch the PR ref,
+// `git merge-tree --write-tree` against today's main answers "would this land
+// clean" for free — never a label and never a gate.
+//
+// ## Why "ACCEPTED/armed" gates the row
+//
+// A pair of unarmed drafts is ordinary concurrent work-in-progress; the walk
+// at their own dispatch time is the instrument for that. The board state
+// worth a standing row is the incident's: a side that is DONE — ready
+// (= reviewed by construction here: dev PRs flip ready only at review
+// ACCEPT) or armed — can be silently passed by the other side landing first,
+// after which every proxy signal reads healthy while it rots. `auto_merge`
+// is read in the finding-INCREASING direction only, H16's argument exactly:
+// arming resolves no conflict, so an armed side is more at risk, not handled.
+//
+// ## The noise floor is CLOSED, and argued from the single-claim gate's data
+//
+// That gate's header measured shared-changed-path collisions over ~650 PRs:
+// the top repo-wide pairs are the lock file (33), a plugin manifest (21) and
+// the root manifest (15) — ordinary concurrent work in a repo taking ~18
+// merges a day. Pairing on those would put a row on the anchor every sweep
+// and bury the one that matters. So exactly two spellings are excluded, both
+// shared BY CONSTRUCTION, and the closed set is pinned by the self-test
+// against per-incident growth (the discipline `SINGLE_CLAIM_PATHS` applies
+// to itself): the pnpm lockfile (touched by any PR moving dependencies, and
+// merged mechanically) and `.changeset/` (every PR ADDS a uniquely-named
+// file there — a collision on one is not a source-file hold).
+// `changeset-release/*` PRs are excluded as CANDIDATES for the matching
+// reason: the Version Packages PR consumes every changeset file on the
+// board, so it would pair with essentially every open PR, and it is
+// regenerated from `main` on every push — it holds nothing.
+//
+// ## Bounded, and bounded honestly
+//
+// The files fetch is ONE page per candidate, candidates being the open PRs
+// this sweep already listed — bounded by the open population (~19 at the
+// reading this landed on). A PR with more changed files than the page has
+// the tail unread: that can only MISS a pair, never invent one, and both the
+// summary line's `read X of Y` and a per-row truncation sentence say so.
+// Positive evidence only — this row never asserts "no overlap".
+// ---------------------------------------------------------------------------
+
+/** The closed noise floor — exact spellings, then prefixes. See the banner. */
+export const H36_SHARED_PATH_NOISE = Object.freeze(['pnpm-lock.yaml']);
+export const H36_SHARED_PREFIX_NOISE = Object.freeze(['.changeset/']);
+export const H36_FILES_PAGE_SIZE = 100;
+export const H36_SAMPLE_PATHS = 3;
+
+export function h36NoisePath(path) {
+  const p = String(path ?? '');
+  if (H36_SHARED_PATH_NOISE.includes(p)) return true;
+  return H36_SHARED_PREFIX_NOISE.some((prefix) => p.startsWith(prefix));
+}
+
+/** ACCEPTED (ready = reviewed by construction) or armed — the at-risk side. */
+export function h36AcceptedOrArmed(pr) {
+  if (!pr) return false;
+  return pr.draft === false || pr.auto_merge != null;
+}
+
+/**
+ * Whether this open PR is worth a files page — the gathering policy, H16's
+ * idiom: answerable from the LIST row alone, and never NARROWER than the
+ * predicate's population. A pair needs one accepted/armed side, but the
+ * OTHER side can be any open PR (a draft included — the incident's second
+ * side was one when the window opened), so every open PR outside the
+ * changeset-release exclusion is a candidate.
+ */
+export function h36NeedsFiles(pr) {
+  if (!pr || pr.merged_at) return false;
+  return !String(pr.head?.ref ?? '').startsWith('changeset-release/');
+}
+
+/** The all-failed transport judgement — H16's, verbatim in shape. */
+export function h36DetailPassUnreadable(candidates, probed) {
+  return (candidates ?? 0) > 0 && (probed ?? 0) === 0;
+}
+
+/**
+ * The pair rows. `filesByPr` maps PR number → `{ paths, truncated }`; a PR
+ * absent from the map was unread (a failed page) and simply cannot pair —
+ * the coverage pair reports that shortfall, and a missed pair is the only
+ * possible consequence. One row per PAIR, keyed to the accepted/armed side
+ * (both accepted: the earlier-created one), because that is the side that
+ * silently rots when the other lands first; the other side is named in the
+ * sentence.
+ */
+export function h36SharedFileHolds(openPrs, filesByPr) {
+  const rows = [];
+  const prs = (openPrs ?? []).filter((pr) => h36NeedsFiles(pr));
+  prs.sort((a, b) => String(a.created_at ?? '').localeCompare(String(b.created_at ?? '')));
+  for (let i = 0; i < prs.length; i++) {
+    for (let j = i + 1; j < prs.length; j++) {
+      const a = prs[i];
+      const b = prs[j];
+      if (!h36AcceptedOrArmed(a) && !h36AcceptedOrArmed(b)) continue;
+      const fa = filesByPr?.get?.(a.number);
+      const fb = filesByPr?.get?.(b.number);
+      if (!fa || !fb) continue;
+      const inB = new Set((fb.paths ?? []).filter((p) => !h36NoisePath(p)));
+      const shared = (fa.paths ?? []).filter((p) => !h36NoisePath(p) && inB.has(p));
+      if (shared.length === 0) continue;
+      const key = h36AcceptedOrArmed(a) ? a : b;
+      const other = key === a ? b : a;
+      const state =
+        key.auto_merge != null
+          ? key.draft === false
+            ? 'ready AND armed'
+            : 'armed'
+          : 'ready (reviewed by construction)';
+      const sample = shared
+        .slice(0, H36_SAMPLE_PATHS)
+        .map((p) => `\`${p}\``)
+        .join(', ');
+      const more = shared.length > H36_SAMPLE_PATHS ? `, +${shared.length - H36_SAMPLE_PATHS} more` : '';
+      const truncated =
+        fa.truncated || fb.truncated
+          ? ' One side\'s file list was TRUNCATED at the page size, which can only have hidden MORE overlap.'
+          : '';
+      rows.push([
+        key,
+        `open and ${state}, sharing ${shared.length} changed file(s) with open PR #${other.number} ` +
+          `(${sample}${more}) — a cross-lane same-file hold made visible: the fence otherwise lives ` +
+          'only in one lane\'s claim comment, and `mergeable_state` volunteers nothing (`unknown` is ' +
+          'not a reading). Patrol input, NOT a verdict — both sides may be additive and disjoint. ' +
+          'Whichever lands second re-probes before (re-)arming: fetch the PR ref and run ' +
+          '`git merge-tree --write-tree` against current `main` — the zero-quota reading GitHub ' +
+          `never volunteers.${truncated}`,
+      ]);
+    }
+  }
+  return rows;
+}
+
+// ---------------------------------------------------------------------------
+// H37 — a FAMILY DISPATCH whose per-member label writes did not all land
+// (#12629).
+//
+// ## The incident, and the exact reason nothing said so
+//
+// A family dispatch folds N already-triaged cards into ONE dev run: one shared
+// branch named after the CHAIN HEAD, one worktree, one PR — and one
+// `pm:dispatched` write PER MEMBER. Those writes are N separate calls with
+// nothing tying them together, so a partial run is possible and produced no
+// signal at all. Measured on the filing seat's own error: in a 3-card fold it
+// wrote 2 of the 3, leaving one member carrying a member-pointer claim comment
+// naming the chain head while its label still read `pm:queue`.
+//
+// That combination is a lie in the DISPATCHABLE direction — the queue label
+// says "free to claim" about a card a fold already holds — and every per-card
+// predicate in this file reads it as clean, CORRECTLY:
+//
+//   - H1/H2/H3/H24/H29 key on `assignee` x label x claim-comment pairings ON
+//     ONE CARD. That card had no assignee and a consistent-looking `pm:queue`.
+//   - The fold's own record lives in the CHAIN HEAD's claim comment, on
+//     another card. Nothing joined the two.
+//   - The seat's in-flight ledger is its seat post, which lists the fold by
+//     its HEAD.
+//
+// The mirror direction is measured too, on this card's own grading round:
+// #12200 was left `pm:dispatched` WITH its assignee after the fold's recovery
+// had declared release — the same non-atomic write failing the other way, and
+// equally invisible until a seat happened to look. Both directions are rows
+// here, because a predicate that reported only the first would have said
+// nothing about the second instance on the very card that filed it.
+//
+// ## The join, and why the BRANCH is the whole of it
+//
+// The fold convention (SKILL.md, step 4 -> 家族派发的折叠认领约定) is:
+//
+//     共享分支按链首卡命名,每张成员卡各留认领评论并点名该分支
+//
+// — the shared branch is named for the chain head, and EVERY member card
+// leaves its own claim comment naming that branch (a member with no branch of
+// its own is the design, not a half-state). So the fold's roster is already
+// written on the board in a machine-readable field: the `Branch:` directive
+// this file has read since H20, through `claimedBranches` / `governingClaim`.
+//
+// A card whose governing claim names `claude/issue-H-...` with H NOT its own
+// number IS the member pointer, and a branch carrying at least one such
+// claimant IS a live fold. That single reading covers BOTH halves the filing
+// card asks to join — 「a member pointer on this card」 and 「named as a member
+// in a live `Claim:` on another open card」 — because the shared branch is the
+// one string both of them spell, and each member's claim names it.
+//
+// ⛔ No prose scraping, deliberately. A claim comment names sibling cards,
+// serial-constraint predecessors and blocker targets as bare `#N` in its own
+// text — the specimen on this row's own filing card names the chain that HELD
+// this script — so scanning claim prose for card numbers would manufacture
+// members out of the one field the protocol fills in correctly. H20's header
+// makes the same call about branch spellings, for the same reason: a fabricated
+// row sends a reader to check something that was never there.
+//
+// ## What the row compares, in BOTH directions
+//
+// Per fold, the HEAD's own state says whether the fold is in flight, and every
+// other claimant is read against it:
+//
+//   head `pm:dispatched`         -> IN FLIGHT. A claimant without
+//                                   `pm:dispatched` is a missed write — the
+//                                   filing seat's own error.
+//   head CLOSED, or open without -> RELEASED. A claimant still carrying
+//   `pm:dispatched`                 `pm:dispatched` is residue — #12200's
+//                                   mirror.
+//   head open + undispatched,    -> the HEAD's own half of the write is the one
+//   some claimant dispatched        that missed. The row lands on the head, and
+//                                   it is visible from the members' claims and
+//                                   from nothing else on the board.
+//   head in neither population   -> UNRESOLVABLE, and the row DECLINES rather
+//                                   than picking a side (H19's call).
+//
+// A fold in which NOTHING is dispatched — head included — is deliberately
+// quiet. It is indistinguishable from an abandoned or not-yet-launched fold,
+// and those cards are already H30's population on their own terms.
+// Under-report over fabricate is this file's standing direction.
+//
+// ## The noise floor is CLOSED, and it is the ordinary case
+//
+// Exactly ONE exclusion, and it covers essentially the whole board: a claim
+// naming its OWN card's branch is not fold evidence. Every solo dispatch here
+// writes exactly that, so without the exclusion this row would fire on every
+// dispatched card in existence. A branch is a fold branch only when some
+// claimant is not its head. ⛔ Nothing else is suppressed by name — this row
+// carries no per-incident exclusion list to grow, which is the discipline H36's
+// closed noise floor states and `SINGLE_CLAIM_PATHS` applies to itself.
+//
+// ## Bounded, and bounded honestly
+//
+// Round 1 is FREE. It reads the claim threads this sweep ALREADY holds: every
+// open `pm:dispatched` card (the dispatch-liveness loop) and every assigned
+// pm-tracked card (H2's fetch). So fold DISCOVERY converges on the open
+// `pm:dispatched` population, exactly as the filing card bounds it — a fold
+// with a dispatched member announces itself there at no cost.
+//
+// Round 2 buys ONE comment page per open `pm:queue` card, and ONLY when round 1
+// actually saw a live fold. A board with no fold in flight therefore costs
+// NOTHING, and a board with one costs at most the queue page count (40 open
+// `pm:queue` cards at the 2026-08-24 census H30 measured, against a 15,000/h
+// core quota and four sweeps a day). It is bought for `pm:queue` because that
+// is precisely where the dispatchable-direction lie parks — a card the queue
+// offers while a fold already holds it — and it is the one population whose
+// threads no other item here reads.
+//
+// Positive evidence only. A member page that fails drops that card out of the
+// roster — a MISS, never an invention — and the coverage pair reports it, with
+// an all-failed pass named in the summary as the transport it is (#4690). The
+// pass does NOT rethrow, unlike H16's and H36's: those rows ARE their detail
+// pass, while two of this row's three directions are free and already gathered,
+// so discarding the sweep would cost more readings than it protects. ⛔ This
+// row never asserts that a fold's writes all landed.
+//
+// Report-only like everything here: the remedy is a seat re-reading the fold's
+// members and writing the missing half. ⛔ Never a label written from this
+// script.
+// ---------------------------------------------------------------------------
+
+/** How many fold members one row names before it counts the rest — H19/H20's budget, same grounds. */
+export const H37_MEMBER_LIST_CAP = 5;
+
+/**
+ * The live folds on this board, keyed by the SHARED BRANCH.
+ *
+ * @param {{ number: number, branches: string[] }[]} claims — one entry per card
+ *   whose governing claim named at least one protocol-shaped branch.
+ * @returns {Map<string, { head: number, claimants: number[] }>} branch ->
+ *   the chain head the branch is named for, and every card claiming it.
+ *
+ * The single exclusion IS the noise floor (see the banner): a branch whose only
+ * claimant is its own head is ordinary solo work and never a fold. Branch keys
+ * come back sorted so a roster is deterministic for a reader and for the
+ * self-test; claimants are sorted for the same reason.
+ */
+export function h37FoldBranches(claims) {
+  const byBranch = new Map();
+  for (const claim of claims ?? []) {
+    const number = Number(claim?.number);
+    if (!Number.isFinite(number)) continue;
+    for (const branch of claim?.branches ?? []) {
+      // ⚠️ The null check is separate from the finiteness one and must stay so:
+      // `branchNameTarget` returns NULL for a branch it cannot read, and
+      // `Number(null)` is 0 — a perfectly finite head number for a card that
+      // does not exist. Collapsing the two mints a phantom fold on every
+      // unreadable branch spelling, which then gates the round-2 member read on
+      // nothing (caught by this row's own pin).
+      const target = branchNameTarget(branch);
+      if (target === null) continue;
+      const head = Number(target);
+      if (!Number.isFinite(head)) continue;
+      if (!byBranch.has(branch)) byBranch.set(branch, { head, claimants: [] });
+      const entry = byBranch.get(branch);
+      if (!entry.claimants.includes(number)) entry.claimants.push(number);
+    }
+  }
+  const folds = new Map();
+  for (const branch of [...byBranch.keys()].sort()) {
+    const entry = byBranch.get(branch);
+    if (!entry.claimants.some((n) => n !== entry.head)) continue;
+    folds.set(branch, {
+      head: entry.head,
+      claimants: [...entry.claimants].sort((a, b) => a - b),
+    });
+  }
+  return folds;
+}
+
+/**
+ * Whether the fold headed by `head` is in flight, released, or unreadable —
+ * four-valued, because "open but not dispatched" and "closed" are the same
+ * RELEASE for a member's verdict while only the first can carry a row of its
+ * own.
+ *
+ * `unknown` is the #4690 state and is kept distinct from both: a head this
+ * sweep never listed cannot be reported as released, which would accuse every
+ * dispatched member of residue on the strength of a card nobody read.
+ */
+export function h37HeadState(head, openByNumber, closedByNumber) {
+  const n = Number(head);
+  const open = openByNumber?.get?.(n);
+  if (open) return labelNames(open).includes('pm:dispatched') ? 'in-flight' : 'open-undispatched';
+  return closedByNumber?.get?.(n) ? 'closed' : 'unknown';
+}
+
+/**
+ * The member classifier — asserted directly by the self-test, H35's idiom, so
+ * the three-way fold is pinned independently of any sentence it produces.
+ *
+ * @param {'in-flight'|'open-undispatched'|'closed'|'unknown'} headState
+ * @param {boolean} memberDispatched
+ * @returns {'undispatched-member'|'dispatched-residue'|'clean'|'unresolvable-head'}
+ */
+export function h37MemberVerdict(headState, memberDispatched) {
+  if (headState === 'unknown') return 'unresolvable-head';
+  if (headState === 'in-flight') return memberDispatched ? 'clean' : 'undispatched-member';
+  return memberDispatched ? 'dispatched-residue' : 'clean';
+}
+
+/** Which cards buy a member comment page — the gathering policy, exported like every other. */
+export function h37NeedsMemberRead(issue, foldsSeen) {
+  if (!((foldsSeen ?? 0) > 0)) return false;
+  const labels = labelNames(issue ?? {});
+  if (labels.includes('pm:dispatched')) return false;
+  return labels.includes('pm:queue');
+}
+
+/**
+ * Whether the member pass failed as a TRANSPORT rather than leaving a bounded
+ * gap — H16's judgement, shared in shape and deliberately not re-derived. Zero
+ * candidates is a clean reading (no fold was live, or the queue is empty), never
+ * a fault.
+ */
+export function h37MemberPassUnreadable(candidates, probed) {
+  return (candidates ?? 0) > 0 && (probed ?? 0) === 0;
+}
+
+/** `#N` for each fold member, capped at the render budget, + its note. */
+function namedMembers(numbers) {
+  const shown = numbers.slice(0, H37_MEMBER_LIST_CAP);
+  const named = shown.map((n) => `#${n}`).join(', ');
+  return `${named}${numbers.length > shown.length ? ` +${numbers.length - shown.length} more` : ''}`;
+}
+
+/**
+ * The rows. One per CARD whose own `pm:dispatched` disagrees with the fold it
+ * claims, keyed to that card because that is where the missing write belongs.
+ *
+ * A claimant this sweep did not list as open is skipped rather than judged: the
+ * roster is assembled from claim TEXT, and a number that resolves to nothing
+ * open here is not evidence of anything (H19's treatment of an absent
+ * resolution, and the same reason `h37HeadState` keeps `unknown` separate).
+ *
+ * @param {Map<string, { head: number, claimants: number[] }>} folds
+ * @param {Map<number, object>} openByNumber
+ * @param {Map<number, object>} closedByNumber
+ */
+export function h37FamilyMemberDrift(folds, openByNumber, closedByNumber) {
+  const rows = [];
+  for (const [branch, entry] of folds ?? new Map()) {
+    const head = entry?.head;
+    const headState = h37HeadState(head, openByNumber, closedByNumber);
+    if (headState === 'unknown') continue;
+    const members = (entry?.claimants ?? []).filter((n) => n !== head);
+    const dispatchedMembers = [];
+    const pending = [];
+    for (const n of members) {
+      const card = openByNumber?.get?.(n);
+      if (!card) continue;
+      const dispatched = labelNames(card).includes('pm:dispatched');
+      if (dispatched) dispatchedMembers.push(n);
+      pending.push([card, h37MemberVerdict(headState, dispatched)]);
+    }
+    for (const [card, verdict] of pending) {
+      if (verdict === 'undispatched-member') {
+        rows.push([
+          card,
+          `carries a family-dispatch member pointer at \`${branch}\` — the shared branch of the fold ` +
+            `headed by #${head}, which IS \`pm:dispatched\` — while this card carries none. The fold's ` +
+            'per-member label writes are separate calls with nothing tying them together, so a partial ' +
+            'run leaves the queue offering a card the fold already holds, and every per-card predicate ' +
+            'here reads it as clean. Patrol input, NOT a verdict — a claim may name another card\'s ' +
+            'branch for a reason that is not a fold (a cross-lane hand-off, a mistyped branch). Remedy: ' +
+            `re-read the fold's members off \`${branch}\` and write the missing half (assign + state in ` +
+            'ONE write), or correct the branch this claim names. Claimants seen on that branch: ' +
+            `${namedMembers(entry?.claimants ?? [])}.`,
+        ]);
+      } else if (verdict === 'dispatched-residue') {
+        rows.push([
+          card,
+          `still carries \`pm:dispatched\` while the fold it claims — \`${branch}\`, headed by #${head} ` +
+            `— has ${headState === 'closed' ? 'CLOSED' : 'released the state (open, no `pm:dispatched`)'}. ` +
+            'That is the same non-atomic family write failing in the MIRROR direction, and it reads to ' +
+            'every per-card predicate as an ordinary in-flight card. Patrol input, NOT a verdict — this ' +
+            'member may still have work of its own outstanding. Remedy: clear the residue in the write ' +
+            'that cleared the head (drop `pm:dispatched` and the assignee together — H24\'s ' +
+            '「同笔摘 assignee」), or re-dispatch it on its own card and its own branch if work remains. ' +
+            `Claimants seen on that branch: ${namedMembers(entry?.claimants ?? [])}.`,
+        ]);
+      }
+    }
+    if (headState === 'open-undispatched' && dispatchedMembers.length > 0) {
+      rows.push([
+        openByNumber.get(Number(head)),
+        `is the chain head of \`${branch}\` and carries NO \`pm:dispatched\`, while ` +
+          `${dispatchedMembers.length} card(s) claiming that branch do (${namedMembers(dispatchedMembers)}) ` +
+          '— the head\'s own half of the fold\'s label write is the one that did not land, and it is ' +
+          'visible ONLY from those members\' claims: nothing on this card says so. Patrol input, NOT a ' +
+          'verdict — the members may equally be pointing at the wrong branch. Remedy: confirm which ' +
+          'reading holds, then write the missing half here or correct the claims that name it.',
+      ]);
+    }
+  }
+  return rows;
+}
+
+// ---------------------------------------------------------------------------
 // Report rendering — pure over (findings, counts), so `--self-test` pins both
 // media offline. The live sweep below picks a renderer and prints it; nothing
 // about WHAT is swept or WHICH predicates fire depends on the format.
@@ -6135,6 +6593,11 @@ export function isUnjudgedFinding(message) {
 export const SWEEP_COUNT_KEYS = [
   'conflictCandidates',
   'conflictProbed',
+  'sharedFileCandidates',
+  'sharedFileProbed',
+  'liveFolds',
+  'memberReadCandidates',
+  'memberReadProbed',
   'fallbackCandidates',
   'fallbackProbed',
   'restartCandidates',
@@ -6303,6 +6766,21 @@ export function summaryLine(counts, findingCount) {
           `the ${H35_EVENT_WINDOW_HOURS}h horizon — this run saw LESS than its stated window, so a ` +
           'quiet H35 section here is a short read, not a clean board.'
         : '.'
+    } ` +
+    `Shared-file holds (H36): changed-file page read on ${counts.sharedFileProbed ?? 0} of ` +
+    `${counts.sharedFileCandidates ?? 0} open PR(s) — a pair needs both sides read, so a shortfall ` +
+    'can only MISS a hold, never invent one. ' +
+    `Family folds (H37): ${counts.liveFolds ?? 0} live shared branch(es) claimed by more than their ` +
+    `own chain head, and a member comment page read on ${counts.memberReadProbed ?? 0} of ` +
+    `${counts.memberReadCandidates ?? 0} open \`pm:queue\` card(s) — that second read is bought ONLY ` +
+    'when a fold is live, so 0 of 0 is a board with no fold in flight rather than a pass that ' +
+    'skipped one, and an unread member can only MISS a drifted write, never invent one.' +
+    `${
+      h37MemberPassUnreadable(counts.memberReadCandidates, counts.memberReadProbed)
+        ? ' ⚠️ NO member page was readable on this run, so H37 saw a live fold and judged its queue ' +
+          'side on NOTHING — a quiet H37 section here is the transport, not a fold whose writes all ' +
+          'landed.'
+        : ''
     } ` +
     `Report-only: findings are patrol input, not a gate verdict.`
   );
@@ -7097,6 +7575,11 @@ async function sweep(options = {}) {
   const stats = {
     conflictCandidates: 0,
     conflictProbed: 0,
+    // H36's coverage pair (#12286) — open PRs whose changed-file page this
+    // sweep owes, and how many pages actually answered. Same per-row failure
+    // mode as H16's detail pass, so it owes the same `read X of Y`.
+    sharedFileCandidates: 0,
+    sharedFileProbed: 0,
     fallbackCandidates: 0,
     fallbackProbed: 0,
     // H9's coverage pair — `pm:on-hold` cards whose verdict the comment
@@ -7763,6 +8246,36 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
     throw lastDetailError;
   }
 
+  // H36 (#12286) — the shared-file pass, H16's transport posture over one
+  // changed-file page per open PR (the population this sweep already listed;
+  // gathering policy at `h36NeedsFiles`). A failed page drops that PR out of
+  // the pairing — a MISS, never an invention — and the summary's `read X of Y`
+  // says so; all-failed is the transport, not a clean board (#4690).
+  let lastFilesError = null;
+  const filesByPr = new Map();
+  for (const pr of seenPrs.values()) {
+    if (!h36NeedsFiles(pr)) continue;
+    stats.sharedFileCandidates = (stats.sharedFileCandidates ?? 0) + 1;
+    let page;
+    try {
+      page = await rest(`/repos/${OWNER_REPO}/pulls/${pr.number}/files?per_page=${H36_FILES_PAGE_SIZE}`);
+    } catch (err) {
+      lastFilesError = err;
+      continue;
+    }
+    stats.sharedFileProbed = (stats.sharedFileProbed ?? 0) + 1;
+    filesByPr.set(pr.number, {
+      paths: (Array.isArray(page) ? page : []).map((f) => String(f?.filename ?? '')),
+      truncated: Array.isArray(page) && page.length >= H36_FILES_PAGE_SIZE,
+    });
+  }
+  if (h36DetailPassUnreadable(stats.sharedFileCandidates, stats.sharedFileProbed)) {
+    throw lastFilesError;
+  }
+  for (const [pr, hold36] of h36SharedFileHolds([...seenPrs.values()], filesByPr)) {
+    findings.push([pr, 'H36', hold36]);
+  }
+
   // H8 — one bounded merged-PR listing (window note at the helper), matched
   // against the already-collected open `pm:dispatched` cards; no per-card fetch.
   //
@@ -8016,6 +8529,54 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
   // H19's, so the number cannot be misread as a per-card count.
   stats.dispatchRefTargets = refCache.size;
   stats.dispatchRefRead = [...refCache.values()].filter((r) => r.state !== 'unreadable').length;
+
+  // H37 (#12629) — the family-dispatch join, in two rounds (banner at the
+  // predicate). Placed HERE, after the dispatch-liveness loop, because round 1
+  // is exactly that loop's leftovers: `commentCache` now holds a thread for
+  // every open `pm:dispatched` card and every assigned pm-tracked card, so the
+  // fold roster costs no request at all.
+  const claimsOf = (rows, number) => {
+    const claim = governingClaim(rows);
+    return claim && (claim.branches ?? []).length > 0 ? { number, branches: claim.branches } : null;
+  };
+  const h37Claims = [];
+  for (const [number, rows] of commentCache) {
+    const entry = claimsOf(rows, number);
+    if (entry) h37Claims.push(entry);
+  }
+  // Round 2 — gated on round 1 having actually SEEN a fold (`h37NeedsMemberRead`),
+  // so a board with none costs nothing. `commentRowsFor` memoises, so a candidate
+  // already read above is counted as read and costs no second request; the pair
+  // therefore describes the POPULATION rather than only the new fetches.
+  const foldsSeen = h37FoldBranches(h37Claims).size;
+  for (const issue of seen.values()) {
+    if (!h37NeedsMemberRead(issue, foldsSeen)) continue;
+    stats.memberReadCandidates = (stats.memberReadCandidates ?? 0) + 1;
+    let rows;
+    try {
+      rows = await commentRowsFor(issue);
+    } catch {
+      // One member unread is one card out of the roster, never a report worth
+      // discarding — H32's posture, and the banner says why this pass does not
+      // rethrow the way H16's and H36's do. The coverage pair states the gap and
+      // the summary names an all-failed pass as the transport it is.
+      continue;
+    }
+    stats.memberReadProbed = (stats.memberReadProbed ?? 0) + 1;
+    const entry = claimsOf(rows, issue.number);
+    if (entry && !h37Claims.some((c) => c.number === entry.number)) h37Claims.push(entry);
+  }
+  // The roster is rebuilt over the UNION: a member found in round 2 can complete
+  // a fold round 1 saw only one side of, and judging the round-1 roster would
+  // discard exactly the card the second read was bought for.
+  const h37OpenByNumber = new Map();
+  for (const [number, issue] of seenUnscoped) h37OpenByNumber.set(number, issue);
+  for (const [number, issue] of seen) h37OpenByNumber.set(number, issue);
+  const h37Folds = h37FoldBranches(h37Claims);
+  stats.liveFolds = h37Folds.size;
+  for (const [card, drift] of h37FamilyMemberDrift(h37Folds, h37OpenByNumber, seenClosed)) {
+    findings.push([card, 'H37', drift]);
+  }
 
   // H19 — blocker liveness. Last, because it is the only pass that reads a
   // card this sweep did not list: every other item answers from a listing
@@ -11839,6 +12400,206 @@ function selfTest() {
   t('H35 summary: an untruncated window makes no such claim', summaryLine(gateCounts, 1).includes('TRUNCATED'), false);
   // Absent counts degrade to 0, never to `undefined` — H32's pair does the same.
   t('H35 summary: absent counts degrade to 0', summaryLine({}, 0).includes('0 removal(s) of a gate-semantic label'), true);
+
+  // -- H36 — cross-lane same-file holds (report-only patrol input, #12286) ---
+  const h36pr = (number, opts = {}) => ({
+    number,
+    created_at: opts.created_at ?? '2026-08-25T10:00:00Z',
+    draft: opts.draft ?? true,
+    auto_merge: opts.auto_merge ?? null,
+    merged_at: opts.merged_at ?? null,
+    head: { ref: opts.ref ?? `claude/issue-${number}-x` },
+    html_url: `https://example.test/${number}`,
+  });
+  const h36files = (entries, truncated = []) =>
+    new Map(
+      Object.entries(entries).map(([n, paths]) => [
+        Number(n),
+        { paths, truncated: truncated.includes(Number(n)) },
+      ]),
+    );
+  const h36rows = (...args) => h36SharedFileHolds(...args);
+  // The wrapper discipline the row-text wrappers at the top explain: a nulled
+  // first row must report as red CASES, never abort the suite in argument
+  // evaluation. The count assertions stay on `h36rows` directly.
+  const h36row1 = (...args) => String(h36SharedFileHolds(...args)[0]?.[1] ?? '');
+  const h36key1 = (...args) => h36SharedFileHolds(...args)[0]?.[0]?.number ?? null;
+  const readyEarly = h36pr(100, { draft: false });
+  const draftLate = h36pr(200, { created_at: '2026-08-25T11:00:00Z' });
+  const sharedAuto = h36files({
+    100: ['packages/runtime/src/domains/automation.ts'],
+    200: ['packages/runtime/src/domains/automation.ts', 'docs/x.md'],
+  });
+  // ⭐ THE FINDING — the incident's own shape: an accepted side and any other
+  // open PR holding one source file.
+  t('H36: ready + draft sharing a source file -> one row', h36rows([readyEarly, draftLate], sharedAuto).length, 1);
+  t('H36: …keyed to the accepted side', h36key1([readyEarly, draftLate], sharedAuto), 100);
+  t('H36: …naming the other side', h36row1([readyEarly, draftLate], sharedAuto).includes('#200'), true);
+  t('H36: …and the shared path', h36row1([readyEarly, draftLate], sharedAuto).includes('automation.ts'), true);
+  t('H36: …and states the non-verdict posture', h36row1([readyEarly, draftLate], sharedAuto).includes('NOT a verdict'), true);
+  t('H36: …and the remedy is the local probe', h36row1([readyEarly, draftLate], sharedAuto).includes('merge-tree'), true);
+  // The gate on the row: some side must be DONE.
+  t('H36: two unarmed drafts -> silent (the dispatch-time walk owns that case)', h36rows([h36pr(100), draftLate], sharedAuto).length, 0);
+  t('H36: an ARMED draft is at risk, finding-increasing like H16', h36rows([h36pr(100, { auto_merge: { merge_method: 'squash' } }), draftLate], sharedAuto).length, 1);
+  t('H36: both accepted -> keyed to the earlier-created side', h36key1([h36pr(100, { draft: false }), h36pr(200, { draft: false, created_at: '2026-08-25T11:00:00Z' })], sharedAuto), 100);
+  // The noise floor: closed, two spellings, pinned against per-incident growth.
+  t('H36: lockfile-only overlap is the noise floor -> silent', h36rows([readyEarly, draftLate], h36files({ 100: ['pnpm-lock.yaml'], 200: ['pnpm-lock.yaml'] })).length, 0);
+  t('H36: .changeset/ overlap is the noise floor -> silent', h36rows([readyEarly, draftLate], h36files({ 100: ['.changeset/a.md'], 200: ['.changeset/a.md'] })).length, 0);
+  t('H36: the noise floor is CLOSED at two spellings — growing it needs its own card', H36_SHARED_PATH_NOISE.length + H36_SHARED_PREFIX_NOISE.length, 2);
+  t('H36: a source path is NOT noise', h36NoisePath('packages/runtime/src/domains/automation.ts'), false);
+  // Candidate policy: never narrower than the predicate's population.
+  t('H36: changeset-release PRs are not candidates', h36NeedsFiles(h36pr(300, { ref: 'changeset-release/main' })), false);
+  t('H36: a merged row is not a candidate', h36NeedsFiles(h36pr(300, { merged_at: '2026-08-25T12:00:00Z' })), false);
+  t('H36: a draft IS a candidate (the pair\'s other side can be one)', h36NeedsFiles(draftLate), true);
+  // An unread side cannot pair — a miss, never an invention.
+  t('H36: an unread side cannot pair', h36rows([readyEarly, draftLate], h36files({ 100: ['x.ts'] })).length, 0);
+  // Truncation: pairs on what was seen, and says the list was short.
+  const truncPair = h36files(
+    { 100: ['packages/runtime/src/domains/automation.ts'], 200: ['packages/runtime/src/domains/automation.ts'] },
+    [200],
+  );
+  t('H36: a truncated list still pairs on what was seen', h36rows([readyEarly, draftLate], truncPair).length, 1);
+  t('H36: …and the row says so, in the only-hides-more direction', h36row1([readyEarly, draftLate], truncPair).includes('TRUNCATED'), true);
+  t('H36: an untruncated pair makes no such claim', h36row1([readyEarly, draftLate], sharedAuto).includes('TRUNCATED'), false);
+  // The transport judgement — H16's shape, asserted on this pass's own pair.
+  t('H36: an all-failed files pass is the transport, not a clean board', h36DetailPassUnreadable(3, 0), true);
+  t('H36: zero candidates is a clean reading', h36DetailPassUnreadable(0, 0), false);
+  t('H36: a partial read is a bounded gap, not a failure', h36DetailPassUnreadable(3, 1), false);
+  // The coverage pair reaches the summary line, and degrades to 0.
+  t('H36 summary: the pair is reported', summaryLine({ sharedFileProbed: 17, sharedFileCandidates: 19 }, 0).includes('changed-file page read on 17 of 19 open PR(s)'), true);
+  t('H36 summary: …and states the miss-only direction', summaryLine({}, 0).includes('MISS a hold, never invent one'), true);
+  t('H36: both count keys ride the enumerated contract', SWEEP_COUNT_KEYS.includes('sharedFileCandidates') && SWEEP_COUNT_KEYS.includes('sharedFileProbed'), true);
+  // The markdown medium renders an H36 row like every other finding row.
+  t('markdown: an H36 row links the PR it names', renderMarkdown([[{ number: 100, html_url: 'https://example.test/100' }, 'H36', 'shares a file']], { repo: 'r', issues: 0, unscoped: 0, prs: 2, merged: 0 }).includes('- **H36** [#100](https://example.test/100)'), true);
+
+  // -- H37 — family-dispatch member drift (report-only patrol input, #12629) --
+  //
+  // The fixtures are the two MEASURED instances the filing card carries: a
+  // 3-card fold whose third member kept `pm:queue` while the fold ran, and the
+  // mirror — a member left `pm:dispatched` WITH its assignee after the head had
+  // released. Fold #11678 is the shape the live claim census records
+  // (「folded into the 11678 family dispatch」).
+  const FOLD_37 = 'claude/issue-11678-family-fold';
+  const h37card = (number, labels, assignees = ['os-litant']) => ({
+    number,
+    html_url: `https://example.test/${number}`,
+    labels: labels.map((name) => ({ name })),
+    assignees: assignees.map((login) => ({ login })),
+  });
+  const h37claim = (number, ...branches) => ({ number, branches });
+  const h37map = (...cards) => new Map(cards.map((c) => [c.number, c]));
+  const h37rows = (...args) => h37FamilyMemberDrift(...args);
+  // The wrapper discipline: a nulled row must report as a red CASE, never abort
+  // the suite while evaluating `t()`'s arguments.
+  const h37row1 = (...args) => String(h37FamilyMemberDrift(...args)[0]?.[1] ?? '');
+  const h37key1 = (...args) => h37FamilyMemberDrift(...args)[0]?.[0]?.number ?? null;
+  const foldClaims37 = [h37claim(11678, FOLD_37), h37claim(11679, FOLD_37), h37claim(11680, FOLD_37)];
+  const folds37 = h37FoldBranches(foldClaims37);
+  const headLive37 = h37card(11678, ['domain:skills', 'pm:dispatched']);
+
+  // The roster: what makes a branch a FOLD, and the one exclusion that is the
+  // whole noise floor.
+  t('H37 roster: two cards claiming one branch is a fold', folds37.size, 1);
+  t('H37 roster: …keyed to the shared branch', [...folds37.keys()][0], FOLD_37);
+  t('H37 roster: …whose head is the card the branch is named for', folds37.get(FOLD_37).head, 11678);
+  t('H37 roster: …and every claimant is on it, sorted', folds37.get(FOLD_37).claimants.join(','), '11678,11679,11680');
+  // ⛔ THE NOISE FLOOR — and it is the ordinary case: every solo dispatch on
+  // this board claims its own branch, so without this the row fires on all of them.
+  t('H37 roster: a claim naming its OWN branch is not a fold', h37FoldBranches([h37claim(11678, FOLD_37)]).size, 0);
+  t('H37 roster: …not even several of them', h37FoldBranches([h37claim(11678, FOLD_37), h37claim(9000, 'claude/issue-9000-solo')]).size, 0);
+  t('H37 roster: a lone FOREIGN claimant is already a fold (the head may be silent)', h37FoldBranches([h37claim(9999, 'claude/issue-8888-x')]).size, 1);
+  t('H37 roster: a branch with no readable card number is not a roster key', h37FoldBranches([h37claim(1, 'main'), h37claim(2, 'main')]).size, 0);
+  t('H37 roster: a duplicate claimant is counted once', h37FoldBranches([h37claim(11679, FOLD_37, FOLD_37)]).get(FOLD_37).claimants.length, 1);
+  t('H37 roster: no claims at all -> no folds', h37FoldBranches([]).size, 0);
+  t('H37 roster: a missing claim list does not crash', h37FoldBranches(undefined).size, 0);
+
+  // The head state — four-valued, because `unknown` must never read as released.
+  t('H37 head: dispatched and open -> in flight', h37HeadState(11678, h37map(headLive37), new Map()), 'in-flight');
+  t('H37 head: open without the label -> released, and separably so', h37HeadState(11678, h37map(h37card(11678, ['pm:queue'])), new Map()), 'open-undispatched');
+  t('H37 head: closed -> released', h37HeadState(11678, new Map(), h37map(h37card(11678, []))), 'closed');
+  t('H37 head: listed nowhere -> unknown, never released (#4690)', h37HeadState(11678, new Map(), new Map()), 'unknown');
+
+  // The classifier, asserted directly — H35's idiom, so the fold is pinned
+  // independently of any sentence it produces.
+  t('H37 verdict: fold in flight + member undispatched -> the missed write', h37MemberVerdict('in-flight', false), 'undispatched-member');
+  t('H37 verdict: fold in flight + member dispatched -> clean', h37MemberVerdict('in-flight', true), 'clean');
+  t('H37 verdict: head CLOSED + member dispatched -> residue', h37MemberVerdict('closed', true), 'dispatched-residue');
+  t('H37 verdict: head open-undispatched + member dispatched -> residue', h37MemberVerdict('open-undispatched', true), 'dispatched-residue');
+  t('H37 verdict: nothing dispatched anywhere -> clean (an abandoned fold is H30\'s)', h37MemberVerdict('open-undispatched', false), 'clean');
+  t('H37 verdict: an unresolvable head declines rather than accusing', h37MemberVerdict('unknown', true), 'unresolvable-head');
+
+  // ⭐ THE FINDING, direction 1 — the filing seat's own error: the fold ran and
+  // one member kept `pm:queue`, with no assignee, looking clean to every
+  // per-card predicate here.
+  const stranded37 = h37card(11680, ['domain:skills', 'pm:queue'], []);
+  const liveFold37 = [folds37, h37map(headLive37, h37card(11679, ['pm:dispatched']), stranded37), new Map()];
+  t('H37: a fold in flight with one member on `pm:queue` -> one row', h37rows(...liveFold37).length, 1);
+  t('H37: …keyed to the stranded member, not the head', h37key1(...liveFold37), 11680);
+  t('H37: …naming the shared branch', h37row1(...liveFold37).includes(FOLD_37), true);
+  t('H37: …and the chain head', h37row1(...liveFold37).includes('#11678'), true);
+  t('H37: …stating the non-verdict posture', h37row1(...liveFold37).includes('NOT a verdict'), true);
+  t('H37: …and naming the alternative reading a reader might find', h37row1(...liveFold37).includes('cross-lane hand-off'), true);
+  t('H37: …with the remedy as ONE write', h37row1(...liveFold37).includes('ONE write'), true);
+
+  // ⭐ THE FINDING, direction 2 — the MIRROR measured on this card's own round
+  // (#12200): the head released, the member kept `pm:dispatched` + assignee.
+  const residue37 = [
+    h37FoldBranches([h37claim(11679, FOLD_37)]),
+    h37map(h37card(11679, ['pm:dispatched'])),
+    h37map(h37card(11678, [])),
+  ];
+  t('H37 mirror: head closed + member still dispatched -> one row', h37rows(...residue37).length, 1);
+  t('H37 mirror: …keyed to the member carrying the residue', h37key1(...residue37), 11679);
+  t('H37 mirror: …and it says the head CLOSED', h37row1(...residue37).includes('CLOSED'), true);
+  t('H37 mirror: …naming it as the same write failing the other way', h37row1(...residue37).includes('MIRROR direction'), true);
+  const released37 = [
+    h37FoldBranches([h37claim(11679, FOLD_37)]),
+    h37map(h37card(11679, ['pm:dispatched']), h37card(11678, ['pm:queue'])),
+    new Map(),
+  ];
+  t('H37 mirror: an open head that dropped the label reads as released too', h37rows(...released37).length, 2);
+
+  // ⭐ THE FINDING, direction 3 — the HEAD's own half missed, visible from the
+  // members' claims and from nothing on the head's card.
+  const headMissed37 = h37rows(...released37).find(([card]) => card.number === 11678);
+  t('H37 head half: the undispatched head gets its own row', headMissed37 === undefined, false);
+  t('H37 head half: …and it says the members are the only witnesses', String(headMissed37?.[1] ?? '').includes('visible ONLY from'), true);
+  t('H37 head half: …counting the dispatched claimants', String(headMissed37?.[1] ?? '').includes('#11679'), true);
+
+  // Silence, in both directions — the halves that must NOT fire.
+  t('H37 silent: a fold whose members are all dispatched', h37rows(folds37, h37map(headLive37, h37card(11679, ['pm:dispatched']), h37card(11680, ['pm:dispatched'])), new Map()).length, 0);
+  t('H37 silent: a fold with nothing dispatched at all (abandoned, or not yet launched)', h37rows(folds37, h37map(h37card(11678, ['pm:queue']), h37card(11679, ['pm:queue']), h37card(11680, ['pm:queue'])), new Map()).length, 0);
+  t('H37 silent: an unresolvable head judges nothing', h37rows(folds37, h37map(h37card(11679, ['pm:queue']), h37card(11680, ['pm:queue'])), new Map()).length, 0);
+  t('H37 silent: a claimant this sweep never listed is skipped, not judged', h37rows(folds37, h37map(headLive37), new Map()).length, 0);
+  t('H37 silent: no folds -> no rows', h37rows(new Map(), h37map(headLive37), new Map()).length, 0);
+  t('H37 silent: a missing roster does not crash', h37rows(undefined, h37map(headLive37), new Map()).length, 0);
+
+  // The gathering policy: never wider than the fold population it is bought for.
+  t('H37 gate: a `pm:queue` card is read once a fold is live', h37NeedsMemberRead(h37card(9, ['pm:queue']), 1), true);
+  t('H37 gate: …and costs NOTHING on a board with no fold', h37NeedsMemberRead(h37card(9, ['pm:queue']), 0), false);
+  t('H37 gate: a dispatched card buys nothing (its thread is already read)', h37NeedsMemberRead(h37card(9, ['pm:dispatched']), 1), false);
+  t('H37 gate: a card in neither state is out of scope', h37NeedsMemberRead(h37card(9, ['pm:blocked']), 1), false);
+  t('H37 gate: a missing issue does not crash', h37NeedsMemberRead(undefined, 1), false);
+  t('H37 gate: an absent fold count is not a fold', h37NeedsMemberRead(h37card(9, ['pm:queue']), undefined), false);
+
+  // The transport judgement — H16's shape, on this pass's own pair.
+  t('H37: an all-failed member pass is the transport, not a fold whose writes landed', h37MemberPassUnreadable(40, 0), true);
+  t('H37: zero candidates is a clean reading (no fold was live)', h37MemberPassUnreadable(0, 0), false);
+  t('H37: a partial read is a bounded gap, not a failure', h37MemberPassUnreadable(40, 12), false);
+
+  // The render budget, H19/H20's cap and note.
+  const wide37 = h37FoldBranches([1, 2, 3, 4, 5, 6, 7].map((n) => h37claim(11670 + n, FOLD_37)));
+  t('H37: a wide fold names the cap and counts the rest', h37row1(wide37, h37map(h37card(11678, ['pm:dispatched']), h37card(11671, ['pm:queue'])), new Map()).includes(`+${7 - H37_MEMBER_LIST_CAP} more`), true);
+
+  // The coverage pair reaches the summary line, and degrades to 0.
+  t('H37 summary: the pair is reported', summaryLine({ liveFolds: 2, memberReadProbed: 38, memberReadCandidates: 40 }, 0).includes('member comment page read on 38 of 40'), true);
+  t('H37 summary: …and the fold count with it', summaryLine({ liveFolds: 2 }, 0).includes('2 live shared branch(es)'), true);
+  t('H37 summary: …stating the miss-only direction', summaryLine({}, 0).includes('never invent one'), true);
+  t('H37 summary: an all-failed pass is named as the transport', summaryLine({ liveFolds: 1, memberReadCandidates: 40, memberReadProbed: 0 }, 0).includes('NO member page was readable'), true);
+  t('H37 summary: …and 0 of 0 makes no such claim', summaryLine({}, 0).includes('NO member page was readable'), false);
+  t('H37: all three count keys ride the enumerated contract', ['liveFolds', 'memberReadCandidates', 'memberReadProbed'].every((k) => SWEEP_COUNT_KEYS.includes(k)), true);
+  // The markdown medium renders an H37 row like every other finding row.
+  t('markdown: an H37 row links the card it names', renderMarkdown([[{ number: 11680, html_url: 'https://example.test/11680' }, 'H37', 'member pointer without the label']], { repo: 'r', issues: 1, unscoped: 0, prs: 0, merged: 0 }).includes('- **H37** [#11680](https://example.test/11680)'), true);
 
   // -- The `[::]` collapse (#12090): behaviour-preserving, asserted as such ---
   // The class held U+003A TWICE, never the fullwidth U+FF1A its shape implied.
