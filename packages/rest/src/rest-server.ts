@@ -9136,6 +9136,40 @@ export class RestServer {
                     // sits between the two arms and moves exactly that class.
                     // The sentence this line computes is unchanged.
                     const clientMsg = sandboxBusinessMessage(error) ?? msg;
+
+                    // ── [#12710] The producer's marked sentence, resolved once ─
+                    // #9934's `userMessage` channel is STATUS- and BRANCH-agnostic
+                    // by construction: `withDeclaredUserMessage` applies it ONCE at
+                    // the `/data` door's exit, over whatever envelope classification
+                    // chose. This door has no such wrapper — it builds ①, ③a and ③b
+                    // by hand — so the rule was applied at none of them, and one
+                    // producer's sentence reached the client on `POST /data/:object`
+                    // and vanished here for the identical throw (measured door to
+                    // door in `analytics-fault-user-message.test.ts` §3).
+                    //
+                    // Resolved ONCE here rather than at each terminal so this door
+                    // has a single answer to "is there a mark, and how long may it
+                    // be": {@link boundedDeclaredUserMessage} is that pair
+                    // (`declaredUserMessage`'s presence answer + #5423's bound)
+                    // shared with the `/data` door rather than copied beside it,
+                    // the same way the record-share family's two hand-built exits
+                    // ask it (#12693).
+                    //
+                    // ⛔ Deliberately NOT spread onto ①b below. That arm re-dresses
+                    // {@link classifiedRefusalAnswer}'s body, which already carries
+                    // the mark, so a second application there would be one rule
+                    // applied twice. Scope here is by ARM, not by door.
+                    //
+                    // ⛔ And riding it across the FAULT terminals ③a/③b does not
+                    // re-open #5367/#5437/#5811. Those withhold prose the producer
+                    // never addressed to the caller — driver text, a crash's
+                    // `TypeError` — while this field exists on an error only
+                    // because an author deliberately wrote caller-facing text onto
+                    // it. The prose stays withheld byte for byte, neither the
+                    // status nor the `code` moves, and an UNMARKED throw's envelope
+                    // is byte-identical to before (pinned, §4).
+                    const marked = boundedDeclaredUserMessage(error);
+                    const markExtra = marked === undefined ? {} : { userMessage: marked };
                     // ── [#5352] ① The ADR-0112 envelope, read FIRST ──────────
                     // A thrown error that already carries `code` + a 4xx
                     // `status` has ANSWERED the classification question. This
@@ -9167,7 +9201,7 @@ export class RestServer {
                     const envelopeStatus = typeof error?.status === 'number' ? error.status : undefined;
                     const envelopeCode = typeof error?.code === 'string' && error.code.length > 0 ? error.code : undefined;
                     if (envelopeStatus !== undefined && envelopeStatus >= 400 && envelopeStatus < 500 && envelopeCode) {
-                        return res.status(envelopeStatus).json({ code: envelopeCode, message: clientMsg.slice(0, 1000) });
+                        return res.status(envelopeStatus).json({ code: envelopeCode, message: clientMsg.slice(0, 1000), ...markExtra });
                     }
                     // ── [#11684] ①b The refusal ① could not read ─────────────
                     // ① answers a refusal that declared BOTH halves of the
@@ -9345,7 +9379,7 @@ export class RestServer {
                     // this route's answer for an UNDECLARED fault, below.
                     const declaredFault = declaredServerFaultAnswer(error);
                     if (declaredFault) {
-                        return res.status(declaredFault.status).json(declaredFault.body);
+                        return res.status(declaredFault.status).json({ ...declaredFault.body, ...markExtra });
                     }
                     // ── ③b The generic 500, for a fault nobody declared ──────
                     // `declaresServerFault` is kept in the withhold test rather
@@ -9356,7 +9390,7 @@ export class RestServer {
                     const outward = declaresServerFault(error) || looksLikeInternalErrorLeak(msg)
                         ? INTERNAL_ERROR_MESSAGE
                         : clientMsg.slice(0, 500);
-                    res.status(500).json({ code: 'ANALYTICS_QUERY_FAILED', error: outward });
+                    res.status(500).json({ code: 'ANALYTICS_QUERY_FAILED', error: outward, ...markExtra });
                 }
             },
             metadata: { summary: 'Run a semantic-layer dataset (preview/query)', tags: ['analytics'] },
