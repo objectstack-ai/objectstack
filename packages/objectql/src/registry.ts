@@ -3048,7 +3048,7 @@ export class SchemaRegistry {
       if (shadowed) {
         console.warn(
           `[Registry] Collision: ${type}/${baseName} is shipped by package ` +
-          `"${shadowed._packageId}" and a runtime-authored row with the same name has ` +
+          `'${shadowed._packageId}' and a runtime-authored row with the same name has ` +
           `just been registered from sys_metadata. The runtime row now shadows the ` +
           `package value (ADR-0005 overlay precedence): every read of ${type}/${baseName} ` +
           `serves the stored row, not the packaged definition. That is the sanctioned ` +
