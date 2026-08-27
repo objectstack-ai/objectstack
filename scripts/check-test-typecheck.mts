@@ -639,8 +639,11 @@ function selfTest(): void {
     JSON.stringify(Object.keys(built)) === '["_comment","entries"]',
   );
   expect(
+    // `in`, not `Object.hasOwn`: this file is in the ROOT tsc program, whose
+    // `lib` is ES2020, so a second `Object.hasOwn` would add a TS2550 to a
+    // shrink-only raw count (check:type-check-debt). Measured: +1 either way.
     '#12624 — no `_note` key is invented when the ledger carries no authored note',
-    !Object.hasOwn(built, '_note'),
+    !('_note' in built),
   );
 
   {
