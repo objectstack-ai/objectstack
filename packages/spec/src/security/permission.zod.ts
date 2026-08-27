@@ -17,6 +17,7 @@ import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
  * - Purge (Hard delete / Compliance)
  */
 import { lazySchema } from '../shared/lazy-schema';
+import { retiredKey } from '../shared/retired-key';
 import { strictObject } from '../shared/strict-object';
 /**
  * [ADR-0057 D1] Object access DEPTH — the Dataverse "access level" axis,
@@ -58,8 +59,10 @@ const OBJECT_PERMISSION_KEY_ALIASES: Readonly<Record<string, string>> = {
   remove: 'allowDelete',
   export: 'allowExport',
   transfer: 'allowTransfer',
-  restore: 'allowRestore',
-  purge: 'allowPurge',
+  // `restore` / `purge` left this table with the #12497 retirement: an alias
+  // may only prescribe a key the shape ACCEPTS (#5013), and `allowRestore` /
+  // `allowPurge` are tombstones now. Both verbs moved to `guidance` below so
+  // an author reaching for them still gets the retirement prescription.
   canread: 'allowRead',
   cancreate: 'allowCreate',
   canedit: 'allowEdit',
@@ -80,6 +83,25 @@ export const ObjectPermissionSchema = lazySchema(() => strictObject(
         'only on the RESPONSE surface (`/me/permissions`) and is never authored. Grant ' +
         'capability with the `allow*` bits here; tighten an object\'s exposure with ' +
         '`apiMethods` on the object schema.',
+      // ── Former aliases of the #12497 tombstones. The bare verbs were never
+      //    accepted keys, but until the retirement they were aliased to
+      //    `allowRestore` / `allowPurge`; pointing them at a tombstone would
+      //    send the author into a second rejection (#5013), so they carry the
+      //    prescription directly.
+      restore:
+        '`restore` was the alias of `objects.<object>.allowRestore`, which was removed in ' +
+        '@objectstack/spec 17 (#12497, ADR-0049) — the `restore` ObjectQL operation it claimed ' +
+        'to gate has never shipped (roadmap M2), so granting the bit delivered nothing. Delete ' +
+        'the key — a dispatched `restore` stays denied fail-closed by the permission ' +
+        'evaluator\'s destructive-operation backstop, and the bit returns with the M2 ' +
+        'lifecycle initiative (#1883) alongside the operation it gates.',
+      purge:
+        '`purge` was the alias of `objects.<object>.allowPurge`, which was removed in ' +
+        '@objectstack/spec 17 (#12497, ADR-0049) — the `purge` ObjectQL operation it claimed ' +
+        'to gate has never shipped (roadmap M2), so granting the bit delivered nothing. Delete ' +
+        'the key — a dispatched `purge` stays denied fail-closed by the permission ' +
+        'evaluator\'s destructive-operation backstop, and the bit returns with the M2 ' +
+        'lifecycle initiative (#1883) alongside the operation it gates.',
     },
     history:
       'Until #4001 these were dropped silently — the permission set still parsed, so the ' +
@@ -134,15 +156,8 @@ export const ObjectPermissionSchema = lazySchema(() => strictObject(
   /**
    * Lifecycle Operations.
    *
-   * RBAC-gated, operations pending (#1883 / roadmap M2). The dedicated
-   * `transfer`/`restore`/`purge` ObjectQL operations do not exist yet, but the
-   * permission evaluator PRE-MAPS them to these bits
-   * (`permission-evaluator.ts` OPERATION_TO_PERMISSION): the moment such an
-   * operation is dispatched it is denied unless a resolved permission set
-   * grants the bit (or `modifyAllRecords`). Until the operations ship,
-   * authoring `restore`/`purge` grants nothing — there is no ungated window
-   * either way (unmapped destructive ops additionally fail CLOSED via
-   * DESTRUCTIVE_OPERATIONS, per ADR-0049).
+   * `allowTransfer` is the one lifecycle bit that stays: ENFORCED (#3004). Its
+   * former siblings `allowRestore` / `allowPurge` are tombstones below.
    *
    * EXCEPTION (#3004): `allowTransfer` is ALREADY ENFORCED today through the
    * ordinary `insert`/`update` door, not only the future `transfer` op. The
@@ -154,8 +169,44 @@ export const ObjectPermissionSchema = lazySchema(() => strictObject(
    * operation will reuse the same bit.
    */
   allowTransfer: z.boolean().default(false).describe('[RBAC-gated; ENFORCED now via insert/update owner_id guard, #3004] Change record ownership (assign/reassign/disown owner_id)'),
-  allowRestore: z.boolean().default(false).describe('[RBAC-gated; operation pending M2] Restore from trash (Undelete)'),
-  allowPurge: z.boolean().default(false).describe('[RBAC-gated; operation pending M2] Permanently delete (Hard Delete/GDPR)'),
+
+  /**
+   * REMOVED — `allowRestore` / `allowPurge` claimed to gate `restore` /
+   * `purge` ObjectQL operations that have never existed (no destructive
+   * lifecycle verb is in the engine's dispatch vocabulary — pinned by
+   * objectql's `engine-middleware-operation-vocabulary.test.ts`, #8106).
+   *
+   * ADR-0049 enforce-or-remove, maintainer ruling 2026-08-26 accepting
+   * #1883's recommendation B (#12497): an AI author who declared
+   * `allowPurge: false` believed a lock existed; the failure was silent.
+   * Tombstoned so the removal is audible (tsc `never` + the parse-time
+   * prescription) instead of a silent strip. The former evaluator pre-mapping
+   * (`OPERATION_TO_PERMISSION` restore/purge rows) retired in the same batch —
+   * with the bits unwritable, a mapping onto them was a claim about a surface
+   * that rejects authoring — and a dispatched `restore`/`purge` stays denied
+   * fail-closed via the evaluator's `DESTRUCTIVE_OPERATIONS` backstop, so
+   * there is still no ungated window. THE KEYS RETURN with the M2 lifecycle
+   * initiative (feature + RBAC in one batch, maintainer 2026-08-03); #1883
+   * stays open as the anchor.
+   */
+  allowRestore: retiredKey(
+    '`objects.<object>.allowRestore` was removed in @objectstack/spec 17 (#12497, ADR-0049) — ' +
+    'the `restore` ObjectQL operation it claimed to gate has never shipped (roadmap M2), so ' +
+    'granting the bit delivered nothing. Delete the key — a dispatched `restore` stays denied ' +
+    'fail-closed by the permission evaluator\'s destructive-operation backstop, and the bit ' +
+    'returns with the M2 lifecycle initiative (#1883) alongside the operation it gates. ' +
+    'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.',
+  ),
+  allowPurge: retiredKey(
+    '`objects.<object>.allowPurge` was removed in @objectstack/spec 17 (#12497, ADR-0049) — ' +
+    'the `purge` ObjectQL operation it claimed to gate has never shipped (roadmap M2), so ' +
+    'granting the bit delivered nothing (a compliance/GDPR erase the author believed was ' +
+    'permission-locked was not — the operation itself does not exist). Delete the key — a ' +
+    'dispatched `purge` stays denied fail-closed by the permission evaluator\'s ' +
+    'destructive-operation backstop, and the bit returns with the M2 lifecycle initiative ' +
+    '(#1883) alongside the operation it gates. ' +
+    'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.',
+  ),
 
   /** 
    * View All Records: Super-user read access. 

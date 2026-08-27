@@ -23,13 +23,11 @@ ObjectStack's `ObjectPermission` schema defines these boolean flags for object a
 | **Delete** | `allowDelete` | Remove records owned by the user or shared with them | Delete own records |
 | **Export** | `allowExport` | Take a bulk machine-readable copy of the records the user can read | Export / bulk egress ([details](/docs/permissions/permission-sets#allowexport--the-export-axis)) |
 | **Transfer** | `allowTransfer` | Change record ownership | Reassign owner |
-| **Restore** | `allowRestore` | Undelete from trash | Recover soft-deleted records |
-| **Purge** | `allowPurge` | Permanently (hard) delete | GDPR / compliance erase |
 | **View All** | `viewAllRecords` | View all records regardless of ownership or sharing | Read all records (bypass sharing) |
 | **Modify All** | `modifyAllRecords` | Edit/delete all records regardless of ownership | Full object access (bypass sharing) |
 
 <Callout type="tip">
-**Super-user bypass:** When `modifyAllRecords` is set it satisfies write checks (`allowEdit`/`allowDelete`, and the lifecycle class `allowTransfer`/`allowRestore`/`allowPurge`) on any record; `viewAllRecords` (or `modifyAllRecords`) satisfies `allowRead` on any record — both bypass ownership and sharing. See `packages/plugins/plugin-security/src/permission-evaluator.ts`.
+**Super-user bypass:** When `modifyAllRecords` is set it satisfies write checks (`allowEdit`/`allowDelete`, and the lifecycle bit `allowTransfer`) on any record; `viewAllRecords` (or `modifyAllRecords`) satisfies `allowRead` on any record — both bypass ownership and sharing. See `packages/plugins/plugin-security/src/permission-evaluator.ts`.
 
 **The one exception is `allowExport`.** Neither super-user bit confers it: a
 principal with View/Modify All Data may read every record and still be refused a
@@ -52,7 +50,7 @@ and `plugin-security/src/security-plugin.ts` (`computeLayeredRlsFilter`).
 </Callout>
 
 <Callout type="warn">
-**Lifecycle operations are partly pending:** the dedicated `transfer` / `restore` / `purge` ObjectQL operations do not exist yet (roadmap M2); their RBAC gate is already mapped in the permission evaluator, so the moment they ship they are denied unless the matching flag (or `modifyAllRecords`) is granted. One exception: `allowTransfer` is **already enforced today** through the ordinary `insert` / `update` door — `owner_id` is system-managed, so planting a record under another user or reassigning / disowning one is denied unless the caller holds `allowTransfer` (or `modifyAllRecords`, which implies it) (#3004). Authoring `allowRestore` / `allowPurge` today still grants nothing (#1883).
+**Lifecycle operations are partly pending:** the dedicated `transfer` / `restore` / `purge` ObjectQL operations do not exist yet (roadmap M2). `allowTransfer` is **already enforced today** through the ordinary `insert` / `update` door — `owner_id` is system-managed, so planting a record under another user or reassigning / disowning one is denied unless the caller holds `allowTransfer` (or `modifyAllRecords`, which implies it) (#3004), and the future `transfer` op is pre-mapped to the same bit. The former `allowRestore` / `allowPurge` flags were **retired** (#12497, ADR-0049 — they claimed to gate operations that do not exist, so authoring them granted nothing); a dispatched `restore` / `purge` is denied unconditionally by the fail-closed destructive-operation backstop, and the flags return with the M2 lifecycle batch (#1883).
 </Callout>
 
 ---
