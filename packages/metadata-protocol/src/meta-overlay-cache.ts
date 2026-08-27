@@ -146,7 +146,24 @@ interface MetaOverlayCacheEntry {
  * never share, which is what keeps two environments in one process from seeing
  * each other's rows.
  */
-const metaOverlayCache = new WeakMap<object, Map<string, MetaOverlayCacheEntry>>();
+interface MetaOverlayCacheBucket {
+  /**
+   * The epoch every entry in {@link entries} was read at. The epoch is
+   * process-wide and object-agnostic (any write to any object advances it), so
+   * when it moves EVERY entry here is stale at once — Fork 1 → A's coarse
+   * invalidation, applied to storage and not only to validity.
+   *
+   * ⚠️ The per-entry `epoch` comparison in {@link readMetaOverlayCache} remains
+   * the VALIDITY rule and is not redundant with this. Entries are dropped in
+   * {@link writeMetaOverlayCache}, which only runs on a miss, so between a write
+   * and the next miss a stale entry is still present and it is the read-side
+   * comparison — nothing else — that refuses to serve it.
+   */
+  epoch: number;
+  entries: Map<string, MetaOverlayCacheEntry>;
+}
+
+const metaOverlayCache = new WeakMap<object, MetaOverlayCacheBucket>();
 
 export const META_OVERLAY_CACHE_TTL_ENV = 'OS_METADATA_OVERLAY_CACHE_TTL_MS';
 export const META_OVERLAY_CACHE_DEFAULT_TTL_MS = 30_000;
@@ -233,11 +250,26 @@ export function readMetaOverlayCache(
 ): unknown[] | undefined {
   if (epoch === undefined || ttlMs <= 0) return undefined;
   if (!engine || typeof engine !== 'object') return undefined;
-  const entry = metaOverlayCache.get(engine as object)?.get(cacheKeyOf(key));
+  const entry = metaOverlayCache.get(engine as object)?.entries.get(cacheKeyOf(key));
   if (!entry) return undefined;
   if (entry.epoch !== epoch) return undefined;
   if (entry.expiresAt <= now) return undefined;
   return cloneRecords(entry.records);
+}
+
+/**
+ * How many entries this engine's bucket currently holds. Diagnostics and pins
+ * only — the eviction in {@link writeMetaOverlayCache} has no behavioural
+ * signature (a stale entry is refused by the read-side epoch rule whether or
+ * not it was evicted), so without an observation channel it would be an
+ * unpinned optimisation, which is the kind that silently regresses.
+ *
+ * ⛔ Package-internal: this module is deliberately NOT re-exported from
+ * `src/index.ts`, so nothing here is public surface.
+ */
+export function metaOverlayCacheEntryCount(engine: unknown): number {
+  if (!engine || typeof engine !== 'object') return 0;
+  return metaOverlayCache.get(engine as object)?.entries.size ?? 0;
 }
 
 /**
@@ -262,7 +294,18 @@ export function writeMetaOverlayCache(
   if (!engine || typeof engine !== 'object') return;
   const snapshot = cloneRecords(records);
   if (snapshot === undefined) return;
-  const bucket = metaOverlayCache.get(engine as object) ?? new Map<string, MetaOverlayCacheEntry>();
-  bucket.set(cacheKeyOf(key), { records: snapshot, epoch, expiresAt: now + ttlMs });
-  metaOverlayCache.set(engine as object, bucket);
+  let bucket = metaOverlayCache.get(engine as object);
+  if (bucket === undefined) {
+    bucket = { epoch, entries: new Map<string, MetaOverlayCacheEntry>() };
+    metaOverlayCache.set(engine as object, bucket);
+  } else if (bucket.epoch !== epoch) {
+    // ⭐ Every entry read at an older epoch is already dead by the read-side
+    // rule, so keeping it costs memory and buys nothing. Without this a
+    // long-lived process accumulates one never-evicted entry per distinct
+    // `(type, packageId, organizationId)` ever requested — bounded in principle
+    // by the tenant count, which is not a bound worth shipping.
+    bucket.entries.clear();
+    bucket.epoch = epoch;
+  }
+  bucket.entries.set(cacheKeyOf(key), { records: snapshot, epoch, expiresAt: now + ttlMs });
 }

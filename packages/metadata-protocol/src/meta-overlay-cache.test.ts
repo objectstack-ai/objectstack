@@ -32,16 +32,16 @@
  * write epoch has moved past it.
  *
  * PREDICTED IN WRITING BEFORE THE MUTATION (committed ahead of it): RED,
- * exactly **4** failing cases, named —
+ * exactly **5** failing cases, named —
  *   1. §1 "the answer after an epoch bump equals the answer an UNCACHED engine gives"
  *   2. §1 "a bumped epoch re-reads even when the row set did not change"
  *   3. §4 "a newly published row appears promptly — the epoch, never the timer"
  *   4. §5 "an epoch bump retires an entry the TTL would still have served"
+ *   5. §9 "does not accumulate one never-evicted entry per requested key" — the
+ *      post-bump read would HIT instead of missing, so the store that performs
+ *      the eviction never runs and the count stays at 2.
  * Every other case either never bumps the epoch or never reaches the comparison.
- * OBSERVED: RED, **4** failed / 15 passed (19) — the prediction's exact count AND its
- * exact named set, in order: §1 "…equals the answer an UNCACHED engine gives",
- * §1 "a bumped epoch re-reads…", §4 "a newly published row appears promptly",
- * §5 "an epoch bump retires an entry the TTL would still have served".
+ * OBSERVED: __A1__
  *
  * ## ⭐ ABLATION 2 — the hit half (`writeMetaOverlayCache` call removed)
  *
@@ -50,14 +50,12 @@
  * i.e. a cache that never caches.
  *
  * PREDICTED IN WRITING BEFORE THE MUTATION (committed ahead of it): RED,
- * exactly **9** failing cases — every case carrying a "the repeat read nothing"
- * assertion: §1 (2 of 3), §2 (both), §4 (both), §5 (1 of 3), §6, §8. The three
- * §7 key-separation cases and §1's "a bumped epoch re-reads" use
- * `toBeGreaterThan` and stay green, as do all of §3.
- * OBSERVED: RED, **9** failed / 10 passed (19) — the prediction's exact count AND its
- * exact named set: §1 "a repeat … issues ZERO engine reads", §1 "…equals the
- * answer an UNCACHED engine gives", §2 both, §4 both, §5 "an epoch bump
- * retires…", §6, §8.
+ * exactly **10** failing cases — every case carrying a "the repeat read
+ * nothing" assertion: §1 (2 of 3), §2 (both), §4 (both), §5 (1 of 3), §6, §8,
+ * and §9 (nothing is ever stored, so its entry count is 0, not 2). The three §7
+ * key-separation cases and §1's "a bumped epoch re-reads" use `toBeGreaterThan`
+ * and stay green, as do all of §3.
+ * OBSERVED: __A2__
  *
  * Named positive control for BOTH ablations, predicted GREEN throughout:
  * §3 "an engine with no write-epoch seam keeps its exact query multiset". It
@@ -85,6 +83,7 @@ import { describe, expect, it } from 'vitest';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 import {
     META_OVERLAY_CACHE_DEFAULT_TTL_MS,
+    metaOverlayCacheEntryCount,
     metaOverlayCacheTtlMs,
     readWriteEpoch,
 } from './meta-overlay-cache.js';
@@ -217,6 +216,7 @@ function makeHarness(rows: StoredRow[], options: HarnessOptions = {}) {
 
     return {
         protocol,
+        engine,
         finds,
         registeredItems,
         rows,
@@ -574,5 +574,32 @@ describe('[#11967] §8 a scoped (environment) kernel caches without hydrating', 
         // The hydration limb is gated to unscoped kernels, so this stays empty
         // on BOTH calls — the cache did not change which limb runs.
         expect(h.registeredItems).toEqual([]);
+    });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 9. Storage is bounded — a new epoch drops the entries it just orphaned
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe('[#11967] §9 a write at a new epoch evicts the entries it orphaned', () => {
+    it('does not accumulate one never-evicted entry per requested key', async () => {
+        const h = makeHarness([storedRow('object', 'alpha'), storedRow('app', 'console')]);
+
+        await h.protocol.getMetaItems({ type: 'object' });
+        await h.protocol.getMetaItems({ type: 'app' });
+        expect(metaOverlayCacheEntryCount(h.engine)).toBe(2);
+
+        // Paired hit assertion — both entries are live, so the drop below is
+        // demonstrably removing real entries rather than an empty bucket.
+        const findsBefore = h.finds.length;
+        await h.protocol.getMetaItems({ type: 'object' });
+        await h.protocol.getMetaItems({ type: 'app' });
+        expect(h.finds.length).toBe(findsBefore);
+
+        h.bumpEpoch();
+        // One read at the new epoch is enough: every entry from the old one is
+        // already dead by the read-side rule, so the bucket is dropped whole.
+        await h.protocol.getMetaItems({ type: 'app' });
+        expect(metaOverlayCacheEntryCount(h.engine)).toBe(1);
     });
 });
