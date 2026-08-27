@@ -146,6 +146,15 @@ type ObjectFoldScalarKey = (typeof OBJECT_FOLD_SCALAR_KEYS)[number];
  * that the drop is silent; keep this comment in sync with the merge set below
  * if it ever changes.
  *
+ * This is not only a hypothetical: `_provenance` is a real top-level prop an
+ * `extend` contributor carries TODAY. Copying it through (as "later value
+ * wins" would) lets a third-party extender flip a tenant-authored object's
+ * `_provenance` to the extending package's — reaching, by a different route,
+ * the exact outcome ADR-0029 D9.3's priority-reranking guard exists to
+ * prevent. `registry-object-overlay-layer.test.ts` ("an extender declaring
+ * priority 140 does not become the base layer") fails if this merge set is
+ * widened to copy it through.
+ *
  * [#8460] …the SCALAR override above is conditional. `tenantAuthored` names
  * the scalars the fold's BASE has authored away from the packaged owner's
  * value; an extender yields on those. See
