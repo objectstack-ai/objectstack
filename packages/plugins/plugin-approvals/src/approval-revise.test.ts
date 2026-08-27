@@ -315,6 +315,39 @@ describe('Send back for revision (ADR-0044)', () => {
     await expect(editAttempt()).rejects.toThrow(/RECORD_LOCKED/);          // round 2 pending → re-locked
   });
 
+  it('viewer.can_override drops on `returned`, which is what keeps the recall override arm pending-only (#12716)', async () => {
+    // `sys_approval_request`'s `approval_recall` action ORs in
+    // `record.viewer.can_override`, spelled exactly like its three siblings and
+    // with no status test of its own. What makes that arm pending-only is not
+    // the predicate — it is `attachViewers`, which ANDs the status in when it
+    // COMPUTES the flag. `action-predicate-sparse-face.test.ts` pins the
+    // predicate half against fixture viewer blocks; this pins the half those
+    // fixtures stand for, against a genuinely `returned` row produced by the
+    // real send-back path. Without it, "pending-only" would be a property of
+    // hand-written fixtures rather than of the service.
+    //
+    // Relaxing the flag is also not available as a fix: it feeds the three
+    // sibling predicates too, and THEIR endpoints are pending-only
+    // (`decideNode`, and reassign via `loadPendingRow`), so widening it would
+    // put those three buttons on statuses their services refuse.
+    registerReviseFlow();
+    const { req } = await startFlow();
+    // A platform admin with no tenant scope: `loadRequest` narrows by the
+    // CALLER's org, and this harness's requests carry none.
+    const ADMIN = { isSystem: false, userId: 'root', positions: [], permissions: ['admin_full_access'] } as any;
+
+    // Positive control first — the same actor, same request, on `pending`.
+    const whilePending = await service.getRequest(req.id, ADMIN);
+    expect(whilePending!.status).toBe('pending');
+    expect(whilePending!.viewer!.can_override).toBe(true);
+
+    await service.sendBack(req.id, { actorId: 'u1' }, asUser('u1'));
+
+    const whileReturned = await service.getRequest(req.id, ADMIN);
+    expect(whileReturned!.status).toBe('returned');
+    expect(whileReturned!.viewer!.can_override).toBe(false);
+  });
+
   it('recall crossing the revise window cancels the run (returned → recalled)', async () => {
     registerReviseFlow();
     const { runId, req } = await startFlow();

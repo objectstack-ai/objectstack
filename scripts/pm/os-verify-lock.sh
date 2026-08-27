@@ -92,6 +92,49 @@
 # a kill -9 at any point releases the lock the moment the process dies.
 #
 # ---------------------------------------------------------------------------
+# WHAT THIS LOCK DOES NOT COVER — THE GUARANTEE IS NARROWER THAN THE NAME
+#
+# What this lock guarantees is: NO CONCURRENT LOCKED HEAVY JOB. What every
+# reader has assumed it means is: AN IDLE BOX. Those are not the same sentence,
+# and until this block existed nothing anywhere said so.
+#
+# The gap is not a defect in the acquisition path — exclusion works exactly as
+# described above. It is a POPULATION gap. Only what comes through this entry
+# point is serialised, and the discipline routes builds and test suites here and
+# nothing else. Gate scripts (`pnpm check:*`, the `node scripts/check-*.mjs`
+# family) are neither a build nor a suite, so nothing routes them; neither is a
+# dev server, a `pnpm install`, a docs build, or any free-hand command a sibling
+# agent types at a prompt. All of it runs ALONGSIDE a holder, on the same cores.
+#
+# ⚠️ THE FAILURE MODE IS SILENCE, which is why this is stated and not merely
+# true. Nothing is red, nothing is skipped, no verdict changes, and a wall-clock
+# absolute taken while holding the lock looks EXACTLY as authoritative as one
+# taken on a quiet box. A timing card acquires, believes it has the machine, and
+# publishes seconds it never measured the conditions of.
+#
+# Observed once, in this container, during a real cost measurement (2026-08-25,
+# alongside a locked 13m14s hold): a neighbour's UNLOCKED gate script at ~130%
+# CPU, with 1-minute load averaging 4.36 and peaking at 6.97 on 4 cores. ⛔ That
+# is a HISTORICAL OBSERVATION OF ONE RUN — not a constant, not a prediction, and
+# not something this script measures. Do not quote it as current. What is
+# durable, and what the messages below carry, is the BOUNDARY; the magnitude on
+# any given day is whatever the neighbours happen to be doing.
+#
+# ⛔ THIS IS A DISCLOSURE, NOT A REPAIR, and the difference is deliberate.
+# Routing CPU-heavy gate runs through this entry point would make the name match
+# the guarantee — and it would trade every seat's PARALLELISM for contention on
+# a resource the lock does not cover today. The direction of that trade is
+# unmeasured, so it is a separate card that owes the measurement as its
+# evidence, not a rider on the sentence that admits the gap. Nothing here
+# refuses, shortens or reshapes a hold on account of coverage: same doctrine as
+# the filter preflight and declared unlocked mode — say the true thing loudly,
+# never silently narrow what the caller asked for.
+#
+# Consequence for anyone quoting a number from this wrapper: the seconds are
+# SHARED-BOX seconds. State that beside the absolute, or quote RATIOS, which are
+# what survived when #11707 re-ran a set of absolutes on another machine.
+#
+# ---------------------------------------------------------------------------
 # THE LOCK IS LINUX-ONLY, AND A HOST WITHOUT `flock` SAYS SO RATHER THAN STOPS
 #
 # Maintainer ruling, 2026-08-22: the shared verification lock is declared
@@ -1002,6 +1045,38 @@ announce_arrival() {
   return 0
 }
 
+# ⭐ WHAT THE HOLDER IS TOLD IT ACTUALLY HAS, AT THE MOMENT IT BELIEVES IT HAS
+# THE MACHINE.
+#
+# The coverage block at the top of this file explains the gap; this is the same
+# sentence delivered where the misbelief is formed. A caller reaches this line
+# having just been told ACQUIRED, and the next thing it does is measure
+# something. Told nothing, it measures a shared box and publishes the number as
+# if the lock had cleared it — the silent failure this text exists for.
+#
+# It is UNCONDITIONAL, unlike the arrival notice above, and the asymmetry is the
+# point rather than an oversight. The arrival notice is spent only where it buys
+# something because it is ACTIONABLE ADVICE (set a slot) that a caller walking
+# up to a free lock has no use for. This is not advice, it is the SCOPE OF WHAT
+# WAS JUST GRANTED, and it is equally untrue for a contended acquisition and an
+# uncontended one — an idle queue says nothing at all about the unlocked gate
+# script running beside it. A holder that is told the boundary only when the
+# queue happened to be busy learns it in exactly the runs where it was most
+# likely to have guessed anyway.
+#
+# ⛔ It carries no numbers. This script does not sample load, and a disclosure
+# that quoted the one observation behind it as if it were today's would be the
+# defect it repairs, one level up.
+coverage_note() {
+  log "  ⚠ WHAT YOU NOW HOLD: exclusion against other LOCKED runs — the ones that came in"
+  log "    through this entry point — and NOTHING ELSE. Unlocked sibling work (\`check:*\` gate"
+  log "    scripts, dev servers, installs, any free-hand command) is NOT excluded by this lock"
+  log "    and runs alongside this hold, on the same cores."
+  log "    ⇒ ⛔ Holding this lock is NOT having an idle box. A wall-clock absolute measured"
+  log "      under it is a reading about a SHARED box: state that condition beside the number,"
+  log "      or quote RATIOS, which survive contention where absolutes do not."
+}
+
 # Does a count-based backstop have grounds to blame the CLOCK?
 #
 # Both backstops below bound this script by counting something that cannot lie
@@ -1404,6 +1479,15 @@ usage:
                                             and which commands own the lock-seconds
   os-verify-lock.sh --self-test             verify this script
 
+WHAT THE LOCK COVERS, AND WHAT IT DOES NOT. Holding it means NO OTHER LOCKED
+HEAVY JOB is running -- no other run that came in through this entry point. It
+does NOT mean an idle box. Gate scripts (`pnpm check:*`), dev servers, installs
+and any free-hand command a sibling agent types are not routed here by anything,
+are not excluded, and run on the same cores as your hold. ⇒ Seconds measured
+under this lock are SHARED-BOX seconds. Say so beside any absolute you publish,
+or quote ratios, which survive contention. Every acquiring run prints this
+boundary, and the VERDICT line repeats it beside the numbers it carries.
+
 There is deliberately no -w / --timeout: the acquisition budget is capped at the
 call site. OS_VERIFY_LOCK_WAIT may LOWER it; a value above the cap is clamped.
 ⛔ The cap is not a tuning knob and raising it is not the remedy for a long
@@ -1535,6 +1619,14 @@ run_unlocked() {
 mode_status() {
   local n=0 file pid start stamp label problem
   printf 'lock: %s\n' "$LOCK_FILE"
+  # ⚠ Everything printed below is about LOCKED work only. Said here because
+  # `--status` is what an agent reads to answer "is this box busy?", and the
+  # honest answer is that this command cannot see the half of the load that
+  # never took a ticket. An empty queue here is not an idle machine.
+  printf 'covers: LOCKED runs only — this listing sees runs that came through this entry\n'
+  printf '        point (plus a free-hand flock holder, unnamed). It does NOT see unlocked\n'
+  printf '        sibling work — `check:*` gate scripts, dev servers, installs — which is\n'
+  printf '        never excluded by this lock. An empty queue is NOT an idle box.\n'
   if ! preflight; then
     printf 'host: CANNOT OPERATE THIS LOCK — a run here refuses with VERDICT lock-unusable:\n'
     while IFS= read -r problem; do
@@ -2005,6 +2097,7 @@ mode_run() {
   acquired_at="$(now_s)"
   waited=$((acquired_at - started))
   log "ACQUIRED after $(human_s "$waited") — running: ${label}"
+  coverage_note
 
   local rc=0
   if [[ "$kind" == shell ]]; then
@@ -2017,7 +2110,7 @@ mode_run() {
   held=$(($(now_s) - acquired_at))
   HOLDING=0
   rm -f "$HOLDER_FILE" 2> /dev/null || true
-  log "$(verdict_head "$rc") · held the lock $(human_s "$held") · waited $(human_s "$waited")"
+  log "$(verdict_head "$rc") · held the lock $(human_s "$held") · waited $(human_s "$waited") · ⚠ SHARED-BOX SECONDS — this lock excluded other LOCKED runs, NOT unlocked sibling work (\`check:*\` gates and the rest), so these are not idle-box figures"
   ledger_append "$VERDICT_WORD" "$waited" "$held" "$rc" "$label"
   if ((held >= LONG_HOLD_WARN_S)); then
     log "⚠ THIS RUN held the shared verify lock for $(human_s "$held"). Every sibling agent"
@@ -2383,6 +2476,61 @@ mode_self_test() {
   freeout="$(bash "$SELF" -c true 2>&1)"
   st_case 'an uncontended call is not told to set a slot' \
     "$([[ "$freeout" == *OS_VERIFY_LOCK_SLOT* ]] && echo yes || echo no)" no
+
+  # --- the coverage boundary ------------------------------------------------
+  #
+  # ⭐ THESE ARE PRESENCE PINS, and that is the design rather than a style. The
+  # defect repaired here was SILENCE: nothing red, nothing skipped, and a
+  # wall-clock absolute that looked exactly as authoritative as a clean one
+  # because no line ever said what it was taken against. A pin written as "the
+  # output does not claim an idle box" passes just as happily against a script
+  # that prints NOTHING AT ALL — i.e. against the defect itself. So every case
+  # below asserts a sentence IS PRESENT in the output a real caller gets, and
+  # the one absence case carries its own positive control.
+  #
+  # `freeout` is reused on purpose: it is an UNCONTENDED acquisition (free lock,
+  # nobody ahead), which is where the arrival notice two cases above deliberately
+  # says nothing. The boundary is not advice, it is the scope of what was just
+  # granted, and an idle QUEUE says nothing about the unlocked gate script
+  # running beside it — so it must be there in this run too. That asymmetry
+  # between the two notices is what these cases hold in place.
+  st_case 'an acquiring run is told what this lock does NOT exclude' \
+    "$([[ "$freeout" == *'NOT excluded by this lock'* ]] && echo yes || echo no)" yes
+  st_case 'and says it in the words of the misreading — not an idle box' \
+    "$([[ "$freeout" == *'NOT having an idle box'* ]] && echo yes || echo no)" yes
+  st_case 'and names the population nothing routes through here (`check:*` gates)' \
+    "$([[ "$freeout" == *'check:*'* ]] && echo yes || echo no)" yes
+
+  # ⭐ AND THE CAVEAT TRAVELS ON THE LINE THAT CARRIES THE SECONDS. Same reason
+  # `verdict_head` exists at all: the VERDICT line is the one every dispatch
+  # brief tells a dev to quote, and a caveat sitting on the line above it is
+  # left behind by the quote. So this case reads the VERDICT LINE ALONE and
+  # requires the boundary INSIDE it — an implementation that printed the same
+  # sentence as a separate following line would satisfy a whole-output match
+  # and fail this one, which is the difference that matters.
+  st_case 'the VERDICT line itself carries the boundary, beside its own seconds' \
+    "$(printf '%s\n' "$freeout" | grep 'held the lock' | grep -c 'SHARED-BOX SECONDS')" 1
+
+  # ⛔ THE ONE ABSENCE, WITH ITS POSITIVE CONTROL. What is durable is the
+  # BOUNDARY. The magnitude behind it is a single historical observation of a
+  # single run (a neighbouring unlocked gate script at ~130% CPU, 1-minute load
+  # 4.36 on 4 cores) and this script does not sample load at all — reprinting
+  # those figures as though they described THIS run would be this card's own
+  # defect rebuilt one level up. The control term is `ACQUIRED`: present in the
+  # same capture, and not a substring of anything under test, so a zero above
+  # cannot be a zero produced by a capture that was simply empty.
+  st_case 'the disclosure quotes no load figure this script never measured' \
+    "$(printf '%s\n' "$freeout" | grep -c '130%\|4\.36')" 0
+  st_case 'and that zero is a real zero — the same capture matches a control term' \
+    "$(printf '%s\n' "$freeout" | grep -c 'ACQUIRED')" 1
+
+  # The other two surfaces a caller reads. `--status` is what an agent runs to
+  # answer "is this box busy?", and its honest answer is that it cannot see the
+  # half of the load that never took a ticket.
+  st_case '--status declares that its listing cannot see unlocked work' \
+    "$(bash "$SELF" --status 2>&1 | grep -c 'An empty queue is NOT an idle box')" 1
+  st_case 'and --help states the coverage boundary as well' \
+    "$(bash "$SELF" --help 2>&1 | grep -c 'WHAT THE LOCK COVERS')" 1
 
   # --- the ledger -----------------------------------------------------------
   #

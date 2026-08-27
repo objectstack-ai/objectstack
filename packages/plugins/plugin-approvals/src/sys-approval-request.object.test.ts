@@ -13,8 +13,11 @@
  *   • every `type:'api'` target resolves `{id}` and points at a route that the
  *     REST server actually registers (approve/reject/reassign/recall/remind/
  *     request-info/revise/resubmit) — a typo'd verb would 404 silently in the UI;
- *   • submitter-only levers (remind/recall/resubmit) gate on
- *     `submitter_id == ctx.user.id` so a non-submitter never sees them.
+ *   • submitter levers (remind/recall/resubmit) gate on the server-computed
+ *     `record.viewer.is_submitter`, so a plain non-submitter never sees them.
+ *     `recall` additionally ORs in the #3424 admin override (#12716) — an
+ *     override admin is therefore the one non-submitter who does see it, and
+ *     is a caller `ApprovalService.recall` already authorises.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -74,16 +77,39 @@ describe('sys_approval_request declared actions', () => {
     }
   });
 
-  it('the core decision levers OR in the admin override (#3424) so a stuck request is recoverable', () => {
-    // approve / reject / reassign additionally show for a platform/tenant admin
-    // (`record.viewer.can_override`) so an approval routed to an unstaffed
-    // position — otherwise undecidable, locking the record forever — can be
-    // rescued in-product. The secondary approver levers stay slot-only.
-    for (const name of ['approval_approve', 'approval_reject', 'approval_reassign']) {
+  it('the levers the admin override covers OR it in (#3424, +recall #12716) so a stuck request is recoverable', () => {
+    // approve / reject / reassign / recall additionally show for a
+    // platform/tenant admin (`record.viewer.can_override`) so an approval routed
+    // to an unstaffed position — otherwise undecidable, locking the record
+    // forever — can be rescued in-product. Recall joined the set in #12716: the
+    // service has admitted the override caller on that endpoint since #3424
+    // (`isOverrideActor`'s doc block names recall as one of the four levers),
+    // and it is the only one that RELEASES the record without recording a
+    // decision on someone else's behalf. The secondary approver levers and the
+    // remaining submitter levers stay slot-only.
+    for (const name of ['approval_approve', 'approval_reject', 'approval_reassign', 'approval_recall']) {
       expect(vis(name)).toContain('record.viewer.can_override');
     }
-    for (const name of ['approval_send_back', 'approval_request_info']) {
+    for (const name of ['approval_send_back', 'approval_request_info', 'approval_remind', 'approval_resubmit']) {
       expect(vis(name)).not.toContain('can_override');
+    }
+
+    // Exhaustive, so a FIFTH lever cannot quietly join the override set without
+    // this pin moving: the two loops above only constrain the names they name.
+    expect(
+      actions.filter((a) => vis(a.name).includes('can_override')).map((a) => a.name).sort(),
+      'exactly these levers OR in the #3424 override',
+    ).toEqual(['approval_approve', 'approval_reassign', 'approval_recall', 'approval_reject']);
+
+    // ONE spelling of the arm, not four. This file has a spelling-drift history,
+    // and a fourth wording of the same idea is its own defect — `toContain` on
+    // the whole arm (leading ` || ` included) is what makes drift fail here
+    // rather than in review.
+    const OVERRIDE_ARM =
+      ' || has(record.viewer) && has(record.viewer.can_override) && record.viewer.can_override == true';
+    for (const name of ['approval_approve', 'approval_reject', 'approval_reassign', 'approval_recall']) {
+      expect(vis(name), `${name} must spell the override arm exactly as its siblings do`)
+        .toContain(OVERRIDE_ARM);
     }
   });
 
