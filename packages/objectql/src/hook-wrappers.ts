@@ -500,6 +500,17 @@ export function wrapDeclarativeHook(
  * read picks up mutations made by user code as `input.field = value`.
  * "Writes" means every mutation JS has, not assignment alone: `delete` and
  * `Object.defineProperty` route into `data` too (#12277).
+ *
+ * [#12601] ⚠️ `id` / `options` / `ast` / `data` are RESERVED on this flat
+ * face — EVERY instrument (`get`, `getOwnPropertyDescriptor`, `ownKeys`,
+ * `has`, spread, `Object.entries`) resolves one of these four names against
+ * the WRAPPER, never the payload, even when the payload itself declares a
+ * field sharing the name. That field does not vanish — it still round-trips
+ * through storage exactly as declared — it is simply not reachable through
+ * `ctx.input.<name>`; reach it at `ctx.input.data.<name>` instead. See the
+ * `get` and `getOwnPropertyDescriptor` traps below for the instrument-by-
+ * instrument account, and `content/docs/automation/hooks.mdx` (Hook Context)
+ * for the author-facing statement of the same rule.
  */
 function installFlatInput(ctx: HookContext): () => void {
   const raw: any = ctx.input ?? {};
@@ -516,6 +527,14 @@ function installFlatInput(ctx: HookContext): () => void {
   };
 
   const proxy = new Proxy(raw, {
+    // [#12601] Reserved-name precedence STARTS here: an unconditional,
+    // wrapper-only read for the four names, never falling through to `data`
+    // even when `data` owns a same-named field, and even when the WRAPPER
+    // itself does not (an insert-shaped envelope with no `id` reads
+    // `undefined`, not the payload's `id`). Every other trap that touches
+    // these four names (`getOwnPropertyDescriptor`, `has`) is written to
+    // agree with this one — this is the trap the others were made to match,
+    // not a peer that could equally have been changed instead.
     get(target, prop, receiver) {
       if (prop === 'id' || prop === 'options' || prop === 'ast' || prop === 'data') {
         return Reflect.get(target, prop, receiver);
@@ -640,6 +659,17 @@ function installFlatInput(ctx: HookContext): () => void {
     // wrapper — NOT by subtracting those four names, which would hide a
     // genuine payload field that happens to be called `id`.
     //
+    // [#12601] That deliberate non-subtraction is why a payload field sharing
+    // one of the four names is still LISTED here when it exists — this trap
+    // is unchanged by #12601 and stays that way. What #12601 fixed sits one
+    // trap down: the descriptor trap used to answer such a listed key's VALUE
+    // from `data` (the payload), while `get` and spread already answered it
+    // from the wrapper (the envelope) — two instruments, one listed key, two
+    // objects. The descriptor trap now checks the reserved names first too,
+    // so a key this trap lists under a reserved name always resolves to the
+    // SAME value everywhere it is read. See the descriptor trap's own comment
+    // for the full account.
+    //
     // SYMBOL KEYS are deliberately still absent, and this is NOT a finding
     // that they do not belong on a payload: `Reflect.ownKeys(data)` here would
     // additionally publish them, and whether the record payload may carry a
@@ -692,17 +722,58 @@ function installFlatInput(ctx: HookContext): () => void {
     // (it persists a payload by evaluating it). That is a contract question
     // about the payload, and neither routing nor persistence is touched here —
     // the trap reports what is there, under every answer to it.
+    //
+    // [#12601] RESERVED-NAME PRECEDENCE mirrors `get`: checked FIRST, not last.
+    // `id`/`options`/`ast`/`data` are PLATFORM names on the flat face — a
+    // payload field sharing one of them is still a legal record field, but it
+    // is not reachable through the flat face at all, `input.data.<name>` is
+    // the only route to it. Before this fix the order was reversed (`data`
+    // checked first, the reserved-name branch only reached when `data` did
+    // not own the key), so a payload that genuinely declared a field called
+    // `id` made this trap report the PAYLOAD's descriptor while `get` — which
+    // has always checked the reserved names unconditionally, first — reported
+    // the WRAPPER's value for the identical property access. Two instruments,
+    // one key, two different objects:
+    //
+    //   const raw = { data: { id: 'PAYLOAD-ID', subject }, options: {}, id: 'WRAPPER-ID' };
+    //   input.id                                            -> 'WRAPPER-ID'  (get)
+    //   Object.getOwnPropertyDescriptor(input, 'id').value   -> 'PAYLOAD-ID'  (descriptor, PRE-FIX)
+    //
+    // Reordering costs nothing `ownKeys` does not already pay for: `ownKeys`
+    // (#12578) is untouched and keeps listing the payload's own key set
+    // unconditionally, INCLUDING a reserved name the payload happens to
+    // share — so `enumerable` here still depends on whether `data` owns the
+    // name too. That is deliberate, not an oversight: it is what keeps
+    // `Object.keys`/spread/`Object.entries` carrying the ENVELOPE's value
+    // under the reserved name exactly as before this fix (get already won
+    // there, since spread reads a value through `get`), rather than silently
+    // dropping a key `ownKeys` just offered. When `data` does NOT own the
+    // name, the reserved-name branch still hides it from enumeration exactly
+    // as it always did (`enumerable: false`) — unaffected by this fix.
+    //
+    // A reserved name absent from the WRAPPER (e.g. `id` on an insert-shaped
+    // envelope) reports NO descriptor at all here, even when `data` owns a
+    // same-named field and `ownKeys` therefore still lists it — matching
+    // `get`'s unconditional wrapper-only read, which never falls through to
+    // `data` for these four names. A proxy may legally answer `undefined` for
+    // a key its OWN `ownKeys` trap listed, as long as the target (extensible,
+    // always, here) does not itself carry that key: `Object.keys`/spread
+    // silently skip such a key rather than throwing. Pinned, all of it, in
+    // `hook-input-envelope-precedence.test.ts` (and the sandbox-snapshot
+    // consequence in `packages/runtime/src/sandbox/hook-input-envelope-precedence.integration.test.ts`).
     getOwnPropertyDescriptor(target, prop) {
+      if (prop === 'id' || prop === 'options' || prop === 'ast' || prop === 'data') {
+        const desc = Object.getOwnPropertyDescriptor(target, prop);
+        if (!desc) return undefined;
+        const data = target.data;
+        const payloadOwnsName =
+          !!data && typeof data === 'object' && Object.prototype.hasOwnProperty.call(data, prop);
+        return { ...desc, configurable: true, enumerable: payloadOwnsName };
+      }
       const data = target.data;
       if (data && typeof data === 'object') {
         const own = Object.getOwnPropertyDescriptor(data, prop);
         if (own) return { ...own, configurable: true };
-      }
-      // Wrapper keys: still descriptors so `prop in input` works, but
-      // marked non-enumerable so they don't appear in Object.keys().
-      if (prop === 'id' || prop === 'options' || prop === 'ast' || prop === 'data') {
-        const desc = Object.getOwnPropertyDescriptor(target, prop);
-        return desc ? { ...desc, enumerable: false } : undefined;
       }
       return Object.getOwnPropertyDescriptor(target, prop);
     },
