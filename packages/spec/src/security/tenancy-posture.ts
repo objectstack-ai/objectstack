@@ -93,10 +93,88 @@ export function postureUsesUnionScope(posture: TenancyPosture): boolean {
  *
  * Omitting `supportedPostures` entitles every walled posture, which is what
  * every runtime predating this seam did.
+ *
+ * ## Per-deployment wall shaping (#12699, cloud#1653 ruling 2026-08-26)
+ *
+ * The two keys below extend the same seam in the same direction: they are
+ * DEPLOYMENT facts declared by the mounted org-scoping runtime — never
+ * authorable app metadata — and both FAIL CLOSED: an absent (or unparseable)
+ * declaration leaves behaviour byte-identical to a runtime predating the key.
+ *
+ * They exist because the alternative seams are dead. Host self-declaration of
+ * the boundary is a paywall bypass (only a mounted enterprise runtime may
+ * declare anything here, which is what keeps the org-create gate intact), and
+ * carrying `tenancy` through `objectExtensions` silently drops it in the merge
+ * (objectstack#12680). Nor can the per-object authoring channel
+ * (`tenancy: { enabled: false }`) express either fact: that declaration travels
+ * with the OBJECT into every deployment, while these are facts about ONE
+ * deployment — the same object that is platform-global on the platform's own
+ * control plane genuinely walls on tenant runtimes.
  */
 export interface OrgScopingEntitlement {
   readonly supportedPostures?: readonly TenancyPosture[];
+  /**
+   * Objects THIS deployment declares platform-global: Layer 0 must not wall
+   * them here, exactly as if the object had declared
+   * `tenancy: { enabled: false }` — but only on this deployment. Consumed by
+   * plugin-security when arming the Layer 0 organization wall; it composes
+   * with (never replaces) the object-level authoring channel.
+   *
+   * Entries are exact object machine names ({@link PlatformGlobalObjectsSchema}
+   * — no wildcards: a pattern would let one declaration unwall an open-ended
+   * set, and the whole point of the seam is an explicit, auditable carve-out).
+   *
+   * Fail closed: absent ⇒ every object walls exactly as its own declaration
+   * says; a junk shape is refused loudly at the consuming seam (the
+   * `MembershipPolicy` precedent — never coerced), which also resolves to
+   * "absent".
+   */
+  readonly platformGlobalObjects?: readonly string[];
+  /**
+   * When `true`, arming a walled posture must NOT auto-grant the
+   * `organization_admin` role's unbounded `viewAllRecords`/`modifyAllRecords`
+   * superbits: the membership-driven auto-grant hands out
+   * `organization_admin_no_bypass` (the de-VAMA'd variant) instead, on walled
+   * postures too. The ADR-0105 D4 rationale for granting the unbounded set
+   * under a wall — "Layer 0 bounds it" — stops holding on a deployment that
+   * carves platform-global objects OUT of the wall with
+   * {@link platformGlobalObjects}, so the same runtime that declares the
+   * carve-out declares this suppression.
+   *
+   * Fail closed: absent or `false` ⇒ today's posture-keyed grant; junk is
+   * refused loudly and resolves to "absent".
+   */
+  readonly suppressUnboundedOrgAdminGrant?: boolean;
 }
+
+/**
+ * [#12699] `platformGlobalObjects` value shape: exact object machine names
+ * (the `ObjectSchema.name` grammar), at least one character, no wildcards.
+ *
+ * A junk shape — a bare string, non-string entries, `''`, `'*'` — must be
+ * REFUSED at the consuming seam, never coerced or partially honoured: the
+ * declarer is first-party runtime code, so a malformed declaration is a bug to
+ * surface, and refusing resolves to the fail-closed default (everything walls).
+ */
+export const PlatformGlobalObjectsSchema = z
+  .array(z.string().regex(/^[a-z_][a-z0-9_]*$/))
+  .readonly();
+export type PlatformGlobalObjects = z.infer<typeof PlatformGlobalObjectsSchema>;
+
+/**
+ * [ADR-0105 D12 / #12699] Runtime twin of {@link OrgScopingEntitlement} for the
+ * keys with structural shape requirements. Deliberately a plain (non-strict)
+ * object schema: the `org-scoping` service is usually a live plugin instance
+ * carrying service machinery alongside the declaration, and unknown keys are
+ * not junk. Consumers validate PER KEY (each key fails closed independently)
+ * rather than all-or-nothing — see plugin-security's
+ * `readDeploymentOrgScopingEntitlement`.
+ */
+export const OrgScopingEntitlementSchema = z.object({
+  supportedPostures: z.array(TenancyPostureSchema).readonly().optional(),
+  platformGlobalObjects: PlatformGlobalObjectsSchema.optional(),
+  suppressUnboundedOrgAdminGrant: z.boolean().optional(),
+});
 
 /**
  * Normalize a stored/env-supplied posture value, accepting the legacy `multi`

@@ -113,6 +113,10 @@ import {
   extractMemberPairs,
   reconcileOrgAdminGrant,
 } from './auto-org-admin-grant.js';
+import {
+  readDeploymentOrgScopingEntitlement,
+  type DeploymentOrgScopingEntitlementReading,
+} from './deployment-org-scoping-entitlement.js';
 import { SysPositionDetailPage } from '@objectstack/platform-objects/pages';
 import {
   securityObjects,
@@ -773,6 +777,38 @@ export class SecurityPlugin implements Plugin {
     return postureEnforcesWall(this.tenancyPosture);
   }
   /**
+   * [#12699] `problem` strings already warned about, so a junk
+   * `OrgScopingEntitlement` key is explained once per boot rather than on
+   * every security-meta fill (the `warnedAuthoredTenantPolicies` pattern).
+   */
+  private readonly warnedEntitlementRefusals = new Set<string>();
+  /**
+   * [#12699] The deployment's wall-shaping declaration, read LIVE off the
+   * mounted `org-scoping` service — the same read pattern as the seam's
+   * existing consumer (plugin-auth's `probeEntitledPostures`): resolve the
+   * service per call, fail closed to "absent" on any miss. Live resolution is
+   * ordering-robust by construction: a deployment where the wall is ARMED had
+   * `org-scoping` registered before this plugin's `start()` captured the
+   * posture, so the declaration is present from the first read; a deployment
+   * where it registered too late resolves `single` and Layer 0 is inert, so
+   * the exemption decides nothing. Validation is memoized per service
+   * instance inside the reader; refusals are warned once per boot here.
+   */
+  private deploymentOrgScopingEntitlement(): DeploymentOrgScopingEntitlementReading {
+    const reading = readDeploymentOrgScopingEntitlement(
+      this.resolveKernelService?.('org-scoping'),
+    );
+    for (const refusal of reading.refused) {
+      if (this.warnedEntitlementRefusals.has(refusal.problem)) continue;
+      this.warnedEntitlementRefusals.add(refusal.problem);
+      this.logger?.warn?.(
+        `[security/#12699] org-scoping entitlement key '${refusal.key}' REFUSED — ${refusal.problem}`,
+        { key: refusal.key, declared: refusal.value },
+      );
+    }
+    return reading;
+  }
+  /**
    * [ADR-0105 D3] `object|policy` keys already reported by
    * {@link warnAuthoredTenantPolicyOnce}, so a retained authored tenant policy
    * is explained once per boot instead of on every find.
@@ -1142,6 +1178,25 @@ export class SecurityPlugin implements Plugin {
             ? 'organization_id IN accessible_org_ids — union access across the caller\'s memberships'
             : 'organization_id = active organization'})`,
       );
+      // [#12699] Surface the deployment's wall-shaping declaration at arming
+      // time: the carve-out list is a security-relevant deployment fact, and
+      // this is also the boot-time seam where a junk declaration gets its
+      // warn-once (the accessor validates as a side effect), instead of
+      // surfacing on the first request.
+      const entitlement = this.deploymentOrgScopingEntitlement();
+      if (entitlement.platformGlobalObjects.size > 0) {
+        ctx.logger.info(
+          `[security/#12699] deployment declares ${entitlement.platformGlobalObjects.size} platform-global ` +
+            `object(s) — Layer 0 does not wall them on THIS deployment`,
+          { objects: [...entitlement.platformGlobalObjects].sort() },
+        );
+      }
+      if (entitlement.suppressUnboundedOrgAdminGrant) {
+        ctx.logger.info(
+          '[security/#12699] deployment suppresses the unbounded organization_admin auto-grant — ' +
+            'membership-driven grants hand out organization_admin_no_bypass under this walled posture',
+        );
+      }
     } else {
       ctx.logger.info(
         "[security] tenancy posture 'single' — Layer 0 is inert; the platform's own tenant-scoped RLS policies are stripped (app-authored ones are retained and fail closed, ADR-0105 D3)",
@@ -3528,6 +3583,12 @@ export class SecurityPlugin implements Plugin {
           await reconcileOrgAdminGrant(ql, userId, orgId, {
             logger: ctx.logger,
             posture: this.tenancyPosture,
+            // [#12699] The deployment's declared suppression of the unbounded
+            // walled-posture grant — read live, like the posture is cached-at-
+            // start: both are deployment facts, but the entitlement's declarer
+            // may register between init and this middleware's first fire.
+            suppressUnboundedOrgAdminGrant:
+              this.deploymentOrgScopingEntitlement().suppressUnboundedOrgAdminGrant,
             ...(attributedUserId ? { attributedUserId } : {}),
           });
         } catch (e) {
@@ -3545,7 +3606,13 @@ export class SecurityPlugin implements Plugin {
     // missing rows and revokes orphaned ones, never duplicates.
     const runOrgAdminBackfill = async () => {
       try {
-        await backfillOrgAdminGrants(ql, { logger: ctx.logger, posture: this.tenancyPosture });
+        await backfillOrgAdminGrants(ql, {
+          logger: ctx.logger,
+          posture: this.tenancyPosture,
+          // [#12699] Same live read as the middleware call site above.
+          suppressUnboundedOrgAdminGrant:
+            this.deploymentOrgScopingEntitlement().suppressUnboundedOrgAdminGrant,
+        });
       } catch (e) {
         ctx.logger.warn?.('[security] organization_admin backfill failed', {
           error: (e as Error).message,
@@ -6379,8 +6446,25 @@ export class SecurityPlugin implements Plugin {
     }
     const meta = {
       isPrivate: (obj as any)?.access?.default === 'private',
+      // [#12699] The deployment's `platformGlobalObjects` declaration folds in
+      // HERE, and only here — this meta is the single source every Layer 0
+      // consumer reads (the read wall and the Layer 1 wildcard-`organization_id`
+      // drop via the 'tenancyDisabled' merge in computeLayeredRlsFilter; the
+      // ADR-0123 D2 write refusal and the forge guard via
+      // computeWriteTenantCheckFilter, which IS that same layer0; the
+      // platform-admin `posturePermits` gate and the write-check bypass via
+      // `meta.tenancyDisabled` directly) — so a deployment-exempted object
+      // behaves exactly as if it had declared `tenancy: { enabled: false }`
+      // itself, on every one of those paths at once, on THIS deployment only.
+      // Gated on the armed wall so the `single` posture stays byte-identical
+      // (there the exemption could only perturb Layer 1 bypasses on a wall
+      // that does not exist). Fail closed: absent/junk declaration ⇒ the
+      // object's own two clauses decide, exactly as today.
       tenancyDisabled:
-        (obj as any)?.tenancy?.enabled === false || (obj as any)?.systemFields?.tenant === false,
+        (obj as any)?.tenancy?.enabled === false ||
+        (obj as any)?.systemFields?.tenant === false ||
+        (this.orgScopingEnabled &&
+          this.deploymentOrgScopingEntitlement().platformGlobalObjects.has(object)),
       // Identity-infrastructure tables managed by the auth library
       // (`managedBy: 'better-auth'`: sys_user, sys_account, sys_session,
       // sys_oauth_application, sys_sso_provider, …). Their rows are written by

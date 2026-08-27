@@ -214,3 +214,82 @@ describe('the shape assertions ignore a comment that quotes the old call (#10514
     expect(maskComments(regressed)).not.toMatch(/checkMultiNodeAllowed\(\s*[^)\s]/);
   });
 });
+
+/**
+ * THE SECOND PIN: serve's declared-count normalization still matches the gate's
+ * own, byte for byte modulo comments and whitespace.
+ *
+ * The telemetry reading (#12667) has to report the count the operator DECLARED,
+ * and the resolved verdict cannot give it back: `admitted` is `min(cap,
+ * wanted)`, so `{admitted: 3, refused: 0}` is produced BOTH by "declared 3 under
+ * a cap of 5" and by "declared nothing under a cap of 3". The declaration is
+ * only knowable from `OS_CLUSTER_REPLICAS`, so `serve.ts` normalizes that value
+ * itself — and a normalization that disagrees with the gate's would publish a
+ * declaration the gate never saw (a `0` or a `2.7` the gate had already thrown
+ * away as "not declared").
+ *
+ * Both sides are read from the file that OWNS each, for the same reason the
+ * shape pin above is: an expected rule re-typed here would just relocate the
+ * divergence into this file, where it would be equally silent.
+ */
+
+/**
+ * The brace-matched body of a top-level `function <name>(…) … { … }`, with
+ * comments blanked and whitespace collapsed, so two implementations can be
+ * compared on what they DO.
+ *
+ * The first `{` after the declaration is taken as the body opener — true for
+ * both functions compared below (neither has an object type or a destructured
+ * parameter in its signature); a signature that grows one would need the scan
+ * to skip the parameter list first, and would fail loudly here rather than
+ * quietly compare the wrong span.
+ */
+function functionBody(source: string, name: string): string {
+  const masked = maskComments(source);
+  const at = masked.indexOf(`function ${name}(`);
+  expect(at, `function ${name} not found — did it move or get renamed?`).toBeGreaterThan(-1);
+
+  const open = masked.indexOf('{', at);
+  expect(open, `function ${name} has no body brace`).toBeGreaterThan(-1);
+
+  let depth = 1;
+  let i = open + 1;
+  for (; i < masked.length && depth > 0; i++) {
+    if (masked[i] === '{') depth++;
+    else if (masked[i] === '}') depth--;
+  }
+  expect(depth, `function ${name} body is unbalanced`).toBe(0);
+
+  return masked.slice(open + 1, i - 1).replace(/\s+/g, ' ').trim();
+}
+
+describe('os serve ↔ multi-node gate: the declared-count rule', () => {
+  it("serve's `normalizeDeclaredNodeCount` still mirrors the gate's `normalizeCount`", () => {
+    const producer = functionBody(GATE_SOURCE, 'normalizeCount');
+    const consumer = functionBody(SERVE_SOURCE, 'normalizeDeclaredNodeCount');
+
+    // Guard the extractor: two empty bodies would agree vacuously.
+    expect(producer).toContain('Number.isFinite');
+    expect(producer).toContain('Math.floor');
+    expect(producer.length).toBeGreaterThan(40);
+
+    expect(
+      consumer,
+      'packages/services/service-cluster/src/multi-node-gate.ts changed how it decides '
+      + 'whether a requested node count counts as DECLARED. serve.ts mirrors that rule by '
+      + 'hand (no static dependency) so its operator telemetry reports the same declaration '
+      + 'the gate saw — update `normalizeDeclaredNodeCount` in '
+      + 'packages/cli/src/commands/serve.ts to match.',
+    ).toEqual(producer);
+  });
+
+  it('the telemetry reading is fed from the DECLARED env var, not from a count of anything', () => {
+    // The whole card turns on this: `OS_CLUSTER_REPLICAS` is what the operator
+    // wrote, identical in every replica. There is no membership count to read
+    // instead, and a future edit that reached for one would be publishing a
+    // number this process cannot know.
+    expect(MASKED_SERVE_SOURCE).toMatch(
+      /describeMultiNodeCapTelemetry\(\s*verdict\s*,\s*Number\(process\.env\.OS_CLUSTER_REPLICAS\)\s*\)/,
+    );
+  });
+});

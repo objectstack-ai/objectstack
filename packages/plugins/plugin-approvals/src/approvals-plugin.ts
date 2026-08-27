@@ -199,6 +199,24 @@ export class ApprovalsServicePlugin implements Plugin {
           return undefined;
         }
       },
+      // [#11993] Deployment override lookup for user-facing refusal copy.
+      // Resolved LAZILY for the reason the two providers above are: the i18n
+      // service is contributed by another plugin (ADR-0029 D8) and may start
+      // after this one. Without it the service still renders the built-in
+      // catalog in the caller's locale; with it, a deployment's own
+      // `translation` for `errors.approval_recall_not_submitter` wins — the
+      // override address the catalog documents, made real for this emitter.
+      messageTranslator: () => {
+        try {
+          const i18n = ctx.getService<II18nService>('i18n');
+          const t = i18n?.t;
+          if (typeof t !== 'function') return undefined;
+          return (key: string, locale: string, params?: Record<string, unknown>) =>
+            t.call(i18n, key, locale, params);
+        } catch {
+          return undefined;
+        }
+      },
     });
 
     // [#10749] Field-visibility authority for payload-snapshot redaction.
