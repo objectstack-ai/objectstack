@@ -126,11 +126,29 @@ type ObjectFoldScalarKey = (typeof OBJECT_FOLD_SCALAR_KEYS)[number];
 
 /**
  * Deep merge two ServiceObject definitions.
- * Fields are merged additively. Other props: later value wins.
  *
- * [#8460] …except that "later value wins" is now conditional for the three
- * SCALARS. `tenantAuthored` names the scalars the fold's BASE has authored away
- * from the packaged owner's value; an extender yields on those. See
+ * The merge set is CLOSED and enumerable — this is NOT "every prop, later
+ * value wins":
+ *   - `fields`, `validations`, `indexes` are merged ADDITIVELY.
+ *   - The three {@link OBJECT_FOLD_SCALAR_KEYS} (`label`, `pluralLabel`,
+ *     `description`) are overridden last-writer-wins, subject to the
+ *     `tenantAuthored` yield rule below.
+ *
+ * **Every other top-level prop on `extension` is silently discarded.**
+ * `merged` starts as `{ ...base }` and nothing outside the list above is ever
+ * copied onto it — an extender that ships e.g. `tenancy: { enabled: false }`
+ * or `permissions: {...}` gets a valid-but-inert no-op: no error, no warning,
+ * the base's existing value simply wins as if the extension had never named
+ * the key (issue #12680). This is deliberate for security-relevant keys —
+ * "any extender may override any prop" would make `tenancy`/`permissions`
+ * extender-writable, which is a separate, much bigger decision that has NOT
+ * been made — but it means the docblock is the only place a reader can learn
+ * that the drop is silent; keep this comment in sync with the merge set below
+ * if it ever changes.
+ *
+ * [#8460] …the SCALAR override above is conditional. `tenantAuthored` names
+ * the scalars the fold's BASE has authored away from the packaged owner's
+ * value; an extender yields on those. See
  * {@link SchemaRegistry.tenantAuthoredScalars} for why the set is computed once
  * over the base rather than re-derived from the running `merged`.
  */
