@@ -1024,9 +1024,60 @@ filter_preflight() {
 # a quoted argument, belongs to one ELEMENT of the chain and not to the chain,
 # and the element's own exit status is what the chain sees either way.
 #
+# ---------------------------------------------------------------------------
+# A REDIRECTION IS NOT AN OPERATOR, AND `&` / `|` EACH APPEAR IN BOTH ROLES
+#
+# Only one of the two roles joins parts, so the scanner carries ONE CHARACTER of
+# look-behind -- the redirection operator it just passed. Look-behind, because
+# the character that disambiguates these tokens is the one BEFORE them, not the
+# one after: in `2>&1` the `&` is followed by `1`, exactly as a backgrounding
+# `&` before a next command would be.
+#
+#   2>&1  >&2  >&/dev/null  2>&-  <&0  <&-  2>&1-     the `&` follows `>` or `<`
+#   &>log  &>>log                                      the `&` is followed by `>`
+#   >|log                                              the `|` follows `>`
+#
+# Read off bash's own parser rather than assumed -- `declare -f` re-prints a
+# function body from the parsed AST, so it says what bash DID with each token
+# (bash 5.2.21; `bash -c` is what runs the string here, so bash's grammar, not
+# POSIX sh's, is the authority):
+#
+#   f() { true 2>&1 && true; }    ->  true 2>&1 && true       redirection
+#   f() { true&>/dev/null; }      ->  true &> /dev/null       redirection
+#   f() { true & > /dev/null; }   ->  true & > /dev/null      BACKGROUND
+#   f() { echo \>&true; }         ->  echo \> & true          BACKGROUND
+#   f() { printf "a>"&true; }     ->  printf "a>" & true      BACKGROUND
+#   f() { true 2>&1& true; }      ->  true 2>&1 & true        one of each
+#   f() { true |& cat; }          ->  true 2>&1 | cat         a PIPELINE
+#
+# Three consequences, and each is why this is scanner STATE and not a look-back
+# into the raw string at `i-1`:
+#
+#   - The `>` must be UNESCAPED and UNQUOTED. `echo \>&true` and
+#     `printf "a>"&true` both background, and in both the character at `i-1` is
+#     a `>`. Only the scanner's own quote and escape state separates them, so
+#     every path that skips a character clears the look-behind as it goes.
+#   - `&>` must be ADJACENT. `true &> log` redirects; `true & > log`
+#     backgrounds. The test is therefore the next CHARACTER, never the next
+#     token.
+#   - Consuming a redirection's `&` must not swallow a later backgrounding one.
+#     `true 2>&1& true` carries both, in that order, and the second still flags.
+#
+# `|&` needs no case of its own: bash rewrites it to `2>&1 |`, so it really is a
+# pipeline and the `|` branch below already answers it correctly. `<|` is a bash
+# syntax error, so the `>|` case is guarded on `>` alone.
+#
+# The direction of the old defect is worth keeping in view: it labelled a
+# `&&`-joined command `batch-last-exit` and told the caller to join the parts
+# with `&&` -- a remedy already satisfied, so no action could clear it. That is
+# how a banner stops being read, including on the `;` / `|` / `&` cases where it
+# is right. Over-labelling is the cheap direction of this scanner's error, but
+# it is not free.
+# ---------------------------------------------------------------------------
+#
 # Sets CERTIFIABLE_NOTE to the reason when it answers no; returns 0 for yes.
 exit_certifiable() {
-  local kind="$1" s="$2" n i ch nx sq=0 dq=0 depth=0
+  local kind="$1" s="$2" n i ch nx sq=0 dq=0 depth=0 prev_redir=''
   CERTIFIABLE_NOTE=""
 
   # `-- argv` never reaches a shell: one command, its own exit, nothing to scan.
@@ -1040,6 +1091,7 @@ exit_certifiable() {
     # Inside single quotes nothing is special but the closing quote.
     if ((sq == 1)); then
       [[ "$ch" == "'" ]] && sq=0
+      prev_redir=''
       i=$((i + 1))
       continue
     fi
@@ -1047,9 +1099,14 @@ exit_certifiable() {
     # a `\"` would be read as the end of the string.
     if ((dq == 1)); then
       case "$ch" in
-        '\') i=$((i + 2)) && continue ;;
+        '\')
+          prev_redir=''
+          i=$((i + 2))
+          continue
+          ;;
         '"') dq=0 ;;
       esac
+      prev_redir=''
       i=$((i + 1))
       continue
     fi
@@ -1057,7 +1114,13 @@ exit_certifiable() {
     case "$ch" in
       "'") sq=1 ;;
       '"') dq=1 ;;
-      '\') i=$((i + 2)) && continue ;;
+      '\')
+        # The escaped character is a literal, so a `\>` never arms the
+        # look-behind: `echo \>&true` really does background.
+        prev_redir=''
+        i=$((i + 2))
+        continue
+        ;;
       '`')
         CERTIFIABLE_NOTE="it contains a backtick substitution, which this scanner does not read"
         return 1
@@ -1080,7 +1143,17 @@ exit_certifiable() {
         # `&&` is the one joiner that certifies, so it is consumed, not flagged.
         nx="${s:i+1:1}"
         if [[ "$nx" == '&' ]]; then
+          prev_redir=''
           i=$((i + 2))
+          continue
+        fi
+        # A redirection's `&` joins nothing, so it is consumed too -- `2>&1`,
+        # `>&2`, `2>&-`, `<&0` (the `&` follows `>` or `<`) and `&>log`,
+        # `&>>log` (the `&` is followed by `>`). See the block above this
+        # function for the bash parses these are read off.
+        if [[ "$prev_redir" == '>' || "$prev_redir" == '<' || "$nx" == '>' ]]; then
+          prev_redir=''
+          i=$((i + 1))
           continue
         fi
         ((depth == 0)) && {
@@ -1089,6 +1162,14 @@ exit_certifiable() {
         }
         ;;
       '|')
+        # `>|` is the noclobber-override REDIRECTION, not a pipeline. Guarded on
+        # `>` alone because `<|` is a bash syntax error, so there is no input
+        # form to admit here.
+        if [[ "$prev_redir" == '>' ]]; then
+          prev_redir=''
+          i=$((i + 1))
+          continue
+        fi
         if ((depth == 0)); then
           nx="${s:i+1:1}"
           if [[ "$nx" == '|' ]]; then
@@ -1099,6 +1180,14 @@ exit_certifiable() {
           return 1
         fi
         ;;
+    esac
+    # One character of look-behind for the redirection cases above. Maintained
+    # HERE, at the end of the unquoted path, so it can only ever be armed by a
+    # `>` or `<` this scanner read as an operator: every path that skips over a
+    # quoted or escaped character clears it on the way past instead.
+    case "$ch" in
+      '>' | '<') prev_redir="$ch" ;;
+      *) prev_redir='' ;;
     esac
     i=$((i + 1))
   done
