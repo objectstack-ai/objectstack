@@ -233,17 +233,23 @@ describe('[#7505] assertPackageManagedWriteGate — the two-doors boundary under
     ],
   });
   // `update` / `delete` defer to the ADR-0094 write-through, so the gate's own
-  // row protection is reachable on the lifecycle verbs only.
-  const purge = (where: Row) => ({ object: 'sys_permission_set', operation: 'purge', options: { where } });
+  // row protection is reachable on the lifecycle verbs only. Of those,
+  // `transfer` is the one a caller can still be GRANTED since #12497
+  // (`restore`/`purge` lost their bits and their evaluator rows, so the
+  // object-level gate downstream refuses them unconditionally and an
+  // "admitted" leg could never resolve) — the two-doors boundary this suite
+  // measures is verb-agnostic, so the probe verb moved from `purge` to
+  // `transfer` with nothing else changing.
+  const lifecycleWrite = (where: Row) => ({ object: 'sys_permission_set', operation: 'transfer', options: { where } });
   // See TENANT_ADMIN_SET: this table's writes pass a second, later gate.
   const bootPkg = (o: BootOptions = {}) => boot({ sets: [TENANT_ADMIN_SET], ...o });
 
   it('STEADY STATE: a package-managed row is refused, an admin-authored row is admitted', async () => {
     const h = await bootPkg({ rows: rows() });
-    const denied = await refusalOf(h.write(purge({ id: 'ps_pkg' })));
+    const denied = await refusalOf(h.write(lifecycleWrite({ id: 'ps_pkg' })));
     expect(denied.code).toBe('PERMISSION_DENIED');
     expect(denied.message).toContain('package-managed permission set');
-    await expect(h.write(purge({ id: 'ps_env' }))).resolves.toBe('admitted');
+    await expect(h.write(lifecycleWrite({ id: 'ps_env' }))).resolves.toBe('admitted');
   });
 
   it('FAULT (by id): the outage propagates — it does NOT read as "no package row here"', async () => {
@@ -252,7 +258,7 @@ describe('[#7505] assertPackageManagedWriteGate — the two-doors boundary under
     // package-managed, and the purge went through — against the very row the
     // steady-state case above proves is protected.
     const h = await bootPkg({ rows: rows(), faultOn: 'sys_permission_set' });
-    expectPropagatedOutage(await refusalOf(h.write(purge({ id: 'ps_pkg' }))));
+    expectPropagatedOutage(await refusalOf(h.write(lifecycleWrite({ id: 'ps_pkg' }))));
   });
 
   it('FAULT (bulk filter): the same answer — one gate cannot answer two ways for one outage', async () => {
@@ -260,14 +266,14 @@ describe('[#7505] assertPackageManagedWriteGate — the two-doors boundary under
     // the same question of the same store with `.findOne`, and used to swallow
     // the same fault with `.catch(() => null)`.
     const h = await bootPkg({ rows: rows(), faultOn: 'sys_permission_set' });
-    expectPropagatedOutage(await refusalOf(h.write(purge({ name: 'Package Set' }))));
+    expectPropagatedOutage(await refusalOf(h.write(lifecycleWrite({ name: 'Package Set' }))));
   });
 
   it('STEADY STATE (bulk filter): a filter that hits no package row is still admitted', async () => {
     // Fail-closed must not become "refuse everything": the bulk branch exists
     // precisely so a bulk edit that touches only env-authored rows succeeds.
     const h = await bootPkg({ rows: rows() });
-    await expect(h.write(purge({ managed_by: 'admin' }))).resolves.toBe('admitted');
+    await expect(h.write(lifecycleWrite({ managed_by: 'admin' }))).resolves.toBe('admitted');
   });
 });
 

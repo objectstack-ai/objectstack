@@ -708,28 +708,68 @@ describe('RecordDetailsProps', () => {
     expect(message).toContain('`defaultCollapse` → `defaultCollapsed`');
   });
 
-  it('still refuses the two keys #11661 deliberately withholds (`title`, `headerColor`)', () => {
-    // Both are honoured by the renderer at the pin, and both stay OUT of the
-    // accept set on purpose: `title` is a second spelling of the heading slot
-    // `label` declares (the `page:card` `body`-vs-`children` shape, which
-    // #5775 converged rather than declared) and is held for a maintainer
-    // ruling; `headerColor` reaches the DOM only as `bg-${...}`, a
-    // template-literal Tailwind class that generates no CSS under the v4
-    // source scan — dead-in-practice, so declaring it would advertise a
-    // capability the renderer does not deliver. A later batch declaring
-    // either must flip this pin consciously.
-    for (const [key, value] of [
-      ['title', 'Company'],
-      ['headerColor', 'muted'],
+  it('still refuses the one key #11661 deliberately withholds (`title`)', () => {
+    // Honoured by the renderer at the pin, and OUT of the accept set on
+    // purpose: `title` is a second spelling of the heading slot `label`
+    // declares (the `page:card` `body`-vs-`children` shape, which #5775
+    // converged rather than declared) and is held for a maintainer ruling.
+    // A later batch declaring it must flip this pin consciously.
+    //
+    // `headerColor` was withheld alongside it until #12126 (maintainer
+    // ruling A, 2026-08-26): its refusal's recorded reason — a
+    // template-literal Tailwind read that generated no CSS — was repaired by
+    // objectui#6294's literal-class lookup, so the pin flipped CONSCIOUSLY,
+    // as this comment always anticipated. The key's new accept/reject
+    // boundary is pinned by the two tests below.
+    const r = RecordDetailsProps.safeParse({
+      sections: [{ label: 'A', fields: ['a'], title: 'Company' }],
+    });
+    expect(r.success).toBe(false);
+    const message = r.success === false
+      ? r.error.issues.map((i) => i.message).join('\n')
+      : '';
+    expect(message).toContain('`title`');
+  });
+
+  it('accepts all six `headerColor` enum tokens verbatim, with no schema default (#12126)', () => {
+    // Ruling A: a closed z.enum over exactly the six tokens objectui#6294's
+    // `plugin-detail/src/headerColor.ts` lookup ships — complete class
+    // literals in a file every consuming app's Tailwind scan covers, so
+    // every enum value is guaranteed present in the compiled stylesheet.
+    // Declared = enforced.
+    for (const token of [
+      'muted', 'muted/50', 'accent', 'primary/10', 'secondary/10', 'destructive/10',
     ] as const) {
+      const section = RecordDetailsProps.parse({
+        sections: [{ label: 'A', fields: ['a'], headerColor: token }],
+      }).sections?.[0] as Record<string, unknown>;
+      expect(section.headerColor).toBe(token);
+    }
+    // No schema default: an omitted key means "no tint" — the renderer's own
+    // fallback, not an authored request (the `maxVisible` principle).
+    const bare = RecordDetailsProps.parse({
+      sections: [{ label: 'A', fields: ['a'] }],
+    }).sections?.[0] as Record<string, unknown>;
+    expect('headerColor' in bare).toBe(false);
+  });
+
+  it('refuses `headerColor` values outside the closed enum, by name (#12126)', () => {
+    // The boundary ruling A draws: everything outside the six tokens — an
+    // arbitrary palette guess (the objectui#6178 silent-no-paint failure
+    // mode), the renderer's `bg-*` pass-through spellings (which render only
+    // if the HOST app's Tailwind build happens to generate the class), and
+    // the solid tokens the tints-only vocabulary deliberately excludes — is
+    // refused at authoring time rather than shipping a header that silently
+    // does not paint.
+    for (const value of ['blue-100', 'bg-muted', 'primary', 'destructive']) {
       const r = RecordDetailsProps.safeParse({
-        sections: [{ label: 'A', fields: ['a'], [key]: value }],
+        sections: [{ label: 'A', fields: ['a'], headerColor: value }],
       });
       expect(r.success).toBe(false);
-      const message = r.success === false
-        ? r.error.issues.map((i) => i.message).join('\n')
-        : '';
-      expect(message).toContain(`\`${key}\``);
+      if (r.success) continue;
+      const issue = r.error.issues[0]!;
+      expect(issue.code).toBe('invalid_value');
+      expect(issue.path).toEqual(['sections', 0, 'headerColor']);
     }
   });
 

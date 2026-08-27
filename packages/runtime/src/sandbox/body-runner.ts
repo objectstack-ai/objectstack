@@ -643,8 +643,15 @@ function buildSandboxContext(
 
   // [#11552] The per-row dispatch signal, and the D2 options visibility, both
   // of which the snapshot above DROPS by construction: `unwrapProxyToPlain`
-  // materialises only what `installFlatInput`'s `ownKeys` enumerates (the
-  // payload fields), and `dispatch` was never marshalled at all. ADR-0058
+  // materialises the own ENUMERABLE STRING subset of what `installFlatInput`'s
+  // `ownKeys` enumerates (the payload fields), and `dispatch` was never
+  // marshalled at all. Both words carry weight since #12578 widened that trap
+  // to the payload's whole own-key set: `options` is still dropped because it
+  // is a WRAPPER key and never enumerated at all, while a payload key held
+  // non-enumerable is now listed by `ownKeys` and still dropped here — by the
+  // `Object.entries` filter, through the descriptor trap. The marshalled set
+  // is byte-for-byte what it was before that card, which is what let the trap
+  // be repaired without touching this contract. ADR-0058
   // Addendum II D3 names three routes for row-specific work, and routes 1
   // (scoped throw) and 2 (`ctx.api` per row) both require the handler to KNOW
   // it is on the per-row path — a guard written `ctx.dispatch?.mode ===
@@ -770,6 +777,14 @@ function buildActionSandboxContext(
  * Convert a Proxy-wrapped record into a plain object so it round-trips through
  * JSON cleanly. `Object.fromEntries(Object.entries(p))` triggers the proxy's
  * ownKeys + get traps, materialising every visible field.
+ *
+ * "Visible" is `Object.entries`'s own definition and not `ownKeys`'s (#12578):
+ * it walks the own-key list and then keeps the STRING keys whose descriptor —
+ * the proxy's descriptor trap, mirroring the payload since #12397 — says
+ * `enumerable`. So a payload key a handler defined non-enumerable, and a key
+ * held under a symbol, are deliberately not marshalled into the VM even though
+ * the flat-input proxy now lists the former through `ownKeys`. A body sees the
+ * fields, exactly as it did before that card.
  */
 function unwrapProxyToPlain(v: unknown): Record<string, unknown> | undefined {
   if (v === undefined || v === null) return undefined;

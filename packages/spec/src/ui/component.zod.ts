@@ -902,25 +902,49 @@ export const RecordDetailsProps = strictObject({
      * the `.objectui-sha` pin (`190fbd01`, objectui `plugin-detail/src/
      * renderers/record-details.tsx` + `plugin-detail/src/DetailSection.tsx`).
      *
-     * Two keys the same measurement found are deliberately NOT declared here
-     * (#11661 holds their forks):
+     * One key the same measurement found is deliberately NOT declared here
+     * (#11661 holds its fork):
      * - `title` — the renderer's `s.title ?? s.label` limb is a second
      *   spelling of the heading slot `label` already declares (identical
      *   localization handling, zero producers). Same shape as the `page:card`
      *   `body`-vs-`children` pair, which #5775 CONVERGED rather than declared
      *   — one heading slot, not two de-facto contracts (Prime Directive #12).
      *   Held for the maintainer's declare-vs-converge ruling.
-     * - `headerColor` — the renderer's only read is `bg-${headerColor}`, a
-     *   template-literal Tailwind class: Tailwind v4 scans source text with
-     *   no safelist, so this call site generates NO CSS and an authored value
-     *   works only when some other source file happens to use the same class
-     *   literally. Dead-in-practice at the pin (zero producers); declaring it
-     *   would advertise a capability the renderer does not deliver.
+     *
+     * `headerColor` used to be withheld alongside it (the renderer's only
+     * read was `bg-${headerColor}`, a template-literal Tailwind class that
+     * generates no CSS under the v4 source scan — declaring it would have
+     * advertised a capability the renderer did not deliver). objectui#6294
+     * (merged 2026-08-25) replaced the interpolation with a lookup of
+     * complete class literals in `plugin-detail/src/headerColor.ts`, so the
+     * renderer now delivers the key because the module declares it; the
+     * refusal outlived its recorded reason and #12126 (maintainer ruling A,
+     * 2026-08-26) declares the key below as a closed enum.
      */
     defaultCollapsed: z.boolean().optional().describe('Start a `collapsible: true` section collapsed (renderer default: expanded). Consulted only when `collapsible` is on — a non-collapsible section never reads its collapse state.'),
     icon: z.string().optional().describe('Heading icon, as a lucide icon name (kebab-case, e.g. `building-2`). A value that is not an ASCII identifier (emoji, CJK text) renders as literal text beside the heading instead. Shown where the section heading renders: a titled section, or any collapsible section.'),
     description: z.string().optional().describe('Sub-heading text rendered under the section heading (plain string — the renderer applies no translation to it, unlike `label`). Renders on a titled or collapsible section; a collapsible section hides it while collapsed.'),
-  })).optional().describe('Field groups rendered as the detail body, in order. Object form: `{ name?, label?, columns?, fields, hideEmpty?, collapsible?, showBorder?, defaultCollapsed?, icon?, description? }`.'),
+    /**
+     * Section-header background tint (#12126, maintainer ruling A 2026-08-26:
+     * declare as a CLOSED enum — declared = enforced). The vocabulary is
+     * exactly the six complete class literals objectui's
+     * `plugin-detail/src/headerColor.ts` lookup ships (objectui#6294): those
+     * literals live in a file every consuming app's Tailwind scan covers, so
+     * each enum value is guaranteed to be in the compiled stylesheet. Tints
+     * only, by the renderer module's own reasoning: `CardHeader` sets no
+     * foreground colour, so a solid `bg-primary` would leave the title
+     * unreadable without a paired `text-*-foreground`.
+     *
+     * Anything outside the enum — including the renderer's `bg-*`
+     * pass-through spellings, which render only if the HOST app's Tailwind
+     * build happens to generate the class — is refused at authoring time
+     * rather than shipping a header that silently does not paint (the
+     * objectui#6178 failure mode this key's old refusal existed to prevent).
+     * Optional with NO schema default: an omitted key means "no tint", the
+     * renderer's own fallback.
+     */
+    headerColor: z.enum(['muted', 'muted/50', 'accent', 'primary/10', 'secondary/10', 'destructive/10']).optional().describe('Section-header background tint, from the closed six-token vocabulary rendered by objectui\'s `record:details` header (`muted` | `muted/50` | `accent` | `primary/10` | `secondary/10` | `destructive/10`). A value outside the enum is refused at authoring time rather than silently not painting. Omit for an untinted header.'),
+  })).optional().describe('Field groups rendered as the detail body, in order. Object form: `{ name?, label?, columns?, fields, hideEmpty?, collapsible?, showBorder?, defaultCollapsed?, icon?, description?, headerColor? }`.'),
   fields: z.array(z.string()).optional().describe('Explicit field list to display (optional, overrides highlightFields)'),
   /**
    * Field names to omit from the body, applied to both `fields` and every

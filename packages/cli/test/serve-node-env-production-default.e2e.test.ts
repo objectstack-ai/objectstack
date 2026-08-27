@@ -153,6 +153,12 @@
  * file exists to measure unreachable — the pin would go green measuring
  * nothing. `bin/run.js` plus a genuinely built `dist/` is the only shape
  * that reaches the gate for this pin.
+ *
+ * ⭐ And that prerequisite is now STATED rather than discovered: `beforeAll`
+ * calls `requireBuiltCli()` (#12539), so an unbuilt worktree gets a sentence
+ * naming the build command instead of ` ›   Error: command serve not found`
+ * relayed as `serve exited 2 before "Server is ready"`. The reason it prints
+ * is this file's own — see `UNSET_LEG_MEASURES_THE_BUILT_DIST` below.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -161,7 +167,13 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import type { Readable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
-import { childEnv, E2E_SECRET_KEY, portContentionError, reservePort } from './helpers/serve-process.js';
+import {
+  childEnv,
+  E2E_SECRET_KEY,
+  portContentionError,
+  requireBuiltCli,
+  reservePort,
+} from './helpers/serve-process.js';
 
 /** What `spawn(..., { stdio: ['ignore', 'pipe', 'pipe'] })` actually returns — no `stdin`. */
 type ProbeChild = ChildProcessByStdio<null, Readable, Readable>;
@@ -169,6 +181,36 @@ type ProbeChild = ChildProcessByStdio<null, Readable, Readable>;
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 /** `bin/run.js` — the SHIPPED entrypoint. See the file header for why this one, not `run-dev.js`. */
 const CLI = resolve(HERE, '../bin/run.js');
+
+/**
+ * Why THIS file needs `packages/cli/dist`, in its own terms (#12539).
+ *
+ * ⛔ NOT `RUN_JS_RESOLVES_FROM_DIST`, the constant the three sibling spawners
+ * pass. That sentence ends `… and every boot below times out`, which holds for
+ * a file whose every boot goes through `bin/run.js` with `NODE_ENV` unset.
+ * This file is not one: of its three legs only the unset pin resolves from
+ * `dist/`, and the other two hand the child `development`/`test` — exactly the
+ * value that makes `@oclif/core`'s `isProd()` false and reroutes them to
+ * `src/commands` (the header above; both are pinned as `DELIBERATE_REROUTE` in
+ * `scripts/check-cli-test-child-env.mjs`). Passing the siblings' sentence here
+ * would be a true refusal carrying a false explanation — the class #12498,
+ * #12561 and #12563 were filed for.
+ *
+ * ⭐ It is also why the guard runs for the WHOLE file rather than for the
+ * unset leg alone. Measured on a closure-only tree before this guard existed,
+ * this file reported `3 tests | 1 failed`: the unset pin failed with
+ * `serve exited 2 before "Server is ready"`, and the two rerouted legs PASSED
+ * — from `src/`, reporting green for a program this file's header says it does
+ * not measure. A partial green that misreports which program it measured is
+ * worse than a red (#12561).
+ */
+const UNSET_LEG_MEASURES_THE_BUILT_DIST =
+  'Only the unset-NODE_ENV pin here resolves from dist/: unset is the one value that leaves ' +
+  "@oclif/core's isProd() true, so that leg globs the real dist/commands and answers " +
+  '"command serve not found" on an unbuilt tree. The other two legs set NODE_ENV to ' +
+  'development/test, which reroutes them to src/commands — they would PASS without a built ' +
+  'dist/, reporting green for a program this file does not measure. So the whole file ' +
+  'refuses, not just that leg.';
 
 /**
  * The fixture's parent directory sits INSIDE `packages/cli/test/`, not the
@@ -387,6 +429,10 @@ async function stop(child: ProbeChild): Promise<void> {
 
 describe('#11113: os serve defaults NODE_ENV to production when unset', () => {
   beforeAll(() => {
+    // Build prerequisite first (#12539): the unset pin below resolves `serve`
+    // from `dist/`, and the two rerouted legs must not report green without it.
+    requireBuiltCli(UNSET_LEG_MEASURES_THE_BUILT_DIST);
+
     dir = mkdtempSync(join(FIXTURES_ROOT, 'tmp-node-env-default-'));
     writeFileSync(
       join(dir, 'package.json'),

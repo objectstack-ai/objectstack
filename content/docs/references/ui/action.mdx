@@ -146,6 +146,7 @@ L2 sandboxed JS body — runs inside an isolated VM with declared capabilities
 | **maxSize** | `integer` | optional | Max upload size in bytes for file/image params. |
 | **reference** | `string` | optional | Reference target object for inline lookup/master_detail params; mirrors FieldSchema.reference. |
 | **defaultFromRow** | `boolean` | optional |  |
+| **carryOver** | `boolean` | optional | Carry-over param: seed the value from the current row (requires defaultFromRow: true), render it as a non-editable summary in the dialog, and submit it verbatim in the request body. Unlike `visible: false` (which omits the param from the submission entirely), a carry-over param is always sent. |
 | **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Param visibility predicate (CEL); omits the param when false. |
 | **requiresFeature** | `Enum<'twoFactor' \| 'organization' \| 'multiOrgEnabled' \| 'degradedTenancy' \| …>` | optional | Public auth feature flag gating this param; lowered into `visible` at parse time. |
 
@@ -239,6 +240,7 @@ L2 sandboxed JS body — runs inside an isolated VM with declared capabilities
 | **maxSize** | `integer` | optional | Max upload size in bytes for file/image params. |
 | **reference** | `string` | optional | Reference target object for inline lookup/master_detail params; mirrors FieldSchema.reference. |
 | **defaultFromRow** | `boolean` | optional |  |
+| **carryOver** | `boolean` | optional | Carry-over param: seed the value from the current row (requires defaultFromRow: true), render it as a non-editable summary in the dialog, and submit it verbatim in the request body. Unlike `visible: false` (which omits the param from the submission entirely), a carry-over param is always sent. |
 | **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Param visibility predicate (CEL); omits the param when false. |
 | **requiresFeature** | `Enum<'twoFactor' \| 'organization' \| 'multiOrgEnabled' \| 'degradedTenancy' \| 'oidcProvider' \| 'sso' \| 'ssoEnforced' \| 'deviceAuthorization' \| 'admin' \| 'phoneNumber' \| 'phoneNumberOtp'>` | optional | Public auth feature flag gating this param; lowered into `visible` at parse time. |
 
@@ -358,6 +360,7 @@ L2 sandboxed JS body — runs inside an isolated VM with declared capabilities
 | **maxSize** | `integer` | optional | Max upload size in bytes for file/image params. |
 | **reference** | `string` | optional | Reference target object for inline lookup/master_detail params; mirrors FieldSchema.reference. |
 | **defaultFromRow** | `boolean` | optional |  |
+| **carryOver** | `boolean` | optional | Carry-over param: seed the value from the current row (requires defaultFromRow: true), render it as a non-editable summary in the dialog, and submit it verbatim in the request body. Unlike `visible: false` (which omits the param from the submission entirely), a carry-over param is always sent. |
 | **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Param visibility predicate (CEL); omits the param when false. |
 | **requiresFeature** | `Enum<'twoFactor' \| 'organization' \| 'multiOrgEnabled' \| 'degradedTenancy' \| …>` | optional | Public auth feature flag gating this param; lowered into `visible` at parse time. |
 

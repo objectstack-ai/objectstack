@@ -50,7 +50,8 @@ export const SysSecret = ObjectSchema.create({
   // SettingsService / the datasource secret-binder read with no principal
   // (middleware falls open for principal-less internal calls).
   access: { default: 'private' },
-  description: 'Cipher store referenced by sys_setting handles. Never holds plaintext.',
+  description:
+    'Cipher store written by three privileged producers (see managedBy); each holds its handle in its own column. Never holds plaintext.',
   highlightFields: ['namespace', 'key', 'kms_key_id', 'version', 'rotated_at'],
   listViews: {
     all: {
@@ -65,7 +66,8 @@ export const SysSecret = ObjectSchema.create({
     id: Field.text({
       label: 'ID',
       readonly: true,
-      description: 'Opaque handle referenced by `sys_setting.value_enc`.',
+      description:
+        'Opaque handle. The reference lives in the writing producer\'s own holder column — `sys_setting.value_enc`, a `secret:` ref on a business row, or a datasource `credentialsRef` — so a row unreferenced by `sys_setting` is not thereby unreferenced.',
     }),
 
     created_at: Field.datetime({
@@ -81,23 +83,42 @@ export const SysSecret = ObjectSchema.create({
     }),
 
     /**
-     * Namespace/key duplicated from `sys_setting` for forensic
-     * convenience — lets operators answer "which secret backs
-     * mail.api_key right now?" without joining the K/V table.
-     * The authoritative link is `sys_setting.value_enc → sys_secret.id`.
+     * `(namespace, key)` is a PRODUCER-SCOPED pair, not an owner. Each of the
+     * three producers named in `managedBy` (#4270) fills it from its own
+     * vocabulary, and the reference to the resulting row lives in a different
+     * column for each:
+     *
+     *  - `SettingsService` — settings namespace + specifier key; referenced by
+     *    `sys_setting.value_enc`.
+     *  - the engine's `secret`-field encryption (`encryptSecretFields`) —
+     *    object name + field name; referenced by a `secret:<id>` ref stored on
+     *    the business row itself.
+     *  - the datasource credential binder — caller-supplied namespace (default
+     *    `datasource`) + datasource name; referenced by the artefact's
+     *    `sys_secret:<id>` credentialsRef.
+     *
+     * ⛔ So the pair does NOT attribute a row to a producer, and a lookup that
+     * finds no `sys_setting` behind a pair has found nothing: #8103's
+     * re-measurement rejected exactly that reading, which is why
+     * `service-settings/src/sys-secret-orphan-report.ts` reports a row it
+     * cannot attribute as `'unattributable'` rather than `'orphaned'`. The pair
+     * is for inspecting and rotating a known secret, never for deciding what a
+     * row belongs to.
      */
     namespace: Field.text({
       label: 'Namespace',
       required: true,
       maxLength: 128,
-      description: 'Settings namespace this secret belongs to.',
+      description:
+        'Producer-scoped label, not a settings namespace in general: `SettingsService` writes the settings namespace, the engine\'s `secret`-field encryption writes the object name, the datasource binder writes its caller-supplied scope (default `datasource`). See managedBy.',
     }),
 
     key: Field.text({
       label: 'Key',
       required: true,
       maxLength: 128,
-      description: 'Specifier key within the namespace.',
+      description:
+        'Producer-scoped label paired with `namespace`: the settings specifier key, the encrypted `secret` field\'s name, or the datasource name. The pair records how the producer addressed the value; it does not identify which producer wrote the row.',
     }),
 
     /** Identifier of the KMS key used to wrap `ciphertext`. */
