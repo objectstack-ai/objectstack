@@ -14637,14 +14637,14 @@ export class SqlDriver implements IDataDriver {
         // expected physical shape of a bounded field (its `widen_varchar` /
         // `narrow_varchar` ops say so in as many words); this is the emitter
         // finally agreeing with the differ. There is no `Field.string`
-        // builder: `Field` has 37 keys and none of them is `string`,
-        // `FieldType.options` (49 entries) omits it too, and
-        // `FieldSchema.safeParse({ type: 'string', … })` fails at `[type]`
-        // (#12593). What IS true of knex: its bare `table.string(name)` call
-        // (no length argument) is `varchar(255)`. This branch never calls it
-        // bare — `table.string(name, keyable)`, where `keyable` is the
-        // field's own declared `maxLength`, up to `MAX_KEYABLE_VARCHAR_CHARS`
-        // (768 chars, wider than knex's 255-char default).
+        // builder: none of `Field`'s keys is named `string`, `FieldType.options`
+        // omits it too, and `FieldSchema.safeParse({ type: 'string', … })`
+        // fails at `[type]` (#12593). What IS true of knex: its bare
+        // `table.string(name)` call (no length argument) is `varchar(255)`.
+        // This branch never calls it bare — `table.string(name, keyable)`,
+        // where `keyable` is the field's own declared `maxLength`, up to
+        // `MAX_KEYABLE_VARCHAR_CHARS` (768 chars, wider than knex's
+        // 255-char default).
         //
         // Applied on every dialect rather than under `isMysql`, deliberately:
         // the alternative is one declaration with two enforcement answers, so
