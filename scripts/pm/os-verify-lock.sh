@@ -2465,6 +2465,66 @@ true' 2>&1 | grep -c 'VERDICT batch-last-exit 0')" 1
   st_case 'argv mode never reaches a shell, so it is certified by construction' \
     "$(bash "$SELF" -- true 2>&1 | grep -c 'VERDICT command-exit 0')" 1
 
+  # (g3) a REDIRECTION is not an operator (#12518).
+  #
+  # The defect these pin: the `&` in a `2>&1` redirection was read as a
+  # backgrounding `&`, so a correctly `&&`-joined command was downgraded to
+  # `batch-last-exit` — and the banner told the caller to "join the parts with
+  # '&&'", a repair that command had ALREADY made. A warning whose remedy is
+  # already satisfied cannot be acted on, and that is how a banner stops being
+  # read at all — including on the `;` / `|` / `&` cases where it is right. It
+  # also misfired on exactly the shape this repo's gate docs prescribe
+  # (`cmd > out.log 2>&1 && next`, the redirect-then-capture that keeps `$?`
+  # from being `tail`'s), and it spent a true label on a false positive.
+  #
+  # Pinned from BOTH directions, and the second direction is the load-bearing
+  # one: a "fix" that merely stopped flagging `&` would pass every certified
+  # case here while deleting the check these sit next to.
+  st_case 'a 2>&1 redirection is not a background operator — the reported case' \
+    "$(bash "$SELF" -c 'true > /dev/null 2>&1 && true' 2>&1 | grep -c 'VERDICT command-exit 0')" 1
+  st_case 'nor is the >&2 form, where the fd number is on the left' \
+    "$(bash "$SELF" -c 'true >&2 && true' 2>&1 | grep -c 'VERDICT command-exit 0')" 1
+  st_case 'nor >&word, which redirects both streams with the & on the RIGHT of >' \
+    "$(bash "$SELF" -c 'true >& /dev/null && true' 2>&1 | grep -c 'VERDICT command-exit 0')" 1
+  st_case 'nor &>word, the same redirection with the & on the LEFT' \
+    "$(bash "$SELF" -c 'true &> /dev/null && true' 2>&1 | grep -c 'VERDICT command-exit 0')" 1
+  st_case 'nor its appending form &>>word' \
+    "$(bash "$SELF" -c 'true &>> /dev/null && true' 2>&1 | grep -c 'VERDICT command-exit 0')" 1
+  st_case 'nor a >&- fd close' \
+    "$(bash "$SELF" -c 'true 2>&- && true' 2>&1 | grep -c 'VERDICT command-exit 0')" 1
+  st_case 'nor a <& input duplication, which the > alone would have missed' \
+    "$(bash "$SELF" -c 'true <&0 && true' 2>&1 | grep -c 'VERDICT command-exit 0')" 1
+  st_case 'nor several redirections in one command' \
+    "$(bash "$SELF" -c 'true 3>&1 4>&2 && true' 2>&1 | grep -c 'VERDICT command-exit 0')" 1
+  st_case 'and >| is the noclobber REDIRECTION, not a pipeline' \
+    "$(bash "$SELF" -c 'true >| /dev/null && true' 2>&1 | grep -c 'VERDICT command-exit 0')" 1
+  st_case 'the redirect-then-capture shape the gate docs prescribe is certified' \
+    "$(bash "$SELF" -c "true > '${tmp}/rtc.log' 2>&1 && true" 2>&1 | grep -c 'VERDICT command-exit 0')" 1
+  st_case 'and a redirected chain that FAILS still reports the failing exit' \
+    "$(bash "$SELF" -c 'sh -c "exit 3" 2>&1 && true' 2>&1 | grep -c 'VERDICT command-exit 3')" 1
+
+  # The other direction. Every case below contains a `>` or a `<` somewhere near
+  # an `&`, and in every one bash backgrounds — verified against bash's own
+  # parser (`declare -f` re-prints from the AST), not assumed. If any of these
+  # goes green the scanner has been widened into a hole, which is the failure
+  # direction that cannot be seen from a passing run.
+  st_case 'a REAL background & is still uncertified' \
+    "$(bash "$SELF" -c 'sleep 1 &' 2>&1 | grep -c 'VERDICT batch-last-exit')" 1
+  st_case 'and still says so in the banner, with backgrounding named' \
+    "$([[ "$(bash "$SELF" -c 'sleep 1 &' 2>&1)" == *"backgrounded with '&'"* ]] && echo yes || echo no)" yes
+  st_case 'a redirection FOLLOWED by a background & still flags the background one' \
+    "$(bash "$SELF" -c 'true 2>&1 & true' 2>&1 | grep -c 'VERDICT batch-last-exit')" 1
+  st_case 'a spaced `& >` is backgrounding, not the adjacent &> redirection' \
+    "$(bash "$SELF" -c 'true & true > /dev/null' 2>&1 | grep -c 'VERDICT batch-last-exit')" 1
+  st_case 'an ESCAPED > before the & does not arm the redirection reading' \
+    "$(bash "$SELF" -c 'echo \>&true' 2>&1 | grep -c 'VERDICT batch-last-exit')" 1
+  st_case 'nor does a QUOTED > before it' \
+    "$(bash "$SELF" -c 'printf "a>"&true' 2>&1 | grep -c 'VERDICT batch-last-exit')" 1
+  st_case '|& is a pipeline (bash rewrites it to 2>&1 |) and stays uncertified' \
+    "$(bash "$SELF" -c 'true |& cat' 2>&1 | grep -c 'VERDICT batch-last-exit')" 1
+  st_case 'and a pipeline whose LEFT side is red still exits 0 through it, uncertified' \
+    "$(bash "$SELF" -c 'sh -c "exit 1" 2>&1 | cat' 2>&1 | grep -c 'VERDICT batch-last-exit 0')" 1
+
   # (h) the filter preflight (#10853). BOTH directions, because a guard shown
   # only to red could be a guard that reds on everything -- which here would
   # block the fleet's verification. The commands are `echo`, so what is measured
