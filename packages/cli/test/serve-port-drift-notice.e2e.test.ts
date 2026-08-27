@@ -103,16 +103,46 @@ beforeAll(() => {
   writeFileSync(join(dir, 'objectstack.config.ts'), BARE_CONFIG, 'utf8');
 });
 
-afterAll(() => {
-  for (const child of children) {
-    try {
-      child.kill('SIGKILL');
-    } catch {
-      /* already gone */
-    }
-  }
+afterAll(async () => {
+  for (const child of children) await stop(child);
   if (dir) rmSync(dir, { recursive: true, force: true });
-});
+}, 60_000);
+
+/**
+ * Stop a spawned child and WAIT for it to be gone — SIGTERM first, SIGKILL only
+ * as a fallback, which is the shape every other spawner in this directory uses.
+ *
+ * ⚠️ ⛔ Not a bare `child.kill('SIGKILL')`. The child here is the `tsx` shim,
+ * and the `os serve` process is its own child: SIGKILL cannot be forwarded, so
+ * killing the shim outright leaves the server running, re-parented to init and
+ * still holding this process's stdio pipes — measured while writing this file,
+ * where it kept the runner alive after the assertions had all passed. SIGTERM
+ * reaches the server through the shim; the 10s SIGKILL is the fallback for a
+ * child that ignores it.
+ */
+async function stop(child: ChildProcessWithoutNullStreams): Promise<void> {
+  if (child.exitCode !== null || child.signalCode !== null) return;
+  await new Promise<void>((done) => {
+    const give = setTimeout(() => {
+      try {
+        child.kill('SIGKILL');
+      } catch {
+        /* already gone */
+      }
+      done();
+    }, 10_000);
+    child.once('exit', () => {
+      clearTimeout(give);
+      done();
+    });
+    try {
+      child.kill('SIGTERM');
+    } catch {
+      clearTimeout(give);
+      done();
+    }
+  });
+}
 
 /**
  * A real HTTP neighbour on a real port — the card's own instrument, and the
@@ -257,7 +287,7 @@ describe('#12543: a shifted port announces itself, naming both numbers', () => {
         'A NEIGHBOURING AGENT DEV SERVER, not os serve',
       );
 
-      booted.child.kill('SIGKILL');
+      await stop(booted.child);
     } finally {
       await neighbour.release();
     }
@@ -279,6 +309,6 @@ describe('#12543: a shifted port announces itself, naming both numbers', () => {
       DRIFT_NOTICE,
     );
 
-    booted.child.kill('SIGKILL');
+    await stop(booted.child);
   }, 240_000);
 });
