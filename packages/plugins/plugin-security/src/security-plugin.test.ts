@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect, vi } from 'vitest';
-import { assertEngineUpdateDispatch } from '@objectstack/metadata-core';
+import { assertEngineUpdateDispatch, assertEngineFindOnePredicate, type EngineFindOneQueryInput } from '@objectstack/metadata-core';
 import { SecurityPlugin } from './security-plugin.js';
 import { PermissionEvaluator, crudBucketForOperation } from './permission-evaluator.js';
 import { FieldMasker } from './field-masker.js';
@@ -119,7 +119,7 @@ describe('SecurityPlugin', () => {
     const ql: any = {
       registerMiddleware: (mw: any) => middlewares.push(mw),
       find: vi.fn(async () => []),
-      findOne: vi.fn(async () => null),
+      findOne: vi.fn(async (object: string, query?: EngineFindOneQueryInput) => { assertEngineFindOnePredicate(object, query); return null; }),
       insert: vi.fn(async (_o: string, d: any) => ({ id: d?.id ?? 'x' })),
       // Opens with the PRODUCER's own dispatch predicate, never a hand-mirrored
       // guard (check:engine-double-contract) — same shape as the makeQl double
@@ -859,12 +859,16 @@ describe('SecurityPlugin', () => {
       expect(harness.findOne).toHaveBeenCalledTimes(1);
     });
 
-    it('DENIES a purge of a not-owned row via the pre-image check (#1883 — destructive ops inherit row-level gating)', async () => {
-      // The destructive lifecycle class (transfer/restore/purge) is pre-wired
-      // into OPERATION_TO_PERMISSION, so it clears the object-level RBAC gate.
-      // The record-level pre-image RLS check must therefore ALSO cover it —
-      // otherwise a grant-holder could destroy out-of-scope rows by id. purge
-      // maps onto the `delete` RLS class.
+    it('DENIES a purge AT the object gate, before any row is read (#12497 — bits tombstoned, rows retired)', async () => {
+      // Until #12497 this case pinned the pre-image RLS check on a purge whose
+      // `allowPurge` grant had cleared the object gate (the #1883 pre-wiring).
+      // The bits retired with their mapping rows — `allowPurge` on a legacy
+      // stored set (`as any`: the spec type now spells it `never`) grants
+      // nothing, and the dispatch is refused fail-closed by the object-level
+      // gate. The row-level machinery must never even be consulted: no
+      // pre-image read, no sharing probe. (The pre-image coverage claim for
+      // by-id destructive writes lives on with `delete` above, and returns for
+      // purge with the M2 batch.)
       const purgerSet: PermissionSet = {
         name: 'purger', label: 'Purger',
         objects: { '*': { allowRead: true, allowPurge: true } },
@@ -876,7 +880,7 @@ describe('SecurityPlugin', () => {
       const harness = makeMiddlewareCtx({
         permissionSets: [purgerSet],
         objectFields: ownerFields,
-        findOneImpl: () => null, // row exists but not owned → filtered out → deny
+        findOneImpl: () => null,
       });
       await plugin.init(harness.ctx);
       await plugin.start(harness.ctx);
@@ -886,7 +890,7 @@ describe('SecurityPlugin', () => {
         context: memberCtx,
       };
       await expect(harness.run(opCtx)).rejects.toMatchObject({ name: 'PermissionDeniedError' });
-      expect(harness.findOne).toHaveBeenCalledTimes(1);
+      expect(harness.findOne).toHaveBeenCalledTimes(0);
     });
 
     it('SKIPS the check when no RLS policy applies (e.g. modifyAllRecords / admin) — no extra read', async () => {
@@ -2711,9 +2715,10 @@ describe('PermissionEvaluator', () => {
 
   it('denies transfer/restore/purge without the matching RBAC bit (#1883)', () => {
     const evaluator = new PermissionEvaluator();
-    // Full CRUD does NOT imply the destructive lifecycle class: each op is
-    // gated by its own bit (allowTransfer/allowRestore/allowPurge) and must
-    // be denied when the bit is absent — never default-allow (ADR-0049).
+    // Full CRUD does NOT imply the destructive lifecycle class: `transfer` is
+    // gated by its own bit (`allowTransfer`) and must be denied when the bit
+    // is absent — never default-allow (ADR-0049). `restore`/`purge` are denied
+    // unconditionally since #12497 (bits tombstoned, mapping rows retired).
     const ps = makePermSet('member', {
       contact: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true },
     });
@@ -2724,25 +2729,39 @@ describe('PermissionEvaluator', () => {
     expect(evaluator.checkObjectPermission('purge', 'contact', [])).toBe(false);
   });
 
-  it('allows transfer/restore/purge via their specific RBAC bits (#1883)', () => {
+  it('allows transfer via its specific RBAC bit (#1883/#3004)', () => {
     const evaluator = new PermissionEvaluator();
     const transferOnly = makePermSet('t', { contact: { allowTransfer: true } });
-    const restoreOnly = makePermSet('r', { contact: { allowRestore: true } });
-    const purgeOnly = makePermSet('p', { contact: { allowPurge: true } });
     expect(evaluator.checkObjectPermission('transfer', 'contact', [transferOnly])).toBe(true);
-    expect(evaluator.checkObjectPermission('restore', 'contact', [restoreOnly])).toBe(true);
-    expect(evaluator.checkObjectPermission('purge', 'contact', [purgeOnly])).toBe(true);
-    // A bit on one op never leaks to another.
+    // The bit never leaks to another destructive op.
     expect(evaluator.checkObjectPermission('purge', 'contact', [transferOnly])).toBe(false);
-    expect(evaluator.checkObjectPermission('transfer', 'contact', [purgeOnly])).toBe(false);
+    expect(evaluator.checkObjectPermission('restore', 'contact', [transferOnly])).toBe(false);
   });
 
-  it('modifyAllRecords super-user bypass covers transfer/restore/purge (#1883)', () => {
+  it('restore/purge are denied FAIL-CLOSED even for a legacy stored grant (#12497)', () => {
+    // `allowRestore`/`allowPurge` retired with their mapping rows (#12497,
+    // ADR-0049 — the ops never existed; the keys return with M2, #1883). A
+    // 17-era STORED permission-set row can still carry the bits (`as any` —
+    // the spec type now spells them `never`, and a fresh parse rejects them),
+    // and it must grant nothing: denial is unconditional via the
+    // DESTRUCTIVE_OPERATIONS backstop, before any bit or bypass is consulted.
+    const evaluator = new PermissionEvaluator();
+    const legacy = makePermSet('legacy', {
+      contact: { allowRestore: true, allowPurge: true },
+    } as any);
+    expect(evaluator.checkObjectPermission('restore', 'contact', [legacy])).toBe(false);
+    expect(evaluator.checkObjectPermission('purge', 'contact', [legacy])).toBe(false);
+  });
+
+  it('modifyAllRecords super-user bypass covers transfer; restore/purge stay fail-closed (#1883/#12497)', () => {
     const evaluator = new PermissionEvaluator();
     const admin = makePermSet('admin', { contact: { modifyAllRecords: true } });
     expect(evaluator.checkObjectPermission('transfer', 'contact', [admin])).toBe(true);
-    expect(evaluator.checkObjectPermission('restore', 'contact', [admin])).toBe(true);
-    expect(evaluator.checkObjectPermission('purge', 'contact', [admin])).toBe(true);
+    // Unmapped destructive ops are denied before the bypass is consulted —
+    // "Modify All Data" re-covers restore/purge only when the M2 batch re-adds
+    // their mapping rows (Salesforce semantics, #1883 disposition).
+    expect(evaluator.checkObjectPermission('restore', 'contact', [admin])).toBe(false);
+    expect(evaluator.checkObjectPermission('purge', 'contact', [admin])).toBe(false);
   });
 
   it('should allow via viewAllRecords', () => {
@@ -2941,15 +2960,20 @@ describe('crudBucketForOperation (ADR-0066 ⑤)', () => {
   it('maps insert to `create`', () => {
     expect(crudBucketForOperation('insert')).toBe('create');
   });
-  it('folds update/transfer/restore into `update`', () => {
-    for (const op of ['update', 'transfer', 'restore']) {
+  it('folds update/transfer into `update`', () => {
+    for (const op of ['update', 'transfer']) {
       expect(crudBucketForOperation(op)).toBe('update');
     }
   });
-  it('folds delete/purge into `delete`', () => {
-    for (const op of ['delete', 'purge']) {
-      expect(crudBucketForOperation(op)).toBe('delete');
-    }
+  it('folds delete into `delete`', () => {
+    expect(crudBucketForOperation('delete')).toBe('delete');
+  });
+  it('restore/purge resolve null since #12497 — out of the map with their retired bits', () => {
+    // Their dispatch is denied at the object gate before any per-operation map
+    // is consulted; the M2 batch re-adds the rows (restore→update,
+    // purge→delete) together with the bits.
+    expect(crudBucketForOperation('restore')).toBeNull();
+    expect(crudBucketForOperation('purge')).toBeNull();
   });
   it('returns null for an operation with no CRUD mapping', () => {
     expect(crudBucketForOperation('customReadSideOp')).toBeNull();
@@ -3551,7 +3575,7 @@ describe('SecurityPlugin — ADR-0066 D3 field-level requiredPermissions', () =>
     const ql: any = {
       registerMiddleware: (mw: any) => { if (!middleware) middleware = mw; },
       getSchema: () => schema,
-      findOne: async () => null,
+      findOne: async (object: string, query?: EngineFindOneQueryInput) => { assertEngineFindOnePredicate(object, query); return null; },
       find: async () => [],
     };
     const metadata = { get: async () => schema, list: async () => sets };
@@ -3655,6 +3679,7 @@ describe('explainAccessForCaller (ADR-0090 D6/D12)', () => {
         return typeof opts?.limit === 'number' ? rows.slice(0, opts.limit) : rows;
       },
       async findOne(object: string, opts: any) {
+        assertEngineFindOnePredicate(object, opts);
         const rows = (tables[object] ?? []).filter((r) => matches(r, opts?.where));
         return rows[0] ?? null;
       },
@@ -3779,6 +3804,7 @@ describe('SecurityPlugin — ADR-0090 D10 agent intersection', () => {
         return typeof o?.limit === 'number' ? rows.slice(0, o.limit) : rows;
       },
       async findOne(object: string, o: any) {
+        assertEngineFindOnePredicate(object, o);
         if (object.startsWith('sys_')) {
           return (tables[object] ?? []).filter((r) => matches(r, o?.where))[0] ?? null;
         }
@@ -3960,7 +3986,7 @@ describe('managed-object write denies wiring (#3325)', () => {
     const ql: any = {
       registerMiddleware: vi.fn(),
       getSchema: () => undefined,
-      findOne: async () => null,
+      findOne: async (object: string, query?: EngineFindOneQueryInput) => { assertEngineFindOnePredicate(object, query); return null; },
       find: async () => [],
       count: async () => 0,
       insert: async (_o: string, d: any) => ({ id: d?.id ?? 'x' }),

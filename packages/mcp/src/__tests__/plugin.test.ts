@@ -2,6 +2,7 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { MCPServerPlugin } from '../plugin.js';
+import { assertEngineFindOnePredicate, type EngineFindOneQueryInput } from '@objectstack/metadata-core';
 
 // ---------------------------------------------------------------------------
 // Mock PluginContext
@@ -69,7 +70,7 @@ function createMockMetadataService() {
 function createMockDataEngine() {
   return {
     find: vi.fn(async () => []),
-    findOne: vi.fn(async () => null),
+    findOne: vi.fn(async (object: string, query?: EngineFindOneQueryInput) => { assertEngineFindOnePredicate(object, query); return null; }),
     insert: vi.fn(),
     update: vi.fn(),
     delete: vi.fn(),

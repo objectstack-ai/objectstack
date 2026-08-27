@@ -78,23 +78,100 @@
  * So hashing `en` transitively hashes the declared source, and this module needs
  * to import nothing but the bundle sitting next to it.
  *
- * ## Scope: the hand-authored sections only
+ * ## Scope: BOTH halves — and the correction that put the generated half here
  *
- * `objects` and `metadataForms` are GENERATED (`*.generated.ts`) and are
- * deliberately out of {@link HAND_AUTHORED_SECTIONS}. This hole cannot occur
- * there: `os i18n extract` rewrites the `en` bundle from the source on every
- * run and does not merge the default locale (#8543), so a source edit either
- * lands in the generated bundle or fails `check:i18n` as drift.
+ * This note used to end with a claim that is FALSE, and #11671 is its
+ * counterexample. It read:
+ *
+ * > `objects` and `metadataForms` are GENERATED (`*.generated.ts`) and are
+ * > deliberately out of `HAND_AUTHORED_SECTIONS`. **This hole cannot occur
+ * > there**: `os i18n extract` rewrites the `en` bundle from the source on
+ * > every run and does not merge the default locale (#8543), so a source edit
+ * > either lands in the generated bundle or fails `check:i18n` as drift.
+ *
+ * Every clause of that is true except the conclusion. Rewriting `en` catches
+ * drift **in `en`**. The TRANSLATED locales keep merge semantics
+ * (`i18n-extract.ts`: a non-empty existing value in a non-default locale wins),
+ * so the ordinary sequence — extract with `--fill=default`, revise the source
+ * string, extract again — rewrites `en` and STRANDS the previous source text in
+ * every other locale. The bundle is still in sync by key, so `check:i18n`
+ * reports OK; the leaf is still present, so `check:i18n-coverage` counts it
+ * translated. Measured on #11659 at `bbe0b17`: three locales serving a 602-char
+ * superseded draft of a 411-char help string under 31 green checks.
+ *
+ * A written-down impossibility is what stops the next reader from looking,
+ * which is why correcting it was made part of the ruling rather than left as a
+ * comment cleanup.
+ *
+ * Maintainer ruling on #12069 (2026-08-25, Option A): extend THIS module to the
+ * generated bundles. So {@link GENERATED_SECTIONS} joins
+ * {@link HAND_AUTHORED_SECTIONS} here — one mechanism, one hash function, one
+ * recorded table shape.
+ *
+ * ## The two halves need two PREDICATES, and that is not two mechanisms
+ *
+ * What a recorded hash MEANS is the same in both halves — "the source revision
+ * this leaf was last reconciled against". What the leaf's VALUE is differs, and
+ * the predicate has to follow it:
+ *
+ *  - **hand-authored** — the value is a TRANSLATION, whose bytes say nothing
+ *    about the source's. Stale is decided on the record alone:
+ *    `recorded !== hash(currentSource)`. {@link findStaleLeaves}, unchanged.
+ *  - **generated** — the value got there by being COPIED from the source
+ *    (`--fill=default`). So the bytes themselves are evidence, and the record
+ *    only certifies WHICH source revision they are a copy of. Stale is
+ *    `hash(value) === recorded && hash(currentSource) !== recorded`.
+ *    {@link findStaleFills}.
+ *
+ * The extra conjunct in the generated predicate is not caution, it is what
+ * makes the mechanism self-healing where the hand-authored half cannot be. The
+ * generated hash tables are themselves generated (`<locale>.source-hashes.
+ * generated.ts`), so a translator CANNOT be asked to update a digest by hand
+ * the way `<locale>.source-hashes.ts`'s header asks. Without the conjunct,
+ * re-translating a filled leaf after its source moved would leave the stale
+ * record standing and the gate would report the fresh translation as stale
+ * forever — a false positive on precisely the action the mechanism exists to
+ * provoke. With it, editing the value clears the flag by itself: the value is
+ * no longer a copy of the recorded revision, so no claim is being made about it
+ * any more.
+ *
+ * ## Why the generated tables can be BACKFILLED with no history
+ *
+ * The generated predicate only ever fires on a leaf whose value is still a byte
+ * copy of the recorded revision. So the only records worth writing are for
+ * leaves that ARE currently source copies, and those are identifiable from the
+ * committed tree alone: `value === currentSource ⇒ record hash(value)`. A leaf
+ * that differs from the current source is left with NO record — legacy-trusted,
+ * exactly as the ruling's property 1 requires — because nothing in the tree says
+ * which revision it was made from.
+ *
+ * Measured on this tree when the mechanism landed: 9030 translated leaves across
+ * the nine bundle sets, 1543 of them byte-equal to `en` (records written) and
+ * 7487 differing (legacy-trusted). Day-one stale count is **0 by construction** —
+ * every record written equals the hash of the current source, so the second
+ * conjunct is false for all of them. This mechanism cannot arrive red.
  */
 
 import type { TranslationData } from '@objectstack/spec/system';
 
 /**
- * The `TranslationData` sections whose leaves carry staleness checking — the
- * hand-authored half. See the module note for why the generated sections
- * (`objects`, `metadataForms`) are excluded rather than merely unlisted.
+ * The `TranslationData` sections written by hand in `<locale>.ts`, judged by
+ * {@link findStaleLeaves}. Their recorded digests live in the hand-maintained
+ * `<locale>.source-hashes.ts`.
  */
 export const HAND_AUTHORED_SECTIONS = ['apps', 'dashboards', 'pages'] as const;
+
+/**
+ * The `TranslationData` sections written by `os i18n extract` into
+ * `<locale>.objects.generated.ts` / `<locale>.metadata-forms.generated.ts`,
+ * judged by {@link findStaleFills}. Their recorded digests live in the
+ * generated `<locale>.source-hashes.generated.ts`.
+ *
+ * These were excluded from this module until #11671 measured that the hole it
+ * closes occurs here too — see the module note for the claim that was wrong and
+ * why it was wrong.
+ */
+export const GENERATED_SECTIONS = ['objects', 'metadataForms'] as const;
 
 /** A recorded map of dotted leaf path → the source hash translated from. */
 export type SourceHashes = Readonly<Record<string, string>>;
@@ -152,6 +229,27 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
  * declared-but-unwalked failure this module exists to close.
  */
 export function collectSourceLeaves(data: TranslationData | undefined): Map<string, string> {
+  return collectLeavesOf(data, HAND_AUTHORED_SECTIONS);
+}
+
+/**
+ * The same walk over {@link GENERATED_SECTIONS} — every string leaf of the
+ * `objects` / `metadataForms` sub-trees, keyed by dotted path
+ * (`objects.sys_user.fields.email.help`).
+ *
+ * A separate entry point rather than a parameter on {@link collectSourceLeaves}
+ * because the two populations are judged by two different predicates, and a
+ * single call that could return either is one `??` away from applying the wrong
+ * one to the wrong half.
+ */
+export function collectGeneratedLeaves(data: TranslationData | undefined): Map<string, string> {
+  return collectLeavesOf(data, GENERATED_SECTIONS);
+}
+
+function collectLeavesOf(
+  data: TranslationData | undefined,
+  sections: readonly string[],
+): Map<string, string> {
   const leaves = new Map<string, string>();
   if (!data) return leaves;
 
@@ -166,7 +264,7 @@ export function collectSourceLeaves(data: TranslationData | undefined): Map<stri
     }
   };
 
-  for (const section of HAND_AUTHORED_SECTIONS) {
+  for (const section of sections) {
     walk((data as Record<string, unknown>)[section], section);
   }
   return leaves;
@@ -186,6 +284,48 @@ export function collectSourceHashes(source: TranslationData | undefined): Record
   const hashes: Record<string, string> = {};
   for (const [path, value] of collectSourceLeaves(source)) {
     hashes[path] = hashSource(value);
+  }
+  return hashes;
+}
+
+/**
+ * The record `os i18n extract` writes for one translated locale's generated
+ * sections — the pure rule behind `<locale>.source-hashes.generated.ts`.
+ *
+ * One entry per leaf that IS currently a byte copy of some source revision, and
+ * nothing else:
+ *
+ *  - `value === currentSource` — the leaf is a copy of the CURRENT source
+ *    (a fresh `--fill=default`, or a term deliberately left in English). Record
+ *    `hash(value)`, which is also `hash(currentSource)`, so it is not stale.
+ *  - `previous[path] === hash(value)` — the leaf is still the copy the last run
+ *    recorded, whatever the source has done since. Carry the record forward;
+ *    that is the whole memory this mechanism has, and dropping it is how the
+ *    drift becomes undetectable again.
+ *  - otherwise — record NOTHING. Either the leaf was translated (its bytes are
+ *    not a copy of anything we recorded) or it predates the mechanism. Both are
+ *    legacy-trusted, per the ruling's property 1.
+ *
+ * Note the third bullet is also the self-healing step: a translator who edits a
+ * stale filled leaf makes `hash(value)` stop matching the record, so the record
+ * is dropped on the next extract and the leaf goes back to legacy-trusted
+ * instead of being reported stale forever.
+ *
+ * Pure and total: same inputs, same table. That is what lets `os i18n extract
+ * --check` compare the committed companion byte-for-byte.
+ */
+export function collectFilledFromHashes(
+  translated: TranslationData | undefined,
+  source: TranslationData | undefined,
+  previous: SourceHashes | undefined,
+): Record<string, string> {
+  const sourceLeaves = collectGeneratedLeaves(source);
+  const hashes: Record<string, string> = {};
+  for (const [path, value] of collectGeneratedLeaves(translated)) {
+    const digest = hashSource(value);
+    const isCurrentCopy = sourceLeaves.get(path) === value;
+    const wasRecordedCopy = previous?.[path] === digest;
+    if (isCurrentCopy || wasRecordedCopy) hashes[path] = digest;
   }
   return hashes;
 }
@@ -236,6 +376,59 @@ export function findStaleLeaves(
   return stale;
 }
 
+/** A generated leaf still holding a byte copy of a source revision that has moved on. */
+export interface StaleFill {
+  /** Dotted leaf path, e.g. `objects.sys_user.fields.email.help`. */
+  path: string;
+  /** The digest of the source revision this leaf is a copy of. */
+  recorded: string;
+  /** The digest of the source string as it reads now. */
+  current: string;
+}
+
+/**
+ * The stale FILLS of one translated bundle's generated sections, in walk order.
+ *
+ * Three conjuncts, and each one is load-bearing:
+ *
+ *  1. a digest is recorded for the path — no record is legacy-trusted, never
+ *     stale (the ruling's property 1);
+ *  2. `hash(value) === recorded` — the leaf is STILL the copy that was
+ *     recorded. A leaf someone has since re-translated fails here and is not
+ *     reported, which is what keeps a real translation from being called stale
+ *     merely because it once started life as a fill;
+ *  3. `hash(currentSource) !== recorded` — the source has actually moved. A
+ *     leaf equal to the CURRENT source is not drift: an untranslated key, a
+ *     proper noun, a symbol or a term left in English on purpose all live here,
+ *     and reporting them would be restating the gap `check:i18n-coverage`
+ *     already owns.
+ *
+ * A path whose source string no longer exists is not reported — that is a
+ * REMOVED key, which `check:i18n`'s key-set comparison owns.
+ */
+export function findStaleFills(
+  translated: TranslationData | undefined,
+  source: TranslationData | undefined,
+  recorded: SourceHashes | undefined,
+): StaleFill[] {
+  if (!translated || !recorded) return [];
+  const sourceLeaves = collectGeneratedLeaves(source);
+  const stale: StaleFill[] = [];
+
+  for (const [path, value] of collectGeneratedLeaves(translated)) {
+    const recordedHash = recorded[path];
+    if (recordedHash === undefined) continue; // legacy-trusted
+    if (hashSource(value) !== recordedHash) continue; // re-translated since — not our claim
+    const sourceValue = sourceLeaves.get(path);
+    if (sourceValue === undefined) continue; // removed key — not this rule's
+    const currentHash = hashSource(sourceValue);
+    if (currentHash !== recordedHash) {
+      stale.push({ path, recorded: recordedHash, current: currentHash });
+    }
+  }
+  return stale;
+}
+
 function setDeep(target: Record<string, unknown>, path: string, value: string): void {
   const segments = path.split('.');
   let node = target;
@@ -257,6 +450,12 @@ function setDeep(target: Record<string, unknown>, path: string, value: string): 
  * other leaf — including every leaf with no recorded hash — is carried through
  * untouched.
  *
+ * `recorded` judges the hand-authored sections ({@link findStaleLeaves}); the
+ * optional `filledFrom` judges the generated ones ({@link findStaleFills}).
+ * Omitting `filledFrom` leaves the generated sections entirely legacy-trusted,
+ * which is what every caller did before #11671 and is still the honest default
+ * for a bundle with no committed `<locale>.source-hashes.generated.ts`.
+ *
  * The input is never mutated. Returns the same reference when nothing is stale,
  * so the common case allocates nothing.
  */
@@ -264,14 +463,21 @@ export function withSourceFallback(
   translated: TranslationData,
   source: TranslationData | undefined,
   recorded: SourceHashes | undefined,
+  filledFrom?: SourceHashes,
 ): TranslationData {
   const stale = findStaleLeaves(translated, source, recorded);
-  if (stale.length === 0) return translated;
+  const staleFills = findStaleFills(translated, source, filledFrom);
+  if (stale.length === 0 && staleFills.length === 0) return translated;
 
-  const sourceLeaves = collectSourceLeaves(source);
+  const handAuthored = collectSourceLeaves(source);
+  const generated = collectGeneratedLeaves(source);
   const next: Record<string, unknown> = { ...translated };
   for (const { path } of stale) {
-    const sourceValue = sourceLeaves.get(path);
+    const sourceValue = handAuthored.get(path);
+    if (sourceValue !== undefined) setDeep(next, path, sourceValue);
+  }
+  for (const { path } of staleFills) {
+    const sourceValue = generated.get(path);
     if (sourceValue !== undefined) setDeep(next, path, sourceValue);
   }
   return next as TranslationData;

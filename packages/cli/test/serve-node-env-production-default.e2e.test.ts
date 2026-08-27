@@ -108,8 +108,23 @@
  *
  * THEY REACH IT NOW, and the declaration below is the whole reason that is
  * allowed. #11707 dropped that `NODE_ENV` pin: all three leave the variable
- * unset and spawn `bin/run.js` through plain `node` — this file's own shape —
- * and the `--dev` seed survives because `serve.ts` assigns
+ * unset and spawn `bin/run.js` through plain `node` — ⛔ but NOT this file's
+ * own shape, and the difference decides how each one FAILS on a taken port
+ * (#12526). Those three pass `--dev` on the spawn line; this file does not.
+ * `serve.ts`'s `portAutoShiftAllowed = flags.dev || NODE_ENV === 'development'`
+ * is opened by `flags.dev` ALONE, so for those three a taken port is not an
+ * error at all: `getAvailablePort()` hops the child onto another port and the
+ * boot reports itself READY — the SILENT-DRIFT column, where their own
+ * requests then reach whatever else holds the port they reserved (measured:
+ * reserved 34259, child bound 34260, the next request answered by a
+ * neighbouring dev server). Only THIS file — `--dev` absent, so unset
+ * `NODE_ENV` defaults to production — is in the LOUD column where a taken port
+ * is a hard `exit 1` and `portContentionError()` below has something to read.
+ * ⚠️ That `--dev` has been on their spawn lines since `83e6016fa`, long
+ * predating #11707: it was never read, not newly introduced. Each of those
+ * three carries its own port-drift check now; ⛔ do not read this paragraph as
+ * putting them in this file's column.
+ * The `--dev` seed survives because `serve.ts` assigns
  * `process.env.NODE_ENV = 'development'` IN-PROCESS for `--dev` before
  * `runtime.start()`, which is after oclif has already resolved the command.
  * Measured when they moved, with a distinct marker planted in each tree:
@@ -123,7 +138,9 @@
  * answers ` ›   Error: command serve not found` before `serve.ts` runs a
  * single line. Measured, deterministic, not load-dependent: unset and
  * `production` both fail that way, `test` and `development` both resolve
- * from `src/`. An earlier revision of this file wrapped the boot in a
+ * from `src/` — which is why the two explicit-`NODE_ENV` `it()` blocks
+ * below execute `src/commands`, and only the unset pin measures the built
+ * `dist/`. An earlier revision of this file wrapped the boot in a
  * signature-scoped retry on the theory that the failure was a transient
  * `dist/commands` read under concurrent spawn load; that retry shipped, ran
  * in the failing job, and changed nothing — which is the measurement that
@@ -135,7 +152,13 @@
  * before argv is parsed, which makes the unset-`NODE_ENV` input this whole
  * file exists to measure unreachable — the pin would go green measuring
  * nothing. `bin/run.js` plus a genuinely built `dist/` is the only shape
- * that reaches the gate.
+ * that reaches the gate for this pin.
+ *
+ * ⭐ And that prerequisite is now STATED rather than discovered: `beforeAll`
+ * calls `requireBuiltCli()` (#12539), so an unbuilt worktree gets a sentence
+ * naming the build command instead of ` ›   Error: command serve not found`
+ * relayed as `serve exited 2 before "Server is ready"`. The reason it prints
+ * is this file's own — see `UNSET_LEG_MEASURES_THE_BUILT_DIST` below.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -144,7 +167,13 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import type { Readable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
-import { childEnv, E2E_SECRET_KEY } from './helpers/serve-process.js';
+import {
+  childEnv,
+  E2E_SECRET_KEY,
+  portContentionError,
+  requireBuiltCli,
+  reservePort,
+} from './helpers/serve-process.js';
 
 /** What `spawn(..., { stdio: ['ignore', 'pipe', 'pipe'] })` actually returns — no `stdin`. */
 type ProbeChild = ChildProcessByStdio<null, Readable, Readable>;
@@ -152,6 +181,36 @@ type ProbeChild = ChildProcessByStdio<null, Readable, Readable>;
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 /** `bin/run.js` — the SHIPPED entrypoint. See the file header for why this one, not `run-dev.js`. */
 const CLI = resolve(HERE, '../bin/run.js');
+
+/**
+ * Why THIS file needs `packages/cli/dist`, in its own terms (#12539).
+ *
+ * ⛔ NOT `RUN_JS_RESOLVES_FROM_DIST`, the constant the three sibling spawners
+ * pass. That sentence ends `… and every boot below times out`, which holds for
+ * a file whose every boot goes through `bin/run.js` with `NODE_ENV` unset.
+ * This file is not one: of its three legs only the unset pin resolves from
+ * `dist/`, and the other two hand the child `development`/`test` — exactly the
+ * value that makes `@oclif/core`'s `isProd()` false and reroutes them to
+ * `src/commands` (the header above; both are pinned as `DELIBERATE_REROUTE` in
+ * `scripts/check-cli-test-child-env.mjs`). Passing the siblings' sentence here
+ * would be a true refusal carrying a false explanation — the class #12498,
+ * #12561 and #12563 were filed for.
+ *
+ * ⭐ It is also why the guard runs for the WHOLE file rather than for the
+ * unset leg alone. Measured on a closure-only tree before this guard existed,
+ * this file reported `3 tests | 1 failed`: the unset pin failed with
+ * `serve exited 2 before "Server is ready"`, and the two rerouted legs PASSED
+ * — from `src/`, reporting green for a program this file's header says it does
+ * not measure. A partial green that misreports which program it measured is
+ * worse than a red (#12561).
+ */
+const UNSET_LEG_MEASURES_THE_BUILT_DIST =
+  'Only the unset-NODE_ENV pin here resolves from dist/: unset is the one value that leaves ' +
+  "@oclif/core's isProd() true, so that leg globs the real dist/commands and answers " +
+  '"command serve not found" on an unbuilt tree. The other two legs set NODE_ENV to ' +
+  'development/test, which reroutes them to src/commands — they would PASS without a built ' +
+  'dist/, reporting green for a program this file does not measure. So the whole file ' +
+  'refuses, not just that leg.';
 
 /**
  * The fixture's parent directory sits INSIDE `packages/cli/test/`, not the
@@ -197,11 +256,6 @@ export default {
 let dir: string;
 const children: ProbeChild[] = [];
 
-/** A random high port, so a run never contends with another agent's dev server on this host. */
-function randomPort(): number {
-  return 41000 + Math.floor(Math.random() * 19000);
-}
-
 interface OriginCheckResult {
   status: number;
   body: any;
@@ -218,7 +272,19 @@ interface OriginCheckResult {
  * stringifying them, so this is not the same as `NODE_ENV=''`.
  */
 async function probeOriginCheck(env: Record<string, string | undefined>): Promise<OriginCheckResult> {
-  const port = randomPort();
+  // A BIND-PROBED port, from the one draw this directory has (#12441). It used
+  // to be a blind `41000 + Math.random() * 19000` under a docblock claiming "a
+  // run never contends with another agent's dev server on this host" — and this
+  // very file is where that claim was falsified, with `✗ Port 49402 is already
+  // in use`. ⚠️ `reservePort()` narrows that race, it does not close it; the
+  // `exit` handler below is what makes the residual loss legible. Read
+  // `reservePort()`'s own docblock before trusting either half of that.
+  //
+  // ⛔ This must stay a DRAWN port, not a fixed one: `serve` is driven here with
+  // `NODE_ENV` unset, i.e. into its production posture, where it refuses to
+  // auto-select a different port on purpose (#11113) — so a pinned port would
+  // convert an unlikely collision into a certain one.
+  const port = reservePort();
   const untrustedOriginPort = port + 1;
   writeFileSync(join(dir, 'objectstack.config.ts'), configFor(port), 'utf8');
 
@@ -307,7 +373,21 @@ async function probeOriginCheck(env: Record<string, string | undefined>): Promis
     child.stderr.on('data', (d) => { err += String(d); onData(); });
     child.on('exit', (code) => {
       clearTimeout(timer);
-      readyReject(new Error(`serve exited ${code} before "Server is ready"\n--- stdout ---\n${out}\n--- stderr ---\n${err}`));
+      // ⭐ Port contention gets its OWN failure, before the generic one (#12441).
+      // The generic message — `serve exited 1 before "Server is ready"` — is
+      // literally what a lost port race produced in this file, and it costs a
+      // reader a round to work out that a file about NODE_ENV defaulting just
+      // failed for a reason that has nothing to do with NODE_ENV. `serve` in
+      // production posture prints `✗ Port <n> is already in use.` and exits 1,
+      // so the evidence is already in `err` — it just was not being read.
+      readyReject(
+        portContentionError(
+          out + err,
+          'os serve (bin/run.js, NODE_ENV unset ⇒ production ⇒ no auto-select)',
+          port,
+        )
+        ?? new Error(`serve exited ${code} before "Server is ready"\n--- stdout ---\n${out}\n--- stderr ---\n${err}`),
+      );
     });
   });
 
@@ -349,6 +429,10 @@ async function stop(child: ProbeChild): Promise<void> {
 
 describe('#11113: os serve defaults NODE_ENV to production when unset', () => {
   beforeAll(() => {
+    // Build prerequisite first (#12539): the unset pin below resolves `serve`
+    // from `dist/`, and the two rerouted legs must not report green without it.
+    requireBuiltCli(UNSET_LEG_MEASURES_THE_BUILT_DIST);
+
     dir = mkdtempSync(join(FIXTURES_ROOT, 'tmp-node-env-default-'));
     writeFileSync(
       join(dir, 'package.json'),

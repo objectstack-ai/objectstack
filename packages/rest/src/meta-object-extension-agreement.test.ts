@@ -32,7 +32,7 @@
 // the anti-vacuity case pins that they ARE discriminated.
 
 import { describe, it, expect, vi } from 'vitest';
-import { SchemaRegistry } from '@objectstack/objectql';
+import { SchemaRegistry, assertEngineFindOnePredicate, type EngineFindOneQueryInput } from '@objectstack/objectql';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { RestServer } from './rest-server.js';
 
@@ -152,7 +152,7 @@ async function measure(opts: {
         // tenant overlay row is a different layer with its own precedence. Both
         // routes read this store, so it is held constant across every host.
         find: async () => [],
-        findOne: async () => undefined,
+        findOne: async (object: string, query?: EngineFindOneQueryInput) => { assertEngineFindOnePredicate(object, query); return undefined; },
     };
 
     const services = new Map<string, unknown>();

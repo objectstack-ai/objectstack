@@ -52,6 +52,8 @@ import { LOG_LEVELS, resolveLogLevel, readLogLevelEnv } from '../utils/log-level
 import { BootLogCapture, isVerboseBootLevel } from '../utils/boot-log-capture.js';
 import { graftAuthoredRuntimeMembers, isAppPluginLike } from '../utils/graft-runtime-hooks.js';
 import { redactConnectionUrl, describeDriverConnection } from '../utils/connection-display.js';
+// The posture prose `os serve` and `os doctor` BOTH print, declared once (#12492).
+import { TENANCY_POSTURE_FIX_HINTS } from '../utils/tenancy-posture-hints.js';
 // Shared with @objectstack/verify and the dogfood multi-org probes (#4700) —
 // node-only, hence the `/node` subpath rather than the edge-safe root export.
 import {
@@ -513,6 +515,31 @@ export default class Serve extends Command {
    *
    * Exposed as a static for the same reason ALWAYS_ON_CAPABILITIES above is:
    * one declaration, two readers — the boot path and the pin.
+   *
+   * ⛔ This MUST stay a string LITERAL in this file — do not turn it into a
+   * re-export of `../utils/tenancy-posture-hints.ts`, however tempting that is
+   * now that the posture hints live there (#12492).
+   *
+   * `serve-cluster-host-resolution.test.ts` sweeps this file for every dynamic
+   * `import()` and proves each app-declarable one is host-anchored. To do that
+   * it must know WHICH package a load site names, and the organizations load is
+   * spelled `const organizationsPkg = Serve.ORGANIZATIONS_RUNTIME_PKG;` — so the
+   * sweep resolves the identifier one hop, to this static, and then reads the
+   * literal. Written as `= SOME_IMPORTED_CONST`, the literal is no longer in
+   * this file, the specifier becomes unresolvable, and that load drops OUT of
+   * the swept population rather than failing inside it. That is the exact
+   * silent-vacuity failure #11614 already paid for once; the named half of that
+   * sweep's vacuity guard is what catches it, and it does (measured on this
+   * card, which tried the re-export and was refused by it).
+   *
+   * The consequence is that the spelling is declared twice inside this package
+   * — here, and in the shared hints module `os doctor` also reads. That
+   * duplication is CHECKED, not silent: `serve-organizations-message-spelling.test.ts`
+   * asserts the two are equal, and each is independently pinned as a key of the
+   * spec-owned roster (here via `test/serve-capability-vocabulary.test.ts`,
+   * there via `doctor-organizations-message-spelling.test.ts`). Single-sourcing
+   * it properly needs that sweep's resolver to follow one more hop, into a
+   * sibling module — an edit to a file this card does not own.
    *
    * This single-sources the SPELLING and nothing else. Which postures load the
    * runtime, and what each of the two failure stages means, stay exactly where
@@ -1321,6 +1348,53 @@ export default class Serve extends Command {
         port = await getAvailablePort(requestedPort);
       } catch {
         // Ignore — fall through and try the requested port.
+      }
+      if (port !== requestedPort) {
+        // ── The shift is CORRECT; its SILENCE was the defect (#12543) ────
+        // Auto-shifting is the whole point of this branch and it stays exactly
+        // as it is — #11113 owns the other half of the policy, where a busy
+        // port is a refusal instead. What was missing is that the hop happened
+        // with nothing marking it: the ready banner prints the port that was
+        // BOUND, and no line anywhere said it was not the port that was ASKED
+        // FOR.
+        //
+        // A reader holding only the bound port has to already know the
+        // requested one and compare the two by hand. That is not a
+        // hypothetical cost: five landed consumer-side PRs each re-derived it
+        // from this command's banner (a bind probe, the shared `runServe()`
+        // read-back, three spawners, a security probe). This line is the only
+        // place that holds BOTH numbers for free, so it says both.
+        //
+        // ⭐ Three facts, not one — what was asked for, that it could not be
+        // had, and what was taken instead. A line naming only the bound port
+        // is what the banner already prints, and it leaves the comparison
+        // undone.
+        //
+        // CHANNEL — measured, not chosen (#7915). `stdout` is the JSON-RPC
+        // channel whenever the stdio MCP transport is mounted, where a single
+        // non-frame line reaches the client as a transport error; that is what
+        // `serve-stdio-stdout-purity.e2e.test.ts` exists to pin. So this goes
+        // through `printDiagnostic` — straight to **stderr**, the same helper,
+        // the same stream and the same point in the boot as the production
+        // refusal in the `else` branch just below, which is this notice's
+        // counterpart under the other half of the same policy.
+        //
+        // TIMING — also measured. This runs BEFORE the boot-quiet window
+        // opens (`bootQuiet` is still `false` here; it is assigned from
+        // `verboseBoot` several hundred lines down), so unlike a boot-phase
+        // `logger.warn` — which that window captures and replays only after a
+        // banner has printed, and only if the boot ever reaches one — this
+        // line cannot be swallowed, and it survives a boot that dies later. A
+        // drifted port is a plausible CAUSE of such a death, so the notice has
+        // to outlive it.
+        printDiagnostic(
+          '\n'
+          + chalk.yellow(`  ⚠ Port ${requestedPort} is in use — serving on ${port} instead.\n`)
+          + chalk.dim(`     Development auto-shift: ${requestedPort} was not free, so this server took\n`)
+          + chalk.dim(`     the next one that was (${port}). Anything still pointed at ${requestedPort} — a\n`)
+          + chalk.dim('     proxy, an OAuth callback URL, another terminal, a test harness — is\n')
+          + chalk.dim(`     talking to whatever holds ${requestedPort}, not to this server.`),
+        );
       }
     } else if (!(await isPortAvailable(requestedPort))) {
       // One write, for the reason spelled out at the "Nothing to serve" exit
@@ -4265,20 +4339,6 @@ export type TenancyPostureGateVerdict =
   | { ok: false; fatal: string };
 
 /**
- * One-line prescriptions for the accepted postures, keyed by the vocabulary
- * `@objectstack/spec/security` owns. A posture added there but not described
- * here still gets listed by the gate (bare, without prose) rather than silently
- * dropped from the advice — the fix list can go terse, never stale.
- */
-const TENANCY_POSTURE_FIX_HINTS: Readonly<Record<string, string>> = {
-  single: 'one organization, no organization wall — the default',
-  group: 'organization wall enforced by the open engine, one shared database',
-  isolated:
-    `organization wall + the enterprise ${Serve.ORGANIZATIONS_RUNTIME_PKG} runtime `
-    + "(the legacy spelling 'multi' is accepted and normalizes to this)",
-};
-
-/**
  * Resolve the deployment's requested tenancy posture, or produce the FATAL text
  * that refuses the boot (#5359).
  *
@@ -5147,9 +5207,9 @@ export function resolveBannerConfigRow(opts: {
  * banner reads the binding state off the engine instead).
  *
  * Every probe is feature-detected so an older `@objectstack/service-automation`
- * (without `getTriggerBindingAudit` / extended runtime states) degrades to the
- * plain count line instead of crashing the banner. Returns `undefined` when
- * there is nothing automation-related to show at all.
+ * (without `getTriggerBindingAudit` / `getShadowedFlows` / extended runtime
+ * states) degrades to the plain count line instead of crashing the banner.
+ * Returns `undefined` when there is nothing automation-related to show at all.
  */
 export function collectAutomationSummary(
   kernel: any,
@@ -5168,12 +5228,40 @@ export function collectAutomationSummary(
           triggerTypes: [],
           unbound: [],
           unknownObject: [],
+          shadowed: [],
           draftCount: 0,
         }
       : undefined;
   }
 
-  let states: Array<{ name: string; enabled: boolean; bound: boolean; status?: string; triggerType?: string; object?: string }> = [];
+  /**
+   * One flow body's provenance, as the engine spells it (`FlowContender` in
+   * `@objectstack/service-automation`): a code-shipped artifact, or an
+   * ADR-0005 runtime overlay row in `sys_metadata`.
+   *
+   * Declared structurally, like every other shape this function reads off the
+   * engine. The probes below are feature-detected precisely so a host running
+   * an OLDER automation package still boots its banner, and a nominal import
+   * would type these reads against the CURRENT package while the runtime
+   * deliberately tolerates a previous one.
+   */
+  type Contender = { source: 'package' | 'runtime'; packageId?: string };
+
+  let states: Array<{
+    name: string;
+    enabled: boolean;
+    bound: boolean;
+    status?: string;
+    triggerType?: string;
+    object?: string;
+    // [#12028] `getFlowRuntimeStates()` has attached these two per row since
+    // #11997 whenever a bare name had more than one contender. Named here so a
+    // later read is type-checked against the row's real shape — casting past
+    // this annotation is how the field goes back to being declared and unread,
+    // which is the whole defect this banner line closes.
+    armedFrom?: Contender;
+    shadowed?: Contender[];
+  }> = [];
   try { states = automation.getFlowRuntimeStates?.() ?? []; } catch { /* older engine */ }
   if (states.length === 0 && declaredFlowCount === 0) return undefined;
 
@@ -5182,6 +5270,19 @@ export function collectAutomationSummary(
 
   let unbound: Array<{ flowName: string; triggerType: string; reason: string }> = [];
   try { unbound = automation.getTriggerBindingAudit?.() ?? []; } catch { /* older engine */ }
+
+  // [#12028] Same-named definitions: which body armed, and which lost. Read
+  // from the engine's dedicated receipt rather than from `states` above, for
+  // one measured reason — `getFlowRuntimeStates()` can only attach the receipt
+  // to a row it is already emitting, i.e. to a name still in the flow map,
+  // whereas `getShadowedFlows()` returns every receipt the boot pull recorded.
+  // A contested name is worth saying out loud either way.
+  //
+  // Feature-detected exactly like the `unbound` probe above and with nothing
+  // more: optional call, `?? []`, `catch` for an older engine. No extra
+  // tolerance — the neighbouring read is the standard here.
+  let shadowing: Array<{ name: string; armed: Contender; shadowed: Contender[] }> = [];
+  try { shadowing = automation.getShadowedFlows?.() ?? []; } catch { /* older engine */ }
 
   // Dead bindings: a bound record-change flow whose target object nobody
   // registered — the hook is filtered to a name that never writes.
@@ -5205,6 +5306,13 @@ export function collectAutomationSummary(
     triggerTypes,
     unbound,
     unknownObject,
+    // A receipt that displaced nothing is not a contested name. The engine
+    // already refuses to record one, and the banner keeps its own end of that
+    // guarantee here rather than inheriting it: a benign boot must print no
+    // shadowing line at all, and this is where "benign" is decided.
+    shadowed: shadowing
+      .filter((r) => r.shadowed.length > 0)
+      .map((r) => ({ flowName: r.name, armed: r.armed, shadowedCount: r.shadowed.length })),
     draftCount: states.filter((s) => s.enabled && (s.status ?? 'draft') === 'draft').length,
   };
 }

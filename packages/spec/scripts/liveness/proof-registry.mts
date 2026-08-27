@@ -791,6 +791,54 @@ export const HIGH_RISK_CLASSES: HighRiskClass[] = [
     // for a property it does not exercise.
     ledgerBindings: [{ type: 'permission', path: 'fields.readable' }],
   },
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // 2026-08-26 round — ONE tag, and the reason it is worth a paragraph is that
+  // it is a RECURRENCE of the block above: the 2026-08-21 round registered the
+  // eleven tags that existed then, and a twelfth arrived with the next dogfood
+  // proof. Registering instances one round at a time never closes the class,
+  // because the drift signal was a ⚠ that nothing failed on — so the gate is
+  // switched to red in the same PR (check-liveness.mts), which is the half
+  // that stops a thirteenth.
+  //
+  // Direction of drift, decided by reading both sides rather than assuming:
+  // the REGISTRY lagged. `admin-platform-admin-standing` is not a misspelling
+  // of an already-registered tag — the file names itself, its tag and its
+  // sibling (`admin-route-nonadmin-refusal`, registered above) distinctly, and
+  // no registered id is within a typo of it.
+  // ─────────────────────────────────────────────────────────────────────────
+
+  {
+    id: 'admin-platform-admin-standing',
+    label: 'Platform-admin standing across the /admin/ route surface',
+    summary:
+      'the DUAL of `admin-route-nonadmin-refusal`, over the same derived `/admin/` route population: '
+      + 'no route refuses a genuine ADR-0068 platform admin unless the refusal is a RECORDED by-design '
+      + 'ruling (#9969\'s seven consumer-less vendor routes, #9968\'s `set-role`). better-auth\'s stock '
+      + 'admin plugin authorizes on the legacy `user.role === \'admin\'` scalar that ADR-0068 D2 stopped '
+      + 'synthesizing, so the vendor\'s own endpoints refuse a real platform admin — and this file is '
+      + 'what keeps that answer a ruled outcome instead of an unread gap. Two anti-vacuity pins carry '
+      + 'it: the subject\'s standing is asserted as a CONTROL before any route answer is read '
+      + '(`positions[]` contains `platform_admin`, `isPlatformAdmin` true, `sys_user.role` NOT '
+      + '`\'admin\'` — the fixture a real deployment has, not the `role = \'admin\'` scalar the unit '
+      + 'tests write), and every route is fired with a payload valid enough to REACH the gate, because '
+      + 'better-auth validates the body BEFORE the admin check and an empty-body sweep draws a '
+      + '`400 VALIDATION_ERROR` byte-identical for member and admin while looking exactly like a '
+      + 'passing security suite.',
+    proofId: 'admin-platform-admin-standing',
+    proofRef:
+      'packages/qa/dogfood/test/admin-platform-admin-standing.dogfood.test.ts#admin-platform-admin-standing',
+    bound: false,
+    ledgerBindings: [],
+    blockedReason:
+      'platform-admin standing is the ADR-0068 D2 identity resolution (`positions[]` / '
+      + '`isPlatformAdmin`, consolidated since #11686 as `hasPlatformAdminStanding`) evaluated inside '
+      + 'the auth plugin\'s route gate — runtime principal resolution, not an authorable per-type '
+      + 'property, so there is no metadata key whose `live` status it gates. It is also a BREADTH guard '
+      + 'over a DERIVED route population, the `admin-route-nonadmin-refusal` / `permission-model-zoo` '
+      + 'shape: binding it to any single entry would misrepresent both what it covers and what that '
+      + 'entry is proven by. It runs unconditionally in the dogfood suite.',
+  },
 ];
 
 /** Bound ledger paths → the class that binds them. Key: `<type>/<path>`. */

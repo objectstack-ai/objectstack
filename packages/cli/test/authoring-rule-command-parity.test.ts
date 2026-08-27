@@ -29,6 +29,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { AUTHORING_COMMANDS, runAuthoringRules, type AuthoringCommand } from '@objectstack/lint';
+import { childEnv } from './helpers/serve-process.js';
 
 const cliBin = join(fileURLToPath(new URL('.', import.meta.url)), '..', 'bin', 'run-dev.js');
 
@@ -189,7 +190,16 @@ describe('every authoring command reaches the same verdict (#4409)', () => {
         let exitCode = 0;
         let output = '';
         try {
-          output = execFileSync(process.execPath, [cliBin, command], { cwd: dir, encoding: 'utf8', stdio: 'pipe' });
+          output = execFileSync(process.execPath, [cliBin, command], {
+            cwd: dir,
+            encoding: 'utf8',
+            stdio: 'pipe',
+            // Every spawned child under this directory declares its environment at the
+            // call site (#11595). An omitted `env` is the leak in its purest form: the
+            // child gets the vitest worker's environment verbatim, with nothing on the
+            // page to read.
+            env: childEnv(),
+          });
         } catch (error: any) {
           exitCode = error.status ?? 1;
           output = `${error.stdout ?? ''}${error.stderr ?? ''}`;

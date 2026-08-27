@@ -50,7 +50,7 @@ import type { IHttpRequest, IHttpResponse, RouteHandler } from '@objectstack/spe
 // (`check:engine-double-contract`, #4550/#5480). It declares no `delete`: this
 // suite never deletes a row, and a verb a double does not need is a contract
 // it cannot get wrong.
-import { assertEngineUpdateDispatch } from '@objectstack/objectql';
+import { assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/objectql';
 import { LocalStorageAdapter } from './local-storage-adapter.js';
 import { StorageMetadataStore } from './metadata-store.js';
 import { registerStorageRoutes } from './storage-routes.js';
@@ -117,6 +117,7 @@ function fakeEngine(seed: {
       return typeof options?.limit === 'number' ? rows.slice(0, options.limit) : rows;
     },
     async findOne(object: string, options: any) {
+      assertEngineFindOnePredicate(object, options);
       return (tables[object] ?? []).find((r) => matches(r, options?.where ?? {})) ?? null;
     },
     async insert(object: string, data: any) {

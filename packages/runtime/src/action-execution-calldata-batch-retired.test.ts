@@ -61,6 +61,7 @@ import { ApiEndpointSchema } from '@objectstack/spec/api';
 
 import { callData, type ActionExecutionDeps } from './action-execution.js';
 import { HttpDispatcher, type HttpProtocolContext } from './http-dispatcher.js';
+import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 
 const EC = { userId: 'u1', isSystem: false, positions: [], permissions: [] } as any;
 /** [#5155] Every service lookup resolves off the REQUEST's kernel. */
@@ -87,7 +88,7 @@ function engine(store = rows()) {
             const id = bag?.where?.id;
             return id == null ? [...store] : store.filter((r) => r.id === String(id));
         },
-        findOne: async (_o: string, opts: any) => store.find((r) => r.id === String(opts?.where?.id)) ?? null,
+        findOne: async (_o: string, opts: any) => { assertEngineFindOnePredicate(_o, opts); return store.find((r) => r.id === String(opts?.where?.id)) ?? null; },
     } as any;
 }
 

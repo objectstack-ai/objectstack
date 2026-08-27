@@ -15,7 +15,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { IHttpRequest, IHttpResponse, RouteHandler, IDataEngine } from '@objectstack/spec/contracts';
-import { assertEngineDeleteDispatch } from '@objectstack/objectql';
+import { assertEngineDeleteDispatch, assertEngineFindOnePredicate } from '@objectstack/objectql';
 import { LocalStorageAdapter } from './local-storage-adapter.js';
 import { StorageMetadataStore } from './metadata-store.js';
 import { registerStorageRoutes } from './storage-routes.js';
@@ -85,6 +85,7 @@ function createFakeEngine(opts: { failing?: EngineMethod[] } = {}) {
       return { ...data };
     },
     async findOne(object: string, query?: any) {
+      assertEngineFindOnePredicate(object, query);
       boom('findOne', object);
       return table(object).get(String(query?.where?.id)) ?? null;
     },

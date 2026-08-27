@@ -82,7 +82,7 @@
  * needs no rebuild, and its RED result rules out a stale-artifact false green.
  */
 import { describe, expect, it } from 'vitest';
-import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate, type EngineFindOneQueryInput } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 
 interface Row {
@@ -101,7 +101,8 @@ function makeProtocol() {
     const rows = new Map<string, Row>();
     let nextId = 0;
     const engine: any = {
-        async findOne() { return null; },
+        async findOne(object: string, query?: EngineFindOneQueryInput) {
+                          assertEngineFindOnePredicate(object, query); return null; },
         async find() { return []; },
         async insert(table: string, data: Record<string, unknown>) {
             if (table === 'sys_metadata_audit') return { id: 'audit_skip' };

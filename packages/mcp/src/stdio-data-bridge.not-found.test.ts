@@ -23,12 +23,13 @@ import { describe, it, expect, vi } from 'vitest';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type { IDataEngine, IMetadataService } from '@objectstack/spec/contracts';
 import { createStdioDataBridge } from './stdio-data-bridge.js';
+import { assertEngineFindOnePredicate, type EngineFindOneQueryInput } from '@objectstack/metadata-core';
 
 /** An engine that resolves NO row for any id — every by-id write is a miss. */
 function makeEmptyEngine() {
   return {
     find: vi.fn(async () => []),
-    findOne: vi.fn(async () => null),
+    findOne: vi.fn(async (object: string, query?: EngineFindOneQueryInput) => { assertEngineFindOnePredicate(object, query); return null; }),
     insert: vi.fn(),
     update: vi.fn(),
     delete: vi.fn(),

@@ -5,7 +5,7 @@ description: Marketplace protocol schemas
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
 
-# Marketplace Protocol
+## Marketplace Protocol
 
 Defines the core schemas for the plugin marketplace ecosystem, covering:
 - **Developer Side**: Package publishing, submission, and version releases
@@ -14,13 +14,13 @@ Defines the core schemas for the plugin marketplace ecosystem, covering:
 This protocol defines the contract between plugin developers, the marketplace
 platform, and customers who install plugins.
 
-## Architecture Alignment
+### Architecture Alignment
 - **Salesforce AppExchange**: Security review, managed packages, listing profiles
 - **VS Code Marketplace**: Extension publishing, ratings, verified publishers
 - **npm Registry**: Package publishing, versioning, scoped packages
 - **Shopify App Store**: App review process, billing integration, merchant installs
 
-## Developer Publishing Flow
+### Developer Publishing Flow
 ```
 1. Develop   → Build the project locally using ObjectStack CLI
 2. Validate  → Run `os validate` (schema + security checks)
@@ -30,7 +30,7 @@ platform, and customers who install plugins.
 6. Publish   → Approved listing goes live on marketplace
 ```
 
-## Platform Management Flow
+### Platform Management Flow
 ```
 1. Receive   → Accept submissions from verified publishers
 2. Scan      → Automated security scan and compatibility check

@@ -65,7 +65,7 @@
 // the companion is genuinely DISCRIMINATED rather than always-present.
 
 import { describe, it, expect, vi } from 'vitest';
-import { SchemaRegistry } from '@objectstack/objectql';
+import { SchemaRegistry, assertEngineFindOnePredicate } from '@objectstack/objectql';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { RestServer } from './rest-server.js';
 
@@ -208,7 +208,7 @@ async function measure(opts: {
         registry,
         find: async (_t: string, o?: { where?: Record<string, unknown> }) => matchesRow(o?.where),
         findOne: async (_t: string, o?: { where?: Record<string, unknown> }) =>
-            matchesRow(o?.where)[0],
+            { assertEngineFindOnePredicate(_t, o); return matchesRow(o?.where)[0]; },
     };
 
     const services = new Map<string, unknown>();

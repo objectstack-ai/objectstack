@@ -65,7 +65,10 @@ describe('#7113 — the reported shape is refused at authoring time', () => {
   it('names the consumer-side coercion as the thing being replaced', () => {
     const issue = valueIssue(parse({ field: 'userRole', operator: 'not_in', value: 'admin' }));
     expect(issue.message).toContain('coerces the scalar today');
-    expect(issue.message).toContain('#7113');
+    // The claim is carried by the SENTENCE, not by a tracker id: this string is
+    // printed at an author who has no tracker to open.
+    expect(issue.message).toContain('the contract never declared that spelling');
+    expect(issue.message).not.toMatch(/(?<![#&])#[0-9]{3,5}(?![0-9A-Za-z])/);
   });
 });
 

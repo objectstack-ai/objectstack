@@ -5,14 +5,14 @@ description: Cli Extension protocol schemas
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
 
-# CLI Extension Protocol
+## CLI Extension Protocol
 
 Defines the contract for plugins that extend the ObjectStack CLI with
 custom commands. This enables third-party packages (e.g., marketplace,
 cloud deployment tools) to register new CLI commands via oclif's
 built-in plugin system.
 
-## How It Works (oclif Plugin Model)
+### How It Works (oclif Plugin Model)
 
 1. **Declare** — Plugin's `package.json` includes an `oclif` config section
    declaring its commands directory and any topics.
@@ -21,7 +21,7 @@ built-in plugin system.
 3. **Load** — oclif automatically discovers and registers all Command classes
    exported from the plugin's commands directory.
 
-## Plugin Package Contract
+### Plugin Package Contract
 
 The plugin must be a valid oclif plugin:
 
@@ -57,7 +57,7 @@ export default class MarketplaceSearch extends Command {
 }
 ```
 
-## Migration from Commander.js
+### Migration from Commander.js
 
 The previous plugin model required `contributes.commands` in the manifest
 and exported Commander.js `Command` instances. The new model uses oclif's
@@ -71,25 +71,12 @@ The `objectstack.config.ts` plugins array no longer determines CLI commands.
 ## TypeScript Usage
 
 ```typescript
-import { CLICommandContributionSchema, OclifPluginConfigSchema } from '@objectstack/spec/kernel';
-import type { CLICommandContribution, OclifPluginConfig } from '@objectstack/spec/kernel';
+import { OclifPluginConfigSchema } from '@objectstack/spec/kernel';
+import type { OclifPluginConfig } from '@objectstack/spec/kernel';
 
 // Validate data
-const result = CLICommandContributionSchema.parse(data);
+const result = OclifPluginConfigSchema.parse(data);
 ```
-
----
-
-## CLICommandContribution
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **name** | `string` | ✅ | CLI command name |
-| **description** | `string` | optional | Command description for help text |
-| **module** | `string` | optional | Module path exporting oclif Command classes |
-
 
 ---
 

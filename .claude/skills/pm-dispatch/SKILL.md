@@ -92,7 +92,7 @@ fire 一轮烟测,判据取**GitHub 上的产出**;③ 每 fire 一轮:读座位
 | `pm:dispatched` | 已派发(派发评论记轮次);与摘 `pm:queue` **同一次标签写入**成对落地 |
 | `needs-user-decision` | 决定**待做** —— 永不派发、除已裁代裁通道外永不代答;维护者的收件箱 |
 | `pm:on-hold` | 决定**已做**且答案是「不是现在」—— 不派发也不催;**仅当带机器可读 `Restart-when:` 行(closed 形或一行可执行判据)才合法**,重启放行须过**放行双查** —— 行契约、双通道、`Restart-touch:` 触发文件与双查细则见 `references/state-machine.md` |
-| `pm:blocked` + 正文行 `Blocked-by: #N` | 等上游 —— 选择期跳过,#N 关闭时由解锁扫描放回。工已完、PR 被外部门禁缺陷卡住的卡**同用本态,⛔ 不设新标签**(`Unlock-action:` 行改写解锁动作,细则见 `references/state-machine.md`) |
+| `pm:blocked` + 正文行 `Blocked-by: #N` | 等上游 —— 选择期跳过,#N 关闭时由解锁扫描放回。工已完、PR 被外部门禁缺陷卡住的卡**同用本态,⛔ 不设新标签**(`Unlock-action: re-check PR #M` 行改写解锁动作 —— **只认此一值**,别的写法静默回落默认重派,细则见 `references/state-machine.md`) |
 | `pm:awaiting-maintainer` | 决定**已做**,剩余动作是一次 GitHub 之外的人工维护者操作(如 Routines UI 变更)—— 不派发、不催;与其它 pm 状态标签**互斥**;互斥面、出口与巡查细则见 `references/state-machine.md` |
 | `pm:blocking` | 有 open 下游依赖者(分诊 sweep 自 `Blocked-by:` 索引推导的缓存,⛔ 不手工挂);进选择优先级全序 |
 | `pm:retriage` | 等分诊改判(维护者 2026-08-19/20 裁定:「同意 并存」)—— 与现行 `pm:*` 标签**并存,⛔ 不摘原标**;带本标签的 `pm:queue` 卡**跳过派发**(异议未决不派,即可派发行的除外项);挂/摘两方机制见 `references/state-machine.md` |

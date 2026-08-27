@@ -39,6 +39,7 @@ import { DATA_ACTION_TO_API_OPERATION } from '@objectstack/spec/data';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type { IDataEngine, IMetadataService } from '@objectstack/spec/contracts';
 import { createStdioDataBridge, GATED_ACTIONS, type McpExposureError } from './stdio-data-bridge.js';
+import { assertEngineFindOnePredicate, type EngineFindOneQueryInput } from '@objectstack/metadata-core';
 
 // ---------------------------------------------------------------------------
 // Doubles
@@ -54,7 +55,7 @@ import { createStdioDataBridge, GATED_ACTIONS, type McpExposureError } from './s
 function makeEngine(rows: Array<Record<string, unknown>> = [{ id: 'r1', title: 'row' }]) {
   return {
     find: vi.fn(async () => rows),
-    findOne: vi.fn(async () => rows[0] ?? null),
+    findOne: vi.fn(async (object: string, query?: EngineFindOneQueryInput) => { assertEngineFindOnePredicate(object, query); return rows[0] ?? null; }),
     insert: vi.fn(),
     update: vi.fn(),
     delete: vi.fn(),

@@ -43,11 +43,17 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { E2E_SECRET_KEY, childEnv, randomPort } from './helpers/serve-process.js';
+import {
+  E2E_SECRET_KEY,
+  RUN_JS_RESOLVES_FROM_DIST,
+  childEnv,
+  randomPort,
+  requireBuiltCli,
+} from './helpers/serve-process.js';
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 /**
@@ -74,47 +80,17 @@ const HERE = resolve(fileURLToPath(import.meta.url), '..');
  * STATE as well as about the source in the checkout, which is the trade
  * `scripts/check-test-source-alias.mjs` argues against for in-process imports.
  * `turbo.json` declares `@objectstack/cli#test` `dependsOn: ["build"]` (#11268)
- * so CI always builds `dist/` first; `requireBuiltCli()` below is what a
- * developer running `vitest` directly gets instead of oclif's "command serve
- * not found". Neither catches a `dist/` that is merely BEHIND its source —
+ * so CI always builds `dist/` first; `requireBuiltCli()` — hoisted into
+ * `helpers/serve-process.ts` by #12539, with the reason it refuses supplied
+ * from HERE (`RUN_JS_RESOLVES_FROM_DIST`) because it is true of this
+ * entrypoint and not of the tsx one — is what a developer running `vitest`
+ * directly gets instead of oclif's "command serve not found". Neither catches
+ * a `dist/` that is merely BEHIND its source —
  * that residual is the honest cost of consuming the artifact, and
  * `serve-node-env-production-default.e2e.test.ts` (which has consumed `dist/`
  * since #11113) carries exactly the same one.
  */
 const CLI = resolve(HERE, '../bin/run.js');
-
-/**
- * Refuse to run against an unbuilt `packages/cli`, in a sentence rather than as
- * oclif's "command serve not found".
- *
- * The command target is read from the CLI's own `oclif.commands.target` rather
- * than restated here: that declaration is where `dist/commands` is decided, and
- * a copy keeps probing the old path after someone moves it — the argument
- * `scripts/cli-build-prerequisite.mjs` makes for the gates that shell out to
- * this CLI. Only that one declared shape is read; anything else (unreadable,
- * or `oclif.commands` written as a bare string) DEFERS rather than failing, so
- * a checkout this cannot understand never turns red here and the spawn's own
- * output stays the fallback — the same fail-open direction those gates take.
- */
-function requireBuiltCli(): void {
-  let target: unknown;
-  try {
-    target = JSON.parse(readFileSync(resolve(HERE, '../package.json'), 'utf8'))?.oclif?.commands?.target;
-  } catch {
-    return;
-  }
-  if (typeof target !== 'string' || !target) return;
-  const commandFile = resolve(HERE, '..', target.replace(/^\.\//, ''), 'serve.js');
-  if (existsSync(commandFile)) return;
-  throw new Error(
-    `packages/cli is not built: ${commandFile} does not exist.\n` +
-      'This file spawns bin/run.js with NODE_ENV unset, which is what makes oclif resolve the ' +
-      'command from dist/ instead of transpiling src/ — so on an unbuilt tree the child answers ' +
-      '"command serve not found" and every boot below times out.\n' +
-      'CI declares the build (turbo: @objectstack/cli#test dependsOn build); a direct vitest run does not.\n' +
-      'Run: pnpm exec turbo run build --filter=@objectstack/cli',
-  );
-}
 
 const CONFIG = `
 export default {
@@ -176,12 +152,31 @@ function boot(env: Record<string, string | undefined>, waitFor: RegExp): Promise
         NO_COLOR: '1',
         OS_LOG_LEVEL: 'info',
         OS_DISABLE_CONSOLE: '1',
-        // Explicit, not minted: with `VITEST` no longer inherited (#11267),
-        // `local-crypto-provider.ts`'s detectMode answers `development` for
-        // this child instead of `test`, and development mode PERSISTS a minted
-        // key to `$HOME/.objectstack/dev-crypto-key`. Supplying one keeps this
-        // boot from writing to the runner's home directory and from coupling
-        // itself to whatever other test got there first.
+        // Explicit, not minted — but NOT because of the `VITEST` strip above.
+        // What follows is quoted in the PAST TENSE on purpose: the code it
+        // quotes is GONE. `detectMode` used to read
+        // `if (env.VITEST || env.NODE_ENV === 'test') return 'test'`, so an
+        // inherited `VITEST=true` did put a spawned child's crypto layer in
+        // `test` mode. #11448 (`a58eac3e2`, merged 2026-08-23) deleted that
+        // arm; the live `detectMode` (`local-crypto-provider.ts:185`, read
+        // off this tree) reads `NODE_ENV` and nothing else. So stripping
+        // `VITEST` is not what selects the posture here, and the `test` →
+        // `development` flip the old wording predicted is unreachable in
+        // either direction.
+        //
+        // What DOES select `development` is the `NODE_ENV` entry below, and
+        // it is measured on this tree, not inherited: this file spawns
+        // `bin/run.js`, which pins no `NODE_ENV` of its own (only
+        // `bin/run-dev.js` does), with the variable UNSET — so `serve.ts`
+        // assigns `process.env.NODE_ENV = 'development'` in-process for
+        // `--dev` before `runtime.start()`, and the crypto provider reads
+        // `process.env` when it resolves its key, after that assignment.
+        //
+        // ⭐ The conclusion is unchanged and load-bearing: development mode
+        // PERSISTS a minted key to `$HOME/.objectstack/dev-crypto-key`, so
+        // supplying one keeps this boot from writing to the runner's home
+        // directory and from coupling itself to whatever other test got
+        // there first.
         OS_SECRET_KEY: E2E_SECRET_KEY,
         // UNSET, not `development` — and `undefined` rather than `''`, because
         // Node's `spawn()` omits an undefined-valued entry rather than
@@ -210,12 +205,26 @@ function boot(env: Record<string, string | undefined>, waitFor: RegExp): Promise
       if (settled) return;
       settled = true;
       rejectBoot(
-        new Error(`serve never printed ${waitFor}\n--- stdout ---\n${out.slice(-4000)}\n--- stderr ---\n${err.slice(-4000)}`),
+        new Error(`serve never printed ${waitFor} (child-reported bound port: ${boundPort(out + err) ?? 'NEVER PRINTED'}; this file reserved ${port})\n--- stdout ---\n${out.slice(-4000)}\n--- stderr ---\n${err.slice(-4000)}`),
       );
     }, 150_000);
 
     const onOutput = () => {
-      if (!settled && waitFor.test(out + err)) {
+      if (settled) return;
+      // ⭐ #12526: the child is the authority on which port it bound, so read it
+      // back before handing this boot to assertions that will use `port`.
+      const bound = boundPort(out + err);
+      if (bound !== null && bound !== port) {
+        settled = true;
+        clearTimeout(timer);
+        rejectBoot(portDriftError(port, bound, out, err));
+        return;
+      }
+      // `bound !== null` is part of the gate, not an optimisation: resolving on
+      // `waitFor` alone would let a boot through before the child had said which
+      // port it took, and the drift check would then be a no-op on an already
+      // settled promise. Every marker below arrives with or before the banner.
+      if (bound !== null && waitFor.test(out + err)) {
         settled = true;
         clearTimeout(timer);
         resolveBoot({ child, stdout: () => out, stderr: () => err });
@@ -239,6 +248,63 @@ function boot(env: Record<string, string | undefined>, waitFor: RegExp): Promise
       );
     });
   });
+}
+
+/**
+ * The port the CHILD says it bound — read out of the child's OWN output, never
+ * out of what this file reserved (#12526, and #12441 ruling 2 before it).
+ *
+ * ## Why this file needs it at all
+ *
+ * The spawn below passes `--dev`, and `serve.ts` reads
+ * `portAutoShiftAllowed = flags.dev || NODE_ENV === 'development'` — `flags.dev`
+ * ALONE opens the auto-select branch, whatever `NODE_ENV` is. So a port taken
+ * between `randomPort()`'s bind probe and this spawn does NOT fail the boot the
+ * way it does in `serve-node-env-production-default.e2e.test.ts` (no `--dev`
+ * there, so unset `NODE_ENV` defaults to production and a taken port is a hard
+ * `exit 1` that `portContentionError()` can name). Here `getAvailablePort()`
+ * silently hops the child onto the next free port and it reports itself READY.
+ *
+ * That is the strictly worse direction: a GREEN boot on the wrong port. Every
+ * request this file makes afterwards goes to `port` — the port it reserved and
+ * no longer owns — so it measures whatever else took it. Measured on this tree
+ * with a neighbour holding the reserved port: reserved 34259, child bound
+ * 34260, boot green, and the file's own next request was answered
+ * `{"iAm":"A NEIGHBOURING AGENT DEV SERVER, not os serve"}`.
+ *
+ * ⚠️ The `--dev` responsible has been on this spawn line since `83e6016fa` — it
+ * long predates #11707/#12459, which changed `NODE_ENV` and never touched it.
+ * This was never read, not newly introduced.
+ *
+ * Two patterns because either one alone can be absent: the structured log obeys
+ * `OS_LOG_LEVEL`, and the banner line is what survives when it does not.
+ */
+function boundPort(output: string): string | null {
+  const match = /HTTP server started successfully[^\n]*?"port":\s*(\d+)/.exec(output)
+    ?? /API:\s+http:\/\/localhost:(\d+)/.exec(output);
+  return match ? match[1] : null;
+}
+
+/**
+ * A lost port race, said out loud — the failure this file used to hide behind a
+ * green boot (#12526).
+ */
+function portDriftError(reserved: string, bound: string, out: string, err: string): Error {
+  return new Error(
+    `PORT DRIFT: this file reserved port ${reserved}, but the child bound ${bound}.\n`
+    + `\`os serve -p ${reserved} --dev\` passes \`--dev\`, so \`serve.ts\`'s `
+    + `\`portAutoShiftAllowed = flags.dev || NODE_ENV === 'development'\` opened the auto-select `
+    + `branch and \`getAvailablePort()\` hopped the child off the port that was asked for. The `
+    + `boot SUCCEEDED — on the wrong port.\n`
+    + `⛔ Something else took ${reserved} between \`randomPort()\`'s bind probe and the spawn. That `
+    + `is a HOST race (several agents share one container), not a verdict about the code under `
+    + `test — but it is NOT harmless here: every assertion below talks to ${reserved}, which is `
+    + `now that other process, so continuing would measure a stranger rather than this boot.\n`
+    + `⛔ Do not "fix" this by following the child to ${bound}: the point is that the port this `
+    + `file uses and the port the child bound must be the SAME port. Re-run this file in `
+    + `isolation; if it reproduces there, the port is genuinely held.\n`
+    + `--- stdout ---\n${out.slice(-4000)}\n--- stderr ---\n${err.slice(-4000)}`,
+  );
 }
 
 async function stop(child: ChildProcessWithoutNullStreams): Promise<void> {
@@ -268,7 +334,7 @@ async function stop(child: ChildProcessWithoutNullStreams): Promise<void> {
 describe('#7645: the stdio MCP transport answers over a spawned CLI process', () => {
   beforeAll(async () => {
     // Build prerequisite first: the spawns below resolve `serve` from `dist/`.
-    requireBuiltCli();
+    requireBuiltCli(RUN_JS_RESOLVES_FROM_DIST);
 
     dir = mkdtempSync(join(tmpdir(), 'mcp-stdio-e2e-'));
     writeFileSync(join(dir, 'objectstack.config.ts'), CONFIG, 'utf8');

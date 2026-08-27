@@ -74,7 +74,7 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { SqlDriver } from '@objectstack/driver-sql';
-import { assertEngineDeleteDispatch } from '@objectstack/objectql';
+import { assertEngineDeleteDispatch, assertEngineFindOnePredicate } from '@objectstack/objectql';
 import { whereOperators } from '@better-auth/core/db/adapter';
 import { FILTER_OPERATORS } from '@objectstack/spec/data';
 import type { QueryAST } from '@objectstack/spec/data';
@@ -146,7 +146,7 @@ function sqlEngine(driver: SqlDriver): IDataEngine {
   // `query-options/no-any-erasure` (#4674/#4918) counts test-side calls too.
   return {
     find: (object: string, query: QueryAST) => driver.find(object, query),
-    findOne: (object: string, query: QueryAST) => driver.findOne(object, query),
+    findOne: (object: string, query: QueryAST) => { assertEngineFindOnePredicate(object, query); return driver.findOne(object, query); },
     count: (object: string, query?: QueryAST) => driver.count(object, query),
     delete: async (object: string, options: Record<string, unknown>) => {
       const dispatch = assertEngineDeleteDispatch(options);

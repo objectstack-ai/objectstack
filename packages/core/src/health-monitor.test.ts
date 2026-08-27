@@ -24,9 +24,6 @@ describe('PluginHealthMonitor', () => {
       timeout: 1000,
       failureThreshold: 3,
       successThreshold: 1,
-      autoRestart: false,
-      maxRestartAttempts: 3,
-      restartBackoff: 'exponential',
     };
 
     monitor.registerPlugin('test-plugin', config);
@@ -39,9 +36,6 @@ describe('PluginHealthMonitor', () => {
       timeout: 1000,
       failureThreshold: 3,
       successThreshold: 1,
-      autoRestart: false,
-      maxRestartAttempts: 3,
-      restartBackoff: 'fixed',
     };
 
     monitor.registerPlugin('test-plugin', config);
@@ -54,9 +48,6 @@ describe('PluginHealthMonitor', () => {
       timeout: 1000,
       failureThreshold: 3,
       successThreshold: 1,
-      autoRestart: false,
-      maxRestartAttempts: 3,
-      restartBackoff: 'linear',
     };
 
     monitor.registerPlugin('plugin1', config);
@@ -74,9 +65,6 @@ describe('PluginHealthMonitor', () => {
       timeout: 1000,
       failureThreshold: 3,
       successThreshold: 1,
-      autoRestart: false,
-      maxRestartAttempts: 3,
-      restartBackoff: 'exponential',
     };
 
     monitor.registerPlugin('test-plugin', config);
@@ -102,9 +90,6 @@ describe('PluginHealthMonitor', () => {
       timeout: 120_000,
       failureThreshold: 3,
       successThreshold: 1,
-      autoRestart: false,
-      maxRestartAttempts: 3,
-      restartBackoff: 'fixed',
       checkMethod: 'healthCheck',
       ...overrides,
     });
@@ -247,50 +232,68 @@ describe('PluginHealthMonitor', () => {
     });
   });
 
-  // #11852 — `autoRestart` covers BOTH failure routes, not only the milder one.
+  // ── #12032 — the monitor REPORTS; it never destroys, and never lies ───────
   //
-  // `performHealthCheck` fails two disjoint ways: the check RETURNS a failure
-  // (`false` / `{ status: 'unhealthy' }`), or it THROWS — which, because
+  // This block replaces #11852's `autoRestart covers both failure routes`.
+  // Those five tests are REWRITTEN here rather than deleted, and the change is
+  // declared because four of them pinned the false contract as the contract:
+  // each drove a plugin past `failureThreshold` and then asserted
+  // `destroyed.count === 1` and status `recovering` — i.e. asserted that a
+  // "restart" had happened. It had not. `attemptRestart` called
+  // `plugin.destroy()` and stopped; `init` appeared in `health-monitor.ts`
+  // ONLY inside the comment that claimed both were called. The assertions were
+  // true readings of a false behaviour.
+  //
+  // What #11852 actually established SURVIVES and is re-pinned below: both
+  // failure routes — the check RETURNS a failure, or it THROWS (which, because
   // `raceCheckTimeout` rejects rather than resolving, includes every `timeout`
-  // overrun. Only the returned route ever reached `config.autoRestart`, so a
-  // plugin that threw or hung until its timeout — the severer failure of the
-  // two — was marked `failed` and never restarted, whatever the config said.
+  // overrun) — share the counters, and a throw keeps its own `failed` label.
+  // What leaves is the restart decision they were also said to share, because
+  // there is no restart (#12032: `autoRestart` / `maxRestartAttempts` /
+  // `restartBackoff` retired in @objectstack/spec 18, ADR-0049).
   //
-  // These pin the observable consequence, never the source: `attemptRestart`
-  // is the only caller of `plugin.destroy()` and the only writer of
-  // `recovering`, so those two readings together mean a restart happened and
-  // nothing else can produce them. Asserting that some shared helper was
-  // called would be a tautology any refactor could satisfy.
-  describe('autoRestart covers both failure routes (#11852)', () => {
-    /** `calculateBackoff(0, 'fixed')` — the delay before the first restart. */
-    const FIRST_RESTART_BACKOFF_MS = 1_000;
+  // These pin the observable consequence, never the source. `plugin.destroy()`
+  // had exactly one caller in this class, so a `destroyed.count` of zero is
+  // the whole claim "the monitor does not tear plugins down"; asserting that
+  // some method is absent would be a tautology any refactor could satisfy, and
+  // asserting "`init` is called" would be satisfied by a no-op `init`.
+  describe('a failing plugin is reported, never destroyed (#12032)', () => {
+    const INTERVAL_MS = 10_000;
+    /** The backoff the retired restart used to wait out before destroying. */
+    const FORMER_RESTART_BACKOFF_MS = 1_000;
 
-    const restartConfig = (
+    const failingConfig = (
       overrides: Partial<PluginHealthCheckParsed> = {}
     ): PluginHealthCheckParsed => ({
-      interval: 10_000,
+      interval: INTERVAL_MS,
       timeout: 100,
       failureThreshold: 2,
       successThreshold: 1,
-      autoRestart: true,
-      maxRestartAttempts: 3,
-      restartBackoff: 'fixed',
       checkMethod: 'healthCheck',
       ...overrides,
     });
 
-    const restartable = (name: string, healthCheck: () => unknown) => {
+    /**
+     * A plugin that records whether it is still ALIVE — not merely whether
+     * `destroy` was called. `alive` is what an operator's `healthy` reading is
+     * supposed to be about, and it is the reading the old behaviour got wrong.
+     */
+    const observable = (name: string, healthCheck: () => unknown) => {
       const destroyed = { count: 0 };
+      const state = { alive: true };
       const plugin = {
         name,
         version: '1.0.0',
-        init: () => {},
+        init: () => {
+          state.alive = true;
+        },
         destroy: async () => {
           destroyed.count++;
+          state.alive = false;
         },
         healthCheck,
       } as unknown as Plugin;
-      return { plugin, destroyed };
+      return { plugin, destroyed, state };
     };
 
     beforeEach(() => {
@@ -301,38 +304,137 @@ describe('PluginHealthMonitor', () => {
       vi.useRealTimers();
     });
 
-    it('restarts a plugin whose check THROWS, once failureThreshold accumulates', async () => {
-      const config = restartConfig();
-      const { plugin, destroyed } = restartable('throwing-plugin', async () => {
+    // ⭐ The terminal-state pin. Not "init is called" — that is green the
+    // moment someone adds a no-op `init`. This asserts what an operator READS
+    // at the end of the sequence, and the invariant behind it: a plugin that
+    // reads `healthy` is a plugin that is alive.
+    //
+    // The sequence is the one that used to produce the false report: drive a
+    // plugin past `failureThreshold` (the point the retired `autoRestart`
+    // fired), wait out the former restart backoff, then feed it
+    // `successThreshold` CONSECUTIVE passing rounds — the #11955 gate — and
+    // read the status an operator would read.
+    //
+    // Before #12032 this same drive ended at:
+    //   after backoff:    status=recovering destroyed=1 alive=false
+    //   recovery round 3: status=healthy    destroyed=1 alive=false
+    it('never reports `healthy` for a plugin it has torn down', async () => {
+      const config = failingConfig({ failureThreshold: 1, successThreshold: 3 });
+      const mode = { current: 'throw' as 'throw' | 'pass' };
+      const { plugin, destroyed, state } = observable('observed-plugin', async () => {
+        if (mode.current === 'throw') throw new Error('check exploded');
+        return true;
+      });
+
+      monitor.registerPlugin('observed-plugin', config);
+      monitor.startMonitoring('observed-plugin', plugin);
+
+      // The failing round that used to trigger the "restart".
+      await vi.advanceTimersByTimeAsync(0);
+      expect(monitor.getHealthStatus('observed-plugin')).toBe('failed');
+      expect(destroyed.count).toBe(0);
+      expect(state.alive).toBe(true);
+
+      // The window the destroy used to land in.
+      await vi.advanceTimersByTimeAsync(FORMER_RESTART_BACKOFF_MS);
+      expect(destroyed.count, 'the monitor must not tear the plugin down').toBe(0);
+      expect(monitor.getHealthStatus('observed-plugin')).toBe('failed');
+
+      // `successThreshold` consecutive successes — the walk that used to end
+      // at `healthy` on a destroyed instance.
+      mode.current = 'pass';
+      for (let round = 1; round <= config.successThreshold; round++) {
+        await vi.advanceTimersByTimeAsync(INTERVAL_MS);
+        await vi.advanceTimersByTimeAsync(0);
+        // THE INVARIANT, checked at every step and not only at the end: a
+        // `healthy` reading is only ever about a plugin that is alive.
+        if (monitor.getHealthStatus('observed-plugin') === 'healthy') {
+          expect(state.alive, '`healthy` was reported for a destroyed plugin').toBe(true);
+        }
+      }
+
+      expect(monitor.getHealthStatus('observed-plugin')).toBe('healthy');
+      expect(state.alive, 'the plugin that reads healthy must actually be alive').toBe(true);
+      expect(destroyed.count).toBe(0);
+
+      monitor.stopMonitoring('observed-plugin');
+    });
+
+    // ⭐⭐ The same contract with NOTHING else in the way. The pin above walks
+    // the sequence and checks each step, which means an ablation trips one of
+    // its early assertions first; this one asserts only what an operator reads
+    // at the END, so the assertion that fails IS the contract:
+    //
+    //   "a plugin reported `healthy` is a plugin that is alive."
+    //
+    // Deliberately NOT "`init` was called" — that pin goes green the moment
+    // somebody adds a no-op `init`, while this one cannot: it reads the
+    // plugin's own liveness, which only a real re-initialisation restores.
+    it('a plugin reported `healthy` is a plugin that is alive', async () => {
+      const config = failingConfig({ failureThreshold: 1, successThreshold: 3 });
+      const mode = { current: 'throw' as 'throw' | 'pass' };
+      const { plugin, state } = observable('terminal-state-plugin', async () => {
+        if (mode.current === 'throw') throw new Error('check exploded');
+        return true;
+      });
+
+      monitor.registerPlugin('terminal-state-plugin', config);
+      monitor.startMonitoring('terminal-state-plugin', plugin);
+
+      // The failing round, the window the destroy used to land in, then
+      // `successThreshold` consecutive passes. No assertions in between.
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(FORMER_RESTART_BACKOFF_MS);
+      mode.current = 'pass';
+      for (let round = 1; round <= config.successThreshold; round++) {
+        await vi.advanceTimersByTimeAsync(INTERVAL_MS);
+        await vi.advanceTimersByTimeAsync(0);
+      }
+
+      expect(monitor.getHealthStatus('terminal-state-plugin')).toBe('healthy');
+      expect(
+        state.alive,
+        'the monitor reported `healthy` for a plugin that had been destroyed'
+      ).toBe(true);
+
+      monitor.stopMonitoring('terminal-state-plugin');
+    });
+
+    it('leaves a plugin whose check THROWS alone, however many rounds fail', async () => {
+      // Was: 'restarts a plugin whose check THROWS, once failureThreshold
+      // accumulates', asserting destroyed.count === 1 and `recovering`.
+      const config = failingConfig();
+      const { plugin, destroyed, state } = observable('throwing-plugin', async () => {
         throw new Error('check exploded');
       });
 
       monitor.registerPlugin('throwing-plugin', config);
       monitor.startMonitoring('throwing-plugin', plugin);
 
-      // Round 1 (the immediate initial check) is below `failureThreshold`.
       await vi.advanceTimersByTimeAsync(0);
       expect(monitor.getHealthStatus('throwing-plugin')).toBe('failed');
-      expect(destroyed.count).toBe(0);
 
-      // Round 2 reaches the threshold and arms the restart's backoff.
+      // Past `failureThreshold`, and past the former backoff window, twice
+      // over: the retired path would have destroyed by now and moved the
+      // status to `recovering`.
       await vi.advanceTimersByTimeAsync(config.interval);
-      await vi.advanceTimersByTimeAsync(0);
-      // Not yet: the restart waits out `restartBackoff` first. Without this the
-      // reading below could be "restarted eventually" rather than "restarted".
-      expect(destroyed.count).toBe(0);
+      await vi.advanceTimersByTimeAsync(FORMER_RESTART_BACKOFF_MS);
+      await vi.advanceTimersByTimeAsync(config.interval);
+      await vi.advanceTimersByTimeAsync(FORMER_RESTART_BACKOFF_MS);
 
-      await vi.advanceTimersByTimeAsync(FIRST_RESTART_BACKOFF_MS);
-      expect(destroyed.count).toBe(1);
-      expect(monitor.getHealthStatus('throwing-plugin')).toBe('recovering');
+      expect(destroyed.count).toBe(0);
+      expect(state.alive).toBe(true);
+      expect(monitor.getHealthStatus('throwing-plugin')).toBe('failed');
 
       monitor.stopMonitoring('throwing-plugin');
     });
 
-    it('restarts a plugin whose check exceeds `timeout` — the severest route', async () => {
-      const config = restartConfig();
-      // Never settles: the timeout guard is what ends every round.
-      const { plugin, destroyed } = restartable(
+    it('leaves a plugin that exceeds `timeout` alone — and still reports the timeout', async () => {
+      // Was: 'restarts a plugin whose check exceeds `timeout` — the severest
+      // route'. The REPORT half of that test is kept verbatim: a timed-out
+      // round is still reported as the timeout it was.
+      const config = failingConfig();
+      const { plugin, destroyed, state } = observable(
         'hanging-plugin',
         () => new Promise(() => {})
       );
@@ -340,22 +442,16 @@ describe('PluginHealthMonitor', () => {
       monitor.registerPlugin('hanging-plugin', config);
       monitor.startMonitoring('hanging-plugin', plugin);
 
-      // Round 1's guard rejects at +timeout. Below threshold: no restart.
       await vi.advanceTimersByTimeAsync(config.timeout);
       expect(monitor.getHealthStatus('hanging-plugin')).toBe('failed');
-      expect(destroyed.count).toBe(0);
 
-      // Round 2 begins at +interval and its own guard rejects at +timeout.
       await vi.advanceTimersByTimeAsync(config.interval - config.timeout);
       await vi.advanceTimersByTimeAsync(config.timeout);
+      await vi.advanceTimersByTimeAsync(FORMER_RESTART_BACKOFF_MS);
+
       expect(destroyed.count).toBe(0);
+      expect(state.alive).toBe(true);
 
-      await vi.advanceTimersByTimeAsync(FIRST_RESTART_BACKOFF_MS);
-      expect(destroyed.count).toBe(1);
-      expect(monitor.getHealthStatus('hanging-plugin')).toBe('recovering');
-
-      // The round is still reported as the timeout it was — restarting it does
-      // not relabel why it failed.
       const report = monitor.getHealthReport('hanging-plugin');
       expect(report?.message).toBe(`Health check timeout after ${config.timeout}ms`);
       expect(report?.checks).toEqual([
@@ -365,58 +461,35 @@ describe('PluginHealthMonitor', () => {
       monitor.stopMonitoring('hanging-plugin');
     });
 
-    it('still restarts a plugin whose check RETURNS a failure', async () => {
-      // The route that already worked. Without this pin, unifying the two
-      // routes could close the throw gap by opening one here instead.
-      const config = restartConfig();
-      const { plugin, destroyed } = restartable('unhealthy-plugin', async () => false);
+    it('leaves a plugin whose check RETURNS a failure alone', async () => {
+      // Was: 'still restarts a plugin whose check RETURNS a failure'.
+      const config = failingConfig();
+      const { plugin, destroyed, state } = observable('unhealthy-plugin', async () => false);
 
       monitor.registerPlugin('unhealthy-plugin', config);
       monitor.startMonitoring('unhealthy-plugin', plugin);
 
       await vi.advanceTimersByTimeAsync(0);
       expect(monitor.getHealthStatus('unhealthy-plugin')).toBe('degraded');
-      expect(destroyed.count).toBe(0);
 
       await vi.advanceTimersByTimeAsync(config.interval);
-      await vi.advanceTimersByTimeAsync(FIRST_RESTART_BACKOFF_MS);
-      expect(destroyed.count).toBe(1);
-      expect(monitor.getHealthStatus('unhealthy-plugin')).toBe('recovering');
+      await vi.advanceTimersByTimeAsync(FORMER_RESTART_BACKOFF_MS);
+
+      expect(monitor.getHealthStatus('unhealthy-plugin')).toBe('unhealthy');
+      expect(destroyed.count).toBe(0);
+      expect(state.alive).toBe(true);
 
       monitor.stopMonitoring('unhealthy-plugin');
     });
 
-    it('leaves a throwing plugin alone when `autoRestart` is false', async () => {
-      // The control. Without it, the pins above would also pass if every
-      // failure restarted unconditionally — which would be a different defect,
-      // not a fix.
-      const config = restartConfig({ autoRestart: false });
-      const { plugin, destroyed } = restartable('opted-out-plugin', async () => {
-        throw new Error('check exploded');
-      });
-
-      monitor.registerPlugin('opted-out-plugin', config);
-      monitor.startMonitoring('opted-out-plugin', plugin);
-
-      await vi.advanceTimersByTimeAsync(0);
-      await vi.advanceTimersByTimeAsync(config.interval);
-      await vi.advanceTimersByTimeAsync(FIRST_RESTART_BACKOFF_MS);
-
-      expect(destroyed.count).toBe(0);
-      expect(monitor.getHealthStatus('opted-out-plugin')).toBe('failed');
-
-      monitor.stopMonitoring('opted-out-plugin');
-    });
-
     it('keeps a throw at `failed` immediately, with no threshold', async () => {
-      // The documented rule this fix deliberately does NOT unify away:
-      // "A check that throws — including one that exceeds `timeout` — is the
-      // separate `failed` status, applied immediately with no threshold"
+      // Unchanged from #11852 except for the retired config keys. The
+      // documented rule this must not unify away: "A check that throws —
+      // including one that exceeds `timeout` — is the separate `failed`
+      // status, applied immediately with no threshold"
       // (content/docs/protocol/kernel/lifecycle.mdx, "Custom Health Checks").
-      // Sharing the counters and the restart decision must not turn a throw
-      // into the returned route's `degraded`.
-      const config = restartConfig({ failureThreshold: 10 });
-      const { plugin, destroyed } = restartable('strict-plugin', async () => {
+      const config = failingConfig({ failureThreshold: 10 });
+      const { plugin, destroyed } = observable('strict-plugin', async () => {
         throw new Error('check exploded');
       });
 
@@ -428,6 +501,66 @@ describe('PluginHealthMonitor', () => {
       expect(destroyed.count).toBe(0);
 
       monitor.stopMonitoring('strict-plugin');
+    });
+  });
+
+  // ── #12032 — the door for the audience that does not parse ───────────────
+  //
+  // `PluginHealthCheckSchema` is not `.strict()`, so before the tombstones a
+  // leftover restart key was SILENTLY STRIPPED on the parse paths that exist.
+  // The tombstones answer the parse; `registerPlugin` answers everyone else —
+  // and everyone else is who there is, since nothing in the tree parses this
+  // schema outside its own unit test and `registerPlugin` takes the parsed
+  // shape straight from the caller's hand.
+  describe('a config still declaring a restart is REFUSED (#12032)', () => {
+    const legalConfig = (): PluginHealthCheckParsed => ({
+      interval: 30_000,
+      timeout: 5_000,
+      failureThreshold: 3,
+      successThreshold: 1,
+    });
+
+    for (const [key, value] of [
+      ['autoRestart', true],
+      ['maxRestartAttempts', 3],
+      ['restartBackoff', 'exponential'],
+    ] as const) {
+      it(`refuses \`${key}\` with an ADR-0112 envelope and the prescription`, () => {
+        const config = { ...legalConfig(), [key]: value } as PluginHealthCheckParsed;
+
+        // ADR-0112: assert the ENVELOPE, not merely that it threw. A bare
+        // `toThrow()` here would stay green against an unrelated TypeError.
+        let caught: (Error & { code?: string; status?: number }) | undefined;
+        try {
+          monitor.registerPlugin('legacy-host-plugin', config);
+        } catch (error) {
+          caught = error as Error & { code?: string; status?: number };
+        }
+
+        expect(caught, `${key} must be refused`).toBeDefined();
+        expect(caught?.code).toBe('VALIDATION_ERROR');
+        expect(caught?.status).toBe(400);
+
+        const message = caught?.message ?? '';
+        expect(message).toContain(`'${key}' was removed`);
+        expect(message).toContain('#12032');
+        expect(message).toContain('ADR-0049');
+        expect(message).toContain('Delete the key');
+        // The affordance that exists, named in place of the one that did not.
+        expect(message).toContain('getHealthStatus');
+
+        // Refused BEFORE anything was stored: a refused config must not leave
+        // a half-registered plugin behind.
+        expect(monitor.getHealthStatus('legacy-host-plugin')).toBeUndefined();
+        expect(monitor.getAllHealthStatuses().size).toBe(0);
+      });
+    }
+
+    it('accepts a config that carries none of them (anti-vacuity)', () => {
+      // The control. Without it, the three refusals above would also pass if
+      // `registerPlugin` had simply started throwing for everything.
+      monitor.registerPlugin('clean-plugin', legalConfig());
+      expect(monitor.getHealthStatus('clean-plugin')).toBe('unknown');
     });
   });
 
@@ -449,8 +582,6 @@ describe('PluginHealthMonitor', () => {
   describe('`successThreshold` binds from every status that records a failure (#11955)', () => {
     const THRESHOLD = 3;
     const INTERVAL_MS = 10_000;
-    /** `calculateBackoff(0, 'fixed')` — the delay before the first restart. */
-    const FIRST_RESTART_BACKOFF_MS = 1_000;
 
     const thresholdConfig = (
       overrides: Partial<PluginHealthCheckParsed> = {}
@@ -459,9 +590,6 @@ describe('PluginHealthMonitor', () => {
       timeout: 100,
       failureThreshold: 2,
       successThreshold: THRESHOLD,
-      autoRestart: false,
-      maxRestartAttempts: 3,
-      restartBackoff: 'fixed',
       checkMethod: 'healthCheck',
       ...overrides,
     });
@@ -575,33 +703,52 @@ describe('PluginHealthMonitor', () => {
       monitor.stopMonitoring('thrown-plugin');
     });
 
-    it('requires all three successes to leave the `recovering` a restart wrote', async () => {
-      // `recovering` reached from the restart path rather than from the
-      // success branch: `attemptRestart` writes it with both counters zeroed,
-      // so this is the status as a genuine STARTING point, not as a value the
-      // gate under test just produced.
-      const config = thresholdConfig({ failureThreshold: 1, autoRestart: true });
-      const { plugin, mode, destroyed } = switchable('restarted-plugin', 'throw');
+    it('requires all three successes to leave a `recovering` it did not just write', async () => {
+      // [#12032] REWRITTEN, declared, not a quiet edit. This test was
+      // 'requires all three successes to leave the `recovering` a restart
+      // wrote', and its whole point was to reach `recovering` from the RESTART
+      // path — `attemptRestart` wrote it with both counters zeroed — so the
+      // gate under test was reading a status it had not just produced itself.
+      // That starting point no longer exists: the restart was only a
+      // `plugin.destroy()`, and it is gone (#12032, ADR-0049). The test drove
+      // a plugin to `destroyed=1, alive=false` and then asserted it walks to
+      // `healthy`, which is precisely the false report #12032 removes.
+      //
+      // What it was PROTECTING survives and is re-pinned here without the
+      // destroy: `recovering` as an INHERITED starting state rather than one
+      // the current round wrote. A fresh monitor is seeded by driving the
+      // plugin into `recovering` and then STOPPING — the next `startMonitoring`
+      // resumes from a `recovering` the gate did not just produce, with the
+      // success counter mid-flight, which is the same reading the restart path
+      // used to supply.
+      const config = thresholdConfig({ failureThreshold: 1 });
+      const { plugin, mode, destroyed } = switchable('resumed-plugin', 'throw');
 
-      monitor.registerPlugin('restarted-plugin', config);
-      monitor.startMonitoring('restarted-plugin', plugin);
+      monitor.registerPlugin('resumed-plugin', config);
+      monitor.startMonitoring('resumed-plugin', plugin);
 
       await vi.advanceTimersByTimeAsync(0);
-      // The restart waits out `restartBackoff` before it destroys.
-      expect(destroyed.count).toBe(0);
-      await vi.advanceTimersByTimeAsync(FIRST_RESTART_BACKOFF_MS);
-      expect(destroyed.count).toBe(1);
-      expect(monitor.getHealthStatus('restarted-plugin')).toBe('recovering');
+      expect(monitor.getHealthStatus('resumed-plugin')).toBe('failed');
 
       mode.current = 'pass';
       await nextRound();
-      expect(monitor.getHealthStatus('restarted-plugin')).toBe('recovering');
-      await nextRound();
-      expect(monitor.getHealthStatus('restarted-plugin')).toBe('recovering');
-      await nextRound();
-      expect(monitor.getHealthStatus('restarted-plugin')).toBe('healthy');
+      expect(monitor.getHealthStatus('resumed-plugin')).toBe('recovering');
 
-      monitor.stopMonitoring('restarted-plugin');
+      // Suspend and resume: the status the next round reads was written by an
+      // earlier round, not by this one.
+      monitor.stopMonitoring('resumed-plugin');
+      monitor.startMonitoring('resumed-plugin', plugin);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(monitor.getHealthStatus('resumed-plugin')).toBe('recovering');
+
+      await nextRound();
+      expect(monitor.getHealthStatus('resumed-plugin')).toBe('healthy');
+
+      // And the reading the old version of this test could not make: the
+      // plugin that reached `healthy` was never torn down.
+      expect(destroyed.count).toBe(0);
+
+      monitor.stopMonitoring('resumed-plugin');
     });
 
     it('starts the count over after a throw interrupts a recovery (#11852)', async () => {

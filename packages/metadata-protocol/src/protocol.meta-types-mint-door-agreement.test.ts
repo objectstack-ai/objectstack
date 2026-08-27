@@ -57,7 +57,7 @@
 import { describe, expect, it } from 'vitest';
 // [#5619] The producer's OWN write-verb dispatch decisions, so the fake engine
 // below cannot accept a call ObjectQL itself refuses.
-import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate, type EngineFindOneQueryInput } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 
 /**
@@ -76,7 +76,8 @@ function makeProtocol() {
     const rows = new Map<string, Record<string, unknown>>();
     let nextId = 0;
     const engine: any = {
-        async findOne() { return null; },
+        async findOne(object: string, query?: EngineFindOneQueryInput) {
+                          assertEngineFindOnePredicate(object, query); return null; },
         async find() { return []; },
         async insert(table: string, data: Record<string, unknown>) {
             if (table !== 'sys_metadata') return { id: 'side_effect_skip' };

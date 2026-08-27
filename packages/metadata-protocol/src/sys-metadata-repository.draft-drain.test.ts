@@ -34,7 +34,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 // would close a dependency cycle turbo rejects outright — which is why all 26
 // of this package's (file, verb) pairs sat in the gate's DEBT ledger until
 // #5619 sank the two predicates into a package both sides already depend on.
-import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { readFileSync } from 'node:fs';
 import { SysMetadataRepository } from './sys-metadata-repository.js';
 
@@ -143,6 +143,7 @@ function makeFakeEngine() {
       });
     },
     async findOne(table: string, opts: { where: Record<string, unknown> }) {
+      assertEngineFindOnePredicate(table, opts);
       if (table === 'sys_metadata_history') {
         return historyRows.find((h) => matchesHistory(h, opts.where)) ?? null;
       }

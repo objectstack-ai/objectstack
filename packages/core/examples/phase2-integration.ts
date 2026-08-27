@@ -270,15 +270,15 @@ async function example() {
       timeout: 5000,
       failureThreshold: 3,
       successThreshold: 1,
-      autoRestart: true,
-      maxRestartAttempts: 3,
-      restartBackoff: 'exponential',
+      // [#12032] `autoRestart` / `maxRestartAttempts` / `restartBackoff`
+      // removed: the monitor never restarted anything (it called
+      // `plugin.destroy()` and reported the corpse `healthy`), so the keys
+      // were retired under ADR-0049. Act on `getHealthStatus()` in the host.
     },
 
     // Hot reload
     hotReload: {
       enabled: true,
-      watchPatterns: ['plugins/my-plugin/**/*.ts'],
       debounceDelay: 1000,
       preserveState: true,
       stateStrategy: 'memory',

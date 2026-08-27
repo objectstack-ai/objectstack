@@ -88,7 +88,14 @@ import {
   mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { createRequire } from 'node:module';
 import { dirname, join, sep } from 'node:path';
+import { parseSourceFile } from './ts-parse.mjs';
+
+// `typescript` is resolved rather than imported at module top so this gate's
+// two Markdown rules keep working in a checkout where it is absent; Rule 3 asks
+// for it at the moment it scans, and says so by name if it cannot be had.
+const requireFromHere = createRequire(import.meta.url);
 
 const ROOTS = ['.claude', 'docs', 'skills', 'content'];
 const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', 'references']);
@@ -325,6 +332,77 @@ const INTERNAL_ID_SOURCE = String.raw`(?<![#&])#[0-9]{3,5}(?![0-9A-Za-z])`;
  */
 const INTERNAL_ID = new RegExp(INTERNAL_ID_SOURCE, 'g');
 
+// ── Rule 3: bare internal issue ids in SPEC REFUSAL MESSAGES ────────────────
+//
+// The same ruling as Rule 2, inherited to a third population by the triage of
+// 2026-08-25: the customer-facing zod refusal `message:` strings in
+// `packages/spec/src/**`. Rule 2's argument transfers unchanged and is if
+// anything stronger here — a skill file is read by a customer's agent, while a
+// refusal message is printed AT the customer, verbatim, the moment their
+// metadata is rejected by `os validate` or a parse. Same audience, no tracker,
+// same citation-shaped token resolving to nothing.
+//
+// ## Why this rule needs a PARSER and the other two do not
+//
+// The card that commissioned this shipped a census command —
+// `git grep -nE "message:.*#[0-9]{3,5}" packages/spec/src` — and it found ONE
+// of the sixteen literals actually in the population. Refusal prose in this
+// tree is written as multi-line `'a ' + 'b ' + 'c'` chains, so `message:` and
+// the id it carries land on different lines and no line-oriented pattern can
+// see both. A line scan here would be the dormant gate this file's header opens
+// with: running, green, and structurally unable to reach 15/16 of its subject.
+//
+// So the scan walks the AST and climbs OUT of the concatenation to ask what
+// position the string occupies. `parseSourceFile` (scripts/ts-parse.mjs) is the
+// only sanctioned way in — `check-parse-guard` reds on a raw
+// `ts.createSourceFile` anywhere else under `scripts/**`, because a tree that
+// failed to parse is returned looking exactly like one that had nothing to
+// report.
+//
+// ## What counts as a message position
+//
+// Two spellings, both real in this tree:
+//
+//   1. a `message:` property — `ctx.addIssue({ message: … })`, a `.refine()`
+//      options object, a publish-gate rejection record;
+//   2. a POSITIONAL message argument to a zod validator —
+//      `z.string().regex(RE, 'an inline label map is keyed by …')`. One member
+//      of the founding population was spelled this way, so a property-only
+//      matcher would have under-reported by exactly the shape it was written to
+//      catch.
+//
+// ## What is deliberately NOT in scope, and why that is not a loophole
+//
+// Three ADJACENT populations under the same root carry ids in text a customer
+// also sees, measured the day this rule landed: the `strictObject` unknown-key
+// error-map options (`guidance` / `history` / `aliases` / `retiredForms`, 181
+// literals), the `retiredKey()` tombstone prescriptions (176), and `.describe()`
+// docs prose (182). Each is larger than this rule's whole population, each has
+// its own pinning tests, and — for the tombstones — AGENTS.md positively
+// requires the prescription to carry a durable reference. Folding them in here
+// would be a corpus-wide convention change riding on a card that adjudicated
+// refusal messages, which is the rider this repo files issues instead of
+// making. They are filed, and this comment is the pointer for whoever gets that
+// ruling: widening this rule means widening MESSAGE_POSITIONS below, not adding
+// an exemption. There is no exemption list here, by design, exactly as in
+// Rule 2.
+const SPEC_SOURCE_ROOT = 'packages/spec/src';
+
+/**
+ * zod validators whose trailing positional argument is a refusal message.
+ *
+ * Deliberately a closed list rather than "any string argument in position > 0":
+ * an open rule would flag `.default('draft')`, `.catch('')` and every other
+ * VALUE argument, and a gate that reports values as prose is one authors route
+ * around. Reaching for a spelling that is not here? Add it, and add a self-test
+ * case in the same edit — an unrecognised spelling produces no flag, silently.
+ */
+const POSITIONAL_MESSAGE_CALLS = new Set([
+  'refine', 'superRefine', 'check', 'regex', 'min', 'max', 'length',
+  'startsWith', 'endsWith', 'includes', 'email', 'url', 'uuid', 'int',
+  'positive', 'nonnegative', 'multipleOf', 'nonempty', 'gt', 'gte', 'lt', 'lte',
+]);
+
 const posix = (p) => p.split(sep).join('/');
 
 function walk(dir, out) {
@@ -470,6 +548,116 @@ function findIdViolations(source, file) {
     if (ids) out.push({ file: posix(file), line: i + 1, ids, text: ln.trim() });
   }
   return out;
+}
+
+/**
+ * Every non-test TypeScript source in the spec package.
+ *
+ * Test bodies are excluded on purpose and it is the one exclusion here: a test
+ * asserting "this refusal names #5869" is read only by someone who has the
+ * tracker, and the pin has to be able to quote whatever the message says. The
+ * ban follows the audience, which is the same sentence Rule 2 is scoped by.
+ *
+ * @throws {DeadRootError} the root is not a directory.
+ * @throws {EmptyRootError} the root yielded no source file — "the spec is
+ *   clean" and "the spec was never opened" are otherwise the same output and
+ *   the same exit code (#4932, one population over).
+ */
+function collectSpecSourceFiles(root = SPEC_SOURCE_ROOT) {
+  assertRootsResolvable([root]);
+  const files = [];
+  (function descend(dir) {
+    for (const e of readdirSync(dir)) {
+      if (e === 'node_modules' || e === '.git' || e === 'dist') continue;
+      const p = join(dir, e);
+      if (statSync(p).isDirectory()) descend(p);
+      else if (/\.m?ts$/.test(e) && !/\.(test|spec|bench)\.m?ts$/.test(e)) files.push(posix(p));
+    }
+  })(root);
+  if (files.length === 0) throw new EmptyRootError([root], 0);
+  return files.sort();
+}
+
+/**
+ * Does this string literal sit in a refusal-message position?
+ *
+ * Climbs OUT through `+` concatenation, parentheses, conditionals and template
+ * spans before asking — the whole reason this rule is an AST walk. Returns the
+ * position's name (for the failure text) or `undefined`.
+ */
+function messagePosition(node, ts) {
+  let cur = node;
+  // A bound, not a belief: refusal prose in this tree reaches ~14 concatenated
+  // operands, and an unbounded climb would walk to the SourceFile and start
+  // reporting whole modules as messages.
+  for (let hops = 0; cur.parent && hops < 60; hops++) {
+    const p = cur.parent;
+    if (
+      (ts.isBinaryExpression(p) && p.operatorToken.kind === ts.SyntaxKind.PlusToken)
+      || ts.isParenthesizedExpression(p)
+      || ts.isConditionalExpression(p)
+      || ts.isTemplateSpan(p)
+      || ts.isTemplateExpression(p)
+      || ts.isAsExpression(p)
+      || ts.isSatisfiesExpression(p)
+    ) { cur = p; continue; }
+
+    if (ts.isPropertyAssignment(p) && p.initializer === cur) {
+      return p.name.getText() === 'message' ? 'message:' : undefined;
+    }
+    if (ts.isCallExpression(p)) {
+      const callee = p.expression;
+      const name = ts.isPropertyAccessExpression(callee) ? callee.name.getText() : callee.getText();
+      return POSITIONAL_MESSAGE_CALLS.has(name) && p.arguments.indexOf(cur) > 0
+        ? `.${name}(…, message)`
+        : undefined;
+    }
+    if (ts.isVariableDeclaration(p) || ts.isReturnStatement(p) || ts.isArrowFunction(p)) return undefined;
+    cur = p;
+  }
+  return undefined;
+}
+
+/**
+ * Refusal messages in one spec source, and how many message strings were seen
+ * at all.
+ *
+ * The second number is not decoration. This rule's population is expected to be
+ * EMPTY in the steady state, so "no violations" is the same output as "the
+ * detector no longer recognises how messages are spelled" — the failure this
+ * whole file is a monument to. `seen` is what {@link main} asserts against, so
+ * a detector that has gone blind reds instead of congratulating itself.
+ */
+function findMessageIdViolations(source, file, ts) {
+  const out = [];
+  let seen = 0;
+  const sf = parseSourceFile(file, source);
+  const visit = (node) => {
+    if (
+      ts.isStringLiteral(node)
+      || ts.isNoSubstitutionTemplateLiteral(node)
+      || ts.isTemplateExpression(node)
+    ) {
+      const where = messagePosition(node, ts);
+      if (where) {
+        seen += 1;
+        const text = node.getText(sf);
+        const ids = text.match(INTERNAL_ID);
+        if (ids) {
+          out.push({
+            file: posix(file),
+            line: sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1,
+            ids,
+            where,
+            text: text.length > 120 ? `${text.slice(0, 120)}…` : text,
+          });
+        }
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  ts.forEachChild(sf, visit);
+  return { violations: out, seen };
 }
 
 /** Bare metadata literals inside ts/tsx fenced blocks of one file's source. */
@@ -777,6 +965,8 @@ function selfTest() {
       process.chdir(dir);
       rmSync(idDir, { recursive: true, force: true });
     }
+
+    selfTestRule3(expect);
   } finally {
     process.chdir(cwd);
     rmSync(dir, { recursive: true, force: true });
@@ -835,7 +1025,173 @@ function selfTest() {
     console.error(`\n✗ check-doc-authoring self-test failed:\n${failures.join('\n')}\n`);
     process.exit(1);
   }
-  console.log('✓ check-doc-authoring self-test: scope wiring (.claude and the live docs/ corpus in, .claude/worktrees and docs/{audits,handoff,plans} out), detection, the dead-root hard error (red when a ROOT is renamed, green when restored), the empty-scan hard error (red when a root yields nothing and when the whole scan does, green when restored), the published-catalog internal-id rule (red on a planted id in prose, in a fenced comment and in the repo#NNNN spelling, green when removed; hex colours, version numbers, HTTP codes, array indices and the "#1" ordinal all pass; references/ reached, generated artifacts and the internal roots out; the `#<n>` placeholder passes while the concrete ids it replaced stay red, with no exemption to reach for) and the dispatch-gates declaration (every separator-less ROOT declared as a subtree, nothing declared this gate does not walk, the over-claim bounded to SKIP_PATHS) all hold.');
+  console.log('✓ check-doc-authoring self-test: scope wiring (.claude and the live docs/ corpus in, .claude/worktrees and docs/{audits,handoff,plans} out), detection, the dead-root hard error (red when a ROOT is renamed, green when restored), the empty-scan hard error (red when a root yields nothing and when the whole scan does, green when restored), the published-catalog internal-id rule (red on a planted id in prose, in a fenced comment and in the repo#NNNN spelling, green when removed; hex colours, version numbers, HTTP codes, array indices and the "#1" ordinal all pass; references/ reached, generated artifacts and the internal roots out; the `#<n>` placeholder passes while the concrete ids it replaced stay red, with no exemption to reach for), the spec refusal-message internal-id rule (red on an id planted on a LATER line of a concatenated message — the shape a line-oriented census cannot see, proven here — and in a template chain, a positional validator message and the repo#NNNN spelling; green when removed; a `.default()` VALUE and a `.describe()` do not fire; test bodies out, and a tree with no recognised message string reports seen=0 so a blinded detector reds instead of passing) and the dispatch-gates declaration (every separator-less ROOT declared as a subtree, nothing declared this gate does not walk, the over-claim bounded to SKIP_PATHS) all hold.');
+}
+
+/**
+ * Rule 3's red/green battery, over a real temporary `packages/spec/src` tree.
+ *
+ * Same discipline as Rule 2's: green on a clean tree proves nothing on its own,
+ * because a rule that CANNOT fire looks identical. Every claim below is a pair —
+ * plant the id, require red; remove it, require green — and the multi-line
+ * concatenation case is first because it is the one the commissioning card's
+ * own census command could not see.
+ */
+function selfTestRule3(expect) {
+  const ts = requireFromHere('typescript');
+  const cwd = process.cwd();
+  const dir = mkdtempSync(join(tmpdir(), 'doc-authoring-selftest-msg-'));
+  try {
+    const write = (rel, body) => {
+      const full = join(dir, ...rel.split('/'));
+      mkdirSync(dirname(full), { recursive: true });
+      writeFileSync(full, body);
+      return full;
+    };
+    const CLEAN = [
+      "import { z } from 'zod';",
+      'export const S = z.object({ a: z.string() }).refine((v) => !!v.a, {',
+      "  message: 'a is required — declare it or drop the block.',",
+      '});',
+    ].join('\n');
+    // A test body carrying an id: in the tree, out of the population.
+    write('packages/spec/src/ui/pin.test.ts',
+      "expect(issue.message).toContain('400 INVALID_FILTER, #5869');");
+    // A TSDoc / `.describe()` id: a different population, deliberately untouched
+    // by this rule. If it ever fires here, the scope has silently widened.
+    write('packages/spec/src/data/doc.ts', [
+      "import { z } from 'zod';",
+      '/** Removed in protocol 17 (#4286). */',
+      "export const D = z.string().describe('A machine name (#4286).');",
+    ].join('\n'));
+    const target = write('packages/spec/src/ui/action.zod.ts', CLEAN);
+
+    const scan = () => {
+      let out = [];
+      let seen = 0;
+      for (const f of collectSpecSourceFiles()) {
+        const r = findMessageIdViolations(readFileSync(f, 'utf8'), f, ts);
+        out = out.concat(r.violations);
+        seen += r.seen;
+      }
+      return { violations: out, seen };
+    };
+
+    process.chdir(dir);
+
+    // GREEN, and the detector is demonstrably NOT blind: it saw the clean
+    // message. Reporting both numbers is the point — "0 violations" and "0
+    // messages found" are the same line to a reader who only checks the first.
+    let r = scan();
+    expect('a clean spec tree is green', r.violations.length, 0);
+    expect('the detector actually recognised a message string', r.seen >= 1, true);
+
+    // Scope, both directions, before any red: a test body is out and a
+    // `.describe()` is out — each is satisfied by a wrong scope in the other
+    // direction if asserted alone.
+    const scanned = collectSpecSourceFiles();
+    expect('test bodies are not scanned', scanned.includes('packages/spec/src/ui/pin.test.ts'), false);
+    expect('ordinary sources are scanned', scanned.includes('packages/spec/src/data/doc.ts'), true);
+    expect('a `.describe()` id is NOT this rule\'s population',
+      r.violations.some((v) => v.file === 'packages/spec/src/data/doc.ts'), false);
+
+    // RED #1 — the founding shape: `message:` and the id on DIFFERENT lines of a
+    // `+` chain. This is what `git grep "message:.*#[0-9]{3,5}"` cannot see, and
+    // the whole reason this rule parses instead of scanning lines.
+    writeFileSync(target, [
+      "import { z } from 'zod';",
+      'export const S = z.object({ a: z.string() }).refine((v) => !!v.a, {',
+      '  message:',
+      "    'This pair declares two destinations for one success, so the doubled '",
+      "    + 'declaration is refused at authoring time (#11519). Keep `onSuccess`.',",
+      '});',
+    ].join('\n'));
+    r = scan();
+    expect('an id on a later line of a concatenated message is RED', r.violations.length, 1);
+    expect('the red names the file', r.violations[0]?.file, 'packages/spec/src/ui/action.zod.ts');
+    expect('the red names the id', r.violations[0]?.ids?.join(','), '#11519');
+    expect('the red names the position', r.violations[0]?.where, 'message:');
+    // ...and the single-line grep the card shipped really cannot: proven here so
+    // the claim in this file's header is a measurement, not a recollection.
+    expect('the line-oriented census command misses it',
+      /message:.*#[0-9]{3,5}/.test(readFileSync(target, 'utf8')), false);
+
+    // RED #2 — a template literal, the other half of the real population.
+    writeFileSync(target, [
+      "import { z } from 'zod';",
+      'export const S = z.object({ a: z.string() }).superRefine((v, ctx) => {',
+      '  ctx.addIssue({',
+      "    code: 'custom',",
+      '    message:',
+      '      `Operator "${v.a}" needs an ARRAY. `',
+      '      + `The query path refuses it too (400 INVALID_FILTER, #5869).`,',
+      '  });',
+      '});',
+    ].join('\n'));
+    r = scan();
+    expect('an id in a concatenated TEMPLATE message is RED', r.violations.length, 1);
+    expect('the template red names the id', r.violations[0]?.ids?.join(','), '#5869');
+
+    // RED #3 — the POSITIONAL spelling. One member of the founding population
+    // was written this way, so a `message:`-only matcher under-reports by
+    // exactly the shape it exists to catch.
+    writeFileSync(target, [
+      "import { z } from 'zod';",
+      'export const S = z.record(z.string().regex(',
+      '  /^[a-z]+$/,',
+      "  'keyed by BCP-47 locale tags — never by `key`, the retired form (#5055)',",
+      '), z.string());',
+    ].join('\n'));
+    r = scan();
+    expect('an id in a positional validator message is RED', r.violations.length, 1);
+    expect('the positional red names the position', r.violations[0]?.where, '.regex(…, message)');
+
+    // RED #4 — the cross-repo spelling, which really occurs in this population
+    // (`objectui#5933`, `cloud#687`).
+    writeFileSync(target, [
+      "import { z } from 'zod';",
+      'export const S = z.object({ a: z.string() }).refine((v) => !!v.a, {',
+      "  message: 'under the interim precedence (objectui#5933) the declared hop wins.',",
+      '});',
+    ].join('\n'));
+    r = scan();
+    expect('the `repo#NNNN` spelling is RED here too', r.violations.length, 1);
+
+    // Precision — a validator's VALUE argument is not prose. `.min(3, …)` takes
+    // a message; `.default('#4286')` does not, and an open "any string after
+    // position 0" rule would report it.
+    writeFileSync(target, [
+      "import { z } from 'zod';",
+      "export const S = z.object({ a: z.string().default('#4286') });",
+    ].join('\n'));
+    expect('precision — a `.default()` VALUE is not a message', scan().violations.length, 0);
+
+    // GREEN again from the same scan, so every red above was the id and nothing
+    // else about the tree.
+    writeFileSync(target, CLEAN);
+    r = scan();
+    expect('stripping the id makes it green again', r.violations.length, 0);
+    expect('and the detector is still not blind', r.seen >= 1, true);
+
+    // The blindness assertion itself must be able to fire: a tree whose only
+    // sources declare no message at all is `seen === 0`, which main() reds on.
+    writeFileSync(target, "export const S = 1;\n");
+    write('packages/spec/src/data/doc.ts', "export const D = 2;\n");
+    write('packages/spec/src/ui/pin.test.ts', "export const T = 3;\n");
+    expect('a tree with no recognised message string reports seen=0 (main reds on it)',
+      scan().seen, 0);
+
+    // Empty is a hard error, not a pass — same discipline as the other two rules.
+    rmSync(join(dir, 'packages', 'spec', 'src'), { recursive: true, force: true });
+    mkdirSync(join(dir, 'packages', 'spec', 'src'), { recursive: true });
+    let emptyErr = null;
+    try { collectSpecSourceFiles(); } catch (err) { emptyErr = err; }
+    expect('an empty spec source root is red, not "0 files clean"',
+      emptyErr instanceof EmptyRootError, true);
+  } finally {
+    process.chdir(cwd);
+    rmSync(dir, { recursive: true, force: true });
+  }
 }
 
 function main() {
@@ -894,6 +1250,27 @@ function main() {
   }
   const idViolations = published.flatMap((file) => findIdViolations(readFileSync(file, 'utf8'), file));
 
+  const ts = requireFromHere('typescript');
+  let specSources;
+  try {
+    specSources = collectSpecSourceFiles();
+  } catch (err) {
+    console.error(
+      `\n✗ doc authoring guard: the spec source root (${SPEC_SOURCE_ROOT}/) could not be`
+      + `\nscanned for internal issue-id references in refusal messages, so this run cannot`
+      + `\nvouch for it:\n\n  ${err.message}\n`,
+    );
+    process.exit(1);
+    return;
+  }
+  const messageIdViolations = [];
+  let messageStringsSeen = 0;
+  for (const file of specSources) {
+    const r = findMessageIdViolations(readFileSync(file, 'utf8'), file, ts);
+    messageIdViolations.push(...r.violations);
+    messageStringsSeen += r.seen;
+  }
+
   let failed = false;
 
   if (violations.length > 0) {
@@ -933,10 +1310,54 @@ function main() {
     );
   }
 
+  if (messageStringsSeen === 0) {
+    failed = true;
+    console.error(
+      `\n✗ doc authoring guard: ${specSources.length} spec source(s) were parsed and NOT ONE`
+      + `\nrefusal-message string was recognised, so "no violations" below would be a verdict on`
+      + `\na population this run never located.`
+      + `\n\nThat is the dormant-gate shape, not a clean tree: the spec really does declare`
+      + `\nrefusal prose, so a zero here means the DETECTOR stopped matching how it is spelled —`
+      + `\nan options-object key renamed away from \`message\`, a new validator helper, a wrapper`
+      + `\nthat builds the string somewhere \`messagePosition()\` does not climb to.`
+      + `\n\nFix \`messagePosition()\` / POSITIONAL_MESSAGE_CALLS in scripts/check-doc-authoring.mjs`
+      + `\nand add the new spelling to --self-test in the same edit. Do NOT delete this assertion:`
+      + `\nit is the only thing standing between this rule and a permanent green.\n`,
+    );
+  }
+
+  if (messageIdViolations.length > 0) {
+    failed = true;
+    console.error(`\n✗ Internal issue-id reference(s) in CUSTOMER-FACING spec refusal messages:\n`);
+    for (const v of messageIdViolations) {
+      console.error(`  ${v.file}:${v.line}  ${v.ids.join(' ')}  [${v.where}]`);
+      console.error(`    ${v.text}`);
+    }
+    console.error(
+      `\n${messageIdViolations.length} message string(s). These are printed AT the customer, verbatim,`
+      + `\nthe moment their metadata is refused — by \`os validate\`, by a publish gate, by a parse.`
+      + `\nThat reader has no tracker, no \`git log\` and no ADRs, so \`#NNNN\` is a citation-shaped`
+      + `\ntoken resolving to nothing in the one place they most need the sentence to be actionable.`
+      + `\n\nStrip the id from the string. Where the reference is genuinely load-bearing for an`
+      + `\nINTERNAL reader, move it to an adjacent \`//\` comment; otherwise just remove it — git`
+      + `\nhistory keeps the anchor. Prefer a customer-resolvable anchor where one exists: an ADR`
+      + `\nnumber, a protocol version, an error code (\`400 INVALID_FILTER\` traces the runtime twin`
+      + `\nfar better than the id that used to ride beside it).`
+      + `\n\nA test twin pinning the old wording moves WITH the string — keep it pinning the new`
+      + `\ntext, and add the negative pin (the message must not match an issue id).`
+      + `\n\nThere is no per-message exemption to reach for, by design.`
+      + `\n\nMaintainer ruling 2026-08-12, verbatim: 「处理 issue 时犯的错应该总结成经验,保留 issue id没有意义」\n`,
+    );
+  }
+
   if (failed) process.exit(1);
 
   console.log(`✓ doc authoring guard: ${files.length} files clean — no bare metadata literals.`);
   console.log(`✓ doc authoring guard: ${published.length} published skill files clean — no internal issue-id references.`);
+  console.log(
+    `✓ doc authoring guard: ${messageStringsSeen} refusal-message string(s) across `
+    + `${specSources.length} spec sources clean — no internal issue-id references.`,
+  );
 }
 
 main();

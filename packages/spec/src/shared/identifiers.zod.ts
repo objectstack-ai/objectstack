@@ -31,6 +31,20 @@ import { z } from 'zod';
  * | Machine ID | snake_case | `crm_account`, `btn_submit`, `role_admin` |
  * | Event keys | dot.notation | `user.login`, `order.created` |
  * | Labels | Any case | `Client Account`, `Submit Form` |
+ *
+ * **Length ceiling — storage-owned, deliberately not declared here (#12144).**
+ * The identifier schemas in this file declare a floor and a grammar but no
+ * `.max()`: the enforced ceiling on an identifier is the `maxLength` of the
+ * column that stores it (refused at the write seam by ObjectQL's record
+ * validator), and the storing columns disagree — the config-object name
+ * columns (`sys_permission_set.name`, `sys_position.name`,
+ * `sys_capability.name`) enforce 100 while `sys_metadata.name` enforces 255 —
+ * so no single `.max()` here can equal every consumer's enforced ceiling.
+ * Do not add one unless every consuming column agrees on one width: a
+ * `.max()` below the widest storing column refuses names that are legal
+ * stored rows today. The schema↔column link is pinned in
+ * `@objectstack/plugin-security`'s `identifier-storage-ceiling-pin.test.ts`,
+ * which reads the column widths off the registration surface.
  * 
  * @example Valid identifiers
  * - 'account'
@@ -69,6 +83,10 @@ export const SystemIdentifierSchema = lazySchema(() => z
  * @example Invalid
  * - 'user.profile' (dots not allowed)
  * - 'UserProfile' (uppercase)
+ *
+ * No `.max()` is declared, deliberately — identifier length ceilings are
+ * storage-owned and the storing columns disagree; see the length-ceiling note
+ * on {@link SystemIdentifierSchema} and issue #12144.
  */
 export const SnakeCaseIdentifierSchema = lazySchema(() => z
   .string()
@@ -170,6 +188,12 @@ export const MetadataItemNameSchema = lazySchema(() => z
  * @example Invalid
  * - 'UserCreated' (camelCase)
  * - 'user_created' (should use dots for namespacing)
+ *
+ * No `.max()` is declared, deliberately — identifier length ceilings are
+ * storage-owned; see the length-ceiling note on
+ * {@link SystemIdentifierSchema} and issue #12144. (No bounded storage column
+ * among #12144's measured set stores an event name, so no ceiling has been
+ * measured for this schema at all.)
  */
 export const EventNameSchema = lazySchema(() => z
   .string()

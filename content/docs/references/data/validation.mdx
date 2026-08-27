@@ -5,12 +5,12 @@ description: Validation protocol schemas
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
 
-# ObjectStack Validation Protocol
+## ObjectStack Validation Protocol
 
 This module defines the validation schema protocol for ObjectStack, providing a comprehensive
 type-safe validation system similar to Salesforce's validation rules but with enhanced capabilities.
 
-## Overview
+### Overview
 
 Validation rules are applied at the data layer to ensure data integrity and enforce business logic.
 A validation rule is a **deterministic, synchronous, side-effect-free predicate over a single
@@ -30,7 +30,7 @@ The system supports these validation types:
 5. **JSON Schema Validation**: Validate a JSON field against a JSON Schema
 6. **Conditional Validation**: Apply a nested rule based on a CEL condition
 
-## Deliberately NOT validation rules
+### Deliberately NOT validation rules
 
 These were once declared here but never enforced. Because the contract above rules them out
 (they need I/O or are client-side concerns), they were removed rather than left as silent
@@ -51,7 +51,7 @@ no-ops. Use the layer that already does each one correctly:
   a `delete` event was a proven silent no-op — the enum value was removed rather than left
   advertised-but-unenforced (#3184; see docs/audits/2026-06-validationschema-property-liveness.md).
 
-## Salesforce Comparison
+### Salesforce Comparison
 
 ObjectStack validation rules are inspired by Salesforce validation rules but enhanced:
 - Salesforce: Formula-based validation with `Error Condition Formula`
@@ -117,6 +117,248 @@ const result = ConditionalValidationSchema.parse(data);
 | **when** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | ✅ | Predicate (CEL). e.g. P`record.type == 'enterprise'` |
 | **then** | `{ name: string; label?: string; description?: string; active?: boolean; … } \| [ConditionalValidation](#conditionalvalidation) \| … +4 more` | ✅ | Validation rule to apply when condition is true |
 | **otherwise** | `{ name: string; label?: string; description?: string; active?: boolean; … } \| [ConditionalValidation](#conditionalvalidation) \| … +4 more` | optional | Validation rule to apply when condition is false |
+
+### Nested Shape: `ConditionalValidation.then[type='script']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Unique rule name (snake_case) |
+| **label** | `string` | optional | Human-readable label for the rule listing |
+| **description** | `string` | optional | Administrative notes explaining the business reason |
+| **active** | `boolean` | optional (default: `true`) |  |
+| **events** | `Enum<'insert' \| 'update'>[]` | optional (default: `["insert","update"]`) | Write contexts the rule runs on. `delete` is intentionally absent — the evaluator only runs on the insert/update write path; guard deletions with a `beforeDelete` lifecycle hook |
+| **priority** | `integer` | optional (default: `100`) | Execution priority (lower runs first, default: 100) |
+| **tags** | `string[]` | optional | Categorization tags (e.g., "compliance", "billing") |
+| **severity** | `Enum<'error' \| 'warning' \| 'info'>` | optional (default: `"error"`) |  |
+| **message** | `string` | ✅ | Error message to display to the user |
+| **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
+| **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
+| **_lockSource** | `Enum<'artifact' \| 'package' \| 'env-forced'>` | optional | Layer that set _lock (artifact \| package \| env-forced). |
+| **_provenance** | `Enum<'package' \| 'org' \| 'env-forced'>` | optional | Origin of the item (package \| org \| env-forced). |
+| **_packageId** | `string` | optional | Owning package machine id. |
+| **_packageVersion** | `string` | optional | Owning package version. |
+| **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
+| **type** | `'script'` | ✅ |  |
+| **condition** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | ✅ | Predicate (CEL). If TRUE, validation fails. e.g. P`record.amount < 0` |
+
+### Nested Shape: `ConditionalValidation.then[type='state_machine']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Unique rule name (snake_case) |
+| **label** | `string` | optional | Human-readable label for the rule listing |
+| **description** | `string` | optional | Administrative notes explaining the business reason |
+| **active** | `boolean` | optional (default: `true`) |  |
+| **events** | `Enum<'insert' \| 'update'>[]` | optional (default: `["insert","update"]`) | Write contexts the rule runs on. `delete` is intentionally absent — the evaluator only runs on the insert/update write path; guard deletions with a `beforeDelete` lifecycle hook |
+| **priority** | `integer` | optional (default: `100`) | Execution priority (lower runs first, default: 100) |
+| **tags** | `string[]` | optional | Categorization tags (e.g., "compliance", "billing") |
+| **severity** | `Enum<'error' \| 'warning' \| 'info'>` | optional (default: `"error"`) |  |
+| **message** | `string` | ✅ | Error message to display to the user |
+| **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
+| **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
+| **_lockSource** | `Enum<'artifact' \| 'package' \| 'env-forced'>` | optional | Layer that set _lock (artifact \| package \| env-forced). |
+| **_provenance** | `Enum<'package' \| 'org' \| 'env-forced'>` | optional | Origin of the item (package \| org \| env-forced). |
+| **_packageId** | `string` | optional | Owning package machine id. |
+| **_packageVersion** | `string` | optional | Owning package version. |
+| **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
+| **type** | `'state_machine'` | ✅ |  |
+| **field** | `string` | ✅ | State field (e.g. status) |
+| **transitions** | `Record<string, string[]>` | ✅ | Map of `{ OldState: [AllowedNewStates] }` |
+| **initialStates** | `string[]` | optional | States a record may be CREATED in. When set, an INSERT whose state field carries a value outside this list is rejected (server-enforced) — the FSM entry point. `transitions` only governs UPDATE, and a `select` field permits ANY declared option as an initial value, so without this a record could be born mid-flow (e.g. created already `approved`). Omit to keep the legacy behavior (no initial-state check on insert). #3165. |
+
+### Nested Shape: `ConditionalValidation.then[type='format']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Unique rule name (snake_case) |
+| **label** | `string` | optional | Human-readable label for the rule listing |
+| **description** | `string` | optional | Administrative notes explaining the business reason |
+| **active** | `boolean` | optional (default: `true`) |  |
+| **events** | `Enum<'insert' \| 'update'>[]` | optional (default: `["insert","update"]`) | Write contexts the rule runs on. `delete` is intentionally absent — the evaluator only runs on the insert/update write path; guard deletions with a `beforeDelete` lifecycle hook |
+| **priority** | `integer` | optional (default: `100`) | Execution priority (lower runs first, default: 100) |
+| **tags** | `string[]` | optional | Categorization tags (e.g., "compliance", "billing") |
+| **severity** | `Enum<'error' \| 'warning' \| 'info'>` | optional (default: `"error"`) |  |
+| **message** | `string` | ✅ | Error message to display to the user |
+| **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
+| **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
+| **_lockSource** | `Enum<'artifact' \| 'package' \| 'env-forced'>` | optional | Layer that set _lock (artifact \| package \| env-forced). |
+| **_provenance** | `Enum<'package' \| 'org' \| 'env-forced'>` | optional | Origin of the item (package \| org \| env-forced). |
+| **_packageId** | `string` | optional | Owning package machine id. |
+| **_packageVersion** | `string` | optional | Owning package version. |
+| **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
+| **type** | `'format'` | ✅ |  |
+| **field** | `string` | ✅ |  |
+| **regex** | `string` | optional |  |
+| **format** | `Enum<'email' \| 'url' \| 'phone' \| 'json'>` | optional |  |
+
+### Nested Shape: `ConditionalValidation.then[type='cross_field']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Unique rule name (snake_case) |
+| **label** | `string` | optional | Human-readable label for the rule listing |
+| **description** | `string` | optional | Administrative notes explaining the business reason |
+| **active** | `boolean` | optional (default: `true`) |  |
+| **events** | `Enum<'insert' \| 'update'>[]` | optional (default: `["insert","update"]`) | Write contexts the rule runs on. `delete` is intentionally absent — the evaluator only runs on the insert/update write path; guard deletions with a `beforeDelete` lifecycle hook |
+| **priority** | `integer` | optional (default: `100`) | Execution priority (lower runs first, default: 100) |
+| **tags** | `string[]` | optional | Categorization tags (e.g., "compliance", "billing") |
+| **severity** | `Enum<'error' \| 'warning' \| 'info'>` | optional (default: `"error"`) |  |
+| **message** | `string` | ✅ | Error message to display to the user |
+| **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
+| **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
+| **_lockSource** | `Enum<'artifact' \| 'package' \| 'env-forced'>` | optional | Layer that set _lock (artifact \| package \| env-forced). |
+| **_provenance** | `Enum<'package' \| 'org' \| 'env-forced'>` | optional | Origin of the item (package \| org \| env-forced). |
+| **_packageId** | `string` | optional | Owning package machine id. |
+| **_packageVersion** | `string` | optional | Owning package version. |
+| **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
+| **type** | `'cross_field'` | ✅ |  |
+| **condition** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | ✅ | Predicate (CEL) comparing fields. e.g. P`record.end_date > record.start_date` |
+| **fields** | `string[]` | ✅ | Fields involved. Only fields[0] is read (labels which field the violation attaches to); the rest are advisory. Shares script’s evaluation path. |
+
+### Nested Shape: `ConditionalValidation.then[type='json_schema']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Unique rule name (snake_case) |
+| **label** | `string` | optional | Human-readable label for the rule listing |
+| **description** | `string` | optional | Administrative notes explaining the business reason |
+| **active** | `boolean` | optional (default: `true`) |  |
+| **events** | `Enum<'insert' \| 'update'>[]` | optional (default: `["insert","update"]`) | Write contexts the rule runs on. `delete` is intentionally absent — the evaluator only runs on the insert/update write path; guard deletions with a `beforeDelete` lifecycle hook |
+| **priority** | `integer` | optional (default: `100`) | Execution priority (lower runs first, default: 100) |
+| **tags** | `string[]` | optional | Categorization tags (e.g., "compliance", "billing") |
+| **severity** | `Enum<'error' \| 'warning' \| 'info'>` | optional (default: `"error"`) |  |
+| **message** | `string` | ✅ | Error message to display to the user |
+| **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
+| **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
+| **_lockSource** | `Enum<'artifact' \| 'package' \| 'env-forced'>` | optional | Layer that set _lock (artifact \| package \| env-forced). |
+| **_provenance** | `Enum<'package' \| 'org' \| 'env-forced'>` | optional | Origin of the item (package \| org \| env-forced). |
+| **_packageId** | `string` | optional | Owning package machine id. |
+| **_packageVersion** | `string` | optional | Owning package version. |
+| **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
+| **type** | `'json_schema'` | ✅ |  |
+| **field** | `string` | ✅ | JSON field to validate |
+| **schema** | `Record<string, any>` | ✅ | JSON Schema object definition |
+
+### Nested Shape: `ConditionalValidation.otherwise[type='script']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Unique rule name (snake_case) |
+| **label** | `string` | optional | Human-readable label for the rule listing |
+| **description** | `string` | optional | Administrative notes explaining the business reason |
+| **active** | `boolean` | optional (default: `true`) |  |
+| **events** | `Enum<'insert' \| 'update'>[]` | optional (default: `["insert","update"]`) | Write contexts the rule runs on. `delete` is intentionally absent — the evaluator only runs on the insert/update write path; guard deletions with a `beforeDelete` lifecycle hook |
+| **priority** | `integer` | optional (default: `100`) | Execution priority (lower runs first, default: 100) |
+| **tags** | `string[]` | optional | Categorization tags (e.g., "compliance", "billing") |
+| **severity** | `Enum<'error' \| 'warning' \| 'info'>` | optional (default: `"error"`) |  |
+| **message** | `string` | ✅ | Error message to display to the user |
+| **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
+| **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
+| **_lockSource** | `Enum<'artifact' \| 'package' \| 'env-forced'>` | optional | Layer that set _lock (artifact \| package \| env-forced). |
+| **_provenance** | `Enum<'package' \| 'org' \| 'env-forced'>` | optional | Origin of the item (package \| org \| env-forced). |
+| **_packageId** | `string` | optional | Owning package machine id. |
+| **_packageVersion** | `string` | optional | Owning package version. |
+| **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
+| **type** | `'script'` | ✅ |  |
+| **condition** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | ✅ | Predicate (CEL). If TRUE, validation fails. e.g. P`record.amount < 0` |
+
+### Nested Shape: `ConditionalValidation.otherwise[type='state_machine']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Unique rule name (snake_case) |
+| **label** | `string` | optional | Human-readable label for the rule listing |
+| **description** | `string` | optional | Administrative notes explaining the business reason |
+| **active** | `boolean` | optional (default: `true`) |  |
+| **events** | `Enum<'insert' \| 'update'>[]` | optional (default: `["insert","update"]`) | Write contexts the rule runs on. `delete` is intentionally absent — the evaluator only runs on the insert/update write path; guard deletions with a `beforeDelete` lifecycle hook |
+| **priority** | `integer` | optional (default: `100`) | Execution priority (lower runs first, default: 100) |
+| **tags** | `string[]` | optional | Categorization tags (e.g., "compliance", "billing") |
+| **severity** | `Enum<'error' \| 'warning' \| 'info'>` | optional (default: `"error"`) |  |
+| **message** | `string` | ✅ | Error message to display to the user |
+| **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
+| **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
+| **_lockSource** | `Enum<'artifact' \| 'package' \| 'env-forced'>` | optional | Layer that set _lock (artifact \| package \| env-forced). |
+| **_provenance** | `Enum<'package' \| 'org' \| 'env-forced'>` | optional | Origin of the item (package \| org \| env-forced). |
+| **_packageId** | `string` | optional | Owning package machine id. |
+| **_packageVersion** | `string` | optional | Owning package version. |
+| **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
+| **type** | `'state_machine'` | ✅ |  |
+| **field** | `string` | ✅ | State field (e.g. status) |
+| **transitions** | `Record<string, string[]>` | ✅ | Map of `{ OldState: [AllowedNewStates] }` |
+| **initialStates** | `string[]` | optional | States a record may be CREATED in. When set, an INSERT whose state field carries a value outside this list is rejected (server-enforced) — the FSM entry point. `transitions` only governs UPDATE, and a `select` field permits ANY declared option as an initial value, so without this a record could be born mid-flow (e.g. created already `approved`). Omit to keep the legacy behavior (no initial-state check on insert). #3165. |
+
+### Nested Shape: `ConditionalValidation.otherwise[type='format']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Unique rule name (snake_case) |
+| **label** | `string` | optional | Human-readable label for the rule listing |
+| **description** | `string` | optional | Administrative notes explaining the business reason |
+| **active** | `boolean` | optional (default: `true`) |  |
+| **events** | `Enum<'insert' \| 'update'>[]` | optional (default: `["insert","update"]`) | Write contexts the rule runs on. `delete` is intentionally absent — the evaluator only runs on the insert/update write path; guard deletions with a `beforeDelete` lifecycle hook |
+| **priority** | `integer` | optional (default: `100`) | Execution priority (lower runs first, default: 100) |
+| **tags** | `string[]` | optional | Categorization tags (e.g., "compliance", "billing") |
+| **severity** | `Enum<'error' \| 'warning' \| 'info'>` | optional (default: `"error"`) |  |
+| **message** | `string` | ✅ | Error message to display to the user |
+| **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
+| **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
+| **_lockSource** | `Enum<'artifact' \| 'package' \| 'env-forced'>` | optional | Layer that set _lock (artifact \| package \| env-forced). |
+| **_provenance** | `Enum<'package' \| 'org' \| 'env-forced'>` | optional | Origin of the item (package \| org \| env-forced). |
+| **_packageId** | `string` | optional | Owning package machine id. |
+| **_packageVersion** | `string` | optional | Owning package version. |
+| **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
+| **type** | `'format'` | ✅ |  |
+| **field** | `string` | ✅ |  |
+| **regex** | `string` | optional |  |
+| **format** | `Enum<'email' \| 'url' \| 'phone' \| 'json'>` | optional |  |
+
+### Nested Shape: `ConditionalValidation.otherwise[type='cross_field']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Unique rule name (snake_case) |
+| **label** | `string` | optional | Human-readable label for the rule listing |
+| **description** | `string` | optional | Administrative notes explaining the business reason |
+| **active** | `boolean` | optional (default: `true`) |  |
+| **events** | `Enum<'insert' \| 'update'>[]` | optional (default: `["insert","update"]`) | Write contexts the rule runs on. `delete` is intentionally absent — the evaluator only runs on the insert/update write path; guard deletions with a `beforeDelete` lifecycle hook |
+| **priority** | `integer` | optional (default: `100`) | Execution priority (lower runs first, default: 100) |
+| **tags** | `string[]` | optional | Categorization tags (e.g., "compliance", "billing") |
+| **severity** | `Enum<'error' \| 'warning' \| 'info'>` | optional (default: `"error"`) |  |
+| **message** | `string` | ✅ | Error message to display to the user |
+| **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
+| **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
+| **_lockSource** | `Enum<'artifact' \| 'package' \| 'env-forced'>` | optional | Layer that set _lock (artifact \| package \| env-forced). |
+| **_provenance** | `Enum<'package' \| 'org' \| 'env-forced'>` | optional | Origin of the item (package \| org \| env-forced). |
+| **_packageId** | `string` | optional | Owning package machine id. |
+| **_packageVersion** | `string` | optional | Owning package version. |
+| **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
+| **type** | `'cross_field'` | ✅ |  |
+| **condition** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | ✅ | Predicate (CEL) comparing fields. e.g. P`record.end_date > record.start_date` |
+| **fields** | `string[]` | ✅ | Fields involved. Only fields[0] is read (labels which field the violation attaches to); the rest are advisory. Shares script’s evaluation path. |
+
+### Nested Shape: `ConditionalValidation.otherwise[type='json_schema']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Unique rule name (snake_case) |
+| **label** | `string` | optional | Human-readable label for the rule listing |
+| **description** | `string` | optional | Administrative notes explaining the business reason |
+| **active** | `boolean` | optional (default: `true`) |  |
+| **events** | `Enum<'insert' \| 'update'>[]` | optional (default: `["insert","update"]`) | Write contexts the rule runs on. `delete` is intentionally absent — the evaluator only runs on the insert/update write path; guard deletions with a `beforeDelete` lifecycle hook |
+| **priority** | `integer` | optional (default: `100`) | Execution priority (lower runs first, default: 100) |
+| **tags** | `string[]` | optional | Categorization tags (e.g., "compliance", "billing") |
+| **severity** | `Enum<'error' \| 'warning' \| 'info'>` | optional (default: `"error"`) |  |
+| **message** | `string` | ✅ | Error message to display to the user |
+| **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
+| **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
+| **_lockSource** | `Enum<'artifact' \| 'package' \| 'env-forced'>` | optional | Layer that set _lock (artifact \| package \| env-forced). |
+| **_provenance** | `Enum<'package' \| 'org' \| 'env-forced'>` | optional | Origin of the item (package \| org \| env-forced). |
+| **_packageId** | `string` | optional | Owning package machine id. |
+| **_packageVersion** | `string` | optional | Owning package version. |
+| **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
+| **type** | `'json_schema'` | ✅ |  |
+| **field** | `string` | ✅ | JSON field to validate |
+| **schema** | `Record<string, any>` | ✅ | JSON Schema object definition |
 
 
 ---

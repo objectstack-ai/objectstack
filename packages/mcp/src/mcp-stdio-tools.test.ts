@@ -41,7 +41,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { MCPServerRuntime } from './mcp-server-runtime.js';
 import { MCPServerPlugin } from './plugin.js';
 import type { McpDataBridge } from './mcp-http-tools.js';
-import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate, type EngineFindOneQueryInput } from '@objectstack/metadata-core';
 
 // ---------------------------------------------------------------------------
 // A real stdio client: newline-delimited JSON-RPC over the transport's pipes
@@ -503,7 +503,7 @@ describe('#8034 plugin composition: os serve stdio wiring', () => {
       }),
       aggregate: vi.fn(async () => []),
       count: vi.fn(async () => 0),
-      findOne: vi.fn(async () => null),
+      findOne: vi.fn(async (object: string, query?: EngineFindOneQueryInput) => { assertEngineFindOnePredicate(object, query); return null; }),
     };
   }
 

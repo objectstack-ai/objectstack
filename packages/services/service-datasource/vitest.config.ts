@@ -37,6 +37,17 @@ export default defineConfig({
     // matches by PREFIX, so a bare `@objectstack/core` entry would also swallow
     // `@objectstack/core/logger` and resolve it to `core/src/index.ts/logger`
     // (ENOTDIR). Same shape as `service-storage` and `service-knowledge`.
-    alias: [{ find: /^@objectstack\/core$/, replacement: path.resolve(__dirname, '../../core/src/index.ts') }],
+    // `@objectstack/metadata-core` became a VALUE import of this package's TEST
+    // layer when its engine double adopted `assertEngineFindOnePredicate`
+    // (objectstack#12068). Same reasoning as the entry above, and the same
+    // direction of danger: unaliased it would follow the workspace link to
+    // `packages/metadata-core/dist/index.js`, so the double would be pinned to
+    // whatever the last build of that predicate emitted rather than to the
+    // predicate sitting next to it — a green pin over a stale contract, which is
+    // the one failure a contract pin exists to make impossible.
+    alias: [
+      { find: /^@objectstack\/core$/, replacement: path.resolve(__dirname, '../../core/src/index.ts') },
+      { find: /^@objectstack\/metadata-core$/, replacement: path.resolve(__dirname, '../../metadata-core/src/index.ts') },
+    ],
   },
 });

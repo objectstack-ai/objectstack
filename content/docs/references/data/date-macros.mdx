@@ -8,7 +8,7 @@ description: Date Macros protocol schemas
 Date Macro Tokens — the declarative placeholders the UI substitutes
 into filter values before sending a query to the data engine.
 
-# Why this lives in `spec`
+## Why this lives in `spec`
 
 Filter values in dashboards, views, reports and pages travel as JSON.
 Because JSON cannot evaluate code, callers cannot write `daysAgo(30)`
@@ -52,7 +52,7 @@ so the **set of recognised tokens is part of the platform contract**
 and must live here next to the rest of the JSON-DSL schemas, not
 inside any single UI implementation.
 
-# Two flavours of token
+## Two flavours of token
 
 1. **Fixed tokens** — small, finite list (`{today}`,
    `{current_quarter_start}`, `{last_year_end}`, …). Enumerated by
@@ -63,7 +63,7 @@ inside any single UI implementation.
    `DATE_MACRO_PARAM_RE`. Units: `minute(s)`, `hour(s)`, `day(s)`,
    `week(s)`, `month(s)`, `year(s)`. Directions: `ago`, `from_now`.
 
-# Out of scope
+## Out of scope
 
 - CEL expressions (`cel\`daysAgo(30)\``) run **server-side** in the
   formula engine. They are unrelated to these placeholders; see

@@ -60,7 +60,16 @@ describe('#6227 — the reported shape is refused at authoring time', () => {
 
   it('names the runtime twin, so the two moments are traceable to one rule', () => {
     const issue = valueIssue(parse({ field: 'stage', operator: 'in', value: 'won' }));
-    expect(issue.message).toContain('400 INVALID_FILTER, #5869');
+    // The traceable token is the runtime's ERROR CODE, not a tracker id — the
+    // code is what an author sees on the query path and can match this refusal
+    // against. The id that used to ride beside it resolved to nothing for the
+    // customer this string is printed to.
+    expect(issue.message).toContain('400 INVALID_FILTER');
+  });
+
+  it('carries no internal tracker id — the reader of this string cannot open one', () => {
+    const issue = valueIssue(parse({ field: 'stage', operator: 'in', value: 'won' }));
+    expect(issue.message).not.toMatch(/(?<![#&])#[0-9]{3,5}(?![0-9A-Za-z])/);
   });
 
   it('refuses through an ALIAS spelling too — the fold runs before the check', () => {

@@ -87,6 +87,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { ErrorCode } from '@objectstack/spec/api';
 import { DEFAULT_METADATA_TYPE_REGISTRY, getMetadataTypeSchema } from '@objectstack/spec/kernel';
 import { ObjectStackProtocolImplementation } from './protocol.js';
+import { assertEngineFindOnePredicate, type EngineFindOneQueryInput } from '@objectstack/metadata-core';
 
 /**
  * The set the sweep walks — derived from the same two spec symbols the
@@ -112,7 +113,8 @@ function emptyRegistry(overrides: Record<string, unknown> = {}) {
 
 /** An engine whose every read REJECTS — a metadata store the protocol cannot reach. */
 function engineThatCannotBeRead(error: () => unknown) {
-    const reject = vi.fn(async () => { throw error(); });
+    const reject = vi.fn(async (object: string, query?: EngineFindOneQueryInput) => {
+                                       assertEngineFindOnePredicate(object, query); throw error(); });
     return { registry: emptyRegistry(), find: reject, findOne: reject } as any;
 }
 
@@ -231,7 +233,7 @@ describe('[#8855] the discrimination is selective, not a blanket refusal', () =>
                 },
             }),
             find: vi.fn(async () => []),
-            findOne: vi.fn(async () => null),
+            findOne: vi.fn(async (object: string, query?: EngineFindOneQueryInput) => { assertEngineFindOnePredicate(object, query); return null; }),
         } as any;
         const p = new ObjectStackProtocolImplementation(engine);
 
@@ -257,7 +259,7 @@ describe('[#8855] the discrimination is selective, not a blanket refusal', () =>
                     }]
                     : []
             )),
-            findOne: vi.fn(async () => null),
+            findOne: vi.fn(async (object: string, query?: EngineFindOneQueryInput) => { assertEngineFindOnePredicate(object, query); return null; }),
         } as any;
         const p = new ObjectStackProtocolImplementation(engine);
 
@@ -275,7 +277,7 @@ describe('[#8924] a caller error the producer classified is refused loudly, neve
         return {
             registry: emptyRegistry(),
             find: vi.fn(async () => []),
-            findOne: vi.fn(async () => null),
+            findOne: vi.fn(async (object: string, query?: EngineFindOneQueryInput) => { assertEngineFindOnePredicate(object, query); return null; }),
         } as any;
     }
 
@@ -339,7 +341,7 @@ describe('[#8924] a caller error the producer classified is refused loudly, neve
                 },
             }),
             find: vi.fn(async () => []),
-            findOne: vi.fn(async () => null),
+            findOne: vi.fn(async (object: string, query?: EngineFindOneQueryInput) => { assertEngineFindOnePredicate(object, query); return null; }),
         } as any;
         const p = new ObjectStackProtocolImplementation(engine);
 

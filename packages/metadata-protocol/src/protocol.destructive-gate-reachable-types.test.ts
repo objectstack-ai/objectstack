@@ -79,7 +79,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 // Imported from `@objectstack/metadata-core`, ⛔ never from
 // `@objectstack/objectql`: objectql DEPENDS ON this package, so that import
 // would close a dependency cycle turbo rejects outright.
-import { assertEngineUpdateDispatch } from '@objectstack/metadata-core';
+import { assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 // Reason 1 is a claim about the AUTHORABLE SHAPE of a `field` body, so it is
 // asserted against the schema itself rather than restated in prose here.
 import { FieldSchema } from '@objectstack/spec/data';
@@ -164,6 +164,7 @@ function makeKernel(seed: Row[] = [], artifacts: Record<string, unknown> = {}) {
             return Array.from(rows.values()).filter((r) => match(r, o?.where ?? {}));
         },
         async findOne(table: string, o: { where: Record<string, unknown> }) {
+            assertEngineFindOnePredicate(table, o);
             if (table !== 'sys_metadata') return null;
             for (const r of rows.values()) if (match(r, o?.where ?? {})) return r;
             return null;

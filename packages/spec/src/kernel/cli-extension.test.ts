@@ -1,69 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import {
-  CLICommandContributionSchema,
-  OclifPluginConfigSchema,
-} from './cli-extension.zod';
+import { OclifPluginConfigSchema } from './cli-extension.zod';
 
-describe('CLICommandContributionSchema', () => {
-  it('should accept valid command contribution', () => {
-    const result = CLICommandContributionSchema.parse({
-      name: 'marketplace',
-      description: 'Manage marketplace applications',
-    });
-    expect(result.name).toBe('marketplace');
-    expect(result.description).toBe('Manage marketplace applications');
-  });
-
-  it('should accept command with module path', () => {
-    const result = CLICommandContributionSchema.parse({
-      name: 'deploy',
-      description: 'Deploy to cloud',
-      module: './dist/commands/deploy.js',
-    });
-    expect(result.module).toBe('./dist/commands/deploy.js');
-  });
-
-  it('should accept minimal command (name only)', () => {
-    const result = CLICommandContributionSchema.parse({
-      name: 'sync',
-    });
-    expect(result.name).toBe('sync');
-    expect(result.description).toBeUndefined();
-    expect(result.module).toBeUndefined();
-  });
-
-  it('should accept hyphenated command names', () => {
-    const result = CLICommandContributionSchema.parse({
-      name: 'cloud-sync',
-    });
-    expect(result.name).toBe('cloud-sync');
-  });
-
-  it('should reject invalid command names', () => {
-    const invalidNames = [
-      'Uppercase',
-      'has spaces',
-      '123start',
-      '-leading-hyphen',
-      'special_underscore',
-      'dot.name',
-      '',
-    ];
-
-    invalidNames.forEach(name => {
-      expect(() => CLICommandContributionSchema.parse({ name })).toThrow();
-    });
-  });
-
-  it('should accept valid lowercase alphanumeric names', () => {
-    const validNames = ['a', 'abc', 'a1', 'my-command', 'plugin2'];
-
-    validNames.forEach(name => {
-      expect(() => CLICommandContributionSchema.parse({ name })).not.toThrow();
-    });
-  });
-});
-
+// [#12007] The `CLICommandContributionSchema` block that used to sit here left
+// with the retired export (ADR-0049 enforce-or-remove) — the rejection/holder
+// pins live in `cli-command-contribution-retirement.test.ts`.
 describe('OclifPluginConfigSchema', () => {
   it('should accept valid oclif plugin config', () => {
     const result = OclifPluginConfigSchema.parse({

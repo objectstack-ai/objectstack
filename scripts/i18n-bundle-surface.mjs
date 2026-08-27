@@ -155,11 +155,17 @@ export function findMetadataFormModules(absDir, rel, out = []) {
  * Read the regenerate command a config documents about itself. Every flag the
  * gate passes comes from there, so a package that changes its locales or output
  * directory updates one place and both readers follow.
+ *
+ * `--source-hashes` (#11671) is in the recognised set for the same reason
+ * `--no-metadata-forms` is: it decides WHICH FILES the extract emits, so a gate
+ * that dropped it would run `--check` against a different file set than the one
+ * the package commits and report drift on a tree that is in sync. A flag that
+ * only changed a message would not belong here.
  */
 export function flagsFromDocstring(configPath) {
   const src = readFileSync(configPath, 'utf8');
   const head = src.slice(0, src.indexOf('*/') + 2);
-  const flags = head.match(/--(?:locales|fill|out)=[^\s\\*]+|--(?:objects-only|no-metadata-forms|no-merge)\b/g) ?? [];
+  const flags = head.match(/--(?:locales|fill|out)=[^\s\\*]+|--(?:objects-only|no-metadata-forms|no-merge|source-hashes)\b/g) ?? [];
   return [...new Set(flags)];
 }
 

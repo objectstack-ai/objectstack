@@ -56,6 +56,7 @@ import { matchesFilterCondition } from '@objectstack/formula';
 import { PermissionSetSchema } from '@objectstack/spec/security';
 import type { PermissionSet } from '@objectstack/spec/security';
 import { defaultPermissionSets } from './objects/default-permission-sets.js';
+import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 
 const MKT = 'usr_marketing';
 const ADMIN = 'usr_admin';
@@ -205,14 +206,20 @@ const MEMBER_DEFAULT = defaultPermissionSets.find((p) => p.name === 'member_defa
 /**
  * Object grants wide enough that NO case below is decided by the CRUD check.
  *
- * The lifecycle three are here for a measured reason. Step 2.7 and step 2.8 are
- * both pre-wired for `transfer` / `restore` / `purge` (#1883), but each maps to
- * its own grant (`allowTransfer` / `allowRestore` / `allowPurge`,
- * `permission.zod.ts`), so a principal holding only CRUD is refused by the
+ * `allowTransfer` is here for a measured reason: step 2.7 and step 2.8 are
+ * pre-wired for `transfer` (#1883/#3004) but it maps to its own grant
+ * (`permission.zod.ts`), so a principal holding only CRUD is refused by the
  * OBJECT-level check long before either row gate runs — with
- * `insufficient_permission`, not a row verdict. Granting them is what makes §1's
+ * `insufficient_permission`, not a row verdict. Granting it is what makes §1's
  * per-operation coverage claim about the row gates rather than about the CRUD
  * bit that never let the operation through.
+ *
+ * `allowRestore` / `allowPurge` left this fixture with #12497 (ADR-0049 —
+ * bits tombstoned, evaluator mapping rows retired; the keys return with M2,
+ * #1883): they can no longer be authored, and a `restore`/`purge` dispatch is
+ * refused fail-closed at the object gate, so no grant could carry those two
+ * verbs to the row gates this suite measures. Their loop cases went with them
+ * — see BY_ID_WRITE_OPERATIONS below.
  */
 const CRUD = {
   allowRead: true,
@@ -220,8 +227,6 @@ const CRUD = {
   allowEdit: true,
   allowDelete: true,
   allowTransfer: true,
-  allowRestore: true,
-  allowPurge: true,
 };
 
 /**
@@ -371,6 +376,7 @@ function makeStore(rows: Record<string, Row[]>) {
       return typeof options?.limit === 'number' ? hits.slice(0, options.limit) : hits;
     }),
     findOne: vi.fn(async (object: string, options: any = {}) => {
+      assertEngineFindOnePredicate(object, options);
       const all = rows[object] ?? [];
       return all.find((r) => matchesFilterCondition(r, options?.where ?? options?.filter ?? null)) ?? null;
     }),
@@ -547,8 +553,16 @@ async function boot(seed: { shares?: Row[] } = {}) {
 const MASTER_GATE_SENTENCE = /requires edit access to its master record/;
 const PRE_IMAGE_GATE_SENTENCE = /row-level security\)$/;
 
-/** Step 2.7's set — the operations whose floor this card removes on a cbp detail. */
-const BY_ID_WRITE_OPERATIONS = ['update', 'delete', 'transfer', 'restore', 'purge'] as const;
+/**
+ * Step 2.7's set — the operations whose floor this card removes on a cbp
+ * detail — MINUS `restore`/`purge` since #12497: their bits are tombstoned and
+ * their evaluator mapping rows retired, so those two verbs are refused
+ * fail-closed at the OBJECT gate (`insufficient_permission`) and can no longer
+ * reach the row gates this loop measures. Step 2.7 still lists them, as
+ * dormant defense-in-depth; re-add them here when the M2 batch makes them
+ * grantable again.
+ */
+const BY_ID_WRITE_OPERATIONS = ['update', 'delete', 'transfer'] as const;
 
 describe('[#8757] §1 PRECONDITION — the master gate runs on every by-id write path the floor comes off', () => {
   // The ruling's licence condition, stated once per operation in step 2.7's

@@ -41,6 +41,12 @@
  * organizations by construction — which is correct for a seeder, and is exactly
  * why the predicate has to say which row it means.
  *
+ * [#11520] The two batched reads inherit that property rather than re-deriving
+ * it: `seed-name-lookup.ts` reads under `seedCtx(organizationId)`, and with no
+ * organization threaded that is `{ isSystem: true }` — the same object literal as
+ * `SYSTEM_CTX`. Both batched reads and the surviving `tryFind` bucket reads
+ * therefore ask under one context.
+ *
  * Since #8461 made `sys_capability.name` unique per ORGANIZATION rather than per
  * installation (ADR-0120 D1, the cross-tenant existence oracle #8323 reports), an
  * admin may author `manage_users` inside their organization while the platform
@@ -178,13 +184,24 @@
  *    `seed-name-lookup.ts`: that module's index answers with ONE row chosen by
  *    arrival order, so filtering needs an all-rows accessor, which hands every
  *    caller its own spelling of "which row is mine" — the shape #10103 repaired.
- *  - The DERIVED half keeps its per-item read. Not because it is smaller (it is
- *    the half that grows) but because its question is cross-organization by
- *    construction and its counters — `skippedAuthored`, and #8751's
- *    `platformStampedInOrg` — are computed from the lowest-id row installation-
- *    wide. Narrowing it to the platform bucket answers a different question and
- *    silently reverses part of the #8552 ruling; batching it unnarrowed needs an
- *    unbounded read. Filed rather than taken.
+ *  - The DERIVED half kept its per-item read, filed rather than taken. Not
+ *    because it is smaller (it is the half that grows) but because its question
+ *    is cross-organization by construction and its counters — `skippedAuthored`,
+ *    and #8751's `platformStampedInOrg` — are computed from the lowest-id row
+ *    installation-wide. Narrowing it to the platform bucket answers a different
+ *    question and silently reverses part of the #8552 ruling; batching it
+ *    unnarrowed needed an unbounded read.
+ *
+ * [#11520] The derived half is now batched too — UNNARROWED, on the second of
+ * those two objections being removed rather than accepted. #11518 turned the
+ * page cap from a promise into a measurement (`readNamePage` asks for one row
+ * more than its budget and calls the overflow `truncated` = "could not answer",
+ * degrading to the per-item read), so "batching it unnarrowed needs an unbounded
+ * read" stopped being true. The FIRST objection is untouched and still binding:
+ * ⛔ the derived read is not narrowed to the platform bucket, because that
+ * answers a different question and reverses #8552 and #8751 by read shape. The
+ * seeder therefore issues two batched reads that ask different questions — the
+ * curated one predicated (#8470), the derived one deliberately wide.
  *
  * ⚠️ NOTHING here claims a measured speedup. The hosted `bootstrap-curve.mjs`
  * rig lives in `objectstack-ai/cloud` and its axes are permission sets /
@@ -355,8 +372,16 @@ export interface CapabilitySeedResult {
    */
   unchanged: number;
   /**
-   * [#11451] Curated definitions left ENTIRELY alone because the existence read
-   * could not answer — not read as absent, and therefore never inserted.
+   * [#11451] Definitions left ENTIRELY alone because the existence read could
+   * not answer — not read as absent, and therefore never inserted.
+   *
+   * [#11520] Counts BOTH halves since the derived read was batched. It was
+   * curated-only while the derived half swallowed a failed read into `[]` and
+   * went on to attempt an insert; that half now declines on `unknown` like every
+   * other caller of the shared oracle, so its unanswerable names land here. One
+   * counter rather than two, deliberately: the fact reported is "this pass could
+   * not find out", and which half asked does not change the remedy (the next
+   * boot with a readable database does the work).
    *
    * ⛔ This is the counter that exists because hoisting a read out of a loop
    * changes what a failure means. Per item, a failed read fell through to an
@@ -431,19 +456,8 @@ export async function bootstrapSystemCapabilities(
   // .ts`'s own index comment names ("exactly the bucket this key part keeps a
   // singleton").
   //
-  // ⛔ The DERIVED half is deliberately NOT batched, and the reason is not that
-  // it is the smaller half — it is the half that GROWS. Its lookup is `{ name }`
-  // across organizations by construction, and everything it does with the row it
-  // finds depends on WHICH row that is: `derivedRowIsOurs`, `skippedAuthored`
-  // and the #8751 `platformStampedInOrg` anomaly signal are all computed from
-  // the lowest-id row installation-wide. Narrowing that read to the platform
-  // bucket answers a DIFFERENT question — it would stop counting an
-  // organization's platform-stamped row whenever our own bucket row also exists,
-  // and it would start seeding the bucket in the very case #8552 ruled must be
-  // left alone. Batching it WITHOUT narrowing it needs an unbounded read. Both
-  // are decisions above this card, so both are filed rather than taken. What
-  // this card does remove from the derived half is its WRITE: the reconcile
-  // below is now equality-gated for both halves.
+  // [#11451] What this half does NOT do is narrow the derived read — see the
+  // derived index below, which #11520 batched on the terms #11451 could not.
   const curatedExisting = await buildExistingByName(
     ql,
     'sys_capability',
@@ -453,31 +467,95 @@ export async function bootstrapSystemCapabilities(
     CURATED_LOOKUP,
   );
 
+  // [#11520] The DERIVED half, batched — UNNARROWED, which is the only shape
+  // that preserves what it computes. #11451 filed this rather than taking it,
+  // and the two objections it recorded resolved in opposite ways: one was
+  // removed by #11518, the other still stands and still forbids the cheap fix.
+  //
+  // ## Why the batched read is the SAME question, not a cheaper one
+  //
+  // Everything this half does depends on WHICH row it finds: `derivedRowIsOurs`,
+  // `skippedAuthored` and #8751's `platformStampedInOrg` are all read off `X` —
+  // the lowest-id row for the name, installation-wide. Three properties, each
+  // checked against the shared module rather than assumed, make the index answer
+  // with that same `X`:
+  //
+  //  - NO predicate is passed, so `readNamePage` emits `{ name: { $in: … } }` —
+  //    the set-widening of the per-item `{ name }`, with no key added (the
+  //    `...(equals ?? {})` spread contributes nothing when omitted);
+  //  - the read runs under `seedCtx(undefined)` — `{ isSystem: true }`, byte-
+  //    identical to this file's `SYSTEM_CTX`, so it stays unscoped and
+  //    cross-organization;
+  //  - unscoped, `resolveOwnOrganizationRow` returns the FIRST row and applies
+  //    NO bucket filter, so the index resolves to the row `tryFind(…, 1)[0]`
+  //    returned under #4363's `ORDER BY id ASC`. The sibling seeder on this very
+  //    table records the same equivalence for its own unscoped adoption
+  //    (`bootstrap-declared-capabilities.ts`: "an unscoped lookup is EXACTLY the
+  //    question the per-item read asked").
+  //
+  // ## What #11518 removed
+  //
+  // The blocking objection was the PAGE CAP, not the question: this set is
+  // bounded only by the number of organizations, against a page that was capped
+  // at one row per name — so it truncated, and a truncated page reads as
+  // `absent`, which INSERTS. `readNamePage` now asks for one row MORE than its
+  // budget and reports the overflow as `truncated` — "could not answer" —
+  // degrading, loudly, to exactly the per-item read this half used to do
+  // unconditionally. So the unbounded-read trade #11451 declined no longer
+  // exists: the worst case is the old cost plus a warning naming the budget.
+  //
+  // ## What is still forbidden
+  //
+  // ⛔ NARROWING this to the platform bucket (`organization_id: null`). It
+  // answers a DIFFERENT question — `B`, the bucket occupant, not `X` — and the
+  // two diverge on ruled ground in both directions: it would stop counting an
+  // organization's platform-stamped row whenever our own bucket row also exists
+  // (#8751's signal, in precisely the case its doc says it is counted for), and
+  // it would seed the bucket in the very case #8552 ruled must be left alone.
+  // Both are maintainer decisions and neither has been made, so the read stays
+  // wide and pays a page budget instead.
+  const derivedExisting = await buildExistingByName(
+    ql,
+    'sys_capability',
+    [...derivedNames],
+    options.logger,
+  );
+
   for (const def of byName.values()) {
     const isDerived = derivedNames.has(def.name);
-    // [#8470] CURATED: address the platform's OWN row. DERIVED: unchanged — its
-    // own `managed_by` guard below is what keeps it off rows it does not own
-    // (#5876), and narrowing its lookup here would change a half this card
-    // deliberately leaves alone.
-    let row: any;
-    if (isDerived) {
-      row = (await tryFind(ql, 'sys_capability', { name: def.name }, 1))[0];
-    } else {
-      const found = await curatedExisting.get(def.name);
-      if (found.status === 'unknown') {
-        // ⛔ [#10946] "I could not find out" is not the answer "it is not there".
-        // The per-item shape was accidentally immune to the conflation — a failed
-        // read fell through to an insert the unique index refused, for that one
-        // name — and a batched read is not, because one failure now speaks for
-        // the entire set. Declining is also STRICTER than the code it replaces,
-        // deliberately: on an unreadable database this half used to attempt an
-        // insert per curated name and then report a `blockedCurated` collision
-        // for each, describing a row nobody ever saw.
-        unreadable += 1;
-        continue;
-      }
-      row = found.status === 'present' ? found.row : undefined;
+    // [#8470] CURATED: address the platform's OWN row. DERIVED: still the WIDE
+    // question — its own `managed_by` guard below is what keeps it off rows it
+    // does not own (#5876), and narrowing its lookup is the thing #8552/#8751
+    // forbid rather than an optimisation left undone.
+    // [#11520] ONE consumption idiom for both halves. They consult DIFFERENT
+    // indexes — the curated one carries the #8470 predicate, the derived one is
+    // deliberately unpredicated — but "what does a lookup answer mean" is one
+    // question with one answer, and a second spelling of it is how the two halves
+    // would drift apart again.
+    const existing = isDerived ? derivedExisting : curatedExisting;
+    const found = await existing.get(def.name);
+    if (found.status === 'unknown') {
+      // ⛔ [#10946] "I could not find out" is not the answer "it is not there".
+      // The per-item shape was accidentally immune to the conflation — a failed
+      // read fell through to an insert the unique index refused, for that one
+      // name — and a batched read is not, because one failure now speaks for
+      // the entire set. Declining is also STRICTER than the code it replaces,
+      // deliberately: on an unreadable database this half used to attempt an
+      // insert per curated name and then report a `blockedCurated` collision
+      // for each, describing a row nobody ever saw.
+      //
+      // [#11520] The DERIVED half reaches this branch now too, and there the
+      // strictness replaces something worse than a phantom diagnostic: its
+      // `tryFind` swallowed a failed read into `[]`, which reads as absent, so
+      // the half went on to attempt an insert. Where the read failed but the
+      // write did not — a transient read timeout, a replica lagging — that
+      // insert is a DUPLICATE placeholder, refused only if the unique index
+      // happens to exist. Declining is the answer the module header already
+      // requires of every other caller of this oracle.
+      unreadable += 1;
+      continue;
     }
+    const row: any = found.status === 'present' ? found.row : undefined;
     if (row?.id) {
       // [#5876] Reconcile display fields only where THIS pass owns the copy.
       //
@@ -653,7 +731,12 @@ export async function bootstrapSystemCapabilities(
         // keyed by name, so a curated name cannot repeat within one pass — this
         // records the row anyway rather than making the batched read depend on
         // an invariant that lives somewhere else.
-        if (!isDerived) curatedExisting.remember(def.name, payload);
+        //
+        // [#11520] …and now the derived half records on ITS index for the same
+        // reason. `byName` is keyed by name so no name repeats within one pass
+        // in either half; both record anyway, because "the read cannot see rows
+        // this loop just inserted" is a property of the hoist, not of the half.
+        existing.remember(def.name, payload);
       } else if (!isDerived) {
         // [#8470] The curated row is absent AND could not be written — the
         // NULL-organization bucket already holds the name under a row the
@@ -719,12 +802,17 @@ export async function bootstrapSystemCapabilities(
     // [#11096] Said ONCE with the count, like the sibling seeders: a per-name
     // warn on a database that is down is a log flood that buries its own
     // meaning. The consequence is spelled out because "unreadable" alone does
-    // not state one — these curated definitions were left ENTIRELY alone, so one
-    // that is genuinely absent has not been seeded and a drifted one has not been
+    // not state one — these definitions were left ENTIRELY alone, so one that is
+    // genuinely absent has not been seeded and a drifted one has not been
     // reconciled; the next boot with a readable database does both.
+    //
+    // [#11520] "capabilities", not "curated capabilities": the derived half can
+    // land here too now. `total` is the whole definition set for the same
+    // reason — measured against `KNOWN_CAPABILITIES.length` a count that
+    // included derived names could exceed its own total.
     options.logger?.warn?.(
-      '[security] curated capabilities left untouched — their sys_capability rows could not be read',
-      { unreadable, total: KNOWN_CAPABILITIES.length },
+      '[security] capabilities left untouched — their sys_capability rows could not be read',
+      { unreadable, total: byName.size },
     );
   }
   options.logger?.info?.('[security] system capabilities seeded into sys_capability (ADR-0066 D1)', {

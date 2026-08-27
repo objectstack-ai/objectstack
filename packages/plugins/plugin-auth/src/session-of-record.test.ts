@@ -24,7 +24,7 @@
 // and the sign-in after-hook really run.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { assertEngineDeleteDispatch } from '@objectstack/objectql';
+import { assertEngineDeleteDispatch, assertEngineFindOnePredicate } from '@objectstack/objectql';
 import { AuthManager } from './auth-manager';
 import { cacheSecondaryStorage } from './secondary-storage';
 
@@ -86,6 +86,7 @@ const createMemoryEngine = () => {
       return { ...row };
     },
     async findOne(name: string, q: any = {}) {
+      assertEngineFindOnePredicate(name, q);
       const row = rows(name).find((r) => matches(r, q.where));
       return row ? project(row, q.fields) : null;
     },

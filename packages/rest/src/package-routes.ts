@@ -18,6 +18,7 @@ import {
   sendOk,
   sendError,
   resolveThrownHttpError,
+  demotedDeclaredCode,
   looksLikeInternalErrorLeak,
   INTERNAL_ERROR_MESSAGE,
 } from '@objectstack/types';
@@ -203,12 +204,68 @@ function sendThrownError(res: any, error: unknown): void {
   const message = thrown.status >= 500 && looksLikeInternalErrorLeak(thrown.message)
     ? INTERNAL_ERROR_MESSAGE
     : thrown.message;
+  // [#12405] The producer's OWN spelling, when the closed vocabulary did not
+  // admit it — the same demote the dispatcher twin serving this very path has
+  // emitted since #9106 (`errorFromThrown` in
+  // `packages/runtime/src/http-dispatcher.ts`) and the flat `/data` door since
+  // #9232 (`thrownCodeFields` in `error-response.ts`). This helper already
+  // held the resolved answer and forwarded only `details`, so the author's
+  // string was dropped one line below the local that carried it: nothing
+  // invalid shipped — the closed `code` still carried the derived member —
+  // which is exactly what made the loss silent and one-directional.
+  //
+  // ⛔ Read through {@link demotedDeclaredCode}, NEVER `thrown.declaredCode`
+  // raw. Presence MEANS demotion (`ApiErrorSchema.declaredCode`'s documented
+  // invariant), and the raw field is also set when the producer's spelling IS
+  // the member already sitting in `code` — forwarding that would put two
+  // spellings of one fact on every registered refusal. `sendError`
+  // deliberately does not re-derive this; the caller owes it (that writer's
+  // docblock records the obligation).
+  //
+  // ⚠️ NOT withheld on the sanitised 5xx above, deliberately: this door's
+  // withholding is scoped to the PROSE (see the note on this function), and
+  // `status`, `code` and `details` are untouched by it. `declaredCode` is a
+  // CODE channel, and the twin applies no status condition to it either —
+  // adding one here would be a new rule at one door and would re-create the
+  // divergence this closes.
+  const declaredCode = demotedDeclaredCode(thrown);
+  // [#12502] The producer's user-facing refusal text (#9934), the SECOND
+  // declared channel this writer was holding and dropping. A third spread into
+  // the same object, and the three do not interact: `details` is structured
+  // context, `declaredCode` is a code spelling, `userMessage` is prose a
+  // producer marked AT THROW TIME as addressed to the end user.
+  //
+  // The idiom is the INVERSE of `declaredCode`'s directly above, and the
+  // inversion is the whole point of this being a separate change rather than a
+  // rider. Read `thrown.userMessage` RAW: `resolveThrownHttpError` has already
+  // applied `declaredUserMessage`'s non-empty-string rule when it built the
+  // field, and presence here means only "the producer opted in". `declaredCode`
+  // needs `demotedDeclaredCode` because its raw field carries a SECOND meaning
+  // — it is also set when the producer's spelling IS the registered member, so
+  // forwarding it raw would put two spellings of one fact on every registered
+  // refusal. ⛔ `userMessage` has no second meaning, so there is no caller
+  // obligation to re-derive and inventing one to match the sibling would be the
+  // mistake, not the safe choice. Byte for byte the dispatcher twin's
+  // expression (`errorFromThrown`, `packages/runtime/src/http-dispatcher.ts`),
+  // which serves this same path and has emitted the channel since #9934.
+  //
+  // ⚠️ NOT withheld on the sanitised 5xx above, and this one needs no judgement
+  // call: the withhold rewrites a LOCAL `message` const, and
+  // `looksLikeInternalErrorLeak` is only ever handed `thrown.message`, so
+  // `thrown.userMessage` is never an input to it. A marked text is the
+  // producer's deliberate statement to the caller at any status — the ruling
+  // that created the channel made it status-agnostic on purpose.
+  const extra = {
+    ...(thrown.details ? { details: thrown.details } : {}),
+    ...(declaredCode !== undefined ? { declaredCode } : {}),
+    ...(thrown.userMessage !== undefined ? { userMessage: thrown.userMessage } : {}),
+  };
   sendError(
     res,
     thrown.status,
     thrown.code,
     message,
-    thrown.details ? { details: thrown.details } : undefined,
+    Object.keys(extra).length > 0 ? extra : undefined,
   );
 }
 

@@ -3,7 +3,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { SeedLoaderService } from './seed-loader';
 import type { IDataEngine, IMetadataService } from '@objectstack/spec/contracts';
-import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 
 /**
  * Composite externalId (framework#3434).
@@ -43,6 +43,7 @@ function createFaithfulEngine(): { engine: IDataEngine; store: Record<string, an
       return records;
     }),
     findOne: vi.fn(async (objectName: string, query?: any) => {
+      assertEngineFindOnePredicate(objectName, query);
       const rows = await (engine.find as any)(objectName, { ...query, limit: 1 });
       return rows[0] ?? null;
     }),

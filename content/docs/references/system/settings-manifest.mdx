@@ -239,6 +239,33 @@ const result = ResolvedSettingValueSchema.parse(data);
 | **description** | `string` | optional | Optional helper text |
 | **icon** | `string` | optional | Optional Lucide icon name |
 
+### Nested Shape: `Specifier.handler[kind='http']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **kind** | `'http'` | ✅ |  |
+| **method** | `Enum<'GET' \| 'POST' \| 'PUT' \| 'DELETE' \| 'PATCH'>` | optional (default: `"POST"`) |  |
+| **url** | `string` | ✅ | Endpoint URL; supports $`{...}` interpolation |
+| **body** | `Record<string, any>` | optional | Optional JSON body; supports $`{...}` interpolation |
+| **confirmText** | `string \| Record<string, string>` | optional | Confirm dialog text before invoking (omit = no confirm) |
+
+### Nested Shape: `Specifier.handler[kind='action']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **kind** | `'action'` | ✅ |  |
+| **name** | `string` | ✅ | Registered action machine name |
+| **params** | `Record<string, any>` | optional |  |
+| **confirmText** | `string \| Record<string, string>` | optional | Display label — the default-language string, or an inline locale map (`{ en, "zh-CN" }`) resolved at render time |
+
+### Nested Shape: `Specifier.handler[kind='navigate']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **kind** | `'navigate'` | ✅ |  |
+| **url** | `string` | ✅ | Target URL or in-app route |
+| **target** | `Enum<'_self' \| '_blank'>` | optional (default: `"_self"`) |  |
+
 
 ---
 

@@ -15,6 +15,7 @@ import { checkSpecVersionGap } from '../utils/spec-version.js';
 // them apart. That classification lives in one place, with the measurements
 // behind it written down there.
 import { loadOptionalPackage } from '../utils/optional-package.js';
+import { TENANCY_POSTURE_FIX_HINTS } from '../utils/tenancy-posture-hints.js';
 import { validateWidgetBindings } from '@objectstack/lint';
 import {
   resolveTenancyPosture,
@@ -523,18 +524,21 @@ export function environmentSourcesCheck(
 // ─── Tenancy Posture ────────────────────────────────────────────────
 
 /**
- * One-line descriptions of the accepted postures, keyed by the vocabulary
- * `@objectstack/spec/security` owns. A posture declared there but not described
- * here is still listed by the fix list (bare, without prose) rather than
- * silently dropped — the advice can go terse, never stale.
+ * The posture prose below comes from `../utils/tenancy-posture-hints.ts`, which
+ * `os serve` reads too (#12492).
+ *
+ * #12464 added a module-local `ORGANIZATIONS_RUNTIME_PKG` here and a
+ * `TENANCY_POSTURE_FIX_HINTS` table that repeated `serve`'s, byte for byte. That
+ * const's docblock named THIS card as its deletion condition, so it is gone: the
+ * declaration moved to the shared module and doctor reads it from there. ⛔ Not
+ * from `serve.ts` — a diagnostic command depending on a `serve` command's export
+ * in order to spell a package name is the coupling that docblock ruled out, and
+ * a neutral utility both commands sit above is not that.
+ *
+ * Doctor keeps its OWN bullet assembly (indent, `• OS_TENANCY_POSTURE=`, the
+ * ` — ` separator): serve renders the same hints at a different indent inside a
+ * FATAL refusal, and only the TABLE was ever duplicated.
  */
-const TENANCY_POSTURE_FIX_HINTS: Readonly<Record<string, string>> = {
-  single: 'one organization, no organization wall — the default',
-  group: 'organization wall enforced by the open engine, one shared database',
-  isolated:
-    'organization wall + the enterprise @objectstack/organizations runtime '
-    + "(the legacy spelling 'multi' is accepted and normalizes to this)",
-};
 
 /**
  * What doctor's tenancy-posture read decided (#5382).

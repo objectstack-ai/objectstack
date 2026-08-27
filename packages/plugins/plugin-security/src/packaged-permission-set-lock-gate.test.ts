@@ -40,7 +40,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 // The producer's OWN write-verb dispatch decisions, so this fake engine cannot
 // accept a call ObjectQL refuses (`check:engine-double-contract`; imported
 // from `@objectstack/metadata-core` exactly as the sibling pins do).
-import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import {
   ObjectStackProtocolImplementation,
   resetEnvWritableMetadataTypes,
@@ -116,6 +116,7 @@ function makeFakeEngine(opts?: { listItemsThrows?: boolean }) {
       return Array.from(rows.values());
     },
     async findOne(table: string, opts2: { where: Record<string, unknown> }) {
+      assertEngineFindOnePredicate(table, opts2);
       if (table === 'sys_metadata_history') return null;
       return findRow(opts2.where)?.row ?? null;
     },

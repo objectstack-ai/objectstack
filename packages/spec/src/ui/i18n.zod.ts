@@ -195,7 +195,7 @@ export const InlineLocaleMapSchema: z.ZodType<
   z.string().regex(
     INLINE_LOCALE_KEY,
     'an inline label map is keyed by BCP-47 locale tags (`en`, `zh-CN`, …) or `default` — '
-    + 'never by `key`/`defaultValue`, the retired key-reference form (#5055): nothing looks the key up, '
+    + 'never by `key`/`defaultValue`, the retired key-reference form: nothing looks the key up, '
     + 'so both resolvers fall through to the first string value and the raw key is rendered on screen',
   ),
   z.string(),

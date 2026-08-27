@@ -527,7 +527,7 @@ function checkViewFilterRuleValueShape(
         + `${value === undefined ? '["…"]' : previewFilterValue([value])} for a single value, `
         + `or use ${operator === 'in' ? '"equals"' : '"not_equals"'} to compare against it. `
         + `An empty list [] is allowed and is a real predicate. This is refused at authoring `
-        + `time because the query path refuses it too (400 INVALID_FILTER, #5869).`,
+        + `time because the query path refuses it too (400 INVALID_FILTER).`,
     });
     return;
   }
@@ -541,7 +541,7 @@ function checkViewFilterRuleValueShape(
       `Operator "${operator}" on field "${field}" requires a [min, max] value array. `
       + `Received ${describeFilterValue(value)} (${previewFilterValue(value)}). `
       + `A range needs exactly two bounds, in order. This is refused at authoring time `
-      + `because the query path refuses it too (400 INVALID_FILTER, #5869).`,
+      + `because the query path refuses it too (400 INVALID_FILTER).`,
   });
 }
 

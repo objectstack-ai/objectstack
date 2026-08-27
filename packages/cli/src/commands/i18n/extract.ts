@@ -16,7 +16,13 @@ import {
   emitJson,
   isExitSignal,
 } from '../../utils/format.js';
-import { extractTranslations, renderTranslationModule, type FillStrategy } from '../../utils/i18n-extract.js';
+import {
+  extractTranslations,
+  renderTranslationModule,
+  renderSourceHashModule,
+  parseSourceHashModule,
+  type FillStrategy,
+} from '../../utils/i18n-extract.js';
 
 const FILL_STRATEGIES: FillStrategy[] = ['empty', 'default', 'todo'];
 
@@ -89,6 +95,12 @@ export default class I18nExtract extends Command {
       default: true,
       allowNo: true,
     }),
+    'source-hashes': Flags.boolean({
+      description:
+        'Also write <locale>.source-hashes.generated.ts — the provenance companion that lets a stale fill be told from a translation (#11671). Off by default: it is a format addition, so a bundle set opts in by documenting the flag in its extract config.',
+      default: false,
+      allowNo: true,
+    }),
     'dry-run': Flags.boolean({
       description: 'Print to stdout instead of writing to --out',
       default: false,
@@ -131,9 +143,25 @@ export default class I18nExtract extends Command {
           ? declared.defaultLocale
           : 'en');
 
+      // Resolved before the extract because the previously committed provenance
+      // records are an INPUT to it: they are the mechanism's only memory, and a
+      // run that could not read them would silently re-derive every record from
+      // the current tree and forget the drift it is supposed to be holding on to.
+      const outDir = flags.out ? path.resolve(process.cwd(), flags.out) : undefined;
+      const previousSourceHashes: Record<string, Record<string, string>> = {};
+      if (flags['source-hashes'] && outDir) {
+        for (const locale of locales ?? []) {
+          const file = path.join(outDir, `${locale}.source-hashes.generated.ts`);
+          if (!fs.existsSync(file)) continue;
+          const table = parseSourceHashModule(fs.readFileSync(file, 'utf8'));
+          if (table) previousSourceHashes[locale] = table;
+        }
+      }
+
       const result = extractTranslations(normalized, {
         defaultLocale,
         locales,
+        previousSourceHashes,
         fill: flags.fill as FillStrategy,
         filter,
         // Merge (the default) never overwrites an existing non-default-locale
@@ -222,7 +250,8 @@ export default class I18nExtract extends Command {
         return;
       }
 
-      const outDir = path.resolve(process.cwd(), flags.out);
+      // `flags.out` is non-empty here — the two branches above return otherwise.
+      const resolvedOutDir = outDir as string;
 
       // Every file a normal run would emit, paired with its rendered content.
       // Both branches below iterate this, so `--check` can never diverge from
@@ -231,16 +260,27 @@ export default class I18nExtract extends Command {
       for (const locale of localesEmitted) {
         if (result.counts[locale] > 0) {
           emitted.push({
-            file: path.join(outDir, `${locale}.objects.generated.ts`),
+            file: path.join(resolvedOutDir, `${locale}.objects.generated.ts`),
             content: renderTranslationModule(result.bundles[locale], { locale, objectsOnly }),
             keys: result.counts[locale],
           });
         }
         if (emitsMetadataForms(locale)) {
           emitted.push({
-            file: path.join(outDir, `${locale}.metadata-forms.generated.ts`),
+            file: path.join(resolvedOutDir, `${locale}.metadata-forms.generated.ts`),
             content: renderTranslationModule(result.bundles[locale], { locale, kind: 'metadataForms' }),
             keys: metadataFormsCounts[locale],
+          });
+        }
+        // The provenance companion rides in the SAME list, so `--check` compares
+        // it by the same byte-for-byte rule as the bundles it belongs to and can
+        // never diverge from what a real extract writes.
+        const table = result.sourceHashes[locale];
+        if (flags['source-hashes'] && table) {
+          emitted.push({
+            file: path.join(resolvedOutDir, `${locale}.source-hashes.generated.ts`),
+            content: renderSourceHashModule(table, { locale }),
+            keys: Object.keys(table).length,
           });
         }
       }
@@ -269,7 +309,7 @@ export default class I18nExtract extends Command {
         process.exit(1);
       }
 
-      fs.mkdirSync(outDir, { recursive: true });
+      fs.mkdirSync(resolvedOutDir, { recursive: true });
       let written = 0;
       for (const { file, content, keys } of emitted) {
         fs.writeFileSync(file, content, 'utf8');

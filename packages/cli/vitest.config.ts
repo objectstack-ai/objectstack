@@ -32,7 +32,11 @@
 // was reachable from NO other file in `packages/cli` (which is why it was
 // absent from the ledger in the first place), so this entry re-resolves
 // exactly one file — the new test — and cannot move any existing suite.
-// Measured again after: 135 files / 1470 tests, unchanged.
+// Measured again after: unchanged. ⚠️ The file/test COUNT that "unchanged" was
+// checked against is deliberately not repeated here. This file used to carry
+// this package's population in two separate sections; the two copies drifted
+// apart and neither said which was current, so the population is now stated
+// ONCE — with the commit it was measured on — in the suite-cost section below.
 //
 // ## Why the create-objectstack entry (#10557)
 //
@@ -62,69 +66,189 @@
 // suite cost in this repo — per-file module-graph re-execution under isolation,
 // the proxy `scripts/partition-test-shards.mjs` weights by — predicted the
 // cause would be import surface, which would have made a `test` block (`pool`,
-// `isolate`) the lever. Measured on 2026-08-20, it is NOT that, and the
-// measurement is recorded here because this file is where the next person
-// looking for a lever will arrive.
+// `isolate`) the lever. It is NOT that, and the measurement is recorded here
+// because this file is where the next person looking for a lever will arrive.
 //
-// One machine, 4 cores, warm build, `npx vitest run --maxWorkers=2` per
-// package, vitest 4.1.10. Both normalisers, because per-FILE cost alone cannot
-// tell "expensive suite" from "more tests per file":
+// ⚠️ EVERY FIGURE BELOW COMES FROM ONE RUN ON ONE STATED COMMIT — 2f665a1af,
+// re-measured 2026-08-26 (#12499). The first version of this section carried a
+// DATE and no commit, and the population moved under it while the figures went
+// on reading as precise: 137 files / 1498 tests had become 185 / 2115, and 20
+// spawner files had become 39, before anyone checked. A date says when someone
+// looked; a commit says WHAT they looked at, and only the second can be
+// re-checked. Whoever re-measures next: print your commit here, and keep these
+// counts in exactly one place in this file — a second copy is what rotted last
+// time, because the two drifted and neither said which was current.
+//
+// PROTOCOL. One machine, 4 cores, warm build, one `vitest run --maxWorkers=2`
+// per package, vitest 4.1.10 on node 22.22.2. ⚠️ Several agents share this
+// container, so every run below held the shared heavy-verify lock
+// (`scripts/pm/os-verify-lock.sh`): a suite timed beside a neighbour's build is
+// a reading about the box, not about the suite.
+//
+// Contention actually seen, so the absolutes can be discounted honestly: three
+// other agents were working this container. The `cli` run waited 4m01s for the
+// lock behind a neighbour's build and then held it 13m14s; the five peer runs
+// waited 7m03s and held 8m57s. The lock serialises LOCKED work only — a
+// neighbour's UNLOCKED gate script was seen at ~130% CPU partway through the
+// `cli` run — and 1-minute load averaged 4.36 (peak 6.97) on 4 cores across it.
+// ⛔ Also part of the protocol: each package was measured against a tree with
+// its own dependency closure BUILT. A package measured without one does not
+// report a cheap wall, it fails loudly — `example-showcase` did, first time.
+//
+// ⚠️ WHICH OF THESE TRAVEL TO ANOTHER BOX. #11707 re-ran this section's
+// absolutes elsewhere and they did NOT reproduce, while the ratio it cared
+// about did. So: every figure in SECONDS here is box-dependent and comparable
+// only inside this one run — the walls, s/file, s/test, the `Duration` split,
+// the per-spawn floors. What a reader on another box should expect to reproduce
+// are the RATIOS: tests/file, the top-20 concentration, the spawner share of
+// the file wall, this package's multiple over its peers, and the ratio between
+// the two spawn floors.
+//
+// Both normalisers, because per-FILE cost alone cannot tell "expensive suite"
+// from "more tests per file":
 //
 //   package                files  tests   tests/file   wall     s/file   s/test
-//   @objectstack/cli         137   1498       10.9    495.81s   3.619   0.3310
-//   @objectstack/spec        415  11045       26.6    325.31s   0.784   0.0295
-//   …/service-automation      83    991       11.9     57.97s   0.698   0.0585
-//   …/driver-turso            39   1003       25.7     38.50s   0.987   0.0384
-//   @objectstack/client       23    314       13.7     23.75s   1.033   0.0756
-//   …/example-showcase        21    342       16.3     31.15s   1.483   0.0911
+//   @objectstack/cli       185   2115       11.4   793.31s    4.288   0.3751
+//   @objectstack/spec      432  11460       26.5   358.46s    0.830   0.0313
+//   …/service-automation    91   1082       11.9    96.06s    1.056   0.0888
+//   …/driver-turso          39   1006       25.8    33.89s    0.869   0.0337
+//   @objectstack/client     25    346       13.8    18.74s    0.750   0.0542
+//   …/example-showcase      26    364       14.0    32.94s    1.267   0.0905
 //
-// Normalising per TEST makes this package look worse, not better: it has the
-// LOWEST tests-per-file of the six, so its 2.4-5.2x per-file cost becomes
-// 3.6-11x per test. "It just has more tests per file" is falsified.
+// Normalising per TEST makes this package look WORSE, not better: it has the
+// LOWEST tests-per-file of the six, so its 3.4-5.7x per-file cost becomes
+// 4.1-12.0x per test. "It just has more tests per file" is falsified. ⚠️ Read
+// the SHAPE of that check, not only its answer: the multiple has to WIDEN when
+// the normaliser changes, and it does.
 //
 // The `Duration` split says where the cost is NOT:
 //
-//   cli      495.81s (transform 29.47s, setup 0ms, import 192.91s, tests 774.95s)
-//   spec     325.31s (transform 13.79s, setup 0ms, import  63.90s, tests 456.36s)
-//   svc-auto  57.97s (transform 14.54s, setup 0ms, import  96.78s, tests   4.73s)
-//   turso     38.50s (transform 16.85s, setup 0ms, import  65.98s, tests   3.56s)
-//   client    23.75s (transform 18.31s, setup 0ms, import  39.72s, tests   2.25s)
+//   cli       793.31s (transform 25.17s, setup 0ms, import 203.72s, tests 1353.09s)
+//   spec      358.46s (transform 15.68s, setup 0ms, import  68.50s, tests  528.18s)
+//   svc-auto   96.06s (transform 14.72s, setup 0ms, import 172.68s, tests    4.71s)
+//   turso      33.89s (transform 14.13s, setup 0ms, import  56.93s, tests    3.62s)
+//   client     18.74s (transform 10.91s, setup 0ms, import  30.15s, tests    2.38s)
+//   showcase   32.94s (transform 16.68s, setup 0ms, import  48.76s, tests   12.78s)
 //
-// Per file this package's import cost is 1.41s and its transform cost 0.215s —
-// MID-BAND and LOWEST respectively (client 1.73s/file import, turso 1.69s).
-// The wide dependency closure in `package.json` is not what the test files
-// import. `setup` is 0ms everywhere, so setupFiles cost is not it either.
+// Per file this package's import cost is 1.10s and its transform cost 0.136s —
+// SECOND-LOWEST of the six on BOTH; only `spec` is below it (0.16s import,
+// 0.036s transform), and the tops are `service-automation` at 1.90s import and
+// `example-showcase` at 0.642s transform. The wide dependency closure in
+// `package.json` is not what the test files import. `setup` is 0ms in all six,
+// so setupFiles cost is not it either — and that zero was checked against an
+// instrument that can say otherwise: the same reporter, pointed at a
+// deliberate 300ms setup file, reports it.
 //
 // The cost is test-body work, and it is concentrated, not uniform: median file
-// 0.03s, 105 of 137 files under 2s, top 20 files = 87.7% of the wall. The 20
-// files that spawned the real CLI as a subprocess (all 20 of them
-// `bin/run-dev.js` through `tsx` on that date, against a `mkdtemp` project)
-// were 56.1% of the file wall (300.1s) while carrying 177 of 1498 tests —
-// three have since moved to the built entry (#11707; last section of this
-// header) and the split has not been re-measured. Each spawn re-executes the
-// CLI's module graph in a COLD process, which is the standing theory after
-// all — relocated out of vitest's worker, where neither its transform cache
-// nor its module registry can reach it. Floor per spawn, doing nothing but
-// printing a version:
+// 0.05s, 129 of 185 files under 2s, top 20 files = 71.3% of the file wall
+// (965.3s of 1353.1s). "File wall" here is the sum of the per-module run
+// durations, which is the SAME quantity vitest prints as the `tests` term
+// above — said out loud so the two can be checked against each other instead of
+// drifting apart, which is how this section went stale the first time.
 //
-//   tsx bin/run-dev.js --version   6.5-6.8s     (the source entry all 20 used)
-//   node bin/run.js --version      2.9-3.2s     (the built entry)
-//   node -e 0                      0.031s       (process floor)
+// The 39 files that spawn the real CLI as a subprocess (against a `mkdtemp`
+// project) are 89.4% of that file wall (1209.8s) while carrying 319 of the 2115
+// tests — and they are the WHOLE of the top 20, all twenty of them. Each spawn
+// re-executes the CLI's module graph in a COLD process, which is the standing
+// theory after all — relocated out of vitest's worker, where neither its
+// transform cache nor its module registry can reach it.
+//
+// ⚠️ THE SPAWNER SET MOVED IN BOTH DIRECTIONS AT ONCE, which is why the two
+// shares here disagree with the 2026-08-20 pair in OPPOSITE directions: 20
+// spawner files became 39, so the share of the wall they hold ROSE (56.1% ->
+// 89.4%) while the top-20 concentration FELL (87.7% -> 71.3%) — the same kind
+// of cost, spread across more files. Either number read alone tells the wrong
+// story; the pair is the finding.
+//
+// ⚠️ COUNTING THE SPAWNERS: match the entry BASENAME, not `bin/run-dev.js`.
+// Three of the 39 assemble the path from separate literals
+// (`join(…, '..', 'bin', 'run-dev.js')`) and a slash-joined pattern misses all
+// three — silently, since the answer it returns is still a plausible number.
+// Prose mentions do not count either: at least one file names the entry four
+// times while explicitly not spawning it.
+//
+// By entry point, after #11707 moved three files onto the built one:
+//
+//   35 files spawn `bin/run-dev.js` (source)   1169.2s   33.4s/file   311 tests
+//    4 files spawn `bin/run.js`     (built)      40.6s   10.1s/file     8 tests
+//
+// ⛔ That is NOT a measurement of what the two entries cost. Those four are also
+// the smallest files here — 2.0 tests/file against 8.9 — and per TEST the
+// ordering REVERSES (5.1s vs 3.8s). File-level shares say where the wall sits,
+// not what one spawn costs. What a spawn costs is measured directly, one spawn
+// at a time, below.
+//
+// Floor per spawn, doing nothing but printing a version — 5 timed runs each
+// after one discarded warm-up, box idle inside the lock:
+//
+//   tsx bin/run-dev.js --version   5.45-6.07s    (the source entry, 35 files)
+//   node bin/run.js --version      2.46-2.66s    (the built entry, 4 files)
+//   node -e 0                      0.025-0.031s  (process floor)
+//
+// ⚠️ The absolutes moved from the 2026-08-20 reading (6.5-6.8 / 2.9-3.2 /
+// 0.031); the RATIO did not — source-over-built was 2.18x then and 2.21x here (means of the five runs each).
+// That is the #11707 pattern exactly: carry the ratio to another box, never the
+// seconds.
+//
+// ⛔ The exit code is PART of this measurement, not a formality. A nonexistent
+// entry (`node bin/run-NOPE.js --version`, exit 1) returns in 0.030s — which
+// reads as a better floor than anything real. Timing alone cannot tell "fast"
+// from "never ran"; every row above was checked for exit 0.
+//
+// ⚠️ A port-selection change (#12441) was in flight on three of these spawner
+// files (`serve-node-env-production-default`,
+// `serve-app-anchored-optional-import`, `helpers/serve-process`) while this was
+// measured. It changes which PORT a spawned `serve` binds, not which ENTRY is
+// spawned, so the source-vs-built split above is unaffected by it; it can move
+// wall times slightly. Recorded so the next reader can tell drift from noise.
 //
 // ⚠️ Two levers were measured and both are rejected HERE, on this evidence:
 //
-//   `test: { maxWorkers: 4 }` — real but not ours to take. 2->4 workers on an
-//   idle box is 495.81s -> 337.13s, but CPU is flat (user+sys 1291.3s ->
-//   1256.2s) and per-file wall INFLATES (sum 535.1s -> 748.3s; longest file
-//   74.3s -> 104.1s): the box is saturated, so this is packing, not work. In CI
+//   `test: { maxWorkers: 4 }` — real but not ours to take. 2->4 workers on this
+//   box is 793.31s -> 565.86s, but CPU is FLAT (user+sys 2028.5s -> 1971.2s)
+//   and per-file wall INFLATES (sum 1353.1s -> 1969.8s; longest file 94.0s ->
+//   114.1s): the box is saturated, so this is packing, not work. Re-measured on
+//   the commit above, and the 2026-08-20 verdict reproduced in every term. In CI
 //   the box is not this package's — `ci.yml` runs `turbo run test
 //   --concurrency=4` — so pinning a worker count here spends cores belonging to
-//   whatever else lands on the shard. Worker allocation is a property of the
-//   shard, decided in `ci.yml`, not of this config (#10149).
+//   whatever else lands on the shard. That OUTER fan-out — how many package
+//   `test` tasks run at once — is a property of the shard, decided in `ci.yml`,
+//   not of this config (#10149).
 //
-//   `NODE_COMPILE_CACHE` for the spawned processes — measured 6.98/6.24/6.41/
-//   6.18s cached vs 6.39/6.72s uncached, i.e. inside noise for 42MB of cache.
-//   The per-spawn cost is module-graph EXECUTION, not compilation.
+//   ⚠️ THE INNER POOL IS BOUNDED TOO, AND THE WORDING HERE USED TO DENY IT.
+//   Vitest's own worker pool, inside THIS package's task, has had a host-sized
+//   cap since #11958: the root `test` script and the CI test steps export
+//   `VITEST_MAX_WORKERS` from `scripts/vitest-worker-cap.mjs`, which only ever
+//   LOWERS vitest's own `cores - 1` default. ⛔ Their call sites are
+//   deliberately NOT listed here — a list of call sites inside a package config
+//   is the next thing to rot, and a citation that rotted is why this paragraph
+//   exists. The script is single-source and carries its own reasoning.
+//
+//   ⭐ Worth keeping is WHY that omission was worse than a gap. The export sits
+//   in the SAME `run:` block as the `--concurrency` flag quoted above, a few
+//   lines earlier, under a comment explaining it. Saying "worker allocation is
+//   decided in `ci.yml`" and then naming only the turbo flag sent the reader to
+//   the exact place the cap lives and told them what they would find there — so
+//   they walked past it, on the authority of this file. That is how a one-way
+//   citation survives: the newer document points back at the older one, and
+//   nobody re-reads the older one to check that it still holds.
+//
+//   ⚠️ The lever is also INERT wherever that variable is exported, not merely
+//   unwise. Vitest applies the env var to the RESOLVED config, so it overwrites
+//   a declared `maxWorkers` rather than being bounded by it. Observed on vitest
+//   4.1.10 against a positive control: a `vitest.config.ts` declaring
+//   `maxWorkers: 8` resolves to 8 with the variable unset, and to 2 under
+//   `VITEST_MAX_WORKERS=2`. A pin added here would read as taken and change
+//   nothing in exactly the runs that matter.
+//
+//   `NODE_COMPILE_CACHE` for the spawned processes — re-measured 5.15/5.34/
+//   5.16/5.42s cached against 5.46/5.61/5.64/5.71s uncached, for 42MB of cache
+//   (783 files). ⚠️ Unlike the 2026-08-20 reading, where the two sets
+//   overlapped and the answer was "inside noise", these four-and-four do not
+//   overlap: cached is consistently ~0.3s (~5%) faster. It is still not the
+//   lever — that is an order of magnitude less than the 3.11s the built entry
+//   already saves per spawn, and it buys 42MB to get it. The per-spawn cost is
+//   module-graph EXECUTION, not compilation.
 //
 // So the work is real, the price is fair, and nothing contained in this package
 // removes it without changing what the e2e tests assert.

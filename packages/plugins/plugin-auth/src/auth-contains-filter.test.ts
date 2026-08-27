@@ -91,6 +91,7 @@ import { FILTER_OPERATORS } from '@objectstack/spec/data';
 import type { QueryAST } from '@objectstack/spec/data';
 import type { IDataEngine } from '@objectstack/core';
 import { createObjectQLAdapterFactory } from './objectql-adapter';
+import { assertEngineFindOnePredicate } from '@objectstack/objectql';
 
 /**
  * The columns face 2 reads, declared — a real table has to be told.
@@ -126,7 +127,7 @@ function sqlReadEngine(driver: SqlDriver): IDataEngine {
   // `find(obj, … as any)` too, and nothing here needs to be off-contract.
   return {
     find: (object: string, query: QueryAST) => driver.find(object, query),
-    findOne: (object: string, query: QueryAST) => driver.findOne(object, query),
+    findOne: (object: string, query: QueryAST) => { assertEngineFindOnePredicate(object, query); return driver.findOne(object, query); },
     count: (object: string, query?: QueryAST) => driver.count(object, query),
   } as unknown as IDataEngine;
 }

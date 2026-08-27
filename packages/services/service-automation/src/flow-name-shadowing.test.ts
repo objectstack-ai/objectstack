@@ -26,7 +26,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { SchemaRegistry } from '@objectstack/objectql';
 import { AutomationEngine } from './engine.js';
-import { resolveFlowPrecedence, describeFlowContender } from './flow-precedence.js';
+import { resolveFlowPrecedence, describeFlowContender, renderFlowContender } from './flow-precedence.js';
 
 const FLOW = 'opportunity_approval';
 const silentLogger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } as any;
@@ -121,7 +121,14 @@ describe('#11997 — packaged flow shadowed by a same-named runtime flow', () =>
         const [message, meta] = warn.mock.calls[0] as [string, any];
 
         expect(message).toContain(FLOW); // the bare name
-        expect(message).toContain('package "crm"'); // contender A
+        // ⚠️ Contender A is asserted THROUGH the renderer, not as a literal
+        // (#12563). This warning used to spell the phrase itself, in a private
+        // `const describe` two lines above the call — with double quotes, while
+        // the two other copies of the same sentence used single. Deriving the
+        // expectation here means re-introducing a private spelling at this call
+        // site fails THIS row; the renderer's own literal output is pinned
+        // separately below, so the two cannot drift together and stay green.
+        expect(message).toContain(renderFlowContender({ source: 'package', packageId: 'crm' })); // contender A
         expect(message).toContain('runtime-authored row'); // contender B
         expect(message).toContain('arming a runtime-authored row'); // which one wins
         expect(message).toContain('ADR-0005');
@@ -217,5 +224,50 @@ describe('#11997 — precedence is a total order, not an iteration order', () =>
         const tenant = { ...flowBody(FLOW, 'TENANT'), _packageId: 'crm', _provenance: 'org' };
         const resolved = resolveFlowPrecedence([packaged, tenant], silentLogger);
         expect((resolved[0].definition as any).label).toBe('TENANT');
+    });
+});
+
+/**
+ * [#12563] The phrase itself, pinned as literals.
+ *
+ * The call sites above and the CLI banner assert THROUGH `renderFlowContender`,
+ * so a caller that re-invents the phrase privately goes red. That alone is not
+ * enough: if the renderer's own spelling changed, every derived assertion would
+ * move with it and stay green. These three rows are the anchor that cannot
+ * move quietly — one per decision the renderer makes.
+ */
+describe('#12563 — renderFlowContender: one spelling for the contested-flow phrase', () => {
+    it('quotes a package id the way this package quotes identifiers — single, not double', () => {
+        // ⛔ Not a majority vote of the three copies that used to exist. Measured
+        // over `service-automation/src`: 203 single-quoted interpolations in
+        // operator prose against 3 double-quoted, one of which WAS this phrase.
+        // The sentence already single-quotes the flow name beside this.
+        expect(renderFlowContender({ source: 'package', packageId: 'crm' })).toBe("package 'crm'");
+        expect(renderFlowContender({ source: 'package', packageId: 'com.objectstack.platform-objects' })).toBe(
+            "package 'com.objectstack.platform-objects'",
+        );
+    });
+
+    it('names a runtime overlay by the table an admin would go edit', () => {
+        expect(renderFlowContender({ source: 'runtime' })).toBe('a runtime-authored row (sys_metadata)');
+        // A runtime row bound to a real package id is STILL a runtime row — the
+        // id is not part of this branch's phrase, and leaking it here would
+        // read as "a package shipped this", the opposite of what happened.
+        expect(renderFlowContender({ source: 'runtime', packageId: 'crm' })).toBe(
+            'a runtime-authored row (sys_metadata)',
+        );
+    });
+
+    it('never interpolates an absent package id into the sentence', () => {
+        // ⚠️ Unreachable from THIS package's callers today — `isCodeArtifactBody`
+        // is false on a falsy `_packageId`, so `describeFlowContender` never
+        // emits a package contender without one. That is a property of today's
+        // callers, not of the renderer, and this row is what keeps the renderer
+        // safe for the next one. It is a real branch of an exported function.
+        expect(renderFlowContender({ source: 'package' })).toBe('a code-shipped package (id unknown)');
+        expect(renderFlowContender({ source: 'package' })).not.toContain('undefined');
+        expect(renderFlowContender({ source: 'package', packageId: '' })).toBe(
+            'a code-shipped package (id unknown)',
+        );
     });
 });

@@ -45,7 +45,7 @@ import { matchesFilterCondition } from '@objectstack/formula';
 // the day the validator's own skip list changes. This package's vitest config
 // aliases `@objectstack/objectql` to `packages/objectql/src`, so this resolves
 // to the source in the checkout rather than a prebuilt dist.
-import { validateRecord } from '@objectstack/objectql';
+import { validateRecord, assertEngineFindOnePredicate } from '@objectstack/objectql';
 import type { PermissionSet } from '@objectstack/spec/security';
 
 const REP = 'usr_rep';
@@ -227,6 +227,7 @@ function makeStore(rows: Record<string, Row[]>, detail: DetailVariant = 'valid',
       return typeof options?.limit === 'number' ? hits.slice(0, options.limit) : hits;
     }),
     findOne: vi.fn(async (object: string, options: any = {}) => {
+      assertEngineFindOnePredicate(object, options);
       // [#7505] The one thing this double gains: a store that is DOWN for one
       // object, so "the row is not there" and "I could not look" stop being the
       // same observation.

@@ -80,6 +80,40 @@ describe('RestApiConfigSchema', () => {
     expect(config.enableDiscovery).toBe(false);
   });
 
+  it('[#11983] enableSearch defaults to true — search is ON unless opted out', () => {
+    // Pinning the MATERIALIZED default (not just the declaration) is what makes
+    // a later `.optional()` — which would hand `undefined` to the REST layer —
+    // fail here rather than silently change the mount decision.
+    const config = RestApiConfigSchema.parse({});
+
+    expect(config.enableSearch).toBe(true);
+  });
+
+  it('[#11983] enableSearch: false is the declared deployment-wide opt-out, and it SURVIVES the parse', () => {
+    // Before this key had a declared seat, this exact parse was the measured
+    // trap: `RestApiConfigSchema` is not `.strict()`, so it STRIPPED the
+    // undeclared key and any consumer of the parsed output silently got search
+    // turned back on (the ADR-0104 silent-strip class). This is the pin that
+    // says the opt-out now round-trips through the key's own contract.
+    const optedOut = RestApiConfigSchema.parse({ version: 'v1', enableSearch: false });
+
+    expect(optedOut.enableSearch).toBe(false);
+    expect(Object.prototype.hasOwnProperty.call(optedOut, 'enableSearch')).toBe(true);
+
+    // Explicit `true` is a real answer too, not a no-op the parse discards.
+    expect(RestApiConfigSchema.parse({ enableSearch: true }).enableSearch).toBe(true);
+  });
+
+  it('[#11983] enableSearch is authorable without a cast, and is a boolean (compile-time)', () => {
+    // The declaration's REASON for existing: `objectstack.config.ts` authors
+    // the key by name and `packages/rest`'s `normalizeConfig` reads it. Both go
+    // through this input type, so this is the pin that says the key no longer
+    // needs `(api as any)` to be reachable.
+    const authored: RestApiConfig = { enableSearch: false };
+    const readAsBoolean: boolean | undefined = authored.enableSearch;
+    expect(readAsBoolean).toBe(false);
+  });
+
   describe('Documentation Configuration', () => {
     it('should accept basic documentation config', () => {
       const config = RestApiConfigSchema.parse({

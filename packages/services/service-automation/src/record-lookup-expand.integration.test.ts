@@ -17,6 +17,7 @@ import { describe, it, expect } from 'vitest';
 import { LiteKernel } from '@objectstack/core';
 import { AutomationServicePlugin } from './plugin.js';
 import { AutomationEngine } from './engine.js';
+import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 
 interface CrudCall { op: string; obj: string; ctx: any; expand?: any; fields?: any }
 
@@ -33,6 +34,7 @@ function fakeObjectQl(opts: { throwOnFindOne?: boolean } = {}) {
   const engine: any = {
     async find(object: string, o: any) { crud.push({ op: 'find', obj: object, ctx: o?.context }); return []; },
     async findOne(object: string, o: any) {
+      assertEngineFindOnePredicate(object, o);
       crud.push({ op: 'findOne', obj: object, ctx: o?.context, expand: o?.expand });
       if (opts.throwOnFindOne) throw new Error('boom');
       return object === 'lead' ? { ...LEAD } : undefined;

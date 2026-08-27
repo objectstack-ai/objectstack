@@ -16,6 +16,7 @@ import {
   createInvitationPlacementService,
   readPlacementIntent,
 } from './invitation-placement.js';
+import { assertEngineFindOnePredicate, type EngineFindOneQueryInput } from '@objectstack/metadata-core';
 
 const INTENT = { businessUnitId: 'bu_plant_a', positions: ['qc_inspector', 'line_lead'] };
 
@@ -38,7 +39,7 @@ function makeQl(tables: Record<string, any[]> = {}) {
         ),
       );
     }),
-    findOne: vi.fn(async () => null),
+    findOne: vi.fn(async (object: string, query?: EngineFindOneQueryInput) => { assertEngineFindOnePredicate(object, query); return null; }),
     insert: vi.fn(async (_o: string, row: any) => ({ id: 'row', ...row })),
   };
 }

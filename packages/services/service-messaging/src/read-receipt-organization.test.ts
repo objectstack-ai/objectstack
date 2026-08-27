@@ -3,6 +3,7 @@
 import { describe, it, expect } from 'vitest';
 import { MessagingService, NOTIFICATION_EVENT_OBJECT } from './messaging-service.js';
 import { RECEIPT_OBJECT } from './inbox-channel.js';
+import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 
 /**
  * [#11303] The SECOND `sys_notification_receipt` producer.
@@ -44,6 +45,7 @@ function engineWithNotification(notificationOrg: string | null) {
             return { ...row, id: 'rec_1' };
         },
         async findOne(object: string, opts: any) {
+            assertEngineFindOnePredicate(object, opts);
             if (object === NOTIFICATION_EVENT_OBJECT) {
                 return { id: 'evt_pin', organization_id: notificationOrg };
             }

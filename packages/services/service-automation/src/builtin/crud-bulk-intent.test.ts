@@ -43,7 +43,7 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import { assertEngineDeleteDispatch } from '@objectstack/objectql';
+import { assertEngineDeleteDispatch, assertEngineFindOnePredicate } from '@objectstack/objectql';
 import { AutomationEngine } from '../engine.js';
 import { registerCrudNodes } from './crud-nodes.js';
 
@@ -82,7 +82,7 @@ function pinnedFakeData() {
     const calls: { update?: any; delete?: any } = {};
     const service = {
         find: async (_object: string, options: any) => rows.filter((r) => matches(r, options?.where)),
-        findOne: async (_object: string, options: any) => rows.find((r) => matches(r, options?.where)) ?? null,
+        findOne: async (_object: string, options: any) => { assertEngineFindOnePredicate(_object, options); return rows.find((r) => matches(r, options?.where)) ?? null; },
         insert: async (_object: string, data: any) => ({ id: 'new', ...data }),
         update: async (_object: string, data: any, options: any) => {
             calls.update = options;

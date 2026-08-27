@@ -68,7 +68,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { assertEngineUpdateDispatch } from '@objectstack/metadata-core';
+import { assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { PermissionSetSchema } from '@objectstack/spec/security';
 import {
   createPermissionSetWriteThrough,
@@ -140,6 +140,7 @@ function makeQl(rows: any[], declared: any[]) {
       );
     },
     async findOne(object: string, q: any) {
+      assertEngineFindOnePredicate(object, q);
       return (await this.find(object, q))[0] ?? null;
     },
     // Opens with the PRODUCER's own dispatch predicate, never a hand-mirrored

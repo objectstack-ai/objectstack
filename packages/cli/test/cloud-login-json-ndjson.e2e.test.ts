@@ -308,7 +308,11 @@ describe('os cloud login --json — the declared NDJSON stream (#6730)', () => {
 
   beforeAll(async () => {
     try {
-      execFileSync('script', ['--version'], { stdio: 'ignore' });
+      // Every spawned child under this directory declares its environment at the
+      // call site (#11595). An omitted `env` is the leak in its purest form: the
+      // child gets the vitest worker's environment verbatim, with nothing on the
+      // page to read.
+      execFileSync('script', ['--version'], { stdio: 'ignore', env: childEnv() });
     } catch {
       throw new Error(
         'script(1) is required to drive the TTY-gated device flow — see this file’s header for why this fails instead of skipping.',

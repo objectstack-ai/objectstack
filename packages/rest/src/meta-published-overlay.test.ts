@@ -42,7 +42,7 @@ import { describe, it, expect, vi } from 'vitest';
 // The producer's OWN write-verb dispatch decisions, so the fake engine below
 // cannot accept a call ObjectQL itself would refuse — a double looser than the
 // real engine is how a dead route once shipped with its suite green.
-import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { MetadataManager } from '@objectstack/metadata';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { RestServer } from './rest-server.js';
@@ -100,6 +100,7 @@ function makeStubEngine(opts: { failSysMetadataReads?: Error } = {}) {
 
     const engine: any = {
         async findOne(table: string, options: { where: Record<string, unknown> }) {
+            assertEngineFindOnePredicate(table, options);
             if (table === 'sys_metadata' && opts.failSysMetadataReads) throw opts.failSysMetadataReads;
             if (table === 'sys_metadata_history') return null;
             return findRow(options.where)?.row ?? null;

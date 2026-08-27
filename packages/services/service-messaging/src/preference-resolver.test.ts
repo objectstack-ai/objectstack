@@ -2,6 +2,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { PreferenceResolver, quietHoursDeferral, digestDeferral } from './preference-resolver.js';
+import { assertEngineFindOnePredicate, type EngineFindOneQueryInput } from '@objectstack/metadata-core';
 
 function silentLogger() {
     return { info: () => {}, warn: () => {}, error: () => {} };
@@ -26,7 +27,8 @@ function fakeData(rows: any[] = [], opts: { throwOnFind?: boolean } = {}) {
                         (w.organization_id == null || r.organization_id === w.organization_id),
                 );
             },
-            async findOne() { return null; },
+            async findOne(object: string, query?: EngineFindOneQueryInput) {
+                              assertEngineFindOnePredicate(object, query); return null; },
             async insert(_o: string, r: any) { return { id: 'x', ...r }; },
             async update() { return {}; },
             async delete() { return {}; },

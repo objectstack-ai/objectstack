@@ -630,9 +630,15 @@
     "UnknownAuthoringKeyFinding": "src/data/authoring-key-lint.ts#UnknownAuthoringKeyFinding (interface)",
     "UnorderedPaginationConformanceCase": "src/data/pagination-conformance.ts#UnorderedPaginationConformanceCase (interface)",
     "VALID_AST_OPERATORS": "src/data/filter.zod.ts#VALID_AST_OPERATORS (const)",
+    "VALUE_ROUNDTRIP_CASES": "src/data/value-roundtrip-conformance.ts#VALUE_ROUNDTRIP_CASES (const)",
+    "VALUE_ROUNDTRIP_COLLISION_PAIRS": "src/data/value-roundtrip-conformance.ts#VALUE_ROUNDTRIP_COLLISION_PAIRS (const)",
+    "VALUE_ROUNDTRIP_FIELDS": "src/data/value-roundtrip-conformance.ts#VALUE_ROUNDTRIP_FIELDS (const)",
+    "VALUE_ROUNDTRIP_ROWS": "src/data/value-roundtrip-conformance.ts#VALUE_ROUNDTRIP_ROWS (const)",
     "ValidationRule": "src/data/validation.zod.ts#ValidationRule (type)",
     "ValidationRuleSchema": "src/data/validation.zod.ts#ValidationRuleSchema (const)",
     "ValueForm": "src/data/field-value.zod.ts#ValueForm (type)",
+    "ValueRoundTripCase": "src/data/value-roundtrip-conformance.ts#ValueRoundTripCase (interface)",
+    "ValueRoundTripColumn": "src/data/value-roundtrip-conformance.ts#ValueRoundTripColumn (type)",
     "ValueShapeFieldDef": "src/data/field-value.zod.ts#ValueShapeFieldDef (interface)",
     "ZeroLimitConformanceCase": "src/data/pagination-conformance.ts#ZeroLimitConformanceCase (interface)",
     "apiExposureDenialReason": "src/data/api-derivation.ts#apiExposureDenialReason (function)",
@@ -769,6 +775,7 @@
     "urlUserinfoUsername": "src/data/driver/common.zod.ts#urlUserinfoUsername (function)",
     "utcInstantMs": "src/data/calendar-day.ts#utcInstantMs (function)",
     "validateDriverConfig": "src/data/driver/config-registry.zod.ts#validateDriverConfig (function)",
+    "valueRoundTripDivergence": "src/data/value-roundtrip-conformance.ts#valueRoundTripDivergence (function)",
     "valueSchemaFor": "src/data/field-value.zod.ts#valueSchemaFor (function)"
   }
 }

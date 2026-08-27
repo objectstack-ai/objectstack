@@ -88,7 +88,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { ErrorCode } from '@objectstack/spec/api';
 import { ObjectStackProtocolImplementation } from './protocol.js';
-import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 
 /** A registry holding only what the test explicitly puts in it. */
 function registry(items: Record<string, unknown> = {}) {
@@ -161,6 +161,7 @@ function engineWithTransientLockReadFault(opts: {
     const engine: any = {
         registry: registry(opts.registryItems ?? {}),
         findOne: vi.fn(async (object: string, query: any) => {
+            assertEngineFindOnePredicate(object, query);
             if (object !== 'sys_metadata') {
                 calls.push(`findOne:${object}`);
                 return null;

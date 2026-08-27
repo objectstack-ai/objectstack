@@ -18,6 +18,7 @@ import { describe, it, expect } from 'vitest';
 import { LiteKernel } from '@objectstack/core';
 import { AutomationServicePlugin } from './plugin.js';
 import { AutomationEngine } from './engine.js';
+import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 
 /**
  * A fake ObjectQL engine that both serves the authz tables (for grant
@@ -35,7 +36,8 @@ function fakeObjectQl(tables: Record<string, any[]>) {
     );
   const engine: any = {
     async find(object: string, opts: any) { crud.push({ op: 'find', obj: object, ctx: opts?.context }); return match(object, opts?.where); },
-    async findOne(object: string, opts: any) { crud.push({ op: 'findOne', obj: object, ctx: opts?.context }); return match(object, opts?.where)[0]; },
+    async findOne(object: string, opts: any) {
+                                               assertEngineFindOnePredicate(object, opts); crud.push({ op: 'findOne', obj: object, ctx: opts?.context }); return match(object, opts?.where)[0]; },
     async insert(object: string, _f: any, opts: any) { crud.push({ op: 'insert', obj: object, ctx: opts?.context }); return { id: `${object}_1` }; },
     async update(object: string, _f: any, opts: any) { crud.push({ op: 'update', obj: object, ctx: opts?.context }); return { ok: true }; },
     async delete(object: string, opts: any) { crud.push({ op: 'delete', obj: object, ctx: opts?.context }); return { ok: true }; },

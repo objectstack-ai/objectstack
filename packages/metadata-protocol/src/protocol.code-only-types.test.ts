@@ -36,7 +36,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 // would close a dependency cycle turbo rejects outright — which is why all 26
 // of this package's (file, verb) pairs sat in the gate's DEBT ledger until
 // #5619 sank the two predicates into a package both sides already depend on.
-import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 import { resetEnvWritableMetadataTypes } from './sys-metadata-repository.js';
@@ -168,6 +168,7 @@ function makeStubEngine(artifacts: Array<{ type: string; name: string }> = []) {
     const writes: Array<{ op: 'insert' | 'update' | 'delete'; table: string }> = [];
     const engine: any = {
         async findOne(_t: string, opts: { where: Record<string, unknown> }) {
+            assertEngineFindOnePredicate(_t, opts);
             for (const row of rows.values()) {
                 if (opts.where.type !== undefined && row.type !== opts.where.type) continue;
                 if (opts.where.name !== undefined && row.name !== opts.where.name) continue;

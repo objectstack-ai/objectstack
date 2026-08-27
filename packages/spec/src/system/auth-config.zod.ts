@@ -417,7 +417,7 @@ export const AudienceConfigSchema = lazySchema(() => z.object({
         message:
           `posture '${posture}' permits self-registration, so the permission set a self-registrant receives ` +
           'must be DECLARED (selfRegistrationPermissionSet) — the implicit member_default fallback is retired ' +
-          '(#11739; declaring member_default explicitly is allowed).',
+          '(declaring member_default explicitly is allowed).',
       });
     } else if (value.selfRegistrationPermissionSet === 'admin_full_access') {
       ctx.addIssue({

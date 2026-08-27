@@ -116,6 +116,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { PLURAL_TO_SINGULAR, canonicalMetaUrlType } from '@objectstack/spec/shared';
 import { ObjectStackProtocolImplementation } from './protocol.js';
+import { assertEngineFindOnePredicate, type EngineFindOneQueryInput } from '@objectstack/metadata-core';
 
 interface StoredRow {
     id: string;
@@ -142,7 +143,8 @@ function makeUnscopedProtocol(rows: StoredRow[]) {
                 return (r as unknown as Record<string, unknown>)[k] === v;
             }));
         },
-        async findOne() { return null; },
+        async findOne(object: string, query?: EngineFindOneQueryInput) {
+                          assertEngineFindOnePredicate(object, query); return null; },
         // ⛔ No `update` / `delete` / `insert` on this double, deliberately.
         // Both paths under test are READ-then-register — `loadMetaFromDb`
         // issues `find` only, and the direct helper calls touch nothing but
