@@ -410,6 +410,11 @@ export function accumulate(rows: Doc[], acc: unknown): unknown {
       // so an unmodelled aggregand raises rather than collapsing to `null`.
       const present = values.filter((v) => v !== MISSING && v !== null);
       if (present.length === 0) return null;
+      // Rank every candidate BEFORE folding, so the refusal is a property of
+      // the aggregand's TYPE and not of the group's cardinality: a fold alone
+      // never compares a one-element group, and would hand back an unmodelled
+      // value unexamined — the same silence this arm was fixed to stop.
+      for (const v of present) bsonRank(v);
       return present.reduce((best, v) =>
         (op === '$min' ? bsonLte(v, best) : bsonLte(best, v)) ? v : best,
       );
