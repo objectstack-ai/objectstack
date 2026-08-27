@@ -92,10 +92,21 @@ describe('FileSystemRepository — startWatcher() declares `atomic` explicitly (
     // `true` after chokidar's internal merge (see file header).
     expect(Object.prototype.hasOwnProperty.call(options, 'atomic')).toBe(true);
     expect(options.atomic).toBe(true);
+  });
 
-    // Positive control. `usePolling` is unconditionally declared today and
-    // untouched by this card's fix — if THIS assertion ever failed too, the
-    // spy/harness is the suspect, not the `atomic` declaration.
+  // Positive control (#12696 ablation) — a SEPARATE case so it runs to
+  // completion, and so its verdict, on its own assertions, is independent of
+  // whatever the case above does. `usePolling` is unconditionally declared
+  // today and untouched by this card's fix; it must stay green under the
+  // ablation that removes the explicit `atomic`. If it ever went red too,
+  // the spy/harness would be the suspect, not the `atomic` declaration.
+  it('[control] passes `usePolling: true` as an OWN key of the same options object', async () => {
+    repo = new FileSystemRepository({ root, org: 'system', disableWatch: false });
+    await repo.start();
+
+    expect(watchSpy).toHaveBeenCalledTimes(1);
+    const [, options] = watchSpy.mock.calls[0] as [string, Record<string, unknown>];
+
     expect(Object.prototype.hasOwnProperty.call(options, 'usePolling')).toBe(true);
     expect(options.usePolling).toBe(true);
   });
