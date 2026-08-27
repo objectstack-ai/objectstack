@@ -442,7 +442,12 @@ describe('family 3 — datasource artefacts (`external.credentialsRef`)', () => 
   });
 
   it('an undeclared code-defined set is a GAP; an EMPTY one is an answer', async () => {
-    const undeclared = await collect(rt, undefined);
+    // Called directly, not through `collect` — a default parameter would swallow
+    // the `undefined` this case is about (measured: it did, first run).
+    const undeclared = await collectSecretReferenceUnion({
+      engine: rt.engine,
+      declaredDatasources: undefined,
+    });
     expect(undeclared.complete).toBe(false);
     expect(undeclared.gaps.map((g) => g.family)).toEqual(['datasource']);
     expect(undeclared.gaps[0].reason).toContain('declaredDatasources');
