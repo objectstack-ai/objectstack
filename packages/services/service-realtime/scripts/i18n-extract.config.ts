@@ -9,37 +9,31 @@
  *
  *   os i18n extract packages/services/service-realtime/scripts/i18n-extract.config.ts \
  *     --locales=zh-CN,ja-JP,es-ES --fill=default --objects-only --no-metadata-forms \
+ *     --source-hashes \
  *     --out=packages/services/service-realtime/src/translations
  *
- * ## Provenance: LEGACY-TRUSTED BY CHOICE, and here is the measurement
+ * The `source-hashes` flag on the command above also emits
+ * `<locale>.source-hashes.generated.ts` — the provenance companion from
+ * maintainer ruling #12069 Option A (#11671), rolled out to every bundle set by
+ * #12559. Without it every generated leaf here is LEGACY-TRUSTED: a leaf filled
+ * from the source and then left behind when the source was revised is
+ * indistinguishable BY VALUE from a real translation, so it publishes a
+ * superseded draft under a green `check:i18n` forever, and
+ * `check:i18n-stale-fill` cannot see it either unless two locales happen to
+ * hold the same stale bytes.
  *
- * #12559 rolled the generated-leaf provenance companion (maintainer ruling
- * #12069 Option A, #11671) out to every other bundle set. This one is the
- * measured exception, declared here rather than left silent — a set that is
- * simply missing from a rollout reads as covered to anyone who does not go
- * counting configs, which is the hazard #12559 was filed about.
+ * A record is written only for a leaf that IS currently a byte copy of the
+ * CURRENT source, so the companion arrives 0-stale by construction and only
+ * ever reports drift accruing afterwards. Records count the leaves currently
+ * RECORDABLE, never the leaves covered — a table with few entries, or with none
+ * at all where a locale is fully translated, is the instrument armed, and an
+ * entry appears by itself on the first extract after a leaf becomes a fill.
  *
- * Measured on this set at rollout time: 23 generated leaves per locale, and
- * **0** of them — in any of zh-CN, ja-JP, es-ES — is a byte copy of the current
- * `en` source. The companion records a leaf only while it IS such a copy, so
- * opting in here would emit three `<locale>.source-hashes.generated.ts` files
- * containing zero entries. That is not coverage: all 23 leaves would stay
- * legacy-trusted exactly as they are today, while three committed files
- * announced an instrument that measures nothing. `sys_presence` is a single
- * fully-translated object; there is no filled leaf here to record.
- *
- * **Revisit when that stops being true.** The declaration above is a claim
- * about the tree, not a preference, and `presence-bundle-provenance.test.ts`
- * next to the bundles keeps it honest: it fails the moment any locale's leaf
- * becomes a byte copy of `en` — i.e. the moment this set gains a leaf the
- * companion could record — and sends the reader back to this paragraph.
- *
- * ⛔ Do not name the opt-in flag with its leading dashes anywhere in THIS
- * docstring, not even in prose arguing against it: `flagsFromDocstring`
- * (scripts/i18n-bundle-surface.mjs) harvests every recognised flag spelling out
- * of this comment and hands the result to the extractor, so a mention would
- * silently convert this declaration into the opt-in it declares against. The
- * flag is `source-hashes`; the files it would write are named above.
+ * The flag is named in prose WITHOUT its leading dashes on purpose:
+ * `flagsFromDocstring` (scripts/i18n-bundle-surface.mjs) harvests every
+ * recognised flag spelling out of this whole comment, so a second spelling
+ * would keep the opt-in switched on after someone deleted it from the command
+ * block — the one place that decides.
  */
 
 import { defineStack, type ObjectStackDefinition } from '@objectstack/spec';
