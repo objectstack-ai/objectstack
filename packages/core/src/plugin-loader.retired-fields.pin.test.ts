@@ -1,31 +1,25 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 //
-// Pins for the ADR-0049 retirements on `PluginMetadata` (#11982), recorded in
-// ADR-0025 §3.7.
+// RUNTIME pins for the ADR-0049 retirements on `PluginMetadata` (#11982,
+// #12587), recorded in ADR-0025 §3.7: the security barrel must not publish the
+// retired validator again. These fail in `pnpm --filter @objectstack/core test`
+// the moment the export returns.
 //
-// Two instruments, deliberately different:
-//
-// 1. COMPILE-TIME pins — the `@ts-expect-error` directives below. Their
-//    failure channel is `tsc --noEmit` on this package, which CI runs through
-//    the type-check DEBT ratchet (`pnpm check:type-check-coverage`;
-//    `@objectstack/core` is a DEBT entry, growth is red). Re-adding a retired
-//    field turns each satisfied directive into an "Unused '@ts-expect-error'"
-//    error, growing the measured count past the ledger — proven able to fail
-//    by ablation on the retirement PR.
-// 2. RUNTIME pins — vitest assertions that the security barrel no longer
-//    publishes the retired validator. These fail in `pnpm --filter
-//    @objectstack/core test` the moment the export returns.
-//
-// Positive control (compile-time): the `startupTimeout` literal below is a
-// LIVE field (read at kernel.ts `startPluginWithTimeout`) and must keep
-// compiling with no directive — proving the interface still accepts its real
-// members, so the directives above it are readings, not a broken instrument.
+// The COMPILE-TIME half — a declared `configSchema` / `hotReloadable` no
+// longer type-checks against the published `PluginMetadata` — lives in
+// `packages/rest/src/plugin-metadata-retired-fields.pin.test.ts`, deliberately
+// NOT here: `@objectstack/core` has no `typecheck` script (type-check DEBT
+// ledger entry), so a `@ts-expect-error` in this package is a phantom pin no
+// tsc program a `typecheck` script runs would ever evaluate —
+// `check:type-check-coverage` refuses exactly that. The rest package's
+// `tsconfig.test.json` program is compiled by its `typecheck` script and reads
+// core's BUILT `.d.ts`, so the pin over there guards the published contract
+// itself.
 
 import { describe, it, expect } from 'vitest';
-import type { PluginMetadata } from './plugin-loader.js';
 import * as securityBarrel from './security/index.js';
 
-describe('PluginMetadata retired fields (ADR-0049, ADR-0025 §3.7)', () => {
+describe('PluginConfigValidator retirement (ADR-0049, ADR-0025 §3.7)', () => {
     it('no longer publishes PluginConfigValidator from the security barrel (#11982)', () => {
         expect((securityBarrel as Record<string, unknown>).PluginConfigValidator).toBeUndefined();
         expect((securityBarrel as Record<string, unknown>).createPluginConfigValidator).toBeUndefined();
@@ -33,41 +27,10 @@ describe('PluginMetadata retired fields (ADR-0049, ADR-0025 §3.7)', () => {
         expect(Object.keys(securityBarrel)).not.toContain('createPluginConfigValidator');
     });
 
-    it('compile-time: a declared configSchema no longer type-checks (#11982)', () => {
-        const declared: PluginMetadata = {
-            name: 'retired-configschema-pin',
-            version: '1.0.0',
-            // @ts-expect-error — `configSchema` was retired under ADR-0049
-            // (#11982): the kernel never received a config to validate it
-            // against. Parse plugin config at the plugin's own seam instead.
-            configSchema: { parse: (v: unknown) => v },
-            async init() {},
-        };
-        // The value exists at runtime (TS types are erased); the pin is the
-        // directive above, enforced by tsc through the DEBT ratchet.
-        expect(declared.name).toBe('retired-configschema-pin');
-    });
-
-    it('compile-time: a declared hotReloadable no longer type-checks (#12587)', () => {
-        const declared: PluginMetadata = {
-            name: 'retired-hotreloadable-pin',
-            version: '1.0.0',
-            // @ts-expect-error — `hotReloadable` was retired under ADR-0049
-            // (#12587): nothing ever read it. Reload participation is governed
-            // solely by `HotReloadManager.registerReloadConfig`.
-            hotReloadable: false,
-            async init() {},
-        };
-        expect(declared.name).toBe('retired-hotreloadable-pin');
-    });
-
-    it('positive control: live sibling fields still type-check with no directive', () => {
-        const control: PluginMetadata = {
-            name: 'live-sibling-control',
-            version: '1.0.0',
-            startupTimeout: 1000,
-            async init() {},
-        };
-        expect(control.startupTimeout).toBe(1000);
+    it('positive control: the barrel still publishes its live siblings', () => {
+        // Proves the absence assertions above read a populated namespace, not
+        // an accidentally-empty import.
+        expect(Object.keys(securityBarrel)).toContain('PluginSignatureVerifier');
+        expect(Object.keys(securityBarrel)).toContain('PluginPermissionEnforcer');
     });
 });
