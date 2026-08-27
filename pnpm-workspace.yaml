@@ -184,7 +184,7 @@ overrides:
   # ships the rc.2 rewrite, so adopting it is the ADR-0071 migration (#3653),
   # not this bump. Its bound stays AT the rc on purpose: a major-boundary bound
   # here would rewrite the stable release down onto the rc.
-  '@better-auth/scim@<1.7.0-rc.1': '1.7.0-rc.1'
+  '@better-auth/scim@<2.0.0': '^1.7.1'
   '@better-auth/oauth-provider@<2.0.0': '^1.7.1'
   '@better-auth/sso@<2.0.0': '^1.7.1'
   '@better-auth/drizzle-adapter@<2.0.0': '^1.7.1'
