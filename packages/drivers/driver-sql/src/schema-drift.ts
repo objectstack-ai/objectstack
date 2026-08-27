@@ -535,7 +535,7 @@ function acceptsStringifiedJson(type: string | undefined): boolean {
  * partition, so deriving would have to INVENT an answer for every future member
  * at the one seam where the maintainer has actually ruled per type. It is a
  * hand-written list and is therefore PINNED rather than trusted —
- * `schema-drift.12121-unbounded-text-column.test.ts` probes the driver's OWN
+ * `schema-drift.unbounded-text-column.test.ts` probes the driver's OWN
  * dispatch (`varcharColumnChars`) over every `FieldType` the spec declares and
  * asserts set equality in both directions, plus the keyed-and-unkeyed `null`
  * above for every member. A type entering or leaving `createColumn`'s text
