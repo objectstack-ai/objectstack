@@ -181,6 +181,36 @@ export const ESCALATION_JOB_NAME = 'approvals-sla-escalation';
 export const ESCALATION_SCAN_INTERVAL_MS = 5 * 60 * 1000;
 /** Reserved actor id for machine decisions made by the SLA scanner. */
 export const SLA_ACTOR_ID = 'system:sla';
+/**
+ * Read-side legacy window for the #12278 `escalation.enabled` default flip
+ * (maintainer ruling 2026-08-27, Option C).
+ *
+ * Until the flip, `ApprovalEscalationSchema` declared `enabled` with
+ * `.default(false)` while this sweep never read the key — and the
+ * approval-node executor parses node config through that schema before
+ * `openNodeRequest` snapshots it onto the request row. Every request opened
+ * from a flow that OMITTED `enabled` therefore stores a MATERIALIZED
+ * `enabled: false` in `node_config_json`, byte-identical to an authored
+ * `false`, and every such stored row is escalating today (measured basis on
+ * the ruling: the console inspector cannot author a `timeoutHours` without
+ * toggling the switch on, so no stored `false + timeoutHours` row carries an
+ * enforceable off-intent that today's runtime honours).
+ *
+ * The sweep's `enabled === false ⇒ skip` gate below therefore applies only to
+ * snapshots created at/after this cutoff (written by post-flip code, where
+ * `false` survives the parse only when an author wrote it). Older snapshots
+ * keep today's behaviour — they escalate — and the window retires itself as
+ * those pending requests drain; no tenant row is ever rewritten.
+ *
+ * Known, deliberate bound (recorded on #12278): an install that upgrades LONG
+ * after this date has pending requests created between the cutoff and its
+ * upgrade whose materialized `false` post-dates the cutoff; those honour the
+ * declared off. The alternative (a per-install marker or a stored-data
+ * normalization) buys that edge back at the price of new machinery or tenant
+ * writes — both rejected as the more expensive option under the ruling's
+ * "pick the cheaper transition" instruction.
+ */
+export const ESCALATION_ENABLED_FLIP_CUTOFF_MS = Date.parse('2026-08-28T00:00:00Z');
 /** Reserved actor id for requests abandoned because their run died (#3456). */
 export const DEAD_RUN_ACTOR_ID = 'system:dead-run';
 /**
@@ -3450,7 +3480,10 @@ export class ApprovalService implements IApprovalService {
    * `escalation.timeoutHours` and whose deadline has passed is escalated
    * **at most once, ever** — the `escalate` audit row is the idempotency
    * marker, written before any mutation (audit-first, like reassign). One
-   * bad row never stops the sweep.
+   * bad row never stops the sweep. A block that explicitly declares
+   * `enabled: false` is skipped (#12278 — the declared switch is enforced;
+   * pre-flip snapshots ride the legacy window on
+   * {@link ESCALATION_ENABLED_FLIP_CUTOFF_MS}).
    */
   async runEscalations(): Promise<{ scanned: number; escalated: number }> {
     let rows: any[] = [];
@@ -3471,6 +3504,15 @@ export class ApprovalService implements IApprovalService {
         const cfg = parseJson<any>(raw.node_config_json, undefined);
         const esc = cfg?.escalation;
         if (!esc || typeof esc.timeoutHours !== 'number' || esc.timeoutHours <= 0) continue;
+        // #12278: the declared switch is enforced — an explicit
+        // `enabled: false` skips the sweep (strict `=== false`: an absent key
+        // escalates, both for pre-materialization legacy rows and because the
+        // schema default is now `true`). Snapshots created before the flip
+        // cutoff carry a schema-materialized `false` that is indistinguishable
+        // from an authored one and are escalating today — the legacy window
+        // preserves them verbatim; see ESCALATION_ENABLED_FLIP_CUTOFF_MS.
+        if (esc.enabled === false
+          && Date.parse(raw.created_at ?? '') >= ESCALATION_ENABLED_FLIP_CUTOFF_MS) continue;
         const due = slaDueAt(raw.created_at, cfg);
         if (!due || Date.parse(due) > this.clock.now().getTime()) continue;
 

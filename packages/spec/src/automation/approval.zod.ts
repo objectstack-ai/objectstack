@@ -613,7 +613,13 @@ export const ApprovalEscalationSchema = lazySchema(() => strictObject(
       'the author declared never fired the way they intended.',
   },
   {
-  enabled: z.boolean().default(false).describe('Enable SLA-based escalation for this node'),
+  // #12278 (maintainer ruling 2026-08-27): default flipped false → true. The
+  // feature switch is whether an `escalation` block exists at all; within a
+  // block carrying `timeoutHours`, escalation is ON unless explicitly turned
+  // off — which is what the sweep, its behaviour tests and every teaching
+  // surface have always meant. Declared in DEFAULT_CHANGES_BY_MAJOR (17) and
+  // the `approval-escalation-enabled-default-flip` semantic migration entry.
+  enabled: z.boolean().default(true).describe('SLA escalation switch. Defaults to true: an escalation block carrying timeoutHours is live unless this is explicitly false — the feature-level switch is whether the escalation block exists at all'),
   timeoutHours: z.number().min(1).describe('Hours before escalation triggers'),
   action: z.enum(['reassign', 'auto_approve', 'auto_reject', 'notify']).default('notify')
     .describe('Action on escalation timeout'),

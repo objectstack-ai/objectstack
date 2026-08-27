@@ -11,7 +11,7 @@
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { APPROVAL_REVISE_NODE_TYPE } from '@objectstack/spec/automation';
-import { ApprovalService, REMIND_COOLDOWN_MS } from './approval-service.js';
+import { ApprovalService, REMIND_COOLDOWN_MS, ESCALATION_ENABLED_FLIP_CUTOFF_MS } from './approval-service.js';
 import { bindApprovalLockHook, bindDelegationWriteGuard, unbindAllHooks } from './lifecycle-hooks.js';
 
 interface FakeRow { [k: string]: any }
@@ -1761,6 +1761,80 @@ describe('ApprovalService (node era)', () => {
     const out = await svc.runEscalations();
     expect(out.scanned).toBe(2);
     expect(out.escalated).toBe(0);
+  });
+
+  // ── #12278: the declared switch is enforced ─────────────────────
+  // The default test clock (2026-01-15) predates the flip cutoff, so these
+  // pins run a service whose clock sits AFTER it — both the snapshot side and
+  // the sweep side of the gate are exercised where the flip is in force.
+
+  /** A service whose injected clock starts `offsetMs` past the flip cutoff. */
+  function postFlipService(offsetMs: number) {
+    let n = 0;
+    return new ApprovalService({
+      engine: engine as any,
+      clock: { now: () => new Date(ESCALATION_ENABLED_FLIP_CUTOFF_MS + offsetMs + (n++) * 1000) },
+    });
+  }
+
+  it('runEscalations: explicit enabled:false does NOT escalate a post-flip snapshot (#12278)', async () => {
+    const late = postFlipService(2 * 3600_000);
+    const resumed: any[] = [];
+    late.attachAutomation({ async resume(runId, signal) { resumed.push({ runId, signal }); } });
+    const req = await late.openNodeRequest(
+      openInput(['u9'], {}, { escalation: { enabled: false, timeoutHours: 1, action: 'auto_approve', notifySubmitter: false } }), CTX,
+    );
+    // Deadline breached (due = cutoff + 1h < sweep clock at cutoff + 2h) while
+    // created_at stays ON the cutoff — the boundary belongs to the new regime.
+    const row = engine._tables['sys_approval_request'].find(r => r.id === req.id)!;
+    row.created_at = new Date(ESCALATION_ENABLED_FLIP_CUTOFF_MS).toISOString();
+    const out = await late.runEscalations();
+    // Concrete outcomes, not just counters: no decision, no audit row, no resume.
+    expect(out.scanned).toBe(1);
+    expect(out.escalated).toBe(0);
+    const fresh = await late.getRequest(req.id, SYS);
+    expect(fresh?.status).toBe('pending');
+    const actions = await late.listActions(req.id, SYS);
+    expect(actions.map(a => a.action)).toEqual(['submit']);
+    expect(resumed).toHaveLength(0);
+  });
+
+  it('runEscalations: a PRE-flip snapshot with materialized enabled:false keeps escalating (#12278 legacy window)', async () => {
+    // Pre-flip code materialized `enabled: false` onto every author-omitted
+    // block via the executor parse; every such stored row is escalating today.
+    // The read-side window preserves exactly that behaviour for snapshots
+    // created before the cutoff — auto_approve still fires.
+    const late = postFlipService(2 * 3600_000);
+    const resumed: any[] = [];
+    late.attachAutomation({ async resume(runId, signal) { resumed.push({ runId, signal }); } });
+    const req = await late.openNodeRequest(
+      openInput(['u9'], {}, { escalation: { enabled: false, timeoutHours: 1, action: 'auto_approve', notifySubmitter: false } }), CTX,
+    );
+    const row = engine._tables['sys_approval_request'].find(r => r.id === req.id)!;
+    row.created_at = new Date(ESCALATION_ENABLED_FLIP_CUTOFF_MS - 10 * 3600_000).toISOString();
+    const out = await late.runEscalations();
+    expect(out.escalated).toBe(1);
+    const fresh = await late.getRequest(req.id, SYS);
+    expect(fresh?.status).toBe('approved');
+    expect(resumed[0]).toMatchObject({ runId: 'run_1', signal: { branchLabel: 'approve' } });
+    const actions = await late.listActions(req.id, SYS);
+    expect(actions.map(a => a.action)).toEqual(['submit', 'escalate', 'approve']);
+  });
+
+  it('runEscalations: an omitted enabled key still escalates post-flip (#12278)', async () => {
+    // Raw snapshots without the key (the eleven behaviour tests above, and any
+    // pre-materialization historical row) gate on `=== false` only — absence
+    // escalates, matching the new schema default the executor parse writes.
+    const late = postFlipService(2 * 3600_000);
+    const req = await late.openNodeRequest(
+      openInput(['u9'], {}, { escalation: { timeoutHours: 1, action: 'auto_reject', notifySubmitter: false } }), CTX,
+    );
+    const row = engine._tables['sys_approval_request'].find(r => r.id === req.id)!;
+    row.created_at = new Date(ESCALATION_ENABLED_FLIP_CUTOFF_MS).toISOString();
+    const out = await late.runEscalations();
+    expect(out.escalated).toBe(1);
+    const fresh = await late.getRequest(req.id, SYS);
+    expect(fresh?.status).toBe('rejected');
   });
 
   // ── SLA + flow steps ────────────────────────────────────────────
