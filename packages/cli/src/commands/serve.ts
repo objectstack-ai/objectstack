@@ -1349,6 +1349,53 @@ export default class Serve extends Command {
       } catch {
         // Ignore — fall through and try the requested port.
       }
+      if (port !== requestedPort) {
+        // ── The shift is CORRECT; its SILENCE was the defect (#12543) ────
+        // Auto-shifting is the whole point of this branch and it stays exactly
+        // as it is — #11113 owns the other half of the policy, where a busy
+        // port is a refusal instead. What was missing is that the hop happened
+        // with nothing marking it: the ready banner prints the port that was
+        // BOUND, and no line anywhere said it was not the port that was ASKED
+        // FOR.
+        //
+        // A reader holding only the bound port has to already know the
+        // requested one and compare the two by hand. That is not a
+        // hypothetical cost: five landed consumer-side PRs each re-derived it
+        // from this command's banner (a bind probe, the shared `runServe()`
+        // read-back, three spawners, a security probe). This line is the only
+        // place that holds BOTH numbers for free, so it says both.
+        //
+        // ⭐ Three facts, not one — what was asked for, that it could not be
+        // had, and what was taken instead. A line naming only the bound port
+        // is what the banner already prints, and it leaves the comparison
+        // undone.
+        //
+        // CHANNEL — measured, not chosen (#7915). `stdout` is the JSON-RPC
+        // channel whenever the stdio MCP transport is mounted, where a single
+        // non-frame line reaches the client as a transport error; that is what
+        // `serve-stdio-stdout-purity.e2e.test.ts` exists to pin. So this goes
+        // through `printDiagnostic` — straight to **stderr**, the same helper,
+        // the same stream and the same point in the boot as the production
+        // refusal in the `else` branch just below, which is this notice's
+        // counterpart under the other half of the same policy.
+        //
+        // TIMING — also measured. This runs BEFORE the boot-quiet window
+        // opens (`bootQuiet` is still `false` here; it is assigned from
+        // `verboseBoot` several hundred lines down), so unlike a boot-phase
+        // `logger.warn` — which that window captures and replays only after a
+        // banner has printed, and only if the boot ever reaches one — this
+        // line cannot be swallowed, and it survives a boot that dies later. A
+        // drifted port is a plausible CAUSE of such a death, so the notice has
+        // to outlive it.
+        printDiagnostic(
+          '\n'
+          + chalk.yellow(`  ⚠ Port ${requestedPort} is in use — serving on ${port} instead.\n`)
+          + chalk.dim(`     Development auto-shift: ${requestedPort} was not free, so this server took\n`)
+          + chalk.dim(`     the next one that was (${port}). Anything still pointed at ${requestedPort} — a\n`)
+          + chalk.dim('     proxy, an OAuth callback URL, another terminal, a test harness — is\n')
+          + chalk.dim(`     talking to whatever holds ${requestedPort}, not to this server.`),
+        );
+      }
     } else if (!(await isPortAvailable(requestedPort))) {
       // One write, for the reason spelled out at the "Nothing to serve" exit
       // below: `this.exit(1)` reaches `process.exit` without draining a piped

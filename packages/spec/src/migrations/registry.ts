@@ -5207,7 +5207,22 @@ const step18: MigrationStep = {
     'runtime, so only the spec strictObject can refuse the key. The mechanical ' +
     'conversion carries the pair over — renamed to `sort` and wrapped in the array ' +
     'shape — when `sort` is absent, and strips it as a pure lossless delete when ' +
-    '`sort` is present (the renderer\'s own precedence made it unread then).',
+    '`sort` is present (the renderer\'s own precedence made it unread then). ' +
+    'Finally, it retires the object-permission lifecycle bits `allowRestore` and ' +
+    '`allowPurge` (#12497, ADR-0049 enforce-or-remove; maintainer ruling 2026-08-26, ' +
+    'decision-inbox batch 5, accepting #1883\'s recommendation B): the `restore` / ' +
+    '`purge` ObjectQL operations the bits claimed to gate have never existed — no ' +
+    'destructive lifecycle verb is in the engine\'s dispatch vocabulary (#8106 pin) — ' +
+    'so granting the bits delivered nothing, and an author who declared ' +
+    '`allowPurge: false` believed a lock on GDPR hard-deletion existed when the ' +
+    'operation itself did not. Both keys are retiredKey tombstones; the evaluator\'s ' +
+    'pre-mapping rows retired in the same batch (a dispatched `restore`/`purge` stays ' +
+    'denied fail-closed via the DESTRUCTIVE_OPERATIONS backstop, so there is no ' +
+    'ungated window), and the mechanical conversion strips the keys from every object ' +
+    'grant in `permissions[].objects` (pure lossless delete — they never had an ' +
+    'effect to lose). `allowTransfer` is ENFORCED (#3004) and stays. The keys return ' +
+    'with the M2 lifecycle initiative (feature + RBAC in one batch); #1883 stays ' +
+    'open as the anchor.',
   conversionIds: [
     'field-malformed-scale-precision-removed',
     'record-chatter-position-vocabulary',
@@ -5221,6 +5236,7 @@ const step18: MigrationStep = {
     'translation-component-submit-label-removed',
     'page-component-responsive-removed',
     'object-grid-default-sort-removed',
+    'permission-allow-restore-purge-removed',
   ],
   semantic: [
     // One file per entry under `entries/semantic/`, concatenated here sorted by
@@ -7919,6 +7935,89 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // registration-time refusal in `PluginHealthMonitor.registerPlugin` is the door
     // for the audience that exists.
     'kernel/PluginHealthCheck:restartBackoff',
+    // #12497 — the RESPONSE-side face of `security/ObjectPermission:allowPurge`
+    // (see that entry for the full rationale: ADR-0049 enforce-or-remove,
+    // maintainer ruling 2026-08-26 accepting #1883's recommendation B; the key
+    // returns with the M2 lifecycle initiative). `EffectiveObjectPermissionSchema`
+    // is `ObjectPermissionSchema.extend({ apiOperations }).strip()` — the clone
+    // shares the authoring shape's per-property schema instances, so the
+    // `retiredKey()` tombstone rides into the effective surface and this def's
+    // walked shape carries the same `[RETIRED]` row. Registered so the aging clock
+    // (#5898) has an exact-key entry for BOTH rows the tombstone produces. The
+    // effective surface is server-resolved, never authored, so no D2 conversion
+    // clause targets it — the authoring-side strip in
+    // `permission-allow-restore-purge-removed` is the only source rewrite that
+    // exists to do.
+    'security/EffectiveObjectPermission:allowPurge',
+    // #12497 — the RESPONSE-side face of `security/ObjectPermission:allowRestore`
+    // (see that entry for the full rationale: ADR-0049 enforce-or-remove,
+    // maintainer ruling 2026-08-26 accepting #1883's recommendation B; the key
+    // returns with the M2 lifecycle initiative). `EffectiveObjectPermissionSchema`
+    // is `ObjectPermissionSchema.extend({ apiOperations }).strip()` — the clone
+    // shares the authoring shape's per-property schema instances, so the
+    // `retiredKey()` tombstone rides into the effective surface and this def's
+    // walked shape carries the same `[RETIRED]` row. Registered so the aging clock
+    // (#5898) has an exact-key entry for BOTH rows the tombstone produces. The
+    // effective surface is server-resolved, never authored, so no D2 conversion
+    // clause targets it — the authoring-side strip in
+    // `permission-allow-restore-purge-removed` is the only source rewrite that
+    // exists to do.
+    'security/EffectiveObjectPermission:allowRestore',
+    // #12497 — ADR-0049 enforce-or-remove (maintainer ruling 2026-08-26, decision-
+    // inbox batch 5, accepting #1883's recommendation B). `allowPurge` claimed to
+    // gate a `purge` (hard-delete / GDPR erase) ObjectQL operation that has never
+    // existed: no destructive lifecycle verb is in the engine's dispatch
+    // vocabulary (pinned by objectql's
+    // `engine-middleware-operation-vocabulary.test.ts`, #8106). This was ADR-0049's
+    // worst false-compliance shape — an admin who set `allowPurge: false` believed
+    // a lock on permanent deletion existed, when the operation itself did not.
+    // The permission evaluator's pre-mapping row (`OPERATION_TO_PERMISSION`
+    // purge→allowPurge) retired in the same batch: with the bit unwritable, a
+    // mapping onto it was a claim about a surface that rejects authoring. A
+    // dispatched `purge` stays denied fail-closed via the evaluator's
+    // `DESTRUCTIVE_OPERATIONS` backstop — there is no ungated window in either
+    // direction. THE KEY RETURNS with the M2 lifecycle initiative (feature + RBAC
+    // in one batch, maintainer 2026-08-03); anchor card #1883 stays open.
+    //
+    // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
+    // removal ships on the 17.x line (launch-window convention: accept-set
+    // narrowings ride minor releases) and the prescription lives at the major
+    // boundary where `migrate meta` users look (the #8495 / PR #8666 precedent).
+    // ObjectPermissionSchema is `strictObject` but the def is reachable from the
+    // `permission` metadata root, so the route is the `retiredKey()` tombstone
+    // (the `rls.priority` posture) — the key stays in the walked shape as
+    // `[RETIRED]`, and authoring it is a tsc error and a parse error carrying the
+    // prescription. Sources are rewritten by the D2 conversion
+    // `permission-allow-restore-purge-removed`, which strips the key from every
+    // object grant in `permissions[].objects`.
+    'security/ObjectPermission:allowPurge',
+    // #12497 — ADR-0049 enforce-or-remove (maintainer ruling 2026-08-26, decision-
+    // inbox batch 5, accepting #1883's recommendation B). `allowRestore` claimed to
+    // gate a `restore` (undelete) ObjectQL operation that has never existed: no
+    // destructive lifecycle verb is in the engine's dispatch vocabulary (pinned by
+    // objectql's `engine-middleware-operation-vocabulary.test.ts`, #8106), so
+    // authoring the bit granted nothing — an AI author who declared it believed a
+    // recycle-bin capability boundary existed, and the failure was silent. The
+    // permission evaluator's pre-mapping row (`OPERATION_TO_PERMISSION`
+    // restore→allowRestore) retired in the same batch: with the bit unwritable, a
+    // mapping onto it was a claim about a surface that rejects authoring. A
+    // dispatched `restore` stays denied fail-closed via the evaluator's
+    // `DESTRUCTIVE_OPERATIONS` backstop — there is no ungated window in either
+    // direction. THE KEY RETURNS with the M2 lifecycle initiative (feature + RBAC
+    // in one batch, maintainer 2026-08-03); anchor card #1883 stays open.
+    //
+    // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
+    // removal ships on the 17.x line (launch-window convention: accept-set
+    // narrowings ride minor releases) and the prescription lives at the major
+    // boundary where `migrate meta` users look (the #8495 / PR #8666 precedent).
+    // ObjectPermissionSchema is `strictObject` but the def is reachable from the
+    // `permission` metadata root, so the route is the `retiredKey()` tombstone
+    // (the `rls.priority` posture) — the key stays in the walked shape as
+    // `[RETIRED]`, and authoring it is a tsc error and a parse error carrying the
+    // prescription. Sources are rewritten by the D2 conversion
+    // `permission-allow-restore-purge-removed`, which strips the key from every
+    // object grant in `permissions[].objects`.
+    'security/ObjectPermission:allowRestore',
     // #9220 — ADR-0049 enforce-or-remove at ELEMENT grain. `element:filter` never
     // had a renderer or reader anywhere: objectui registers none (its
     // renderers/basic/elements.tsx header deferred the element to "owning plugins"

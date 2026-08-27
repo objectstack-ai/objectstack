@@ -50,7 +50,7 @@ export const SalesUser = definePermissionSet({
 |------------|-------------|
 | `allowCreate` / `allowRead` / `allowEdit` / `allowDelete` | CRUD on records the user can see |
 | `allowExport` | Bulk data egress — an opt-in grant on top of read, see below |
-| `allowTransfer` / `allowRestore` / `allowPurge` | Lifecycle class (RBAC-gated ahead of the M2 operations) |
+| `allowTransfer` | Lifecycle class: change record ownership — enforced today via the `owner_id` guard (#3004). The former `allowRestore` / `allowPurge` keys were retired (#12497, ADR-0049 — the operations they claimed to gate do not exist yet) and return with the M2 lifecycle batch (#1883) |
 | `viewAllRecords` | Read ALL records regardless of ownership (super-user read) |
 | `modifyAllRecords` | Edit ALL records regardless of ownership (super-user write) |
 
