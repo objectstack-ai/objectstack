@@ -5,6 +5,7 @@ import { createAdapterFactory } from 'better-auth/adapters';
 import type { CleanedWhere, WhereOperator } from 'better-auth/adapters';
 import { SystemObjectName } from '@objectstack/spec/system';
 import { resolveAttributedUserId } from './auth-actor-attribution.js';
+import { inScimRequestScope } from './scim-connection-service.js';
 import { adoptExistingMembership } from './adopt-membership.js';
 import {
   filterRevokedSessionRows,
@@ -768,30 +769,34 @@ export function createObjectQLAdapterFactory(rawDataEngine: IDataEngine) {
   const remapWhere = (where: CleanedWhere[]): CleanedWhere[] =>
     where.map((c) => ({ ...c, field: camelToSnake(c.field) }));
 
-  // [#3653] NATIVE transactions. Stable `@better-auth/scim` refuses to mount
-  // on an adapter whose `transaction` is the factory's sequential fallback
-  // (`assertNativeSCIMTransactions` reads `adapterConfig.transaction` and
-  // demands a function) — provisioning multi-writes must be atomic. The
-  // implementation is ObjectQL's own `engine.transaction()`: it publishes the
-  // handle into the engine's AMBIENT transaction store (ADR-0034), so every
-  // engine call the raw methods below make inside the callback automatically
-  // binds to the same connection/rollback scope — the trx adapter handed to
-  // the callback is therefore the SAME wrapped adapter, captured at factory
-  // time below.
+  // [#3653] NATIVE transactions, SCOPED to SCIM protocol requests. Stable
+  // `@better-auth/scim` refuses to mount on an adapter whose `transaction` is
+  // the factory's sequential fallback (`assertNativeSCIMTransactions` reads
+  // `adapterConfig.transaction` and demands a function) — provisioning
+  // multi-writes must be atomic. The implementation is ObjectQL's own
+  // `engine.transaction()`: it publishes the handle into the engine's AMBIENT
+  // transaction store (ADR-0034), so every engine call the raw methods below
+  // make inside the callback automatically binds to the same
+  // connection/rollback scope — the trx adapter handed to the callback is
+  // therefore the SAME wrapped adapter, captured at factory time below.
   //
-  // ⚠️ Scope this honestly: better-auth routes its OWN multi-writes through
-  // `adapter.transaction` too — sign-up (user + account) included, measured —
-  // so this is the transaction path for EVERY better-auth flow, not a
-  // scim-only seam, and it must keep the same degrade contract those flows
-  // had under the factory's sequential fallback. Two declared degrades:
-  //  - an engine with no `transaction` API at all (test doubles, minimal
-  //    IDataEngine implementations) runs the callback directly — exactly the
-  //    factory's own `createAsIsTransaction` behaviour;
-  //  - a driver without `beginTransaction` follows the engine's OWN declared
-  //    contract (ADR-0119 D1): run directly, warn once (#4619). Every SQL
-  //    production driver has `beginTransaction`, so a real deployment's scim
-  //    provisioning is genuinely atomic; fail-closed here (`require: true`)
-  //    was measured to 500 every sign-up on the memory engine.
+  // ⚠️ The scoping is load-bearing, measured twice, not a hedge. better-auth
+  // wraps its OWN whole request flows in `adapter.transaction` too
+  // (`runWithTransaction` — sign-in/sign-up included), and two unscoped
+  // variants each broke a measured surface:
+  //  - `require: true` (fail closed on non-transactional drivers) 500'd every
+  //    sign-up on the memory engine — 275 plugin-auth tests red;
+  //  - unconditional real transactions starved the single-connection sqlite
+  //    pools: the dogfood showcase boot deadlocked on `Acquire connection
+  //    error` until the 180s hook timeout, in CI and reproduced locally.
+  // Core better-auth flows never had native DB transactions here (the factory
+  // default is the sequential as-is fallback), so they KEEP that historical
+  // posture; the real transaction opens exactly where upstream's assertion
+  // demands it — inside an authenticated SCIM protocol request, marked by the
+  // auth manager's `verifyBearerToken` via `scimRequestScope`. Remaining
+  // declared degrades on that path: an engine with no `transaction` API runs
+  // the callback directly, and a driver without `beginTransaction` follows
+  // the engine's ADR-0119 D1 warn-once degrade.
   let wrappedAdapter: unknown = null;
   const engineWithTx = rawDataEngine as unknown as {
     transaction?<T>(
@@ -819,8 +824,12 @@ export function createObjectQLAdapterFactory(rawDataEngine: IDataEngine) {
           // rather than hand the callback a null adapter.
           throw new Error('[objectql-adapter] transaction requested before the adapter was constructed');
         }
+        // Non-SCIM better-auth flows keep their historical sequential
+        // behaviour — see the #3653 scoping note above for the two measured
+        // breakages that make this conditional load-bearing.
+        if (!inScimRequestScope()) return cb(wrappedAdapter as never);
         if (typeof engineWithTx.transaction !== 'function') {
-          // Declared degrade #1 (see the #3653 note above): no transaction API
+          // Declared degrade (see the #3653 note above): no transaction API
           // on this engine — run directly, as the factory fallback would.
           return cb(wrappedAdapter as never);
         }

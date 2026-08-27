@@ -38,6 +38,34 @@
  */
 
 import { createHmac, randomBytes } from 'node:crypto';
+import { AsyncLocalStorage } from 'node:async_hooks';
+
+/**
+ * Request-scoped marker: "the current async chain is a SCIM protocol
+ * request". Entered by the auth manager's `verifyBearerToken` wrapper (the
+ * first application code every authenticated SCIM request runs) via
+ * `enterWith`, so it holds for the remainder of that request's async chain —
+ * including the provisioning writes the plugin performs afterwards.
+ *
+ * Read by `objectql-adapter.ts`'s `config.transaction`: SCIM requests get a
+ * REAL engine transaction (the atomicity upstream's
+ * `assertNativeSCIMTransactions` exists to demand), while every other
+ * better-auth flow keeps the sequential behaviour it has always had. The
+ * scoping is load-bearing, measured, not a convenience: better-auth wraps
+ * WHOLE request flows in `adapter.transaction` (`runWithTransaction`), and
+ * opening a real driver transaction around every sign-in/sign-up starved the
+ * single-connection sqlite pools — the dogfood showcase boot deadlocked on
+ * `Acquire connection error` until the hook timeout, reproduced in CI and
+ * locally (#3653). Core flows never had native DB transactions before (the
+ * adapter factory's default is the sequential as-is fallback), so this keeps
+ * them at their historical posture rather than weakening anything.
+ */
+export const scimRequestScope = new AsyncLocalStorage<{ scim: true }>();
+
+/** Is the current async chain inside an authenticated SCIM protocol request? */
+export function inScimRequestScope(): boolean {
+  return scimRequestScope.getStore()?.scim === true;
+}
 
 /** The ObjectStack-owned credential store (see platform-objects/identity). */
 export const SCIM_CREDENTIAL_OBJECT = 'sys_scim_connection_credential';

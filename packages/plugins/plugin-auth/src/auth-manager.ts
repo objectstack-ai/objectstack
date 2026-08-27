@@ -3120,12 +3120,17 @@ export class AuthManager {
     if (enabled.scim) {
       await this.addOptionalPlugin(plugins, 'scim', async () => {
         const { scim } = await import('@better-auth/scim');
-        const { verifyScimBearerToken } = await import('./scim-connection-service.js');
+        const { verifyScimBearerToken, scimRequestScope } = await import('./scim-connection-service.js');
         const secret = this.resolveAuthSecret();
         return scim({
           connections: [],
           authentication: {
             verifyBearerToken: async (input) => {
+              // Mark the remainder of this request's async chain as a SCIM
+              // protocol request, so the adapter runs its provisioning writes
+              // inside a REAL engine transaction (see scimRequestScope's
+              // rationale in scim-connection-service.ts).
+              scimRequestScope.enterWith({ scim: true });
               const engine = this.config.dataEngine;
               if (!engine) return null; // no store to verify against — fail closed
               return verifyScimBearerToken(engine as never, secret, input.token);
