@@ -189,17 +189,108 @@ const isPortAvailable = (port: number): Promise<boolean> => {
   });
 };
 
-// Helper to find available port (dev convenience — see the gated caller).
-const getAvailablePort = async (startPort: number): Promise<number> => {
+/**
+ * How far past `startPort` the dev auto-shift search walks before giving up.
+ *
+ * ⚠️ This is a SPAN, not a count: the search probes `startPort` itself and then
+ * every port up to and including `startPort + PORT_SEARCH_SPAN`, so the number
+ * of ports actually probed is `PORT_SEARCH_SPAN + 1`. Both numbers are read
+ * from this one constant — by the loop below and by
+ * {@link formatExhaustedPortSearchNotice}, which states the range to the
+ * operator. ⛔ Never hand-write either number anywhere else: an off-by-one
+ * inside a diagnostic that exists to be accurate is the defect it was added to
+ * fix (#12620).
+ */
+const PORT_SEARCH_SPAN = 100;
+
+/**
+ * The one thing {@link getAvailablePort} does to the outside world, injectable
+ * so its exhausted path can be driven without binding a socket.
+ *
+ * ⛔ The alternative is a test that holds 101 real ports: slow, flaky, and
+ * hostile to a shared many-agent container whose ephemeral range is already
+ * crowded (#12441 measured that contention costing a suite a red run). The
+ * production call site passes nothing and gets {@link isPortAvailable}.
+ */
+type PortProbe = (port: number) => Promise<boolean>;
+
+/**
+ * Helper to find available port (dev convenience — see the gated caller).
+ *
+ * A plain contiguous `port++` walk: `startPort`, `startPort + 1`, … with **no
+ * skip**. ⚠️ Nearby cards have described this search as hopping over ports; it
+ * does not, and a diagnostic written from that reading would be wrong.
+ */
+export const getAvailablePort = async (
+  startPort: number,
+  probe: PortProbe = isPortAvailable,
+): Promise<number> => {
   let port = startPort;
-  while (!(await isPortAvailable(port))) {
+  while (!(await probe(port))) {
     port++;
-    if (port > startPort + 100) {
-       throw new Error(`Could not find an available port starting from ${startPort}`);
+    if (port > startPort + PORT_SEARCH_SPAN) {
+      throw new Error(`Could not find an available port starting from ${startPort}`);
     }
   }
   return port;
 };
+
+/**
+ * The notice for a search that ran out of ports (#12620).
+ *
+ * ## The fallthrough is deliberate; the SILENCE was the defect
+ *
+ * When {@link getAvailablePort} exhausts its span the caller swallows the throw
+ * and binds `requestedPort` anyway — which is defensible on its own terms: a
+ * dev whose whole next span is busy arguably wants the requested port attempted
+ * rather than a hard refusal. ⛔ Whether it should refuse instead is #11113's
+ * production/development policy split and is deliberately NOT decided here;
+ * nothing in this function changes what `os serve` does.
+ *
+ * What is not defensible is doing it in silence. This is the one shape in the
+ * whole port policy where the operator gets **neither** half of the legibility
+ * work this family has landed: the production `Port … is already in use` line
+ * lives in the `else if` this boot never enters, and #12543's drift notice is
+ * gated on `port !== requestedPort`, which on this path is false because the
+ * assignment never happened. The boot then dies on the kernel's raw error with
+ * the accurate explanation discarded one line earlier.
+ *
+ * ## ⭐ It CARRIES the thrown message; it does not paraphrase it
+ *
+ * `Could not find an available port starting from ${startPort}` already names
+ * the problem exactly. Rewriting it into a fresh sentence would create a second
+ * spelling of one fact, free to drift from the first. So the caught error's own
+ * `message` is the headline, verbatim, and every other line here adds a
+ * DIFFERENT fact: how wide the search was, what happens next, and what to do.
+ *
+ * `cause` is typed `unknown` and rendered defensively rather than narrowed to
+ * `Error`: the point is to carry whatever text the seam actually produced, and
+ * a probe that rejects with a non-`Error` must not turn this notice into
+ * `[object Object]`.
+ *
+ * ## CHANNEL — measured, not chosen (#7915)
+ *
+ * The caller writes this through `printDiagnostic`, straight to **stderr**.
+ * `stdout` is the JSON-RPC channel whenever the stdio MCP transport is mounted,
+ * where one non-frame line reaches a conforming client as a transport error;
+ * `serve-stdio-stdout-purity.e2e.test.ts` exists to pin exactly that.
+ */
+export function formatExhaustedPortSearchNotice(requestedPort: number, cause: unknown): string {
+  // ⭐ The thrown text, carried — not restated. See the docblock.
+  const thrown = cause instanceof Error ? cause.message : String(cause);
+  const lastProbed = requestedPort + PORT_SEARCH_SPAN;
+  const probedCount = PORT_SEARCH_SPAN + 1;
+  return (
+    '\n'
+    + chalk.yellow(`  ⚠ ${thrown}\n`)
+    + chalk.dim(`     Development auto-shift probed ${probedCount} ports (${requestedPort}–${lastProbed}) and every\n`)
+    + chalk.dim(`     one was busy, so this server is falling back to ${requestedPort} — the port the\n`)
+    + chalk.dim('     search has just proven is taken. The bind that follows will almost\n')
+    + chalk.dim('     certainly fail with a raw EADDRINUSE from the kernel, and this notice\n')
+    + chalk.dim('     is the only place that says why.\n')
+    + chalk.dim(`     Free a port in ${requestedPort}–${lastProbed}, or pick another via PORT=<port> (or --port <port>).`)
+  );
+}
 
 /**
  * The IDENTITIES a capability provider registers under: full `plugin.name` ids
@@ -1371,8 +1462,23 @@ export default class Serve extends Command {
     if (portAutoShiftAllowed) {
       try {
         port = await getAvailablePort(requestedPort);
-      } catch {
-        // Ignore — fall through and try the requested port.
+      } catch (searchExhausted) {
+        // ── The FALLTHROUGH is CORRECT; its SILENCE was the defect (#12620) ──
+        // This `catch` used to read `// Ignore — fall through and try the
+        // requested port`, and it did exactly that: it discarded an error whose
+        // message already named the problem exactly, then fell through and
+        // bound the port the search had just proven was taken. The boot died on
+        // the kernel's raw EADDRINUSE with nothing anywhere explaining it —
+        // this is the one path in the whole port policy that reaches NEITHER
+        // half of the family's legibility work. The `else if` below owns the
+        // production wording and is never entered here; #12543's drift notice
+        // sits under `port !== requestedPort` a few lines down and is false
+        // here, because the assignment above threw before it could happen.
+        //
+        // ⛔ The fallthrough itself stays. Whether an exhausted search should
+        // refuse instead is #11113's production/development policy split, and
+        // answering it here would be answering a different card.
+        printDiagnostic(formatExhaustedPortSearchNotice(requestedPort, searchExhausted));
       }
       if (port !== requestedPort) {
         // ── The shift is CORRECT; its SILENCE was the defect (#12543) ────
