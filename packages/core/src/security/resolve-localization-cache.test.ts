@@ -50,6 +50,10 @@ function makeQl(rows: Array<Record<string, unknown>>, opts: { epoch?: boolean } 
       const where = o?.where ?? {};
       const matched = rows.filter((r) =>
         Object.entries(where).every(([k, v]) => {
+          // REFUSE a combinator rather than matching it as a field name: a
+          // hand-written matcher that reads `$and` as a column silently answers
+          // the wrong question instead of failing (`check:where-matcher`).
+          if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
           if (v && typeof v === 'object' && '$in' in (v as any)) return (v as any).$in.includes(r[k]);
           return r[k] === v;
         }),
