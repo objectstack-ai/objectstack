@@ -48,10 +48,11 @@
  * Until #12567 the two happy-path cases stopped at the two marker lines. They
  * proved `serve` RESOLVES both app-local packages; the fixture driver then
  * registered nothing, so `serve` walked on to `Cluster driver "redis" is not
- * registered` and the child exited 1 about 5.6s in, having never called
- * `listen()`. Nothing here proved `serve` BOOTS with an app-local cluster
- * driver — while the test names and the `Press Ctrl+C to stop` settle
- * alternative both read as though a boot were in scope.
+ * registered` and the child exited 1 having never called `listen()` — 9.6s in
+ * when #12567 re-measured it on `527e0505d`, 5.6s when the card was filed.
+ * Nothing here proved `serve` BOOTS with an app-local cluster driver — while
+ * the test names and the `Press Ctrl+C to stop` settle alternative both read as
+ * though a boot were in scope.
  *
  * ⭐ #12567's ruling was to sweep the repo for something that DID prove it
  * before changing anything here, because if something did, this file should
