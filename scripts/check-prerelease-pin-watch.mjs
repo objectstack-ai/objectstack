@@ -960,18 +960,26 @@ function selfTest() {
       jsonRun.stdout,
     );
 
-    // The REAL pins must parse — a self-test that only ever reads its own
-    // fixture would pass while the file it polices had moved out from under it.
-    const realWatch = buildWatchList(readOverrides(readFileSync(DEFAULT_WORKSPACE, 'utf8')));
+    // The REAL file must still parse — a self-test that only ever reads its
+    // own fixture would pass while the file it polices had moved out from
+    // under it. Since #3653 redeemed the last prerelease pin (the scim
+    // override now targets stable 1.7.1 exactly), the probe's RETIRED state —
+    // an empty watch list — is the expected reading. Assert it over a
+    // successfully parsed, non-empty overrides block, so a parser break
+    // cannot masquerade as retirement.
+    const realOverrides = readOverrides(readFileSync(DEFAULT_WORKSPACE, 'utf8'));
     check(
-      `the repo's own pnpm-workspace.yaml parses to a non-empty watch list (${realWatch.length} pin(s))`,
-      realWatch.length > 0,
-      'no prerelease pin found — if that is genuinely true, this probe has retired itself',
+      `the repo's own pnpm-workspace.yaml overrides still parse (${Object.keys(realOverrides).length} entr(y/ies))`,
+      Object.keys(realOverrides).length > 0,
+      'readOverrides returned nothing — the parser broke or the file moved; this is NOT retirement',
     );
+    const realWatch = buildWatchList(realOverrides);
     check(
-      'every watched pin from the real file has a base version and a line',
-      realWatch.every((w) => /^\d+\.\d+\.\d+$/.test(w.base) && /^\d+\.\d+$/.test(w.line)),
-      JSON.stringify(realWatch.map((w) => [w.name, w.base])),
+      `the repo's own watch list is EMPTY — the probe's retired state (#3653; found ${realWatch.length} pin(s))`,
+      realWatch.length === 0,
+      'a prerelease pin re-appeared in pnpm-workspace.yaml — the probe is live again: flip this '
+        + 'check back to the non-empty expectations it replaced (git log this file), and restore '
+        + 'the per-pin base/line shape assertion beside it',
     );
   } finally {
     rmSync(tmp, { recursive: true, force: true });
