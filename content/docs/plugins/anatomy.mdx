@@ -9,7 +9,6 @@ Plugins are the building blocks of ObjectStack. A plugin is a plain JavaScript/T
 
 ```typescript
 import type { Plugin, PluginContext } from '@objectstack/core';
-import { z } from 'zod';
 
 export class MyPlugin implements Plugin {
     // Identity
@@ -21,12 +20,12 @@ export class MyPlugin implements Plugin {
     // This controls init ordering — it is NOT an npm-style version map.
     dependencies = ['com.objectstack.engine.objectql'];
 
-    // Configuration Schema (Optional)
-    // Read by the plugin loader to validate config; it lives on the plugin
-    // metadata rather than the base `Plugin` interface.
-    configSchema = z.object({
-        apiKey: z.string()
-    });
+    // Configuration (Optional)
+    // A plugin owns its config: take it as a constructor/factory argument and
+    // parse it yourself (with a Zod schema, say) before use. The kernel never
+    // receives plugin config — the old `configSchema` metadata field was
+    // retired under ADR-0049 because nothing could ever run it.
+    constructor(private readonly options: { apiKey?: string } = {}) {}
 
     /**
      * Init Phase (REQUIRED)
