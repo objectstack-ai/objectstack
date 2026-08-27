@@ -4920,6 +4920,9 @@ export const DERIVATION_SURFACE = ['.github/workflows', 'package.json', 'scripts
  *
  * Every field degrades to null rather than throwing. No base ref, a shallow
  * clone and no git at all are real states, and none of them is an error here.
+ * They are not a NON-EVENT either: `driftLines` renders `base: null` as a
+ * stated refusal to measure rather than as the silence a level tree gets, so
+ * degrading here costs the caller a reading and never costs it the news.
  */
 export function baseDrift({ cwd = ROOT } = {}) {
   const read = (args) => {
@@ -4950,9 +4953,35 @@ export function baseDrift({ cwd = ROOT } = {}) {
  * the banner has no "all paths present" twin: against a base ref nobody
  * refreshed, a clean bill of health is precisely the reading the measured
  * failure would have passed.
+ *
+ * That silence at zero is what makes the UNMEASURABLE case a defect rather
+ * than a fourth flavour of quiet. `baseDrift` degrades every field to null
+ * when the base ref does not resolve — a fresh checkout, a clone nobody
+ * fetched, a graft — so `behind: null` ("no reading was taken") used to render
+ * byte-identically to `behind: 0` ("a reading was taken, and it was zero"):
+ * nothing at all, from a single `!drift.behind`. The reasoning above defends
+ * withholding an ALL-CLEAR; it never defended withholding the fact that no
+ * instrument was available. And the two states are not equally safe to be
+ * silent about: unmeasured is precisely when the family list below is LEAST
+ * trustworthy, because a gate that landed on the base branch after this tree
+ * was cut cannot be seen from inside this tree, and here nothing can even say
+ * how far back that is. So this branch speaks, zero stays silent, and a reader
+ * can finally tell them apart.
+ *
+ * A drift of `null` — no measurement ATTACHED, because the caller never asked
+ * for one — stays silent, deliberately and separately: reporting a missing
+ * instrument to a reader who never reached for one would be the fabricated
+ * lead this file's header prices as the expensive direction.
  */
 export function driftLines(drift) {
-  if (!drift || !drift.behind) return [];
+  if (!drift) return [];
+  if (drift.base === null) {
+    return [
+      `  ⚠️  STALENESS NOT MEASURED — ${DEFAULT_BASE_REF} does not resolve in this checkout, so this tree's distance from it is UNKNOWN. Not zero: no reading was taken.`,
+      `    A fresh checkout, a clone nobody fetched or a graft all reach here — and an unmeasured tree is where the families below are LEAST trustworthy, not most. Run 'git fetch ${DEFAULT_BASE_REMOTE} ${DEFAULT_BASE_BRANCH}' and derive again for a reading.`,
+    ];
+  }
+  if (!drift.behind) return [];
   const { behind, base, changed, headDate, baseDate } = drift;
   const span = `HEAD${headDate ? ` ${headDate}` : ''} vs ${DEFAULT_BASE_REF} ${base}${baseDate ? ` ${baseDate}` : ''}`;
   if (changed.length === 0) {
@@ -8617,8 +8646,27 @@ function selfTest() {
   // reads as ordinary provenance. These pin the loudness, and pin that the
   // quiet cases stay quiet — a warning on every honest run is a warning nobody
   // reads.
-  t('no measurable base ref prints nothing rather than guessing', driftLines(null).length === 0 && driftLines({ base: null, behind: null, changed: [] }).length === 0);
-  t('a tree level with the base prints NO clearance — the failure would have passed one', driftLines({ base: 'aaaaaaa', behind: 0, changed: [] }).length === 0);
+  // Unmeasured is not silence (#12411). These pin the ARRIVAL — the sentence a
+  // reader actually gets — not merely that the old silence is gone: a pin
+  // asserting "the output is not empty" passes against any garbage. The
+  // previous assertion here read "no measurable base ref prints nothing rather
+  // than guessing" and was green on the defect itself, which is what a
+  // departure pin buys you.
+  const level = driftLines({ base: 'aaaaaaa', behind: 0, changed: [] });
+  const unmeasured = driftLines({ base: null, behind: null, changed: [], headDate: null, baseDate: null });
+  const unmeasuredText = unmeasured.join('\n');
+  t('an unresolvable base ref SAYS staleness was not measured, and names the ref it could not resolve',
+    unmeasuredText.includes('STALENESS NOT MEASURED') && unmeasuredText.includes(DEFAULT_BASE_REF));
+  t('and it spells the reading UNKNOWN, so the reader cannot land on zero by default',
+    unmeasuredText.includes('UNKNOWN') && unmeasuredText.includes('Not zero'));
+  t('it hands over the one action that would produce a reading',
+    unmeasuredText.includes(`git fetch ${DEFAULT_BASE_REMOTE} ${DEFAULT_BASE_BRANCH}`));
+  t('and it does NOT cry stale — a tree nobody measured is not a tree measured stale',
+    !unmeasuredText.includes('STALE TREE'));
+  t('a tree level with the base prints NO clearance — the failure would have passed one', level.length === 0);
+  t('so the two readings no longer share one output — the defect, stated as the comparison that used to hold',
+    unmeasuredText !== level.join('\n'));
+  t('and a drift of null — no measurement ATTACHED, the caller never asked — still prints nothing', driftLines(null).length === 0);
   const benign = driftLines({ base: 'aaaaaaa', behind: 7, changed: [], headDate: '2026-01-01T00:00:00Z', baseDate: '2026-01-02T00:00:00Z' });
   t('behind, but with the derivation surface untouched, states the distance in ONE quiet line', benign.length === 1 && benign[0].includes('7 commit(s) behind'));
   t('and that quiet line does not cry stale, so the loud spelling stays rare', !benign.join('\n').includes('STALE TREE'));
@@ -8644,6 +8692,16 @@ function selfTest() {
     // Positive control: a clone level with its base must read zero, or a
     // non-zero reading below proves nothing.
     t('a checkout level with its base measures zero drift (positive control)', baseDrift({ cwd: clone }).behind === 0);
+    // The other end of the distinction, measured rather than hand-built: `up`
+    // was `git init`-ed and has no remote at all, so the base ref genuinely
+    // does not resolve there — the fresh-checkout state the object literals
+    // above only describe. Its reading must not be the zero the clone reads.
+    const unresolvableRepo = baseDrift({ cwd: up });
+    t('a checkout with no such remote measures NO base, and does not fall back to zero',
+      unresolvableRepo.base === null && unresolvableRepo.behind === null);
+    t('and from a real repo too it arrives as a sentence, not as the silence the level clone gets',
+      driftLines(unresolvableRepo).join('\n').includes('STALENESS NOT MEASURED')
+        && driftLines(baseDrift({ cwd: clone })).length === 0);
     // Upstream moves in a file the answer is NOT derived from.
     writeFileSync(join(up, 'seed.txt'), 'seed2\n');
     gd(['add', '-A'], up); gd(['commit', '-qm', 'unrelated'], up);
