@@ -1784,6 +1784,7 @@ describe('ApprovalService (node era)', () => {
     const req = await late.openNodeRequest(
       openInput(['u9'], {}, { escalation: { enabled: false, timeoutHours: 1, action: 'auto_approve', notifySubmitter: false } }), CTX,
     );
+    if ('autoApproved' in req) throw new Error('expected a pending request, not an auto-approve outcome');
     // Deadline breached (due = cutoff + 1h < sweep clock at cutoff + 2h) while
     // created_at stays ON the cutoff — the boundary belongs to the new regime.
     const row = engine._tables['sys_approval_request'].find(r => r.id === req.id)!;
@@ -1810,6 +1811,7 @@ describe('ApprovalService (node era)', () => {
     const req = await late.openNodeRequest(
       openInput(['u9'], {}, { escalation: { enabled: false, timeoutHours: 1, action: 'auto_approve', notifySubmitter: false } }), CTX,
     );
+    if ('autoApproved' in req) throw new Error('expected a pending request, not an auto-approve outcome');
     const row = engine._tables['sys_approval_request'].find(r => r.id === req.id)!;
     row.created_at = new Date(ESCALATION_ENABLED_FLIP_CUTOFF_MS - 10 * 3600_000).toISOString();
     const out = await late.runEscalations();
@@ -1829,6 +1831,7 @@ describe('ApprovalService (node era)', () => {
     const req = await late.openNodeRequest(
       openInput(['u9'], {}, { escalation: { timeoutHours: 1, action: 'auto_reject', notifySubmitter: false } }), CTX,
     );
+    if ('autoApproved' in req) throw new Error('expected a pending request, not an auto-approve outcome');
     const row = engine._tables['sys_approval_request'].find(r => r.id === req.id)!;
     row.created_at = new Date(ESCALATION_ENABLED_FLIP_CUTOFF_MS).toISOString();
     const out = await late.runEscalations();
