@@ -96,7 +96,7 @@ const FLAG_BY_ID: Record<string, boolean> = {
  * empty-input branch of an order statistic: `voidcol` is an explicit `null` on
  * every row, and no row carries `absent` at all.
  */
-const ROWS: Doc[] = (AGGREGATION_ROWS as ReadonlyArray<Record<string, unknown>>).map((row) => ({
+const ROWS: Doc[] = (AGGREGATION_ROWS as unknown as Doc[]).map((row) => ({
   ...row,
   flag: FLAG_BY_ID[row.id as string],
   voidcol: null,
