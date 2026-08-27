@@ -651,7 +651,7 @@ type NormalizedRestServerConfig = {
         enableBatch: boolean;
         enableDiscovery: boolean;
         enableOpenApi: boolean;
-        enableSearch?: boolean;
+        enableSearch: boolean;
         enableProjectScoping: boolean;
         projectResolution: 'required' | 'optional' | 'auto';
         documentation: RestApiConfig['documentation'];
@@ -2964,17 +2964,14 @@ export class RestServer {
      * VALIDATION ONLY — the parsed output is deliberately discarded and the
      * normalization below keeps reading the raw input. Two measured reasons:
      *
-     *  - `enableSearch` is read below through `as any` and is declared NOWHERE
-     *    in `packages/spec` (zero hits in `packages/spec/src`).
-     *    `RestApiConfigSchema` is not `.strict()`, and a non-strict
-     *    `z.object()` STRIPS keys it does not declare — measured: parsing
-     *    `{ version: 'v1', enableSearch: false }` returns an object with no
-     *    `enableSearch` at all. Consuming the parsed output would therefore
-     *    turn search back ON, silently, for a deployment that turned it off:
-     *    the ADR-0104 silent-strip class that `shared/retired-key.ts` exists to
-     *    prevent. The undeclared key is a defect in its own right, filed
-     *    separately rather than fixed here (`packages/spec` is not this
-     *    change's surface).
+     *  - `enableSearch` USED to be the silent-strip trap here: it was read
+     *    below through `as any` and declared nowhere in `packages/spec`, so
+     *    this non-strict `z.object()` stripped it and consuming the parsed
+     *    output would have turned search back ON for a deployment that turned
+     *    it off (the ADR-0104 class `shared/retired-key.ts` exists to
+     *    prevent). #11983 gave it a declared seat
+     *    (`RestApiConfigSchema.enableSearch`, default `true`), so the parse
+     *    now preserves it — but the discard stays, for the omitted keys:
      *
      *  - the retired `api.requireAuth` key is `.omit()`ed rather than enforced.
      *    #3963 retired it with a deliberate warn-and-ignore posture
@@ -3062,8 +3059,8 @@ export class RestServer {
                 enableUi: api.enableUi ?? true,
                 enableBatch: api.enableBatch ?? true,
                 enableDiscovery: api.enableDiscovery ?? true,
-                enableOpenApi: (api as any).enableOpenApi ?? true,
-                enableSearch: (api as any).enableSearch ?? true,
+                enableOpenApi: api.enableOpenApi ?? true,
+                enableSearch: api.enableSearch ?? true,
                 enableProjectScoping: api.enableProjectScoping ?? false,
                 projectResolution: api.projectResolution ?? 'auto',
                 documentation: api.documentation,
@@ -3090,15 +3087,14 @@ export class RestServer {
                 enableCache: metadata.enableCache ?? true,
                 cacheTtl: metadata.cacheTtl ?? 3600,
                 // [ADR-0106 D8] Default ON — masking is the platform default and
-                // ships with the current major. Read through `as any` for the
-                // same reason `api.enableOpenApi` / `api.enableSearch` above are:
-                // `MetadataEndpointsConfigSchema` lives in `packages/spec` and
-                // giving this key a declared seat there is a separate change.
+                // ships with the current major. The key has a declared seat
+                // (`MetadataEndpointsConfigSchema.maskObjectFields` in
+                // `packages/spec`), so this is a typed read.
                 // `isObjectSchemaMaskingEnabled` also honours the
                 // `OS_ALLOW_UNMASKED_OBJECT_METADATA` escape hatch, which is the
                 // knob the runtime `/metadata` dispatcher shares (it has no REST
                 // config to read).
-                maskObjectFields: isObjectSchemaMaskingEnabled((metadata as any).maskObjectFields),
+                maskObjectFields: isObjectSchemaMaskingEnabled(metadata.maskObjectFields),
                 endpoints: {
                     types: metadata.endpoints?.types ?? true,
                     items: metadata.endpoints?.items ?? true,
@@ -3174,7 +3170,7 @@ export class RestServer {
             if (this.config.api.enableDiscovery) {
                 this.registerDiscoveryEndpoints(bp);
             }
-            if (this.config.api.enableOpenApi ?? true) {
+            if (this.config.api.enableOpenApi) {
                 this.registerOpenApiEndpoints(bp);
             }
             if (this.config.api.enableMetadata) {
@@ -3183,7 +3179,7 @@ export class RestServer {
             if (this.config.api.enableUi) {
                 this.registerUiEndpoints(bp);
             }
-            if (this.config.api.enableSearch ?? true) {
+            if (this.config.api.enableSearch) {
                 this.registerSearchEndpoints(bp);
             }
             this.registerEmailEndpoints(bp);
@@ -3512,11 +3508,13 @@ export class RestServer {
                     // fallback for a wrong bit: each layer states the fact only
                     // it knows, and `enabled` is their conjunction.
                     //
-                    // The flag is read with the mount's own `?? true` spelling
-                    // rather than the equivalent `!== false` — same predicate,
-                    // same characters, so the two cannot be edited apart.
+                    // The flag is the NORMALIZED boolean (defaulted in
+                    // `normalizeConfig`, declared seat in
+                    // `RestApiConfigSchema.enableSearch` since #11983) — the
+                    // same field the mount in `registerRoutes` reads, so the
+                    // two cannot be edited apart.
                     caps.search = {
-                        enabled: !!caps.search?.enabled && (this.config.api.enableSearch ?? true),
+                        enabled: !!caps.search?.enabled && this.config.api.enableSearch,
                     };
 
                     // Attach scoping metadata so clients can detect dual-mode routing.

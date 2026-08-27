@@ -138,7 +138,16 @@ describe('hookBodyRunnerFactory', () => {
         (t as any)[k as string] = v;
         return true;
       },
-      ownKeys: (t) => Reflect.ownKeys(t),
+      // [#12578] CHANGED, from `Reflect.ownKeys(t)`. This double stood as the
+      // tree's second answer to "what does `installFlatInput`'s `ownKeys`
+      // report": the implementation said `Object.keys(data)` (enumerable only)
+      // while this modelled the full key set INCLUDING symbols, and neither
+      // was declared. That card settled it — the trap reports the payload's own
+      // STRING key set — and this line now models the settled spelling, so the
+      // double cannot drift from the trap it stands in for again. Symbols are
+      // the deliberate exclusion (an open payload-contract question, #12578),
+      // which is precisely what `Reflect.ownKeys` here used to assert away.
+      ownKeys: (t) => Object.getOwnPropertyNames(t),
       getOwnPropertyDescriptor: (t, k) => Reflect.getOwnPropertyDescriptor(t, k),
     });
     const factory = hookBodyRunnerFactory(runner, { ql: {}, appId: 'crm' });

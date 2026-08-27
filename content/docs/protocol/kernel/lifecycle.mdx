@@ -693,8 +693,7 @@ export const salesforcePlugin = {
 const monitor = new PluginHealthMonitor(kernel.logger);
 
 // `registerPlugin` takes the PARSED config, so parse it: the schema fills in
-// interval 30000, timeout 5000, failureThreshold 3, successThreshold 1,
-// autoRestart false, maxRestartAttempts 3, restartBackoff 'exponential'.
+// interval 30000, timeout 5000, failureThreshold 3 and successThreshold 1.
 monitor.registerPlugin(
   salesforcePlugin.name,
   PluginHealthCheckSchema.parse({ checkMethod: 'healthCheck' }),
@@ -734,9 +733,26 @@ failure resets the success count to zero — both routes included — so a throw
 part-way through a recovery starts the next attempt at one rather than resuming
 where it left off. The symmetry holds the other way too: a passing round resets
 the failure count, so `failureThreshold` likewise counts only an unbroken run.
-A successful auto-restart lands the plugin in `recovering` with **both**
-counters cleared, so a restarted plugin still owes a full `successThreshold` of
-passing rounds before it reads `healthy`.
+
+### The monitor reports; it does not act
+
+Nothing above does anything **to** the plugin. A failing plugin is labelled
+`degraded`, `unhealthy` or `failed` and left running; the monitor never calls
+`destroy()`, and acting on what it reports is the host's job — this is a
+host-driven library, and the host is the only party that owns the plugin's
+lifetime.
+
+It used to claim otherwise. `PluginHealthCheck` carried `autoRestart`,
+`maxRestartAttempts` and `restartBackoff`, and a plugin that crossed
+`failureThreshold` with `autoRestart: true` got `plugin.destroy()` called on it
+— and nothing else. `init()` was never called, because the monitor has no
+`PluginContext` to call it with and no way to obtain one. The plugin was then
+logged as `Plugin restarted`, marked `recovering`, and kept under periodic
+checks it went on passing from the grave: the default check when no
+`checkMethod` resolves is `plugin-loaded`, which a destroyed object satisfies
+forever. So the terminal report on a torn-down plugin was `healthy`. The three
+keys were removed in `@objectstack/spec` 18 under ADR-0049 enforce-or-remove;
+`PluginHealthMonitor.registerPlugin` refuses a config that still carries one.
 
 At the default `successThreshold: 1` none of this is observable: the first
 passing round satisfies the count from every status, and `recovering` is never

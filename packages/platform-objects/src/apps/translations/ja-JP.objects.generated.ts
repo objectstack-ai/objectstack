@@ -3012,11 +3012,11 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
   sys_secret: {
     label: "シークレット",
     pluralLabel: "シークレット",
-    description: "sys_setting ハンドルが参照する暗号ストア。平文は保持しません。",
+    description: "3 つの特権的な書き込み経路が書き込む暗号ストア（managedBy を参照）。ハンドルはそれぞれの経路が自身の列で保持します。平文は保持しません。",
     fields: {
       id: {
         label: "ID",
-        help: "`sys_setting.value_enc` が参照する不透明なハンドル。"
+        help: "不透明なハンドル。参照は書き込んだ経路それぞれの保持列にあります — `sys_setting.value_enc`、業務レコード上の `secret:` 参照、またはデータソースの `credentialsRef`。したがって `sys_setting` から参照されていない行が、参照されていない行であるとは限りません。"
       },
       created_at: {
         label: "作成日時",
@@ -3028,11 +3028,11 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       namespace: {
         label: "名前空間",
-        help: "このシークレットが属する設定名前空間。"
+        help: "書き込み経路ごとに意味が決まるラベルであり、一般に設定名前空間とは限りません：`SettingsService` は設定名前空間を、エンジンの `secret` フィールド暗号化はオブジェクト名を、データソースバインダーは呼び出し側が指定したスコープ（既定は `datasource`）を書き込みます。managedBy を参照。"
       },
       key: {
         label: "キー",
-        help: "名前空間内の識別キー。"
+        help: "`namespace` と対になる、書き込み経路ごとに意味が決まるラベル：設定の識別キー、暗号化される `secret` フィールド名、またはデータソース名。この対は書き込み経路が値をどう指定したかを記録するもので、どの経路がその行を書き込んだかを示すものではありません。"
       },
       kms_key_id: {
         label: "KMS キー ID",

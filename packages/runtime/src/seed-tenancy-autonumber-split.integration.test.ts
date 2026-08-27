@@ -143,6 +143,15 @@ const readSequences = async (driver: any) =>
     lastValue: Number(r.last_value),
   }));
 
+/** The same rows WITH their scope — a `{field}`/date format runs one per scope. */
+const readScopedSequences = async (driver: any) =>
+  (await driver.knex('_objectstack_sequences').select('tenant_id', 'scope', 'last_value').orderBy('scope'))
+    .map((r: any) => ({
+      tenant: String(r.tenant_id),
+      scope: String(r.scope),
+      lastValue: Number(r.last_value),
+    }));
+
 const readDuplicates = async (driver: any) =>
   driver
     .knex('crm_case')
@@ -205,8 +214,12 @@ describe('#8686 seed/API tenancy split — autonumber scope', () => {
     // Every seeded row now carries the organization — one tenancy contract for
     // both write paths, which is what option 1 says.
     expect(await countUntenanted(driver)).toBe(0);
-    // The `__global__` pseudo-tenant is gone as a peer of the real organization.
-    expect(await readSequences(driver)).toEqual([]);
+    // The `__global__` pseudo-tenant is gone as a peer of the real organization
+    // — and its HIGH-WATER MARK did not go with it (#12394). This assertion used
+    // to read `toEqual([])`, which pinned the defect as if it were the contract:
+    // an empty counter table is exactly what sends the driver back into its
+    // one-time `MAX(data)` bootstrap.
+    expect(await readSequences(driver)).toEqual([{ tenant: ORG_ID, lastValue: SEEDED_ROWS }]);
 
     // The API path now continues the SAME sequence instead of restarting it.
     const numbers: string[] = [];
@@ -336,10 +349,139 @@ describe('#8686 seed/API tenancy split — autonumber scope', () => {
     await createOrganization(engine);
 
     expect(await countUntenanted(driver)).toBe(0);
-    expect(await readSequences(driver)).toEqual([]);
+    // Merged into the organization's own row, not deleted along with the
+    // `__global__` one (#12394).
+    expect(await readSequences(driver)).toEqual([{ tenant: ORG_ID, lastValue: SEEDED_ROWS }]);
     // And the very first API create on this install already continues the seed's
     // sequence, which is the outcome the card measured going wrong.
     expect((await apiCreate(engine, 'api 1')).case_number).toBe('CASE-00039');
+  });
+
+  /**
+   * #12394 — the handoff must carry the COUNTER's high-water mark, not the data
+   * max. Both cases below BURN a number first, and that is the whole point.
+   *
+   * ⚠️ A pin that asserts "no duplicates after seed + sign-up + create" is GREEN
+   * with and without the defect: with no number burned, the `MAX(data)` rescan
+   * the driver falls back to lands on exactly the value the counter held, so the
+   * two candidate mechanisms are indistinguishable. Only a burned number — a
+   * value the platform has already handed out that no surviving row holds —
+   * separates them, and `SqlDriver.getNextSequenceValue`'s own docstring names
+   * that state as BY DESIGN ("a rolled-back insert burns a number", and after
+   * the one-time bootstrap "the data table is never consulted again").
+   *
+   * Deleting the highest-numbered row is the stand-in the card measured with:
+   * it leaves the counter at 38 and the data max at 37, which is precisely the
+   * shape a rolled-back allocation leaves behind.
+   */
+  it('[#12394] a burned number survives the handoff — the merged counter is written, not destroyed', async () => {
+    const { driver, engine } = await bootInstall();
+    await seedFreshInstall(engine);
+
+    // Burn the top number. The counter stays at 38; the data max is now 37.
+    await (driver as any).knex('crm_case').where({ case_number: 'CASE-00038' }).delete();
+    expect(await readSequences(driver)).toEqual([{ tenant: GLOBAL_TENANT, lastValue: SEEDED_ROWS }]);
+    const dataMax = String(
+      (await (driver as any).knex('crm_case').max({ m: 'case_number' }))[0].m,
+    );
+    expect(dataMax).toBe('CASE-00037');
+
+    await createOrganization(engine);
+    const result = await backfillSeedTenancy(resolveSeedTenancySeam(engine), createLogger() as any);
+    expect(result.status).toBe('applied');
+
+    // The mechanism: the merged high-water mark is WRITTEN into the
+    // organization's own counter row. Before this fix the merge targeted a row
+    // that did not exist yet, the `__global__` row was deleted unconditionally,
+    // and this table came back empty.
+    expect(await readSequences(driver)).toEqual([{ tenant: ORG_ID, lastValue: SEEDED_ROWS }]);
+
+    // The consequence: CASE-00038 is NOT handed out a second time.
+    expect((await apiCreate(engine, 'api 1')).case_number).toBe('CASE-00039');
+    expect((await apiCreate(engine, 'api 2')).case_number).toBe('CASE-00040');
+  });
+
+  /**
+   * #12394, per-scope half — the same handoff on a `{field}`-scoped format.
+   *
+   * A scoped autonumber runs ONE counter row per rendered prefix, keyed by a
+   * `key_hash` over `(object, tenant, field, scope)`. So the merge cannot be
+   * scope-blind in either direction: writing one row for the object/field pair
+   * would leave every other scope's mark destroyed, and writing a row under the
+   * wrong `scope` produces a counter the driver can never find — which reads
+   * exactly like the destroyed mark it was supposed to repair.
+   *
+   * This case is also the cross-package agreement pin for the row key: if the
+   * hash this migration computes disagreed with the driver's by one byte, the
+   * driver would miss the row, re-enter its `MAX(data)` bootstrap, and re-issue
+   * the burned number below.
+   */
+  it('[#12394] each {field} scope keeps its own high-water mark across the handoff', async () => {
+    const ticketObject = {
+      name: 'crm_ticket',
+      fields: {
+        subject: { type: 'text' },
+        region: { type: 'text' },
+        organization_id: { type: 'text' },
+        ticket_no: { type: 'autonumber', format: '{region}-{0000}', unique: 'organization' },
+      },
+    } as any;
+
+    const driver = new SqlDriver({
+      client: 'better-sqlite3',
+      connection: { filename: ':memory:' },
+      useNullAsDefault: true,
+    });
+    openDrivers.push(driver);
+    const engine = new ObjectQL();
+    engine.registerDriver(driver as any, true);
+    await engine.init();
+    engine.registry.registerObject(ticketObject, '#12394');
+    engine.registry.registerObject(ORG_OBJECT, '#12394');
+    await driver.initObjects([ticketObject, ORG_OBJECT]);
+
+    // Seed-shaped writes: untenanted, because no organization exists yet.
+    const seed = (region: string, n: number) =>
+      engine.insert(
+        'crm_ticket',
+        { subject: `seeded ${region} ${n}`, region },
+        { context: { isSystem: true } } as any,
+      );
+    for (let i = 1; i <= 3; i++) await seed('EU', i);
+    for (let i = 1; i <= 2; i++) await seed('US', i);
+
+    // Two independent counters, one per rendered scope.
+    expect(await readScopedSequences(driver)).toEqual([
+      { tenant: GLOBAL_TENANT, scope: 'EU-', lastValue: 3 },
+      { tenant: GLOBAL_TENANT, scope: 'US-', lastValue: 2 },
+    ]);
+
+    // Burn the top EU number only. EU data max drops to EU-0002; US is untouched.
+    await (driver as any).knex('crm_ticket').where({ ticket_no: 'EU-0003' }).delete();
+
+    await createOrganization(engine);
+    const result = await backfillSeedTenancy(resolveSeedTenancySeam(engine), createLogger() as any);
+    expect(result.status).toBe('applied');
+
+    // Both marks move into the organization, each under its OWN scope.
+    expect(await readScopedSequences(driver)).toEqual([
+      { tenant: ORG_ID, scope: 'EU-', lastValue: 3 },
+      { tenant: ORG_ID, scope: 'US-', lastValue: 2 },
+    ]);
+
+    // EU does not re-issue the burned EU-0003, and US continues its own run.
+    const eu = await engine.insert(
+      'crm_ticket',
+      { subject: 'api eu', region: 'EU', organization_id: ORG_ID },
+      { context: { isSystem: true } } as any,
+    );
+    const us = await engine.insert(
+      'crm_ticket',
+      { subject: 'api us', region: 'US', organization_id: ORG_ID },
+      { context: { isSystem: true } } as any,
+    );
+    expect(eu.ticket_no).toBe('EU-0004');
+    expect(us.ticket_no).toBe('US-0003');
   });
 
   it('[GUARD] platform seeds stay global — sys_/cloud_/ai_ are never adopted', async () => {

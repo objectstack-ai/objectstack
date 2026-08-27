@@ -1,17 +1,13 @@
 {
   "_comment": "Per-file tsc error debt of the @objectstack/rest TEST layer (#5286). `tsconfig.test.json` compiles `src/**/*.test.ts` — which `tsconfig.json` excludes and therefore no gate ever read — and every file below still carries errors from before that gate existed, almost all of them fixture literals annotated with a schema OUTPUT type (`z.infer`) while holding an authored INPUT literal. EXACT ratchet, judged by re-running tsc: a file that gains errors is red, a file that loses them is red until its number is re-recorded, a file that reaches zero is red until its entry is deleted, and a file NOT listed here may have no errors at all. Regenerate with: pnpm --filter @objectstack/rest gen:test-typecheck-debt",
   "entries": {
-    "src/analytics-read-scope-refusal-envelope.test.ts": 1,
-    "src/export-integration.test.ts": 17,
+    "src/export-integration.test.ts": 4,
     "src/import-dryrun-parity.test.ts": 1,
     "src/import-integration.test.ts": 3,
     "src/import-job-integration.test.ts": 2,
     "src/meta-public-book-grant.test.ts": 1,
     "src/rest-batch-size-cap.test.ts": 1,
-    "src/rest-expected-error-logging.test.ts": 1,
-    "src/rest-meta-outage-vs-miss.test.ts": 1,
     "src/rest-meta-save-receipt-envelope.test.ts": 3,
-    "src/rest-unclassified-fault-status.test.ts": 1,
     "src/rest-write-response-formula.test.ts": 1,
     "src/rest.test.ts": 4
   }

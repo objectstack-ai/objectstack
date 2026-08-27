@@ -250,9 +250,17 @@ describe('#10789 a seam that answers with no rows still reports no-split', () =>
     // installs it exists for. This seam answers every SELECT and hands back a
     // NON-result-set for every write — and the repair must still complete.
     const writes: string[] = [];
-    const exec: SeedTenancyExec = async (sql: string) => {
-      if (sql.startsWith('UPDATE') || sql.startsWith('DELETE')) {
+    // #12394: the handoff reads its own write back before retiring anything, so
+    // the counter row is modelled rather than assumed — the WRITES still answer
+    // with a non-result-set, which is what this case exists to pin.
+    let orgCounter: Record<string, unknown> | undefined;
+    const exec: SeedTenancyExec = async (sql: string, params?: unknown[]) => {
+      if (sql.startsWith('UPDATE') || sql.startsWith('DELETE') || sql.startsWith('INSERT')) {
         writes.push(sql.slice(0, 6));
+        if (sql.startsWith('INSERT')) orgCounter = { last_value: Number(params?.[5]) };
+        if (sql.startsWith('UPDATE') && sql.includes('_objectstack_sequences')) {
+          orgCounter = { last_value: Number(params?.[0]) };
+        }
         return { affectedRows: 3 }; // not a result set, by design
       }
       if (sql.includes('WHERE 1 = 0')) return [];
@@ -263,7 +271,8 @@ describe('#10789 a seam that answers with no rows still reports no-split', () =>
       }
       if (sql.includes(ORGANIZATION_TABLE)) return [{ id: 'org_a' }];
       if (sql.includes('rows_holding')) return [];
-      if (sql.includes('tenant_id')) return [{ tenant_id: 'org_a', last_value: 1 }];
+      if (sql.includes('"key_hash" = ?')) return orgCounter ? [orgCounter] : [];
+      if (sql.includes('tenant_id')) return [{ key_hash: 'hash-global', scope: '', last_value: 38 }];
       return [];
     };
 
@@ -274,6 +283,9 @@ describe('#10789 a seam that answers with no rows still reports no-split', () =>
     expect(result.organizationId).toBe('org_a');
     expect(writes).toContain('UPDATE');
     expect(writes).toContain('DELETE');
+    // The write that used to be missing: on a fresh install there is no
+    // organization-scoped counter row to raise, so the mark is INSERTed.
+    expect(writes).toContain('INSERT');
   });
 });
 

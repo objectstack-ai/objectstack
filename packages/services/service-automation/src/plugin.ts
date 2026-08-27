@@ -15,7 +15,7 @@ import { stripReadDecorations } from '@objectstack/spec/kernel';
 import { AutomationEngine } from './engine.js';
 import type { RunSummaryLogLevel } from './engine.js';
 import { describeThrownForLog, thrownMessageText } from './thrown-cause-diagnostics.js';
-import { resolveFlowPrecedence } from './flow-precedence.js';
+import { resolveFlowPrecedence, renderFlowContender } from './flow-precedence.js';
 import { installBuiltinNodes, rearmSuspendedWaitTimers } from './builtin/index.js';
 import { resolveRunDataContext } from './runtime-identity.js';
 import { SysAutomationRun } from './sys-automation-run.object.js';
@@ -1135,11 +1135,10 @@ export class AutomationServicePlugin implements Plugin {
             // trace on any other surface — `flows` is keyed by bare name, so
             // the loser is not in `listFlows()` or in `states` below.
             for (const record of this.engine.getShadowedFlows()) {
-                const describe = (c: { source: string; packageId?: string }) =>
-                    c.source === 'package' ? `package '${c.packageId}'` : 'a runtime-authored row (sys_metadata)';
                 ctx.logger.warn(
                     `[Automation] flow '${record.name}' is claimed by ${record.shadowed.length + 1} definitions — ` +
-                        `${describe(record.armed)} is ARMED and ${record.shadowed.map(describe).join(', ')} ` +
+                        `${renderFlowContender(record.armed)} is ARMED and ` +
+                        `${record.shadowed.map(renderFlowContender).join(', ')} ` +
                         `${record.shadowed.length === 1 ? 'is' : 'are'} shadowed (ADR-0005 overlay precedence). ` +
                         `Only the armed definition dispatches.`,
                 );

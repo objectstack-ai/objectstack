@@ -87,16 +87,16 @@
           "note": "#1883 — RBAC gate pre-mapped, deny unless granted; the `transfer` ObjectQL operation is pending M2, so granting delivers nothing until it ships. Re-verified 2026-07-30: M2 still unshipped (no transfer/restore/purge operations in packages/objectql), the gate mapping stands."
         },
         "allowRestore": {
-          "status": "live",
-          "verifiedAt": "2026-07-30",
-          "evidence": "packages/plugins/plugin-security/src/permission-evaluator.ts:15 (OPERATION_TO_PERMISSION restore→allowRestore; DESTRUCTIVE_OPERATIONS fail-closed backstop)",
-          "note": "#1883 — RBAC gate pre-mapped, deny unless granted; the `restore` ObjectQL operation is pending M2. Re-verified 2026-07-30: M2 still unshipped."
+          "status": "dead",
+          "verifiedAt": "2026-08-26",
+          "evidence": "packages/spec/src/security/permission.zod.ts (retiredKey tombstone — authored values REJECT with the prescription; z.input types the key never)",
+          "note": "REMOVED 2026-08-26 (#12497, ADR-0049 enforce-or-remove — maintainer ruling accepting #1883's recommendation B) — the `restore` ObjectQL operation the bit claimed to gate has never existed (no destructive lifecycle verb in the engine's dispatch vocabulary, #8106 pin), so granting it delivered nothing. The former 'live' verdict cited only the evaluator's pre-mapping row, which retired in the same batch: a mapping onto an unwritable bit is a claim about a surface that rejects authoring. A dispatched `restore` stays denied fail-closed via DESTRUCTIVE_OPERATIONS. Tombstoned at the schema and stripped from sources by the protocol-18 conversion `permission-allow-restore-purge-removed`. The entry stays because retiredKey keeps the key in the walked shape (the rls.priority precedent); the key RETURNS with the M2 lifecycle initiative (#1883, feature + RBAC in one batch) — drop the tombstone (and this entry) only if M2 respells it."
         },
         "allowPurge": {
-          "status": "live",
-          "verifiedAt": "2026-07-30",
-          "evidence": "packages/plugins/plugin-security/src/permission-evaluator.ts:15 (OPERATION_TO_PERMISSION purge→allowPurge; DESTRUCTIVE_OPERATIONS fail-closed backstop)",
-          "note": "#1883 — RBAC gate pre-mapped, deny unless granted; the `purge` ObjectQL operation is pending M2. Re-verified 2026-07-30: M2 still unshipped."
+          "status": "dead",
+          "verifiedAt": "2026-08-26",
+          "evidence": "packages/spec/src/security/permission.zod.ts (retiredKey tombstone — authored values REJECT with the prescription; z.input types the key never)",
+          "note": "REMOVED 2026-08-26 (#12497, ADR-0049 enforce-or-remove — maintainer ruling accepting #1883's recommendation B) — the `purge` ObjectQL operation the bit claimed to gate has never existed (no destructive lifecycle verb in the engine's dispatch vocabulary, #8106 pin), so granting it delivered nothing; worse, an admin who set `allowPurge: false` believed a lock on GDPR hard-deletion existed. The former 'live' verdict cited only the evaluator's pre-mapping row, which retired in the same batch. A dispatched `purge` stays denied fail-closed via DESTRUCTIVE_OPERATIONS. Tombstoned at the schema and stripped from sources by the protocol-18 conversion `permission-allow-restore-purge-removed`. The entry stays because retiredKey keeps the key in the walked shape (the rls.priority precedent); the key RETURNS with the M2 lifecycle initiative (#1883, feature + RBAC in one batch) — drop the tombstone (and this entry) only if M2 respells it."
         },
         "viewAllRecords": {
           "status": "live",

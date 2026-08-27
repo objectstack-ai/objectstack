@@ -29,20 +29,38 @@
  * dialect, it must recognise every spelling knex resolves to the same canon. A
  * hand-copied list would keep passing after a knex upgrade changed the answer.
  *
- * ## What this suite deliberately does NOT decide
+ * ## The question this suite used to hold open, and its answer
  *
  * Whether `redshift` and `cockroachdb` — separate knex dialects that speak the
- * pg WIRE protocol — should be treated as Postgres for SQL EMISSION is a
- * support-scope question, open as **#11756**. The cases under "emission is not
- * wire" pin the current, deliberate asymmetry so that a convergence refactor
- * cannot answer #11756 as a side effect. When #11756 is decided, those cases are
- * the ones that must be consciously rewritten — that is their job.
+ * pg WIRE protocol — should be treated as Postgres for SQL EMISSION was a
+ * support-scope question, held open as **#11756**. The cases under "emission is
+ * not wire" pinned the deliberate asymmetry so that a convergence refactor
+ * could not answer it as a side effect, and said in as many words that they
+ * were the cases to rewrite once it was decided.
+ *
+ * It was decided — maintainer, 2026-08-25, verbatim 「同意」 on 「C，但
+ * pgnative 归入 Postgres 家族」 (#11756, comment 5404884704) — and **this file's
+ * rewrite (#11991) is that decision landing**, done as its own act rather than
+ * inherited from a refactor. What changed here, and only here:
+ *
+ *   - `redshift` / `cockroachdb` keep wire recognition and are now REFUSED BY
+ *     NAME at the DDL gate. The cases below assert the refusal's code, status
+ *     and message rather than the silent fall-through they used to assert.
+ *   - `pgnative` joins the Postgres family for emission and enters the wire
+ *     table, so three expected-membership lists gained a name.
+ *   - `mariadb` is untouched: the ruling put it out of scope, and its case
+ *     below still pins it as unrecognised — AND, since #11991, as unrefused.
+ *
+ * The refusal's own behaviour is pinned next door, in
+ * `sql-driver-11991-emission-identity-refusal.test.ts`; what stays here is the
+ * spelling-table half this suite has always owned.
  */
 
 import { describe, it, expect, afterEach } from 'vitest';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { SqlDriver } from './sql-driver.js';
+import { UnsupportedDialectEmissionError } from './dialect-emission-refusal.js';
 
 // ── knex's own vocabulary, read from the pinned install ──────────────────────
 
@@ -75,6 +93,10 @@ class ProbeDriver extends SqlDriver {
   }
   nowDefaultSql(type: string): string {
     return this.nowColumnDefault(type).toString();
+  }
+  /** [#11991] Drive the DDL gate without a database — `initObjects`' first act. */
+  gate(operation: string): void {
+    this.assertSchemaMutable(operation);
   }
   /**
    * Re-spell the DECLARED client after construction.
@@ -137,6 +159,11 @@ describe("#11550 — knex's alias table is the vocabulary, not a pair of literal
     for (const spelling of ['sqlite3', 'sqlite', 'mysql', 'mariadb']) {
       expect(() => make(spelling), spelling).toThrow(/Cannot find module|Knex: run/);
     }
+    // [#11991] `pgnative` is NOT in that list, measured: knex constructs its
+    // client here and only resolves the native binding on connect. So the
+    // spelling the #11756 ruling admits is exercised through a REAL client
+    // wherever this suite compares it against `pg`, not through the stand-in.
+    expect(() => make('pgnative')).not.toThrow();
   });
 });
 
@@ -208,7 +235,13 @@ describe('#11550 — identity across every spelling knex supports', () => {
     // Names every answer, so a widening cannot slip in unannounced — and so the
     // spellings that already worked are pinned as UNCHANGED. Sibling cards this
     // round select behaviour through these getters with `pg` / `mysql2`.
-    expect(recognised('postgres')).toEqual(['pg', 'postgres', 'postgresql']);
+    //
+    // [#11991] `pgnative` is the ONE announced widening, and it is the #11756
+    // ruling: knex compiles it with the same `postgresql` dialect as `pg`
+    // (asserted from a live client below), so it was the easy end of that
+    // decision lumped in with the hard end. `redshift` / `cockroachdb` did NOT
+    // join — they are refused instead, which is the other half of the ruling.
+    expect(recognised('postgres')).toEqual(['pg', 'pgnative', 'postgres', 'postgresql']);
     expect(recognised('sqlite')).toEqual(['better-sqlite3', 'sqlite', 'sqlite3']);
     expect(recognised('mysql')).toEqual(['mysql', 'mysql2']);
   });
@@ -226,43 +259,82 @@ describe('#11550 — identity across every spelling knex supports', () => {
   });
 });
 
-describe('#11550 — emission identity is not wire identity (#11756 stays open)', () => {
+describe('#11550 — emission identity is not wire identity (#11756 ruled, #11991 landed)', () => {
   const emit = (name: string): ReadonlySet<string> => (SqlDriver as any)[name];
 
-  it('redshift and cockroachdb parse pg wire but do NOT emit Postgres DDL', () => {
-    // ⚠️ These two cases are the deliberate, currently-undecided asymmetry.
-    // Rewriting them is how #11756 gets answered — not by a refactor quietly
-    // merging the tables.
+  it('redshift and cockroachdb parse pg wire and are REFUSED for DDL', () => {
+    // ⚠️ THE REWRITE. This case previously pinned the undecided asymmetry:
+    // no emission identity, no refusal either — the DDL path simply proceeded
+    // and knex built whatever its own compiler produced. #11756 was ruled on
+    // 2026-08-25 (option C, 「同意」) and this is the case changing to say so.
+    // It is edited deliberately, with the ruling named, precisely because the
+    // block it lives in existed to stop a refactor changing it silently.
     for (const spelling of ['redshift', 'cockroachdb']) {
       const d = respelled(spelling);
+      // Unchanged by the ruling: no emission identity, in either direction.
       expect(d.flags, spelling).toEqual({ sqlite: false, postgres: false, mysql: false });
       expect(d.dialect, spelling).toBe('unknown');
-      // The consequence, spelled out: they keep the CURRENT_TIMESTAMP default.
-      expect(d.nowDefaultSql('date').toUpperCase(), spelling).toContain('CURRENT_TIMESTAMP');
-      // …while still getting the #11389 calendar-day wire hook.
+      // CHANGED: the fall-through is gone. What used to be "keeps the
+      // CURRENT_TIMESTAMP default and builds the table anyway" is now a named
+      // refusal — nothing is emitted at all.
+      expect(() => d.gate('initObjects'), spelling).toThrow(UnsupportedDialectEmissionError);
+      // Unchanged: the #11389 calendar-day wire hook still applies…
       expect(emit('POSTGRES_WIRE_CLIENTS'), spelling).toContain(spelling);
-      // …and, since #11784, the connect-timeout bound too. Both are properties
-      // of the npm driver doing the connecting (`pg`), which is why neither
-      // waits on #11756: knex's Client_Redshift/Client_CockroachDB extend
-      // Client_PG for the WIRE while overriding the query compiler for
-      // EMISSION. Timeout row present, emission identity still false — the
-      // independence #11784 asserted, pinned rather than argued.
+      // …and so does the #11784 connect-timeout bound. Both are properties of
+      // the npm driver doing the connecting (`pg`), which is why the ruling
+      // could keep them while refusing emission: knex's
+      // Client_Redshift/Client_CockroachDB extend Client_PG for the WIRE while
+      // overriding the query compiler for EMISSION. Wire yes, emission no —
+      // now stated by the driver instead of merely being true of it.
       expect((SqlDriver as any).DIALECT_CONNECT_TIMEOUT[spelling], spelling)
         .toEqual({ key: 'connectionTimeoutMillis', urlKey: 'connectionString' });
     }
   });
 
+  it('pgnative IS the Postgres family, and knex agrees from a live client', () => {
+    // The other half of the ruling, and the reason it was separable from the
+    // hard end: knex resolves `pgnative` to the SAME dialect and compiler as
+    // `pg` — only the npm binding differs. Asserted off a constructed client,
+    // not from knex's docs, so a knex upgrade that changed the answer fails
+    // here rather than silently widening what this driver claims.
+    const client = (make('pgnative') as any).knex.client;
+    expect(client.dialect).toBe('postgresql');
+    expect(client.driverName).toBe('pgnative');
+
+    const d = respelled('pgnative');
+    expect(d.flags).toEqual({ sqlite: false, postgres: true, mysql: false });
+    expect(d.dialect).toBe('postgres');
+    // The defect it inherited by being lumped in with Redshift: a bare
+    // CURRENT_TIMESTAMP default on a DATE column — the server's calendar day.
+    // Fixed by membership, not by a branch.
+    expect(d.nowDefaultSql('date')).toContain("timezone('utc', now())::date");
+    expect(d.nowDefaultSql('date').toUpperCase()).not.toContain('CURRENT_TIMESTAMP');
+    // …and it is NOT refused, which is the whole difference from the two above.
+    expect(() => d.gate('initObjects')).not.toThrow();
+  });
+
   it('the wire set EXTENDS the emission set, never the reverse', () => {
     const wire = emit('POSTGRES_WIRE_CLIENTS');
     for (const spelling of emit('POSTGRES_EMIT_CLIENTS')) expect(wire).toContain(spelling);
+    // [#11991] `pgnative` entered BOTH sets in one edit — it was absent from
+    // both before the ruling, so it got neither emission nor the #11389
+    // calendar-day parser. The wire membership is derived from the emission
+    // one, so this list gaining a name proves the derivation, not a second
+    // hand-written table.
     expect([...wire].sort()).toEqual(
-      ['cockroachdb', 'pg', 'postgres', 'postgresql', 'redshift'],
+      ['cockroachdb', 'pg', 'pgnative', 'postgres', 'postgresql', 'redshift'],
     );
   });
 
-  it('mariadb is a separate knex dialect and is not MySQL for emission', () => {
+  it('mariadb is out of the ruling: not MySQL for emission, and not refused', () => {
+    // #11756 put `mariadb` explicitly out of scope, so it keeps the third
+    // state: unrecognised AND unrefused. The `not.toThrow()` is the load-
+    // bearing half — a refusal keyed on "the getters do not recognise this"
+    // instead of on the named wire-only set would sweep mariadb in and widen a
+    // decided ruling by one dialect, silently.
     expect(SUPPORTED_CLIENTS).toContain('mariadb');
     expect(respelled('mariadb').flags.mysql).toBe(false);
+    expect(() => respelled('mariadb').gate('initObjects')).not.toThrow();
   });
 });
 
@@ -283,22 +355,27 @@ describe('#11550 — the client-keyed tables now derive from one source', () => 
     }
   });
 
-  it('membership is the derivation plus its literal extensions, and nothing else', () => {
+  it('membership is the derivation plus its ONE declared extension, and nothing else', () => {
     // #11550's refactor half had to be a no-op, and this pinned that. #11784
-    // then added `redshift` — a real membership change, deliberate, and the only
-    // one since. The comment that stood here cited redshift's ABSENCE as
-    // load-bearing documentation for `withConnectBound`'s early-return note;
-    // that example was retired together with the row, and the note now carries
-    // its reasoning directly instead of leaning on this table.
+    // then added `redshift` — a real membership change, deliberate. #11991 added
+    // `pgnative`, and added it WITHOUT touching this table: it is a member of
+    // POSTGRES_EMIT_CLIENTS, and this table derives from that set. A row
+    // appearing here for free is the derivation working.
     //
-    // ⚠️ `cockroachdb` and `redshift` must stay LITERAL extensions of
-    // POSTGRES_EMIT_CLIENTS here. This list now coincides with
-    // POSTGRES_WIRE_CLIENTS, and spelling it as that set instead would grant
-    // both of them SQL-emission identity as a silent refactor side effect —
-    // which is #11756's open decision, not this table's.
+    // ⚠️ `cockroachdb` and `redshift` are no longer two hand-written literals
+    // here and two more in POSTGRES_WIRE_CLIENTS: #11991 named the extension
+    // once (POSTGRES_WIRE_ONLY_CLIENTS) and both tables extend THAT. What must
+    // still never happen is the reverse derivation — spelling this list as
+    // POSTGRES_WIRE_CLIENTS, or the emission set as a union of these tables,
+    // which would grant both databases SQL-emission identity as a refactor side
+    // effect and re-answer a ruling that has already been made.
     expect(Object.keys(table()).sort()).toEqual(
-      ['cockroachdb', 'mysql', 'mysql2', 'pg', 'postgres', 'postgresql', 'redshift'],
+      ['cockroachdb', 'mysql', 'mysql2', 'pg', 'pgnative', 'postgres', 'postgresql', 'redshift'],
     );
+    // The extension set is the only literal, and it holds exactly the two
+    // databases #11756 ruled on — never `mariadb`, which stays out of scope.
+    expect([...((SqlDriver as any).POSTGRES_WIRE_ONLY_CLIENTS as ReadonlySet<string>)].sort())
+      .toEqual(['cockroachdb', 'redshift']);
   });
 
   it('the UTC session pin still fires for MySQL only', () => {

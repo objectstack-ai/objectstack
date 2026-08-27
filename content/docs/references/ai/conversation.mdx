@@ -104,6 +104,42 @@ const result = CodeContentSchema.parse(data);
 | **embedding** | `number[]` | optional | Vector embedding for semantic search |
 | **metadata** | `Record<string, any>` | optional |  |
 
+### Nested Shape: `ConversationMessage.content[number][type='text']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `'text'` | ✅ |  |
+| **text** | `string` | ✅ | Text content |
+| **metadata** | `Record<string, any>` | optional |  |
+
+### Nested Shape: `ConversationMessage.content[number][type='image']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `'image'` | ✅ |  |
+| **imageUrl** | `string` | ✅ | Image URL |
+| **detail** | `Enum<'low' \| 'high' \| 'auto'>` | optional (default: `"auto"`) |  |
+| **metadata** | `Record<string, any>` | optional |  |
+
+### Nested Shape: `ConversationMessage.content[number][type='file']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `'file'` | ✅ |  |
+| **fileUrl** | `string` | ✅ | File attachment URL |
+| **mimeType** | `string` | ✅ | MIME type |
+| **fileName** | `string` | optional |  |
+| **metadata** | `Record<string, any>` | optional |  |
+
+### Nested Shape: `ConversationMessage.content[number][type='code']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `'code'` | ✅ |  |
+| **text** | `string` | ✅ | Code snippet |
+| **language** | `string` | optional (default: `"text"`) |  |
+| **metadata** | `Record<string, any>` | optional |  |
+
 ### Nested Shape: `ConversationMessage.functionCall`
 
 | Property | Type | Required | Description |

@@ -192,11 +192,15 @@ describe('[#11637] §C regression guards — the narrowing is exactly the declar
         expect(construct({ apiPath: '/backend/api/v9' }).getApiBasePath()).toBe('/backend/api/v9');
     });
 
-    it('KEEPS `enableSearch`, which no schema in packages/spec declares', () => {
-        // The reason the seam validates but does NOT consume the parsed output.
-        // `RestApiConfigSchema` is not `.strict()`, so a non-strict `z.object()`
-        // STRIPS this key (measured). Consuming the parse would silently turn
-        // search back ON for a deployment that turned it off.
+    it('KEEPS `enableSearch` — declared since #11983, and the opt-out survives normalization', () => {
+        // Historically the reason the seam validates but does NOT consume the
+        // parsed output: this key had no declared seat, so the non-strict
+        // `z.object()` STRIPPED it (measured), and consuming the parse would
+        // silently have turned search back ON for a deployment that turned it
+        // off. #11983 declared it (`RestApiConfigSchema.enableSearch`, default
+        // `true`), so the parse now preserves it too — this pin remains as the
+        // end-to-end guarantee that the deployment-wide opt-out reaches the
+        // normalized config, whichever way the seam reads it.
         const rest = construct({ version: 'v1', enableSearch: false });
         expect((rest as any).config.api.enableSearch).toBe(false);
     });

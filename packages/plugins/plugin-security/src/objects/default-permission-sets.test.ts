@@ -4,6 +4,8 @@
 
 import { describe, it, expect } from 'vitest';
 import * as PlatformObjects from '@objectstack/platform-objects';
+import { PermissionSetSchema } from '@objectstack/spec/security';
+import { ADMIN_FULL_ACCESS_CAPABILITIES } from '@objectstack/spec';
 import { defaultPermissionSets, BETTER_AUTH_MANAGED_OBJECTS } from './default-permission-sets.js';
 import { MANAGED_DENY_TARGET_SETS } from '../managed-object-write-denies.js';
 
@@ -308,5 +310,56 @@ describe('sys_comment delete is moderation-shaped, not ownership-shaped (#8839)'
       if (!setByName(setName)) continue;
       expect(policiesFor(setName, 'sys_comment'), `${setName} sys_comment policies`).toEqual([]);
     }
+  });
+});
+
+/**
+ * [#11965 / #11663 Choice 6A] platform-admin re-anchor, L1 behaviour-neutrality
+ * pin.
+ *
+ * `admin_full_access`'s capability CONTENT moved to `@objectstack/spec`
+ * (`ADMIN_FULL_ACCESS_CAPABILITIES`) and is IMPORTED here — one list, one copy.
+ * L1 is ruled behaviour-neutral, so the parsed declaration must be deep-equal
+ * to what the previously-inline literal produced. The literal below is the
+ * exact pre-#11965 inline value (comments elided); if this pin fails, the spec
+ * export changed the declared capability set — that is a capability change
+ * riding on a refactor card, and it must not land silently.
+ */
+describe('admin_full_access imports the kernel capability declaration unchanged (#11965)', () => {
+  it('parsed declaration deep-equals the pre-#11965 inline literal', () => {
+    const preMove = PermissionSetSchema.parse({
+      name: 'admin_full_access',
+      label: 'Administrator — Full Access',
+      objects: {
+        '*': {
+          allowRead: true,
+          allowCreate: true,
+          allowEdit: true,
+          allowDelete: true,
+          viewAllRecords: true,
+          modifyAllRecords: true,
+          // [#8681] no `allowExport` — deliberate, see the spec declaration.
+        },
+      },
+      systemPermissions: [
+        'manage_users',
+        'manage_metadata',
+        'manage_platform_settings',
+        'manage_sharing',
+        'setup.access',
+        'setup.write',
+        'studio.access',
+      ],
+    });
+    expect(setByName('admin_full_access')).toEqual(preMove);
+  });
+
+  it('the imported spec constant is the declaration content — no local fork', () => {
+    const admin = setByName('admin_full_access');
+    // Same values, sourced from the one spec-exported copy.
+    expect(admin.objects).toEqual(
+      PermissionSetSchema.parse({ name: 'admin_full_access', ...ADMIN_FULL_ACCESS_CAPABILITIES }).objects,
+    );
+    expect(admin.systemPermissions).toEqual(ADMIN_FULL_ACCESS_CAPABILITIES.systemPermissions);
   });
 });

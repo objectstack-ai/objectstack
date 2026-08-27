@@ -121,6 +121,49 @@ const result = AwarenessEventSchema.parse(data);
 | **state** | `{ type: 'lww-register'; value: any; timestamp: string; replicaId: string; … } \| { type: 'g-counter'; counts: Record<string, integer> } \| { type: 'pn-counter'; positive: Record<string, integer>; negative: Record<string, integer> } \| { type: 'or-set'; elements: object[] } \| … +1 more` | ✅ | Merged CRDT state |
 | **conflicts** | `{ type: string; description: string; resolved: boolean }[]` | optional | Conflicts encountered during merge |
 
+### Nested Shape: `CRDTMergeResult.state[type='lww-register']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `'lww-register'` | ✅ |  |
+| **value** | `any` | ✅ | Current register value |
+| **timestamp** | `string` | ✅ | ISO 8601 datetime of last write |
+| **replicaId** | `string` | ✅ | ID of replica that performed last write |
+| **vectorClock** | `{ clock: Record<string, integer> }` | optional | Optional vector clock for causality tracking |
+
+### Nested Shape: `CRDTMergeResult.state[type='g-counter']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `'g-counter'` | ✅ |  |
+| **counts** | `Record<string, integer>` | ✅ | Map of replica ID to count |
+
+### Nested Shape: `CRDTMergeResult.state[type='pn-counter']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `'pn-counter'` | ✅ |  |
+| **positive** | `Record<string, integer>` | ✅ | Positive increments per replica |
+| **negative** | `Record<string, integer>` | ✅ | Negative increments per replica |
+
+### Nested Shape: `CRDTMergeResult.state[type='or-set']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `'or-set'` | ✅ |  |
+| **elements** | `{ value: any; timestamp: string; replicaId: string; uid: string; … }[]` | ✅ | Set elements with metadata |
+
+### Nested Shape: `CRDTMergeResult.state[type='text']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `'text'` | ✅ |  |
+| **documentId** | `string` | ✅ | Document identifier |
+| **content** | `string` | ✅ | Current text content |
+| **operations** | `{ operationId: string; replicaId: string; position: integer; insert?: string; … }[]` | ✅ | History of operations |
+| **lamportClock** | `integer` | ✅ | Current Lamport clock value |
+| **vectorClock** | `{ clock: Record<string, integer> }` | ✅ | Vector clock for causality |
+
 ### Nested Shape: `CRDTMergeResult.conflicts[number]`
 
 | Property | Type | Required | Description |
@@ -338,6 +381,31 @@ This schema accepts one of the following structures:
 | **isTyping** | `boolean` | optional (default: `false`) | Whether user is currently typing |
 | **lastUpdate** | `string` | ✅ | ISO 8601 datetime of last cursor update |
 | **metadata** | `Record<string, any>` | optional | Additional cursor metadata |
+
+### Nested Shape: `CollaborationSession.operations[number][option 1]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **operationId** | `string` | ✅ | Unique operation identifier |
+| **documentId** | `string` | ✅ | Document identifier |
+| **userId** | `string` | ✅ | User who created the operation |
+| **sessionId** | `string` | ✅ | Session identifier |
+| **components** | `({ type: 'insert'; text: string; attributes?: Record<string, any> } \| { type: 'delete'; count: integer } \| { type: 'retain'; count: integer; attributes?: Record<string, any> })[]` | ✅ | Operation components |
+| **baseVersion** | `integer` | ✅ | Document version this operation is based on |
+| **timestamp** | `string` | ✅ | ISO 8601 datetime when operation was created |
+| **metadata** | `Record<string, any>` | optional | Additional operation metadata |
+
+### Nested Shape: `CollaborationSession.operations[number][option 2]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **operationId** | `string` | ✅ | Unique operation identifier |
+| **replicaId** | `string` | ✅ | Replica identifier |
+| **position** | `integer` | ✅ | Position in document |
+| **insert** | `string` | optional | Text to insert |
+| **delete** | `integer` | optional | Number of characters to delete |
+| **timestamp** | `string` | ✅ | ISO 8601 datetime of operation |
+| **lamportTimestamp** | `integer` | ✅ | Lamport timestamp for ordering |
 
 
 ---
@@ -642,6 +710,29 @@ This schema accepts one of the following structures:
 | **baseVersion** | `integer` | ✅ | Document version this operation is based on |
 | **timestamp** | `string` | ✅ | ISO 8601 datetime when operation was created |
 | **metadata** | `Record<string, any>` | optional | Additional operation metadata |
+
+### Nested Shape: `OTOperation.components[number][type='insert']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `'insert'` | ✅ |  |
+| **text** | `string` | ✅ | Text to insert |
+| **attributes** | `Record<string, any>` | optional | Text formatting attributes (e.g., bold, italic) |
+
+### Nested Shape: `OTOperation.components[number][type='delete']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `'delete'` | ✅ |  |
+| **count** | `integer` | ✅ | Number of characters to delete |
+
+### Nested Shape: `OTOperation.components[number][type='retain']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `'retain'` | ✅ |  |
+| **count** | `integer` | ✅ | Number of characters to retain |
+| **attributes** | `Record<string, any>` | optional | Attribute changes to apply |
 
 
 ---

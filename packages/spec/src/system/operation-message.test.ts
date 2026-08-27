@@ -294,3 +294,127 @@ describe('operation message catalog — the row-level user copy (#7451)', () => 
     }
   });
 });
+
+/**
+ * #12493 — two keys whose EMITTERS convert in follow-up cards: the sharing
+ * middleware's by-id write denial (`record_write_denied`, consumer half
+ * #12260) and plugin-approvals' non-submitter recall refusal
+ * (`approval_recall_not_submitter`, consumer half #11993). Until those land,
+ * this catalog block is the only pin the keys have — same battery the #7451
+ * family keys get.
+ */
+describe('operation message catalog — sharing write denial and approvals recall (#12493)', () => {
+  /**
+   * The vocabulary a business user must never read in these refusals. It is
+   * the #7451 list plus the exact nouns the two measured raw strings leaked:
+   * the wire prefix `FORBIDDEN` and the phrase `insufficient privileges`
+   * (the sharing site also interpolated the object API name and the row id —
+   * covered structurally by the placeholder-free case, since the sentences
+   * take no params at all).
+   */
+  const DEVELOPER_VOCABULARY = [
+    'positions', 'permissionSets', 'permission set', 'capability',
+    '[Security]', 'Access denied', 'operation', 'row-level', 'CHECK',
+    'FORBIDDEN', 'insufficient privileges',
+  ];
+
+  const KEYS = ['record_write_denied', 'approval_recall_not_submitter'] as const;
+
+  it('renders the caller locale, not English', () => {
+    expect(renderOperationMessage({ messageKey: 'record_write_denied' }, { locale: 'zh-CN' }))
+      .toBe('您无权修改或删除这条记录,如需修改请联系该记录的负责人或管理员。');
+    expect(renderOperationMessage({ messageKey: 'record_write_denied' }, { locale: 'en' }))
+      .toBe('You do not have access to change or delete this record. Contact the person who owns it, or your administrator, if you need to make changes.');
+    expect(renderOperationMessage({ messageKey: 'approval_recall_not_submitter' }, { locale: 'zh-CN' }))
+      .toBe('只有提交人可以撤回这条审批请求,如需撤回请联系提交人或管理员。');
+    expect(renderOperationMessage({ messageKey: 'approval_recall_not_submitter' }, { locale: 'en' }))
+      .toBe('Only the person who submitted this approval request can recall it. Contact the submitter, or your administrator, if it needs to be recalled.');
+  });
+
+  it('matches a base language against a regional catalog key (ja → ja-JP)', () => {
+    for (const key of KEYS) {
+      expect(renderOperationMessage({ messageKey: key }, { locale: 'ja' }))
+        .toBe(BUILTIN_OPERATION_MESSAGES['ja-JP'][key]);
+    }
+  });
+
+  it('falls back to the en sentence for a locale the catalog does not carry', () => {
+    // `de-DE` has no catalog entry and no base-language sibling.
+    for (const key of KEYS) {
+      expect(renderOperationMessage({ messageKey: key }, { locale: 'de-DE' }))
+        .toBe(BUILTIN_OPERATION_MESSAGES.en[key]);
+    }
+  });
+
+  it('names no object, no record id and no wire vocabulary — in EVERY locale', () => {
+    const locales = Object.keys(BUILTIN_OPERATION_MESSAGES);
+    // Guard the guard: a catalog that lost its locales would make the loop
+    // below vacuously true, which is exactly the shape of an assertion that
+    // cannot fail.
+    expect(locales.length).toBeGreaterThanOrEqual(4);
+    for (const locale of locales) {
+      for (const key of KEYS) {
+        const rendered = renderOperationMessage({ messageKey: key }, { locale });
+        // Non-empty and locale-specific, so the absence assertions below cannot
+        // be satisfied by an empty string.
+        expect(rendered).toBe(BUILTIN_OPERATION_MESSAGES[locale][key]);
+        expect(rendered.length).toBeGreaterThan(10);
+        for (const word of DEVELOPER_VOCABULARY) {
+          expect(rendered.toLowerCase(), `${locale}.${key} must not say "${word}"`)
+            .not.toContain(word.toLowerCase());
+        }
+      }
+    }
+  });
+
+  it('says something DIFFERENT from every sibling situation — new keys earn their keep', () => {
+    // `record_write_denied` exists because `record_access_denied` would be
+    // FALSE on the sharing gate's rows (the read path already admitted them —
+    // the user is looking at the record), and `approval_recall_not_submitter`
+    // exists because naming who CAN act is the refusal's entire content.
+    // Identical copy would mean the new key is a synonym, which the header
+    // bars.
+    const SIBLINGS = ['permission_denied', 'record_access_denied', 'record_change_not_allowed'] as const;
+    for (const locale of Object.keys(BUILTIN_OPERATION_MESSAGES)) {
+      for (const key of KEYS) {
+        for (const sibling of SIBLINGS) {
+          expect(BUILTIN_OPERATION_MESSAGES[locale][key], `${locale}.${key} vs ${sibling}`)
+            .not.toBe(BUILTIN_OPERATION_MESSAGES[locale][sibling]);
+        }
+      }
+      expect(BUILTIN_OPERATION_MESSAGES[locale].record_write_denied)
+        .not.toBe(BUILTIN_OPERATION_MESSAGES[locale].approval_recall_not_submitter);
+    }
+  });
+
+  it('ships no unfilled placeholder in any locale — these sentences take no params', () => {
+    // Asserts on the CATALOG ENTRY, not on the rendering, and that is the
+    // difference between a guard and a decoration. Rendering a removed key
+    // yields the bare messageKey — which has no braces either, so a
+    // rendering-based version of this case would stay green on a catalog that
+    // lost the key entirely.
+    for (const [locale, catalog] of Object.entries(BUILTIN_OPERATION_MESSAGES)) {
+      for (const key of KEYS) {
+        expect(catalog[key], `${locale} defines ${key}`).toBeTypeOf('string');
+        expect(catalog[key], `${locale}.${key} placeholder-free`).not.toMatch(/[{}]/);
+      }
+    }
+  });
+
+  it('a deployment translation override wins, under the shared `errors.` address', () => {
+    for (const key of KEYS) {
+      expect(operationMessageTranslationKey(key)).toBe(`errors.${key}`);
+      const translate = (k: string) => (k === `errors.${key}` ? '部署自定义文案。' : k);
+      expect(renderOperationMessage({ messageKey: key }, { locale: 'zh-CN', translate }))
+        .toBe('部署自定义文案。');
+    }
+  });
+
+  it('a throwing i18n service does not turn a 403 into a 500', () => {
+    const translate = () => { throw new Error('service down'); };
+    for (const key of KEYS) {
+      expect(renderOperationMessage({ messageKey: key }, { locale: 'zh-CN', translate }))
+        .toBe(BUILTIN_OPERATION_MESSAGES['zh-CN'][key]);
+    }
+  });
+});
