@@ -56,3 +56,5 @@ Inverts the pin `hook-input-ownkeys-agreement.test.ts` carried OPEN since
 #12578 (the disagreement, deliberately left standing) into a REFUSAL pin
 (the write throws, nothing persists) — the same case, turned around in place,
 not a second assertion stacked beside the first.
+
+<!-- adr-0087: not-required (no-migration-prescription) A JS-runtime Proxy trap now throws instead of silently accepting a write; no spec or Zod field, object definition, or stored representation is added, removed, or renamed. A symbol key was never a declarable metadata surface for objectstack migrate meta to know about, so there is nothing here for a migration to rewrite -- the Migration section above is authoring guidance for hook bodies, not a metadata-ledger prescription, and carries no arrow or FROM/TO pair. -->
