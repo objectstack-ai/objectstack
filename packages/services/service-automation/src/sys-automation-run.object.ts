@@ -286,11 +286,27 @@ export const SysAutomationRun = ObjectSchema.create({
     }),
 
     // ── Run summary (#4354) ────────────────────────────────────────────────
-    // COLUMNS, not just a blob: `selected_count > 0 AND acted_count = 0` over N
-    // consecutive runs is a near-perfect broken-sweep detector, and an operator
-    // can only alert on what is filterable. Buried inside `summary_json` these
-    // would be readable but not queryable — the difference between a dashboard
-    // and an alarm.
+    // COLUMNS, not just a blob: `selected_count > 0 AND acted_count = 0` is the
+    // first FILTER of the broken-sweep detector, and an operator can only alert
+    // on what is filterable. Buried inside `summary_json` these would be
+    // readable but not queryable — the difference between a dashboard and an
+    // alarm.
+    //
+    // [#12685] A filter, not the detector — and the description used to say
+    // otherwise. Measured A/B through the real engine (pinned in
+    // `run-summary.test.ts`, and downstream in hotcrm's
+    // `flow-run-summary.test.ts`): a healthy idempotent sweep — re-select the
+    // same records, gate each one on "already handled" — and a dead gate BOTH
+    // report `selected > 0, acted 0, unmeasured 0`. "Over N consecutive runs"
+    // does not separate them: the healthy steady state is persistent for as
+    // long as the outstanding work stands, so it trips on EVERY run;
+    // consecutiveness filters flapping, which is a different failure. The
+    // discrimination lives in the per-node fold (`summary_json.nodes[]` /
+    // `gates[]`) and is spelled out in `acted_count`'s description, which is
+    // what an operator wiring an alert actually reads. Worth the words because
+    // the failure mode is silent: a detector that fires during normal operation
+    // gets muted, and a muted broken-sweep detector is the same silence #4347
+    // produced — except it now looks monitored.
     selected_count: Field.number({
       label: 'Records Selected',
       required: false,
@@ -301,21 +317,21 @@ export const SysAutomationRun = ObjectSchema.create({
     acted_count: Field.number({
       label: 'Records Acted On',
       required: false,
-      description: 'Records this run created / updated / deleted, plus effects dispatched (notifications delivered). `selected_count > 0 AND acted_count = 0` over consecutive runs is the broken-sweep signal.',
+      description: 'Records this run created / updated / deleted, plus effects dispatched (notifications delivered). `selected_count > 0 AND acted_count = 0 AND unmeasured_count = 0` is the FIRST FILTER for a broken sweep, not a verdict: a healthy idempotent sweep that re-selects the same records and gates each one on "already handled" satisfies it on every run while that work stands, so "over N consecutive runs" does not separate the two. `summary_json` does: a healthy skip is accounted for by a read this run performed — the lookup the gate depends on shows `runs > 0` and `selected > 0` in `nodes[]` — while a dead gate skips just as often with nothing behind it (`runs: 0`, or `selected: 0`).',
       group: 'Outcome',
     }),
 
     skipped_count: Field.number({
       label: 'Gate Skips',
       required: false,
-      description: 'Node executions a closed gate prevented — one per loop iteration whose conditional edge evaluated false. Many skips with no writes names the gate as the suspect.',
+      description: 'Node executions a closed gate prevented — one per loop iteration whose conditional edge evaluated false. Many skips with no writes names the gate as the suspect; `summary_json` is what convicts or clears it — `gates[]` names which edge closed and how often, and `nodes[]` says whether the lookup that gate depends on ran and found anything (see `acted_count`).',
       group: 'Outcome',
     }),
 
     unmeasured_count: Field.number({
       label: 'Uncountable Effects',
       required: false,
-      description: 'Executions that reached something the platform cannot count (a `connector_action`, a mutating `http` call whose response was lost). The qualifier `acted_count` needs to be trusted: the broken-sweep alert is `selected_count > 0 AND acted_count = 0 AND unmeasured_count = 0`, because a run with uncountable effects has an INCOMPLETE acted count, not a zero one. Null on rows written before this was tracked.',
+      description: 'Executions that reached something the platform cannot count (a `connector_action`, a mutating `http` call whose response was lost). The qualifier `acted_count` needs to be trusted: the broken-sweep filter is `selected_count > 0 AND acted_count = 0 AND unmeasured_count = 0` (a filter, not a verdict — see `acted_count`), because a run with uncountable effects has an INCOMPLETE acted count, not a zero one. Null on rows written before this was tracked.',
       group: 'Outcome',
     }),
 
