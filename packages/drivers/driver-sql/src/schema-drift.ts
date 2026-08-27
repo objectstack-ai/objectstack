@@ -668,8 +668,29 @@ export function diffManagedTable(args: {
   fields: Record<string, FieldDef>;
   columns: PhysicalColumn[];
   dialect: SqlDialectName;
+  /**
+   * Which columns an index KEYS ON (#11374), keyed by field name — the exact
+   * map {@link indexedKeyColumns} builds. Consulted ONLY by the varchar-length
+   * branch below, through {@link varcharColumnChars}, to answer the same
+   * question `createColumn` asks before it sizes a text-family column.
+   * Omitted (the default), a field reads as unkeyed — the same default the
+   * emitter itself takes when nobody supplies one.
+   */
+  keyedColumns?: ReadonlyMap<string, { unique: boolean }>;
+  /**
+   * The emitter's OWN read-only mirror — `SqlDriver.varcharColumnChars`,
+   * bound by the caller — asked "what `varchar(n)` would `createColumn`
+   * actually build for this field, or `null` if it would not build a varchar
+   * at all?" (#12732). `SqlDriver.detectTableDrift` supplies it on every real
+   * call; a caller that doesn't (this module cannot reach `sql-driver.ts` —
+   * see {@link UNBOUNDED_TEXT_FIELD_TYPES}'s note on the cycle) keeps this
+   * branch's pre-#12732 behaviour, unconditional on `declaredMaxLength`
+   * alone — an intentionally additive default so no existing direct caller of
+   * this exported function changes shape under it.
+   */
+  varcharColumnChars?: (field: FieldDef, keyed?: { unique: boolean }) => number | null;
 }): ManagedDriftEntry[] {
-  const { table, fields, columns, dialect } = args;
+  const { table, fields, columns, dialect, keyedColumns, varcharColumnChars } = args;
   const out: ManagedDriftEntry[] = [];
 
   const columnsByName = new Map(columns.map((c) => [c.name, c]));
@@ -899,10 +920,39 @@ export function diffManagedTable(args: {
       typeof field.maxLength === 'number' && Number.isInteger(field.maxLength) && field.maxLength > 0
         ? field.maxLength
         : undefined;
+    // ── #12732: would `createColumn` even make this a VARCHAR? ───────
+    //
+    // `declaredMaxLength` alone answers "did the author write a bound?" — it
+    // says nothing about whether the emitter honours that bound as a varchar
+    // width at all, and it disagreed with `createColumn` in two measured
+    // directions: an UNKEYED bounded text-family field (`text` / `richtext` /
+    // `signature` / `markdown` / …) is TEXT regardless of its declared bound
+    // (`keyableTextLength` returns `null` unkeyed), and a base string-family
+    // field (`email` / `url` / `password` / …) bounded PAST the varchar
+    // ceiling is TEXT too (`declaredVarcharLength` returns `null` above
+    // `MAX_VARCHAR_CHARS`). Both were nonetheless diffed as `varchar(N)`
+    // against the physical column — a `narrow_varchar` at `destructive` for
+    // the first (refusing the boot of an already-serving deployment over a
+    // divergence the write seam already enforces), a `widen_varchar` at
+    // `safe` for the second (planning `ALTER … varchar(100000)`, DDL MySQL
+    // refuses outright).
+    //
+    // Asking `varcharColumnChars` — the emitter's own read-only mirror,
+    // rather than a second copy of its switch — answers both at once: `null`
+    // means "the emitter would not make this a varchar", which is the honest
+    // expectation in both directions, so the branch below simply does not
+    // fire. See the parameter doc above for why an OMITTED mirror leaves this
+    // `true` rather than `false` — additive, not a silent behaviour change
+    // for a caller that hasn't been threaded the new input yet.
+    const emitterWouldVarchar =
+      varcharColumnChars === undefined || declaredMaxLength === undefined
+        ? true
+        : varcharColumnChars(field, keyedColumns?.get(fieldName)) !== null;
     if (
       enforcesVarcharLength(dialect) &&
       !declaresJsonColumn &&
       declaredMaxLength !== undefined &&
+      emitterWouldVarchar &&
       isCharacterColumn(col.type) &&
       typeof col.maxLength === 'number' &&
       declaredMaxLength !== col.maxLength

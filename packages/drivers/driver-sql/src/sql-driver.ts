@@ -10339,7 +10339,27 @@ export class SqlDriver implements IDataDriver {
       // literal (#4560).
       defaultValue: c.defaultValue,
     }));
-    const out = diffManagedTable({ table: tableName, fields, columns: physical, dialect: this.dialectName });
+    // #12732: `diffManagedTable`'s varchar-length branch asks `createColumn`'s
+    // own read-only mirror (`varcharColumnChars`) whether it would even build
+    // a varchar for a given field — and for the text family that answer needs
+    // keyedness (#11374), the same input `initObjects` / `ensureShardTable`
+    // already resolve via `indexedKeyColumns` before any DDL. Resolved here
+    // too so the DIFFER'S expectation, not only the DDL, agrees with keyed
+    // columns.
+    const keyedColumns = indexedKeyColumns({
+      table: tableName,
+      fields,
+      tenantField: this.resolveTenantField(tableName),
+      declaredIndexes,
+    });
+    const out = diffManagedTable({
+      table: tableName,
+      fields,
+      columns: physical,
+      dialect: this.dialectName,
+      keyedColumns,
+      varcharColumnChars: (field, keyed) => this.varcharColumnChars(field, keyed),
+    });
     out.push(...(await this.detectTableIndexDrift(tableName, fields, declaredIndexes, new Set(cols.map((c) => c.name)))));
     return out;
   }
