@@ -111,6 +111,55 @@ export const SEMCONV = {
     registryLookupDurationMs: 'registry_lookup_duration_ms',
     /** Counter, labels: `source` (`r2`|`http`|`local`), `result` (`hit`|`miss`|`error`). */
     registrySourceFetchesTotal: 'registry_source_fetches_total',
+
+    // ── Cluster licensing — emitted by `@objectstack/cli`'s `os serve` at boot ──
+    //
+    // ⚠️ Every name in this group is a reading of what the operator DECLARED
+    // and what the licence gate SAID about that declaration. **None of them is
+    // a membership reading**, and none may be renamed into one. At the moment
+    // `os serve` consults the multi-node gate, the process has no cluster
+    // membership view at all: `nodeId` is generated randomly per process, there
+    // is no join/leave registry, and the only count in existence is
+    // `OS_CLUSTER_REPLICAS` — an operator-declared desired count that is
+    // identical in every replica. A series called `cluster_nodes` or
+    // `cluster_active_nodes` fed from here would be a false statement dressed
+    // as telemetry, so the honesty lives in the NAMES: `declared` is what the
+    // operator wrote, `admitted` is what the gate says fits the licence.
+    //
+    // The cap these describe is ADVISORY and is not enforced: no replica can
+    // act on the verdict alone to refuse itself, so a `capped` verdict means
+    // every declared replica still joins. Read a `capped` series as "this
+    // deployment is configured beyond what it paid for", never as "replicas
+    // were turned away".
+    //
+    // ⚠️ Absence is meaningful and is NOT an instrumentation gap: the gate is
+    // consulted only when `OS_CLUSTER_DRIVER` names a remote driver, so a
+    // single-node deployment emits nothing here at all. An emission also needs
+    // a configured metrics backend (`OS_OBS_EXPORTER`); with none, the boot log
+    // line remains the only reading.
+    /**
+     * Gauge, labels: `verdict` (`admitted`|`capped`|`refused`). The replica
+     * count the operator DECLARED via `OS_CLUSTER_REPLICAS` — not a count of
+     * anything observed. Absent when nothing was declared; deliberately never
+     * emitted as `0`, which would read as a declaration of zero replicas.
+     */
+    clusterDeclaredNodes: 'cluster_declared_nodes',
+    /**
+     * Gauge, labels: `verdict` (`admitted`|`capped`|`refused`). How many of the
+     * declared nodes the licence gate admits. Absent when the gate imposes no
+     * count cap at all — emitting a number there would invent a limit that was
+     * never expressed.
+     */
+    clusterAdmittedNodes: 'cluster_admitted_nodes',
+    /**
+     * Counter, labels: `verdict` (`admitted`|`capped`|`refused`). One
+     * increment per PROCESS BOOT that consulted the gate — a boot-event count,
+     * never a node count. It exists because the two gauges above are written
+     * once per boot and a push-based exporter lets a one-shot gauge age out of
+     * the backend; `increase(cluster_node_cap_verdicts_total{verdict="capped"}[1h]) > 0`
+     * stays alertable after the gauges have gone stale.
+     */
+    clusterNodeCapVerdictsTotal: 'cluster_node_cap_verdicts_total',
 } as const;
 
 /**

@@ -36,7 +36,7 @@ metadata:
 | `triage` | 以**分诊座位**身份运行(只扫/分类/路由,永不认领) | — |
 | `<domain>`(如 `spec`、`skills`) | 以该 `domain:*` 车道的**执行座位**身份运行 | — |
 | `epic:#<n>` | 以父单 #n 的 **epic PM** 身份运行(见「Epic 子树车道」) | — |
-| `director` | 以**项目总监席**身份运行(人工召唤;三职与章程见「升级与决策」与 `references/lanes/director.md`) | — |
+| `director` | 以**项目总监席**身份运行(人工召唤;四职与章程见「升级与决策」与 `references/lanes/director.md`) | — |
 | `label:<name>` | backlog 过滤标签;`label:all` = 全部 open 未认领 | `pm:queue` |
 | `repo:<owner/name>` | 扫哪个仓的 backlog(单 issue 的落地仓看它自己的 `repo:*` 标签) | `objectstack-ai/objectstack` |
 | `batch:<n>` | 同时在飞的 dev 上限 | `3` |
@@ -819,7 +819,8 @@ main 红了约一小时,逐 PR 连环红到 fix-forward 才止)。本段只适�
 每轮向维护者打**中文**轮次报告(chat 通道,语言政策显式例外):issue → 判决 → PR 链接 → 备
 注的表
 ,加升级项、代裁清单(分诊)、awaiting a human merge 项、governed 合并审计清单(实跑
-`node scripts/pm/check-governed-merges.mjs --since <上轮>`,⛔ 不凭记忆汇总)、**`UNRECOGNISED` 行**(对本轮
+`node scripts/pm/check-governed-merges.mjs --since <上轮>`,⛔ 不凭记忆汇总;此为车道早警,权威
+合并窗口与认定/回滚处置归总监席,`references/lanes/director.md`)、**`UNRECOGNISED` 行**(对本轮
 门禁日志 grep `UNRECOGNISED`,逐行照录,`NOT APPLICABLE` 行也在内 —— 缺行读作「无未识别项」,实
 则可能是没人 grep)。健康指标四个(总 open 数刻意不在其
 中 —— 债密区发现快于关闭是循环在工作):**可派发库存**(dispatchable inventory;open `pm:queue` 未
@@ -942,14 +943,13 @@ grep <branch>`),复升级时逐条**跑**一遍,零命中/变形的就地改写�
 者在本会话
 ~30 分钟内有过人类输入才可发,每问必带推荐项,被 Skip 或长挂即转卡通道 ⛔ 不重弹 ——
 卡先于弹窗存在,弹窗怎么死盘面都诚实。
-**项目总监席(Project Director):人工召唤,三职 = `needs:contract-review` 复审链、决裁勤务、维护
-者动作台账**(维护者 2026-08-27 裁定,原话:「项目总监 由人工定期指挥，负责处理 contract-review 类
-别的和需要决裁的。」「需要维护者处理的事情，也归项目总监。」—— 决裁半边自此由 skills 席移交本席,
+**项目总监席:人工召唤,四职 = `needs:contract-review` 复审链、决裁勤务、维护者动作台账、
+governed 合并审计**(维护者 2026-08-27 裁定,原话:「项目总监 由人工定期指挥，负责处理
+contract-review 类别的和需要决裁的。」「需要维护者处理的事情，也归项目总监。」—— 决裁半边自此由 skills 席移交本席,
 改写 2026-08-26「skills 和决裁的问题,还是由skills席统一人工处理,我会要求你处理某个仓的skills和
 决裁。」的归属半句,skills 面与其车道照旧归 skills 席)。入口 = `/pm-dispatch director`;⛔ 无
-Routine 无 cron,召唤间隔载体停放是设计安全态;档位硬门 = `CONTRACT_REVIEW_TIER`(保险丝机读),
-不达档只做免档整理并停放三职;不占 `domain:*`,按职责标签跨车道跨仓,永不认领 backlog、
-永不写码,机械接手经派发 dev(与分诊席同款 carve-out);章程见 `references/lanes/director.md`。
+Routine 无 cron;档位硬门 = `CONTRACT_REVIEW_TIER`(保险丝机读),不达档只做免档整理并停放
+四职;不占 `domain:*`,永不认领 backlog、永不写码;章程见 `references/lanes/director.md`。
 
 ## 护栏(Guardrails,有约束力)
 
