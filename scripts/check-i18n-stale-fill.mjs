@@ -1,7 +1,28 @@
 #!/usr/bin/env node
 // check-i18n-stale-fill — the `pnpm check:i18n-stale-fill` gate.
 //
-// ONE verdict: a translated leaf that is a COPY OF A PREVIOUS SOURCE REVISION.
+// TWO verdicts, kept distinct — both about the same population, the committed
+// translation bundles and the provenance companions beside them:
+//
+//   1. STALE FILL           a translated leaf that is a COPY OF A PREVIOUS
+//                           SOURCE REVISION, detected from cross-locale
+//                           agreement alone. The original verdict; everything
+//                           down to "## The ledger" below is about it.
+//   2. UNSERVED PROVENANCE  a bundle set that COMMITS a
+//                           `<locale>.source-hashes.generated.ts` companion and
+//                           never consults it at serving time, so it records the
+//                           drift and goes on serving the superseded draft. See
+//                           the section at the definition of
+//                           `UNSERVED_PROVENANCE` for why recording without
+//                           serving is worse than not recording at all.
+//
+// Verdict 2 exists because verdict 1 is blind by construction in exactly the
+// case provenance was introduced to cover: a leaf revised in ONE locale has no
+// second witness, so condition 1 can never fire on it. Measured on the tree the
+// day the recording rollout landed: provenance RECORDED in 9 of 9 bundle sets
+// and READ at serving time in 1. Every gate green, and es-ES serving a
+// superseded English draft. Nothing in either half's file surface said so —
+// which is why the check is mechanical now rather than a sentence in a header.
 //
 // ## The hole (#11671)
 //
@@ -101,8 +122,10 @@
 // baseline entry carries a reason, so the ledger is a worklist rather than a
 // silencer.
 //
-//   node scripts/check-i18n-stale-fill.mjs             # gate
-//   node scripts/check-i18n-stale-fill.mjs --update    # re-baseline from the tree
+//   node scripts/check-i18n-stale-fill.mjs             # gate (both verdicts)
+//   node scripts/check-i18n-stale-fill.mjs --update    # re-baseline VERDICT 1 from the tree
+//                                                     # (verdict 2 has no ratchet — see
+//                                                     #  UNSERVED_PROVENANCE)
 //   node scripts/check-i18n-stale-fill.mjs --self-test # prove every rule can go red
 //
 // Needs NO workspace build: it reads the committed bundles as text, so unlike
@@ -272,6 +295,113 @@ export function ratchet(found, baselined) {
 const NEW_REASON = 'unclassified — triage this: real drift (re-translate the leaf) or a benign coincidence';
 
 // ---------------------------------------------------------------------------
+// Verdict 2 — UNSERVED PROVENANCE
+//
+// ## Recording without serving is worse than not recording at all
+//
+// A committed companion is read by a human as evidence that the mechanism is
+// ON for that set. Maintainer ruling #12069 Option A landed provenance as two
+// halves — `os i18n extract --source-hashes` RECORDS, and `withSourceFallback`
+// SUBSTITUTES at serving time — and the rollout of the first half to every set
+// left the second where it was. The tree then said `--source-hashes` in nine
+// extract configs, 27 committed companions and a changeset announcing the
+// rollout, while eight of the nine sets assembled their `TranslationBundle`
+// from the raw generated modules and never looked at the companion sitting
+// beside them. The natural reading of all of that — "a stale generated leaf now
+// serves the current source everywhere" — was false, and no gate disagreed.
+//
+// ## Why this verdict is a SOURCE SCAN and what that costs
+//
+// The behavioural alternatives were measured and are vacuous today. Every
+// record is written only for a leaf that IS a byte copy of the CURRENT source
+// (see the extract configs' docstrings), so the tree arrives 0-stale by
+// construction: comparing served bytes against source bytes is green whether or
+// not the seam is wired. Object identity is no better — `withSourceFallback`
+// returns its input by reference when nothing is stale, deliberately, so a
+// wired bundle and an unwired one are the same object. A gate that can only be
+// observed green is indistinguishable from a gate that matches nothing (#4690),
+// so the structural question — "does the serving code consult this table?" — is
+// the one that can actually be answered on a clean tree.
+//
+// The price of a source scan is that it sees only the spellings it knows, so
+// they are published here rather than left inside the implementation. A
+// companion counts as SERVED when some non-generated, non-test `.ts` file under
+// the same package's `src/` passes the companion's own exported identifier as
+// an ARGUMENT to a `withSourceFallback(...)` call:
+//
+//     import { esESGeneratedSourceHashes } from './es-ES.source-hashes.generated.js';
+//     'es-ES': withSourceFallback({ objects: esESObjects }, enSource, undefined, esESGeneratedSourceHashes),
+//
+// Naming the identifier is not enough and neither is calling the seam: the
+// measured near-miss is a set that wires two locales and forgets the third, and
+// an import-only or call-only test reads that as fully served. Both halves are
+// required PER COMPANION, which is per locale.
+// ---------------------------------------------------------------------------
+
+/** The seam that turns a provenance record into a served string. */
+const PROVENANCE_SEAM = 'withSourceFallback';
+
+/**
+ * Bundle sets that commit a provenance companion and deliberately do NOT
+ * consult it, keyed by the extract config's own `--out=` directory.
+ *
+ * Hand-maintained and shrink-only, with no `--update` that can grow it: an
+ * entry here is a decision someone made and wrote down, not a measurement to
+ * be re-taken. The gate fails BOTH ways — a set that starts serving its
+ * companion must delete its entry in the same PR, so the ledger cannot outlive
+ * the hole it documents.
+ */
+const UNSERVED_PROVENANCE = {
+  'packages/plugins/plugin-webhooks/src/translations':
+    '@objectstack/plugin-webhooks does not depend on @objectstack/platform-objects, where ' +
+    '`withSourceFallback` lives — its dependencies are @objectstack/core, ' +
+    '@objectstack/service-messaging and @objectstack/spec. Wiring it needs either a new ' +
+    'package edge or the mechanism relocated to a package all nine sets reach, and the ' +
+    'nine share no runtime dependency but @objectstack/spec. That is an architecture ' +
+    'call, not a mechanical follow-up, so it is open rather than forced. Recorded ' +
+    '2026-08-27, when the other eight sets were wired: this set records provenance for 20 ' +
+    'leaves across three locales and serves the superseded draft when a source moves under ' +
+    'one of them. Delete this entry in the PR that wires it.',
+};
+
+/** The identifier a provenance companion exports, read from the file itself. */
+export function provenanceExportName(source) {
+  const m = source.match(/export const ([A-Za-z_$][A-Za-z0-9_$]*)/);
+  return m ? m[1] : undefined;
+}
+
+/**
+ * The argument text of every `withSourceFallback(...)` call in a file, matched
+ * with a balanced-paren scan rather than a regex so a nested call or a
+ * parenthesised argument cannot truncate the match and read as "not served".
+ */
+export function provenanceCallArguments(sourceText) {
+  const out = [];
+  const re = new RegExp(`\\b${PROVENANCE_SEAM}\\s*\\(`, 'g');
+  let m;
+  while ((m = re.exec(sourceText)) !== null) {
+    let depth = 1;
+    let i = re.lastIndex;
+    while (i < sourceText.length && depth > 0) {
+      const c = sourceText[i];
+      if (c === '(') depth += 1;
+      else if (c === ')') depth -= 1;
+      i += 1;
+    }
+    out.push(sourceText.slice(re.lastIndex, i - 1));
+    re.lastIndex = i;
+  }
+  return out;
+}
+
+/** Is `ident` passed as an argument to a seam call in this file? */
+export function servedByCallSite(sourceText, ident) {
+  if (!ident) return false;
+  const named = new RegExp(`(^|[^A-Za-z0-9_$])${ident}([^A-Za-z0-9_$]|$)`);
+  return provenanceCallArguments(sourceText).some((args) => named.test(args));
+}
+
+// ---------------------------------------------------------------------------
 // Population
 // ---------------------------------------------------------------------------
 
@@ -301,6 +431,65 @@ function discoverBundleSets() {
     }
   }
   return sets;
+}
+
+/** The package root owning an out-dir: the nearest ancestor with a manifest. */
+function packageRootOf(outDir) {
+  let dir = outDir;
+  while (dir && dir !== '.' && dir !== PACKAGES_DIR) {
+    if (existsSync(at(join(dir, 'package.json')))) return dir;
+    dir = dirname(dir);
+  }
+  return undefined;
+}
+
+/**
+ * The `.ts` files that could serve a bundle: everything under the package's
+ * `src/` that is neither generated nor a test. Generated files are excluded
+ * because a companion importing itself would otherwise read as served, and
+ * tests because a call in a test proves the FUNCTION works, never that the
+ * shipped bundle goes through it — which is the whole distinction this verdict
+ * draws.
+ */
+function servingSourcesOf(pkgRoot) {
+  const src = at(join(pkgRoot, 'src'));
+  if (!existsSync(src)) return [];
+  return readdirSync(src, { withFileTypes: true, recursive: true })
+    .filter((e) => e.isFile() && e.name.endsWith('.ts'))
+    .filter((e) => !e.name.endsWith('.generated.ts') && !/\.(test|spec)\.ts$/.test(e.name))
+    .map((e) => join(e.parentPath ?? e.path, e.name));
+}
+
+/**
+ * Every committed provenance companion, and whether the package that owns it
+ * consults it at serving time. Discovered through the extract configs' own
+ * documented `--out=`, the same seam as `discoverBundleSets` — a set that lands
+ * tomorrow is judged tomorrow, with no manifest to forget to update.
+ */
+function discoverProvenanceServing() {
+  const rows = [];
+  for (const config of findExtractConfigs(at(PACKAGES_DIR), PACKAGES_DIR)) {
+    const flags = flagsFromDocstring(config.abs);
+    const out = flags.find((f) => f.startsWith('--out='))?.slice('--out='.length);
+    if (!out || !existsSync(at(out))) continue;
+    const companions = readdirSync(at(out)).filter((f) => f.endsWith(PROVENANCE_KIND)).sort();
+    if (!companions.length) continue;
+    const pkgRoot = packageRootOf(out);
+    if (!pkgRoot) {
+      console.error(`\ncheck-i18n-stale-fill: no package.json above ${out} — cannot judge its provenance serving.\n`);
+      process.exit(1);
+    }
+    const sources = servingSourcesOf(pkgRoot).map((f) => readFileSync(f, 'utf8'));
+    for (const file of companions) {
+      const ident = provenanceExportName(readFileSync(at(`${out}/${file}`), 'utf8'));
+      if (!ident) {
+        console.error(`\ncheck-i18n-stale-fill: ${out}/${file} declares no \`export const\` — cannot judge whether it is served.\n`);
+        process.exit(1);
+      }
+      rows.push({ out, file, ident, served: sources.some((text) => servedByCallSite(text, ident)) });
+    }
+  }
+  return rows;
 }
 
 function selfTest() {
@@ -423,6 +612,82 @@ function selfTest() {
     isTranslationBundleKind('objects.generated.ts') && isTranslationBundleKind('metadata-forms.generated.ts'),
   );
 
+  // ---- Verdict 2 — UNSERVED PROVENANCE -----------------------------------
+  //
+  // The three shapes below are the ones actually measured on this repo: the
+  // wired barrel, the barrel that assembles from raw modules (eight sets on the
+  // day provenance was rolled out), and the barrel that wires two locales and
+  // forgets the third. A rule that cannot separate the last two would have read
+  // a half-wired set as served.
+  const WIRED = [
+    "import { withSourceFallback } from '@objectstack/platform-objects/apps';",
+    "import { esESObjects } from './es-ES.objects.generated.js';",
+    "import { esESGeneratedSourceHashes } from './es-ES.source-hashes.generated.js';",
+    'const enSource: TranslationData = { objects: enObjects };',
+    "export const XTranslations: TranslationBundle = {",
+    '  en: enSource,',
+    "  'es-ES': withSourceFallback({ objects: esESObjects }, enSource, undefined, esESGeneratedSourceHashes),",
+    '};',
+  ].join('\n');
+  const RAW = [
+    "import { esESObjects } from './es-ES.objects.generated.js';",
+    "export const XTranslations: TranslationBundle = {",
+    '  en: { objects: enObjects },',
+    "  'es-ES': { objects: esESObjects },",
+    '};',
+  ].join('\n');
+
+  expect(
+    'a barrel that passes the companion to withSourceFallback IS served',
+    servedByCallSite(WIRED, 'esESGeneratedSourceHashes') === true,
+  );
+  expect(
+    "the eight sets' measured shape — raw generated modules, companion never named — is NOT served",
+    servedByCallSite(RAW, 'esESGeneratedSourceHashes') === false,
+  );
+  expect(
+    'IMPORTING the companion without passing it to the seam is NOT served (the near-miss)',
+    servedByCallSite(
+      WIRED.replace(', esESGeneratedSourceHashes)', ')'),
+      'esESGeneratedSourceHashes',
+    ) === false,
+  );
+  expect(
+    'a set that wires zh-CN and forgets es-ES is served for zh-CN and NOT for es-ES',
+    servedByCallSite(WIRED.replace(/esES/g, 'zhCN'), 'zhCNGeneratedSourceHashes') === true &&
+      servedByCallSite(WIRED.replace(/esES/g, 'zhCN'), 'esESGeneratedSourceHashes') === false,
+  );
+  expect(
+    'a nested call in an earlier argument does not truncate the scan (balanced parens)',
+    servedByCallSite(
+      "withSourceFallback(merge(a, b), enSource, undefined, esESGeneratedSourceHashes);",
+      'esESGeneratedSourceHashes',
+    ) === true,
+  );
+  expect(
+    'an identifier that merely CONTAINS the name is not a match',
+    servedByCallSite(
+      'withSourceFallback(x, y, undefined, esESGeneratedSourceHashesLegacy);',
+      'esESGeneratedSourceHashes',
+    ) === false,
+  );
+  expect(
+    'provenanceCallArguments finds every call, not just the first',
+    provenanceCallArguments(
+      "a: withSourceFallback(p, q, undefined, zhCNGen),\nb: withSourceFallback(r, s, undefined, esESGen),",
+    ).length === 2,
+  );
+  expect(
+    'provenanceExportName reads the companion’s own exported identifier',
+    provenanceExportName(
+      'export const esESGeneratedSourceHashes: Readonly<Record<string, string>> = {\n  "a.b": "0011223344556677",\n};',
+    ) === 'esESGeneratedSourceHashes',
+  );
+  expect(
+    'provenanceExportName returns undefined for a file that exports nothing (the gate REFUSES rather than passing)',
+    provenanceExportName('// just a comment') === undefined,
+  );
+
   console.log(failures === 0 ? '\ncheck-i18n-stale-fill: self-test OK\n' : `\ncheck-i18n-stale-fill: self-test FAILED (${failures})\n`);
   process.exit(failures === 0 ? 0 : 1);
 }
@@ -437,7 +702,91 @@ function selfTest() {
 // `check:entry-guard` is there to catch.
 // ---------------------------------------------------------------------------
 
+/**
+ * Verdict 2. Runs FIRST and exits on failure: an unserved companion means the
+ * bundle this gate is about to judge is not the bundle the product serves, so
+ * reporting stale fills over it would be measuring the wrong tree.
+ */
+function judgeProvenanceServing() {
+  const rows = discoverProvenanceServing();
+
+  // #4690 / #10907, the same refusal the stale-fill population makes: zero is a
+  // broken scan, not a repo that records no provenance.
+  if (rows.length === 0) {
+    console.error(
+      `\ncheck-i18n-stale-fill: REFUSING TO JUDGE — no \`<locale>.${PROVENANCE_KIND}\` companion was found under ${PACKAGES_DIR}/.\n\n` +
+        `  This gate reads ${PACKAGES_DIR}/ from its own location (${ROOT}), so an empty\n` +
+        `  population is a broken scan, not a tree without provenance. Nothing was checked.\n`,
+    );
+    process.exit(1);
+  }
+
+  const unservedByOut = new Map();
+  for (const row of rows) {
+    if (row.served) continue;
+    if (!unservedByOut.has(row.out)) unservedByOut.set(row.out, []);
+    unservedByOut.get(row.out).push(row);
+  }
+
+  const declared = new Set(Object.keys(UNSERVED_PROVENANCE));
+  const undeclared = [...unservedByOut.keys()].filter((out) => !declared.has(out)).sort();
+  const repaired = [...declared].filter((out) => !unservedByOut.has(out)).sort();
+
+  console.log(
+    `check-i18n-stale-fill: ${rows.length} provenance companion(s), ` +
+      `${rows.filter((r) => r.served).length} served at serving time, ` +
+      `${unservedByOut.size} bundle set(s) unserved (${declared.size} declared).`,
+  );
+
+  if (undeclared.length) {
+    console.error(
+      `\ncheck-i18n-stale-fill: UNSERVED PROVENANCE — ${undeclared.length} bundle set(s) record provenance and never read it\n\n` +
+        `A committed \`<locale>.${PROVENANCE_KIND}\` says a leaf is still a byte copy of a\n` +
+        `RECORDED source revision. Recording alone changes nothing anyone sees: when the source\n` +
+        `moves, this set keeps serving the superseded draft, \`check:i18n\` stays OK (the key sets\n` +
+        `still match), \`check:i18n-coverage\` counts the leaf translated, and this gate's own\n` +
+        `stale-fill verdict cannot testify unless a SECOND locale happens to hold the same bytes.\n`,
+    );
+    for (const out of undeclared) {
+      console.error(`  • ${out}`);
+      for (const row of unservedByOut.get(out)) {
+        console.error(`      ${row.file} — \`${row.ident}\` is passed to no ${PROVENANCE_SEAM}() call in this package`);
+      }
+    }
+    console.error(
+      `\nFix at the bundle set's serving barrel — pass the companion as the FOURTH argument,\n` +
+        `the shape \`@objectstack/platform-objects\`'s own \`metadata-translations/index.ts\` uses:\n\n` +
+        `    import { withSourceFallback } from '@objectstack/platform-objects/apps';\n` +
+        `    import { esESGeneratedSourceHashes } from './es-ES.source-hashes.generated.js';\n\n` +
+        `    const enSource: TranslationData = { objects: enObjects };\n` +
+        `    export const XTranslations: TranslationBundle = {\n` +
+        `      en: enSource,\n` +
+        `      'es-ES': withSourceFallback({ objects: esESObjects }, enSource, undefined, esESGeneratedSourceHashes),\n` +
+        `    };\n\n` +
+        `The third argument stays \`undefined\` for a fully generated set: it judges the\n` +
+        `HAND-AUTHORED sections. ⛔ Deleting the companion to quiet this is not a fix — it\n` +
+        `discards the only evidence that tells a stale fill from a real translation. If the\n` +
+        `set genuinely cannot reach the seam, record it in UNSERVED_PROVENANCE with the reason.\n`,
+    );
+    process.exit(1);
+  }
+
+  if (repaired.length) {
+    console.error(
+      `\ncheck-i18n-stale-fill: ${repaired.length} UNSERVED_PROVENANCE entry/entries now serve their companion (improvement!)\n`,
+    );
+    for (const out of repaired) console.error(`  • ${out}`);
+    console.error(
+      `\nDelete each entry above from UNSERVED_PROVENANCE in ${'scripts/check-i18n-stale-fill.mjs'} —\n` +
+        `a ledger entry that outlives its hole reads as a hole that is still open.\n`,
+    );
+    process.exit(1);
+  }
+}
+
 function main() {
+judgeProvenanceServing();
+
 const sets = discoverBundleSets();
 
 // #4690 / #10907: zero is a broken scan, not a repo with nothing to translate.
