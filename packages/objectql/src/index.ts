@@ -90,6 +90,10 @@ export type { CompanionFieldMeta, CompanionObjectMeta } from './search-companion
 export { ObjectQL, ObjectRepository, ScopedContext } from './engine.js';
 export type { HookHandler, HookEntry, OperationContext, EngineMiddleware, HeldFileResolver } from './engine.js';
 export type { AdmittedValueShapeViolationTally } from './engine.js';
+// The declarative datasource definition the engine indexes, and the element
+// type of `ObjectQL.listDatasourceDefs()`. Exported so a consumer sweeping for
+// `sys_secret` references can name the shape it reads instead of re-declaring it.
+export type { DatasourceDef } from './engine.js';
 export { SummaryRecomputeError } from './summary-errors.js';
 export type { SummaryRecomputeFailure } from './summary-errors.js';
 // [#5126] Thrown by `update` when `options.strictReadonlyWrites` is set and the
