@@ -408,7 +408,23 @@ const KNOWN_UNALIASED_TEST_IMPORTS = {
     '@objectstack/service-automation', '@objectstack/spec', '@objectstack/trigger-record-change',
   ],
   '@objectstack/formula': ['@objectstack/spec'],
-  '@objectstack/hono': ['@objectstack/types'],
+  // #12555 — RE-MEASURED, not widened. `@objectstack/plugin-hono-server` was always
+  // an unaliased artifact import of this package; the detector could not see it. Its
+  // import in `src/index.ts` sits directly under `export type EnvironmentDriverRegistry
+  // = any;`, and the unbounded clause capture above used to start at that `export`,
+  // run through the `;` and swallow the whole import statement — leaving a clause that
+  // BEGINS with `type`, which `isTypeOnlyClause` then discarded as type-only. A real
+  // runtime import was therefore filtered out as erased-at-compile-time. `--list` on
+  // the corrected detector adds exactly this one pair repo-wide (303 -> 304); the
+  // sibling gate corroborates it, `check-type-source-resolution.mjs` having carried
+  // `@objectstack/plugin-hono-server` in ITS entry for this package all along because
+  // `extractTypeImports` never applies the type-only filter.
+  // ⚠️ This is a LEDGER CORRECTION, not a remediation: hono's unit verdicts are still a
+  // function of build state for this pair. The fix the gate prescribes — an anchored
+  // alias in `packages/adapters/hono/vitest.config.ts` — is filed separately, because
+  // it makes that suite execute plugin-hono-server's SOURCE and so needs its own
+  // verification rather than a ride-along in a detector PR.
+  '@objectstack/hono': ['@objectstack/plugin-hono-server', '@objectstack/types'],
   '@objectstack/http-conformance': [
     '@objectstack/core', '@objectstack/driver-sqlite-wasm', '@objectstack/objectql',
     '@objectstack/plugin-hono-server', '@objectstack/runtime',
@@ -667,8 +683,47 @@ function walkFiles(dir, acc = []) {
 
 // ── import extraction ───────────────────────────────────────────────────────
 
+/**
+ * The clause capture is bounded to ONE statement by `[^;'"]`, and that class is
+ * load-bearing in both of its halves (#12555).
+ *
+ * The first alternative is tried first at every position, so at a bare
+ * side-effect `import 'x';` it used to win with an unbounded `[\s\S]*?` that ran
+ * past the end of that statement and terminated at the NEXT import's `from '…'`.
+ * The side-effect import vanished inside the clause capture and only the later
+ * specifier was reported. Ordering the same two statements the other way read
+ * correctly, so the verdict depended on import ORDER rather than on what the
+ * file loads:
+ *
+ *   import '@objectstack/spec/kernel';                  <-- swallowed
+ *   import { X } from '@objectstack/metadata-core';     <-- only this reported
+ *
+ * Downstream that is not a cosmetic miss: `moduleLoadSites` never adds the
+ * swallowed specifier to `moduleScope`, and `clockedWindowFindings` suppresses
+ * a finding only `if (moduleScope.has(site.spec))` — so the gate reported a
+ * CLOCKED window against a file that had already applied the exact remedy this
+ * gate prescribes, three lines above the import that triggered the misread. An
+ * author who trusts the message adds a duplicate and stays red; one who does not
+ * concludes the gate is noise.
+ *
+ * ⚠️ Excluding `;` ALONE does not fix it, measured — which is why this class is
+ * the one #12320 landed in `check-driver-conformance` (`IMPORT_STATEMENT`) and
+ * not the narrower `;`-only class. Under ASI the same two statements carry no
+ * terminator at all, and a `;`-excluding clause still spans them:
+ *
+ *   import 'pkg/kernel'                 // no `;` anywhere for a class to stop on
+ *   import { X } from 'other'
+ *
+ * Excluding the QUOTES is what closes that: every intervening specifier is
+ * quoted, so a match that starts at one `import` keyword cannot reach the `from`
+ * of a later statement whether or not the author writes semicolons. A legal
+ * import clause contains neither character, and the class still matches newlines,
+ * so multi-line clauses keep working. The one shape it narrows away is ES2022
+ * arbitrary module namespace names (`import { "a-b" as ab } from 'm'`) — the
+ * same narrowing #12320 accepted, and a scan of this tree finds no instance.
+ */
 const IMPORT_PATTERNS =
-  /(?:^|[\s;})])(?:import|export)\s+([\s\S]*?)\s*from\s*['"]([^'"]+)['"]|(?:^|[\s;{(=,])import\s*\(\s*['"]([^'"]+)['"]\s*\)|(?:^|[\s;{(=,])require\s*\(\s*['"]([^'"]+)['"]\s*\)|(?:^|[\s;}])import\s+['"]([^'"]+)['"]/g;
+  /(?:^|[\s;})])(?:import|export)\s+([^;'"]*?)\s*from\s*['"]([^'"]+)['"]|(?:^|[\s;{(=,])import\s*\(\s*['"]([^'"]+)['"]\s*\)|(?:^|[\s;{(=,])require\s*\(\s*['"]([^'"]+)['"]\s*\)|(?:^|[\s;}])import\s+['"]([^'"]+)['"]/g;
 
 /**
  * Every module specifier the file loads AT RUNTIME, with type-only imports
@@ -2692,6 +2747,69 @@ function selfTest() {
     expect(
       clockedIn('packages/clocked-typed-signature/src/thing.test.ts:6').length === 1,
       'a helper whose multi-line signature ends `}): Promise< { … } > {` was read as not a function body — a SILENT exemption',
+    );
+
+    // ── the import clause is bounded to ONE statement (#12555) ────────────
+    //
+    // All three rows of the card's table, pinned as a set comparison so the two
+    // orderings are compared to EACH OTHER and not to a hand-copied expectation:
+    // the whole defect was that the verdict depended on import ORDER rather than
+    // on what the file loads, and a detector that silently stops matching
+    // reports a spotless repo.
+    const specsOf = (code) => [...new Set(extractRuntimeImports(code))].sort();
+    const rowA = specsOf("import 'pkg/kernel';\nconst x = 1;\n");
+    const rowB = specsOf("import 'pkg/kernel';\nimport { X } from 'other';\n");
+    const rowC = specsOf("import { X } from 'other';\nimport 'pkg/kernel';\n");
+    expect(rowA.join() === 'pkg/kernel', 'row A: a lone side-effect import was not seen at all');
+    expect(
+      rowB.join() === 'other,pkg/kernel',
+      'row B: the side-effect import was swallowed by the NEXT statement\'s clause — the #12555 defect itself',
+    );
+    expect(
+      rowB.join() === rowC.join(),
+      'rows B/C disagree: the same two statements read differently when reordered, so the verdict is a function of import ORDER',
+    );
+
+    // Why the clause class excludes the QUOTES and not only `;`. Under ASI there
+    // is no terminator for a `;`-only class to stop on, and the unbounded span
+    // reappears — measured, and the reason this matches #12320's `[^;'"]` rather
+    // than the narrower class the card floated.
+    expect(
+      specsOf("import 'pkg/kernel'\nimport { X } from 'other'\n").join() === 'other,pkg/kernel',
+      'a semicolon-less (ASI) pair still spans two statements — a `;`-only clause class would pass row B and fail here',
+    );
+
+    // The swallow also ran BACKWARDS, and that direction is worse: the clause
+    // capture started at a preceding `export type … = any;`, ate the terminator
+    // and the whole following import, and left a clause BEGINNING with `type` —
+    // which `isTypeOnlyClause` then discarded as erased-at-compile-time. A real
+    // runtime import disappeared through the type-only filter. This is the shape
+    // that hid `@objectstack/plugin-hono-server` in `@objectstack/hono`.
+    expect(
+      specsOf("export type R = any;\nimport { a } from '@fx/real';\n").join() === '@fx/real',
+      'a runtime import under an `export type … = any;` was filtered out as TYPE-ONLY — the backward swallow (#12555)',
+    );
+    // …and the narrowing did not cost the type-only filter its real job.
+    expect(
+      specsOf("import type { A } from '@fx/types';\n").length === 0,
+      'a genuine type-only import is now counted as a runtime load — the bound over-corrected',
+    );
+    // Legal multi-line clauses must keep matching: `[^;\'"]` still matches
+    // newlines, and this is the shape a naive `[^\\s;]` bound would break.
+    expect(
+      specsOf('import {\n  a,\n  b,\n} from \'@fx/multi\';\n').join() === '@fx/multi',
+      'a multi-line import clause stopped matching — the statement bound broke line-spanning clauses',
+    );
+
+    // The end-to-end consequence, at the rule that actually misreported: the
+    // side-effect import must land in `moduleScope`, because that set is the ONLY
+    // thing that suppresses a clocked-window finding.
+    const paid = moduleLoadSites(
+      "import 'pkg/kernel';\nimport { X } from 'other';\nit('t', async () => { await import('pkg/kernel'); });\n",
+    );
+    expect(
+      paid.moduleScope.has('pkg/kernel'),
+      'the module-top side-effect import did not reach `moduleScope` — the gate would report the very line it prescribes',
     );
 
     // The population the green line prints has to BE a number. `check()` returning
