@@ -14636,17 +14636,25 @@ export class SqlDriver implements IDataDriver {
         // `schema-drift.ts` already treats `varchar(field.maxLength)` as the
         // expected physical shape of a bounded field (its `widen_varchar` /
         // `narrow_varchar` ops say so in as many words); this is the emitter
-        // finally agreeing with the differ. `Field.string` has always taken
-        // knex's `varchar(255)`, so a bounded text field is now LESS arbitrary
-        // than its string sibling, not more.
+        // finally agreeing with the differ. There is no `Field.string`
+        // builder: `Field` has 37 keys and none of them is `string`,
+        // `FieldType.options` (49 entries) omits it too, and
+        // `FieldSchema.safeParse({ type: 'string', … })` fails at `[type]`
+        // (#12593). What IS true of knex: its bare `table.string(name)` call
+        // (no length argument) is `varchar(255)`. This branch never calls it
+        // bare — `table.string(name, keyable)`, where `keyable` is the
+        // field's own declared `maxLength`, up to `MAX_KEYABLE_VARCHAR_CHARS`
+        // (768 chars, wider than knex's 255-char default).
         //
         // Applied on every dialect rather than under `isMysql`, deliberately:
         // the alternative is one declaration with two enforcement answers, so
         // the same app would refuse an over-length write on MySQL and accept it
         // on Postgres. Dialect-divergent enforcement of one declared bound is
         // the defect class this repo's conformance matrices exist to close, and
-        // a `varchar(n)` is exactly what the SQLite and Postgres columns would
-        // have been had the field been declared `Field.string`.
+        // a `varchar(n)` is exactly what the SQLite and Postgres columns land
+        // as for a field declared `Field.text({ maxLength: n })` on a keyed
+        // column — the nearest authorable spelling to this shape; there is no
+        // `Field.string` (#12593).
         //
         // ⚠️ Scope, both halves load-bearing:
         //   - KEYED only. A non-indexed `Field.text({ maxLength: 65000 })` stays
