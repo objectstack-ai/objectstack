@@ -285,30 +285,6 @@ Plugins must use semantic versioning:
 'latest'
 ```
 
-### 10. Plugin Configuration Validation
-
-Use Zod schemas to validate plugin configuration:
-
-```typescript
-import { z } from 'zod';
-
-const MyPluginConfigSchema = z.object({
-  apiKey: z.string(),
-  timeout: z.number().min(1000).max(30000),
-  retries: z.number().int().min(0).default(3)
-});
-
-const plugin: PluginMetadata = {
-  name: 'my-plugin',
-  version: '1.0.0',
-  configSchema: MyPluginConfigSchema,
-  
-  async init(ctx) {
-    // Config is validated before init is called
-  }
-};
-```
-
 ## Migration from LiteKernel
 
 To migrate from `LiteKernel` to `ObjectKernel`:
@@ -367,7 +343,6 @@ Both kernels adhere to the same `Plugin` interface, but `ObjectKernel` supports 
 
 Extended `Plugin` interface with:
 - `version: string` - Semantic version
-- `configSchema?: z.ZodSchema` - Configuration schema
 - `signature?: string` - Plugin signature for verification
 - `healthCheck?(): Promise<PluginHealthStatus>` - Health check function
 - `startupTimeout?: number` - Startup timeout in milliseconds
