@@ -15,6 +15,14 @@
  * one does, so each neighbouring shape — a transport wired, a federated
  * sign-in wired, an unwalled posture, an undeclared owner, and the dev/harness
  * boot that verifies its own seeded owner — is pinned SILENT.
+ *
+ * [#12751] (maintainer ruling 2026-08-28, 「运营方创建即视为已验证」): the
+ * operator-provisioning stamp is itself a verification path, so the firing
+ * now follows the OWNER ACCOUNT STATE the caller probes — a fresh walled
+ * boot with nothing wired is SILENT (its owner's first-account creation
+ * arrives verified), while an owner account already existing unverified, a
+ * populated store with no owner account, and an unanswerable probe keep
+ * warning. The `#12751` describe below is that two-sided contract's pin.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -23,14 +31,23 @@ import {
   WALLED_OWNER_NO_VERIFICATION_PATH,
   resolveWalledOwnerVerificationPathWarning,
   warnIfWalledOwnerCannotVerify,
+  type WalledOwnerAccountState,
 } from './walled-owner-verification-path';
 import type { PluginContext } from '@objectstack/core';
 
 const OWNER = 'operator@corp.example';
 const DEV_SEED_ADMIN = 'admin@objectos.ai';
 
-/** No transport, no federated sign-in — the shape the ruling is about. */
-const NOTHING_WIRED = { hasEmailTransport: false, hasFederatedSignIn: false } as const;
+/**
+ * No transport, no federated sign-in, with the caller-resolved owner account
+ * state. [#12751] The default state here is `owner-unverified` — the shape
+ * that stays a dead end after the operator-provisioning stamp — so every
+ * pre-existing "the dead-end shape warns" pin below keeps measuring a real
+ * dead end rather than the fresh boot the stamp now covers.
+ */
+const nothingWired = (ownerAccountState: WalledOwnerAccountState = 'owner-unverified') =>
+  ({ hasEmailTransport: false, hasFederatedSignIn: false, ownerAccountState }) as const;
+const NOTHING_WIRED = nothingWired();
 
 const ENV_KEYS = [
   'OS_TENANCY_POSTURE',
@@ -122,10 +139,12 @@ describe('#11640 — the dead-end shape warns, by name and with the remedy', () 
 describe('#11640 — controls: every neighbouring shape stays SILENT', () => {
   it('an email transport is wired ⇒ the verification link can be delivered ⇒ no warning', () => {
     walledWithDeclaredOwner();
+    // Even against the worst account state: the transport IS the remedy.
     expect(
       resolveWalledOwnerVerificationPathWarning({
         hasEmailTransport: true,
         hasFederatedSignIn: false,
+        ownerAccountState: 'owner-unverified',
       }),
     ).toBeNull();
   });
@@ -136,6 +155,7 @@ describe('#11640 — controls: every neighbouring shape stays SILENT', () => {
       resolveWalledOwnerVerificationPathWarning({
         hasEmailTransport: false,
         hasFederatedSignIn: true,
+        ownerAccountState: 'owner-unverified',
       }),
     ).toBeNull();
   });
@@ -156,30 +176,82 @@ describe('#11640 — controls: every neighbouring shape stays SILENT', () => {
   it('a dev/harness boot that seeds THIS owner verifies it at startup ⇒ no warning', () => {
     // The dev-admin seed provisions the declared owner and stamps it
     // `email_verified` (#11343), which is a verification path even with no
-    // mailbox anywhere — the verify harness boots exactly this shape.
+    // mailbox anywhere — the verify harness boots exactly this shape. The
+    // seed acts on an empty store, and the harness boots that cannot probe
+    // one hand in 'unknown' — both stay silent.
     process.env.NODE_ENV = 'development';
     walledWithDeclaredOwner('isolated', DEV_SEED_ADMIN);
-    expect(resolveWalledOwnerVerificationPathWarning(NOTHING_WIRED)).toBeNull();
+    expect(resolveWalledOwnerVerificationPathWarning(nothingWired('no-human-users'))).toBeNull();
+    expect(resolveWalledOwnerVerificationPathWarning(nothingWired('unknown'))).toBeNull();
 
     // …and it follows the seed's own address knob, not a hard-coded default.
     process.env.OS_SEED_ADMIN_EMAIL = 'seeded-owner@corp.example';
     process.env.OS_PLATFORM_OWNER_EMAIL = 'seeded-owner@corp.example';
-    expect(resolveWalledOwnerVerificationPathWarning(NOTHING_WIRED)).toBeNull();
+    expect(resolveWalledOwnerVerificationPathWarning(nothingWired('no-human-users'))).toBeNull();
   });
 
   it('…but a dev boot whose declared owner is NOT the seeded one is a real dead end', () => {
     process.env.NODE_ENV = 'development';
     walledWithDeclaredOwner('isolated', OWNER); // seed provisions admin@objectos.ai
-    expect(resolveWalledOwnerVerificationPathWarning(NOTHING_WIRED)).toContain(
+    const msg = resolveWalledOwnerVerificationPathWarning(nothingWired('no-human-users'));
+    expect(msg).toContain(WALLED_OWNER_NO_VERIFICATION_PATH);
+    // [#12751] …and the message says WHY the first-account stamp cannot help:
+    // the armed seed will spend the bootstrap carve-out on its own address.
+    expect(msg).toContain(DEV_SEED_ADMIN);
+  });
+
+  it('[#12751] …and the seed cannot rescue a store it will never touch — a populated dev boot still warns', () => {
+    // The seed acts only on an EMPTY store. An owner account that already
+    // exists unverified is past its reach, so even the address-matched dev
+    // shape is a real dead end there.
+    process.env.NODE_ENV = 'development';
+    walledWithDeclaredOwner('isolated', DEV_SEED_ADMIN);
+    expect(resolveWalledOwnerVerificationPathWarning(nothingWired('owner-unverified'))).toContain(
       WALLED_OWNER_NO_VERIFICATION_PATH,
     );
   });
+});
 
-  it('…and a dev boot with the seed switched OFF gets no free pass either', () => {
-    process.env.NODE_ENV = 'development';
-    process.env.OS_SEED_ADMIN = '0';
-    walledWithDeclaredOwner('isolated', DEV_SEED_ADMIN);
-    expect(resolveWalledOwnerVerificationPathWarning(NOTHING_WIRED)).toContain(
+// ---------------------------------------------------------------------------
+// [#12751] 「运营方创建即视为已验证」 (maintainer, 2026-08-28): the operator
+// provisioning stamp is itself a verification path, so the warning's firing
+// now follows the OWNER ACCOUNT STATE — quiet where the stamp (or a finished
+// verification) covers the deployment, loud where the store is past the
+// stamp's reach.
+// ---------------------------------------------------------------------------
+
+describe('#12751 — the warning follows the owner account state', () => {
+  it('THE CASE THIS CARD CLOSES: a fresh production walled boot with nothing wired stays SILENT — the operator first-account creation arrives verified', () => {
+    walledWithDeclaredOwner();
+    // NODE_ENV is production-shaped here (the beforeEach cleared it), so the
+    // dev seed is NOT armed — pre-#12751 this exact shape warned on every
+    // fresh walled EE deployment following the shipped .env.example.
+    expect(resolveWalledOwnerVerificationPathWarning(nothingWired('no-human-users'))).toBeNull();
+  });
+
+  it('an owner account that exists VERIFIED needs nothing — silent (also on every later boot of a settled deployment)', () => {
+    walledWithDeclaredOwner();
+    expect(resolveWalledOwnerVerificationPathWarning(nothingWired('owner-verified'))).toBeNull();
+  });
+
+  it('an owner account that exists UNVERIFIED is the dead end — warns, and names the situation', () => {
+    walledWithDeclaredOwner();
+    const msg = resolveWalledOwnerVerificationPathWarning(nothingWired('owner-unverified'));
+    expect(msg).toContain(WALLED_OWNER_NO_VERIFICATION_PATH);
+    expect(msg).toContain('ALREADY EXISTS');
+    expect(msg).toContain('walled_owner_not_verified');
+  });
+
+  it('a populated store with NO owner account warns — the bootstrap window is spent and an invitee arrives unverified', () => {
+    walledWithDeclaredOwner();
+    const msg = resolveWalledOwnerVerificationPathWarning(nothingWired('owner-absent'));
+    expect(msg).toContain(WALLED_OWNER_NO_VERIFICATION_PATH);
+    expect(msg).toContain('UNVERIFIED');
+  });
+
+  it('an unanswerable probe warns — noisy over silent about a real dead end (the pre-#12751 posture)', () => {
+    walledWithDeclaredOwner();
+    expect(resolveWalledOwnerVerificationPathWarning(nothingWired('unknown'))).toContain(
       WALLED_OWNER_NO_VERIFICATION_PATH,
     );
   });
@@ -202,7 +274,10 @@ describe('#11640 — the emitter logs once, on the channel `serve` replays', () 
     walledWithDeclaredOwner();
     const logger = { warn: vi.fn(), error: vi.fn(), info: vi.fn() };
     expect(
-      warnIfWalledOwnerCannotVerify({ hasEmailTransport: true, hasFederatedSignIn: false }, logger),
+      warnIfWalledOwnerCannotVerify(
+        { hasEmailTransport: true, hasFederatedSignIn: false, ownerAccountState: 'owner-unverified' },
+        logger,
+      ),
     ).toBeNull();
     expect(logger.warn).not.toHaveBeenCalled();
   });

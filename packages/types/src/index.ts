@@ -1,6 +1,10 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 export * from './degraded-boot.js';
+// [#11343/#12751] The one verified-email predicate the walled owner-elevation
+// gate (plugin-security) and the owner-verification boot diagnostic
+// (plugin-auth) both read — see the module doc for why it must be one.
+export * from './email-verified.js';
 export * from './env.js';
 export * from './error-leak.js';
 // Seek-based pagination for batch walks — the offset alternative that neither

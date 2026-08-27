@@ -20,6 +20,7 @@ import {
   AUDIENCE_CONFIG_ERROR,
   type ResolvedAudience,
 } from './audience-posture.js';
+import { shouldStampOwnerVerifiedAtCreation } from './walled-owner-operator-stamp.js';
 import type { IDataEngine } from '@objectstack/core';
 // [#10348] The ONE id-shaped platform-admin predicate (ADR-0068 D2).
 // `auth-manager` used to re-derive that standing itself, in two spellings
@@ -3510,6 +3511,20 @@ export class AuthManager {
   private static readonly SELF_REG_GRANT_STAGE_TTL_MS = 10 * 60 * 1000;
 
   /**
+   * [#12751] Owner-verified stamps staged by the admission gate for the
+   * composed `user.create.before` hook — same shape and lifetime discipline
+   * as {@link pendingSelfRegistrationGrants} (keyed by lowercased email;
+   * better-auth lowercases the address on `createUser`, and an in-flight
+   * duplicate cannot create twice). One entry only ever exists for the
+   * declared platform owner's address on a walled deployment; TTL pruning
+   * keeps an admission whose creation never completed from leaking into an
+   * unrelated later creation of the same address.
+   */
+  private pendingOwnerVerifiedStamps = new Map<string, { stagedAtMs: number }>();
+
+  private static readonly OWNER_STAMP_STAGE_TTL_MS = 10 * 60 * 1000;
+
+  /**
    * Page size of the bootstrap population probe ({@link isBootstrapCreation}).
    * Matches the bound the dev-admin seed reads with, so the two ask the same
    * question of the same window.
@@ -3613,6 +3628,23 @@ export class AuthManager {
           });
         }
         return { error: verdict.code, errorDescription: verdict.message };
+      }
+      // [#12751] Walled deployments: an ADMITTED creation of the declared
+      // platform owner through an operator provisioning path (operator class,
+      // or the bootstrap carve-out) is stamped email-verified at creation —
+      // maintainer ruling 2026-08-28, 「运营方创建即视为已验证」. The decision
+      // (and the per-path argument) lives in `walled-owner-operator-stamp.ts`;
+      // this seam only STAGES it, because the admission gate is the one place
+      // that holds the vendor's own `source.method` signal AND the bootstrap
+      // probe. Consumed once by the composed `user.create.before` hook, so the
+      // row is BORN verified; an email UPDATE can never traverse that seam,
+      // which is what keeps a later change-to-owner-address from inheriting
+      // the stamp.
+      if (
+        email &&
+        shouldStampOwnerVerifiedAtCreation({ email, creationClass, isBootstrap })
+      ) {
+        this.stageOwnerVerifiedStamp(email);
       }
       if (verdict.grantPermissionSet) {
         const setName = audience.selfRegistrationPermissionSet;
@@ -3815,6 +3847,32 @@ export class AuthManager {
       return Array.isArray(raw) ? raw : Array.isArray(raw?.records) ? raw.records : [];
     } catch {
       return [];
+    }
+  }
+
+  /** [#12751] Stage the owner-verified stamp for the address being created. */
+  private stageOwnerVerifiedStamp(email: string): void {
+    this.prunePendingOwnerVerifiedStamps();
+    this.pendingOwnerVerifiedStamps.set(email.trim().toLowerCase(), { stagedAtMs: Date.now() });
+  }
+
+  /**
+   * [#12751] Consume the staged stamp for this address — one shot: the entry
+   * is deleted on read, so exactly one creation can be born verified per
+   * admission, and nothing survives for any later write to inherit.
+   */
+  private takeOwnerVerifiedStamp(email: string): boolean {
+    this.prunePendingOwnerVerifiedStamps();
+    const key = email.trim().toLowerCase();
+    if (!this.pendingOwnerVerifiedStamps.has(key)) return false;
+    this.pendingOwnerVerifiedStamps.delete(key);
+    return true;
+  }
+
+  private prunePendingOwnerVerifiedStamps(): void {
+    const cutoff = Date.now() - AuthManager.OWNER_STAMP_STAGE_TTL_MS;
+    for (const [key, value] of this.pendingOwnerVerifiedStamps) {
+      if (value.stagedAtMs < cutoff) this.pendingOwnerVerifiedStamps.delete(key);
     }
   }
 
@@ -5625,6 +5683,35 @@ export class AuthManager {
           await membershipReconciler(user);
         };
 
+    // [#12751] Walled owner-verified stamp, the CONSUMING half: the admission
+    // gate staged the decision (see `validateAudienceAdmission` and
+    // `walled-owner-operator-stamp.ts`); this before-hook lands it, so the
+    // declared owner's operator-provisioned row is BORN `emailVerified: true`
+    // — the same at-creation shape as a trusted-SSO insert, and the creation
+    // write then replays `bootstrapPlatformAdmin` (`shouldReplayBootstrapFor`,
+    // `create` arm), which elevates it with no further verification step.
+    // `user.create.before` is a seam only a CREATION traverses, so a later
+    // email UPDATE to the owner address structurally cannot inherit the
+    // stamp. Host hook chains FIRST and keeps its result shape, exactly as
+    // `sessionBefore` above does; a host `false` (refuse the creation) is
+    // honoured before the stamp is even consumed.
+    const hostUserBefore = (host as any)?.user?.create?.before;
+    const userBefore = async (user: any, ctx: any) => {
+      let draft = user;
+      if (hostUserBefore) {
+        const hostResult = await hostUserBefore(user, ctx);
+        if (hostResult === false) return false;
+        if (hostResult && typeof hostResult === 'object' && 'data' in hostResult) {
+          draft = { ...draft, ...(hostResult as any).data };
+        }
+      }
+      const email = typeof draft?.email === 'string' ? draft.email : '';
+      if (email && this.takeOwnerVerifiedStamp(email)) {
+        return { data: { ...draft, emailVerified: true } };
+      }
+      return draft === user ? undefined : { data: draft };
+    };
+
     return {
       ...(host ?? {}),
       account: {
@@ -5638,6 +5725,7 @@ export class AuthManager {
         ...((host as any)?.user ?? {}),
         create: {
           ...((host as any)?.user?.create ?? {}),
+          before: userBefore,
           after: userAfter,
         },
       },

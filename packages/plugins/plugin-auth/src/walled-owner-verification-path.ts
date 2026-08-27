@@ -63,26 +63,41 @@
  * boot-phase `info` is dropped; a boot-phase `warn` reaches the operator's
  * terminal.
  *
- * ## Scope — deliberately half the problem
+ * ## [#12751] The operator-provisioning stamp changed which shapes dead-end
  *
- * This covers the no-verification-path route only. Whether the *declared
- * address itself* is already spoken for is a runtime state a boot check
- * cannot see, and the ruling leaves it out on purpose; it stays an ungraded
- * finding on the card's thread.
+ * Maintainer ruling 2026-08-28 (cloud#1677, 「运营方创建即视为已验证」): the
+ * declared owner's account, created through an OPERATOR provisioning path on
+ * a walled deployment — the bootstrap first account, admin create-user, SCIM
+ * — is stamped `email_verified` AT CREATION (`walled-owner-operator-stamp.ts`).
+ * So "no transport and no federated sign-in" is no longer, by itself, a dead
+ * end: a FRESH deployment's owner arrives verified through the operator's own
+ * first-account creation. What still dead-ends is an owner account that
+ * already exists UNVERIFIED (created outside the operator path — before this
+ * ruling, or through an invitation-admitted self-registration), or a
+ * populated store whose bootstrap window is spent with no owner account in
+ * it. Telling those apart requires the one runtime fact the original ruling
+ * deliberately left out — whether the declared address is already spoken for
+ * — so the caller now probes it ({@link probeWalledOwnerAccountState}) and
+ * this predicate reads the result. An unanswerable probe warns (the
+ * pre-#12751 behaviour for every shape): a diagnostic that cannot see may be
+ * noisy, never silent about a real dead end.
  *
  * ⚠️ **For whoever rewrites this surface** (the #11663 re-anchor legs L2
  * #11970 / L4 #11974, both `pm:blocked` as of 2026-08-25): the decision lives
  * entirely in this module and the call site is one `kernel:ready` hook in
- * `AuthPlugin.start()`. Move the call; the predicate and its message travel
- * with the file.
+ * `AuthPlugin.start()`. Move the call; the predicate, the probe and the
+ * message travel with the file.
  */
 
 import {
   PLATFORM_OWNER_EMAIL_ENV,
+  isEmailVerifiedUserRow,
   resolvePlatformOwnerEmail,
   resolveTenancyPosture,
 } from '@objectstack/types';
 import { postureEnforcesWall } from '@objectstack/spec/security';
+import { SystemObjectName } from '@objectstack/spec/system';
+import { isHumanUserRow } from './audience-posture.js';
 
 /**
  * The stable NAME of this warning — the "named" half of the ruled "loud, named
@@ -127,10 +142,32 @@ export function isDevAdminSeedArmed(): boolean {
 }
 
 /**
- * What this deployment has wired that could ever verify an address. Both
- * members are resolved by the caller from the live runtime — the services and
- * provider config as they stand at `kernel:ready` — because neither is an
- * env-only fact.
+ * [#12751] What the user store says about the declared owner's account at
+ * boot — the runtime fact that separates "the operator provisioning path will
+ * verify the owner at creation" from a genuine dead end.
+ */
+export type WalledOwnerAccountState =
+  /** Zero human users: the bootstrap first account is still ahead, and an owner-email bootstrap creation is stamped verified. */
+  | 'no-human-users'
+  /** An account holding the declared address exists and IS verified — nothing left to verify. */
+  | 'owner-verified'
+  /** An account holding the declared address exists and is NOT verified — created outside the operator path; the dead end. */
+  | 'owner-unverified'
+  /** Human users exist but none holds the declared address — the bootstrap window is spent. */
+  | 'owner-absent'
+  /** The store could not be consulted (no engine, probe failure) — treated as the dead end, loudly. */
+  | 'unknown';
+
+/** The bounded read this module's probe performs — every data engine satisfies it. */
+export interface WalledOwnerProbeEngine {
+  find(object: string, query: Record<string, unknown>, options?: unknown): Promise<unknown>;
+}
+
+/**
+ * What this deployment has wired that could ever verify an address. All
+ * members are resolved by the caller from the live runtime — the services,
+ * provider config and user store as they stand at `kernel:ready` — because
+ * none of them is an env-only fact.
  */
 export interface VerificationPathWiring {
   /**
@@ -145,6 +182,66 @@ export interface VerificationPathWiring {
    * through one is inserted already verified when the IdP says the address is.
    */
   hasFederatedSignIn: boolean;
+  /**
+   * [#12751] The declared owner's account state, from
+   * {@link probeWalledOwnerAccountState} — pass `'unknown'` when the store is
+   * not consultable (the predicate then keeps the pre-#12751 loud posture).
+   */
+  ownerAccountState: WalledOwnerAccountState;
+}
+
+/**
+ * [#12751] Resolve {@link WalledOwnerAccountState} from the live user store.
+ *
+ * Mirrors the two reads the elevation gate performs rather than inventing new
+ * ones: the bounded human-population page (`isBootstrapCreation`'s shape —
+ * humans, not rows; a FULL page of non-humans cannot prove absence and reads
+ * as populated) and the by-email owner lookup (both the lowercased and the
+ * verbatim spelling, matches re-checked trimmed + lowercased, exactly as
+ * `bootstrapPlatformAdmin` queries). The verified answer is the shared
+ * [#11343] allow-list (`isEmailVerifiedUserRow`) — the SAME predicate the
+ * elevation gate refuses on, so this probe can never forecast a refusal the
+ * gate would not make, nor stay quiet about one it would.
+ *
+ * Never throws: any unanswerable read is `'unknown'`.
+ */
+export async function probeWalledOwnerAccountState(
+  engine: WalledOwnerProbeEngine | undefined,
+): Promise<WalledOwnerAccountState> {
+  const ownerEmail = resolvePlatformOwnerEmail();
+  if (!ownerEmail || !engine || typeof engine.find !== 'function') return 'unknown';
+  const SYSTEM = { context: { isSystem: true } };
+  const PROBE_LIMIT = 50;
+  const asRows = (raw: unknown): Record<string, unknown>[] => {
+    if (Array.isArray(raw)) return raw as Record<string, unknown>[];
+    const records = (raw as { records?: unknown } | null | undefined)?.records;
+    return Array.isArray(records) ? (records as Record<string, unknown>[]) : [];
+  };
+  try {
+    const wanted = ownerEmail.toLowerCase();
+    const spellings = [...new Set([wanted, ownerEmail])];
+    const byId = new Map<unknown, Record<string, unknown>>();
+    for (const spelling of spellings) {
+      for (const row of asRows(
+        await engine.find(SystemObjectName.USER, { where: { email: spelling }, limit: 5 }, SYSTEM),
+      )) {
+        if (row?.id) byId.set(row.id, row);
+      }
+    }
+    const owners = [...byId.values()].filter(
+      (row) =>
+        isHumanUserRow(row) &&
+        String((row as { email?: unknown }).email ?? '').trim().toLowerCase() === wanted,
+    );
+    if (owners.length > 0) {
+      return owners.some(isEmailVerifiedUserRow) ? 'owner-verified' : 'owner-unverified';
+    }
+    const page = asRows(await engine.find(SystemObjectName.USER, { limit: PROBE_LIMIT }, SYSTEM));
+    const humansExist = page.some(isHumanUserRow) || page.length >= PROBE_LIMIT;
+    return humansExist ? 'owner-absent' : 'no-human-users';
+  } catch {
+    return 'unknown';
+  }
 }
 
 /** The `warn` channel this check needs — every kernel logger satisfies it. */
@@ -154,11 +251,13 @@ export interface WalledOwnerVerificationLogger {
 
 /**
  * The predicate and its message, with no I/O — the whole decision, testable
- * shape by shape.
+ * shape by shape (the caller resolves the probe, {@link
+ * probeWalledOwnerAccountState}, and hands the result in as wiring).
  *
- * Returns the warning text for the ONE dead-end shape (walled + owner declared
- * + no transport + no federated sign-in), or `null` for every other shape.
- * Each neighbouring shape is `null` for its own reason:
+ * Returns the warning text for the dead-end shapes (walled + owner declared
+ * + no transport + no federated sign-in + an owner account state the
+ * operator provisioning stamp can no longer reach), or `null` for every
+ * other shape. Each `null` shape is `null` for its own reason:
  *
  *   - **not walled** — `single` still promotes the first human user, so a
  *     declared owner that cannot verify costs nothing;
@@ -166,9 +265,26 @@ export interface WalledOwnerVerificationLogger {
  *     refuses), and off the boot path the undeclared case has its own refusal;
  *   - **a transport is wired** — the verification link can be delivered;
  *   - **federated sign-in is wired** — the owner can arrive already verified;
- *   - **the dev-admin seed will stamp this very address** — a dev/harness boot
- *     verifies its own declared owner at startup (#11343's `email_verified`
- *     stamp), which is a verification path even with no mailbox anywhere.
+ *   - **the owner's account exists VERIFIED** — nothing left to verify (also
+ *     what stops this warning re-firing on every boot of a healthy, settled
+ *     deployment);
+ *   - **no human users yet** — [#12751] the bootstrap first-account creation
+ *     of the declared owner is stamped verified at creation, so a fresh
+ *     walled boot with nothing wired is no longer a dead end. Two dev-boot
+ *     sub-shapes keep their pre-#12751 answers: a seed armed for the
+ *     declared owner's own address was already `null` (#11343's seed stamp),
+ *     and a seed armed for some OTHER address still WARNS — the seed will
+ *     spend the bootstrap carve-out on a non-owner account at `kernel:ready`,
+ *     before the owner can ever be first.
+ *
+ * And each warning shape names its own situation:
+ *
+ *   - **`owner-unverified`** — the account exists, created outside the
+ *     operator path; the stamp is creation-only, so it stays refused;
+ *   - **`owner-absent`** — the store is populated, the bootstrap window is
+ *     spent, and an invitation-admitted registration arrives UNVERIFIED;
+ *   - **`unknown`** — the store could not be consulted; unanswerable reads
+ *     warn (the pre-#12751 posture: noisy over silent about a dead end).
  */
 export function resolveWalledOwnerVerificationPathWarning(
   wiring: VerificationPathWiring,
@@ -181,25 +297,62 @@ export function resolveWalledOwnerVerificationPathWarning(
 
   if (wiring.hasEmailTransport || wiring.hasFederatedSignIn) return null;
 
-  // The dev-admin seed provisions the declared owner AND stamps it verified,
-  // so a dev/harness walled boot is not a dead end even with nothing wired.
-  // Address-matched on purpose: a dev boot that declares some OTHER owner is
-  // the dead end this warning is for.
-  if (
-    isDevAdminSeedArmed() &&
-    devSeedAdminEmail().toLowerCase() === ownerEmail.toLowerCase()
-  ) {
-    return null;
+  const state = wiring.ownerAccountState;
+  if (state === 'owner-verified') return null;
+
+  // The dev-admin seed provisions the declared owner AND stamps it verified
+  // (#11343) — but only ever on an EMPTY store, so it rescues exactly the
+  // shapes where the store is empty or unknowable (the verify-harness boots
+  // that probe nothing). An owner account that already exists unverified, or
+  // a populated store with no owner account, is past the seed's reach and
+  // warns below whatever the seed configuration says. Address-matched on
+  // purpose: a dev boot that declares some OTHER owner still dead-ends (the
+  // seed spends the bootstrap carve-out on the seed address at kernel:ready,
+  // so the [#12751] first-account stamp can never reach the owner).
+  const seedArmed = isDevAdminSeedArmed();
+  const seedStampsDeclaredOwner =
+    seedArmed && devSeedAdminEmail().toLowerCase() === ownerEmail.toLowerCase();
+
+  if (state === 'no-human-users') {
+    if (seedStampsDeclaredOwner) return null;
+    if (!seedArmed) {
+      // [#12751] Fresh store, no seed in the way: the operator's own first
+      // account IS the verification path — an owner-email bootstrap creation
+      // is stamped verified at creation.
+      return null;
+    }
+    // Seed armed for a NON-owner address: it will be first; fall through.
   }
+  if (state === 'unknown' && seedStampsDeclaredOwner) return null;
+
+  const situation =
+    state === 'owner-unverified'
+      ? 'An account holding that address ALREADY EXISTS and is NOT verified — it was created ' +
+        'outside the operator provisioning path (the #12751 stamp applies at operator-provisioned ' +
+        'CREATION only), so elevation keeps being refused (walled_owner_not_verified) and the ' +
+        'account has no in-product way to satisfy the condition. '
+      : state === 'owner-absent'
+        ? 'Human users already exist but none holds that address, so the first-account bootstrap ' +
+          'window (whose owner-email creation would have been stamped verified) is spent; an ' +
+          'invitation-admitted registration arrives UNVERIFIED, would be refused ' +
+          '(walled_owner_not_verified), and would have no in-product way to satisfy the condition. '
+        : state === 'no-human-users'
+          ? `The dev-admin seed is armed and will provision '${devSeedAdminEmail()}' as the FIRST ` +
+            'account at kernel:ready, spending the bootstrap carve-out on an address that is not ' +
+            'the declared owner — the owner then registers later, is refused ' +
+            '(walled_owner_not_verified), and has no in-product way to satisfy the condition. '
+          : "The user store could not be consulted at boot, so the declared owner's account state " +
+            'is unknown; an owner account not created through an operator provisioning path is ' +
+            'refused (walled_owner_not_verified) with no in-product way to satisfy the condition. ';
 
   return (
     `[auth] ${WALLED_OWNER_NO_VERIFICATION_PATH}: tenancy posture '${posture}' declares its ` +
     `platform owner (${PLATFORM_OWNER_EMAIL_ENV}=${ownerEmail}) but this deployment has NO way ` +
     'to verify that address — no email transport is wired AND no trusted federated sign-in ' +
     '(enterprise SSO or a social/OIDC provider) is configured. Boot continues, but ' +
-    "platform-admin elevation requires the declared owner's address to be VERIFIED, so the " +
-    'owner will register, be refused (walled_owner_not_verified), and have no in-product way ' +
-    'to satisfy the condition. Wire EITHER path before the owner registers: (1) an EMAIL ' +
+    "platform-admin elevation requires the declared owner's address to be VERIFIED. " +
+    situation +
+    'Wire EITHER path: (1) an EMAIL ' +
     'TRANSPORT — register an email service (EmailServicePlugin + OS_EMAIL_*), which delivers ' +
     'the verification link; or (2) a TRUSTED FEDERATED SIGN-IN — enterprise SSO ' +
     '(OS_SSO_ENABLED=1 plus a sys_sso_provider row) or a social provider (e.g. ' +
