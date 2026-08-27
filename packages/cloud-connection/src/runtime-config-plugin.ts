@@ -16,7 +16,7 @@
  *     defaultOrgId?, defaultEnvironmentId?,   // multi-tenant, per-hostname
  *     features: { installLocal, marketplace, aiStudio, autoPublishAiBuilds, ... },
  *     branding: { productName, productShortName, stage?, logoUrl, faviconUrl, brandColor, pwaDescription, pwaThemeColor },
- *     telemetry: { allowClientErrorReporting: boolean }
+ *     telemetry: { errorReporting?: { dsn, sendDefaultPii, environment?, tracesSampleRate, replaysOnErrorSampleRate } }
  *   }
  *
  * ## `branding.stage` — a documented knob that this runtime never sent (#9252)
@@ -58,39 +58,42 @@
  * so the Console keeps applying its own documented `'preview'` default and
  * nothing that works today changes.
  *
- * ## `telemetry.allowClientErrorReporting` — the post-build off switch (#10805)
+ * ## `telemetry.errorReporting` — the client error-reporting SOURCE (#12681)
  *
  * Upstream half of cloud#1508 (p0/security): an air-gapped on-prem EE Console
  * was measured sending 14 Sentry envelopes per session to `sentry.io` carrying
- * IP + User-Agent PII, with no way to turn it off. objectui fixed the half it
- * owns — a build that never opts in now issues no third-party request at all —
- * and documented the half it could not, verbatim from its shipped
- * `app-shell/src/observability/sentry.ts`: *"a build that DID opt in still has
- * no post-build off switch, because the only server-to-SPA channel is
- * `/api/v1/runtime/config` and a telemetry key on that payload is an
- * objectstack contract change, not objectui's to make."* This is that key.
+ * IP + User-Agent PII, with no way to turn it off. The first fix (#10805)
+ * served a runtime PERMISSION and left the SOURCE build-time, which closed the
+ * leak and opened a different hole. The maintainer named it on 2026-08-27,
+ * verbatim and untranslated:
  *
- * Ruled Option A (maintainer, 2026-08-22): server-authoritative, fail-closed,
- * and the composed / air-gap posture defaults telemetry off so an operator who
- * has never heard of Sentry is safe with zero configuration.
+ * > 「我是一个开发平台呀，我的用户并不会去构建我的前端，我理解这种应该在服务端传进去。」
+ *
+ * ObjectStack's users consume a PREBUILT console and cannot set a build-time
+ * key, so under the two-key gate a self-hosting operator could not enable
+ * client error reporting at all. The DSN therefore moves here, and the
+ * permission boolean it replaces is REMOVED rather than paralleled — no dual
+ * spelling, per the startup-stage no-gradualism rule.
  *
  * Three properties, and each is a decision rather than a detail — see
- * `telemetry-posture.ts` for the vocabulary reasoning:
+ * `telemetry-posture.ts` for the full reasoning:
  *
- *  1. **A permission, not a kill switch.** Only a positive grant sends. A
- *     negative `disabled` key would read falsy on every server too old to know
- *     it, on every malformed payload and on every failed fetch — i.e. it would
- *     be vacuous on the runtimes that are leaking today.
- *  2. **Denied on EVERY posture until granted**, not only on the air-gapped
- *     one. Deriving "connected therefore allowed" would have left the reported
- *     injury class open one deployment over: an internet-connected on-prem EE
- *     box runs the SAME build artifact as the hosted console, so the DSN
- *     cannot distinguish them and its customer has equally never heard of
- *     Sentry. A universal opt-in satisfies "air-gap defaults off" strictly,
- *     and satisfies it without having to identify the posture correctly —
- *     which matters, because a posture predicate that is wrong in the ALLOW
- *     direction is this card's own defect.
- *  3. **A declared-off control plane REFUSES the grant** — see
+ *  1. **The DSN's presence IS the grant.** No second boolean. Two knobs in two
+ *     places produced two silent dead states ("permission on, no DSN" / "DSN
+ *     in, permission off") that are indistinguishable from the browser; one
+ *     knob cannot disagree with itself. Fail-closed survives the collapse for
+ *     free: absence of a source is not a value that can be misread, so an
+ *     older runtime, a third-party host, a 404, a network error and a
+ *     malformed body all carry no DSN and therefore deny.
+ *  2. **Denied on EVERY posture until configured**, not only on the air-gapped
+ *     one. An internet-connected on-prem EE box runs the SAME build artifact
+ *     as the hosted console, so nothing in the bundle distinguishes them and
+ *     its customer has equally never heard of Sentry. A universal opt-in
+ *     satisfies "air-gap defaults off" strictly, and satisfies it without
+ *     having to identify the posture correctly — which matters, because a
+ *     posture predicate that is wrong in the ALLOW direction is this defect
+ *     class exactly.
+ *  3. **A declared-off control plane REFUSES to serve the DSN** — see
  *     {@link declinesControlPlane}. That is the one place
  *     the posture is load-bearing rather than decorative.
  *
@@ -115,9 +118,10 @@
  * requirement — zero configuration — by requiring the operator to learn it
  * exists.
  *
- * So no posture source is introduced. What is introduced is one opt-in
- * permission (`OS_TELEMETRY_CLIENT_ERROR_REPORTING_ENABLED`), and the existing
- * decline declaration is honoured as a ceiling on it.
+ * So no posture source is introduced. What is introduced is one operator
+ * configuration (`OS_TELEMETRY_CLIENT_ERROR_REPORTING_DSN` and the closed set
+ * of knobs that travel with it), and the existing decline declaration is
+ * honoured as a ceiling on it.
  *
  * ## Feature seam (open-core boundary — cloud ADR-0012)
  *
@@ -190,10 +194,16 @@
 import type { Plugin, PluginContext } from '@objectstack/core';
 import { resolveCloudUrl, isControlPlaneDeclined } from './cloud-url.js';
 import {
-    CLIENT_ERROR_REPORTING_ENV,
-    CLIENT_ERROR_REPORTING_SPELLINGS,
-    readClientErrorReportingGrant,
+    CLIENT_ERROR_REPORTING_DSN_ENV,
+    CLIENT_ERROR_REPORTING_PII_ENV,
+    CLIENT_ERROR_REPORTING_ENVIRONMENT_ENV,
+    CLIENT_ERROR_REPORTING_TRACES_RATE_ENV,
+    CLIENT_ERROR_REPORTING_REPLAY_RATE_ENV,
+    readClientErrorReportingConfig,
+    redactDsn,
+    type ClientErrorReportingConfig,
     type RuntimeTelemetryPosture,
+    type TelemetryRefusal,
 } from './telemetry-posture.js';
 import type { IHttpServer } from '@objectstack/spec/contracts';
 
@@ -525,26 +535,41 @@ export interface RuntimeConfigPluginConfig {
     /** PWA theme color hex. Falls back to OS_PWA_THEME_COLOR env var. Default: brandColor or '#4f46e5'. */
     pwaThemeColor?: string;
     /**
-     * Grant the SPA permission to send client error reports to the sink its
-     * build was compiled with (#10805). Falls back to the
-     * `OS_TELEMETRY_CLIENT_ERROR_REPORTING_ENABLED` env var.
+     * The Console's client error-reporting sink and the closed set of knobs
+     * that travel with it (#12681). Each field falls back to its own env var:
+     * `OS_TELEMETRY_CLIENT_ERROR_REPORTING_DSN` and siblings.
      *
-     * ⛔ Default **false**, on every posture. This is the post-build off
-     * switch cloud#1508 asked for, so it fails closed: a deployment that says
-     * nothing sends nothing, and the operator who has never heard of Sentry
-     * needs no configuration to be safe.
+     * ⛔ Default **absent**, on every posture. A deployment that says nothing
+     * sends nothing, and the operator who has never heard of Sentry needs no
+     * configuration to be safe.
      *
-     * It is a PERMISSION, not a source — the server supplies no DSN and cannot
-     * turn telemetry on for a build that carries none. `true` says only "this
-     * deployment does not object to the sink you were built with".
+     * **Presence of the `dsn` IS the grant** — there is no separate permission
+     * boolean (the #10805 one was removed by this card, not paralleled). A
+     * runtime that serves a DSN is asking for reports; a runtime that serves
+     * none is not.
      *
-     * ⛔ It cannot be granted on a runtime that declared its control plane off
+     * Precedence is **per field**, matching every branding key above: an
+     * explicit value here wins, the env var fills the rest. Whole-object
+     * replacement was rejected — a host passing only `sendDefaultPii` would
+     * silently discard the operator's `..._DSN`, which is the class of quiet
+     * two-knob failure this card exists to delete.
+     *
+     * ⛔ Nothing is served on a runtime that declared its control plane off
      * (`OS_CLOUD_URL=off` / `none` / `local` / `disabled`). That declaration
-     * IS a runtime declining outbound calls, and the ruling this key
-     * implements is that a declining runtime wins. Refused loudly at mount
-     * time, never silently.
+     * IS a runtime declining outbound calls, and a declining runtime wins.
+     * Refused loudly at mount time, never silently.
+     *
+     * ⛔ A malformed DSN is refused, never coerced — see
+     * `telemetry-posture.ts` for what "malformed" means and why a bad sample
+     * rate only takes down itself while a bad DSN takes down the block.
      */
-    allowClientErrorReporting?: boolean;
+    clientErrorReporting?: {
+        dsn?: string;
+        sendDefaultPii?: boolean;
+        environment?: string;
+        tracesSampleRate?: number;
+        replaysOnErrorSampleRate?: number;
+    };
     /**
      * Distribution feature-policy hook (open-core seam — cloud ADR-0012).
      * Called with `undefined` for the static default (no environment resolved
@@ -593,12 +618,15 @@ export class RuntimeConfigPlugin implements Plugin {
     private readonly brandColor: string | undefined;
     private readonly pwaDescription: string;
     private readonly pwaThemeColor: string;
-    /** The resolved permission served as `telemetry.allowClientErrorReporting`. */
-    private readonly allowClientErrorReporting: boolean;
-    /** An unrecognised switch spelling, kept so `start()` can name it once. */
-    private readonly refusedTelemetryGrant: string | undefined;
-    /** True when a real grant was overruled by the declined control plane. */
-    private readonly telemetryGrantRefusedByPosture: boolean;
+    /**
+     * The resolved sink served as `telemetry.errorReporting`, or `undefined`
+     * for "serve no block" — unset, refused, or lowered by the posture.
+     */
+    private readonly clientErrorReporting: ClientErrorReportingConfig | undefined;
+    /** Every knob the operator got wrong, kept so `start()` can name them once. */
+    private readonly telemetryRefusals: readonly TelemetryRefusal[];
+    /** The DSN (redacted) that the declined control plane took away, if any. */
+    private readonly telemetryDsnRefusedByPosture: string | undefined;
     private readonly resolveFeatures?: (token: string | undefined) => RuntimeFeatureOverrides;
 
     constructor(config: RuntimeConfigPluginConfig = {}) {
@@ -638,23 +666,31 @@ export class RuntimeConfigPlugin implements Plugin {
         this.pwaDescription = config.pwaDescription ?? envPwaDescription ?? `${this.productName} — runtime console`;
         this.pwaThemeColor = config.pwaThemeColor ?? envPwaThemeColor ?? this.brandColor ?? '#4f46e5';
 
-        // Telemetry permission (#10805). Same precedence as every branding key
-        // — the HOST's explicit option wins, the env var is the operator's
-        // fallback — but the BASE is denial rather than a default value, and
-        // the posture can only lower the result.
-        const envGrant = readClientErrorReportingGrant(
-            typeof process !== 'undefined' ? process.env?.[CLIENT_ERROR_REPORTING_ENV] : undefined,
-        );
-        this.refusedTelemetryGrant = envGrant.refused;
-        // `=== true`, not `??` then coerce: a JS host outside this type can
-        // hand us any value, and only the literal boolean grants.
-        const requested = config.allowClientErrorReporting !== undefined
-            ? config.allowClientErrorReporting === true
-            : envGrant.allowed;
+        // Client error reporting (#12681). Same precedence as every branding
+        // key above — the HOST's explicit option wins, the env var is the
+        // operator's fallback — applied PER FIELD, and resolved through one
+        // validating reader so a host option and an env var cannot be believed
+        // on different terms. The BASE is "no block" rather than a default
+        // value, and the posture can only take away.
+        const env = (name: string): string | undefined =>
+            typeof process !== 'undefined' ? process.env?.[name] : undefined;
+        const telemetryConfig = config.clientErrorReporting;
+        const reading = readClientErrorReportingConfig({
+            dsn: telemetryConfig?.dsn ?? env(CLIENT_ERROR_REPORTING_DSN_ENV),
+            sendDefaultPii: telemetryConfig?.sendDefaultPii ?? env(CLIENT_ERROR_REPORTING_PII_ENV),
+            environment: telemetryConfig?.environment ?? env(CLIENT_ERROR_REPORTING_ENVIRONMENT_ENV),
+            tracesSampleRate:
+                telemetryConfig?.tracesSampleRate ?? env(CLIENT_ERROR_REPORTING_TRACES_RATE_ENV),
+            replaysOnErrorSampleRate:
+                telemetryConfig?.replaysOnErrorSampleRate ?? env(CLIENT_ERROR_REPORTING_REPLAY_RATE_ENV),
+        });
+        this.telemetryRefusals = reading.refusals;
         const declined = declinesControlPlane(config.controlPlaneUrl);
-        this.allowClientErrorReporting = requested && !declined;
+        this.clientErrorReporting = declined ? undefined : reading.config;
         // Only worth a diagnostic when something was actually taken away.
-        this.telemetryGrantRefusedByPosture = requested && declined;
+        this.telemetryDsnRefusedByPosture = declined && reading.config
+            ? redactDsn(reading.config.dsn)
+            : undefined;
     }
 
     init = async (_ctx: PluginContext): Promise<void> => {};
@@ -707,35 +743,39 @@ export class RuntimeConfigPlugin implements Plugin {
                 );
             }
 
-            // Telemetry switch outside the closed vocabulary (#10805). Same
-            // shape and same reason as the stage refusal above: the operator
-            // meant to GRANT something, the value was not understood, and the
-            // permission stays denied. Denial is the safe direction, so this
-            // is `warn` — but it must not be silent, or the operator reads a
-            // console with no error reporting and no explanation.
-            if (this.refusedTelemetryGrant !== undefined) {
+            // Telemetry knobs the operator got wrong (#12681). Same shape and
+            // same reason as the stage refusal above: they meant to CONFIGURE
+            // something, the value was not understood, and it was refused
+            // rather than coerced. Every refusal lands on the safer value, so
+            // this is `warn` — but it must not be silent, or the operator
+            // reads a console with no error reporting and no explanation.
+            //
+            // One line per refusal, each naming the env var, what was said and
+            // what is accepted, because an operator who mis-set two knobs has
+            // two things to fix and hearing about one is how the second stays
+            // hidden.
+            for (const refusal of this.telemetryRefusals) {
                 ctx.logger?.warn?.(
-                    `[RuntimeConfigPlugin] ignoring unrecognised telemetry switch `
-                    + `${JSON.stringify(this.refusedTelemetryGrant)} (${CLIENT_ERROR_REPORTING_ENV}) — `
-                    + `telemetry.allowClientErrorReporting stays false and the Console will not send client `
-                    + `error reports. Accepted values: ${CLIENT_ERROR_REPORTING_SPELLINGS.join(', ')}.`,
+                    `[RuntimeConfigPlugin] ignoring unrecognised telemetry value `
+                    + `${JSON.stringify(refusal.value)} (${refusal.env}) — ${refusal.consequence}. `
+                    + `Accepted: ${refusal.accepted}.`,
                 );
             }
 
-            // A real, well-spelled grant overruled by the deployment's own
-            // declaration (#10805). This is the copied-env-file shape that
-            // cloud#1508 reported: a hosted configuration landing on an
-            // air-gapped box. The grant loses — a runtime that declined
-            // outbound calls has declined this one too — and `warn` rather
-            // than silence because the operator's explicit request is the
-            // thing being refused.
-            if (this.telemetryGrantRefusedByPosture) {
+            // A well-formed DSN overruled by the deployment's own declaration
+            // (#12681). This is the copied-env-file shape cloud#1508 reported:
+            // a hosted configuration landing on an air-gapped box. The DSN
+            // loses — a runtime that declined outbound calls has declined this
+            // one too — and `warn` rather than silence because the operator's
+            // explicit configuration is the thing being refused.
+            if (this.telemetryDsnRefusedByPosture !== undefined) {
                 ctx.logger?.warn?.(
-                    `[RuntimeConfigPlugin] refusing the client-error-reporting grant `
-                    + `(${CLIENT_ERROR_REPORTING_ENV} / the \`allowClientErrorReporting\` option): this runtime `
+                    `[RuntimeConfigPlugin] refusing to serve the client error-reporting DSN `
+                    + `${JSON.stringify(this.telemetryDsnRefusedByPosture)} `
+                    + `(${CLIENT_ERROR_REPORTING_DSN_ENV} / the \`clientErrorReporting\` option): this runtime `
                     + `declared its control plane off via OS_CLOUD_URL, which disables every remote call. `
-                    + `telemetry.allowClientErrorReporting stays false. Point OS_CLOUD_URL at a control plane `
-                    + `if this deployment is not air-gapped.`,
+                    + `No telemetry.errorReporting block is served and the Console sends no error reports. `
+                    + `Point OS_CLOUD_URL at a control plane if this deployment is not air-gapped.`,
                 );
             }
 
@@ -853,22 +893,26 @@ export class RuntimeConfigPlugin implements Plugin {
                         pwaThemeColor: this.pwaThemeColor,
                     },
                     // Its OWN namespace, deliberately not a member of
-                    // `features` (#10805). That map is open-ended and a host's
+                    // `features` (#12681). That map is open-ended and a host's
                     // `resolveFeatures` hook merges arbitrary keys into it
-                    // verbatim, so a distribution could grant this permission
-                    // by returning one boolean from code whose subject is
-                    // billing tiers. A security permission has exactly one
-                    // author. Pinned in runtime-config-telemetry.test.ts.
+                    // verbatim, so a distribution could hand out a telemetry
+                    // sink from code whose subject is billing tiers. A
+                    // security-bearing configuration has exactly one author.
+                    // Pinned in runtime-config-telemetry.test.ts.
                     //
-                    // Always present, unlike `branding.stage` above: absence
-                    // is reserved for payloads that did NOT come from a
-                    // runtime that knows this key (older ObjectStack, third
-                    // party, 404, network error), and every one of those must
-                    // read as denial. Emitting an explicit `false` keeps that
-                    // meaning unambiguous and leaves the state diagnosable
-                    // with one curl.
+                    // The `telemetry` block itself is ALWAYS present, unlike
+                    // `branding.stage` above; `errorReporting` inside it is
+                    // present only when a DSN resolved. That pair is what one
+                    // curl has to distinguish: `{"telemetry":{}}` is "this
+                    // runtime knows the key and has no DSN", while no
+                    // `telemetry` key at all is "this payload did not come
+                    // from a runtime that knows it" (older ObjectStack, third
+                    // party, 404, network error). Both deny; only one of them
+                    // is something the operator can fix here.
                     telemetry: {
-                        allowClientErrorReporting: this.allowClientErrorReporting,
+                        ...(this.clientErrorReporting !== undefined
+                            ? { errorReporting: this.clientErrorReporting }
+                            : {}),
                     } satisfies RuntimeTelemetryPosture,
                 });
             };

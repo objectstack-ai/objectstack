@@ -158,7 +158,8 @@ export const FIELD_KEY_STORAGE_CLASS: Readonly<Record<string, FieldKeyClass>> = 
  *
  *   - `id`         — `table.string('id').primary()`: varchar(255), NOT NULL,
  *                    PRIMARY KEY (so: unique), no column default (the engine
- *                    generates the key).
+ *                    generates the key). varchar canonicalizes to the field
+ *                    type `text`, which is what the table below records.
  *   - `created_at` / `updated_at` — `createAuditTimestampColumn`: a timestamp
  *                    (MySQL `datetime(3)`) defaulted to the database clock,
  *                    left NULLABLE and stamped by the driver on every write.
@@ -168,7 +169,24 @@ export const FIELD_KEY_STORAGE_CLASS: Readonly<Record<string, FieldKeyClass>> = 
  * defaultValue: 'NOW()' }` describes precisely what lands.
  */
 export interface BuiltinColumnDelivery {
-  /** The field type whose column this builtin actually is. */
+  /**
+   * The field type whose column this builtin actually is, spelled in the
+   * SPEC's `FieldType` vocabulary — because that is the vocabulary a
+   * declaration's `type` is written in, and this value is compared against it
+   * with `===`.
+   *
+   * ⛔ NEVER the knex builder name. `id` is emitted by `table.string('id')`,
+   * but knex's `string` IS varchar(255), and `canonicalizeSqlType('varchar(255)')`
+   * is `'text'` — so the field type this column delivers is `'text'`, and
+   * `isCompatible('varchar(255)', 'text')` is EXACT (both pinned in
+   * `type-compat.test.ts`). Spelling the builder name here compares two
+   * vocabularies and reports every correct `id: Field.text(...)` declaration
+   * as a disagreement: measured at 45 false warnings on a stock boot of
+   * `@objectstack/platform-objects`, on declarations that were right all
+   * along. `'string'` is not even authorable — it is absent from `FieldType`'s
+   * members and `FieldSchema` refuses it — so no declaration could have
+   * silenced it.
+   */
   type: string;
   /** Fixed varchar width, when the column is bounded. */
   maxLength?: number;
@@ -181,7 +199,10 @@ export interface BuiltinColumnDelivery {
 }
 
 export const BUILTIN_COLUMN_DELIVERY: Readonly<Record<string, BuiltinColumnDelivery>> = Object.freeze({
-  id: Object.freeze({ type: 'string', maxLength: 255, unique: true, notNull: true, defaultValue: null }),
+  // `table.string('id')` is knex's varchar(255); the FIELD TYPE it delivers is
+  // `text` (see the vocabulary note on `BuiltinColumnDelivery.type` — do not
+  // put the builder name back here).
+  id: Object.freeze({ type: 'text', maxLength: 255, unique: true, notNull: true, defaultValue: null }),
   created_at: Object.freeze({ type: 'datetime', unique: false, notNull: false, defaultValue: 'NOW()' as const }),
   updated_at: Object.freeze({ type: 'datetime', unique: false, notNull: false, defaultValue: 'NOW()' as const }),
 });

@@ -431,11 +431,12 @@ describe('#8389: the identities and options the arm mounts with are the real one
 });
 
 /**
- * #10805 — the same offline arm must also serve the SPA telemetry refusal.
+ * #12681 — the same offline arm must also refuse to serve the telemetry sink.
  *
- * This is cloud#1508's acceptance expressed on the server side: on a
- * composed / air-gapped posture, a Console build that DOES carry a Sentry DSN
- * must be told not to send, through a switch that needs no rebuild.
+ * This is cloud#1508's acceptance expressed on the server side, now that the
+ * DSN itself travels on the payload: on a composed / air-gapped posture, the
+ * Console must be given no sink at all, and an operator who configured one
+ * anyway must be told it was refused — with no rebuild involved on either side.
  *
  * It belongs here rather than only in the plugin's own suite because of one
  * measured property of this wiring: `Serve.RUNTIME_CONFIG_OPTIONS` hands the
@@ -451,12 +452,13 @@ describe('#8389: the identities and options the arm mounts with are the real one
  * blocks above do, because that simulation is precisely the half that would
  * hide the defect.
  */
-describe('#10805: the offline arm refuses client telemetry on a real OS_CLOUD_URL=off boot', () => {
-  const GRANT_ENV = 'OS_TELEMETRY_CLIENT_ERROR_REPORTING_ENABLED';
+describe('#12681: the offline arm serves no client telemetry sink on a real OS_CLOUD_URL=off boot', () => {
+  const DSN_ENV = 'OS_TELEMETRY_CLIENT_ERROR_REPORTING_DSN';
+  const DSN = 'https://abc123@o1.ingest.sentry.io/42';
 
   async function bootAirGapped(run: (body: any) => void | Promise<void>): Promise<void> {
     const savedCloudUrl = process.env.OS_CLOUD_URL;
-    const savedGrant = process.env[GRANT_ENV];
+    const savedDsn = process.env[DSN_ENV];
     const dir = tempStorageDir();
     try {
       process.env.OS_CLOUD_URL = 'off';
@@ -465,52 +467,52 @@ describe('#10805: the offline arm refuses client telemetry on a real OS_CLOUD_UR
     } finally {
       if (savedCloudUrl === undefined) delete process.env.OS_CLOUD_URL;
       else process.env.OS_CLOUD_URL = savedCloudUrl;
-      if (savedGrant === undefined) delete process.env[GRANT_ENV];
-      else process.env[GRANT_ENV] = savedGrant;
+      if (savedDsn === undefined) delete process.env[DSN_ENV];
+      else process.env[DSN_ENV] = savedDsn;
       rmSync(dir, { recursive: true, force: true });
     }
   }
 
-  it('THE ACCEPTANCE — an air-gapped boot tells the Console not to send, with zero configuration', async () => {
+  it('THE ACCEPTANCE — an air-gapped boot hands the Console no sink, with zero configuration', async () => {
     await bootAirGapped((body) => {
       expect(
-        body.telemetry.allowClientErrorReporting,
+        body.telemetry.errorReporting,
         'an operator who has never heard of Sentry must be safe without configuring anything',
-      ).toBe(false);
+      ).toBeUndefined();
     });
   });
 
-  it('...and refuses even an explicit grant, because this runtime declared its control plane off', async () => {
-    process.env[GRANT_ENV] = 'true';
+  it('...and refuses even an explicit DSN, because this runtime declared its control plane off', async () => {
+    process.env[DSN_ENV] = DSN;
     await bootAirGapped(async (body) => {
-      const { isClientErrorReportingAllowed } = await import('@objectstack/cloud-connection');
-      expect(body.telemetry.allowClientErrorReporting).toBe(false);
+      const { readClientErrorReporting } = await import('@objectstack/cloud-connection');
+      expect(body.telemetry.errorReporting).toBeUndefined();
       // Read through the exported contract too: what the SPA will actually do
-      // with this payload is the thing under test, not the raw boolean.
-      expect(isClientErrorReportingAllowed(body)).toBe(false);
+      // with this payload is the thing under test, not the raw key.
+      expect(readClientErrorReporting(body)).toBeNull();
     });
   });
 
-  it('POSITIVE CONTROL — the same grant on the CLOUD arm is honoured', async () => {
+  it('POSITIVE CONTROL — the same DSN on the CLOUD arm is served', async () => {
     // Without this, the refusal above could be an artifact of the fixture
     // rather than a posture reading, and the pin would stay green on a build
-    // that denies everything unconditionally.
+    // that serves nothing unconditionally.
     const savedCloudUrl = process.env.OS_CLOUD_URL;
-    const savedGrant = process.env[GRANT_ENV];
+    const savedDsn = process.env[DSN_ENV];
     try {
       process.env.OS_CLOUD_URL = 'https://cloud.objectos.ai';
-      process.env[GRANT_ENV] = 'true';
+      process.env[DSN_ENV] = DSN;
       const { RuntimeConfigPlugin } = await import('@objectstack/cloud-connection');
       const app = createApp();
       // The cloud arm's own mount, verbatim — same shared frozen options.
       await startOn(app, new RuntimeConfigPlugin({ ...Serve.RUNTIME_CONFIG_OPTIONS }));
       const body = await readConfig(app);
-      expect(body.telemetry.allowClientErrorReporting).toBe(true);
+      expect(body.telemetry.errorReporting.dsn).toBe(DSN);
     } finally {
       if (savedCloudUrl === undefined) delete process.env.OS_CLOUD_URL;
       else process.env.OS_CLOUD_URL = savedCloudUrl;
-      if (savedGrant === undefined) delete process.env[GRANT_ENV];
-      else process.env[GRANT_ENV] = savedGrant;
+      if (savedDsn === undefined) delete process.env[DSN_ENV];
+      else process.env[DSN_ENV] = savedDsn;
     }
   });
 });

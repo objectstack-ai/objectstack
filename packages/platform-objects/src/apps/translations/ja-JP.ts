@@ -35,6 +35,7 @@ export const jaJP: TranslationData = {
         // Setup's own `nav_packages` — distinct from the same id under
         // `apps.studio.navigation`, which does not answer for this app (#5750).
         nav_packages: { label: 'パッケージ' },
+        nav_packaged_automation: { label: 'パッケージ自動化' },
         nav_marketplace_browse: { label: 'マーケットプレイスを閲覧' },
         nav_marketplace_installed: { label: 'インストール済みアプリ' },
         nav_cloud_connection: { label: 'クラウド接続' },

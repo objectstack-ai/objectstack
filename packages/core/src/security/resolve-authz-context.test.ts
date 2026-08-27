@@ -396,7 +396,10 @@ function makeMissingTableQl() {
 // The #2409 batching above already collapsed one request down to a single
 // query; this collapses the FAILING query across requests with a short TTL
 // cache — but ONLY the failure, never a successful (or legitimately empty)
-// read. A first version cached every outcome, mirroring
+// read on a `ql` that offers no way to learn a write happened. (#11966 later
+// added the success cache behind exactly that seam; the failure memo below is
+// untouched by it, and a dedicated pin in `resolve-localization-cache.test.ts`
+// holds it untouched — retiring it on a write would restart this very spam.) A first version cached every outcome, mirroring
 // `packages/plugins/plugin-audit/src/audit-writers.ts` (`resolveWriteLocale`)'s
 // existing memoization of this same read — that broke
 // `packages/qa/dogfood/test/analytics-timezone.dogfood.test.ts` (#1982/#2018),
@@ -458,7 +461,15 @@ describe('resolveLocalizationContext — failure-only cross-request cache (#1022
   // must never be served stale. Simulates the exact shape of the failing CI
   // scenario — a settings write changes the effective row between two calls —
   // entirely at this unit level, without booting the dogfood stack.
-  it('never caches a successful read: a value change between two calls is visible on the very next call', async () => {
+  //
+  // [#11966] `makeCountingQl` carries no write-epoch seam, and that is now
+  // load-bearing rather than incidental: leg C caches a success ONLY behind an
+  // engine that can tell it a write happened, so this double pins the
+  // seam-ABSENT arm — where the pre-#11966 multiset must survive byte for byte.
+  // The seam-PRESENT arm is `resolve-localization-cache.test.ts`, which pins
+  // the same staleness property through the invalidation instead of through the
+  // absence of a cache.
+  it('without an engine write-epoch seam, a successful read is never cached: a value change between two calls is visible on the very next call', async () => {
     const rows = [{ namespace: 'localization', key: 'timezone', scope: 'tenant', value: 'UTC' }];
     const ql = makeCountingQl({ sys_setting: rows });
     const first = await resolveLocalizationContext({ ql, tenantId: 'o1' });
@@ -472,10 +483,11 @@ describe('resolveLocalizationContext — failure-only cross-request cache (#1022
   });
 
   // A legitimate empty result (table exists, no settings configured for this
-  // tenant yet) is a successful read too — not a failure — so it must not be
-  // cached either: the first write for a previously-unconfigured tenant must
-  // be visible on the very next call, same as the value-change case above.
-  it('never caches a legitimate empty result: the first write for a previously-unconfigured tenant is visible immediately', async () => {
+  // tenant yet) is a successful read too — not a failure — so on a seam-less
+  // `ql` it must not be cached either: the first write for a previously-
+  // unconfigured tenant must be visible on the very next call, same as the
+  // value-change case above. (#11966: same seam-absent arm as that case.)
+  it('without a seam, a legitimate empty result is not cached either: the first write for a previously-unconfigured tenant is visible immediately', async () => {
     const rows: Array<{ namespace: string; key: string; scope: string; value: string }> = [];
     const ql = makeCountingQl({ sys_setting: rows });
     const first = await resolveLocalizationContext({ ql, tenantId: 'o1' });

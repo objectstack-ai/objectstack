@@ -464,6 +464,32 @@ export function parseRequestedPort(raw: string): number | null {
 }
 
 /**
+ * Spell a port input the way the operator set it: `--port "3e3"`, `PORT="3e3"`,
+ * `OS_PORT="3e3"`, or `the built-in default ("3000")`.
+ *
+ * ⭐ ONE spelling of one fact. Both notices that name the input read it from
+ * here — {@link formatInvalidPortNotice} (#12662) and
+ * {@link portTextReadNotice} (#12674) — which is the rule
+ * {@link PORT_SEARCH_SPAN}'s docblock established for numbers, applied to
+ * prose. Two hand-written copies of "how this input is written back" are two
+ * things free to drift, and an operator who cannot recognise what they typed is
+ * the defect both notices exist to fix.
+ *
+ * ⚠️ `JSON.stringify` is not decoration. It makes `" 3000"` distinguishable
+ * from `"3000"` on the screen — whitespace is the likeliest thing an operator
+ * is staring at without seeing — and it escapes control bytes instead of
+ * writing them to a terminal.
+ */
+function spellPortInput(raw: string, source: PortInputSource): string {
+  const shown = JSON.stringify(raw);
+  return source === '--port'
+    ? `--port ${shown}`
+    : source === 'the built-in default'
+      ? `the built-in default (${shown})`
+      : `${source}=${shown}`;
+}
+
+/**
  * The refusal for a port value that cannot be one (#12662).
  *
  * ⭐ Held to the standard the card is about. Two things it must do that the
@@ -475,10 +501,11 @@ export function parseRequestedPort(raw: string): number | null {
  *    a second, hand-written copy of those numbers: this sentence exists to be
  *    accurate about the bounds the code enforces, so it interpolates them.
  *
- * ⚠️ The raw text is rendered with `JSON.stringify`, which is not decoration.
- * It makes `" 3000"` distinguishable from `"3000"` on the screen — the
- * whitespace case is the most likely thing an operator is staring at without
- * seeing — and it escapes control bytes rather than writing them to a terminal.
+ * ⚠️ The source spelling is {@link spellPortInput}'s, shared with #12674's
+ * read notice so that one input is named one way — `JSON.stringify` rendering
+ * included, which is not decoration: it makes `" 3000"` distinguishable from
+ * `"3000"` on the screen and escapes control bytes rather than writing them to
+ * a terminal.
  *
  * ⚠️ KNOWN LIMIT, stated rather than papered over: `os dev` forwards its own
  * `--port` (and `$PORT`, promoted to a flag) to the `serve` child on argv,
@@ -493,12 +520,7 @@ export function parseRequestedPort(raw: string): number | null {
  * client as a transport error.
  */
 export function formatInvalidPortNotice(raw: string, source: PortInputSource): string {
-  const shown = JSON.stringify(raw);
-  const spelled = source === '--port'
-    ? `--port ${shown}`
-    : source === 'the built-in default'
-      ? `the built-in default (${shown})`
-      : `${source}=${shown}`;
+  const spelled = spellPortInput(raw, source);
   const fix = source === '--port' || source === 'the built-in default'
     ? '     Pass a whole number instead, for example --port 3000.'
     : `     Correct ${source} in this process's environment (for example ${source}=3000),\n`
@@ -510,6 +532,137 @@ export function formatInvalidPortNotice(raw: string, source: PortInputSource): s
     + chalk.dim(`     A port must be a whole number from ${MIN_PORT} to ${MAX_PORT} — ${MIN_PORT} is legal, and\n`)
     + chalk.dim('     asks the kernel for any free port. Nothing was started, and no socket\n')
     + chalk.dim('     was opened.\n')
+    + chalk.dim(fix)
+  );
+}
+
+/**
+ * The port the TEXT says, on a strict reading — or `null` when the text does
+ * not say a port at all.
+ *
+ * ## This boundary IS the card (#12674)
+ *
+ * {@link parseRequestedPort} keeps `parseInt`, deliberately: #12662's ruling is
+ * that no value which boots today may be refused, and a tightening would narrow
+ * a published CLI's accepted input. But `parseInt`'s tolerance changes the
+ * ANSWER, not merely the spelling — `--port 3e3` binds port **3**, `--port
+ * 0x0BB8` binds 3000, `--port 3000abc` binds 3000. The server comes up on a
+ * port the operator never named and nothing says so. ⭐ That silence, not the
+ * tolerance, is what is repaired here.
+ *
+ * So the notice fires on a DIFFERENCE, which makes the definition of "the same"
+ * the whole precision of this card. MEASURED on this checkout (Node v22.22.2):
+ *
+ * ```
+ *   " 3000" → 3000   "+3000" → 3000   "08080" → 8080   ← says what it selected
+ *   "3000 " → 3000   "3000"  → 3000
+ *   "3e3"   → 3      "0x0BB8" → 3000  "3000.0" → 3000  ← does NOT
+ *   "1e10"  → 1      "0b111"  → 0     "3000abc" → 3000
+ * ```
+ *
+ *  - **Whitespace is not a difference.** `" 3000"` reads as 3000 to a human and
+ *    to `parseInt` alike, and production `PORT` values carry whitespace. A
+ *    boundary that counted it would drone a notice on every boot of the most
+ *    ordinary deployment there is — noise on the one input shape that is both
+ *    common and harmless. ⭐ This half of the line is why it is drawn on the
+ *    TRIMMED text.
+ *  - **A leading `+` is not a difference**, and **leading zeros are not**:
+ *    `"+3000"` says 3000, `"08080"` says 8080 (`parseInt` has read no leading
+ *    zero as octal since ES5 — measured above, not assumed).
+ *  - **Everything else IS**, because it means the port was not read off the
+ *    digits: an exponent, a radix prefix, a fraction, a separator, or trailing
+ *    text.
+ *
+ * ⛔ Nothing here refuses anything. The accept set stays EXACTLY
+ * {@link parseRequestedPort}'s. Whether the CLI should take only strict decimal
+ * text is a contract question, left open on purpose (#12674), and #12673 is
+ * blocked on the same one.
+ *
+ * ⛔ Not `Number()`, which is the near-miss worth naming: it AGREES with
+ * `parseInt` on `"0x0BB8"` (both 3000, measured), so a boundary built on it
+ * would be blind to a hex literal — one of the two coercions this exists to
+ * see. It disagrees on `"3e3"` (3000 vs 3), which is the other one.
+ */
+export function strictPortReading(raw: string): number | null {
+  const trimmed = raw.trim();
+  if (!/^[+-]?\d+$/.test(trimmed)) return null;
+  const value = Number(trimmed);
+  return Number.isInteger(value) ? value : null;
+}
+
+/**
+ * The notice for a port that was read as something other than what it says
+ * (#12674) — or `null` when the text and the port agree.
+ *
+ * ## ⭐ The DECISION lives in here, not at the call site
+ *
+ * A notice printed unconditionally satisfies every assertion that only checks
+ * what a mismatch prints. Returning `null` for the agreeing case puts that arm
+ * where a test can drive it directly, at the same seam, with no source at all:
+ * `portTextReadNotice(' 3000', 'PORT', 3000)` is `null` or this is broken. The
+ * call site is then one `if`, and the three-way split it completes is:
+ * mismatch → this notice; agreement → nothing; a value that cannot be a port
+ * at all → {@link formatInvalidPortNotice}'s refusal, which exits before this
+ * function is ever reached.
+ *
+ * ## What it states — and the second reading it must NOT invent
+ *
+ * Two facts, both of which the operator lacks: the text they set, and the port
+ * it selected. ⛔ Never a third — the number they MEANT. `3e3` looks like 3000
+ * to a reader, but `3000abc` and `0b111` have no such second reading, and a
+ * diagnostic that guessed would be wrong the first time it met one. It reports
+ * that the text does not say the selected port, and stops there.
+ *
+ * ⚠️ It says "asked for", not "bound": in development the auto-shift below
+ * may still move off this port, and #12543's drift notice — which prints just
+ * after this one — owns that fact. Two notices, two facts, neither restating
+ * the other.
+ *
+ * ## ⚠️ KNOWN LIMIT — the source it names on a spawn (#12673)
+ *
+ * MEASURED, and stated rather than papered over. `os dev` reads
+ * `flags.port ?? readEnvWithDeprecation('OS_PORT', 'PORT')` and forwards the
+ * result to the `serve` child as `--port <text>` on argv (`commands/dev.ts`).
+ * So `PORT=3e3 os dev` reaches this function as `--port "3e3"`, and the notice
+ * names the channel the value ARRIVED on rather than the one the operator set.
+ * The text and the port — the two facts above — are still exactly right; only
+ * the source label is the child's rather than the parent's. ⛔ It is NOT fixed
+ * here: `os dev`'s own port handling is #12673, which is blocked on the same
+ * accept-set question this card was scoped away from.
+ *
+ * `os start` is measured too and does not have the defect on this path: its
+ * `--port` is a `Flags.integer` (parser `/^-?\d+$/` in `@oclif/core` 4.13.3),
+ * so a spelling this notice would fire on is refused by the parent before any
+ * spawn, and an env-supplied value reaches the child through the inherited
+ * environment under its own name.
+ *
+ * CHANNEL — the same `printDiagnostic` (stderr) as its three siblings, for the
+ * reason #7915 measured: `stdout` carries JSON-RPC frames whenever the stdio
+ * MCP transport is mounted, where one non-frame line reaches a conforming
+ * client as a transport error. `serve-stdio-stdout-purity.e2e.test.ts` pins it.
+ */
+export function portTextReadNotice(
+  raw: string,
+  source: PortInputSource,
+  port: number,
+): string | null {
+  if (strictPortReading(raw) === port) return null;
+
+  const spelled = spellPortInput(raw, source);
+  const fix = source === '--port' || source === 'the built-in default'
+    ? '     If that is not the port you meant, write it as a plain decimal number\n'
+      + '     (for example --port 3000).'
+    : `     If that is not the port you meant, correct ${source} in this process's\n`
+      + `     environment (for example ${source}=3000), or override it with --port 3000.`;
+
+  return (
+    '\n'
+    + chalk.yellow(`  ⚠ ${spelled} was read as port ${port}.\n`)
+    + chalk.dim('     That text is not a plain decimal number, and the reader that accepts it\n')
+    + chalk.dim('     is tolerant: it honours a leading 0x as hexadecimal and discards\n')
+    + chalk.dim('     everything from the first character that cannot continue the number.\n')
+    + chalk.dim(`     Nothing downstream reads it again — ${port} is the port this server asked\n`)
+    + chalk.dim('     for, whatever the text looks like.\n')
     + chalk.dim(fix)
   );
 }
@@ -1702,6 +1855,25 @@ export default class Serve extends Command {
       this.exit(1);
     }
     const requestedPort = parsedPort;
+
+    // ── …and it has to BE the port the text SAYS, or say otherwise (#12674) ──
+    // `parseInt` is kept as the reader (#12662's ruling: nothing that boots
+    // today may be refused), and its tolerance changes the answer rather than
+    // the spelling — `--port 3e3` selects port 3, `--port 0x0BB8` selects 3000.
+    // The boot then succeeds on a port nobody named, which is the harm: not a
+    // strange value being accepted, but a server listening somewhere the
+    // operator never asked for and nothing saying so.
+    //
+    // ⭐ Placement completes the three-way split rather than adding a fourth
+    // path. A value that cannot be a port has already exited above, so the
+    // refusal and this notice can never both fire; and this sits AHEAD of
+    // `portAutoShiftAllowed`, so it states the port that was ASKED FOR while
+    // #12543's drift notice, a few lines down, states the one that was taken
+    // instead. It also runs before the boot-quiet window opens, so — like its
+    // siblings — it survives a boot that dies later.
+    const textReadNotice = portTextReadNotice(flags.port, portSource, requestedPort);
+    if (textReadNotice) printDiagnostic(textReadNotice);
+
     let port = requestedPort;
     // Port-conflict policy differs by mode:
     //

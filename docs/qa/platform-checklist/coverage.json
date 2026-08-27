@@ -5,7 +5,11 @@
       "items": [
         "records-forms.action-param-widgets",
         "ai.mcp-run-action-exposure-gate",
-        "records-forms.action-location-matrix"
+        "records-forms.action-location-matrix",
+        "api-backend.packaged-action-disabled-dispatch",
+        "api-backend.action-activation-door-contract",
+        "automation.setup-packaged-automation-board",
+        "platform-core.activation-ledger-registration-home"
       ]
     },
     "agent": {
@@ -36,7 +40,8 @@
         "dashboards.chart-type-matrix",
         "dashboards.global-filters-rescope",
         "dashboards.chart-first-paint",
-        "dashboards.empty-null-bucket-boundaries"
+        "dashboards.empty-null-bucket-boundaries",
+        "studio-authoring.packaged-display-class-direct-edit"
       ]
     },
     "dataset": {
@@ -78,7 +83,14 @@
         "automation.screen-flow-roundtrip",
         "automation.durable-suspend-restart",
         "automation.flow-runs-page-test-trigger",
-        "automation.flow-toggle-kill-switch"
+        "automation.flow-toggle-kill-switch",
+        "automation.packaged-flow-disable-durable",
+        "automation.packaged-flow-subflow-disable-refusal",
+        "automation.packaged-flow-clone-contract",
+        "automation.setup-packaged-automation-board",
+        "access-security.activation-write-operator-gate",
+        "access-security.packaged-flow-write-door-parity",
+        "studio-authoring.packaged-automation-studio-lock"
       ]
     },
     "hook": {
@@ -108,7 +120,8 @@
       "items": [
         "records-forms.crud-roundtrip",
         "platform-core.metadata-authoring-roundtrip",
-        "studio-authoring.object-designer-roundtrip"
+        "studio-authoring.object-designer-roundtrip",
+        "platform-core.packaged-object-extend-only"
       ]
     },
     "page": {
@@ -128,7 +141,8 @@
         "access-security.permission-matrix-edit-loop",
         "access-security.sharing-rule-authoring-ui",
         "access-security.owd-save-gate",
-        "access-security.share-link-capability-tokens"
+        "access-security.share-link-capability-tokens",
+        "access-security.packaged-permission-set-lifecycle"
       ]
     },
     "position": {
@@ -193,7 +207,8 @@
         "records-forms.list-view-capabilities",
         "studio-authoring.view-authoring-live",
         "records-forms.gantt-interactions",
-        "records-forms.saved-view-management"
+        "records-forms.saved-view-management",
+        "studio-authoring.packaged-display-class-direct-edit"
       ]
     },
     "webhook": {

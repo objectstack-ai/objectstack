@@ -9648,8 +9648,12 @@ export class RestServer {
             if (refusal) {
                 // `code` is REQUIRED by the nested envelope, and the flat
                 // classification legitimately carries none for an undeclared
-                // sandbox refusal (ADR-0112: the producer names the condition,
-                // so nothing is invented for the half it did not name). The
+                // sandbox refusal (ADR-0112 D4 governs the semantic-CODE
+                // channel: the producer names the condition on the CODE axis,
+                // so nothing is invented for the half it did not name; the ADR
+                // rules no HTTP status here, and the phrase is
+                // `error-response.ts`'s own prose rather than an ADR
+                // quotation). The
                 // catalog's own floor fills the required field —
                 // `standardErrorCodeForHttpStatus`, whose docblock exists for
                 // exactly this ("Total by construction: a producer can always
@@ -9705,9 +9709,52 @@ export class RestServer {
                 const declaredCode = typeof refusal.body.declaredCode === 'string'
                     ? refusal.body.declaredCode
                     : undefined;
+                // [#12669] …and so does the sentence the producer addressed to
+                // the CALLER. The flat `/data` door attaches it in
+                // `withDeclaredUserMessage` (`error-response.ts`, #9934) and
+                // the one classification asked above is already holding the
+                // result; this family dropped it at the same re-dress, with the
+                // same one-directional silence — an author's own remedy text
+                // reaching `/data` and vanishing here.
+                //
+                // ⛔ `userMessage` and `declaredCode` are NOT symmetric, and
+                // the next reader will assume they are because they arrive on
+                // the same line. `declaredCode` is read from the CLASSIFICATION
+                // because presence there MEANS demotion — an invariant the raw
+                // thrown field does not carry, which is the whole subject of
+                // the paragraphs above (⛔ not restated here: #12510 owns that
+                // derivation and one reason with two copies is this lane's own
+                // recurring defect). `userMessage` has NO invariant left for a
+                // caller to re-derive. `declaredUserMessage` already decided
+                // PRESENCE — the field exists on an error only because an
+                // author deliberately wrote caller-facing text onto it, and
+                // platform and driver code never set it — and
+                // `truncateClientMessage` already applied #5423's bound to the
+                // value. Reading `refusal.body.userMessage` IS the rule; there
+                // is no second function to run it through, and running one
+                // would be a second answer to a question the classification
+                // has already answered.
+                //
+                // The `typeof` guard below is therefore not that invariant. It
+                // is the same non-string floor `code` and `declaredCode` carry
+                // two lines up: a producer may put anything on a thrown object,
+                // and a number arriving in a string channel is the #3842 drift.
+                //
+                // ⛔ SCOPE: `userMessage` only. The producer's structured
+                // context — the flat body's top-level `issues` — is the other
+                // half of #12669 and is deliberately NOT forwarded here. The
+                // nested envelope's channel for it is `ApiError.details`, so
+                // mapping one onto the other is a SHAPE decision on a contract
+                // field rather than a rename, and #12669 is open on it.
+                const userMessage = typeof refusal.body.userMessage === 'string'
+                    ? refusal.body.userMessage
+                    : undefined;
                 respondError(
                     res, refusal.status, code, String(refusal.body.error ?? ''),
-                    declaredCode !== undefined ? { declaredCode } : undefined,
+                    {
+                        ...(declaredCode !== undefined ? { declaredCode } : {}),
+                        ...(userMessage !== undefined ? { userMessage } : {}),
+                    },
                 );
                 return true;
             }

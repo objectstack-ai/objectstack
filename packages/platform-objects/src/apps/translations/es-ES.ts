@@ -35,6 +35,7 @@ export const esES: TranslationData = {
         // Setup's own `nav_packages` — distinct from the same id under
         // `apps.studio.navigation`, which does not answer for this app (#5750).
         nav_packages: { label: 'Paquetes' },
+        nav_packaged_automation: { label: 'Automatización empaquetada' },
         nav_marketplace_browse: { label: 'Explorar Marketplace' },
         nav_marketplace_installed: { label: 'Aplicaciones instaladas' },
         nav_cloud_connection: { label: 'Conexión a la nube' },

@@ -38,6 +38,7 @@ export const zhCN: TranslationData = {
         // literal in an otherwise Chinese menu (#5750). Both entries are
         // legitimate; keep them both.
         nav_packages: { label: '软件包' },
+        nav_packaged_automation: { label: '打包自动化' },
         nav_marketplace_browse: { label: '浏览应用市场' },
         nav_marketplace_installed: { label: '已安装应用' },
         nav_cloud_connection: { label: '云连接' },

@@ -2483,9 +2483,13 @@ describe('mapDataError — schema/constraint envelopes', () => {
   it('a 5xx that declares NO code passes its status and invents no code', () => {
     // The shape this case originally carried. `declaresServerFault` — the
     // `@objectstack/types` criterion the 5xx arm reads for the `code` half —
-    // needs a non-empty string `code`, and ADR-0112 says the PRODUCER names the
-    // condition: the declared half is honoured, the undeclared half is left
-    // empty rather than filled with an invented `INTERNAL_ERROR`. Same answer
+    // needs a non-empty string `code`, and ADR-0112 D4 governs the
+    // semantic-CODE channel: the producer names the condition on the CODE
+    // axis, so the declared half is honoured and the undeclared half is left
+    // empty rather than filled with an invented `INTERNAL_ERROR`. The 502
+    // passes through on #5437/#5582's rule, NOT the ADR's: ADR-0112 rules no
+    // HTTP status for an undeclared throw, and the phrase is
+    // `error-response.ts`'s own prose rather than an ADR quotation. Same answer
     // `resolveErrorResponse` already gives this shape.
     const r = mapDataError(
       Object.assign(new Error('connect ECONNREFUSED 10.0.0.5:5432 (internal pool)'), { status: 502 }),
