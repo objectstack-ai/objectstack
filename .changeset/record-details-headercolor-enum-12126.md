@@ -1,0 +1,5 @@
+---
+"@objectstack/spec": minor
+---
+
+Declare `headerColor` on the strict `record:details` section schema as a closed enum (#12126, maintainer ruling A 2026-08-26). The key was deliberately refused by #11661 because the renderer's only read was a template-literal Tailwind class that generated no CSS; objectui#6294 (merged 2026-08-25) replaced that read with a lookup of complete class literals, so the refusal outlived its recorded reason. The vocabulary is exactly the six tokens that lookup ships — `muted` | `muted/50` | `accent` | `primary/10` | `secondary/10` | `destructive/10` — tints only (`CardHeader` sets no foreground, so solids would need a paired `text-*-foreground`). Declared = enforced: `objectstack validate` refuses anything outside the enum at authoring time — including the renderer's `bg-*` pass-through spellings, which render only when the host app's Tailwind build happens to generate the class — instead of shipping a header that silently does not paint. Optional with NO schema default; the `title` withhold from #11661 stands unchanged.
