@@ -9581,7 +9581,14 @@ export class RestServer {
             status: number,
             code: ErrorCode,
             message: string,
-        ): void => sendEnvelopeError(res, status, code, message);
+            // [#12510] The shared writer's OWN `extra` type, referenced rather
+            // than restated: this wrapper decides POSITION (the nested D5
+            // envelope), never which channels exist. A local `{ declaredCode?:
+            // string }` would be a second, narrower declaration of a set
+            // `sendError` already owns — the shape that silently stops
+            // forwarding the next channel admitted there.
+            extra?: Parameters<typeof sendEnvelopeError>[4],
+        ): void => sendEnvelopeError(res, status, code, message, extra);
 
         const respond501 = (res: any) => respondError(
             res, 501, 'NOT_IMPLEMENTED',
@@ -9651,17 +9658,57 @@ export class RestServer {
                 // is the one place the two dialects genuinely differ: the flat
                 // body may omit `code`, the nested one may not.
                 //
-                // ⚠️ Measured and NOT repaired here: an UNREGISTERED producer
-                // code is demoted by the shared resolver to a `declaredCode`
-                // sibling (ADR-0112 #9232), and `sendError`'s `extra` does not
-                // accept that field — so the author's own spelling is dropped
-                // on this family while `/data` carries it. Widening the shared
-                // envelope writer is a `@objectstack/types` change outside
-                // this card's surface; filed separately.
+                // [#12510] …and the producer's OWN spelling travels with it.
+                // An UNREGISTERED thrown code is demoted by the shared rule to
+                // a `declaredCode` sibling (ADR-0112 #9232) — the open,
+                // author-authored channel `ApiErrorSchema` has declared since
+                // #9106. This family used to drop it: the classification below
+                // was already holding the demoted string and only `code` and
+                // the message were re-dressed, so an app's spelling vanished
+                // here while the flat `/data` door carried it. Nothing invalid
+                // shipped — the closed `code` still carried the member the
+                // status derives — which is exactly what made the loss silent
+                // and one-directional: a consumer told by ADR-0112 to read
+                // `declaredCode` found nothing at this door.
+                //
+                // ⛔ The reason that used to stand here said `sendError`'s
+                // `extra` would not accept the field. That was true when it was
+                // written and false since #11719 / `db8c288` (PR #12403) added
+                // `declaredCode` to the writer's `Pick`. A stale sentence that
+                // discourages a repair costs more than one that misdescribes a
+                // mechanism, so it is recorded rather than merely deleted.
+                //
+                // ⛔ Read the CLASSIFICATION's field, never the resolver's raw
+                // `thrown.declaredCode`. Presence MEANS demotion
+                // (`ApiErrorSchema.declaredCode`'s documented invariant) and
+                // the raw field is set for a REGISTERED spelling too —
+                // measured: a producer throwing `{ code: 'RECORD_LOCKED',
+                // status: 409 }` resolves with `declaredCode: 'RECORD_LOCKED'`
+                // sitting beside an identical `code`, and forwarding that would
+                // put two spellings of one fact on every registered refusal.
+                // `refusal.body.declaredCode` is the answer AFTER
+                // `demotedDeclaredCode` (`error-response.ts`'s
+                // `thrownCodeFields`, the same one definition the dispatcher
+                // door reads), so the invariant arrives with the value.
+                //
+                // ⭐ Why re-dress rather than re-resolve: this door asks
+                // {@link classifiedRefusalAnswer} ONCE and re-dresses that one
+                // answer, exactly as it does for `status`, `code` and the
+                // message. Calling the resolver a second time here would be a
+                // second answer to a question already asked — the shape that
+                // let two `/api/v1/packages` doors drift apart (#12405). The
+                // pair is carried, not recomputed: `code` and `declaredCode`
+                // leave this door as the pair `thrownCodeFields` produced.
                 const code = typeof refusal.body.code === 'string'
                     ? refusal.body.code as ErrorCode
                     : standardErrorCodeForHttpStatus(refusal.status);
-                respondError(res, refusal.status, code, String(refusal.body.error ?? ''));
+                const declaredCode = typeof refusal.body.declaredCode === 'string'
+                    ? refusal.body.declaredCode
+                    : undefined;
+                respondError(
+                    res, refusal.status, code, String(refusal.body.error ?? ''),
+                    declaredCode !== undefined ? { declaredCode } : undefined,
+                );
                 return true;
             }
             const msg = String(error?.message ?? error ?? '');
