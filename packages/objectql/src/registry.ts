@@ -72,7 +72,12 @@ export const DEFAULT_EXTENDER_PRIORITY = 200;
  *   whichever layer is the base.
  */
 export interface ObjectContributor {
-  packageId: string;
+  // Optional (#12623): `registerObject`'s own `packageId` parameter is now
+  // optional, and this is the exact value it was called with — a bare
+  // `registerObject(schema)` call stores `undefined` here, matching the
+  // runtime behavior every call site without a tsc test-layer gate already
+  // exercised (JS does not enforce TS arity).
+  packageId: string | undefined;
   namespace: string;
   ownership: ObjectOwnership;
   priority: number;
@@ -1567,7 +1572,12 @@ export class SchemaRegistry {
    * @param schema - The object definition
    * @param packageId - The owning package ID, or — for an `overlay` — the
    *   `sys_metadata` row's own binding (provenance ON the layer, never an
-   *   ownership claim; ADR-0029 D9.9)
+   *   ownership claim; ADR-0029 D9.9). Optional (#12623) — matches the
+   *   sibling {@link registerItem}: a bare `registerObject(schema)` call
+   *   passes `packageId: undefined` through to `applyProtection`, which
+   *   leaves the item clean (no `_packageId`, no `_provenance`) rather than
+   *   defaulting. Do not give this parameter a default value — that would
+   *   silently stamp package provenance onto every bare-call fixture.
    * @param namespace - The package namespace (for FQN computation)
    * @param ownership - 'own' (single owner) | 'overlay' (tenant layer that
    *   REPLACES the base at resolution; ADR-0029 D9) | 'extend' (additive merge)
@@ -1577,7 +1587,7 @@ export class SchemaRegistry {
    */
   registerObject(
     schema: ServiceObject,
-    packageId: string,
+    packageId?: string,
     namespace?: string,
     ownership: ObjectOwnership = 'own',
     priority: number = ownership === 'own'
@@ -1640,8 +1650,12 @@ export class SchemaRegistry {
     const shortName = schema.name;
     const fqn = computeFQN(namespace, shortName);
 
-    // Ensure namespace is registered
-    if (namespace) {
+    // Ensure namespace is registered. [#12623] `packageId` is now optional
+    // on this method, so a namespace passed without one has no owner to
+    // record — skip rather than registering `undefined` as an owner (which
+    // would also mean widening `registerNamespace`'s own required-string
+    // contract, out of scope here).
+    if (namespace && packageId) {
       this.registerNamespace(namespace, packageId);
     }
 
