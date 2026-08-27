@@ -13,7 +13,8 @@
  *
  *   node scripts/pm/check-governed-merges.mjs                  # sweep, last 24h, all four repos
  *   node scripts/pm/check-governed-merges.mjs --since 7d       # or 36h, or ISO date
- *   node scripts/pm/check-governed-merges.mjs --since-ref v5.0.0-rc.3
+ *   node scripts/pm/check-governed-merges.mjs --since-ref v5.0.0-rc.3       # topological, exact
+ *   node scripts/pm/check-governed-merges.mjs --since-ref objectstack=<tip> --since-ref objectui=<tip>
  *   node scripts/pm/check-governed-merges.mjs --repos objectstack,objectui
  *   node scripts/pm/check-governed-merges.mjs --repo-root cloud=/srv/cloud
  *   node scripts/pm/check-governed-merges.mjs --json           # for round reports
@@ -256,6 +257,75 @@
  * the default window is 24h — still sweeps exactly as before, with no fetch.
  * Deepening is never done here: this sweep reads four checkouts it does not
  * own, so the remedy is printed as a command for the operator to run.
+ *
+ * Queue-batch TOPOLOGY (#11996) is a separate question from the window below,
+ * and it is answered: measured NON-BLIND 2026-08-27 (six batch topologies plus
+ * a live batch replay) — re-measure if the repo's merge method changes, or if
+ * the mainline-commits / commit-paths enumeration is reworked.
+ *
+ * ## The WINDOW is landing order, not committer dates (#12633)
+ *
+ * The merge queue writes a batch entry's commit when the batch is BUILT, and
+ * `main` receives it when the batch LANDS. Measured on two governed PRs of one
+ * batch, 2026-08-26: #12440 committed 05:00:27Z, merged 05:25:22Z (1,495 s);
+ * #12443 committed 05:00:49Z, merged 05:33:08Z (1,939 s). So a commit can sit
+ * ABOVE another on `main`'s first-parent chain — it landed later — while
+ * carrying an EARLIER committer date. Re-measured on this mainline 2026-08-27:
+ * 10 inversions in 3,613 first-parent pairs, max 874 s, median 539 s; two of
+ * the ten inverted commits touch a governed surface.
+ *
+ * `git log --since=DATE` cuts on committer date, so at a knife-edge boundary —
+ * the previous round's tip, or an exact previous-round timestamp, which is what
+ * 「实跑 `--since 上轮`」 invites — a governed landing that is above the
+ * boundary but dated below it is simply absent. Measured on real history:
+ * `--since 2026-08-14T05:55:02Z` reports 190 governed entries and `01a7337fc0`
+ * (PR #8620, an ADR) is not among them; `--since 2026-08-14T05:44:52Z` reports
+ * 191 and lists it. Same tree, same landed set, boundaries ten minutes apart —
+ * and nothing in the first output marks the gap. Where that landing is the only
+ * one in the window, the sweep prints a clean window and exits 0 = "swept
+ * COMPLETELY", the one reading #4690 and #9902 say must never be producible.
+ *
+ * Ruled 2026-08-27 on #12633: **B for `--since-ref`, A for `--since`** — C
+ * (detect and refuse, answering with a problem instead of an answer) and D
+ * (document the hole) both declined. Three parts, and the third is what keeps
+ * the invariant rather than the budget:
+ *
+ *   1. `--since-ref` IS TOPOLOGICAL. The window is the first-parent range from
+ *      the ref to `origin/main`; committer dates are not consulted at all, so
+ *      no skew of any size can move the boundary. Multi-repo: a bare
+ *      `--since-ref` is tried in every governed repo and used wherever it
+ *      resolves, and `--since-ref <repoId>=<ref>` pins one repo (repeatable).
+ *      A repo no ref resolves in falls back to the date window below, and its
+ *      report line SAYS which repos got which window — one repo's ref silently
+ *      dating four repos' windows is the same class of bug as the one above.
+ *      Recording the previous round's tip is the CALLER's obligation (this
+ *      script keeps no state), so every sweep prints the `--since-ref` line to
+ *      use next round. Bonus property: for a topological window the #9902
+ *      horizon question answers itself — the presence of the ref in a checkout
+ *      is necessary and sufficient for the range to be complete.
+ *   2. A bare `--since` IS A DATE WINDOW, BACKED OFF BY A DECLARED BUDGET.
+ *      `SKEW_BUDGET_SECONDS` = 3600: 1.86× the largest directly measured
+ *      build-to-land skew (1,939 s, PR #12443) and 4.1× the largest
+ *      committer-date inversion on this mainline (874 s, re-measured
+ *      2026-08-27). ⛔ It is deliberately NOT the measured maximum — a bound
+ *      written exactly at today's worst case invalidates itself the first time
+ *      a slower batch lands. The cost is re-listing whatever landed in the hour
+ *      before the boundary, and the report line says so out loud: a re-listed
+ *      entry is RE-RECOGNITION (one glance from the maintainer, who recognised
+ *      it last round), while a dropped entry is never seen again.
+ *   3. THE DATE WINDOW IS CLOSED TOPOLOGICALLY, AND REFUSES TO READ CLEAN WHEN
+ *      IT CANNOT PROVE IT. The emitted set is every first-parent commit at or
+ *      above the DEEPEST commit whose committer date falls inside the budgeted
+ *      window — a prefix of the chain, so no entry is ever dropped for being
+ *      dated below something that landed before it, whatever the budget is.
+ *      The proof obligation is the other half: the walk must actually SEE a
+ *      commit dated below the boundary, or that deepest commit cannot be shown
+ *      to be the deepest one. When it cannot, the repo is WINDOW EDGE — the ✅
+ *      is suppressed and the sweep exits 2, because a skew larger than the
+ *      budget must read as INCOMPLETE and never as clean-and-absent. Before
+ *      giving up it widens the walk: one budget below the boundary, then a
+ *      week, then the whole first-parent chain; a walk that reaches the root
+ *      commit is complete by construction and never an edge.
  *
  * ## Institutional memory — why governed surfaces are guarded at all
  *
@@ -1070,16 +1140,175 @@ export function describeHorizon(horizon) {
   return horizon.shallow ? `shallow, oldest visible ${horizon.floor} (predates the window)` : 'complete clone';
 }
 
-/** First-parent mainline commits of `ref` since `sinceIso`, newest first. */
-export function mainlineCommits(root, ref, sinceIso) {
-  const out = git(root, ['log', '--first-parent', `--since=${sinceIso}`, '--format=%H%x09%cI%x09%s', ref]);
-  return out
+// ── the window (#12633): landing order, not committer dates ─────────────────
+
+/**
+ * The declared build-to-land skew budget, in seconds — subtracted from every
+ * operator-supplied date boundary (route A of the #12633 ruling), and stated in
+ * the report line so a re-listed boundary entry reads as re-recognition.
+ *
+ * 3600 s = 1.86× the largest directly measured build-to-land skew (1,939 s, PR
+ * #12443, 2026-08-26) and 4.1× the largest committer-date inversion on this
+ * mainline (874 s of 10 inversions in 3,613 first-parent pairs, re-measured
+ * 2026-08-27). ⛔ Never set to the measured maximum: a bound written exactly at
+ * today's worst case invalidates itself the first time a slower batch lands.
+ */
+export const SKEW_BUDGET_SECONDS = 3600;
+
+/** The ref pinned for a repo — its own `<id>=<ref>`, else the bare one, else none. */
+export function refForRepo(window, repoId) {
+  return window.pinnedRefs?.get(repoId) ?? window.bareRef ?? null;
+}
+
+/**
+ * The window a sweep runs against, as data. Pure: `resolveRefDate` is injected,
+ * so every branch — including the unresolvable ref — is offline-testable.
+ *
+ * Returns `{ error }` for a window this sweep cannot parse. A window it cannot
+ * parse is a hard failure, never a default (the `parseSince` rule, one level up).
+ */
+export function resolveWindow({
+  sinceRefArgs = [],
+  sinceArg = null,
+  now = new Date(),
+  budgetSeconds = SKEW_BUDGET_SECONDS,
+  resolveRefDate = () => null,
+} = {}) {
+  const pinnedRefs = new Map();
+  let bareRef = null;
+  for (const raw of sinceRefArgs) {
+    const arg = String(raw);
+    const eq = arg.indexOf('=');
+    if (eq > 0) pinnedRefs.set(arg.slice(0, eq), arg.slice(eq + 1));
+    else bareRef = arg;
+  }
+  const backOff = (iso) => new Date(Date.parse(iso) - budgetSeconds * 1000).toISOString();
+
+  if (bareRef === null && pinnedRefs.size === 0) {
+    const requestedIso = parseSince(sinceArg ?? '24h', now);
+    if (!requestedIso) return { error: `--since wants <N>d, <N>h, or an ISO date; got '${sinceArg}'.` };
+    return { mode: 'date', bareRef: null, pinnedRefs, requestedIso, effectiveIso: backOff(requestedIso), budgetSeconds };
+  }
+
+  // The topological window still carries a date: it is what a repo the ref does
+  // not resolve in falls back to, and what `historyHorizon` is asked about
+  // there. The OLDEST resolved ref date is the conservative choice — a wider
+  // fallback window over-lists, which this audit tolerates by design.
+  const named = [bareRef, ...pinnedRefs.values()].filter((r) => r != null);
+  const dates = named.map((r) => resolveRefDate(r)).filter((d) => typeof d === 'string' && d !== '' && !Number.isNaN(Date.parse(d)));
+  if (dates.length === 0) {
+    return { error: `--since-ref ${named.map((r) => `'${r}'`).join(', ')} does not resolve to a commit.` };
+  }
+  const requestedIso = new Date(Math.min(...dates.map((d) => Date.parse(d)))).toISOString();
+  return { mode: 'topological', bareRef, pinnedRefs, requestedIso, effectiveIso: backOff(requestedIso), budgetSeconds };
+}
+
+/**
+ * The landing window over an already-walked first-parent chain (newest first).
+ * Pure, and the heart of #12633: the emitted set is the chain PREFIX down to
+ * the DEEPEST commit dated inside the window, so a commit that landed after
+ * something inside the window is never dropped for carrying an earlier date.
+ *
+ * `anchorAtEdge` is the proof obligation. The anchor is the deepest DATED-IN
+ * commit *of what was walked*; if nothing below it was walked, it cannot be
+ * shown to be the deepest one, and the caller must report INCOMPLETE rather
+ * than a clean window. `straddlers` are the entries a bare `--since` cut would
+ * have dropped — the re-listings the report line names.
+ */
+export function landingWindowFrom(rows, windowStartMs) {
+  let anchor = -1;
+  for (let i = rows.length - 1; i >= 0; i--) {
+    if (Date.parse(rows[i].date) >= windowStartMs) {
+      anchor = i;
+      break;
+    }
+  }
+  if (anchor === -1) return { commits: [], anchor: -1, anchorAtEdge: false, straddlers: [] };
+  const commits = rows.slice(0, anchor + 1);
+  return {
+    commits,
+    anchor,
+    anchorAtEdge: anchor === rows.length - 1,
+    straddlers: commits.filter((c) => Date.parse(c.date) < windowStartMs),
+  };
+}
+
+/** One first-parent walk, newest first — a date floor, a range, or the whole chain. */
+export function firstParentLog(root, ref, { sinceIso = null, base = null } = {}) {
+  const args = ['log', '--first-parent', '--format=%H%x09%cI%x09%s'];
+  if (sinceIso) args.push(`--since=${sinceIso}`);
+  args.push(base ? `${base}..${ref}` : ref);
+  return git(root, args)
     .split('\n')
     .filter((l) => l !== '')
     .map((l) => {
       const [sha, date, ...rest] = l.split('\t');
       return { sha, date, subject: rest.join('\t') };
     });
+}
+
+/** Has this commit no parent at all? Then a walk that ended on it saw everything. */
+function isRootCommit(root, sha) {
+  try {
+    return git(root, ['rev-list', '--parents', '-n', '1', sha]).trim().split(/\s+/).length === 1;
+  } catch {
+    return false;
+  }
+}
+
+/** The topological base for one repo — the pinned/bare ref, resolved HERE, or null. */
+export function topologicalBaseIn(root, window, repoId, resolve = (r, s) => git(r, ['rev-parse', '--verify', '--quiet', `${s}^{commit}`]).trim()) {
+  if (window.mode !== 'topological') return null;
+  const ref = refForRepo(window, repoId);
+  if (!ref) return null;
+  try {
+    const sha = resolve(root, ref);
+    return sha ? { ref, sha } : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The date window, walked with escalating floors until the anchor is PROVEN —
+ * one budget below the boundary (the common case, one walk), then a week, then
+ * the whole chain. Only a walk that still ends on the anchor, with a parent
+ * below it that was never read, is a WINDOW EDGE.
+ */
+export function datedWindowCommits(root, ref, window, { log = firstParentLog, isRoot = isRootCommit } = {}) {
+  const startMs = Date.parse(window.effectiveIso);
+  const budgetMs = Math.max(Number(window.budgetSeconds) || 0, 1) * 1000;
+  const floors = [new Date(startMs - budgetMs).toISOString(), new Date(startMs - 7 * 86_400_000).toISOString(), null];
+  let picked = null;
+  for (const floorIso of floors) {
+    const rows = log(root, ref, floorIso ? { sinceIso: floorIso } : {});
+    const found = landingWindowFrom(rows, startMs);
+    const bottom = rows.length > 0 ? rows[rows.length - 1] : null;
+    const atEdge = found.anchorAtEdge && !(floorIso === null && bottom !== null && isRoot(root, bottom.sha));
+    picked = { ...found, anchorAtEdge: atEdge, floorIso, walked: rows.length };
+    if (!atEdge) break;
+  }
+  return picked;
+}
+
+/**
+ * The mainline commits of `ref` inside `window`, newest first — topological
+ * where a ref resolves here, the budgeted date window otherwise, and never a
+ * bare `--since` cut. `fellBack` names WHY a topological sweep took the date
+ * window in this repo, so the report can say it per repo.
+ */
+export function mainlineCommitsInWindow(root, ref, window, { repoId = null, log = firstParentLog, isRoot = isRootCommit, base = undefined } = {}) {
+  const resolved = base === undefined ? topologicalBaseIn(root, window, repoId) : base;
+  if (window.mode === 'topological' && resolved) {
+    return { commits: log(root, ref, { base: resolved.sha }), mode: 'topological', base: resolved, anchorAtEdge: false, straddlers: [], fellBack: null };
+  }
+  const fellBack =
+    window.mode !== 'topological'
+      ? null
+      : refForRepo(window, repoId)
+        ? `'${refForRepo(window, repoId)}' does not resolve in this checkout`
+        : 'no --since-ref names this repo';
+  return { ...datedWindowCommits(root, ref, window, { log, isRoot }), mode: 'date', base: null, fellBack };
 }
 
 /** The paths a mainline commit changed, against its first parent. */
@@ -1194,18 +1423,71 @@ export function summariseAttributionFailures(entries) {
 
 // ── rendering ───────────────────────────────────────────────────────────────
 
+/**
+ * The window, in the words the operator reads — pure, and the half of route A
+ * the #12633 ruling names explicitly: the back-off has to be SAID, or a
+ * re-listed boundary entry reads as noise instead of as re-recognition.
+ */
+export function describeWindow(window) {
+  if (window.mode === 'topological') {
+    const refs = [
+      ...(window.bareRef ? [`any repo it resolves in: ${window.bareRef}`] : []),
+      ...[...(window.pinnedRefs ?? new Map())].map(([id, ref]) => `${id}: ${ref}`),
+    ].join('; ');
+    return [
+      `  window: TOPOLOGICAL — the first-parent range from the ref to origin/main, per repo (${refs}).`,
+      `      Committer dates are not consulted, so no build-to-land skew of any size can move this`,
+      `      boundary. A repo no ref resolves in falls back to the date window below and says so.`,
+    ].join('\n');
+  }
+  return [
+    `  window: DATE boundary ${window.requestedIso}, backed off by the ${window.budgetSeconds} s build-to-land`,
+    `      skew budget to ${window.effectiveIso}, then closed topologically down to the deepest commit`,
+    `      inside it (#12633). An entry you recognised last round may be RE-LISTED at the boundary —`,
+    `      that is RE-RECOGNITION, not noise; a dropped entry is never seen again.`,
+  ].join('\n');
+}
+
+/**
+ * Why a repo whose walk never reached below the boundary is INCOMPLETE rather
+ * than clean. Pure, and the #4690 invariant in one place: a skew larger than
+ * the budget must be readable as "we could not tell", never as an empty list.
+ */
+export function windowEdgeReason({ budgetSeconds }) {
+  return (
+    `the walk never saw a commit dated BELOW the boundary, so the deepest commit inside the window ` +
+    `cannot be shown to be the deepest one. A governed landing skewed further than the ${budgetSeconds} s ` +
+    `budget would be missing from the list above with nothing marking it — and a short governed list ` +
+    `reads as COMPLIANCE (#9902). Remedy: re-run with \`--since-ref <a tip you recorded>\` for a ` +
+    `topological window, or widen \`--since\`.`
+  );
+}
+
+/** The `--since-ref` line for the NEXT round — this script keeps no state of its own. */
+export function nextRoundRefLine(repos) {
+  const pins = repos.filter((r) => r.status === 'audited' && r.tip).map((r) => `--since-ref ${r.id}=${r.tip.sha.slice(0, 12)}`);
+  if (pins.length === 0) return [];
+  return [
+    `  next round, exactly: ${pins.join(' ')}`,
+    `      (record these tips — a topological window is exact, and this script stores nothing for you).`,
+  ];
+}
+
 /** The whole report as text — pure, so --self-test asserts on the words. */
-export function renderReport({ sinceIso, repos, scanned, entries, lookups }) {
+export function renderReport({ window, repos, scanned, entries, lookups }) {
   const audited = repos.filter((r) => r.status === 'audited');
   const unaudited = repos.filter((r) => r.status !== 'audited');
+  const edged = audited.filter((r) => r.windowIncomplete);
   const head =
-    `governed-merges sweep: ${entries.length} governed merge(s) since ${sinceIso} ` +
+    `governed-merges sweep: ${entries.length} governed merge(s) since ${window.requestedIso} ` +
     `across ${audited.length}/${repos.length} governed repo(s)\n` +
-    `  scanned ${scanned} mainline commit(s); ${lookups} API lookup(s).`;
+    `  scanned ${scanned} mainline commit(s); ${lookups} API lookup(s).\n` +
+    describeWindow(window);
   const auditedLines = audited.map(
-    (r) => `  ✓ audited  ${r.slug} — tip ${r.tip ? `${r.tip.sha.slice(0, 9)} @ ${r.tip.date}` : '(unknown)'}; ${r.scanned ?? 0} mainline commit(s) in window${r.horizon ? `; history ${r.horizon}` : ''}${r.quiet ? ' — none in window; if that tip predates your last fetch, run `git fetch origin main` there' : ''}`,
+    (r) => `  ✓ audited  ${r.slug} — tip ${r.tip ? `${r.tip.sha.slice(0, 9)} @ ${r.tip.date}` : '(unknown)'}; ${r.scanned ?? 0} mainline commit(s) in window${r.windowMode ? `; window ${r.windowMode}${r.windowBase ? ` from ${r.windowBase.sha.slice(0, 9)}` : ''}${r.windowFellBack ? ` (fell back — ${r.windowFellBack})` : ''}${r.straddlers ? `, ${r.straddlers} boundary re-listing(s)` : ''}` : ''}${r.horizon ? `; history ${r.horizon}` : ''}${r.quiet ? ' — none in window; if that tip predates your last fetch, run `git fetch origin main` there' : ''}`,
   );
   const unauditedLines = unaudited.map((r) => `  ⚠️  UNAUDITED  ${r.slug} — ${r.reason}`);
+  const edgeLines = edged.map((r) => `  ⚠️  WINDOW EDGE  ${r.slug} — ${r.windowIncomplete}`);
   const unauditedNote =
     unaudited.length > 0
       ? [
@@ -1218,12 +1500,12 @@ export function renderReport({ sinceIso, repos, scanned, entries, lookups }) {
     `  Every entry below should correspond to a merge the maintainer performed or ordered in person.`,
     `  An entry the maintainer does not recognise is the violation signal — file it as an incident (#9495 regime).`,
   ];
-  const preamble = [head, ...auditedLines, ...unauditedLines, ...unauditedNote, ...contract].join('\n');
+  const preamble = [head, ...auditedLines, ...unauditedLines, ...edgeLines, ...unauditedNote, ...nextRoundRefLine(repos), ...contract].join('\n');
 
   if (entries.length === 0) {
-    return unaudited.length > 0
-      ? `${preamble}\n  no governed surface was merged in the audited repo(s) — NOT a clean window; see UNAUDITED above.`
-      : `${preamble}\n  ✅  clean window — no governed surface was merged in any governed repo.`;
+    if (unaudited.length > 0) return `${preamble}\n  no governed surface was merged in the audited repo(s) — NOT a clean window; see UNAUDITED above.`;
+    if (edged.length > 0) return `${preamble}\n  no governed surface was merged inside the PROVEN part of the window — NOT a clean window; see WINDOW EDGE above.`;
+    return `${preamble}\n  ✅  clean window — no governed surface was merged in any governed repo.`;
   }
 
   const lines = entries.map((e) => {
@@ -1317,21 +1599,23 @@ async function main() {
   }
   const repoSet = only.length > 0 ? GOVERNED_REPOS.filter((r) => only.includes(r.id)) : GOVERNED_REPOS;
 
-  let sinceIso;
-  const sinceRef = argOf('--since-ref');
-  if (sinceRef) {
-    try {
-      sinceIso = git(selfRoot, ['log', '-1', '--format=%cI', `${sinceRef}^{commit}`]).trim();
-    } catch {
-      console.error(`❌  --since-ref '${sinceRef}' does not resolve to a commit.`);
-      return EXIT_CANNOT_SWEEP;
-    }
-  } else {
-    sinceIso = parseSince(argOf('--since') ?? '24h');
-    if (!sinceIso) {
-      console.error(`❌  --since wants <N>d, <N>h, or an ISO date; got '${argOf('--since')}'.`);
-      return EXIT_CANNOT_SWEEP;
-    }
+  // The window (#12633). `--since-ref` is topological and `--since` is a date
+  // boundary backed off by the declared skew budget; both are resolved here as
+  // data so the report can SAY which one it ran and what it cost.
+  const window = resolveWindow({
+    sinceRefArgs: argsOf('--since-ref'),
+    sinceArg: argOf('--since'),
+    resolveRefDate: (r) => {
+      try {
+        return git(selfRoot, ['log', '-1', '--format=%cI', `${r}^{commit}`]).trim();
+      } catch {
+        return null;
+      }
+    },
+  });
+  if (window.error) {
+    console.error(`❌  ${window.error}`);
+    return EXIT_CANNOT_SWEEP;
   }
 
   // Transport before credentials, and only once every argument has validated
@@ -1374,15 +1658,27 @@ async function main() {
       const [sha, date] = git(repo.path, ['log', '-1', '--format=%H%x09%cI', ref]).trim().split('\t');
       repo.tip = { sha, date };
       // Before enumerating: can this checkout SEE the whole window? A short
-      // answer here reads as compliance, so it must not be produced at all.
-      const horizon = historyHorizon({ cwd: repo.path, ref, sinceMs: Date.parse(sinceIso) });
-      if (!horizon.covered) {
-        repo.status = 'unaudited';
-        repo.reason = truncatedHorizonReason({ ref, horizon });
-        continue;
+      // answer here reads as compliance, so it must not be produced at all. A
+      // TOPOLOGICAL window answers that itself — the range is complete exactly
+      // when the ref is present here — so the date horizon is asked only of the
+      // repos that actually run a date window (#12633).
+      const base = topologicalBaseIn(repo.path, window, repo.id);
+      if (!base) {
+        const horizon = historyHorizon({ cwd: repo.path, ref, sinceMs: Date.parse(window.effectiveIso) });
+        if (!horizon.covered) {
+          repo.status = 'unaudited';
+          repo.reason = truncatedHorizonReason({ ref, horizon });
+          continue;
+        }
+        repo.horizon = describeHorizon(horizon);
       }
-      repo.horizon = describeHorizon(horizon);
-      commits = mainlineCommits(repo.path, ref, sinceIso);
+      const walked = mainlineCommitsInWindow(repo.path, ref, window, { repoId: repo.id, base });
+      commits = walked.commits;
+      repo.windowMode = walked.mode;
+      repo.windowBase = walked.base;
+      repo.windowFellBack = walked.fellBack;
+      repo.straddlers = walked.straddlers.length;
+      if (walked.anchorAtEdge) repo.windowIncomplete = windowEdgeReason({ budgetSeconds: window.budgetSeconds });
     } catch (error) {
       repo.status = 'unaudited';
       repo.reason = `cannot read ${ref} in ${repo.path}: ${String(error.message ?? error).split('\n')[0]} — run \`git fetch origin main\` there`;
@@ -1426,14 +1722,36 @@ async function main() {
   }
 
   const unaudited = repos.filter((r) => r.status !== 'audited');
-  const complete = !attributionFailed && unaudited.length === 0;
+  const edged = repos.filter((r) => r.status === 'audited' && r.windowIncomplete);
+  const complete = !attributionFailed && unaudited.length === 0 && edged.length === 0;
 
   if (args.includes('--json')) {
     console.log(
       JSON.stringify(
         {
-          since: sinceIso,
-          repos: repos.map((r) => ({ id: r.id, slug: r.slug, path: r.path, status: r.status, reason: r.reason, tip: r.tip ?? null, horizon: r.horizon ?? null, scanned: r.scanned ?? 0 })),
+          since: window.requestedIso,
+          window: {
+            mode: window.mode,
+            requested: window.requestedIso,
+            effective: window.effectiveIso,
+            skewBudgetSeconds: window.budgetSeconds,
+            refs: { bare: window.bareRef ?? null, pinned: Object.fromEntries(window.pinnedRefs ?? new Map()) },
+          },
+          repos: repos.map((r) => ({
+            id: r.id,
+            slug: r.slug,
+            path: r.path,
+            status: r.status,
+            reason: r.reason,
+            tip: r.tip ?? null,
+            horizon: r.horizon ?? null,
+            scanned: r.scanned ?? 0,
+            windowMode: r.windowMode ?? null,
+            windowBase: r.windowBase?.sha ?? null,
+            windowFellBack: r.windowFellBack ?? null,
+            windowIncomplete: r.windowIncomplete ?? null,
+            straddlers: r.straddlers ?? 0,
+          })),
           scanned,
           complete,
           channelsTried: channels.map((c) => c.id),
@@ -1444,17 +1762,19 @@ async function main() {
       ),
     );
   } else {
-    console.log(renderReport({ sinceIso, repos, scanned, entries, lookups }));
+    console.log(renderReport({ window, repos, scanned, entries, lookups }));
   }
 
   if (!complete) {
     const why = [];
     if (unaudited.length > 0) why.push(`${unaudited.length} governed repo(s) unaudited (${unaudited.map((r) => r.slug).join(', ')})`);
+    if (edged.length > 0) why.push(`${edged.length} governed repo(s) at the WINDOW EDGE (${edged.map((r) => r.slug).join(', ')}) — the boundary could not be proven`);
     if (attributionFailed) why.push('at least one entry has no merged_by reading on any channel');
     console.error(
       `\n⚠️  sweep INCOMPLETE — ${why.join('; ')}. The list above is printed, but it must not read as\n` +
         `    clean (#4690): "does the maintainer recognise every entry" cannot be answered over repos that\n` +
-        `    were never looked at or entries with no who-merged-it column.` +
+        `    were never looked at, windows whose boundary could not be proven, or entries with no\n` +
+        `    who-merged-it column.` +
         (attributionFailed && rearm.hint
           ? `\n    ⚠️  ${rearm.reason} — node's fetch is bypassing the session proxy, which answers 401/403 here.\n` +
             `        Re-run as NODE_OPTIONS=${PROXY_FLAG} before concluding anything about credentials (#9642).`
@@ -1505,6 +1825,10 @@ async function selfTest() {
     checked++;
     if (!cond) failures.push(`${name}: ${detail ?? ''}`);
   };
+  // Report fixtures take a REAL window from the real resolver, never a
+  // hand-built object: a shape drifting from `resolveWindow`'s would render
+  // green here and print nothing an operator could read.
+  const dateWindowFor = (iso) => resolveWindow({ sinceArg: iso });
 
   // ── the governed predicate: the 2026-08-18 unified list, exactly ──────────
   const ids = (paths) => governedPathsIn(paths).map((s) => s.id);
@@ -1547,6 +1871,134 @@ async function selfTest() {
   assert('since-days', parseSince('7d', now) === '2026-08-11T12:00:00.000Z');
   assert('since-iso', parseSince('2026-08-01', now) !== null);
   assert('since-nonsense-is-null-never-a-default', parseSince('yesterday', now) === null);
+
+  // ── the window: landing order, not committer dates (#12633) ──────────────
+  //
+  // The fixtures are the measured shapes, not imitations: QS-7 is a queue chain
+  // whose governed entry carries a committer date 874 s — the measured maximum
+  // inversion on this mainline — BEFORE its own first parent, with the boundary
+  // set at that parent's date, which is exactly what `--since <上轮>` produces.
+  // The old semantics dropped it and printed a clean window; the assertions
+  // below pin BOTH halves of the replacement — that it is listed, and that a
+  // skew the budget cannot cover reads as INCOMPLETE rather than as absent.
+  const ROUND_TIP_DATE = '2026-08-14T05:55:02Z';
+  const qs7Governed = { sha: '01a7337fc0'.padEnd(40, '0'), date: '2026-08-14T05:40:28Z', subject: 'docs(adr): kernel object ownership (#8620)' };
+  // Newest first, as `git log --first-parent` prints it. `qs7Governed` sits
+  // ABOVE the round tip — it landed later — while dated 874 s earlier.
+  const qs7Chain = [
+    { sha: 'a'.repeat(40), date: '2026-08-14T06:30:00Z', subject: 'chore: a later landing (#900)' },
+    qs7Governed,
+    { sha: 'b'.repeat(40), date: ROUND_TIP_DATE, subject: 'chore: the round tip (#899)' },
+    { sha: 'c'.repeat(40), date: '2026-08-14T04:00:00Z', subject: 'chore: well below the boundary (#898)' },
+  ];
+  const budgeted = resolveWindow({ sinceArg: ROUND_TIP_DATE });
+  assert('a-bare---since-is-a-date-window-backed-off-by-the-declared-budget',
+    budgeted.mode === 'date' && budgeted.budgetSeconds === SKEW_BUDGET_SECONDS && budgeted.effectiveIso === '2026-08-14T04:55:02.000Z',
+    JSON.stringify(budgeted));
+  assert('the-budget-is-never-the-measured-maximum-a-bound-at-todays-worst-case-self-invalidates',
+    SKEW_BUDGET_SECONDS > 874 && SKEW_BUDGET_SECONDS > 1939, String(SKEW_BUDGET_SECONDS));
+  // The control: the semantics this replaces. A bare committer-date cut at the
+  // round tip loses the governed entry, which is the whole card.
+  const naiveCut = qs7Chain.filter((c) => Date.parse(c.date) >= Date.parse(ROUND_TIP_DATE));
+  assert('QS-7-control-the-old-bare-date-cut-DROPS-the-governed-entry',
+    !naiveCut.some((c) => c.sha === qs7Governed.sha) && naiveCut.length === 2, JSON.stringify(naiveCut.map((c) => c.sha.slice(0, 4))));
+  const qs7 = landingWindowFrom(qs7Chain, Date.parse(budgeted.effectiveIso));
+  assert('QS-7-regression-pin-the-budgeted-window-LISTS-the-skewed-governed-entry',
+    qs7.commits.some((c) => c.sha === qs7Governed.sha) && qs7.anchorAtEdge === false, JSON.stringify(qs7.commits.map((c) => c.sha.slice(0, 4))));
+  assert('and-the-entry-classifies-as-governed-once-it-is-in-the-window',
+    classifyCommit(qs7.commits.find((c) => c.sha === qs7Governed.sha), ['docs/adr/0029-kernel-object-ownership.md']) !== null);
+  // The second mechanism, free of the budget: an entry dated BELOW the boundary
+  // that landed ABOVE something inside it is carried by the topological close,
+  // whatever the skew. This is the inversion class the budget cannot bound.
+  const beyondBudget = [
+    { sha: 'd'.repeat(40), date: '2026-08-14T06:30:00Z', subject: 'chore: later (#901)' },
+    { sha: 'e'.repeat(40), date: '2026-08-14T03:00:00Z', subject: 'docs(adr): skewed far past the budget (#8621)' },
+    { sha: 'f'.repeat(40), date: ROUND_TIP_DATE, subject: 'chore: the round tip (#899)' },
+    { sha: '0'.repeat(40), date: '2026-08-13T00:00:00Z', subject: 'chore: below (#897)' },
+  ];
+  const closed = landingWindowFrom(beyondBudget, Date.parse(budgeted.effectiveIso));
+  assert('an-entry-skewed-PAST-the-budget-is-still-carried-by-the-topological-close',
+    closed.commits.some((c) => c.sha === 'e'.repeat(40)) && closed.straddlers.length === 1, JSON.stringify(closed.straddlers.map((c) => c.sha.slice(0, 4))));
+  assert('and-those-re-listings-are-counted-so-the-report-can-name-them', closed.straddlers[0]?.sha === 'e'.repeat(40));
+  // The third case, and the invariant's teeth: a walk that never reached below
+  // the boundary cannot prove its anchor is the deepest one.
+  const unproven = landingWindowFrom(qs7Chain.slice(0, 3), Date.parse(budgeted.effectiveIso));
+  assert('a-walk-that-never-saw-a-commit-below-the-boundary-is-an-EDGE-not-a-clean-window',
+    unproven.anchorAtEdge === true, JSON.stringify(unproven));
+  assert('an-empty-walk-is-a-PROVEN-empty-window-not-an-edge',
+    landingWindowFrom([], Date.parse(budgeted.effectiveIso)).anchorAtEdge === false);
+  // The #4690 invariant itself, over every fixture: LISTED, or INCOMPLETE.
+  // Never clean-and-absent. Written as a property so a fourth fixture inherits it.
+  for (const [name, chain, watch] of [
+    ['QS-7', qs7Chain, qs7Governed.sha],
+    ['beyond-budget', beyondBudget, 'e'.repeat(40)],
+    ['unproven', qs7Chain.slice(0, 3), qs7Governed.sha],
+  ]) {
+    const got = landingWindowFrom(chain, Date.parse(budgeted.effectiveIso));
+    assert(`the-invariant-holds-on-${name}-listed-or-INCOMPLETE-never-clean-and-absent`,
+      got.commits.some((c) => c.sha === watch) || got.anchorAtEdge === true, JSON.stringify({ listed: got.commits.map((c) => c.sha.slice(0, 4)), edge: got.anchorAtEdge }));
+  }
+  // The escalating floors: one budget below the boundary answers the ordinary
+  // case in ONE walk, and only a chain that stays at the edge pays for more.
+  const walks = [];
+  const fakeLog = (root, ref, opts) => {
+    walks.push(opts.sinceIso ?? null);
+    return opts.sinceIso && Date.parse(opts.sinceIso) > Date.parse('2026-08-14T03:00:00Z') ? qs7Chain.slice(0, 3) : qs7Chain;
+  };
+  const escalated = datedWindowCommits('/w', 'origin/main', budgeted, { log: fakeLog, isRoot: () => false });
+  assert('the-walk-widens-until-the-anchor-is-proven-and-stops-there',
+    walks.length === 2 && escalated.anchorAtEdge === false && escalated.commits.length === 3, JSON.stringify({ walks, n: escalated.commits.length }));
+  const alwaysEdge = datedWindowCommits('/w', 'origin/main', budgeted, { log: () => qs7Chain.slice(0, 3), isRoot: () => false });
+  assert('a-chain-that-stays-at-the-edge-through-every-floor-reports-the-EDGE-not-a-clean-window',
+    alwaysEdge.anchorAtEdge === true && alwaysEdge.floorIso === null, JSON.stringify(alwaysEdge.floorIso));
+  const rootStop = datedWindowCommits('/w', 'origin/main', budgeted, { log: () => qs7Chain.slice(0, 3), isRoot: () => true });
+  assert('but-a-walk-that-reached-the-ROOT-commit-is-complete-by-construction-never-an-edge',
+    rootStop.anchorAtEdge === false, JSON.stringify(rootStop.floorIso));
+
+  // ── --since-ref is topological (#12633 route B) ───────────────────────────
+  const refDates = { 'v5.0.0-rc.3': '2026-08-14T05:55:02Z', deadbee: '2026-08-13T00:00:00Z' };
+  const topo = resolveWindow({ sinceRefArgs: ['v5.0.0-rc.3'], resolveRefDate: (r) => refDates[r] ?? null });
+  assert('a-bare---since-ref-is-a-TOPOLOGICAL-window', topo.mode === 'topological' && topo.bareRef === 'v5.0.0-rc.3', JSON.stringify(topo));
+  const pinned = resolveWindow({ sinceRefArgs: ['objectstack=v5.0.0-rc.3', 'objectui=deadbee'], resolveRefDate: (r) => refDates[r] ?? null });
+  assert('--since-ref-<id>=<ref>-pins-one-repo-and-is-repeatable',
+    pinned.pinnedRefs.get('objectstack') === 'v5.0.0-rc.3' && pinned.pinnedRefs.get('objectui') === 'deadbee', JSON.stringify([...pinned.pinnedRefs]));
+  assert('a-repos-own-pin-wins-over-the-bare-ref-and-an-unnamed-repo-takes-the-bare-one',
+    refForRepo(resolveWindow({ sinceRefArgs: ['v5.0.0-rc.3', 'objectui=deadbee'], resolveRefDate: (r) => refDates[r] ?? null }), 'objectui') === 'deadbee' &&
+      refForRepo(resolveWindow({ sinceRefArgs: ['v5.0.0-rc.3', 'objectui=deadbee'], resolveRefDate: (r) => refDates[r] ?? null }), 'cloud') === 'v5.0.0-rc.3');
+  assert('the-fallback-date-of-a-topological-window-is-the-OLDEST-resolved-ref-a-wider-window-over-lists-never-under-lists',
+    pinned.requestedIso === '2026-08-13T00:00:00.000Z', pinned.requestedIso);
+  assert('and-it-carries-the-budget-too-so-a-fallback-repo-is-no-worse-off-than-a---since-run',
+    pinned.effectiveIso === '2026-08-12T23:00:00.000Z', pinned.effectiveIso);
+  assert('an-unresolvable---since-ref-is-a-hard-failure-never-a-default-window',
+    typeof resolveWindow({ sinceRefArgs: ['nope'], resolveRefDate: () => null }).error === 'string');
+  assert('and-so-is-an-unparseable---since', typeof resolveWindow({ sinceArg: 'yesterday' }).error === 'string');
+  // The enumeration itself: topological consults NO date, and a repo the ref
+  // does not resolve in says why it took the date window instead.
+  const topoWalk = mainlineCommitsInWindow('/w/objectstack', 'origin/main', topo, {
+    repoId: 'objectstack',
+    base: { ref: 'v5.0.0-rc.3', sha: 'f'.repeat(40) },
+    log: (root, ref, opts) => (opts.base === 'f'.repeat(40) ? qs7Chain : []),
+  });
+  assert('a-topological-sweep-enumerates-the-range-and-never-a-date-cut',
+    topoWalk.mode === 'topological' && topoWalk.commits.length === 4 && topoWalk.anchorAtEdge === false, JSON.stringify(topoWalk.mode));
+  assert('and-it-lists-the-skewed-governed-entry-with-no-budget-involved-at-all',
+    topoWalk.commits.some((c) => c.sha === qs7Governed.sha));
+  const fellBack = mainlineCommitsInWindow('/w/cloud', 'origin/main', topo, { repoId: 'cloud', base: null, log: () => qs7Chain, isRoot: () => false });
+  assert('a-repo-the-ref-does-not-resolve-in-falls-back-to-the-budgeted-date-window-and-NAMES-why',
+    fellBack.mode === 'date' && /does not resolve in this checkout/.test(fellBack.fellBack), JSON.stringify(fellBack.fellBack));
+
+  // ── the words an operator reads about the window ─────────────────────────
+  const dateWords = describeWindow(budgeted);
+  assert('the-date-window-line-states-the-budget-it-subtracted-and-both-boundaries',
+    dateWords.includes('3600 s') && dateWords.includes(budgeted.requestedIso) && dateWords.includes('2026-08-14T04:55:02.000Z'), dateWords);
+  assert('and-says-a-re-listed-boundary-entry-is-RE-RECOGNITION-not-noise',
+    dateWords.includes('RE-RECOGNITION') && dateWords.includes('never seen again'), dateWords);
+  const topoWords = describeWindow(topo);
+  assert('the-topological-line-says-committer-dates-are-not-consulted-at-all',
+    topoWords.includes('TOPOLOGICAL') && topoWords.includes('Committer dates are not consulted') && topoWords.includes('v5.0.0-rc.3'), topoWords);
+  const edgeWords = windowEdgeReason({ budgetSeconds: SKEW_BUDGET_SECONDS });
+  assert('the-window-edge-reason-names-the-budget-the-DIRECTION-and-a-runnable-remedy',
+    edgeWords.includes('3600 s') && /COMPLIANCE/.test(edgeWords) && edgeWords.includes('--since-ref'), edgeWords);
 
   // ── classification + replay fixtures ─────────────────────────────────────
   assert('ungoverned-commit-classifies-null', classifyCommit({ sha: 'a'.repeat(40), date: '2026-08-18T00:00:00Z', subject: 'fix: x (#1)' }, ['packages/spec/src/index.ts']) === null);
@@ -1596,16 +2048,53 @@ async function selfTest() {
 
   // ── the report words an operator reads ────────────────────────────────────
   const allAudited = resolved.map((r) => ({ ...r, status: 'audited', reason: null, tip: { sha: 'c'.repeat(40), date: '2026-08-18T00:00:00Z' }, scanned: 3 }));
-  const clean = renderReport({ sinceIso: '2026-08-17T00:00:00Z', repos: allAudited, scanned: 12, entries: [], lookups: 0 });
+  const clean = renderReport({ window: dateWindowFor('2026-08-17T00:00:00Z'), repos: allAudited, scanned: 12, entries: [], lookups: 0 });
   assert('clean-window-says-clean-and-costs-zero-lookups', clean.includes('clean window') && clean.includes('0 API lookup(s)'), clean);
   assert('a-clean-sweep-names-every-repo-it-audited', GOVERNED_REPOS.every((r) => clean.includes(r.slug)), clean);
-  const withAbsent = renderReport({ sinceIso: '2026-08-17T00:00:00Z', repos: resolved.map((r) => ({ ...r, tip: r.status === 'audited' ? { sha: 'c'.repeat(40), date: '2026-08-18T00:00:00Z' } : undefined, scanned: 3 })), scanned: 9, entries: [], lookups: 0 });
+  const withAbsent = renderReport({ window: dateWindowFor('2026-08-17T00:00:00Z'), repos: resolved.map((r) => ({ ...r, tip: r.status === 'audited' ? { sha: 'c'.repeat(40), date: '2026-08-18T00:00:00Z' } : undefined, scanned: 3 })), scanned: 9, entries: [], lookups: 0 });
   // The ✅ marker, not the words: "NOT a clean window" contains "clean window",
   // so a substring test on the phrase alone would pass while the green tick
   // still printed. Assert on the tick and on the refusal sentence together.
   assert('an-unaudited-repo-never-renders-as-a-clean-window', !withAbsent.includes('✅') && withAbsent.includes('UNAUDITED') && withAbsent.includes('NOT a clean window'), withAbsent);
   assert('and-the-clean-case-does-print-the-tick', clean.includes('✅'), clean);
   assert('the-unaudited-line-names-the-repo-and-the-reason', withAbsent.includes('objectstack-ai/cloud') && withAbsent.includes('no git checkout'), withAbsent);
+
+  // ── an unproven window boundary never renders as a clean window (#12633) ──
+  //
+  // The same shape as the UNAUDITED case and for the same reason: a repo whose
+  // boundary could not be proven is not a repo with nothing to report. Assert
+  // on the TICK, not on the phrase — "NOT a clean window" contains the phrase.
+  const withEdge = renderReport({
+    window: dateWindowFor('2026-08-17T00:00:00Z'),
+    repos: [{ ...allAudited[0], windowMode: 'date', straddlers: 0, windowIncomplete: windowEdgeReason({ budgetSeconds: SKEW_BUDGET_SECONDS }) }, ...allAudited.slice(1)],
+    scanned: 12,
+    entries: [],
+    lookups: 0,
+  });
+  assert('a-repo-at-the-window-edge-never-renders-the-green-tick',
+    !withEdge.includes('✅') && withEdge.includes('WINDOW EDGE') && withEdge.includes('NOT a clean window'), withEdge);
+  assert('and-the-edge-line-names-the-repo-and-what-could-not-be-proven',
+    withEdge.includes('objectstack-ai/objectstack') && withEdge.includes('deepest commit inside the window'), withEdge);
+  assert('every-sweep-prints-the---since-ref-line-to-record-for-the-next-round',
+    clean.includes('next round, exactly:') && clean.includes('--since-ref objectstack=cccccccccccc'), clean);
+  const relisting = renderReport({
+    window: dateWindowFor('2026-08-17T00:00:00Z'),
+    repos: [{ ...allAudited[0], windowMode: 'date', straddlers: 2 }, ...allAudited.slice(1)],
+    scanned: 12,
+    entries: [],
+    lookups: 0,
+  });
+  assert('a-repo-line-says-which-window-it-ran-and-how-many-boundary-re-listings-it-cost',
+    relisting.includes('window date') && relisting.includes('2 boundary re-listing(s)'), relisting);
+  const topoReport = renderReport({
+    window: resolveWindow({ sinceRefArgs: ['v5.0.0-rc.3'], resolveRefDate: () => '2026-08-17T00:00:00Z' }),
+    repos: [{ ...allAudited[0], windowMode: 'topological', windowBase: { ref: 'v5.0.0-rc.3', sha: 'e'.repeat(40) }, straddlers: 0 }, ...allAudited.slice(1)],
+    scanned: 12,
+    entries: [],
+    lookups: 0,
+  });
+  assert('a-topological-repo-line-names-the-base-it-windowed-from',
+    topoReport.includes('window topological from eeeeeeeee'), topoReport);
 
   // ── a truncated history is UNAUDITED, not a clean sweep (#9902) ───────────
   //
@@ -1625,7 +2114,7 @@ async function selfTest() {
   assert('and-it-names-the-DIRECTION-under-enumeration-reads-as-compliance', /COMPLIANCE/.test(truncated), truncated);
   assert('and-it-carries-a-runnable-remedy', truncated.includes('fetch --unshallow'), truncated);
   const withTruncated = renderReport({
-    sinceIso: '2026-05-23T00:00:00Z',
+    window: dateWindowFor('2026-05-23T00:00:00Z'),
     repos: [{ ...allAudited[0], status: 'unaudited', reason: truncated, scanned: 1 }, ...allAudited.slice(1)],
     scanned: 1,
     entries: [],
@@ -1642,7 +2131,7 @@ async function selfTest() {
     describeHorizon({ shallow: true, floor: '2026-06-02' }) === 'shallow, oldest visible 2026-06-02 (predates the window)');
   assert('a-complete-clone-says-so-instead', describeHorizon({ shallow: false, floor: null }) === 'complete clone');
   const sweptShallow = renderReport({
-    sinceIso: '2026-08-20T00:00:00Z',
+    window: dateWindowFor('2026-08-20T00:00:00Z'),
     repos: allAudited.map((r) => ({ ...r, horizon: describeHorizon({ shallow: true, floor: '2026-06-02' }) })),
     scanned: 12,
     entries: [],
@@ -1652,7 +2141,7 @@ async function selfTest() {
     sweptShallow.includes('history shallow, oldest visible 2026-06-02'), sweptShallow);
   assert('and-a-covered-shallow-sweep-is-still-allowed-to-be-clean', sweptShallow.includes('✅'), sweptShallow);
   const noPr = classifyCommit({ sha: 'd'.repeat(40), date: '2026-08-18T00:00:00Z', subject: 'chore: direct push' }, ['AGENTS.md'], GOVERNED_REPOS[0]);
-  const loud = renderReport({ sinceIso: '2026-08-17T00:00:00Z', repos: allAudited, scanned: 3, entries: [noPr], lookups: 0 });
+  const loud = renderReport({ window: dateWindowFor('2026-08-17T00:00:00Z'), repos: allAudited, scanned: 3, entries: [noPr], lookups: 0 });
   assert('a-pr-less-mainline-commit-is-its-own-loud-entry', loud.includes('NO PR NUMBER IN SUBJECT'), loud);
   assert('the-violation-contract-is-stated-on-every-sweep', clean.includes('violation signal') && loud.includes('violation signal'));
 
@@ -1686,11 +2175,11 @@ async function selfTest() {
   assert('two-failures-with-one-cause-collapse-to-ONE-named-line-not-per-entry-spam', notes.length === 1, JSON.stringify(notes));
   assert('the-named-line-names-repo-entries-and-every-channel-tried', notes[0].includes('objectstack-ai/cloud') && notes[0].includes('#101, #102') && notes[0].includes('HTTP 401') && notes[0].includes('anonymous REST'), notes[0]);
   assert('two-different-causes-do-not-collapse', summariseAttributionFailures([failedEntries[0], { ...failedEntries[1], attributionError: 'anonymous REST: request failed (ENOTFOUND)' }]).length === 2);
-  const unresolvedReport = renderReport({ sinceIso: '2026-08-17T00:00:00Z', repos: allAudited, scanned: 3, entries: failedEntries, lookups: 2 });
+  const unresolvedReport = renderReport({ window: dateWindowFor('2026-08-17T00:00:00Z'), repos: allAudited, scanned: 3, entries: failedEntries, lookups: 2 });
   assert('an-unattributed-entry-is-marked-UNAVAILABLE-never-silently-blank', unresolvedReport.includes('merged_by UNAVAILABLE'), unresolvedReport);
   assert('the-reason-appears-once-below-the-list-not-inside-every-entry', unresolvedReport.split('HTTP 401').length - 1 === 1, unresolvedReport);
   const resolvedReport = renderReport({
-    sinceIso: '2026-08-17T00:00:00Z',
+    window: dateWindowFor('2026-08-17T00:00:00Z'),
     repos: allAudited,
     scanned: 3,
     entries: [{ ...classifyCommit({ sha: 'e'.repeat(40), date: '2026-08-18T00:00:00Z', subject: 'docs: a (#5188)' }, ['AGENTS.md'], GOVERNED_REPOS[1]), attribution: { mergedBy: 'os-steve', mergedAt: '2026-08-18T09:00:00Z' }, attributionChannel: 'anonymous' }],
