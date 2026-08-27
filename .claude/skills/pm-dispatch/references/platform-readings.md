@@ -9,10 +9,14 @@
   重跑 CI),两者独立、缺席不构成反证(实测:某仓 ruleset 强制而无 trigger,队列照收 PR);权威读
   数 = 合并尝试本身(回 405 `Changes must be made through the merge queue`)或 rulesets API;姊妹仓不一
   致(objectos 2026-08-18 起有队列,hotcrm 只有 ruleset)⇒ 新仓靠实测,⛔ 不由缺席推断(2026-08-20)。
-- 判「在不在合并队列」看 timeline 事件 `added_to_merge_queue`(REST
-  `GET /repos/{owner}/{repo}/issues/{pr}/timeline`),⛔ 不看 `auto_merge` 字段 —— 入队后它回落为 off,零
-  信息量(维护者 2026-08-11 裁定)。队列分支(ls-remote 拼写见「零成本等价物」)正命中即已入
-  队,缺席不作反证 —— 队列满载时分支尚未建出。
+- 判「在不在合并队列」的**决断**读数是 timeline 事件 `added_to_merge_queue` /
+  `removed_from_merge_queue`(REST `GET /repos/{owner}/{repo}/issues/{pr}/timeline`)—— 它**可按需
+  重查、一次调用双向答**,分得开「从未入队」与「入队后被踢」;`pull_request.enqueued` webhook
+  订阅了的会话确实收得到(与 timeline 差 ~1 秒),但推送式**不可重读** —— 新上下文或当时
+  没订阅就取不回,故只作旁证,⛔ 不作决策依据。⛔ `auto_merge` 字段不只是空,是**不稳
+  定**:同一 PR 一分钟内先 `set` 后 `None`(2026-08-26 实测),入队后又回落为 off(维护者
+  2026-08-11 裁定)—— 永不据它判「没挂上」而重挂(重挂踢队重排)。队列分支(ls-remote 拼写
+  见「零成本等价物」)正命中即已入队,缺席不作反证 —— 队列满载时分支尚未建出。
 - **成功序列读间隔不读事件名**:`removed_from_merge_queue` 后 ~1 秒内跟 `merged` 是落地不是被
   踢;真被踢是其后无 `merged`、几分钟后 PR 仍 open。
 - 「不在 `origin/main` 上」是二义读数(在队列里等 / 没入队,处置相反)—— 落地检查永远两个
@@ -89,12 +93,11 @@
   —— 它兼任不了通道探针;探针 = 一条真 repo-scoped 读。探针 403 后 `/rate_limit` 是**单调用
   凭据判别**:15000/时 = 凭据活、被 repo-scoping 拒;60/时或 auth 错 = 无凭据(实测有席位 token
   是 14 字节占位串),两形同症不同治。**按班矩阵**:2026-08-25 两车道 5+ dev 席全被门拒(整类
-  403、读写同门 —— 加法标签 POST、评论 PATCH 同死 ⇒ 无评论编辑通道,更正=重发;`gh` 缺
-  席,MCP 与 git push 正常);2026-08-26 反例一席:os-dev 席门开,加法 POST 回 200、/rate_limit
-  15000/时;顶层席同窗分裂(两 403、一 200,2026-08-24)⇒ **门态逐容器变**,⛔ 不据他席、他日读
-  数推本席,唯一安全读法即本行的 repo-scoped 探针。**门关着时的降级梯**:① git 先行(「零成
-  本等价物」);② 公开仓 payload 档(下方「公开仓」条);③ MCP:search 定向一击、列表**单标
-  签**读全 + 本地求交(`labels` 是 OR,见 MCP 参数条);④ 等重置。
+  403、读写同门 —— 加法标签 POST、评论 PATCH 同死 ⇒ 无评论编辑通道,更正=重发);2026-08-26
+  反例一席门开,加法 POST 回 200;顶层席同窗分裂(两 403、一 200)⇒ **门态逐容器变**,⛔ 不据
+  他席、他日读数推本席,唯一安全读法即本行 repo-scoped 探针。**门关着时的降级梯**:① git
+  先行(「零成本等价物」);② 公开仓 payload 档(下方「公开仓」条);③ MCP:search 定向一击、列
+  表**单标签**读全 + 本地求交(`labels` 是 OR,见 MCP 参数条);④ 等重置。
 - **默认读序 git → payload → REST → MCP/GraphQL**(2026-08-23 策略翻转,2026-08-25 增补 payload 档;
   ⚠️ REST 档以**本班 repo-scoped 探针绿**为前提 —— 前提就住本行,403 会话改按降级梯读)。
   list/查重/卡与 PR 读/标签回读默认走容器 curl 的 REST 通道 —— App installation token,core
@@ -177,13 +180,11 @@
 - **`list_issues` 永不返回 assignees**(`fields` 枚举无此成员,不传也没有)—— 已认领卡与空闲卡
   响应逐字节相同,清单只是**候选名单**:每条认领前必须过完整 `issue_read`(它才返回
   `assignees`),⛔ 不把清单当候选集直接认领。
-- **MCP `issue_read` 的 body 实体转义是纯读侧伪影**(撇号/引号/尖括号成数字实体;comments 原
-  样),存储体是明文,**先解码实体再写回**往返实测安全(无双重转义)—— 腐蚀 body 的恰是把
-  转义读数原样回写;⚠️ 但读侧**并非一律可逆** —— 行内反引号里的尖括号片段被 MCP 读
-  路径**整个丢弃**(不是转义,无从解码回来),判据与处置见「读数陷阱」判截断行;写侧剥
-  除(HTML 注释、tag 形状片段 —— 细则见「读数陷阱」写侧行)是**真实存储损耗**,⛔ 两类不
-  并成一条「API 会改 body」,写后回读因此必做;实体归属(MCP 还是 GitHub API)与 `&amp;` 类未实
-  测。
+- **MCP `issue_read` 的 body 实体转义是纯读侧伪影**(撇号/引号/尖括号成数字实体;comments
+  原样),存储体是明文,**先解码实体再写回**往返实测安全 —— 腐蚀 body 的恰是把转义读数
+  原样回写;⚠️ 但读侧**并非一律可逆** —— 行内反引号里的尖括号片段被 MCP 读路径**整
+  个丢弃**(不是转义,无从解码回来),判据见「读数陷阱」判截断行。写侧剥除是**真实存储
+  损耗**,⛔ 两类不并成一条「API 会改 body」,写后回读必做;实体归属与 `&amp;` 类未实测。
 - **`Blocked-by:` 行归 BODY(单通道反向索引)**:追加按上条「解码后写回」执行;历史上寄放在评
   论里的行按同程序**增量**回填(⛔ 不搞批量突击 —— 限流压力);解锁扫描只 grep body,⛔ 不
   加常设评论读;旧「连评论一起扫(`in:comments`)」提示作废,扫描走直读(`list_issues` + `issue_read`
@@ -281,10 +282,9 @@
   `git push origin --delete <b>` 回 `send-pack: unexpected disconnect while reading sideband packet`,三次退避全
   败;**同会话普通 push 正常** ⇒ 不是连通性问题),于是测量型派发留下的探针分支永久堆在
   origin 上。读法规则:`claude/issue-*` 分支**零提交领先 `origin/main` 且没有开着的 PR** = 不承载
-  任何工作,⛔ 不据 `ls-remote | grep issue-` 的正命中回避该卡 —— 失效方向是**活卡被永久读
-  成已被认领**(无红信号、只增不减,认领前的在飞预检恰恰依赖它)。判据两
-  读:`git rev-list --count origin/main..origin/<b>` 为 0,且该分支名下无 open PR。边界:一容器一会话三
-  次,成因未诊断(代理 / 服务端钩子 / 分支保护未分辨),存量未普查。
+  任何工作,⛔ 不据 `ls-remote | grep issue-` 正命中回避该卡 —— 失效方向是**活卡被永久读成
+  已被认领**,无红信号、只增不减。判据两读:`git rev-list --count origin/main..origin/<b>` 为 0,且
+  分支名下无 open PR。边界:一容器一会话三次,成因未诊断,存量未普查。
 - **会话从上下文检测不到自己的静默降档**(2026-08-20 实测:一次分诊 fire 两级静默降档,横幅
   只在 UI 侧渲染、上下文零信号,子轮开场自述「跑在契约复审档」)——服役档的权威读数
   是 `get_session`(claude-code-remote MCP,无参)的 `external_metadata.last_served_model`(最近一轮实
