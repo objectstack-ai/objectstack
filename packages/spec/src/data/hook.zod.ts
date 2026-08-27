@@ -397,6 +397,18 @@ export const HookContextSchema = lazySchema(() => z.object({
    *   `for…in` list the record fields and hide the wrapper keys (the proxy's
    *   `ownKeys` trap), so a diff written as
    *   `Object.keys(input).filter(k => input[k] !== previous[k])` sees fields.
+   *   What that trap reports is the payload's OWN key set, not its ENUMERABLE
+   *   subset (#12578): `Object.getOwnPropertyNames(input)` and
+   *   `Reflect.ownKeys(input)` answer for a key the payload holds
+   *   non-enumerable — which a handler can create, since #12277 routes
+   *   `Object.defineProperty` into the payload — and they answer the same way
+   *   `hasOwnProperty` and `Object.getOwnPropertyDescriptor` (#12397's mirror)
+   *   do. The three own-ness instruments agreeing IS the contract; the
+   *   `Object.keys`/spread/`for…in` face above is unchanged by it, because
+   *   those filter by `enumerable` themselves. Symbol keys reach the payload
+   *   and persist but are NOT enumerated — the one remaining split, left open
+   *   deliberately on #12578 because publishing them is a question about what
+   *   a record payload may hold, not about the trap.
    * - declarative `body` (L2 sandboxed JS): `ctx.input` IS the flat record —
    *   a plain snapshot the runner takes as `unwrapProxyToPlain(engineCtx.input)`
    *   (`packages/runtime/src/sandbox/body-runner.ts`), i.e. `Object.entries`

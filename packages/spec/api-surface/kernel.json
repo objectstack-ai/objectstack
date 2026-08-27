@@ -13,8 +13,6 @@
     "BreakingChange (type)",
     "BreakingChangeParsed (type)",
     "BreakingChangeSchema (const)",
-    "CLICommandContribution (type)",
-    "CLICommandContributionSchema (const)",
     "CONSUMER_INSTALLABLE_TYPES (const)",
     "CORE_PLUGIN_TYPES (const)",
     "CapabilityClassification (interface)",

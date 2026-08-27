@@ -3012,11 +3012,11 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
   sys_secret: {
     label: "密钥",
     pluralLabel: "密钥",
-    description: "由 sys_setting 句柄引用的密文存储。绝不保存明文。",
+    description: "由三个特权写入方写入的密文存储（见 managedBy）；每个写入方各自在自己的列中保存句柄。绝不保存明文。",
     fields: {
       id: {
         label: "ID",
-        help: "由 `sys_setting.value_enc` 引用的不透明句柄。"
+        help: "不透明句柄。引用保存在写入方各自的持有列中 —— `sys_setting.value_enc`、业务记录上的 `secret:` 引用，或数据源的 `credentialsRef`；因此某行未被 `sys_setting` 引用，并不等于它未被引用。"
       },
       created_at: {
         label: "创建时间",
@@ -3028,11 +3028,11 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       namespace: {
         label: "命名空间",
-        help: "该密钥所属的设置命名空间。"
+        help: "按写入方限定的标签，并非普遍意义上的设置命名空间：`SettingsService` 写入设置命名空间，引擎的 `secret` 字段加密写入对象名，数据源绑定器写入调用方提供的范围（默认 `datasource`）。见 managedBy。"
       },
       key: {
         label: "键",
-        help: "命名空间内的标识键。"
+        help: "与 `namespace` 配对的、按写入方限定的标签：设置的标识键、被加密的 `secret` 字段名，或数据源名。该配对记录的是写入方如何寻址该值；它并不标明是哪个写入方写入了该行。"
       },
       kms_key_id: {
         label: "KMS 密钥 ID",

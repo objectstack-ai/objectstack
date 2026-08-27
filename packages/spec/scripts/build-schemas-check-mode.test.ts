@@ -2186,6 +2186,118 @@ describe('build-schemas.ts — the output clean spares a sibling generator (#537
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// #12588 — the bundle's `x-schema-count` counts what the bundle carries.
+//
+// `objectstack.json` ships in the npm tarball and a docs page publishes the
+// field's meaning ("its `x-schema-count` field reports the total number of
+// definitions"), so the number is a contract, not a build log. It used to be
+// taken from `count` — incremented once per EMIT — while `$defs` is assembled
+// from a map keyed by `<category>/<Name>`. Every def key written twice therefore
+// widened a gap nothing reconciled: the published bundle declared 1596
+// definitions and shipped 1585.
+//
+// The unit half (scripts/def-key-collisions.test.ts) pins the arithmetic. What
+// only this sandbox can assert is that the artifact the generator really writes
+// describes itself correctly — the assertions below read the emitted bytes, not
+// a helper's return value. `src/` is symlinked into the sandbox, so this runs
+// over the REAL spec surface (~1600 schemas), which is also what makes the
+// non-vacuity guard below meaningful: this build genuinely collapses emits.
+//
+// The invariant is pinned, never today's absolute number — 1585 moves with
+// every schema anyone adds, and a test that has to be edited by unrelated PRs
+// gets edited without being read.
+describe('build-schemas.ts — the bundle counts the definitions it carries (#12588)', () => {
+  const OUT = () => path.join(sandbox, 'json-schema');
+
+  beforeEach(() => {
+    // A current, self-consistent tree, so the run exits 0 and these assertions
+    // are about the bundle rather than about some ratchet upstream of it.
+    seedManifest((s) => s);
+    const tip = seedBase((s) => s);
+    seedSurface((s) => s);
+    seedSurfaceBase(tip, (k) => k);
+  });
+
+  it(
+    'writes x-schema-count equal to its own $defs size, and to the files on disk',
+    { timeout: SPAWN_TIMEOUT_MS },
+    () => {
+      const { status, output } = run([]);
+      expect(status).toBe(0);
+
+      const bundle = JSON.parse(
+        fs.readFileSync(path.join(OUT(), 'objectstack.json'), 'utf8'),
+      ) as { 'x-schema-count': number; $defs: Record<string, unknown> };
+      const defCount = Object.keys(bundle.$defs).length;
+
+      // 1. The artifact describes itself.
+      expect(bundle['x-schema-count']).toBe(defCount);
+
+      // 2. A second, independent instrument: one file per def key on disk. The
+      //    per-schema writes collapse the same way the map does, so the tree is
+      //    a witness the bundle cannot fabricate. `openapi.json` belongs to
+      //    gen:openapi and objectstack.json is the bundle itself.
+      const onDisk = fs
+        .readdirSync(OUT(), { recursive: true, encoding: 'utf8' })
+        .filter(
+          (entry) =>
+            entry.endsWith('.json') &&
+            path.basename(entry) !== 'objectstack.json' &&
+            path.basename(entry) !== 'openapi.json',
+        );
+      expect(onDisk).toHaveLength(defCount);
+
+      // 3. The generator's own console agrees, so a reader of the build log and
+      //    a reader of the artifact reach the same number.
+      expect(output).toContain(`objectstack.json (${defCount} definitions)`);
+    },
+  );
+
+  it(
+    'accounts for every emit the definition count does not include',
+    { timeout: SPAWN_TIMEOUT_MS },
+    () => {
+      const { status, output } = run([]);
+      expect(status).toBe(0);
+
+      const bundle = JSON.parse(
+        fs.readFileSync(path.join(OUT(), 'objectstack.json'), 'utf8'),
+      ) as { 'x-schema-count': number };
+      const emitted = Number(/Successfully generated (\d+) schemas/.exec(output)?.[1]);
+      expect(Number.isFinite(emitted), 'summary line must report the emit total').toBe(true);
+
+      // Non-vacuity: this build must still collapse emits, or the case proves
+      // nothing about the defect. If a future PR removes the last self-alias
+      // from the spec, `x-schema-count: count` and the correct expression stop
+      // differing and this pin can no longer fail — delete it deliberately
+      // then, rather than discovering later that it had gone quiet.
+      expect(
+        emitted,
+        'no emit collapses any more — this build no longer models #12588',
+      ).toBeGreaterThan(bundle['x-schema-count']);
+
+      // The delta is reported, not left as a subtraction between two lines —
+      // that silence is what let a wrong number ship unnoticed. The reported
+      // figure must reconcile the two totals exactly.
+      const collapsed = Number(/ℹ️\s+(\d+) emit\(s\) collapsed/.exec(output)?.[1]);
+      expect(Number.isFinite(collapsed), 'the collapsed-emit report line must be printed').toBe(true);
+      expect(emitted - collapsed).toBe(bundle['x-schema-count']);
+
+      // Every collapsed key is named, and named as a self-alias: the guard
+      // upstream exits on any def key written twice by DIFFERENT schemas, so a
+      // build that reaches here has only benign ones. Stating it in the report
+      // is what makes that population readable instead of implied.
+      expect(output).toContain('all self-aliases');
+      const named = [...output.matchAll(/ {5}json-schema\/(\S+)\.json {2}<- {2}/g)].map((m) => m[1]);
+      expect(named.length).toBeGreaterThan(0);
+      for (const defKey of named) {
+        expect(fs.existsSync(path.join(OUT(), `${defKey}.json`))).toBe(true);
+      }
+    },
+  );
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // #4659 — check (b) registers a tombstone by its EXACT key, not by its leaf.
 //
 // Until this change, "live → retired must be registered" was satisfied by

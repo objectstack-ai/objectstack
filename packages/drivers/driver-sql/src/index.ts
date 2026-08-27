@@ -14,6 +14,17 @@ export { resolveSqliteAbsentFileTarget } from './sql-driver.js';
 // stops an embedder from re-deriving the seam (or, worse, putting the text back
 // on the wire by spreading the error, which the symbol key exists to prevent).
 export { withheldFilterDiagnosticOf } from './sql-driver.js';
+// [#11991] The #11756 emission-scope refusal. Exported because a host that
+// renders its own diagnostics (Studio, `os migrate plan`, an installer) needs
+// the structured `client` / `supportedClients` and the stable `code` — the
+// alternative is parsing the sentence back out of `message`, which is how a
+// refusal's wording becomes an accidental contract.
+export {
+  DIALECT_EMISSION_UNSUPPORTED_CODE,
+  DIALECT_EMISSION_UNSUPPORTED_STATUS,
+  UnsupportedDialectEmissionError,
+  renderDialectEmissionRefusal,
+} from './dialect-emission-refusal.js';
 export type {
   SqlDriverConfig,
   SqliteJournalMode,

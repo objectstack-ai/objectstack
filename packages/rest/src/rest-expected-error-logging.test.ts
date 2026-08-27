@@ -110,7 +110,7 @@ async function callDataList(rest: any, object: string) {
 let errorSpy: ReturnType<typeof vi.spyOn>;
 
 /** Only the "[REST] Unhandled error" channel — other console.error noise is not this test's business. */
-const unhandledLogs = () => errorSpy.mock.calls.filter((c) => c[0] === '[REST] Unhandled error:');
+const unhandledLogs = () => errorSpy.mock.calls.filter((c: unknown[]) => c[0] === '[REST] Unhandled error:');
 
 beforeEach(() => { errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {}); });
 afterEach(() => { errorSpy.mockRestore(); });

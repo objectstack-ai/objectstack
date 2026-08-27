@@ -97,6 +97,21 @@ export const RestApiConfigSchema = lazySchema(() => z.object({
   enableOpenApi: z.boolean().default(true).describe('Enable OpenAPI 3.1 spec & docs viewer endpoints'),
 
   /**
+   * Deployment-wide switch for the structured-search surface. `false` skips
+   * mounting the search endpoints entirely (`registerSearchEndpoints` is never
+   * called, so the routes 404), and the discovery capability block reports
+   * `search.enabled: false` regardless of what the underlying protocol could
+   * serve — declared and enforced at the mount, not advertised past it.
+   *
+   * Before this key had a declared seat the REST layer honoured it anyway,
+   * reading its config raw through a cast — and this schema (a non-strict
+   * `z.object()`) STRIPPED it, so any config that was parsed and then consumed
+   * silently turned search back on. Declared here so the opt-out survives its
+   * own contract's parse.
+   */
+  enableSearch: z.boolean().default(true).describe('Enable structured search endpoints (deployment-wide search opt-out)'),
+
+  /**
    * Enable project-scoped routing (/api/v1/environments/:environmentId/data/...)
    * When true, all data/meta/AI APIs are scoped under /environments/:environmentId
    * Control plane routes (/auth, /cloud) remain unscoped

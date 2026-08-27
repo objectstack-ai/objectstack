@@ -16,7 +16,7 @@ import { escapeMdxDescription } from './escape-mdx';
 import {
   formatPropertyType,
   formatType,
-  nestedShapeOf,
+  nestedShapesOf,
   type NestedShape,
   type TypeContext,
 } from './format-type';
@@ -299,14 +299,25 @@ export function renderSchemaSection(schemaName: string, schema: any, ctx: Sectio
             : { cell: formatType(prop, { ...typeCtx, inShapeSummary: true }), allowedValues: null };
           if (allowedValues) relocated.push({ key, members: allowedValues });
           if (expandNested) {
-            const shape = nestedShapeOf(prop, typeCtx);
-            // Only when there is text to relocate. The cell already states the
-            // shape's KEYS (four of them, then `…`) and their types; what it
-            // structurally cannot state is a description, so a table carrying
-            // none would restate the cell in more space. Measured on the tree
-            // at the time of the fix: 1208 of the 1293 shape-opening property
-            // rows carry at least one described key.
-            if (shape && carriesDescription(shape)) {
+            // EVERY shape the cell opens, not just the single-shape case
+            // (#12316). A property whose type is a union of object shapes —
+            // `ui/App.navigation`'s nine variants, `data/ConditionalValidation`'s
+            // five — gets one sub-table per variant, each under the accessor
+            // path that selects that variant (`navigation[number][type='sidebar']`).
+            // The loop IS the whole change on this side: #12309 already emitted
+            // a list of tables, it was `nestedShapeOf` that could only ever put
+            // one thing in it.
+            for (const shape of nestedShapesOf(prop, typeCtx)) {
+              // Only where there is text to relocate, and decided PER VARIANT.
+              // The cell already states the shape's KEYS (four of them, then
+              // `…`) and their types; what it structurally cannot state is a
+              // description, so a table carrying none would restate the cell in
+              // more space. Applying it per variant is what keeps the rule the
+              // same rule: `ui/FormView.submitBehavior` opens four shapes and
+              // exactly one of them carries prose, so it gets exactly one
+              // table. Measured on the tree at the time of #12309: 1208 of the
+              // 1293 shape-opening rows carry at least one described key.
+              if (!carriesDescription(shape)) continue;
               const own = typeof shape.node.description === 'string' ? shape.node.description : '';
               nested.push({
                 // Qualified by schema AND property, for the reason the
@@ -315,10 +326,16 @@ export function renderSchemaSection(schemaName: string, schema: any, ctx: Sectio
                 // give it two identical anchors. `schemaName` and not a
                 // threaded `owner` parameter — a nested table opens no
                 // relocation and no sub-table of its own, so an owner threaded
-                // into one would be a parameter nothing ever reads.
+                // into one would be a parameter nothing ever reads. The variant
+                // selector inside `accessor` is what extends that same
+                // qualification down one more level, so nine sub-tables under
+                // one property still carry nine distinct anchors.
                 path: `${schemaName}.${key}${shape.accessor}`,
                 // The element/value node's OWN describe, when it is not simply
-                // the property's — that one is already in the row above.
+                // the property's — that one is already in the row above. On a
+                // union this is the VARIANT's describe, which is the line that
+                // says what distinguishes it from its eight siblings, so it
+                // earns its position here more than it does on a lone shape.
                 ownDescription: own && own !== prop.description ? own : '',
                 shape,
               });

@@ -57,8 +57,12 @@ describe('describeHighPrivilegeBits (anchor-binding predicate)', () => {
     expect(describeHighPrivilegeBits({ objects: { a: { viewAllRecords: true } } })).toMatch(/View\/Modify All/);
     expect(describeHighPrivilegeBits({ objects: { a: { modifyAllRecords: true } } })).toMatch(/View\/Modify All/);
     expect(describeHighPrivilegeBits({ objects: { a: { allowDelete: true } } })).toMatch(/delete\/purge\/transfer/);
-    expect(describeHighPrivilegeBits({ objects: { a: { allowPurge: true } } })).toMatch(/delete\/purge\/transfer/);
     expect(describeHighPrivilegeBits({ objects: { a: { allowTransfer: true } } })).toMatch(/delete\/purge\/transfer/);
+    // `allowPurge` RETIRED (#12497): the bit is a retiredKey tombstone — no
+    // parsed set can carry it, and a legacy stored row that still does grants
+    // nothing (no `purge` op, evaluator row retired), so the predicate stopped
+    // reading it. The M2 batch restores the bit, its gate row, and this read.
+    expect(describeHighPrivilegeBits({ objects: { a: { allowPurge: true } } })).toBeNull();
     expect(describeHighPrivilegeBits({ systemPermissions: ['manage_users'], objects: {} })).toMatch(/system permissions/);
   });
 

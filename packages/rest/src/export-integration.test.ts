@@ -144,9 +144,17 @@ async function boot() {
   const rest = new RestServer(createMockServer() as any, protocol as any, { api: { requireAuth: false } } as any);
   (rest as any).resolveExecCtx = async () => ({ userId: 'test-user' });
   rest.registerRoutes();
+  // [#12573] `Array.prototype.find` is `Route | undefined`, so every
+  // `route.handler(...)` below read as possibly-undefined (TS18048 x13).
+  // Asserted non-null HERE, once, rather than at each call site: the
+  // lookup either finds the registered route or the boot is broken, and
+  // `registerRoutes()` two lines up is what guarantees it. Same form the
+  // green siblings in this package already use (e.g.
+  // `analytics-dataset-where-gate.test.ts`). Type-level only — `!` erases,
+  // so no call below receives a different value than it did before.
   const route = rest.getRoutes().find(
     (r: any) => r.method === 'GET' && r.path === '/api/v1/data/:object/export',
-  );
+  )!;
   return { engine, protocol, route };
 }
 
@@ -394,9 +402,10 @@ describe('export route — FLS column projection via getReadableFields (#3547)',
     );
     (rest as any).resolveExecCtx = async () => ({ userId: 'test-user' });
   rest.registerRoutes();
+    // [#12573] Non-null for the same reason as `boot()` above.
     const route = rest.getRoutes().find(
       (r: any) => r.method === 'GET' && r.path === '/api/v1/data/:object/export',
-    );
+    )!;
     return { engine, route };
   }
 

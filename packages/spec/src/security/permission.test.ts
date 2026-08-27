@@ -108,6 +108,62 @@ describe('ObjectPermissionSchema', () => {
   });
 });
 
+describe('allowRestore / allowPurge are RETIRED (#12497, ADR-0049)', () => {
+  // Removed by the 2026-08-26 maintainer ruling accepting #1883's
+  // recommendation B: the `restore`/`purge` ObjectQL operations the bits
+  // claimed to gate have never existed (no destructive lifecycle verb in the
+  // engine's dispatch vocabulary — the #8106 pin), so granting them delivered
+  // nothing. The tombstone keeps the removal audible instead of silently
+  // stripping an authored value; the keys return with the M2 lifecycle
+  // initiative (#1883 stays open).
+
+  it('absent parses clean — no defaults materialize for the retired keys', () => {
+    const parsed = ObjectPermissionSchema.parse({ allowRead: true });
+    expect('allowRestore' in parsed, 'retired key contributes nothing to the parsed output').toBe(false);
+    expect('allowPurge' in parsed, 'retired key contributes nothing to the parsed output').toBe(false);
+  });
+
+  it('authored values reject with the prescription (not a bare strict error)', () => {
+    for (const key of ['allowRestore', 'allowPurge'] as const) {
+      // Both directions are dead: the authored `false` claimed a lock that
+      // never existed just as loudly as the authored `true` claimed a grant.
+      for (const value of [true, false]) {
+        const r = ObjectPermissionSchema.safeParse({ [key]: value } as never);
+        expect(r.success).toBe(false);
+        const messages = r.error!.issues.map((i) => i.message).join('\n');
+        expect(messages).toContain('#12497');
+        expect(messages).toContain('removed in @objectstack/spec 17');
+        expect(messages).toContain('Delete the key');
+        expect(messages).toContain('M2');
+      }
+    }
+  });
+
+  it('the bare verbs carry the prescription too, never a rename onto a tombstone', () => {
+    // `restore`/`purge` were ALIASES of the retired bits; an alias may only
+    // prescribe a key the shape accepts (#5013), so both verbs moved to
+    // `guidance` and answer with the retirement instead of a dead-end rename.
+    for (const key of ['restore', 'purge'] as const) {
+      const r = ObjectPermissionSchema.safeParse({ [key]: true } as never);
+      expect(r.success).toBe(false);
+      const messages = r.error!.issues.map((i) => i.message).join('\n');
+      expect(messages).toContain('#12497');
+      expect(messages).not.toContain(`\`${key}\` → \``);
+    }
+  });
+
+  it('the tombstone rides into the EffectiveObjectPermission clone', () => {
+    // `.extend()` shares the authoring shape's per-property instances, so the
+    // response-side def carries the same `[RETIRED]` row in the authorable
+    // surface — and a DECLARED-never key is refused there even though the
+    // schema `.strip()`s unknown keys (declared ≠ unknown). No server can emit
+    // the bit any more (the parsed authoring output omits it), so this refusal
+    // has no wire-compat cost inside the launch window.
+    const r = EffectiveObjectPermissionSchema.safeParse({ allowRead: true, allowRestore: false } as never);
+    expect(r.success).toBe(false);
+  });
+});
+
 describe('EffectiveObjectPermissionSchema (#3391 response-side)', () => {
   it('carries every ObjectPermission field plus optional apiOperations', () => {
     const parsed = EffectiveObjectPermissionSchema.parse({

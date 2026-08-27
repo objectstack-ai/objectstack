@@ -11,6 +11,7 @@
  */
 
 import { execFileSync, spawn } from 'node:child_process';
+import { existsSync, readFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:net';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -20,6 +21,104 @@ const HERE = resolve(fileURLToPath(import.meta.url), '..');
 /** `bin/run-dev.js` — the CLI entrypoint that runs from TS source via tsx. */
 export const CLI = resolve(HERE, '../../bin/run-dev.js');
 export const TSX = resolve(HERE, '../../../../node_modules/.bin/tsx');
+
+// ─────────────────────────────────────────────────────────────────────────
+// THE OTHER ENTRYPOINT: `bin/run.js`, and the build state it silently needs
+//
+// `CLI` above is `bin/run-dev.js`, which pins `NODE_ENV=development` and runs
+// the command from `src/` through tsx — so a file using `runServe()` needs no
+// `packages/cli/dist` at all. A handful of e2e files deliberately spawn the
+// OTHER entrypoint instead, because the thing they measure only exists when
+// oclif resolves the command from the BUILT artifact. Those files, and only
+// those, carry a build-state prerequisite, and it used to be invisible: an
+// unbuilt worktree answered ` ›   Error: command serve not found`, the harness
+// reported `serve exited 2 before "Server is ready"`, and nothing in either
+// sentence said "run the build" (#12539).
+//
+// ⭐ The guard is here rather than in those files because it was written THREE
+// times, byte-identical, 19 lines each (#11707 / PR #12459 swept three
+// spawners in one edit and each got its own copy). Three copies of a refusal is
+// the same defect the refusal exists to prevent, one level up.
+//
+// ⛔ It is NOT a general "is the CLI ready" preflight. `runServe()` must never
+// call it: a tsx child reads `src/`, so `packages/cli/dist` is not that child's
+// prerequisite and a guard that refused there would be a false red on a tree
+// that can run the test perfectly well.
+// ─────────────────────────────────────────────────────────────────────────
+
+/**
+ * Why a `bin/run.js` child needs `packages/cli/dist`, in the child's own terms.
+ *
+ * ⭐ Named and exported rather than defaulted inside `requireBuiltCli()`, which
+ * is the whole point: this sentence is true of the `bin/run.js` + unset-
+ * `NODE_ENV` spawn and of nothing else. A caller reaching a different way (a
+ * `bin/run-dev.js` + tsx child, a `pnpm` bin shim, a packed tarball) has a
+ * DIFFERENT reason, and pasting this one there would attach a false
+ * explanation to a true refusal — the failure class #12498 and #12561 were
+ * filed for. The identifier says `RUN_JS` so that misuse has to be deliberate.
+ */
+export const RUN_JS_RESOLVES_FROM_DIST =
+  'This file spawns bin/run.js with NODE_ENV unset, which is what makes oclif resolve the ' +
+  'command from dist/ instead of transpiling src/ — so on an unbuilt tree the child answers ' +
+  '"command serve not found" and every boot below times out.';
+
+/**
+ * The refusal itself, separated from the check so its WORDING can be pinned.
+ *
+ * `requireBuiltCli()` can only produce this Error on an unbuilt tree, and no
+ * test can produce an unbuilt tree without breaking every neighbouring file in
+ * the same run. So the sentence a reader actually acts on would otherwise be
+ * the one part of this guard nothing checks — and a refusal that forgets to
+ * name the build command is exactly the false red #12539 exists to end.
+ * `serve-built-cli-prerequisite.test.ts` pins it through this function.
+ *
+ * @param commandFile the `dist/` command file that was looked for and missing
+ * @param mechanism   why THIS caller's child needs it — see
+ *                    `RUN_JS_RESOLVES_FROM_DIST` for the only one in the tree
+ */
+export function unbuiltCliError(commandFile: string, mechanism: string): Error {
+  return new Error(
+    `packages/cli is not built: ${commandFile} does not exist.\n` +
+      `${mechanism}\n` +
+      'CI declares the build (turbo: @objectstack/cli#test dependsOn build); a direct vitest run does not.\n' +
+      'Run: pnpm exec turbo run build --filter=@objectstack/cli',
+  );
+}
+
+/**
+ * Refuse to run against an unbuilt `packages/cli`, in a sentence rather than as
+ * oclif's "command serve not found".
+ *
+ * The command target is read from the CLI's own `oclif.commands.target` rather
+ * than restated here: that declaration is where `dist/commands` is decided, and
+ * a copy keeps probing the old path after someone moves it — the argument
+ * `scripts/cli-build-prerequisite.mjs` makes for the gates that shell out to
+ * this CLI. Only that one declared shape is read; anything else (unreadable,
+ * or `oclif.commands` written as a bare string) DEFERS rather than failing, so
+ * a checkout this cannot understand never turns red here and the spawn's own
+ * output stays the fallback — the same fail-open direction those gates take.
+ *
+ * `serve.js` is the probe because it is the command every caller of this guard
+ * spawns, and one `tsup` run emits the whole `dist/commands` directory — so its
+ * absence answers "this package was never built" for any of them. ⛔ It does
+ * not catch a `dist/` that is merely BEHIND its source; that residual is the
+ * honest cost of consuming the artifact and is stated in each caller's header.
+ *
+ * @param mechanism why this caller's child resolves the command from `dist/`.
+ *                  Required, with no default: see `RUN_JS_RESOLVES_FROM_DIST`.
+ */
+export function requireBuiltCli(mechanism: string): void {
+  let target: unknown;
+  try {
+    target = JSON.parse(readFileSync(resolve(HERE, '../../package.json'), 'utf8'))?.oclif?.commands?.target;
+  } catch {
+    return;
+  }
+  if (typeof target !== 'string' || !target) return;
+  const commandFile = resolve(HERE, '../..', target.replace(/^\.\//, ''), 'serve.js');
+  if (existsSync(commandFile)) return;
+  throw unbuiltCliError(commandFile, mechanism);
+}
 
 /**
  * The bind probe, run in a throwaway Node process: bind `0.0.0.0:<want>`, print
