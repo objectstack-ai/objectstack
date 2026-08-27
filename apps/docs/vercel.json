@@ -3,6 +3,7 @@
   "framework": "nextjs",
   "installCommand": "cd ../.. && pnpm install",
   "buildCommand": "cd ../.. && pnpm turbo run build --filter=@objectstack/docs",
+  "ignoreCommand": "bash ../../scripts/vercel-ignore-docs.sh",
   "github": {
     "silent": true
   }
