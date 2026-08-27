@@ -814,15 +814,32 @@ if (surfaceDoc) {
       `\n   These schemas are NOT .strict(), so Zod silently STRIPS an unknown key: an author\n` +
       `   who keeps writing one gets a clean parse and a setting that never takes effect —\n` +
       `   no error, nothing to grep, nothing pointing at the changelog (#3733, ADR-0104).\n\n` +
-      `   To retire a key, tombstone it instead of deleting it:\n` +
+      `   You are seeing this because the BUILD stopped emitting the key while the committed\n` +
+      `   baseline still records it — a bare deletion, which is the one shape none of the\n` +
+      `   retirement routes has. Which route you owe turns on a single question:\n\n` +
+      `     Does anything still PARSE this def — can an author keep writing this key?\n\n` +
+      `   YES — the def survives and keeps emitting; only the key is leaving. There is a\n` +
+      `   reader to warn, so tombstone the key instead of deleting it:\n` +
       `     1. \`retiredKey('<key> was removed in ... — use <replacement>. ...')\` in the schema\n` +
       `        (or an UNKNOWN_KEY_GUIDANCE entry for an object top-level key), so the\n` +
       `        rejection carries the fix;\n` +
       `     2. a D2 conversion (and D3 chain step) so the rename reaches spec-changes.json\n` +
       `        and \`os migrate meta\` can rewrite consumer sources;\n` +
       `     3. a \`major\` changeset carrying the FROM → TO mapping.\n\n` +
-      `   A tombstone that has aged out (~two majors) is the ONE legitimate reason to delete\n` +
-      `   a line here — do it in the same PR, deliberately.`,
+      `   NO — the def is not reachable from the metadata-type roots (no metadata document is\n` +
+      `   ever parsed by it), or the whole def is leaving this build. Then there is no author\n` +
+      `   to tombstone for, and a prescription nobody can receive is not worth its cost: let\n` +
+      `   the baseline line go WITH the key, in the same commit —\n` +
+      `   \`pnpm --filter @objectstack/spec gen:schema\`. You are not taken at your word on\n` +
+      `   that answer: check (c) below recomputes it from this build's own Zod graph and from\n` +
+      `   the manifest deletion gate, and refuses the deletion unless it holds (#4650 proofs\n` +
+      `   2 and 3). ⚠️ It waives THIS file's tombstone requirement only — plugin manifests,\n` +
+      `   connector configs and other non-metadata authoring go through their own gates.\n\n` +
+      `   Separately, a tombstone that has aged out (~two majors) may have its line deleted\n` +
+      `   too — check (c) proof 1, which requires the exact key be declared in\n` +
+      `   RETIRED_KEYS_BY_MAJOR. Do it in the same PR, deliberately.\n\n` +
+      `   The routes and their preconditions are the spec-property-retirement playbook's\n` +
+      `   (.claude/skills/); ADR-0104 and #4650 are the decisions behind them.`,
     );
     process.exit(1);
   }

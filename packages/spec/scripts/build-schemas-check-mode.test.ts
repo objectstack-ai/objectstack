@@ -831,6 +831,50 @@ describe('build-schemas.ts — deleted baseline lines must prove themselves (#46
   );
 
   it(
+    "check (a)'s remedy names every route and claims exhaustiveness for none (#12574)",
+    { timeout: SPAWN_TIMEOUT_MS },
+    () => {
+      // Same trip condition as the test above — this one reads the REMEDY rather
+      // than the verdict. The message once said tombstoning was the only route and
+      // that an aged-out tombstone was "the ONE legitimate reason to delete": a
+      // claim of exhaustiveness that check (c) below already contradicted in its
+      // own logic (proofs 2 and 3), and that measurably re-routed a dev off a
+      // documented route. The pin is on the FORK — the precondition question, both
+      // of its answers, and the absence of the exhaustiveness claim.
+      seedBase((s) => [...s, 'data/Object:zzPhantom12574'].sort());
+      seedSurface((s) => [...s, 'data/Object:zzPhantom12574'].sort());
+
+      const { status, output } = run(['--check']);
+
+      expect(status).toBe(1);
+
+      // The fork is asked as a question about the def, not decreed.
+      expect(output).toContain('Does anything still PARSE this def');
+
+      // Route A — the def survives, so there is a reader to warn.
+      expect(output).toContain('tombstone the key instead of deleting it');
+      expect(output).toContain('retiredKey(');
+
+      // Route B (#4650 proofs 2 and 3) — nothing parses the def, or the whole def
+      // is leaving: the baseline line goes with the key, and check (c) adjudicates.
+      expect(output).toContain('not reachable from the metadata-type roots');
+      expect(output).toContain('the whole def is leaving this build');
+      expect(output).toContain('gen:schema');
+      expect(output).toContain('#4650 proofs');
+      // The 2026-08-02 ruling's limit travels with the route it waives.
+      expect(output).toContain("waives THIS file's tombstone requirement only");
+
+      // The aged-out tombstone survives as A route, no longer as THE reason.
+      expect(output).toContain('aged out (~two majors)');
+      expect(output).toContain('RETIRED_KEYS_BY_MAJOR');
+      expect(output).not.toContain('ONE legitimate reason');
+
+      // Still gate (a) talking: (c) never ran.
+      expect(output).not.toContain('deleted without proof');
+    },
+  );
+
+  it(
     'fails --check on a hand-edit that changes no key (generated-form mismatch, #4662), and write mode regenerates it',
     { timeout: SPAWN_TIMEOUT_MS * 2 },
     () => {
