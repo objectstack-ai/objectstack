@@ -345,24 +345,28 @@ const PROVENANCE_SEAM = 'withSourceFallback';
  * Bundle sets that commit a provenance companion and deliberately do NOT
  * consult it, keyed by the extract config's own `--out=` directory.
  *
+ * ⭐ **Currently EMPTY, and empty is the load-bearing state**: all nine bundle
+ * sets read their companions at serving time. An empty registry is where a
+ * guard most often degenerates into a no-op, so the discrimination is proven
+ * mechanically rather than assumed — `--self-test` drives the empty-ledger
+ * cases directly (an empty ledger with everything served PASSES; an empty
+ * ledger with one set recording-but-not-serving FAILS), and the two-sided
+ * comparison below is the SAME {@link ratchet} the stale-fill verdict uses,
+ * not a second copy of that logic.
+ *
  * Hand-maintained and shrink-only, with no `--update` that can grow it: an
  * entry here is a decision someone made and wrote down, not a measurement to
  * be re-taken. The gate fails BOTH ways — a set that starts serving its
  * companion must delete its entry in the same PR, so the ledger cannot outlive
- * the hole it documents.
+ * the hole it documents. That is why this object is empty rather than deleted:
+ * `@objectstack/plugin-webhooks` sat here while its dependency question was
+ * open, and its entry was removed by the change that wired it.
+ *
+ * ⛔ Adding an entry is not the remedy for a red verdict. The remedy is to pass
+ * the companion to `withSourceFallback` in the set's serving barrel. An entry
+ * is for a set that genuinely cannot reach the seam, and it must say why.
  */
-const UNSERVED_PROVENANCE = {
-  'packages/plugins/plugin-webhooks/src/translations':
-    '@objectstack/plugin-webhooks does not depend on @objectstack/platform-objects, where ' +
-    '`withSourceFallback` lives — its dependencies are @objectstack/core, ' +
-    '@objectstack/service-messaging and @objectstack/spec. Wiring it needs either a new ' +
-    'package edge or the mechanism relocated to a package all nine sets reach, and the ' +
-    'nine share no runtime dependency but @objectstack/spec. That is an architecture ' +
-    'call, not a mechanical follow-up, so it is open rather than forced. Recorded ' +
-    '2026-08-27, when the other eight sets were wired: this set records provenance for 20 ' +
-    'leaves across three locales and serves the superseded draft when a source moves under ' +
-    'one of them. Delete this entry in the PR that wires it.',
-};
+const UNSERVED_PROVENANCE = {};
 
 /** The identifier a provenance companion exports, read from the file itself. */
 export function provenanceExportName(source) {
@@ -688,6 +692,33 @@ function selfTest() {
     provenanceExportName('// just a comment') === undefined,
   );
 
+  // ---- Verdict 2, the EMPTY-LEDGER cases ---------------------------------
+  //
+  // `UNSERVED_PROVENANCE` is empty on this tree: all nine bundle sets read
+  // their companions. An empty registry is the state where a guard most often
+  // degenerates into a no-op — it can no longer be observed doing anything, and
+  // "nothing to declare" reads exactly like "nothing is checked". So the
+  // discrimination is driven here rather than inferred from a green run. The
+  // verdict compares through this same `ratchet`, so these three cases ARE the
+  // verdict's decision procedure, not a model of it.
+  const emptyClean = ratchet([], []);
+  expect(
+    'EMPTY ledger + every set serving its companion ⇒ no finding (the gate passes, correctly)',
+    emptyClean.added.length === 0 && emptyClean.removed.length === 0,
+  );
+  const emptyBreached = ratchet(['packages/plugins/plugin-x/src/translations'], []);
+  expect(
+    '⭐ EMPTY ledger + a set that RECORDS-BUT-DOES-NOT-SERVE ⇒ still reported (the emptied ledger did NOT disarm the gate)',
+    emptyBreached.added.length === 1 &&
+      emptyBreached.added[0] === 'packages/plugins/plugin-x/src/translations' &&
+      emptyBreached.removed.length === 0,
+  );
+  const stale = ratchet([], ['packages/plugins/plugin-x/src/translations']);
+  expect(
+    'a ledger entry whose set now SERVES its companion is reported for deletion (shrink-only, both directions)',
+    stale.removed.length === 1 && stale.added.length === 0,
+  );
+
   console.log(failures === 0 ? '\ncheck-i18n-stale-fill: self-test OK\n' : `\ncheck-i18n-stale-fill: self-test FAILED (${failures})\n`);
   process.exit(failures === 0 ? 0 : 1);
 }
@@ -728,14 +759,19 @@ function judgeProvenanceServing() {
     unservedByOut.get(row.out).push(row);
   }
 
-  const declared = new Set(Object.keys(UNSERVED_PROVENANCE));
-  const undeclared = [...unservedByOut.keys()].filter((out) => !declared.has(out)).sort();
-  const repaired = [...declared].filter((out) => !unservedByOut.has(out)).sort();
+  // The SAME two-sided ratchet the stale-fill verdict uses, over out-dirs
+  // instead of leaf ids — one pure function, driven by `--self-test` for both
+  // verdicts, including the empty-ledger cases this registry now lives in.
+  const declared = Object.keys(UNSERVED_PROVENANCE).sort();
+  const { added: undeclared, removed: repaired } = ratchet(
+    [...unservedByOut.keys()].sort(),
+    declared,
+  );
 
   console.log(
     `check-i18n-stale-fill: ${rows.length} provenance companion(s), ` +
       `${rows.filter((r) => r.served).length} served at serving time, ` +
-      `${unservedByOut.size} bundle set(s) unserved (${declared.size} declared).`,
+      `${unservedByOut.size} bundle set(s) unserved (${declared.length} declared).`,
   );
 
   if (undeclared.length) {
