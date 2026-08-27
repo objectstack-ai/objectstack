@@ -52,8 +52,16 @@ import { LOG_LEVELS, resolveLogLevel, readLogLevelEnv } from '../utils/log-level
 import { BootLogCapture, isVerboseBootLevel } from '../utils/boot-log-capture.js';
 import { graftAuthoredRuntimeMembers, isAppPluginLike } from '../utils/graft-runtime-hooks.js';
 import { redactConnectionUrl, describeDriverConnection } from '../utils/connection-display.js';
-// The posture prose `os serve` and `os doctor` BOTH print, declared once (#12492).
-import { TENANCY_POSTURE_FIX_HINTS } from '../utils/tenancy-posture-hints.js';
+// The posture prose `os serve` and `os doctor` BOTH print, declared once
+// (#12492) — and, since #12579, the multi-org runtime SPELLING those two
+// commands put in front of the same operator, declared once with it.
+//
+// Renamed on import so `Serve.ORGANIZATIONS_RUNTIME_PKG` below keeps its own
+// NAME: separate pins address that static by name, and only the spelling moved.
+import {
+  ORGANIZATIONS_RUNTIME_PKG as SHARED_ORGANIZATIONS_RUNTIME_PKG,
+  TENANCY_POSTURE_FIX_HINTS,
+} from '../utils/tenancy-posture-hints.js';
 // Shared with @objectstack/verify and the dogfood multi-org probes (#4700) —
 // node-only, hence the `/node` subpath rather than the edge-safe root export.
 import {
@@ -993,7 +1001,7 @@ export default class Serve extends Command {
    * Exposed as a static for the same reason ALWAYS_ON_CAPABILITIES above is:
    * one declaration, two readers — the boot path and the pin.
    *
-   * ── A ⛔ stood here, and the constraint it named no longer exists ─────────
+   * ── The ⛔ that stood here, and how it ended ──────────────────────────────
    *
    * ⚠️ Until #12579 this read: MUST stay a string LITERAL in this file, because
    * `serve-cluster-host-resolution.test.ts` sweeps `serve.ts` for every dynamic
@@ -1013,41 +1021,47 @@ export default class Serve extends Command {
    * `../utils/tenancy-posture-hints.ts` read through this file's own scan
    * context, in the case named "resolves an alias to a literal in a REAL sibling
    * module of packages/cli", and again in "resolves `static readonly MEMBER =
-   * <alias>` — the shape the refactor writes".
+   * <alias>` — the shape the refactor writes", which is the shape this
+   * declaration now carries.
    *
-   * ⛔ Both halves are recorded rather than the whole note deleted, because a
-   * reader who meets neither re-derives the dead constraint from the duplication
-   * and puts the ⛔ back. ⛔ Nor is that hop dead code for having no live caller:
-   * delete it and this file is one refactor away from emptying the sweep again.
+   * ⛔ Both halves stay recorded rather than the note deleted, because a reader
+   * who meets neither re-derives the dead constraint from the shape and puts the
+   * ⛔ back.
    *
-   * ── What holds today, which is less than a prohibition ───────────────────
+   * ── What this declaration is now ─────────────────────────────────────────
    *
-   * The spelling is declared twice inside this package — here, and in the shared
-   * hints module `os doctor` also reads. That duplication is CHECKED, not
-   * silent: `serve-organizations-message-spelling.test.ts` site 8 asserts the two
-   * are EQUAL, and each is independently pinned as a key of the spec-owned
-   * roster (here via `test/serve-capability-vocabulary.test.ts`, there via
-   * `doctor-organizations-message-spelling.test.ts`). All three read this
-   * static's VALUE, never this file's source text, so none of them is a reason
-   * for the literal — and #12579 measured that the sweep was the only thing in
-   * the tree that ever read this file's source for a package spelling.
+   * ⭐ The spelling is declared ONCE, in `../utils/tenancy-posture-hints.ts` —
+   * the neutral module `os doctor` reads too — and this static is assigned from
+   * it (#12579, maintainer ruling 2026-08-27, Option A). It is the same shape
+   * `ALWAYS_ON_CAPABILITIES` above already carries: a stable handle over a
+   * declaration that lives elsewhere. Until that ruling this was a second
+   * LITERAL held EQUAL by an assertion — site 8 of
+   * `serve-organizations-message-spelling.test.ts`, retired in the same diff,
+   * because with one declaration an equality pin has no subject.
    *
-   * ⚠️ So the honest state is that nothing forbids single-sourcing this any
-   * more, and ⛔ that is still not a licence to do it in passing. PR #12532
-   * shipped the duplication deliberately with the reasoning at both ends, which
-   * makes ending it a maintainer-facing decision — open at #12579, where what
-   * would have to move together is written down. Two things outlive that
-   * decision either way: this static keeps its NAME (the roster pins address
-   * `Serve.ORGANIZATIONS_RUNTIME_PKG`, and only a spelling may move), and the
-   * gap is ⛔ never closed in the other direction — see the ⛔ on
-   * `ORGANIZATIONS_RUNTIME_PKG` in `../utils/tenancy-posture-hints.ts`, whose
-   * reason (#12464) the hop did not touch.
+   * Two things outlive that decision, and neither moved:
+   *
+   *   · This static keeps its NAME. `test/serve-capability-vocabulary.test.ts`
+   *     pins it as a roster KEY and the sweep resolves the load THROUGH it, both
+   *     addressing `Serve.ORGANIZATIONS_RUNTIME_PKG`; only the spelling moved
+   *     out. ⛔ Rename the member and those read something that is not there.
+   *   · ⛔ The gap is NEVER closed in the other direction — see the ⛔ on
+   *     `ORGANIZATIONS_RUNTIME_PKG` in `../utils/tenancy-posture-hints.ts`.
+   *     `os doctor` must not depend on a `serve` command's export in order to
+   *     spell a package name (#12464's coupling ruling, which none of this
+   *     touches).
+   *
+   * ⚠️ This assignment is the alias hop's FIRST LIVE CONSUMER, which is a cost
+   * as well as the point: narrowing that hop is now a LIVE regression rather
+   * than a synthetic one. It is written down once, where whoever narrows it will
+   * be standing — the suite docblock over the hop's own cases in
+   * `serve-cluster-host-resolution.test.ts`.
    *
    * This single-sources the SPELLING and nothing else. Which postures load the
    * runtime, and what each of the two failure stages means, stay exactly where
    * they are; the roster is deliberately not a resolution registry.
    */
-  static readonly ORGANIZATIONS_RUNTIME_PKG = '@objectstack/organizations';
+  static readonly ORGANIZATIONS_RUNTIME_PKG = SHARED_ORGANIZATIONS_RUNTIME_PKG;
 
   /**
    * Auto-registered plugin tiers. Plugins explicitly listed in

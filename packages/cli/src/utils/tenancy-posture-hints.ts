@@ -19,9 +19,10 @@
  * here together. Single-sourcing only `isolated` would have closed the half that
  * was already covered and left the other two exactly as silent as before.
  *
- * What moved is the TABLE. The package name the `isolated` sentence interpolates
- * is declared here too, but `serve.ts` still holds its own copy for a reason
- * recorded at that const below — read it before "finishing the job".
+ * What moved is the TABLE — and, since #12579, the package name the `isolated`
+ * sentence interpolates moved with it. It is declared once, at the const below,
+ * and `serve.ts`'s `Serve.ORGANIZATIONS_RUNTIME_PKG` is assigned from it. Read
+ * that const's docblock before touching either end.
  *
  * ── Why this is CLI-INTERNAL and not `packages/spec` ─────────────────────
  *
@@ -57,37 +58,45 @@
 
 /**
  * The `plugins[]`-wired multi-org runtime both commands NAME in their posture
- * advice, spelled once FOR THIS TABLE (#11614 → #12464 → #12492).
+ * advice — and, since #12579, the one place that package is spelled at all
+ * inside `packages/cli` (#11614 → #12464 → #12492 → #12579).
  *
- * ⚠️ This is not the only declaration of the literal inside `packages/cli`:
- * `serve.ts` keeps its own `Serve.ORGANIZATIONS_RUNTIME_PKG` literal. ⛔ Do not
- * read that as a live constraint on this file. It WAS one — the host-anchoring
- * sweep in `serve-cluster-host-resolution.test.ts` resolved the organizations
- * load site through that static to a LITERAL IN THAT FILE, so rewriting the
- * static as a re-export of this const stopped the specifier resolving and
- * dropped that load OUT of the sweep instead of failing inside it (#11614's
- * silent-vacuity mode; #12492 tried it and the sweep's named vacuity guard
- * refused it, by name). ⭐ That reason died at `1ca763b60` (#12533, PR #12582):
- * the sweep now follows an import alias into a sibling module of the same
- * package, and it pins that hop against THIS FILE by name. The full reading
- * lives on `Serve.ORGANIZATIONS_RUNTIME_PKG`; ⛔ do not restate it here — it is
- * one reason, and #12579 exists because it had four copies.
+ * ⚠️ Since #12579 this is the ONLY declaration of the spelling inside
+ * `packages/cli`. `serve.ts` no longer holds a second literal: its
+ * `Serve.ORGANIZATIONS_RUNTIME_PKG` is assigned from this const, keeping the
+ * NAME the roster pins address while the spelling lives here. ⛔ That is not a
+ * reason to move this declaration somewhere more central — it sits in a module
+ * NEITHER command owns for the reason the ⛔ below states.
  *
- * ⭐ So the spelling is declared twice in this package, and both copies are
- * CHECKED rather than silent — a duplicate that can drift unnoticed and one
- * that cannot are different things:
+ * It was a duplicate until then, and the reason it HAD to be one is dead rather
+ * than forgotten: the host-anchoring sweep in
+ * `serve-cluster-host-resolution.test.ts` resolved the organizations load site
+ * through that static to a LITERAL IN THAT FILE, so rewriting the static as a
+ * re-export of this const stopped the specifier resolving and dropped that load
+ * OUT of the sweep instead of failing inside it (#11614's silent-vacuity mode;
+ * #12492 tried it and the sweep's named vacuity guard refused it, by name).
+ * ⭐ That reason died at `1ca763b60` (#12533, PR #12582): the sweep now follows
+ * an import alias into a sibling module of the same package, and it pins that
+ * hop against THIS FILE by name. The full reading lives on
+ * `Serve.ORGANIZATIONS_RUNTIME_PKG`; ⛔ do not restate it here — it is one
+ * reason, and #12579 exists because it had four copies.
  *
- *   · `serve-organizations-message-spelling.test.ts` asserts the two are EQUAL.
- *   · this one is a key of the spec-owned `PLATFORM_PLUGIN_WIRED_RUNTIMES`
+ * ⭐ So: one declaration, and the pins that used to hold two copies equal are
+ * now pins over this one —
+ *
+ *   · it is a key of the spec-owned `PLATFORM_PLUGIN_WIRED_RUNTIMES`
  *     (`doctor-organizations-message-spelling.test.ts`, leg (ii)).
- *   · serve's is a key of the same roster (`test/serve-capability-vocabulary.test.ts`).
+ *   · the same value read as `Serve.ORGANIZATIONS_RUNTIME_PKG` is pinned as a
+ *     key of that roster again (`test/serve-capability-vocabulary.test.ts`), and
+ *     is what every operator-facing `os serve` message renders
+ *     (`serve-organizations-message-spelling.test.ts`).
+ *   · the equality assertion that kept the duplication CHECKED — site 8 of that
+ *     file — retired WITH its subject, in the same diff.
  *
- * Ending the duplication for real is now POSSIBLE — the further hop it was
- * waiting on landed, and single-sourcing the spelling into this module is the
- * only live consumer it would have. ⛔ Possible is not decided: PR #12532
- * shipped this duplication deliberately with the reasoning at both ends, so
- * reversing it is a maintainer-facing call. It is open at #12579, which carries
- * the list of what would have to move in one diff.
+ * ⛔ Ending the duplication was a maintainer-facing call rather than a refactor,
+ * because PR #12532 shipped it deliberately with the reasoning at both ends. It
+ * was ruled on 2026-08-27 (#12579, Option A: single-source the spelling here,
+ * the static keeps its NAME) and taken in one diff.
  *
  * ⛔ Do NOT close the gap by importing `Serve.ORGANIZATIONS_RUNTIME_PKG` here
  * instead: this module is read by `os doctor`, and a diagnostic command taking a
