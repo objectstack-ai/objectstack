@@ -232,19 +232,20 @@ describe('[#12792] ① the dev auto-reconcile reports what it reconciled', () =>
 
     await reconcile(driver, 'os12792_info');
 
-    const infos = logger.at('info');
-    expect(infos.map((l) => l.message)).toEqual([
-      expect.stringContaining('[schema-drift] auto-reconciled'),
+    // ⭐ The WHOLE recorded log, not just the line we want. The defect's second
+    // half is a line that must NOT be there: this site sits inside the
+    // reconcile's own `try`, so a detached call is CAUGHT and re-reported as
+    // `dev auto-reconcile failed` — a reconcile that really happened, announced
+    // as a failure. Asserting the full transcript makes both halves visible in
+    // one diff instead of hiding the mislabel behind an earlier expectation.
+    expect(logger.lines.map((l) => `${l.level}: ${l.message}`)).toEqual([
+      expect.stringContaining('info: [schema-drift] auto-reconciled'),
     ]);
-    expect(infos[0].message).toContain('os12792_info');
+    expect(logger.lines[0].message).toContain('os12792_info');
     // The index really was created — the reconcile the line reports happened.
     expect(await (driver as unknown as {
       getExistingIndexNames(t: string): Promise<Set<string>>;
     }).getExistingIndexNames('os12792_info')).toContain('idx_os12792_info_code');
-    // …and the reconcile is NOT reported as having failed: that mislabel is the
-    // second half of the defect, produced by the `catch` that swallowed the
-    // TypeError this line used to throw.
-    expect(logger.lines.some((l) => l.message.includes('dev auto-reconcile failed'))).toBe(false);
   });
 
   it('falls back to warn — at the same INFO meaning — for a host with no info channel', async () => {
@@ -255,8 +256,9 @@ describe('[#12792] ① the dev auto-reconcile reports what it reconciled', () =>
 
     await reconcile(driver, 'os12792_info_fallback');
 
-    expect(logger.at('warn').some((l) => l.message.includes('auto-reconciled'))).toBe(true);
-    expect(logger.at('warn').some((l) => l.message.includes('dev auto-reconcile failed'))).toBe(false);
+    expect(logger.lines.map((l) => `${l.level}: ${l.message}`)).toEqual([
+      expect.stringContaining('warn: [schema-drift] auto-reconciled'),
+    ]);
   });
 });
 
