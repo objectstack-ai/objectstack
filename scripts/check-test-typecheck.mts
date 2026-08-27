@@ -28,10 +28,19 @@
 // reading the residue, is the #4311 discipline this repo already writes down.
 //
 // The residue is real (691 errors over 79 files for spec; 6 over 3 files for
-// client), overwhelmingly fixture object literals annotated with a schema's
-// OUTPUT type (`z.infer`) while holding an authored INPUT literal — so every
-// defaulted key reads as "missing". Hand-fixing 691 of those in the PR that
-// opens the gate would bury the gate. They are ledgered per file instead, in
+// client). ⚠️ Its COMPOSITION as read at the time — "overwhelmingly fixture
+// object literals annotated with a schema's OUTPUT type (`z.infer`) while
+// holding an authored INPUT literal" — is a 2026-08 reading, and it is not what
+// the ledgers hold now. That cause is #5478 / #5543, fixed by PR #6786 on
+// 2026-08-08. Re-measured on 2026-08-27 (#12624): across spec's 55 ledgered
+// files `z.infer` occurs 8 times in 4 files, 5 of those inside prose comments,
+// and 9 of the 263 errors are of the missing-properties shape at all — none of
+// the 9 in a file that contains `z.infer`. For rest's ledgered files the count
+// is 0. That is why `LEDGER_COMMENT` below states NO cause: a cause written
+// into a generated constant is rewritten verbatim into every ledger by every
+// regeneration, so it outlives its own repair and cannot be corrected in the
+// file where it is read. Hand-fixing 691 errors in the PR that opens the gate
+// would bury the gate. They are ledgered per file instead, in
 // the package's own `test-typecheck-debt.json`, and the ledger is EXACT:
 // recorded must equal measured. That is what makes it shrink-only in practice —
 //
@@ -107,12 +116,68 @@ const UPDATE_COMMAND = `pnpm --filter ${PKG_NAME} gen:test-typecheck-debt`;
 const LEDGER_COMMENT =
   `Per-file tsc error debt of the ${PKG_NAME} TEST layer (#5286). ` +
   '`tsconfig.test.json` compiles `src/**/*.test.ts` — which `tsconfig.json` excludes and therefore ' +
-  'no gate ever read — and every file below still carries errors from before that gate existed, ' +
-  'almost all of them fixture literals annotated with a schema OUTPUT type (`z.infer`) while holding ' +
-  'an authored INPUT literal. EXACT ratchet, judged by re-running tsc: a file that gains errors is red, ' +
+  'no gate ever read — and every file below still carries errors from before that gate existed. ' +
+  'THIS FIELD IS GENERATED: every regeneration rewrites it from scripts/check-test-typecheck.mts, and ' +
+  'the EXACT ratchet below requires a regeneration on every repair — so an edit made here is gone by ' +
+  'the next one. Anything true of THIS package goes in the sibling `_note` field, which is authored, ' +
+  'is preserved verbatim, and is never written by the generator (#12624). ' +
+  'This comment states NO cause for the errors, deliberately: the classes differ per package and ' +
+  'per file, they move as the debt is paid down, and a cause written here is rewritten verbatim into ' +
+  'every ledger by every regeneration — so it outlives its own repair and cannot be corrected in the ' +
+  'file where it is read. Measure instead, before repairing anything: `tsc --noEmit --pretty false -p ' +
+  'tsconfig.test.json` in the package prints the real classes with their TS codes. ' +
+  'EXACT ratchet, judged by re-running tsc: a file that gains errors is red, ' +
   'a file that loses them is red until its number is re-recorded, a file that reaches zero is red until ' +
   'its entry is deleted, and a file NOT listed here may have no errors at all. Regenerate with: ' +
   UPDATE_COMMAND;
+
+// ── What the ledger's own prose must say, pinned (#12624) ───────────────────
+//
+// Every `--update` rebuilds `_comment` from the constant above, so the prose a
+// dev picking up a paydown card reads is whatever this file said last — and a
+// correction written into a `test-typecheck-debt.json` survives only until the
+// next regeneration, which the EXACT ratchet REQUIRES on every repair. That is
+// how the #5478 / #5543 OUTPUT-vs-INPUT cause, fixed by PR #6786 on 2026-08-08,
+// went on being stamped into ledgers created 18 days later.
+//
+// A DEPARTURE pin alone cannot hold this: "the fossil sentence is absent"
+// passes just as happily against a `_comment` that is the empty string. So the
+// mechanism sentences are pinned by ARRIVAL — each one named, so a failure says
+// which sentence went missing rather than that the prose "changed" — and the
+// refuted cause is pinned by absence beside it. Both are asserted against the
+// text `buildLedger()` REALLY emits, not a copy of it.
+
+/** Named fragments the generated `_comment` MUST carry. Labels are the failure text. */
+const LEDGER_COMMENT_REQUIRED: ReadonlyArray<readonly [string, string]> = [
+  ['names the package whose debt it is', PKG_NAME],
+  ['declares the ratchet EXACT', 'EXACT ratchet'],
+  ['red direction 1 — a file that GAINS errors', 'a file that gains errors is red'],
+  ['red direction 2 — a file that LOSES errors', 'red until its number is re-recorded'],
+  ['red direction 3 — a file that reaches ZERO', 'red until its entry is deleted'],
+  ['says a file NOT listed may be clean', 'may have no errors at all'],
+  ['hands the reader the regenerate command', UPDATE_COMMAND],
+  ['tells the reader no cause is stated and the real classes must be measured', 'states NO cause'],
+  ['warns that this field is regenerated, so an edit here does not survive', 'THIS FIELD IS GENERATED'],
+  ['names the authored field a package-specific note survives in', '`_note`'],
+];
+
+/**
+ * The causal claim this constant carried until #12624, pinned as absent.
+ * Measured on 2026-08-27: 0 `z.infer` occurrences across rest's ledgered files;
+ * 8 across spec's 55 (5 of them inside prose comments), and none of the 9
+ * missing-properties errors among spec's 263 sits in a file containing one.
+ */
+const LEDGER_COMMENT_REFUTED_CAUSE = /z\.infer|OUTPUT type|INPUT literal/;
+
+/** Which required sentences a candidate `_comment` is missing, by label. */
+export function ledgerCommentOmissions(comment: string): string[] {
+  return LEDGER_COMMENT_REQUIRED.filter(([, fragment]) => !comment.includes(fragment)).map(([label]) => label);
+}
+
+/** Whether a candidate `_comment` has had the refuted cause put back into it. */
+export function ledgerCommentRestatesRefutedCause(comment: string): boolean {
+  return LEDGER_COMMENT_REFUTED_CAUSE.test(comment);
+}
 
 // ── The ratchet-remedy authority convention (#8435) ─────────────────────────
 //
@@ -169,7 +234,13 @@ export function ratchetRemedyCarriesAuthority(message: string): boolean {
   return message.includes(RATCHET_AUTHORITY_MARKER);
 }
 
-type Ledger = { _comment: string; entries: Record<string, number> };
+type Ledger = {
+  /** GENERATED — rebuilt from `LEDGER_COMMENT` by every `--update`. */
+  _comment: string;
+  /** AUTHORED — preserved verbatim by `--update`, never written by it (#12624). */
+  _note?: string;
+  entries: Record<string, number>;
+};
 
 /** `path(line,col): error TSxxxx: …` — continuation lines of a multi-line message never match. */
 const DIAGNOSTIC = /^(\S[^(]*)\((\d+),(\d+)\): error (TS\d+): /;
@@ -252,11 +323,27 @@ function loadLedger(): Ledger {
   return parsed;
 }
 
-function writeLedger(counts: Map<string, number>): void {
+/**
+ * Exactly what `--update` writes, as a pure function so the self-test asserts
+ * against the emitted object rather than a hand-copied fixture of it. The
+ * counts pass through untouched and sorted: a regeneration re-records what tsc
+ * measured and moves no number of its own.
+ */
+export function buildLedger(counts: Map<string, number>, note?: string): Ledger {
   const entries: Record<string, number> = {};
   for (const file of [...counts.keys()].sort()) entries[file] = counts.get(file)!;
-  const ledger: Ledger = { _comment: LEDGER_COMMENT, entries };
-  fs.writeFileSync(LEDGER_PATH, `${JSON.stringify(ledger, null, 2)}\n`, 'utf8');
+  return note === undefined ? { _comment: LEDGER_COMMENT, entries } : { _comment: LEDGER_COMMENT, _note: note, entries };
+}
+
+/**
+ * `--update` regenerates `_comment` and re-records `entries`; `_note` it reads
+ * back out of the file it is about to overwrite and writes unchanged. Via
+ * `loadLedger()` on purpose: a ledger too broken to parse REFUSES the update
+ * rather than silently dropping the authored half of its prose — the loss this
+ * whole split exists to stop (#12624).
+ */
+function writeLedger(counts: Map<string, number>): void {
+  fs.writeFileSync(LEDGER_PATH, `${JSON.stringify(buildLedger(counts, loadLedger()._note), null, 2)}\n`, 'utf8');
 }
 
 /** Compile the test program and hand back the raw transcript. */
@@ -487,15 +574,111 @@ function selfTest(): void {
     );
   }
 
+  // ── The ledger's own prose (#12624) ───────────────────────────────────────
+  //
+  // Asserted against what `buildLedger()` REALLY emits, because that object is
+  // what `--update` writes over every ledger on every repair. The pins are
+  // deliberately paired: (A) ARRIVAL — each mechanism sentence is present, and
+  // its own control proves that assertion can FAIL; (D) DEPARTURE — the refuted
+  // cause is absent, and its own control proves the detector still recognises
+  // that clause. A departure pin alone is decoration: it passes against an
+  // empty `_comment`, which is exactly the regression it would be there to
+  // catch.
+  const written = buildLedger(new Map([['a.test.ts', 3]]))._comment;
+
+  const omissions = ledgerCommentOmissions(written);
+  expect(
+    `#12624 (A) — the _comment that \`--update\` WRITES carries every mechanism sentence. Missing: `
+      + `${omissions.join('; ') || 'none'}. Every repair regenerates this text over the ledger, so this `
+      + 'constant is the only place the prose a paydown reader sees can be made true',
+    omissions.length === 0,
+  );
+  expect(
+    '#12624 (A-control) — ledgerCommentOmissions() reports EVERY required sentence missing from an empty '
+      + 'string (proves the arrival pin can fail; a pin that only asserted the old cause is GONE would '
+      + 'pass happily against a `_comment` of "")',
+    ledgerCommentOmissions('').length === LEDGER_COMMENT_REQUIRED.length,
+  );
+
+  expect(
+    '#12624 (D) — the emitted _comment does not restate the #5478/#5543 OUTPUT-vs-INPUT cause, which '
+      + 'PR #6786 fixed on 2026-08-08 and which was measured absent from the ledgered files on 2026-08-27',
+    !ledgerCommentRestatesRefutedCause(written),
+  );
+  {
+    // SYNTHETIC, and specifically the pre-#12624 wording: the detector must be
+    // shown able to recognise the clause it exists to keep out, or its silence
+    // above says nothing at all.
+    const fossil =
+      'almost all of them fixture literals annotated with a schema OUTPUT type (`z.infer`) while '
+      + 'holding an authored INPUT literal.';
+    expect(
+      '#12624 (D-control) — ledgerCommentRestatesRefutedCause() RECOGNISES the pre-#12624 clause (proves '
+        + 'the detector discriminates rather than returning false for everything)',
+      ledgerCommentRestatesRefutedCause(fossil),
+    );
+  }
+
+  // The other half of `--update`: it re-records what tsc measured and invents,
+  // reorders or rounds nothing. The ledger's NUMBERS are the ratchet itself.
+  const built = buildLedger(
+    new Map([
+      ['b.test.ts', 2],
+      ['a.test.ts', 1],
+    ]),
+  );
+  expect(
+    '#12624 — `--update` writes the measured counts through unchanged and key-sorted (a regeneration '
+      + `must move no number): got ${JSON.stringify(built.entries)}`,
+    JSON.stringify(built.entries) === '{"a.test.ts":1,"b.test.ts":2}',
+  );
+  expect(
+    '#12624 — with no authored note the written ledger is exactly { _comment, entries } in that order, '
+      + `the shape loadLedger() refuses to judge against when it is anything else: got `
+      + `${JSON.stringify(Object.keys(built))}`,
+    JSON.stringify(Object.keys(built)) === '["_comment","entries"]',
+  );
+  expect(
+    '#12624 — no `_note` key is invented when the ledger carries no authored note',
+    !Object.hasOwn(built, '_note'),
+  );
+
+  {
+    // The authored half. A regeneration that quietly dropped this is the defect
+    // #12624 records, committed one level up: the ledger's own correction was
+    // being deleted by the very command the ratchet requires after every repair.
+    // Asserted VERBATIM and in its own key — that is the whole answer to "how
+    // does a reader tell preserved prose from generated prose".
+    const note = 'ADR-0122 phase 2 (#6083) emptied this ledger.';
+    const withNote = buildLedger(new Map([['a.test.ts', 3]]), note);
+    expect(
+      `#12624 — an authored _note is preserved VERBATIM by a regeneration: got ${JSON.stringify(withNote._note)}`,
+      withNote._note === note,
+    );
+    expect(
+      '#12624 — the authored note keeps its own key rather than being folded into the generated '
+        + '_comment (a reader must be able to tell which half is regenerated, and a merged field cannot '
+        + `say): got ${JSON.stringify(Object.keys(withNote))}`,
+      JSON.stringify(Object.keys(withNote)) === '["_comment","_note","entries"]' && !withNote._comment.includes(note),
+    );
+    expect(
+      '#12624 — preserving a note moves no number either',
+      JSON.stringify(withNote.entries) === '{"a.test.ts":3}',
+    );
+  }
+
   if (failures.length) {
     console.error(`✗ check:test-typecheck --self-test — ${failures.length} failure(s)\n`);
     for (const f of failures) console.error('  • ' + f);
     process.exit(1);
   }
   console.log(
-    `✓ check:test-typecheck --self-test — ${cases.length} semantic case(s), the parser, and the #8435 `
-      + 'convention hold (the unledgered-file verdict keeps its ledger offer marked maintainer-only, '
-      + 'and the SHRANK / GRADUATED / GREW verdicts stay unmarked).',
+    `✓ check:test-typecheck --self-test — ${cases.length} semantic case(s), the parser, the #8435 `
+      + 'convention (the unledgered-file verdict keeps its ledger offer marked maintainer-only, and the '
+      + 'SHRANK / GRADUATED / GREW verdicts stay unmarked) and the #12624 ledger-prose pins (the text '
+      + '`--update` writes carries every mechanism sentence, states no refuted cause, passes the '
+      + 'measured counts through unchanged, and preserves an authored `_note` verbatim in its own key) '
+      + 'all hold.',
   );
 }
 
