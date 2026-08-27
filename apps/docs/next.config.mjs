@@ -49,6 +49,35 @@ const config = {
     // multiplied the resident set until the build was OOM-killed (exit 137).
     // Cap the worker count so peak memory stays well under the container limit.
     cpus: 2,
+    // Suppress server-side source maps. Measured during the 2026-08-27 production
+    // outage (#12711): the build emitted 260 map files totalling 348 MB into
+    // `.next/server`, and nothing in a production serverless function reads them.
+    //
+    // This is a memory knob, not a disk one, and it is the only free one that
+    // reaches the phase that actually dies. Those builds were SIGKILLed (exit 137,
+    // Vercel `errorCode: "out_of_memory"`) on a 4-core/8192 MB build machine, and
+    // the logs place every kill between `Creating an optimized production build`
+    // and `Compiled successfully`, with zero output in between -- inside the
+    // Turbopack COMPILE phase. Two knobs that look like they should help cannot:
+    // `cpus` above bounds static-generation workers that have not spawned yet when
+    // the kill lands, and `--max-old-space-size` in package.json bounds V8 while
+    // Turbopack allocates from Rust outside it (measured: lowering it to 2048
+    // moved the peak by 23 MB, i.e. noise).
+    //
+    // Measured effect, local cold build of all 403 pages, peak single-process RSS:
+    // 5191 MB -> 4757 MB (-434 MB, -8.4%); compile 22.6s -> 19.5s.
+    //
+    // Set explicitly on purpose. Next documents this flag's build-time default as
+    // following `productionBrowserSourceMaps` (false), but the server-side maps are
+    // emitted anyway -- naming it is what suppresses them.
+    //
+    // Deliberately NOT paired with `turbopackMinify: false`, which takes a further
+    // 972 MB off the peak: it inflates client JS from 5.8 MB to 16 MB (+176%), a
+    // cost real readers pay on every visit. Confining minification to the server
+    // side -- where the memory actually goes, 589 MB of server chunks against
+    // 5.8 MB of client -- is not on offer: `experimental.serverMinification` is
+    // read only by `dist/build/webpack-config.js` and never on the Turbopack path.
+    turbopackSourceMaps: false,
   },
   typescript: {
     ignoreBuildErrors: false,
