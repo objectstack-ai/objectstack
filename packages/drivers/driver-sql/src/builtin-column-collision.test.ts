@@ -17,10 +17,19 @@
  *    own column already provides is NOT a disagreement and must not be
  *    reported as one — that is the whole content of the 2026-08-25 narrowing,
  *    and the case that makes the message true again.
+ *
+ * ③ **The delivery table speaks the SPEC's vocabulary** (#12131). Its `type`
+ *    is compared with `===` against a declaration's `type`, so a knex builder
+ *    name there is a cross-vocabulary comparison that no declaration can
+ *    satisfy. `id` used to record `'string'` — the `table.string('id')`
+ *    builder name — and reported all 45 correct `id: Field.text(...)`
+ *    declarations in `@objectstack/platform-objects` as disagreements while
+ *    `'string'` was not even authorable. The first case below now holds every
+ *    entry to `FieldType`, so the class fails by name rather than by corpus.
  */
 
 import { describe, it, expect } from 'vitest';
-import { FieldSchema } from '@objectstack/spec/data';
+import { FieldSchema, FieldType } from '@objectstack/spec/data';
 import {
   FIELD_KEY_STORAGE_CLASS,
   BUILTIN_COLUMN_DELIVERY,
@@ -60,10 +69,30 @@ describe('the FieldSchema storage/presentation classification (#12015)', () => {
     }
   });
 
+  it('⛔ spells every delivered `type` in the SPEC vocabulary, never a knex builder name (#12131)', () => {
+    // The one that got away: `id` recorded `'string'`, the knex builder name,
+    // and `undeliveredStorageAttributes` compares it with `===` against a
+    // declaration's `type` — a spec `FieldType`. No declaration could match it
+    // (`'string'` is absent from FieldType's 49 members and `FieldSchema`
+    // refuses it), so every correct `id: Field.text(...)` was reported as a
+    // disagreement: 45 of them on a stock boot of platform-objects.
+    for (const [column, delivery] of Object.entries(BUILTIN_COLUMN_DELIVERY)) {
+      expect(
+        FieldType.options as readonly string[],
+        `BUILTIN_COLUMN_DELIVERY.${column}.type must be a spec FieldType, not a builder name`,
+      ).toContain(delivery.type);
+    }
+  });
+
   it('records what each builtin column actually delivers, read off the emitting lines', () => {
-    // `table.string('id').primary()` — varchar(255), NOT NULL, unique, no default.
+    // `table.string('id').primary()` — varchar(255), NOT NULL, unique, no
+    // default. varchar canonicalizes to the field type `text`
+    // (`canonicalizeSqlType('varchar(255)') === 'text'`, pinned in
+    // `type-compat.test.ts`), so `text` is what this column DELIVERS — which
+    // is why the platform's own `id: Field.text(...)` declarations agree with
+    // it exactly (#12131).
     expect(BUILTIN_COLUMN_DELIVERY.id).toMatchObject({
-      type: 'string', maxLength: 255, unique: true, notNull: true, defaultValue: null,
+      type: 'text', maxLength: 255, unique: true, notNull: true, defaultValue: null,
     });
     // `createAuditTimestampColumn` — a timestamp defaulted to the DB clock, left NULLABLE.
     for (const column of ['created_at', 'updated_at']) {
@@ -76,22 +105,30 @@ describe('the FieldSchema storage/presentation classification (#12015)', () => {
 
 describe('what a declaration on a builtin column name loses (#12015)', () => {
   it('FIRES on the author error the card was filed for', () => {
-    // `id: { type: 'number' }` — an author expecting a numeric key.
+    // `id: { type: 'number' }` — an author expecting a numeric key. This is
+    // the real author error; ⛔ NOT `{ type: 'text' }`, which is what the
+    // column delivers (see the silent case below).
     expect(keysOf(undeliveredStorageAttributes('id', { type: 'number' }))).toEqual(['type']);
-    // The #11456 fixture's shape.
-    expect(keysOf(undeliveredStorageAttributes('id', { type: 'text', name: 'id' }))).toEqual(['type']);
+    expect(keysOf(undeliveredStorageAttributes('id', { type: 'number', name: 'id' }))).toEqual(['type']);
     // …and names what the column really is, not just that something was lost.
-    expect(undeliveredStorageAttributes('id', { type: 'text' })[0]).toMatchObject({
-      key: 'type', declared: 'text', delivered: 'string',
+    expect(undeliveredStorageAttributes('id', { type: 'number' })[0]).toMatchObject({
+      key: 'type', declared: 'number', delivered: 'text',
     });
   });
 
   it('is SILENT for a presentation-only declaration — the platform honours that half', () => {
     // `sys_presence.id`, verbatim in shape: the population the pre-narrowing
-    // warning was false about.
+    // warning was false about. ⚠️ It is `Field.text`, and this fixture used to
+    // spell it `type: 'string'` — matching the delivery table's builder name
+    // rather than the source. That made this case pass while the same
+    // declaration as actually written warned (#12131). Verbatim now.
     expect(
-      undeliveredStorageAttributes('id', { type: 'string', label: 'Presence ID', required: true, readonly: true }),
+      undeliveredStorageAttributes('id', { type: 'text', label: 'Presence ID', required: true, readonly: true }),
     ).toEqual([]);
+    // The #11456 fixture's exact shape — the declaration that started #12015.
+    // It asks for precisely what the column delivers, so it is SILENT; it was
+    // reported as a disagreement until the delivery table was corrected.
+    expect(undeliveredStorageAttributes('id', { type: 'text', name: 'id' })).toEqual([]);
     expect(
       undeliveredStorageAttributes('created_at', {
         type: 'datetime', label: 'Created At', defaultValue: 'NOW()', readonly: true,
@@ -100,21 +137,21 @@ describe('what a declaration on a builtin column name loses (#12015)', () => {
   });
 
   it('is SILENT for a storage attribute the column already delivers', () => {
-    expect(undeliveredStorageAttributes('id', { type: 'string', maxLength: 255 })).toEqual([]);
-    expect(undeliveredStorageAttributes('id', { type: 'string', unique: true })).toEqual([]);        // the PK is unique
-    expect(undeliveredStorageAttributes('id', { type: 'string', storage: { notNull: true } })).toEqual([]); // the PK is NOT NULL
+    expect(undeliveredStorageAttributes('id', { type: 'text', maxLength: 255 })).toEqual([]);
+    expect(undeliveredStorageAttributes('id', { type: 'text', unique: true })).toEqual([]);        // the PK is unique
+    expect(undeliveredStorageAttributes('id', { type: 'text', storage: { notNull: true } })).toEqual([]); // the PK is NOT NULL
     expect(undeliveredStorageAttributes('created_at', { type: 'datetime', defaultValue: 'now()' })).toEqual([]); // token, case-insensitive
   });
 
   it('FIRES for a storage attribute the column does NOT deliver, one entry each', () => {
-    expect(keysOf(undeliveredStorageAttributes('id', { type: 'string', maxLength: 12 }))).toEqual(['maxLength']);
-    expect(keysOf(undeliveredStorageAttributes('id', { type: 'string', defaultValue: 'NOW()' }))).toEqual(['defaultValue']);
+    expect(keysOf(undeliveredStorageAttributes('id', { type: 'text', maxLength: 12 }))).toEqual(['maxLength']);
+    expect(keysOf(undeliveredStorageAttributes('id', { type: 'text', defaultValue: 'NOW()' }))).toEqual(['defaultValue']);
     // created_at IS nullable and NOT unique — asking for either is a real disagreement.
     expect(keysOf(undeliveredStorageAttributes('created_at', { type: 'datetime', unique: true }))).toEqual(['unique']);
     expect(keysOf(undeliveredStorageAttributes('created_at', { type: 'datetime', storage: { notNull: true } })))
       .toEqual(['storage.notNull']);
     // Several at once, in declaration order.
-    expect(keysOf(undeliveredStorageAttributes('id', { type: 'text', maxLength: 12, unique: false })))
+    expect(keysOf(undeliveredStorageAttributes('id', { type: 'number', maxLength: 12, unique: false })))
       .toEqual(['type', 'maxLength']);   // `unique: false` asks for nothing
   });
 
@@ -125,7 +162,7 @@ describe('what a declaration on a builtin column name loses (#12015)', () => {
   it('stays silent — never throws — on a key it does not know, and on a malformed declaration', () => {
     // Forward compatibility: an unclassified key cannot invent a warning. The
     // exhaustiveness case above is what makes its arrival visible.
-    expect(undeliveredStorageAttributes('id', { type: 'string', someFutureKey: 'x' } as any)).toEqual([]);
+    expect(undeliveredStorageAttributes('id', { type: 'text', someFutureKey: 'x' } as any)).toEqual([]);
     expect(undeliveredStorageAttributes('id', undefined)).toEqual([]);
     expect(undeliveredStorageAttributes('id', null as any)).toEqual([]);
   });
