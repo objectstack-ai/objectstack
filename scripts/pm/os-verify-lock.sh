@@ -243,6 +243,24 @@ set -uo pipefail
 # single foreground agent call (harness ceiling: 10 minutes). Everything above
 # this is unrepresentable through this entry point — that is the point of the
 # entry point, so it is a constant and not an option.
+#
+# ⛔ THIS IS NOT THE NUMBER TO RAISE, AND THE REASON IS ARITHMETIC RATHER THAN
+# TASTE. It was filed as one (#12538): holds on this lock were measured at 1164s
+# while the budget is 540s, so "raise the budget above the p95 legitimate hold"
+# reads as the obvious repair. It cannot be done. The budget is spent INSIDE one
+# foreground agent turn, and that turn is killed at ~600s by a ceiling nothing in
+# this file can move. A budget of, say, 1200s does not buy 1200s of waiting; it
+# buys a SIGTERM at 600s — no VERDICT line, no ledger record, no NOT MEASURED
+# note, the caller left with the one outcome this whole file exists to prevent
+# (see the bash 3.2 block above: 20 seconds of spinning and ZERO verdicts). The
+# cap at 540s is what keeps the refusal REPORTABLE, with ~60s of headroom for the
+# verdict and the ledger append. Raising it converts an honest exit 99 into an
+# unreportable exit 143.
+#
+# So a wait longer than one turn is not a longer BUDGET. It is a place kept
+# ACROSS turns — the slot mechanism further down, whose ageing bound is the
+# number that actually has to cover a long hold. The card's arithmetic is real;
+# it just indicts SLOT_MAX_AGE_S, not this constant.
 readonly HARD_CAP_S=540
 readonly DEFAULT_WAIT_S=540
 
@@ -275,10 +293,12 @@ HOLDER_FILE="${LOCK_FILE}.holder"
 LEDGER_FILE="${OS_VERIFY_LOCK_LEDGER:-${LOCK_FILE}.ledger}"
 readonly TICKET_MAX_AGE_S=$((HARD_CAP_S + 300))
 
-# How long a PARKED slot keeps the arrival stamp it is holding a place with.
-# Three budgets: long enough that an agent doing lock-free work between
-# attempts still finds its place, short enough that the priority a slot carries
-# over later arrivals is bounded and declared rather than indefinite.
+# How long a PARKED slot keeps the arrival stamp it is holding a place with,
+# measured from when it was LAST RELINQUISHED rather than from the original
+# arrival — see the ageing paragraph in the slots block below for why the clock
+# moved. Long enough that an agent doing lock-free work between attempts still
+# finds its place; short enough that a place nobody is coming back for stops
+# carrying priority over later arrivals.
 readonly SLOT_MAX_AGE_S=$((HARD_CAP_S * 3))
 
 # Past this the ledger stops growing. A record is ~150 bytes, so this is tens
@@ -448,9 +468,18 @@ queue_usable() {
 
 # ticket file: "<pid> <starttime> <arrival-epoch> <label>"
 #
-# A PARKED slot writes pid 0 and starttime 0 -- there is no process behind it,
-# which is the whole point -- so pid 0 is what tells the two kinds apart. It is
-# not a value a real ticket can carry: no waiter here runs as pid 0.
+# A PARKED slot writes pid 0 -- there is no process behind it, which is the
+# whole point -- so pid 0 is what tells the two kinds apart. It is not a value a
+# real ticket can carry: no waiter here runs as pid 0.
+#
+# In a parked record the STARTTIME field carries the relinquish time instead:
+# there is no process, so there is no start time to hold, and the age that
+# decides whether the place is still wanted is measured from there (see the
+# ageing paragraph in the slots block). The field is reused rather than appended
+# because the label is last and must stay last -- a label containing spaces
+# cannot be allowed to displace a field. A 0 there means no relinquish time was
+# recorded (a record written before this, or one whose clock failed), and those
+# age from arrival exactly as they did.
 #
 # Three states, not two, and the third is why this is a classifier rather than
 # the predicate it replaced. `dead` is removed from disk, `active` is queued,
@@ -480,6 +509,18 @@ ticket_state() {
   }
   age=$((now - stamp))
   if [[ "$pid" == 0 ]]; then
+    # A parked place ages from when it was PUT DOWN, not from when it was first
+    # taken. `start` carries that instant for a parked record; a 0 or an
+    # unreadable one falls back to the arrival stamp, which is what every record
+    # written before this did. `since` can only move the age DOWN -- the
+    # relinquish is never earlier than the arrival -- so a clock that went
+    # backwards cannot lengthen a place's life past the arrival-based bound.
+    local since="$stamp"
+    case "$start" in
+      '' | *[!0-9]*) ;;
+      *) ((start > since)) && since="$start" ;;
+    esac
+    age=$((now - since))
     ((age <= SLOT_MAX_AGE_S)) && {
       printf 'parked'
       return 0
@@ -506,6 +547,16 @@ ticket_state() {
     # identity rather than requiring the dying process to have written it. It
     # costs nothing and wedges nothing: parked blocks nobody, and the ageing
     # bound below is the same one every other parked place is held to.
+    #
+    # This shape carries no relinquish time -- the field holds the dead
+    # process's real start time -- so it ages from ARRIVAL, the shorter of the
+    # two windows. Stated rather than fixed, because the direction is the safe
+    # one: such a place expires EARLIER than a politely parked one, never later,
+    # so the worst case is a caller sent to the back, never a line-cut that
+    # outlives its bound. It is also transient in practice -- SIGTERM (what the
+    # foreground ceiling sends) leaves through the trap and parks properly, and
+    # the next resume rewrites the record, so only a slot SIGKILLed on every
+    # turn it ever takes stays in this shape.
     case "${file##*/}" in
       *-s?*)
         ((age <= SLOT_MAX_AGE_S)) && {
@@ -617,13 +668,22 @@ take_ticket() {
 }
 
 # Turn our ticket into a kept place instead of deleting it. Writing pid 0 is
-# what makes it parked; the arrival stamp is preserved verbatim.
+# what makes it parked; the arrival stamp is preserved verbatim, because that
+# stamp IS the place. The relinquish time goes where the starttime was -- a
+# parked record has no process, so it has no start time, and the age that
+# decides whether this place is still wanted runs from here.
+#
+# A clock that will not answer is not a reason to refuse the park: the place is
+# worth more than the freshness of its age. Such a record writes 0 and is aged
+# from arrival, exactly as records written before this mechanism are.
 park_ticket() {
-  local pid0 start0 stamp0 label0
+  local pid0 start0 stamp0 label0 parked_at
   [[ -n "$TICKET" && -f "$TICKET" ]] || return 1
   read -r pid0 start0 stamp0 label0 < "$TICKET" 2> /dev/null || return 1
   case "$stamp0" in '' | *[!0-9]*) return 1 ;; esac
-  printf '0 0 %s %s\n' "$stamp0" "${label0:-?}" > "$TICKET" 2> /dev/null || return 1
+  parked_at="$(now_s 2> /dev/null)" || parked_at=0
+  case "$parked_at" in '' | *[!0-9]*) parked_at=0 ;; esac
+  printf '0 %s %s %s\n' "$parked_at" "$stamp0" "${label0:-?}" > "$TICKET" 2> /dev/null || return 1
   return 0
 }
 
@@ -794,11 +854,43 @@ ledger_append() {
 # while parked it was not waiting. It resumes its place among the callers
 # waiting now, which is the honest meaning of the place it kept.
 #
-# And the priority a slot carries is bounded: the retained arrival stamp ages
-# out at SLOT_MAX_AGE_S from the ORIGINAL arrival, after which the slot is
+# And the priority a slot carries is bounded: past SLOT_MAX_AGE_S the slot is
 # pruned like any dead ticket and the caller starts a fresh one at the back.
 # Without that bound a long-lived slot would cut ahead of newer arrivals
 # indefinitely, which is the same unfairness in the other direction.
+#
+# ⭐ THAT AGE IS MEASURED FROM THE LAST RELINQUISH, NOT FROM THE ORIGINAL
+# ARRIVAL, and the difference is the whole of #12538. Measured against the
+# original-arrival clock: legitimate holds on this lock reach 1164s, and a
+# caller queued behind two of them needs to keep its place for ~40 minutes,
+# while the bound was 27 (3 × the cap). So the caller that did everything right
+# — named a slot, came back every turn, never ran unlocked — was still dropped
+# to the back of the queue by the ageing bound, for the offence of the queue
+# ahead of it being long. That is waiter asymmetry (mechanism 1 at the top of
+# this file) reappearing a third time: obeying the cap remains the losing
+# strategy, now because obedience takes more turns than the place survives.
+#
+# ⚠️ The repair is NOT a bigger constant, and the reason is that the number to
+# size it against does not exist. The ledger cannot price a p95 of legitimate
+# holds: it lives in this container's /tmp and starts empty on every reset, so
+# the population it holds is one shift's worth of whatever ran since — read on
+# 2026-08-27 it was 24 records, max hold 344s, max wait 3s, ZERO queue-timeouts
+# and arrival depth 1 on every single record, i.e. not one contended run of the
+# kind this card is about. Picking `HARD_CAP_S * 6` off the back of four
+# hand-correlated anecdotes would be a constant with the same standing as the
+# one it replaced, and it would be wrong again the first time three long holds
+# queue up instead of two.
+#
+# What the bound is actually FOR is discarding a place nobody is coming back
+# for. So it asks that, and nothing else: the age is the time since the slot
+# was last put down. A caller that keeps returning — the compliant one, the one
+# that spent its turn waiting and came back — keeps its place for as long as it
+# keeps coming back, and its priority is still exactly its arrival stamp, so it
+# is FIFO and not a line-cut. A caller that walks away ages out on the same
+# clock it always did, from the moment it walked away. Nothing here is
+# unbounded: a returning caller can only ever be ahead of arrivals it genuinely
+# preceded, and the tickets ahead of IT can only disappear, so it reaches the
+# head in finite time and its ticket is consumed there.
 #
 # ⛔ None of this touches `flock`. Slots are advisory ordering only, exactly as
 # the ticket queue is; exclusion, the budget and the hard cap are untouched,
@@ -854,6 +946,60 @@ not_measured_note() {
     log "    same name and you resume where you were, rather than behind everyone who arrived"
     log "    while you were away."
   fi
+}
+
+# ⭐ WHAT A QUEUEING CALLER IS TOLD AT SECOND ZERO, AND WHY IT IS NOT LEFT TO
+# THE EXIT-99 MESSAGE.
+#
+# The slot mechanism above works, and it is the only thing in this file that can
+# serve a wait longer than one foreground turn. Both devs who used it in the
+# shift that produced #12538 found it the same way: from `not_measured_note`,
+# after spending the full 540s budget. That is nine minutes late by
+# construction, and not by a little -- the place a timed-out call loses is
+# EXACTLY the thing a slot would have kept, so learning the name at the moment
+# of loss is learning it after the only moment it was worth anything. A slot
+# named on the next call starts a fresh place at the back.
+#
+# So the disclosure moves to arrival, where it is still actionable, and it is
+# spent only where it buys something: a caller that walks up to a free lock with
+# nobody ahead is told nothing, because it is about to acquire.
+#
+# ⛔ It does NOT refuse, shorten or reshape the wait. Predicting that a wait will
+# not fit and acting on the prediction would be this file's own doctrine
+# inverted -- the filter preflight refuses only what is CERTAINLY worthless and
+# fails open in every other direction, and a queue can drain far faster than any
+# estimate. The full budget is still spent; the caller just gets to decide,
+# before spending it, whether to spend it holding a place.
+announce_arrival() {
+  local depth="$1" ahead=-1 holder contended=0
+  case "$depth" in
+    '' | *[!0-9]*) ;;
+    *) ((depth > 0)) && ahead=$((depth - 1)) ;;
+  esac
+  holder="$(holder_line)"
+  ((ahead > 0)) && contended=1
+  ((contended == 0)) && lock_is_held && contended=1
+  if ((ahead >= 0)); then
+    log "queued: ${ahead} ahead of you · budget ${BUDGET}s · ${holder}"
+  else
+    log "queued: unordered fallback (no ticket) · budget ${BUDGET}s · ${holder}"
+  fi
+  ((contended == 1)) || return 0
+  if [[ -n "$SLOT_SLUG" ]]; then
+    log "  slot '${SLOT_SLUG}' is set — if the budget runs out, this place is KEPT, not lost."
+    return 0
+  fi
+  log "⚠ NO SLOT IS SET and this call is queueing behind someone else."
+  log "⚠   The budget above is capped at ${HARD_CAP_S}s because an acquisition wait has to fit"
+  log "⚠   inside ONE foreground agent turn. It is NOT raisable — and holds on this lock have"
+  log "⚠   been measured at 19 minutes, so a queue can outlast the whole budget honestly."
+  log "⚠   What spans several turns is a SLOT: re-run with OS_VERIFY_LOCK_SLOT=<name> and a"
+  log "⚠   call that gives up PARKS its place instead of returning to the back of the queue"
+  log "⚠   behind everyone who arrived while it was away."
+  log "⚠   ⛔ Set it NOW, not after this call exits: a slot named later starts a NEW place —"
+  log "⚠   it cannot recover the one this call is about to lose."
+  log "⚠   (\`--status\` shows who holds it and who is queued; \`--report\` shows the holds.)"
+  return 0
 }
 
 # Does a count-based backstop have grounds to blame the CLOCK?
@@ -1260,15 +1406,25 @@ usage:
 
 There is deliberately no -w / --timeout: the acquisition budget is capped at the
 call site. OS_VERIFY_LOCK_WAIT may LOWER it; a value above the cap is clamped.
+⛔ The cap is not a tuning knob and raising it is not the remedy for a long
+queue: the budget is spent inside ONE foreground agent turn, which is killed at
+its own ~600s ceiling, so a larger number buys a kill with no VERDICT line
+instead of a longer wait. A wait longer than one turn is a SLOT, below.
 
-KEEPING YOUR PLACE ACROSS CALLS. An acquisition wait is capped so it fits inside
-one foreground agent turn; nothing here can stop that turn's own ceiling from
-counting the wait, so the remedy is not to spend a second turn re-queueing from
-the back. Set OS_VERIFY_LOCK_SLOT=<name> and a call that never acquires PARKS its
-place instead of losing it; the next call with the same name resumes it. A parked
-slot BLOCKS NOBODY -- it can be overtaken while you are away, which is the honest
-meaning of a place kept by someone who was not waiting -- and its priority ages
-out, so it cannot cut the line indefinitely. Being killed mid-wait parks it too.
+KEEPING YOUR PLACE ACROSS CALLS -- ⭐ SET THIS BEFORE YOU QUEUE, NOT AFTER YOU
+TIME OUT. An acquisition wait is capped so it fits inside one foreground agent
+turn; nothing here can stop that turn's own ceiling from counting the wait, so
+the remedy is not to spend a second turn re-queueing from the back. Set
+OS_VERIFY_LOCK_SLOT=<name> and a call that never acquires PARKS its place instead
+of losing it; the next call with the same name resumes it, keeping its ORIGINAL
+arrival stamp. A parked slot BLOCKS NOBODY -- it can be overtaken while you are
+away, which is the honest meaning of a place kept by someone who was not waiting.
+Its priority is bounded by an age measured from when the place was last PUT DOWN,
+so a caller that keeps coming back keeps its place however long the queue ahead
+of it is, while a place nobody returns for expires and stops cutting the line.
+Being killed mid-wait parks it too. A call that queues behind somebody with no
+slot set is told all this at second zero -- naming it in the timeout message
+alone is naming it one whole budget too late to be worth anything.
 
 EXIT 99 IS NOT A RESULT. It means this call never got a turn: nothing built,
 nothing tested, no gate decided. Record it as NOT MEASURED -- never as a red
@@ -1631,6 +1787,7 @@ mode_run() {
     # into is gone.
     ARRIVAL_DEPTH="$(queue_live | wc -l | tr -d ' ')"
     case "$ARRIVAL_DEPTH" in '' | *[!0-9]*) ARRIVAL_DEPTH=-1 ;; esac
+    announce_arrival "$ARRIVAL_DEPTH"
   else
     ordered=0
     log "⚠ ticket queue at ${QUEUE_DIR} is unusable — falling back to unordered acquisition (the cap and the lock itself are unaffected)."
@@ -1891,6 +2048,20 @@ mode_self_test() {
   # shellcheck disable=SC2064
   trap "rm -rf '$tmp'" EXIT
   local L="${tmp}/lock"
+
+  # ⚠ THE SUITE MUST TEST THE SCRIPT, NOT THE SHELL IT WAS LAUNCHED FROM. Every
+  # knob below changes what a case OBSERVES while leaving it well-formed, and
+  # they are exactly the knobs an agent has in its environment when it runs this
+  # suite from inside a wrapped call. Measured while adding the arrival-notice
+  # cases (#12538): a self-test invoked from a shell carrying
+  # OS_VERIFY_LOCK_SLOT put every child on the has-a-slot branch, so a case
+  # asserting the no-slot notice failed against a script that was behaving
+  # correctly. The failure direction was the lucky one; the same inheritance can
+  # silence a case instead (OS_VERIFY_LOCK_NO_FILTER_CHECK=1 skips the very
+  # check two cases below assert). The cases that want one of these set it
+  # themselves, per command, which still works.
+  unset OS_VERIFY_LOCK_SLOT OS_VERIFY_LOCK_WAIT OS_VERIFY_LOCK_NO_FILTER_CHECK
+
   # Both halves matter: the export reaches the child invocations, and the three
   # globals redirect the helpers called IN THIS PROCESS. Without the second, a
   # self-test would serialise the real fleet behind its own fixtures.
@@ -2180,6 +2351,39 @@ mode_self_test() {
   st_case 'and tells a caller with no slot how to keep its place next time' \
     "$([[ "$ordout" == *OS_VERIFY_LOCK_SLOT* ]] && echo yes || echo no)" yes
 
+  # --- and the same name, at second zero (#12538) ---------------------------
+  #
+  # ⭐ THE ASSERTION IS THE ORDER, NOT THE PRESENCE. The exit-99 message above
+  # already names the slot, and naming it there was measured to be nine minutes
+  # too late: the place a timed-out call loses is precisely what the slot would
+  # have kept, so a caller reading the name in the verdict reads it after the
+  # only moment it was worth anything. Asserting only that the string appears
+  # SOMEWHERE would pass on the version this fix exists to replace. So the pin
+  # is that the first mention precedes the VERDICT line — the same output,
+  # early enough to act on.
+  local firsthint firstverdict
+  firsthint="$(printf '%s\n' "$ordout" | grep -n 'OS_VERIFY_LOCK_SLOT' | head -1 | cut -d: -f1)"
+  firstverdict="$(printf '%s\n' "$ordout" | grep -n 'VERDICT ' | head -1 | cut -d: -f1)"
+  st_case 'and named the slot BEFORE the wait was spent, not only in the verdict' \
+    "$(case "$firsthint" in
+         '' | *[!0-9]*) echo 'NO-ARRIVAL-HINT' ;;
+         *) case "$firstverdict" in
+              '' | *[!0-9]*) echo 'NO-VERDICT-LINE' ;;
+              *) ((firsthint < firstverdict)) && echo yes || echo no ;;
+            esac ;;
+       esac)" yes
+  st_case 'and the arrival line says how many are ahead and what the budget is' \
+    "$([[ "$ordout" == *'ahead of you · budget '* ]] && echo yes || echo no)" yes
+
+  # ⛔ AND IT IS NOT PRINTED WHEN IT WOULD BUY NOTHING. A caller walking up to a
+  # free lock is about to acquire; telling it how to keep a place it is not
+  # about to lose is the noise that gets a warning filtered out, and this one
+  # has to still be read the day it matters.
+  local freeout
+  freeout="$(bash "$SELF" -c true 2>&1)"
+  st_case 'an uncontended call is not told to set a slot' \
+    "$([[ "$freeout" == *OS_VERIFY_LOCK_SLOT* ]] && echo yes || echo no)" no
+
   # --- the ledger -----------------------------------------------------------
   #
   # The two directions that matter, and the second is the one a ledger gets
@@ -2252,6 +2456,16 @@ mode_self_test() {
   read -r _ _ parked_stamp _ < "$sq"/*-sprobe-slot 2> /dev/null || parked_stamp=''
   st_case 'and the parked ticket carries pid 0 — nobody is waiting behind it' \
     "$(awk '{print $1}' "$sq"/*-sprobe-slot 2> /dev/null)" 0
+  # The relinquish time is what the ageing bound is measured from (#12538), so
+  # a park that did not record one would silently restore the arrival clock.
+  local parked_at parked_at_ok=no
+  parked_at="$(awk '{print $2}' "$sq"/*-sprobe-slot 2> /dev/null)"
+  case "$parked_at" in
+    '' | *[!0-9]*) ;;
+    *) ((parked_at > 0 && parked_at >= $(now_s) - 120)) && parked_at_ok=yes ;;
+  esac
+  st_case 'and it records WHEN it was put down, not a start time it does not have' \
+    "$parked_at_ok" yes
 
   # THE SAFETY INVARIANT. Another caller must acquire straight past the parked
   # place while the lock is free — if a parked slot could hold the head, one
@@ -2309,13 +2523,31 @@ mode_self_test() {
   mkdir -p "$sq"
 
   # Ageing: a place older than SLOT_MAX_AGE_S is pruned like any dead ticket,
-  # so the priority it carries is bounded rather than indefinite.
+  # so the priority it carries is bounded rather than indefinite. These two
+  # fixtures carry NO relinquish time (field 2 is 0) — the shape every record
+  # written before #12538 has — and they must still age from arrival.
   mkdir -p "$sq"
   printf '0 0 %s stale-slot\n' "$(($(now_s) - SLOT_MAX_AGE_S - 60))" > "${sq}/00000000000000000009-sstale"
   printf '0 0 %s fresh-slot\n' "$(now_s)" > "${sq}/00000000000000000010-sfresh"
   st_case 'an over-age parked slot is dead' "$(ticket_state "${sq}/00000000000000000009-sstale")" dead
   st_case 'a fresh parked slot is parked, not active and not dead' \
     "$(ticket_state "${sq}/00000000000000000010-sfresh")" parked
+
+  # ⭐ WHICH CLOCK THE BOUND RUNS ON (#12538). The two fixtures below differ ONLY
+  # in the relinquish time, and both have an arrival stamp far past the bound —
+  # so under the arrival clock both are dead and this pair cannot pass. It is
+  # the pair that pins the fix rather than either case alone: a caller that
+  # keeps coming back keeps its place however long the queue ahead of it has
+  # been, and a place nobody has come back for still expires on schedule.
+  printf '0 %s %s returning-slot\n' "$(now_s)" "$(($(now_s) - SLOT_MAX_AGE_S * 4))" \
+    > "${sq}/00000000000000000012-sreturning"
+  printf '0 %s %s abandoned-slot\n' "$(($(now_s) - SLOT_MAX_AGE_S - 60))" "$(($(now_s) - SLOT_MAX_AGE_S * 4))" \
+    > "${sq}/00000000000000000013-sabandoned"
+  st_case 'a slot put down just now keeps its place however old its arrival is' \
+    "$(ticket_state "${sq}/00000000000000000012-sreturning")" parked
+  st_case 'while one nobody came back for still ages out on the same bound' \
+    "$(ticket_state "${sq}/00000000000000000013-sabandoned")" dead
+  rm -f "${sq}/00000000000000000012-sreturning" "${sq}/00000000000000000013-sabandoned"
   queue_live > /dev/null 2>&1
   st_case 'and a queue scan removes the stale one' \
     "$([[ -e "${sq}/00000000000000000009-sstale" ]] && echo yes || echo no)" no
