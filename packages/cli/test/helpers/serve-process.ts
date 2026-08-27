@@ -60,7 +60,8 @@ export const TSX = resolve(HERE, '../../../../node_modules/.bin/tsx');
 export const RUN_JS_RESOLVES_FROM_DIST =
   'This file spawns bin/run.js with NODE_ENV unset, which is what makes oclif resolve the ' +
   'command from dist/ instead of transpiling src/ — so on an unbuilt tree the child answers ' +
-  '"command serve not found" and every boot below times out.';
+  '"command serve not found" and every boot below fails immediately with "serve exited 2", ' +
+  'not a timeout.';
 
 /**
  * The refusal itself, separated from the check so its WORDING can be pinned.

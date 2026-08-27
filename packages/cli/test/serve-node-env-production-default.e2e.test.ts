@@ -186,8 +186,9 @@ const CLI = resolve(HERE, '../bin/run.js');
  * Why THIS file needs `packages/cli/dist`, in its own terms (#12539).
  *
  * ⛔ NOT `RUN_JS_RESOLVES_FROM_DIST`, the constant the three sibling spawners
- * pass. That sentence ends `… and every boot below times out`, which holds for
- * a file whose every boot goes through `bin/run.js` with `NODE_ENV` unset.
+ * pass. That sentence ends `… and every boot below fails immediately with
+ * "serve exited 2", not a timeout`, which holds for a file whose every boot
+ * goes through `bin/run.js` with `NODE_ENV` unset.
  * This file is not one: of its three legs only the unset pin resolves from
  * `dist/`, and the other two hand the child `development`/`test` — exactly the
  * value that makes `@oclif/core`'s `isProd()` false and reroutes them to
