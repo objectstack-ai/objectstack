@@ -6,13 +6,17 @@
  * The localized message templates for the data path's OPERATION-level
  * refusals — a write the engine declines as a whole, rather than a constraint
  * one field violated. Members today: the referential-integrity refusal
- * (`409 DELETE_RESTRICTED`, `cascadeDeleteRelations`'s `restrict` branch, #7307)
- * and three `403 PERMISSION_DENIED` gates in plugin-security — the object CRUD
+ * (`409 DELETE_RESTRICTED`, `cascadeDeleteRelations`'s `restrict` branch, #7307),
+ * three `403 PERMISSION_DENIED` gates in plugin-security — the object CRUD
  * grant and the capability AND-gate (#7414, #7451), the row-level pre-image
- * write denial and the row-level CHECK post-image denial (#7451). The catalog
- * is the seat for the rest of the family as they are localized — a second
- * mechanism for the second producer is exactly what this module exists to
- * prevent.
+ * write denial and the row-level CHECK post-image denial (#7451) — and two
+ * `403 FORBIDDEN` refusals whose keys land ahead of their emitters (#12493):
+ * the sharing middleware's by-id write denial (`record_write_denied`; emitter
+ * conversion is #12260's half) and plugin-approvals' non-submitter recall
+ * refusal (`approval_recall_not_submitter`; emitter conversion is #11993's
+ * half). The catalog is the seat for the rest of the family as they are
+ * localized — a second mechanism for the second producer is exactly what this
+ * module exists to prevent.
  *
  * ## One key per SITUATION, not per wire code (#7451)
  *
@@ -25,6 +29,24 @@
  * | `permission_denied` | their permissions do not cover this action, on this object, at all | ask an administrator |
  * | `record_access_denied` | they may work with this kind of record, but not with THIS one | ask its owner, or an administrator |
  * | `record_change_not_allowed` | they may edit this record, but not into the state they just asked for | change what they entered |
+ * | `record_write_denied` | they can see this record, but changing or deleting it is beyond their access | ask its owner, or an administrator |
+ * | `approval_recall_not_submitter` | they asked to recall an approval request someone else submitted | ask the submitter, or an administrator |
+ *
+ * `record_write_denied` (#12493) is NOT `record_access_denied` restated: the
+ * sharing middleware's by-id write gate fires on a row the READ path already
+ * admitted — the user is typically looking at the record it refuses — so
+ * "You do not have access to this record" would be false the moment it
+ * rendered. The situation is read-yes/write-no, and the honest next step is
+ * asking the owner for edit access. It is one key for both write verbs
+ * (update and delete) because the user's situation and remedy are the same;
+ * which verb was refused is a developer fact that stays on
+ * `developerMessage` and the structured `details`.
+ *
+ * `approval_recall_not_submitter` (#12493) names who CAN act because that is
+ * the entire content of the refusal: recall belongs to the request's
+ * submitter (a privileged administrator may also recall to release a stuck
+ * record — the #3424 override), so the sentence sends the user to the
+ * submitter or an administrator instead of dead-ending them.
  *
  * The distinction the copy does NOT make is the internal one: a caller blocked
  * by a missing CRUD bit and a caller blocked by a missing `requiredPermissions`
@@ -142,6 +164,16 @@ export function operationMessageTranslationKey(messageKey: string): string {
  *     policy predicate, not WHICH field carried the offending value (the
  *     predicate is an authored expression over the whole row). Naming the
  *     object without naming the field would send the user hunting.
+ *
+ * The two #12493 keys take no placeholders either, re-derived per site:
+ *
+ *   - `record_write_denied` — the sharing gate's nameable facts are the
+ *     object's API name and the row's opaque id (the raw string interpolated
+ *     exactly those), which is the #7414 vocabulary that must not reach a
+ *     toast; the user already knows which record they tried to change.
+ *   - `approval_recall_not_submitter` — the throw site knows the submitter
+ *     only as an opaque user id; "the person who submitted this request" is
+ *     the resolvable spelling, and the user's own screen shows who that is.
  */
 export const BUILTIN_OPERATION_MESSAGES: Record<string, Record<string, string>> = {
   en: {
@@ -151,6 +183,10 @@ export const BUILTIN_OPERATION_MESSAGES: Record<string, Record<string, string>> 
       'You do not have access to this record. Contact the person who owns it, or your administrator, if you need access.',
     record_change_not_allowed:
       'You are not allowed to save this record with the values you entered. Change them and try again, or contact your administrator if you need access.',
+    record_write_denied:
+      'You do not have access to change or delete this record. Contact the person who owns it, or your administrator, if you need to make changes.',
+    approval_recall_not_submitter:
+      'Only the person who submitted this approval request can recall it. Contact the submitter, or your administrator, if it needs to be recalled.',
     delete_restricted:
       'This {{object}} is still referenced by {{count}} {{dependentObject}} record(s) through “{{field}}”. Delete or reassign them first.',
     delete_restricted_required:
@@ -160,6 +196,8 @@ export const BUILTIN_OPERATION_MESSAGES: Record<string, Record<string, string>> 
     permission_denied: '您没有执行此操作的权限,如需访问请联系管理员。',
     record_access_denied: '您无权访问这条记录,如需访问请联系该记录的负责人或管理员。',
     record_change_not_allowed: '您无权将这条记录保存为当前填写的内容,请修改后重试,或联系管理员。',
+    record_write_denied: '您无权修改或删除这条记录,如需修改请联系该记录的负责人或管理员。',
+    approval_recall_not_submitter: '只有提交人可以撤回这条审批请求,如需撤回请联系提交人或管理员。',
     delete_restricted:
       '该{{object}}正被 {{count}} 条{{dependentObject}}记录通过「{{field}}」引用,请先删除或改派这些记录。',
     delete_restricted_required:
@@ -171,6 +209,10 @@ export const BUILTIN_OPERATION_MESSAGES: Record<string, Record<string, string>> 
       'このレコードにアクセスする権限がありません。アクセスが必要な場合は、レコードの担当者または管理者にお問い合わせください。',
     record_change_not_allowed:
       '入力された内容ではこのレコードを保存できません。内容を変更して再試行するか、管理者にお問い合わせください。',
+    record_write_denied:
+      'このレコードを変更または削除する権限がありません。変更が必要な場合は、レコードの担当者または管理者にお問い合わせください。',
+    approval_recall_not_submitter:
+      'この承認申請を取り下げられるのは申請者本人のみです。取り下げが必要な場合は、申請者または管理者にお問い合わせください。',
     delete_restricted:
       'この{{object}}は {{count}} 件の{{dependentObject}}レコードから「{{field}}」で参照されています。先にそれらを削除するか、参照先を変更してください。',
     delete_restricted_required:
@@ -183,6 +225,10 @@ export const BUILTIN_OPERATION_MESSAGES: Record<string, Record<string, string>> 
       'No tiene acceso a este registro. Póngase en contacto con la persona responsable del registro o con su administrador si necesita acceso.',
     record_change_not_allowed:
       'No puede guardar este registro con los valores que ha introducido. Modifíquelos e inténtelo de nuevo o póngase en contacto con su administrador si necesita acceso.',
+    record_write_denied:
+      'No tiene acceso para modificar o eliminar este registro. Póngase en contacto con la persona responsable del registro o con su administrador si necesita hacer cambios.',
+    approval_recall_not_submitter:
+      'Solo la persona que envió esta solicitud de aprobación puede retirarla. Póngase en contacto con el remitente o con su administrador si es necesario retirarla.',
     delete_restricted:
       '{{count}} registro(s) de {{dependentObject}} todavía hacen referencia a este {{object}} mediante «{{field}}». Elimínelos o reasígnelos primero.',
     delete_restricted_required:
