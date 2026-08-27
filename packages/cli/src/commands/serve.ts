@@ -91,6 +91,17 @@ import {
   type ConsoleShaDrift,
 } from '../utils/console.js';
 import dotenvFlow from 'dotenv-flow';
+// Metric NAMES and the metrics-service name, from the package that owns both.
+// `buildServeObservability()` below reaches the same package through a dynamic
+// `import()` with a "not installed — silently skip" catch; this STATIC import
+// adds no new failure mode on top of it, and the measurement is written down
+// so the next reader does not have to re-derive it: `@objectstack/runtime` is
+// imported statically a few lines above, its index re-exports
+// `./observability/index.js`, and that module statically imports
+// `@objectstack/observability` for `OBSERVABILITY_METRICS_SERVICE`. So loading
+// this command already requires the package to resolve; the dynamic form there
+// is about the exporter CLASSES, not about reachability.
+import { SEMCONV, OBSERVABILITY_METRICS_SERVICE } from '@objectstack/observability';
 
 // ---------------------------------------------------------------------------
 // Observability bootstrap for `objectstack serve`
@@ -2525,6 +2536,13 @@ export default class Serve extends Command {
       // only the in-memory driver — remote drivers (e.g. redis) come from the EE
       // distribution; if absent we fall back to the in-memory cluster.
       let clusterConfig: { driver: string; url?: string } | undefined;
+      // The gate's verdict, held for the operator-facing telemetry emitted near
+      // the end of boot (#12667). The gate is consulted exactly once per
+      // process and its answer is otherwise consumed on the spot by the boot
+      // warning, so a second consult later would be a second question, not a
+      // second reading of the same one. `undefined` means the gate was never
+      // consulted — a single-node boot — and nothing is emitted.
+      let multiNodeVerdict: MultiNodeGateVerdict | undefined;
       const __clusterDriver = process.env.OS_CLUSTER_DRIVER?.trim();
       if (__clusterDriver && __clusterDriver !== 'memory') {
         // Multi-node authorization gate (open mechanism): a distribution (e.g.
@@ -2561,6 +2579,10 @@ export default class Serve extends Command {
         // declared" — normalization lives at the seam on purpose, so there is
         // deliberately no `?? 0` or pre-parse here.
         const __gate = checkMultiNodeAllowed(Number(process.env.OS_CLUSTER_REPLICAS));
+        // Held for BOTH branches below: an outright denial is as much an
+        // operator-facing reading as a licensed overflow, and only one of the
+        // two currently reaches a log line an operator is likely to still have.
+        multiNodeVerdict = __gate;
         if (!__gate.allowed) {
           console.warn(
             `[cluster] multi-node not authorized (${__gate.reason ?? 'denied'}) — ` +
@@ -4474,6 +4496,21 @@ export default class Serve extends Command {
         if (Array.isArray(s) && s.length > 0) seedSummary = s;
       } catch { /* no seeds ran — nothing to show */ }
 
+      // ── Multi-node licence reading → telemetry (#12667) ────────────
+      // The advisory the gate produced at boot, published where a deployment's
+      // metrics pipeline already looks. Emitted HERE, after every plugin has
+      // been registered, so a host that mounts its own
+      // `ObservabilityServicePlugin` is covered as well as serve's own
+      // auto-wired one — the auto-wire block runs long before the config
+      // plugins, and resolving there would have reached only half the hosts.
+      //
+      // ⛔ Visibility only. This publishes the SAME advisory verdict the boot
+      // warning renders as prose; it refuses nothing, counts no peers, and must
+      // never be reworded into a claim that it does. See
+      // `describeMultiNodeCapTelemetry` for why a real membership count is not
+      // available to this process at all.
+      if (multiNodeVerdict) emitMultiNodeCapTelemetry(kernel, multiNodeVerdict);
+
       // ── Clean startup summary ──────────────────────────────────────
       // #8978 — the Config:/Artifact: row must name what actually booted,
       // never `relativeConfig` unconditionally (see resolveBannerConfigRow).
@@ -5666,6 +5703,145 @@ export function formatMultiNodeCapAdvisory(verdict: MultiNodeGateVerdict): strin
     + `${declared} replicas will still join the cluster.\n`
     + `[cluster] Reduce OS_CLUSTER_REPLICAS to ${admitted}, or raise the licensed node limit.`
   );
+}
+
+/**
+ * The gate verdict as one word, from the vocabulary the gate itself ships
+ * (`admitted` / `refused` / `capped`) — deliberately not a second vocabulary.
+ *
+ * - `refused` — `allowed: false`, the unlicensed case: the whole topology is
+ *   refused and `os serve` downgrades to single-node.
+ * - `capped`  — the licensed-overflow case: entitled to cluster, declared more
+ *   nodes than the licence admits. **Advisory**: every declared replica still
+ *   joins.
+ * - `admitted` — everything declared fits, or no cap was expressed at all.
+ */
+export type MultiNodeCapVerdictWord = 'admitted' | 'capped' | 'refused';
+
+/** One metric observation the operator surface publishes. */
+export interface MultiNodeCapMetric {
+  /** Canonical name from `SEMCONV` — never a literal written here. */
+  name: string;
+  kind: 'gauge' | 'counter';
+  value: number;
+  labels: { verdict: MultiNodeCapVerdictWord };
+}
+
+/**
+ * A positive, finite, whole node count — or `undefined` for "not declared".
+ *
+ * ⚠️ A deliberate MIRROR of `normalizeCount` in
+ * `@objectstack/service-cluster`'s `multi-node-gate.ts`, kept BYTE-IDENTICAL in
+ * its body so `serve-multi-node-cap-advisory.pin.test.ts` can compare the two
+ * bodies derived from their own files rather than against a rule re-typed in a
+ * test. The mirror exists because the resolved verdict does not carry the
+ * declared count back: `admitted` is `min(cap, wanted)`, so `{admitted: 3,
+ * refused: 0}` is produced both by "declared 3 under a cap of 5" and by
+ * "declared nothing under a cap of 3". The declaration is only knowable from
+ * the env var the operator wrote, which is what this reads.
+ */
+function normalizeDeclaredNodeCount(value: number | undefined): number | undefined {
+    if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return undefined;
+    return Math.floor(value);
+}
+
+/**
+ * The operator-facing TELEMETRY reading of a multi-node gate verdict — the
+ * second reach of the same advisory the boot warning above renders as prose
+ * (#12667, ruled C on #8501, maintainer 2026-08-27 「其他接受」).
+ *
+ * ⚠️ **Visibility, not enforcement, and the shape says so.** Nothing here
+ * refuses anything: the gate is consulted once per process at boot, every
+ * replica computes the same verdict, and none can know whether it is one of the
+ * admitted ones — so all of them join. The two facts that make a real count
+ * impossible are unchanged: there is no cluster membership view (`nodeId` is
+ * random per process, no join/leave registry) and `OS_CLUSTER_REPLICAS` is an
+ * operator-DECLARED count identical in every replica. Hence
+ * `cluster_declared_nodes` and `cluster_admitted_nodes`: "declared vs what the
+ * licence admits" is an honest sentence, "N nodes running" is not, and would
+ * be a false statement dressed as telemetry.
+ *
+ * Why prose alone was not enough reach: the boot warning is one `console.warn`
+ * in one process's startup output. An operator who scaled past their cap three
+ * weeks ago has no way to ask the question today, and no way to alert on it.
+ * These observations put the same reading where the deployment's existing
+ * metrics pipeline already looks.
+ *
+ * Deliberate omissions, each of which would be a false number rather than a
+ * missing one:
+ *
+ *   - no `cluster_declared_nodes` when nothing was declared — `0` would read
+ *     as a declaration of zero replicas;
+ *   - no `cluster_admitted_nodes` when the gate expressed no count cap
+ *     (`admitted` absent) — any number there invents a limit nobody stated;
+ *   - no series at all when the gate was never consulted (single-node boot).
+ *
+ * Pure and exported so the test suite can assert **what an operator sees** for
+ * each verdict rather than that some value was computed.
+ *
+ * @param verdict - the verdict `checkMultiNodeAllowed` returned at boot.
+ * @param declaredReplicas - `Number(process.env.OS_CLUSTER_REPLICAS)`, raw:
+ *   normalization is this function's job, exactly as it is the gate's at its
+ *   own seam. `NaN` (the variable is unset) means "not declared".
+ */
+export function describeMultiNodeCapTelemetry(
+  verdict: MultiNodeGateVerdict,
+  declaredReplicas: number,
+): MultiNodeCapMetric[] {
+  const verdictWord: MultiNodeCapVerdictWord =
+    !verdict.allowed ? 'refused' : verdict.capped ? 'capped' : 'admitted';
+  const labels = { verdict: verdictWord };
+
+  // The boot EVENT first: it is the one series that survives a push-based
+  // exporter's staleness window, so it is what an alert can be written against.
+  const metrics: MultiNodeCapMetric[] = [
+    { name: SEMCONV.clusterNodeCapVerdictsTotal, kind: 'counter', value: 1, labels },
+  ];
+
+  const declared = normalizeDeclaredNodeCount(declaredReplicas);
+  if (declared !== undefined) {
+    metrics.push({ name: SEMCONV.clusterDeclaredNodes, kind: 'gauge', value: declared, labels });
+  }
+  if (typeof verdict.admitted === 'number') {
+    metrics.push({ name: SEMCONV.clusterAdmittedNodes, kind: 'gauge', value: verdict.admitted, labels });
+  }
+  return metrics;
+}
+
+/**
+ * Publish {@link describeMultiNodeCapTelemetry}'s observations into whatever
+ * metrics backend the deployment configured.
+ *
+ * Best-effort by contract: a metric call site must never throw, and an
+ * unconfigured deployment must not be worse off than before this existed — with
+ * no backend registered the boot warning remains the only reading, which is
+ * precisely the state this card set out to improve on rather than replace.
+ *
+ * ⚠️ `kernel.getService` THROWS on a miss (see `packages/core/src/kernel.ts`),
+ * so the lookup is wrapped rather than null-checked. Resolving through the
+ * kernel — not through the block `serve` built itself — is what lets a host
+ * that mounts its OWN `ObservabilityServicePlugin` receive these too.
+ */
+function emitMultiNodeCapTelemetry(kernel: any, verdict: MultiNodeGateVerdict): void {
+  let metrics: any;
+  try {
+    metrics = kernel?.getService?.(OBSERVABILITY_METRICS_SERVICE);
+  } catch {
+    return; // no observability backend configured — boot warning stands alone
+  }
+  if (!metrics) return;
+  try {
+    for (const sample of describeMultiNodeCapTelemetry(verdict, Number(process.env.OS_CLUSTER_REPLICAS))) {
+      // The two signatures differ in argument ORDER (`MetricsRegistry` in
+      // @objectstack/observability): counter(name, labels, value) vs
+      // gauge(name, value, labels). Swapping them type-checks under an `any`
+      // registry and emits garbage, so they are written out separately.
+      if (sample.kind === 'counter') metrics.counter?.(sample.name, sample.labels, sample.value);
+      else metrics.gauge?.(sample.name, sample.value, sample.labels);
+    }
+  } catch {
+    // Per the metrics contract: never throw from a call site.
+  }
 }
 
 /**
