@@ -167,6 +167,14 @@ const POPULATION_ROOTS = ['scripts'];
  * and nothing may appear here that the gate does not walk. A declaration that can drift
  * from the scan is worse than none — it replaces a silent gate with a lying one.
  *
+ * That harm is measured, not argued (#12472): run `extractWatchHints` over this file and
+ * the literal spelling yields the subtree hint while the computed spelling yields NOTHING.
+ * The self-test's own copies of the hint cannot stand in for this line — the extractor
+ * blanks comments and the whole `selfTest` body before it scans, so this declaration is
+ * the only occurrence in the file that the extractor can ever see. Which is exactly why
+ * the `--self-test` case guarding it must search THIS STATEMENT and not the whole file:
+ * spelled as a bare whole-file `includes`, it found its own needle and could not fail.
+ *
  * ⛔ And only roots the gate reads WHOLE belong here. `packages/**` does not: this gate
  * opens `packages/<pkg>/package.json` and each package's `src` subtree, not the root entire, so
  * declaring it would name this gate for a card touching a package README. Naming a root
@@ -537,8 +545,36 @@ function selfTest() {
     separatorless.length > 0 && separatorless.every((r) => ROOT_DIR_WATCH_HINTS.includes(`${r}/**`)));
   t('and nothing is declared that this gate does not walk whole — no fabricated lead',
     ROOT_DIR_WATCH_HINTS.every((h) => POPULATION_ROOTS.includes(h.replace(/\/\*+$/, ''))));
+  // ⭐ This case is SCOPED to the declaration statement and DERIVES its needle. Both
+  // halves are load-bearing, and the naive spelling got both wrong (#12472).
+  //
+  // It used to search the WHOLE file for a needle it spelled inline, so `includes` found
+  // that needle in the ASSERTION rather than in the declaration and the case was
+  // satisfied by its own text: rewriting the declaration into the computed form it
+  // exists to reject left the self-test fully GREEN, all 38 cases passing. A case that
+  // cannot fail is the same under-enforcement this gate was built to catch, one layer in.
+  //
+  // Assembling the needle -- the remedy `check-objectql-double-limit.mjs` carries for
+  // the identical idiom -- is NOT sufficient here, which is why this looks different from
+  // its sibling. That file spells the hint twice (declaration, assertion), so un-spelling
+  // the assertion leaves the declaration as the only copy. This file spells it a THIRD
+  // time, in the runtime-value case just below, and a whole-file search finds THAT copy
+  // and stays green on the computed form. Measured. So the scope is the fix and the
+  // derived needle is the hygiene; ⛔ do not widen the search back to the whole file.
+  //
+  // The harm this case names is real, not theoretical -- measured against the extractor
+  // itself: `extractWatchHints` recovers the subtree hint from the literal declaration
+  // and recovers NOTHING from the computed one. The self-test's own copies cannot rescue
+  // it, because `maskSelfTests` blanks this whole function before the scan runs.
+  const ownSource = readFileSync(fileURLToPath(import.meta.url), 'utf8');
+  const declSites = [...ownSource.matchAll(/\bconst\s+ROOT_DIR_WATCH_HINTS\s*=\s*([^;]*);/g)];
+  t('the declaration statement is found exactly once in this source',
+    declSites.length === 1,
+    `${declSites.length} site(s) matched -- the case below cannot judge what it cannot locate`);
   t('the declaration is spelled as a LITERAL in this source, not computed',
-    readFileSync(fileURLToPath(import.meta.url), 'utf8').includes("'scripts/**'"),
+    declSites.length === 1 && ROOT_DIR_WATCH_HINTS.length > 0
+    && ROOT_DIR_WATCH_HINTS.every((h) =>
+      declSites[0][1].includes(`'${h}'`) || declSites[0][1].includes(`"${h}"`)),
     'the hint extractor reads source text; a computed `${r}/**` builds no hint at all');
   t('scripts is the root it declares, and the population really reaches across it',
     ROOT_DIR_WATCH_HINTS.includes('scripts/**')
