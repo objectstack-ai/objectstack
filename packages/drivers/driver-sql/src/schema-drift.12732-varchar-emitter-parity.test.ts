@@ -57,7 +57,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { SqlDriver } from './sql-driver.js';
-import { diffManagedTable, type PhysicalColumn, type SqlDialectName } from './schema-drift.js';
+import { diffManagedTable, type FieldDef, type PhysicalColumn, type SqlDialectName } from './schema-drift.js';
 import { dialectCell } from './live-dialect-matrix.testkit.js';
 
 const T = 'os12732_probe';
@@ -77,7 +77,7 @@ const ENFORCING: readonly SqlDialectName[] = ['postgres', 'mysql'];
 // as `sql-driver-11565-row-byte-budget.test.ts` and
 // `schema-drift.unbounded-text-column.test.ts` already do.
 const driver = new SqlDriver(dialectCell('sqlite').config());
-const mirror = (field: Record<string, unknown>, keyed?: { unique: boolean }) =>
+const mirror = (field: FieldDef, keyed?: { unique: boolean }) =>
   (driver as any).varcharColumnChars(field, keyed) as number | null;
 
 const diffWithMirror = (
