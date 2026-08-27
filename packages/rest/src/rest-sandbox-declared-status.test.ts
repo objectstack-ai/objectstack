@@ -127,8 +127,13 @@ describe('[#9967] a sandboxed body that declares a 5xx takes the sanitised 5xx a
         expect(r.status).toBe(503);
         expect(r.body.error).toBe(INTERNAL_ERROR_MESSAGE);
         expect(JSON.stringify(r.body)).not.toContain('close-period lock');
-        // No code was declared; none is invented (ADR-0112: the producer names
-        // the condition).
+        // No code was declared; none is invented — ADR-0112 D4 governs the
+        // semantic-CODE channel: the producer names the condition on the CODE
+        // axis, and the ADR rules no HTTP status for an undeclared throw. The
+        // 503 above is kept on #5582's rule (this section's own heading), not
+        // the ADR's. See `error-response.ts`'s `resolveThrownHttpError`
+        // docblock for why the phrase is that file's own prose and not an ADR
+        // quotation.
         expect(r.body.code).toBeUndefined();
     });
 

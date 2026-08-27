@@ -9648,8 +9648,12 @@ export class RestServer {
             if (refusal) {
                 // `code` is REQUIRED by the nested envelope, and the flat
                 // classification legitimately carries none for an undeclared
-                // sandbox refusal (ADR-0112: the producer names the condition,
-                // so nothing is invented for the half it did not name). The
+                // sandbox refusal (ADR-0112 D4 governs the semantic-CODE
+                // channel: the producer names the condition on the CODE axis,
+                // so nothing is invented for the half it did not name; the ADR
+                // rules no HTTP status here, and the phrase is
+                // `error-response.ts`'s own prose rather than an ADR
+                // quotation). The
                 // catalog's own floor fills the required field —
                 // `standardErrorCodeForHttpStatus`, whose docblock exists for
                 // exactly this ("Total by construction: a producer can always
