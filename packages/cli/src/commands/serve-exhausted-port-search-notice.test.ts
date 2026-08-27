@@ -178,11 +178,22 @@ describe('#12620: an exhausted port search is announced, in the words the search
 
     // The thrown text is still carried — that ruling does not bend by branch.
     expect(notice).toContain(badPort.message);
+
     // …but the claim that is false here is simply not made.
-    expect(notice, 'a span was claimed for a search that never walked one').not.toMatch(
-      /probed \d+ ports/,
-    );
-    expect(notice, 'the notice printed a NaN range').not.toContain('NaN–');
+    //
+    // ⚠️ The predicate here is `/probed/`, NOT `/probed \d+ ports/`, and the
+    // difference is the whole test. Removing the branch guard does not produce
+    // a WRONG number — it produces `undefined`, because the span body reads
+    // `startPort`/`lastPort`/`probedCount` off an error that does not carry
+    // them. A `\d+` pattern does not match `probed undefined ports`, so the
+    // narrow spelling passed against precisely the regression this case exists
+    // to catch. Measured: an ablation that neutered the guard left all eight
+    // cases green.
+    expect(notice, 'a span was claimed for a search that never walked one').not.toMatch(/probed/);
+    expect(
+      notice,
+      'the notice rendered a placeholder where a number belongs',
+    ).not.toMatch(/undefined|NaN–/);
 
     // Anti-vacuity for the two negatives above: the real exhausted notice DOES
     // make both claims, so their absence here is a discrimination and not a
