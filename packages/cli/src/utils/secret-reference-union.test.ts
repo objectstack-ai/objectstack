@@ -119,6 +119,8 @@ function makeDriver() {
   };
 }
 
+const TEST_PACKAGE_ID = 'com.objectstack.test.12663';
+
 const textField = (name: string) => ({ name, label: name, type: 'text' as const });
 
 const sysSecretObject = {
@@ -183,10 +185,12 @@ async function buildRuntime() {
   const engine = new ObjectQL();
   engine.registerDriver(store.driver as never, true);
   await engine.init();
-  engine.registry.registerObject(sysSecretObject as never);
-  engine.registry.registerObject(sysSettingObject as never);
-  engine.registry.registerObject(sysMetadataObject as never);
-  engine.registry.registerObject(smtpObject as never);
+  // `packageId` is required by the built declaration this package resolves
+  // (`registerObject(schema, packageId, …)`); the engine's own in-package tests
+  // reach a source signature that defaults it.
+  for (const object of [sysSecretObject, sysSettingObject, sysMetadataObject, smtpObject]) {
+    engine.registry.registerObject(object as never, TEST_PACKAGE_ID);
+  }
 
   const crypto = new LocalCryptoProvider({ mode: 'test' });
   engine.setCryptoProvider(crypto as never);
@@ -370,7 +374,7 @@ describe('family 2 — the engine secret-field channel (`secret:<id>` on a busin
         label: textField('label'),
         api_token: { name: 'api_token', label: 'api_token', type: 'secret' as const },
       },
-    } as never);
+    } as never, TEST_PACKAGE_ID);
     await rt.realEngine.insert('tenant_api_integration', {
       id: 'rec_t1', label: 'crm', api_token: 'tok-live-42',
     });
