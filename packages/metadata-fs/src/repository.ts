@@ -901,8 +901,35 @@ export class FileSystemRepository implements MetadataRepository {
    *   - `unlink` — `!currentHead` drops the event when the index already
    *     agrees the item is gone. `delete()` retires the head *before* it
    *     unlinks, precisely because this face gets no `awaitWriteFinish` delay.
+   *     This is the whole of the *self-write* answer on this face, and it is
+   *     not the whole of the face — see the section below it.
    *
    * Both faces are pinned together in `test/self-write-suppression.test.ts`.
+   *
+   * ## A removal is confirmed against the disk before it is published (#7369)
+   *
+   * Those two checks answer "is this event OURS". Neither answers "did this
+   * happen at all", and the `unlink` face needs that second question asked
+   * because its input is a third party's inference: chokidar decides a file is
+   * gone from a *stat that failed*, not only from a file that went away, and
+   * `!currentHead` cannot tell the two apart because a spurious unlink leaves
+   * the index exactly as valid as it was.
+   *
+   * The cost of getting it wrong is not a dropped notification, which the
+   * sweep would repair. A `delete` is appended to the change log and broadcast
+   * to every subscriber, and `MetadataManager` drops the item from the
+   * registry and the `list()` cache on receipt. The sweep then finds the file
+   * still on disk and republishes it as a `create` — so a failed stat becomes
+   * a durable, permanently recorded delete/create pair for an item that never
+   * changed, and every consumer sees the item disappear in between. That is
+   * the shape ADR-0008's log is least able to walk back.
+   *
+   * So `existsSync` under the same per-key lock the sweep uses, and the same
+   * decision it makes: absent ⇒ publish the removal; present ⇒ this was a
+   * change, answered by the content path below. Genuine removals pay nothing —
+   * `delete()` is still suppressed by `!currentHead`, and an external `rm` is
+   * still published on the first delivery, because for those the file really
+   * is gone. Pinned in `test/external-delete-requires-absence.test.ts`.
    *
    * Note the deliberate limit: identity is judged on what round-trips through
    * the file, so a spec whose in-memory form does not (a `Date`, which
@@ -922,7 +949,36 @@ export class FileSystemRepository implements MetadataRepository {
     };
     const key = refKey(ref);
     await this.mutex.run(key, async () => {
-      if (kind === 'unlink') {
+      // A watcher `unlink` is a CLAIM of absence, not absence — so it is
+      // confirmed against the disk before a `delete` is published (#7369).
+      // `!currentHead` inside `publishExternalDelete` cannot do this job: it
+      // compares against the INDEX, which is exactly what a spurious unlink
+      // leaves intact. The reconciliation sweep already re-checks disk truth
+      // under this same lock before retiring a key, for a reason it states in
+      // place; the watcher face was the one path that published a removal on
+      // the observer's word alone.
+      //
+      // chokidar reaches its removal path from failed *stats* as well as from
+      // real removals, and says so at both sites (chokidar 5 `handler.js`):
+      // `_handleFile`'s poll listener re-stats a file whose watched stat came
+      // back zeroed and calls `_remove` from the catch — under the comment
+      // "Fix issues where mtime is null but file is still present" — with no
+      // discrimination on errno, so EMFILE/ENFILE retires a file that is
+      // there; and `_handleRead`'s snapshot diff `_remove`s every previously
+      // tracked entry its readdirp pass did not enumerate, which includes the
+      // entries whose per-entry `lstat` failed rather than only the ones that
+      // are gone. Both faults are load-shaped, which is why the merge queue —
+      // the only context that runs the FULL suite — is where this surfaced,
+      // twice, on a case that touches nothing else.
+      //
+      // Falling through is the repair, not just skipping: when the path is
+      // still there the honest reading of the event is "something happened to
+      // this file", which is the content path's question. It answers with the
+      // same `currentHead === hash` comparison used everywhere else, so a
+      // spurious unlink that accompanied a real in-place edit still surfaces
+      // as the `update` it always was, in the same tick, rather than as the
+      // `delete` + `create` pair the index-only check produced.
+      if (kind === 'unlink' && !existsSync(absPath)) {
         await this.publishExternalDelete(ref, key);
         return;
       }
