@@ -1180,6 +1180,148 @@ export function resolveModuleRelativeHint(literal, scriptPath, { root = ROOT } =
 }
 
 /**
+ * The repo-relative DIRECTORY a single-segment module-relative literal names —
+ * or `null` for every other single-segment literal, which is the standing
+ * refusal this narrows by exactly one class.
+ *
+ * ## The class, and the two literals it exists for
+ *
+ * `looksPathy` reads a literal as the author wrote it minus the depth prefix,
+ * so a literal that is ONE segment after the strip carries no separator and is
+ * no hint at all. That is right for `'./invoked-as.mjs'` and `'./package.json'`
+ * and wrong for these two, which are unambiguous subtree declarations:
+ *
+ *   packages/spec/scripts/build-docs.ts:61             path.resolve(__dirname, '../src')
+ *   packages/spec/scripts/build-skill-references.ts:35 path.resolve(__dirname, '../src')
+ *
+ * Checked at the declaration site rather than assumed, which is the provenance
+ * criterion this file prices: `build-docs.ts` does `fs.readdirSync(SRC_DIR)`
+ * and walks the category directories under it; `build-skill-references.ts`
+ * resolves every spec file it reads against `SPEC_SRC`. Both really do read
+ * `packages/spec/src`.
+ *
+ * ## Why the test is "a tracked DIRECTORY" and not "the resolve succeeded"
+ *
+ * Admitting on the resolved form alone is the naive widening, and it is
+ * measured and REFUSED — `extractWatchHints`' admission comment carries the
+ * verdict. Re-measured on this tree at `96dc446c9`, it adds 53 distinct hints,
+ * and the split is the whole argument:
+ *
+ *   resolve to a tracked DIRECTORY   1    `packages/spec/src`, on the two gates above
+ *   resolve to a tracked FILE       42    `invoked-as.mjs` (x123 families),
+ *                                         `ts-parse.mjs`, `js-comment-mask.mjs`,
+ *                                         `packages/spec/package.json` — the sibling
+ *                                         module and manifest class, a second and
+ *                                         unpriced answer to the question
+ *                                         `firstPartyImportTargets` already owns
+ *   resolve to nothing tracked      10    `packages/spec/json-schema`,
+ *                                         `packages/spec/scripts/{contracts,data,other,ui}`,
+ *                                         `scripts/{package,base,tsconfig}.json` —
+ *                                         build OUTPUT directories and untracked
+ *                                         siblings, hints that would print and reach
+ *                                         nothing
+ *
+ * So the directory test is not a refinement of the naive widening, it is a
+ * different predicate that happens to share its resolve: it takes 1 of the 53
+ * and leaves the two refused classes bit for bit.
+ *
+ * TRACKED, never `existsSync` + `isDirectory`. The ten in the third row are
+ * exactly what a filesystem test would get wrong the moment anything has been
+ * built — `packages/spec/json-schema` and the four `packages/spec/scripts/*`
+ * roots are generated output, absent from a clean checkout and present after a
+ * build, so a filesystem predicate would mint five hints whose existence
+ * depends on whether the reader ran a build first. `git` is the corpus every
+ * other answer in this file is measured against, and it is the corpus here.
+ *
+ * ## Why the resolved form must carry a SEPARATOR
+ *
+ * A literal like `'../../skills'` written from `scripts/pm/` resolves to
+ * `skills` — a tracked directory, and a BARE ROOT. Admitting it would build a
+ * hint `hintCovers` refuses on its own bare-word rule, so it would reach
+ * nothing, and it would land as a fresh row in the SHRINK-ONLY escapable-literal
+ * ledger (`escapableLiteralRows` selects on exactly "no separator, and the tree
+ * has the whole literal"). That is the +139084-pair class re-entering one
+ * literal at a time, through a door labelled "directory".
+ *
+ * The separator requirement makes the refusal structural rather than lucky: no
+ * literal this function admits can be a hint `hintCovers` would refuse, so the
+ * bare-word verdict is untouched by construction and not merely untouched on
+ * today's tree. The gate whose population really is a repo root has the same
+ * escape it always had — declare the subtree spelling, `ROOT_DIR_WATCH_HINTS`.
+ *
+ * ## WITH the neighbouring refusals, or APART? — apart, and on their own criterion
+ *
+ * `hintCovers`' docblock refuses two neighbours: a bare top-level word
+ * (+139084 pairs) and a bare root FILE literal (refused on provenance, 8 of 17
+ * new pairs fabricated because `README.md` is a basename gates JOIN with a
+ * package directory). This class sits APART from both, and the distinction is
+ * not one of degree:
+ *
+ *   - both neighbours are literals with NO WRITER to resolve against, so the
+ *     tree cannot say which path — if any — they mean. `packages` is a path
+ *     COMPONENT in dozens of gates that never read the root. A module-relative
+ *     literal is the opposite shape: it is an author pointing from where they
+ *     stand, it resolves to exactly one path, and whether that path is a
+ *     tracked directory is a fact of the tree rather than a reading of intent;
+ *   - provenance, which is the criterion the docblock says it actually prices
+ *     and never volume: 2 of 2 admitted (family, hint) pairs are TRUE leads,
+ *     verified at the declaration site above. 0 fabricated;
+ *   - the neighbours are refusals of a hint the covering rule cannot judge.
+ *     This function emits a resolved, multi-segment path, so both refusals keep
+ *     running on exactly the population they always did.
+ *
+ * ## Price, measured through `hintCovers` and nothing else
+ *
+ * Over 176 families x 7131 tracked files at `96dc446c9`:
+ *
+ *   watch-hint (gate, file) pairs   83846 -> 85954   (+2108, and ZERO lost)
+ *   families gaining coverage       2; ZERO losing
+ *   (check, hint) live / inert      892/590 -> 894/590   (+2 live, 0 newly inert)
+ *   distinct hints in the fleet     829 -> 829       UNCHANGED, and that is the
+ *                                   shape of the thing: `packages/spec/src` is
+ *                                   already spelled from the root by other
+ *                                   gates, so this admits no hint text the
+ *                                   fleet did not already carry — it gives two
+ *                                   gates the hint their own source declares
+ *   check:docs                      451 -> 1505
+ *   check:skill-refs                 15 -> 1069
+ *
+ * Each of the two new (check, hint) pairs contributes 1054 files, the whole of
+ * `packages/spec/src`, which is why the pair total is exactly twice it. The
+ * hint has no `packages/spec/src.<ext>` sibling, so the dropped-extension
+ * disjunct adds nothing to either.
+ *
+ * The card that filed this measured 2062 (1031 + 1031) on 6899 tracked files
+ * and the pre-#12794 matcher. The reading moved with the tree, not with the
+ * rule: `packages/spec/src` holds 1054 tracked files now rather than 1031, and
+ * both gates take all of them.
+ *
+ * ## Why the TREE is a parameter and not a read
+ *
+ * `extractWatchHints` is a pure string function over one script's source, and
+ * `hintCovers`' docblock refuses coupling extraction to a git checkout — the
+ * refusal that sent the dropped-extension follow to comparison time. It is not
+ * relaxed here. The corpus arrives as an argument, from the caller that has
+ * already read it once; a caller with no tree gets the standing refusal, which
+ * is a MISSING lead and the direction this file errs in everywhere. And the
+ * membership questions are answered by `trackedPrefixes` and `trackedFiles` —
+ * the file's existing single owners of "what does the tree have" — never by a
+ * second walker built here.
+ */
+export function moduleRelativeDirectoryHint(literal, scriptPath, tree, { root = ROOT } = {}) {
+  if (!scriptPath || !tree) return null;
+  const resolved = resolveModuleRelativeHint(literal, scriptPath, { root });
+  // A bare root is refused BEFORE the tree is consulted: it is not a directory
+  // this rule declines to name, it is a hint `hintCovers` would refuse anyway.
+  if (!resolved || !resolved.includes('/')) return null;
+  // A tracked prefix that is not itself a tracked file IS a directory — read
+  // off the two sets the sweep already builds, so this cannot disagree with
+  // what the reachability half of the tool believes the tree holds.
+  if (!tree.prefixes.has(resolved) || tree.files.has(resolved)) return null;
+  return resolved;
+}
+
+/**
  * Scan a check script's MODULE BODY for the path-ish string literals it
  * operates on. A hint is a quoted string that contains a `/` (or names a
  * top-level dotted dir) and looks like a repo path rather than a URL or a
@@ -1262,7 +1404,7 @@ export function resolveModuleRelativeHint(literal, scriptPath, { root = ROOT } =
  * where the hint is built — not at comparison time, where every caller would
  * have to remember to do it.
  */
-export function extractWatchHints(scriptSource, scriptPath = null) {
+export function extractWatchHints(scriptSource, scriptPath = null, { tree = null } = {}) {
   const moduleBody = maskSelfTests(maskComments(scriptSource));
   const hints = new Set();
   for (const m of moduleBody.matchAll(/['"`]([^'"`\n]{2,120})['"`]/g)) {
@@ -1279,13 +1421,42 @@ export function extractWatchHints(scriptSource, scriptPath = null) {
     // `gate source` where the import channel says `gate source via <mod>`. It
     // also put a path population on two gates that DECLARE they have none. The
     // bare-single-segment refusal in `hintCovers`' docblock is the same
-    // standing verdict, one class over.
+    // standing verdict, one class over. Re-measured at 96dc446c9 the refusal
+    // still costs all three: the self-test's `--self-test`-inherits-nothing
+    // case, its no-path-population case (contradicted for check:release-body
+    // and check-prerelease-pin-watch.mjs), and the two pins that state the
+    // refusal itself.
+    //
+    // ONE class is admitted back, and it is a different predicate rather than a
+    // softening of that one: a single-segment literal whose resolved form is a
+    // tracked DIRECTORY carrying a separator (`moduleRelativeDirectoryHint`,
+    // whose docblock carries the split of the 53 hints and the judgement).
+    // Nothing about the sibling module, the manifest, or the bare root moves.
     const stripped = raw.replace(/^(?:\.\.?(?:\/|$))+/, '');
     // Dots and nothing else name no file, on either path — checked before the
     // resolve so it cannot turn `'..'` into the writer's own directory.
     if (!stripped) continue;
     const looksPathy = stripped.includes('/') || /^\.(claude|changeset|github|gitattributes)\b/.test(stripped);
-    if (!looksPathy) continue;
+    if (!looksPathy) {
+      // The one narrow re-admission, and it is MODULE-RELATIVE ONLY. `resolve`
+      // treats a bare word exactly like a `./` one, so dropping the
+      // `stripped !== raw` test here silently widens this to the bare-word class
+      // one writer's directory at a time — measured on this tree at three
+      // fabricated hints, the sharpest being `'fixtures'`, a member of
+      // check-error-status-conformance's SKIP_DIRS set, i.e. a directory the
+      // gate declares it does NOT read, admitted as `scripts/fixtures` because
+      // the tree happens to have one. The hint is the RESOLVED directory, so
+      // what reaches `hintCovers` is an ordinary multi-segment path and every
+      // refusal below is untouched; a caller with no tree keeps the standing
+      // refusal, which is a missing lead rather than a fabricated one.
+      const directory =
+        stripped !== raw
+          ? moduleRelativeDirectoryHint(raw.replace(/[./]+$/, ''), scriptPath, tree)
+          : null;
+      if (!directory) continue;
+      hints.add(directory);
+      continue;
+    }
     const trimmed = stripped.replace(/[./]+$/, '');
     if (!trimmed) continue;
     // A slash is the separator of several namespaces, and only one of them is
@@ -2351,6 +2522,22 @@ export function trackedPrefixes(files) {
     for (let i = f.indexOf('/'); i !== -1; i = f.indexOf('/', i + 1)) prefixes.add(f.slice(0, i));
   }
   return prefixes;
+}
+
+/**
+ * The tracked corpus in the two shapes `moduleRelativeDirectoryHint` asks it
+ * about: every tracked FILE, and every path PREFIX the tree has. Built once and
+ * handed down, so the extractor, the reachability sweep and the ledger cannot
+ * describe different revisions of the tree — the same "one read, N answers"
+ * discipline `discoverFamilies` takes with a workflow's text.
+ *
+ * It is a bundle rather than two parameters because the pair is meaningless
+ * apart: "is this a directory" is `prefixes.has(p) && !files.has(p)`, and a
+ * caller that supplied one from one listing and one from another would get an
+ * answer about no tree at all.
+ */
+export function watchHintTree(files = trackedFiles()) {
+  return { files: new Set(files), prefixes: trackedPrefixes(files) };
 }
 
 /**
@@ -4159,7 +4346,7 @@ export function tierLines(result) {
  * is the drift this file's header refuses everywhere else. The self-test is
  * the only other caller, and it calls THIS.
  */
-export function discoverFamilies() {
+export function discoverFamilies({ tree = watchHintTree() } = {}) {
   const wfDir = join(ROOT, '.github/workflows');
   const workflows = readdirSync(wfDir).filter((f) => /\.ya?ml$/.test(f));
   if (workflows.length === 0) throw new Error('no workflow files found under .github/workflows');
@@ -4235,7 +4422,7 @@ export function discoverFamilies() {
       // A module that declares nothing contributes everything it spells, which
       // is the behaviour every followed module had before the marker existed.
       const source = readFileSync(join(ROOT, rel), 'utf8');
-      const spelled = extractWatchHints(source, rel);
+      const spelled = extractWatchHints(source, rel, { tree });
       const declared = declaredInheritedPopulation(source, spelled);
       moduleHints.set(rel, declared ? declared.population : spelled);
     }
@@ -4252,7 +4439,7 @@ export function discoverFamilies() {
       // them can describe different revisions of a file, the same discipline
       // the trigger paths take above.
       const source = readFileSync(abs, 'utf8');
-      entry.hints.push(...extractWatchHints(source, f));
+      entry.hints.push(...extractWatchHints(source, f, { tree }));
       entry.noPopulationReason ??= declaredNoPathPopulation(source);
       // A `--self-test` family follows NO import, and that is a measurement
       // rather than a preference (#11404). The invocation runs the script's
@@ -4308,13 +4495,16 @@ export function discoverFamilies() {
 }
 
 function derive(paths, { showResidue = false } = {}) {
-  const { byCheck, workflows } = discoverFamilies();
-
   // The reachability sweep runs BEFORE a line is printed, so its refusals
   // (#4690: an empty corpus, or an all-unreachable answer) come out as a
   // failed derivation rather than as a footnote under an answer that already
   // looks complete. It reads the tree only; it moves no verdict above.
+  //
+  // It is read here, above the discovery, because the extractor needs the same
+  // corpus to judge a single-segment directory literal — one listing, so the
+  // hints and the sweep that grades them cannot be taken from different trees.
   const swept = trackedFiles();
+  const { byCheck, workflows } = discoverFamilies({ tree: watchHintTree(swept) });
   const unreachable = unreachableFamilies([...byCheck], swept);
 
   const matched = new Map();
@@ -5509,13 +5699,133 @@ function selfTest() {
   // `hintCovers`' docblock states for a bare filename. Admitting it would hand
   // every gate its own import specifiers as a watched population, a second and
   // unpriced answer to the question `firstPartyImportTargets` owns.
+  //
+  // Both are asserted WITH the live tree, never without one. The refusal is
+  // cheap to pass for the wrong reason — a call with no tree refuses every
+  // single-segment literal — so a pin that omitted it would be green whatever
+  // `moduleRelativeDirectoryHint` did.
+  const hintTree = watchHintTree();
+  const isTrackedDir = (p) => hintTree.prefixes.has(p) && !hintTree.files.has(p);
   t(
     'a single-segment sibling specifier does NOT convert into a hint',
-    extractWatchHints("import { invokedAs } from './invoked-as.mjs';", 'scripts/check-x.mjs').length === 0,
+    extractWatchHints("import { invokedAs } from './invoked-as.mjs';", 'scripts/check-x.mjs', { tree: hintTree })
+      .length === 0,
+  );
+  t(
+    '…and it is refused because the resolve lands on a tracked FILE, not for want of a tree',
+    hintTree.files.has('scripts/invoked-as.mjs') && !isTrackedDir('scripts/invoked-as.mjs'),
   );
   t(
     '…nor does a bare sibling manifest name',
-    extractWatchHints("const P = './package.json';", 'scripts/check-x.mjs').length === 0,
+    extractWatchHints("const P = './package.json';", 'scripts/check-x.mjs', { tree: hintTree }).length === 0,
+  );
+
+  // ── ONE class IS admitted back: a single-segment literal whose resolve lands
+  // ── on a tracked DIRECTORY (#12470)
+  //
+  // `moduleRelativeDirectoryHint` carries the split of the 53 hints the naive
+  // widening adds and the judgement that puts this class apart from the two
+  // `hintCovers` refuses. Pinned here as the four things a reader needs to be
+  // able to break: that it FIRES, WHERE the admitted hint lands, and the two
+  // structural refusals that keep it from becoming either of its neighbours.
+  const specDirLiteral = "const SRC_DIR = path.resolve(__dirname, '../src');";
+  t(
+    'a single-segment literal resolving to a tracked directory DOES convert',
+    extractWatchHints(specDirLiteral, 'packages/spec/scripts/build-docs.ts', { tree: hintTree }).join() ===
+      'packages/spec/src',
+    extractWatchHints(specDirLiteral, 'packages/spec/scripts/build-docs.ts', { tree: hintTree }).join(),
+  );
+  t(
+    '…and without a tree the same call keeps the standing refusal — a missing lead, never a fabricated one',
+    extractWatchHints(specDirLiteral, 'packages/spec/scripts/build-docs.ts').length === 0,
+  );
+  // ARRIVAL, not departure. That the literal left the refused set says nothing
+  // about which family it reaches or which files: both live gates are named,
+  // and each is shown to reach a real file under the directory that NO other
+  // hint of that family reaches — so the pair is this rule's, not a coincidence
+  // of some other hint already covering the tree there.
+  const dirLanding = discoverFamilies({ tree: hintTree }).byCheck;
+  const specSrcFile = trackedFiles().find((f) => f.startsWith('packages/spec/src/'));
+  for (const check of ['check:docs', 'check:skill-refs']) {
+    const entry = dirLanding.get(check);
+    t(
+      `${check} carries the admitted directory hint`,
+      (entry?.hints ?? []).includes('packages/spec/src'),
+    );
+    t(
+      `…and it is what reaches ${specSrcFile} for ${check} — no other hint of that family does`,
+      Boolean(specSrcFile) &&
+        (entry?.hints ?? []).filter((h) => hintCovers(h, specSrcFile)).join() === 'packages/spec/src',
+    );
+  }
+  // The BLAST RADIUS, both directions, over the live fleet: which families this
+  // rule changes at all. Read as the difference between the discovery WITH the
+  // tree and the same discovery WITHOUT one, so it measures the rule and not
+  // the tree — `packages/spec/src` is already a hint several other gates spell
+  // from the root, and asking "who carries it" would count those too.
+  const withoutTree = discoverFamilies({ tree: null }).byCheck;
+  const dirGained = [];
+  const dirLost = [];
+  for (const [check, entry] of dirLanding) {
+    const before = new Set(withoutTree.get(check)?.hints ?? []);
+    for (const h of entry.hints ?? []) if (!before.has(h)) dirGained.push(`${check} +${h}`);
+    for (const h of before) if (!(entry.hints ?? []).includes(h)) dirLost.push(`${check} -${h}`);
+  }
+  t(
+    'the rule changes exactly the two gates that walk packages/spec/src, and adds exactly the directory they walk',
+    dirGained.join(' · ') === 'check:docs +packages/spec/src · check:skill-refs +packages/spec/src',
+    dirGained.join(' · '),
+  );
+  t(
+    'and it takes NOTHING away — a widening that also subtracted would read exactly like this one',
+    dirLost.length === 0,
+    dirLost.join(' · '),
+  );
+
+  // REFUSAL 1 — module-relative ONLY. `resolve` treats a bare word exactly like
+  // a `./` one, so without this the rule reads any bare word against its
+  // writer's directory and becomes the bare-word class one gate at a time. The
+  // specimen is the sharpest one on the tree: a member of
+  // check-error-status-conformance's SKIP_DIRS, a directory the gate DECLARES
+  // it does not read, which the tree happens to have under `scripts/`.
+  t(
+    'a BARE word is not resolved against its writer, even when that lands on a tracked directory',
+    extractWatchHints("const SKIP = new Set(['fixtures']);", 'scripts/check-x.mjs', { tree: hintTree }).length === 0,
+  );
+  t(
+    '…and that refusal is non-vacuous: scripts/fixtures IS a tracked directory the resolve would have found',
+    isTrackedDir('scripts/fixtures'),
+  );
+  // REFUSAL 2 — the resolved form must carry a SEPARATOR. A bare root would
+  // build a hint `hintCovers` refuses on its own bare-word rule, reaching
+  // nothing and landing as a fresh row in the SHRINK-ONLY escapable-literal
+  // ledger. Refusing it here makes that structural rather than lucky.
+  t(
+    'a single-segment literal that resolves to a bare ROOT is refused',
+    extractWatchHints("const P = '../../skills';", 'scripts/pm/x.mjs', { tree: hintTree }).length === 0,
+  );
+  t(
+    '…non-vacuously: skills IS a tracked directory, and a hint spelling it would reach nothing anyway',
+    isTrackedDir('skills') && !trackedFiles().some((f) => hintCovers('skills', f)),
+  );
+  // The #12794 boundary, asserted as the structural exclusion it is rather than
+  // as a count. `extensionlessModuleTarget` refuses any hint the tree has as a
+  // prefix, and this rule admits ONLY hints the tree has as a prefix — so no
+  // literal can be both a tracked-directory hint and an extensionless module
+  // target, on this tree or any other.
+  t(
+    'a single-segment literal whose target the tree has only under a dropped extension is NOT admitted',
+    extractWatchHints("import { invokedAs } from './invoked-as';", 'scripts/check-x.mjs', { tree: hintTree })
+      .length === 0,
+  );
+  t(
+    '…non-vacuously: had it been admitted, hintCovers would have matched the file through the extension rule',
+    hintCovers('scripts/invoked-as', 'scripts/invoked-as.mjs'),
+  );
+  t(
+    'the two rules are mutually exclusive by construction — an admitted directory is a tracked prefix, which extensionlessModuleTarget refuses',
+    extensionlessModuleTarget('packages/spec/src', hintTree.files, hintTree.prefixes) === null &&
+      isTrackedDir('packages/spec/src'),
   );
   t(
     'a literal that climbs out of the repo names nothing',
@@ -7391,7 +7701,12 @@ function selfTest() {
   // Without this the marker rots in the direction that costs — a gate grows a
   // real population, keeps its old declaration, and the residue keeps vouching
   // that its emptiness was examined.
-  const liveDiscovery = discoverFamilies();
+  // ONE tree for the discovery and for the reconstruction below. The extractor
+  // judges a single-segment directory literal against the tracked corpus, so a
+  // reconstruction that read a different corpus — or none — would report the
+  // rule as a mismatch rather than checking it.
+  const liveTree = watchHintTree();
+  const liveDiscovery = discoverFamilies({ tree: liveTree });
   const declaredEmpty = [...liveDiscovery.byCheck].filter(([, e]) => e.noPopulationReason);
   t(
     `the live tree carries at least one no-population declaration (the guard is not vacuous; found ${declaredEmpty.length})`,
@@ -7431,7 +7746,7 @@ function selfTest() {
   // and silent about the rule.
   const liveGateFiles = new Set([...liveDiscovery.byCheck.values()].flatMap((e) => e.files ?? []));
   const liveSource = (rel) => readFileSync(join(ROOT, rel), 'utf8');
-  const liveModuleHints = (rel) => extractWatchHints(liveSource(rel), rel);
+  const liveModuleHints = (rel) => extractWatchHints(liveSource(rel), rel, { tree: liveTree });
   const liveTargets = (rel) => firstPartyImportTargets(rel, liveSource(rel));
 
   // The recogniser, on fixture source: one line per refusal, so a widening or
@@ -7475,7 +7790,7 @@ function selfTest() {
     for (const f of entry.files ?? []) {
       if (!existsSync(join(ROOT, f))) continue;
       const source = liveSource(f);
-      own.push(...extractWatchHints(source, f));
+      own.push(...extractWatchHints(source, f, { tree: liveTree }));
       for (const mod of firstPartyImportTargets(f, source)) {
         if (liveGateFiles.has(mod) || direct.includes(mod)) continue;
         direct.push(mod);
