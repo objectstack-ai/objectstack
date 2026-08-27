@@ -13,8 +13,6 @@
     "BreakingChange": "src/kernel/plugin-versioning.zod.ts#BreakingChange (type)",
     "BreakingChangeParsed": "src/kernel/plugin-versioning.zod.ts#BreakingChangeParsed (type)",
     "BreakingChangeSchema": "src/kernel/plugin-versioning.zod.ts#BreakingChangeSchema (const)",
-    "CLICommandContribution": "src/kernel/cli-extension.zod.ts#CLICommandContribution (type)",
-    "CLICommandContributionSchema": "src/kernel/cli-extension.zod.ts#CLICommandContributionSchema (const)",
     "CONSUMER_INSTALLABLE_TYPES": "src/kernel/plugin.zod.ts#CONSUMER_INSTALLABLE_TYPES (const)",
     "CORE_PLUGIN_TYPES": "src/kernel/plugin.zod.ts#CORE_PLUGIN_TYPES (const)",
     "CapabilityClassification": "src/kernel/platform-capabilities.ts#CapabilityClassification (interface)",

@@ -64,6 +64,7 @@ import type { DriverQuery, IDataDriver } from '@objectstack/spec/contracts';
 import { StandardErrorCode } from '@objectstack/spec/api';
 import { StorageNameMapping } from '@objectstack/spec/system';
 import { ExternalSchemaModeViolationError } from '@objectstack/spec/shared';
+import { UnsupportedDialectEmissionError } from './dialect-emission-refusal.js';
 import {
   isUniqueViolationError,
   isUnbackedConflictTargetError,
@@ -4354,24 +4355,54 @@ export class SqlDriver implements IDataDriver {
    * ("measured: a UTC-12 server records YESTERDAY") that method's Postgres
    * branch exists to remove.
    *
-   * ## What is deliberately NOT in here
+   * ## What is deliberately NOT in here — settled by the #11756 ruling
    *
    * `redshift` and `cockroachdb` speak the pg WIRE protocol and are in
-   * {@link POSTGRES_WIRE_CLIENTS} for that reason — but they are separate knex
-   * dialects (`redshift` compiles its own DDL; `cockroachdb` ships its own
+   * {@link POSTGRES_WIRE_ONLY_CLIENTS} for that reason — but they are separate
+   * knex dialects (`redshift` compiles its own DDL; `cockroachdb` ships its own
    * driver), and whether this driver should claim to emit correct DDL for them
-   * is a SUPPORT-SCOPE question rather than a spelling one. `mariadb` is the
-   * same shape against the MySQL family. They stay out until that is decided
-   * — see #11756. Wire recognition and the connect-timeout table EXTEND these
-   * sets; nothing derives these sets from a union of the others, because that
-   * would answer #11756 as a side effect of a refactor.
+   * was a SUPPORT-SCOPE question rather than a spelling one. It is no longer
+   * open: the maintainer ruled on 2026-08-25 (#11756, verbatim 「同意」 on
+   * 「C，但 pgnative 归入 Postgres 家族」) that they keep wire recognition and
+   * get NO emission identity — and that a configuration of theirs reaching the
+   * DDL path is REFUSED BY NAME ({@link assertDialectEmits}) rather than served
+   * a table this driver cannot vouch for.
+   *
+   * What "cannot vouch for" means, measured on the pinned knex rather than
+   * argued (#11991, one CREATE TABLE, three clients):
+   *
+   * ```
+   * pg         create table "t" ("id" varchar(255), …, "body" text,
+   *                              constraint "t_pkey" primary key ("id"))
+   * pgnative   … byte-identical to pg …
+   * redshift   create table "t" ("id" varchar(255) not null, …,
+   *                              "body" varchar(max));
+   *            alter table "t" add constraint "t_pkey" primary key ("id")
+   * ```
+   *
+   * `mariadb` is the same shape against the MySQL family and is EXPLICITLY out
+   * of that ruling's scope: it stays unrecognised, and — deliberately — it is
+   * not refused either. {@link POSTGRES_WIRE_ONLY_CLIENTS} is the refusal's
+   * only input, so nothing here quietly widens the ruling by one dialect.
+   *
+   * Wire recognition and the connect-timeout table EXTEND these sets through
+   * that one declared extension; nothing derives these sets from a union of the
+   * others, because that would re-answer #11756 as a side effect of a refactor.
    *
    * `better-sqlite3` is a member rather than an extension because it is not a
    * scope question: this driver's own default SQLite client is `better-sqlite3`
    * and every SQLite branch in this file was written against it.
    */
   private static readonly POSTGRES_EMIT_CLIENTS: ReadonlySet<string> = new Set([
-    'postgres', 'pg', 'postgresql',
+    // `pgnative` is a MEMBER, not an extension (#11756 ruling): knex resolves it
+    // to `dialect === 'postgresql'` — the same query compiler as `pg`, differing
+    // only in which npm binding carries the bytes (`driverName: 'pgnative'`).
+    // Measured on the pinned knex while landing #11991. Before that ruling it
+    // was the easy end of the question lumped in with the hard end, and it paid
+    // for it: `isPostgres === false` meant a `date` column got a bare
+    // CURRENT_TIMESTAMP default — the server-timezone calendar day, the exact
+    // #11550 defect — on a config knex compiles as Postgres.
+    'postgres', 'pg', 'postgresql', 'pgnative',
   ]);
   /** SQLite spellings that mean "emit SQLite SQL". See {@link POSTGRES_EMIT_CLIENTS}. */
   private static readonly SQLITE_EMIT_CLIENTS: ReadonlySet<string> = new Set([
@@ -4381,6 +4412,61 @@ export class SqlDriver implements IDataDriver {
   private static readonly MYSQL_EMIT_CLIENTS: ReadonlySet<string> = new Set([
     'mysql', 'mysql2',
   ]);
+
+  /**
+   * The ONE declared extension over the emission sets above: knex clients this
+   * driver recognises on the pg WIRE and deliberately does not emit DDL for.
+   *
+   * #11756 ruling, maintainer, 2026-08-25, verbatim 「同意」 on 「C，但
+   * pgnative 归入 Postgres 家族」 — "connection and parsing yes, building your
+   * tables no", stated in the open instead of left to be discovered.
+   *
+   * ## Why it exists as a NAMED set rather than two literal pairs
+   *
+   * Before #11991 the pair `cockroachdb, redshift` was hand-written into
+   * {@link DIALECT_CONNECT_TIMEOUT} and again into
+   * {@link POSTGRES_WIRE_CLIENTS}, and a third copy would have been needed for
+   * the refusal — three lists that must agree, kept in step by nobody. They
+   * answer one question ("recognised on the wire, not for emission") and now
+   * have one answer: both tables extend the emission sets through THIS set, and
+   * {@link assertDialectEmits} refuses exactly its members. Adding a future
+   * pg-wire client to this line therefore gives it the connect bound, the
+   * #11389 calendar-day parser AND the named DDL refusal in one edit — the
+   * three cannot drift apart again.
+   *
+   * ## The direction is load-bearing
+   *
+   * ⛔ Never derive the emission sets FROM this one. Emission is the source and
+   * this is the extension; the reverse would grant `redshift` and `cockroachdb`
+   * SQL-emission identity as a silent side effect of a refactor — the outcome
+   * (option A) the ruling explicitly declined, on a platform that has never
+   * measured how far their DDL diverges.
+   *
+   * ⛔ `mariadb` is NOT here. It is the same shape one family over and the
+   * ruling put it explicitly out of scope: unrecognised for emission, and not
+   * refused either. A dialect the platform never claimed and never refused is a
+   * third state, and it is the deliberate one.
+   */
+  private static readonly POSTGRES_WIRE_ONLY_CLIENTS: ReadonlySet<string> = new Set([
+    'cockroachdb', 'redshift',
+  ]);
+
+  /**
+   * Every client spelling this driver will emit DDL for, sorted — the guidance
+   * half of {@link assertDialectEmits}'s refusal.
+   *
+   * Read off the emission sets rather than written out, so the sentence an
+   * operator is shown can never name a client the driver has stopped
+   * supporting, or omit one it has just gained (`pgnative` arrived exactly that
+   * way).
+   */
+  protected static emissionClients(): string[] {
+    return [
+      ...SqlDriver.SQLITE_EMIT_CLIENTS,
+      ...SqlDriver.POSTGRES_EMIT_CLIENTS,
+      ...SqlDriver.MYSQL_EMIT_CLIENTS,
+    ].sort();
+  }
 
   /**
    * The configured client as a STRING, or `''`.
@@ -4408,9 +4494,12 @@ export class SqlDriver implements IDataDriver {
   /**
    * Whether the underlying database is PostgreSQL.
    *
-   * Every knex spelling of the family: `postgres` (knex's canon) and its
-   * registered aliases `pg` / `postgresql`. `redshift` and `cockroachdb` are
-   * deliberately NOT here — see {@link POSTGRES_EMIT_CLIENTS} and #11756.
+   * Every knex spelling of the family: `postgres` (knex's canon), its registered
+   * aliases `pg` / `postgresql`, and `pgnative` — a separate knex client name
+   * that resolves to the same `postgresql` dialect and compiler (#11756 ruling).
+   * `redshift` and `cockroachdb` are deliberately NOT here: they are refused by
+   * name at the DDL gate instead. See {@link POSTGRES_EMIT_CLIENTS},
+   * {@link POSTGRES_WIRE_ONLY_CLIENTS} and {@link assertDialectEmits}.
    */
   protected get isPostgres(): boolean {
     return SqlDriver.POSTGRES_EMIT_CLIENTS.has(SqlDriver.clientSpelling(this.config));
@@ -4420,7 +4509,9 @@ export class SqlDriver implements IDataDriver {
    * Whether the underlying database is MySQL.
    *
    * Both knex spellings of the family; `mariadb` is a separate knex dialect and
-   * is deliberately NOT here. See {@link POSTGRES_EMIT_CLIENTS} and #11756.
+   * is deliberately NOT here. The #11756 ruling put `mariadb` explicitly OUT of
+   * its scope, so it is neither recognised nor refused — see
+   * {@link POSTGRES_WIRE_ONLY_CLIENTS} for why that third state is deliberate.
    */
   protected get isMysql(): boolean {
     return SqlDriver.MYSQL_EMIT_CLIENTS.has(SqlDriver.clientSpelling(this.config));
@@ -4691,14 +4782,16 @@ export class SqlDriver implements IDataDriver {
    */
   private static readonly DIALECT_CONNECT_TIMEOUT: Record<string, { key: string; urlKey: string }> =
     Object.fromEntries<{ key: string; urlKey: string }>([
-      // Every spelling that means Postgres SQL, EXTENDED by `cockroachdb` and
-      // `redshift`: separate knex dialects, but ones that reach the server
-      // through the same `pg` driver and therefore take the same knob. Knex's
-      // `Client_Redshift` literally `extends Client_PG`, so the settings object
-      // it hands to `pg.Client` honours `connectionTimeoutMillis` exactly as
-      // `pg` does. Deriving the pg arm from {@link POSTGRES_EMIT_CLIENTS} is
-      // what keeps this table from drifting away from the getters again
-      // (#11550) — widening recognition now widens this with it.
+      // Every spelling that means Postgres SQL, EXTENDED by
+      // {@link POSTGRES_WIRE_ONLY_CLIENTS}: separate knex dialects, but ones
+      // that reach the server through the same `pg` driver and therefore take
+      // the same knob. Knex's `Client_Redshift` literally `extends Client_PG`,
+      // so the settings object it hands to `pg.Client` honours
+      // `connectionTimeoutMillis` exactly as `pg` does. Deriving the pg arm
+      // from {@link POSTGRES_EMIT_CLIENTS} is what keeps this table from
+      // drifting away from the getters again (#11550) — widening recognition
+      // now widens this with it, which is how `pgnative` got its row when the
+      // #11756 ruling made it a Postgres client (#11991), with no edit here.
       //
       // `redshift`'s row arrived with #11784. It had the knob and would have
       // obeyed it, but carried no entry, so its connection attempt fell through
@@ -4707,14 +4800,16 @@ export class SqlDriver implements IDataDriver {
       // and nothing was logged — the bound was simply 50% looser, for one
       // client name.
       //
-      // ⚠️ This arm and {@link POSTGRES_WIRE_CLIENTS} now happen to hold the
-      // same five names. That is a fact about today's membership, NOT an
-      // invariant, and must not be refactored into one: the two answer
-      // different questions (how do I spell the connect timeout vs. which npm
-      // package parses the wire), and unioning them would hand `redshift` and
-      // `cockroachdb` SQL-emission identity as a silent side effect — the open
-      // decision #11756, and #11550's subject, not this table's to make.
-      ...[...SqlDriver.POSTGRES_EMIT_CLIENTS, 'cockroachdb', 'redshift'].map(
+      // ⚠️ This arm and {@link POSTGRES_WIRE_CLIENTS} are spelled from the same
+      // two sets and therefore hold the same six names. That remains a fact
+      // about today's membership, NOT an invariant, and the two must not be
+      // collapsed into one another: they answer different questions (how do I
+      // spell the connect timeout vs. which npm package parses the wire), and
+      // one may gain a client the other should not. What #11991 removed is the
+      // hand-written `'cockroachdb', 'redshift'` pair that used to sit here and
+      // again in the wire set — the extension is declared ONCE now, so the two
+      // tables extend the same answer rather than two copies of it.
+      ...[...SqlDriver.POSTGRES_EMIT_CLIENTS, ...SqlDriver.POSTGRES_WIRE_ONLY_CLIENTS].map(
         (c): [string, { key: string; urlKey: string }] =>
           [c, { key: 'connectionTimeoutMillis', urlKey: 'connectionString' }],
       ),
@@ -4838,14 +4933,20 @@ export class SqlDriver implements IDataDriver {
    * really exposing `setTypeParser`, so a client name that turns out not to be
    * a `pg.Client` degrades to a no-op instead of throwing.
    *
-   * Built by EXTENDING {@link POSTGRES_EMIT_CLIENTS}, never by unioning tables
-   * into it: the reverse direction would grant `cockroachdb` and `redshift`
-   * SQL-emission identity as a silent side effect of a refactor, which is the
-   * open decision #11756 and not this file's to make (#11550).
+   * Built by EXTENDING {@link POSTGRES_EMIT_CLIENTS} with the one declared
+   * {@link POSTGRES_WIRE_ONLY_CLIENTS} set, never by unioning tables into it:
+   * the reverse direction would grant `cockroachdb` and `redshift` SQL-emission
+   * identity as a silent side effect of a refactor — the outcome #11756's
+   * ruling declined, and not this file's to re-make (#11550, #11991).
+   *
+   * `pgnative` is here because it is in the EMISSION set, not by a second
+   * decision: before #11991 it was in neither, so it got no calendar-day parser
+   * — the one table membership the #11756 ruling had to add by hand, and it is
+   * this derivation that added it.
    */
   private static readonly POSTGRES_WIRE_CLIENTS: ReadonlySet<string> = new Set([
     ...SqlDriver.POSTGRES_EMIT_CLIENTS,
-    'cockroachdb', 'redshift',
+    ...SqlDriver.POSTGRES_WIRE_ONLY_CLIENTS,
   ]);
 
   /** Postgres OID of `date` — a bare calendar day, no time and no zone. */
@@ -5012,6 +5113,12 @@ export class SqlDriver implements IDataDriver {
    * schema-mutating DDL is only performed on a `managed` datasource.
    * Federated datasources (`external` / `validate-only`) are guests in a
    * database ObjectStack does not own and must never run DDL against.
+   *
+   * [#11991] Since the #11756 ruling this choke-point asks a SECOND question
+   * after that one — may this driver emit DDL for the configured DIALECT at all
+   * ({@link assertDialectEmits}). Two questions, one gate, in this order: the
+   * datasource question is unchanged and still answered first, so the new
+   * refusal fires only where DDL would otherwise have PROCEEDED.
    */
   protected assertSchemaMutable(operation: string): void {
     if (this.schemaMode !== 'managed') {
@@ -5020,6 +5127,46 @@ export class SqlDriver implements IDataDriver {
           `ObjectStack never mutates the schema of an external database.`,
       );
     }
+    this.assertDialectEmits(operation);
+  }
+
+  /**
+   * Emission-scope gate (#11991, landing the #11756 ruling of 2026-08-25):
+   * refuse — by name, with guidance — a client this driver recognises on the pg
+   * WIRE and deliberately does not emit DDL for.
+   *
+   * ## Why it sits inside the DDL gate rather than at each DDL verb
+   *
+   * {@link assertSchemaMutable} is already the one place every schema mutation
+   * passes through (`initObjects` / `syncSchema`, `dropTable`, `rotateShards`,
+   * `reconcileManagedSchema`), so putting the question here answers it once for
+   * all of them. The alternative — refuse CREATE/ALTER but allow DROP, on the
+   * grounds that `DROP TABLE` is portable — requires deciding WHICH DDL is safe
+   * on Redshift, and how far Redshift's DDL diverges is precisely the thing
+   * #11756 recorded as never measured. A gate that guesses at that would be
+   * making the ruling's option A one verb at a time.
+   *
+   * ## What it deliberately does NOT refuse
+   *
+   * Only {@link POSTGRES_WIRE_ONLY_CLIENTS} — never "anything the getters do
+   * not recognise". `mariadb` is out of the ruling's scope and stays
+   * unrecognised-and-unrefused; so does a bring-your-own Client constructor
+   * (knex's documented hatch, which names no spelling in any table here). A
+   * refusal keyed on `dialectName === 'unknown'` would have swept both in and
+   * widened a decided ruling by side effect — the exact move the ruling's own
+   * implementation note forbids.
+   *
+   * ## Reads, never writes
+   *
+   * Nothing has been issued to the database when this throws: it runs before
+   * `ensureDatabaseExists` and before the first `hasTable` probe. The refusal
+   * is therefore total for schema work and inert for everything else — reads,
+   * writes and connection handling on these databases are untouched.
+   */
+  protected assertDialectEmits(operation: string): void {
+    const client = SqlDriver.clientSpelling(this.config);
+    if (!SqlDriver.POSTGRES_WIRE_ONLY_CLIENTS.has(client)) return;
+    throw new UnsupportedDialectEmissionError(client, operation, SqlDriver.emissionClients());
   }
 
   // ===================================

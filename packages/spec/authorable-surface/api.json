@@ -1407,6 +1407,7 @@
     "api/RestApiConfig:enableMetadata",
     "api/RestApiConfig:enableOpenApi",
     "api/RestApiConfig:enableProjectScoping",
+    "api/RestApiConfig:enableSearch",
     "api/RestApiConfig:enableUi",
     "api/RestApiConfig:projectResolution",
     "api/RestApiConfig:requireAuth [RETIRED]",

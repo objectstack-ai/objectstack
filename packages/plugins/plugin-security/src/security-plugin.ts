@@ -2025,9 +2025,13 @@ export class SecurityPlugin implements Plugin {
       // `checkDelete` for the delete class, so an `edit` share widens update and
       // still leaves delete denied without this file knowing why.
       if (
-        // update/delete today; transfer/restore/purge are pre-wired (#1883) so
-        // the M2 ops inherit the pre-image check the moment they dispatch —
-        // the CRUD bit alone must never be the only row-level defense.
+        // update/delete today; the lifecycle verbs stay listed so the M2 ops
+        // inherit the pre-image check the moment they dispatch — the CRUD bit
+        // alone must never be the only row-level defense. `transfer` clears
+        // the object gate via its mapped bit (#1883/#3004); `restore`/`purge`
+        // are denied AT the object gate since #12497 (bits tombstoned, rows
+        // retired, DESTRUCTIVE_OPERATIONS fail-closed), so this branch is
+        // dormant defense-in-depth for them until the M2 batch re-adds both.
         ['update', 'delete', 'transfer', 'restore', 'purge'].includes(opCtx.operation) &&
         permissionSets.length > 0 &&
         !!opCtx.context?.userId &&

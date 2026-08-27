@@ -60,6 +60,14 @@ export interface FlowPrecedenceWinner {
 /**
  * Classify one registry body's provenance.
  *
+ * ⚠️ This is a CLASSIFIER, not a renderer. It answers "where did this body come
+ * from?" with a {@link FlowContender} and carries no prose at all — yet it is
+ * exported, and it sits exactly where a shared renderer would live. It has been
+ * mistaken for one: three separate callers each wrote their own private
+ * sentence about a contested flow name, because the export that looked
+ * reusable had nothing in it to reuse. For the operator-facing phrase, use
+ * {@link renderFlowContender} below.
+ *
  * Delegates to `isCodeArtifactBody` — the canonical ADR-0029 D9.6 test, which
  * exists precisely so callers cannot drift into a second answer to "does a code
  * package ship this name?". ⛔ Do not re-derive this from `_packageId`: that
@@ -76,6 +84,43 @@ export function describeFlowContender(item: unknown): FlowContender {
         source: 'runtime',
         ...(typeof packageId === 'string' && packageId ? { packageId } : {}),
     };
+}
+
+/**
+ * Render one contender as the phrase an operator reads.
+ *
+ * ⛔ The ONLY place this phrase is spelled. Before it existed the same sentence
+ * was written three times from scratch — twice in this package (the pull
+ * warning below, and the plugin's bootstrap audit) and once in
+ * `@objectstack/cli`'s startup banner — and the copies had already drifted on
+ * TWO axes. A private `const describe = …` beside a log call is how each copy
+ * arrived; reach for this instead, and a fourth caller costs nothing.
+ *
+ * ## Both spellings are decisions, so they are recorded here
+ *
+ * **Single quotes** — measured against this package, ⛔ not voted across the
+ * copies. Of the interpolated identifiers in operator prose under
+ * `service-automation/src`, 203 are single-quoted and 3 double-quoted, and one
+ * of those 3 was this phrase. The sentence this phrase lands in already
+ * single-quotes the flow NAME, which is the more free-form of the two values,
+ * so single quotes here add no ambiguity the line does not already carry.
+ * `packageId` is an unconstrained `z.string()` in `packages/spec`, so neither
+ * spelling is provably safe against an adversarial id — this one is at least
+ * the house convention rather than a coin flip.
+ *
+ * **A named fallback, never an interpolated `undefined`.** `packageId` is
+ * optional on {@link FlowContender}, and `package 'undefined'` is the one
+ * rendering an operator cannot act on. This package's own callers cannot reach
+ * that branch today — `isCodeArtifactBody` is false on a falsy `_packageId`,
+ * so a `source: 'package'` contender always carries one — but that is a
+ * property of today's CALLERS, not of this function. A renderer that is safe
+ * only because of who happens to call it stops being safe at the next caller.
+ */
+export function renderFlowContender(contender: FlowContender): string {
+    if (contender.source !== 'package') return 'a runtime-authored row (sys_metadata)';
+    return contender.packageId
+        ? `package '${contender.packageId}'`
+        : 'a code-shipped package (id unknown)';
 }
 
 /**
@@ -147,13 +192,10 @@ export function resolveFlowPrecedence(
 
         const armed = ranked[0];
         const shadowed = ranked.slice(1).map((entry) => entry.contender);
-        const describe = (c: FlowContender) =>
-            c.source === 'package' ? `package "${c.packageId}"` : 'a runtime-authored row (sys_metadata)';
-
         logger?.warn(
             `[Automation] Flow name collision: '${name}' is claimed by ${group.length} definitions ` +
-            `(${ranked.map((entry) => describe(entry.contender)).join(', ')}); ` +
-            `arming ${describe(armed.contender)} per ADR-0005 overlay precedence and shadowing ` +
+            `(${ranked.map((entry) => renderFlowContender(entry.contender)).join(', ')}); ` +
+            `arming ${renderFlowContender(armed.contender)} per ADR-0005 overlay precedence and shadowing ` +
             `${shadowed.length} other definition(s). Only the armed definition dispatches. ` +
             `Rename one, or remove the sys_metadata row if the package value should win.`,
             {

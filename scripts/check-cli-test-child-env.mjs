@@ -511,16 +511,103 @@ function isBulkUse(node) {
 }
 
 /**
+ * The three vitest block roots whose modifier chains name a real test block.
+ *
+ * ⛔ A ROSTER rather than "any identifier", and the population is why: this
+ * directory calls `it.name`, `it.type`, `it.next` and `it.prevVersion` on
+ * ordinary loop variables that happen to be spelled `it`. Gating on the root
+ * alone would name a callback site after one of those.
+ */
+const TEST_BLOCK_ROOTS = new Set(['it', 'test', 'describe']);
+
+/**
+ * The vitest modifiers that keep a chain a TEST BLOCK, so `it.skip(...)` names
+ * a site and `rows.map(...)` does not.
+ *
+ * ⛔ Also a roster, and this is the half that does the refusing. Measured under
+ * {@link POPULATION_ROOT}: a blanket "property access whose base is an
+ * identifier" rule matches **209 call sites across 87 distinct callees** here
+ * -- `literals.filter`, `child.on`, `entries.map`, `run.then`, `rows.map`,
+ * `vi.fn`, `Array.from` -- against the **22** this roster matches (`it.each`
+ * x20, `describe.each` x2, the whole modifier population of this directory).
+ * Those 87 are not test blocks, their callee is a WORSE name than the enclosing
+ * block the walk reaches today, and naming them would MOVE the key of every
+ * site nested inside one. Re-keying is a data migration wearing a bug fix's
+ * clothes; the roster is what keeps this a rename of nothing.
+ *
+ * `each`/`for` and `skipIf`/`runIf` are the curried forms -- `it.each(table)(
+ * 'title', fn)` -- and are unwrapped one call deeper by {@link calleeSiteName}.
+ *
+ * ⛔ `extend` is deliberately absent: `test.extend(fixtures)` builds a NEW test
+ * function rather than a block, and that product is bound to a name the
+ * identifier branch already reads.
+ */
+const TEST_BLOCK_MODIFIERS = new Set([
+  'skip', 'only', 'todo', 'fails',            // verdict
+  'concurrent', 'sequential', 'shuffle',      // scheduling
+  'each', 'for',                              // table (curried)
+  'skipIf', 'runIf',                          // conditional (curried)
+]);
+
+/**
+ * The dotted name of a test-block chain -- `it.skip`, `describe.each`,
+ * `it.skip.each` -- or `null` for anything that is not one.
+ *
+ * Every segment after the root must be on {@link TEST_BLOCK_MODIFIERS}, so a
+ * chain stays a block however deep it nests, and `a.b.c(...)` never becomes a
+ * site name.
+ */
+function testBlockChainName(expr) {
+  const modifiers = [];
+  let cursor = expr;
+  while (ts.isPropertyAccessExpression(cursor)) {
+    if (!ts.isIdentifier(cursor.name)) return null;
+    modifiers.unshift(cursor.name.text);
+    cursor = cursor.expression;
+  }
+  // A bare identifier is the pre-existing branch, not this one.
+  if (modifiers.length === 0 || !ts.isIdentifier(cursor)) return null;
+  if (!TEST_BLOCK_ROOTS.has(cursor.text)) return null;
+  if (!modifiers.every((part) => TEST_BLOCK_MODIFIERS.has(part))) return null;
+  return [cursor.text, ...modifiers].join('.');
+}
+
+/**
+ * The callee half of a site name, or `null` when the call does not name a site.
+ *
+ * ⚠️ The identifier branch is FIRST and byte-identical to what it always was.
+ * That is load-bearing: {@link DELIBERATE_REROUTE} holds keys this function
+ * produced for plain `it("...")` blocks, and both registries are pinned in both
+ * directions, so a green live-tree run is the proof that no existing key moved.
+ */
+function calleeSiteName(expr) {
+  if (ts.isIdentifier(expr)) return expr.text;
+  const chain = testBlockChainName(expr);
+  if (chain) return chain;
+  // The curried table/conditional forms: `it.each(table)('title', fn)` is a
+  // call whose CALLEE is itself a call of a test-block chain. Only one level --
+  // vitest defines no deeper currying, and unbounded unwrapping would start
+  // guessing again.
+  if (ts.isCallExpression(expr)) return testBlockChainName(expr.expression);
+  return null;
+}
+
+/**
  * The name a call-argument arrow takes from the call it is passed to:
  * `it("boots the child")`, or `beforeAll` when the call carries no title.
  *
  * DOUBLE quotes around the title, deliberately: the product is a
  * {@link DELIBERATE} key, and this file's string literals are single-quoted, so
  * a key pasted into that registry needs no escaping.
+ *
+ * The title is read from the OUTER call's arguments, which is what makes the
+ * curried form come out right: `it.each(table)('boots', fn)` is named for
+ * `'boots'`, never for a string that happens to sit in `table`.
  */
 function callbackSiteName(owner) {
-  if (!owner || !ts.isCallExpression(owner) || !ts.isIdentifier(owner.expression)) return null;
-  const callee = owner.expression.text;
+  if (!owner || !ts.isCallExpression(owner)) return null;
+  const callee = calleeSiteName(owner.expression);
+  if (!callee) return null;
   const title = owner.arguments.find((arg) => ts.isStringLiteralLike(arg));
   return title ? `${callee}("${title.text.replace(/\s+/g, ' ').trim()}")` : callee;
 }
@@ -560,12 +647,15 @@ function callbackSiteName(owner) {
  *
  * ⚠️ Three limits, named here so they are pinned rather than discovered:
  *
- *   1. The callee must be an IDENTIFIER. `it.skip('...')` and
- *      `it.each(table)('...')` call through a property access or through
- *      another call, and still walk past to `(top-level)`. That is a choice:
- *      widening to a property-access callee would also capture
- *      `promise.then(() => ...)` and `rows.map(() => ...)`, whose callee is a
- *      WORSE site name than the enclosing test block the walk reaches today.
+ *   1. The callee must be an identifier, or a ROSTERED vitest block chain.
+ *      `it.skip('...')`, `describe.each(table)('...')` and `it.skip.each(...)`
+ *      are named (#12545); `promise.then(() => ...)`, `rows.map(() => ...)` and
+ *      every other `foo.bar(cb)` are still walked past to the enclosing block,
+ *      because their callee is a WORSE site name than the block above them.
+ *      ⛔ The refusal is the point, not a leftover: see
+ *      {@link TEST_BLOCK_MODIFIERS} for the 209-vs-22 measurement that decides
+ *      it. A blanket property-access widening would RE-KEY existing sites,
+ *      which is a data migration disguised as a bug fix.
  *   2. The title's whitespace is collapsed so the name stays one line, but it
  *      is ⛔ never truncated -- two long titles sharing a prefix would collide
  *      again, which is the defect being closed.
@@ -1752,12 +1842,119 @@ export function selfTest() {
       siteNames('site-title-wrap', { 'a.e2e.test.ts': suite(`it(\`boots\nthe child\`, () => {\n${BULK}\n});`) })
         === names('it("boots the child")'));
 
-    // The named limit, pinned rather than discovered: a property-access callee
-    // is deliberately NOT captured, because `promise.then(...)` and `rows.map(
-    // ...)` would be worse site names than the test block the walk reaches.
-    t('an it.skip() callee is a property access, not an identifier, so it still reads (top-level)',
-      siteNames('site-property-callee', { 'a.e2e.test.ts': suite(`it.skip('x', () => {\n${BULK}\n});`) })
+    // -- (8c) THE MODIFIER FAMILY (#12545): a rostered vitest chain names a
+    //    site; every other property-access callee still does not.
+    //
+    //    Until this landed, the callee had to be a bare IDENTIFIER, so
+    //    `it.skip(...)` (property access) and `it.each(table)(...)` (a call)
+    //    walked past to `(top-level)` and every skipped/table-driven block in
+    //    one file collided on ONE key -- the same defect #12531 closed for the
+    //    identifier branch, one modifier over. The case below that used to pin
+    //    `it.skip` AS `(top-level)` is retargeted to the name it now produces;
+    //    what that case's comment was really protecting -- the refusal of
+    //    `promise.then` and `rows.map` -- is pinned outright further down,
+    //    where it is a measurement rather than a side effect.
+
+    t('an it.skip() block is named, not (top-level)',
+      siteNames('site-mod-skip', { 'a.e2e.test.ts': suite(`it.skip('x', () => {\n${BULK}\n});`) })
+        === names('it.skip("x")'));
+    t('an it.only() block is named',
+      siteNames('site-mod-only', { 'a.e2e.test.ts': suite(`it.only('x', () => {\n${BULK}\n});`) })
+        === names('it.only("x")'));
+    t('a describe.skip() block is named -- the root roster is not it-only',
+      siteNames('site-mod-desc-skip', { 'a.e2e.test.ts': suite(`describe.skip('x', () => {\n${BULK}\n});`) })
+        === names('describe.skip("x")'));
+    t('a test.concurrent() block is named -- test is a root too',
+      siteNames('site-mod-test-conc', { 'a.e2e.test.ts': suite(`test.concurrent('x', () => {\n${BULK}\n});`) })
+        === names('test.concurrent("x")'));
+    t('a modifier with NO string title falls back to the chain alone',
+      siteNames('site-mod-untitled', { 'a.e2e.test.ts': suite(`it.skip(() => {\n${BULK}\n});`) })
+        === names('it.skip'));
+
+    // The CURRIED forms: the callee is itself a call. The title must come from
+    // the OUTER call, never from the table.
+    t('a curried it.each(table)() block is named after the OUTER title',
+      siteNames('site-mod-each', { 'a.e2e.test.ts': suite(`it.each([1])('x', () => {\n${BULK}\n});`) })
+        === names('it.each("x")'));
+    t('a curried describe.each(table)() block is named',
+      siteNames('site-mod-desc-each', { 'a.e2e.test.ts': suite(`describe.each([1])('x', () => {\n${BULK}\n});`) })
+        === names('describe.each("x")'));
+    t('...and a string INSIDE the table never becomes the title',
+      siteNames('site-mod-each-table-string', {
+        'a.e2e.test.ts': suite(`it.each(['from the table'])('from the block', () => {\n${BULK}\n});`),
+      }) === names('it.each("from the block")'));
+    t('a curried it.skipIf(cond)() block is named -- the conditional form curries too',
+      siteNames('site-mod-skipif', { 'a.e2e.test.ts': suite(`it.skipIf(flag)('x', () => {\n${BULK}\n});`) })
+        === names('it.skipIf("x")'));
+    t('a CHAINED it.skip.each(table)() block is named through every segment',
+      siteNames('site-mod-chain', { 'a.e2e.test.ts': suite(`it.skip.each([1])('x', () => {\n${BULK}\n});`) })
+        === names('it.skip.each("x")'));
+
+    // ⭐ THE case for this change, the modifier twin of `site-siblings`: two
+    //    sibling it.each blocks in ONE file must not share a key either.
+    t('two it.each() blocks in one file get TWO DISTINCT names',
+      siteNames('site-mod-siblings', {
+        'a.e2e.test.ts': suite(
+          `it.each([1])('first', () => {\n${BULK}\n});\nit.each([2])('second', () => {\n${BULK}\n});`),
+      }) === names('it.each("first")', 'it.each("second")'));
+
+    // ⭐ THE NEGATIVE PIN. Without it, nothing in this suite distinguishes
+    //    "the modifiers now work" from "everything got renamed". The plain
+    //    identifier branch must be byte-identical to what it always was,
+    //    because DELIBERATE_REROUTE holds keys it produced.
+    t('⭐ a plain it() block STILL yields exactly it("x") -- the identifier branch did not move',
+      siteNames('site-mod-plain-unmoved', { 'a.e2e.test.ts': suite(`it('x', () => {\n${BULK}\n});`) })
+        === names('it("x")'));
+    t('...and a plain describe() > it() nesting is unmoved too',
+      siteNames('site-mod-plain-nested', {
+        'a.e2e.test.ts': suite(`describe('outer', () => {\n  it('inner', () => {\n${BULK}\n  });\n});`),
+      }) === names('it("inner")'));
+
+    // ⛔ THE REFUSALS -- the half that keeps this a targeted unwrap. A blanket
+    //    property-access widening matches 209 call sites across 87 callees in
+    //    the live population against this roster's 22, and would RE-KEY every
+    //    site nested inside one of them.
+    t('⛔ promise.then(cb) is NOT a site name -- the walk still reaches past it',
+      siteNames('site-refuse-then', { 'a.e2e.test.ts': suite(`p.then(() => {\n${BULK}\n});`) })
         === names('(top-level)'));
+    t('⛔ rows.map(cb) is NOT a site name',
+      siteNames('site-refuse-map', { 'a.e2e.test.ts': suite(`rows.map(() => {\n${BULK}\n});`) })
+        === names('(top-level)'));
+    t('⛔ an arbitrary a.b.c(cb) chain is NOT a site name',
+      siteNames('site-refuse-chain', { 'a.e2e.test.ts': suite(`a.b.c('x', () => {\n${BULK}\n});`) })
+        === names('(top-level)'));
+    t('⛔ a NON-rostered member of a real root is refused -- it.name(cb) is a loop variable, not a block',
+      siteNames('site-refuse-nonroster', { 'a.e2e.test.ts': suite(`it.name('x', () => {\n${BULK}\n});`) })
+        === names('(top-level)'));
+    t('⛔ a rostered MODIFIER on a non-rostered root is refused -- only it/test/describe are roots',
+      siteNames('site-refuse-nonroot', { 'a.e2e.test.ts': suite(`suite.each([1])('x', () => {\n${BULK}\n});`) })
+        === names('(top-level)'));
+    t('⛔ a curried call whose inner callee is a bare identifier is refused',
+      siteNames('site-refuse-curried-ident', { 'a.e2e.test.ts': suite(`makeSuite('t')('x', () => {\n${BULK}\n});`) })
+        === names('(top-level)'));
+
+    // The nearest NAMED binding still wins over a modifier block, exactly as it
+    // does over a plain one -- limit 3 of the walk, unchanged by this.
+    t('a named helper inside an it.skip() block still wins over the block',
+      siteNames('site-mod-helper', {
+        'a.e2e.test.ts': suite(`it.skip('x', () => {\n  function build() {\n    return { ...process.env };\n  }\n  void build;\n});`),
+      }) === names('build'));
+
+    // ⭐ The collision END TO END for the modifier family, through audit():
+    //    one synthesised entry keyed to ONE it.each block silences that block
+    //    and leaves its sibling a finding. Before this, both keyed to
+    //    `(top-level)` and one entry silenced BOTH.
+    const modSiblingRoot = tree('carve-mod-siblings', {
+      'a.e2e.test.ts': suite(
+        `it.each([1])('first', () => {\n${BULK}\n});\nit.each([2])('second', () => {\n${BULK}\n});`),
+    });
+    const modOnlyFirst = audit(modSiblingRoot, { 'packages/cli/test/a.e2e.test.ts::it.each("first")': { why: 'synthetic' } });
+    t('a registry entry for ONE it.each() block silences THAT block and leaves its sibling a finding',
+      JSON.stringify({
+        deliberate: modOnlyFirst.deliberate.map((row) => row.fn),
+        findings: modOnlyFirst.findings.map((row) => row.fn),
+      }) === JSON.stringify({ deliberate: ['it.each("first")'], findings: ['it.each("second")'] }),
+      JSON.stringify(modOnlyFirst.findings.map((row) => row.fn)));
 
     // ⭐ The collision END TO END, through the real classification path in
     //    audit(). One synthesised entry, two sibling blocks. Before this fix

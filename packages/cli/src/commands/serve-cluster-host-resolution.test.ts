@@ -82,11 +82,35 @@
 import { describe, it, expect } from 'vitest';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHostImporter } from '@objectstack/types/node';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
+
+/**
+ * Where a scanned source sits, so a relative import written in it can be followed.
+ *
+ * The import-alias hop (#12533) reads a SIBLING MODULE off disk, which means the
+ * scan needs two facts it could previously ignore: the directory the scanned file
+ * lives in (what `./x.js` is relative TO) and the package that file belongs to
+ * (the fence the hop may not cross). Both are parameters rather than constants so
+ * the synthetic sources below can be scanned against a temp package instead of
+ * this one — the hop has no live site in the tree yet, so a fixture package is
+ * the only way to exercise it at all.
+ */
+type ScanContext = {
+  /** Directory of the scanned file — the base a relative specifier resolves against. */
+  baseDir: string;
+  /** Root of the scanned file's package — the hop refuses to resolve outside it. */
+  packageRoot: string;
+};
+
+/** `serve.ts` sits in `packages/cli/src/commands`, inside `packages/cli`. */
+const SERVE_CONTEXT: ScanContext = {
+  baseDir: HERE,
+  packageRoot: resolve(HERE, '..', '..'),
+};
 
 /** `packages/cli/src/commands/serve.ts` — same package, no escaping read. */
 const SERVE_SOURCE = readFileSync(resolve(HERE, 'serve.ts'), 'utf8');
@@ -246,6 +270,97 @@ function packageNameOf(specifier: string): string | undefined {
   return specifier.startsWith('@') ? parts.slice(0, 2).join('/') : parts[0];
 }
 
+/** One named import binding: the local name, the module, and the exported name. */
+type ImportedBinding = {
+  /** The module specifier exactly as written, e.g. `'../utils/tenancy-posture-hints.js'`. */
+  module: string;
+  /** The name the other module exports, before any `as` rename. */
+  exported: string;
+};
+
+/**
+ * This module's named import bindings: local name → (module specifier, export).
+ *
+ * Deliberately narrow, and narrow in the SAFE direction — anything not matched
+ * here is simply absent from the map, so the resolver refuses rather than
+ * guesses. A DEFAULT import, a namespace import (`* as ns`) and a bare
+ * side-effect import bind nothing this resolver could follow to a literal; a
+ * `type` import binds no runtime value at all, so a live load specifier can
+ * never be one.
+ */
+function collectImportedBindings(code: string): Map<string, ImportedBinding> {
+  const bindings = new Map<string, ImportedBinding>();
+  for (const m of code.matchAll(/\bimport\s+(type\s+)?\{([^}]*)\}\s*from\s*(['"])([^'"]+)\3/g)) {
+    if (m[1]) continue;                                  // `import type { … }`
+    const module = m[4];
+    for (const piece of m[2].split(',')) {
+      const named = piece.trim().match(/^([A-Za-z_$][\w$]*)(?:\s+as\s+([A-Za-z_$][\w$]*))?$/);
+      if (!named) continue;                              // `type A`, or anything unusual
+      bindings.set(named[2] ?? named[1], { module, exported: named[1] });
+    }
+  }
+  return bindings;
+}
+
+/**
+ * Follow ONE import alias to a string literal in a sibling module of the SAME
+ * package — the hop this sweep stopped short of (#12533).
+ *
+ * ── Why it can only ever widen ───────────────────────────────────────────────
+ *
+ * It is consulted exactly where `resolveIdentifier` would otherwise return
+ * `undefined`, and it returns either a literal or `undefined`. So a specifier
+ * that resolves today resolves to the same string after this hop, and one that
+ * does not resolve either becomes JUDGED or stays REPORTED. It cannot excuse a
+ * load, which is the property this resolver's docblock commits to and the
+ * property every future widening owes.
+ *
+ * ── The fence, and why it is a fence rather than a resolver ─────────────────
+ *
+ * ⛔ This is not a module resolver and must not grow into one. It follows a
+ * RELATIVE specifier only, and only to a path inside the scanned file's own
+ * package. A bare specifier (`@objectstack/…`, `node:…`) and a relative path
+ * that escapes the package are both refused: a spelling declared in ANOTHER
+ * package is not something `packages/cli`'s own manifest cross-check —
+ * `CLI_DECLARES`, the thing that decides app-declarable at all — can reason
+ * about. Re-exports, computed members, arbitrary expressions and conditionals
+ * are refused by construction, because the target must be a literal
+ * `export const` and nothing else matches.
+ */
+function resolveImportedLiteral(
+  binding: ImportedBinding,
+  context: ScanContext,
+): string | undefined {
+  if (!/^\.\.?\//.test(binding.module)) return undefined;   // bare ⇒ another package
+
+  const target = resolve(context.baseDir, binding.module);
+  // NodeNext source spells a sibling `./x.js`; what is on disk is `./x.ts`.
+  const paths = target.endsWith('.js')
+    ? [`${target.slice(0, -3)}.ts`, target]
+    : [`${target}.ts`, target];
+
+  for (const candidate of paths) {
+    const inside = relative(context.packageRoot, candidate);
+    if (!inside || inside.startsWith('..') || isAbsolute(inside)) continue;   // escapes the package
+    let source: string;
+    try {
+      source = readFileSync(candidate, 'utf8');
+    } catch {
+      continue;                                 // no such sibling — refuse, never guess
+    }
+    // Comments blanked for the same reason `serve.ts` is: a commented-out
+    // declaration is prose, and reading it would resolve the load to a spelling
+    // that nothing exports.
+    const literal = stripComments(source).match(
+      new RegExp(
+        `\\bexport\\s+const\\s+${binding.exported}\\s*(?::\\s*string\\s*)?=\\s*(['"\`])([^'"\`]*)\\1`,
+      ),
+    );
+    return literal?.[2];                        // present but not a literal ⇒ refuse
+  }
+  return undefined;
+}
+
 /**
  * Resolve `const X = '<literal>'` — the idiom `serve.ts` uses everywhere to keep
  * `tsc` from statically resolving an optional package
@@ -274,10 +389,36 @@ function packageNameOf(specifier: string): string | undefined {
  *
  * Resolving may only ever WIDEN what the sweep judges. When it cannot resolve,
  * it says so and the site is reported; it never excuses a load.
+ *
+ * ── The third hop: an import alias (#12533) ─────────────────────────────────
+ *
+ * Both hops above can only see spellings written INSIDE `serve.ts`, so any
+ * attempt to single-source a package spelling into a module `serve.ts` SHARES
+ * with another reader turned that load from "app-declarable, host-anchored,
+ * checked" into "unknowable". That was not reasoned, it was hit: the refactor
+ * was attempted and came back as `the sweep no longer sees the
+ * @objectstack/organizations load` — caught by the NAMED half of the vacuity
+ * guard, which is the half a count could never have supplied.
+ *
+ * So a third hop follows an import alias to a literal in a sibling module of the
+ * SAME package (`resolveImportedLiteral` below), consulted at each of the three
+ * points this resolver would otherwise return `undefined`.
  */
-function resolveIdentifier(code: string, name: string, before: number): string | undefined {
+function resolveIdentifier(
+  code: string,
+  name: string,
+  before: number,
+  context: ScanContext = SERVE_CONTEXT,
+): string | undefined {
   const region = code.slice(0, before);
-  const candidates: Array<{ index: number; literal?: string; member?: string }> = [];
+  const imported = collectImportedBindings(code);
+  const candidates: Array<{
+    index: number;
+    literal?: string;
+    member?: string;
+    /** Local name of an import alias, resolved through the sibling module. */
+    alias?: string;
+  }> = [];
 
   for (const m of region.matchAll(
     new RegExp(`\\bconst\\s+${name}\\s*(?::\\s*string\\s*)?=\\s*(['"\`])([^'"\`]*)\\1`, 'g'),
@@ -292,10 +433,38 @@ function resolveIdentifier(code: string, name: string, before: number): string |
     candidates.push({ index: m.index ?? 0, member: m[1] });
   }
 
+  // `const organizationsPkg = ORGANIZATIONS_RUNTIME_PKG;` — the right-hand side
+  // is an IMPORT ALIAS (#12533).
+  //
+  // Only a name this module actually IMPORTS is admitted as a candidate. A
+  // `const x = someLocalThing` is a spelling this resolver does not know, and
+  // admitting it as a permanently unresolvable candidate would let it SHADOW a
+  // farther `const x = '<literal>'` and take a site OUT of the judged
+  // population — the one direction this resolver is forbidden to move in.
+  // Gating on the import map keeps the addition strictly additive: a form
+  // becomes a candidate only when the hop can actually be attempted on it.
+  for (const m of region.matchAll(
+    new RegExp(`\\bconst\\s+${name}\\s*(?::\\s*string\\s*)?=\\s*([A-Za-z_$][\\w$]*)\\s*;`, 'g'),
+  )) {
+    if (imported.has(m[1])) candidates.push({ index: m.index ?? 0, alias: m[1] });
+  }
+
   candidates.sort((a, b) => a.index - b.index);
   const nearest = candidates.at(-1);
-  if (!nearest) return undefined;
+  if (!nearest) {
+    // No local binding at all: the call names the import alias itself, as in
+    // `await importFromHost(SHARED_RUNTIME_PKG)`. An `import` declaration binds
+    // over the whole module body, so unlike a `const` there is no position to
+    // confine this to — and a nearer `const` of the same name shadows it, which
+    // is why this point is reached only when there is no `const` candidate.
+    const direct = imported.get(name);
+    return direct ? resolveImportedLiteral(direct, context) : undefined;
+  }
   if (nearest.literal !== undefined) return nearest.literal;
+  if (nearest.alias !== undefined) {
+    const binding = imported.get(nearest.alias);
+    return binding ? resolveImportedLiteral(binding, context) : undefined;
+  }
 
   // A `static readonly` is a property of the class object rather than a binding,
   // so its position relative to the call carries no meaning: this hop reads the
@@ -303,7 +472,18 @@ function resolveIdentifier(code: string, name: string, before: number): string |
   const member = code.match(
     new RegExp(`\\bstatic\\s+readonly\\s+${nearest.member}\\s*(?::\\s*string\\s*)?=\\s*(['"\`])([^'"\`]*)\\1`),
   );
-  return member?.[2];
+  if (member) return member[2];
+
+  // `static readonly ORGANIZATIONS_RUNTIME_PKG = SHARED_RUNTIME_PKG;` (#12533) —
+  // the shape a single-sourcing refactor actually produces. The static keeps its
+  // NAME, because separate pins read `Serve.ORGANIZATIONS_RUNTIME_PKG` as a
+  // roster key; only the spelling moves out, to the module both readers share.
+  // Before this branch, that rewrite is what emptied the sweep.
+  const memberAlias = code.match(
+    new RegExp(`\\bstatic\\s+readonly\\s+${nearest.member}\\s*(?::\\s*string\\s*)?=\\s*([A-Za-z_$][\\w$]*)\\s*;`),
+  );
+  const aliased = memberAlias ? imported.get(memberAlias[1]) : undefined;
+  return aliased ? resolveImportedLiteral(aliased, context) : undefined;
 }
 
 /**
@@ -315,7 +495,7 @@ function resolveIdentifier(code: string, name: string, before: number): string |
  * as a permanently unresolvable entry, inflating the vacuity floors by one and
  * guaranteeing at least one member of any "cannot resolve" report is noise.
  */
-function collectLoadSites(code: string): LoadSite[] {
+function collectLoadSites(code: string, context: ScanContext = SERVE_CONTEXT): LoadSite[] {
   const sites: LoadSite[] = [];
   const re = /\b(?:await\s+)?(importFromHost|import)\s*\(/g;
   let m: RegExpExecArray | null;
@@ -336,7 +516,7 @@ function collectLoadSites(code: string): LoadSite[] {
     if (literal) specifier = literal[2];
     else if (plainTemplate) specifier = plainTemplate[1];
     else if (prefixTemplate) specifier = prefixTemplate[1];        // `@objectstack/service-cluster-${driver}`
-    else if (identifier) specifier = resolveIdentifier(code, identifier[1], m.index);
+    else if (identifier) specifier = resolveIdentifier(code, identifier[1], m.index, context);
 
     // A BLANK specifier is not a specifier. `import(`${base}/plugin`)` yields the
     // empty prefix, which is falsy everywhere downstream: `packageNameOf` is
@@ -937,5 +1117,259 @@ describe('os serve → the sweep reports what it cannot resolve (failure path)',
     expect('pkg' in UNRESOLVABLE_BARE_IMPORTS).toBe(false);
     expect('pkg' in DECLARED_UNRESOLVABLE.import).toBe(false);
     expect('pkg' in DECLARED_UNRESOLVABLE.importFromHost).toBe(true);
+  });
+});
+
+/**
+ * A synthetic PACKAGE to scan against, because the alias hop has no live site.
+ *
+ * ⚠️ Read this together with the note on the suite below. The hop reads a
+ * sibling module off DISK, so exercising it needs a directory layout, not just a
+ * source string: a package root, a `src/commands` inside it standing in for
+ * where `serve.ts` sits, and whatever siblings the case needs. Paths are keyed
+ * from the enclosing temp HOME rather than from the package root on purpose —
+ * that is what lets one case write a module OUTSIDE the package and assert the
+ * hop refuses to reach it.
+ */
+function makeScannedPackage(files: Record<string, string>): ScanContext {
+  const home = mkdtempSync(join(tmpdir(), 'os-scan-'));
+  const packageRoot = join(home, 'pkg');
+  const baseDir = join(packageRoot, 'src', 'commands');
+  mkdirSync(baseDir, { recursive: true });
+  for (const [path, source] of Object.entries(files)) {
+    const file = join(home, path);
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, source);
+  }
+  return { baseDir, packageRoot };
+}
+
+/**
+ * The import-alias hop (#12533), proven against synthetic source.
+ *
+ * ── Why synthetic, and why that is stated here rather than assumed ──────────
+ *
+ * ⚠️ NOTHING IN THE TREE USES THIS HOP YET. That is deliberate: the hop is the
+ * capability, and its consumer — single-sourcing a package spelling out of
+ * `serve.ts` — is a follow-up. A capability and the reversal it licenses do not
+ * land together, because `Serve.ORGANIZATIONS_RUNTIME_PKG` is deliberately a
+ * duplicated LITERAL today, with the reasoning written at both ends
+ * (`utils/tenancy-posture-hints.ts` and `serve-organizations-message-spelling.test.ts`),
+ * and a diff that both adds the safety net and removes the thing it protects
+ * cannot be reviewed as either.
+ *
+ * ⛔ So do NOT read a resolver branch with no live caller as dead code. It is
+ * reached from every case below, and deleting it puts the tree back in the state
+ * where single-sourcing a spelling silently empties the sweep — which is how
+ * this file lost the `@objectstack/organizations` load once already.
+ *
+ * The first case is the strongest anchor available without a live site: the
+ * source is synthetic, but the sibling it follows is the REAL
+ * `packages/cli/src/utils/tenancy-posture-hints.ts`, read through `serve.ts`'s
+ * own scan context.
+ */
+describe('os serve → the resolver follows ONE import alias into a sibling module', () => {
+  const shape = (src: string, context?: ScanContext) =>
+    collectLoadSites(stripComments(src), context)
+      .map((s) => `${s.line} ${s.callee}(${s.argument}) → ${s.specifier ?? 'UNRESOLVED'}`);
+
+  /** The sibling every fixture case imports, unless the case is about refusing. */
+  const SIBLING = "export const SHARED_RUNTIME_PKG = '@objectstack/organizations';\n";
+
+  it('resolves an alias to a literal in a REAL sibling module of packages/cli', () => {
+    // No fixture: `SERVE_CONTEXT`, so the sibling read is the live
+    // `packages/cli/src/utils/tenancy-posture-hints.ts` — the module a
+    // single-sourcing refactor would actually import from. If that export is
+    // renamed or stops being a string literal, this goes red HERE, naming the
+    // hop, instead of the sweep quietly judging one load fewer.
+    expect(
+      shape([
+        "import { ORGANIZATIONS_RUNTIME_PKG } from '../utils/tenancy-posture-hints.js';",
+        'const organizationsPkg = ORGANIZATIONS_RUNTIME_PKG;',
+        'await importFromHost(organizationsPkg);',
+      ].join('\n')),
+    ).toEqual(['3 importFromHost(organizationsPkg) → @objectstack/organizations']);
+  });
+
+  it('resolves an alias named directly at the call site', () => {
+    const context = makeScannedPackage({ 'pkg/src/utils/spelling.ts': SIBLING });
+    expect(
+      shape([
+        "import { SHARED_RUNTIME_PKG } from '../utils/spelling.js';",
+        'await importFromHost(SHARED_RUNTIME_PKG);',
+      ].join('\n'), context),
+    ).toEqual(['2 importFromHost(SHARED_RUNTIME_PKG) → @objectstack/organizations']);
+  });
+
+  it('resolves `static readonly MEMBER = <alias>` — the shape the refactor writes', () => {
+    // The static keeps its NAME (separate pins read it as a roster key); only
+    // the spelling moves to the shared module. This is the exact rewrite that
+    // came back as `the sweep no longer sees the @objectstack/organizations
+    // load` before this hop existed.
+    const context = makeScannedPackage({ 'pkg/src/utils/spelling.ts': SIBLING });
+    expect(
+      shape([
+        "import { SHARED_RUNTIME_PKG } from '../utils/spelling.js';",
+        'export default class Serve extends Command {',
+        '  static readonly ORGANIZATIONS_RUNTIME_PKG = SHARED_RUNTIME_PKG;',
+        '}',
+        'const organizationsPkg = Serve.ORGANIZATIONS_RUNTIME_PKG;',
+        'await importFromHost(organizationsPkg);',
+      ].join('\n'), context),
+    ).toEqual(['6 importFromHost(organizationsPkg) → @objectstack/organizations']);
+  });
+
+  it('REFUSES an alias whose target is not a literal', () => {
+    const context = makeScannedPackage({
+      'pkg/src/utils/spelling.ts': 'export const SHARED_RUNTIME_PKG = deriveSpelling();\n',
+    });
+    expect(
+      shape([
+        "import { SHARED_RUNTIME_PKG } from '../utils/spelling.js';",
+        'const pkg = SHARED_RUNTIME_PKG;',
+        'await importFromHost(pkg);',
+      ].join('\n'), context),
+    ).toEqual(['3 importFromHost(pkg) → UNRESOLVED']);
+  });
+
+  it('REFUSES a cross-package alias — a bare specifier is another package', () => {
+    // `CLI_DECLARES` is what decides app-declarable at all, and it is
+    // `packages/cli`'s OWN manifest. A spelling declared in another package is
+    // not something that cross-check can reason about, so the hop stops at the
+    // package boundary and the load is REPORTED rather than judged.
+    const context = makeScannedPackage({ 'pkg/src/utils/spelling.ts': SIBLING });
+    expect(
+      shape([
+        "import { SHARED_RUNTIME_PKG } from '@objectstack/types';",
+        'const pkg = SHARED_RUNTIME_PKG;',
+        'await importFromHost(pkg);',
+      ].join('\n'), context),
+    ).toEqual(['3 importFromHost(pkg) → UNRESOLVED']);
+  });
+
+  it('REFUSES a relative alias that escapes the package, even when the file exists', () => {
+    // The literal is right there and readable — and still refused, because the
+    // fence is the PACKAGE, not the filesystem.
+    const context = makeScannedPackage({ 'other-pkg/spelling.ts': SIBLING });
+    expect(
+      shape([
+        "import { SHARED_RUNTIME_PKG } from '../../../other-pkg/spelling.js';",
+        'const pkg = SHARED_RUNTIME_PKG;',
+        'await importFromHost(pkg);',
+      ].join('\n'), context),
+    ).toEqual(['3 importFromHost(pkg) → UNRESOLVED']);
+  });
+
+  it('REFUSES a re-export, a namespace import, a type import and a missing sibling', () => {
+    // One hop, named — not a module resolver. Each of these is a spelling the
+    // hop deliberately does not know, and each must come back UNRESOLVED rather
+    // than half-resolved.
+    const context = makeScannedPackage({
+      'pkg/src/utils/spelling.ts': "export { SHARED_RUNTIME_PKG } from './deeper.js';\n",
+      'pkg/src/utils/deeper.ts': SIBLING,
+    });
+    expect(
+      shape([
+        "import { SHARED_RUNTIME_PKG } from '../utils/spelling.js';",
+        'const viaReExport = SHARED_RUNTIME_PKG;',
+        'await importFromHost(viaReExport);',
+      ].join('\n'), context),
+    ).toEqual(['3 importFromHost(viaReExport) → UNRESOLVED']);
+
+    expect(
+      shape([
+        "import * as spelling from '../utils/deeper.js';",
+        'const viaNamespace = spelling.SHARED_RUNTIME_PKG;',
+        'await importFromHost(viaNamespace);',
+      ].join('\n'), context),
+    ).toEqual(['3 importFromHost(viaNamespace) → UNRESOLVED']);
+
+    expect(
+      shape([
+        "import type { SHARED_RUNTIME_PKG } from '../utils/deeper.js';",
+        'const viaType = SHARED_RUNTIME_PKG;',
+        'await importFromHost(viaType);',
+      ].join('\n'), context),
+    ).toEqual(['3 importFromHost(viaType) → UNRESOLVED']);
+
+    // A sibling that is not on disk must REFUSE, not throw: a scan that throws
+    // takes the whole sweep down instead of reporting one site.
+    expect(
+      shape([
+        "import { SHARED_RUNTIME_PKG } from '../utils/does-not-exist.js';",
+        'const viaMissing = SHARED_RUNTIME_PKG;',
+        'await importFromHost(viaMissing);',
+      ].join('\n'), context),
+    ).toEqual(['3 importFromHost(viaMissing) → UNRESOLVED']);
+  });
+
+  it('reads the sibling as CODE, not as the prose that discusses it', () => {
+    // Same reason `serve.ts` is stripped before it is swept: a commented-out
+    // declaration is prose, and reading it resolves the load to a spelling that
+    // nothing exports.
+    const context = makeScannedPackage({
+      'pkg/src/utils/spelling.ts':
+        "// export const SHARED_RUNTIME_PKG = '@objectstack/organizations';\n",
+    });
+    expect(
+      shape([
+        "import { SHARED_RUNTIME_PKG } from '../utils/spelling.js';",
+        'const pkg = SHARED_RUNTIME_PKG;',
+        'await importFromHost(pkg);',
+      ].join('\n'), context),
+    ).toEqual(['3 importFromHost(pkg) → UNRESOLVED']);
+  });
+
+  it('leaves the two existing hops resolving exactly as before', () => {
+    // The widening is additive or it is not a widening. Both spellings the
+    // resolver already knew, asserted through the same path the new hop runs in.
+    const context = makeScannedPackage({ 'pkg/src/utils/spelling.ts': SIBLING });
+    expect(
+      shape([
+        "const i18nPkg = '@objectstack/service-i18n';",
+        'await importFromHost(i18nPkg);',
+      ].join('\n'), context),
+    ).toEqual(['2 importFromHost(i18nPkg) → @objectstack/service-i18n']);
+
+    expect(
+      shape([
+        'export default class Serve extends Command {',
+        "  static readonly ORGANIZATIONS_RUNTIME_PKG = '@objectstack/organizations';",
+        '}',
+        'const organizationsPkg = Serve.ORGANIZATIONS_RUNTIME_PKG;',
+        'await importFromHost(organizationsPkg);',
+      ].join('\n'), context),
+    ).toEqual(['5 importFromHost(organizationsPkg) → @objectstack/organizations']);
+
+    // A binding below the call is still refused, alias hop or not.
+    expect(
+      shape([
+        'await importFromHost(later);',
+        "const later = '@objectstack/organizations';",
+      ].join('\n'), context),
+    ).toEqual(['1 importFromHost(later) → UNRESOLVED']);
+  });
+
+  it('never lets an unresolvable alias inherit a farther binding of the same name', () => {
+    // ⭐ The property that makes this hop safe to add at all. The nearer binding
+    // is an alias the hop cannot follow (cross-package); the farther one is a
+    // literal in an unrelated scope. Answering with the farther literal would be
+    // resolving to a value that is not the file's — the phantom that kept
+    // '@objectstack/organizations' in the named list on a tree where the real
+    // load had already dropped out. UNRESOLVED is the honest answer, and it is
+    // LOUD: an unresolved, undeclared site fails the sweep by name.
+    const context = makeScannedPackage({ 'pkg/src/utils/spelling.ts': SIBLING });
+    expect(
+      shape([
+        "import { SHARED_RUNTIME_PKG } from '@objectstack/types';",
+        '{',
+        "  const pkg = '@objectstack/service-cluster';",
+        '}',
+        '{',
+        '  const pkg = SHARED_RUNTIME_PKG;',
+        '  await importFromHost(pkg);',
+        '}',
+      ].join('\n'), context),
+    ).toEqual(['7 importFromHost(pkg) → UNRESOLVED']);
   });
 });

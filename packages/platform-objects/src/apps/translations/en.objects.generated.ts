@@ -3012,11 +3012,11 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
   sys_secret: {
     label: "Secret",
     pluralLabel: "Secrets",
-    description: "Cipher store referenced by sys_setting handles. Never holds plaintext.",
+    description: "Cipher store written by three privileged producers (see managedBy); each holds its handle in its own column. Never holds plaintext.",
     fields: {
       id: {
         label: "ID",
-        help: "Opaque handle referenced by `sys_setting.value_enc`."
+        help: "Opaque handle. The reference lives in the writing producer's own holder column — `sys_setting.value_enc`, a `secret:` ref on a business row, or a datasource `credentialsRef` — so a row unreferenced by `sys_setting` is not thereby unreferenced."
       },
       created_at: {
         label: "Created At",
@@ -3028,11 +3028,11 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       namespace: {
         label: "Namespace",
-        help: "Settings namespace this secret belongs to."
+        help: "Producer-scoped label, not a settings namespace in general: `SettingsService` writes the settings namespace, the engine's `secret`-field encryption writes the object name, the datasource binder writes its caller-supplied scope (default `datasource`). See managedBy."
       },
       key: {
         label: "Key",
-        help: "Specifier key within the namespace."
+        help: "Producer-scoped label paired with `namespace`: the settings specifier key, the encrypted `secret` field's name, or the datasource name. The pair records how the producer addressed the value; it does not identify which producer wrote the row."
       },
       kms_key_id: {
         label: "KMS Key ID",

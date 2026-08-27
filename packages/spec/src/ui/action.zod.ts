@@ -88,6 +88,13 @@ const ACTION_PARAM_KEY_ALIASES: Readonly<Record<string, string>> = {
   description: 'helpText',
   help: 'helpText',
   default: 'defaultValue',
+  // The words an author borrows from `FieldSchema` (`readonly`) or widget
+  // vocabulary (`disabled`) for "the user must not edit this". On a param the
+  // declared contract is `carryOver` (#11753): non-editable AND still
+  // submitted verbatim — which is the half `readonly`'s field semantics
+  // (write-path strip) would get exactly wrong here.
+  readonly: 'carryOver',
+  disabled: 'carryOver',
 };
 
 /**
@@ -373,6 +380,40 @@ export const ActionParamSchema = lazySchema(() => strictObject(
    */
   defaultFromRow: z.boolean().optional(),
   /**
+   * Carry-over declaration (#11753 ruling, 2026-08-25): the param's value is
+   * carried through the dialog rather than collected from the user — seeded
+   * from the current row (`defaultFromRow` is required alongside), rendered as
+   * a NON-EDITABLE summary, and submitted VERBATIM in the request body.
+   *
+   * The knob exists because neither neighbour expresses this contract:
+   *
+   * - `visible: false` omits the param from the dialog AND from the submission
+   *   — measured on #11753; a clone action that hid its facet params this way
+   *   would silently stop copying them, which is exactly the #11703 defect
+   *   shape.
+   * - Leaving the param editable invites the failure the ruling names: the
+   *   clone dialog offered `member_default`'s `row_level_security` — a JSON
+   *   array of 17+ policy objects — as a prefilled textarea on the platform's
+   *   SANCTIONED clone path, where a hand-mangled-but-valid-JSON edit produces
+   *   a clone granting MORE than its base, accepted without a word
+   *   (`PermissionSetSchema` validates shape, not intent).
+   *
+   * "Not editable" is expressed by contract and enforced by the renderer
+   * (maintainer ruling on #11753, recommendation A): objectui's
+   * `ActionParamDialog` renders a declared carry-over as a read-only summary
+   * while keeping the seeded value in its submit state, so what is declared is
+   * what is sent. Requiring `defaultFromRow: true` is the declared = enforced
+   * half at authoring time — a carry-over with no row seed would render an
+   * empty locked control and submit nothing, which is an authoring error, not
+   * a rendering decision (ADR-0078).
+   */
+  carryOver: z.boolean().optional().describe(
+    'Carry-over param: seed the value from the current row (requires defaultFromRow: true), '
+    + 'render it as a non-editable summary in the dialog, and submit it verbatim in the request '
+    + 'body. Unlike `visible: false` (which omits the param from the submission entirely), a '
+    + 'carry-over param is always sent.',
+  ),
+  /**
    * Visibility predicate (CEL) — same scope as the action-level `visible`
    * (`current_user` / `app` / `data` / `features`). When it evaluates false the
    * dialog omits this param entirely. Use it to hide a param that the backend
@@ -404,6 +445,22 @@ export const ActionParamSchema = lazySchema(() => strictObject(
     path: ['reference'],
     message:
       'ActionParam with type "lookup"/"master_detail" requires "reference" (the target object) when declared inline — without it the param dialog degrades to a raw record-id text input. Set `reference: \'<object>\'`, or use a field-backed param (`{ field: \'<lookup_field>\' }`) to inherit it.',
+  },
+).refine(
+  // A carry-over param must have its row seed declared. The pair is checked at
+  // parse time because the failure it prevents is silent at runtime: a
+  // `carryOver: true` param with no `defaultFromRow` would render an empty
+  // read-only control and submit `undefined` — the #11703 silent-drop shape,
+  // reintroduced through the very key added to close it.
+  (p) => !p.carryOver || p.defaultFromRow === true,
+  {
+    path: ['carryOver'],
+    message:
+      'ActionParam with "carryOver" requires "defaultFromRow: true" — a carry-over param is '
+      + 'seeded from the current row, rendered read-only and submitted verbatim; without the row '
+      + 'seed it would render an empty locked control and submit nothing. Declare '
+      + '`defaultFromRow: true`, or (for a fixed value the user should not see) use the action\'s '
+      + '`bodyExtra` instead.',
   },
 ).superRefine((p, ctx) => {
   // #6970 — an authored `defaultValue` is checked against the param's OWN

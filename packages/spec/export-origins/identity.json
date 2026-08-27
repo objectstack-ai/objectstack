@@ -3,6 +3,7 @@
   "entry": "./identity",
   "exports": {
     "ADMIN_FULL_ACCESS": "src/identity/eval-user.zod.ts#ADMIN_FULL_ACCESS (const)",
+    "ADMIN_FULL_ACCESS_CAPABILITIES": "src/identity/eval-user.zod.ts#ADMIN_FULL_ACCESS_CAPABILITIES (const)",
     "AUDIENCE_ANCHOR_POSITIONS": "src/identity/position.zod.ts#AUDIENCE_ANCHOR_POSITIONS (const)",
     "AUTH_CONSTANTS": "src/identity/protocol.ts#AUTH_CONSTANTS (const)",
     "AUTH_ERROR_CODES": "src/identity/protocol.ts#AUTH_ERROR_CODES (const)",
