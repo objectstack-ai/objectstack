@@ -388,6 +388,100 @@ describe('[ADR-0105 D4] posture selects the org-admin variant', () => {
 });
 
 // ---------------------------------------------------------------------------
+// [#12699] Deployment-declared suppression of the unbounded walled grant.
+//
+// D4's "the wall bounds the superbits" rationale stops holding on a deployment
+// that carves platform-global objects OUT of the wall
+// (`OrgScopingEntitlement.platformGlobalObjects`), so the same entitlement may
+// declare `suppressUnboundedOrgAdminGrant: true` and the walled auto-grant
+// hands out the de-VAMA'd variant there too. Fail closed: absent ⇒ D4's
+// posture-keyed behaviour byte-identical (the block above IS that pin).
+// ---------------------------------------------------------------------------
+describe('[#12699] suppressUnboundedOrgAdminGrant', () => {
+  const seedBoth = () =>
+    makeStub({
+      sys_permission_set: [ORG_ADMIN_SET, ORG_ADMIN_NO_BYPASS_SET],
+      sys_member: [{ id: 'm1', user_id: 'u1', organization_id: 'o1', role: 'owner' }],
+      sys_user_permission_set: [],
+    });
+
+  it('suppression ON: `isolated` grants the de-VAMA\'d variant', async () => {
+    const stub = seedBoth();
+    const res = await reconcileOrgAdminGrant(stub, 'u1', 'o1', {
+      posture: 'isolated',
+      suppressUnboundedOrgAdminGrant: true,
+    });
+    expect(res.action).toBe('granted');
+    expect(stub.tables.sys_user_permission_set).toHaveLength(1);
+    expect(stub.tables.sys_user_permission_set[0].permission_set_id).toBe('ps_org_admin_nb');
+  });
+
+  it('suppression ON: `group` grants the de-VAMA\'d variant too', async () => {
+    const stub = seedBoth();
+    await reconcileOrgAdminGrant(stub, 'u1', 'o1', {
+      posture: 'group',
+      suppressUnboundedOrgAdminGrant: true,
+    });
+    expect(stub.tables.sys_user_permission_set[0].permission_set_id).toBe('ps_org_admin_nb');
+  });
+
+  it('suppression OFF (explicit false) is byte-identical to today: `isolated` grants the full set', async () => {
+    const stub = seedBoth();
+    await reconcileOrgAdminGrant(stub, 'u1', 'o1', {
+      posture: 'isolated',
+      suppressUnboundedOrgAdminGrant: false,
+    });
+    expect(stub.tables.sys_user_permission_set[0].permission_set_id).toBe('ps_org_admin');
+  });
+
+  it('turning suppression on REVOKES a standing unbounded grant (superseded-variant convergence)', async () => {
+    const stub = seedBoth();
+    await reconcileOrgAdminGrant(stub, 'u1', 'o1', { posture: 'isolated' });
+    expect(stub.tables.sys_user_permission_set[0].permission_set_id).toBe('ps_org_admin');
+
+    await reconcileOrgAdminGrant(stub, 'u1', 'o1', {
+      posture: 'isolated',
+      suppressUnboundedOrgAdminGrant: true,
+    });
+    expect(stub.tables.sys_user_permission_set).toHaveLength(1);
+    expect(stub.tables.sys_user_permission_set[0].permission_set_id).toBe('ps_org_admin_nb');
+
+    // ...and a deployment that withdraws the declaration converges back —
+    // the fail-closed default protects any deployment RELYING on the auto-grant.
+    await reconcileOrgAdminGrant(stub, 'u1', 'o1', { posture: 'isolated' });
+    expect(stub.tables.sys_user_permission_set).toHaveLength(1);
+    expect(stub.tables.sys_user_permission_set[0].permission_set_id).toBe('ps_org_admin');
+  });
+
+  it('backfill threads the suppression to every pair AND the orphan sweep', async () => {
+    const stub = makeStub({
+      sys_permission_set: [ORG_ADMIN_SET, ORG_ADMIN_NO_BYPASS_SET],
+      sys_member: [
+        { id: 'm1', user_id: 'u1', organization_id: 'o1', role: 'owner' },
+        { id: 'm2', user_id: 'u2', organization_id: 'o1', role: 'admin' },
+      ],
+      // Pre-existing unbounded grants from a pre-suppression walled boot, plus
+      // one orphan (no membership row) that only the sweep can reach.
+      sys_user_permission_set: [
+        { id: 'ups1', user_id: 'u1', organization_id: 'o1', permission_set_id: 'ps_org_admin' },
+        { id: 'ups2', user_id: 'u2', organization_id: 'o1', permission_set_id: 'ps_org_admin' },
+        { id: 'ups3', user_id: 'u9', organization_id: 'o1', permission_set_id: 'ps_org_admin' },
+      ],
+    });
+
+    await backfillOrgAdminGrants(stub, {
+      posture: 'isolated',
+      suppressUnboundedOrgAdminGrant: true,
+    });
+
+    const grants = stub.tables.sys_user_permission_set;
+    expect(grants).toHaveLength(2);
+    expect(grants.every((g) => g.permission_set_id === 'ps_org_admin_nb')).toBe(true);
+    expect(grants.some((g) => g.user_id === 'u9')).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // [#4586] Hop 2 of the elevation chain stops discarding provenance.
 //
 // The chain is `sys_member.role` → this reconciler → `sys_user_permission_set`

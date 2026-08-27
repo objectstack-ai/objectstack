@@ -1140,7 +1140,13 @@ describe('#11518 — a page that could not fit the answer must not report "absen
     expect(page).toHaveLength(CURATED_NAMES.length);
     const namesOnThePage = new Set(page.map((r) => r.name));
     expect(namesOnThePage.size, 'two names are missing from a page that is full').toBe(CURATED_NAMES.length - 2);
-    for (const lost of [CURATED_NAMES[6], CURATED_NAMES[7]]) {
+    // [#12702] The LAST TWO curated names, derived — the two org rows' ids
+    // sort ahead of every `cap_*` id, so under `ORDER BY id ASC` it is always
+    // the tail of the curated list that falls off a `length`-capped page. This
+    // read hard-coded `[6]`/`[7]` while the list had eight entries, and went
+    // red the day the list grew — the count belongs to the list, never to
+    // prose (this file's own #8919-era rule, applied to indices).
+    for (const lost of CURATED_NAMES.slice(-2)) {
       expect(namesOnThePage.has(lost)).toBe(false);
       expect(ql.rows.some((r: any) => r.name === lost && r.managed_by === 'platform')).toBe(true);
     }

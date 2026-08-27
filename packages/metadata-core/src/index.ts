@@ -87,6 +87,15 @@ export * from './item-key-discriminators.js';
 // so its behaviour is unchanged and there is no second copy to drift.
 export * from './meta-write-org-scope.js';
 
+// [#12702] The capability half of the same decision: which CALLERS a `/meta`
+// item write door admits — `manage_metadata` as before, plus the org-scoped
+// `manage_org_presentation` for org-overridable types written to the caller's
+// own active organization. Sunk here by the same criterion as the scope half
+// above: the doors live in `@objectstack/runtime` and `@objectstack/rest`,
+// which share no other common home, and the predicate is registry-coupled
+// (through `declaresOrgOverride`) so a second copy is forbidden drift.
+export * from './meta-write-capability.js';
+
 // [#8707 / #10101] The shared platform-row organization resolver — sunk here
 // from `@objectstack/plugin-audit` per the maintainer ruling recorded on
 // cloud#1395 ("promoted to a shared resolver used by all three platform-row

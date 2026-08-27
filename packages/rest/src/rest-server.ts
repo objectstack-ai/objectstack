@@ -41,6 +41,12 @@ import {
     // `metadata-core`.
     organizationIdForMetaRead,
     organizationIdForMetaWrite,
+    // [#12702] The capability half of the same decision, from the same home:
+    // `manage_metadata` as before, plus `manage_org_presentation` for
+    // org-overridable types written org-scoped to the caller's own active
+    // organization. One predicate for every `/meta` item write door on both
+    // transports — never a REST-local restatement.
+    metaWriteCapabilityVerdict,
 } from '@objectstack/metadata-core';
 import { RouteManager, type RouteEntry } from './route-manager.js';
 // [#6877] Query-parameter multiplicity. `IHttpRequest.query` declares
@@ -206,6 +212,7 @@ import {
     mapDataError,
     sandboxBusinessMessage,
     classifiedRefusalAnswer,
+    boundedDeclaredUserMessage,
     declaredServerFaultAnswer,
     sendThrownError,
     sendDeclaredFault,
@@ -4235,6 +4242,13 @@ export class RestServer {
                         // capability, and a canonicalization rewrite is
                         // authoring; `isSystem` bypasses, matching every other
                         // capability gate on the platform.
+                        //
+                        // [#12702] Deliberately NOT `metaWriteCapabilityVerdict`:
+                        // an install-wide stored-metadata rewrite is env-wide by
+                        // definition, so `manage_org_presentation`'s "org-scoped
+                        // to the caller's own active organization" condition can
+                        // never hold here. `manage_metadata`-only, unchanged —
+                        // do not copy the item doors' acceptance in.
                         const ctx = await this.resolveExecCtx(environmentId, req).catch(() => undefined);
                         const held = new Set<string>(
                             Array.isArray(ctx?.systemPermissions) ? ctx!.systemPermissions : [],
@@ -5589,18 +5603,36 @@ export class RestServer {
                     // ADR-0066 D1's authoring capability and saving a metadata
                     // item is authoring; `isSystem` bypasses, matching every
                     // other capability gate on the platform.
+                    //
+                    // [#12702] The gate is the shared `metaWriteCapabilityVerdict`
+                    // (`@objectstack/metadata-core`, beside the org-scope
+                    // predicate this door already runs): beside `manage_metadata`
+                    // it admits `manage_org_presentation`, ONLY for a type whose
+                    // registry entry declares `allowOrgOverride: true` AND a
+                    // session with an active organization — `ctx.tenantId`, the
+                    // very value `organizationIdForMetaWrite` threads below, so
+                    // an admitted write can only land org-scoped in the caller's
+                    // own partition: never env-wide, never another org's.
                     const ctx = await this.resolveExecCtx(environmentId, req).catch(() => undefined);
-                    const held = new Set<string>(
-                        Array.isArray(ctx?.systemPermissions) ? ctx!.systemPermissions : [],
-                    );
-                    if (!ctx?.isSystem && !held.has('manage_metadata')) {
-                        res.status(403).json({
-                            error: {
-                                code: 'FORBIDDEN',
-                                message: 'Saving a metadata item requires the `manage_metadata` capability.',
-                            },
+                    {
+                        const verdict = metaWriteCapabilityVerdict({
+                            isSystem: ctx?.isSystem === true,
+                            systemPermissions: ctx?.systemPermissions,
+                            // [#10340] Folded at the boundary — the verdict and
+                            // the scope decision below read one spelling.
+                            canonicalType: canonicalMetaUrlType(req.params.type),
+                            activeOrganizationId: ctx?.tenantId,
+                            operation: 'save',
                         });
-                        return;
+                        if (!verdict.allowed) {
+                            res.status(403).json({
+                                error: {
+                                    code: 'FORBIDDEN',
+                                    message: verdict.message,
+                                },
+                            });
+                            return;
+                        }
                     }
                     const p = await this.resolveProtocol(environmentId, req);
                     if (!p.saveMetaItem) {
@@ -5803,18 +5835,34 @@ export class RestServer {
                     // still intact. A gate that answers 403 after
                     // `deleteMetaItem` has run would still be the bug.
                     // `isSystem` bypasses, as everywhere else.
+                    //
+                    // [#12702] Same shared verdict as the PUT door. On THIS
+                    // verb the org condition is also what bounds the blast
+                    // radius: an admitted org-presentation reset threads the
+                    // caller's own organization, and `orgId` selects the
+                    // overlay repository — so the only row such a caller can
+                    // discard is their own org's overlay, never the env-wide
+                    // one (see the [#8805] comment below). `?dropStorage=true`
+                    // is `object`-only, and `object` is not org-overridable,
+                    // so the org capability can never reach it.
                     const ctx = await this.resolveExecCtx(environmentId, req).catch(() => undefined);
-                    const held = new Set<string>(
-                        Array.isArray(ctx?.systemPermissions) ? ctx!.systemPermissions : [],
-                    );
-                    if (!ctx?.isSystem && !held.has('manage_metadata')) {
-                        res.status(403).json({
-                            error: {
-                                code: 'FORBIDDEN',
-                                message: 'Resetting a metadata item requires the `manage_metadata` capability.',
-                            },
+                    {
+                        const verdict = metaWriteCapabilityVerdict({
+                            isSystem: ctx?.isSystem === true,
+                            systemPermissions: ctx?.systemPermissions,
+                            canonicalType: canonicalMetaUrlType(req.params.type),
+                            activeOrganizationId: ctx?.tenantId,
+                            operation: 'reset',
                         });
-                        return;
+                        if (!verdict.allowed) {
+                            res.status(403).json({
+                                error: {
+                                    code: 'FORBIDDEN',
+                                    message: verdict.message,
+                                },
+                            });
+                            return;
+                        }
                     }
                     const p = await this.resolveProtocol(environmentId, req);
                     if (!p.deleteMetaItem) {
@@ -6133,18 +6181,33 @@ export class RestServer {
                     // which kernels implement publishing, and so nothing is promoted
                     // before the refusal. `isSystem` bypasses, matching every other
                     // capability gate on the platform.
+                    //
+                    // [#12702] Same shared verdict as the save door, because
+                    // promotion is the second half of the save→publish loop: a
+                    // caller admitted to author an org-scoped draft must be able
+                    // to promote it, and the SAME conditions bound what a
+                    // promotion can reach — `promoteDraftForPublish` resolves
+                    // the draft through `getOverlayRepo(orgId)`, so an admitted
+                    // org-presentation publish promotes only the caller's own
+                    // org partition.
                     const ctx = await this.resolveExecCtx(environmentId, req).catch(() => undefined);
-                    const held = new Set<string>(
-                        Array.isArray(ctx?.systemPermissions) ? ctx!.systemPermissions : [],
-                    );
-                    if (!ctx?.isSystem && !held.has('manage_metadata')) {
-                        res.status(403).json({
-                            error: {
-                                code: 'FORBIDDEN',
-                                message: 'Publishing a metadata item requires the `manage_metadata` capability.',
-                            },
+                    {
+                        const verdict = metaWriteCapabilityVerdict({
+                            isSystem: ctx?.isSystem === true,
+                            systemPermissions: ctx?.systemPermissions,
+                            canonicalType: canonicalMetaUrlType(req.params.type),
+                            activeOrganizationId: ctx?.tenantId,
+                            operation: 'publish',
                         });
-                        return;
+                        if (!verdict.allowed) {
+                            res.status(403).json({
+                                error: {
+                                    code: 'FORBIDDEN',
+                                    message: verdict.message,
+                                },
+                            });
+                            return;
+                        }
                     }
                     const p = await this.resolveProtocol(environmentId, req);
                     if (!p.publishMetaItem) {
@@ -6312,18 +6375,32 @@ export class RestServer {
                     // Gate FIRST — before the protocol is resolved — so 403-vs-501
                     // leaks no kernel capability and nothing is restored before the
                     // refusal. `isSystem` bypasses, as everywhere else.
+                    //
+                    // [#12702] Same shared verdict as the sibling doors. The
+                    // org condition bounds this verb too: `rollbackMetaItem`
+                    // resolves the row AND its history through the organization
+                    // (see the [#8805] comment below), so an admitted
+                    // org-presentation rollback restores only a version of the
+                    // caller's own org overlay — the env-wide row and its
+                    // history stay out of reach.
                     const ctx = await this.resolveExecCtx(environmentId, req).catch(() => undefined);
-                    const held = new Set<string>(
-                        Array.isArray(ctx?.systemPermissions) ? ctx!.systemPermissions : [],
-                    );
-                    if (!ctx?.isSystem && !held.has('manage_metadata')) {
-                        res.status(403).json({
-                            error: {
-                                code: 'FORBIDDEN',
-                                message: 'Rolling back a metadata item requires the `manage_metadata` capability.',
-                            },
+                    {
+                        const verdict = metaWriteCapabilityVerdict({
+                            isSystem: ctx?.isSystem === true,
+                            systemPermissions: ctx?.systemPermissions,
+                            canonicalType: canonicalMetaUrlType(req.params.type),
+                            activeOrganizationId: ctx?.tenantId,
+                            operation: 'rollback',
                         });
-                        return;
+                        if (!verdict.allowed) {
+                            res.status(403).json({
+                                error: {
+                                    code: 'FORBIDDEN',
+                                    message: verdict.message,
+                                },
+                            });
+                            return;
+                        }
                     }
                     const p = await this.resolveProtocol(environmentId, req);
                     if (!(p as any).rollbackMetaItem) {
@@ -9594,6 +9671,59 @@ export class RestServer {
             res, 501, 'NOT_IMPLEMENTED',
             'Sharing service is not configured on this deployment',
         );
+        /**
+         * [#12693] The `extra` this family's TWO NON-CLASSIFIED exits owe a
+         * producer that marked its refusal: the 500 fault terminal below, and
+         * the ADR-0111 prefix arm inside {@link respondSharingError}.
+         *
+         * Neither reaches {@link classifiedRefusalAnswer} — the 500 terminal
+         * because a declared server fault is deliberately not a refusal
+         * (that function's own docblock rules it back to "the catching route's
+         * own terminal", which is these three arms), the prefix arm because it
+         * runs precisely when the classification answered `undefined`. So
+         * neither holds a `refusal.body` to re-dress, and the one line the
+         * classified arm uses (`refusal.body.userMessage`, #12669) is NOT
+         * reusable here. What is reusable is the RULE, and
+         * {@link boundedDeclaredUserMessage} is that rule asked of the raw
+         * thrown error instead of the classification: `declaredUserMessage`'s
+         * presence answer with #5423's bound applied, one definition, shared
+         * with the `/data` door rather than copied beside it.
+         *
+         * Measured on `15bf9e859` before the repair, one producer per exit
+         * through the real routes on both doors:
+         *
+         * ```text
+         * throw { code: 'SHARE_STORE_DOWN', status: 503, userMessage: '…' }
+         *   share door : 500 SHARES_LIST_FAILED        — no mark
+         *   /data door : 503 SERVICE_UNAVAILABLE       — mark carried
+         * throw Error('NOT_FOUND: no such record …') + userMessage
+         *   share door : 404 NOT_FOUND                 — no mark
+         *   /data door : 500 INTERNAL_ERROR            — mark carried
+         * ```
+         *
+         * ⛔ The mark is the ONLY thing this adds, and the two doors' other
+         * disagreements visible in that measurement stay exactly as they are:
+         * the share family folds a declared 503 into its own 500 terminal, and
+         * it interpolates the caught message where `/data` withholds 5xx prose
+         * unconditionally (#5437). Both are deliberate and argued in
+         * {@link sharingFaultMessage} and the #11683 docblock below; the
+         * `/data` door's status for the prefix arm differs for a third
+         * deliberate reason — the prefix idiom is this service's local
+         * convention and no shared classifier can read it (ADR-0111).
+         *
+         * ⛔ Riding the mark across a FAULT terminal is not a re-opening of
+         * #5437 either, and the reason is `withDeclaredUserMessage`'s, not a
+         * second one: the withheld text is prose the producer never addressed
+         * to the caller, while this field exists only because an author wrote
+         * caller-facing text onto it. A genuine crash carries no mark and its
+         * envelope is byte-identical to before.
+         */
+        const sharingDeclaredExtra = (
+            error: any,
+        ): { userMessage: string } | undefined => {
+            const userMessage = boundedDeclaredUserMessage(error);
+            return userMessage === undefined ? undefined : { userMessage };
+        };
         // [ADR-0111] The service enforces authorization (D1/D4/D5/D7) and
         // signals the verdict via message prefixes, the plugin's established
         // error idiom — this maps them onto HTTP. Returns true when handled.
@@ -9768,9 +9898,14 @@ export class RestServer {
             ];
             for (const [code, status] of map) {
                 if (msg.startsWith(code)) {
+                    // [#12693] …and the producer's own sentence to the caller
+                    // rides this arm too. ⛔ Only the sentence: the PREFIX
+                    // read, the status it decides and the stripping below are
+                    // untouched — see {@link sharingDeclaredExtra}.
                     respondError(
                         res, status, code,
                         msg.replace(new RegExp(`^${code}:\\s*`), ''),
+                        sharingDeclaredExtra(error),
                     );
                     return true;
                 }
@@ -9823,7 +9958,10 @@ export class RestServer {
                     // The 500 arms keep their 500-char cap: an unexpected
                     // fault's message is not a contract, and truncating it
                     // stays a sanitization step — only the position moves.
-                    respondError(res, 500, 'SHARES_LIST_FAILED', sharingFaultMessage(error));
+                    respondError(
+                        res, 500, 'SHARES_LIST_FAILED', sharingFaultMessage(error),
+                        sharingDeclaredExtra(error),
+                    );
                 }
             },
             metadata: { summary: 'List per-record sharing grants', tags: ['sharing'] },
@@ -9857,7 +9995,10 @@ export class RestServer {
                 } catch (error: any) {
                     if (respondSharingError(res, error)) return;
                     logError('[REST] Grant share error:', error);
-                    respondError(res, 500, 'SHARE_GRANT_FAILED', sharingFaultMessage(error));
+                    respondError(
+                        res, 500, 'SHARE_GRANT_FAILED', sharingFaultMessage(error),
+                        sharingDeclaredExtra(error),
+                    );
                 }
             },
             metadata: { summary: 'Grant a per-record share to a principal', tags: ['sharing'] },
@@ -9886,7 +10027,10 @@ export class RestServer {
                 } catch (error: any) {
                     if (respondSharingError(res, error)) return;
                     logError('[REST] Revoke share error:', error);
-                    respondError(res, 500, 'SHARE_REVOKE_FAILED', sharingFaultMessage(error));
+                    respondError(
+                        res, 500, 'SHARE_REVOKE_FAILED', sharingFaultMessage(error),
+                        sharingDeclaredExtra(error),
+                    );
                 }
             },
             metadata: { summary: 'Revoke a per-record share by id', tags: ['sharing'] },

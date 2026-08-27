@@ -225,6 +225,26 @@ describe('#7019 — dispatcher PUT /meta/:type/:name: the capability gate', () =
         expect(saveItem).not.toHaveBeenCalled();
     });
 
+    it('holding `manage_org_presentation` alone is not enough for an OBJECT save — tier-B stays walled', async () => {
+        // The org-scoped presentation capability (#12702) reaches ONLY types
+        // whose registry entry declares `allowOrgOverride: true`; `object`
+        // does not, so this caller is exactly as refused as a capability-less
+        // one — full matrix in the #12702 describe below.
+        const stack = boot();
+
+        const res = await stack.dispatcher.handleMetadata(
+            '/object/account',
+            ctx({ userId: 'u_orgadmin', systemPermissions: ['manage_org_presentation'] }),
+            'PUT',
+            { label: 'clobbered' },
+        );
+
+        expect(res.response?.status).toBe(403);
+        expect(res.response?.body?.error?.code).toBe('PERMISSION_DENIED');
+        expect(stack.saveMetaItem).not.toHaveBeenCalled();
+        expect(stack.storedLabel()).toBe('Account');
+    });
+
     it('leaves the READ path alone — a capability-less caller can still GET', async () => {
         // This card gates WRITES. The read side has its own posture (ADR-0106
         // masking); turning this into a blanket `/meta` gate would be a
@@ -241,5 +261,127 @@ describe('#7019 — dispatcher PUT /meta/:type/:name: the capability gate', () =
         );
 
         expect(res.response?.status).not.toBe(403);
+    });
+});
+
+/**
+ * [#12702] `manage_org_presentation` — the org-scoped presentation capability
+ * on THIS transport. A subset key beside `manage_metadata`: admitted ONLY for
+ * a type whose registry entry declares `allowOrgOverride: true` AND a session
+ * with an active organization, and the admitted write is threaded to exactly
+ * that organization — the same single resolution feeding authorization and
+ * scope. Both directions pinned: the tier-A admission (with the threaded
+ * organization asserted, not assumed) and the tier-B / env-wide refusals.
+ */
+describe('#12702 — dispatcher PUT: `manage_org_presentation`, org-scoped tier-A admission', () => {
+    /**
+     * The `boot()` double above, plus an auth service whose session carries an
+     * active organization — the value `deps.resolveActiveOrganizationId` reads,
+     * which the gate and the write threading now share.
+     */
+    function bootOrg(activeOrganizationId?: string) {
+        const saveMetaItem = vi.fn(async ({ type, name }: any) => ({ success: true, type, name }));
+        const protocol = { saveMetaItem };
+        const auth = activeOrganizationId === undefined ? null : {
+            api: { getSession: async () => ({ session: { activeOrganizationId } }) },
+        };
+        const kernel = {
+            context: {
+                getService: (n: string) => (n === 'protocol' ? protocol : n === 'auth' ? auth : null),
+            },
+        } as any;
+        return { dispatcher: new HttpDispatcher(kernel), saveMetaItem };
+    }
+
+    const HOLDER = { userId: 'u_orgadmin', systemPermissions: ['manage_org_presentation'] };
+
+    it('admits an org-scoped tier-A save, threaded to the caller\'s OWN organization', async () => {
+        const stack = bootOrg('org_a');
+
+        const res = await stack.dispatcher.handleMetadata(
+            '/view/org_grid', ctx(HOLDER), 'PUT', { name: 'org_grid', label: 'Org Grid' },
+        );
+
+        expect(res.response?.status).toBe(200);
+        expect(stack.saveMetaItem).toHaveBeenCalledTimes(1);
+        // The threading IS the wall: the only organization an admitted write
+        // can carry is the caller's own active one.
+        expect(stack.saveMetaItem.mock.calls[0][0]).toMatchObject({
+            type: 'view', name: 'org_grid', organizationId: 'org_a',
+        });
+    });
+
+    it('[#10340] the URL-only spelling is folded BEFORE the verdict — `email_templates` is tier-A here too', async () => {
+        const stack = bootOrg('org_a');
+
+        const res = await stack.dispatcher.handleMetadata(
+            '/email_templates/welcome', ctx(HOLDER), 'PUT', { name: 'welcome', subject: 'Hi' },
+        );
+
+        expect(res.response?.status).toBe(200);
+        // The request type stays the RAW segment (the protocol folds it
+        // itself); only the verdict and the scope argument read the fold.
+        expect(stack.saveMetaItem.mock.calls[0][0]).toMatchObject({
+            type: 'email_templates', name: 'welcome', organizationId: 'org_a',
+        });
+    });
+
+    it.each([
+        ['object', '/object/account'],
+        ['flow', '/flow/order_followup'],
+    ])('refuses the SAME holder a tier-B `%s` write — org active or not, nothing is written', async (_t, path) => {
+        const stack = bootOrg('org_a');
+
+        const res = await stack.dispatcher.handleMetadata(
+            path, ctx(HOLDER), 'PUT', { label: 'x' },
+        );
+
+        expect(res.response?.status).toBe(403);
+        expect(res.response?.body?.error?.code).toBe('PERMISSION_DENIED');
+        expect(stack.saveMetaItem).not.toHaveBeenCalled();
+    });
+
+    it('refuses the SAME holder a tier-A write when the session has NO active organization — env-wide is walled', async () => {
+        const stack = bootOrg(undefined);
+
+        const res = await stack.dispatcher.handleMetadata(
+            '/view/org_grid', ctx(HOLDER), 'PUT', { name: 'org_grid', label: 'Org Grid' },
+        );
+
+        expect(res.response?.status).toBe(403);
+        expect(res.response?.body?.error?.code).toBe('PERMISSION_DENIED');
+        // The message names the sanctioned path and the scope fact — never the
+        // caller's own grants (#7450).
+        expect(String(res.response?.body?.error?.message ?? '')).toContain('active organization');
+        expect(stack.saveMetaItem).not.toHaveBeenCalled();
+    });
+
+    it('a foreign organization is not expressible: a body-smuggled organization_id does not move the threading', async () => {
+        const stack = bootOrg('org_a');
+
+        const res = await stack.dispatcher.handleMetadata(
+            '/view/org_grid', ctx(HOLDER), 'PUT',
+            { name: 'org_grid', label: 'Org Grid', organization_id: 'org_b', organizationId: 'org_b' },
+        );
+
+        expect(res.response?.status).toBe(200);
+        // `item` is data, never a channel (the request is built field by
+        // field): the write still carries the CALLER's organization.
+        expect(stack.saveMetaItem.mock.calls[0][0]).toMatchObject({ organizationId: 'org_a' });
+    });
+
+    it('control: `manage_metadata` with no active organization still saves a view env-wide, as today', async () => {
+        const stack = bootOrg(undefined);
+
+        const res = await stack.dispatcher.handleMetadata(
+            '/view/org_grid',
+            ctx({ userId: 'u_author', systemPermissions: ['manage_metadata'] }),
+            'PUT',
+            { name: 'org_grid', label: 'Org Grid' },
+        );
+
+        expect(res.response?.status).toBe(200);
+        expect(stack.saveMetaItem).toHaveBeenCalledTimes(1);
+        expect(stack.saveMetaItem.mock.calls[0][0].organizationId).toBeUndefined();
     });
 });
