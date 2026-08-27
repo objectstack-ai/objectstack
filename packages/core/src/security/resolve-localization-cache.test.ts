@@ -48,12 +48,17 @@ function makeQl(rows: Array<Record<string, unknown>>, opts: { epoch?: boolean } 
     async find(_object: string, o: any) {
       counts.sys_setting += 1;
       const where = o?.where ?? {};
-      return rows.filter((r) =>
+      const matched = rows.filter((r) =>
         Object.entries(where).every(([k, v]) => {
           if (v && typeof v === 'object' && '$in' in (v as any)) return (v as any).$in.includes(r[k]);
           return r[k] === v;
         }),
       );
+      // [#10978] Hold the caller's bound, AFTER the filter and by PRESENCE — a
+      // double that hands back everything it matched cannot tell this read's
+      // `limit: 10` from no bound at all, so folding or dropping that bound
+      // would stay green here by construction.
+      return typeof o?.limit === 'number' ? matched.slice(0, o.limit) : matched;
     },
   };
   // The seam is opt-in per double on purpose: the guard under test is "no seam
