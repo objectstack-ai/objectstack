@@ -96,8 +96,11 @@ const HERE = dirname(fileURLToPath(import.meta.url));
  * lives in (what `./x.js` is relative TO) and the package that file belongs to
  * (the fence the hop may not cross). Both are parameters rather than constants so
  * the synthetic sources below can be scanned against a temp package instead of
- * this one — the hop has no live site in the tree yet, so a fixture package is
- * the only way to exercise it at all.
+ * this one: the REFUSAL cases need siblings that must never exist inside
+ * `packages/cli` — a non-literal export, a module outside the package, a
+ * re-export, a missing file — so a fixture package is the only way to exercise
+ * them. The hop's live site (#12579) proves what it RESOLVES; it can say nothing
+ * about what it refuses.
  */
 type ScanContext = {
   /** Directory of the scanned file — the base a relative specifier resolves against. */
@@ -1145,25 +1148,41 @@ function makeScannedPackage(files: Record<string, string>): ScanContext {
 }
 
 /**
- * The import-alias hop (#12533), proven against synthetic source.
+ * The import-alias hop (#12533), proven against synthetic source — and, since
+ * #12579, carrying a LIVE site.
  *
- * ── Why synthetic, and why that is stated here rather than assumed ──────────
+ * ── The live consumer, and what it costs whoever narrows this hop ───────────
  *
- * ⚠️ NOTHING IN THE TREE USES THIS HOP YET. That is deliberate: the hop is the
- * capability, and its consumer — single-sourcing a package spelling out of
- * `serve.ts` — is a follow-up. A capability and the reversal it licenses do not
- * land together, because `Serve.ORGANIZATIONS_RUNTIME_PKG` is deliberately a
- * duplicated LITERAL today, with the reasoning written at both ends
- * (`utils/tenancy-posture-hints.ts` and `serve-organizations-message-spelling.test.ts`),
- * and a diff that both adds the safety net and removes the thing it protects
- * cannot be reviewed as either.
+ * ⭐ `serve.ts` declares `static readonly ORGANIZATIONS_RUNTIME_PKG =
+ * SHARED_ORGANIZATIONS_RUNTIME_PKG;` — an import alias of the const in
+ * `packages/cli/src/utils/tenancy-posture-hints.ts` — so the
+ * `@objectstack/organizations` load the sweep above judges is resolved THROUGH
+ * this hop rather than beside it. Until then the branch was reached only from
+ * the cases below, which is the state the maintainer ruling of 2026-08-27
+ * (#12579, Option A) deliberately ended: a capability nothing live reaches is
+ * the defect class this lane keeps filing, one level down.
  *
- * ⛔ So do NOT read a resolver branch with no live caller as dead code. It is
- * reached from every case below, and deleting it puts the tree back in the state
- * where single-sourcing a spelling silently empties the sweep — which is how
- * this file lost the `@objectstack/organizations` load once already.
+ * ⚠️ The cost came with it, and this paragraph is where it is written down.
+ * NARROWING THIS HOP IS NOW A LIVE REGRESSION, not a synthetic one. Refuse a
+ * spelling these cases accept and the result is no longer "a fixture case went
+ * red": `serve.ts`'s organizations load drops out of the judged population and
+ * the NAMED half of the vacuity guard above fires by package name — the loud
+ * path, but a whole command's load rather than a fixture. ⛔ So do not narrow
+ * this hop to make some other case pass. Read what the live site spells first,
+ * and move both or neither.
  *
- * The first case is the strongest anchor available without a live site: the
+ * ⛔ And should that site ever change shape again, still do not read the branch
+ * as dead code: deleting it puts the tree back where single-sourcing a spelling
+ * silently empties the sweep — which is how this file lost the
+ * `@objectstack/organizations` load once already.
+ *
+ * ── Why the cases stay synthetic ────────────────────────────────────────────
+ *
+ * The live site proves what the hop RESOLVES; it can prove nothing about what
+ * the hop REFUSES, and the refusals are the fence. Those cases need siblings
+ * that must never exist in `packages/cli` — a non-literal export, a module
+ * outside the package, a re-export, a missing file — so they are written against
+ * a temp package. The first case is the anchor between the two halves: its
  * source is synthetic, but the sibling it follows is the REAL
  * `packages/cli/src/utils/tenancy-posture-hints.ts`, read through `serve.ts`'s
  * own scan context.
@@ -1178,10 +1197,10 @@ describe('os serve → the resolver follows ONE import alias into a sibling modu
 
   it('resolves an alias to a literal in a REAL sibling module of packages/cli', () => {
     // No fixture: `SERVE_CONTEXT`, so the sibling read is the live
-    // `packages/cli/src/utils/tenancy-posture-hints.ts` — the module a
-    // single-sourcing refactor would actually import from. If that export is
-    // renamed or stops being a string literal, this goes red HERE, naming the
-    // hop, instead of the sweep quietly judging one load fewer.
+    // `packages/cli/src/utils/tenancy-posture-hints.ts` — the module `serve.ts`
+    // imports the spelling from since #12579. If that export is renamed or stops
+    // being a string literal, this goes red HERE, naming the hop, instead of the
+    // sweep quietly judging one load fewer.
     expect(
       shape([
         "import { ORGANIZATIONS_RUNTIME_PKG } from '../utils/tenancy-posture-hints.js';",
@@ -1205,7 +1224,9 @@ describe('os serve → the resolver follows ONE import alias into a sibling modu
     // The static keeps its NAME (separate pins read it as a roster key); only
     // the spelling moves to the shared module. This is the exact rewrite that
     // came back as `the sweep no longer sees the @objectstack/organizations
-    // load` before this hop existed.
+    // load` before this hop existed — and, since #12579, the shape `serve.ts`
+    // itself carries. Kept synthetic anyway: the live site is judged by the
+    // sweep above, and this case is what names the SHAPE when it moves.
     const context = makeScannedPackage({ 'pkg/src/utils/spelling.ts': SIBLING });
     expect(
       shape([

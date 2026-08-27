@@ -48,22 +48,31 @@
  * included — the two entries that touch no roster and that, before #12492,
  * nothing at either command ever read.
  *
- * **Site 8** covers what the shared table could NOT absorb.
- * `Serve.ORGANIZATIONS_RUNTIME_PKG` is still a string LITERAL in `serve.ts`, so
- * the spelling is declared twice inside `packages/cli`, and site 8 is what keeps
- * that duplication CHECKED instead of silent — it asserts the two declarations
- * are equal. Each is separately pinned as a roster key, here via
- * `test/serve-capability-vocabulary.test.ts` and there via doctor's leg (ii).
+ * **Site 8 retired WITH its subject (#12579).** It asserted that
+ * `Serve.ORGANIZATIONS_RUNTIME_PKG` and the shared hints module declared the
+ * same package — the assertion that kept a deliberate duplication CHECKED
+ * instead of silent. The maintainer ruling of 2026-08-27 (Option A) ended the
+ * duplication: the spelling is declared once in
+ * `../utils/tenancy-posture-hints.ts` and serve's static is assigned from it, so
+ * an equality pin between two declarations has nothing left to compare. ⛔ It
+ * was deleted in the diff that removed its subject and not one diff earlier —
+ * while two declarations existed the pin had a job, which is why #12533 left it
+ * alone.
  *
- * ⚠️ This paragraph used to say the literal HAD to stay, because
+ * ⛔ Nothing it measured went with it. Its second assertion — that the
+ * `isolated` hint an operator reads interpolates that same spelling — is what
+ * site 6 renders through the real gate and compares hard-coded against `PKG`;
+ * and both ends of the vanished pair are still pinned as a roster KEY, serve's
+ * via `test/serve-capability-vocabulary.test.ts` and the shared const's via
+ * doctor's leg (ii).
+ *
+ * ⚠️ This paragraph used to say the literal HAD to stay in `serve.ts`, because
  * `serve-cluster-host-resolution.test.ts` resolved the organizations `import()`
  * through that static and needed the literal in that file or the load dropped
  * out of the host-anchoring sweep silently. ⭐ That reason died at `1ca763b60`
- * (#12533): the sweep now follows an import alias into a sibling module. Site 8
- * never rested on it — while there are two declarations the pin has a subject,
- * whichever way the open decision at #12579 goes — so ⛔ do not delete site 8 to
- * "finish" that decision. It falls with its subject or not at all. The reading
- * of what survives the hop is on `Serve.ORGANIZATIONS_RUNTIME_PKG`'s docblock.
+ * (#12533): the sweep now follows an import alias into a sibling module — and
+ * serve's static is the live site it follows. The reading of what survives the
+ * hop is on `Serve.ORGANIZATIONS_RUNTIME_PKG`'s docblock.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -71,11 +80,10 @@ import type { HostDeclaration } from '@objectstack/types/node';
 import { TENANCY_POSTURES } from '@objectstack/spec/security';
 
 // The table `doctor` renders too (#12492). Read here so site 7 measures the
-// SHARING, not this command talking to itself.
-import {
-  ORGANIZATIONS_RUNTIME_PKG as SHARED_ORGANIZATIONS_RUNTIME_PKG,
-  TENANCY_POSTURE_FIX_HINTS,
-} from '../utils/tenancy-posture-hints.js';
+// SHARING, not this command talking to itself. The spelling itself is no longer
+// imported beside it: since #12579 there is one declaration, and `PKG` below
+// reaches it through the handle these pins are actually about.
+import { TENANCY_POSTURE_FIX_HINTS } from '../utils/tenancy-posture-hints.js';
 
 import Serve, {
   formatDegradedTenancyWarning,
@@ -90,9 +98,10 @@ import Serve, {
  *
  * Reading it as `Serve.…` is deliberate: what these pins are about is what THIS
  * COMMAND puts in front of an operator, and the static is the seam the boot path
- * and the roster pin already address. It is a literal in `serve.ts`, not a
- * re-export of the shared hints module — site 8 below is what holds the two
- * equal.
+ * and the roster pin already address. Since #12579 that static is assigned from
+ * the shared hints module rather than being a second literal, so this reads the
+ * ONE declaration through serve's own handle — which is what these pins want,
+ * the value an `os serve` message actually interpolates.
  */
 const PKG = Serve.ORGANIZATIONS_RUNTIME_PKG;
 
@@ -247,24 +256,6 @@ describe('serve — the posture description an operator reads names the declarat
     expect(TENANCY_POSTURES).toContain('single');
     expect(TENANCY_POSTURES).toContain('group');
     expect(TENANCY_POSTURES).toContain('isolated');
-  });
-
-  // #12492. The one thing the shared table could not absorb: the package name is
-  // declared twice inside `packages/cli` on purpose — see
-  // `Serve.ORGANIZATIONS_RUNTIME_PKG`'s docblock, and the shared module's. This
-  // is the assertion that makes that duplication a CHECKED one. Drift either
-  // copy and `os serve` and `os doctor` start naming different packages at
-  // operators; without this, nothing anywhere would say so.
-  it('site 8 — serve\'s literal and the shared hints module declare the SAME package', () => {
-    expect(
-      PKG,
-      'Serve.ORGANIZATIONS_RUNTIME_PKG and the shared tenancy-hints module disagree about the '
-        + 'multi-org runtime, so `os serve` and `os doctor` now name different packages at operators',
-    ).toBe(SHARED_ORGANIZATIONS_RUNTIME_PKG);
-
-    // …and the isolated hint an operator reads is built from the shared copy, so
-    // the equality above is load-bearing rather than a spare assertion.
-    expect(TENANCY_POSTURE_FIX_HINTS.isolated).toContain(SHARED_ORGANIZATIONS_RUNTIME_PKG);
   });
 });
 
