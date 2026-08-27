@@ -777,12 +777,24 @@ export function createObjectQLAdapterFactory(rawDataEngine: IDataEngine) {
   // engine call the raw methods below make inside the callback automatically
   // binds to the same connection/rollback scope — the trx adapter handed to
   // the callback is therefore the SAME wrapped adapter, captured at factory
-  // time below. `require: true` fails CLOSED on a driver without
-  // `beginTransaction` (#5696): a sequential fallback here would be exactly
-  // the degraded posture upstream's assertion exists to refuse.
+  // time below.
+  //
+  // ⚠️ Scope this honestly: better-auth routes its OWN multi-writes through
+  // `adapter.transaction` too — sign-up (user + account) included, measured —
+  // so this is the transaction path for EVERY better-auth flow, not a
+  // scim-only seam, and it must keep the same degrade contract those flows
+  // had under the factory's sequential fallback. Two declared degrades:
+  //  - an engine with no `transaction` API at all (test doubles, minimal
+  //    IDataEngine implementations) runs the callback directly — exactly the
+  //    factory's own `createAsIsTransaction` behaviour;
+  //  - a driver without `beginTransaction` follows the engine's OWN declared
+  //    contract (ADR-0119 D1): run directly, warn once (#4619). Every SQL
+  //    production driver has `beginTransaction`, so a real deployment's scim
+  //    provisioning is genuinely atomic; fail-closed here (`require: true`)
+  //    was measured to 500 every sign-up on the memory engine.
   let wrappedAdapter: unknown = null;
   const engineWithTx = rawDataEngine as unknown as {
-    transaction<T>(
+    transaction?<T>(
       cb: (trxCtx: unknown, info: unknown) => Promise<T>,
       baseContext?: unknown,
       opts?: { require?: boolean },
@@ -807,11 +819,12 @@ export function createObjectQLAdapterFactory(rawDataEngine: IDataEngine) {
           // rather than hand the callback a null adapter.
           throw new Error('[objectql-adapter] transaction requested before the adapter was constructed');
         }
-        return engineWithTx.transaction(
-          async () => cb(wrappedAdapter as never),
-          undefined,
-          { require: true },
-        );
+        if (typeof engineWithTx.transaction !== 'function') {
+          // Declared degrade #1 (see the #3653 note above): no transaction API
+          // on this engine — run directly, as the factory fallback would.
+          return cb(wrappedAdapter as never);
+        }
+        return engineWithTx.transaction(async () => cb(wrappedAdapter as never));
       },
     },
     adapter: () => withValidationErrorMapping({

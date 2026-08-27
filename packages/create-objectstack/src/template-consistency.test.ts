@@ -502,14 +502,17 @@ describe('blank template peer-skew declarations (#10326)', () => {
     ).toBe(true);
   });
 
-  it('declares the frozen @better-auth/scim > better-call peer', () => {
-    // scim is held at 1.7.0-rc.1 deliberately; the rc peers an EXACT 1.3.7
-    // while better-auth depends on 1.4.0. A better-auth plugin must share the
-    // host's better-call instance, so the single 1.4.0 copy is correct.
+  it('keeps the retired @better-auth/scim > better-call suppression OUT (#3653)', () => {
+    // FLIPPED from a presence ratchet when the scim pin moved off the rc:
+    // stable @better-auth/scim 1.7.1 peers better-call@1.4.0 exactly, so the
+    // rc-era skew the entry declared away is gone. A suppression with no skew
+    // behind it would hide the NEXT real better-call peer break from an
+    // `npx create-objectstack` user's first screen — re-adding it needs a new
+    // measured skew, not a revert.
     expect(
-      /^\s*'@better-auth\/scim>better-call':\s*'1\.4\.0'\s*$/m.test(allowed),
-      'allowedVersions must accept the single better-call 1.4.0 copy scim resolves to',
-    ).toBe(true);
+      /'@better-auth\/scim>better-call'/.test(allowed),
+      'the retired @better-auth/scim>better-call suppression must stay out of allowedVersions',
+    ).toBe(false);
   });
 
   it.each([

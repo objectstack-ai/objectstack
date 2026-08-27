@@ -109,15 +109,11 @@ export const SCAFFOLD_BUILT_DEPENDENCIES = ['better-sqlite3', 'esbuild'];
  *    and on 12.11.1. So the upstream range is stale and 13 is right — widening
  *    is the correct remedy, not pinning our own declaration back to 12.
  *
- *  - `@better-auth/scim>better-call` — scim is held at `1.7.0-rc.1`
- *    deliberately (stable 1.7.x ships a whole-model rewrite that is its own
- *    migration), and the rc peers an exact `better-call@1.3.7` while
- *    better-auth itself depends on 1.4.0. A better-auth plugin must share the
- *    HOST's better-call instance, so the single 1.4.0 copy every install
- *    already resolves is the correct tree, not a skew to repair.
- *    ⚠️ This entry retires together with the SCIM rc pin — delete both at once.
- *    Stable `@better-auth/scim@1.7.1` peers `better-call@1.4.0`, so the skew
- *    this line covers is genuinely gone the moment the pin moves.
+ *  - RETIRED (#3653): `@better-auth/scim>better-call` — the rc.1-era scim pin
+ *    peered an exact `better-call@1.3.7` against the host's 1.4.0, and this
+ *    map declared that skew away. Stable `@better-auth/scim@1.7.1` (the pin
+ *    since #3653 landed) peers `better-call@1.4.0`, so the skew is genuinely
+ *    gone and the entry retired WITH the pin move, as its ratchet demanded.
  *
  *  - `<four>@better-auth/utils` — `@better-auth/core`, `/oauth-provider`,
  *    `/scim` and `/sso` each peer an EXACT `@better-auth/utils@0.4.2`, while a
@@ -167,7 +163,9 @@ export const SCAFFOLD_BUILT_DEPENDENCIES = ['better-sqlite3', 'esbuild'];
  */
 export const SCAFFOLD_ALLOWED_PEER_VERSIONS: Record<string, string> = {
   'better-auth>better-sqlite3': '13',
-  '@better-auth/scim>better-call': '1.4.0',
+  // '@better-auth/scim>better-call' retired with the scim rc pin (#3653) —
+  // stable 1.7.1 peers better-call@1.4.0 exactly, the copy every install
+  // already resolves. init.test.ts pins its ABSENCE now.
   '@better-auth/core>@better-auth/utils': '0.5.0',
   '@better-auth/oauth-provider>@better-auth/utils': '0.5.0',
   '@better-auth/scim>@better-auth/utils': '0.5.0',
