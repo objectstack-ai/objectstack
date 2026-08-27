@@ -91,9 +91,15 @@ function makeDriver() {
     async execute() { return null; },
     async find(object: string, ast?: Row) {
       if (throwOnFind?.object === object) throw throwOnFind.error;
-      return Array.from(storeFor(object).values())
-        .filter((r) => matches(r, ast?.where))
-        .map(copy);
+      const matched = Array.from(storeFor(object).values()).filter((r) => matches(r, ast?.where));
+      // Hold the caller's bound by PRESENCE, AFTER the filter and BEFORE the
+      // row-touching copy — the shape `check:objectql-double-limit` requires of
+      // a `find` double, in that order (a copy applied first reads rows outside
+      // the bound). The union itself never passes a bound (see the module
+      // header); this arm keeps the double honest rather than serving a call
+      // site here.
+      const page = typeof ast?.limit === 'number' ? matched.slice(0, ast.limit) : matched;
+      return page.map(copy);
     },
     async create(object: string, data: Row) {
       n += 1;

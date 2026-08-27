@@ -72,6 +72,11 @@
  *    unreferenced. Under-reporting is the direction that deletes live
  *    credentials, so the union deliberately declines every filter.
  *
+ * The reads also carry **no `limit`**, deliberately. Every driver in this tree
+ * bounds a result only when `query.limit` is present, so an unbounded read
+ * returns the whole holder set; a page size introduced here would truncate the
+ * union silently on exactly the large tables where an orphan sweep matters.
+ *
  * The three producer surfaces are consumed **read-only, through their own
  * published predicates** — `isSecretHandle` (service-settings),
  * `collectSecretFields`/`parseSecretRef` (objectql), `parseCredentialsRef`
