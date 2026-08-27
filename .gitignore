@@ -52,6 +52,8 @@ coverage/
 # Temporary files
 tmp/
 temp/
+# Killed-run fixture leftover; its in-tree root is deliberate (objectstack#12583)
+packages/cli/test/tmp-node-env-default-*/
 
 # Package builds
 packages/*/dist/
