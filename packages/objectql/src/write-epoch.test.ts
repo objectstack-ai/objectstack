@@ -34,6 +34,9 @@ import {
   isWriteEpochOperation,
 } from './write-epoch.js';
 
+/** Owning package id — `registerObject` requires one; it is not optional. */
+const WRITE_EPOCH_TEST_PACKAGE = 'os-write-epoch-test';
+
 const epochObject = {
   name: 'epoch_task',
   label: 'Task',
@@ -98,7 +101,11 @@ function makeStubDriver() {
       return null;
     },
     async find(object: string, ast: any) {
-      return Array.from(storeFor(object).values()).filter((r) => matches(r, ast?.where));
+      const rows = Array.from(storeFor(object).values()).filter((r) => matches(r, ast?.where));
+      // The caller's bound is applied AFTER the filter, by PRESENCE — a double
+      // that silently drops `limit` answers a different question than the
+      // engine asked, and every assertion built on it reads as evidence.
+      return typeof ast?.limit === 'number' ? rows.slice(0, ast.limit) : rows;
     },
     async findOne(object: string, ast: any) {
       for (const r of storeFor(object).values()) if (matches(r, ast?.where)) return r;
@@ -163,8 +170,8 @@ describe('[#11968] the engine seam advances the write epoch', () => {
     engine = new ObjectQL();
     engine.registerDriver(makeStubDriver(), true);
     await engine.init();
-    engine.registry.registerObject(epochObject);
-    engine.registry.registerObject(otherObject);
+    engine.registry.registerObject(epochObject, WRITE_EPOCH_TEST_PACKAGE);
+    engine.registry.registerObject(otherObject, WRITE_EPOCH_TEST_PACKAGE);
   });
 
   it('starts at zero and exposes the substrate surface', () => {
@@ -176,10 +183,10 @@ describe('[#11968] the engine seam advances the write epoch', () => {
     const row: any = await engine.insert('epoch_task', { title: 'a' });
     expect(engine.writeEpoch.current).toBe(1);
 
-    await engine.update('epoch_task', { title: 'b' }, { where: { id: row.id } } as any);
+    await engine.update('epoch_task', { title: 'b' }, { where: { id: row.id } });
     expect(engine.writeEpoch.current).toBe(2);
 
-    await engine.delete('epoch_task', { where: { id: row.id } } as any);
+    await engine.delete('epoch_task', { where: { id: row.id } });
     expect(engine.writeEpoch.current).toBe(3);
   });
 
@@ -187,9 +194,9 @@ describe('[#11968] the engine seam advances the write epoch', () => {
     const row: any = await engine.insert('epoch_task', { title: 'a' });
     const afterWrite = engine.writeEpoch.current;
 
-    await engine.find('epoch_task', {} as any);
-    await engine.findOne('epoch_task', { where: { id: row.id } } as any);
-    await engine.count('epoch_task', {} as any);
+    await engine.find('epoch_task');
+    await engine.findOne('epoch_task', { where: { id: row.id } });
+    await engine.count('epoch_task');
 
     expect(engine.writeEpoch.current).toBe(afterWrite);
   });
@@ -233,7 +240,7 @@ describe('[#11968] ⭐ with no consumers, the substrate is inert', () => {
     const engine = new ObjectQL();
     engine.registerDriver(makeStubDriver(), true);
     await engine.init();
-    engine.registry.registerObject(epochObject);
+    engine.registry.registerObject(epochObject, WRITE_EPOCH_TEST_PACKAGE);
 
     expect(engine.writeEpoch.listenerCount).toBe(0);
 

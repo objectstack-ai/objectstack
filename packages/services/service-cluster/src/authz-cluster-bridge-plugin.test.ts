@@ -45,7 +45,9 @@ function makeHarness(opts: HarnessOptions = {}) {
         error: vi.fn(),
     };
 
-    const attach = vi.fn(() => {
+    // Typed parameters, not `() => …`: the call tuple is what the node-id
+    // assertion below reads, and an untyped mock gives it an empty tuple.
+    const attach = vi.fn((_pubsub: unknown, _nodeId: string) => {
         if (attachThrows) throw new Error('attach exploded');
         return detach;
     });
