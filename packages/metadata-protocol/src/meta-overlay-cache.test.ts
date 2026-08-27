@@ -31,32 +31,33 @@
  * `if (false) return undefined;` — an entry is served no matter how far the
  * write epoch has moved past it.
  *
- * PREDICTED IN WRITING BEFORE THE MUTATION: RED, exactly **3** failing cases —
- * §2 "the answer after an epoch bump equals the uncached answer", §2 "a bumped
- * epoch re-reads", §5 "an epoch bump retires an entry the TTL would still
- * serve". Every other case either never bumps the epoch or never reaches the
- * comparison.
- * OBSERVED: RED, 3 failed / 19 passed — as predicted, same three cases.
- * Named positive control, predicted and observed GREEN throughout:
- * §3 "an engine with no write-epoch seam keeps its exact query multiset" —
- * it never stores an entry, so it never reaches the neutered comparison, and
- * its staying green is what shows the ablation cut the epoch check rather than
- * the cache.
+ * PREDICTED IN WRITING BEFORE THE MUTATION (committed ahead of it): RED,
+ * exactly **4** failing cases, named —
+ *   1. §1 "the answer after an epoch bump equals the answer an UNCACHED engine gives"
+ *   2. §1 "a bumped epoch re-reads even when the row set did not change"
+ *   3. §4 "a newly published row appears promptly — the epoch, never the timer"
+ *   4. §5 "an epoch bump retires an entry the TTL would still have served"
+ * Every other case either never bumps the epoch or never reaches the comparison.
+ * OBSERVED: __ABL1_OBSERVED__
  *
  * ## ⭐ ABLATION 2 — the hit half (`writeMetaOverlayCache` call removed)
  *
  * Mutation: in `protocol.ts`, the `writeMetaOverlayCache(...)` call in
- * `getMetaItems` commented out — the cache is read but never populated.
+ * `getMetaItems` replaced by a no-op — the cache is read but never populated,
+ * i.e. a cache that never caches.
  *
- * PREDICTED IN WRITING BEFORE THE MUTATION: RED, exactly **5** failing cases —
- * the five that assert a repeat issues zero reads (§1 hit, §1 identity-plus-hit,
- * §4 negative caching, §5 within-TTL hit, §6 clone isolation, which needs a hit
- * to have something to corrupt). That is 5 by the count of cases, and the
- * prediction names them.
- * OBSERVED: RED, 5 failed / 17 passed — as predicted.
- * Same positive control §3, predicted and observed GREEN: a no-seam engine
- * already issues its full multiset every call, so removing the store changes
- * nothing for it.
+ * PREDICTED IN WRITING BEFORE THE MUTATION (committed ahead of it): RED,
+ * exactly **9** failing cases — every case carrying a "the repeat read nothing"
+ * assertion: §1 (2 of 3), §2 (both), §4 (both), §5 (1 of 3), §6, §8. The three
+ * §7 key-separation cases and §1's "a bumped epoch re-reads" use
+ * `toBeGreaterThan` and stay green, as do all of §3.
+ * OBSERVED: __ABL2_OBSERVED__
+ *
+ * Named positive control for BOTH ablations, predicted GREEN throughout:
+ * §3 "an engine with no write-epoch seam keeps its exact query multiset". It
+ * never stores an entry, so ablation 1 never reaches its neutered comparison
+ * and ablation 2 removes a store it never made. Its staying green is what shows
+ * each ablation cut the intended half rather than the cache as a whole.
  *
  * The two ablations failing DISJOINT sets is the point: it is what shows the
  * hit assertions and the staleness assertions are testing different halves.
