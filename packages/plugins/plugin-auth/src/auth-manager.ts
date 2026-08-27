@@ -1371,6 +1371,62 @@ export class AuthManager {
       } : {}),
 
       // Session configuration
+      //
+      // ⚠️ `session.cookieCache` is the OTHER door into the architecture #4785
+      // rejected, and it is deliberately not opened here. What that costs, and
+      // what is actually known about it, measured 2026-08-27 against the
+      // installed better-auth `1.7.1` (read out of `node_modules`, never off
+      // the `^1.7.1` range) — each claim names the file it came from so a
+      // version bump is re-checkable one grep at a time:
+      //
+      //  - **The failure DIRECTION is the sibling's.** With `cookieCache`
+      //    enabled, `/get-session` answers from a signed payload in the
+      //    client's own `session_data` cookie and returns before any adapter
+      //    read (`dist/api/routes/session.mjs:48-130`). ObjectStack revokes by
+      //    writing the `sys_session` row — `enforceSessionControls` /
+      //    `enforceConcurrentCap` stamp `revoked_at` + a past `expires_at`
+      //    (ADR-0069 D4), and `hideRevokedSessionRow` hides a tombstoned row
+      //    from better-auth's reads (`session-tombstone.ts`). All of it is
+      //    read-path enforcement, so for as long as the cookie answers, a
+      //    revoked session keeps authenticating and nobody gets an error. Same
+      //    silent direction as `secondaryStorage` (see `secondary-storage.ts`).
+      //
+      //  - ⭐ **The REACH is materially smaller, and saying so is the point.**
+      //    Three differences, all measured, not inferred:
+      //    1. The session of RECORD does not move. `cookieCache` is read-side
+      //       only — `createSession` still writes the `sys_session` row, so
+      //       admin session lists, the concurrent-cap count and D4's audit
+      //       trail all stay correct. `secondaryStorage` skips the row.
+      //    2. The staleness window is BOUNDED and per-client:
+      //       `cookieCache.maxAge`, default 300s (`dist/cookies/index.mjs:50`,
+      //       `:99`). It cannot be extended without a database read either —
+      //       better-auth force-disables the stateless `refreshCache` whenever
+      //       a `database` is configured, which ObjectStack always does
+      //       (`dist/context/create-context.mjs:149-165`). Under
+      //       `secondaryStorage` the cache IS the record and the window has no
+      //       bound at all.
+      //    3. Sensitive operations already bypass it: better-auth's own
+      //       `getAuthoritativeSessionFromCtx` / `sensitiveSessionMiddleware`
+      //       re-read with `disableCookieCache: true` when a `database` is
+      //       configured (`dist/api/routes/session.mjs:270-280`). There is no
+      //       equivalent escape from `secondaryStorage`.
+      //
+      //  - **It is not reachable from ObjectStack config today, by
+      //    construction rather than by refusal.** The spec's
+      //    `AuthConfigSchema.session` declares `expiresIn` / `updateAge` only,
+      //    and this block reads only those two, so a `cookieCache` key on
+      //    `AuthManagerOptions.session` is DROPPED, not honoured — pinned
+      //    end-of-chain in `session-of-record.test.ts`. The one way in is
+      //    `authInstance`, where the host has replaced this whole config.
+      //
+      // ⛔ So this is a disclosed cost on a door a host must build to reach —
+      // NOT a guard, and deliberately not one. The #4785 posture is opt-in with
+      // the cost stated (maintainer ruling 2026-08-27), the same posture
+      // `cacheSecondaryStorage()` is exported under. Plumbing `cookieCache`
+      // through is therefore a decision that re-opens #4785, not a feature: it
+      // would trade D4's revocation latency for request latency, and the trade
+      // has to be made deliberately, by a maintainer, with the window written
+      // down. If you are here to add it, that ruling is what you need first.
       session: {
         ...AUTH_SESSION_CONFIG,
         expiresIn: this.config.session?.expiresIn || 60 * 60 * 24 * 7, // 7 days default

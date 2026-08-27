@@ -36,6 +36,18 @@ type SecondaryStorage = NonNullable<BetterAuthOptions['secondaryStorage']>;
  * cache at all (and rewrite D4's revocation to match) is #4785 — a decision,
  * not a bug fix.
  *
+ * ⚠️ **`session.cookieCache` is the sibling key, and its cost is NOT the same
+ * size.** It reaches the same read-path failure direction — a revoked session
+ * keeps authenticating, silently — but the session of record stays in
+ * `sys_session`, the window is bounded by `cookieCache.maxAge` (default 300s)
+ * rather than unbounded, and better-auth's own sensitive-operation path
+ * re-reads with the cookie cache disabled. It is also not reachable through
+ * `AuthManagerOptions`. The measurement, with the better-auth files each claim
+ * was read out of, is at `auth-manager.ts`'s `session:` block — the place a
+ * future author would plumb it. ⛔ Neither door is boot-refused by
+ * ObjectStack, and that is the ruled posture, not a gap: opt-in with the cost
+ * stated. Adding a refusal to either needs a new maintainer ruling.
+ *
  * better-auth's `secondaryStorage` contract is string-valued: `get` returns the
  * stored string (or null), `set` takes a string value + optional TTL (seconds),
  * `delete` removes it. We map straight onto `ICacheService`, translating
