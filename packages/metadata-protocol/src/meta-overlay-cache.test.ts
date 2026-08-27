@@ -38,7 +38,10 @@
  *   3. §4 "a newly published row appears promptly — the epoch, never the timer"
  *   4. §5 "an epoch bump retires an entry the TTL would still have served"
  * Every other case either never bumps the epoch or never reaches the comparison.
- * OBSERVED: __ABL1_OBSERVED__
+ * OBSERVED: RED, **4** failed / 15 passed (19) — the prediction's exact count AND its
+ * exact named set, in order: §1 "…equals the answer an UNCACHED engine gives",
+ * §1 "a bumped epoch re-reads…", §4 "a newly published row appears promptly",
+ * §5 "an epoch bump retires an entry the TTL would still have served".
  *
  * ## ⭐ ABLATION 2 — the hit half (`writeMetaOverlayCache` call removed)
  *
@@ -51,7 +54,10 @@
  * assertion: §1 (2 of 3), §2 (both), §4 (both), §5 (1 of 3), §6, §8. The three
  * §7 key-separation cases and §1's "a bumped epoch re-reads" use
  * `toBeGreaterThan` and stay green, as do all of §3.
- * OBSERVED: __ABL2_OBSERVED__
+ * OBSERVED: RED, **9** failed / 10 passed (19) — the prediction's exact count AND its
+ * exact named set: §1 "a repeat … issues ZERO engine reads", §1 "…equals the
+ * answer an UNCACHED engine gives", §2 both, §4 both, §5 "an epoch bump
+ * retires…", §6, §8.
  *
  * Named positive control for BOTH ablations, predicted GREEN throughout:
  * §3 "an engine with no write-epoch seam keeps its exact query multiset". It
@@ -59,8 +65,20 @@
  * and ablation 2 removes a store it never made. Its staying green is what shows
  * each ablation cut the intended half rather than the cache as a whole.
  *
- * The two ablations failing DISJOINT sets is the point: it is what shows the
- * hit assertions and the staleness assertions are testing different halves.
+ * ⭐ The two failure sets are what shows the halves are independent. They
+ * overlap on exactly THREE cases — §1 "…equals the answer an UNCACHED engine
+ * gives", §4 "a newly published row appears promptly", §5 "an epoch bump
+ * retires…" — and that overlap is not slack: those are precisely the cases
+ * written to carry BOTH a hit assertion and a staleness assertion, so each
+ * ablation kills a different assertion inside the same case. Outside the
+ * overlap the sets are disjoint: ablation 1 alone takes §1 "a bumped epoch
+ * re-reads", ablation 2 alone takes §1 "a repeat … issues ZERO reads", both of
+ * §2, §4 "an empty overlay set costs two reads once", §6 and §8.
+ *
+ * ⭐ Both ablations also MEASURE the source-resolution claim above rather than
+ * restating it: each mutated only this package's source, ran vitest with NO
+ * rebuild of any kind, and the behaviour changed on that run. A dist-mediated
+ * test path would have stayed green through both.
  */
 
 import { describe, expect, it } from 'vitest';
