@@ -5,11 +5,20 @@ import type { PermissionSet, ObjectPermission, FieldPermissionParsed } from '@ob
 /**
  * Operation type mapping to permission checks.
  *
- * `transfer`/`restore`/`purge` are pre-mapped to their RBAC bits (#1883) even
- * though the ObjectQL operations do not exist yet (roadmap M2): the moment such
- * an operation is dispatched through the security middleware it is gated by the
- * corresponding `allow*` bit — deny unless a resolved permission set grants it.
- * There is no window where the ops could ship ungated.
+ * `transfer` is pre-mapped to its RBAC bit (#1883) even though the dedicated
+ * ObjectQL operation does not exist yet (roadmap M2): the moment it is
+ * dispatched through the security middleware it is gated by `allowTransfer` —
+ * deny unless a resolved permission set grants it. (`allowTransfer` is also
+ * ENFORCED today through the ordinary insert/update `owner_id` door, #3004.)
+ *
+ * The former `restore`/`purge` rows RETIRED with their bits (#12497, ADR-0049
+ * — maintainer ruling 2026-08-26 accepting #1883's recommendation B):
+ * `allowRestore`/`allowPurge` are `retiredKey()` tombstones in the spec, so a
+ * mapping onto them was a claim about a surface that rejects authoring. A
+ * dispatched `restore`/`purge` is now denied unconditionally by the
+ * DESTRUCTIVE_OPERATIONS backstop below — there is still no window where the
+ * ops could ship ungated. The rows return with the M2 lifecycle initiative
+ * (feature + RBAC in one batch), together with the bits they read.
  */
 const OPERATION_TO_PERMISSION: Record<string, keyof ObjectPermission> = {
   find: 'allowRead',
@@ -20,36 +29,41 @@ const OPERATION_TO_PERMISSION: Record<string, keyof ObjectPermission> = {
   update: 'allowEdit',
   delete: 'allowDelete',
   transfer: 'allowTransfer',
-  restore: 'allowRestore',
-  purge: 'allowPurge',
 };
 
 /**
  * Destructive operation class — operations that must FAIL CLOSED when they are
  * not mapped to a concrete permission key. See ADR-0049: an unrecognised
  * destructive operation must be DENIED rather than silently allowed by the
- * default-allow fallthrough. `transfer`/`restore`/`purge` are now mapped above
- * (#1883), so this set acts as a backstop: it keeps them (and any future
- * destructive op prefixed here before its mapping lands) fail-closed if the
- * mapping is ever removed. Non-destructive unknown operations retain
- * default-allow so custom read-side operations are not broken.
+ * default-allow fallthrough. Since #12497 this set is the ACTIVE gate for
+ * `restore`/`purge` (their mapping rows retired with their tombstoned bits —
+ * denial is unconditional, not even `modifyAllRecords` reaches them until the
+ * M2 ops ship with re-added rows) and the backstop for `transfer` (mapped
+ * above; this keeps it fail-closed if the mapping is ever removed).
+ * Non-destructive unknown operations retain default-allow so custom read-side
+ * operations are not broken.
  */
 const DESTRUCTIVE_OPERATIONS = new Set<string>(['transfer', 'restore', 'purge']);
 
 /**
  * Permission keys covered by the `modifyAllRecords` super-user WRITE bypass:
- * edit/delete plus the destructive lifecycle class, DERIVED from the two
- * constants above so a future destructive op added to the map+set is covered
- * automatically (hand-listing it inline is how bypass gaps happen — #1883).
+ * edit/delete plus the MAPPED members of the destructive lifecycle class,
+ * DERIVED from the two constants above so a future destructive op added to the
+ * map+set is covered automatically (hand-listing it inline is how bypass gaps
+ * happen — #1883). Unmapped destructive ops (`restore`/`purge` since #12497)
+ * contribute nothing here — they are denied before the bypass is consulted.
  * NOTE this means "Modify All Data" grants (incl. the wildcard on
- * organization_admin / admin_full_access defaults) will cover
- * transfer/restore/purge the moment the M2 ops ship — Salesforce semantics,
- * confirmed in the #1883 disposition; revisit per-op when M2 lands.
+ * organization_admin / admin_full_access defaults) cover `transfer` (and will
+ * cover restore/purge again when the M2 batch re-adds their rows — Salesforce
+ * semantics, confirmed in the #1883 disposition; revisit per-op when M2 lands).
  */
 const MODIFY_ALL_WRITE_KEYS = new Set<keyof ObjectPermission>([
   'allowEdit',
   'allowDelete',
-  ...[...DESTRUCTIVE_OPERATIONS].map((op) => OPERATION_TO_PERMISSION[op]),
+  ...[...DESTRUCTIVE_OPERATIONS].flatMap((op) => {
+    const key = OPERATION_TO_PERMISSION[op];
+    return key ? [key] : [];
+  }),
 ]);
 
 /** CRUD operation class an object-level `requiredPermissions` map keys on. */
@@ -86,20 +100,21 @@ export function superuserBypassBitForOperation(operation: string): SuperuserBypa
  * [ADR-0066 ⑤] Map a raw ObjectQL operation to the CRUD class a per-operation
  * `requiredPermissions` map is keyed on, DERIVED from `OPERATION_TO_PERMISSION`
  * so it stays in lockstep with the CRUD permission bits (and any future
- * destructive op added there). `transfer`/`restore` fold into `update`,
- * `purge` into `delete`. Returns `null` for an operation with no CRUD mapping
- * (e.g. a custom read-side op) — such an op is never matched by a per-operation
- * map, but the flat `string[]` form still gates it via its `all` bucket.
+ * destructive op added there). `transfer` folds into `update`. Returns `null`
+ * for an operation with no CRUD mapping (e.g. a custom read-side op) — such an
+ * op is never matched by a per-operation map, but the flat `string[]` form
+ * still gates it via its `all` bucket. (`restore`/`purge` fell out of the map
+ * with #12497 — they resolve `null` here, and their dispatch is denied at the
+ * object gate before any per-operation map is consulted; the M2 batch re-adds
+ * the rows, restore→update / purge→delete, with the bits.)
  */
 export function crudBucketForOperation(operation: string): CrudBucket | null {
   switch (OPERATION_TO_PERMISSION[operation]) {
     case 'allowRead': return 'read';
     case 'allowCreate': return 'create';
     case 'allowEdit':
-    case 'allowTransfer':
-    case 'allowRestore': return 'update';
-    case 'allowDelete':
-    case 'allowPurge': return 'delete';
+    case 'allowTransfer': return 'update';
+    case 'allowDelete': return 'delete';
     default: return null;
   }
 }

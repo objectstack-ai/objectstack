@@ -2,6 +2,8 @@
 
 import { PermissionSetSchema, type PermissionSet } from '@objectstack/spec/security';
 import {
+  ADMIN_FULL_ACCESS,
+  ADMIN_FULL_ACCESS_CAPABILITIES,
   ORGANIZATION_ADMIN,
   ORGANIZATION_ADMIN_NO_BYPASS,
   BUILTIN_IDENTITY_ORG_ADMIN,
@@ -117,51 +119,17 @@ const denyWritesOnManagedObjects = (): Record<string, {
  */
 const baseDefaultPermissionSets: PermissionSet[] = [
   PermissionSetSchema.parse({
-    name: 'admin_full_access',
+    name: ADMIN_FULL_ACCESS,
     label: 'Administrator — Full Access',
-    objects: {
-      '*': {
-        allowRead: true,
-        allowCreate: true,
-        allowEdit: true,
-        allowDelete: true,
-        viewAllRecords: true,
-        modifyAllRecords: true,
-        // [#3544] Export is an OPT-IN grant and is deliberately NOT implied by
-        // the super-user bits — "may see all data" and "may take a bulk copy of
-        // it" are separable on purpose (SAP S_GUI 61 / segregation of duties).
-        //
-        // [#8681] NO `allowExport` HERE, and it is not an oversight. This set
-        // shipped `allowExport: true` on the wildcard through 17.0.0 GA, which
-        // made the export axis undeniable for anyone holding it: an app could
-        // declare an object exportable by nobody and the platform exported it
-        // anyway, with no supported opt-out (editing a code-package set answers
-        // `403 [not_overridable]`, and the admin holds no app-authored set to
-        // put the per-object `false` into). Measured on GA, hotcrm#1152: an org
-        // owner exported three objects no app set grants export on, 200 with
-        // full rows. Maintainer ruling (2026-08-15) removes the grant — the
-        // export axis's half of #5491, which removed `member_default`'s CRUD
-        // wildcard for the identical "a wildcard nobody can get under" reason.
-        //
-        // ⛔ Do not restore it, and do not restore a NARROWER wildcard either —
-        // "which platform objects should ship an explicit export grant" is an
-        // OPEN question the ruling deliberately left to a separate decision, and
-        // any `'*'` export grant here re-opens the hole for every object the
-        // platform does not know about. Where admin export is intended, grant
-        // `allowExport` per object in an APP permission set.
-      },
-    },
-    systemPermissions: [
-      'manage_users',
-      'manage_metadata',
-      'manage_platform_settings',
-      // [ADR-0111 D9] Sharing administration — gates the sharing-rule surface
-      // and (in the DEPTH extension) non-owner share management.
-      'manage_sharing',
-      'setup.access',
-      'setup.write',
-      'studio.access',
-    ],
+    // [#11965 / #11663 Choice 6A] The capability CONTENT (object wildcard +
+    // `systemPermissions`) is the kernel platform-admin declaration exported
+    // by `@objectstack/spec` — one list, imported here and read by core's
+    // platform-admin derivation, so exactly one copy exists. The export-axis
+    // rulings travel with the declaration (see `ADMIN_FULL_ACCESS_CAPABILITIES`
+    // in `spec/src/identity/eval-user.zod.ts`: #3544 export is opt-in; #8681
+    // ⛔ no `allowExport` on the wildcard, and do not restore a narrower one).
+    // Behaviour-neutrality is pinned by `default-permission-sets.test.ts`.
+    ...ADMIN_FULL_ACCESS_CAPABILITIES,
   }),
   // ── Organization Administrator ──────────────────────────────────────
   //

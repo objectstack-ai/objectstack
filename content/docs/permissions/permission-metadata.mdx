@@ -79,8 +79,6 @@ objects: {
     allowEdit: true,           // Can update records
     allowDelete: false,        // Can delete records
     allowTransfer: false,      // Can change record ownership
-    allowRestore: false,       // Can restore deleted records
-    allowPurge: false,         // Can permanently delete (GDPR)
     viewAllRecords: false,     // Bypass sharing rules for read
     modifyAllRecords: false,   // Bypass sharing rules for write
   },
@@ -94,10 +92,15 @@ objects: {
 | `allowEdit` | Update records (subject to sharing rules) |
 | `allowDelete` | Soft-delete records |
 | `allowTransfer` | Transfer record ownership |
-| `allowRestore` | Restore records from trash |
-| `allowPurge` | Permanently delete records (GDPR compliance) |
 | `viewAllRecords` | View all records regardless of sharing rules |
 | `modifyAllRecords` | Edit all records regardless of sharing rules |
+
+> **Retired:** the former `allowRestore` / `allowPurge` keys were removed
+> (#12497, ADR-0049) — the `restore` / `purge` operations they claimed to gate
+> do not exist yet, so authoring them granted nothing. Authoring either key is
+> now a loud publish-time error carrying this prescription. The keys return
+> with the M2 lifecycle initiative (feature + RBAC in one batch, #1883);
+> until then a dispatched `restore` / `purge` is denied unconditionally.
 
 ## Field Permissions
 
@@ -229,8 +232,6 @@ const salesManagerPermission = {
       allowEdit: true,
       allowDelete: true,
       allowTransfer: true,
-      allowRestore: true,
-      allowPurge: false,
       viewAllRecords: true,
       modifyAllRecords: false,
     },
@@ -240,8 +241,6 @@ const salesManagerPermission = {
       allowEdit: true,
       allowDelete: true,
       allowTransfer: true,
-      allowRestore: true,
-      allowPurge: false,
       viewAllRecords: true,
       modifyAllRecords: true,
     },

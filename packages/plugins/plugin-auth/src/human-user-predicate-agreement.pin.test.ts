@@ -31,6 +31,19 @@
  * the legacy `usr_system` service row (`SystemUserId.SYSTEM` — no longer
  * provisioned, but present in every DB an older runtime created).
  *
+ * ## Two populations, held apart on purpose
+ *
+ * {@link CORPUS} is the REACHABLE one: every entry is a shape a `sys_user`
+ * read can really return, so a failure there is a live defect.
+ * {@link NON_OBJECT_CORPUS} is the unreachable one — truthy non-objects, which
+ * no real read yields. It was originally left out of this file because the two
+ * owners genuinely disagreed on it and it would have failed; [#12515] closed
+ * that disagreement by giving plugin-security the same `typeof` guard
+ * `isHumanUserRow` already had, which is what made the class pinnable. The two
+ * stay in separate arrays so the arrays keep saying different things: a red in
+ * `CORPUS` means a reachable answer moved, a red in `NON_OBJECT_CORPUS` means
+ * the fail-closed guard was dropped.
+ *
  * ## Why the pin lives in plugin-auth and not in plugin-security
  *
  * Reaching both predicates from one test is a package-boundary problem, and
@@ -184,6 +197,59 @@ const CORPUS: { name: string; row: unknown }[] = [
   { name: 'an undefined row', row: undefined },
 ];
 
+/**
+ * The NON-OBJECT input class — held separately from {@link CORPUS} on purpose.
+ *
+ * ## Why it is a second array and not four more corpus entries
+ *
+ * `CORPUS`'s contract is that every entry is a shape a `sys_user` read can
+ * really return, and these are not: a real read yields plain objects, measured
+ * against a real `SqlDriver` over the shipped `SysUser` declaration. Filing
+ * them into `CORPUS` would quietly falsify that promise and blur the one
+ * distinction that decides how a failure here should be read.
+ *
+ * ## Why it is pinned at all, given it is unreachable
+ *
+ * This class is the gap the original pin deliberately left: it was excluded
+ * because at the time it would have FAILED, not because it was uninteresting.
+ * The two owners genuinely disagreed on it — `isHumanUserRow` requires
+ * `typeof row === 'object'` and answered `false`, while plugin-security's
+ * hand-spelled copy ran a bare truthiness check whose two property comparisons
+ * are both `undefined` on a non-object and therefore both pass, answering
+ * `true`. That direction fails OPEN on the copy that performs the
+ * platform-admin promotion.
+ *
+ * Unreachable-today would be a fine reason to shrug if the asymmetry had a
+ * scheduled end. It does not: consolidating the predicate into a package both
+ * plugins depend on stays declined (it would widen a published surface), so
+ * nothing is going to delete this divergence on its own. The guard closed it
+ * instead, and this group is what stops it coming back — if a refactor ever
+ * makes a non-object row reachable, or if the guard is dropped as noise, these
+ * cases are the only mechanism that says so. Without them the pin sits green
+ * through exactly the edit that reopens the hole.
+ *
+ * Both owners must answer NON-HUMAN here. That is the fail-closed direction,
+ * and for a promotion predicate the safe answer to malformed input is "no".
+ */
+const NON_OBJECT_CORPUS: { name: string; row: unknown }[] = [
+  {
+    name: 'a bare id STRING where a row was expected',
+    row: 'usr_alice',
+  },
+  {
+    name: "the SYSTEM account's own id as a bare string — fail-open would promote the service account",
+    row: SystemUserId.SYSTEM,
+  },
+  { name: 'a number', row: 42 },
+  { name: 'the boolean true', row: true },
+  {
+    name: 'a function — truthy, and every property read on it is undefined',
+    row: () => 'not a row',
+  },
+  { name: 'the number zero — falsy, so the decision already agreed', row: 0 },
+  { name: 'an empty string — falsy, so the decision already agreed', row: '' },
+];
+
 describe('human-user predicate agreement — plugin-security `isHumanUser` vs plugin-auth `isHumanUserRow`', () => {
   const saved: Record<string, string | undefined> = {};
   const PINNED_ENV = ['OS_TENANCY_POSTURE', 'OS_PLATFORM_OWNER_EMAIL'];
@@ -237,6 +303,56 @@ describe('human-user predicate agreement — plugin-security `isHumanUser` vs pl
     );
     expect(CORPUS.map(({ row }) => isHumanUserRow(row)).some(Boolean)).toBe(true);
     expect(CORPUS.map(({ row }) => isHumanUserRow(row)).some((v) => !v)).toBe(true);
+  });
+
+  describe('the non-object input class — unreachable today, and fail-CLOSED on both sides', () => {
+    for (const { name, row } of NON_OBJECT_CORPUS) {
+      it(`agrees on ${name}`, async () => {
+        const authSays = isHumanUserRow(row);
+        const security = await securityVerdict(row);
+
+        // Stated as an absolute, not just as agreement: two predicates could
+        // agree by both failing OPEN, which is the outcome this group exists
+        // to forbid. `isHumanUserRow` is asserted false first so a regression
+        // in the OWNER cannot be laundered into "well, they still agree".
+        expect(
+          authSays,
+          `plugin-auth isHumanUserRow must answer NON-HUMAN for a non-object row.\n` +
+            `  row: ${String(row)} (typeof ${typeof row})`,
+        ).toBe(false);
+
+        expect(
+          security.human,
+          `plugin-security and plugin-auth disagree on a NON-OBJECT row — the security\n` +
+            `copy is failing OPEN on malformed input, and it is the copy that PERFORMS\n` +
+            `platform-admin promotion.\n` +
+            `  row:            ${String(row)} (typeof ${typeof row})\n` +
+            `  plugin-auth  isHumanUserRow -> ${authSays}\n` +
+            `  plugin-security isHumanUser -> ${security.human} (reason: ${security.reason ?? 'none'})\n` +
+            `The fix is the \`typeof\` guard in bootstrap-platform-admin.ts, mirroring\n` +
+            `isHumanUserRow — not a relaxation of this expectation.`,
+        ).toBe(false);
+
+        // Same anti-vacuity guard the reachable corpus uses: only the human
+        // filter reaches `no_users`, so this proves the negative came from the
+        // predicate rather than from a harness that broke earlier.
+        expect(security.reason, 'negative verdict did not come from the human filter').toBe(
+          'no_users',
+        );
+      });
+    }
+
+    it('anti-vacuity: this group really carries truthy non-objects, not just falsy ones', () => {
+      // A falsy row is non-human on both sides even with the guard removed, so
+      // a group that had quietly lost its truthy members would keep passing
+      // through the very regression it is here to catch.
+      const truthyNonObjects = NON_OBJECT_CORPUS.filter(
+        ({ row }) => Boolean(row) && typeof row !== 'object',
+      );
+      expect(truthyNonObjects.length, 'no truthy non-object rows left in the group').toBeGreaterThan(
+        0,
+      );
+    });
   });
 
   it('the legacy usr_system row alone leaves the install with NO admin and awaiting a human', async () => {

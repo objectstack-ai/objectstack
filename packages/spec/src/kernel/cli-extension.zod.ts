@@ -63,42 +63,32 @@ import { z } from 'zod';
  * The `objectstack.config.ts` plugins array no longer determines CLI commands.
  */
 
-/**
- * Schema for a CLI Command Contribution declaration in the manifest.
- * 
- * This declarative metadata describes CLI commands contributed by a plugin.
- * With the oclif migration, commands are auto-discovered from the plugin's
- * commands directory. This schema is retained for backward compatibility
- * and for describing command metadata in plugin manifests.
- */
+// ─── [#12007] `CLICommandContributionSchema` / `CLICommandContribution` are
+// RETIRED (ADR-0049 enforce-or-remove) ───────────────────────────────────────
+//
+// The pair described a "CLI Command Contribution declaration in the manifest"
+// and claimed to be "retained for backward compatibility and for describing
+// command metadata in plugin manifests" — but after #10724 tombstoned
+// `manifest.contributes.commands` (see `manifest.zod.ts`), no manifest surface
+// could legally carry these entries: the exported schema advertised a shape
+// whose only declared carrier rejects it. It was never referenced by
+// `manifest.zod.ts` either — the manifest's inline `commands` item schema was
+// an independent duplicate (now the tombstone). Zero consumers outside spec's
+// own test and generated artifacts, measured with positive controls in
+// objectstack, objectui (at the pinned sha) and cloud — the exported
+// orphan-value-schema class (#3950: an exported schema with no consumer reads
+// as a capability).
+//
+// Route 3: no carrier key, no authored document for a D2 conversion to
+// rewrite, so no tombstone and no conversion — `RETIRED_DEFS_BY_MAJOR[18]`
+// (`kernel/CLICommandContribution`) plus the D3 semantic entry
+// `cli-command-contribution-retired` ARE the declaration. What ACTUALLY
+// registers a CLI command is oclif's native plugin discovery: the plugin
+// declares an `oclif` section in its own `package.json` —
+// `OclifPluginConfigSchema` below describes that live surface and survives.
+// The Commander.js migration record in the module docblock above is
+// load-bearing (the `contributes.commands` tombstone cites it) and stays.
 import { lazySchema } from '../shared/lazy-schema';
-export const CLICommandContributionSchema = lazySchema(() => z.object({
-  /** 
-   * CLI command name. Must be a valid identifier: lowercase alphanumeric with hyphens.
-   * This becomes a top-level subcommand of the `os` CLI.
-   * 
-   * @example "marketplace"
-   * @example "deploy"
-   * @example "cloud-sync"
-   */
-  name: z.string()
-    .regex(/^[a-z][a-z0-9-]*$/, 'Command name must be lowercase alphanumeric with hyphens')
-    .describe('CLI command name'),
-
-  /** Brief description shown in `os --help` output. */
-  description: z.string().optional().describe('Command description for help text'),
-
-  /** 
-   * Module path that exports the oclif Command class(es).
-   * Relative to the plugin package root. With oclif, this is typically
-   * auto-discovered from the `commands` directory, but can be specified
-   * for documentation or manifest purposes.
-   * 
-   * @example "./dist/commands/marketplace.js"
-   * @example "./dist/commands"
-   */
-  module: z.string().optional().describe('Module path exporting oclif Command classes'),
-}));
 
 /**
  * Schema for oclif plugin configuration in package.json.
@@ -125,5 +115,6 @@ export const OclifPluginConfigSchema = lazySchema(() => z.object({
 
 // ─── Types ───────────────────────────────────────────────────────────
 
-export type CLICommandContribution = z.input<typeof CLICommandContributionSchema>;
+// [#12007] `CLICommandContribution` left with its schema — see the retirement
+// block above.
 export type OclifPluginConfig = z.input<typeof OclifPluginConfigSchema>;

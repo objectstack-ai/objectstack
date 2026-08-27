@@ -100,10 +100,15 @@ Beyond the four CRUD flags, the schema also exposes lifecycle and super-user gra
 | --- | --- |
 | `allowCreate` / `allowRead` / `allowEdit` / `allowDelete` | Standard CRUD |
 | `allowTransfer` | Change record ownership (assign/reassign/disown `owner_id`) — *enforced now via the insert/update `owner_id` guard (#3004); the dedicated `transfer` op is still M2* |
-| `allowRestore` | Restore from trash (undelete) — *operation pending (M2); RBAC gate pre-mapped (#1883)* |
-| `allowPurge` | Permanently delete (hard delete / GDPR) — *operation pending (M2); RBAC gate pre-mapped (#1883)* |
 | `viewAllRecords` | Read every record, bypassing sharing & ownership |
 | `modifyAllRecords` | Write every record, bypassing sharing & ownership |
+
+> The former `allowRestore` / `allowPurge` flags were **retired** (#12497,
+> ADR-0049): the `restore` / `purge` operations they claimed to gate have never
+> existed, so authoring them granted nothing — the schema now refuses them with
+> a migration prescription. A dispatched `restore` / `purge` is denied
+> unconditionally (fail-closed destructive-operation backstop). The flags
+> return with the M2 lifecycle initiative (feature + RBAC in one batch, #1883).
 
 > Permission sets are **additive-only**: a user's effective capability is the union of every set they hold — directly, via positions, or via the built-in `everyone` baseline (ADR-0090 D5). A `true` anywhere wins; there are no subtraction sets — to withhold, don't grant.
 

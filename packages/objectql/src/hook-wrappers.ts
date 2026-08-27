@@ -595,16 +595,64 @@ function installFlatInput(ctx: HookContext): () => void {
       if (data && typeof data === 'object' && prop in data) return true;
       return prop in target;
     },
+    // [#12578] Reports the record payload's OWN key set — not its ENUMERABLE
+    // subset. The trap answered from `Object.keys(data)`, which filters by
+    // `enumerable`, and that filtering was incidental to what the trap is for:
+    // hiding the WRAPPER keys. The two are different exclusions, and reading
+    // one through the other cost a key.
+    //
+    // `[[OwnPropertyKeys]]` is the wrong place to apply an enumerability
+    // filter, because every consumer that wants one applies it itself, one
+    // layer up and through the descriptor trap: `Object.keys`, spread,
+    // `Object.entries`, `for…in` and `JSON.stringify` all walk this list and
+    // then drop what is not `enumerable`. Filtering here too does not make
+    // those answers cleaner — it only starves the surfaces that ask for the
+    // whole set, `Object.getOwnPropertyNames` and `Reflect.ownKeys`, which is
+    // exactly what those two are for.
+    //
+    // #12277 routed `defineProperty` into `data`, so a hook can now put a
+    // non-default-attribute key on the payload, and #12397 made the descriptor
+    // trap mirror `data` instead of synthesising defaults. Measured on the
+    // merged ref, for a key defined `{ enumerable: false }` on a payload the
+    // engine then persisted with that key on it:
+    //
+    //   Object.getOwnPropertyDescriptor(input, 'k')   -> own, enumerable:false
+    //   Object.prototype.hasOwnProperty.call(input,'k') -> true
+    //   Object.getOwnPropertyNames(input)             -> ['subject']  <- not own?
+    //
+    // Three instruments, one payload, two answers about own-ness — the same
+    // shape #12397 closed one trap over, and legal for a proxy (extensible
+    // target, no non-configurable own key) but untrue. The enumerable face is
+    // deliberately NOT changed by reporting the full set: `Object.keys`,
+    // spread, `Object.entries` and `JSON.stringify` still omit a
+    // non-enumerable key, because they filter through the descriptor trap,
+    // which mirrors `data`. That is what keeps the sandbox snapshot contract
+    // (`unwrapProxyToPlain`, `packages/runtime/src/sandbox/body-runner.ts` —
+    // `Object.entries` over this proxy) materialising exactly the fields it
+    // materialised before. Both halves are pinned in
+    // `hook-input-ownkeys-agreement.test.ts`.
+    //
+    // WRAPPER KEYS remain excluded, which is what this trap exists for:
+    // `id`/`options`/`ast`/`data` stay reachable by dot/bracket notation but
+    // out of `Object.keys`/`for-in`, so the payload-diff idiom
+    // `Object.keys(input).filter(k => input[k] !== previous[k])` sees record
+    // fields only. The exclusion is achieved by reading `data` and never the
+    // wrapper — NOT by subtracting those four names, which would hide a
+    // genuine payload field that happens to be called `id`.
+    //
+    // SYMBOL KEYS are deliberately still absent, and this is NOT a finding
+    // that they do not belong on a payload: `Reflect.ownKeys(data)` here would
+    // additionally publish them, and whether the record payload may carry a
+    // symbol key at all is a question about the PAYLOAD contract (they already
+    // reach `data` through the `set` trap and already persist — measured), not
+    // about this trap. It is open, reported on #12578, and the day it is
+    // answered "yes" this line becomes `Reflect.ownKeys`. Until then the
+    // symbol half of the disagreement is pinned AS open in the sibling test,
+    // so an answer changes a recorded fact rather than an unnoticed one.
     ownKeys(target) {
-      // Only enumerate the flat record fields. Wrapper keys
-      // (id/options/ast/data) remain accessible via dot/bracket notation
-      // but are hidden from Object.keys/for-in so user code that does
-      // `Object.keys(input).filter(k => input[k] !== previous[k])` only
-      // sees actual record fields.
-      const dataKeys = target.data && typeof target.data === 'object'
-        ? Object.keys(target.data)
+      return target.data && typeof target.data === 'object'
+        ? Object.getOwnPropertyNames(target.data)
         : [];
-      return Array.from(new Set(dataKeys));
     },
     // [#12397] MIRRORS `data`'s own descriptor; it does not synthesise one.
     // The literal that stood here — `{ configurable: true, enumerable: true,
