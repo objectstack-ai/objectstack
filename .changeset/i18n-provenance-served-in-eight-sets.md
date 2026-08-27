@@ -3,6 +3,7 @@
 "@objectstack/plugin-audit": patch
 "@objectstack/plugin-security": patch
 "@objectstack/plugin-sharing": patch
+"@objectstack/plugin-webhooks": patch
 "@objectstack/service-messaging": patch
 "@objectstack/service-realtime": patch
 "@objectstack/service-storage": patch
@@ -26,18 +27,24 @@ counts a present leaf as translated, and `check:i18n-stale-fill`'s cross-locale
 rule needs a SECOND locale holding the same stale bytes before it can testify.
 The measured case had one locale and no second witness.
 
-Seven of the eight are wired here, in the shape
-`@objectstack/platform-objects`'s own `metadata-translations/index.ts` uses —
-the committed `<locale>.source-hashes.generated.ts` passed as the fourth
-argument, the third left `undefined` because these sets have no hand-authored
-sections. `@objectstack/plugin-webhooks` is the eighth and is NOT wired: it does
-not depend on `@objectstack/platform-objects`, where the seam lives, and the
-nine sets share no runtime dependency but `@objectstack/spec`. Wiring it needs
-either a new package edge or the mechanism relocated, which is an architecture
-call rather than a mechanical follow-up. It is recorded in
-`check:i18n-stale-fill`'s `UNSERVED_PROVENANCE` ledger with the reason, and that
-gate's new **UNSERVED PROVENANCE** verdict now fails the build for any other set
-that commits a companion and does not read it.
+All eight are wired here, in the shape `@objectstack/platform-objects`'s own
+`metadata-translations/index.ts` uses — the committed
+`<locale>.source-hashes.generated.ts` passed as the fourth argument, the third
+left `undefined` because these sets have no hand-authored sections. Provenance
+is now recorded in 9 of 9 sets and served in 9 of 9.
+
+`@objectstack/plugin-webhooks` was the last of them and is the only one whose
+manifest changed: `withSourceFallback` lives in `@objectstack/platform-objects`,
+which that package did not declare. It was **already in that package's install
+closure** through `@objectstack/service-messaging`, so the edge declares a
+resolution that already resolved rather than adding a package to the graph —
+and relying on it undeclared would have been a phantom dependency under this
+repo's strict package manager.
+
+`check:i18n-stale-fill` gains a second verdict, **UNSERVED PROVENANCE**, so this
+cannot silently come apart again: a bundle set that commits a companion and
+does not consult it at serving time now fails the build, including a tenth set
+that lands tomorrow.
 
 **Graded `patch`, and the grade is the interesting part.** No API changes, no
 new exported surface, and no key set moves — substitution was chosen over
