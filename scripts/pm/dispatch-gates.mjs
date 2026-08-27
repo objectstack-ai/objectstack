@@ -2292,16 +2292,25 @@ export function deepestTrackedPrefix(hint, prefixes) {
  * The file extensions a module specifier is allowed to have DROPPED.
  *
  * Not a general "source file" list and not a guess: it is the set of
- * extensions an extensionless relative import can resolve to, and it is held
- * to the tree rather than asserted. Measured over the live fleet (829 distinct
- * hints, 385 inert, 7125 tracked files) this list and a rule that accepts ANY
- * suffix in the same directory select the SAME 38 hints — zero disagreement in
- * either direction — so the narrower one is chosen: a hint whose only sibling
- * is `<name>.md` names a document, not the module the gate imports, and
- * printing a document's path as "the file this specifier means" would be a new
- * false statement in place of the old one. All 38 resolve through `.ts` today;
- * the rest of the list is what module resolution admits, not padding, and the
- * self-test pins the agreement so a divergence is a red rather than a drift.
+ * extensions an extensionless relative import can resolve to, and the
+ * narrowing is PRICED against the obvious alternative rather than asserted.
+ * Measured over the live fleet (829 distinct hints, 385 inert, 7125 tracked
+ * files, on 1246b4cf2): this list and a rule that accepts ANY suffix in the
+ * same directory select the SAME 38 hints — the narrowing costs no lead — and
+ * they NAME A DIFFERENT FILE for 4 of them, because a test sibling sorts
+ * first:
+ *
+ *   packages/spec/src/kernel/protocol-version.test.ts   <- the loose rule
+ *   packages/spec/src/kernel/protocol-version.ts        <- the import's target
+ *
+ * ...and likewise for `metadata-type-schemas`, `react-blocks` and
+ * `manifest-collection-spelling`. Reporting a gate's test sibling as "the file
+ * this specifier means" is a new false sentence in place of the old one, which
+ * is the entire failure this repair exists to undo. So the list stays explicit.
+ * All 38 resolve through `.ts` today; the rest is what module resolution
+ * admits, not padding. Both halves are pinned in the self-test — the hint sets
+ * agree, and no named file is invented — so a divergence reds rather than
+ * drifts.
  */
 export const MODULE_SPECIFIER_EXTENSIONS = ['.ts', '.tsx', '.mts', '.cts', '.js', '.mjs', '.cjs', '.jsx'];
 
@@ -5492,12 +5501,25 @@ function selfTest() {
     if (!plain || agreePrefixes.has(plain)) return null;
     return agreeFiles.find((f) => f.startsWith(`${plain}.`) && !f.slice(plain.length + 1).includes('/')) ?? null;
   };
-  const disagreements = [...agreeHints]
-    .filter((h) => !hintReachesTree(h, agreeFiles))
-    .filter((h) => extensionlessModuleTarget(h, agreeFileSet, agreePrefixes) !== looseTarget(h));
+  const agreeInert = [...agreeHints].filter((h) => !hintReachesTree(h, agreeFiles));
+  const strictOf = (h) => extensionlessModuleTarget(h, agreeFileSet, agreePrefixes);
+  const refusedByNarrowing = agreeInert.filter((h) => !strictOf(h) && looseTarget(h));
   t(
-    `the extension narrowing refuses nothing the tree actually offers (disagreements: ${disagreements.join(', ') || 'none'})`,
-    disagreements.length === 0,
+    `the extension narrowing costs no lead — every hint the loose rule resolves, this one resolves too (refused: ${refusedByNarrowing.join(', ') || 'none'})`,
+    refusedByNarrowing.length === 0,
+  );
+  t(
+    'and it invents nothing: every file it names is a tracked file',
+    agreeInert.every((h) => !strictOf(h) || agreeFileSet.has(strictOf(h))),
+  );
+  // The reason the list is explicit rather than "any suffix", held to the tree
+  // so the justification cannot quietly evaporate: somewhere in the fleet the
+  // loose rule picks a `.test.ts` sibling over the module the import means. If
+  // those test files are ever removed, re-point this case at whatever pair the
+  // tree then has rather than deleting it — the trade is decided, not stale.
+  t(
+    'the loose alternative really would name the wrong file, which is why it is refused',
+    agreeInert.some((h) => strictOf(h) && looseTarget(h) && strictOf(h) !== looseTarget(h)),
   );
 
   t('hint covers deeper path', hintCovers('.claude/agents', '.claude/agents/os-dev.md'));
@@ -7514,7 +7536,7 @@ function selfTest() {
 
   const listed = unreachableLines(sweep, treeFixture.length);
   const listedText = listed.join('\n');
-  t('the listing heading carries the count and the corpus it swept', /3 famil\(ies\).*swept over 4 tracked file\(s\)/.test(listed[0]));
+  t('the listing heading carries the count and the corpus it swept', /4 famil\(ies\).*swept over 4 tracked file\(s\)/.test(listed[0]));
   t('⛔ and states plainly that CI still runs them — the one wrong reading', /NOT a skip list: CI runs these on every pull request/.test(listedText));
   t('the layout-moved family prints under its own heading', /THE LAYOUT MOVED under a gate that still spells the old path/.test(listedText));
   t('and the by-construction families under theirs', /unreachable BY CONSTRUCTION/.test(listedText));
