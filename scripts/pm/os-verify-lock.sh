@@ -1034,7 +1034,7 @@ filter_preflight() {
 # `&` before a next command would be.
 #
 #   2>&1  >&2  >&/dev/null  2>&-  <&0  <&-  2>&1-     the `&` follows `>` or `<`
-#   &>log  &>>log                                      the `&` is followed by `>`
+#   &>log                                              the `&` is followed by `>`
 #   >|log                                              the `|` follows `>`
 #
 # Read off bash's own parser rather than assumed -- `declare -f` re-prints a
@@ -1066,6 +1066,21 @@ filter_preflight() {
 # `|&` needs no case of its own: bash rewrites it to `2>&1 |`, so it really is a
 # pipeline and the `|` branch below already answers it correctly. `<|` is a bash
 # syntax error, so the `>|` case is guarded on `>` alone.
+#
+# THE APPEND-BOTH FORM IS DELIBERATELY LEFT UNCERTIFIED, and it is the one place
+# here where the answer is not a property of the string. An `&` before a DOUBLED
+# `>` appends both streams on bash 4.0+, but this file is held to a 3.2 floor
+# (`/usr/bin/env bash` is 3.2.57 on macOS, and `bash -c` is what runs the string
+# — so the host's bash, not this script's reading, decides), and 3.2 parses it
+# as `&` then `>>`: it really is backgrounded there. A token whose meaning
+# depends on the host is exactly what "cannot be read with confidence" means, so
+# it takes the uncertified exit this scanner reserves for that, with a note
+# naming the portable spelling (`>> file 2>&1`) — which this scanner certifies.
+# ⚠️ There is no `st_case` for it, and that is not an oversight: writing the
+# token in this repo's shell is itself a `check:bash32-floor` violation (it
+# fires on quoted occurrences too, measured on the first draft of this change),
+# so the gate that forbids the spelling is also what keeps the pin unwritable.
+# The same reason removed a `|&` case — `|&` is bash 4.0 as well.
 #
 # The direction of the old defect is worth keeping in view: it labelled a
 # `&&`-joined command `batch-last-exit` and told the caller to join the parts
@@ -1148,13 +1163,30 @@ exit_certifiable() {
           continue
         fi
         # A redirection's `&` joins nothing, so it is consumed too -- `2>&1`,
-        # `>&2`, `2>&-`, `<&0` (the `&` follows `>` or `<`) and `&>log`,
-        # `&>>log` (the `&` is followed by `>`). See the block above this
-        # function for the bash parses these are read off.
-        if [[ "$prev_redir" == '>' || "$prev_redir" == '<' || "$nx" == '>' ]]; then
+        # `>&2`, `2>&-`, `<&0` (the `&` follows `>` or `<`) and `&>log` (the `&`
+        # is followed by a single `>`). See the block above this function for
+        # the bash parses these are read off.
+        if [[ "$prev_redir" == '>' || "$prev_redir" == '<' ]]; then
           prev_redir=''
           i=$((i + 1))
           continue
+        fi
+        if [[ "$nx" == '>' ]]; then
+          # ... but an `&` before a DOUBLED `>` is the append-both form, which
+          # is bash 4.0. On the 3.2 floor this file is held to, bash parses it
+          # as `&` then `>>` -- it really does background there. Its meaning is
+          # therefore a property of the host's bash, which is the definition of
+          # something this scanner cannot read with confidence, so it comes out
+          # uncertified BY CONSTRUCTION rather than guessed either way.
+          if [[ "${s:i+2:1}" != '>' ]]; then
+            prev_redir=''
+            i=$((i + 1))
+            continue
+          fi
+          ((depth == 0)) && {
+            CERTIFIABLE_NOTE="it appends both streams with an '&' before a doubled '>', which bash 3.2 (this repo's floor) parses as backgrounding — write '>> file 2>&1' instead"
+            return 1
+          }
         fi
         ((depth == 0)) && {
           CERTIFIABLE_NOTE="a part of it is backgrounded with '&'"
@@ -2488,8 +2520,10 @@ true' 2>&1 | grep -c 'VERDICT batch-last-exit 0')" 1
     "$(bash "$SELF" -c 'true >& /dev/null && true' 2>&1 | grep -c 'VERDICT command-exit 0')" 1
   st_case 'nor &>word, the same redirection with the & on the LEFT' \
     "$(bash "$SELF" -c 'true &> /dev/null && true' 2>&1 | grep -c 'VERDICT command-exit 0')" 1
-  st_case 'nor its appending form &>>word' \
-    "$(bash "$SELF" -c 'true &>> /dev/null && true' 2>&1 | grep -c 'VERDICT command-exit 0')" 1
+  # The append-both form has NO case here on purpose — it stays uncertified
+  # because its meaning depends on the host's bash version, and the token itself
+  # is a `check:bash32-floor` violation in this repo's shell, quoted or not. The
+  # block above `exit_certifiable` carries the whole reading.
   st_case 'nor a >&- fd close' \
     "$(bash "$SELF" -c 'true 2>&- && true' 2>&1 | grep -c 'VERDICT command-exit 0')" 1
   st_case 'nor a <& input duplication, which the > alone would have missed' \
@@ -2520,8 +2554,6 @@ true' 2>&1 | grep -c 'VERDICT batch-last-exit 0')" 1
     "$(bash "$SELF" -c 'echo \>&true' 2>&1 | grep -c 'VERDICT batch-last-exit')" 1
   st_case 'nor does a QUOTED > before it' \
     "$(bash "$SELF" -c 'printf "a>"&true' 2>&1 | grep -c 'VERDICT batch-last-exit')" 1
-  st_case '|& is a pipeline (bash rewrites it to 2>&1 |) and stays uncertified' \
-    "$(bash "$SELF" -c 'true |& cat' 2>&1 | grep -c 'VERDICT batch-last-exit')" 1
   st_case 'and a pipeline whose LEFT side is red still exits 0 through it, uncertified' \
     "$(bash "$SELF" -c 'sh -c "exit 1" 2>&1 | cat' 2>&1 | grep -c 'VERDICT batch-last-exit 0')" 1
 
