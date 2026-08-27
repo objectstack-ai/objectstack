@@ -328,11 +328,14 @@ export const SysApprovalRequest = ObjectSchema.create({
   // per-viewer block (#3310): approver actions on `record.viewer.can_act`
   // (the caller is a current pending approver — same check the service
   // authorizes a decision with, so position/team approvers resolve correctly),
-  // submitter actions on `record.viewer.is_submitter`. The core decision levers
-  // (approve/reject/reassign) additionally OR in `record.viewer.can_override`
-  // (#3424) so a platform/tenant admin can rescue a request routed to an
+  // submitter actions on `record.viewer.is_submitter`. The four levers the
+  // #3424 override covers (approve/reject/reassign, and recall since #12716)
+  // additionally OR in `record.viewer.can_override`
+  // so a platform/tenant admin can rescue a request routed to an
   // unstaffed position — otherwise undecidable, locking the record forever — by
-  // approving, rejecting, or reassigning it to a real approver. `viewer` is
+  // approving, rejecting, reassigning it to a real approver, or recalling it
+  // (the lever that releases the record without recording a decision nobody
+  // made). `viewer` is
   // attached by getRequest/listRequests; where it is absent the predicate fails
   // closed.
   //
@@ -476,8 +479,13 @@ export const SysApprovalRequest = ObjectSchema.create({
     // Remind / recall (pending) and resubmit / recall (returned). These are the
     // submitter's own levers, so `visible` gates on `record.viewer.is_submitter`
     // (server-computed on the current viewer). The service re-checks ownership;
-    // the predicate keeps a non-submitter from ever seeing a button they cannot
-    // use.
+    // the predicate keeps a plain non-submitter from ever seeing a button they
+    // cannot use.
+    //
+    // `recall` is the one exception, and it is not a widening: it ALSO ORs in
+    // the #3424 admin override (#12716), because an override admin is a caller
+    // `ApprovalService.recall` already authorises. Remind and resubmit keep no
+    // override arm.
     {
       name: 'approval_remind',
       label: 'Send reminder',
@@ -508,9 +516,29 @@ export const SysApprovalRequest = ObjectSchema.create({
       ],
       // Recall applies while the request is live for the submitter — pending
       // (withdraw) or returned (abandon the revision instead of resubmitting).
+      //
+      // The second arm is the #3424 admin override, spelled byte-identically to
+      // the three core decision levers above (#12716). `ApprovalService.recall`
+      // has admitted the override caller since #3424 — `isOverrideActor`'s own
+      // doc block names recall as one of the four levers — so until this arm
+      // landed, recall was the one authorised capability with no button: an
+      // admin could approve or reject their way out of a stuck request (writing
+      // a decision that did not happen) or reassign it, but could not withdraw.
+      //
+      // The override arm carries no status test of its own, on purpose, because
+      // it does not need one and the siblings do not have one either: the flag
+      // is already status-scoped where it is COMPUTED. `attachViewers` in
+      // `approval-service.ts` sets
+      // `can_override: row.status === 'pending' && isOverrideActor(...)` —
+      // ANDed — so `record.viewer.can_override` can never be true off `pending`,
+      // and this arm is pending-only in effect however CEL groups the
+      // expression. Pinned in both directions in
+      // `action-predicate-sparse-face.test.ts`, with the flag's own scoping
+      // pinned against the real service in `approval-revise.test.ts`.
       visible:
         'has(record.status) && (record.status == "pending" || record.status == "returned")' +
-        ' && has(record.viewer) && has(record.viewer.is_submitter) && record.viewer.is_submitter == true',
+        ' && has(record.viewer) && has(record.viewer.is_submitter) && record.viewer.is_submitter == true' +
+        ' || has(record.viewer) && has(record.viewer.can_override) && record.viewer.can_override == true',
       locations: ['record_section'],
       successMessage: 'Recalled.',
       refreshAfter: true,

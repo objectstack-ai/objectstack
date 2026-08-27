@@ -121,14 +121,54 @@ describe('#8990 — the fail-closed intent survives as a real false, and the lev
     expect(evaluate(visibleOf('approval_remind'), approver)).toBe(false);
   });
 
-  it('an override-only admin still gets the three core decision levers and nothing else (#3424)', () => {
+  it('an override-only admin gets the four levers the override covers, and nothing else (#3424, +recall #12716)', () => {
+    // Re-expressed for #12716. This pin previously read "the three core decision
+    // levers and nothing else" — true when written, and it is the shape of pin
+    // the recall override arm was expected to turn red. It did not go red (it
+    // never asserted anything about recall), but its TITLE became false the
+    // moment recall joined the set, so it is restated rather than left to read
+    // as a claim the code no longer honours.
     const admin = { status: 'pending', viewer: { can_act: false, can_override: true, is_submitter: false } };
     expect(evaluate(visibleOf('approval_approve'), admin)).toBe(true);
     expect(evaluate(visibleOf('approval_reject'), admin)).toBe(true);
     expect(evaluate(visibleOf('approval_reassign'), admin)).toBe(true);
+    // #12716 — the fourth lever. An override admin is a NON-SUBMITTER who now
+    // sees Recall: the service has authorised them since #3424, and this is the
+    // one lever that releases a stuck request without writing a decision on
+    // someone else's behalf.
+    expect(evaluate(visibleOf('approval_recall'), admin)).toBe(true);
     // `can_override` was never OR'd into the secondary levers, and still is not.
     expect(evaluate(visibleOf('approval_send_back'), admin)).toBe(false);
     expect(evaluate(visibleOf('approval_request_info'), admin)).toBe(false);
+    // Nor into the remaining submitter levers — recall is the only one that
+    // moved, and remind/resubmit stay shut for an actor who is not the submitter.
+    expect(evaluate(visibleOf('approval_remind'), admin)).toBe(false);
+    expect(evaluate(visibleOf('approval_resubmit'), { ...admin, status: 'returned' })).toBe(false);
+  });
+
+  it('the recall override arm is pending-only in effect, because `can_override` is itself pending-scoped (#12716)', () => {
+    // The negative direction, and the reason the arm needs no status test of its
+    // own. `attachViewers` computes
+    //   can_override: row.status === 'pending' && isOverrideActor(...)
+    // — ANDed — so for the SAME override actor the flag the service attaches is
+    // true on `pending` and false on `returned`. Both rows below are viewer
+    // blocks the service really emits: forcing `can_override: true` onto a
+    // `returned` row would pin a state the server never produces, and would
+    // measure CEL's grouping rather than the product's behaviour.
+    //
+    // That is what makes "pending-only" enforced rather than asserted in prose.
+    // The flag's own scoping is pinned against the REAL service — an override
+    // admin reading a genuinely `returned` request — in `approval-revise.test.ts`;
+    // this pair is the predicate half of the same claim.
+    const onPending = { status: 'pending', viewer: { can_act: false, can_override: true, is_submitter: false } };
+    const onReturned = { status: 'returned', viewer: { can_act: false, can_override: false, is_submitter: false } };
+    expect(evaluate(visibleOf('approval_recall'), onPending)).toBe(true);
+    expect(evaluate(visibleOf('approval_recall'), onReturned)).toBe(false);
+    // And the submitter's own `returned` arm is untouched by the new OR — the
+    // revise-window withdraw stays exactly as available as it was.
+    expect(evaluate(visibleOf('approval_recall'), {
+      status: 'returned', viewer: { can_act: false, can_override: false, is_submitter: true },
+    })).toBe(true);
   });
 
   it('the submitter still gets remind / recall on pending and resubmit / recall on returned', () => {
