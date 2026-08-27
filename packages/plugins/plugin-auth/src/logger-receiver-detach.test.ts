@@ -221,7 +221,7 @@ describe('[#12773] ③ reconcile-membership refuses an off-vocabulary policy wit
       logger: logger as never,
     });
 
-    expect(res.outcome).toBe('skipped');
+    expect(res.outcome).toBe('invalid-policy');
     const errors = logger.at('error');
     expect(errors).toHaveLength(1);
     expect(errors[0].message).toContain('[membership] refusing to bind');
@@ -237,7 +237,7 @@ describe('[#12773] ③ reconcile-membership refuses an off-vocabulary policy wit
       logger: logger as never,
     });
 
-    expect(res.outcome).toBe('skipped');
+    expect(res.outcome).toBe('invalid-policy');
     expect(logger.at('warn')).toHaveLength(1);
     expect(logger.at('warn')[0].message).toContain('[membership] refusing to bind');
   });
