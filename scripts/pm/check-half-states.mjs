@@ -6030,6 +6030,165 @@ export function h35GateRemovalWithoutEvidence(removal, gateEvents, options = {})
 }
 
 // ---------------------------------------------------------------------------
+// H36 — two open PRs holding the same changed file, one side already ACCEPTED
+// or armed (#12286).
+//
+// ## The incident, and what exactly went unheld
+//
+// Two open PRs edited one runtime source file across lanes for ~4h. The
+// later-opened one merged first; the earlier — reviewed, ACCEPTED, 32/32
+// checks green — was left in a silent merge conflict. Nothing mechanical
+// objected, and the single-claim gate was RIGHT not to: its header forbids
+// per-incident growth of `SINGLE_CLAIM_PATHS`, and its declared scope held.
+// What is unheld is LEGIBILITY: the same-file fence lives in a claim comment
+// in one lane's thread, so a second seat that never asks the cross-lane
+// question gets no signal from anywhere. The platform volunteers nothing
+// either: `mergeable_state` stayed `unknown` throughout (computed lazily), so
+// the seat's first reading was wrong and it armed auto-merge on a dirty head.
+//
+// ## What this row is — patrol INPUT, never a verdict
+//
+// A pair sharing a changed file is often perfectly fine (the incident's own
+// two sides were additive and semantically safe). The row does not judge the
+// pair; it makes the hold visible on the anchor every seat already reads, so
+// the cross-lane walk the claim shape requires has a mechanical backstop for
+// the case where a seat skipped or misjudged it — which is exactly the
+// two-possibility fork the incident could not distinguish after the fact.
+// Report-only like everything here: the remedy is a PROBE — fetch the PR ref,
+// `git merge-tree --write-tree` against today's main answers "would this land
+// clean" for free — never a label and never a gate.
+//
+// ## Why "ACCEPTED/armed" gates the row
+//
+// A pair of unarmed drafts is ordinary concurrent work-in-progress; the walk
+// at their own dispatch time is the instrument for that. The board state
+// worth a standing row is the incident's: a side that is DONE — ready
+// (= reviewed by construction here: dev PRs flip ready only at review
+// ACCEPT) or armed — can be silently passed by the other side landing first,
+// after which every proxy signal reads healthy while it rots. `auto_merge`
+// is read in the finding-INCREASING direction only, H16's argument exactly:
+// arming resolves no conflict, so an armed side is more at risk, not handled.
+//
+// ## The noise floor is CLOSED, and argued from the single-claim gate's data
+//
+// That gate's header measured shared-changed-path collisions over ~650 PRs:
+// the top repo-wide pairs are the lock file (33), a plugin manifest (21) and
+// the root manifest (15) — ordinary concurrent work in a repo taking ~18
+// merges a day. Pairing on those would put a row on the anchor every sweep
+// and bury the one that matters. So exactly two spellings are excluded, both
+// shared BY CONSTRUCTION, and the closed set is pinned by the self-test
+// against per-incident growth (the discipline `SINGLE_CLAIM_PATHS` applies
+// to itself): the pnpm lockfile (touched by any PR moving dependencies, and
+// merged mechanically) and `.changeset/` (every PR ADDS a uniquely-named
+// file there — a collision on one is not a source-file hold).
+// `changeset-release/*` PRs are excluded as CANDIDATES for the matching
+// reason: the Version Packages PR consumes every changeset file on the
+// board, so it would pair with essentially every open PR, and it is
+// regenerated from `main` on every push — it holds nothing.
+//
+// ## Bounded, and bounded honestly
+//
+// The files fetch is ONE page per candidate, candidates being the open PRs
+// this sweep already listed — bounded by the open population (~19 at the
+// reading this landed on). A PR with more changed files than the page has
+// the tail unread: that can only MISS a pair, never invent one, and both the
+// summary line's `read X of Y` and a per-row truncation sentence say so.
+// Positive evidence only — this row never asserts "no overlap".
+// ---------------------------------------------------------------------------
+
+/** The closed noise floor — exact spellings, then prefixes. See the banner. */
+export const H36_SHARED_PATH_NOISE = Object.freeze(['pnpm-lock.yaml']);
+export const H36_SHARED_PREFIX_NOISE = Object.freeze(['.changeset/']);
+export const H36_FILES_PAGE_SIZE = 100;
+export const H36_SAMPLE_PATHS = 3;
+
+export function h36NoisePath(path) {
+  const p = String(path ?? '');
+  if (H36_SHARED_PATH_NOISE.includes(p)) return true;
+  return H36_SHARED_PREFIX_NOISE.some((prefix) => p.startsWith(prefix));
+}
+
+/** ACCEPTED (ready = reviewed by construction) or armed — the at-risk side. */
+export function h36AcceptedOrArmed(pr) {
+  if (!pr) return false;
+  return pr.draft === false || pr.auto_merge != null;
+}
+
+/**
+ * Whether this open PR is worth a files page — the gathering policy, H16's
+ * idiom: answerable from the LIST row alone, and never NARROWER than the
+ * predicate's population. A pair needs one accepted/armed side, but the
+ * OTHER side can be any open PR (a draft included — the incident's second
+ * side was one when the window opened), so every open PR outside the
+ * changeset-release exclusion is a candidate.
+ */
+export function h36NeedsFiles(pr) {
+  if (!pr || pr.merged_at) return false;
+  return !String(pr.head?.ref ?? '').startsWith('changeset-release/');
+}
+
+/** The all-failed transport judgement — H16's, verbatim in shape. */
+export function h36DetailPassUnreadable(candidates, probed) {
+  return (candidates ?? 0) > 0 && (probed ?? 0) === 0;
+}
+
+/**
+ * The pair rows. `filesByPr` maps PR number → `{ paths, truncated }`; a PR
+ * absent from the map was unread (a failed page) and simply cannot pair —
+ * the coverage pair reports that shortfall, and a missed pair is the only
+ * possible consequence. One row per PAIR, keyed to the accepted/armed side
+ * (both accepted: the earlier-created one), because that is the side that
+ * silently rots when the other lands first; the other side is named in the
+ * sentence.
+ */
+export function h36SharedFileHolds(openPrs, filesByPr) {
+  const rows = [];
+  const prs = (openPrs ?? []).filter((pr) => h36NeedsFiles(pr));
+  prs.sort((a, b) => String(a.created_at ?? '').localeCompare(String(b.created_at ?? '')));
+  for (let i = 0; i < prs.length; i++) {
+    for (let j = i + 1; j < prs.length; j++) {
+      const a = prs[i];
+      const b = prs[j];
+      if (!h36AcceptedOrArmed(a) && !h36AcceptedOrArmed(b)) continue;
+      const fa = filesByPr?.get?.(a.number);
+      const fb = filesByPr?.get?.(b.number);
+      if (!fa || !fb) continue;
+      const inB = new Set((fb.paths ?? []).filter((p) => !h36NoisePath(p)));
+      const shared = (fa.paths ?? []).filter((p) => !h36NoisePath(p) && inB.has(p));
+      if (shared.length === 0) continue;
+      const key = h36AcceptedOrArmed(a) ? a : b;
+      const other = key === a ? b : a;
+      const state =
+        key.auto_merge != null
+          ? key.draft === false
+            ? 'ready AND armed'
+            : 'armed'
+          : 'ready (reviewed by construction)';
+      const sample = shared
+        .slice(0, H36_SAMPLE_PATHS)
+        .map((p) => `\`${p}\``)
+        .join(', ');
+      const more = shared.length > H36_SAMPLE_PATHS ? `, +${shared.length - H36_SAMPLE_PATHS} more` : '';
+      const truncated =
+        fa.truncated || fb.truncated
+          ? ' One side\'s file list was TRUNCATED at the page size, which can only have hidden MORE overlap.'
+          : '';
+      rows.push([
+        key,
+        `open and ${state}, sharing ${shared.length} changed file(s) with open PR #${other.number} ` +
+          `(${sample}${more}) — a cross-lane same-file hold made visible: the fence otherwise lives ` +
+          'only in one lane\'s claim comment, and `mergeable_state` volunteers nothing (`unknown` is ' +
+          'not a reading). Patrol input, NOT a verdict — both sides may be additive and disjoint. ' +
+          'Whichever lands second re-probes before (re-)arming: fetch the PR ref and run ' +
+          '`git merge-tree --write-tree` against current `main` — the zero-quota reading GitHub ' +
+          `never volunteers.${truncated}`,
+      ]);
+    }
+  }
+  return rows;
+}
+
+// ---------------------------------------------------------------------------
 // Report rendering — pure over (findings, counts), so `--self-test` pins both
 // media offline. The live sweep below picks a renderer and prints it; nothing
 // about WHAT is swept or WHICH predicates fire depends on the format.
@@ -6135,6 +6294,8 @@ export function isUnjudgedFinding(message) {
 export const SWEEP_COUNT_KEYS = [
   'conflictCandidates',
   'conflictProbed',
+  'sharedFileCandidates',
+  'sharedFileProbed',
   'fallbackCandidates',
   'fallbackProbed',
   'restartCandidates',
@@ -6304,6 +6465,9 @@ export function summaryLine(counts, findingCount) {
           'quiet H35 section here is a short read, not a clean board.'
         : '.'
     } ` +
+    `Shared-file holds (H36): changed-file page read on ${counts.sharedFileProbed ?? 0} of ` +
+    `${counts.sharedFileCandidates ?? 0} open PR(s) — a pair needs both sides read, so a shortfall ` +
+    'can only MISS a hold, never invent one. ' +
     `Report-only: findings are patrol input, not a gate verdict.`
   );
 }
@@ -7097,6 +7261,11 @@ async function sweep(options = {}) {
   const stats = {
     conflictCandidates: 0,
     conflictProbed: 0,
+    // H36's coverage pair (#12286) — open PRs whose changed-file page this
+    // sweep owes, and how many pages actually answered. Same per-row failure
+    // mode as H16's detail pass, so it owes the same `read X of Y`.
+    sharedFileCandidates: 0,
+    sharedFileProbed: 0,
     fallbackCandidates: 0,
     fallbackProbed: 0,
     // H9's coverage pair — `pm:on-hold` cards whose verdict the comment
@@ -7761,6 +7930,36 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
   }
   if (h16DetailPassUnreadable(stats.conflictCandidates, stats.conflictProbed)) {
     throw lastDetailError;
+  }
+
+  // H36 (#12286) — the shared-file pass, H16's transport posture over one
+  // changed-file page per open PR (the population this sweep already listed;
+  // gathering policy at `h36NeedsFiles`). A failed page drops that PR out of
+  // the pairing — a MISS, never an invention — and the summary's `read X of Y`
+  // says so; all-failed is the transport, not a clean board (#4690).
+  let lastFilesError = null;
+  const filesByPr = new Map();
+  for (const pr of seenPrs.values()) {
+    if (!h36NeedsFiles(pr)) continue;
+    stats.sharedFileCandidates = (stats.sharedFileCandidates ?? 0) + 1;
+    let page;
+    try {
+      page = await rest(`/repos/${OWNER_REPO}/pulls/${pr.number}/files?per_page=${H36_FILES_PAGE_SIZE}`);
+    } catch (err) {
+      lastFilesError = err;
+      continue;
+    }
+    stats.sharedFileProbed = (stats.sharedFileProbed ?? 0) + 1;
+    filesByPr.set(pr.number, {
+      paths: (Array.isArray(page) ? page : []).map((f) => String(f?.filename ?? '')),
+      truncated: Array.isArray(page) && page.length >= H36_FILES_PAGE_SIZE,
+    });
+  }
+  if (h36DetailPassUnreadable(stats.sharedFileCandidates, stats.sharedFileProbed)) {
+    throw lastFilesError;
+  }
+  for (const [pr, hold36] of h36SharedFileHolds([...seenPrs.values()], filesByPr)) {
+    findings.push([pr, 'H36', hold36]);
   }
 
   // H8 — one bounded merged-PR listing (window note at the helper), matched
@@ -11839,6 +12038,72 @@ function selfTest() {
   t('H35 summary: an untruncated window makes no such claim', summaryLine(gateCounts, 1).includes('TRUNCATED'), false);
   // Absent counts degrade to 0, never to `undefined` — H32's pair does the same.
   t('H35 summary: absent counts degrade to 0', summaryLine({}, 0).includes('0 removal(s) of a gate-semantic label'), true);
+
+  // -- H36 — cross-lane same-file holds (report-only patrol input, #12286) ---
+  const h36pr = (number, opts = {}) => ({
+    number,
+    created_at: opts.created_at ?? '2026-08-25T10:00:00Z',
+    draft: opts.draft ?? true,
+    auto_merge: opts.auto_merge ?? null,
+    merged_at: opts.merged_at ?? null,
+    head: { ref: opts.ref ?? `claude/issue-${number}-x` },
+    html_url: `https://example.test/${number}`,
+  });
+  const h36files = (entries, truncated = []) =>
+    new Map(
+      Object.entries(entries).map(([n, paths]) => [
+        Number(n),
+        { paths, truncated: truncated.includes(Number(n)) },
+      ]),
+    );
+  const h36rows = (...args) => h36SharedFileHolds(...args);
+  const readyEarly = h36pr(100, { draft: false });
+  const draftLate = h36pr(200, { created_at: '2026-08-25T11:00:00Z' });
+  const sharedAuto = h36files({
+    100: ['packages/runtime/src/domains/automation.ts'],
+    200: ['packages/runtime/src/domains/automation.ts', 'docs/x.md'],
+  });
+  // ⭐ THE FINDING — the incident's own shape: an accepted side and any other
+  // open PR holding one source file.
+  t('H36: ready + draft sharing a source file -> one row', h36rows([readyEarly, draftLate], sharedAuto).length, 1);
+  t('H36: …keyed to the accepted side', h36rows([readyEarly, draftLate], sharedAuto)[0][0].number, 100);
+  t('H36: …naming the other side', h36rows([readyEarly, draftLate], sharedAuto)[0][1].includes('#200'), true);
+  t('H36: …and the shared path', h36rows([readyEarly, draftLate], sharedAuto)[0][1].includes('automation.ts'), true);
+  t('H36: …and states the non-verdict posture', h36rows([readyEarly, draftLate], sharedAuto)[0][1].includes('NOT a verdict'), true);
+  t('H36: …and the remedy is the local probe', h36rows([readyEarly, draftLate], sharedAuto)[0][1].includes('merge-tree'), true);
+  // The gate on the row: some side must be DONE.
+  t('H36: two unarmed drafts -> silent (the dispatch-time walk owns that case)', h36rows([h36pr(100), draftLate], sharedAuto).length, 0);
+  t('H36: an ARMED draft is at risk, finding-increasing like H16', h36rows([h36pr(100, { auto_merge: { merge_method: 'squash' } }), draftLate], sharedAuto).length, 1);
+  t('H36: both accepted -> keyed to the earlier-created side', h36rows([h36pr(100, { draft: false }), h36pr(200, { draft: false, created_at: '2026-08-25T11:00:00Z' })], sharedAuto)[0][0].number, 100);
+  // The noise floor: closed, two spellings, pinned against per-incident growth.
+  t('H36: lockfile-only overlap is the noise floor -> silent', h36rows([readyEarly, draftLate], h36files({ 100: ['pnpm-lock.yaml'], 200: ['pnpm-lock.yaml'] })).length, 0);
+  t('H36: .changeset/ overlap is the noise floor -> silent', h36rows([readyEarly, draftLate], h36files({ 100: ['.changeset/a.md'], 200: ['.changeset/a.md'] })).length, 0);
+  t('H36: the noise floor is CLOSED at two spellings — growing it needs its own card', H36_SHARED_PATH_NOISE.length + H36_SHARED_PREFIX_NOISE.length, 2);
+  t('H36: a source path is NOT noise', h36NoisePath('packages/runtime/src/domains/automation.ts'), false);
+  // Candidate policy: never narrower than the predicate's population.
+  t('H36: changeset-release PRs are not candidates', h36NeedsFiles(h36pr(300, { ref: 'changeset-release/main' })), false);
+  t('H36: a merged row is not a candidate', h36NeedsFiles(h36pr(300, { merged_at: '2026-08-25T12:00:00Z' })), false);
+  t('H36: a draft IS a candidate (the pair\'s other side can be one)', h36NeedsFiles(draftLate), true);
+  // An unread side cannot pair — a miss, never an invention.
+  t('H36: an unread side cannot pair', h36rows([readyEarly, draftLate], h36files({ 100: ['x.ts'] })).length, 0);
+  // Truncation: pairs on what was seen, and says the list was short.
+  const truncPair = h36files(
+    { 100: ['packages/runtime/src/domains/automation.ts'], 200: ['packages/runtime/src/domains/automation.ts'] },
+    [200],
+  );
+  t('H36: a truncated list still pairs on what was seen', h36rows([readyEarly, draftLate], truncPair).length, 1);
+  t('H36: …and the row says so, in the only-hides-more direction', h36rows([readyEarly, draftLate], truncPair)[0][1].includes('TRUNCATED'), true);
+  t('H36: an untruncated pair makes no such claim', h36rows([readyEarly, draftLate], sharedAuto)[0][1].includes('TRUNCATED'), false);
+  // The transport judgement — H16's shape, asserted on this pass's own pair.
+  t('H36: an all-failed files pass is the transport, not a clean board', h36DetailPassUnreadable(3, 0), true);
+  t('H36: zero candidates is a clean reading', h36DetailPassUnreadable(0, 0), false);
+  t('H36: a partial read is a bounded gap, not a failure', h36DetailPassUnreadable(3, 1), false);
+  // The coverage pair reaches the summary line, and degrades to 0.
+  t('H36 summary: the pair is reported', summaryLine({ sharedFileProbed: 17, sharedFileCandidates: 19 }, 0).includes('changed-file page read on 17 of 19 open PR(s)'), true);
+  t('H36 summary: …and states the miss-only direction', summaryLine({}, 0).includes('MISS a hold, never invent one'), true);
+  t('H36: both count keys ride the enumerated contract', SWEEP_COUNT_KEYS.includes('sharedFileCandidates') && SWEEP_COUNT_KEYS.includes('sharedFileProbed'), true);
+  // The markdown medium renders an H36 row like every other finding row.
+  t('markdown: an H36 row links the PR it names', renderMarkdown([[{ number: 100, html_url: 'https://example.test/100' }, 'H36', 'shares a file']], { repo: 'r', issues: 0, unscoped: 0, prs: 2, merged: 0 }).includes('- **H36** [#100](https://example.test/100)'), true);
 
   // -- The `[::]` collapse (#12090): behaviour-preserving, asserted as such ---
   // The class held U+003A TWICE, never the fullwidth U+FF1A its shape implied.

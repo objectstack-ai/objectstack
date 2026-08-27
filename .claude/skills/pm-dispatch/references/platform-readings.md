@@ -21,7 +21,7 @@
   交**,`git merge-base --is-ancestor <pr-head> origin/main` 对已完全合入的 PR 答 NO(非浅检出),而同
   一 PR 的 `list_pull_requests` 实测回过自相矛盾的行:`merged: false` 与 `merged_at` 有值并存 ——
   只读布尔的一切判据把已落地读成「没合」(2026-08-23 落地时刻实测)。
-- **`mergeable_state` 惰性计算,`unknown` 不是读数、可整窗不散**(实测:头已 dirty 的 PR 全程答
+- **`mergeable_state` 惰性计算,`unknown` 不是读数**(2026-08-25 实测:头已 dirty 的 PR 整窗答
   unknown,席位误读「auto-merge 被清」在脏头上重挂 —— 挂 unknown = 挂在可能脏的头上);`dirty`
   即队列入口否决(冲突对象是**当前** main);draft PR 恒回 `draft`;判头脏的决断读数是零配额本
   地试合并:fetch PR ref 后 `git merge-tree --write-tree origin/main <ref>`(冲突文件直接列出;随 fetch
