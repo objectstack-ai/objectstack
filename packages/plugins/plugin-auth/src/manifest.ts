@@ -26,6 +26,14 @@ import {
   SysSession,
   SysSsoProvider,
   SysScimProvider,
+  SysScimConnectionBinding,
+  SysScimConnectionCredential,
+  SysScimGroup,
+  SysScimGroupMember,
+  SysScimIdentityTombstone,
+  SysScimProjectionGrant,
+  SysScimSubject,
+  SysScimUser,
   SysTeam,
   SysTeamMember,
   SysTwoFactor,
@@ -63,6 +71,17 @@ export const authIdentityObjects: any[] = [
   SysDeviceCode,
   SysSsoProvider,
   SysScimProvider,
+  // Stable @better-auth/scim 1.7.x model set (#3653): seven library-managed
+  // tables plus the ObjectStack-owned credential store for the app-owned
+  // verifyBearerToken route. SysScimProvider above retires under #11757.
+  SysScimConnectionBinding,
+  SysScimConnectionCredential,
+  SysScimGroup,
+  SysScimGroupMember,
+  SysScimIdentityTombstone,
+  SysScimProjectionGrant,
+  SysScimSubject,
+  SysScimUser,
 ];
 
 /**

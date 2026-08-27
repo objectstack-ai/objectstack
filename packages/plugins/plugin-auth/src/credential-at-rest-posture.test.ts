@@ -1,130 +1,86 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#8192] The credential-at-rest posture for `sys_scim_provider.scim_token` and
+ * [#8192 → #3653] The credential-at-rest posture for
+ * `sys_scim_connection_credential.token_digest` and
  * `sys_oauth_application.client_secret` is PINNED here.
  *
- * ## Why this file exists (nothing is broken — that is the point)
+ * ## History — why the SCIM half of this file changed shape (#3653)
  *
- * #8011 measured, by real round trip, that both columns already store a one-way
- * SHA-256 digest. This file is not a defect fix; it is the tripwire that holds
- * that posture in place. The two columns get there by two mechanisms with very
- * different fragilities:
+ * This file originally pinned `sys_scim_provider.scim_token`, whose hashing
+ * hung on a single option literal: `scim({ storeSCIMToken: 'hashed' })` in
+ * `auth-manager.ts`, against an upstream default of **`'plain'` — cleartext**.
+ * The stable `@better-auth/scim` 1.7.x line VACATED that posture rather than
+ * weakening it: `storeSCIMToken`, `/scim/generate-token` and the
+ * `scimProvider` model are all gone (0 occurrences), and **no stable model
+ * declares any token/secret/credential column at all** — upstream stores
+ * nothing. Under the application-owned `verifyBearerToken` route ObjectStack
+ * now owns the whole credential lifecycle — mint, store, verify — in
+ * `scim-connection-service.ts` + `sys_scim_connection_credential`.
  *
- * | column                          | how hashing is obtained                | upstream default if the wiring is dropped |
- * |:--------------------------------|:---------------------------------------|:------------------------------------------|
- * | `sys_scim_provider.scim_token`  | EXPLICIT `scim({ storeSCIMToken: 'hashed' })` in `auth-manager.ts` | **`'plain'` — cleartext** |
- * | `sys_oauth_application.client_secret` | IMPLICIT — nothing is passed; `@better-auth/oauth-provider` resolves `storeClientSecret: disableJwtPlugin ? 'encrypted' : 'hashed'` | `'hashed'` |
+ * So the pin moved WITH the credential. The posture it holds is deliberately
+ * at parity or better than what the old literal bought:
  *
- * The SCIM row is the sharp one, and the asymmetry is structural rather than a
- * matter of which default happens to be safer. Upstream's two helpers END
- * differently on an unrecognised storage method:
+ * | column | posture | how it is obtained |
+ * |:---|:---|:---|
+ * | `sys_scim_connection_credential.token_digest` | HMAC-SHA-256(secret, "scim-credential-v1:" + token), base64url | `mintScimConnectionCredential()` — ObjectStack code, no upstream default to fall back to |
+ * | `sys_oauth_application.client_secret` | SHA-256(secret), base64url | IMPLICIT — `@better-auth/oauth-provider` resolves `storeClientSecret: 'hashed'` |
  *
- *   - `@better-auth/scim`'s `storeSCIMToken()` falls through to
- *     `return scimToken` — cleartext, silently.
- *   - `@better-auth/oauth-provider`'s `storeClientSecret()` ends in
- *     `throw new BetterAuthError("Unsupported storeClientSecret type …")`.
+ * "Better": rc.1 stored an UNSALTED SHA-256 of the token; the keyed digest
+ * additionally resists offline table matching if the table leaks without the
+ * deployment secret. Case ②-b pins the unkeyed shape as a NEGATIVE so a
+ * future "simplification" back to bare SHA-256 goes red.
  *
- * So `client_secret` cannot reach cleartext by a dropped literal at all: the
- * only non-hashed value the plugin will accept is `'encrypted'` (and only with
- * `disableJwtPlugin`, which its own validation cross-checks). `scim_token` can,
- * and a single option literal is the only thing between a live IdP bearer and a
- * cleartext value in a column that is readable over the generic data API
- * (`sys_scim_provider` declares `apiMethods: ['list']`).
- * Before this file, `grep -rn 'storeSCIMToken|storeClientSecret' --include=*.test.ts`
- * returned **zero hits** — so dropping that literal (a plausible edit during the
- * `@better-auth/scim` rc.2 migration tracked in #3653, which changes this exact
- * call site's construction signature) would persist the bearer in cleartext with
- * the entire gate farm green.
+ * ## The control arm, restated honestly (#3653)
  *
- * ## What makes this pin non-vacuous — five deliberate choices
+ * Case ③ used to construct `scim()` with NO option and MEASURE upstream's
+ * cleartext default — proof the repo literal was load-bearing. That arm is no
+ * longer measurable, because upstream now stores nothing at all: there is no
+ * upstream write path to compare against. Its honest successor asserts the
+ * fact that vacated it, from the installed artifact itself: no stable scim
+ * model declares a credential-shaped column, and the rc.1 mint endpoint
+ * answers 404 through the repo's own manager. If ③ ever goes RED, upstream
+ * has grown a credential store again — re-read whether ObjectStack's own
+ * mint/verify is still the right ownership boundary before touching anything
+ * here (do NOT delete the service to get green).
  *
- * 1. **It drives `AuthManager`, not `scim()`.** This is the load-bearing choice.
- *    A test that calls `scim({ storeSCIMToken: 'hashed' })` itself pins its own
- *    literal and would stay green forever after the repo's literal was deleted —
- *    it would certify exactly the regression it was written to catch. Every
- *    assertion below runs against a plugin list built by the REPO's own
- *    `AuthManager.buildPluginList()`, so the option literal in `auth-manager.ts`
- *    is inside the system under test.
- * 2. **It reads the row at DRIVER level**, below the ObjectQL read mask and below
- *    the plugin's own accessor. Asking better-auth what it stored proves nothing
- *    about what is on disk.
- * 3. **It asserts the hash RELATIONSHIP, recomputed independently.** The expected
- *    digest is computed here with `node:crypto`, not by calling better-auth's
- *    hasher. "Differs from the plaintext" would be satisfied by base64 of the
- *    plaintext, which is not a credential-at-rest posture at all.
- * 4. **It pins the inner-token trap as an explicit NEGATIVE.** For SCIM the value
- *    handed to the caller is `base64url("BASE:providerId:organizationId")` while
- *    the stored digest is over the inner `BASE` alone. Hashing the full bearer
- *    does NOT reproduce the stored value. #8011 measured both; case ②-b below
- *    asserts the full-bearer digest does not match, so a future rewrite cannot
- *    "fix" this file into the naive shape that fails on correct code.
- * 5. **The control arm measures the upstream default rather than citing it.**
- *    Case ③ constructs `scim()` with NO option and shows the bearer lands in
- *    cleartext. That is what makes the literal demonstrably load-bearing: without
- *    it a reader cannot tell whether `storeSCIMToken: 'hashed'` is doing work or
- *    is redundant belt-and-braces. It is also the permanent form of this card's
- *    ablation — the "flip it to plain and watch it go red" experiment, kept.
+ * ## What makes this pin non-vacuous — the same five choices, restated
  *
- * ## Ablation measured when this file landed (predicted first, then run)
- *
- * - `storeSCIMToken: 'hashed'` → `'plain'` in `auth-manager.ts`: case ②-a red,
- *   `stored` = the raw 24-char inner base token, everything else green.
- * - `storeClientSecret: { hash: async (s) => s }` added to the same file's
- *   `oauthProvider(...)` call: case ① red, `stored` = the 32-char plaintext
- *   secret, everything else green. Note the shape — `'plain'` is NOT usable as
- *   an ablation here, because `storeClientSecret()` throws on it rather than
- *   storing cleartext.
- *
- * Predicted and measured agreed in both directions, including the deliberate
- * prediction that the AUTHENTICATES case stays GREEN under the SCIM ablation:
- * `verifySCIMToken` mirrors whatever storage method is configured, so with
- * `'plain'` it compares plaintext to plaintext and still succeeds. That case is
- * a liveness arm, not a posture detector, and the ablation is what establishes
- * the difference.
- *
- * And each positive case asserts the credential still AUTHENTICATES. Hashing is
- * trivially satisfiable by storing garbage; a posture pin that only checked "not
- * cleartext" would pass on a build where SCIM provisioning is entirely broken —
- * the same trap `sso-client-secret-at-rest.test.ts` (#8009) names in its header.
- *
- * ## One honest deviation from the usual "the test chooses the plaintext" bar
- *
- * For `sso-client-secret-at-rest.test.ts` the secret is caller-supplied, so that
- * file feeds in a literal of its own and nothing in the implementation can
- * supply it. Neither credential here works that way: `/scim/generate-token`
- * mints `generateRandomString(24)` and `/oauth2/register` mints
- * `generateRandomString(32)` server-side by design — RFC 7591 registration does
- * not accept a client-chosen secret. So the plaintext is necessarily observed
- * rather than chosen. The independence that bar protects is preserved by the
- * ORACLE instead: the expected digest is recomputed here from that observed
- * plaintext by a different implementation (`node:crypto`), and the negative
- * cases below pin the two ways the relationship could be wrong. Stated plainly
- * rather than papered over.
+ * 1. **Verification drives `AuthManager`.** The AUTHENTICATES cases run
+ *    against `manager.handleRequest()`, so the `verifyBearerToken` wiring in
+ *    `auth-manager.ts` — not the service called directly — is inside the
+ *    system under test. (Mint has no HTTP surface yet by design — the Setup
+ *    admin surface is its own epic leg — so ② mints through the service the
+ *    manager's verifier reads.)
+ * 2. **It reads the row at DRIVER level**, below the ObjectQL read mask and
+ *    below the service's own accessor.
+ * 3. **It asserts the digest RELATIONSHIP, recomputed independently** with
+ *    `node:crypto` here — not by importing the service's digest function,
+ *    which would certify whatever the implementation does.
+ * 4. **It pins the wrong-digest shapes as explicit NEGATIVES**: the unkeyed
+ *    SHA-256 (the rc.1 posture), a wrong-key HMAC, and a missing
+ *    domain-separation prefix must all NOT match the stored value.
+ * 5. **Each positive case asserts the credential still AUTHENTICATES** a real
+ *    SCIM 2.0 request — hashing is trivially satisfiable by storing garbage —
+ *    and the rejection paths (forged, revoked, expired) pin status and error
+ *    envelope, so the 200 is evidence of verification, not an open door.
  *
  * ## Backend note
  *
- * A real `ObjectQL` over `@objectstack/driver-sql` + better-sqlite3 `:memory:`,
- * the backend the sibling at-rest pin (#8009) and the SCIM adapter tests already
- * use.
+ * A real `ObjectQL` over `@objectstack/driver-sql` + better-sqlite3
+ * `:memory:`, the backend the sibling at-rest pin (#8009) already uses.
  */
 
 import { describe, it, expect, afterEach } from 'vitest';
-import { createHash } from 'node:crypto';
+import { createHash, createHmac } from 'node:crypto';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
-import { betterAuth } from 'better-auth';
 import { AuthManager } from './auth-manager.js';
-import { createObjectQLAdapterFactory } from './objectql-adapter.js';
-import {
-  buildOrganizationPluginSchema,
-  buildAdminPluginSchema,
-  AUTH_USER_CONFIG,
-  AUTH_SESSION_CONFIG,
-  AUTH_ACCOUNT_CONFIG,
-  AUTH_VERIFICATION_CONFIG,
-} from './auth-schema-config.js';
 import { createTenancyService } from './tenancy-service.js';
+import {
+  mintScimConnectionCredential,
+  SCIM_BEARER_PREFIX,
+} from './scim-connection-service.js';
 import {
   SysUser,
   SysSession,
@@ -136,38 +92,47 @@ import {
   SysTeam,
   SysTeamMember,
   SysScimProvider,
+  SysScimConnectionBinding,
+  SysScimConnectionCredential,
+  SysScimGroup,
+  SysScimGroupMember,
+  SysScimIdentityTombstone,
+  SysScimProjectionGrant,
+  SysScimSubject,
+  SysScimUser,
   SysOauthApplication,
   SysOauthAccessToken,
   SysOauthRefreshToken,
   SysOauthConsent,
   SysJwks,
 } from '@objectstack/platform-objects';
-import { inviteForAudienceGate } from './audience-gate-test-support';
 
 const BASE = 'http://localhost:3000';
 const AUTH = `${BASE}/api/v1/auth`;
 const SECRET = 'test-secret-at-least-32-chars-long-8192';
 
-const SCIM_PROVIDER_OBJECT = 'sys_scim_provider';
+const SCIM_CREDENTIAL_OBJECT = 'sys_scim_connection_credential';
 const OAUTH_APPLICATION_OBJECT = 'sys_oauth_application';
 
 /**
- * SHA-256 → base64url, unpadded. Recomputed HERE rather than imported from
- * better-auth: an expectation produced by the implementation under test cannot
- * fail. This mirrors `@better-auth/utils`' `defaultKeyHasher`, and #8011
- * measured the two agree byte for byte.
+ * SHA-256 → base64url, unpadded. Recomputed HERE rather than imported: an
+ * expectation produced by the implementation under test cannot fail. Positive
+ * oracle for the oauth case (①), and the UNKEYED negative for the scim case
+ * (②-b) — the rc.1-era posture the keyed digest deliberately exceeds.
  */
 function sha256b64url(value: string): string {
   return createHash('sha256').update(value, 'utf8').digest('base64url');
 }
 
 /**
- * The SCIM bearer handed to the IdP admin is
- * `base64url("BASE:providerId:organizationId")`. The stored digest covers the
- * inner `BASE` only — see `generateSCIMToken` in `@better-auth/scim`.
+ * The scim digest relationship, recomputed independently with `node:crypto`:
+ * HMAC-SHA-256 keyed by the deployment auth secret over the domain-separated
+ * bearer. Mirrors `scim-connection-service.ts`'s documented construction —
+ * the negatives in ②-b are what keep this from being a tautology if the two
+ * ever drift.
  */
-function decodeInnerBaseToken(bearer: string): string {
-  return Buffer.from(bearer, 'base64url').toString('utf8').split(':')[0];
+function hmacScimDigest(secret: string, token: string): string {
+  return createHmac('sha256', secret).update(`scim-credential-v1:${token}`, 'utf8').digest('base64url');
 }
 
 const engines: ObjectQL[] = [];
@@ -194,6 +159,15 @@ const AUTH_OBJECTS = [
   SysTeam,
   SysTeamMember,
   SysScimProvider,
+  // The stable scim model set + the ObjectStack-owned credential store (#3653).
+  SysScimConnectionBinding,
+  SysScimConnectionCredential,
+  SysScimGroup,
+  SysScimGroupMember,
+  SysScimIdentityTombstone,
+  SysScimProjectionGrant,
+  SysScimSubject,
+  SysScimUser,
   SysOauthApplication,
   SysOauthAccessToken,
   SysOauthRefreshToken,
@@ -225,7 +199,7 @@ async function bootEngine(): Promise<ObjectQL> {
 
 /**
  * The stored row read at DRIVER level — below every engine read mask, and below
- * the plugin accessor that would happily tell us what it *meant* to store.
+ * the service accessor that would happily tell us what it *meant* to store.
  */
 async function readRowsAtRest(
   engine: ObjectQL,
@@ -240,77 +214,11 @@ async function readRowsAtRest(
   return (Array.isArray(found) ? found : [found]).filter(Boolean) as Record<string, unknown>[];
 }
 
-function cookiesFrom(response: Response): string {
-  return (response.headers.get('set-cookie') ?? '')
-    .split(',')
-    .map((c) => c.split(';')[0].trim())
-    .filter(Boolean)
-    .join('; ');
-}
-
-/** Sign up through the real pipeline and return the session cookie header. */
-async function signUpAdmin(
-  send: (request: Request) => Promise<Response>,
-  email = 'admin@example.com',
-  engine?: unknown,
-): Promise<string> {
-  // [#11739] default posture invite_only: fixture users beyond the first
-  // enter through the invitation carve-out (see audience-gate-test-support).
-  if (engine) await inviteForAudienceGate(engine, email);
-  const res = await send(
-    new Request(`${AUTH}/sign-up/email`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', origin: BASE },
-      body: JSON.stringify({ email, password: 'S3cure!Passw0rd-8192', name: 'Admin' }),
-    }),
-  );
-  expect(res.status, `sign-up/email failed: ${await res.clone().text()}`).toBeLessThan(400);
-  return cookiesFrom(res);
-}
-
-async function createOrganization(
-  send: (request: Request) => Promise<Response>,
-  cookie: string,
-  slug: string,
-): Promise<string> {
-  const res = await send(
-    new Request(`${AUTH}/organization/create`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', origin: BASE, cookie },
-      body: JSON.stringify({ name: 'Probe Org', slug }),
-    }),
-  );
-  expect(res.status, `organization/create failed: ${await res.clone().text()}`).toBeLessThan(400);
-  const body = (await res.json()) as Record<string, unknown>;
-  const id = (body?.id ?? (body?.organization as Record<string, unknown>)?.id) as string;
-  expect(id, 'organization/create must return an organization id').toBeTruthy();
-  return id;
-}
-
-async function generateScimToken(
-  send: (request: Request) => Promise<Response>,
-  cookie: string,
-  organizationId: string,
-  providerId = 'okta-probe',
-): Promise<string> {
-  const res = await send(
-    new Request(`${AUTH}/scim/generate-token`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', origin: BASE, cookie },
-      body: JSON.stringify({ providerId, organizationId }),
-    }),
-  );
-  expect(res.status, `scim/generate-token failed: ${await res.clone().text()}`).toBeLessThan(400);
-  const body = (await res.json()) as { scimToken?: string };
-  expect(body.scimToken, 'generate-token must return the plaintext bearer exactly once').toBeTruthy();
-  return body.scimToken!;
-}
-
 /**
  * The manager under test — built exactly the way a deployment with SCIM and the
- * OIDC provider turned on builds it. Nothing here names `storeSCIMToken` or
- * `storeClientSecret`; those come from `AuthManager.buildPluginList()`, which is
- * the whole point.
+ * OIDC provider turned on builds it. Nothing here names a digest or a storage
+ * method; the verifier wiring comes from `AuthManager.buildPluginList()`, which
+ * is the whole point.
  */
 function makeManager(engine: ObjectQL): AuthManager {
   return new AuthManager({
@@ -318,8 +226,7 @@ function makeManager(engine: ObjectQL): AuthManager {
     baseUrl: BASE,
     dataEngine: engine as never,
     // ADR-0093 D5 / #5233 — `organization/create` is gated by the EFFECTIVE
-    // tenancy posture. SCIM tokens are org-scoped by construction, so a wall
-    // that is actually in force is part of the fixture, not part of the claim.
+    // tenancy posture; a wall that is actually in force is part of the fixture.
     getTenancy: () => createTenancyService({ requested: 'isolated', probeIsolation: () => true }),
     plugins: {
       scim: true,
@@ -330,68 +237,63 @@ function makeManager(engine: ObjectQL): AuthManager {
   } as never);
 }
 
-describe('[#8192] sys_scim_provider.scim_token is hashed at rest — via the repo’s own wiring', () => {
-  it('② the persisted bearer is the SHA-256 digest of the INNER base token, never cleartext', async () => {
+describe('[#8192/#3653] sys_scim_connection_credential.token_digest is a keyed one-way digest — via the repo’s own wiring', () => {
+  it('② the persisted value is the keyed HMAC of the bearer, never cleartext and never the unkeyed rc.1 shape', async () => {
     const engine = await bootEngine();
-    const manager = makeManager(engine);
-    const send = (request: Request) => manager.handleRequest(request);
 
-    const cookie = await signUpAdmin(send, undefined, engine);
-    const organizationId = await createOrganization(send, cookie, 'probe-org-8192');
-    const bearer = await generateScimToken(send, cookie, organizationId);
+    const { token, credentialId } = await mintScimConnectionCredential(engine as never, SECRET, {
+      connectionId: 'okta-probe',
+      organizationId: 'probe-org-8192',
+    });
+    expect(token.startsWith(SCIM_BEARER_PREFIX)).toBe(true);
+    expect(credentialId).toBeTruthy();
 
-    const rows = await readRowsAtRest(engine, SCIM_PROVIDER_OBJECT);
+    const rows = await readRowsAtRest(engine, SCIM_CREDENTIAL_OBJECT);
     expect(rows).toHaveLength(1);
-    const stored = String(rows[0].scim_token);
-    const inner = decodeInnerBaseToken(bearer);
-
-    // Sanity on the decode itself, so a change in the bearer's SHAPE surfaces
-    // here rather than silently turning the cases below into tautologies.
-    expect(inner).toBeTruthy();
-    expect(inner).not.toBe(bearer);
-    expect(Buffer.from(bearer, 'base64url').toString('utf8')).toContain(`:${organizationId}`);
+    const stored = String(rows[0].token_digest);
 
     // ②-a THE POSITIVE. Recomputed by node:crypto from the observed plaintext.
-    expect(stored).toBe(sha256b64url(inner));
+    expect(stored).toBe(hmacScimDigest(SECRET, token));
 
-    // ②-b THE NEGATIVE THAT CATCHES THE NAIVE PIN. Hashing the full bearer —
-    // the string the caller actually received — must NOT match. #8011 measured
-    // this; without the case, a future rewrite could "simplify" ②-a into the
-    // shape that fails while the code is correct.
-    expect(stored).not.toBe(sha256b64url(bearer));
+    // ②-b THE NEGATIVES THAT CATCH THE WRONG SHAPES. The unkeyed SHA-256 is
+    // the rc.1 posture this store deliberately exceeds; the wrong-key HMAC
+    // pins that the digest is bound to THIS deployment's secret; the
+    // no-domain-separation HMAC pins the input framing. Any of these matching
+    // means the relationship in ②-a stopped being what this file claims.
+    expect(stored).not.toBe(sha256b64url(token));
+    expect(stored).not.toBe(hmacScimDigest('a-different-secret-32-chars-long!!', token));
+    expect(stored).not.toBe(createHmac('sha256', SECRET).update(token, 'utf8').digest('base64url'));
 
-    // ②-c not cleartext, in either spelling, anywhere in the row.
-    expect(stored).not.toBe(bearer);
-    expect(stored).not.toBe(inner);
-    expect(JSON.stringify(rows[0])).not.toContain(inner);
-    expect(JSON.stringify(rows[0])).not.toContain(bearer);
+    // ②-c not cleartext, in any spelling, anywhere in the row.
+    expect(stored).not.toBe(token);
+    expect(JSON.stringify(rows[0])).not.toContain(token);
   }, 60_000);
 
-  it('② the hashed credential still AUTHENTICATES a real SCIM 2.0 request', async () => {
-    // The half that stops "hash it" from being satisfiable by storing garbage:
-    // a build that persisted a digest of the wrong thing would pass the at-rest
+  it('② the digested credential still AUTHENTICATES a real SCIM 2.0 request — and the rejection paths refuse', async () => {
+    // The half that stops "digest it" from being satisfiable by storing
+    // garbage: a build that digested the wrong thing would pass the at-rest
     // case above and break every IdP provisioning call.
     const engine = await bootEngine();
     const manager = makeManager(engine);
     const send = (request: Request) => manager.handleRequest(request);
 
-    const cookie = await signUpAdmin(send, undefined, engine);
-    const organizationId = await createOrganization(send, cookie, 'probe-org-8192-auth');
-    const bearer = await generateScimToken(send, cookie, organizationId);
+    const { token } = await mintScimConnectionCredential(engine as never, SECRET, {
+      connectionId: 'okta-probe',
+    });
 
     const ok = await send(
       new Request(`${AUTH}/scim/v2/Users`, {
         method: 'GET',
-        headers: { origin: BASE, authorization: `Bearer ${bearer}` },
+        headers: { origin: BASE, authorization: `Bearer ${token}` },
       }),
     );
     expect(ok.status, `SCIM v2 Users rejected a freshly minted bearer: ${await ok.clone().text()}`)
       .toBe(200);
 
     // …and a bearer that is merely well-formed is still refused, so the 200
-    // above is evidence of verification rather than of an open door.
-    const forged = Buffer.from(`not-the-base-token:okta-probe:${organizationId}`, 'utf8')
-      .toString('base64url');
+    // above is evidence of verification rather than of an open door. Pinned
+    // as code+status: HTTP 401 with the SCIM 2.0 error envelope.
+    const forged = `${SCIM_BEARER_PREFIX}${'A'.repeat(43)}`;
     const denied = await send(
       new Request(`${AUTH}/scim/v2/Users`, {
         method: 'GET',
@@ -399,6 +301,44 @@ describe('[#8192] sys_scim_provider.scim_token is hashed at rest — via the rep
       }),
     );
     expect(denied.status).toBe(401);
+    const deniedBody = (await denied.json()) as { schemas?: string[]; status?: string };
+    expect(deniedBody.schemas ?? []).toContain('urn:ietf:params:scim:api:messages:2.0:Error');
+    expect(String(deniedBody.status)).toBe('401');
+  }, 60_000);
+
+  it('② revocation and expiry are enforced at verification, not just stored', async () => {
+    const engine = await bootEngine();
+    const manager = makeManager(engine);
+    const send = (request: Request) => manager.handleRequest(request);
+
+    // Revoked: minted, then switched inactive — refused.
+    const revoked = await mintScimConnectionCredential(engine as never, SECRET, {
+      connectionId: 'okta-revoked',
+    });
+    await (engine as unknown as {
+      update(o: string, data: Record<string, unknown>): Promise<unknown>;
+    }).update(SCIM_CREDENTIAL_OBJECT, { id: revoked.credentialId, active: false });
+
+    const deniedRevoked = await send(
+      new Request(`${AUTH}/scim/v2/Users`, {
+        method: 'GET',
+        headers: { origin: BASE, authorization: `Bearer ${revoked.token}` },
+      }),
+    );
+    expect(deniedRevoked.status).toBe(401);
+
+    // Expired: minted with a past expiry — refused.
+    const expired = await mintScimConnectionCredential(engine as never, SECRET, {
+      connectionId: 'okta-expired',
+      expiresAt: new Date(Date.now() - 60_000),
+    });
+    const deniedExpired = await send(
+      new Request(`${AUTH}/scim/v2/Users`, {
+        method: 'GET',
+        headers: { origin: BASE, authorization: `Bearer ${expired.token}` },
+      }),
+    );
+    expect(deniedExpired.status).toBe(401);
   }, 60_000);
 });
 
@@ -437,59 +377,42 @@ describe('[#8192] sys_oauth_application.client_secret is hashed at rest', () => 
   }, 60_000);
 });
 
-describe('[#8192] the control arm — what the SCIM plugin does with NO option', () => {
-  it('③ upstream’s default persists the bearer in CLEARTEXT, so the literal is load-bearing', async () => {
-    // This is the ablation, kept. It constructs `scim()` with upstream defaults
-    // — deliberately NOT through AuthManager — and measures the posture the repo
-    // would inherit if `storeSCIMToken: 'hashed'` were dropped from
-    // `auth-manager.ts`. It is the reason the cases above mean something.
-    //
-    // If this case ever goes RED, upstream changed its default. That is
-    // INFORMATION for whoever is doing the #3653 rc.2 migration, not a defect:
-    // re-read whether the explicit literal is still load-bearing, and update
-    // this file's header table. Do not "fix" it by deleting the literal.
-    const engine = await bootEngine();
+describe('[#3653] the control arm, restructured — stable upstream stores NOTHING', () => {
+  it('③ no stable scim model declares a credential-shaped column, and the rc.1 mint endpoint is gone', async () => {
+    // The old arm measured upstream's cleartext DEFAULT to prove the repo's
+    // `storeSCIMToken: 'hashed'` literal was load-bearing. Stable upstream
+    // stores no credential at all, so that comparison has no subject any more
+    // — what this arm pins instead is exactly the fact that vacated it. RED
+    // here means upstream grew a credential store again: re-read the
+    // ownership boundary (see the file header) before changing anything.
     const { scim } = await import('@better-auth/scim');
-    const { organization } = await import('better-auth/plugins/organization');
-    const { admin } = await import('better-auth/plugins/admin');
+    const plugin = scim({
+      connections: [],
+      authentication: { verifyBearerToken: () => null },
+    } as never) as unknown as { schema?: Record<string, { fields?: Record<string, unknown> }> };
 
-    const auth = betterAuth({
-      secret: SECRET,
-      baseURL: BASE,
-      basePath: '/api/v1/auth',
-      trustedOrigins: [BASE],
-      emailAndPassword: { enabled: true },
-      // The same column mapping AuthManager applies — without it better-auth
-      // writes camelCase keys the sys_* objects do not declare, and the control
-      // arm would fail for a reason that has nothing to do with token storage.
-      user: { ...AUTH_USER_CONFIG },
-      session: { ...AUTH_SESSION_CONFIG },
-      account: { ...AUTH_ACCOUNT_CONFIG },
-      verification: { ...AUTH_VERIFICATION_CONFIG },
-      database: createObjectQLAdapterFactory(engine as never),
-      plugins: [
-        admin({ schema: buildAdminPluginSchema() } as never),
-        organization({ schema: buildOrganizationPluginSchema() } as never),
-        // No `storeSCIMToken` — upstream's own default.
-        scim() as never,
-      ],
-    });
-    const send = (request: Request) => auth.handler(request);
+    const models = Object.entries(plugin.schema ?? {});
+    expect(models.length, 'the installed scim plugin declared no schema — the sweep below would be vacuous')
+      .toBeGreaterThan(0);
 
-    const cookie = await signUpAdmin(send, 'control@example.com', engine);
-    const organizationId = await createOrganization(send, cookie, 'control-org-8192');
-    const bearer = await generateScimToken(send, cookie, organizationId);
+    const credentialish = models.flatMap(([model, def]) =>
+      Object.keys(def.fields ?? {})
+        .filter((field) => /token|secret|credential|digest|hash|password/i.test(field))
+        .map((field) => `${model}.${field}`),
+    );
+    expect(credentialish).toEqual([]);
 
-    const rows = await readRowsAtRest(engine, SCIM_PROVIDER_OBJECT);
-    expect(rows).toHaveLength(1);
-    const stored = String(rows[0].scim_token);
-    const inner = decodeInnerBaseToken(bearer);
-
-    // The measured exposure: the inner base token, verbatim, on disk.
-    expect(
-      stored,
-      'upstream @better-auth/scim no longer defaults to cleartext — see this case’s comment',
-    ).toBe(inner);
-    expect(stored).not.toBe(sha256b64url(inner));
+    // And through the repo's own manager: the rc.1 mint endpoint no longer
+    // exists (404 — route absent, not a refusal envelope).
+    const engine = await bootEngine();
+    const manager = makeManager(engine);
+    const res = await manager.handleRequest(
+      new Request(`${AUTH}/scim/generate-token`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', origin: BASE },
+        body: JSON.stringify({ providerId: 'okta-probe', organizationId: 'probe-org' }),
+      }),
+    );
+    expect(res.status).toBe(404);
   }, 60_000);
 });

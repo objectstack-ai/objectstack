@@ -39,13 +39,13 @@ onlyBuiltDependencies:
 # For a 0.x line the "major boundary" is the caret boundary (0.35.x -> <0.36.0),
 # because that is where semver's compatibility break actually falls.
 # `scripts/check-override-consistency.mjs` reports (never fails on) any entry
-# that drifts back into the old shape. Two carve-outs deliberately keep it:
-# `@better-auth/scim` alone — the rest of the better-auth family was retired to
-# the stable `^1.7.1` line with major-boundary bounds when 1.7.0 shipped (#3002),
-# and scim's bound MUST stay at the pinned rc, because a `<2.0.0` bound would
-# rewrite the stable release DOWN onto the rc it is deliberately held at (#3653)
-# — and the three zero-consumer pins awaiting a #5835-style ruling
-# (@tootallnate/once, react-router, @sveltejs/kit).
+# that drifts back into the old shape. One carve-out deliberately keeps it:
+# the three zero-consumer pins awaiting a #5835-style ruling
+# (@tootallnate/once, react-router, @sveltejs/kit). (`@better-auth/scim` was
+# the other carve-out while it held the rc; #3653 moved it onto stable with
+# the bound at the major boundary. Its TARGET is exact `1.7.1` by ruling —
+# see its note below — which is about the resolved version, not the selector
+# shape this rule governs.)
 #   - esbuild: GHSA-gv7w-rqvm-qjhr (high). tsup/tsx/vite pulled 0.27.7 / 0.28.0
 #     (< 0.28.1); force the patched line everywhere.
 #   - form-data: GHSA-hmw2-7cc7-3qxx (high) — CRLF injection via unescaped
@@ -80,51 +80,39 @@ onlyBuiltDependencies:
 #     8.9.0 is a different major and stays outside, unaffected. Kept as
 #     defense-in-depth on the same reasoning as form-data above.
 #   - @better-auth/scim: GHSA-j8v8-g9cx-5qf4 (high) — account/provider
-#     takeover, patched only in >=1.7.0-beta.4. THE ONLY MEMBER OF THE FAMILY
-#     STILL ON A PRE-RELEASE, and deliberately so.
-#     Stable 1.7.0/1.7.1 have now shipped, and measured against the published
-#     1.7.1 tarball they ship the rc.2 REWRITE, not the rc.1 shape: no
-#     `scimProvider` model and no generate-token endpoint (0 occurrences in
-#     `dist/index.mjs`), replaced by seven new models (scimUser, scimGroup,
-#     scimGroupMember, scimSubject, scimConnectionBinding,
-#     scimIdentityTombstone, scimProjectionGrant — all seven present).
-#     Connections may be code-defined, but that is only one of three shapes
-#     the plugin accepts: with `managedConnections` configured it also
-#     persists a DB-backed connection catalog of three MORE models
-#     (scimManagedConnection, scimManagedCredential,
-#     scimManagedConnectionEvent) — ten in total. Re-measured 2026-08-24
-#     against 1.7.1 (still `latest`) by constructing the plugin and reading
-#     `plugin.schema`. So
-#     moving this pin is still the ADR-0071 feature migration tracked by #3653
-#     (new platform objects, retiring `sys_scim_provider`, a new way for a
-#     tenant to register a connection) — NOT the version bump #3002 did for the
-#     rest of the family. Holding here stays security-clean: rc.1 is above the
-#     >=1.7.0-beta.4 fix floor, and rc.1's peer ranges (`better-auth` and
-#     `@better-auth/core` at `^1.7.0-rc.1`) are satisfied by the stable 1.7.1
-#     the family now resolves to.
-#     KNOWN SKEW while this hold lasts: scim rc.1 peers `better-call@1.3.7`
-#     while better-auth 1.7.1 depends on `better-call@1.4.0`. CORRECTION
-#     (#10326, measured): the tree does NOT carry two copies — this lockfile
-#     holds exactly ONE better-call version, 1.4.0, and scim rc.1 resolves to
-#     it, in a scaffolded downstream install too. That is the correct tree
-#     rather than a skew to repair: a better-auth plugin has to share the
-#     HOST's better-call instance, and the exact `1.3.7` is just the rc's
-#     frozen stamp. What the skew does produce is an unmet-peer line on a
-#     newcomer's very first `pnpm install`, which the scaffold templates now
-#     declare away (see `peerDependencyRules` in
-#     `packages/create-objectstack/src/templates/blank/pnpm-workspace.yaml`
-#     and `renderPnpmWorkspaceYaml` in `packages/cli`). Measured green on the
-#     plugin-auth suite; the skew, and both template entries, retire with
-#     #3653.
+#     takeover, patched only in >=1.7.0-beta.4. The pin sat on the 1.7.0-rc.1
+#     PRE-RELEASE while stable 1.7.x shipped the rc.2 REWRITE (no
+#     `scimProvider` model, no generate-token endpoint, seven replacement
+#     models: scimUser, scimGroup, scimGroupMember, scimSubject,
+#     scimConnectionBinding, scimIdentityTombstone, scimProjectionGrant),
+#     because moving it was the ADR-0071 feature migration tracked by #3653 —
+#     NOT the version bump #3002 did for the rest of the family. That
+#     migration has LANDED (#3653, epic #11632): the seven stable models are
+#     provisioned as platform objects, connections are runtime data resolved
+#     by an application-owned `verifyBearerToken` in plugin-auth, and
+#     `sys_scim_provider` retires separately under #11757. The
+#     `managedConnections` catalog (three more conditional models) is
+#     deliberately NOT adopted — maintainer ruling 2026-08-25, no real
+#     customers, no pull.
+#     The TARGET is `1.7.1` EXACT rather than the family's `^1.7.1` — see the
+#     comment at the override line below: `^1.7.1` resolves to 1.7.2, whose
+#     `better-auth`/`@better-auth/core` peers at `^1.7.2` these overrides
+#     would silence rather than satisfy. Floating is its own follow-up card.
+#     The rc-era better-call skew is GONE: stable 1.7.1 peers
+#     `better-call@1.4.0` exactly — the one version this lockfile holds — so
+#     the scaffold `peerDependencyRules` entries for
+#     `@better-auth/scim>better-call` retired with the pin move (#3653).
 #     Its sibling line is better-auth's own stale `better-sqlite3@^12.0.0`
 #     peer against our `^13.0.3`. That one is NOT reported here, because
 #     `auto-install-peers=true` (.npmrc) quietly installs a second, unused
 #     better-sqlite3 12.11.1 to satisfy it — which is why CI never saw what a
 #     scaffolded project shows on its first screen. #10326 measured 1.7.1 as
 #     behaviourally identical on 13.0.3 and 12.11.1 and left this workspace's
-#     resolution untouched; only the scaffolds declare it.
-#     `scripts/check-prerelease-pin-watch.mjs` keeps watching this pin (it is
-#     now the only entry on its watch list) so #3653 has a producer.
+#     resolution untouched; only the scaffolds declare it (their
+#     `better-auth>better-sqlite3` and `@better-auth/utils` entries do NOT
+#     retire with #3653 — their conditions are separate and unmet).
+#     `scripts/check-prerelease-pin-watch.mjs` now has nothing to watch and
+#     says so — the self-retiring exit its own header promised.
 #   - @better-auth/oauth-provider: GHSA-p2fr-6hmx-4528 — same better-auth
 #     monorepo and same situation as @better-auth/scim above. The fix first
 #     shipped in the 1.7.0 pre-release line; it is now in stable 1.7.x, and
@@ -179,12 +167,16 @@ overrides:
   # at the MAJOR boundary, so a future advisory lift moves only the target.
   'better-auth@<2.0.0': '^1.7.1'
   '@better-auth/core@<2.0.0': '^1.7.1'
-  # scim is deliberately held on the 1.7.0-rc.1 PRE-RELEASE, one line behind the
-  # rest of the family — see the @better-auth/scim note above. Stable 1.7.x
-  # ships the rc.2 rewrite, so adopting it is the ADR-0071 migration (#3653),
-  # not this bump. Its bound stays AT the rc on purpose: a major-boundary bound
-  # here would rewrite the stable release down onto the rc.
-  '@better-auth/scim@<2.0.0': '^1.7.1'
+  # scim is pinned to 1.7.1 EXACTLY, one deliberate step behind the family's
+  # `^1.7.1` — see the @better-auth/scim note above. `^1.7.1` resolves to
+  # 1.7.2, which peers `better-auth`/`@better-auth/core` at `^1.7.2` while the
+  # installed family is 1.7.1; these very overrides would rewrite those peer
+  # ranges down and SILENCE the mismatch rather than satisfy it. Every
+  # instrument of the #3653 migration measured 1.7.1, so the resolution is
+  # held to the measured version (#3653 ruling, 2026-08-27); floating to
+  # 1.7.2+ is its own follow-up with the family moved in step, never a side
+  # effect of a lockfile refresh.
+  '@better-auth/scim@<2.0.0': '1.7.1'
   '@better-auth/oauth-provider@<2.0.0': '^1.7.1'
   '@better-auth/sso@<2.0.0': '^1.7.1'
   '@better-auth/drizzle-adapter@<2.0.0': '^1.7.1'

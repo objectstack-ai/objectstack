@@ -47,20 +47,20 @@
  * for a narrower reason than this header used to give. The previous wording —
  * "accept no `schema` option, so `getAuthTables()` cannot see them" — was
  * measured false and is corrected here (#8224). Re-measured 2026-08-19 against
- * the installed `@better-auth/sso@1.7.1` / `@better-auth/scim@1.7.0-rc.1` (the
- * 2026-08-18 stamp this block carried named `sso@1.7.0-rc.2`, a pin that has
- * since moved — the very drift this card is about):
+ * the installed `@better-auth/sso@1.7.1` / `@better-auth/scim@1.7.0-rc.1`, and
+ * again 2026-08-27 against the stable `@better-auth/scim@1.7.1` after the
+ * #3653 migration moved the pin (the very drift this card is about):
  *
  *  - Both DECLARE a schema `getAuthTables()` reads. Passing `sso()` yields the
- *    `ssoProvider` model; `scim({})` yields `scimProvider` plus the four
- *    `scimGroup*` models. The library is not hiding them.
+ *    `ssoProvider` model; the stable scim (constructed with the gate options
+ *    below) yields the seven `scim*` models. The library is not hiding them.
  *  - `@better-auth/sso` also ACCEPTS a `schema` option now:
  *    `SSOOptions.schema.ssoProvider.{modelName,fields,additionalFields}`, honoured
  *    at runtime (`modelName: options?.modelName ?? options?.schema?.ssoProvider
  *    ?.modelName ?? 'ssoProvider'`, plus a per-field `fieldName` fallback each).
  *    `@better-auth/scim` still accepts none — `SCIMOptions` declares no
- *    `schema` / `modelName` / `fields` — so that half of the old sentence
- *    survives for scim alone.
+ *    `schema` / `modelName` / `fields`, on stable 1.7.1 as on the rc — so
+ *    that half of the old sentence survives for scim alone.
  *  - What holds for both, and is the actual reason: **the auth manager passes
  *    them no `schema` option.** Their models are bridged at the ADAPTER layer
  *    instead (`AUTH_MODEL_TO_PROTOCOL` + a mechanical camelCase → snake_case in
@@ -114,7 +114,14 @@ import {
   SysSession,
   SysTeam,
   SysTeamMember,
+  SysScimConnectionBinding,
+  SysScimGroup,
+  SysScimGroupMember,
+  SysScimIdentityTombstone,
+  SysScimProjectionGrant,
   SysScimProvider,
+  SysScimSubject,
+  SysScimUser,
   SysSsoProvider,
   SysTwoFactor,
   SysUser,
@@ -145,7 +152,12 @@ const PLATFORM_OBJECTS: Record<string, PlatformObject> = Object.fromEntries(
     SysTwoFactor, SysDeviceCode, SysJwks,
     // Bridged at the adapter layer rather than via a plugin `schema` option —
     // see the sso/scim block at the bottom of this file (#3653).
+    // `SysScimProvider` backs no stable model any more; it retires under
+    // #11757 and stays here only until that lands.
     SysSsoProvider, SysScimProvider,
+    SysScimConnectionBinding, SysScimGroup, SysScimGroupMember,
+    SysScimIdentityTombstone, SysScimProjectionGrant, SysScimSubject,
+    SysScimUser,
   ] as unknown as PlatformObject[]).map((o) => [o.name, o]),
 );
 
@@ -252,8 +264,9 @@ const AUTH_MANAGER_PLUGINS: Record<string, { construct: () => unknown } | { skip
   scim: {
     skip:
       'same adapter bridge as sso and the same dedicated block below. `SCIMOptions` additionally '
-      + 'still declares no `schema` / `modelName` / `fields` option at all on 1.7.0-rc.1, so there '
-      + 'is nothing to pass it even if the bridge moved onto the plugin option.',
+      + 'still declares no `schema` / `modelName` / `fields` option at all on the installed stable '
+      + '1.7.1 (re-measured 2026-08-27, #3653), so there is nothing to pass it even if the bridge '
+      + 'moved onto the plugin option.',
   },
   oauthProvider: {
     skip:
@@ -457,9 +470,9 @@ function adapterColumn(field: string): string {
 }
 
 /**
- * Construct `@better-auth/scim` with options BOTH the pinned prerelease and the
- * stable line accept, so this gate reaches its diff-printing stage instead of
- * dying in collection (#11380).
+ * Construct `@better-auth/scim` with options BOTH the rc.1 prerelease (the pin
+ * until #3653 landed) and the stable line accept, so this gate reaches its
+ * diff-printing stage instead of dying in collection (#11380).
  *
  * The gate was written down as the safety net for the `@better-auth/scim`
  * migration (#3653): the day the pin moves off `1.7.0-rc.1`, it is supposed to
@@ -548,19 +561,19 @@ function scimSchema(): Record<string, { fields?: Record<string, unknown> }> {
 
 /**
  * SCIM models with no platform object, acknowledged rather than silently
- * skipped. These four are SCIM **group** provisioning (`/Groups` push from the
- * IdP); ObjectStack ships only the provider row today, so an IdP pushing
- * groups would write tables that do not exist — filed as its own feature gap.
+ * skipped. EMPTY as of the stable-1.7.x migration (#3653): every model the
+ * installed plugin declares is provisioned and column-checked below — the
+ * rc.1-era group-provisioning gap (four acknowledged `scimGroup*` models with
+ * no tables) is closed.
  *
- * Pinned as an exact set on purpose: a NEW unmapped model is a build failure,
- * so this list can never quietly grow the way the original hole did.
+ * Still pinned as an exact set on purpose, both directions: a NEW name here
+ * is a model the plugin added that nothing provisions (a build failure, so
+ * the list can never quietly grow the way the original hole did), and a name
+ * that DISAPPEARS from the plugin side is caught by the same assertion.
+ * ⛔ Widening this set to get a version bump green is the gate-weakening the
+ * #3653 maintainer ruling forbids — declare the object instead.
  */
-const KNOWN_UNMAPPED_MODELS = new Set([
-  'scimGroup',
-  'scimGroupMember',
-  'scimGroupRole',
-  'scimGroupRoleGrant',
-]);
+const KNOWN_UNMAPPED_MODELS = new Set<string>([]);
 
 describe('@better-auth/sso + @better-auth/scim schema ↔ platform-objects parity (#3653)', () => {
   const plugins: Array<{ label: string; schema: Record<string, { fields?: Record<string, unknown> }> }> = [
@@ -579,8 +592,10 @@ describe('@better-auth/sso + @better-auth/scim schema ↔ platform-objects parit
     >;
 
     // 1. getAuthTables() DOES see them — "cannot see them" was never the reason.
+    //    (`scimUser`, not rc.1's `scimProvider`: stable 1.7.x no longer derives
+    //    that model at all — #3653.)
     expect(Object.keys(derived)).toContain('ssoProvider');
-    expect(Object.keys(derived)).toContain('scimProvider');
+    expect(Object.keys(derived)).toContain('scimUser');
 
     // 2. …but under better-auth's own model name, which is not the platform
     //    object name, because the auth manager passes no `schema.modelName`.

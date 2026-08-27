@@ -1935,6 +1935,421 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       }
     }
   },
+  sys_scim_connection_binding: {
+    label: "SCIM Connection Binding",
+    pluralLabel: "SCIM Connection Bindings",
+    description: "Lifecycle state for a SCIM provisioning connection, including its decommission state machine",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      connection_id: {
+        label: "Connection ID",
+        help: "Immutable SCIM connection identifier that scopes every provisioned resource"
+      },
+      connection_key: {
+        label: "Connection Key",
+        help: "Derived connection uniqueness key maintained by @better-auth/scim; do not write directly."
+      },
+      provisioning_domain_id: {
+        label: "Provisioning Domain",
+        help: "Application-owned boundary that receives provisioned resources (defaults to the connection id)"
+      },
+      decommission_status: {
+        label: "Decommission Status",
+        help: "Connection lifecycle state: active | reconciling | complete"
+      },
+      decommissioned_at: {
+        label: "Decommissioned At"
+      },
+      decommission_cursor_user_id: {
+        label: "Decommission Cursor User",
+        help: "Resumable reconciliation cursor maintained by the library"
+      },
+      decommission_reconciled_user_count: {
+        label: "Reconciled Users"
+      },
+      decommission_batch_count: {
+        label: "Decommission Batches"
+      },
+      decommission_revision: {
+        label: "Decommission Revision",
+        help: "Optimistic-concurrency revision for the decommission state machine"
+      },
+      decommission_completed_at: {
+        label: "Decommission Completed At"
+      },
+      decommission_lease_id: {
+        label: "Decommission Lease",
+        help: "Single-worker reconciliation lease maintained by the library"
+      },
+      decommission_lease_expires_at: {
+        label: "Decommission Lease Expires At"
+      },
+      created_at: {
+        label: "Created At"
+      }
+    },
+    _views: {
+      all: {
+        label: "All"
+      }
+    }
+  },
+  sys_scim_connection_credential: {
+    label: "SCIM Connection Credential",
+    pluralLabel: "SCIM Connection Credentials",
+    description: "Bearer credentials (one-way digests) that authenticate SCIM provisioning connections",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      connection_id: {
+        label: "Connection ID",
+        help: "The SCIM connection this credential authenticates (e.g. \"okta-prod\"); scopes every resource the IdP provisions with it"
+      },
+      provisioning_domain_id: {
+        label: "Provisioning Domain",
+        help: "Application-owned boundary receiving provisioned resources; defaults to the connection id when absent"
+      },
+      organization_id: {
+        label: "Organization",
+        help: "Organization scope of this connection, when provisioning is org-scoped"
+      },
+      label: {
+        label: "Label",
+        help: "Operator-facing name for this credential (e.g. \"rotation 2026-Q3\")"
+      },
+      token_digest: {
+        label: "Token Digest",
+        help: "HMAC-SHA-256 (base64url) of the bearer, keyed by the deployment auth secret — one-way; the plaintext is shown once at mint and never stored."
+      },
+      active: {
+        label: "Active",
+        help: "Revocation switch — an inactive credential is refused at verification"
+      },
+      expires_at: {
+        label: "Expires At",
+        help: "Optional hard expiry for staged credential rotation; an expired credential is refused"
+      },
+      user_id: {
+        label: "Minted By",
+        help: "User who minted this credential"
+      },
+      created_at: {
+        label: "Created At"
+      },
+      updated_at: {
+        label: "Updated At"
+      }
+    },
+    _views: {
+      all: {
+        label: "All"
+      }
+    }
+  },
+  sys_scim_group: {
+    label: "SCIM Group",
+    pluralLabel: "SCIM Groups",
+    description: "IdP-pushed SCIM 2.0 groups, scoped per provisioning connection",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      connection_id: {
+        label: "Connection ID"
+      },
+      provisioning_domain_id: {
+        label: "Provisioning Domain"
+      },
+      revision: {
+        label: "Revision",
+        help: "Optimistic-concurrency revision maintained by @better-auth/scim"
+      },
+      display_name: {
+        label: "Display Name",
+        help: "SCIM displayName as sent by the IdP"
+      },
+      display_name_key: {
+        label: "Display Name Key",
+        help: "Derived case-folded displayName uniqueness key maintained by @better-auth/scim; do not write directly."
+      },
+      external_id: {
+        label: "External ID",
+        help: "IdP-assigned externalId, when the IdP sends one"
+      },
+      external_id_key: {
+        label: "External ID Key",
+        help: "Derived externalId uniqueness key maintained by @better-auth/scim; do not write directly."
+      },
+      order_key: {
+        label: "Order Key",
+        help: "Derived stable-pagination key maintained by @better-auth/scim; do not write directly."
+      },
+      created_at: {
+        label: "Created At"
+      },
+      updated_at: {
+        label: "Updated At"
+      }
+    },
+    _views: {
+      all: {
+        label: "All"
+      }
+    }
+  },
+  sys_scim_group_member: {
+    label: "SCIM Group Member",
+    pluralLabel: "SCIM Group Members",
+    description: "SCIM group membership rows pushed by the IdP (group ↔ provisioned user)",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      connection_id: {
+        label: "Connection ID"
+      },
+      group_id: {
+        label: "Group"
+      },
+      scim_user_id: {
+        label: "SCIM User"
+      },
+      membership_key: {
+        label: "Membership Key",
+        help: "Derived membership uniqueness key maintained by @better-auth/scim; do not write directly."
+      },
+      created_at: {
+        label: "Created At"
+      }
+    },
+    _views: {
+      all: {
+        label: "All"
+      }
+    }
+  },
+  sys_scim_identity_tombstone: {
+    label: "SCIM Identity Tombstone",
+    pluralLabel: "SCIM Identity Tombstones",
+    description: "Tombstones of IdP-deleted SCIM identities, kept so a re-provision is recognized",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      connection_id: {
+        label: "Connection ID"
+      },
+      provisioning_domain_id: {
+        label: "Provisioning Domain"
+      },
+      external_id: {
+        label: "External ID",
+        help: "The IdP-assigned externalId of the deleted identity"
+      },
+      external_id_key: {
+        label: "External ID Key",
+        help: "Derived externalId uniqueness key maintained by @better-auth/scim; do not write directly."
+      },
+      user_id: {
+        label: "User",
+        help: "The platform user the deleted identity was linked to"
+      },
+      profile: {
+        label: "Final Profile",
+        help: "Serialized final SCIM profile at deletion time, maintained by @better-auth/scim"
+      },
+      deleted_at: {
+        label: "Deleted At"
+      }
+    },
+    _views: {
+      all: {
+        label: "All"
+      }
+    }
+  },
+  sys_scim_projection_grant: {
+    label: "SCIM Projection Grant",
+    pluralLabel: "SCIM Projection Grants",
+    description: "Role/entitlement grants projected onto platform users by SCIM provisioning",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      connection_id: {
+        label: "Connection ID"
+      },
+      provisioning_domain_id: {
+        label: "Provisioning Domain"
+      },
+      scim_user_id: {
+        label: "SCIM User",
+        help: "The per-connection user projection this grant belongs to"
+      },
+      user_id: {
+        label: "User",
+        help: "The platform user the grant is projected onto"
+      },
+      source_kind: {
+        label: "Source Kind",
+        help: "What projected the grant (e.g. group, entitlement, attribute)"
+      },
+      source_id: {
+        label: "Source ID",
+        help: "Identifier of the projecting source (e.g. the SCIM group id)"
+      },
+      source_value: {
+        label: "Source Value",
+        help: "Source attribute value, when the source kind carries one"
+      },
+      role: {
+        label: "Role",
+        help: "The role/entitlement projected onto the user"
+      },
+      grant_key: {
+        label: "Grant Key",
+        help: "Derived grant uniqueness key maintained by @better-auth/scim; do not write directly."
+      },
+      created_at: {
+        label: "Created At"
+      },
+      updated_at: {
+        label: "Updated At"
+      }
+    },
+    _views: {
+      all: {
+        label: "All"
+      }
+    }
+  },
+  sys_scim_subject: {
+    label: "SCIM Subject",
+    pluralLabel: "SCIM Subjects",
+    description: "Per-user SCIM provisioning link — one row per user any SCIM connection provisions",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      user_id: {
+        label: "User",
+        help: "The platform user this subject row tracks (unique — one row per user)"
+      },
+      profile_source_id: {
+        label: "Profile Source",
+        help: "The sys_scim_user projection currently sourcing this user's profile"
+      },
+      revision: {
+        label: "Revision",
+        help: "Optimistic-concurrency revision maintained by @better-auth/scim"
+      },
+      created_at: {
+        label: "Created At"
+      },
+      updated_at: {
+        label: "Updated At"
+      }
+    },
+    _views: {
+      all: {
+        label: "All"
+      }
+    }
+  },
+  sys_scim_user: {
+    label: "SCIM User",
+    pluralLabel: "SCIM Users",
+    description: "Per-connection projection of an IdP-provisioned user (SCIM 2.0 /Users)",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      connection_id: {
+        label: "Connection ID",
+        help: "SCIM connection that provisioned this user"
+      },
+      provisioning_domain_id: {
+        label: "Provisioning Domain"
+      },
+      user_id: {
+        label: "User",
+        help: "The platform user this projection materialized as"
+      },
+      connection_user_key: {
+        label: "Connection User Key",
+        help: "Derived (connection, user) uniqueness key maintained by @better-auth/scim; do not write directly."
+      },
+      user_name: {
+        label: "User Name",
+        help: "SCIM userName as sent by the IdP"
+      },
+      user_name_key: {
+        label: "User Name Key",
+        help: "Derived case-folded userName uniqueness key maintained by @better-auth/scim; do not write directly."
+      },
+      primary_email: {
+        label: "Primary Email"
+      },
+      work_email_value_index: {
+        label: "Work Email Index",
+        help: "Derived lookup index maintained by @better-auth/scim; do not write directly."
+      },
+      email_value_index: {
+        label: "Email Index",
+        help: "Derived lookup index maintained by @better-auth/scim; do not write directly."
+      },
+      display_name: {
+        label: "Display Name"
+      },
+      formatted_name: {
+        label: "Formatted Name"
+      },
+      given_name: {
+        label: "Given Name"
+      },
+      family_name: {
+        label: "Family Name"
+      },
+      serialized_emails: {
+        label: "Emails (serialized)",
+        help: "Canonical serialized SCIM emails list maintained by @better-auth/scim; do not write directly."
+      },
+      serialized_attributes: {
+        label: "Attributes (serialized)",
+        help: "Canonical serialized SCIM attributes maintained by @better-auth/scim; do not write directly."
+      },
+      external_id: {
+        label: "External ID",
+        help: "IdP-assigned externalId, when the IdP sends one"
+      },
+      external_id_key: {
+        label: "External ID Key",
+        help: "Derived externalId uniqueness key maintained by @better-auth/scim; do not write directly."
+      },
+      active: {
+        label: "Active",
+        help: "SCIM active flag — false means the IdP deactivated this user"
+      },
+      order_key: {
+        label: "Order Key",
+        help: "Derived stable-pagination key maintained by @better-auth/scim; do not write directly."
+      },
+      created_at: {
+        label: "Created At"
+      },
+      updated_at: {
+        label: "Updated At"
+      }
+    },
+    _views: {
+      all: {
+        label: "All"
+      }
+    }
+  },
   sys_notification: {
     label: "通知",
     pluralLabel: "通知",
