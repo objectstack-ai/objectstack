@@ -595,6 +595,23 @@ export class FileSystemRepository implements MetadataRepository {
       usePolling: true,
       interval: 1000,
       binaryInterval: 2000,
+      // Declared explicitly, not inherited. chokidar's own default-correction
+      // (`if (opts.atomic === undefined) opts.atomic = !opts.usePolling`) can
+      // only fire when the caller omits `atomic`, but its defaults literal
+      // already assigns `atomic: true` *before* the caller's options are
+      // spread in — so leaving `atomic` unset here does not mean "off under
+      // polling" the way the correction's own comment claims, it silently
+      // resolves to `true` regardless of `usePolling`. That has been this
+      // repository's actual runtime behaviour all along (verified by reading
+      // back the resolved option from a real watcher instance, #12696): every
+      // `unlink` gets chokidar's 100ms editor-atomic-write deferral, and
+      // `DOT_RE` (vim swap files, `~`, sublime tmp) is folded into
+      // `_isIgnored` on top of this repository's own `isIgnoredWatchPath`
+      // (#7150). `atomic: true` here keeps that behaviour byte-for-byte —
+      // this is a declaration, not a change. Flipping it to `false` would
+      // remove both behaviours from a live delivery path and needs its own
+      // reverse verification; see #12696 for the analysis.
+      atomic: true,
     });
     w.on('add', (p) => void this.handleFsChange(p, 'add'));
     w.on('change', (p) => void this.handleFsChange(p, 'change'));
