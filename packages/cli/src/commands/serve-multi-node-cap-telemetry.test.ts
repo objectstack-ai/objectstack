@@ -150,8 +150,16 @@ describe('⚠️ the surface never claims observed membership', () => {
    * reading into a false one while every other test here stayed green, because
    * the numbers would not change at all. Only the words would.
    */
+  //
+  // ⚠️ The segment anchors are `[^a-z0-9]`, NOT `\b`. This regex was first
+  // written with `\b` and the vacuity proof at the bottom caught it
+  // immediately: `_` is a WORD character, so `\bactive\b` does not match
+  // inside `cluster_active_nodes` — the exact rename this guard exists to
+  // reject would have sailed through while all three sweeps below reported
+  // green. Metric names are snake_case, so the separator has to be treated as
+  // a boundary explicitly.
   const MEMBERSHIP_CLAIMS =
-    /\b(running|active|live|alive|online|healthy|current|observed|actual|joined|members?|membership|peers?|connected|up)\b/i;
+    /(?:^|[^a-z0-9])(?:running|active|live|alive|online|healthy|current|observed|actual|joined|members?|membership|peers?|connected|up)(?:[^a-z0-9]|$)/i;
 
   const ALL_SAMPLES = Object.values(VERDICTS).flatMap((v) => [
     ...describeMultiNodeCapTelemetry(v, 5),
@@ -202,6 +210,7 @@ describe('⚠️ the surface never claims observed membership', () => {
     // three tests above green over exactly the rename they exist to catch.
     expect('cluster_active_nodes').toMatch(MEMBERSHIP_CLAIMS);
     expect('cluster_nodes_running').toMatch(MEMBERSHIP_CLAIMS);
+    expect('cluster_live_members').toMatch(MEMBERSHIP_CLAIMS);
     expect('members').toMatch(MEMBERSHIP_CLAIMS);
     // ...and does not reject the honest ones.
     expect('cluster_declared_nodes').not.toMatch(MEMBERSHIP_CLAIMS);

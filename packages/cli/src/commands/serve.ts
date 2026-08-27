@@ -101,7 +101,7 @@ import dotenvFlow from 'dotenv-flow';
 // `@objectstack/observability` for `OBSERVABILITY_METRICS_SERVICE`. So loading
 // this command already requires the package to resolve; the dynamic form there
 // is about the exporter CLASSES, not about reachability.
-import { SEMCONV, OBSERVABILITY_METRICS_SERVICE } from '@objectstack/observability';
+import { SEMCONV, OBSERVABILITY_METRICS_SERVICE, type MetricsRegistry } from '@objectstack/observability';
 
 // ---------------------------------------------------------------------------
 // Observability bootstrap for `objectstack serve`
@@ -5822,22 +5822,29 @@ export function describeMultiNodeCapTelemetry(
  * kernel — not through the block `serve` built itself — is what lets a host
  * that mounts its OWN `ObservabilityServicePlugin` receive these too.
  */
-function emitMultiNodeCapTelemetry(kernel: any, verdict: MultiNodeGateVerdict): void {
-  let metrics: any;
+function emitMultiNodeCapTelemetry(
+  kernel: { getService?: <T>(name: string) => T } | undefined,
+  verdict: MultiNodeGateVerdict,
+): void {
+  // Typed with the slot's contract, never erased to `any` (#4127/#4251,
+  // `check:slot-lookup`): the erasure would also have switched off the argument
+  // check the two calls below depend on — see their note.
+  let metrics: MetricsRegistry | undefined;
   try {
-    metrics = kernel?.getService?.(OBSERVABILITY_METRICS_SERVICE);
+    metrics = kernel?.getService?.<MetricsRegistry>(OBSERVABILITY_METRICS_SERVICE);
   } catch {
     return; // no observability backend configured — boot warning stands alone
   }
   if (!metrics) return;
   try {
     for (const sample of describeMultiNodeCapTelemetry(verdict, Number(process.env.OS_CLUSTER_REPLICAS))) {
-      // The two signatures differ in argument ORDER (`MetricsRegistry` in
-      // @objectstack/observability): counter(name, labels, value) vs
-      // gauge(name, value, labels). Swapping them type-checks under an `any`
-      // registry and emits garbage, so they are written out separately.
-      if (sample.kind === 'counter') metrics.counter?.(sample.name, sample.labels, sample.value);
-      else metrics.gauge?.(sample.name, sample.value, sample.labels);
+      // The two signatures differ in argument ORDER (`MetricsRegistry`):
+      // counter(name, labels, value) vs gauge(name, value, labels). Written out
+      // separately so the swap is visible — and, because the lookup above is
+      // typed, a swap is now a compile error rather than a green build emitting
+      // a label map where a number belongs.
+      if (sample.kind === 'counter') metrics.counter(sample.name, sample.labels, sample.value);
+      else metrics.gauge(sample.name, sample.value, sample.labels);
     }
   } catch {
     // Per the metrics contract: never throw from a call site.
