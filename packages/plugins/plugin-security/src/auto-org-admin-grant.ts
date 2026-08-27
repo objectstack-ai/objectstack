@@ -52,14 +52,32 @@ const SYSTEM_CTX = { isSystem: true } as const;
  * there instead. Deliberate blanket visibility remains available through
  * `admin_full_access` or an explicitly authored set; it just stops being a side
  * effect of a better-auth membership role.
+ *
+ * [#12699] `suppressUnbounded` is the deployment's own veto on the walled
+ * branch (`OrgScopingEntitlement.suppressUnboundedOrgAdminGrant`): D4's "Layer
+ * 0 bounds it" rationale stops holding on a deployment that carves
+ * platform-global objects OUT of the wall, so such a deployment declares that
+ * arming a walled posture must NOT auto-grant the unbounded superbits — the
+ * de-VAMA'd variant is granted on walled postures too. Fail closed: `false`/
+ * absent keeps today's posture-keyed behaviour exactly.
  */
-export function orgAdminSetNameForPosture(posture: TenancyPosture): string {
-  return postureEnforcesWall(posture) ? ORGANIZATION_ADMIN : ORGANIZATION_ADMIN_NO_BYPASS;
+export function orgAdminSetNameForPosture(
+  posture: TenancyPosture,
+  suppressUnbounded = false,
+): string {
+  return postureEnforcesWall(posture) && !suppressUnbounded
+    ? ORGANIZATION_ADMIN
+    : ORGANIZATION_ADMIN_NO_BYPASS;
 }
 
-/** The variant NOT granted under `posture` — reconciled away so a posture change converges. */
-function supersededOrgAdminSetName(posture: TenancyPosture): string {
-  return postureEnforcesWall(posture) ? ORGANIZATION_ADMIN_NO_BYPASS : ORGANIZATION_ADMIN;
+/**
+ * The variant NOT granted under `posture` — reconciled away so a posture (or
+ * [#12699] suppression) change converges on exactly one org-admin grant.
+ */
+function supersededOrgAdminSetName(posture: TenancyPosture, suppressUnbounded = false): string {
+  return orgAdminSetNameForPosture(posture, suppressUnbounded) === ORGANIZATION_ADMIN
+    ? ORGANIZATION_ADMIN_NO_BYPASS
+    : ORGANIZATION_ADMIN;
 }
 
 interface MaybeLogger {
@@ -259,6 +277,12 @@ export async function reconcileOrgAdminGrant(
      * did this" (ADR-0118 D1).
      */
     attributedUserId?: string;
+    /**
+     * [#12699] The deployment's `OrgScopingEntitlement.suppressUnboundedOrgAdminGrant`
+     * declaration, threaded by the caller (SecurityPlugin reads it live off the
+     * `org-scoping` service). Default `false` — today's behaviour exactly.
+     */
+    suppressUnboundedOrgAdminGrant?: boolean;
   } = {},
 ): Promise<{
   action: 'granted' | 'revoked' | 'noop' | 'skipped';
@@ -276,8 +300,9 @@ export async function reconcileOrgAdminGrant(
   // `single` (the wall-less, conservative choice) when a caller does not supply
   // one: an unknown posture must not hand out unbounded superuser bits.
   const posture: TenancyPosture = options.posture ?? 'single';
-  const grantSetName = orgAdminSetNameForPosture(posture);
-  const supersededSetName = supersededOrgAdminSetName(posture);
+  const suppressUnbounded = options.suppressUnboundedOrgAdminGrant === true;
+  const grantSetName = orgAdminSetNameForPosture(posture, suppressUnbounded);
+  const supersededSetName = supersededOrgAdminSetName(posture, suppressUnbounded);
 
   const permSetId = await resolvePermissionSetId(ql, grantSetName, logger);
   if (!permSetId) {
@@ -414,15 +439,26 @@ export async function reconcileOrgAdminGrant(
  */
 export async function backfillOrgAdminGrants(
   ql: any,
-  options: { logger?: MaybeLogger; limit?: number; posture?: TenancyPosture } = {},
+  options: {
+    logger?: MaybeLogger;
+    limit?: number;
+    posture?: TenancyPosture;
+    /** [#12699] See {@link reconcileOrgAdminGrant}'s option of the same name. */
+    suppressUnboundedOrgAdminGrant?: boolean;
+  } = {},
 ): Promise<{ scanned: number; granted: number; revoked: number; skipped: number }> {
   const logger = options.logger;
   const limit = options.limit ?? 5000;
   const posture: TenancyPosture = options.posture ?? 'single';
+  const suppressUnbounded = options.suppressUnboundedOrgAdminGrant === true;
   const summary = { scanned: 0, granted: 0, revoked: 0, skipped: 0 };
   if (!ql || typeof ql.find !== 'function') return summary;
 
-  const permSetId = await resolvePermissionSetId(ql, orgAdminSetNameForPosture(posture), logger);
+  const permSetId = await resolvePermissionSetId(
+    ql,
+    orgAdminSetNameForPosture(posture, suppressUnbounded),
+    logger,
+  );
   if (!permSetId) {
     logger?.debug?.('[security] org-admin backfill skipped — permission set missing');
     return summary;
@@ -432,7 +468,7 @@ export async function backfillOrgAdminGrants(
   // exactly the rows whose bits must stop applying.
   const supersededId = await resolvePermissionSetId(
     ql,
-    supersededOrgAdminSetName(posture),
+    supersededOrgAdminSetName(posture, suppressUnbounded),
     logger,
   );
 
@@ -448,7 +484,11 @@ export async function backfillOrgAdminGrants(
     if (seen.has(key)) continue;
     seen.add(key);
     summary.scanned += 1;
-    const res = await reconcileOrgAdminGrant(ql, userId, orgId, { logger, posture });
+    const res = await reconcileOrgAdminGrant(ql, userId, orgId, {
+      logger,
+      posture,
+      suppressUnboundedOrgAdminGrant: suppressUnbounded,
+    });
     if (res.action === 'granted') summary.granted += 1;
     else if (res.action === 'revoked') summary.revoked += 1;
     else if (res.action === 'skipped') summary.skipped += 1;
@@ -471,7 +511,11 @@ export async function backfillOrgAdminGrants(
     if (!userId || !orgId) continue;
     const key = `${userId}|${orgId}`;
     if (seen.has(key)) continue;
-    const res = await reconcileOrgAdminGrant(ql, userId, orgId, { logger, posture });
+    const res = await reconcileOrgAdminGrant(ql, userId, orgId, {
+      logger,
+      posture,
+      suppressUnboundedOrgAdminGrant: suppressUnbounded,
+    });
     if (res.action === 'revoked') summary.revoked += 1;
   }
 
