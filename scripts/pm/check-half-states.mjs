@@ -5363,10 +5363,24 @@ export function isTriageRulingComment(body) {
  *
  * That narrowing is right for H20/H27, whose whole question is about the branch
  * a claim names. It would be wrong here and would silently empty this row's
- * population: the measured claim census carries 「Claim: PM loop round R6」 and
- * 「Claim pointer: folded into the 11678 family dispatch」 — well-formed claims
- * naming no branch of their own. What this row needs from a claim is only WHEN
- * it was written.
+ * population: the measured claim census carries 「Claim: PM loop round R6」 — a
+ * well-formed claim naming no branch of its own — and the shape is still live.
+ * Re-measured 2026-08-27 over 161 pm-tracked cards and every comment on them:
+ * of 19 canonical claim comments, 3 name no protocol-shaped branch, and on 3
+ * cards this row reads a claim `governingClaim` cannot (「Claim: PM loop round 1
+ * (QA wave #9296)」 is one). What this row needs from a claim is only WHEN it
+ * was written.
+ *
+ * ⛔ A second specimen used to stand beside the first — 「Claim pointer: folded
+ * into the 11678 family dispatch」, offered as another well-formed branchless
+ * claim. It is not one, and it is not in this row's population at all:
+ * `CLAIM_COMMENT_MARKER` wants the colon directly after the word, and here the
+ * word is followed by ` pointer`, so the marker has never matched it. Under the
+ * same 2026-08-11 ruling that governs the dash spellings it is a MALFORMED
+ * claim — and unlike those it is invisible to H34 as well, which reports only a
+ * punctuation separator (that gap was measured and deliberately left open; see
+ * H34's header). The paragraph's conclusion is unaffected: it rests on the
+ * first specimen, which is real, and on the live count above.
  *
  * ## ⚠️ The inherited blind spot, and what it is NOT (#12090)
  *
@@ -5531,6 +5545,46 @@ export function h33ClaimPredatesRuling(issue, commentRows) {
 //     content (a session reference, the word "seat", or a protocol-shaped
 //     branch anywhere in the comment) is silent. 「Claim - see above」 in prose
 //     is not evidence that a claim was attempted.
+//
+// ## The WORD position — measured 2026-08-27, and NOT widened
+//
+// A filed finding asked whether the separator class should cover a WORD where
+// the punctuation goes, on the strength of 「Claim pointer: folded into the
+// 11678 family dispatch」 — a string `latestClaimComment`'s header cited as a
+// claim the marker reads, which it never was. Measured before answering,
+// because the header above says this row's strictness was paid for once and
+// a widening is exactly what it was paid to prevent.
+//
+// The census: 161 pm-tracked cards — 13 open `pm:dispatched`, 76 open
+// `pm:queue`, 72 `pm:dispatched` closed since 2026-08-26 — and all 343 comments
+// on them, classified by what follows a line-opening claim word. 19 canonical
+// `Claim:`; 2 with a declared punctuation separator (both EM DASH, both on
+// threads with no canonical claim — this row's live population, and it fires);
+// and ZERO with a distinct word in the separator position. The 「Claim pointer:」
+// specimen occurs nowhere on the board: its only live instance is the finding
+// card quoting this file quoting it.
+//
+// So the widening buys nothing measurable, and it would spend the conservative
+// half's whole margin to buy it. `Claim` followed by a word is ordinary English
+// — 「Claiming this card」, 「Claim comments are …」 — where `Claim` followed by
+// an em dash is not; `looksLikeClaimContent` would carry that load for a
+// population of zero. RECORDED, NOT WIDENED.
+//
+// The same census found three OTHER shapes invisible to both markers, recorded
+// so a later reader can reopen the question on numbers instead of re-measuring
+// — and each is already harmless for a DIFFERENT reason, which is the actual
+// finding:
+//
+//   • 2 「Claim (dev): …」 openings. Both threads ALSO carry a canonical claim,
+//     so the first suppression above already covers them: they are a SECOND
+//     claim comment on a machine-visible card, never a substitute for one.
+//   • 2 inflected openings (「Claiming this card. session …」) and 1 decorated
+//     with backticks (「`Claim:` devx@objectstack seat …」). All three sit on
+//     UNASSIGNED cards, which this row and H2 both decline to judge — the
+//     residual already declared above.
+//
+// Three different shapes, three different reasons, none of them this one. Each
+// is its own question with its own noise floor if it ever acquires a population.
 // ---------------------------------------------------------------------------
 
 /**
