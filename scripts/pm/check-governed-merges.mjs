@@ -416,7 +416,10 @@
  * verbatim and extend the audit to read the enqueue actor from the issue
  * timeline (`added_to_merge_queue`) — never remap silently. A mainline commit
  * whose subject names NO PR is listed as its own loud entry (a direct push to
- * `main` is more anomalous than any PR merge, not less).
+ * `main` is more anomalous than any PR merge, not less). Such an entry has no
+ * pull request to query, so its attribution column reads NOT LOOKED UP, never
+ * "every channel failed" — the three-way column at `attributionCell` (#12645)
+ * carries that distinction and the reason it is not cosmetic.
  *
  * ### The attribution channel chain (#9619, measured on the PM container)
  *
@@ -1431,6 +1434,58 @@ export function summariseAttributionFailures(entries) {
 // ── rendering ───────────────────────────────────────────────────────────────
 
 /**
+ * The attribution column, THREE ways (#12645) — because "nothing was found"
+ * and "nothing was looked at" are different facts, and this report keeps them
+ * apart everywhere else (#4690: an unaudited repo is not a clean repo, a
+ * window whose boundary is unproven is not an empty window).
+ *
+ * The column used to be picked on `entry.attribution` alone, so an entry with
+ * no attribution rendered "every channel failed; see the attribution note
+ * below" — and the ONE entry shape that can reach that branch without a single
+ * channel having been tried is the loudest line the sweep prints: a mainline
+ * commit whose subject names no PR (`main()` skips it: `if (entry.pr == null)
+ * continue` — there is no pull request to query). Measured 2026-08-27 on a
+ * constructed sweep, that line claimed every channel failed four lines under a
+ * printed `0 API lookup(s)`, and referred the reader to a note
+ * `summariseAttributionFailures` never produces for it (that function groups
+ * only entries carrying `attributionError`, and this one carries none). A
+ * false claim on the most anomalous entry in the list is exactly the line a
+ * reader learns to discount.
+ *
+ *   1. resolved       — a channel answered; it names which one.
+ *   2. UNAVAILABLE    — `attributionError` is present: channels WERE tried and
+ *                       all failed. ⚠️ This is the only branch that may point
+ *                       at the attribution note, because it is the only one
+ *                       `summariseAttributionFailures` writes a line for.
+ *   3. NOT LOOKED UP  — no reading was attempted. The reason is READ off the
+ *                       entry, never assumed: absent PR number is the case
+ *                       `main()` produces, and an entry that has a PR number
+ *                       yet reached here gets the honest residual instead of
+ *                       being told it has no PR number — asserting an untried
+ *                       channel and asserting an absent PR number are the same
+ *                       defect wearing different words.
+ *
+ * ⛔ Report-only. This changes no judgment: `attributionFailed` (and with it
+ * the INCOMPLETE exit) is still set only by a real channel failure, and a
+ * PR-less entry is still its own loud entry — a direct push to `main` is more
+ * anomalous than any PR merge, not less. Pure, so `--self-test` asserts on the
+ * words.
+ */
+export function attributionCell(entry) {
+  if (entry.attribution) {
+    return (
+      `merged_by ${entry.attribution.mergedBy ?? '(none)'} @ ${entry.attribution.mergedAt ?? '(unknown)'} ` +
+      `(via ${entry.attributionChannel ?? 'unknown channel'})`
+    );
+  }
+  if (entry.attributionError) return `merged_by UNAVAILABLE — every channel failed; see the attribution note below`;
+  if (entry.pr == null) {
+    return `merged_by NOT LOOKED UP — no PR number in the subject, so there is no pull request to query (not a channel failure)`;
+  }
+  return `merged_by NOT LOOKED UP — no attribution reading was recorded for this entry (not a channel failure)`;
+}
+
+/**
  * The window, in the words the operator reads — pure, and the half of route A
  * the #12633 ruling names explicitly: the back-off has to be SAID, or a
  * re-listed boundary entry reads as noise instead of as re-recognition.
@@ -1517,9 +1572,7 @@ export function renderReport({ window, repos, scanned, entries, lookups }) {
 
   const lines = entries.map((e) => {
     const surfaces = e.surfaces.map((s) => `${s.glob} ×${s.files.length}`).join(', ');
-    const who = e.attribution
-      ? `merged_by ${e.attribution.mergedBy ?? '(none)'} @ ${e.attribution.mergedAt ?? '(unknown)'} (via ${e.attributionChannel ?? 'unknown channel'})`
-      : `merged_by UNAVAILABLE — every channel failed; see the attribution note below`;
+    const who = attributionCell(e);
     const prName = e.pr != null ? `PR #${e.pr}` : '⚠️  NO PR NUMBER IN SUBJECT — direct push to main? investigate';
     const files = e.surfaces.flatMap((s) => s.files.slice(0, 6)).slice(0, 8);
     return `  • ${e.repoSlug ? `${e.repoSlug} ` : ''}${prName} — ${e.subject}\n      commit ${e.sha.slice(0, 9)} @ ${e.date}; ${who}\n      surfaces: ${surfaces}\n${files.map((f) => `        - ${f}`).join('\n')}`;
@@ -2196,6 +2249,41 @@ async function selfTest() {
   assert('a-resolved-column-carries-the-account-is-not-a-principal-caveat', resolvedReport.includes('names an ACCOUNT, not a principal'), resolvedReport);
   assert('the-caveat-is-absent-when-nothing-resolved', !unresolvedReport.includes('names an ACCOUNT, not a principal'));
 
+  // ── the attribution column's THIRD case (#12645) ──────────────────────────
+  // The two fixtures above are cases 1 and 2; the PR-less mainline entry —
+  // the loudest line the sweep prints — is case 3, and it used to render
+  // case 2's words with zero channels tried. All three are pinned as a set,
+  // because the defect was a two-way split covering three facts.
+  const notLookedUp = renderReport({ window: dateWindowFor('2026-08-13T00:00:00Z'), repos: allAudited, scanned: 3, entries: [noPr], lookups: 0 });
+  assert('a-pr-less-entry-is-NOT-LOOKED-UP-not-a-failed-lookup', notLookedUp.includes('merged_by NOT LOOKED UP') && !notLookedUp.includes('every channel failed'), notLookedUp);
+  assert('and-it-says-WHY-nothing-was-queried', notLookedUp.includes('no PR number in the subject') && notLookedUp.includes('not a channel failure'), notLookedUp);
+  // The dangling pointer half of the defect: it named a note that this very
+  // report never prints for it, because the note groups attributionError only.
+  assert('a-not-looked-up-entry-points-at-no-attribution-note', !notLookedUp.includes('attribution note below'), notLookedUp);
+  assert('and-the-report-prints-none-for-it', summariseAttributionFailures([noPr]).length === 0, JSON.stringify(summariseAttributionFailures([noPr])));
+  assert('the-note-pointer-belongs-to-the-every-channel-failed-case-alone', unresolvedReport.includes('attribution note below'), unresolvedReport);
+  // Report-only: the loud entry stays loud, and a case-3 column is still not
+  // a resolved one (no ACCOUNT-not-a-principal caveat, nothing to prompt on).
+  assert('the-third-case-does-not-soften-the-direct-push-warning', notLookedUp.includes('NO PR NUMBER IN SUBJECT — direct push to main? investigate'), notLookedUp);
+  assert('and-carries-no-resolved-column-caveat', !notLookedUp.includes('names an ACCOUNT, not a principal'));
+  // The cell function itself, all three classes plus the residual.
+  assert('cell-case-1-resolved-names-its-channel',
+    attributionCell({ attribution: { mergedBy: 'os-steve', mergedAt: '2026-08-18T09:00:00Z' }, attributionChannel: 'anonymous', pr: 5188 })
+      === 'merged_by os-steve @ 2026-08-18T09:00:00Z (via anonymous)');
+  assert('cell-case-2-every-channel-failed-needs-an-attributionError',
+    attributionCell({ pr: 101, attributionError: 'anonymous REST: HTTP 403' }).startsWith('merged_by UNAVAILABLE — every channel failed'));
+  assert('cell-case-3-no-pr-number-is-nothing-to-query', attributionCell({ pr: null }).startsWith('merged_by NOT LOOKED UP — no PR number in the subject'));
+  // ⛔ An entry that HAS a PR number must never be told it has none: asserting
+  // an untried channel and asserting an absent PR number are the same defect.
+  const residual = attributionCell({ pr: 4242 });
+  assert('cell-residual-never-invents-a-missing-pr-number', residual.startsWith('merged_by NOT LOOKED UP') && !residual.includes('no PR number'), residual);
+  assert('and-the-residual-is-not-a-channel-failure-either', !residual.includes('every channel failed') && !residual.includes('attribution note below'), residual);
+  // An attributionError never outranks a real reading, and a resolved entry
+  // is never demoted by a stale PR-less shape.
+  assert('a-resolved-reading-outranks-a-stale-error',
+    attributionCell({ attribution: { mergedBy: 'x', mergedAt: 'y' }, attributionChannel: 'env-token', pr: null, attributionError: 'HTTP 401' })
+      === 'merged_by x @ y (via env-token)');
+
   // ── the --test pre-arm predicate (#9550) ──────────────────────────────────
   const governedCase = testVerdict(['AGENTS.md']);
   assert('--test-on-the-#9527-file-list-answers-GOVERNED', governedCase.governed === true && governedCase.hitPaths.join() === 'AGENTS.md', JSON.stringify(governedCase));
@@ -2505,7 +2593,7 @@ async function selfTest() {
     for (const failure of failures) console.error(`  • ${failure}`);
     process.exit(1);
   }
-  console.log(`✓ check-governed-merges --self-test: ${checked} assertions (the unified governed predicate + near misses, subject→PR spellings, window parsing, the #12633 landing window — the QS-7 regression pin in both directions, the topological close beyond the budget, the unproven-boundary EDGE, the listed-or-INCOMPLETE invariant over every fixture, the escalating floors, per-repo --since-ref resolution and its named fallback, and the window words — the replay fixtures, the four-repo resolution incl. absent/wrong-origin/relocated checkouts, the attribution channel chain + its proxy-transport re-arm plan and its one named fallback line, the --test pre-arm predicate, the generated-artifact provenance exception — the four ruled cases against the generator's own splice, byte-exactness, fail-closed inputs, the untouched mixed-diff rule, single-file-not-a-class, the #11084 generator co-edit fence in both directions, and its render words — the #11705 generator-owned rows inside skills/** (a genuine generated file passes, the same path hand-edited does not, a path no generator declares is hand-authored content, per-row fences, and the enumeration read from the real generator), the exit table, and the report wording pins).\n  ${liveNote}`);
+  console.log(`✓ check-governed-merges --self-test: ${checked} assertions (the unified governed predicate + near misses, subject→PR spellings, window parsing, the #12633 landing window — the QS-7 regression pin in both directions, the topological close beyond the budget, the unproven-boundary EDGE, the listed-or-INCOMPLETE invariant over every fixture, the escalating floors, per-repo --since-ref resolution and its named fallback, and the window words — the replay fixtures, the four-repo resolution incl. absent/wrong-origin/relocated checkouts, the attribution channel chain + its proxy-transport re-arm plan and its one named fallback line, the three-way attribution column (resolved · every-channel-failed · NOT LOOKED UP, and the note pointer that belongs to the middle one alone), the --test pre-arm predicate, the generated-artifact provenance exception — the four ruled cases against the generator's own splice, byte-exactness, fail-closed inputs, the untouched mixed-diff rule, single-file-not-a-class, the #11084 generator co-edit fence in both directions, and its render words — the #11705 generator-owned rows inside skills/** (a genuine generated file passes, the same path hand-edited does not, a path no generator declares is hand-authored content, per-row fences, and the enumeration read from the real generator), the exit table, and the report wording pins).\n  ${liveNote}`);
 }
 
 /** The exit code `--test` would return for a path list — pinned without spawning. */
