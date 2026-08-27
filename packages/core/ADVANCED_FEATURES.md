@@ -346,7 +346,6 @@ Extended `Plugin` interface with:
 - `signature?: string` - Plugin signature for verification
 - `healthCheck?(): Promise<PluginHealthStatus>` - Health check function
 - `startupTimeout?: number` - Startup timeout in milliseconds
-- `hotReloadable?: boolean` - Whether plugin supports hot reload
 
 ## Examples
 

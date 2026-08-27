@@ -57,7 +57,7 @@ code and npm dependencies**, not just metadata. The repository already has the
   schema), and a `src/index.ts` with a lifecycle entry point.
 - The microkernel can already *load* code plugins: `packages/core/src/
   plugin-loader.ts` (dependency ordering, health checks, `signature` field,
-  `startupTimeout`, `hotReloadable`), `packages/core/src/types.ts` (`Plugin`
+  `startupTimeout`), `packages/core/src/types.ts` (`Plugin`
   with `init/start/destroy` + `PluginContext`),
   `packages/core/src/security/plugin-permission-enforcer.ts`
   (capability-based service/hook/file/network enforcement),

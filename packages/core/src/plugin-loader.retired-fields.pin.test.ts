@@ -48,6 +48,19 @@ describe('PluginMetadata retired fields (ADR-0049, ADR-0025 §3.7)', () => {
         expect(declared.name).toBe('retired-configschema-pin');
     });
 
+    it('compile-time: a declared hotReloadable no longer type-checks (#12587)', () => {
+        const declared: PluginMetadata = {
+            name: 'retired-hotreloadable-pin',
+            version: '1.0.0',
+            // @ts-expect-error — `hotReloadable` was retired under ADR-0049
+            // (#12587): nothing ever read it. Reload participation is governed
+            // solely by `HotReloadManager.registerReloadConfig`.
+            hotReloadable: false,
+            async init() {},
+        };
+        expect(declared.name).toBe('retired-hotreloadable-pin');
+    });
+
     it('positive control: live sibling fields still type-check with no directive', () => {
         const control: PluginMetadata = {
             name: 'live-sibling-control',

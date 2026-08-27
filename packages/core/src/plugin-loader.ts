@@ -56,9 +56,12 @@ export interface PluginMetadata extends Plugin {
     
     /** Startup timeout in milliseconds (default: 30000) */
     startupTimeout?: number;
-    
-    /** Whether plugin supports hot reload */
-    hotReloadable?: boolean;
+
+    // `hotReloadable` was retired on 2026-08-27 (#12587, same ADR-0049 batch):
+    // declared and documented with zero reads — `HotReloadManager.reloadPlugin`
+    // gates only on its own registered reload configs, so `hotReloadable:
+    // false` was hot-reloaded identically to `true`. Reload participation is
+    // governed solely by `HotReloadManager.registerReloadConfig`.
 }
 
 /**
