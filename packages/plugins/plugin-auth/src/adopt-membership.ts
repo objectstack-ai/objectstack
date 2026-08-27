@@ -236,20 +236,25 @@ export async function adoptExistingMembership(
     adopted = updated ?? { ...existing, role: decision.role };
   }
 
-  const log = options.logger?.info ?? ((msg: string, meta?: any) => console.info(msg, meta));
-  log(
+  // ⛔ Call through the PROPERTY, never an extracted reference: `const log =
+  // options.logger?.info ?? …` detaches the method, so `log(…)` runs with
+  // `this === undefined` and a class-based host logger (`@objectstack/core`'s
+  // `ObjectLogger`, whose `info` reaches for `this.write`) throws instead of
+  // reporting. Keep the `console.info` default AND the receiver.
+  const line =
     `[membership] adopted the existing sys_member row instead of inserting a second one ` +
-      `(${decision.verdict}) — the (organization_id, user_id) pair is unique by declaration [#7725]`,
-    {
-      memberId: existing.id,
-      organizationId,
-      userId,
-      existingRole: existing.role,
-      incomingRole: payload.role,
-      resultingRole: adopted.role,
-      verdict: decision.verdict,
-    },
-  );
+    `(${decision.verdict}) — the (organization_id, user_id) pair is unique by declaration [#7725]`;
+  const meta = {
+    memberId: existing.id,
+    organizationId,
+    userId,
+    existingRole: existing.role,
+    incomingRole: payload.role,
+    resultingRole: adopted.role,
+    verdict: decision.verdict,
+  };
+  if (options.logger?.info) options.logger.info(line, meta);
+  else console.info(line, meta);
 
   return adopted;
 }

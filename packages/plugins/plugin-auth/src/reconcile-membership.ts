@@ -158,8 +158,14 @@ function refuseInvalidPolicy(deps: ReconcileMembershipDeps, meta: Record<string,
   const message =
     `[membership] refusing to bind: membership policy ${described} is not a recognized value ` +
     `— expected one of: ${MEMBERSHIP_POLICIES.join(', ')}`;
-  const log = deps.logger?.error ?? deps.logger?.warn;
-  log?.(message, { ...meta, policy: described, expected: MEMBERSHIP_POLICIES });
+  // ⛔ Call through the PROPERTY, never an extracted reference: `const log =
+  // a.error ?? a.warn` detaches the method, so `log(…)` runs with
+  // `this === undefined` and a class-based host logger (`@objectstack/core`'s
+  // `ObjectLogger`) throws instead of reporting. Keep the fallback AND the
+  // receiver.
+  const payload = { ...meta, policy: described, expected: MEMBERSHIP_POLICIES };
+  if (deps.logger?.error) deps.logger.error(message, payload);
+  else deps.logger?.warn?.(message, payload);
   return message;
 }
 

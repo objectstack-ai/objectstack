@@ -3602,12 +3602,29 @@ export class AuthManager {
    */
   private static readonly PENDING_INVITATION_PROBE_MAX_PAGES = 200;
 
-  /** `error` when the host logger carries it, else the guaranteed `warn` channel (#9754). */
+  /**
+   * `error` when the host logger carries it, else the guaranteed `warn` channel (#9754).
+   *
+   * ⛔ Call through the PROPERTY — never through an extracted reference.
+   * `(logger?.error ?? logger?.warn)?.(…)` evaluates to the *function* and then
+   * invokes it, so the call runs with `this === undefined`. A plain-closure
+   * logger survives that; `@objectstack/core`'s class-based `ObjectLogger` does
+   * not — its `error` reaches for `this.writeErrorLike` (and `warn`/`info` for
+   * `this.write`) and throws `Cannot read properties of undefined`. Measured on
+   * a real composed EE boot: every audience refusal routed through here became
+   * `HTTP 500 null`, because the throw escaped the caller's `catch` when that
+   * handler called this helper a second time — so the operator lost the very
+   * verdict this method exists to report.
+   *
+   * The branch below keeps BOTH halves of the contract: the `error`→`warn`
+   * fallback (#9754) and the receiver.
+   */
   private audienceLogError(message: string, meta?: Record<string, unknown>): void {
     const logger = this.config.logger as
       | { error?: (m: string, meta?: any) => void; warn?: (m: string, meta?: any) => void; info?: (m: string, meta?: any) => void }
       | undefined;
-    (logger?.error ?? logger?.warn)?.(message, meta);
+    if (logger?.error) logger.error(message, meta);
+    else logger?.warn?.(message, meta);
   }
 
   /** OAuth providerIds that are OPERATOR-REGISTERED identity authorities (enterprise `oidcProviders`, incl. the cloud platform IdP). */
