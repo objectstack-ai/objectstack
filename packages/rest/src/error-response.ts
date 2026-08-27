@@ -566,9 +566,44 @@ function withDeclaredUserMessage(
     error: any,
     mapped: { status: number; body: Record<string, unknown> },
 ): { status: number; body: Record<string, unknown> } {
-    const userMessage = declaredUserMessage(error);
+    const userMessage = boundedDeclaredUserMessage(error);
     if (userMessage === undefined) return mapped;
-    return { status: mapped.status, body: { ...mapped.body, userMessage: truncateClientMessage(userMessage) } };
+    return { status: mapped.status, body: { ...mapped.body, userMessage } };
+}
+
+/**
+ * [#12693] The wire VALUE of {@link withDeclaredUserMessage}'s rule: the
+ * sentence a producer marked, with #5423's bound already applied — or
+ * `undefined` when it marked none.
+ *
+ * The rule itself is unchanged and still stated once, in the docblock above:
+ * `declaredUserMessage` (`@objectstack/types`) decides PRESENCE and
+ * {@link truncateClientMessage} decides the BOUND. This is that same pair
+ * lifted out of the body-merging wrapper so a caller that has no body to merge
+ * into can ask it.
+ *
+ * ## Why an export rather than the wrapper
+ *
+ * The record-share family in `rest-server.ts` has two exits that never reach
+ * {@link classifiedRefusalAnswer} — its 500 fault terminal, and its ADR-0111
+ * message-prefix arm — and therefore hold no classification `{ status, body }`
+ * to ride the mark onto. They hold the raw thrown error and build their
+ * envelope by hand. Handing them the wrapper would mean inventing a flat body
+ * for them to merge into and then unpicking it, and open-coding
+ * `declaredUserMessage(error)` at the exits instead would leave #5423's bound
+ * applied at some marks and not others — a per-exit answer to a question this
+ * file already owns, which is the drift {@link classifiedRefusalAnswer}'s own
+ * docblock was written against.
+ *
+ * ⛔ What this does NOT decide is the ENVELOPE, and that stays true for every
+ * future caller: it answers a string, and where that string lands — the flat
+ * body's top level, the nested ADR-0112 `ApiError.userMessage` — is the
+ * caller's dialect decision, exactly as #9232 keeps vocabulary and position
+ * apart.
+ */
+export function boundedDeclaredUserMessage(error: unknown): string | undefined {
+    const userMessage = declaredUserMessage(error);
+    return userMessage === undefined ? undefined : truncateClientMessage(userMessage);
 }
 
 function classifyDataError(error: any, object?: string): { status: number; body: Record<string, unknown> } {

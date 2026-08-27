@@ -206,6 +206,7 @@ import {
     mapDataError,
     sandboxBusinessMessage,
     classifiedRefusalAnswer,
+    boundedDeclaredUserMessage,
     declaredServerFaultAnswer,
     sendThrownError,
     sendDeclaredFault,
@@ -9594,6 +9595,59 @@ export class RestServer {
             res, 501, 'NOT_IMPLEMENTED',
             'Sharing service is not configured on this deployment',
         );
+        /**
+         * [#12693] The `extra` this family's TWO NON-CLASSIFIED exits owe a
+         * producer that marked its refusal: the 500 fault terminal below, and
+         * the ADR-0111 prefix arm inside {@link respondSharingError}.
+         *
+         * Neither reaches {@link classifiedRefusalAnswer} — the 500 terminal
+         * because a declared server fault is deliberately not a refusal
+         * (that function's own docblock rules it back to "the catching route's
+         * own terminal", which is these three arms), the prefix arm because it
+         * runs precisely when the classification answered `undefined`. So
+         * neither holds a `refusal.body` to re-dress, and the one line the
+         * classified arm uses (`refusal.body.userMessage`, #12669) is NOT
+         * reusable here. What is reusable is the RULE, and
+         * {@link boundedDeclaredUserMessage} is that rule asked of the raw
+         * thrown error instead of the classification: `declaredUserMessage`'s
+         * presence answer with #5423's bound applied, one definition, shared
+         * with the `/data` door rather than copied beside it.
+         *
+         * Measured on `15bf9e859` before the repair, one producer per exit
+         * through the real routes on both doors:
+         *
+         * ```text
+         * throw { code: 'SHARE_STORE_DOWN', status: 503, userMessage: '…' }
+         *   share door : 500 SHARES_LIST_FAILED        — no mark
+         *   /data door : 503 SERVICE_UNAVAILABLE       — mark carried
+         * throw Error('NOT_FOUND: no such record …') + userMessage
+         *   share door : 404 NOT_FOUND                 — no mark
+         *   /data door : 500 INTERNAL_ERROR            — mark carried
+         * ```
+         *
+         * ⛔ The mark is the ONLY thing this adds, and the two doors' other
+         * disagreements visible in that measurement stay exactly as they are:
+         * the share family folds a declared 503 into its own 500 terminal, and
+         * it interpolates the caught message where `/data` withholds 5xx prose
+         * unconditionally (#5437). Both are deliberate and argued in
+         * {@link sharingFaultMessage} and the #11683 docblock below; the
+         * `/data` door's status for the prefix arm differs for a third
+         * deliberate reason — the prefix idiom is this service's local
+         * convention and no shared classifier can read it (ADR-0111).
+         *
+         * ⛔ Riding the mark across a FAULT terminal is not a re-opening of
+         * #5437 either, and the reason is `withDeclaredUserMessage`'s, not a
+         * second one: the withheld text is prose the producer never addressed
+         * to the caller, while this field exists only because an author wrote
+         * caller-facing text onto it. A genuine crash carries no mark and its
+         * envelope is byte-identical to before.
+         */
+        const sharingDeclaredExtra = (
+            error: any,
+        ): { userMessage: string } | undefined => {
+            const userMessage = boundedDeclaredUserMessage(error);
+            return userMessage === undefined ? undefined : { userMessage };
+        };
         // [ADR-0111] The service enforces authorization (D1/D4/D5/D7) and
         // signals the verdict via message prefixes, the plugin's established
         // error idiom — this maps them onto HTTP. Returns true when handled.
@@ -9768,9 +9822,14 @@ export class RestServer {
             ];
             for (const [code, status] of map) {
                 if (msg.startsWith(code)) {
+                    // [#12693] …and the producer's own sentence to the caller
+                    // rides this arm too. ⛔ Only the sentence: the PREFIX
+                    // read, the status it decides and the stripping below are
+                    // untouched — see {@link sharingDeclaredExtra}.
                     respondError(
                         res, status, code,
                         msg.replace(new RegExp(`^${code}:\\s*`), ''),
+                        sharingDeclaredExtra(error),
                     );
                     return true;
                 }
@@ -9823,7 +9882,10 @@ export class RestServer {
                     // The 500 arms keep their 500-char cap: an unexpected
                     // fault's message is not a contract, and truncating it
                     // stays a sanitization step — only the position moves.
-                    respondError(res, 500, 'SHARES_LIST_FAILED', sharingFaultMessage(error));
+                    respondError(
+                        res, 500, 'SHARES_LIST_FAILED', sharingFaultMessage(error),
+                        sharingDeclaredExtra(error),
+                    );
                 }
             },
             metadata: { summary: 'List per-record sharing grants', tags: ['sharing'] },
@@ -9857,7 +9919,10 @@ export class RestServer {
                 } catch (error: any) {
                     if (respondSharingError(res, error)) return;
                     logError('[REST] Grant share error:', error);
-                    respondError(res, 500, 'SHARE_GRANT_FAILED', sharingFaultMessage(error));
+                    respondError(
+                        res, 500, 'SHARE_GRANT_FAILED', sharingFaultMessage(error),
+                        sharingDeclaredExtra(error),
+                    );
                 }
             },
             metadata: { summary: 'Grant a per-record share to a principal', tags: ['sharing'] },
@@ -9886,7 +9951,10 @@ export class RestServer {
                 } catch (error: any) {
                     if (respondSharingError(res, error)) return;
                     logError('[REST] Revoke share error:', error);
-                    respondError(res, 500, 'SHARE_REVOKE_FAILED', sharingFaultMessage(error));
+                    respondError(
+                        res, 500, 'SHARE_REVOKE_FAILED', sharingFaultMessage(error),
+                        sharingDeclaredExtra(error),
+                    );
                 }
             },
             metadata: { summary: 'Revoke a per-record share by id', tags: ['sharing'] },
