@@ -77,24 +77,37 @@
  *
  * ## The ablation — predicted, then MEASURED
  *
- * Deleting the repair (the `sharingDeclaredExtra` reads at the four call
- * sites) and re-running this file: **12 of 20 red**, mutation confirmed on
- * disk by anchored counts and blob hash before any verdict was read, restored
- * by `git checkout HEAD -- <absolute path>` and proven by an equal blob hash
- * and an empty `git diff HEAD`.
+ * Deleting the repair (the `sharingDeclaredExtra` argument at its four call
+ * sites) and re-running this file: **16 of 21 red**. Mutation confirmed on
+ * disk before any verdict was read — the anchored count went 4 -> 0 and the
+ * blob hash `0112c6b7` -> `b079cac4` — and restored by
+ * `git checkout HEAD -- <absolute path>`, proven by the blob hash returning to
+ * `0112c6b7` and an empty `git diff HEAD`.
  *
  *   §1  RED (4/4) — the fault terminal loses every mark again, x3 routes
- *   §2  RED (2/2) — all five prefixes lose theirs, x3 routes
+ *   §2  RED (6/6) — all five prefixes lose theirs, x3 routes, and the
+ *                   `startsWith`-not-`includes` row loses the mark its
+ *                   fall-through was supposed to ride
  *   §3  RED (1/2) — the door-to-door comparison IS the reproduction; its
  *                   `/data`-only half needs no share door and stays green
  *   §4a RED (2/2) — ⚠️ the absences alone are satisfied by an unrepaired door,
  *                   which is why each carries a positive control in the same
- *                   body; it is the CONTROL that reds. A §4a that went green
- *                   would be the alarm that its zeroes prove nothing
+ *                   body. Measured: it is the CONTROL that reds, naming itself
+ *                   ("positive control - a MARKED producer must carry its
+ *                   sentence"). A §4a that went GREEN here would have been the
+ *                   alarm that its zeroes prove nothing
  *   §4b GRN (0/3) — as predicted: it pins what the repair must not move
  *   §5  RED (2/2) — no sentence arrives, so no bound can be observed on it
- *   §6  RED (1/2) — the forwarding matrix reds; the envelope-shape half needs
- *                   no mark and stays green
+ *   §6  RED (1/2) — the forwarding matrix reds on the half that DID ship; the
+ *                   envelope-shape half needs no mark and stays green
+ *
+ * ⚠️ Recorded because the prediction was written first and one number in it
+ * was wrong: §2 was predicted "2/2" by counting the section's two `it` shapes
+ * instead of the six cases the table expands to. Every section's DIRECTION was
+ * predicted correctly; the totals above are the measurement, not the guess.
+ *
+ * Every failure names itself: the route, the body it got and the exact string
+ * expected.
  */
 
 import { describe, it, expect, vi } from 'vitest';
