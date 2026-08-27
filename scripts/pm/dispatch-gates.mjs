@@ -7753,6 +7753,67 @@ function selfTest() {
       missingBaseErr = err;
     }
     t('an unresolvable base ref is refused on its own terms', !!missingBaseErr && /does not resolve/.test(missingBaseErr.message));
+
+    // ── A leftover in-tree test fixture must not reach the change set (#12632)
+    //
+    // The derivation reads untracked files on purpose, so `.gitignore` is the
+    // only thing standing between a killed test run's leftover fixture and
+    // every seat's gate list. `packages/cli` creates four fixtures inside the
+    // tracked tree; the one that used to root in `packages/cli/test/` needed an
+    // ignore entry written for it alone, and now roots at `packages/cli/tmp/`
+    // with the other three, under the repo-wide `tmp/` rule.
+    //
+    // The CONTROL is the load-bearing half and it runs the SAME derivation on
+    // the SAME repo: asserting only that the covered path is absent would pass
+    // just as happily against a `.gitignore` that ignores the whole tree, or
+    // against a fixture that never planted anything. So an UNCOVERED in-tree
+    // path is planted alongside it and has to come back VISIBLE, and it has to
+    // come back carrying gate families — a leftover that reached the change set
+    // is not inert. Measured on the tree at the time of writing: a two-file
+    // leftover (the `package.json` and `objectstack.config.ts` that fixture
+    // writes) named 20 families the branch's own diff does not implicate.
+    // The count is not asserted — the family inventory grows same-day, which is
+    // this whole tool's premise — only that it is non-empty.
+    //
+    // The uncovered path is deliberately the fixture's FORMER root, so this
+    // control also fails if the bespoke ignore entry is ever restored: a rule
+    // covering a root nothing uses would make the control silently green and
+    // take the pin with it.
+    //
+    // The repo's REAL `.gitignore` is copied in rather than an excerpt written
+    // here: an excerpt would pin the excerpt.
+    const ignoreRepo = join(gitTmp, 'ignore-coverage');
+    mkdirSync(ignoreRepo, { recursive: true });
+    g(['init', '--initial-branch=main', '.'], ignoreRepo);
+    write(ignoreRepo, '.gitignore', readFileSync(join(ROOT, '.gitignore'), 'utf8'));
+    g(['add', '-A'], ignoreRepo);
+    g(['commit', '-m', 'the real ignore rules'], ignoreRepo);
+    g(['update-ref', 'refs/remotes/origin/main', g(['rev-parse', 'main'], ignoreRepo)], ignoreRepo);
+
+    const leftoverAtCoveredRoot = 'packages/cli/tmp/tmp-node-env-default-selftest/objectstack.config.ts';
+    const leftoverAtUncoveredRoot = 'packages/cli/test/tmp-node-env-default-selftest/objectstack.config.ts';
+    for (const rel of [leftoverAtCoveredRoot, leftoverAtUncoveredRoot]) {
+      write(ignoreRepo, rel, "import { AuthPlugin } from '@objectstack/plugin-auth';\n");
+      write(ignoreRepo, join(dirname(rel), 'package.json'), '{ "private": true, "type": "module" }\n');
+    }
+    const leftovers = changedPathsFromGit({ cwd: ignoreRepo });
+
+    t(
+      'the CONTROL reproduces the hazard: a leftover fixture at an UNCOVERED in-tree root does reach the change set',
+      leftovers.paths.includes(leftoverAtUncoveredRoot),
+    );
+    t(
+      'and reaching it is not free — the uncovered leftover names gate families of its own',
+      [...discoverFamilies().byCheck.values()].some((e) => classifyEntry(e, [leftoverAtUncoveredRoot]).verdict === 'matched'),
+    );
+    t(
+      'a leftover fixture at packages/cli/tmp/ is invisible to the derivation, under the same rules in the same repo',
+      !leftovers.paths.includes(leftoverAtCoveredRoot),
+    );
+    t(
+      'and it is the repo-wide tmp/ rule doing it, with no bespoke entry for the fixture former root',
+      !readFileSync(join(ROOT, '.gitignore'), 'utf8').includes('packages/cli/test/tmp-node-env-default'),
+    );
   } finally {
     rmSync(gitTmp, { recursive: true, force: true });
   }
