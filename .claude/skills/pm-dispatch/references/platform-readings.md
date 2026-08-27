@@ -106,9 +106,8 @@
   只留给**没有 REST 对应物**的那几件:draft 翻转、auto-merge/入队挂载、语义 `/search/*`、Projects
   field_values、`issue transfer`。逐操作通道归属(✓ 按席位类别限定)、写侧配方与队列路由三
   读法见 `references/rest-channel.md`,⛔ 不在本表复述。
-- **MCP list/search 家族整个走 GraphQL 稀缺池**(反复撞上的限流墙就是它;`issue_write` 连查找半边
-  都吃);会话级授权门与降级梯见上面第一条。配额红时认领类动作排队,评论(REST 桶)先行把
-  结论发出去。
+- **MCP list/search 家族整个走 GraphQL 稀缺池**(反复撞上的限流墙就是它;`issue_write` 连查找半
+  边都吃);配额红时认领类动作排队,评论(REST 桶)先行把结论发出去。
 - **`gh` CLI 的动词按传输分两桶,池枯竭时只死一半**(2026-08-24 同分钟实测:GraphQL 0 / core
   4987):porcelain 家族(`gh issue view` / `gh pr list`)与 `gh pr create` 走 GraphQL 当场回限流,同一批事实
   改走 `gh api` 的 REST 路径照常返回(含开 draft PR)。⚠️ 容器无 `gh`,本条只对本机席位适用。
@@ -173,18 +172,19 @@
   合法 JSON,期待列表的脚本会静默报假「0 issues」—— 零命中纪律覆盖 list 读:空车道先对仓
   库 `open_issues_count` 反查再信。
 - **MCP 参数两陷阱**:`list_issues` 多标签过滤是 **OR(并集)**不是 AND —— 混入别车道同状态卡
-  与本车道全状态卡,结果良构、失效全静默;**判据 = 结果比任一输入都宽**(三席独立实测
-  OR 侧:`domain:ui` ∩ `pm:queue` 回 154 张、含 `domain:spec`/`pm:blocked`;`domain:ui` ∩ `pm:dispatched`
-  回 135 张而车道自身只有 132 张)。正确读法 = **整车道单标签一次读全 + 本地
-  对 labels 求交**,或改走 REST —— **两个通道的 `labels` 语义相反**:REST 列表端点的 `labels=a,b`
-  是**真 AND**(交集),MCP 的 `labels` 数组是 **OR** ⇒ 要交集按上面的探针与降级梯选档,⛔ 不无
-  条件「改走 REST」。`issue_write` 的 `labels` 是**整组替换**不是追加 —— 同一动作内重读现
-  值合并再写(隔轮旧读数 = 无效快照,按其回写静默剥别的标签);真追加走 REST
-  `POST /issues/{n}/labels`,⚠️ 同样先过探针 —— 403 会话没有真追加通道,只能整组替换;写后
-  照标签纪律回读。
+  与本车道全状态卡,结果良构、失效全静默;**判据 = 结果比任一输入都宽**(三席独立实测:
+  两标签的「交集」回 135 张,而其中一个车道自身只有 132 张)。正确读法 = **整车道单标签
+  一次读全 + 本地对 labels 求交**,或改走 REST —— **两个通道的 `labels` 语义相反**:REST 列表
+  端点的 `labels=a,b` 是**真 AND**(交集),MCP 的 `labels` 数组是 **OR** ⇒ 要交集按上面的探针与
+  降级梯选档,⛔ 不无条件「改走 REST」。`issue_write` 的 `labels` 是**整组替换**不是追加 ——
+  同一动作内重读现值合并再写(隔轮旧读数 = 无效快照,按其回写静默剥别的标签);真追加走
+  REST `POST /issues/{n}/labels`,⚠️ 同样先过探针 —— 403 会话没有真追加通道,只能整组替换;
+  写后照标签纪律回读。
+- **`issue_read` 的 `get_labels` 只解析 Issue 型**:传 PR 号回 GraphQL「Could not resolve to an Issue」
+  —— REST「PR 也是 issue」的惯例在此方法不成立;PR 的标签读数走 `pull_request_read get`(labels
+  随响应回来),⛔ 不为它花一次 search 调用(2026-08-27 两个 dev 独立实测,失效是响亮报错)。
 - **`list_issues` 永不返回 assignees**(`fields` 枚举无此成员,不传也没有)—— 已认领卡与空闲卡
-  响应逐字节相同,清单只是**候选名单**:每条认领前必须过完整 `issue_read`(它才返回
-  `assignees`),⛔ 不把清单当候选集直接认领。
+  响应逐字节相同,清单只是**候选名单**:认领前必须过完整 `issue_read`(它才返回 `assignees`)。
 - **MCP `issue_read` 的 body 实体转义是纯读侧伪影**(撇号/引号/尖括号成数字实体;comments
   原样),存储体是明文,**先解码实体再写回**往返实测安全 —— 腐蚀 body 的恰是把转义读数
   原样回写;⚠️ 但读侧**并非一律可逆** —— 行内反引号里的尖括号片段被 MCP 读路径**整
