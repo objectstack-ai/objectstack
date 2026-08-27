@@ -30,7 +30,7 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import { ObjectQL } from '@objectstack/objectql';
+import { ObjectQL, SECRET_MASK } from '@objectstack/objectql';
 import { createDatasourceSecretBinder } from '@objectstack/service-datasource';
 import {
   classifySysSecretRows,
@@ -392,6 +392,19 @@ describe('family 2 — the engine secret-field channel (`secret:<id>` on a busin
     const result = await collectObjectFieldSecretReferences(rt.engine);
     expect(result.status).toBe('gap');
     expect(result.status === 'gap' && result.reason).toContain('table is locked');
+  });
+
+  it('the driver-level read is load-bearing: the generic engine read cannot see the ref at all', async () => {
+    // Positive control on the module's central design decision. `maskSecretFields`
+    // replaces the stored `secret:<id>` with the mask on every find/findOne,
+    // unconditionally — so a union built on `engine.find` would enumerate the
+    // family and collect NOTHING, silently, on a real runtime.
+    const throughEngine = await rt.realEngine.find('smtp', {}) as Array<Record<string, unknown>>;
+    expect(throughEngine[0].password).toBe(SECRET_MASK);
+    expect(String(throughEngine[0].password).startsWith('secret:')).toBe(false);
+
+    const union = await collect(rt);
+    expect(union.handleIds.has(rt.objectFieldHandleId)).toBe(true);
   });
 
   it('an object with no secret field is never read at all', async () => {
