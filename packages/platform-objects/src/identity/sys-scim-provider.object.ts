@@ -13,11 +13,18 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
  * is OPEN (here, framework `plugin-auth`); enablement is entitlement-gated by
  * the cloud / EE license.
  *
- * `scim_token` holds the connection's bearer credential. With the plugin's
- * `storeSCIMToken: 'hashed'` (the default this env wires) it stores only a
- * HASH — the plaintext is returned exactly once at `/scim/generate-token`. Even
- * so, treat this object as sensitive: it is read-only over the generic data API
- * and the token is excluded from list views.
+ * ⚠️ RC.1-ERA OBJECT — retirement tracked by #11757. The stable
+ * `@better-auth/scim` line (#3653) derives no `scimProvider` model, exposes no
+ * `/scim/generate-token`, and has no `storeSCIMToken` option, so nothing
+ * writes rows here any more; SCIM connection credentials live in
+ * `sys_scim_connection_credential` (ObjectStack-owned). The paragraphs below
+ * describe the rc.1 behaviour this object was built for.
+ *
+ * `scim_token` holds the connection's bearer credential. With the rc.1
+ * plugin's `storeSCIMToken: 'hashed'` (which this env wired) it stored only a
+ * HASH — the plaintext was returned exactly once at `/scim/generate-token`.
+ * Even so, treat this object as sensitive: it is read-only over the generic
+ * data API and the token is excluded from list views.
  *
  * All mutations route through @better-auth/scim's endpoints under
  * `/api/v1/auth/scim/*` (generate-token / delete-provider-connection) and the

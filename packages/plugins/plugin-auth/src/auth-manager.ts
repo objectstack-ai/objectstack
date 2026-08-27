@@ -962,6 +962,14 @@ export class AuthManager {
   private auth: Auth<any> | null = null;
   private config: AuthManagerOptions;
   /**
+   * [#3653] The auth secret, resolved ONCE per manager. `generateSecret()`'s
+   * dev fallback is `'dev-secret-' + Date.now()` — a fresh value per call — so
+   * every consumer that needs the same key material (better-auth's own
+   * `secret` and the SCIM credential digests, which are keyed HMACs over it)
+   * must read this memo rather than re-resolving.
+   */
+  private resolvedAuthSecret?: string;
+  /**
    * [#8289] The org-role ac map handed to the `organization` plugin as `roles`
    * (`undefined` → the plugin runs on better-auth's `defaultRoles`). Stashed at
    * plugin-build time because `assertRemoveMemberPermitted` has to ask the
@@ -1061,7 +1069,7 @@ export class AuthManager {
     const passwordHasher = await this.resolvePasswordHasher();
     const betterAuthConfig: BetterAuthOptions = {
       // Base configuration
-      secret: this.config.secret || this.generateSecret(),
+      secret: this.resolveAuthSecret(),
       // Absolute origin (getCanonicalOrigin prepends https:// when baseUrl is a
       // bare host) so the reset-password / verify-email / magic-link URLs
       // better-auth derives from baseURL are always clickable links.
@@ -3091,24 +3099,44 @@ export class AuthManager {
     // External SCIM 2.0 Service Provider (@better-auth/scim, MIT) — lets an
     // external IdP (Okta / Entra) auto-provision / deprovision THIS env's users
     // (the paid Identity lifecycle, ADR-0071). The env is the SCIM Service
-    // Provider; endpoints mount under /api/v1/auth/scim/v2/{Users,…} (SCIM 2.0)
-    // and /api/v1/auth/scim/{generate-token,…} (management). `active:false` →
-    // ban + session revoke (needs the admin plugin, forced on above); org-scoped
-    // tokens need the organization plugin. This plugin hardcodes its
-    // `scimProvider` model and accepts no `schema` option — still true of the
-    // installed 1.7.0-rc.1 (`SCIMOptions` declares no `schema` / `modelName` /
-    // `fields` member; measured 2026-08-19). NOT "like @better-auth/sso", as
-    // this line used to say: sso accepts one as of 1.7.1 (#8224), so scim is now
-    // the only one of the pair for which the adapter bridge is forced. Bridged
-    // to `sys_scim_provider` via AUTH_MODEL_TO_PROTOCOL. Toggle with
-    // `OS_SCIM_ENABLED`.
+    // Provider; SCIM 2.0 endpoints mount under /api/v1/auth/scim/v2/{Users,…}.
+    // `active:false` → ban + session revoke (needs the admin plugin, forced on
+    // above). This plugin still accepts no `schema` option (`SCIMOptions`
+    // declares no `schema` / `modelName` / `fields` member on the installed
+    // 1.7.1), so its seven models are bridged to the `sys_scim_*` platform
+    // objects via AUTH_MODEL_TO_PROTOCOL. Toggle with `OS_SCIM_ENABLED`.
     //
-    // storeSCIMToken: 'hashed' — never persist the bearer in cleartext; the
-    // plaintext is returned exactly once from generate-token (for the IdP admin).
+    // Connections are RUNTIME DATA, not boot config (#3653): the stable
+    // constructor's three-way requirement (static `connections` | bearer
+    // verifier | managed catalog) is satisfied with an application-owned
+    // `verifyBearerToken` that resolves the connection from a
+    // `sys_scim_connection_credential` row at request time. ObjectStack owns
+    // the whole credential lifecycle — mint / store / verify — in
+    // `scim-connection-service.ts`; only a keyed one-way digest is ever
+    // persisted (pinned by `credential-at-rest-posture.test.ts`). The rc.1
+    // `storeSCIMToken` / `/scim/generate-token` surface no longer exists on
+    // stable, and the upstream `managedConnections` catalog is deliberately
+    // NOT adopted (maintainer ruling 2026-08-25).
     if (enabled.scim) {
       await this.addOptionalPlugin(plugins, 'scim', async () => {
         const { scim } = await import('@better-auth/scim');
-        return scim({ storeSCIMToken: 'hashed' });
+        const { verifyScimBearerToken, scimRequestScope } = await import('./scim-connection-service.js');
+        const secret = this.resolveAuthSecret();
+        return scim({
+          connections: [],
+          authentication: {
+            verifyBearerToken: async (input) => {
+              // Mark the remainder of this request's async chain as a SCIM
+              // protocol request, so the adapter runs its provisioning writes
+              // inside a REAL engine transaction (see scimRequestScope's
+              // rationale in scim-connection-service.ts).
+              scimRequestScope.enterWith({ scim: true });
+              const engine = this.config.dataEngine;
+              if (!engine) return null; // no store to verify against — fail closed
+              return verifyScimBearerToken(engine as never, secret, input.token);
+            },
+          },
+        });
       });
     }
 
@@ -3268,6 +3296,14 @@ export class AuthManager {
   /**
    * Generate a secure secret if not provided
    */
+  /** The auth secret, resolved once — see {@link resolvedAuthSecret}. */
+  private resolveAuthSecret(): string {
+    if (!this.resolvedAuthSecret) {
+      this.resolvedAuthSecret = this.config.secret || this.generateSecret();
+    }
+    return this.resolvedAuthSecret;
+  }
+
   private generateSecret(): string {
     const envSecret = readEnvWithDeprecation('OS_AUTH_SECRET', ['AUTH_SECRET', 'BETTER_AUTH_SECRET'], { silent: true });
     if (envSecret) return envSecret;

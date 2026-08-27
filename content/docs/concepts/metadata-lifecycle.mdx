@@ -183,6 +183,19 @@ The hash is `sha256:` + 64-hex of a canonical (sorted-keys, no-undefined) JSON s
 > configuring a distributed driver; and if no `cluster` (or `metadata`) service is
 > registered the bridge logs and skips, leaving each replica seeing only its own
 > writes.
+>
+> ⚠️ **"Peers re-read from the shared database" has one bound worth naming.** The
+> `sys_metadata` overlay read inside `protocol.ts:getMetaItems` is cached across
+> requests, keyed on the engine write epoch. A **local** write advances that epoch
+> before its own middleware chain runs, so read-your-writes is exact on the node
+> that made the write. A **peer's** write does not: `metadata.changed` invalidates
+> the MetadataManager caches this note is about, but it does not retire the
+> overlay-read cache. What retires that on a peer is the `authz.invalidated`
+> channel — a hint from another node bumps the local write epoch — or, failing
+> that, `OS_METADATA_OVERLAY_CACHE_TTL_MS` (default 30s, `0` disables the cache
+> outright). So on a deployment with no distributed cluster driver attached, a
+> peer's overlay re-read can lag a remote publish by up to that TTL. See
+> [Environment variables](/docs/deployment/environment-variables).
 
 ---
 

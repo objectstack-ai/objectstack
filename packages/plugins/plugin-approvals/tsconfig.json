@@ -18,7 +18,16 @@
     // (`pnpm check:type-source-resolution` — same fix `packages/rest`
     // records for `@objectstack/metadata-protocol`).
     "paths": {
-      "@objectstack/metadata-core": ["../../metadata-core/src/index.ts"]
+      "@objectstack/metadata-core": ["../../metadata-core/src/index.ts"],
+      // [#12642] Resolve the i18n provenance seam to SOURCE. This package's
+      // translation barrel passes its committed
+      // `<locale>.source-hashes.generated.ts` companions through
+      // `withSourceFallback`, whose home is `@objectstack/platform-objects/apps`
+      // — a NEW type import here, so without this rule the typecheck would be a
+      // verdict about that package's `dist/` build state
+      // (`pnpm check:type-source-resolution`). Anchored on the SUBPATH: the
+      // bare key would match by prefix and resolve `/apps` through a file.
+      "@objectstack/platform-objects/apps": ["../../platform-objects/src/apps/index.ts"]
     }
   },
   "include": ["src/**/*"],

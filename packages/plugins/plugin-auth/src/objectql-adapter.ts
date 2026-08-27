@@ -5,6 +5,7 @@ import { createAdapterFactory } from 'better-auth/adapters';
 import type { CleanedWhere, WhereOperator } from 'better-auth/adapters';
 import { SystemObjectName } from '@objectstack/spec/system';
 import { resolveAttributedUserId } from './auth-actor-attribution.js';
+import { inScimRequestScope } from './scim-connection-service.js';
 import { adoptExistingMembership } from './adopt-membership.js';
 import {
   filterRevokedSessionRows,
@@ -36,7 +37,8 @@ export const AUTH_MODEL_TO_PROTOCOL: Record<string, string> = {
   // This comment used to justify that with "both hardcode their model name and
   // accept NO `schema` option (verified vs 1.6.2x)". That expired with the pin
   // (#8224). Measured 2026-08-19 against the installed `@better-auth/sso@1.7.1`
-  // and `@better-auth/scim@1.7.0-rc.1`:
+  // and `@better-auth/scim@1.7.0-rc.1`; scim's half re-measured 2026-08-27
+  // against the installed stable `@better-auth/scim@1.7.1` (#3653) — unchanged:
   //   - sso DOES accept one now — `SSOOptions.schema.ssoProvider.{modelName,
   //     fields,additionalFields}` (dist/index-CZytzKv6.d.mts), honoured at
   //     runtime (dist/index.mjs, the plugin's own `schema:` block: `modelName:
@@ -54,7 +56,22 @@ export const AUTH_MODEL_TO_PROTOCOL: Record<string, string> = {
   // open architecture question, deliberately not decided here). Off by default
   // (OS_SSO_ENABLED / OS_SCIM_ENABLED). See ADR-0024 / ADR-0071.
   ssoProvider: 'sys_sso_provider',
+  // rc.1's one scim model. Stable 1.7.x no longer derives it; the entry (and
+  // sys_scim_provider itself) retires under #11757, not here.
   scimProvider: 'sys_scim_provider',
+  // The stable @better-auth/scim 1.7.x model set (#3653). Verified against the
+  // installed 1.7.1: `SCIMOptions` still declares no `schema` / `modelName` /
+  // `fields` member, so the adapter bridge remains scim's ONLY naming route.
+  // Field names are auto-snake_cased mechanically (connectionId→connection_id,
+  // …) like every bridged model; `better-auth-schema-parity.test.ts` pins each
+  // column against the sys_scim_* platform objects.
+  scimConnectionBinding: 'sys_scim_connection_binding',
+  scimGroup: 'sys_scim_group',
+  scimGroupMember: 'sys_scim_group_member',
+  scimIdentityTombstone: 'sys_scim_identity_tombstone',
+  scimProjectionGrant: 'sys_scim_projection_grant',
+  scimSubject: 'sys_scim_subject',
+  scimUser: 'sys_scim_user',
 };
 
 /**
@@ -752,7 +769,44 @@ export function createObjectQLAdapterFactory(rawDataEngine: IDataEngine) {
   const remapWhere = (where: CleanedWhere[]): CleanedWhere[] =>
     where.map((c) => ({ ...c, field: camelToSnake(c.field) }));
 
-  return createAdapterFactory({
+  // [#3653] NATIVE transactions, SCOPED to SCIM protocol requests. Stable
+  // `@better-auth/scim` refuses to mount on an adapter whose `transaction` is
+  // the factory's sequential fallback (`assertNativeSCIMTransactions` reads
+  // `adapterConfig.transaction` and demands a function) — provisioning
+  // multi-writes must be atomic. The implementation is ObjectQL's own
+  // `engine.transaction()`: it publishes the handle into the engine's AMBIENT
+  // transaction store (ADR-0034), so every engine call the raw methods below
+  // make inside the callback automatically binds to the same
+  // connection/rollback scope — the trx adapter handed to the callback is
+  // therefore the SAME wrapped adapter, captured at factory time below.
+  //
+  // ⚠️ The scoping is load-bearing, measured twice, not a hedge. better-auth
+  // wraps its OWN whole request flows in `adapter.transaction` too
+  // (`runWithTransaction` — sign-in/sign-up included), and two unscoped
+  // variants each broke a measured surface:
+  //  - `require: true` (fail closed on non-transactional drivers) 500'd every
+  //    sign-up on the memory engine — 275 plugin-auth tests red;
+  //  - unconditional real transactions starved the single-connection sqlite
+  //    pools: the dogfood showcase boot deadlocked on `Acquire connection
+  //    error` until the 180s hook timeout, in CI and reproduced locally.
+  // Core better-auth flows never had native DB transactions here (the factory
+  // default is the sequential as-is fallback), so they KEEP that historical
+  // posture; the real transaction opens exactly where upstream's assertion
+  // demands it — inside an authenticated SCIM protocol request, marked by the
+  // auth manager's `verifyBearerToken` via `scimRequestScope`. Remaining
+  // declared degrades on that path: an engine with no `transaction` API runs
+  // the callback directly, and a driver without `beginTransaction` follows
+  // the engine's ADR-0119 D1 warn-once degrade.
+  let wrappedAdapter: unknown = null;
+  const engineWithTx = rawDataEngine as unknown as {
+    transaction?<T>(
+      cb: (trxCtx: unknown, info: unknown) => Promise<T>,
+      baseContext?: unknown,
+      opts?: { require?: boolean },
+    ): Promise<T>;
+  };
+
+  const factory = createAdapterFactory({
     config: {
       adapterId: 'objectql',
       // We let better-auth handle Date↔string and boolean↔0/1 conversion so
@@ -763,6 +817,24 @@ export function createObjectQLAdapterFactory(rawDataEngine: IDataEngine) {
       supportsBooleans: false,
       supportsDates: false,
       supportsJSON: true,
+      transaction: async <R,>(cb: (trx: never) => Promise<R>): Promise<R> => {
+        if (!wrappedAdapter) {
+          // Cannot happen through betterAuth({ database }) — the factory runs
+          // before any plugin can ask for a transaction — but fail loudly
+          // rather than hand the callback a null adapter.
+          throw new Error('[objectql-adapter] transaction requested before the adapter was constructed');
+        }
+        // Non-SCIM better-auth flows keep their historical sequential
+        // behaviour — see the #3653 scoping note above for the two measured
+        // breakages that make this conditional load-bearing.
+        if (!inScimRequestScope()) return cb(wrappedAdapter as never);
+        if (typeof engineWithTx.transaction !== 'function') {
+          // Declared degrade (see the #3653 note above): no transaction API
+          // on this engine — run directly, as the factory fallback would.
+          return cb(wrappedAdapter as never);
+        }
+        return engineWithTx.transaction(async () => cb(wrappedAdapter as never));
+      },
     },
     adapter: () => withValidationErrorMapping({
       create: async <T extends Record<string, any>>(
@@ -1012,6 +1084,14 @@ export function createObjectQLAdapterFactory(rawDataEngine: IDataEngine) {
       },
     }),
   });
+
+  // Capture the WRAPPED adapter (transforms applied) so `config.transaction`
+  // above can hand it to transaction callbacks — see the #3653 note there.
+  return (options: Parameters<typeof factory>[0]) => {
+    const adapter = factory(options);
+    wrappedAdapter = adapter;
+    return adapter;
+  };
 }
 
 // ---------------------------------------------------------------------------

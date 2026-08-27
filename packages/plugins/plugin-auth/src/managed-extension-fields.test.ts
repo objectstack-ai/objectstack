@@ -235,10 +235,54 @@ const UNMAPPED_MANAGED_OBJECTS: Record<string, UnmappedManagedObject> = {
   },
   sys_scim_provider: {
     reason:
-      '@better-auth/scim accepts no `schema` option at all (measured 2026-08-19 against the installed '
-      + '1.7.0-rc.1, and the auth manager passes none either), so getAuthTables() reports its models '
-      + "only under better-auth's own names and they cannot be mapped onto this object (#3653). Same bridge and "
-      + 'same dedicated gate as sys_sso_provider.',
+      'rc.1-era SCIM connection row. The installed stable @better-auth/scim@1.7.1 no longer derives '
+      + 'a scimProvider model at all (re-measured 2026-08-27, #3653), so no better-auth column can '
+      + 'change hands on this table any more; it retires under #11757 and stays only until that '
+      + 'lands. (No noBetterAuthColumns flag: this object declares no extension fields, so the '
+      + 'flag would assert a licence nothing uses; the parity gate\'s exact-set assertion is the '
+      + 'tripwire that fires if a scimProvider model ever reappears.)',
+  },
+  // The stable @better-auth/scim 1.7.x model set (#3653). Same bridge shape as
+  // sys_sso_provider: SCIMOptions still accepts no `schema`/`modelName`/`fields`
+  // option on the installed 1.7.1 (re-measured 2026-08-27), so getAuthTables()
+  // reports these models only under better-auth's own names (scimUser, …) and
+  // MODEL_TO_OBJECT cannot key off anything the library reports. Their columns
+  // are bridged mechanically by objectql-adapter.ts and each is column-checked
+  // by the dedicated sso/scim block in better-auth-schema-parity.test.ts.
+  sys_scim_connection_binding: {
+    reason:
+      'stable scim model (scimConnectionBinding) bridged by objectql-adapter.ts — no `schema` option '
+      + 'exists to map it here; column-checked by better-auth-schema-parity.test.ts (#3653).',
+  },
+  sys_scim_group: {
+    reason:
+      'stable scim model (scimGroup) bridged by objectql-adapter.ts — no `schema` option exists to '
+      + 'map it here; column-checked by better-auth-schema-parity.test.ts (#3653).',
+  },
+  sys_scim_group_member: {
+    reason:
+      'stable scim model (scimGroupMember) bridged by objectql-adapter.ts — no `schema` option '
+      + 'exists to map it here; column-checked by better-auth-schema-parity.test.ts (#3653).',
+  },
+  sys_scim_identity_tombstone: {
+    reason:
+      'stable scim model (scimIdentityTombstone) bridged by objectql-adapter.ts — no `schema` '
+      + 'option exists to map it here; column-checked by better-auth-schema-parity.test.ts (#3653).',
+  },
+  sys_scim_projection_grant: {
+    reason:
+      'stable scim model (scimProjectionGrant) bridged by objectql-adapter.ts — no `schema` option '
+      + 'exists to map it here; column-checked by better-auth-schema-parity.test.ts (#3653).',
+  },
+  sys_scim_subject: {
+    reason:
+      'stable scim model (scimSubject) bridged by objectql-adapter.ts — no `schema` option exists '
+      + 'to map it here; column-checked by better-auth-schema-parity.test.ts (#3653).',
+  },
+  sys_scim_user: {
+    reason:
+      'stable scim model (scimUser) bridged by objectql-adapter.ts — no `schema` option exists to '
+      + 'map it here; column-checked by better-auth-schema-parity.test.ts (#3653).',
   },
 
   // ── @better-auth/oauth-provider — separate package, dedicated gate ────────
@@ -477,7 +521,16 @@ const AUTH_MANAGER_PLUGINS: Record<string, { construct: () => unknown } | { skip
       })),
   },
   sso: { construct: () => sso() },
-  scim: { construct: () => scim() },
+  // The cheapest options the STABLE factory accepts (#3653): its first
+  // statement reads `options.connections.length`, and an empty list is legal
+  // only when a bearer-token verifier (or the managed catalog) resolves
+  // connections. The verifier is never invoked — this gate only reads the
+  // schema. Same shape, same reasoning, as SCIM_GATE_OPTIONS in
+  // better-auth-schema-parity.test.ts.
+  scim: {
+    construct: () =>
+      scim({ connections: [], authentication: { verifyBearerToken: () => null } } as never),
+  },
   // `loginPage` / `consentPage` are required by the constructor and are URLs
   // the auth manager resolves from the console mount point; nothing about the
   // schema depends on their value.

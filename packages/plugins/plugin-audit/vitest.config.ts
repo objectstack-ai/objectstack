@@ -35,6 +35,15 @@ export default defineConfig({
         find: /^@objectstack\/platform-objects\/audit$/,
         replacement: path.resolve(__dirname, '../../platform-objects/src/audit/index.ts'),
       },
+      // [#12642] The i18n provenance seam. This package's translation barrel
+      // passes its committed `<locale>.source-hashes.generated.ts` companions
+      // through `withSourceFallback`, whose home is this subpath — so without
+      // the alias the suite's verdict would be about `platform-objects/dist`
+      // build state rather than the checkout (`pnpm check:test-source-alias`).
+      {
+        find: /^@objectstack\/platform-objects\/apps$/,
+        replacement: path.resolve(__dirname, '../../platform-objects/src/apps/index.ts'),
+      },
       // Covers `data` / `system` / `kernel` / `api` / `contracts` / `ui` /
       // `shared` and, [ADR-0105 D1], `security` reached transitively via
       // `@objectstack/types` (tenancy posture).

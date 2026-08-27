@@ -32,7 +32,7 @@ import {
  * directly when needed.
  *
  * ⚠️ "Subject to the rest of the RLS chain" is the load-bearing half, and it is
- * a BLANKET grant — read this list as 22 objects whose object-level read bit is
+ * a BLANKET grant — read this list as objects whose object-level read bit is
  * open, each narrowed (or not) by whatever `rowLevelSecurity` its holder set
  * declares for it. An object named here with NO `_self` / `_org` policy in
  * `member_default` is org-wide readable by every authenticated member. That is
@@ -40,8 +40,9 @@ import {
  * `sys_user_org_members`) and was NOT intended for `sys_invitation`
  * (maintainer ruling 2026-08-12) — see `sys_invitation_self` below. Do not
  * "fix" a future instance of this class by editing the blanket: dropping
- * `allowRead` here retires the read on all 22 at once, and it would take the
- * invitee's own row with it. The per-object row scope is the narrow instrument.
+ * `allowRead` here retires the read on every listed object at once, and it
+ * would take the invitee's own row with it. The per-object row scope is the
+ * narrow instrument.
  *
  * This is the COMPILE-TIME BASELINE. At `kernel:ready` it is unioned with the
  * live registry by `applyManagedWriteDenies` (see `managed-object-write-denies.ts`),
@@ -69,6 +70,17 @@ export const BETTER_AUTH_MANAGED_OBJECTS = [
   'sys_jwks',
   'sys_device_code',
   'sys_scim_provider',
+  // Stable @better-auth/scim 1.7.x model set (#3653). The ObjectStack-owned
+  // `sys_scim_connection_credential` is deliberately NOT here — it declares
+  // `managedBy: 'engine-owned'` (plugin-auth's SCIM connection service is its
+  // only writer) and is capability-gated rather than blanket-readable.
+  'sys_scim_connection_binding',
+  'sys_scim_group',
+  'sys_scim_group_member',
+  'sys_scim_identity_tombstone',
+  'sys_scim_projection_grant',
+  'sys_scim_subject',
+  'sys_scim_user',
   'sys_sso_provider',
   'sys_oauth_application',
   'sys_oauth_access_token',
