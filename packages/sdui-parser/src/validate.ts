@@ -79,7 +79,38 @@ export function validateTree(tree: SchemaElement | null, manifest: Manifest): Va
         if (input.binding) {
           bindings.push({ tag: node.type, input: key, kind: input.binding, value });
         }
-        if (!isExpr(value)) {
+        if (isExpr(value)) {
+          // A braced value that failed JSON materialization compiled to the
+          // parser's deferred `{ $expr }` marker — and NOTHING downstream
+          // evaluates that marker: this tier parses, never executes
+          // (ADR-0080), and no renderer consumes `$expr`. The value therefore
+          // reaches the renderer as an opaque object, every defensive
+          // non-array/non-object read degrades it to "not declared", and the
+          // author's binding silently vanishes (objectui#6598: eight `columns`
+          // spellings on a data block, all eaten without a single diagnostic —
+          // rows rendered, zero data columns). ADR-0078 prohibits exactly this
+          // parsed-but-silently-inert state, so name it at compile time, with
+          // the fix in the message. Warning, not error, per the objectui#5709
+          // precedent for inert authored keys — escalation to error (and any
+          // widening of the accepted literal grammar, e.g. single-quoted
+          // strings) is a contract decision tracked on objectui#6598.
+          //
+          // LOCKSTEP: this diagnostic is the byte-equal port of objectui's
+          // `packages/sdui-parser` copy (objectui PR #6613). The two copies
+          // must agree on the accepted grammar AND on diagnostic codes — if
+          // they drift, the save gate and the renderer speak different
+          // dialects and a page can save clean and render inert. Change this
+          // block only together with the objectui copy.
+          diagnostics.push({
+            severity: 'warning',
+            code: 'inert-expression',
+            message:
+              `<${node.type}> prop "${key}" is a braced expression this tier never evaluates — ` +
+              `the value will be silently ignored at render. Write it as JSON ` +
+              `(double-quoted strings and keys), e.g. columns={["name","amount"]} not columns={['name','amount']}`,
+            tag: node.type,
+          });
+        } else {
           const typeDiag = checkType(node.type, input, value);
           if (typeDiag) diagnostics.push(typeDiag);
         }
