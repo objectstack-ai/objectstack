@@ -60,11 +60,18 @@ export const SysMigration = ObjectSchema.create({
   highlightFields: ['id', 'blocking', 'verified_at', 'last_run_at'],
 
   fields: {
+    // ⛔ No `maxLength` here. `id` is a builtin column the platform emits
+    // itself (`table.string('id').primary()` — varchar(255)), so the DDL
+    // discards a declared width; and `validateRecord` skips `id` by name on
+    // both the insert and the update path, so it never binds at write time
+    // either. The `maxLength: 128` this field used to carry was inert in
+    // every seam and disagreed with the column it described — the one honest
+    // line in the #12015 corpus (#12131). The 44 sibling system objects
+    // declare no width on `id`; this one now matches them.
     id: Field.text({
       label: 'Migration ID',
       required: true,
       readonly: true,
-      maxLength: 128,
       description: 'Well-known migration id (e.g. adr-0104-file-references). One row per migration.',
     }),
 
