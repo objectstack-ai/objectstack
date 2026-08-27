@@ -1705,6 +1705,106 @@ export function collapseHint(hint) {
  * to 34 and is the number this file calls unaffordable. So the two hints stay
  * as declared; narrowing them at their declaration site was considered and is
  * refused, because the narrowing would be the false statement.
+ *
+ * ## A DROPPED EXTENSION is followed, at comparison time (#12514)
+ *
+ * An ESM/TypeScript relative import spells its target without the extension, so
+ * `check-spec-changes.ts` importing `../src/migrations/registry` yields the hint
+ * `packages/spec/src/migrations/registry` — correct, resolved against the
+ * writing script by `resolveModuleRelativeHint` — while the tree holds
+ * `…/registry.ts`. The comparisons above are segment-wise, and an extension is
+ * not a segment, so the hint missed the file it names by exactly four bytes.
+ *
+ * The cost was NOT the residue row (#12780 repaired that: the printout names
+ * the real file and stops calling it a layout move). It was the MATCHED column.
+ * Nine `packages/spec` families were unreachable ENTIRELY for this reason, so
+ * no path derivation could ever name them: a dev editing
+ * `packages/spec/src/migrations/registry.ts` was never told they owed
+ * `check:spec-changes`. Silent under-derivation, exit 0 — measured four times
+ * in one day on this board as red CI after a dev had run a complete-looking
+ * union (`check:api-surface` on #12585, `check:docs` on #12591,
+ * `check:adr-anchors` on #12652, and #12393/PR #12585).
+ *
+ * ## Why COMPARISON and not EXTRACTION — the two are not equivalent
+ *
+ * The other place to follow the extension is `extractWatchHints`, emitting
+ * `…/registry.ts` as the hint. That was considered and refused on three counts,
+ * and the choice is recorded here because the printed hint is what a reader
+ * sees:
+ *
+ *   - it would make the hint text a LIE ABOUT THE SOURCE. The gate really does
+ *     import `../src/migrations/registry`, extensionless; the hint set's job is
+ *     to say what the script declares, and `resolveModuleRelativeHint`'s own
+ *     docblock calls resolving-rather-than-forgiving the contract-first repair.
+ *     "Which file does this specifier mean" is a different question, and it is
+ *     the one this comparison answers;
+ *   - `extractWatchHints` is a PURE STRING function over one script's source.
+ *     Following an extension there needs the tracked-file set, which would
+ *     couple extraction to a git checkout and hand the file a SECOND answer to
+ *     a question `extensionlessModuleTarget` already owns — the drift this file
+ *     refuses everywhere else;
+ *   - it would move the printed hint for all 38 affected hints, i.e. re-write
+ *     the residue rows #12780 landed the day before, for no gain in the column
+ *     this card is about.
+ *
+ * What extraction-side would have bought and this does not: `deepestTrackedPrefix`
+ * and the escapable-literal rows still see the extensionless spelling. That is
+ * deliberate — those readers describe what the AUTHOR WROTE, and they are
+ * correct about it.
+ *
+ * ## Measured, both directions, through `hintCovers` and nothing else
+ *
+ * Over 176 discovered families x 829 distinct hints x 7129 tracked files, on
+ * `ead731756`:
+ *
+ *   watch-hint (gate, file) pairs   83775 -> 83830   (+55, and ZERO lost)
+ *   (check, hint) live / inert      837/645 -> 892/590   (+55 live, 0 newly inert)
+ *   distinct hints reaching a file  444 -> 482   (+38, all resolving through `.ts`)
+ *   unreachable families            11 -> 2     (the nine `packages/spec` ones)
+ *   families gaining coverage       18; ZERO losing
+ *
+ * Each newly live (check, hint) pair contributes EXACTLY ONE file, which is why
+ * the two `+55` figures coincide: the rule is an equality against one derived
+ * name, so a hint that starts matching starts matching one path. The specimen
+ * the card was filed for moves with it — a card touching
+ * `packages/spec/src/migrations/registry.ts` goes from 18 matched families to
+ * 21, and `check:spec-changes` is one of the three it gains.
+ *
+ * +55 pairs is 0.07% of the corpus, against the +139084 the bare-top-level-word
+ * admission is refused at above — because the rule is an EQUALITY against one
+ * derived name, not a prefix. It cannot reach a subtree and it cannot reach a
+ * sibling: `plain + ext` is one string per extension.
+ *
+ * ## Provenance, which is the criterion this file actually prices
+ *
+ * 39 distinct (hint, file) equalities are added. 38 are the module specifiers
+ * above, each naming the file its own gate imports. The 39th is
+ * `scripts/adr-anchors` vs `scripts/adr-anchors.mjs` — the only hint in the
+ * fleet whose collapsed form is a tracked DIRECTORY that also has a
+ * module-extension sibling. It is a TRUE lead, checked at the declaration site
+ * rather than assumed: `scripts/check-adr-anchors.mjs` line 239 imports
+ * `./adr-anchors.mjs`, and that gate's own header sends a reader editing the
+ * anchor layout to that module's header first. So zero of the 39 are fabricated.
+ *
+ * That case is also the boundary with the `content/docs` sibling trade above,
+ * and the boundary holds because the extension list is a NARROWING:
+ * `content/docs.site.json` is `content/docs` + `.site.json`, which is not a
+ * module extension, so the pinned refusal is untouched. Any suffix in the same
+ * directory would have taken it back, and would additionally have named a
+ * `.test.ts` sibling for 4 of the 38 (`protocol-version`,
+ * `metadata-type-schemas`, `react-blocks`, `manifest-collection-spelling`) —
+ * re-measured here, not taken on trust. See `MODULE_SPECIFIER_EXTENSIONS`.
+ *
+ * ## The fabrication direction, and why it is pinned rather than argued
+ *
+ * This widening is root-agnostic: it follows an extension wherever the hint
+ * points, including at a root the tree does not have. 41 distinct top-level
+ * roots sit one directory away from converting 259 inert hints into MATCHED
+ * pairs (`src` gates 20 of them, `data` 9) — most of that surface predates this
+ * change, but this change adds the extensionless members of it. A repo that
+ * grows a top-level `src/` or `data/` must not mint those pairs SILENTLY, so
+ * the self-test holds the roots out by name and reds on arrival rather than
+ * leaving it to whoever reads a prompt.
  */
 export function hintCovers(hint, inputPath) {
   if (globInNonFinalSegment(hint))
@@ -1717,7 +1817,12 @@ export function hintCovers(hint, inputPath) {
   return (
     inputPath === plain ||
     inputPath.startsWith(`${plain}/`) ||
-    plain.startsWith(`${inputPath}/`)
+    plain.startsWith(`${inputPath}/`) ||
+    // EQUALITY, never a prefix: a dropped extension can only name the ONE file
+    // the specifier resolves to, and the extension list is the shared
+    // `MODULE_SPECIFIER_EXTENSIONS` rather than a second copy of it. See the
+    // section above for the price and for what this deliberately cannot do.
+    MODULE_SPECIFIER_EXTENSIONS.some((ext) => inputPath === plain + ext)
   );
 }
 
@@ -5501,16 +5606,23 @@ function selfTest() {
     if (!plain || agreePrefixes.has(plain)) return null;
     return agreeFiles.find((f) => f.startsWith(`${plain}.`) && !f.slice(plain.length + 1).includes('/')) ?? null;
   };
-  const agreeInert = [...agreeHints].filter((h) => !hintReachesTree(h, agreeFiles));
+  // POPULATION: every distinct hint in the fleet, not just the inert ones.
+  // #12514 made the matcher follow a dropped extension, so the 38 hints this
+  // trade was measured over are LIVE now and an `inert`-scoped population would
+  // have emptied — taking three green cases with it while asserting nothing.
+  // Both `looseTarget` and `extensionlessModuleTarget` already refuse a hint
+  // whose collapsed form the tree HAS as a path, so widening the population
+  // adds no candidate; measured, it still selects the same 38.
+  const agreeCandidates = [...agreeHints];
   const strictOf = (h) => extensionlessModuleTarget(h, agreeFileSet, agreePrefixes);
-  const refusedByNarrowing = agreeInert.filter((h) => !strictOf(h) && looseTarget(h));
+  const refusedByNarrowing = agreeCandidates.filter((h) => !strictOf(h) && looseTarget(h));
   t(
     `the extension narrowing costs no lead — every hint the loose rule resolves, this one resolves too (refused: ${refusedByNarrowing.join(', ') || 'none'})`,
     refusedByNarrowing.length === 0,
   );
   t(
     'and it invents nothing: every file it names is a tracked file',
-    agreeInert.every((h) => !strictOf(h) || agreeFileSet.has(strictOf(h))),
+    agreeCandidates.every((h) => !strictOf(h) || agreeFileSet.has(strictOf(h))),
   );
   // The reason the list is explicit rather than "any suffix", held to the tree
   // so the justification cannot quietly evaporate: somewhere in the fleet the
@@ -5519,8 +5631,97 @@ function selfTest() {
   // tree then has rather than deleting it — the trade is decided, not stale.
   t(
     'the loose alternative really would name the wrong file, which is why it is refused',
-    agreeInert.some((h) => strictOf(h) && looseTarget(h) && strictOf(h) !== looseTarget(h)),
+    agreeCandidates.some((h) => strictOf(h) && looseTarget(h) && strictOf(h) !== looseTarget(h)),
   );
+  // ⚠️ And the trade is now load-bearing in a second place. It used to decide
+  // one SENTENCE in a listing; since #12514 the same list decides which files
+  // the MATCHED column names, so the loose rule would put a gate's `.test.ts`
+  // sibling into dispatch prompts. Re-measured here: 4 of the 38 (the four
+  // named in MODULE_SPECIFIER_EXTENSIONS' docblock), and the matcher reaches
+  // the module rather than the test for every one of them.
+  const trapped = agreeCandidates.filter((h) => strictOf(h) && looseTarget(h) && strictOf(h) !== looseTarget(h));
+  t(
+    `the matcher reaches the module, never the test sibling the loose rule would have named (${trapped.length} such hints)`,
+    trapped.length > 0 &&
+      trapped.every((h) => hintCovers(h, strictOf(h)) && !hintCovers(h, looseTarget(h))),
+  );
+
+  // ── A dropped extension is followed, at COMPARISON time (#12514) ──────────
+  //
+  // Nine `packages/spec` families were unreachable ENTIRELY because a gate
+  // spells an imported module without its extension, so no path derivation
+  // could name them and a dev editing the file was never told they owed them.
+  // Silent under-derivation, exit 0. The pins below are ARRIVAL pins: where a
+  // hint lands, never merely that it left the branch it used to be in.
+  t(
+    'the matcher follows the extension an ESM specifier drops',
+    hintCovers('packages/spec/src/migrations/registry', 'packages/spec/src/migrations/registry.ts'),
+  );
+  // The live specimen the card was filed for, driven end to end through the
+  // real fleet: the family, the hint and the file are all read from the tree.
+  const extlessLive = discoverFamilies().byCheck.get('check:spec-changes');
+  t(
+    'check:spec-changes really declares the extensionless specifier',
+    (extlessLive?.hints ?? []).includes('packages/spec/src/migrations/registry'),
+  );
+  t(
+    '...and a card touching that file now MATCHES it — the silent under-derivation this card names',
+    (extlessLive?.hints ?? []).some((h) => hintCovers(h, 'packages/spec/src/migrations/registry.ts')),
+  );
+  // EQUALITY, not a prefix. The rule may name the one file the specifier
+  // resolves to and nothing else — not a subtree under it, not a sibling that
+  // merely starts the same way, and not a second extension stacked on the
+  // first. Each of these would be a fabricated lead, which this file prices
+  // above a missing one.
+  t('the extension follow does not become a subtree claim', !hintCovers('packages/spec/src/migrations/registry', 'packages/spec/src/migrations/registry.ts/inner.ts'));
+  t('nor reach a sibling that merely shares the stem', !hintCovers('packages/spec/src/migrations/registry', 'packages/spec/src/migrations/registry-v2.ts'));
+  t('nor a doubled extension', !hintCovers('packages/spec/src/migrations/registry', 'packages/spec/src/migrations/registry.ts.ts'));
+  t('and it stays inside the segment rule — a bare word is still refused, extension or not', !hintCovers('registry', 'registry.ts'));
+  // The `content/docs.site.json` trade (#8534) is what a LOOSE suffix rule
+  // would have taken back. Pinned here as well as above, because this card is
+  // the one that would have broken it: `.site.json` is not a module extension.
+  t('the sibling-file refusal survives the extension follow', !hintCovers('content/docs', 'content/docs.site.json'));
+
+  // COHERENCE: the matcher and the residue cannot disagree about a file the
+  // tree HAS. `extensionlessModuleTarget` exists to say "the tree has this
+  // file" about a hint the sweep calls dead; after this change no hint that
+  // carries a separator can be in both states at once, so the residue can never
+  // print that sentence about a hint the derivation is silently missing.
+  const stillDead = agreeCandidates.filter((h) => h.includes('/') && !hintReachesTree(h, agreeFiles));
+  t(
+    'no separator-carrying hint is both dead to the matcher and resolvable to a tracked file',
+    stillDead.every((h) => !strictOf(h)),
+  );
+
+  // ── The fabrication direction, re-homed from #12299 ───────────────────────
+  //
+  // This widening is root-agnostic: it follows an extension wherever the hint
+  // points, INCLUDING at a top-level root the tree does not have. The tree
+  // grows a `src/` or a `data/` and inert hints become MATCHED pairs for gates
+  // that never read those files — the fabricated-lead direction this file
+  // prices above a missing one. The requirement adopted on #12299 was that this
+  // cannot happen SILENTLY, so the roots are held out by name here and their
+  // arrival reds THIS case instead of quietly minting pairs into prompts.
+  const fabTopLevel = new Set(agreeFiles.map((f) => f.split('/')[0]));
+  const fabRoots = new Set();
+  for (const h of agreeCandidates) {
+    if (hintReachesTree(h, agreeFiles)) continue;
+    const root = collapseHint(h).split('/')[0];
+    if (root && !fabTopLevel.has(root)) fabRoots.add(root);
+  }
+  // The mechanism, shown rather than argued — a synthetic pair, so the reader
+  // can see exactly what the guard below is holding out.
+  t('a hint under an absent root WOULD convert the day that root appears', hintCovers('src/kernel/protocol-version', 'src/kernel/protocol-version.ts'));
+  t(
+    `and today none of the ${fabRoots.size} roots one directory away is in the tree — ` +
+      'if this reds, a new top-level directory just converted inert hints into MATCHED pairs; ' +
+      'check each against the gate that declares it before accepting the leads',
+    [...fabRoots].every((r) => !fabTopLevel.has(r)),
+  );
+  // The two the #12299 requirement names, held explicitly so the guard cannot
+  // evaporate if the derived set above ever empties for an unrelated reason.
+  t('`src` is not a tracked top-level entry — 20 inert hints are rooted there', !fabTopLevel.has('src') && fabRoots.has('src'));
+  t('`data` is not a tracked top-level entry — 9 inert hints are rooted there', !fabTopLevel.has('data') && fabRoots.has('data'));
 
   t('hint covers deeper path', hintCovers('.claude/agents', '.claude/agents/os-dev.md'));
   t('collapsed glob prefix covers', hintCovers('packages/spec/src/**', 'packages/spec/src/data/filter.zod.ts'));
@@ -7421,18 +7622,34 @@ function selfTest() {
   // the pin that the sweep judges with hintCovers itself rather than with a
   // faster second rule that would answer this case differently.
   t('the sweep names WHY: the tree HAS the population and the covering rule refuses the literal', /the tree HAS it/.test(reasonOf('check:too-generic')));
-  // The FOURTH cause, and the one no prefix can express: the specifier drops
-  // the extension, so the sweep stops one segment short and the row reads as a
-  // move out of a directory nothing moved out of. Pinned over a fixture corpus
-  // as well as over the live tree above, because the fixture is what pins the
-  // JUDGMENT while the live case pins the corpus reader (the split this whole
-  // section is built on).
-  t('the sweep names WHY: the tree HAS the file under the extension the specifier drops', /extensionless module spelling/.test(reasonOf('check:extensionless')));
-  t('...and it names the FILE, so the reader has no prefix to guess from', reasonOf('check:extensionless').includes('packages/spec/src/index.ts'));
-  t('...never reporting the short prefix as a layout move', !/layout moved/.test(reasonOf('check:extensionless')));
+  // The FOURTH cause used to be reached from HERE, and #12514 took that away on
+  // purpose: `hintCovers` now follows a dropped extension, so a specifier that
+  // names a file the tree HAS is MATCHED and never enters `dead` to be
+  // described. That is the fix, so the pin asserts the ARRIVAL rather than
+  // being deleted for going quiet — a departure pin cannot see an arrival, and
+  // this section learned that the expensive way one card ago.
+  t(
+    'an extensionless specifier whose file the tree HAS is no longer unreachable at all — it is MATCHED',
+    !sweptNames.includes('check:extensionless'),
+  );
+  t('...because the covering rule reaches the file itself', hintCovers('packages/spec/src/index', 'packages/spec/src/index.ts'));
+  // The renderer is a pure function over `dead`, so it is still pinned — just
+  // no longer from the live sweep for a hint that carries a separator. Handed
+  // the entry the sweep used to build, it must still say the true thing; that
+  // sentence is #12780's and this card does not move it.
+  const extlessDead = [
+    {
+      hint: 'packages/spec/src/index',
+      deepest: deepestTrackedPrefix('packages/spec/src/index', trackedPrefixes(treeFixture)),
+      target: extensionlessModuleTarget('packages/spec/src/index', new Set(treeFixture), trackedPrefixes(treeFixture)),
+    },
+  ];
+  t('the renderer still names WHY: the tree HAS the file under the extension the specifier drops', /extensionless module spelling/.test(unreachableReason(extlessDead)));
+  t('...and it names the FILE, so the reader has no prefix to guess from', unreachableReason(extlessDead).includes('packages/spec/src/index.ts'));
+  t('...never reporting the short prefix as a layout move', !/layout moved/.test(unreachableReason(extlessDead)));
   t(
     'a family whose only dead hints are extensionless specifiers is BY CONSTRUCTION, not a miss to triage',
-    unreachableClass(sweep.find((u) => u.check === 'check:extensionless').dead) === 'by construction',
+    unreachableClass(extlessDead) === 'by construction',
   );
   // ...and the exception is exactly that narrow: a hint with no such file in
   // the tree is a layout move exactly as before.
@@ -7536,7 +7753,10 @@ function selfTest() {
 
   const listed = unreachableLines(sweep, treeFixture.length);
   const listedText = listed.join('\n');
-  t('the listing heading carries the count and the corpus it swept', /4 famil\(ies\).*swept over 4 tracked file\(s\)/.test(listed[0]));
+  // Three, not four: the fixture's extensionless family stopped being
+  // unreachable when #12514 taught the matcher to follow a dropped extension.
+  // The corpus size beside it is `treeFixture.length` and did not move.
+  t('the listing heading carries the count and the corpus it swept', /3 famil\(ies\).*swept over 4 tracked file\(s\)/.test(listed[0]));
   t('⛔ and states plainly that CI still runs them — the one wrong reading', /NOT a skip list: CI runs these on every pull request/.test(listedText));
   t('the layout-moved family prints under its own heading', /THE LAYOUT MOVED under a gate that still spells the old path/.test(listedText));
   t('and the by-construction families under theirs', /unreachable BY CONSTRUCTION/.test(listedText));
