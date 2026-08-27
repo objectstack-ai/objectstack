@@ -12057,6 +12057,11 @@ function selfTest() {
       ]),
     );
   const h36rows = (...args) => h36SharedFileHolds(...args);
+  // The wrapper discipline the row-text wrappers at the top explain: a nulled
+  // first row must report as red CASES, never abort the suite in argument
+  // evaluation. The count assertions stay on `h36rows` directly.
+  const h36row1 = (...args) => String(h36SharedFileHolds(...args)[0]?.[1] ?? '');
+  const h36key1 = (...args) => h36SharedFileHolds(...args)[0]?.[0]?.number ?? null;
   const readyEarly = h36pr(100, { draft: false });
   const draftLate = h36pr(200, { created_at: '2026-08-25T11:00:00Z' });
   const sharedAuto = h36files({
@@ -12066,15 +12071,15 @@ function selfTest() {
   // ⭐ THE FINDING — the incident's own shape: an accepted side and any other
   // open PR holding one source file.
   t('H36: ready + draft sharing a source file -> one row', h36rows([readyEarly, draftLate], sharedAuto).length, 1);
-  t('H36: …keyed to the accepted side', h36rows([readyEarly, draftLate], sharedAuto)[0][0].number, 100);
-  t('H36: …naming the other side', h36rows([readyEarly, draftLate], sharedAuto)[0][1].includes('#200'), true);
-  t('H36: …and the shared path', h36rows([readyEarly, draftLate], sharedAuto)[0][1].includes('automation.ts'), true);
-  t('H36: …and states the non-verdict posture', h36rows([readyEarly, draftLate], sharedAuto)[0][1].includes('NOT a verdict'), true);
-  t('H36: …and the remedy is the local probe', h36rows([readyEarly, draftLate], sharedAuto)[0][1].includes('merge-tree'), true);
+  t('H36: …keyed to the accepted side', h36key1([readyEarly, draftLate], sharedAuto), 100);
+  t('H36: …naming the other side', h36row1([readyEarly, draftLate], sharedAuto).includes('#200'), true);
+  t('H36: …and the shared path', h36row1([readyEarly, draftLate], sharedAuto).includes('automation.ts'), true);
+  t('H36: …and states the non-verdict posture', h36row1([readyEarly, draftLate], sharedAuto).includes('NOT a verdict'), true);
+  t('H36: …and the remedy is the local probe', h36row1([readyEarly, draftLate], sharedAuto).includes('merge-tree'), true);
   // The gate on the row: some side must be DONE.
   t('H36: two unarmed drafts -> silent (the dispatch-time walk owns that case)', h36rows([h36pr(100), draftLate], sharedAuto).length, 0);
   t('H36: an ARMED draft is at risk, finding-increasing like H16', h36rows([h36pr(100, { auto_merge: { merge_method: 'squash' } }), draftLate], sharedAuto).length, 1);
-  t('H36: both accepted -> keyed to the earlier-created side', h36rows([h36pr(100, { draft: false }), h36pr(200, { draft: false, created_at: '2026-08-25T11:00:00Z' })], sharedAuto)[0][0].number, 100);
+  t('H36: both accepted -> keyed to the earlier-created side', h36key1([h36pr(100, { draft: false }), h36pr(200, { draft: false, created_at: '2026-08-25T11:00:00Z' })], sharedAuto), 100);
   // The noise floor: closed, two spellings, pinned against per-incident growth.
   t('H36: lockfile-only overlap is the noise floor -> silent', h36rows([readyEarly, draftLate], h36files({ 100: ['pnpm-lock.yaml'], 200: ['pnpm-lock.yaml'] })).length, 0);
   t('H36: .changeset/ overlap is the noise floor -> silent', h36rows([readyEarly, draftLate], h36files({ 100: ['.changeset/a.md'], 200: ['.changeset/a.md'] })).length, 0);
@@ -12092,8 +12097,8 @@ function selfTest() {
     [200],
   );
   t('H36: a truncated list still pairs on what was seen', h36rows([readyEarly, draftLate], truncPair).length, 1);
-  t('H36: …and the row says so, in the only-hides-more direction', h36rows([readyEarly, draftLate], truncPair)[0][1].includes('TRUNCATED'), true);
-  t('H36: an untruncated pair makes no such claim', h36rows([readyEarly, draftLate], sharedAuto)[0][1].includes('TRUNCATED'), false);
+  t('H36: …and the row says so, in the only-hides-more direction', h36row1([readyEarly, draftLate], truncPair).includes('TRUNCATED'), true);
+  t('H36: an untruncated pair makes no such claim', h36row1([readyEarly, draftLate], sharedAuto).includes('TRUNCATED'), false);
   // The transport judgement — H16's shape, asserted on this pass's own pair.
   t('H36: an all-failed files pass is the transport, not a clean board', h36DetailPassUnreadable(3, 0), true);
   t('H36: zero candidates is a clean reading', h36DetailPassUnreadable(0, 0), false);
