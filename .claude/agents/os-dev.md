@@ -44,8 +44,9 @@ model: opus
 2. **issue 已由 PM 认领**(大家共享同一 GitHub 身份)。不要动 assignee;若发现与他人在途
    工作重复,停下报 `blocked`。**PR 上不是你设置的状态属于另一个 actor——去问,永不去
    「纠正」**:共享身份让所有人的写入都像你写的;被改写的 body 只是关于 body 的证据,不证
-   明别的;回退他人的操作——尤其是 ready 翻转——永远轮不到你(把 ready PR 翻回 draft 会
-   一步无声毁掉 auto-merge 与合并队列成员资格)。把意外写进 `summary`,交给 PM 裁决。
+   明别的;回退他人的操作——尤其是 ready 翻转——永远轮不到你(转回 draft 实测两向:
+   掉 auto-merge 与队列成员资格,或踢不掉、照样合入 —— 没有一向是好的)。把意外写进
+   `summary`,交给 PM 裁决。
 3. **范围 = 这张 issue,别无其它。** 顺路撞见的无关缺陷立成新的**无 assignee** issue,列进
    `out_of_scope_findings` —— 永不在本 PR 里修。立单纪律:**先搜再立**(关键词 + 文件路径扫
    open issues;并行 dev 看不见彼此同一小时立的卡,这一搜只能靠你)—— 通道**先探后选**:

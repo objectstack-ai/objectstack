@@ -33,12 +33,12 @@
 - **转 draft 不是可靠的踢队手段 —— 两向都有实测,处置按最坏走**:本仓测得转 draft 同时掉
   auto-merge 与队列成员资格(均不自动恢复,转正后重新挂);objectui 2026-08-25 测得相反 —— 已入
   队 PR 转 draft 后条目保位、~40 分钟后队列照样合并,彼时 `disable_pr_auto_merge` 已拒绝(仓别/时
-  机差异未分辨)。两向共同支持的处置:补救 = 转 draft + disable 都做(disable 单独两仓皆测不踢
-  队),**验队列 ref 与最终未落地**(拼写见「零成本等价物」),⛔ 不据单读数报已补救。
+  机差异未分辨)。共同支持的补救:转 draft + disable 都做(本仓测得 disable 单独不踢队、objectui
+  彼时径直拒绝),**验队列 ref 与未落地**(拼写见「零成本等价物」),⛔ 不据单读数报补救。
 - **`update_pull_request` 不管传不传都发送 `draft` 位 ⇒ 对 draft PR 的任何调用必须显式带
   `draft: true`**(reviewers/title/body/labels 单字段调用同坑;objectui 2026-08-25 实测:一次只传
   reviewers 的请审把治理面 draft 发布进合并队列,后果见上条);请审免碰 draft 位的专用路 = REST
-  `POST /pulls/{n}/requested_reviewers`(2026-08-26 实测,载荷只有 reviewers/team_reviewers;门开席位优
+  `POST /pulls/{n}/requested_reviewers`(文档载明、未实测:载荷只有 reviewers/team_reviewers;门开席位优
   先,MCP-only 席才用 update + 显式 `draft: true`)。undraft 可用路径只有 MCP 这条:传 `draft: false`
   落地(2026-08-24 三张 PR 逐张回读确认);**裸 GraphQL 会话内被拒**(回「only the pinned set of
   PR-review operations is served」,它建议的「改用 REST」对 undraft **是错的**);**裸 REST
@@ -131,7 +131,7 @@
   再派 —— 中途撞限流的 dev **完不成强制查重**,只能把发现交回 PM 代为归档,⛔ 不盲目开
   卡。打满时:待执行写**排成有序清单挂进巡逻词**(不靠记忆),恢复窗口按序连清;重试对齐
   整点(REST core 整点重置)优于指数退避,⛔ 绝不忙轮询;search 与 core 独立计,一侧打满另一侧
-  可作退路;REST core 共享身份下同样会打满。
+  可作退路;REST core 共享身份下同样会打满;文档载明未实测:条件请求答 `304` 不计 core 池。
 - **公开仓零配额读法两档,payload 档优先**:单卡页 `/issues/N` 内嵌 JSON 载**原始 body + 全评
   论**,精确、零配额 —— 取含 `bodyHTML` 的 `script[type="application/json"]` 块,读
   `payload.preloadedQueries[0].result.data.repository.issue.body` 与 `frontTimelineItems`/`backTimelineItems`;

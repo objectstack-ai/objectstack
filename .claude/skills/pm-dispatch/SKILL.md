@@ -756,12 +756,13 @@ issue 上(不能合 ≠ 不复核;技能面 PR 的复核席须跑在契约复审
 draft PR 上 **request review `os-zhuang`**(维护者 2026-08-19:「还是应该在 pr 的审核流程,发给
 os-zhuang 审核。我的手机github 应该会收到推送消息吧」;当日实测 draft 可点名审核且推送到达手机,
 维护者确认「推送到了」;推送通道仅此一条,同日裁定:「只有需要我审核的pr 推给我。」)—— 「等人
-合」清单从此活在 GitHub 的 Review-requested 队列,合并自动消项。**请审的工具纪律(2026-08-26 实测)**:门开席位优先走专用 REST `POST /pulls/{n}/requested_reviewers` —— 载荷无 draft 位,结构上碰不到 draft;
-MCP-only 席位用 `update_pull_request` 请审时**必须显式带 `draft: true`**:该工具不管传不传都发送 `draft`,
-一次只传 reviewers 的请审曾把治理面 draft 静默转正入队(事实与踢队读数住 platform-readings)。**能请审则请审;PR 作者身份即 os-zhuang 的席位,请审必失败**(GitHub 拒绝向 PR 作者请审,author-identity 422)—— 改为把 PR **assign 给 os-zhuang** 替代通知,并在轮次报告点名说明走了 assignee 兜底;④ 轮次报
-告单列「awaiting a human merge」(「等人来合」与「被忘了」在 GitHub 上长得一模一样)。混
-合 diff 一条命中就分叉,⛔ 不按比例判;要拆就让 dev 单独开 PR;已入队才读到本条 ⇒ 转 draft +
-disable 都做再验队列 ref(转 draft 单独不可靠,两向相反实测住 platform-readings)。**skills 车道自有 PR 再按 diff 内容分流**(维护者 2026-08-26 裁定,原话:「skills 中的
+合」清单从此活在 GitHub 的 Review-requested 队列,合并自动消项。**能请审则请审;PR 作者身份即 os-zhuang 的席位,请审必失败**(GitHub 拒绝向 PR 作者请审,author-identity 422)—— 改为把 PR **assign 给 os-zhuang** 替代通知,并在轮次报告点名说明走了 assignee 兜底。
+**MCP 请审必显式带 `draft: true`**:`update_pull_request` 不管传不传都发送 draft 位,一次只传
+reviewers 的请审曾把治理面 draft 静默转正入队;门开席位改走载荷无 draft 位的专用 REST 请审
+端点(事实行与踢队读数住 platform-readings);④ 轮次报告单列「awaiting a human merge」(「等人来
+合」与「被忘了」在 GitHub 上长得一模一样)。混
+合 diff 一条命中就分叉,⛔ 不按比例判;要拆就让 dev 单独开 PR;已入队才读到本条 ⇒ 转 draft
+与 disable 都做再验队列 ref(转 draft 单独不可靠,两向相反实测住 platform-readings)。**skills 车道自有 PR 再按 diff 内容分流**(维护者 2026-08-26 裁定,原话:「skills 中的
 pr，只有包含md文件时需要推给我审核，其他代码文件你直接自己审核。」):diff 含任一 `.md` 文件 ⇒
 上述终局四件套照旧;纯代码面(`scripts/pm/` 工具、`.claude/` hooks/workflows/settings、`skills/**` 非
 md 产物)⇒ skills 席按契约复审档自审(清单不减)后直接落地(ready → 入队),⛔ 不推维护者;分
