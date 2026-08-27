@@ -713,7 +713,7 @@ type NormalizedRestServerConfig = {
 };
 
 /**
- * The declared `api` contract, minus the retired keys whose posture this seam
+ * The declared `api` contract, minus the ONE retired key whose posture this seam
  * does not own (see {@link RestServer.assertDeclaredApiConfig}).
  *
  * Built on first use, not at module load: `RestApiConfigSchema` is a
@@ -723,7 +723,7 @@ type NormalizedRestServerConfig = {
  * `RestServer` is constructed per boot (and per test).
  */
 function buildDeclaredApiConfigSchema() {
-    return RestApiConfigSchema.omit({ requireAuth: true, projectResolution: true });
+    return RestApiConfigSchema.omit({ requireAuth: true });
 }
 let declaredApiConfigSchemaCache: ReturnType<typeof buildDeclaredApiConfigSchema> | undefined;
 
@@ -2989,23 +2989,33 @@ export class RestServer {
      *    tombstone ages out of `packages/spec` this line fails `tsc` — the
      *    drift cannot go silent.
      *
-     *  - `api.projectResolution` is `.omit()`ed for a DIFFERENT reason, and it
-     *    is the one CI caught: the declared enum is
+     *  - `api.projectResolution` USED to be `.omit()`ed here too, for a
+     *    DIFFERENT reason, and it was the one CI caught: the declared enum is
      *    `z.enum(['required', 'optional', 'auto'])`, and the value this
-     *    platform actually ships is `'none'` — produced by
-     *    `@objectstack/runtime`'s standalone stack, whose
-     *    `StandaloneStackResult.api` DECLARES the literal type
-     *    `{ enableProjectScoping: false; projectResolution: 'none' }`, and
-     *    forwarded by `os serve` straight into this config
+     *    platform shipped was `'none'` — produced by `@objectstack/runtime`'s
+     *    standalone stack and forwarded by `os serve` straight into this config
      *    (`apiConfig.projectResolution ?? 'auto'` — `'none'` is not nullish, so
-     *    it passes through). Three packages disagree about this key's
-     *    vocabulary, and they have disagreed silently for exactly as long as
-     *    nothing ran the schema. Parsing it here does not settle that
-     *    disagreement, it just turns every `os serve` boot into a crash.
-     *    ⛔ Which spelling is right — teach the enum `'none'`, or migrate the
-     *    runtime onto `'auto'` — is a contract question about project-scoping
-     *    semantics that this seam cannot answer and this card does not own
-     *    (`packages/spec` is `domain:spec`'s surface). Filed as #11999.
+     *    it passed through). Three packages disagreed about this key's
+     *    vocabulary, silently, for exactly as long as nothing ran the schema.
+     *    Parsing it THEN would not have settled the disagreement, only turned
+     *    every `os serve` boot into a crash — so it was filed as #11999 rather
+     *    than decided here.
+     *
+     *    [#11999 / PR #12444] settled it at the producer: the runtime migrated
+     *    onto the declared `'auto'`. `'none'` read as "no scoping at all" and
+     *    got `'auto'`'s behaviour by fallthrough anyway, because every reader
+     *    that acts on the key is gated on `enableProjectScoping` first — but
+     *    the discovery handler below copies the value into
+     *    `discovery.scoping.resolution` UNCONDITIONALLY, and `DiscoverySchema`
+     *    declares that field as the same three-member enum, so shipping
+     *    `'none'` published a payload the platform's own schema rejects.
+     *
+     *    [#12450] withdrew the exemption: the key is parsed here now, so an
+     *    undeclared strategy is refused at construction instead of being
+     *    stripped as an unknown key (this `z.object()` is non-strict) and
+     *    taking `'auto'`'s branch in silence. ⛔ Do not re-add it to the
+     *    `.omit()` to make some config boot — a strategy outside the enum is
+     *    wrong where it is WRITTEN, not where it is read.
      *
      * The sibling sub-objects (`crud`, `metadata`, `batch`, `routes`) are still
      * cast, not parsed, and carry declared constraints of their own
