@@ -1319,6 +1319,243 @@
           "ref": "#9299"
         }
       ]
+    },
+    {
+      "id": "api-backend.packaged-action-disabled-dispatch",
+      "title": "A disabled packaged action is refused 409 ACTION_DISABLED at BOTH dispatch doors — after the capability gate (a 403 is never an oracle for the switch), before the param contract and the record load, durable across restart",
+      "since": "v17",
+      "status": "active",
+      "revision": 1,
+      "priority": "P0",
+      "surface": "api",
+      "personas": [
+        "admin (dev admin — holds manage_metadata for the activation flips via admin_full_access, and is the invoker on the 409 legs; the probe actions declare no requiredPermissions, so any authed caller clears the ADR-0066 D4 gate)",
+        "any authenticated caller for the 403-oracle leg — showcase_zoo_perm_missing requires showcase.restricted_ops, a capability the app declares and grants to NOBODY (predicate-matrix.action.ts), so even the admin answers 403 there"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "showcase_mark_done on showcase_task (ui/actions/index.ts — script action, registered body, NO declared params, no requiredPermissions): the clean 409 probe",
+          "showcase_action_param_gallery on showcase_field_zoo (ui/actions/index.ts — script action with a required param p_text): the param-ordering discriminator — the ONLY stock action whose param contract can produce a contrasting 400, because enforceActionParams (action-execution.ts) returns null outright for an action with no declared params",
+          "showcase_zoo_perm_missing on showcase_field_zoo (predicate-matrix.action.ts — requiredPermissions: ['showcase.restricted_ops'], granted to nobody): the 403-oracle probe",
+          "showcase_portfolio_snapshot (ui/actions/index.ts — object-less/global, and the ONLY stock action with ai.exposed: true): the live MCP-door probe; its activation flip spells the object segment `global` (/actions/_activation/global/showcase_portfolio_snapshot)"
+        ],
+        "knownGaps": [
+          "The MCP door cannot be driven live with showcase_mark_done: the bridge's AI-exposure gate (actionAiExposureError, fail-closed on ai.exposed !== true) sits AHEAD of the activation consult, so a non-exposed action answers the exposure refusal regardless of its switch. showcase_portfolio_snapshot is the only stock ai.exposed action; if the MCP transport itself is not drivable in the run environment, score the MCP clause from the unit pin (action-activation-dispatch.test.ts 'door 2') and record which oracle the verdict rests on.",
+          "The record-load half of the ordering proof has NO contrasting refusal: the REST door's record load is best-effort (try/catch in domains/actions.ts — a missing record passes an empty record for new-record actions), so a nonexistent recordId never 404s on its own, enabled or disabled. The record leg is proven by code order plus the absence of any read/side effect, never by expecting a 404 from the enabled control."
+        ]
+      },
+      "steps": [
+        "boot showcase isolated on the real HTTP stack (os dev); sign in as admin",
+        "disable the probe: POST /api/v1/actions/_activation/showcase_task/showcase_mark_done {\"enabled\": false} → 200 (the door's own arms are api-backend.action-activation-door-contract's item — do not re-prove them here); confirm the row via GET /api/v1/data/sys_metadata_activation (metadata_type 'action', name showcase_mark_done, organization_id NULL, active false)",
+        "REST door: POST /api/v1/actions/showcase_task/showcase_mark_done with {\"recordId\": \"no-such-record-0000\"}; capture status + body; then re-read a REAL seeded task and confirm no done/progress write happened anywhere",
+        "param-ordering discriminator: disable showcase_action_param_gallery (POST /actions/_activation/showcase_field_zoo/showcase_action_param_gallery {\"enabled\":false}), then invoke POST /actions/showcase_field_zoo/showcase_action_param_gallery with params: {\"bogus_key\": 1} (missing required p_text AND an unknown key) plus a nonexistent recordId; capture. Re-enable and repeat the IDENTICAL request; capture the contrast",
+        "403-oracle: POST /actions/showcase_field_zoo/showcase_zoo_perm_missing while it is ENABLED; capture the 403 body. Disable it via /actions/_activation/showcase_field_zoo/showcase_zoo_perm_missing, repeat the identical invocation, capture again; byte-compare the two refusals",
+        "MCP door: disable showcase_portfolio_snapshot (POST /actions/_activation/global/showcase_portfolio_snapshot {\"enabled\":false}); call the MCP run_action tool for it; capture the tool error envelope. Re-enable and confirm the tool call runs again",
+        "restart durability: RESTART the server (hydrateActionActivations re-loads the ledger at boot, after the authored-action re-sync); wait for the serving line, then invoke showcase_mark_done again → capture; re-enable it via the activation door → invoke again → dispatches; re-read the ledger row (active true, row still present)",
+        "flow-type leg (variant): disable showcase_bulk_reassign (type 'flow', target showcase_reassign_wizard) and invoke it over REST — the refusal must be the ACTION's own switch, ahead of the type branch and of any consult of the target flow's ledger row"
+      ],
+      "acceptance": [
+        {
+          "clause": "the REST door refuses a disabled packaged action 409 ACTION_DISABLED and dispatches NOTHING: status 409, code ACTION_DISABLED (registered in the ADR-0112 ledger, error-code-ledger.zod.ts), message = the engine's own describeDisabledAction sentence naming the ledger — and no side effect lands (the mark_done body's done/progress write never ran)",
+          "oracle": "api",
+          "verify": "step-3 trace: 409 + code ACTION_DISABLED + the disabled-action sentence; follow-up reads show no task mutated",
+          "evidence": "the trace + the control re-reads"
+        },
+        {
+          "clause": "the activation consult PRECEDES the ADR-0104 param contract: the disabled param-gallery invocation with a garbage bag answers 409 ACTION_DISABLED (a disabled action discloses no param shape), and the identical request against the re-enabled action answers 400 'Invalid action params' — the contrast that proves the ordering, since enforceActionParams demonstrably fires for this action",
+          "oracle": "api",
+          "verify": "step-4 pair: disabled → 409 ACTION_DISABLED (NOT 400); enabled → 400 naming the param issues. ⛔ Run the discriminator on showcase_action_param_gallery, never on showcase_mark_done — the latter declares no params, so its enabled control answers 200/404-ish shapes and proves nothing about ordering",
+          "evidence": "both traces side by side"
+        },
+        {
+          "clause": "the consult also precedes the record load, proven by absence not by a contrasting refusal: the 409 arrives with a nonexistent recordId in play and no record read occurs — the enabled control CANNOT 404 on the bad id because the load is best-effort by design (domains/actions.ts catches and passes an empty record), so do not score this leg by expecting one",
+          "oracle": "api",
+          "verify": "the step-3/4 disabled traces are 409 with the bogus recordId present; the run record notes the enabled-control caveat rather than a fabricated 404 expectation",
+          "evidence": "traces + run-record note"
+        },
+        {
+          "clause": "the 403 is never an oracle for the switch: an unentitled caller (showcase_zoo_perm_missing — the ADR-0066 D4 gate fires) answers 403 whether the action is enabled OR disabled, and the two 403 bodies are identical — the D4 gate runs AHEAD of the activation consult, so a caller without the capability learns nothing about what this installation switched off",
+          "oracle": "api",
+          "verify": "step-5 byte-compare: both refusals are 403 with the same capability-naming message; a 409 to the unentitled caller is the leak and an immediate FAIL",
+          "evidence": "the two 403 bodies, diffed"
+        },
+        {
+          "clause": "the MCP run_action bridge (door 2 of 2) refuses the same switch with the same envelope: the disabled showcase_portfolio_snapshot answers a tool error carrying ACTION_DISABLED / 409 (invokeBusinessAction throws with code+status so resolveThrownHttpError keeps the ADR-0112 envelope), and re-enabling re-arms the tool",
+          "oracle": "api",
+          "verify": "step-6 tool-error envelope carries the code and the SAME engine sentence as the REST door (one describeDisabledAction producer, not two agreeing texts); the re-enabled call runs",
+          "evidence": "tool traces before/after the flip"
+        },
+        {
+          "clause": "the switch is DURABLE: after a full server restart the action is still refused 409 (hydrateActionActivations re-applies the ledger at boot), and re-enabling via the door both re-arms dispatch and UPDATES the row in place — the row records the administrator's choice, it is never deleted (ADR-0126 §6 wall 3)",
+          "oracle": "api",
+          "verify": "step-7: post-restart invocation 409; post-re-enable invocation dispatches; sys_metadata_activation still carries the row with active true",
+          "evidence": "post-restart traces + the row read"
+        },
+        {
+          "clause": "a disabled `type: flow` action is refused by its OWN switch, ahead of the type branch — the refusal is ACTION_DISABLED for the action's name, independent of anything the target flow's own ledger row says",
+          "oracle": "api",
+          "verify": "step-8: 409 ACTION_DISABLED naming showcase_bulk_reassign; the automation service is never consulted for the run",
+          "evidence": "the trace"
+        }
+      ],
+      "negative": [
+        "a 400 (param contract) or a handler/record answer for a DISABLED action means the consult sits too deep — the disabled action leaked its param shape or read its record, which is exactly what the ordering exists to prevent",
+        "a 409 ACTION_DISABLED answered to a caller the D4 gate should refuse is the information leak (the 403 must win); conversely ACTION_DISABLED must NEVER surface on a stock boot with no ledger row — absence means ACTIVE (a stock boot behaves exactly as it always has)",
+        "an anonymous caller answers the ADR-0056 401 baseline before any of this — a 409/403 to an anonymous probe means the anonymous floor moved"
+      ],
+      "variants": [
+        "door:rest (POST /actions/:object/:action)",
+        "door:mcp (run_action bridge)",
+        "type:script (showcase_mark_done, showcase_action_param_gallery)",
+        "type:flow (showcase_bulk_reassign — refused by the ACTION's switch)"
+      ],
+      "automated": {
+        "kind": "dogfood",
+        "ref": "packages/qa/dogfood/test/packaged-activation-ledger-reach.dogfood.test.ts (live boots, both compositions: the flip lands 200, ONE install-level row with organization_id NULL, REST-door dispatch 409, re-enable UPDATES the row and re-arms, flows+actions share one table without touching each other's rows) + packages/runtime/src/domains/action-activation-dispatch.test.ts (unit: both doors incl. the MCP envelope, the 403-not-an-oracle leg, the flow-type-refused-by-its-own-switch leg, absence-means-active). ⚠️ Neither pin covers the RESTART leg, the param-ordering contrast, or a LIVE MCP transport call — those stay manual"
+      },
+      "traps": [
+        "dispatcher-vs-hono-route",
+        "wrong-persona",
+        "auth-state-leak",
+        "first-boot-cold-start"
+      ],
+      "source": [
+        "packages/runtime/src/domains/actions.ts (the REST door's ordered gates: ADR-0066 D4 capability gate → activation consult → type branch → ADR-0104 param contract → best-effort record load)",
+        "packages/runtime/src/action-execution.ts (disabledActionRefusal — ACTION_DISABLED_CODE/STATUS 409, the shared consult both doors call; invokeBusinessAction — the MCP door, whose AI-exposure + capability gates run ahead of the consult)",
+        "packages/objectql/src/engine.ts (isActionEnabled / describeDisabledAction / hydrateActionActivations / setActionActive — projection over the durable ledger, row-first then projection)",
+        "packages/spec/src/api/error-code-ledger.zod.ts (ACTION_DISABLED registered — the *_DISABLED family)",
+        "examples/app-showcase/src/ui/actions/index.ts + predicate-matrix.action.ts (the four probe actions)",
+        "docs/adr/0126-packaged-metadata-customization-model.md (§8 item 2, §4 absence-means-active, §6 wall 3)",
+        "#12438",
+        "Epic #12150"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-08-26",
+          "change": "new — ADR-0126 §8 item 2 landed the packaged-action kill switch with a two-door consult and nothing in the ledger asserted the dispatch-side contract: the 409, its position in the gate order (after the D4 403, before params/record), the MCP twin, or restart durability. Register corrections folded in during source verification: the param-ordering discriminator must be showcase_action_param_gallery (showcase_mark_done declares no params, so enforceActionParams is a no-op for it and its enabled control proves nothing); the 403 leg must be an action with requiredPermissions (showcase_zoo_perm_missing — mark_done has none, every authed caller passes its gate); the live MCP leg must be showcase_portfolio_snapshot (the only ai.exposed stock action — the exposure gate refuses everything else ahead of the consult); and the record-load leg has no contrasting 404 because the load is best-effort by design",
+          "ref": "#12438"
+        }
+      ]
+    },
+    {
+      "id": "api-backend.action-activation-door-contract",
+      "title": "POST /actions/_activation/:object/:action — the activation door's ordered arms: authority before body and lookup, the exact 400 shapes, 404 undeclared, 409 ambiguity, 501/503 honesty, and the reserved segment surviving the real mount",
+      "since": "v17",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "api",
+      "personas": [
+        "admin (dev admin — manage_metadata via admin_full_access; the happy-path and body-arm caller)",
+        "a non-admin member for the authority-first leg (Mei Phone phone.demo@example.com or Ada Auditor auditor.demo@example.com, DEMO_PERSONA_PASSWORD 'showcase123' — no showcase permission set grants manage_metadata, only admin_full_access carries it)",
+        "anonymous (the 401 baseline control)"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "showcase_mark_done on showcase_task — the declared action the happy path flips (restore enabled afterwards; api-backend.packaged-action-disabled-dispatch owns what dispatch does with the row)",
+          "an engine carrying the activation projection (any stock v17 boot — ObjectQLPlugin attaches the sys_metadata_activation store at start)"
+        ],
+        "knownGaps": [
+          "The AMBIGUITY arm (409 RESOURCE_CONFLICT from refuseAmbiguousActionActivation — two objects declaring one action name) has NO stock fixture: every showcase action name is unique across both action files (verified — the machine names are all showcase_-prefixed and declared once), so the live leg needs an authored scratch package declaring the SAME action name on two objects. Do not fake it; the arm is pinned at unit level (action-activation-posture-gate.test.ts: 409 RESOURCE_CONFLICT naming both owners, and setActionActive NEVER called — no row on refusal), and a run without the scratch package scores the clause from that pin, recorded as such.",
+          "The 501 arm (engine without setActionActive) and the 503 arm (attached store that throws / no ledger attached) are unreachable on a stock boot — the stock engine implements the projection and the plugin attaches the store. Both are pinned at unit level (action-activation-posture-gate.test.ts: 501 naming ADR-0126 §8; 503 SERVICE_UNAVAILABLE rather than a 200 for a write that did not persist). #12359 measured the 503 live once (actions-without-automation composition) and the registration MOVE closed it — packaged-activation-ledger-reach.dogfood.test.ts keeps that composition green.",
+          "The group/isolated POSTURE legs of the §5 operator gate need an enterprise tenancy runtime no example app composes — the gate itself (both tiers, all postures) is access-security territory (activation-write-operator-gate); this item asserts only the ORDER (authority before body/lookup), which the stock single-posture boot can prove through the manage_metadata tier."
+        ]
+      },
+      "steps": [
+        "boot showcase isolated (os dev — the LIVE mount matters here, see the trap note); sign in as admin and as the non-admin member",
+        "authority-first probe, as the NON-ADMIN: POST /api/v1/actions/_activation/showcase_task/no_such_action with body {\"enable\": false} — a request that is simultaneously mis-bodied AND undeclared; capture. Repeat the same request anonymous; capture",
+        "shape arms, as admin: POST /api/v1/actions/_activation/showcase_mark_done {} (2-segment); POST /api/v1/actions/_activation/showcase_task/showcase_mark_done/extra {} (4-segment); capture both",
+        "body arms, as admin, against the declared action: {\"enable\": false} (one letter off); {\"enabled\": \"false\"} (string, not boolean); [] (non-object body); {} (empty); capture each with full envelope",
+        "declaration arm: POST /actions/_activation/showcase_task/no_such_action {\"enabled\": false} as admin; capture; then GET /api/v1/data/sys_metadata_activation and confirm NO row was written by any refused probe so far",
+        "happy path: POST /actions/_activation/showcase_task/showcase_mark_done {\"enabled\": false} → capture the 200 body; read the ledger row (metadata_type 'action', name, organization_id NULL, active false); POST again {\"enabled\": true} → re-read: the SAME row updated in place, active true — never deleted, never duplicated",
+        "record the ambiguity / 501 / 503 arms against their unit pins (knownGaps above) — run the pins and cite their output rather than skipping the clauses silently"
+      ],
+      "acceptance": [
+        {
+          "clause": "AUTHORITY RUNS FIRST and a refused caller learns nothing: the non-admin's mis-bodied undeclared-action probe answers 403 PERMISSION_DENIED with the manage_metadata sentence ('switching a shipped artifact off is functionally equivalent to deleting it', #10243) — NOT the 400 the body deserves and NOT the 404 the lookup would give, so neither the body contract nor the action namespace is disclosed. The refusal recommends NO clone (action-clone is deliberately unchartered — ACTION_ACTIVATION_SUBJECT's remedy names the operator and authoring a sibling action)",
+          "oracle": "api",
+          "verify": "step-2 non-admin trace: 403 + code PERMISSION_DENIED + the capability-naming message with no clone recommendation; the anonymous twin answers the 401 UNAUTHENTICATED baseline (the ADR-0056 floor sits ahead of even this)",
+          "evidence": "both traces"
+        },
+        {
+          "clause": "the shape arm names the shape: the 2-segment path answers this door's own 400 'Path must be /actions/_activation/:object/:action (use `global` for an object-less action)' — while the 4-segment path 404s at the ROUTER, because no /actions mount pattern matches four segments (the door never sees it; route-ledger.ts records the reconstruction)",
+          "oracle": "api",
+          "verify": "step-3: 2-segment → 400 with the shape sentence; 4-segment → the routing-404 shape (compare against a known unmounted path, per api-backend.route-ledger-live-parity's control discipline)",
+          "evidence": "both traces + the routing-404 control"
+        },
+        {
+          "clause": "the body contract refuses rather than inverts (#3899 — the flow toggle's one-letter-off lesson): {\"enable\": false} → 400 VALIDATION_FAILED with fields[0] {field:'enable', code:'unknown_field'} and a message suggesting `enabled`; {\"enabled\":\"false\"} → 400 with code 'invalid_type' (a JSON boolean, not a string); a non-object body → 400 invalid_type on '(body)'; and the envelope is the shared validationFailure shape every other door emits (fields[], per api-backend.error-envelope-ledger), never a hand-rolled lookalike",
+          "oracle": "api",
+          "verify": "step-4 traces: each 400 carries the named field-level code; crucially the {\"enable\": false} probe must NOT answer 200 — a 200 there ENABLED the artifact the caller meant to switch off",
+          "evidence": "the four envelopes"
+        },
+        {
+          "clause": "an EMPTY body ENABLES — {} answers 200 with enabled true (the documented legacy shape: `enabled` defaults true, same as the flow toggle). A runner must not read the empty-body 200 as a body-contract failure",
+          "oracle": "api",
+          "verify": "the {} trace: 200, response enabled: true",
+          "evidence": "the trace"
+        },
+        {
+          "clause": "the declaration arm distinguishes its three states: an undeclared action → 404 'has no declaration — there is nothing to switch off' (the ledger addresses DECLARED actions, ADR-0126 §4; a typo is not a server fault, #7535); a metadata plane that cannot answer → 503 (an outage is not a verdict); and NO refused probe of any arm writes a sys_metadata_activation row",
+          "oracle": "api",
+          "verify": "step-5: 404 with the nothing-to-switch-off sentence; the ledger read shows zero rows written by any refusal (the only rows present are the happy path's)",
+          "evidence": "the 404 trace + the ledger read"
+        },
+        {
+          "clause": "the happy path writes exactly ONE install-level row and re-enable UPDATES it: 200 {name, objectName, enabled}; the row carries metadata_type 'action', the declarative name, organization_id NULL (the per-org dimension is reserved and unwritten); flipping back answers 200 and the same row flips active — never a second row, never a delete (§6 wall 3: the ledger records the choice)",
+          "oracle": "api",
+          "verify": "step-6: the 200 body + before/after ledger reads (one row throughout, active false then true)",
+          "evidence": "the traces + both row reads"
+        },
+        {
+          "clause": "the ambiguity arm refuses instead of switching off artifacts the caller did not name: a name declared on 2+ objects answers 409 RESOURCE_CONFLICT (standard catalog — no new code minted) naming every owner object, and writes nothing",
+          "oracle": "test",
+          "verify": "no stock fixture (knownGaps) — run packages/runtime/src/domains/action-activation-posture-gate.test.ts and cite the ambiguity case (409 RESOURCE_CONFLICT, both owners named, setActionActive never called); with an authored colliding scratch package, the live probe supersedes the pin",
+          "evidence": "the pin's output (or the live trace when the scratch fixture exists), with which oracle the verdict rests on recorded"
+        },
+        {
+          "clause": "the door is HONEST about what it cannot make durable: an engine without the projection answers 501 naming ADR-0126 §8, and a write the attached store refuses answers the store's own 503 SERVICE_UNAVAILABLE — never a 200 reporting a switch that does not exist (§6 wall 3)",
+          "oracle": "test",
+          "verify": "unreachable on a stock boot (knownGaps) — cite the two unit cases in action-activation-posture-gate.test.ts (501 + 503), and packaged-activation-ledger-reach.dogfood.test.ts for the composition (#12359) where the 503 once fired live and must stay closed",
+          "evidence": "the pins' output"
+        }
+      ],
+      "negative": [
+        "{\"enable\": false} answering 200 is the catastrophic inversion — the caller switching something OFF silently switched it ON (the exact #3899 shape this body contract exists to close)",
+        "a non-manage_metadata caller receiving the body 400 or the declaration 404 is an information-ordering FAIL — the authority gates must answer first, and their message says nothing about the caller's own positions or sets (#7450)",
+        "any refused arm leaving a sys_metadata_activation row behind is a write-first-refuse-second FAIL (#10243 with an audit trail)",
+        "`_activation` read as an invocation — it is structurally impossible (machine names are ^[a-z][a-z0-9_]*$ and cannot start with '_'), so an invocation-shaped answer from this path means the reserved segment collapsed into the name space"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/runtime/src/domains/action-activation-posture-gate.test.ts (the door's own contract: both authority tiers across all three postures, unknown-key/non-boolean 400s, empty-body-enables, undeclared 404 + no row, ambiguity 409 + no write, 501 no-projection, 503 non-durable) + packages/qa/dogfood/test/action-params-contract.dogfood.test.ts ('[#12160] the reserved `_activation` segment survives the real mount' — the 2-segment 400 and undeclared 404 measured through the live dispatcher reconstruction) + packages/qa/dogfood/test/packaged-activation-ledger-reach.dogfood.test.ts (the live happy path: 200 flip, one org-NULL row, re-enable updates). The live-server body/authority arm sweep as a whole stays manual"
+      },
+      "traps": [
+        "dispatcher-vs-hono-route",
+        "wrong-persona",
+        "auth-state-leak"
+      ],
+      "source": [
+        "packages/runtime/src/domains/actions.ts (ACTION_ACTIVATION_SEGMENT, handleActionActivationWrite — the five ordered steps: authority → shape → body → declaration/ambiguity → durable write; refuseAmbiguousActionActivation)",
+        "packages/runtime/src/domains/activation-gate.ts (refuseUngrantedActivationAuthoring — manage_metadata tier, #10243 sentence; refuseUngrantedActivationWrite — the §5 posture tier; ACTION_ACTIVATION_SUBJECT's no-clone remedy)",
+        "packages/runtime/src/route-ledger.ts (the #12160 server-only row: servedBy reconstruction through /actions/:object/:action/:recordId, the 4-segment router-404, and why the segment is reserved)",
+        "packages/objectql/src/engine.ts (setActionActive — durable row first, projection second; the 503-on-no-ledger contract)",
+        "sibling item api-backend.packaged-action-disabled-dispatch (what DISPATCH does with the row this door writes) · access-security.activation-write-operator-gate owns the gate's posture depths",
+        "docs/adr/0126-packaged-metadata-customization-model.md (§4, §5, §6 walls, §8 item 2)",
+        "#12438",
+        "Epic #12150"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-08-26",
+          "change": "new — the ADR-0126 §8 activation door is the only non-invocation shape /actions serves, is absent from every REST-ledger sweep (server-only, servedBy reconstruction), and none of its arms were in the ledger. Register corrections folded in during source verification: the 400-shape message carries a '(use `global` for an object-less action)' tail; a 4-segment path 404s at the ROUTER rather than reaching the door's 400 (no mount pattern matches); the authority gates run ahead of even the path-shape check, not just body/lookup; an empty body ENABLES by contract (a trap for a runner reading it as a refusal); and the ambiguity arm's no-stock-fixture status was verified across both showcase action files rather than assumed",
+          "ref": "#12438"
+        }
+      ]
     }
   ]
 }

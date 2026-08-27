@@ -138,7 +138,48 @@ const swapServerOnlyGrammarArm: Plugin = {
   },
 };
 
-// Generate DTS separately to avoid memory issues
+/**
+ * Generate DTS separately to avoid memory issues — this pass is by far the
+ * heaviest thing this package's build does, and `package.json` runs it under an
+ * explicit `--max-old-space-size` for a reason worth stating where the next
+ * author will look.
+ *
+ * ⚠️ THE HEAP CEILING MUST FIT THE SMALLEST CONTAINER THIS BUILD RUNS IN.
+ * `--max-old-space-size` is a promise to V8 that the memory is there: below it,
+ * V8 defers major GCs and lets the resident set grow. A ceiling ABOVE the
+ * container's memory therefore does not "allow a big build", it converts a
+ * recoverable JS heap error into a kernel SIGKILL — the process is killed at
+ * the container limit long before V8 ever considers the ceiling reached, and
+ * exit 137 carries no diagnostic at all.
+ *
+ * That is not hypothetical: at a 12288 ceiling this pass was killed on every
+ * Vercel docs deploy for two days (`@objectstack/spec:build` exit 137), because
+ * the docs site is built by `turbo run build --filter=@objectstack/docs` inside
+ * one fixed-memory build container and this package is its only workspace
+ * dependency — so this pass meets the container's limit ALONE, with no
+ * parallelism to cap.
+ *
+ * Measured on this package's DTS pass, inside a cgroup capped at 8192 MB
+ * (peak anonymous RSS of the whole process tree):
+ *
+ *     ceiling   result                        peak RSS   wall
+ *     12288     ok, but only ~0.9 GB spare     7290 MB    132s
+ *      6144     ok                             5794 MB    134s
+ *      5120     ok                             5328 MB    148s
+ *      4096     ERR_WORKER_OUT_OF_MEMORY          —       113s
+ *
+ * 6144 is chosen as the largest ceiling whose WORST case still fits: V8 cannot
+ * exceed it, and the pass's non-heap overhead measured ~250 MB, so the bound is
+ * ~6.4 GB inside an 8 GB container. Every completing ceiling emitted a
+ * byte-identical declaration tree (122 files, one sha256 over all of them), so
+ * this number buys headroom and costs nothing but GC time.
+ *
+ * If this pass starts failing with `ERR_WORKER_OUT_OF_MEMORY`, the live type
+ * graph has outgrown 6144 — that is a loud, actionable failure and the point of
+ * the ceiling. ⛔ Do not "fix" it by raising the number past what the build
+ * container has; that trades this error back for the silent exit 137. Shrink
+ * the graph, or split the pass across entries.
+ */
 const isDts = process.env.BUILD_DTS === 'true';
 
 const mainConfig: Options = {

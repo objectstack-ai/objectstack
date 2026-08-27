@@ -1371,6 +1371,268 @@
           "ref": "#11421"
         }
       ]
+    },
+    {
+      "id": "platform-core.activation-ledger-registration-home",
+      "title": "The activation ledger's registration home: sys_metadata_activation is registered by PlatformObjectsPlugin under its OWN manifest, so packaged disable works with or without the automation service — one owner, datasource binding carried across the move",
+      "since": "v17",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": ["seeded admin (admin@objectos.ai / admin123)"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "the with-automation composition is any stock boot: `objectstack dev`/`os serve` composes AutomationServicePlugin whenever the app requires the 'automation' capability token (packages/cli/src/commands/serve.ts CAPABILITY_PROVIDERS, :1056-1063), and the showcase does — so the live-boot legs below need nothing beyond an isolated stock boot",
+          "the NO-automation composition — the one #12359 measured the 503 on — is `bootStack(showcaseStack)` from @objectstack/verify with the `automation` option omitted (packages/verify/src/harness.ts:322; the option at :286 is only honored at :549-553), which is exactly how the pinned dogfood suite constructs it"
+        ],
+        "knownGaps": [
+          "NO stock CLI path boots the showcase WITHOUT the automation service: serve/dev compose it from the app's own `requires`, so a manual runner cannot stage the no-automation composition with `os dev` flags alone. The no-automation legs therefore ride the pinned dogfood suite (automated.ref — its first describe carries an anti-vacuity control asserting the automation service is genuinely absent) or an authored scratch stack config that drops the requirement; the run records WHICH of the two its verdict rests on. Scoring those legs off a stock boot measures the wrong composition"
+        ]
+      },
+      "steps": [
+        "run the pinned suite: pnpm --filter @objectstack/dogfood exec vitest run test/packaged-activation-ledger-reach.dogfood.test.ts — BOTH describes: '#12359 — actions and NO automation service' (the 503-turnaround leg, bootStack with no automation) and '#12159 Part 1 — a composition WITH automation' (the move's second end); capture the full output",
+        "live with-automation boot (stock `objectstack dev`, isolated port/DB), as admin: POST /api/v1/actions/_activation/showcase_task/showcase_mark_done {\"enabled\":false} → 200; GET /api/v1/data/sys_metadata_activation and capture the row (metadata_type 'action', name showcase_mark_done, organization_id NULL, active false/0)",
+        "same boot, the flow half: POST /api/v1/automation/showcase_task_completed/toggle {\"enabled\":false} → 200; re-read the ledger — a metadata_type 'flow' row for showcase_task_completed appears BESIDE the action row, and the flow-name and action-name lists never cross (the discriminator is load-bearing, not decorative)",
+        "restore both switches ({\"enabled\":true} / toggle on) — both rows persist with active true (updated, not deleted); leave the boot as found",
+        "ownership is proven by the boot itself plus the registry read: the stock boot composes BOTH PlatformObjectsPlugin (serve auto-injects it) and the automation service, and it comes up green — a second registrant of sys_metadata_activation would be a boot FAILURE (`registerObject` throws 'already owned by package …', ADR-0029 D3), never a benign duplicate; the dogfood suite additionally reads registry.getObjectOwner('sys_metadata_activation').packageId === 'com.objectstack.platform-objects.activation-ledger'",
+        "spec receipt: read packages/spec/src/system/constants/platform-object-names.ts — the 'platform-objects' array (:47) carries 'sys_metadata_activation' (:63), 41 names total; the automation service's entry does NOT list it"
+      ],
+      "acceptance": [
+        {
+          "clause": "the NO-automation composition serves the ledger: the flip that answered 503 SERVICE_UNAVAILABLE on the #12359 boot (actions composed, no automation service) answers 200, writes ONE install-level row (metadata_type 'action', organization_id NULL), dispatch consults it (409 ACTION_DISABLED ahead of the param contract and the record load), and re-enabling UPDATES the row rather than deleting it",
+          "oracle": "test",
+          "verify": "the dogfood suite's first describe is green INCLUDING its anti-vacuity control ('the automation service really is absent from this composition') — a harness that quietly composed automation would re-measure the case that already worked; the 503 is asserted by name (not.toBe(503)) so a regression reads as 'the ledger went away again', never as 'some error'",
+          "evidence": "the vitest output naming all five tests of the first describe"
+        },
+        {
+          "clause": "the WITH-automation composition — the move's second end — still works whole: the action flip lands (200 → 409 on dispatch) and the flow toggle writes a durable row, both into the SAME sys_metadata_activation table, without either consumer touching the other's rows",
+          "oracle": "api",
+          "verify": "the live-boot legs (steps 2-4): both switches answer 200, the ledger read shows a 'flow' row and an 'action' row side by side, flow names never appear in the action list and vice versa; mirrored by the second dogfood describe ('both consumers share ONE table without touching each other's rows')",
+          "evidence": "the captured switch responses + the ledger row listing showing both metadata_type values"
+        },
+        {
+          "clause": "the ledger object has exactly ONE owner and it is the declaring package's own manifest: com.objectstack.platform-objects.activation-ledger — a MOVE, not an add. The automation service's manifest no longer names the object, and re-adding it there is a boot failure for every served composition, not a duplicate",
+          "oracle": "test",
+          "verify": "the dogfood 'exactly ONE owner' test (registry.getObjectOwner) is green, plus the negative pin in packages/services/service-automation/src/activation-ledger-registration.test.ts (asserts behaviourally, over a real init() against a recording manifest service, that this plugin registers no sys_metadata_activation) and the positive pin in packages/platform-objects/src/plugin.test.ts (exactly one registering manifest)",
+          "evidence": "the three test outputs"
+        },
+        {
+          "clause": "the datasource binding is carried by the registrar, unchanged by the move: the owning ACTIVATION_LEDGER_MANIFEST carries the automation manifest's scope/namespace/defaultDatasource triple verbatim (scope 'system', defaultDatasource 'cloud', namespace 'sys'), so on a composition with no 'cloud' driver the table rides the global default driver exactly as before — a binding change would leave existing rows in one database and read another, silently re-arming every artifact an administrator disabled (ADR-0126 §6 wall 3 through a side door)",
+          "oracle": "test",
+          "verify": "the dogfood binding test: resolveEffectiveDatasource('sys_metadata_activation') === undefined on the no-cloud composition, with sys_automation_run as the control proving the resolver is not answering undefined for everything; the manifest triple itself is pinned in platform-objects/src/plugin.test.ts where it is visible without a cloud driver existing",
+          "evidence": "the vitest output naming both assertions"
+        },
+        {
+          "clause": "the spec-side receipt matches the runtime: PLATFORM_OBJECTS_BY_PACKAGE['platform-objects'] includes sys_metadata_activation (41 names), so the one-way lint rule and every consumer of the constant attribute the ledger to platform-objects, not to the automation service",
+          "oracle": "build",
+          "verify": "grep packages/spec/src/system/constants/platform-object-names.ts: 'sys_metadata_activation' appears in the 'platform-objects' array (:47/:63) and in no other package's array; count the array (41)",
+          "evidence": "the grep excerpt + the count"
+        }
+      ],
+      "negative": [
+        "a 503 SERVICE_UNAVAILABLE from the activation door on ANY composition that carries PlatformObjectsPlugin is THE regression this item exists for (#12359 measured it) — score it as 'the ledger went away again', never as a generic server error",
+        "the no-automation legs scored on a boot where automation was quietly composed are vacuous — the dogfood anti-vacuity control failing is a harness finding, not a skip",
+        "a second package registering sys_metadata_activation surfaces as a BOOT FAILURE ('already owned by package …'), so a green stock boot is half the single-owner proof — a run that sees that throw must not read it as a flaky boot",
+        "a resolveEffectiveDatasource answer that changed from the pre-move behavior (rows in one database, reads in another) silently re-arms disabled artifacts and is a FAIL even though every HTTP response looks healthy"
+      ],
+      "traps": ["dispatcher-vs-hono-route", "stale-dist"],
+      "automated": {
+        "kind": "api",
+        "ref": "packages/qa/dogfood/test/packaged-activation-ledger-reach.dogfood.test.ts (both describes); packages/services/service-automation/src/activation-ledger-registration.test.ts (the negative half of the MOVE); packages/platform-objects/src/plugin.test.ts (the owning manifest + routing triple)"
+      },
+      "source": [
+        "packages/platform-objects/src/plugin.ts:51-80 (the registration-home rationale — the measured 503 at :60-62; MOVE-not-add :67-76), :109-152 (why the ledger rides its OWN manifest — the datasource-routing measurement), :153-164 (ACTIVATION_LEDGER_MANIFEST), :181-192 (the two register calls), :193-199 (lean-kernel degradation: no manifest service → the door refuses loudly with 503 rather than keeping a bit that reverts)",
+        "packages/services/service-automation/src/plugin.ts:738-761 (the flow leg attaches by probe() of the real table — runObjectRegistered no longer vouches for it; not attached on a failed probe, :762-777)",
+        "packages/spec/src/system/constants/platform-object-names.ts:47,:63 (PLATFORM_OBJECTS_BY_PACKAGE receipt)",
+        "packages/verify/src/harness.ts:286,:322,:549-553 (bootStack's automation option — how the no-automation composition is constructed)",
+        "docs/adr/0126-packaged-metadata-customization-model.md §4 (one generic activation ledger)",
+        "#12438 (the scoped sweep this item lands from), #12419 (the registration-home PR), #12359 (the 503 measurement + the 2026-08-26 「同意」 ruling: registration follows the declaration)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-08-26",
+          "change": "new — authored in the #12438 scoped sweep (ADR-0126 disable+clone). Grounding fixed the item's shape twice: (1) the no-automation composition has NO stock CLI path (serve/dev compose automation from the app's own requires), so that leg rides the pinned dogfood suite's bootStack(showcaseStack) with the automation option omitted, recorded as a knownGap rather than pretended manual; (2) the single-owner clause is proven by the boot succeeding plus a registry read, because a double registration is a boot FAILURE (registerObject throws), never an observable duplicate",
+          "ref": "#12438"
+        }
+      ]
+    },
+    {
+      "id": "platform-core.activation-ledger-row-contract",
+      "title": "sys_metadata_activation row contract: reads open / generic-data-API writes 405, one NULL-collapsed row per artifact, org-carrying rows skipped on read, re-enable updates never deletes, and rows exist ONLY for metadata_type flow|action (the ADR-0126 scope wall)",
+      "since": "v17",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "api",
+      "personas": ["seeded admin (admin@objectos.ai / admin123)"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "an isolated boot on a file DB (-d file:/tmp/<run>/data.db) WITH direct sqlite access to that file between boots: the object declares apiMethods ['get','list'], so REST can never stage the org-row and duplicate-row probes — same scratch-DB class of fixture platform-core.interrupted-migration-boot-report uses. On a stock boot no 'cloud' datasource is registered, so the table rides the global default driver and lives in the run's own file DB",
+          "the two shipped switches as row producers: the flow toggle (POST /api/v1/automation/showcase_task_completed/toggle) and the action activation door (POST /api/v1/actions/_activation/showcase_task/showcase_mark_done). Their own door contracts belong to automation.packaged-flow-disable-durable and api-backend.packaged-action-disabled-dispatch — this item owns the ROWS they leave behind"
+        ],
+        "knownGaps": [
+          "metadata_type is an untyped Field.text (maxLength 100) with exactly two string-literal writers in the tree — 'flow' (packages/services/service-automation/src/flow-activation-store.ts:51) and 'action' (packages/objectql/src/action-activation.ts:113). There is NO spec enum to pin: the variants below are enumerated BY HAND and deliberately carry no enumSource, so a third writer (ADR-0126 §8 pre-charts tool/skill/position) lands without failing any ratchet. Re-derive the writer list (grep for METADATA_TYPE literals) before scoring the scope wall, and bump this item's variants when a third writer ships",
+          "the reserved organization_id column has NO writer by design (ADR-0126 §5 — the per-org dimension is additive-later), so the org-row-skip leg can only be staged by hand-seeding the sqlite file between boots; the hand-seeded row is the run's own artifact and must be cleaned up (or the DB discarded)"
+        ]
+      },
+      "steps": [
+        "boot isolated on the file DB; as admin flip BOTH shipped switches off (flow toggle showcase_task_completed, action flip showcase_mark_done); capture both 200s",
+        "read the ledger through the open read path: GET /api/v1/data/sys_metadata_activation — capture every row; each carries the five declared columns (metadata_type, name, package_id, organization_id, active) and organization_id is NULL on every row a shipped switch wrote",
+        "scope wall sweep: the distinct metadata_type set over ALL rows is exactly {'flow','action'} — any other value (hook/permission/position/capability/…) is a FAIL of the model, not a coverage discovery: hooks are code-only by ADR-0126 §3 amendment ruling 1 (no ledger row, no disable switch), and packaged permission sets ride their kind's own `active` field per the 2026-08-26 #12159 ruling (cross-ref access-security.packaged-permission-set-lifecycle)",
+        "write-refusal probes, all three verbs: POST /api/v1/data/sys_metadata_activation {metadata_type:'action',name:'qa_probe',package_id:'qa',active:false}, PATCH /api/v1/data/sys_metadata_activation/<existing id> {active:true}, DELETE /api/v1/data/sys_metadata_activation/<existing id> — each answers 405 naming the refused operation and the allowed set; re-read confirms every row unchanged",
+        "re-enable both switches — the SAME rows update to active true (same ids, row count unchanged, nothing vanished)",
+        "uniqueness probe (direct DB): stop the server; in the sqlite file INSERT a second NULL-organization row for an existing (metadata_type, name) pair — the COALESCE'd unique index (ADR-0120 D3 NULL-collapse) refuses with a constraint error; capture it. A hand-written composite naming organization_id verbatim would be NULL-distinct and enforce nothing (#5030, measured) — the refusal is the proof the declared 'organization' arm is live",
+        "org-row-skip probe (direct DB): INSERT one org-CARRYING row (organization_id = any non-null id, metadata_type 'action', name showcase_mark_done, active 0); restart against the SAME DB; POST /api/v1/actions/showcase_task/showcase_mark_done → NOT refused by the switch (the artifact stays ARMED — the install-level read skips org rows, it never merges them); CONTROL, same boot: flip the real install-level switch off through the door → dispatch now 409 ACTION_DISABLED (proves the probe can see the switch, so the armed reading is not vacuous); re-enable and delete the hand-seeded row (or discard the DB)",
+        "record the operability posture: absence of a row reads as ACTIVE (an empty ledger is the normal stock state, not an error), and the data-API read IS the only 'what is off here' surface today — ObjectQLEngine.listDisabledActions() (packages/objectql/src/engine.ts:3159) has zero route consumers"
+      ],
+      "acceptance": [
+        {
+          "clause": "reads open, generic writes refused: GET /api/v1/data/sys_metadata_activation answers 200 for an admin (operability surfaces can ask 'what is disabled here'), while create/update/delete through the generic data API each answer 405 naming the refused operation — the rows are written by the ADR-0126 enable/disable doors under a system context and by nothing else (ADR-0103 engine-owned posture)",
+          "oracle": "api",
+          "verify": "the 200 list read + the three 405s from step 4 (apiMethods ['get','list'] at sys-metadata-activation.object.ts:153-158; the 405-with-allowedOperations shape from checkApiExposure, packages/runtime/src/api-exposure.ts:138-144); the post-probe re-read diffs empty",
+          "evidence": "the list read + the three refusal bodies + the empty diff"
+        },
+        {
+          "clause": "row identity holds and is NULL-collapsed: one row per (metadata_type, name) at install level — organization_id NULL on every row the shipped switches write (§5 reserved, no writer sets it), and a second NULL-org row for the same pair is REFUSED by the declared unique:'organization' index, so one artifact can never carry two contradictory active rows",
+          "oracle": "log",
+          "verify": "the row dump from step 2 (organization_id NULL throughout) + the sqlite constraint refusal from step 6 (the driver's COALESCE(organization_id,'__global__') NULL-collapse, ADR-0120 D3 — the spelling sys-metadata-activation.object.ts:129-150 documents against the #5030 NULL-distinct hole)",
+          "evidence": "the row dump + the refused INSERT with its constraint error"
+        },
+        {
+          "clause": "org-carrying rows are SKIPPED on read, never merged: a hand-seeded row with organization_id set and active=0 leaves the artifact ARMED across a restart — reading it as install-level would apply one organization's choice to the whole installation (the #10243 direction arrived at from the read side); the control leg proves the same probe detects the real install-level switch",
+          "oracle": "api",
+          "verify": "step 7 both arms: post-restart dispatch NOT 409 with only the org row present (skip at packages/core/src/utils/metadata-activation-store.ts:194), then 409 once the install-level row is written through the door",
+          "evidence": "the seeded row + the two dispatch statuses bracketing the control flip"
+        },
+        {
+          "clause": "re-enable UPDATES the row, never deletes it: after flipping both switches back on, the same rows persist with active true — the ledger records the administrator's CHOICE instead of erasing it (ADR-0126 §6 wall 3), and the store's engine slice deliberately has no delete",
+          "oracle": "api",
+          "verify": "row ids and count identical before/after step 5, active flipped to true/1 (read-then-write setActive, metadata-activation-store.ts:221-250; the delete-less MetadataActivationStoreEngine, :126-133)",
+          "evidence": "the before/after row listings keyed by id"
+        },
+        {
+          "clause": "the scope wall: after exercising every shipped switch, rows exist ONLY for metadata_type ∈ {'flow','action'} — hand-enumerated, because no pinnable enum exists (the column is untyped Field.text; the two values are string literals at their writers). A hook/permission/position/capability row is a FAIL of the model (ADR-0126 §3: hook reclassified code-only by amendment ruling 1; permission rides its own active field, #12159 ruling)",
+          "oracle": "api",
+          "verify": "distinct metadata_type over the full table equals exactly the two-value set; re-derive the writer list by grepping METADATA_TYPE literals first, per knownGaps — a third LEGITIMATE writer means this item needs a revision, a third value from stock switches without one means the wall fell",
+          "evidence": "the distinct-set query result + the writer-grep excerpt"
+        },
+        {
+          "clause": "durability posture: the object declares NO lifecycle block on purpose — a row is durable configuration, never telemetry, and rows survive a restart byte-identical (a retention policy here would be a data-loss bug that silently re-arms disabled artifacts); absence of a row reads as ACTIVE",
+          "oracle": "api",
+          "verify": "the pre/post-restart row diff from step 7 is empty apart from the run's own writes (no-lifecycle ruling at sys-metadata-activation.object.ts:49-54); an empty ledger on a fresh boot changes nothing anywhere",
+          "evidence": "the pre/post-restart row diff"
+        }
+      ],
+      "negative": [
+        "a 2xx on ANY generic-data-API write to sys_metadata_activation is a FAIL of the engine-owned posture — these rows have exactly one writer class (the ADR-0126 doors)",
+        "the artifact reading as DISARMED after step 7's restart (the org-carrying row applied install-wide) is the #10243 failure from the read side — a P1-severity finding inside a P2 item, extract it",
+        "a row deleted by re-enable is a FAIL of §6 wall 3 even though every door answered 200 — the wire looks identical either way, only the row read tells them apart",
+        "two contradictory active rows accepted for one artifact is a FAIL of the declared index (the exact #5030 hole the unique:'organization' spelling exists to close)",
+        "treating this item's variants as a pinned enum is a mis-read: they are hand-enumerated and un-pinned by construction — a stale two-value list over a tree that grew a third writer is a checklist defect, not a platform one; revise the item"
+      ],
+      "variants": [
+        "metadata_type 'flow' — written by ObjectStoreFlowActivationStore (packages/services/service-automation/src/flow-activation-store.ts:51)",
+        "metadata_type 'action' — written by ObjectStoreActionActivationStore (packages/objectql/src/action-activation.ts:113)"
+      ],
+      "traps": ["destructive-in-place", "absence-inference"],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/objectql/src/action-activation.test.ts + packages/services/service-automation/src/flow-activation-ledger.test.ts (the store-level pins: org-row skip, 0-reads-as-false, update-not-delete, organization_id never in the write payload); packages/qa/dogfood/test/packaged-activation-ledger-reach.dogfood.test.ts (row shape + update-not-delete on a live boot)"
+      },
+      "source": [
+        "packages/platform-objects/src/system/sys-metadata-activation.object.ts — apiMethods ['get','list'] :153-158; unique:'organization' NULL-collapsed index + the #5030 rationale :129-150; organization_id reserved-NULL :107-119; no-lifecycle ruling :49-54; what the object is NOT (§4 posture) :15-42",
+        "packages/core/src/utils/metadata-activation-store.ts — org-row skip on read :185-207 (the wall at :194); read-then-write setActive, organization_id never in the payload :221-250; delete-less engine slice :126-133; 0-reads-as-false :199-203",
+        "packages/runtime/src/api-exposure.ts:113-144 (checkApiExposure — the 405 shape for a whitelisted-methods object)",
+        "packages/services/service-automation/src/flow-activation-store.ts:51 + packages/objectql/src/action-activation.ts:113 (the two metadata_type string literals — the whole live vocabulary)",
+        "packages/objectql/src/engine.ts:3159 (listDisabledActions — zero route consumers; the data-API read is the only operability surface)",
+        "docs/adr/0126-packaged-metadata-customization-model.md §3 (scope wall + amendment ruling 1), §4 (row contract), §5 (org column reserved), §6 wall 3 (record the choice, never erase it)",
+        "#12438 (the scoped sweep), #12419 (registration home — the sibling item), #12159 (the permission-rides-its-own-field ruling, 2026-08-26)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-08-26",
+          "change": "new — authored in the #12438 scoped sweep. Grounding decided two load-bearing shapes: (1) metadata_type has NO pinnable enum — an untyped Field.text with two string-literal writers — so the variants are hand-enumerated and explicitly un-pinned, with the re-derivation duty written into the scope-wall clause instead of a false enumSource; (2) the org-row-skip and duplicate-row probes cannot be staged over REST at all (apiMethods get/list), so they ride direct sqlite access to the run's own file DB, the same fixture class the migration-journal item proved",
+          "ref": "#12438"
+        }
+      ]
+    },
+    {
+      "id": "platform-core.packaged-object-extend-only",
+      "title": "Packaged objects are extend-only (Regime E): an extension package's fields merge additively and round-trip on showcase_account, while an in-place field add on the packaged object is refused server-side at both write doors — and the collision-refusal half of the docs claim does not exist yet",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "api",
+      "personas": ["seeded admin (admin@objectos.ai / admin123)"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "the shipped extension fixture: examples/app-showcase/src/data/extensions/account.extension.ts (AccountExtension — loyalty_tier select bronze/silver/gold/platinum, linkedin_url url, csat_score number 0-100 onto showcase_account, priority 210), registered through the showcase manifest's objectExtensions — present on any stock boot"
+        ],
+        "knownGaps": [
+          "the COLLISION-REFUSAL half of the E1 claim DOES NOT EXIST in source, so no clause asserts it: a colliding extension field name is NOT refused at build or boot — mergeObjectDefinitions spreads extension.fields over base.fields (packages/objectql/src/registry.ts:146) and the authoring schema documents exactly that semantics ('Fields to add/override', priority 'higher = applied later (wins on conflict)' — packages/spec/src/data/object.zod.ts:2979,:2996-2997). The only collision gate in the tree is managed-extension-fields.test.ts (plugin-auth), which covers better-auth-managed sys objects only, and ADR-0126 §3 adopts it as Regime E PRIOR ART, not as a live generic gate. A colliding extension field therefore silently OVERRIDES the shipped field today: record the posture, do not stage a collision probe expecting a refusal, and do not file the override as a run FAIL — the missing generic gate is a standing product gap tracked outside this item"
+        ]
+      },
+      "steps": [
+        "additive half — CROSS-REF, do not duplicate: platform-core.metadata-registry-serving owns the overlay steps (its steps 7-8 / clauses 5-6): the three AccountExtension fields present in the MERGED GET /api/v1/meta/object/showcase_account, rendering on the form, and a loyalty_tier + csat_score write round-tripping through /api/v1/data/showcase_account. Cite that item's verdicts when the same run scored them; otherwise drive exactly those steps here",
+        "capture the BEFORE image for the refusal half: GET /api/v1/meta/object/showcase_account and keep the full served field inventory",
+        "in-place refusal, door 1 (org-overlay): PUT /api/v1/meta/object/showcase_account with the served body plus ONE added field qa_inplace_probe_<runid> and NO ?package= → expect 403 NOT_OVERRIDABLE (type 'object' is not in the ADR-0005 overlay opt-ins; the refusal names allowRuntimeCreate/allowOrgOverride and the OS_METADATA_WRITABLE escape hatch — packages/metadata-protocol/src/protocol.ts:11370-11386)",
+        "in-place refusal, door 2 (package write): repeat the same PUT with ?package=com.example.showcase (the showcase's read-only code package) → expect the read-only-base refusal (403 ITEM_LOCKED class — the same door access-security.owd-save-gate's control leg measured on stock, #9477); record WHICH door answered and the exact status + code, reading declaredCode where the wire code is a mapped generic",
+        "after both refusals: re-GET /api/v1/meta/object/showcase_account and diff against step 2 — byte-identical; qa_inplace_probe_ absent, the three extension fields still present",
+        "record the Regime E provenance posture: the extension arrived AS A PACKAGE — it registers as an 'extend' contributor (packages/objectql/src/engine.ts:4618-4636) folded over the base at resolution (mergeObjectDefinitions), the base package's authored definition is never edited, and package identity supplies provenance and upgrade isolation (ADR-0126 §3: 'the customization IS a package', install-grain not per-org)"
+      ],
+      "acceptance": [
+        {
+          "clause": "the additive half holds: the extension package's fields merge into the served showcase_account object without re-declaring it, and they are real writable columns, not display-only badges — a write round-trips through the generic data API",
+          "oracle": "api",
+          "verify": "platform-core.metadata-registry-serving clauses 5-6 green in this run (or re-driven per step 1): the three overlay fields in the merged /meta/object read with their declared types/options, plus the PATCH + GET pair through /data/showcase_account",
+          "evidence": "the cross-referenced verdicts, or the merged field inventory + the PATCH/GET pair"
+        },
+        {
+          "clause": "the in-place half holds at BOTH server doors: a field add on the packaged object is refused whether spelled as an org overlay (no ?package= → 403 NOT_OVERRIDABLE) or as a direct package write (?package= naming the read-only code base → the ITEM_LOCKED-class refusal) — 'a packaged object grows through your own fields via an extension package, never by reshaping what shipped' is a server contract, not a Studio courtesy",
+          "oracle": "api",
+          "verify": "the two PUT refusals from steps 3-4, each with status + code recorded (read declaredCode where the dispatcher maps the wire code to a generic — the owd-save-gate lesson); neither door answers 2xx",
+          "evidence": "both refusal bodies side by side, with the door each came from named"
+        },
+        {
+          "clause": "a refusal changes NOTHING: the post-refusal /meta/object read is identical to the before image — the probe field never landed, the extension fields never moved, and no half-written overlay row exists",
+          "oracle": "api",
+          "verify": "the step 5 diff is empty; a refusal that leaves a draft or a partial overlay behind is the half-installed-remains failure class even though the status code was correct",
+          "evidence": "the empty before/after diff"
+        }
+      ],
+      "negative": [
+        "a 2xx on either in-place PUT is THE fail the E1 tier-3 claim guards against — the packaged base was reshaped at runtime",
+        "an extension field missing from the merged read, or present in /meta but not writable through /data, is a FAIL of the additive half — cross-file it against platform-core.metadata-registry-serving rather than double-counting",
+        "a colliding extension field name silently overriding the shipped field is NOT a run FAIL today — it is the documented merge semantics (see knownGaps) and filing it as a platform defect wastes a triage cycle. The direction that IS a finding: a collision whose override corrupts the object (e.g. a type change under existing rows) — capture and extract separately",
+        "a refusal rendered only by the UI (Studio hiding the affordance) while the API admits the write is a FAIL — both doors are server contracts"
+      ],
+      "traps": ["dispatcher-vs-hono-route", "cache-staleness"],
+      "source": [
+        "examples/app-showcase/src/data/extensions/account.extension.ts (AccountExtension — the shipped fixture, priority 210)",
+        "packages/objectql/src/registry.ts:137-171 (mergeObjectDefinitions — additive fields fold, the spread at :146) + :4566-4648 vicinity via engine: packages/objectql/src/engine.ts:4618-4636 (the objectExtensions loop registering 'extend' contributors)",
+        "packages/spec/src/data/object.zod.ts:2938-3011 (ObjectExtensionSchema — what an extension may carry, the #4001 silently-dropped history, 'Fields to add/override', priority wins-on-conflict; defineObjectExtension :3009)",
+        "packages/metadata-protocol/src/protocol.ts:11370-11386 (the NOT_OVERRIDABLE refusal text and escape hatch)",
+        "packages/plugins/plugin-auth/src/managed-extension-fields.ts + managed-extension-fields.test.ts (the build-time collision gate — better-auth-managed objects ONLY; adopted by ADR-0126 §3 as Regime E prior art, NOT a generic gate)",
+        "docs/adr/0126-packaged-metadata-customization-model.md §2-§3 (Regime E: additive contributions at package grain, base never edited, install-grain not per-org)",
+        "content/docs/capabilities/integrations.mdx:17 + content/docs/build-without-code.mdx:37 (the E1 docs claim this item grounds)",
+        "cross-refs: platform-core.metadata-registry-serving (owns the overlay merge + round-trip steps), platform-core.metadata-authoring-roundtrip (the generic deny-side overlay gate), access-security.owd-save-gate (which layer answers which 4xx on /meta/object writes)",
+        "#12438 (the scoped sweep this item lands from)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-08-26",
+          "change": "new — authored in the #12438 scoped sweep to ground the E1 tier-3 docs claim. Grounding CORRECTED the claim's third half before authoring: no collision refusal exists for generic object extensions (mergeObjectDefinitions spreads extension fields over the base and the schema documents override-by-priority; the managed-extension-fields build gate covers better-auth objects only and is adopted by ADR-0126 §3 as prior art, not as a live gate) — so that half is a knownGap with an explicit do-not-file-as-FAIL rule, and the item asserts the two halves source supports: additive merge + round-trip (cross-referenced to metadata-registry-serving, not duplicated) and the server-side in-place refusal at both write doors",
+          "ref": "#12438"
+        }
+      ]
     }
   ]
 }

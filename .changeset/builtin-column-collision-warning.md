@@ -38,8 +38,11 @@ only when the declaration asks for storage the platform's own column does not de
 (a differing `type`, a `maxLength`, `unique`, `defaultValue`, `storage.notNull`, a
 `multiple` shape…) and stays silent when it does not: `created_at: { type: 'datetime',
 defaultValue: 'NOW()' }` describes precisely what lands, and says nothing.
-`id: { type: 'number' }` — an author expecting a numeric key — still fires, as does
-`id: { type: 'text' }`. The storage/presentation split is one table
+`id: { type: 'number' }` — an author expecting a numeric key — still fires.
+`id: { type: 'text' }` does **not**: varchar(255) canonicalizes to the field type
+`text`, so that declaration asks for precisely what the column delivers (#12131 —
+the delivery table recorded the knex builder name `'string'` there at first, and
+reported all 45 of the platform's own correct `id` declarations as disagreements). The storage/presentation split is one table
 (`builtin-column-collision.ts`) pinned against `FieldSchema.shape`, so a field key
 added later is classified deliberately instead of defaulting into silence.
 

@@ -49,6 +49,18 @@ export const SETUP_NAV_CONTRIBUTIONS: NavigationContribution[] = [
     priority: BASE_PRIORITY,
     items: [
       { id: 'nav_packages', type: 'component', label: 'Packages', componentRef: 'developer:packages', icon: 'package' },
+      // Packaged automation is OPERATIONAL state — on/off per packaged
+      // flow/action, clone for flows (ADR-0126 §7.4: "Studio keeps the
+      // editing; Setup gets the operational state"). The console binds
+      // `automation:packaged` to the packaged-automation page (objectui
+      // app-shell `builtinComponents`). The entry lives HERE, not in
+      // service-automation: the page's data source is the
+      // `sys_metadata_activation` ledger this package registers (#12419), and
+      // the action switches work on compositions with no automation service —
+      // a nav entry riding that service would hide a page that still works
+      // there. #12457: the page merged in objectui with no framework entry
+      // naming its ref, leaving it reachable only by typed URL.
+      { id: 'nav_packaged_automation', type: 'component', label: 'Packaged Automation', componentRef: 'automation:packaged', icon: 'workflow' },
     ],
   },
   {

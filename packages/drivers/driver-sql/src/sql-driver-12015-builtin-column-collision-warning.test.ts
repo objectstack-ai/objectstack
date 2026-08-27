@@ -7,9 +7,18 @@
  * `initObjects` emits `id`, `created_at` and `updated_at` itself, then skips
  * any declared field colliding with one. The driver is right to own its
  * primary key and audit stamps; the defect was that it disagreed with the
- * author without saying so — an object declaring `id: { type: 'text' }` boots
- * green and gets `varchar(255)`, and nothing recorded that the declared type
- * was discarded.
+ * author without saying so — an object declaring `id: { type: 'number' }`
+ * boots green and gets `varchar(255)`, and nothing recorded that the declared
+ * type was discarded.
+ *
+ * ⚠️ #12131: that example used to read `id: { type: 'text' }`, and so did most
+ * of the firing fixtures below. It was the wrong example — varchar(255)
+ * canonicalizes to the field type `text`, so `{ type: 'text' }` asks for
+ * exactly what lands. The delivery table recorded the knex builder name
+ * `'string'` instead, which no declaration could match, and the fixtures were
+ * written to that table rather than to the source. The firing cases now
+ * declare a type that genuinely disagrees; the agreeing shapes are pinned
+ * SILENT.
  *
  * Maintainer ruling 2026-08-25, twice: a **named, loud load-time warning** on
  * all three paths that drop such a declaration, then **narrowed** to the
@@ -83,8 +92,10 @@ describe('a declared field colliding with a builtin column is named at load time
       {
         name: 'collide_create',
         fields: {
-          // The #11456 fixture's exact shape — the declaration that started this card.
-          id: { type: 'text', name: 'id' },
+          // An author expecting a numeric key. (⛔ Not the #11456 shape
+          // `{ type: 'text', name: 'id' }` — that asks for what the column
+          // delivers and is pinned SILENT in the narrowing case below.)
+          id: { type: 'number', name: 'id' },
           region: { type: 'text' },
         },
       },
@@ -97,7 +108,7 @@ describe('a declared field colliding with a builtin column is named at load time
     expect(lines[0]).toContain("declared field 'id'");
     expect(lines[0]).toContain('collide_create');
     expect(lines[0]).toContain("asks for storage the platform's own 'id' column does not provide");
-    expect(lines[0]).toContain("type: 'text' (the column is 'string')");
+    expect(lines[0]).toContain("type: 'number' (the column is 'text')");
     // ⛔ And it must NOT deny the half that IS applied, nor advise deleting it.
     expect(lines[0]).toContain('is honoured as written');
     expect(lines[0]).not.toContain('Remove the declaration');
@@ -114,7 +125,7 @@ describe('a declared field colliding with a builtin column is named at load time
       {
         name: 'collide_three',
         fields: {
-          id: { type: 'text' },            // text ≠ the varchar(255) key
+          id: { type: 'number' },          // a numeric key ≠ the varchar(255) key
           created_at: { type: 'date' },    // date ≠ the timestamp column
           updated_at: { type: 'datetime', unique: true }, // the audit column carries no uniqueness
           // Declared, colliding, and losing NOTHING — the platform's column is
@@ -163,7 +174,7 @@ describe('a declared field colliding with a builtin column is named at load time
       {
         name: 'collide_rot',
         fields: {
-          id: { type: 'text' },
+          id: { type: 'number' },
           payload: { type: 'text' },
           // Declared AND colliding, but it describes the column the platform
           // emits — so it must not appear below.
@@ -187,12 +198,16 @@ describe('a declared field colliding with a builtin column is named at load time
   it('THE NARROWING, end-to-end: a presentation-only declaration boots in silence', async () => {
     // `sys_presence` in shape — the population the pre-narrowing warning fired
     // on 116 times per stock boot of platform-objects while telling the author
-    // something untrue about it.
+    // something untrue about it. ⚠️ #12131: `sys_presence.id` is `Field.text`,
+    // and this fixture used to spell it `type: 'string'` to match the delivery
+    // table's builder name. So it passed while the declaration as actually
+    // written warned — the 45 lines this file's own narrowing was supposed to
+    // have silenced. Verbatim now, and `id` below is the load-bearing half.
     await driver.initObjects([
       {
         name: 'collide_presentation',
         fields: {
-          id: { type: 'string', label: 'Presence ID', required: true, readonly: true },
+          id: { type: 'text', label: 'Presence ID', required: true, readonly: true },
           created_at: { type: 'datetime', label: 'Created At', defaultValue: 'NOW()', readonly: true },
           updated_at: { type: 'datetime', label: 'Updated At', defaultValue: 'NOW()', readonly: true },
           status: { type: 'text' },
@@ -218,8 +233,8 @@ describe('a declared field colliding with a builtin column is named at load time
       {
         name: 'collide_accept',
         // A declaration that asks for something quite different from what the
-        // platform emits: TEXT, plus a length the driver never reads.
-        fields: { id: { type: 'text', maxLength: 12 }, region: { type: 'text' } },
+        // platform emits: a numeric key, plus a length the driver never reads.
+        fields: { id: { type: 'number', maxLength: 12 }, region: { type: 'text' } },
       },
     ]);
 
@@ -232,7 +247,7 @@ describe('a declared field colliding with a builtin column is named at load time
     expect(await driver.count('collide_accept', {})).toBe(1);
 
     // The measurement the warning exists to announce, on SQLite: `id` is the
-    // platform's `table.string('id')` — varchar(255) — NOT the declared TEXT,
+    // platform's `table.string('id')` — varchar(255) — NOT a numeric column,
     // and not the declared 12-char bound. (The card measured the same
     // substitution on PostgreSQL 16.13.)
     const info = await (driver as any).knex('collide_accept').columnInfo();
