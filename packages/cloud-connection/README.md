@@ -55,44 +55,79 @@ const plugins = [
 ];
 ```
 
-## SPA telemetry is denied unless a runtime grants it
+## The Console's error-reporting sink is served by this runtime
 
-`GET /api/v1/runtime/config` carries a `telemetry` block:
+`GET /api/v1/runtime/config` carries a `telemetry` block. Unconfigured, it is
+empty — which is what a deployment that never asked for error reporting serves:
 
 ```json
-{ "telemetry": { "allowClientErrorReporting": false } }
+{ "telemetry": {} }
 ```
 
-It is the Console's **post-build off switch**. Every telemetry knob in the SPA
-is a build-time variable frozen into the bundle, so a build that opted in has
-no other way to be turned off on a deployed host — and an air-gapped
-deployment measurably shipped one that could not be (`cloud#1508`: 14 Sentry
-envelopes per session carrying IP and User-Agent PII).
+Configure a sink and the block carries it, together with the closed set of
+knobs that must travel with it:
 
-It is **denied by default on every posture**. Grant it explicitly:
+```json
+{
+  "telemetry": {
+    "errorReporting": {
+      "dsn": "https://PUBLIC_KEY@o1.ingest.sentry.io/42",
+      "sendDefaultPii": false,
+      "environment": "production",
+      "tracesSampleRate": 0.1,
+      "replaysOnErrorSampleRate": 0
+    }
+  }
+}
+```
+
+Everything is set on the **runtime**, in one place, with no frontend rebuild —
+which is the point: ObjectStack's users consume a prebuilt Console and cannot
+set build-time keys.
 
 ```bash
-OS_TELEMETRY_CLIENT_ERROR_REPORTING_ENABLED=true   # or: new RuntimeConfigPlugin({ allowClientErrorReporting: true })
+OS_TELEMETRY_CLIENT_ERROR_REPORTING_DSN=https://PUBLIC_KEY@o1.ingest.sentry.io/42
+OS_TELEMETRY_CLIENT_ERROR_REPORTING_SEND_DEFAULT_PII=true     # IP + User-Agent, off by default
+OS_TELEMETRY_CLIENT_ERROR_REPORTING_ENVIRONMENT=production
+OS_TELEMETRY_CLIENT_ERROR_REPORTING_TRACES_SAMPLE_RATE=0.1
+OS_TELEMETRY_CLIENT_ERROR_REPORTING_REPLAY_SAMPLE_RATE=0
 ```
 
-Three properties worth knowing before you build on it:
+…or, from a host that composes the plugin directly:
 
-- **A permission, not a source.** The server supplies no DSN and cannot start
-  telemetry for a build that carries none. `true` means only "this deployment
-  does not object to the sink you were compiled with".
-- **A runtime that declared its control plane off cannot grant it.**
-  `OS_CLOUD_URL=off` (or `none` / `local` / `disabled`) refuses the grant and
-  says so in the boot log, so an air-gapped box stays silent even if a hosted
+```ts
+new RuntimeConfigPlugin({ clientErrorReporting: { dsn: 'https://PUBLIC_KEY@…/42' } })
+```
+
+An explicit option wins over the matching env var, **per field** — a host that
+sets only `sendDefaultPii` does not discard the operator's DSN.
+
+Four properties worth knowing before you build on it:
+
+- **The DSN's presence IS the grant.** There is no separate permission boolean
+  (the one that shipped in #10805 was removed by #12681, not paralleled). A
+  runtime that serves a DSN is asking for reports; a runtime that serves none
+  is not. Two knobs in two places had two silent dead states — "permission on,
+  no DSN" and "DSN in, permission off" — that look identical from the browser.
+- **A runtime that declared its control plane off serves no sink.**
+  `OS_CLOUD_URL=off` (or `none` / `local` / `disabled`) refuses the DSN and says
+  so in the boot log, so an air-gapped box stays silent even if a hosted
   configuration is copied onto it.
-- **Absence means denied.** An older runtime, a third-party host, a 404 or a
-  failed fetch all read the same way. Consumers should use the reading that
+- **Malformed is refused at mount, never coerced.** A DSN that is not an
+  `https://PUBLIC_KEY@HOST/PROJECT_ID` URL is refused and named in the boot log,
+  and so is one carrying a **secret** after the public key — this payload is read
+  by every browser that loads the Console. A bad sample rate falls back to its
+  default rather than taking the sink down with it.
+- **Absence means no reporting.** An older runtime, a third-party host, a 404 or
+  a failed fetch all read the same way. Consumers should use the reading that
   ships with the contract rather than writing their own:
 
 ```ts
-import { isClientErrorReportingAllowed } from '@objectstack/cloud-connection';
+import { readClientErrorReporting } from '@objectstack/cloud-connection';
 
 // `payload` may be the parsed body, or undefined when the fetch failed.
-if (buildTimeDsn && isClientErrorReportingAllowed(payload)) initErrorReporting();
+const sink = readClientErrorReporting(payload);
+if (sink) initErrorReporting(sink);
 ```
 
 ## Boundary (open mechanism, closed intelligence)
@@ -106,7 +141,7 @@ rules. Plan-derived feature flags are injected by the host via
 
 `OS_CLOUD_URL=off` disables every remote call; air-gapped installs keep
 working via inline manifests handed to `install-local`, and the SPA telemetry
-permission above cannot be granted.
+sink above is refused rather than served.
 
 See `docs/adr` in the cloud repository (ADR-0008) for the full architecture
 decision.

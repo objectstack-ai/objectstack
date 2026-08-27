@@ -339,7 +339,11 @@ the hosted ObjectOS Cloud control plane.
 | `OS_OTLP_ENDPOINT` | url | — | OTLP/HTTP collector endpoint. Required when `OS_OBS_EXPORTER=otlp`. |
 | `OS_OTLP_HEADERS` | csv | — | Comma-separated `key=value` pairs added to every OTLP export. |
 | `OS_OTLP_FLUSH_MS` | number | `10000` | OTLP batch flush interval. |
-| `OS_TELEMETRY_CLIENT_ERROR_REPORTING_ENABLED` | boolean | `false` | Permits the Console SPA to send client error reports to the sink its build was compiled with, via `telemetry.allowClientErrorReporting` on `/api/v1/runtime/config`. Opt-in on every posture: an unset switch, an unrecognised value, or a runtime that declared its control plane off (`OS_CLOUD_URL=off`) all deny. It is a permission, not a source — it cannot start telemetry for a build that carries no DSN. |
+| `OS_TELEMETRY_CLIENT_ERROR_REPORTING_DSN` | url | — | Error-reporting sink for the Console SPA, served as `telemetry.errorReporting.dsn` on `/api/v1/runtime/config`. **Presence is the grant** — unset means the Console sends nothing, and there is no separate permission flag. Set it here and nowhere else: the Console is consumed prebuilt, so this is the only place a self-hosting operator can configure it, and no frontend rebuild is involved. Refused loudly at mount when it is not an `https://PUBLIC_KEY@HOST/PROJECT_ID` URL, when it carries a secret after the public key (this payload is public to every browser), or when the runtime declared its control plane off (`OS_CLOUD_URL=off`). |
+| `OS_TELEMETRY_CLIENT_ERROR_REPORTING_SEND_DEFAULT_PII` | boolean | `false` | Attach IP address and User-Agent to client error events. Opt-in; an unrecognised value is refused at mount and stays off. Inert without a DSN. |
+| `OS_TELEMETRY_CLIENT_ERROR_REPORTING_ENVIRONMENT` | string | — | `environment` tag on client error events (`production`, `staging`, …). Unset lets the Console tag events with its own build mode. Inert without a DSN. |
+| `OS_TELEMETRY_CLIENT_ERROR_REPORTING_TRACES_SAMPLE_RATE` | number | `0.1` | Fraction (`0`–`1`) of Console transactions sampled for performance tracing. Out-of-range or unparseable values are refused at mount and fall back to the default. Inert without a DSN. |
+| `OS_TELEMETRY_CLIENT_ERROR_REPORTING_REPLAY_SAMPLE_RATE` | number | `0` | Fraction (`0`–`1`) of Console **error** sessions recorded as session replays. Off by default — replay records what the user did, so it is the deliberate choice of the deployment that wants it. Inert without a DSN. |
 
 ---
 

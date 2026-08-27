@@ -55,13 +55,25 @@ export { CloudConnectionPlugin, createCloudConnectionPlugin } from './cloud-conn
 export type { CloudConnectionPluginConfig } from './cloud-connection-plugin.js';
 export { RuntimeConfigPlugin } from './runtime-config-plugin.js';
 export type { RuntimeConfigPluginConfig, RuntimeFeatureOverrides, RuntimeConfigPlanFeatures, PlatformStage } from './runtime-config-plugin.js';
-// #10805 — the SPA telemetry permission carried on that payload, and the
-// canonical fail-closed way to read it. The reader is exported deliberately:
-// "an absent key means do not send" is a claim about consumer code, and a
-// consumer writing its own `?.` chain is one `!== false` away from re-opening
-// the PII leak on exactly the legacy payloads the guarantee is for.
-export { isClientErrorReportingAllowed, CLIENT_ERROR_REPORTING_ENV } from './telemetry-posture.js';
-export type { RuntimeTelemetryPosture } from './telemetry-posture.js';
+// #12681 — the SPA's client error-reporting SOURCE carried on that payload,
+// and the canonical fail-closed way to read it. The reader is exported
+// deliberately: "no DSN means do not send" is a claim about consumer code, and
+// a consumer writing its own `?.` chain is one loose truthiness check away
+// from re-opening the PII leak on exactly the legacy payloads the guarantee is
+// for. (Supersedes the #10805 `isClientErrorReportingAllowed` permission
+// reader, removed with the boolean it read.)
+export {
+    readClientErrorReporting,
+    redactDsn,
+    CLIENT_ERROR_REPORTING_DSN_ENV,
+    CLIENT_ERROR_REPORTING_PII_ENV,
+    CLIENT_ERROR_REPORTING_ENVIRONMENT_ENV,
+    CLIENT_ERROR_REPORTING_TRACES_RATE_ENV,
+    CLIENT_ERROR_REPORTING_REPLAY_RATE_ENV,
+    DEFAULT_TRACES_SAMPLE_RATE,
+    DEFAULT_REPLAYS_ON_ERROR_SAMPLE_RATE,
+} from './telemetry-posture.js';
+export type { RuntimeTelemetryPosture, ClientErrorReportingConfig } from './telemetry-posture.js';
 // ADR-0008 consumption side — the self-hosted credential ledger (bind
 // persists the oscc_ bearer here; forwards present it to the control plane).
 export { ConnectionCredentialStore, DEFAULT_CONNECTION_CREDENTIAL_PATH } from './connection-credential-store.js';
