@@ -89,15 +89,19 @@ describe('#12539: the unbuilt-CLI refusal is legible', () => {
     expect(message).not.toContain('transpiling src/');
   });
 
-  it('reproduces, byte for byte, what the three private copies threw before the hoist', () => {
-    // #12539 moved this refusal out of three files; it did not reword it. The
-    // literal below is the message measured on `09b4f4e4e`, so a rewording has
-    // to be a deliberate edit here rather than a side effect of the move.
+  it('pins the whole refusal, byte for byte', () => {
+    // #12539 moved this refusal out of three files without rewording it, and
+    // the literal below was the message measured on `09b4f4e4e`. #12618 then
+    // reworded ONE clause — `every boot below times out` was false; the child
+    // exits 2 at once — and this literal moved in the SAME commit, which is
+    // the pin doing its job: a rewording has to be a deliberate edit here
+    // rather than a side effect of a move.
     expect(unbuiltCliError('/repo/packages/cli/dist/commands/serve.js', RUN_JS_RESOLVES_FROM_DIST).message).toBe(
       'packages/cli is not built: /repo/packages/cli/dist/commands/serve.js does not exist.\n' +
         'This file spawns bin/run.js with NODE_ENV unset, which is what makes oclif resolve the ' +
         'command from dist/ instead of transpiling src/ — so on an unbuilt tree the child answers ' +
-        '"command serve not found" and every boot below times out.\n' +
+        '"command serve not found" and every boot below fails immediately with "serve exited 2", ' +
+        'not a timeout.\n' +
         'CI declares the build (turbo: @objectstack/cli#test dependsOn build); a direct vitest run does not.\n' +
         'Run: pnpm exec turbo run build --filter=@objectstack/cli',
     );
