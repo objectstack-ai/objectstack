@@ -136,18 +136,29 @@ type ObjectFoldScalarKey = (typeof OBJECT_FOLD_SCALAR_KEYS)[number];
  *
  * **Every other top-level prop on `extension` is silently discarded.**
  * `merged` starts as `{ ...base }` and nothing outside the list above is ever
- * copied onto it — an extender that ships e.g. `tenancy: { enabled: false }`
- * or `permissions: {...}` gets a valid-but-inert no-op: no error, no warning,
- * the base's existing value simply wins as if the extension had never named
- * the key (issue #12680). This is deliberate for security-relevant keys —
- * "any extender may override any prop" would make `tenancy`/`permissions`
- * extender-writable, which is a separate, much bigger decision that has NOT
- * been made — but it means the docblock is the only place a reader can learn
- * that the drop is silent; keep this comment in sync with the merge set below
- * if it ever changes.
+ * copied onto it — a caller that hands this function an extension body
+ * carrying an undeclared key, e.g. `tenancy: { enabled: false }`, gets a
+ * valid-but-inert no-op HERE: no error, no warning from this function, the
+ * base's existing value simply wins as if the extension had never named the
+ * key (issue #12680).
  *
- * This is not only a hypothetical: `_provenance` is a real top-level prop an
- * `extend` contributor carries TODAY. Copying it through (as "later value
+ * Declarative authors never reach that silence, though: `ObjectExtensionSchema`
+ * (`packages/spec/src/data/object.zod.ts`) is `.strict()` — its shape is
+ * exactly `extend` / `fields` / `label` / `pluralLabel` / `description` /
+ * `validations` / `indexes` / `priority`, so an `objectExtensions` entry
+ * naming `tenancy`, `permissions`, or any other key outside that list fails
+ * LOUDLY at authoring time with a prescription (#4001; the same rule is
+ * documented at `content/docs/data-modeling/object-extensions.mdx`). This
+ * function's discard is reachable only by a caller that bypasses that
+ * schema — a direct, programmatic `registry.registerObject(def, pkg,
+ * undefined, 'extend', …)` call, which is how this package's own pin
+ * (`registry-object-extension-nonenumerated-prop-discard.test.ts`) exercises
+ * the rule. Extender-writable `tenancy`/`permissions` would in any case be a
+ * separate, much bigger decision that has NOT been made.
+ *
+ * Unlike `tenancy`/`permissions`, this one is not blocked by schema:
+ * `_provenance` is a real top-level prop an `extend` contributor carries
+ * TODAY. Copying it through (as "later value
  * wins" would) lets a third-party extender flip a tenant-authored object's
  * `_provenance` to the extending package's — reaching, by a different route,
  * the exact outcome ADR-0029 D9.3's priority-reranking guard exists to
