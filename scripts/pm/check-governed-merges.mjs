@@ -325,7 +325,14 @@
  *      budget must read as INCOMPLETE and never as clean-and-absent. Before
  *      giving up it widens the walk: one budget below the boundary, then a
  *      week, then the whole first-parent chain; a walk that reaches the root
- *      commit is complete by construction and never an edge.
+ *      commit is complete by construction and never an edge. ⚠️ Stated
+ *      plainly, because a backstop mistaken for the primary defense is how the
+ *      primary one stops being maintained: on a COMPLETE clone the widened walk
+ *      always reaches the root, so the edge cannot fire, and on a shallow one
+ *      the #9902 horizon guard classifies the repo UNAUDITED before enumeration
+ *      begins. This is the mechanical statement of the invariant standing
+ *      behind a predicate that lives in another file — not the path a real
+ *      sweep is expected to take. `--self-test` is where it is exercised.
  *
  * ## Institutional memory — why governed surfaces are guarded at all
  *
@@ -2498,7 +2505,7 @@ async function selfTest() {
     for (const failure of failures) console.error(`  • ${failure}`);
     process.exit(1);
   }
-  console.log(`✓ check-governed-merges --self-test: ${checked} assertions (the unified governed predicate + near misses, subject→PR spellings, window parsing, the replay fixtures, the four-repo resolution incl. absent/wrong-origin/relocated checkouts, the attribution channel chain + its proxy-transport re-arm plan and its one named fallback line, the --test pre-arm predicate, the generated-artifact provenance exception — the four ruled cases against the generator's own splice, byte-exactness, fail-closed inputs, the untouched mixed-diff rule, single-file-not-a-class, the #11084 generator co-edit fence in both directions, and its render words — the #11705 generator-owned rows inside skills/** (a genuine generated file passes, the same path hand-edited does not, a path no generator declares is hand-authored content, per-row fences, and the enumeration read from the real generator), the exit table, and the report wording pins).\n  ${liveNote}`);
+  console.log(`✓ check-governed-merges --self-test: ${checked} assertions (the unified governed predicate + near misses, subject→PR spellings, window parsing, the #12633 landing window — the QS-7 regression pin in both directions, the topological close beyond the budget, the unproven-boundary EDGE, the listed-or-INCOMPLETE invariant over every fixture, the escalating floors, per-repo --since-ref resolution and its named fallback, and the window words — the replay fixtures, the four-repo resolution incl. absent/wrong-origin/relocated checkouts, the attribution channel chain + its proxy-transport re-arm plan and its one named fallback line, the --test pre-arm predicate, the generated-artifact provenance exception — the four ruled cases against the generator's own splice, byte-exactness, fail-closed inputs, the untouched mixed-diff rule, single-file-not-a-class, the #11084 generator co-edit fence in both directions, and its render words — the #11705 generator-owned rows inside skills/** (a genuine generated file passes, the same path hand-edited does not, a path no generator declares is hand-authored content, per-row fences, and the enumeration read from the real generator), the exit table, and the report wording pins).\n  ${liveNote}`);
 }
 
 /** The exit code `--test` would return for a path list — pinned without spawning. */
