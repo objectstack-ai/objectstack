@@ -6378,6 +6378,85 @@ const step18: MigrationStep = {
         + 'work byte-identically before and after.',
     },
     {
+      id: 'kernel-context-preview-mode-retired',
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
+      // code span AND a table cell.
+      surface:
+        "context.mode — the value 'preview' left the RuntimeMode enum — and "
+        + 'context.previewMode, the whole PreviewModeConfig block it keyed '
+        + '(autoLogin / simulatedRole / simulatedUserName / readOnly / '
+        + 'expiresInSeconds / bannerMessage, declared on KernelContext and on the '
+        + 'TenantRuntimeContext extension). The exported '
+        + 'PreviewModeConfigSchema / PreviewModeConfig / PreviewModeConfigParsed '
+        + 'names left with the def',
+      replacement:
+        'nothing declarative — the capability the block described was never '
+        + 'implemented by any layer, so there is no working configuration to '
+        + 'migrate to. Preview/demo DEPLOYMENTS belong to the deployment layer, '
+        + 'which owns auth per-project (ArtifactKernelFactory in the cloud '
+        + 'distribution); the OS_PREVIEW_MODE environment variable stays exactly '
+        + 'as it is — deployment ROUTING (widening the trusted-origin list for '
+        + 'preview subdomains), unrelated to identity. If a preview experience '
+        + 'becomes a product capability it re-declares fresh, with the '
+        + 'production-posture hard-refusal as the first-landed half (#11846 '
+        + 'ruling record)',
+      reason:
+        'ADR-0049 enforce-or-remove; maintainer ruling 2026-08-27 on #11846 '
+        + '(decision-inbox batch 2, Option A: remove — all four decision facets '
+        + 'pointed the same way). The declaration was the sharpest '
+        + 'declared-≠-enforced shape on a SECURITY surface: the schema promised '
+        + '"bypass auth, simulate admin identity" and named a production guard '
+        + '"the runtime must enforce", and NO code path implemented either half. '
+        + 'Measured zero consumers in all three repos, each leg with positive '
+        + 'controls: objectstack — no runtime branches on the mode; the only '
+        + "non-declaration hits for RuntimeMode or mode === 'preview' are the "
+        + 'schema unit test, a type-alias pin and a measurement-test comment '
+        + '(re-verified at dispatch, 2026-08-27, origin/main 15bf9e8). objectui — '
+        + 'the #11846 card records the measurement. cloud — cloud#1651 (closed '
+        + '2026-08-26): previewMode appears only as a local variable for '
+        + 'OS_PREVIEW_MODE whose effect is adding preview-domain wildcards to '
+        + "better-auth's CSRF trusted origins; RuntimeMode has zero hits "
+        + 'repo-wide; the positive control ArtifactKernelFactory (where serve.ts '
+        + 'predicted preview auto-login would live if it existed) has 20+ hits '
+        + 'and never touches previewMode. An author — very often an AI (ADR-0033) '
+        + '— could write the six-key block per the reference docs, parse cleanly, '
+        + 'and get no behaviour and no diagnostic, while a reader of the docs had '
+        + 'no way to tell the block from the keys that work. Bookkeeping: the '
+        + "enum-VALUE half ('preview') puts nothing in RETIRED_KEYS_BY_MAJOR and "
+        + 'leaves the four surface ratchets untouched by itself — its '
+        + "prescription hangs on the enum's own error map (the HookBodyCapability "
+        + 'precedent); the KEY half is tombstoned with retiredKey() on the '
+        + 'non-strict KernelContextSchema (both walked-shape copies registered in '
+        + 'RETIRED_KEYS_BY_MAJOR[18]); the DEF half (kernel/PreviewModeConfig, '
+        + 'with no carrier left) is registered in RETIRED_DEFS_BY_MAJOR[18]. It '
+        + 'is a SEMANTIC entry rather than a D2 conversion because there is no '
+        + 'source to rewrite: a kernel context is constructed by host code at '
+        + 'boot — not a stack collection member, never stored as a sys_metadata '
+        + 'row — so the conversion chain has no seam that would ever see one '
+        + '(the kernel/Manifest:loading disposition). ADR-0049 / ADR-0087, '
+        + '#11846.',
+      acceptanceCriteria:
+        "No host constructs a kernel context with mode: 'preview' or a "
+        + 'previewMode block: both now fail tsc at the authoring site and fail '
+        + 'the parse with the prescription (pinned in '
+        + 'kernel/preview-mode-retirement.test.ts). Concretely, check three '
+        + "places. (1) Host boot code composing a KernelContext: delete `mode: "
+        + "'preview'` (mode defaults to production; use development for local "
+        + 'demo work) and delete any previewMode block — neither ever changed '
+        + 'runtime behaviour, so removing them changes nothing observable. '
+        + '(2) Code importing PreviewModeConfigSchema, PreviewModeConfig or '
+        + 'PreviewModeConfigParsed from @objectstack/spec or @objectstack/spec/'
+        + 'kernel: every one is TS2305 after upgrade; no working replacement '
+        + 'exists to point at, because the vocabulary described nothing real. '
+        + "(3) TypeScript branching on the RuntimeMode type (a mode === "
+        + "'preview' arm, a switch over modes): the arm is now unreachable and "
+        + 'an exhaustiveness check will fail to compile if it stays — that '
+        + 'compile error is the enforced channel for TypeScript consumers. '
+        + 'Preview deployment ROUTING is untouched: OS_PREVIEW_MODE and '
+        + 'OS_PREVIEW_BASE_DOMAINS keep working exactly as documented '
+        + '(deployment routing, never identity).',
+    },
+    {
       id: 'memory-persistence-placeholder-refused',
       surface: 'memory driver config `persistence.path` (file persistence and the `auto` ' +
         'override) and `persistence.key` (localStorage and the `auto` override) — values ' +
@@ -7584,6 +7663,31 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // declaration, and the registration-time refusal in
     // `HotReloadManager.registerPlugin` is the door for the audience that exists.
     'kernel/HotReloadConfig:watchPatterns',
+    // #11846 — ADR-0049 enforce-or-remove on the preview-mode block (maintainer
+    // ruling 2026-08-27, Option A: remove). The key was declared as an auth bypass
+    // — its docstring promised auto-login as a simulated admin and named a
+    // production guard "the runtime must enforce" — and NOTHING implemented any of
+    // it: zero consumers measured in objectstack, objectui and cloud (cloud#1651,
+    // 2026-08-26, with positive controls; `ArtifactKernelFactory` — where serve.ts
+    // predicted preview auto-login would live if anywhere — never touches it). An
+    // author could write the six-key block today, parse cleanly, and get no
+    // behaviour and no diagnostic, while the reference docs said the capability
+    // existed. Tombstoned with `retiredKey()` — `KernelContextSchema` is not
+    // `.strict()`, so a bare deletion would be a silent strip (#3733, ADR-0104).
+    //
+    // Registered here but NOT in `src/conversions/registry.ts`, the
+    // `kernel/Manifest:loading` reasoning: a kernel context is constructed by HOST
+    // CODE at boot — it is not a stack collection member (`PLURAL_TO_SINGULAR` has
+    // no entry for it) and nothing stores one as a `sys_metadata` row, so a
+    // MetadataConversion would be a transform with no seam that ever runs. The
+    // prescription reaches authors through the tombstone plus the D3 semantic
+    // entry `kernel-context-preview-mode-retired`.
+    //
+    // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
+    // removal ships on the 17.x line (launch-window convention: accept-set
+    // narrowings ride minor releases) and the prescription lives at the major
+    // boundary where `migrate meta` users look (the #8495 / PR #8666 precedent).
+    'kernel/KernelContext:previewMode',
     // #10724 — ADR-0049 enforce-or-remove on the plugin manifest's `contributes`
     // block; one of NINE members tombstoned together. Census, registration major,
     // and the why-no-D2-conversion reasoning are recorded once in the sibling
@@ -7935,6 +8039,14 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // registration-time refusal in `PluginHealthMonitor.registerPlugin` is the door
     // for the audience that exists.
     'kernel/PluginHealthCheck:restartBackoff',
+    // #11846 — the `TenantRuntimeContextSchema` copy of
+    // `kernel/KernelContext:previewMode`: the def is `KernelContextSchema.extend(…)`,
+    // so the tombstone lands in this walked shape too and `authorable-surface/`
+    // marks it `[RETIRED]` separately. Registered per key, as gate (b) reads them —
+    // nothing radiates from the base (the `shared/FieldMapping:transform`
+    // precedent). See the base entry for the full record and the
+    // no-D2-conversion reasoning.
+    'kernel/TenantRuntimeContext:previewMode',
     // #12497 — the RESPONSE-side face of `security/ObjectPermission:allowPurge`
     // (see that entry for the full rationale: ADR-0049 enforce-or-remove,
     // maintainer ruling 2026-08-26 accepting #1883's recommendation B; the key
@@ -8793,6 +8905,24 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // implementation first. See `18.kernel__AdvancedPluginLifecycleConfig.ts`
     // for the family record.
     'kernel/PluginUpdateStrategy',
+    // #11846 — `kernel/PreviewModeConfig` (the six-key preview/demo config block:
+    // `autoLogin` default true, `simulatedRole` default 'admin',
+    // `simulatedUserName`, `readOnly`, `expiresInSeconds`, `bannerMessage`). Its
+    // only carrier key, `KernelContext.previewMode`, is tombstoned in this same
+    // major (both walked-shape copies — see the two `…:previewMode` entries in
+    // RETIRED_KEYS_BY_MAJOR[18]), and an exported value schema with no consumer
+    // reads as a capability (#3950, the `PerformanceConfigSchema` rule) — so the
+    // def leaves the emitted set whole, with its `PreviewModeConfig` /
+    // `PreviewModeConfigParsed` types. Measured before removal: zero consumers of
+    // the schema or any of its six keys in objectstack, objectui or cloud
+    // (cloud#1651, 2026-08-26, positive controls on record). The declared
+    // behaviour (auto-login as a simulated admin, a read-only demo session) was
+    // never implemented by any layer; preview DEPLOYMENTS belong to the
+    // deployment layer, whose `OS_PREVIEW_MODE` is routing-only and stays. If a
+    // preview experience becomes a product capability it re-declares fresh, with
+    // the production-posture hard-refusal as the first-landed half (#11846 ruling
+    // record).
+    'kernel/PreviewModeConfig',
     // #10485 — `ui/BorderRadius` (the border-radius scale sub-block) left with `ui/Theme`:
     // its ONLY consumer was the retired `ThemeSchema` (the #3950 rule — an
     // exported value schema with no consumer reads as a capability). See

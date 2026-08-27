@@ -2,95 +2,80 @@
 
 import { z } from 'zod';
 import { TenantQuotaSchema } from '../system/tenant.zod.js';
+import { lazySchema } from '../shared/lazy-schema';
+import { retiredKey } from '../shared/retired-key';
+
+// Retirement prescriptions (#11846, ADR-0049 enforce-or-remove; maintainer
+// ruling 2026-08-27). Declared with `//` (never `/** */`) and ABOVE the enum's
+// JSDoc on purpose — build-docs takes the file's FIRST JSDoc as the reference
+// page's module blurb (the hook-body.zod.ts placement precedent).
+//
+// No `os migrate meta` sentence in either string, deliberately: there is no D2
+// conversion behind this retirement — a kernel context is constructed by HOST
+// CODE at boot, never authored in a stack collection or stored as a
+// `sys_metadata` row, so the conversion chain has no seam that would ever see
+// one (the `kernel/Manifest:loading` precedent). The prescription reaches
+// authors through these two rejection sites plus the D3 semantic entry
+// `kernel-context-preview-mode-retired`.
+const RUNTIME_MODE_PREVIEW_RETIRED =
+  "`context.mode: 'preview'` was removed from `RuntimeMode` in @objectstack/spec 17 "
+  + '(#11846, ADR-0049 enforce-or-remove) — no layer of the platform ever branched on it: '
+  + 'the value promised "bypass auth, simulate admin identity" and no code path implemented '
+  + 'either half, so a deployment declaring it ran with ordinary production behaviour under '
+  + 'a misleading label. Delete the value — `mode` defaults to `production`; use '
+  + '`development` for local demo work. Preview DEPLOYMENTS are the deployment layer\'s '
+  + 'job (`OS_PREVIEW_MODE` is routing-only and never touched identity). If a preview '
+  + 'experience becomes a product capability it re-declares fresh, with the '
+  + 'production-posture hard-refusal as the first-landed half (#11846 ruling record).';
+const PREVIEW_MODE_RETIRED =
+  '`context.previewMode` was removed in @objectstack/spec 17 (#11846, ADR-0049 '
+  + 'enforce-or-remove) — nothing ever read the block: none of its six keys (`autoLogin`, '
+  + '`simulatedRole`, `simulatedUserName`, `readOnly`, `expiresInSeconds`, `bannerMessage`) '
+  + 'had a consumer in any repo, so an authored block parsed cleanly and configured '
+  + 'NOTHING, while its own docstring promised an auth bypass ("skips authentication '
+  + 'screens", "simulates an admin identity") and named a production guard no runtime ever '
+  + 'received. Delete the key. Preview/demo deployments belong to the deployment layer, '
+  + 'which owns auth per-project (`ArtifactKernelFactory` in the cloud distribution); '
+  + '`OS_PREVIEW_MODE` stays there as a routing-only switch. If a preview experience '
+  + 'becomes a product capability it re-declares fresh, with the production-posture '
+  + 'hard-refusal as the first-landed half (#11846 ruling record).';
 
 /**
  * Runtime Mode Enum
  * Defines the operating mode of the kernel
  */
-import { lazySchema } from '../shared/lazy-schema';
 export const RuntimeMode = z.enum([
   'development', // Hot-reload, verbose logging
   'production',  // Optimized, strict security
   'test',        // Mocked interfaces
   'provisioning', // Setup/Migration mode
-  'preview',     // Demo/preview mode — bypass auth, simulate admin identity
-]).describe('Kernel operating mode');
+  // 'preview' was RETIRED in #11846 — see RUNTIME_MODE_PREVIEW_RETIRED above.
+], {
+  // Only the value that USED to be legal gets the retirement prescription —
+  // telling the author of a typo that their mode "was removed" would
+  // misinform. Everything else keeps zod's own enum message, which already
+  // lists the legal values. (The `HookBodyCapability` / `managedBy: 'system'`
+  // precedent.)
+  error: (issue) => (issue.input === 'preview' ? RUNTIME_MODE_PREVIEW_RETIRED : undefined),
+}).describe('Kernel operating mode');
 
 export type RuntimeMode = z.input<typeof RuntimeMode>;
 
-/**
- * Preview Mode Configuration Schema
- *
- * Configures the kernel's preview/demo mode behaviour.
- * When `mode` is set to `'preview'`, the platform skips authentication
- * screens and optionally simulates an admin identity so that visitors
- * (e.g. app-marketplace customers) can explore the system without
- * registering or logging in.
- *
- * **Security note:** preview mode should NEVER be used in production.
- * The runtime must enforce this constraint.
- *
- * @example
- * ```ts
- * const ctx = KernelContextSchema.parse({
- *   instanceId: '550e8400-e29b-41d4-a716-446655440000',
- *   mode: 'preview',
- *   version: '1.0.0',
- *   cwd: '/app',
- *   startTime: Date.now(),
- *   previewMode: {
- *     autoLogin: true,
- *     simulatedRole: 'admin',
- *   },
- * });
- * ```
- */
-export const PreviewModeConfigSchema = lazySchema(() => z.object({
-  /**
-   * Automatically log in as a simulated user on startup.
-   * When enabled, the frontend skips login/registration screens entirely.
-   */
-  autoLogin: z.boolean().default(true)
-    .describe('Auto-login as simulated user, skipping login/registration pages'),
-
-  /**
-   * Role of the simulated user.
-   * Determines the permission level of the auto-created preview session.
-   */
-  simulatedRole: z.enum(['admin', 'user', 'viewer']).default('admin')
-    .describe('Permission role for the simulated preview user'),
-
-  /**
-   * Display name for the simulated user shown in the UI.
-   */
-  simulatedUserName: z.string().default('Preview User')
-    .describe('Display name for the simulated preview user'),
-
-  /**
-   * Whether the preview session is read-only.
-   * When true, all write operations (create, update, delete) are blocked.
-   */
-  readOnly: z.boolean().default(false)
-    .describe('Restrict the preview session to read-only operations'),
-
-  /**
-   * Session duration in seconds. After expiry the preview session ends.
-   * 0 means no expiration.
-   */
-  expiresInSeconds: z.number().int().min(0).default(0)
-    .describe('Preview session duration in seconds (0 = no expiration)'),
-
-  /**
-   * Optional banner message shown in the UI to indicate preview mode.
-   * Useful for marketplace demos so visitors know they are in a sandbox.
-   */
-  bannerMessage: z.string().optional()
-    .describe('Banner message displayed in the UI during preview mode'),
-}));
-
-export type PreviewModeConfig = z.input<typeof PreviewModeConfigSchema>;
-/** Post-parse shape of {@link PreviewModeConfig} — defaults applied, transforms run (ADR-0122). */
-export type PreviewModeConfigParsed = z.infer<typeof PreviewModeConfigSchema>;
+// ── `PreviewModeConfigSchema` was RETIRED here (#11846, ADR-0049) ────────────
+//
+// The whole def — six authorable keys (`autoLogin` default true,
+// `simulatedRole` default 'admin', `simulatedUserName`, `readOnly`,
+// `expiresInSeconds`, `bannerMessage`) — left the published set together with
+// its `PreviewModeConfig` / `PreviewModeConfigParsed` types: its only carrier
+// key (`KernelContext.previewMode`, tombstoned below) is retired, and an
+// exported value schema with no consumer reads as a capability (#3950, the
+// `PerformanceConfigSchema` rule). Registered as `kernel/PreviewModeConfig` in
+// `RETIRED_DEFS_BY_MAJOR[18]`; the prescription lives on the tombstone below,
+// the `RuntimeMode` error map above, and the D3 semantic entry
+// `kernel-context-preview-mode-retired`. What actually produces preview
+// deployments is the deployment layer — the cloud distribution owns auth
+// per-project (`ArtifactKernelFactory`), and `OS_PREVIEW_MODE` there is
+// routing-only.
 
 /**
  * Kernel Context Schema
@@ -126,12 +111,15 @@ export const KernelContextSchema = lazySchema(() => z.object({
   features: z.record(z.string(), z.boolean()).default({}).describe('Global feature toggles'),
 
   /**
-   * Preview Mode Configuration.
-   * Only relevant when `mode` is `'preview'`. Configures auto-login,
-   * simulated identity, read-only restrictions, and UI banner.
+   * RETIRED (#11846, ADR-0049 enforce-or-remove): the `previewMode` block —
+   * declared as an auth bypass, enforced by nothing — is unwritable. The
+   * schema is not `.strict()`, so a bare deletion would have Zod silently
+   * STRIP the key (#3733, ADR-0104); the tombstone keeps the removal audible
+   * in both channels (`tsc` types the key `never`; the parse raises the
+   * prescription). `TenantRuntimeContextSchema` extends this shape and
+   * inherits the tombstone.
    */
-  previewMode: PreviewModeConfigSchema.optional()
-    .describe('Preview/demo mode configuration (used when mode is "preview")'),
+  previewMode: retiredKey(PREVIEW_MODE_RETIRED),
 }));
 
 export type KernelContext = z.input<typeof KernelContextSchema>;
