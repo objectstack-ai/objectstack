@@ -36,6 +36,7 @@ metadata:
 | `triage` | 以**分诊座位**身份运行(只扫/分类/路由,永不认领) | — |
 | `<domain>`(如 `spec`、`skills`) | 以该 `domain:*` 车道的**执行座位**身份运行 | — |
 | `epic:#<n>` | 以父单 #n 的 **epic PM** 身份运行(见「Epic 子树车道」) | — |
+| `director` | 以**项目总监席**身份运行(人工召唤;三职与章程见「升级与决策」与 `references/lanes/director.md`) | — |
 | `label:<name>` | backlog 过滤标签;`label:all` = 全部 open 未认领 | `pm:queue` |
 | `repo:<owner/name>` | 扫哪个仓的 backlog(单 issue 的落地仓看它自己的 `repo:*` 标签) | `objectstack-ai/objectstack` |
 | `batch:<n>` | 同时在飞的 dev 上限 | `3` |
@@ -93,7 +94,7 @@ fire 一轮烟测,判据取**GitHub 上的产出**;③ 每 fire 一轮:读座位
 | `needs-user-decision` | 决定**待做** —— 永不派发、除已裁代裁通道外永不代答;维护者的收件箱 |
 | `pm:on-hold` | 决定**已做**且答案是「不是现在」—— 不派发也不催;**仅当带机器可读 `Restart-when:` 行(closed 形或一行可执行判据)才合法**,重启放行须过**放行双查** —— 行契约、双通道、`Restart-touch:` 触发文件与双查细则见 `references/state-machine.md` |
 | `pm:blocked` + 正文行 `Blocked-by: #N` | 等上游 —— 选择期跳过,#N 关闭时由解锁扫描放回。工已完、PR 被外部门禁缺陷卡住的卡**同用本态,⛔ 不设新标签**(`Unlock-action: re-check PR #M` 行改写解锁动作 —— **只认此一值**,别的写法静默回落默认重派,细则见 `references/state-machine.md`) |
-| `pm:awaiting-maintainer` | 决定**已做**,剩余动作是一次 GitHub 之外的人工维护者操作(如 Routines UI 变更)—— 不派发、不催;与其它 pm 状态标签**互斥**;互斥面、出口与巡查细则见 `references/state-machine.md` |
+| `pm:awaiting-maintainer` | 决定**已做**,剩余动作是一次 GitHub 之外的人工维护者操作(如 Routines UI 变更)—— 不派发、不催;跨仓台账与出口归**项目总监席**,各席只入态;与其它 pm 状态标签**互斥**;互斥面、出口与巡查细则见 `references/state-machine.md` |
 | `pm:blocking` | 有 open 下游依赖者(分诊 sweep 自 `Blocked-by:` 索引推导的缓存,⛔ 不手工挂);进选择优先级全序 |
 | `pm:retriage` | 等分诊改判(维护者 2026-08-19/20 裁定:「同意 并存」)—— 与现行 `pm:*` 标签**并存,⛔ 不摘原标**;带本标签的 `pm:queue` 卡**跳过派发**(异议未决不派,即可派发行的除外项);挂/摘两方机制见 `references/state-machine.md` |
 | `finding` | 观察类记录,恒 = **待首次定级**(定级即离标:晋级换 `pm:queue` / 关闭 / hold 换 `pm:on-hold`;裸标签数即健康读数)—— 不占队列不进收件箱 |
@@ -186,8 +187,8 @@ fire 一轮烟测,判据取**GitHub 上的产出**;③ 每 fire 一轮:读座位
 ## 多仓协调(五条规则)
 
 产品依赖方向固定:`objectstack`(后端;`packages/spec` 是唯一契约)→ `objectui`(前端,构建产物经
-`pnpm objectui:refresh` 回流)与 `cloud`。**仓分两类**(维护者 2026-08-26 裁定;原话与 skills/决裁归
-席见「升级与决策」):**多车道仓** `objectstack`、`objectui` —— 中央分诊是 `domain:*`/type/定级
+`pnpm objectui:refresh` 回流)与 `cloud`。**仓分两类**(维护者 2026-08-26 裁定;原话与决裁归席交
+接见「升级与决策」):**多车道仓** `objectstack`、`objectui` —— 中央分诊是 `domain:*`/type/定级
 的唯一生产者;**单车道仓** `cloud`、`objectos`、`hotcrm`、`www.objectos.ai`(未来新仓默认此类)——
 其 `repo:*` 席自理无冲突的机械三务(自扫 sweep、自打 `type`、自做 `finding` 首触定级),⛔ 不产
 `domain:*`,决策卡默认入 objectstack 收件箱;跨仓查重/shadow 检查恒归中央(全仓视图不可下放)。
@@ -340,7 +341,7 @@ skills,类似分诊」)—— 贴内指针指向其车道文件,升级走技能 
 跳过)、查重/shadow 检查与代裁通道全仓照跑。**代裁通道保留、档位硬门**(维护者 2026-08-26
 裁定,原话:「代裁通道如果是 fable 可以代裁,其他接受你的建议」):仅当运行席**实测服役模
 型** = `claude-fable-5`(降档保险丝机器读数,⛔ 永不凭自述)才可代裁;通道只在分诊 Routine(钉
-档)或 skills 席上运行,其余执行座位 ⛔ 不代裁;2026-08-12 置信门其余条件全部照旧。
+档)或项目总监席上运行,其余执行座位 ⛔ 不代裁;2026-08-12 置信门其余条件全部照旧。
 **工具加载纪律(fire 开局)**:互斥检查/自退判断只按名加载所需工具 —— `ToolSearch` 用
 `select:mcp__github__list_issues,mcp__github__issue_read` 形式,判定「本轮有活」之后才加载其余;⛔ 开
 局不做泛关键词 ToolSearch(一次注入全家桶 schema —— 分诊席 2026-08-20 自测:空转轮 ~12 万
@@ -786,9 +787,8 @@ main 红了约一小时,逐 PR 连环红到 fix-forward 才止)。本段只适�
   行为或扩大公开面的**内容
   肢**由声明行承载。档位以 dispatch-gates 常量 `CONTRACT_REVIEW_TIER` 为准(档位单源,⛔ 本文与标
   签不写模型名,模型升级只改一行一个文件)。派发席职责止于:卡上记一行认定、挂
-  `needs:contract-review`(标签命名审的对象,恒英文)、停手;⛔ 禁止自查放行。复审链细则 ——
-  载体纪律(双载体同笔挂/清、载体不迁移)、复审资格与归属、降档保险丝 —— 见
-  `references/contract-review.md`。
+  `needs:contract-review`(标签命名审的对象,恒英文)、停手;⛔ 禁止自查放行。复审链细则(载
+  体纪律、资格与归属、降档保险丝)见 `references/contract-review.md`。
 - **碰生成物的 PR,入队前先同步 + 整体重生成**(os-regen 驱动零冲突标记地**静默丢掉一侧改
   动**):
   四步序已机械化 `bash scripts/pm/os-regen-merge.sh`;陷阱、断言措辞与锚点禁令见 landing-operations
@@ -925,7 +925,7 @@ grep <branch>`),复升级时逐条**跑**一遍,零命中/变形的就地改写�
 卡面块是落卡与升级的
 必备件**(四棱维护者 2026-08-11 接受;标准块 2026-08-18 裁定「同意」;同裁定的摘要视图/批量决
 裁通道已退
-役,墓碑与原话见「常设决裁流程」;收件箱由维护者定期与 AI
+役,墓碑与原话见 `references/lanes/director.md`;收件箱由维护者定期与 AI
 讨论消化,⛔ 不 assign 推送 —— 维护者 2026-08-19 裁定:「我感觉决策卡推给我太麻烦了,我需要和ai讨论才能判断,这个还是维
 持之前的样子。我会定期和ai讨论。」),每张 `needs-user-decision` 卡落卡即带、⛔
 不留待维护者到场再补。**四维分析从业务的角度写**(2026-08-20 裁)—— 落卡分析模板、写法
@@ -942,14 +942,14 @@ grep <branch>`),复升级时逐条**跑**一遍,零命中/变形的就地改写�
 者在本会话
 ~30 分钟内有过人类输入才可发,每问必带推荐项,被 Skip 或长挂即转卡通道 ⛔ 不重弹 ——
 卡先于弹窗存在,弹窗怎么死盘面都诚实。
-**常设决裁流程:决裁与跨仓 skills/指令面工作统一归 skills 席,维护者驱动的人工流**(维护者
-2026-08-26 两裁,原话:「skills 和决裁的问题,还是由skills席统一人工处理,我会要求你处理某个仓的skills
-和决裁。」;「决裁流程今天这样很好，决策卡5张一组，从业务的角度给我具体解释，说明可选项，并进行四维
-分析。应该写入技能。」):维护者说「处理决策卡」即入口;每批 ≤5 张按优先序
-呈报,每卡业务角度具体解释 + 选项与真实代价 + 四维分析 + 一个推荐;一行回批
-(「1A 2B …」;「X, 但…」= 附带条件随执行落地)即全链执行,裁后四件原子执行不再请示;
-批间新到滚入下批,收件箱清零才收工 —— 批序与细则见 `references/decision-analysis.md`;
-⛔ 不复活已退役的汇总 issue(维护者 2026-08-19:「之前定期生成的决策汇总 issue没什么用」)。
+**项目总监席(Project Director):人工召唤,三职 = `needs:contract-review` 复审链、决裁勤务、维护
+者动作台账**(维护者 2026-08-27 裁定,原话:「项目总监 由人工定期指挥，负责处理 contract-review 类
+别的和需要决裁的。」「需要维护者处理的事情，也归项目总监。」—— 决裁半边自此由 skills 席移交本席,
+改写 2026-08-26「skills 和决裁的问题,还是由skills席统一人工处理,我会要求你处理某个仓的skills和
+决裁。」的归属半句,skills 面与其车道照旧归 skills 席)。入口 = `/pm-dispatch director`;⛔ 无
+Routine 无 cron,召唤间隔载体停放是设计安全态;档位硬门 = `CONTRACT_REVIEW_TIER`(保险丝机读),
+不达档只做免档整理并停放三职;不占 `domain:*`,按职责标签跨车道跨仓,永不认领 backlog、
+永不写码,机械接手经派发 dev(与分诊席同款 carve-out);章程见 `references/lanes/director.md`。
 
 ## 护栏(Guardrails,有约束力)
 

@@ -96,7 +96,7 @@ fire 附带一次:
 `state=CLOSED` + `since` 与 `Blocked-by:` 反向索引求交,命中走既有回队双查;健康指标 = 逐
 标签 `perPage: 1` 只读 `totalCount`。每日层(当日首 fire)= 四仓全量对账 + 归集本就日频的
 职责(finding 集中轮、`Restart-when:` 判据批扫、决策箱回填)。成本靶:干活轮 ≤50k,空转轮
-守既有探针预算(契约复审的常设承担已收敛为 skills 席自绑小时钟,见 `contract-review.md`)。
+守既有探针预算(契约复审的常设承担归项目总监席人工召唤,见 `contract-review.md`)。
 
 ## 落卡与裁决记录细则(维护者 2026-08-13)
 

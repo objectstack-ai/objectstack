@@ -22,10 +22,10 @@
   核」): 经同一机读证实达档的派发席,可对自派的卡执行复审并清标(审的是低档实现者的
   契约增量,非自身产物 —— 派发席不写代码);放宽的是独立席位,不是复审本身,主文件「⛔
   禁止自查放行」禁的是免复审直放,不禁本路径;低于档位的席照旧留标等待。
-- **归属**:常设 = skills 席自绑小时钟(维护者 2026-08-23:「要不还是你挂个定时处理审核吧」),
-  每小时一轮即天然攒批;分诊席达档时(经同一机读证实)照旧可清。只审契约增量 diff、结
-  论一行写在卡上、PASS 双载体同笔清标(PR 与卡各按标签纪律硬步骤)并清 review request 或留
-  一条 review 评论,标清后卡方可入队。
+- **归属**:常设 = 项目总监席人工召唤(维护者 2026-08-27 裁,原话与交接台账见
+  `lanes/director.md`;取代 skills 席自绑小时钟 —— 2026-08-23 钟实测已死,⛔ 不复活,召唤间隔
+  停放是设计安全态);分诊席达档时(经同一机读证实)照旧可清。只审契约增量 diff、结论一
+  行写在卡上、PASS 双载体同笔清标并清 review request 或留 review 评论,标清后卡方可入队。
 - **清标即落地**(维护者 2026-08-25,原话:「审核通过你应该直接负责合并吧，还要等原始的项
   目经理吗」):非受管 code PR 由**复审链同笔收口**:清标后按 `landing-operations.md` 走落地前
   检(`mergeable_state` 先读、闭合关键词扫描、true-green 核 job 结论、ready 先于 auto-merge 不可
@@ -35,9 +35,9 @@
 
 ## 降档保险丝(机读)
 
-- 子轮开场**必调一次 `get_session`**(claude-code-remote MCP,无参)读 `external_metadata.last_served_model`,⛔
+- 每场开场**必调一次 `get_session`**(claude-code-remote MCP,无参)读 `external_metadata.last_served_model`,⛔
   自述档位不是读数(静默降档腐蚀的恰是自述;实测与配置档陷阱见 platform-readings);读数 ≠
-  `CONTRACT_REVIEW_TIER` ⇒ 该子轮整体跳过、标签原样留置 —— 卡在队列外等待是安全态。
+  `CONTRACT_REVIEW_TIER` ⇒ 该场整体跳过、标签原样留置 —— 卡在队列外等待是安全态。
 - **保险丝只对座位自会话有效**:`mode:subagent` 里的 `get_session` 量的是**派发会话**(实测:钉在
   地板档的子代理读回父会话的档位,`session_context.model` 与 `last_served_model` 一致只是同一来源
   引用两次,⛔ 不作互证)—— subagent 的实际服役档位现无法对 `CONTRACT_REVIEW_TIER` 自证,条

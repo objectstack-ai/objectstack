@@ -300,6 +300,13 @@ export const CEILINGS = new Map([
   // community edition). Set at landed line count (headroom 0, same convention).
   // 45 → 44: same patrol-anchor hoist deletion as the six lanes above.
   ['.claude/skills/pm-dispatch/references/lanes/hotcrm.md', 57],
+  // Project Director seat charter (maintainer ruling 2026-08-27, verbatim in the
+  // file: 「项目总监 由人工定期指挥，负责处理 contract-review 类别的和需要决裁的。」) — a
+  // human-invoked seat owning the contract-review chain, the adjudication duty and
+  // the maintainer-action ledger. A lane charter is read per seat session like
+  // every entry above. Set at the landed line count read from this ratchet's own
+  // run (headroom 0, same convention as the entries above).
+  ['.claude/skills/pm-dispatch/references/lanes/director.md', 75],
   // 399 → 405 (#11126): maintainer-ruled (2026-08-23, option B, quoted in that
   // PR) — the +6-line cross-repo dispatch-gates caveat, sized so the queued
   // #11137 (395→399 on main) and this PR's +6 compose to exactly 405.
@@ -437,6 +444,7 @@ export const MAX_TABLE_ROW_BYTES = new Map([
   ['.claude/skills/pm-dispatch/references/lanes/skills.md', 0],
   ['.claude/skills/pm-dispatch/references/lanes/spec.md', 0],
   ['.claude/skills/pm-dispatch/references/lanes/hotcrm.md', 0],
+  ['.claude/skills/pm-dispatch/references/lanes/director.md', 0],
   ['.claude/agents/os-dev.md', 0],
   ['.claude/skills/checklist-test/SKILL.md', 221],
   ['.claude/skills/checklist-author/SKILL.md', 0],
@@ -887,7 +895,7 @@ function selfTest() {
     ['SKILL.md is covered', CEILINGS.has('.claude/skills/pm-dispatch/SKILL.md'), true],
     ['the dev-agent definition is covered', CEILINGS.has('.claude/agents/os-dev.md'), true],
     ['all five compressed references are covered', ['dispatch-runbook', 'platform-readings', 'review-checklist', 'landing-operations', 'seat-post-protocol'].every((n) => CEILINGS.has(`.claude/skills/pm-dispatch/references/${n}.md`)), true],
-    ['all seven lane job descriptions are covered', ['engine', 'services', 'cli', 'devx', 'skills', 'spec', 'hotcrm'].every((n) => CEILINGS.has(`.claude/skills/pm-dispatch/references/lanes/${n}.md`)), true],
+    ['all eight lane/seat job descriptions are covered', ['engine', 'services', 'cli', 'devx', 'skills', 'spec', 'hotcrm', 'director'].every((n) => CEILINGS.has(`.claude/skills/pm-dispatch/references/lanes/${n}.md`)), true],
     ['the other four skills are covered (#9473)', ['checklist-test', 'checklist-author', 'dogfood-verification', 'spec-property-retirement'].every((n) => CEILINGS.has(`.claude/skills/${n}/SKILL.md`)), true],
     ['root AGENTS.md is covered (#9792)', CEILINGS.has('AGENTS.md'), true],
     ['root CLAUDE.md is covered (#9965)', CEILINGS.has('CLAUDE.md'), true],
