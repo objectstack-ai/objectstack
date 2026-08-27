@@ -8,8 +8,8 @@ description: Misc protocol schemas
 ## TypeScript Usage
 
 ```typescript
-import { CapabilityDeclarationSchema, TenancyPostureSchema } from '@objectstack/spec/security';
-import type { CapabilityDeclaration, TenancyPosture } from '@objectstack/spec/security';
+import { CapabilityDeclarationSchema, OrgScopingEntitlementSchema, PlatformGlobalObjectsSchema, TenancyPostureSchema } from '@objectstack/spec/security';
+import type { CapabilityDeclaration, OrgScopingEntitlement, PlatformGlobalObjects, TenancyPosture } from '@objectstack/spec/security';
 
 // Validate data
 const result = CapabilityDeclarationSchema.parse(data);
@@ -35,6 +35,26 @@ const result = CapabilityDeclarationSchema.parse(data);
 | **_packageId** | `string` | optional | Owning package machine id. |
 | **_packageVersion** | `string` | optional | Owning package version. |
 | **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
+
+
+---
+
+## OrgScopingEntitlement
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **supportedPostures** | `Enum<'single' \| 'group' \| 'isolated'>[]` | optional |  |
+| **platformGlobalObjects** | `string[]` | optional |  |
+| **suppressUnboundedOrgAdminGrant** | `boolean` | optional |  |
+
+
+---
+
+## PlatformGlobalObjects
+
+**Type:** `string[]`
 
 
 ---

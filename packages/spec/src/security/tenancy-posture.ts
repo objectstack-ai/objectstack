@@ -159,6 +159,7 @@ export interface OrgScopingEntitlement {
 export const PlatformGlobalObjectsSchema = z
   .array(z.string().regex(/^[a-z_][a-z0-9_]*$/))
   .readonly();
+export type PlatformGlobalObjects = z.infer<typeof PlatformGlobalObjectsSchema>;
 
 /**
  * [ADR-0105 D12 / #12699] Runtime twin of {@link OrgScopingEntitlement} for the
