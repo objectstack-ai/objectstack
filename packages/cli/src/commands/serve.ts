@@ -303,9 +303,12 @@ export function formatExhaustedPortSearchNotice(requestedPort: number, cause: un
   // ⚠️ The `catch` this feeds catches EVERY rejection, not only an exhausted
   // walk, and the two cannot share a body. `isPortAvailable` rejects
   // synchronously with `ERR_SOCKET_BAD_PORT` whenever it is handed a port
-  // outside 0–65535 — reachable two ways: a walk that starts high enough to
-  // cross the ceiling, and `--port` text that `parseInt` turns into `NaN`. On
-  // those paths nothing was exhausted, so a body claiming a probed range would
+  // outside 0–65535 — reachable by a walk that starts high enough to cross the
+  // ceiling. (⚠️ It used to be reachable a second way, from `--port` text that
+  // `parseInt` turned into `NaN`; since #12662 that value is refused before
+  // this policy runs, so a crossing walk is the only route left. The branch
+  // below is unchanged: the walk route still reaches it.) On that path
+  // nothing was exhausted, so a body claiming a probed range would
   // print `NaN–NaN` and assert a search that never ran. A diagnostic that
   // exists to be accurate does not get to guess, so the span sentence is
   // reached only through the error that actually carries the span.
@@ -333,6 +336,181 @@ export function formatExhaustedPortSearchNotice(requestedPort: number, cause: un
     + chalk.dim('     certainly fail with a raw EADDRINUSE from the kernel, and this notice\n')
     + chalk.dim('     is the only place that says why.\n')
     + chalk.dim(`     Free a port in ${startPort}–${lastPort}, or pick another via PORT=<port> (or --port <port>).`)
+  );
+}
+
+/**
+ * The port values a real `listen()` accepts — MEASURED here, not copied from
+ * the kernel's error text (#12662).
+ *
+ * Measured in this checkout (Node v22.22.2), `net.createServer().listen(v)`:
+ *
+ * ```
+ *   listen(0)      → OK, bound 43025   ← kernel-assigned: 0 is a REQUEST, not an error
+ *   listen(65535)  → OK, bound 65535
+ *   listen(65536)  → ERR_SOCKET_BAD_PORT: options.port should be >= 0 and < 65536
+ *   listen(-1)     → ERR_SOCKET_BAD_PORT
+ *   listen(NaN)    → ERR_SOCKET_BAD_PORT
+ *   listen(3000.5) → ERR_SOCKET_BAD_PORT
+ * ```
+ *
+ * ⚠️ Two traps, and both are why these numbers are measured rather than read
+ * off the message. **`0` is legal** — a floor of `1` would refuse a value that
+ * boots today (`os serve --port 0` binds a kernel-assigned port). And the
+ * ceiling is **65535, not 65536**: the kernel's own sentence says `< 65536`,
+ * an exclusive bound, one past the largest port that binds.
+ *
+ * ⛔ Never hand-write either number anywhere else. The refusal in
+ * {@link formatInvalidPortNotice} reads both from here — the rule
+ * {@link PORT_SEARCH_SPAN} already carries in this file (#12620), for the same
+ * reason: a range a diagnostic STATES has to be the range the code ENFORCES,
+ * or the diagnostic becomes the next defect.
+ */
+const MIN_PORT = 0;
+const MAX_PORT = 65535;
+
+/**
+ * Which input actually supplied the port text.
+ *
+ * ⭐ This type exists because of what the defect WAS. An operator who typed
+ * `--port abc` got back `ERR_SOCKET_BAD_PORT … options.port …` — an error
+ * naming an internal option, thrown from a code path with no connection to the
+ * thing they typed. A refusal that said only "invalid port" would commit the
+ * same defect one level up, so the refusal names the source, and this is the
+ * vocabulary it names it from.
+ */
+export type PortInputSource = '--port' | 'OS_PORT' | 'PORT' | 'the built-in default';
+
+/**
+ * Name the input that supplied `flags.port`.
+ *
+ * `setFromDefault` is oclif's own parse metadata: `false` when the value came
+ * from argv, `true` when the flag's `default` supplied it. It is the ONLY
+ * signal that separates `--port` from the environment here, because
+ * `PORT`/`OS_PORT` never reach flag parsing at all — they are read by the
+ * `default` expression on the flag. MEASURED against this checkout's
+ * `@oclif/core` (4.13.3), both in `lib/parser/parse.js` and at runtime: the
+ * default branch's value function is `async () => flag.default`, and unlike
+ * the argv and `flag.env` branches it never calls `parseFlagOrThrowError`. A
+ * flag's own `parse` therefore cannot see a default, which is exactly why the
+ * validation this function feeds lives at the consumer instead of on the flag.
+ *
+ * ⚠️ The env half MIRRORS `readEnvWithDeprecation('OS_PORT', 'PORT')`'s
+ * precedence, and a mirror can drift from what it mirrors. It is pinned rather
+ * than trusted: `serve-port-validation.test.ts` asserts the two agree for every
+ * combination of the two variables — including `OS_PORT=''`, which is DEFINED
+ * and therefore wins. That case is why the test below is `!== undefined` and
+ * not a truthiness check: an `||` slip here would name `PORT` for a value that
+ * came from `OS_PORT`.
+ */
+export function describePortSource(
+  setFromDefault: boolean,
+  env: { OS_PORT?: string; PORT?: string } = process.env,
+): PortInputSource {
+  if (!setFromDefault) return '--port';
+  if (env.OS_PORT !== undefined) return 'OS_PORT';
+  if (env.PORT !== undefined) return 'PORT';
+  return 'the built-in default';
+}
+
+/**
+ * The port `flags.port` names, or `null` when that text cannot be a port.
+ *
+ * ## What this refuses, and why it is exactly that set
+ *
+ * `null` for precisely the values a real `listen()` refuses: `NaN`, anything
+ * below {@link MIN_PORT}, anything above {@link MAX_PORT}. Those are the
+ * inputs that used to travel all the way to the socket layer and die there on
+ * `ERR_SOCKET_BAD_PORT`, naming `options.port` instead of the flag or the
+ * environment variable the operator actually set.
+ *
+ * ## ⛔ `parseInt`'s tolerance is PRESERVED, and that is deliberate
+ *
+ * The obvious repair is a validating `Flags.integer({ min, max })`, whose
+ * parser is `/^-?\d+$/`. It was measured and NOT taken, for two reasons:
+ *
+ *  1. It cannot see the environment. `PORT`/`OS_PORT` arrive through the
+ *     flag's `default`, and oclif never runs a flag's `parse` on a default
+ *     (measured above, in {@link describePortSource}) — so an integer flag
+ *     fixes `--port abc` and leaves `PORT=abc` and `OS_PORT=abc`, two of the
+ *     three reported paths, dying exactly as before.
+ *  2. It would NARROW what boots. `/^-?\d+$/` refuses `" 3000"` (production
+ *     env vars carry whitespace), `"3000.0"`, `"0x0BB8"`, `"+3000"` and
+ *     `"3e3"` — every one of which `parseInt` accepts and every one of which
+ *     boots a server today.
+ *
+ * So this function keeps `parseInt` as the reader and adds only the refusal.
+ * The accept set is therefore UNCHANGED: every value that boots today still
+ * boots, byte for byte, on the same port. What changes is only that the values
+ * which used to reach `listen()` and die raw are now refused here, in the
+ * operator's own vocabulary, before any socket exists.
+ *
+ * ⚠️ `parseInt`'s tolerance also means `--port 3e3` binds port **3**, not
+ * 3000, and this function preserves that too — a silent coercion, and a
+ * separate defect from the one this card repairs. It is filed rather than
+ * fixed here: tightening the accepted spelling would narrow the accept set,
+ * which is a contract question and not this card's to answer.
+ */
+export function parseRequestedPort(raw: string): number | null {
+  const parsed = parseInt(raw);
+  // `parseInt` yields an integer or `NaN`; `Number.isInteger` refuses the
+  // second. This is the `--port abc` / `PORT=abc` / `OS_PORT=abc` path, and
+  // also `PORT=''` — an env var that is DEFINED but empty, which
+  // `readEnvWithDeprecation` returns as `''` rather than falling back to 3000.
+  if (!Number.isInteger(parsed)) return null;
+  // And the numerically-fine-but-unbindable path: `--port 99999`, `--port -1`.
+  if (parsed < MIN_PORT || parsed > MAX_PORT) return null;
+  return parsed;
+}
+
+/**
+ * The refusal for a port value that cannot be one (#12662).
+ *
+ * ⭐ Held to the standard the card is about. Two things it must do that the
+ * error it replaces did not:
+ *
+ *  - **Name the source the operator actually used.** `--port`, `PORT` or
+ *    `OS_PORT` — decided by {@link describePortSource}, not guessed here.
+ *  - **State the range, read from {@link MIN_PORT}/{@link MAX_PORT}.** ⛔ Never
+ *    a second, hand-written copy of those numbers: this sentence exists to be
+ *    accurate about the bounds the code enforces, so it interpolates them.
+ *
+ * ⚠️ The raw text is rendered with `JSON.stringify`, which is not decoration.
+ * It makes `" 3000"` distinguishable from `"3000"` on the screen — the
+ * whitespace case is the most likely thing an operator is staring at without
+ * seeing — and it escapes control bytes rather than writing them to a terminal.
+ *
+ * ⚠️ KNOWN LIMIT, stated rather than papered over: `os dev` forwards its own
+ * `--port` (and `$PORT`, promoted to a flag) to the `serve` child on argv,
+ * and `os start` forwards its `--port` as `PORT` in the child's environment.
+ * On those spawns this names the channel the value arrived on, which is not
+ * always the one the operator typed. Both parent commands own their own flag
+ * validation; this is `serve` naming what `serve` can see.
+ *
+ * CHANNEL — the same `printDiagnostic` (stderr) as its two siblings, for the
+ * reason #7915 measured: `stdout` carries JSON-RPC frames whenever the stdio
+ * MCP transport is mounted, where one non-frame line reaches a conforming
+ * client as a transport error.
+ */
+export function formatInvalidPortNotice(raw: string, source: PortInputSource): string {
+  const shown = JSON.stringify(raw);
+  const spelled = source === '--port'
+    ? `--port ${shown}`
+    : source === 'the built-in default'
+      ? `the built-in default (${shown})`
+      : `${source}=${shown}`;
+  const fix = source === '--port' || source === 'the built-in default'
+    ? '     Pass a whole number instead, for example --port 3000.'
+    : `     Correct ${source} in this process's environment (for example ${source}=3000),\n`
+      + '     or override it with --port 3000.';
+
+  return (
+    '\n'
+    + chalk.red(`  ✗ Invalid port: ${spelled}\n`)
+    + chalk.dim(`     A port must be a whole number from ${MIN_PORT} to ${MAX_PORT} — ${MIN_PORT} is legal, and\n`)
+    + chalk.dim('     asks the kernel for any free port. Nothing was started, and no socket\n')
+    + chalk.dim('     was opened.\n')
+    + chalk.dim(fix)
   );
 }
 
@@ -1390,7 +1568,11 @@ export default class Serve extends Command {
   };
 
   async run(): Promise<void> {
-    const { args, flags } = await this.parse(Serve);
+    // `metadata` is oclif's record of WHERE each flag's value came from.
+    // `metadata.flags.port.setFromDefault` is the only signal that separates a
+    // `--port` the operator typed from a value the flag's `default` read out of
+    // `OS_PORT`/`PORT`, and the port refusal below has to name which (#12662).
+    const { args, flags, metadata } = await this.parse(Serve);
 
     // ── stdout belongs to the protocol, never to diagnostics (#7915) ──
     // Everything `serve` and the kernel it boots would write to stdout is
@@ -1490,7 +1672,36 @@ export default class Serve extends Command {
       process.env.NODE_ENV = 'production';
     }
 
-    const requestedPort = parseInt(flags.port);
+    // ── The port has to BE a port before anything is done with it (#12662) ──
+    // `--port abc` used to leave this line as `NaN`, travel through the whole
+    // port policy below, and reach the real `listen()`, which refused it with
+    // `ERR_SOCKET_BAD_PORT: options.port should be >= 0 and < 65536` — an error
+    // naming an internal option, raised from a code path with no connection to
+    // the flag the operator typed. `--port 99999` parses fine and died the same
+    // way at the same place.
+    //
+    // ⭐ This sits BEFORE `portAutoShiftAllowed`, and that placement IS the
+    // coverage argument: the dev auto-shift branch, the production refusal in
+    // the `else if`, and a boot that enters neither are all downstream of this
+    // line, so one check covers all three. It is also ahead of every socket —
+    // nothing above probes, binds, or resolves anything.
+    //
+    // The three reported inputs converge here too, which is the other half of
+    // the argument. `PORT` and `OS_PORT` never reach flag parsing: they are read
+    // by the flag's `default`, and oclif runs no flag `parse` on a default
+    // (measured — see {@link describePortSource}). A validating
+    // `Flags.integer({ min, max })` would therefore have guarded `--port` alone
+    // and left the other two dying exactly as before.
+    const portSource = describePortSource(metadata.flags.port?.setFromDefault === true);
+    const parsedPort = parseRequestedPort(flags.port);
+    if (parsedPort === null) {
+      // One write, then exit — for the reason spelled out at the production
+      // refusal below: `this.exit(1)` reaches `process.exit` without draining a
+      // piped stdout, so a multi-call diagnostic loses its tail.
+      printDiagnostic(formatInvalidPortNotice(flags.port, portSource));
+      this.exit(1);
+    }
+    const requestedPort = parsedPort;
     let port = requestedPort;
     // Port-conflict policy differs by mode:
     //

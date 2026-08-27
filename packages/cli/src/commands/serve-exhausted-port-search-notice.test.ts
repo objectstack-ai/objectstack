@@ -166,9 +166,12 @@ describe('#12620: an exhausted port search is announced, in the words the search
   it('makes NO span claim for a rejection that is not an exhausted walk', async () => {
     // ⚠️ The `catch` in serve.ts catches every rejection, not only exhaustion.
     // `isPortAvailable` rejects synchronously with ERR_SOCKET_BAD_PORT for any
-    // port outside 0–65535 — reachable when the walk crosses the ceiling, and
-    // when `--port` text parses to NaN. Measured, not supposed: `net`'s
-    // `listen()` throws for both, inside the probe's promise executor.
+    // port outside 0–65535 — reachable when the walk crosses the ceiling.
+    // Measured, not supposed: `net`'s `listen()` throws there, inside the
+    // probe's promise executor. (It used to be reachable a second way, from
+    // `--port` text that parsed to NaN; #12662 refuses that value before the
+    // port policy runs, so the crossing walk is the only route left. This case
+    // is unaffected either way: it constructs the rejection directly.)
     //
     // ⭐ On those paths nothing was probed, so a body claiming a range would
     // print `NaN–NaN` and assert a search that never ran — an inaccurate
