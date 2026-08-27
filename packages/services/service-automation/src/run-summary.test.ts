@@ -417,6 +417,8 @@ describe('the run-level filter cannot separate a healthy idempotent sweep from a
 
         expect(success).toBe(true);
         expect(written).toHaveLength(0); // nothing to do: every deal already nudged
+        // 3 deals selected by the query + one find per iteration = 6 reads, no writes.
+        expect(summary).toMatchObject({ selected: 6, acted: 0, skipped: 3, unmeasured: 0 });
         expect(tripsRunLevelFilter(summary)).toBe(true);
 
         // …and it is healthy: the lookup ran once per iteration and found the
@@ -431,6 +433,8 @@ describe('the run-level filter cannot separate a healthy idempotent sweep from a
         const { summary, written } = await run('dead_gate');
 
         expect(written).toHaveLength(0);
+        // Only the query read anything — the body never ran at all.
+        expect(summary).toMatchObject({ selected: 3, acted: 0, skipped: 3, unmeasured: 0 });
         expect(tripsRunLevelFilter(summary)).toBe(true);
 
         // The gate is in front of the lookup, so nothing behind it ever ran and
@@ -460,6 +464,7 @@ describe('the run-level filter cannot separate a healthy idempotent sweep from a
         // its place.
         const { summary } = await run('healthy', { findOne: null });
 
+        expect(summary).toMatchObject({ selected: 3, acted: 0, skipped: 3 });
         expect(tripsRunLevelFilter(summary)).toBe(true);
         expect(summary.nodes.find((n) => n.nodeId === 'find_existing')).toMatchObject({ runs: 3, selected: 0 });
         expect(skipsAreAccountedFor(summary, 'find_existing')).toBe(false);
