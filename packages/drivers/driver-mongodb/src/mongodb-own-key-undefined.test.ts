@@ -77,7 +77,11 @@ describe('#9276 driver-mongodb — measured separately from driver-memory', () =
     // would store it as `null`, which is a value — not the absence the caller
     // expressed. Guarding at the insert door is what keeps it from getting
     // there.
-    expect(asStored({ id: 'a1', status: undefined })).toEqual({ id: 'a1', status: null });
+    // `toStrictEqual` throughout this file: `toEqual` IGNORES own keys holding
+    // `undefined`, which is precisely the input class here, so it cannot tell the
+    // two rows apart. See the note on `assertIndistinguishable` in
+    // `driver-memory`'s `memory-own-key-undefined.test.ts`.
+    expect(asStored({ id: 'a1', status: undefined })).toStrictEqual({ id: 'a1', status: null });
     expect(Object.keys(asStored({ id: 'a1' }))).toEqual(['id']);
   });
 
@@ -88,7 +92,7 @@ describe('#9276 driver-mongodb — measured separately from driver-memory', () =
     const neverWritten = await driver.create('article', { id: 'a2', title: 't' });
 
     expect('status' in written).toBe(false);
-    expect(comparable(written)).toEqual(comparable(neverWritten));
+    expect(comparable(written)).toStrictEqual(comparable(neverWritten));
   });
 
   it('nothing is stored for the field, so find() agrees with create()', async () => {
@@ -110,7 +114,7 @@ describe('#9276 driver-mongodb — measured separately from driver-memory', () =
     ]);
 
     expect('status' in written).toBe(false);
-    expect(comparable(written)).toEqual(comparable(neverWritten));
+    expect(comparable(written)).toStrictEqual(comparable(neverWritten));
     expect(inserted.every((doc) => !('status' in doc))).toBe(true);
     expect(inserted.every((doc) => !('status' in asStored(doc)))).toBe(true);
   });

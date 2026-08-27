@@ -62,12 +62,26 @@ function comparable(row: Record<string, unknown>): Record<string, unknown> {
 /**
  * The contract itself: `written` (the field carried an explicit `undefined`)
  * and `neverWritten` (the field was simply absent) must be the same row.
+ *
+ * ⚠️ `toStrictEqual`, never `toEqual`. Measured on this repo's vitest, on the
+ * exact input class this file is about:
+ *
+ * ```
+ * expect({ a: 1, status: undefined }).toEqual({ a: 1 })        // PASSES
+ * expect({ a: 1, status: undefined }).toStrictEqual({ a: 1 })  // fails
+ * ```
+ *
+ * `toEqual` ignores own keys holding `undefined` — so spelled with it, the one
+ * assertion that states the CONTRACT would be vacuous here, green against the
+ * unrepaired driver, and the file would owe its whole discriminating power to
+ * the key-list and `in` assertions below, which pin a SPELLING ("the key is
+ * dropped") rather than the rule. Do not relax this back.
  */
 function assertIndistinguishable(
   written: Record<string, unknown>,
   neverWritten: Record<string, unknown>,
 ) {
-  expect(comparable(written)).toEqual(comparable(neverWritten));
+  expect(comparable(written)).toStrictEqual(comparable(neverWritten));
   // Diagnostic, so a failure names WHICH way the two diverged.
   expect(Object.keys(written).sort()).toEqual(Object.keys(neverWritten).sort());
   expect('status' in written).toBe('status' in neverWritten);
@@ -94,7 +108,7 @@ describe('#9276 an own key holding `undefined` is not a row state this driver em
     const [found] = await d.find('article', { where: { id: 'a1' } });
 
     expect('status' in created).toBe(false);
-    expect(created).toEqual(found);
+    expect(created).toStrictEqual(found);
   });
 
   it('findOne() agrees with find()', async () => {
@@ -132,7 +146,7 @@ describe('#9276 an own key holding `undefined` is not a row state this driver em
 
     expect('status' in (updated as any)).toBe(false);
     const [found] = await d.find('article', { where: { id: 'a1' } });
-    expect(found).toEqual(updated);
+    expect(found).toStrictEqual(updated);
     expect('status' in found).toBe(false);
   });
 
