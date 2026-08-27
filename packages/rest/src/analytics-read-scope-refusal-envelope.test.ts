@@ -222,7 +222,7 @@ describe('[#5367] POST /analytics/dataset/query — a read-scope failure is a 50
       // …and it is in the LOG, which is now its only destination. Asserted rather
       // than assumed: "withheld" is only acceptable because the operator still
       // has the whole thing.
-      const logged = logSpy.mock.calls.map((args) => args.map(String).join(' ')).join('\n');
+      const logged = logSpy.mock.calls.map((args: unknown[]) => args.map(String).join(' ')).join('\n');
       expect(logged).toMatch(/Analytics dataset query error/);
       expect(logged).toContain('read-scope-sql');
       expect(logged).toContain(c.secret);
