@@ -511,7 +511,60 @@ export function wrapDeclarativeHook(
  * `get` and `getOwnPropertyDescriptor` traps below for the instrument-by-
  * instrument account, and `content/docs/automation/hooks.mdx` (Hook Context)
  * for the author-facing statement of the same rule.
+ *
+ * [#12603] ⛔ SYMBOL keys are REFUSED, not routed. `set` and `defineProperty`
+ * throw a `TypeError` for a symbol-keyed write instead of letting it reach
+ * `data` — see those two traps below for the refusal and
+ * `refuseSymbolPayloadKey` for the error text. See "Symbol keys" below the
+ * reserved-name callout in `content/docs/automation/hooks.mdx`.
  */
+
+/**
+ * [#12603] Maintainer ruling, 2026-08-27, Option C refusal arm: a record
+ * payload is a declarable, string-keyed field set — no metadata schema can
+ * declare a symbol field, so a symbol key on this flat `ctx.input` face is a
+ * JS-runtime artifact leaking toward storage, not a legal payload field.
+ *
+ * Thrown from the `set` and `defineProperty` traps, BEFORE either touches
+ * `data` — so a refused write never persists and never needs hiding from
+ * enumeration. That is the shape change from the pre-#12603 state: a
+ * symbol-keyed write used to succeed silently, reach `data`, and persist,
+ * while only `Object.getOwnPropertySymbols` / `Reflect.ownKeys` omitted it
+ * (pinned open in `hook-input-ownkeys-agreement.test.ts` under #12578). Hiding
+ * a key the engine nonetheless persisted is exactly the shape #12277, #12397
+ * and #12578 exist to abolish; refusing the write outright is the other way
+ * to close that gap, and the one this ruling chose (Option B — publish
+ * symbols via `Reflect.ownKeys` — was declined for minting an undeclarable
+ * key kind as contract).
+ *
+ * A plain `TypeError`, not a new subclass: this fires from INSIDE the hook
+ * BODY (an author wrote `input[sym] = …`), the same category as the native
+ * `TypeError` the `defineProperty` trap already lets through for a
+ * non-configurable descriptor the target does not carry (see that trap's own
+ * comment) — an author-code defect, not a declarative-layer diagnostic like
+ * `HookConditionError`. It is therefore subject to the ordinary handler error
+ * path: `onError: 'log'` can swallow it, `retryPolicy` can retry it, exactly
+ * as any other throw from the handler body (unlike `HookConditionError`,
+ * which is deliberately raised OUTSIDE that path — see the comment on that
+ * class for why the two are not the same shape).
+ *
+ * The message names the key kind (a symbol, not "a bad key"), the surface
+ * (hook input), and the fix (a string key, or keep the value off the payload)
+ * — written for the accidental case the ruling calls out: an author spreading
+ * an object that happens to carry a symbol-keyed cache entry onto `ctx.input`.
+ */
+function refuseSymbolPayloadKey(prop: symbol, trap: 'set' | 'defineProperty'): never {
+  const verb = trap === 'set' ? 'Cannot set' : 'Cannot define';
+  throw new TypeError(
+    `${verb} ${String(prop)} on hook input: a symbol key is not a valid record-payload field. ` +
+    'A record payload is a declarable, string-keyed field set — no metadata schema can declare ' +
+    'a symbol field, so a symbol key here would be a JS-runtime artifact leaking toward storage. ' +
+    'Use a string key, or keep the value off the payload entirely (e.g. a local variable) if it ' +
+    'is not meant to be stored. This often happens by accident, such as spreading an object that ' +
+    'carries a symbol-keyed cache entry onto ctx.input.'
+  );
+}
+
 function installFlatInput(ctx: HookContext): () => void {
   const raw: any = ctx.input ?? {};
   const looksWrapped =
@@ -545,7 +598,14 @@ function installFlatInput(ctx: HookContext): () => void {
       }
       return Reflect.get(target, prop, receiver);
     },
+    // [#12603] Symbol keys are REFUSED here, before anything else runs — a
+    // symbol can never equal one of the four reserved (string) names, so the
+    // check can sit first without disturbing that branch below. See
+    // `refuseSymbolPayloadKey` for why this throws instead of routing.
     set(target, prop, value) {
+      if (typeof prop === 'symbol') {
+        refuseSymbolPayloadKey(prop, 'set');
+      }
       if (prop === 'id' || prop === 'options' || prop === 'ast' || prop === 'data') {
         (target as any)[prop] = value;
         return true;
@@ -600,12 +660,23 @@ function installFlatInput(ctx: HookContext): () => void {
     // A throw is a diagnosis; the silence was not. Omitting `configurable`
     // entirely (the common spelling, and every spelling `Object.assign` and
     // spread produce) is unaffected.
+    //
+    // [#12603] Symbol keys are refused here too, identically to `set` and for
+    // the same reason — see `refuseSymbolPayloadKey`.
     defineProperty(target, prop, desc) {
+      if (typeof prop === 'symbol') {
+        refuseSymbolPayloadKey(prop, 'defineProperty');
+      }
       if (prop === 'id' || prop === 'options' || prop === 'ast' || prop === 'data') {
         return Reflect.defineProperty(target, prop, desc);
       }
       return Reflect.defineProperty(ensureData(), prop, desc);
     },
+    // [#12603] `deleteProperty` is deliberately NOT guarded: since `set` and
+    // `defineProperty` now refuse every symbol-keyed write before it reaches
+    // `data`, a symbol key can never be there to delete. `delete input[sym]`
+    // falls through exactly as it always has for any key `data` does not
+    // own — a harmless no-op reporting success, not a persistence lie.
     has(target, prop) {
       if (prop === 'id' || prop === 'options' || prop === 'ast' || prop === 'data') {
         return prop in target;
@@ -670,15 +741,30 @@ function installFlatInput(ctx: HookContext): () => void {
     // SAME value everywhere it is read. See the descriptor trap's own comment
     // for the full account.
     //
-    // SYMBOL KEYS are deliberately still absent, and this is NOT a finding
-    // that they do not belong on a payload: `Reflect.ownKeys(data)` here would
-    // additionally publish them, and whether the record payload may carry a
-    // symbol key at all is a question about the PAYLOAD contract (they already
-    // reach `data` through the `set` trap and already persist — measured), not
-    // about this trap. It is open, reported on #12578, and the day it is
-    // answered "yes" this line becomes `Reflect.ownKeys`. Until then the
-    // symbol half of the disagreement is pinned AS open in the sibling test,
-    // so an answer changes a recorded fact rather than an unnoticed one.
+    // [#12603] SYMBOL KEYS are absent here for a settled reason now, not an
+    // open one: the maintainer ruling (2026-08-27, Option C refusal arm)
+    // answered the payload-contract question this trap's comment used to
+    // leave open ("may a record payload carry a symbol key at all?") with
+    // NO — a record payload is a declarable, string-keyed field set, and no
+    // metadata schema can declare a symbol field. `set` and `defineProperty`
+    // now REFUSE a symbol-keyed write before it ever reaches `data` (see
+    // `refuseSymbolPayloadKey`), so a symbol can no longer BE an own key of
+    // `data` for this trap to omit or report.
+    //
+    // This trap itself is deliberately UNCHANGED by that ruling —
+    // `Object.getOwnPropertyNames(target.data)` stays exactly what #12578
+    // landed. `Reflect.ownKeys(data)` (Option B) was the alternative the
+    // ruling declined: publishing symbols through enumeration would mint an
+    // undeclarable key kind as contract, which is the opposite of what was
+    // ruled. With the write refused at the boundary, the two spellings would
+    // agree anyway — `data` can never carry a symbol key for them to differ
+    // on — so there is no remaining reason to touch this line, and #12578's
+    // own ruling (this card must not re-litigate `ownKeys`) forbids it.
+    //
+    // What used to be pinned OPEN in `hook-input-ownkeys-agreement.test.ts`
+    // (the instrument disagreement, deliberately left standing) is now
+    // pinned as a REFUSAL in the same file: the write throws, so there is no
+    // persisted symbol key left for the three instruments to disagree about.
     ownKeys(target) {
       return target.data && typeof target.data === 'object'
         ? Object.getOwnPropertyNames(target.data)
