@@ -58,13 +58,12 @@
   本接口给不了(`pull_request_read` 与 `fields` 枚举都无该成员,armed 与否读回逐字节相同)⇒ 效果
   读数只有队列分支、timeline 入队事件、最终落地三种;已死假说:已绿 PR 会静默空转。
 - enable 后的验证序列(2026-08-25 增补):① 先验队列分支
-  `git ls-remote origin 'refs/heads/gh-readonly-queue/*'`(零配额,给条目 ~20–30s 建出;正命中即已入队,
-  在 PR 读数发僵时仍决断 —— 实测人工合并后 PR 照答 open/merged:false 达 ~15 分钟,队列 ref
-  早已证明入队);② 分支在 ⇒ 结束,⛔ 不翻转;③ 缺席 ⇒ 先 `update_pull_request_branch` 逼出暗
-  冲突(静默冲突不踢已挂 PR,只是永不入队 —— 实测一张挂 40+ 分钟,update-branch 才吐出
-  merge conflict);④ 无冲突仍缺席才重挂一次,重试回 405 `Pull Request is in the merge queue` = 决断
-  阳性(先前那次其实已生效);⑤ ⛔ enable 与它的队列验证之间永不插 `disable` ——「入队」
-  webhook 可能乱序迟到,armed 窗口里补的 disable 会撤掉已发生的真实入队。
+  `git ls-remote origin 'refs/heads/gh-readonly-queue/*'`(零配额,给条目 ~20–30s 建出;正命中即已入
+  队,在 PR 读数发僵时仍决断);② 分支在 ⇒ 结束,⛔ 不翻转;③ 缺席 ⇒ 先
+  `update_pull_request_branch` 逼出暗冲突(静默冲突不踢已挂 PR,只是永不入队 —— 实测一张挂
+  40+ 分钟,update-branch 才吐出 merge conflict);④ 无冲突仍缺席才重挂一次,重试回 405
+  `Pull Request is in the merge queue` = 决断阳性;⑤ ⛔ enable 与它的队列验证之间永不插 `disable`
+  ——「入队」webhook 可能乱序迟到,armed 窗口里补的 disable 会撤掉已发生的真实入队。
 - **队列踢出先认签名再决定重投**:已知 flaky 核对失败签名一致 ⇒ 原样重投;止血修复合入
   后**同一签名再现就不再是那条 flaky**,是新问题必须重新诊断,⛔ 禁止条件反射式重投;第
   三种签名:本 PR 名下**没有任何** `merge_group` run 且批次同伴的 run 全部 `success` = 队列重建的
@@ -101,11 +100,10 @@
 - **默认读序 git → payload → REST → MCP/GraphQL**(2026-08-23 策略翻转,2026-08-25 增补 payload 档;
   ⚠️ REST 档以**本班 repo-scoped 探针绿**为前提 —— 前提就住本行,403 会话改按降级梯读)。
   list/查重/卡与 PR 读/标签回读默认走容器 curl 的 REST 通道 —— App installation token,core
-  15,000/时,与 GraphQL 池**独立计**(实测 GraphQL 池两次耗尽时 core 余 14,938;另一席 GraphQL 0 /
-  core 4999 时,开卡、认领、标签读改写、评论整条派发环全在 REST 上跑完);GraphQL 池(5000/时)
-  只留给**没有 REST 对应物**的那几件:draft 翻转、auto-merge/入队挂载、语义 `/search/*`、Projects
-  field_values、`issue transfer`。逐操作通道归属(✓ 按席位类别限定)、写侧配方与队列路由三
-  读法见 `references/rest-channel.md`,⛔ 不在本表复述。
+  15,000/时,与 GraphQL 池**独立计**(实测 GraphQL 池两次耗尽时 core 余 14,938);GraphQL 池
+  (5000/时)只留给**没有 REST 对应物**的那几件:draft 翻转、auto-merge/入队挂载、语义
+  `/search/*`、Projects field_values、`issue transfer`。逐操作通道归属(✓ 按席位类别限定)、写侧配
+  方与队列路由三读法见 `references/rest-channel.md`,⛔ 不在本表复述。
 - **MCP list/search 家族整个走 GraphQL 稀缺池**(反复撞上的限流墙就是它;`issue_write` 连查找半
   边都吃);配额红时认领类动作排队,评论(REST 桶)先行把结论发出去。
 - **`gh` CLI 的动词按传输分两桶,池枯竭时只死一半**(2026-08-24 同分钟实测:GraphQL 0 / core
@@ -127,12 +125,11 @@
   测可用):合并队列 `git ls-remote origin 'refs/heads/gh-readonly-queue/*'`;是否落地
   `git log --format='%H %s' -40 origin/main` 按 PR 号 grep;squash 验证 `git rev-list --parents -n1`(父提交
   数);分支存在性 `git ls-remote origin 'refs/heads/*<key>*'`。开轮先读配额(`curl` 带 Bearer `$GH_TOKEN`
-  打 `/rate_limit`,免费;⚠️ 它答不了通道在不在,repo-scoped 探针另跑;容器内**没有** `gh`),graphql
-  remaining < 1000 ⇒ 本轮按默认读序走 git + REST;**派 dev 之前同样先读一次**,额度不足先等重置
-  再派 —— 中途撞限流的 dev **完不成强制查重**,只能把发现交回 PM 代为归档,⛔ 不盲目开
-  卡。打满时:待执行写**排成有序清单挂进巡逻词**(不靠记忆),恢复窗口按序连清;重试对齐
-  整点(REST core 整点重置)优于指数退避,⛔ 绝不忙轮询;search 与 core 独立计,一侧打满另一侧
-  可作退路;REST core 共享身份下同样会打满;文档载明未实测:条件请求答 `304` 不计 core 池。
+  打 `/rate_limit`,免费;⚠️ 它答不了通道在不在,repo-scoped 探针另跑),graphql remaining < 1000 ⇒
+  本轮按默认读序走 git + REST;**派 dev 之前同样先读一次**,额度不足先等重置再派 —— 中途
+  撞限流的 dev **完不成强制查重**,只能把发现交回 PM 代为归档,⛔ 不盲目开卡。打满时:待
+  执行写**排成有序清单挂进巡逻词**(不靠记忆),恢复窗口按序连清;重试对齐整点(REST core 整
+  点重置)优于指数退避,⛔ 绝不忙轮询;文档载明未实测:条件请求答 `304` 不计 core 池。
 - **公开仓零配额读法两档,payload 档优先**:单卡页 `/issues/N` 内嵌 JSON 载**原始 body + 全评
   论**,精确、零配额 —— 取含 `bodyHTML` 的 `script[type="application/json"]` 块,读
   `payload.preloadedQueries[0].result.data.repository.issue.body` 与 `frontTimelineItems`/`backTimelineItems`;
@@ -168,9 +165,8 @@
 - **会话中途轮换凭据把 GitHub MCP 服务器杀到不可恢复**:此后一切 `mcp__github__*` 回
   `Streamable HTTP error: invalid session`,只有新会话重绑 —— 轮换前提醒维护者:在飞席位丢整条
   GitHub 通道;配额池按身份计,换身份即清零燃烧,共享身份结构不变。
-- **组织侧授权变更后仓库访问逐步传播**(同一端点数分钟内 403→200);403 错误对象存盘仍是
-  合法 JSON,期待列表的脚本会静默报假「0 issues」—— 零命中纪律覆盖 list 读:空车道先对仓
-  库 `open_issues_count` 反查再信。
+- **组织侧授权变更后仓库访问逐步传播**(同一端点数分钟内 403→200);该 403 体同样解析成净
+  零 ⇒ 空车道先对仓库 `open_issues_count` 反查再信,零命中纪律覆盖 list 读。
 - **MCP 参数两陷阱**:`list_issues` 多标签过滤是 **OR(并集)**不是 AND —— 混入别车道同状态卡
   与本车道全状态卡,结果良构、失效全静默;**判据 = 结果比任一输入都宽**(三席独立实测:
   两标签的「交集」回 135 张,而其中一个车道自身只有 132 张)。正确读法 = **整车道单标签
@@ -200,9 +196,8 @@
 
 ## 读数陷阱
 
-- **被拦的下载不是缺席证明**:出口策略 403(如 `cdn.playwright.dev`)只说「取不来」,不说「没
-  有」—— 先找产物再下结论(实测:Chromium 预装、`PLAYWRIGHT_BROWSERS_PATH` 已设,「装不了 =
-  没有浏览器」让两条只有浏览器能验的判据白报 unverified);与零命中控制探针同族。
+- **被拦的下载不是缺席证明**:出口策略 403(如 `cdn.playwright.dev`)只说「取不来」不说「没
+  有」—— 先找产物再下结论(实测:Chromium 预装、`PLAYWRIGHT_BROWSERS_PATH` 已设)。
 - **读数五坑**:`cd X && cmd` 会短路(路径不存在时命令在当前仓继续执行,产出假读数)—— 跨
   仓一律 `git -C <path>`; `git grep -c <pat> | wc -l` 数文件数不是命中数;裸名 grep 被幸存家族当子
   串命中 —— 退役核验带引号精确名,更硬判据是查声明
@@ -261,13 +256,11 @@
   序列(markup-declaration 开标记)里的感叹号在存储层被删,幸存文本仍像代码但意义已变;裸
   「less-than + 感叹号」存活。
 - **写侧实测行为 · 评论(形状是「截断」不是「删片段」)**:sanitizer 从**首个命名 HTML 元素
-  的尖括号片段**起,把评论体一路吃到结尾(2026-08-21 实测:一份用**字面文本**标记发出的 dev
-  报告评论,正文在 `this.error(` 处断掉、JSON 不可解析;同机制把记录此事的卡自己的正文也截
-  在同一处)⇒ ⛔ **字面文本标记只保住标记、保不住正文** —— 标记扫描照报成功,人看着
-  像正常收尾,只有真去解析才发现;引信是普通 TS 形状(`Promise<object>`、`Array<link>` 一类),不是
-  奇异语法;安全过程 = 标识符一律进反引号、尖括号写实体或用词拼出(回读纪律见上面的
-  作者规则条)。⚠️ 边界:姊妹仓一次受控探针测到的是**选择性删除**而非截断到尾 ——
-  两种形状都实测过,**写侧一律按最坏的截断防护**。
+  的尖括号片段**起把评论体一路吃到结尾(2026-08-21 实测:一份用**字面文本**标记发出的 dev
+  报告,正文在 `this.error(` 处断掉、JSON 不可解析)⇒ ⛔ **字面文本标记只保住标记、保不住
+  正文** —— 标记扫描照报成功,只有真去解析才发现;引信是普通 TS 形状(泛型一类)不是奇
+  异语法。⚠️ 边界:姊妹仓一次受控探针测到的是**选择性删除**而非截断到尾 ⇒ **写侧按
+  最坏的截断防护**。
 - **并行 spec PR 同动 pin 计数断言**(被踢不是事故,按 os-regen 序再解一轮):解冲突两侧收据都
   保留、按合并顺序堆叠,新计数**从合并后源码重数**(操作数是文件本身不是历史),⛔ 不从
   两侧收据做算术;双方占同一编号是常态(各取当时 max+1),重编号后进侧。
@@ -289,11 +282,18 @@
   只在 UI 侧渲染、上下文零信号,子轮开场自述「跑在契约复审档」)——服役档的权威读数
   是 `get_session`(claude-code-remote MCP,无参)的 `external_metadata.last_served_model`(最近一轮实
   际服役者,降档链中途照真);`session_context.model` 是配置档不是服役档,⛔ 不作保险丝输入。
-- **上条那个读数按宿主分叉,用前先确认工具在**:有的 ccd 宿主装 session-mgmt MCP,其
-  `get_session`/`list_sessions` **按契约排除当前会话** ⇒ 保险丝无输入(2026-08-24);另一台宿主上它
-  省 `session_id` 正常回两键(2026-08-25)⇒ ⛔ 不据一台宿主推全体。**无它时的合法替代**:grep
-  本会话 transcript 最新记录里 harness 写的 `"model":`(逐请求写入、非模型自述;⚠️ 只对本
-  席自己的会话有效,用时在卡上申报)。
+  ⚠️ 该读数**按宿主分叉**:有的 ccd 宿主装 session-mgmt MCP,其 `get_session` **按契约排除当前会
+  话** ⇒ 保险丝无输入(2026-08-24),另一台宿主省 `session_id` 正常回两键(2026-08-25)⇒ ⛔ 不据一
+  台宿主推全体;无它时的合法替代 = grep 本会话 transcript 里 harness 写的 `"model":`(逐请求写
+  入、非模型自述,用时在卡上申报)。
+- **档位额度终止是第三种死法**(2026-08-27 实测):子代理死在编辑中途、宿主报本账户档位
+  额度到顶 —— 有**宿主信号**故非普通子代理死亡,亦非维护者中止:**派发已死、前提完
+  好、卡在资源** ⇒ 死认领回收 + worktree 抢救,⛔ 不重核前提、不升级;⚠️ 无前置探针
+  (只在 dev 死在里面时可观测),缓解只在 dev 侧的早 WIP 提交。
+- **档位不可用时 ⛔ 不凭记忆宣告车道阻塞,逐文件面现推 mandate**:强制档不得因不可用而
+  降档(那正是降档保险丝要拒的替换),但「本车道 fable 强制」多是过宽的回忆 ——
+  `dispatch-gates.mjs --tier PATH` 逐路径现推(实测:`SKILL.md` 与 `.claude/agents/**` 强制,`scripts/pm/**`
+  与 `references/**` 无 ⇒ 全阻塞的三卡 fold 拆成 1 阻 3 可跑);路径线是**下限不是放行**。
 
 ## 闭合关键词解析(PR 正文写侧)
 
