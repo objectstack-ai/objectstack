@@ -41,7 +41,8 @@
  *      post-bump read would HIT instead of missing, so the store that performs
  *      the eviction never runs and the count stays at 2.
  * Every other case either never bumps the epoch or never reaches the comparison.
- * OBSERVED: __A1__
+ * OBSERVED: RED, **5** failed / 15 passed (20) — the prediction's exact count AND its
+ * exact named set, §9 included.
  *
  * ## ⭐ ABLATION 2 — the hit half (`writeMetaOverlayCache` call removed)
  *
@@ -55,7 +56,8 @@
  * and §9 (nothing is ever stored, so its entry count is 0, not 2). The three §7
  * key-separation cases and §1's "a bumped epoch re-reads" use `toBeGreaterThan`
  * and stay green, as do all of §3.
- * OBSERVED: __A2__
+ * OBSERVED: RED, **10** failed / 10 passed (20) — the prediction's exact count AND its
+ * exact named set, §9 included.
  *
  * Named positive control for BOTH ablations, predicted GREEN throughout:
  * §3 "an engine with no write-epoch seam keeps its exact query multiset". It
@@ -64,14 +66,14 @@
  * each ablation cut the intended half rather than the cache as a whole.
  *
  * ⭐ The two failure sets are what shows the halves are independent. They
- * overlap on exactly THREE cases — §1 "…equals the answer an UNCACHED engine
+ * overlap on exactly FOUR cases — §1 "…equals the answer an UNCACHED engine
  * gives", §4 "a newly published row appears promptly", §5 "an epoch bump
- * retires…" — and that overlap is not slack: those are precisely the cases
- * written to carry BOTH a hit assertion and a staleness assertion, so each
- * ablation kills a different assertion inside the same case. Outside the
+ * retires…" and §9 — and that overlap is not slack: those are precisely the
+ * cases written to carry BOTH a hit assertion and a staleness assertion, so
+ * each ablation kills a DIFFERENT assertion inside the same case. Outside the
  * overlap the sets are disjoint: ablation 1 alone takes §1 "a bumped epoch
- * re-reads", ablation 2 alone takes §1 "a repeat … issues ZERO reads", both of
- * §2, §4 "an empty overlay set costs two reads once", §6 and §8.
+ * re-reads", while ablation 2 alone takes §1 "a repeat … issues ZERO reads",
+ * both of §2, §4 "an empty overlay set costs two reads once", §6 and §8.
  *
  * ⭐ Both ablations also MEASURE the source-resolution claim above rather than
  * restating it: each mutated only this package's source, ran vitest with NO
